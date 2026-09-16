@@ -28,12 +28,17 @@ from typing import cast
 
 import pytest
 
-from gideon.workflows import journal as J
-from gideon.workflows import store
-from gideon.workflows import tick as tick_mod
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.models import InstanceState, ItemErrorPolicy, RunStatus, WorkflowRun
-from gideon.workflows.tick import foreach_outcome, item_error_policy
+from gideon.automation.workflows import journal as J
+from gideon.automation.workflows import store
+from gideon.automation.workflows import tick as tick_mod
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.models import (
+    InstanceState,
+    ItemErrorPolicy,
+    RunStatus,
+    WorkflowRun,
+)
+from gideon.automation.workflows.tick import foreach_outcome, item_error_policy
 
 pytestmark = pytest.mark.anyio
 
@@ -49,13 +54,10 @@ def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
 
 
-#: One item of three cannot satisfy the body's `{{item.v}}` binding, so exactly one item fails —
-#: deterministically, in the real dispatcher, with no model call and no retry (a BindingError is
-#: a USER failure, and USER is not retryable).
 ITEMS = [{"name": "alpha", "v": 1}, {"name": "bravo"}, {"name": "charlie", "v": 3}]
 
 
@@ -65,10 +67,12 @@ def _spec(policy: str) -> dict:
         "root": {
             "kind": "foreach",
             "id": "fan",
-            # One item at a time, which is what makes HALT observable at all: unbounded, every
-            # item is already launched before the first failure exists to halt on.
             "config": {"items": ITEMS, "on_item_error": policy, "max_concurrency": 1},
-            "body": {"kind": "transform", "id": "body", "config": {"expr": "{{item.v}}"}},
+            "body": {
+                "kind": "transform",
+                "id": "body",
+                "config": {"expr": "{{item.v}}"},
+            },
         },
     }
 
@@ -91,15 +95,16 @@ async def _drive(policy: str) -> tuple[RunStatus, set[int], list[dict]]:
 class TestThreeWayBehaviour:
     """The proof that the members are worth having: one seeded failure, three outcomes."""
 
-    async def test_halt_fails_the_run_and_leaves_the_rest_of_the_fan_out_unrun(self) -> None:
+    async def test_halt_fails_the_run_and_leaves_the_rest_of_the_fan_out_unrun(
+        self,
+    ) -> None:
         status, started, _ = await _drive("halt")
         assert status == RunStatus.FAILED
-        # Items 0 and 1 ran (1 is the one that failed); item 2 was never started.
         assert started == {0, 1}
 
     async def test_skip_runs_every_item_and_completes(self) -> None:
         status, started, _ = await _drive("skip")
-        assert status == RunStatus.COMPLETE  # container DEGRADED, which is a SUCCESS state
+        assert status == RunStatus.COMPLETE
         assert started == {0, 1, 2}
 
     async def test_collect_runs_every_item_and_then_fails_the_run(self) -> None:
@@ -109,7 +114,8 @@ class TestThreeWayBehaviour:
 
     async def test_the_three_policies_are_not_the_same_run(self) -> None:
         """The distinctness assertion stated directly, so a future change that collapses two
-        policies into one behaviour fails HERE rather than looking like a passing suite."""
+        policies into one behaviour fails HERE rather than looking like a passing suite.
+        """
         outcomes = {}
         for policy in ("halt", "skip", "collect"):
             status, started, _ = await _drive(policy)
@@ -123,14 +129,16 @@ class TestCollectedFailuresReachTheLedger:
     async def test_collect_journals_the_failed_items(self) -> None:
         _, _, ledger = await _drive("collect")
         records = [r for r in ledger if r["kind"] == J.ITEMS_COLLECTED]
-        assert len(records) == 1, "one record per fan-out, not one per item and not none"
+        assert (
+            len(records) == 1
+        ), "one record per fan-out, not one per item and not none"
         record = records[0]
         assert record["node_id"] == "fan"
         assert record["outcome"] == InstanceState.FAILED.value
         assert record["failed_items"] == 1
         (failure,) = record["failures"]
         assert failure["item_index"] == 1
-        assert failure["item_label"] == "bravo"  # names its item, not just its index
+        assert failure["item_label"] == "bravo"
         assert failure["failure_class"] == "user"
         assert failure["cause"]
 
@@ -143,7 +151,10 @@ class TestCollectedFailuresReachTheLedger:
 
     async def test_a_clean_fan_out_writes_no_record(self) -> None:
         spec = _spec("collect")
-        spec["root"]["config"]["items"] = [{"name": "alpha", "v": 1}, {"name": "beta", "v": 2}]
+        spec["root"]["config"]["items"] = [
+            {"name": "alpha", "v": 1},
+            {"name": "beta", "v": 2},
+        ]
         run = store.create(WorkflowRun(id="", workflow_name="clean"))
         store.write_spec(run.id, spec)
         controller = RunController(run, spec, services=EngineServices())
@@ -152,13 +163,13 @@ class TestCollectedFailuresReachTheLedger:
 
     async def test_the_record_is_written_once_not_once_per_tick(self) -> None:
         """A container's state is DERIVED, so every tick re-examines a terminal fan-out. Without
-        the dedup the ledger would carry one collected-failure record per remaining tick."""
+        the dedup the ledger would carry one collected-failure record per remaining tick.
+        """
         spec = _spec("collect")
         run = store.create(WorkflowRun(id="", workflow_name="dedup"))
         store.write_spec(run.id, spec)
         controller = RunController(run, spec, services=EngineServices())
         await controller.run_to_completion(timeout=25)
-        # Extra frontier derivations after the run is terminal must not append again.
         controller._frontier()
         controller._frontier()
         assert len([r for r in J.ledger(run.id) if r["kind"] == J.ITEMS_COLLECTED]) == 1
@@ -210,7 +221,8 @@ class TestExhaustiveness:
 
     def test_neither_skip_nor_collect_reports_a_verdict_mid_flight(self) -> None:
         """Both run every item: a fan-out with an unfinished item is RUNNING under either, which
-        is what stops the container from claiming a verdict while work is outstanding."""
+        is what stops the container from claiming a verdict while work is outstanding.
+        """
         mixed = [InstanceState.FAILED, InstanceState.PENDING]
         assert foreach_outcome(ItemErrorPolicy.SKIP, mixed) == InstanceState.RUNNING
         assert foreach_outcome(ItemErrorPolicy.COLLECT, mixed) == InstanceState.RUNNING
@@ -228,9 +240,13 @@ class TestExhaustiveness:
     def test_an_unknown_config_string_reads_as_the_default(self) -> None:
         """The AUTHORING half is the validator's job (`WF_BAD_ITEM_ERROR`); the runtime read of a
         spec that got past it must still be a real member, never a crash mid-run."""
-        from gideon.workflows.models import Node
+        from gideon.automation.workflows.models import Node
 
         node = Node.from_dict(
-            {"kind": "foreach", "id": "f", "config": {"items": [], "on_item_error": "nonsense"}}
+            {
+                "kind": "foreach",
+                "id": "f",
+                "config": {"items": [], "on_item_error": "nonsense"},
+            }
         )
         assert item_error_policy(node) == ItemErrorPolicy.SKIP

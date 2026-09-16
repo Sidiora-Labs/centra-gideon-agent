@@ -3,7 +3,7 @@
 **The defect this file guards against is the one it was built to fix.** `surfacing_events` was
 named by three consumers and created by none — no schema, no reader, no writer. Shipping a schema
 with no reachable writer would reproduce that exact shape one layer down, so the anchor test here
-does not test the store: it drives the REAL ``ContextBuilder.build_message`` path and asserts a row
+does not test the store: it drives the REAL ``PromptAssembler.build_message`` path and asserts a row
 lands, and its companion asserts that a turn which surfaces nothing writes nothing. A test that
 reads zero rows from an empty table passes for the wrong reason, so every count assertion below has
 a positive and a negative through the same code path.
@@ -15,16 +15,16 @@ from pathlib import Path
 
 import pytest
 
-from gideon.context import ContextBuilder
-from gideon.learning import measure
-from gideon.learning.surfacing_events import (
+from gideon.cognition.context import PromptAssembler
+from gideon.cognition.learning import measure
+from gideon.cognition.learning.surfacing_events import (
     DEFAULT_RETENTION_DAYS,
     SurfacingEvent,
     SurfacingEventStore,
 )
-from gideon.memory import MemoryStore
-from gideon.skills.allocation import SkillRequest, allocate_skills
-from gideon.skills.loader import SkillsLoader
+from gideon.cognition.memory import MemoryJournal
+from gideon.extensions.skills.allocation import SkillRequest, allocate_skills
+from gideon.extensions.skills.loader import ProcedureLibrary
 
 # Over the 200-token budget the refusal test sets, and no larger. Sized to the assertion on
 # purpose: a 42,000-token fixture makes the same point and spends two minutes of tiktoken doing
@@ -48,9 +48,11 @@ def home(tmp_path, monkeypatch) -> Path:
     """
     target = tmp_path / "home"
     target.mkdir()
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: target)
-    monkeypatch.setattr("gideon.config.config_dir", lambda: target)
-    monkeypatch.setattr("gideon.learning.staging._default_home", lambda: target)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: target)
+    monkeypatch.setattr("gideon.core.config.config_dir", lambda: target)
+    monkeypatch.setattr(
+        "gideon.cognition.learning.staging._default_home", lambda: target
+    )
 
     probe = SurfacingEventStore()
     try:
@@ -70,14 +72,13 @@ def _events(store: SurfacingEventStore) -> list[SurfacingEvent]:
 def _write_skill(base: Path, name: str, frontmatter: str, body: str) -> None:
     skill_dir = base / name
     skill_dir.mkdir(parents=True, exist_ok=True)
-    (skill_dir / "SKILL.md").write_text(f"---\n{frontmatter}\n---\n{body}\n", encoding="utf-8")
+    (skill_dir / "SKILL.md").write_text(
+        f"---\n{frontmatter}\n---\n{body}\n", encoding="utf-8"
+    )
 
 
-def _loader(tmp_path: Path) -> SkillsLoader:
-    return SkillsLoader(skills_path=tmp_path / "skills", install_builtins=False)
-
-
-# ── The table exists ──
+def _loader(tmp_path: Path) -> ProcedureLibrary:
+    return ProcedureLibrary(skills_path=tmp_path / "skills", install_builtins=False)
 
 
 def test_the_table_is_created_on_first_use(home):
@@ -116,9 +117,6 @@ def test_opening_an_existing_database_is_a_no_op(home):
         second.close()
 
 
-# ── Writer and reader ──
-
-
 def test_a_recorded_event_reads_back_whole(home):
     store = SurfacingEventStore()
     try:
@@ -143,7 +141,9 @@ def test_a_recorded_event_reads_back_whole(home):
         assert event.used is True
         assert event.query == "ship the thing"
         assert event.session == "dashboard:1"
-        assert event.created_ts > 0, "the prune has nothing to compare against without a stamp"
+        assert (
+            event.created_ts > 0
+        ), "the prune has nothing to compare against without a stamp"
     finally:
         store.close()
 
@@ -182,9 +182,6 @@ def test_from_dict_survives_a_non_numeric_confidence():
     assert event.confidence == 0.0
 
 
-# ── The aggregator's contract ──
-
-
 def test_to_dict_feeds_per_arm_precision_without_a_mapping_layer(home):
     """The consumer that NAMED this table can read it. Asserts real numbers, not a shape.
 
@@ -196,8 +193,12 @@ def test_to_dict_feeds_per_arm_precision_without_a_mapping_layer(home):
         store.record(
             [
                 SurfacingEvent(kind="skill", entity="a", arm="skill_forced", used=True),
-                SurfacingEvent(kind="skill", entity="b", arm="skill_forced", used=False),
-                SurfacingEvent(kind="skill", entity="c", arm="skill_surfaced", used=True),
+                SurfacingEvent(
+                    kind="skill", entity="b", arm="skill_forced", used=False
+                ),
+                SurfacingEvent(
+                    kind="skill", entity="c", arm="skill_surfaced", used=True
+                ),
             ]
         )
         stats = {
@@ -215,14 +216,11 @@ def test_to_dict_feeds_per_arm_precision_without_a_mapping_layer(home):
     assert (surfaced_arm.surfaced, surfaced_arm.used) == (1, 1)
 
 
-# ── The call site: a real surfacing lands a row ──
-
-
 def test_a_real_turn_lands_a_surfacing_event(home, tmp_path):
     """**The anchor.** Drives the production entry point a user's turn goes through.
 
     Not `allocate_skills` directly: the gap being closed was a writer nobody reached, so the
-    assertion has to run through `ContextBuilder.build_message` — the same call the chat path
+    assertion has to run through `PromptAssembler.build_message` — the same call the chat path
     makes — or it would prove only that a function works when called.
     """
     skills = tmp_path / "skills"
@@ -233,9 +231,9 @@ def test_a_real_turn_lands_a_surfacing_event(home, tmp_path):
         "name: monster\ndescription: How to tame a monster in three moves.",
         "# Monster\nOne. Two. Three.\n",
     )
-    builder = ContextBuilder(
-        memory=MemoryStore(workspace=tmp_path / "ws"),
-        skills=SkillsLoader(skills_path=skills, install_builtins=False),
+    builder = PromptAssembler(
+        memory=MemoryJournal(workspace=tmp_path / "ws"),
+        skills=ProcedureLibrary(skills_path=skills, install_builtins=False),
     )
 
     msg, _ = builder.build_message(
@@ -257,17 +255,25 @@ def test_a_real_turn_lands_a_surfacing_event(home, tmp_path):
     ], "a real surfacing wrote no row — the writer is not reached from production"
     (event,) = events
     assert event.kind == "skill"
-    assert event.arm == "skill_forced", "the arm the allocator actually used must be recorded"
-    assert event.used is True, "its body reached the prompt, so the mechanical use is True"
-    assert event.query == "please handle the monster", "the benchmark miner needs the query text"
+    assert (
+        event.arm == "skill_forced"
+    ), "the arm the allocator actually used must be recorded"
+    assert (
+        event.used is True
+    ), "its body reached the prompt, so the mechanical use is True"
+    assert (
+        event.query == "please handle the monster"
+    ), "the benchmark miner needs the query text"
 
 
 def test_a_turn_that_surfaces_nothing_writes_nothing(home, tmp_path):
     """The negative through the SAME path. Without it, the anchor above could pass on a
     writer that appends a row on every turn regardless of what was surfaced."""
-    builder = ContextBuilder(
-        memory=MemoryStore(workspace=tmp_path / "ws"),
-        skills=SkillsLoader(skills_path=tmp_path / "skills", install_builtins=False),
+    builder = PromptAssembler(
+        memory=MemoryJournal(workspace=tmp_path / "ws"),
+        skills=ProcedureLibrary(
+            skills_path=tmp_path / "skills", install_builtins=False
+        ),
     )
     msg, _ = builder.build_message(
         "nothing here resembles a skill", is_new_session=True, agent="loop-worker"
@@ -281,9 +287,6 @@ def test_a_turn_that_surfaces_nothing_writes_nothing(home, tmp_path):
         store.close()
 
 
-# ── `used` is derived mechanically, not asserted ──
-
-
 def test_used_follows_what_reached_the_prompt(home, tmp_path):
     """A refused skill records `used=False`; an admitted one records `used=True`.
 
@@ -293,19 +296,21 @@ def test_used_follows_what_reached_the_prompt(home, tmp_path):
     """
     skills = tmp_path / "skills"
     skills.mkdir()
-    _write_skill(skills, "small", "name: small\ndescription: A tiny skill.", "Do the thing.\n")
-    # No `description` and no `resources:`, so there is no L1 summary to degrade to and the
-    # oversized body is the only thing on offer — the one shape that reaches REFUSED. A skill
-    # WITH a description gets REDUCED instead, which counts as loaded (its summary really is in
-    # the prompt) and would make this a test of the wrong state.
+    _write_skill(
+        skills, "small", "name: small\ndescription: A tiny skill.", "Do the thing.\n"
+    )
     _write_skill(skills, "huge", "name: huge", _OVERSIZED_BODY)
     loader = _loader(tmp_path)
 
     result = allocate_skills(
         loader,
         [
-            SkillRequest(name="small", content=loader.load_skill("small") or "", score=0.9),
-            SkillRequest(name="huge", content=loader.load_skill("huge") or "", score=0.8),
+            SkillRequest(
+                name="small", content=loader.load_skill("small") or "", score=0.9
+            ),
+            SkillRequest(
+                name="huge", content=loader.load_skill("huge") or "", score=0.8
+            ),
         ],
         query="do the thing",
         budget_tokens=200,
@@ -326,7 +331,9 @@ def test_used_follows_what_reached_the_prompt(home, tmp_path):
     )
     assert by_entity["small"].used is True
     assert by_entity["huge"].used is False
-    assert by_entity["huge"].session == "test:1", "the session the caller passed must be stored"
+    assert (
+        by_entity["huge"].session == "test:1"
+    ), "the session the caller passed must be stored"
 
 
 def test_the_recorded_confidence_is_the_score_the_candidate_competed_on(home, tmp_path):
@@ -337,7 +344,11 @@ def test_the_recorded_confidence_is_the_score_the_candidate_competed_on(home, tm
 
     allocate_skills(
         loader,
-        [SkillRequest(name="small", content=loader.load_skill("small") or "", score=0.37)],
+        [
+            SkillRequest(
+                name="small", content=loader.load_skill("small") or "", score=0.37
+            )
+        ],
         query="q",
     )
     store = SurfacingEventStore()
@@ -351,9 +362,6 @@ def test_the_recorded_confidence_is_the_score_the_candidate_competed_on(home, tm
     )
 
 
-# ── Retention ──
-
-
 def test_prune_drops_old_events_and_keeps_fresh_ones(home):
     """The vacuity pair for the prune: a DELETE that removes everything also "passes"."""
     day = 86400.0
@@ -361,14 +369,20 @@ def test_prune_drops_old_events_and_keeps_fresh_ones(home):
     store = SurfacingEventStore()
     try:
         store.record(
-            [SurfacingEvent(kind="skill", entity="ancient", created_ts=now - 200 * day)],
+            [
+                SurfacingEvent(
+                    kind="skill", entity="ancient", created_ts=now - 200 * day
+                )
+            ],
             now=now,
         )
         store.record(
             [SurfacingEvent(kind="skill", entity="recent", created_ts=now - 3 * day)],
             now=now,
         )
-        assert len(_events(store)) == 2, "premise: both rows are present before the prune"
+        assert (
+            len(_events(store)) == 2
+        ), "premise: both rows are present before the prune"
 
         removed = store.prune(retention_days=DEFAULT_RETENTION_DAYS, now=now)
         assert removed == 1
@@ -391,7 +405,9 @@ def test_the_curator_tick_prunes_surfacing_events():
     """
     import ast
 
-    tree = ast.parse(Path("src/gideon/history.py").read_text(encoding="utf-8"))
+    tree = ast.parse(
+        Path("runtime/gideon/cognition/history.py").read_text(encoding="utf-8")
+    )
     fn = next(
         node
         for node in ast.walk(tree)
@@ -413,16 +429,17 @@ def test_the_curator_tick_prunes_surfacing_events():
     assert "prune" in called, "the store is constructed on the tick but never pruned"
 
 
-# ── Reading window ──
-
-
 def test_the_read_window_excludes_events_outside_it(home):
     day = 86400.0
     now = 1_000_000.0
     store = SurfacingEventStore()
     try:
-        store.record([SurfacingEvent(kind="skill", entity="old", created_ts=now - 30 * day)])
-        store.record([SurfacingEvent(kind="skill", entity="new", created_ts=now - 1 * day)])
+        store.record(
+            [SurfacingEvent(kind="skill", entity="old", created_ts=now - 30 * day)]
+        )
+        store.record(
+            [SurfacingEvent(kind="skill", entity="new", created_ts=now - 1 * day)]
+        )
         assert len(store.read(days=None, now=now)) == 2, "premise: both rows exist"
         assert [e.entity for e in store.read(days=7, now=now)] == ["new"]
     finally:
@@ -444,9 +461,6 @@ def test_reading_a_kind_filters_rather_than_returning_everything(home):
         store.close()
 
 
-# ── The panel reader ──
-
-
 def test_the_health_panel_reads_the_table_that_is_written(home):
     """`_precision_from_events` returns real numbers, and `(None, 0, 0)` only when empty.
 
@@ -454,7 +468,7 @@ def test_the_health_panel_reads_the_table_that_is_written(home):
     returned `(None, 0, 0)` on every box. This asserts the replacement is not merely a
     different way of reporting nothing.
     """
-    from gideon.dashboard.handlers.learning import _precision_from_events
+    from gideon.interfaces.dashboard.handlers.learning import _precision_from_events
 
     assert _precision_from_events(7) == (None, 0, 0), "premise: nothing recorded yet"
 
@@ -463,7 +477,9 @@ def test_the_health_panel_reads_the_table_that_is_written(home):
         store.record(
             [
                 SurfacingEvent(kind="skill", entity="a", arm="skill_forced", used=True),
-                SurfacingEvent(kind="skill", entity="b", arm="skill_forced", used=False),
+                SurfacingEvent(
+                    kind="skill", entity="b", arm="skill_forced", used=False
+                ),
             ]
         )
     finally:

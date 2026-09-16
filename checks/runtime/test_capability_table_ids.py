@@ -34,20 +34,18 @@ expires by itself if core ever starts serving the name.
 
 from __future__ import annotations
 
-from gideon.action_providers.registry import (
-    _ensure_default_providers_registered,
-    list_action_providers,
-)
-from gideon.triggers.screen import (
+from gideon.automation.triggers.screen import (
     APP_DELIVERED_PROVIDERS,
     READ_ONLY_PROVIDERS,
     WRITE_CAPABLE_PROVIDERS,
 )
+from gideon.integrations.action_providers.registry import (
+    _ensure_default_providers_registered,
+    list_action_providers,
+)
 
 
 def _registered() -> set[str]:
-    # The registry lazily bootstraps its defaults; without this the list is empty and every
-    # assertion below would pass vacuously.
     _ensure_default_providers_registered()
     return set(list_action_providers())
 

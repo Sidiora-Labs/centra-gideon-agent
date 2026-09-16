@@ -23,8 +23,8 @@ from pathlib import Path
 
 import pytest
 
-from gideon.local_models import layouts
-from gideon.local_models.provider import (
+from gideon.integrations.local_models import layouts
+from gideon.integrations.local_models.provider import (
     CapabilityMatrix,
     LocalModel,
     LocalModelProvider,
@@ -75,8 +75,6 @@ class _CatalogProvider(LocalModelProvider):
         return True
 
 
-# A catalog exercising every branch the contract must handle. `active-model`'s size_mb
-# (10) is what the truncation test writes below-threshold bytes against.
 _CARDS = {
     "models": [
         {
@@ -91,7 +89,11 @@ _CARDS = {
             "runtime_contract": "ctranslate2>=4",
             "context_tokens": 448,
             "io_mime": {"input": ["audio/wav"], "output": ["text/plain"]},
-            "matrix": {"word_timestamps": True, "segment_timestamps": True, "languages": []},
+            "matrix": {
+                "word_timestamps": True,
+                "segment_timestamps": True,
+                "languages": [],
+            },
         },
         {
             "name": "old-model",
@@ -148,18 +150,12 @@ async def _load(
     return await _CatalogProvider(catalog, cache_root=root).list_models()
 
 
-# ── host platform token ─────────────────────────────────────────────────
-
-
 def test_host_platform_token_shape():
     """`<platform>-<arch>`, arch aliases normalized (arm64/x86_64)."""
     tok = host_platform_token()
     assert "-" in tok
     assert tok == tok.lower()
     assert "aarch64" not in tok and "amd64" not in tok
-
-
-# ── the loader maps every field ─────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -172,7 +168,7 @@ async def test_loads_every_card_and_maps_fields(tmp_path):
         "community-model",
     ]
     active = models[0]
-    assert active.description == "An active STT model"  # label → description
+    assert active.description == "An active STT model"
     assert active.runtime == "ctranslate2"
     assert active.runtime_contract == "ctranslate2>=4"
     assert active.license == "MIT"
@@ -192,33 +188,23 @@ async def test_fields_flow_through_to_dict(tmp_path):
     assert d["license"] == "MIT"
     assert d["status"] == "active"
     assert d["matrix"]["word_timestamps"] is True
-    # A model with no matrix serializes it as None, not a crash.
     assert models[1].to_dict()["matrix"] is None
-
-
-# ── Success Criterion 6: deprecated shows a chip but stays bindable ───────
 
 
 @pytest.mark.asyncio
 async def test_deprecated_model_kept_with_status(tmp_path):
     models = await _load(tmp_path)
     old = next(m for m in models if m.name == "old-model")
-    assert old.status == "deprecated"  # FE renders a chip
-    assert old in models  # still listed → still bindable
-
-
-# ── Success Criterion 7: non-commercial license flagged ──────────────────
+    assert old.status == "deprecated"
+    assert old in models
 
 
 @pytest.mark.asyncio
 async def test_non_commercial_license_flagged(tmp_path):
     models = await _load(tmp_path)
     community = next(m for m in models if m.name == "community-model")
-    assert community.non_commercial is True  # warning chip at bind time
+    assert community.non_commercial is True
     assert next(m for m in models if m.name == "active-model").non_commercial is False
-
-
-# ── truncation detection (§2.3) ──────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -226,7 +212,6 @@ async def test_truncated_when_on_disk_below_floor(tmp_path):
     """A finished, non-config-only model with <60% of its declared bytes → truncated."""
     cache = tmp_path / "cache"
     cache.mkdir()
-    # active-model declares 10 MB; write ~1 MB (well under the 60% = 6 MB floor).
     (cache / "active-model.bin").write_bytes(b"x" * 1_000_000)
     models = await _load(tmp_path, cache_root=cache)
     active = next(m for m in models if m.name == "active-model")
@@ -238,7 +223,7 @@ async def test_truncated_when_on_disk_below_floor(tmp_path):
 async def test_full_size_is_not_truncated(tmp_path):
     cache = tmp_path / "cache"
     cache.mkdir()
-    (cache / "active-model.bin").write_bytes(b"x" * 10_000_000)  # exactly the declared size
+    (cache / "active-model.bin").write_bytes(b"x" * 10_000_000)
     models = await _load(tmp_path, cache_root=cache)
     active = next(m for m in models if m.name == "active-model")
     assert active.downloaded is True
@@ -252,11 +237,11 @@ async def test_config_only_never_truncated(tmp_path):
     cache.mkdir()
     d = cache / "models--pyannote--pipeline" / "snapshots" / "r1"
     d.mkdir(parents=True)
-    (d / "config.yaml").write_bytes(b"x" * 100)  # tiny, but config_only
+    (d / "config.yaml").write_bytes(b"x" * 100)
     models = await _load(tmp_path, cache_root=cache)
     pipeline = next(m for m in models if m.name == "pyannote/pipeline")
     assert pipeline.downloaded is True
-    assert pipeline.integrity == ""  # not flagged despite tiny footprint
+    assert pipeline.integrity == ""
 
 
 @pytest.mark.asyncio
@@ -279,9 +264,6 @@ async def test_unfinished_fetch_suppresses_truncation(tmp_path):
     started running for real.
     """
     cache = tmp_path / "cache"
-    # A two-shard HF fetch in progress: shard one renamed and finished, shard two still
-    # `.incomplete`. `is_downloaded` says yes (real bytes are present) and the total is far
-    # under the 60% floor — the exact shape that produced a false Repair button.
     blobs = cache / layouts.hf_repo_dirname("active-model") / "blobs"
     blobs.mkdir(parents=True)
     (blobs / "aaaa").write_bytes(b"x" * 1_000_000)
@@ -294,7 +276,9 @@ async def test_unfinished_fetch_suppresses_truncation(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_a_crashed_fetchs_leftovers_are_swept_then_the_model_reads_truncated(tmp_path):
+async def test_a_crashed_fetchs_leftovers_are_swept_then_the_model_reads_truncated(
+    tmp_path,
+):
     """Vacuity guard for the test above: the excuse must be the PARTIAL, not the layout.
 
     Suppressing on any HF-shaped directory would pass the previous test while silencing the
@@ -306,14 +290,11 @@ async def test_a_crashed_fetchs_leftovers_are_swept_then_the_model_reads_truncat
     blobs.mkdir(parents=True)
     (blobs / "aaaa").write_bytes(b"x" * 1_000_000)
     (blobs / "bbbb.incomplete").write_bytes(b"x" * 500_000)
-    (blobs / "bbbb.incomplete").unlink()  # what "Reclaim N GB" does
+    (blobs / "bbbb.incomplete").unlink()
     models = await _load(tmp_path, cache_root=cache)
     active = next(m for m in models if m.name == "active-model")
     assert active.downloaded is True
     assert active.integrity == "truncated"
-
-
-# ── platform filtering (§4) ──────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -328,10 +309,7 @@ async def test_platforms_filter_against_host(tmp_path):
     }
     models = await _load(tmp_path, cards=cards)
     names = {m.name for m in models}
-    assert names == {"keep-empty", "keep-host"}  # empty = all hosts; other host dropped
-
-
-# ── fail-soft: missing / malformed catalog ───────────────────────────────
+    assert names == {"keep-empty", "keep-host"}
 
 
 @pytest.mark.asyncio
@@ -352,7 +330,7 @@ async def test_one_bad_card_does_not_blank_the_list(tmp_path):
     """A single card missing 'name' is skipped; the rest still load."""
     cards = {
         "models": [
-            {"label": "no name here", "size_mb": 1},  # bad — no name
+            {"label": "no name here", "size_mb": 1},
             {"name": "good", "size_mb": 1},
             "not-even-a-dict",
         ]
@@ -368,14 +346,11 @@ async def test_bare_list_catalog_shape(tmp_path):
     assert [m.name for m in models] == ["solo"]
 
 
-# ── the rails: no catalog field may exist without a writer (#1776) ───────
-
-
 @pytest.mark.asyncio
 async def test_the_shipped_one_liner_reaches_the_repair_button(tmp_path):
     """The regression rail for #1776, asserted on the WIRE shape the FE reads.
 
-    ``web/src/pages/settings/ModelsPanel.tsx`` gates its Repair action on
+    ``apps/console/src/pages/settings/ModelsPanel.tsx`` gates its Repair action on
     ``model.integrity === 'truncated'``, and ``integrity`` has exactly one writer:
     ``_apply_disk_state``. Before the fix that writer was unreachable from the documented
     one-liner (``self._models_from_catalog(path)``), so the button could not render in any
@@ -385,13 +360,15 @@ async def test_the_shipped_one_liner_reaches_the_repair_button(tmp_path):
     """
     cache = tmp_path / "cache"
     cache.mkdir()
-    (cache / "active-model.bin").write_bytes(b"x" * 1_000_000)  # declares 10 MB
+    (cache / "active-model.bin").write_bytes(b"x" * 1_000_000)
     catalog = _write_catalog(tmp_path, _CARDS)
     provider = _CatalogProvider(catalog, cache_root=cache)
 
     wire = [m.to_dict() for m in await provider.list_models()]
     active = next(d for d in wire if d["name"] == "active-model")
-    assert active["downloaded"] is True, "weights are on disk; the row must not offer Download"
+    assert (
+        active["downloaded"] is True
+    ), "weights are on disk; the row must not offer Download"
     assert (
         active["integrity"] == "truncated"
     ), "the FE gates Repair on this exact string — an empty integrity is the whole bug"
@@ -425,7 +402,7 @@ def test_every_local_model_field_has_a_writer(tmp_path):
         "config_only": True,
     }
     from_card = LocalModelProvider._model_from_card(maximal, host_platform_token())
-    default = LocalModel(name="")  # empty, so a written `name` reads as written
+    default = LocalModel(name="")
     card_writes = {
         f.name
         for f in dataclasses.fields(LocalModel)
@@ -438,21 +415,24 @@ def test_every_local_model_field_has_a_writer(tmp_path):
     catalog = _write_catalog(tmp_path, _CARDS)
     truncated = next(
         m
-        for m in _CatalogProvider(catalog, cache_root=cache)._models_from_catalog(catalog)
+        for m in _CatalogProvider(catalog, cache_root=cache)._models_from_catalog(
+            catalog
+        )
         if m.name == "active-model"
     )
     disk_writes = {
         f.name
         for f in dataclasses.fields(LocalModel)
-        if getattr(truncated, f.name) != getattr(LocalModel(name="active-model"), f.name)
+        if getattr(truncated, f.name)
+        != getattr(LocalModel(name="active-model"), f.name)
     } - card_writes
 
-    # Vacuity: an empty partition on either side would make the residue check trivial, and
-    # `disk_writes` is the side that was empty in production for the whole life of the bug.
     assert len(card_writes) >= 14, sorted(card_writes)
     assert disk_writes == {"downloaded", "integrity"}, sorted(disk_writes)
 
-    residue = {f.name for f in dataclasses.fields(LocalModel)} - card_writes - disk_writes
+    residue = (
+        {f.name for f in dataclasses.fields(LocalModel)} - card_writes - disk_writes
+    )
     assert not residue, (
         f"LocalModel.{sorted(residue)} is read on the wire (to_dict) but no catalog card and "
         f"no disk probe ever writes it — the #1776 shape. Give it a producer or delete it."
@@ -480,7 +460,9 @@ def test_a_card_name_cannot_reach_outside_the_cache_root(tmp_path, escaping):
     assert layouts.on_disk_bytes(cache, escaping) == 0
     assert layouts.downloaded_layouts(cache, escaping) == []
     assert layouts.delete_all_layouts(cache, escaping) == []
-    assert (outside / "id_rsa").exists(), "the refusal must happen before anything is touched"
+    assert (
+        outside / "id_rsa"
+    ).exists(), "the refusal must happen before anything is touched"
 
 
 def test_an_ordinary_slashed_model_id_is_not_mistaken_for_an_escape(tmp_path):
@@ -489,10 +471,10 @@ def test_an_ordinary_slashed_model_id_is_not_mistaken_for_an_escape(tmp_path):
     native = tmp_path / "sentence-transformers" / "all-MiniLM-L6-v2"
     native.mkdir(parents=True)
     (native / "w.bin").write_bytes(b"x" * 10)
-    assert layouts.is_downloaded(tmp_path, "sentence-transformers/all-MiniLM-L6-v2") is True
-
-
-# ── the helpers, unit-tested (Part 3) ────────────────────────────────────
+    assert (
+        layouts.is_downloaded(tmp_path, "sentence-transformers/all-MiniLM-L6-v2")
+        is True
+    )
 
 
 def test_on_disk_bytes_sums_a_directory(tmp_path):
@@ -545,7 +527,9 @@ def test_non_commercial_explicit_flag_wins():
 
 
 def test_matrix_from_dict_ignores_unknown_keys():
-    m = _matrix_from_dict({"word_timestamps": True, "not_a_field": 9, "hotword_budget": 224})
+    m = _matrix_from_dict(
+        {"word_timestamps": True, "not_a_field": 9, "hotword_budget": 224}
+    )
     assert m.word_timestamps is True
     assert m.hotword_budget == 224
     assert not hasattr(m, "not_a_field")

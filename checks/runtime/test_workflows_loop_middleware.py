@@ -16,9 +16,15 @@ many times the decision was called.
 
 import pytest
 
-from gideon.loop import tick
-from gideon.loop.tick import Action, Decision, TickConfig, TickState, evaluate
-from gideon.workflows.loop_middleware import (
+from gideon.automation.loop import tick
+from gideon.automation.loop.tick import (
+    Action,
+    Decision,
+    TickConfig,
+    TickState,
+    evaluate,
+)
+from gideon.automation.workflows.loop_middleware import (
     CLASS_ENTRY_RUNG,
     DEFAULT_LADDER,
     RECOVERABLE,
@@ -31,8 +37,6 @@ from gideon.workflows.loop_middleware import (
     structured_brief,
 )
 
-#: A fixed clock. `evaluate` takes `now` as a parameter precisely so a test never needs a real
-#: one, and so the same inputs decide the same way forever.
 NOW = 1_000.0
 
 
@@ -72,9 +76,6 @@ def _walk(cfg: TickConfig, state: TickState, rounds: int, **fail_kw):
     return seen, state
 
 
-# ── classification ──
-
-
 @pytest.mark.parametrize(
     "text,expected",
     [
@@ -100,7 +101,9 @@ def test_failures_are_classified_deterministically(text, expected):
 def test_rate_limits_are_matched_before_generic_patterns():
     """Misclassifying a 429 as wrong-work is the EXPENSIVE direction: it spends a fresh
     session on something that needed a sleep."""
-    assert classify_failure("request failed: 429 rate limited") is FailureClass.RATE_LIMIT
+    assert (
+        classify_failure("request failed: 429 rate limited") is FailureClass.RATE_LIMIT
+    )
 
 
 def test_an_explicit_hint_wins_over_the_text():
@@ -108,15 +111,15 @@ def test_an_explicit_hint_wins_over_the_text():
 
 
 def test_a_bogus_hint_falls_back_to_the_text():
-    assert classify_failure("429 rate limited", hint="not_a_class") is FailureClass.RATE_LIMIT
+    assert (
+        classify_failure("429 rate limited", hint="not_a_class")
+        is FailureClass.RATE_LIMIT
+    )
 
 
 def test_the_failure_class_enum_is_closed():
     with pytest.raises(ValueError):
         FailureClass("something_new")
-
-
-# ── fingerprinting ──
 
 
 def test_identical_calls_fingerprint_identically():
@@ -126,11 +129,15 @@ def test_identical_calls_fingerprint_identically():
 
 
 def test_argument_order_does_not_change_the_fingerprint():
-    assert call_fingerprint("t", {"a": 1, "b": 2}) == call_fingerprint("t", {"b": 2, "a": 1})
+    assert call_fingerprint("t", {"a": 1, "b": 2}) == call_fingerprint(
+        "t", {"b": 2, "a": 1}
+    )
 
 
 def test_different_arguments_fingerprint_differently():
-    assert call_fingerprint("bash", {"cmd": "a"}) != call_fingerprint("bash", {"cmd": "b"})
+    assert call_fingerprint("bash", {"cmd": "a"}) != call_fingerprint(
+        "bash", {"cmd": "b"}
+    )
 
 
 def test_the_tool_name_is_part_of_the_fingerprint():
@@ -139,9 +146,6 @@ def test_the_tool_name_is_part_of_the_fingerprint():
 
 def test_unserializable_arguments_still_fingerprint():
     assert call_fingerprint("t", object())
-
-
-# ── recoverable classes ──
 
 
 def test_a_rate_limit_does_not_burn_an_escalation_rung():
@@ -186,9 +190,6 @@ def test_recoverable_classes_are_exactly_the_worlds_fault():
     assert RECOVERABLE == {FailureClass.RATE_LIMIT, FailureClass.TRANSIENT}
 
 
-# ── the environment shortcut ──
-
-
 def test_an_environment_failure_surfaces_immediately():
     """No retry fixes a missing binary. Walking the ladder would waste every rung."""
     state = _fail(_state(), text="command not found: pytest")
@@ -200,9 +201,6 @@ def test_an_environment_failure_surfaces_immediately():
 
 def test_the_environment_class_enters_at_surface():
     assert CLASS_ENTRY_RUNG[FailureClass.ENVIRONMENT] is Rung.SURFACE
-
-
-# ── the Continue → Nudge → Escalate → Surface ladder ──
 
 
 def test_a_stall_gets_a_nudge_before_anything_expensive():
@@ -226,7 +224,7 @@ def test_later_nudges_keep_the_specific_stall_text():
     the ones a worker most needs specifics from."""
     cfg = TickConfig()
     state = stalled()
-    state = tick.applied(cfg, state, evaluate(cfg, state, NOW))  # first nudge
+    state = tick.applied(cfg, state, evaluate(cfg, state, NOW))
     state = tick.record_failure(state, tool="bash", args={"cmd": "make test"})
     assert "identical command" in evaluate(cfg, state, NOW).nudge_text
 
@@ -265,7 +263,7 @@ def test_an_engine_rung_escalates_rather_than_continuing():
     CLASSIFIED_RETRY is a re-prompt that keeps executing."""
     cfg = TickConfig()
     state = _fail(_state(), n=3, tool="t", args={}, hint="wrong_work")
-    state = tick.applied(cfg, state, evaluate(cfg, state, NOW))  # consume the nudge
+    state = tick.applied(cfg, state, evaluate(cfg, state, NOW))
     decision = evaluate(cfg, state, NOW)
     assert decision.action is Action.ESCALATE
     assert decision.rung is Rung.FRESH_SESSION
@@ -281,7 +279,6 @@ def test_the_attempt_cap_bounds_attempts_within_a_rung():
     cfg = TickConfig(attempt_cap=1)
     decisions, _ = _walk(cfg, _state(), 12, tool="t", args={})
     rungs = [d.rung for d in decisions if d.rung]
-    # With one attempt per rung it walks straight up.
     assert rungs[:2] == [Rung.CLASSIFIED_RETRY, Rung.FRESH_SESSION]
 
 
@@ -294,7 +291,9 @@ def test_a_template_ladder_is_honored():
 
 def test_an_unknown_rung_is_dropped_not_fatal():
     """A template with a typo should escalate along the rungs it named correctly."""
-    cfg = TickConfig(ladder=_resolve_ladder({"ladder": ["classified_retry", "nonsense"]}))
+    cfg = TickConfig(
+        ladder=_resolve_ladder({"ladder": ["classified_retry", "nonsense"]})
+    )
     state = _fail(_state(), n=3, tool="t", args={})
     state = tick.applied(cfg, state, evaluate(cfg, state, NOW))
     assert evaluate(cfg, state, NOW).rung is not None
@@ -315,13 +314,13 @@ def test_a_hand_built_ladder_is_forced_surface_terminal_at_read_time():
     assert TickConfig(ladder=()).rungs() == DEFAULT_LADDER
 
 
-# ── the other stall shapes ──
-
-
 def test_the_same_fix_repeated_abandons_the_hypothesis():
     """The diagnosis is wrong, not the execution."""
     state = _fail(
-        _state(nudges_issued=1), n=3, text="still failing", fix="add a null check at line 52"
+        _state(nudges_issued=1),
+        n=3,
+        text="still failing",
+        fix="add a null check at line 52",
     )
     assert evaluate(TickConfig(), state, NOW).reason == "hypothesis_exhausted"
 
@@ -365,9 +364,6 @@ def test_a_bogus_window_falls_back_to_the_default(bogus):
     assert evaluate(TickConfig(fingerprint_window=bogus), stalled(), NOW).nudge_text
 
 
-# ── success resets ──
-
-
 def test_success_resets_the_counters():
     """A run that recovers is not on thin ice."""
     state = tick.reset_after_success(stalled(_state(escalations_taken=2)))
@@ -379,9 +375,6 @@ def test_success_resets_the_counters():
     assert not decision.nudge_text
 
 
-# ── the decision object ──
-
-
 def test_the_decision_has_no_truthiness():
     """Deliberate: a convenience `__bool__` on a decision is how `if decision` came to
     mean "is this healthy" where the code meant "did I get one". Inherited from the deleted
@@ -390,18 +383,23 @@ def test_the_decision_has_no_truthiness():
         bool(Decision(Action.EXECUTE, 0))
 
 
-# ── the structured brief ──
-
-
 def test_the_brief_is_structured_never_a_transcript():
     """A transcript makes the user redo the diagnosis the engine already did."""
     brief = structured_brief(
         goal="make the gate pass",
-        attempts=[{"class": "wrong_work", "error_signature": "AssertionError: expected 3"}],
+        attempts=[
+            {"class": "wrong_work", "error_signature": "AssertionError: expected 3"}
+        ],
         where_stuck="the judge rejects on evidence",
         recommendation="narrow the rubric",
     )
-    assert set(brief) == {"goal", "attempts", "where_stuck", "recommendation", "options"}
+    assert set(brief) == {
+        "goal",
+        "attempts",
+        "where_stuck",
+        "recommendation",
+        "options",
+    }
     assert brief["attempts"][0]["error_signature"] == "AssertionError: expected 3"
 
 
@@ -409,7 +407,9 @@ def test_the_brief_offers_typed_choices():
     """A free-text "it failed" leaves the user to invent the next move."""
     assert (
         "reassign"
-        in structured_brief(goal="g", attempts=[], where_stuck="w", recommendation="r")["options"]
+        in structured_brief(goal="g", attempts=[], where_stuck="w", recommendation="r")[
+            "options"
+        ]
     )
 
 
@@ -427,13 +427,13 @@ def test_error_signatures_are_kept_verbatim_but_bounded():
     """Paraphrasing an error is how the one detail that identifies it gets lost."""
     long_sig = "E" * 900
     brief = structured_brief(
-        goal="g", attempts=[{"error_signature": long_sig}], where_stuck="w", recommendation="r"
+        goal="g",
+        attempts=[{"error_signature": long_sig}],
+        where_stuck="w",
+        recommendation="r",
     )
     kept = brief["attempts"][0]["error_signature"]
     assert kept.startswith("EEE") and len(kept) <= 400
-
-
-# ── the interrupt queue ──
 
 
 def test_interrupts_are_consumed_atomically_at_the_boundary():
@@ -486,8 +486,6 @@ def test_a_consumed_interrupt_reports_itself_consumed():
     assert item.consumed
 
 
-# ── the backend↔frontend event coupling ──
-
 MIDDLEWARE_EVENTS = ("breaker_trip", "steering", "judge_verdict", "judge_divergence")
 
 
@@ -495,7 +493,7 @@ def test_the_middleware_events_are_ledger_kinds():
     """A refiner needs to know a run was nudged or steered: a verdict that followed a
     human's mid-run instruction is not evidence about the TEMPLATE, and without the
     event there is no way to tell the two apart."""
-    from gideon.workflows.journal import LEDGER_KINDS
+    from gideon.automation.workflows.journal import LEDGER_KINDS
 
     for event in MIDDLEWARE_EVENTS:
         assert event in LEDGER_KINDS, event
@@ -510,8 +508,13 @@ def test_every_middleware_event_is_registered_in_the_frontend_union():
     """
     from pathlib import Path
 
-    source = Path(__file__).resolve().parents[1] / "web/src/pages/loops/useRunStream.ts"
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "apps/console/src/features/loops/useRunStream.ts"
+    )
     text = source.read_text(encoding="utf-8")
     union = text.split("export const RUN_LIFECYCLE = [", 1)[1].split("] as const", 1)[0]
     for event in MIDDLEWARE_EVENTS:
-        assert f"'{event}'" in union, f"{event} is emitted but not registered in RUN_LIFECYCLE"
+        assert (
+            f"'{event}'" in union
+        ), f"{event} is emitted but not registered in RUN_LIFECYCLE"

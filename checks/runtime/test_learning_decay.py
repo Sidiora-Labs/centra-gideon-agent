@@ -7,9 +7,7 @@ silently changes meaning on upgrade.
 
 import pytest
 
-from gideon.learning import decay as D
-
-# ── the curve ──
+from gideon.cognition.learning import decay as D
 
 
 def test_the_kernel_reproduces_the_facet_stores_half_life():
@@ -26,9 +24,11 @@ def test_the_kernel_reproduces_the_facet_stores_half_life():
 
 def test_strength_starts_at_one_and_decreases_monotonically():
     assert D.strength(kind="skill", active_days_since_use=0) == pytest.approx(1.0)
-    values = [D.strength(kind="skill", active_days_since_use=d) for d in (0, 10, 30, 90, 365)]
+    values = [
+        D.strength(kind="skill", active_days_since_use=d) for d in (0, 10, 30, 90, 365)
+    ]
     assert values == sorted(values, reverse=True)
-    assert values[-1] > 0.0  # never reaches zero — decay, not deletion
+    assert values[-1] > 0.0
 
 
 def test_negative_days_are_clamped():
@@ -41,7 +41,14 @@ def test_kind_multipliers_encode_what_endures():
     describes a world that has moved on."""
     at60 = {
         kind: D.strength(kind=kind, active_days_since_use=60)
-        for kind in ("strategy", "preference", "lesson", "skill", "procedural", "failure")
+        for kind in (
+            "strategy",
+            "preference",
+            "lesson",
+            "skill",
+            "procedural",
+            "failure",
+        )
     }
     assert at60["strategy"] > at60["preference"] >= at60["lesson"] > at60["skill"]
     assert at60["skill"] > at60["procedural"] > at60["failure"]
@@ -59,23 +66,24 @@ def test_an_unknown_kind_falls_back_to_the_reference_rate():
     )
 
 
-# ── importance as a second axis, not an exemption ──
-
-
 def test_importance_slows_decay_without_stopping_it():
     """Exemption is what produces a library full of things marked important once
     and never revisited."""
     plain = D.strength(kind="skill", active_days_since_use=90)
     important = D.strength(kind="skill", active_days_since_use=90, importance=1.0)
     assert important > plain
-    assert important < 1.0  # still decayed
+    assert important < 1.0
 
 
 def test_importance_is_clamped():
-    assert D.strength(kind="skill", active_days_since_use=30, importance=5.0) == pytest.approx(
+    assert D.strength(
+        kind="skill", active_days_since_use=30, importance=5.0
+    ) == pytest.approx(
         D.strength(kind="skill", active_days_since_use=30, importance=1.0)
     )
-    assert D.strength(kind="skill", active_days_since_use=30, importance=-1.0) == pytest.approx(
+    assert D.strength(
+        kind="skill", active_days_since_use=30, importance=-1.0
+    ) == pytest.approx(
         D.strength(kind="skill", active_days_since_use=30, importance=0.0)
     )
 
@@ -85,14 +93,13 @@ def test_lambda_never_reaches_zero():
     assert D.effective_lambda("strategy", importance=1.0) > 0.0
 
 
-# ── pruning needs BOTH signals ──
-
-
 def test_pruning_requires_low_strength_AND_low_importance():
     cold_trivial = D.evaluate(kind="failure", active_days_since_use=200)
     assert cold_trivial.prune
 
-    cold_important = D.evaluate(kind="failure", active_days_since_use=200, importance=0.9)
+    cold_important = D.evaluate(
+        kind="failure", active_days_since_use=200, importance=0.9
+    )
     assert not cold_important.prune
 
 
@@ -105,9 +112,6 @@ def test_a_rarely_consulted_runbook_survives():
 
 def test_a_hot_but_trivial_entry_is_not_pruned_while_hot():
     assert not D.evaluate(kind="failure", active_days_since_use=1).prune
-
-
-# ── the sparing rules ──
 
 
 def test_pinned_beats_everything():
@@ -140,16 +144,15 @@ def test_decayed_but_stable_becomes_a_review_not_an_archival():
 
 
 def test_review_takes_precedence_over_pruning():
-    verdict = D.evaluate(kind="failure", active_days_since_use=500, stability=0.95, importance=0.0)
+    verdict = D.evaluate(
+        kind="failure", active_days_since_use=500, stability=0.95, importance=0.0
+    )
     assert verdict.review and not verdict.prune
 
 
 def test_a_healthy_entity_is_truthy():
     assert D.evaluate(kind="skill", active_days_since_use=1)
     assert not D.evaluate(kind="failure", active_days_since_use=500)
-
-
-# ── reinforcement damping ──
 
 
 def test_a_burst_of_reinforcements_counts_half():
@@ -164,30 +167,37 @@ def test_a_first_reinforcement_is_full_weight():
     assert D.reinforcement_weight(-1) == 1.0
 
 
-# ── the active-days clock ──
-
-
 def test_the_clock_counts_active_days_not_wall_clock():
     """Vacation-proof: for a single-user system, "time passed" and "the user moved
     on" are different claims and only the second should age anything."""
     dates = ["2026-07-01", "2026-07-02", "2026-07-03"]
-    counted = D.active_days_between(dates, "2026-06-25T00:00:00Z", "2026-07-25T00:00:00Z")
-    assert counted == 3.0  # not 30
+    counted = D.active_days_between(
+        dates, "2026-06-25T00:00:00Z", "2026-07-25T00:00:00Z"
+    )
+    assert counted == 3.0
 
 
 def test_no_active_days_means_no_decay():
-    assert D.active_days_between([], "2026-01-01T00:00:00Z", "2026-12-31T00:00:00Z") == 0.0
+    assert (
+        D.active_days_between([], "2026-01-01T00:00:00Z", "2026-12-31T00:00:00Z") == 0.0
+    )
 
 
 def test_active_days_outside_the_window_are_excluded():
     dates = ["2026-01-01", "2026-07-02", "2026-12-01"]
-    assert D.active_days_between(dates, "2026-06-01T00:00:00Z", "2026-08-01T00:00:00Z") == 1.0
+    assert (
+        D.active_days_between(dates, "2026-06-01T00:00:00Z", "2026-08-01T00:00:00Z")
+        == 1.0
+    )
 
 
 def test_the_start_boundary_is_exclusive_and_the_end_inclusive():
     """The day an entity was last used is not an idle day."""
     dates = ["2026-07-01", "2026-07-02"]
-    assert D.active_days_between(dates, "2026-07-01T00:00:00Z", "2026-07-02T00:00:00Z") == 1.0
+    assert (
+        D.active_days_between(dates, "2026-07-01T00:00:00Z", "2026-07-02T00:00:00Z")
+        == 1.0
+    )
 
 
 def test_a_malformed_timestamp_degrades_to_zero_rather_than_raising():
@@ -197,18 +207,21 @@ def test_a_malformed_timestamp_degrades_to_zero_rather_than_raising():
 
 def test_an_end_before_the_start_yields_zero():
     assert (
-        D.active_days_between(["2026-07-01"], "2026-08-01T00:00:00Z", "2026-06-01T00:00:00Z") == 0.0
+        D.active_days_between(
+            ["2026-07-01"], "2026-08-01T00:00:00Z", "2026-06-01T00:00:00Z"
+        )
+        == 0.0
     )
 
 
 def test_naive_timestamps_are_treated_as_utc():
     """Half the stored timestamps in this system carry no offset."""
     assert (
-        D.active_days_between(["2026-07-02"], "2026-07-01T00:00:00", "2026-07-03T00:00:00") == 1.0
+        D.active_days_between(
+            ["2026-07-02"], "2026-07-01T00:00:00", "2026-07-03T00:00:00"
+        )
+        == 1.0
     )
-
-
-# ── doctrine ──
 
 
 def test_the_kernel_is_pure():

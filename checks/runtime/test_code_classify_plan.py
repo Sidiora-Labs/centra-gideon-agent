@@ -9,7 +9,7 @@ blanks the stage id (returning only a title); these tests pin the dedup that gua
 
 from __future__ import annotations
 
-from gideon.loop.code_classify import _normalize_plan
+from gideon.automation.loop.code_classify import _normalize_plan
 
 
 def test_dedupes_known_stage_ids():
@@ -22,8 +22,6 @@ def test_dedupes_known_stage_ids():
 
 
 def test_dedupes_blank_stage_rows_by_title():
-    # The planner blanked the stage id on both; they'd otherwise both key to '' and
-    # collide downstream. Same effective key (title) → keep one.
     raw = [
         {"stage": "", "title": "Investigate", "objective": "look at logs"},
         {"stage": "", "title": "Investigate", "objective": "look again"},
@@ -33,7 +31,6 @@ def test_dedupes_blank_stage_rows_by_title():
 
 
 def test_keeps_distinct_blank_stage_rows():
-    # Blank stage ids but DISTINCT titles → distinct effective keys → both kept.
     raw = [
         {"stage": "", "title": "Investigate", "objective": "a"},
         {"stage": "", "title": "Validate", "objective": "b"},
@@ -43,8 +40,6 @@ def test_keeps_distinct_blank_stage_rows():
 
 
 def test_drops_unkeyable_row():
-    # Blank stage AND blank title → no effective downstream key → drop (can't be keyed
-    # into task_list_ids/stage_status without colliding on '').
     raw = [{"stage": "", "title": "", "objective": "orphan"}]
     out = _normalize_plan(raw, set(), set(), None)
     assert out == []

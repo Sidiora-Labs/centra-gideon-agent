@@ -25,19 +25,19 @@ import time
 
 import pytest
 
-from gideon.workflows import service, store
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.journal import STEP_COMPLETED, STEP_STARTED, ledger
-from gideon.workflows.models import (
+from gideon.automation.workflows import service, store
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.journal import STEP_COMPLETED, STEP_STARTED, ledger
+from gideon.automation.workflows.models import (
     FailureClass,
     InstanceState,
     Node,
     RunStatus,
     WorkflowRun,
 )
-from gideon.workflows.native_defs import register_native_provider
-from gideon.workflows.tick import Limits, frontier
-from gideon.workflows.watchdog import WorkflowWatchdog
+from gideon.automation.workflows.native_defs import register_native_provider
+from gideon.automation.workflows.tick import Limits, frontier
+from gideon.automation.workflows.watchdog import WorkflowWatchdog
 
 pytestmark = pytest.mark.anyio
 
@@ -51,8 +51,8 @@ def anyio_backend() -> str:
 def _isolated(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
-    from gideon.workflows import defs as defs_mod
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
+    from gideon.automation.workflows import defs as defs_mod
 
     saved = dict(defs_mod._providers)
     defs_mod._providers.clear()
@@ -83,13 +83,17 @@ class TestTimeoutPair:
         def provider(_name: str):
             class P:
                 async def execute(self, cfg, ctx, timeout=30):
-                    await asyncio.sleep(60)  # never reports, never returns
+                    await asyncio.sleep(60)
 
             return P()
 
         spec = {
             "name": "silent",
-            "root": {"kind": "action", "id": "w", "config": {"provider": "p", "with": {}}},
+            "root": {
+                "kind": "action",
+                "id": "w",
+                "config": {"provider": "p", "with": {}},
+            },
         }
         run = _run_for(spec)
         controller = RunController(
@@ -101,7 +105,6 @@ class TestTimeoutPair:
         )
         started = time.time()
         assert await controller.run_to_completion(timeout=30) == RunStatus.FAILED
-        # Killed by the STALL knob, not the total knob — the total is 120s and this took seconds.
         assert time.time() - started < 20
         failure = store.read_state(run.id)["root"].failure
         assert failure.failure_class == FailureClass.TIMEOUT
@@ -119,10 +122,16 @@ class TestTimeoutPair:
         )
         spec = {
             "name": "parent",
-            "root": {"kind": "subworkflow", "id": "nested", "config": {"ref": "slowchild"}},
+            "root": {
+                "kind": "subworkflow",
+                "id": "nested",
+                "config": {"ref": "slowchild"},
+            },
         }
         run = _run_for(spec)
-        wd = WorkflowWatchdog(None, EngineServices(node_timeout_total=60, node_timeout_stall=1))
+        wd = WorkflowWatchdog(
+            None, EngineServices(node_timeout_total=60, node_timeout_stall=1)
+        )
         controller = await wd.launch(run, spec)
         assert await controller.run_to_completion(timeout=40) == RunStatus.COMPLETE
         assert store.read_state(run.id)["root"].state == InstanceState.DONE
@@ -133,10 +142,12 @@ class TestTimeoutPair:
         trusting it."""
         import inspect
 
-        from gideon.workflows import controller as ctrl
+        from gideon.automation.workflows import controller as ctrl
 
         source = inspect.getsource(ctrl.RunController._execute)
-        assert "on_progress" in source, "the dispatcher is not given a progress callback"
+        assert (
+            "on_progress" in source
+        ), "the dispatcher is not given a progress callback"
 
     async def test_a_zero_stall_knob_disables_the_check(self) -> None:
         """0 means unbounded. A cap the user did not ask for that silently kills a long node is
@@ -162,7 +173,11 @@ class TestTimeoutPair:
 
         spec = {
             "name": "nostall",
-            "root": {"kind": "action", "id": "w", "config": {"provider": "p", "with": {}}},
+            "root": {
+                "kind": "action",
+                "id": "w",
+                "config": {"provider": "p", "with": {}},
+            },
         }
         run = _run_for(spec)
         controller = RunController(
@@ -194,8 +209,16 @@ class TestActiveEdgePair:
                     "id": "route",
                     "config": {"on": "{{inputs.which}}", "enum": ["a", "b"]},
                     "cases": {
-                        "a": {"kind": "transform", "id": "leg_a", "config": {"expr": "A"}},
-                        "b": {"kind": "transform", "id": "leg_b", "config": {"expr": "B"}},
+                        "a": {
+                            "kind": "transform",
+                            "id": "leg_a",
+                            "config": {"expr": "A"},
+                        },
+                        "b": {
+                            "kind": "transform",
+                            "id": "leg_b",
+                            "config": {"expr": "B"},
+                        },
                     },
                 },
                 {
@@ -207,7 +230,6 @@ class TestActiveEdgePair:
             ],
         }
         root = Node.from_dict(spec)
-        # The branch routed to `a`; `leg_b` is unreachable. The join must still become runnable.
         states = {
             "root.children[0]": InstanceState.DONE,
             "root.children[0].cases[a]": InstanceState.DONE,
@@ -243,7 +265,6 @@ class TestActiveEdgePair:
         fr = frontier(root, states, limits=Limits())
         ready = {r.path for r in fr.ready}
         assert "root.children[2]" not in ready, "the join fired on the fast leg alone"
-        # And it is WAITING, not blocked — a deadlock report here would be a false alarm.
         assert not fr.blocked
 
     def test_the_join_fires_once_the_async_leg_SETTLES(self) -> None:
@@ -284,8 +305,16 @@ class TestActiveEdgePair:
                         "id": "route",
                         "config": {"on": "{{inputs.which}}", "enum": ["a", "b"]},
                         "cases": {
-                            "a": {"kind": "transform", "id": "leg_a", "config": {"expr": "A"}},
-                            "b": {"kind": "transform", "id": "leg_b", "config": {"expr": "B"}},
+                            "a": {
+                                "kind": "transform",
+                                "id": "leg_a",
+                                "config": {"expr": "A"},
+                            },
+                            "b": {
+                                "kind": "transform",
+                                "id": "leg_b",
+                                "config": {"expr": "B"},
+                            },
                         },
                     },
                     {
@@ -297,7 +326,9 @@ class TestActiveEdgePair:
                 ],
             },
         }
-        run = store.create(WorkflowRun(id="", workflow_name="routed", inputs={"which": "a"}))
+        run = store.create(
+            WorkflowRun(id="", workflow_name="routed", inputs={"which": "a"})
+        )
         store.write_spec(run.id, spec)
         controller = RunController(run, spec, services=EngineServices())
         assert await controller.run_to_completion(timeout=30) == RunStatus.COMPLETE
@@ -325,7 +356,11 @@ class TestJournalReplay:
                         "kind": "foreach",
                         "id": "fan",
                         "config": {"items": [1, 2, 3]},
-                        "body": {"kind": "transform", "id": "item", "config": {"expr": "{{item}}"}},
+                        "body": {
+                            "kind": "transform",
+                            "id": "item",
+                            "config": {"expr": "{{item}}"},
+                        },
                     },
                     {"kind": "transform", "id": "z", "config": {"expr": "done"}},
                 ],
@@ -342,18 +377,20 @@ class TestJournalReplay:
         journal cut that produced API-rejected conversations on resume because a `tool_result` had
         lost its `tool_use`."""
         run = await self._completed_run()
-        # `step_started` is journaled but is deliberately NOT a LEDGER kind: the ledger is the
-        # subset a downstream refiner reads, and a start carries no outcome. So the pairing is
-        # asserted over the JOURNAL, which is the file a resume actually replays.
         entries = store.read_jsonl(run.id, "journal.jsonl")
-        starts = {e.get("instance_path") for e in entries if e.get("kind") == STEP_STARTED}
-        completions = {e.get("instance_path") for e in entries if e.get("kind") == STEP_COMPLETED}
+        starts = {
+            e.get("instance_path") for e in entries if e.get("kind") == STEP_STARTED
+        }
+        completions = {
+            e.get("instance_path") for e in entries if e.get("kind") == STEP_COMPLETED
+        }
         orphans = {c for c in completions if c not in starts}
         assert not orphans, f"completions with no start: {sorted(orphans)}"
 
     async def test_no_node_completes_TWICE_in_one_epoch(self) -> None:
         """The duplicate-rate metric. A double completion means the same work was counted twice —
-        which corrupts the token totals, the cost attribution and any downstream evaluation."""
+        which corrupts the token totals, the cost attribution and any downstream evaluation.
+        """
         run = await self._completed_run()
         seen: set[tuple[str, int]] = set()
         for event in ledger(run.id, kinds={STEP_COMPLETED}):
@@ -363,7 +400,8 @@ class TestJournalReplay:
 
     async def test_a_start_always_precedes_its_completion(self) -> None:
         """The order-violation metric. Out-of-order events make a replayed trajectory
-        nonsensical — and a consumer folding them would show a node finishing before it began."""
+        nonsensical — and a consumer folding them would show a node finishing before it began.
+        """
         run = await self._completed_run()
         first_start: dict[str, int] = {}
         for i, event in enumerate(store.read_jsonl(run.id, "journal.jsonl")):
@@ -388,13 +426,18 @@ class TestJournalReplay:
         """The plan's performance criterion. The journal is read on every resume, so a slow read
         makes crash recovery quadratic in run length."""
         run = _run_for(
-            {"name": "big", "root": {"kind": "transform", "id": "t", "config": {"expr": 1}}}
+            {
+                "name": "big",
+                "root": {"kind": "transform", "id": "t", "config": {"expr": 1}},
+            }
         )
-        from gideon.workflows.journal import Journal
+        from gideon.automation.workflows.journal import Journal
 
         journal = Journal(run.id)
         for i in range(1000):
-            journal.write(STEP_COMPLETED, instance_path=f"root.n{i}", node_id=f"n{i}", epoch=0)
+            journal.write(
+                STEP_COMPLETED, instance_path=f"root.n{i}", node_id=f"n{i}", epoch=0
+            )
 
         started = time.perf_counter()
         records = ledger(run.id)
@@ -407,7 +450,7 @@ class TestJournalReplay:
         One bad line must not make the whole ledger unreadable — that would turn a recoverable
         crash into a lost run."""
         run = await self._completed_run()
-        from gideon.workflows.journal import EVENTS_FILE
+        from gideon.automation.workflows.journal import EVENTS_FILE
 
         path = store.run_dir(run.id) / EVENTS_FILE
         with path.open("a", encoding="utf-8") as fh:
@@ -439,14 +482,13 @@ class TestWriteScopeEscapes(object):
         Asserted at the comparison layer, not the declaration layer: testing that the declared list
         contains no `..` would pin an implementation detail that is not the safety property.
         """
-        from gideon.workflows.scope import diff, snapshot
+        from gideon.automation.workflows.scope import diff, snapshot
 
         ws = tmp_path / "ws"
         ws.mkdir()
         sibling = tmp_path / "sibling"
         sibling.mkdir()
-        # A spec that tries to claim the parent by traversing out of its own workspace.
-        allowed = [str(ws / ".." / "ws")]  # resolves back to ws — NOT to the parent
+        allowed = [str(ws / ".." / "ws")]
         before = snapshot([str(tmp_path)])
         (sibling / "smuggled.txt").write_text("out of scope", encoding="utf-8")
         report = diff(before, snapshot([str(tmp_path)]), allowed=allowed)
@@ -455,7 +497,7 @@ class TestWriteScopeEscapes(object):
     def test_the_WATCHED_set_is_wider_than_the_allowed_set(self, tmp_path) -> None:
         """The load-bearing asymmetry: an escape lands OUTSIDE what is allowed, so snapshotting
         only the allowed paths would make a violation undetectable by construction."""
-        from gideon.workflows.scope import allowed_write_paths, watch_roots
+        from gideon.automation.workflows.scope import allowed_write_paths, watch_roots
 
         ws = tmp_path / "ws"
         (ws / "sub").mkdir(parents=True)
@@ -470,13 +512,13 @@ class TestWriteScopeEscapes(object):
     def test_a_node_with_no_declaration_does_NOT_snapshot(self, tmp_path) -> None:
         """Opt-in by design: the tree walk is real work, and a fan-out of fast transforms must not
         each pay for one."""
-        from gideon.workflows.scope import enforces_scope
+        from gideon.automation.workflows.scope import enforces_scope
 
         assert enforces_scope({}) is False
         assert enforces_scope({"allowed_write_paths": [str(tmp_path)]}) is True
 
     def test_a_write_outside_the_scope_is_DETECTED(self, tmp_path) -> None:
-        from gideon.workflows.scope import diff, snapshot
+        from gideon.automation.workflows.scope import diff, snapshot
 
         ws = tmp_path / "ws"
         ws.mkdir()
@@ -484,21 +526,17 @@ class TestWriteScopeEscapes(object):
         before = snapshot([str(tmp_path)])
         outside.write_text("escaped", encoding="utf-8")
         report = diff(before, snapshot([str(tmp_path)]), allowed=[str(ws)])
-        # `violations` is the classified field — `created` lists every change, in or out of scope.
-        # Asserting on the classification is the point: the diff SEES all writes and judges them.
         assert any("escaped.txt" in str(v) for v in report.violations), report
 
     def test_an_in_scope_write_is_NOT_flagged(self, tmp_path) -> None:
         """The complement — a scope check that flagged legitimate writes would be turned off."""
-        from gideon.workflows.scope import diff, snapshot
+        from gideon.automation.workflows.scope import diff, snapshot
 
         ws = tmp_path / "ws"
         ws.mkdir()
         before = snapshot([str(tmp_path)])
         (ws / "output.txt").write_text("fine", encoding="utf-8")
         report = diff(before, snapshot([str(tmp_path)]), allowed=[str(ws)])
-        # Created, yes — but NOT a violation. A scope check that flagged legitimate writes would be
-        # turned off, and then it protects nothing.
         assert report.violations == [], report
         assert any("output.txt" in str(c) for c in report.created), report
 
@@ -515,26 +553,30 @@ class TestDocumentationAccuracy:
     def _arch(self) -> str:
         from pathlib import Path
 
-        return (Path(__file__).resolve().parents[1] / "docs/architecture/workflows.md").read_text(
-            encoding="utf-8"
-        )
+        return (
+            Path(__file__).resolve().parents[2] / "docs/architecture/workflows.md"
+        ).read_text(encoding="utf-8")
 
     def _guide(self) -> str:
         from pathlib import Path
 
         return (
-            Path(__file__).resolve().parents[1] / "docs/guides/workflow-templates.md"
+            Path(__file__).resolve().parents[2] / "docs/guides/workflow-templates.md"
         ).read_text(encoding="utf-8")
 
     def test_every_module_the_doc_names_EXISTS(self) -> None:
         import re
         from pathlib import Path
 
-        root = Path(__file__).resolve().parents[1] / "src/gideon/workflows"
+        root = (
+            Path(__file__).resolve().parents[2] / "runtime/gideon/automation/workflows"
+        )
         named = set(re.findall(r"\| `(\w+\.py)` \|", self._arch()))
         assert named, "the module table went missing from the architecture doc"
         missing = {m for m in named if not (root / m).is_file()}
-        assert not missing, f"the doc names modules that do not exist: {sorted(missing)}"
+        assert (
+            not missing
+        ), f"the doc names modules that do not exist: {sorted(missing)}"
 
     def test_the_doc_covers_every_module_that_EXISTS(self) -> None:
         """The other direction: a module absent from the table is one a reader will not find, which
@@ -542,7 +584,9 @@ class TestDocumentationAccuracy:
         import re
         from pathlib import Path
 
-        root = Path(__file__).resolve().parents[1] / "src/gideon/workflows"
+        root = (
+            Path(__file__).resolve().parents[2] / "runtime/gideon/automation/workflows"
+        )
         on_disk = {
             p.name
             for p in root.glob("*.py")
@@ -571,7 +615,7 @@ class TestDocumentationAccuracy:
         """ "Thirteen, and no more" is a load-bearing claim — it is the reason macros exist.
         (Was twelve until AMBIENT-SURFACES §5.3 added `visualize`, the agency-free
         data→genui primitive, as a node kind.)"""
-        from gideon.workflows.models import NodeKind
+        from gideon.automation.workflows.models import NodeKind
 
         assert len(list(NodeKind)) == 13
         assert "Thirteen, and no more" in self._arch()
@@ -579,20 +623,25 @@ class TestDocumentationAccuracy:
     def test_every_macro_the_guide_lists_is_REGISTERED(self) -> None:
         import re
 
-        from gideon.workflows.macros import macro_names
+        from gideon.automation.workflows.macros import macro_names
 
         listed = set(
-            re.findall(r"\| `(judge_panel|verify_panel|route|research_sweep)` \|", self._guide())
+            re.findall(
+                r"\| `(judge_panel|verify_panel|route|research_sweep)` \|",
+                self._guide(),
+            )
         )
         assert listed == set(macro_names()), (listed, macro_names())
 
     def test_every_block_the_guide_lists_SHIPS(self) -> None:
         import re
 
-        from gideon.workflows.blocks import block_names
+        from gideon.automation.workflows.blocks import block_names
 
         listed = set(
-            re.findall(r"\| `(finding-record|safety-tiers|gap-honesty)` \|", self._guide())
+            re.findall(
+                r"\| `(finding-record|safety-tiers|gap-honesty)` \|", self._guide()
+            )
         )
         assert listed == set(block_names()), (listed, block_names())
 
@@ -603,14 +652,17 @@ class TestDocumentationAccuracy:
         from pathlib import Path
 
         source = (
-            Path(__file__).resolve().parents[1] / "src/gideon/workflows/template_lint.py"
+            Path(__file__).resolve().parents[2]
+            / "runtime/gideon/automation/workflows/template_lint.py"
         ).read_text(encoding="utf-8")
         for code in set(re.findall(r"`(WFL_[A-Z_]+)`", self._guide())):
-            assert f'"{code}"' in source, f"the guide documents {code}, which no lint emits"
+            assert (
+                f'"{code}"' in source
+            ), f"the guide documents {code}, which no lint emits"
 
     def test_the_documented_constants_MATCH(self) -> None:
-        from gideon.workflows.engine import MAX_SUBWORKFLOW_DEPTH
-        from gideon.workflows.journal import MAX_INLINE_OUTPUT_BYTES
+        from gideon.automation.workflows.engine import MAX_SUBWORKFLOW_DEPTH
+        from gideon.automation.workflows.journal import MAX_INLINE_OUTPUT_BYTES
 
         assert MAX_SUBWORKFLOW_DEPTH == 3, "the docs say depth is capped at 3"
         assert "capped at 3" in self._arch()
@@ -622,7 +674,7 @@ class TestDocumentationAccuracy:
         from pathlib import Path
 
         overview = (
-            Path(__file__).resolve().parents[1] / "docs/architecture/overview.md"
+            Path(__file__).resolve().parents[2] / "docs/architecture/overview.md"
         ).read_text(encoding="utf-8")
         assert "workflows.md" in overview
 
@@ -630,7 +682,10 @@ class TestDocumentationAccuracy:
         assert "workflow-templates.md" in self._arch()
 
     def test_the_documented_session_policies_match_the_code(self) -> None:
-        from gideon.workflows.context import SESSION_CONTINUOUS, SESSION_FRESH
+        from gideon.automation.workflows.context import (
+            SESSION_CONTINUOUS,
+            SESSION_FRESH,
+        )
 
         guide = self._guide()
         assert f"`session: {SESSION_FRESH}`" in guide
@@ -638,8 +693,9 @@ class TestDocumentationAccuracy:
 
     def test_the_guides_action_shape_is_the_one_the_engine_ACCEPTS(self) -> None:
         """The guide shows `config.with`. If that example were wrong it would teach every template
-        author the exact mistake that deadlocks a run — so it is validated, not trusted."""
-        from gideon.workflows.validator import validate_spec
+        author the exact mistake that deadlocks a run — so it is validated, not trusted.
+        """
+        from gideon.automation.workflows.validator import validate_spec
 
         spec = {
             "name": "doc-example",

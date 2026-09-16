@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from gideon.hooks import (
+from gideon.engine.hooks import (
     HOOK_EVENT_PRE_TOOL_USE,
     ScriptHookResult,
     ScriptHookStore,
@@ -41,11 +41,11 @@ def _capture_payloads():
     """Patch run_script_hook to record the hook_event each fire builds."""
     seen: list[dict] = []
 
-    # `enforced` (G89) rides down from `_fire`; swallowed here because this double is about the
-    # attribution PAYLOAD, and a double that rejects a real keyword fails on the wrong axis.
     async def _fake(hook, context="", hook_event=None, *, enforced=False):
         seen.append(hook_event or {})
-        return ScriptHookResult(hook_id=hook.id, hook_name=hook.name, event=hook.event, exit_code=0)
+        return ScriptHookResult(
+            hook_id=hook.id, hook_name=hook.name, event=hook.event, exit_code=0
+        )
 
     return seen, _fake
 
@@ -55,7 +55,7 @@ class TestFireForIdsAttribution:
     async def test_subagent_fields_present_when_populated(self, store_with_hook):
         store, hook_id = store_with_hook
         seen, fake = _capture_payloads()
-        with patch("gideon.hooks.run_script_hook", side_effect=fake):
+        with patch("gideon.engine.hooks.run_script_hook", side_effect=fake):
             await store.fire_for_ids(
                 HOOK_EVENT_PRE_TOOL_USE,
                 [hook_id],
@@ -74,7 +74,7 @@ class TestFireForIdsAttribution:
     async def test_top_level_fire_omits_fields(self, store_with_hook):
         store, hook_id = store_with_hook
         seen, fake = _capture_payloads()
-        with patch("gideon.hooks.run_script_hook", side_effect=fake):
+        with patch("gideon.engine.hooks.run_script_hook", side_effect=fake):
             await store.fire_for_ids(
                 HOOK_EVENT_PRE_TOOL_USE,
                 [hook_id],
@@ -91,12 +91,12 @@ class TestFireForIdsAttribution:
         """An empty field is omitted; a populated sibling still rides."""
         store, hook_id = store_with_hook
         seen, fake = _capture_payloads()
-        with patch("gideon.hooks.run_script_hook", side_effect=fake):
+        with patch("gideon.engine.hooks.run_script_hook", side_effect=fake):
             await store.fire_for_ids(
                 HOOK_EVENT_PRE_TOOL_USE,
                 [hook_id],
                 tool_name="x",
-                subagent_id="sa-9",  # only this one
+                subagent_id="sa-9",
             )
         payload = seen[0]
         assert payload["subagent_id"] == "sa-9"

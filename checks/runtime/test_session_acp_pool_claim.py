@@ -1,4 +1,4 @@
-"""SessionManager._claim_acp_pool — claim a warmed ACP connection + specialize.
+"""ConversationDirectory._claim_acp_pool — claim a warmed ACP connection + specialize.
 
 Drives the claim helper directly (no full get_or_create) with a fake pool +
 provider to assert: only acp:<cli> runtimes claim, the connection is rekeyed and
@@ -12,11 +12,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gideon.agents.provider import AgentProvider
+from gideon.engine.agents.provider import AgentProvider
 
 
 def _make_sm():
-    from gideon.session import SessionManager
+    from gideon.engine.session import ConversationDirectory
 
     cfg = MagicMock()
     cfg.default_agent = ""
@@ -24,7 +24,7 @@ def _make_sm():
     cfg.session.pool_size = 0
     cfg.session.pool_agent = ""
     cfg.session.pool_ttl_secs = 0
-    return SessionManager(cfg)
+    return ConversationDirectory(cfg)
 
 
 class _FakeAcpProvider(AgentProvider):
@@ -61,9 +61,6 @@ class _FakePool:
     def __init__(self, provider=None):
         self._provider = provider
         self.claimed = []
-        #: The lease holders the session layer passed (EI-6). Recorded rather than ignored:
-        #: a fake that swallowed the kwarg would let the holder silently stop being sent and
-        #: the Settings surface would show every runner as free.
         self.holders = []
 
     async def claim(self, runtime_id, *, holder=""):
@@ -74,7 +71,7 @@ class _FakePool:
 
 @pytest.mark.asyncio
 async def test_claim_specializes_acp_connection(monkeypatch):
-    from gideon.acp import connection_pool as cp
+    from gideon.integrations.acp import connection_pool as cp
 
     sm = _make_sm()
     prov = _FakeAcpProvider()
@@ -90,10 +87,8 @@ async def test_claim_specializes_acp_connection(monkeypatch):
         )
         assert claimed is prov
         assert prov.session_key == "dashboard:s1" and prov.channel == "C1"
-        assert prov.agent_set == "gpu-dev"  # persona bound live
-        assert prov.model_set == "claude-opus-4.8"  # model bound live
-        # EI-6: the session key travels as the lease holder, so Settings → Agents can name
-        # who has the runner. An empty holder here means the lease is never recorded.
+        assert prov.agent_set == "gpu-dev"
+        assert prov.model_set == "claude-opus-4.8"
         assert pool.holders == ["dashboard:s1"]
     finally:
         cp.set_acp_pool(None)
@@ -101,13 +96,12 @@ async def test_claim_specializes_acp_connection(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_claim_skips_non_acp_runtime(monkeypatch):
-    from gideon.acp import connection_pool as cp
+    from gideon.integrations.acp import connection_pool as cp
 
     sm = _make_sm()
     pool = _FakePool(_FakeAcpProvider())
     cp.set_acp_pool(pool)
     try:
-        # native runtime → never consults the pool.
         claimed = await sm._claim_acp_pool(
             "dashboard:s1",
             None,
@@ -123,10 +117,10 @@ async def test_claim_skips_non_acp_runtime(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_claim_none_when_pool_empty(monkeypatch):
-    from gideon.acp import connection_pool as cp
+    from gideon.integrations.acp import connection_pool as cp
 
     sm = _make_sm()
-    cp.set_acp_pool(_FakePool(None))  # pool returns no connection
+    cp.set_acp_pool(_FakePool(None))
     try:
         claimed = await sm._claim_acp_pool(
             "dashboard:s1",
@@ -142,7 +136,7 @@ async def test_claim_none_when_pool_empty(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_claim_none_when_no_pool():
-    from gideon.acp import connection_pool as cp
+    from gideon.integrations.acp import connection_pool as cp
 
     sm = _make_sm()
     cp.set_acp_pool(None)

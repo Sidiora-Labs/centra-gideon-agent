@@ -22,7 +22,7 @@ the feature is absent.
 
 import pytest
 
-from gideon.workflows.surfacing_channels import (
+from gideon.automation.workflows.surfacing_channels import (
     BUNDLED_PACKS,
     ESCALATION_INTERVAL_SECS,
     FIXTURE_KINDS,
@@ -82,9 +82,6 @@ def _state(**kw) -> CadenceState:
     return CadenceState(**base)
 
 
-# ── channel 2: freshness bands ──
-
-
 def test_an_untracked_def_is_always_FRESH():
     """`cadence_days: 0` means the author did not ask to be nagged — the same reading S57 gave
     `ttl: 0`, and for the same reason."""
@@ -121,9 +118,6 @@ def test_overdue_covers_never_run_overdue_and_stale():
         assert overdue(_state(last_completed_at=last), NOW) is True
 
 
-# ── channel 2: ordering ──
-
-
 def test_the_list_sorts_STALE_first_then_overdue_then_never_run():
     states = [
         _state(name="fresh", last_completed_at=NOW - 1 * DAY),
@@ -138,8 +132,12 @@ def test_the_list_sorts_STALE_first_then_overdue_then_never_run():
 def test_lateness_is_PROPORTIONAL_not_absolute():
     """Absolute lateness would park every long-cadence def permanently at the top: a 90-day def is
     always "more days late" than a 7-day one, which is not the same as more overdue."""
-    weekly = CadenceState(name="weekly", cadence_days=7, last_completed_at=NOW - 21 * DAY)
-    quarterly = CadenceState(name="quarterly", cadence_days=90, last_completed_at=NOW - 100 * DAY)
+    weekly = CadenceState(
+        name="weekly", cadence_days=7, last_completed_at=NOW - 21 * DAY
+    )
+    quarterly = CadenceState(
+        name="quarterly", cadence_days=90, last_completed_at=NOW - 100 * DAY
+    )
     assert sort_key(weekly, NOW) < sort_key(quarterly, NOW)
 
 
@@ -149,12 +147,10 @@ def test_the_sort_key_is_STABLE_by_name():
     assert sort_key(a, NOW) < sort_key(b, NOW)
 
 
-# ── channel 2: last-completed comes from real run history ──
-
-
 def test_last_completed_reads_the_RUN_TABLE():
     """Measured: `store.list_runs` is the only run history, and it filters by name and status. A
-    timestamp cached on the def would disagree with this table the first time a run was deleted."""
+    timestamp cached on the def would disagree with this table the first time a run was deleted.
+    """
     seen = {}
 
     class _Run:
@@ -197,9 +193,6 @@ def test_a_BROKEN_store_degrades_to_never_run_rather_than_raising():
 
 def test_no_runs_means_zero():
     assert last_completed("x", lister=lambda **kw: ([], 0)) == 0.0
-
-
-# ── channel 2: escalation ──
 
 
 def test_MANUAL_escalation_materializes_NOTHING():
@@ -255,9 +248,6 @@ def test_a_def_inside_its_cadence_never_escalates():
     assert why == "not overdue"
 
 
-# ── channel 2: the action config, measured against the real provider ──
-
-
 def test_the_action_emits_ONLY_keys_the_provider_actually_reads():
     """The measured defect. `CreateTaskActionProvider.execute` renders `title_template`/
     `body_template` and passes through only priority/project/assignee/due/labels. A `linked_def`
@@ -273,7 +263,9 @@ def test_the_action_emits_ONLY_keys_the_provider_actually_reads():
         "due",
         "labels",
     }
-    assert set(config) <= honored, f"emits keys the provider drops: {set(config) - honored}"
+    assert (
+        set(config) <= honored
+    ), f"emits keys the provider drops: {set(config) - honored}"
 
 
 def test_the_action_names_the_def_and_the_age():
@@ -299,18 +291,19 @@ def test_the_link_block_carries_BOTH_directions():
 
 
 def test_the_link_block_records_downstream_completion():
-    block = link_block(def_name="backup", task_id="t-1", completed=True, completed_at=NOW)
+    block = link_block(
+        def_name="backup", task_id="t-1", completed=True, completed_at=NOW
+    )
     assert block["completed"] is True
     assert block["completed_at"] == NOW
-
-
-# ── channel 2: resume boost ──
 
 
 def test_an_in_flight_run_BOOSTS_its_def():
     """An unfinished checklist is the most likely thing the user is about to ask about, and the
     per-turn matcher cannot know a run is half-done."""
-    assert resume_boost(_state(in_flight=True), base=0.60) == pytest.approx(0.60 + RESUME_BOOST)
+    assert resume_boost(_state(in_flight=True), base=0.60) == pytest.approx(
+        0.60 + RESUME_BOOST
+    )
 
 
 def test_the_boost_is_small_enough_not_to_jump_bands():
@@ -327,14 +320,11 @@ def test_no_in_flight_run_means_no_boost():
     assert resume_boost(_state(in_flight=False), base=0.60) == 0.60
 
 
-# ── channel 3: predicates ──
-
-
 def test_a_directory_predicate_matches_a_path_PREFIX():
-    """`tests/` asks about a directory, which may be empty in a fresh checkout."""
-    assert Predicate("tests/").matches(["tests"]) is True
-    assert Predicate("tests/").matches(["tests/test_a.py"]) is True
-    assert Predicate("tests/").matches(["src/app.py"]) is False
+    """`checks/runtime/` asks about a directory, which may be empty in a fresh checkout."""
+    assert Predicate("checks/runtime/").matches(["tests"]) is True
+    assert Predicate("checks/runtime/").matches(["checks/runtime/test_a.py"]) is True
+    assert Predicate("checks/runtime/").matches(["src/app.py"]) is False
 
 
 def test_a_glob_matches_on_the_BASENAME_too():
@@ -350,9 +340,6 @@ def test_an_exact_filename_matches():
 def test_an_EMPTY_pattern_matches_nothing():
     """An empty predicate that matched everything would propose its pack in every directory."""
     assert Predicate("").matches(["anything"]) is False
-
-
-# ── channel 3: confidence ──
 
 
 def test_confidence_is_WEIGHT_normalized():
@@ -378,17 +365,14 @@ def test_the_bundled_python_pack_recognizes_THIS_repo():
     """Measured against the real tree rather than a fixture: a pack that cannot recognize the
     repository it ships in is not a pack anyone will trust."""
     pack = next(p for p in BUNDLED_PACKS if p.name == "python-project")
-    assert confidence(pack, ["pyproject.toml", "tests", "src/gideon/__init__.py"]) >= (
-        PACK_THRESHOLD
-    )
+    assert confidence(
+        pack, ["pyproject.toml", "tests", "runtime/gideon/__init__.py"]
+    ) >= (PACK_THRESHOLD)
 
 
 def test_the_python_pack_does_NOT_fire_on_a_bare_node_repo():
     pack = next(p for p in BUNDLED_PACKS if p.name == "python-project")
     assert confidence(pack, ["package.json", "src/index.ts"]) < PACK_THRESHOLD
-
-
-# ── channel 3: scanning ──
 
 
 def test_the_scan_SKIPS_vendor_directories(tmp_path):
@@ -410,7 +394,7 @@ def test_the_scan_is_BOUNDED(tmp_path):
 
 
 def test_the_scan_includes_DIRECTORIES(tmp_path):
-    (tmp_path / "tests").mkdir()
+    (tmp_path / "checks/runtime").mkdir()
     assert "tests" in scan_paths(tmp_path)
 
 
@@ -422,13 +406,12 @@ def test_the_scan_cap_is_declared():
     assert MAX_SCAN_FILES >= 1000
 
 
-# ── channel 3: proposals ──
-
-
 def test_a_proposal_is_ONE_grouped_suggestion():
     """Five separate "enable this SOP?" prompts on attach is a wall the user clicks away — and
     clicking away a wall teaches them to click away the next one."""
-    proposal = propose_packs(["pyproject.toml", "tests", ".github/workflows", "Makefile"])
+    proposal = propose_packs(
+        ["pyproject.toml", "tests", ".github/workflows", "Makefile"]
+    )
     assert proposal is not None
     assert len(proposal.packs) >= 2
     assert isinstance(proposal.defs, list)
@@ -475,12 +458,9 @@ def test_the_proposal_carries_its_SCORES():
     assert all(0.0 <= v <= 1.0 for v in proposal.scores.values())
 
 
-# ── channel 3: dismissal persistence, on the isolated home rail ──
-
-
 def test_a_dismissal_PERSISTS_per_project(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.workflows import store as wstore
+    from gideon.automation.workflows import store as wstore
 
     monkeypatch.setattr(wstore, "config_dir", lambda: tmp_path)
     dismiss_pack("proj-a", "python-project")
@@ -489,7 +469,7 @@ def test_a_dismissal_PERSISTS_per_project(tmp_path, monkeypatch):
 
 
 def test_dismissal_is_IDEMPOTENT(tmp_path, monkeypatch):
-    from gideon.workflows import store as wstore
+    from gideon.automation.workflows import store as wstore
 
     monkeypatch.setattr(wstore, "config_dir", lambda: tmp_path)
     dismiss_pack("p", "ci")
@@ -499,7 +479,7 @@ def test_dismissal_is_IDEMPOTENT(tmp_path, monkeypatch):
 def test_UNREADABLE_dismissal_state_reads_as_empty(tmp_path, monkeypatch):
     """Degrading to empty re-proposes (mildly annoying) rather than suppressing forever
     — a channel that silently stopped working is one nobody would ever diagnose."""
-    from gideon.workflows import store as wstore
+    from gideon.automation.workflows import store as wstore
 
     monkeypatch.setattr(wstore, "config_dir", lambda: tmp_path)
     path = tmp_path / "surfacing" / "dismissed-p.json"
@@ -508,9 +488,11 @@ def test_UNREADABLE_dismissal_state_reads_as_empty(tmp_path, monkeypatch):
     assert load_dismissals("p") == set()
 
 
-def test_a_project_id_with_separators_cannot_ESCAPE_the_directory(tmp_path, monkeypatch):
+def test_a_project_id_with_separators_cannot_ESCAPE_the_directory(
+    tmp_path, monkeypatch
+):
     """A project id is not a trust boundary; it reaches this from a session attach."""
-    from gideon.workflows import store as wstore
+    from gideon.automation.workflows import store as wstore
 
     monkeypatch.setattr(wstore, "config_dir", lambda: tmp_path)
     dismiss_pack("../../etc/evil", "ci")
@@ -518,11 +500,10 @@ def test_a_project_id_with_separators_cannot_ESCAPE_the_directory(tmp_path, monk
     assert list((tmp_path / "surfacing").iterdir())
 
 
-# ── R18: scope resolution ──
-
-
 def test_NARROWER_shadows_wider():
-    resolved = resolve_scopes([ScopedDef("deploy", "global"), ScopedDef("deploy", "workspace")])
+    resolved = resolve_scopes(
+        [ScopedDef("deploy", "global"), ScopedDef("deploy", "workspace")]
+    )
     states = {r.entry.scope: r.state for r in resolved}
     assert states["workspace"] is ScopeState.EFFECTIVE
     assert states["global"] is ScopeState.SHADOWED
@@ -531,7 +512,9 @@ def test_NARROWER_shadows_wider():
 def test_a_shadowed_def_stays_VISIBLE_with_a_reason():
     """Silently hiding it is how a user concludes their global procedure vanished and writes a
     third copy."""
-    resolved = resolve_scopes([ScopedDef("deploy", "global"), ScopedDef("deploy", "session")])
+    resolved = resolve_scopes(
+        [ScopedDef("deploy", "global"), ScopedDef("deploy", "session")]
+    )
     shadowed = next(r for r in resolved if r.state is ScopeState.SHADOWED)
     assert shadowed.shadowed_by == "session:deploy"
 
@@ -550,19 +533,29 @@ def test_an_UNKNOWN_scope_sorts_WIDEST_and_cannot_shadow():
 
 def test_a_DISABLED_def_neither_shadows_nor_wins():
     """Calling it shadowed would tell the user something else is winning when nothing is."""
-    resolved = resolve_scopes([ScopedDef("d", "session", disabled=True), ScopedDef("d", "global")])
+    resolved = resolve_scopes(
+        [ScopedDef("d", "session", disabled=True), ScopedDef("d", "global")]
+    )
     states = {r.entry.scope: r.state for r in resolved}
     assert states["session"] is ScopeState.DISABLED
     assert states["global"] is ScopeState.EFFECTIVE
 
 
 def test_every_def_appears_exactly_once_per_entry():
-    entries = [ScopedDef("a", "global"), ScopedDef("a", "session"), ScopedDef("b", "bundled")]
+    entries = [
+        ScopedDef("a", "global"),
+        ScopedDef("a", "session"),
+        ScopedDef("b", "bundled"),
+    ]
     assert len(resolve_scopes(entries)) == len(entries)
 
 
 def test_effective_returns_the_winners_by_name():
-    entries = [ScopedDef("a", "global"), ScopedDef("a", "session"), ScopedDef("b", "bundled")]
+    entries = [
+        ScopedDef("a", "global"),
+        ScopedDef("a", "session"),
+        ScopedDef("b", "bundled"),
+    ]
     won = effective(entries)
     assert won["a"].scope == "session"
     assert won["b"].scope == "bundled"
@@ -570,9 +563,6 @@ def test_effective_returns_the_winners_by_name():
 
 def test_a_fully_disabled_name_has_NO_effective_def():
     assert effective([ScopedDef("a", "global", disabled=True)]) == {}
-
-
-# ── R18: adopt ──
 
 
 def test_adopting_a_BUNDLED_def_targets_an_editable_scope():
@@ -588,14 +578,13 @@ def test_adopting_an_already_editable_def_is_REFUSED():
     assert "already at editable scope" in error
 
 
-# ── R18: per-stage overlays ──
-
-
 def test_an_overlay_PATCHES_one_stage_and_inherits_the_rest():
     """This is what keeps a SOP library DRY: a project swaps one stage of the global deploy
     procedure and keeps inheriting upstream improvements to the rest."""
     base = [{"id": "build", "cmd": "make"}, {"id": "deploy", "cmd": "global-deploy"}]
-    overlay = Overlay(base_def="deploy-proc", patches={"deploy": {"cmd": "project-deploy"}})
+    overlay = Overlay(
+        base_def="deploy-proc", patches={"deploy": {"cmd": "project-deploy"}}
+    )
     stages, diff = apply_overlay(base, overlay)
     assert stages[0] == {"id": "build", "cmd": "make"}
     assert stages[1]["cmd"] == "project-deploy"
@@ -613,27 +602,30 @@ def test_an_overlay_renders_a_DIFF():
     """An overlay whose effect is invisible is one a user cannot audit, and this is the mechanism
     that changes what a procedure does."""
     base = [{"id": "a", "cmd": "x"}]
-    _stages, diff = apply_overlay(base, Overlay(base_def="d", patches={"a": {"cmd": "y"}}))
+    _stages, diff = apply_overlay(
+        base, Overlay(base_def="d", patches={"a": {"cmd": "y"}})
+    )
     assert diff == ["~ a (cmd)"]
 
 
 def test_an_overlay_naming_a_MISSING_stage_is_caught_at_SAVE_time():
     """A patch for a missing id simply never applies, so the stage the author meant to replace runs
-    unchanged — silently. Save time is the only moment this is a typo rather than an incident."""
-    from gideon.workflows.surfacing_channels import validate_overlay
+    unchanged — silently. Save time is the only moment this is a typo rather than an incident.
+    """
+    from gideon.automation.workflows.surfacing_channels import validate_overlay
 
     overlay = Overlay(base_def="d", patches={"typo": {"cmd": "x"}})
     assert any("does not define" in f for f in validate_overlay(overlay, ["real"]))
 
 
 def test_an_overlay_with_no_base_def_is_a_finding():
-    from gideon.workflows.surfacing_channels import validate_overlay
+    from gideon.automation.workflows.surfacing_channels import validate_overlay
 
     assert any("no `base_def`" in f for f in validate_overlay(Overlay(base_def=""), []))
 
 
 def test_a_valid_overlay_has_no_findings():
-    from gideon.workflows.surfacing_channels import validate_overlay
+    from gideon.automation.workflows.surfacing_channels import validate_overlay
 
     assert validate_overlay(Overlay(base_def="d", patches={"a": {}}), ["a", "b"]) == []
 
@@ -641,9 +633,6 @@ def test_a_valid_overlay_has_no_findings():
 def test_disabled_stages_are_enumerable():
     overlay = Overlay(base_def="d", patches={"a": False, "b": None, "c": {"x": 1}})
     assert overlay.disabled_stages() == ["a", "b"]
-
-
-# ── R11: the three-state availability model ──
 
 
 def test_a_missing_provider_is_NOT_INSTALLED():
@@ -655,20 +644,26 @@ def test_a_missing_provider_is_NOT_INSTALLED():
 
 
 def test_an_installed_but_off_provider_is_DISABLED():
-    state, _ = probe_state(Requirement("deploy"), installed=["deploy"], disabled=["deploy"])
+    state, _ = probe_state(
+        Requirement("deploy"), installed=["deploy"], disabled=["deploy"]
+    )
     assert state is Availability.DISABLED
 
 
 def test_an_enabled_but_unconfigured_provider_is_UNAVAILABLE():
     state, why = probe_state(
-        Requirement("deploy"), installed=["deploy"], probe=lambda n: (False, "no API key")
+        Requirement("deploy"),
+        installed=["deploy"],
+        probe=lambda n: (False, "no API key"),
     )
     assert state is Availability.UNAVAILABLE
     assert why == "no API key"
 
 
 def test_a_configured_provider_is_AVAILABLE():
-    state, _ = probe_state(Requirement("deploy"), installed=["deploy"], probe=lambda n: (True, ""))
+    state, _ = probe_state(
+        Requirement("deploy"), installed=["deploy"], probe=lambda n: (True, "")
+    )
     assert state is Availability.AVAILABLE
 
 
@@ -679,7 +674,8 @@ def test_a_provider_with_no_probe_is_available():
 
 def test_a_probe_that_RAISES_reads_as_unavailable_not_available():
     """An availability hook is code from a removable bundle. Treating its crash as a pass would
-    surface a suggestion that dies at dispatch — the exact failure preflight prevents."""
+    surface a suggestion that dies at dispatch — the exact failure preflight prevents.
+    """
 
     def boom(_name):
         raise RuntimeError("bundle exploded")
@@ -702,9 +698,6 @@ def test_availability_is_NOT_probed_for_an_uninstalled_provider():
     assert calls == []
 
 
-# ── R11: preflight ──
-
-
 def test_preflight_PASSES_when_everything_is_available():
     ok, findings = preflight([Requirement("d")], installed=["d"])
     assert ok is True
@@ -720,7 +713,8 @@ def test_preflight_reports_EVERY_unmet_requirement():
 
 def test_a_finding_carries_the_capability_blocked_kind():
     """Shares §1's vocabulary so a preflight finding and a mid-run capability failure read
-    identically — the user should not learn two names for "the deploy binary is missing"."""
+    identically — the user should not learn two names for "the deploy binary is missing".
+    """
     _ok, findings = preflight([Requirement("d")], installed=[])
     assert findings[0].to_dict()["blocked_kind"] == "capability"
 
@@ -747,8 +741,6 @@ def test_a_def_with_NO_requirements_passes():
     assert preflight([])[0] is True
 
 
-# ── R11: pre-fill ──
-
 SCHEMA = {
     "properties": {"env": {"type": "string"}, "version": {"type": "string"}},
     "required": ["env"],
@@ -770,13 +762,17 @@ def test_only_USER_messages_count_as_truth():
 
 def test_FENCED_content_is_excluded():
     """Pasted content firing a workflow is the failure that made manual-first the default."""
-    result = build_prefill(SCHEMA, [{"role": "user", "values": {"env": "prod"}, "fenced": True}])
+    result = build_prefill(
+        SCHEMA, [{"role": "user", "values": {"env": "prod"}, "fenced": True}]
+    )
     assert result.extracted == {}
     assert result.all_filled is False
 
 
 def test_PASTED_content_is_excluded_too():
-    result = build_prefill(SCHEMA, [{"role": "user", "values": {"env": "prod"}, "pasted": True}])
+    result = build_prefill(
+        SCHEMA, [{"role": "user", "values": {"env": "prod"}, "pasted": True}]
+    )
     assert result.extracted == {}
 
 
@@ -799,7 +795,8 @@ def test_a_value_NOT_in_the_schema_is_dropped():
 
 def test_all_filled_is_RE_DERIVED_from_the_schema():
     """A model reporting `all_filled: true` while omitting a required input produces a
-    `workflow_start` that fails engine validation — after the user was told it was ready."""
+    `workflow_start` that fails engine validation — after the user was told it was ready.
+    """
     result = build_prefill(SCHEMA, [{"role": "user", "values": {"version": "1.2"}}])
     assert result.all_filled is False
     assert result.missing == ["env"]
@@ -834,16 +831,15 @@ def test_suggestion_inputs_never_carry_a_PLACEHOLDER():
 
 
 def test_a_prefill_round_trips_to_dict():
-    payload = PreFill(extracted={"a": 1}, missing=["b"], follow_up="?", all_filled=False).to_dict()
+    payload = PreFill(
+        extracted={"a": 1}, missing=["b"], follow_up="?", all_filled=False
+    ).to_dict()
     assert payload == {
         "extracted": {"a": 1},
         "missing": ["b"],
         "follow_up": "?",
         "all_filled": False,
     }
-
-
-# ── the reachability doctor ──
 
 
 def test_a_def_no_channel_can_reach_is_a_FINDING():
@@ -856,11 +852,16 @@ def test_a_def_no_channel_can_reach_is_a_FINDING():
 def test_a_CADENCE_only_def_is_reachable():
     """Checking only `match_text` would report every cadence-only def as broken, which trains a
     user to ignore the doctor."""
-    assert doctor([{"name": "backup", "surface_mode": "passive", "cadence_days": 7}]) == []
+    assert (
+        doctor([{"name": "backup", "surface_mode": "passive", "cadence_days": 7}]) == []
+    )
 
 
 def test_a_PACK_gated_def_is_reachable():
-    assert doctor([{"name": "d", "surface_mode": "passive", "packs": ["python-project"]}]) == []
+    assert (
+        doctor([{"name": "d", "surface_mode": "passive", "packs": ["python-project"]}])
+        == []
+    )
 
 
 def test_an_INDEXED_def_is_reachable():
@@ -914,10 +915,12 @@ def test_the_codes_are_TYPED_not_prose():
 
 
 def test_a_healthy_registry_produces_NO_findings():
-    assert doctor([{"name": "d", "surface_mode": "passive", "match_text": "deploy the app"}]) == []
-
-
-# ── trigger-accuracy CI harness ──
+    assert (
+        doctor(
+            [{"name": "d", "surface_mode": "passive", "match_text": "deploy the app"}]
+        )
+        == []
+    )
 
 
 def test_a_positives_only_fixture_set_is_a_GAP():
@@ -934,14 +937,18 @@ def test_a_complete_fixture_set_has_no_gaps():
 
 
 def test_the_harness_reports_a_MISSED_positive():
-    failures = check_fixtures([TriggerFixture("deploy", "positive", True)], lambda p: False)
+    failures = check_fixtures(
+        [TriggerFixture("deploy", "positive", True)], lambda p: False
+    )
     assert "did NOT fire" in failures[0]
 
 
 def test_the_harness_reports_a_FIRED_negative():
     """A missed positive and a fired negative are different bugs with different fixes; one
     pass/fail count hides which happened."""
-    failures = check_fixtures([TriggerFixture("paste", "pasted_history", False)], lambda p: True)
+    failures = check_fixtures(
+        [TriggerFixture("paste", "pasted_history", False)], lambda p: True
+    )
     assert "fired on" in failures[0]
 
 

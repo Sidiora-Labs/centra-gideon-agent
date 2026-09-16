@@ -6,7 +6,7 @@ ever write. ``inboxMeta.ts`` declares Mentions and Email chips, ``InboxPage`` fi
 but ``IncomingMessage`` had no kind field at all, so every polled message became the
 default ``message``. A mail source could not say "this is an email"; ``ItemKind.EMAIL`` and
 ``ItemKind.MENTION`` were unreachable by construction (both listed inert in
-``inert-surface-baseline.json``).
+``checks/catalogs/inert-surfaces.json``).
 
 So the tests here refuse to stop at the dataclass. Each round trip drives the REAL path —
 a JSON batch dropped in ``<home>/inbox/incoming/`` → ``FilesystemSourceProvider.poll`` →
@@ -28,22 +28,21 @@ from pathlib import Path
 
 import pytest
 
-from gideon.inbox import (
+from gideon.integrations.inbox import (
     NON_CHANNEL_KINDS,
     SOURCE_DECLARABLE_KINDS,
     InboxState,
     InboxStore,
     ItemKind,
 )
-from gideon.inbox_providers.base import IncomingMessage
-from gideon.inbox_providers.filesystem_source import FilesystemSourceProvider
-from gideon.inbox_service import InboxService, _resolve_source_kind
+from gideon.integrations.inbox_providers.base import IncomingMessage
+from gideon.integrations.inbox_providers.filesystem_source import (
+    FilesystemSourceProvider,
+)
+from gideon.integrations.inbox_service import InboxService, _resolve_source_kind
 
-_REPO = Path(__file__).resolve().parent.parent
-_INBOX_META = _REPO / "web" / "src" / "pages" / "inbox" / "inboxMeta.ts"
-
-
-# ── the closed set ──
+_REPO = Path(__file__).resolve().parent.parent.parent
+_INBOX_META = _REPO / "apps/console" / "src" / "features" / "inbox" / "inboxMeta.ts"
 
 
 def test_source_declarable_kinds_is_exactly_the_channel_shaped_enum_members():
@@ -82,15 +81,13 @@ def test_unset_kind_resolves_to_message_without_complaint(caplog):
 )
 def test_an_undeclarable_kind_is_refused_loudly_and_filed_as_message(declared, caplog):
     """Includes core's own non-channel kinds: a source claiming ``proposal`` would render a
-    row with no refs, no deep-link and no reply — a dead row wearing a live kind's chip."""
+    row with no refs, no deep-link and no reply — a dead row wearing a live kind's chip.
+    """
     with caplog.at_level("WARNING"):
         assert _resolve_source_kind(declared, "mail-inbox") == ItemKind.MESSAGE.value
     assert len(caplog.records) == 1
     logged = caplog.records[0].getMessage()
     assert declared in logged and "mail-inbox" in logged
-
-
-# ── the round trip: a source's declared kind → the value the FE filter compares ──
 
 
 def _svc(tmp_path, monkeypatch, provider) -> InboxService:
@@ -100,7 +97,7 @@ def _svc(tmp_path, monkeypatch, provider) -> InboxService:
     isolation fixture, which is what makes the filesystem source's real ``inbox/incoming``
     directory safe to drive here.
     """
-    from gideon import inbox_service as mod
+    from gideon.integrations import inbox_service as mod
 
     svc = InboxService(
         state=InboxState(tmp_path / "state.json"),
@@ -114,7 +111,7 @@ def _svc(tmp_path, monkeypatch, provider) -> InboxService:
 
 def _drop_batch(*messages: dict) -> None:
     """Write a real incoming batch where the filesystem source polls it from."""
-    from gideon.config.loader import config_dir
+    from gideon.core.config.loader import config_dir
 
     incoming = config_dir() / "inbox" / "incoming"
     incoming.mkdir(parents=True, exist_ok=True)
@@ -125,7 +122,7 @@ def _api_request(svc, query=None):
     from unittest.mock import MagicMock
 
     state = MagicMock()
-    state._inbox_svc = svc  # the LIVE store the running gateway serves
+    state._inbox_svc = svc
     req = MagicMock()
     req.app = {"state": state}
     req.query = query or {}
@@ -138,8 +135,10 @@ async def _payload(resp):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("declared", ["email", "mention"])
-async def test_declared_kind_survives_poll_persistence_and_the_api(declared, tmp_path, monkeypatch):
-    from gideon.dashboard import handlers_inbox as h
+async def test_declared_kind_survives_poll_persistence_and_the_api(
+    declared, tmp_path, monkeypatch
+):
+    from gideon.interfaces.dashboard import handlers_inbox as h
 
     _drop_batch(
         {
@@ -156,46 +155,63 @@ async def test_declared_kind_survives_poll_persistence_and_the_api(declared, tmp
     svc = _svc(tmp_path, monkeypatch, FilesystemSourceProvider())
     await svc._poll_once()
 
-    # 1. persisted (a fresh store re-read from disk, not the in-memory instance)
     reloaded = InboxStore(tmp_path / "inbox.json")
     reloaded.load()
     assert [i.item_kind for i in reloaded.items.values()] == [declared]
 
-    # 2. the unfiltered API row carries it, and the kind filter selects on it
     rows = await _payload(await h.api_inbox_list(_api_request(svc)))
     assert [r["item_kind"] for r in rows] == [declared]
-    selected = await _payload(await h.api_inbox_list(_api_request(svc, {"kind": declared})))
+    selected = await _payload(
+        await h.api_inbox_list(_api_request(svc, {"kind": declared}))
+    )
     assert len(selected) == 1
-    # This is the exact comparison InboxPage makes: (it.item_kind || 'message') === kind.
     assert (selected[0].get("item_kind") or "message") == declared
-    assert await _payload(await h.api_inbox_list(_api_request(svc, {"kind": "message"}))) == []
+    assert (
+        await _payload(await h.api_inbox_list(_api_request(svc, {"kind": "message"})))
+        == []
+    )
 
-    # 3. the chip the frontend builds from what's present now exists for this kind
     chips = (await _payload(await h.api_inbox_kinds(_api_request(svc))))["kinds"]
-    assert [(c["kind"], c["open"], c["channel"]) for c in chips] == [(declared, 1, True)]
+    assert [(c["kind"], c["open"], c["channel"]) for c in chips] == [
+        (declared, 1, True)
+    ]
 
 
 @pytest.mark.asyncio
-async def test_a_source_declaring_nothing_still_lands_as_a_message(tmp_path, monkeypatch):
+async def test_a_source_declaring_nothing_still_lands_as_a_message(
+    tmp_path, monkeypatch
+):
     """The pre-EIAT-6 behavior, unchanged — the seam is additive for existing sources."""
-    from gideon.dashboard import handlers_inbox as h
+    from gideon.interfaces.dashboard import handlers_inbox as h
 
-    _drop_batch({"id": "m1", "channel_id": "C1", "channel_name": "#ops", "timestamp": 1.0})
+    _drop_batch(
+        {"id": "m1", "channel_id": "C1", "channel_name": "#ops", "timestamp": 1.0}
+    )
     svc = _svc(tmp_path, monkeypatch, FilesystemSourceProvider())
     await svc._poll_once()
 
-    rows = await _payload(await h.api_inbox_list(_api_request(svc, {"kind": "message"})))
+    rows = await _payload(
+        await h.api_inbox_list(_api_request(svc, {"kind": "message"}))
+    )
     assert [r["item_kind"] for r in rows] == [ItemKind.MESSAGE.value]
 
 
 @pytest.mark.asyncio
-async def test_a_lying_source_cannot_produce_a_row_no_chip_can_reach(tmp_path, monkeypatch):
+async def test_a_lying_source_cannot_produce_a_row_no_chip_can_reach(
+    tmp_path, monkeypatch
+):
     """A refused kind loses the CLAIM, never the message: the row arrives, filed as
     ``message``, reachable behind the Messages chip like any other channel row."""
-    from gideon.dashboard import handlers_inbox as h
+    from gideon.interfaces.dashboard import handlers_inbox as h
 
     _drop_batch(
-        {"id": "m1", "channel_id": "C1", "channel_name": "#ops", "timestamp": 1.0, "kind": "mail"},
+        {
+            "id": "m1",
+            "channel_id": "C1",
+            "channel_name": "#ops",
+            "timestamp": 1.0,
+            "kind": "mail",
+        },
         {
             "id": "m2",
             "channel_id": "C1",
@@ -210,10 +226,10 @@ async def test_a_lying_source_cannot_produce_a_row_no_chip_can_reach(tmp_path, m
     rows = await _payload(await h.api_inbox_list(_api_request(svc)))
     assert len(rows) == 2
     assert {r["item_kind"] for r in rows} == {ItemKind.MESSAGE.value}
-    assert await _payload(await h.api_inbox_list(_api_request(svc, {"kind": "proposal"}))) == []
-
-
-# ── the reader half: the frontend can render everything the seam can now write ──
+    assert (
+        await _payload(await h.api_inbox_list(_api_request(svc, {"kind": "proposal"})))
+        == []
+    )
 
 
 @pytest.mark.skipif(not _INBOX_META.exists(), reason="web sources not present")

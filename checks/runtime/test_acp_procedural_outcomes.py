@@ -27,26 +27,24 @@ from types import SimpleNamespace
 
 import pytest
 
-from gideon.acp.adapter import acp_event_to_agent_event
-from gideon.acp.outcomes import ToolOutcomeAccumulator
-from gideon.acp.translate import (
+from gideon.cognition.memory_record import MemoryKind
+from gideon.cognition.memory_service import PROCEDURAL_OUTCOMES, MemoryService
+from gideon.cognition.vector_memory import SemanticArchive
+from gideon.integrations.acp.adapter import acp_event_to_agent_event
+from gideon.integrations.acp.outcomes import ToolOutcomeAccumulator
+from gideon.integrations.acp.translate import (
     SeenToolCall,
     extract_tool_event,
     extract_tool_update_events,
 )
-from gideon.acp.types import (
+from gideon.integrations.acp.types import (
     EVENT_COMPLETE,
     EVENT_TOOL_RESULT,
     AcpEvent,
     AcpPromptStats,
     JsonRpcMessage,
 )
-from gideon.llm.acp_session_provider import AcpSessionProvider
-from gideon.memory_record import MemoryKind
-from gideon.memory_service import PROCEDURAL_OUTCOMES, MemoryService
-from gideon.vector_memory import VectorMemoryStore
-
-# ── real ACP frames (what a CLI actually puts on the wire) ────────────────────
+from gideon.integrations.llm.acp_session_provider import AcpSessionProvider
 
 
 def _call_frame(call_id: str, title: str) -> JsonRpcMessage:
@@ -72,7 +70,9 @@ def _result_frame(call_id: str, status: str) -> JsonRpcMessage:
                 "sessionUpdate": "tool_call_update",
                 "toolCallId": call_id,
                 "status": status,
-                "content": [{"type": "content", "content": {"type": "text", "text": "out"}}],
+                "content": [
+                    {"type": "content", "content": {"type": "text", "text": "out"}}
+                ],
             }
         },
     )
@@ -82,20 +82,16 @@ def _turn_events(calls: list[tuple[str, str, str]]) -> list[AcpEvent]:
     """Translate a whole turn's frames into AcpEvents. ``calls`` = (id, title, status)."""
     events: list[AcpEvent] = []
     inputs: dict[str, str] = {}
-    # The opening ``tool_call`` frame is the only one that names the tool, so the
-    # correlation map has to outlive it and be shared with the update frames —
-    # exactly how ``AcpSession`` threads its own ``_tool_call_seen``.
     seen: dict[str, SeenToolCall] = {}
     for call_id, title, status in calls:
         call_event = extract_tool_event(_call_frame(call_id, title), inputs, seen, [])
         assert call_event is not None, "translate did not decode the tool_call frame"
         events.append(call_event)
-        events.extend(extract_tool_update_events(_result_frame(call_id, status), inputs, seen))
+        events.extend(
+            extract_tool_update_events(_result_frame(call_id, status), inputs, seen)
+        )
     events.append(AcpEvent(kind=EVENT_COMPLETE, stop_reason="end_turn"))
     return events
-
-
-# ── the provider under test, over a fake session that replays those frames ───
 
 
 class _FakeSession:
@@ -136,7 +132,7 @@ async def _drive(provider: AcpSessionProvider, message: str = "go") -> None:
 @pytest.fixture
 def svc(tmp_path):
     """Procedural memory over a tmp_path store — NEVER the real ~/.gideon."""
-    vs = VectorMemoryStore(db_path=tmp_path / "m.db", embedding_dim=3)
+    vs = SemanticArchive(db_path=tmp_path / "m.db", embedding_dim=3)
     vs.init()
     vs.embed_fn = lambda t: [1.0, 0.0, 0.0]
     return MemoryService.over_vector_store(vs)
@@ -160,9 +156,6 @@ def _session():
     )
 
 
-# ── link 2: the failure bit has to survive the adapter ───────────────────────
-
-
 class TestFailureBitCrossesTheAdapter:
     """``acp_event_to_agent_event`` used to omit ``tool_meta`` entirely. Everything
     downstream then read the dataclass default ``{}``: the tool card could not colour a
@@ -182,9 +175,6 @@ class TestFailureBitCrossesTheAdapter:
         results = [e for e in events if e.kind == EVENT_TOOL_RESULT]
         assert results
         assert "ok" not in acp_event_to_agent_event(results[0]).tool_meta
-
-
-# ── link 1: the hook, and the O12 reproduction ───────────────────────────────
 
 
 class TestAcpTurnProducesProceduralRows:
@@ -217,7 +207,7 @@ class TestAcpTurnProducesProceduralRows:
         """The end of the chain: the drained pairs actually become stored priors.
         Asserting on ROWS, not on the presence of a method — a hook that returned the
         right shape into a store that rejected it would still be zero rows."""
-        from gideon import after_turn_review as atr
+        from gideon.cognition import after_turn_review as atr
 
         provider = _provider(
             [_turn_events([("c1", "Read", "completed"), ("c2", "Bash", "failed")])]
@@ -237,12 +227,13 @@ class TestAcpTurnProducesProceduralRows:
         ``getattr(provider, "drain_tool_outcomes", None)``, not a direct call. This is
         the test that reds on ZERO ROWS if the hook is ever removed from the ACP
         providers again, instead of failing on a missing attribute."""
-        from gideon import after_turn_review as atr
+        from gideon.cognition import after_turn_review as atr
 
-        provider = _provider([_turn_events([(f"c{i}", "Read", "completed") for i in range(6)])])
+        provider = _provider(
+            [_turn_events([(f"c{i}", "Read", "completed") for i in range(6)])]
+        )
         await _drive(provider)
 
-        # verbatim chat_runner.py shape
         drain = getattr(provider, "drain_tool_outcomes", None)
         tool_outcomes: list[tuple[str, str]] = []
         if callable(drain):
@@ -273,9 +264,6 @@ class TestAcpTurnProducesProceduralRows:
         assert provider.drain_tool_outcomes() == [("Read", "failed")]
 
 
-# ── the two disciplines the drain contract rests on ──────────────────────────
-
-
 class TestDrainOnceAndTurnBoundary:
     @pytest.mark.asyncio
     async def test_second_drain_is_empty(self):
@@ -297,12 +285,8 @@ class TestDrainOnceAndTurnBoundary:
         turn2 = _turn_events([("c9", "Read", "completed")])
         provider = _provider([turn1, turn2])
         await _drive(provider, "first")
-        # deliberately NOT drained
         await _drive(provider, "second")
         assert provider.drain_tool_outcomes() == [("Read", "success")]
-
-
-# ── the second reader at chat_runner.py's self-model observer ────────────────
 
 
 class TestSelfModelObserverStillSeesTheTools:
@@ -329,15 +313,19 @@ class TestSelfModelObserverStillSeesTheTools:
         assert all(o == "success" for _t, o in tool_outcomes) is True
 
     @pytest.mark.asyncio
-    async def test_chat_runner_feeds_both_readers_from_one_drain(self, svc, monkeypatch):
+    async def test_chat_runner_feeds_both_readers_from_one_drain(
+        self, svc, monkeypatch
+    ):
         """The real ``_maybe_after_turn_review``, over a real ACP provider. BOTH consumers
         must be fed from the single drained list: procedural memory gets rows, AND the
         self-model observer gets the tool names. Adding a second ``drain()`` between them
         clears the accumulator and starves whichever reader comes second."""
-        from gideon.dashboard import chat_runner as cr
-        from gideon.learning import self_model_observer
+        from gideon.cognition.learning import self_model_observer
+        from gideon.interfaces.dashboard import chat_runner as cr
 
-        monkeypatch.setattr("gideon.memory_service.service_for", lambda _m: svc)
+        monkeypatch.setattr(
+            "gideon.cognition.memory_service.service_for", lambda _m: svc
+        )
         seen: dict = {}
         monkeypatch.setattr(
             self_model_observer,
@@ -365,14 +353,11 @@ class TestSelfModelObserverStillSeesTheTools:
             tool_calls=4,
             provider=provider,
         )
-        # reader 1 — procedural memory
-        assert svc.get_records(kinds={MemoryKind.PROCEDURAL.value}), "procedural rows missing"
-        # reader 2 — the self-model observer
+        assert svc.get_records(
+            kinds={MemoryKind.PROCEDURAL.value}
+        ), "procedural rows missing"
         assert seen.get("tools") == ("Bash", "Edit", "Grep", "Read"), seen
         assert seen.get("succeeded") is False
-
-
-# ── accumulator unit rails ───────────────────────────────────────────────────
 
 
 class TestAccumulatorRails:
@@ -380,10 +365,15 @@ class TestAccumulatorRails:
         """A third spelling must never reach the store. Forced by patching the closed
         vocabulary to exclude ``success`` — the accumulator then has to refuse its own
         output rather than file a row nothing will surface."""
-        monkeypatch.setattr("gideon.acp.outcomes._vocabulary", lambda: frozenset({"denied"}))
+        monkeypatch.setattr(
+            "gideon.integrations.acp.outcomes._vocabulary",
+            lambda: frozenset({"denied"}),
+        )
         acc = ToolOutcomeAccumulator()
         acc.observe(AcpEvent(kind="tool_call", tool_call_id="c1", title="Read"))
-        with caplog.at_level(logging.WARNING, logger="gideon.acp.outcomes"):
+        with caplog.at_level(
+            logging.WARNING, logger="gideon.integrations.acp.outcomes"
+        ):
             acc.observe(AcpEvent(kind=EVENT_TOOL_RESULT, tool_call_id="c1"))
         assert acc.drain() == []
         assert any("not a procedural outcome" in r.message for r in caplog.records)
@@ -400,13 +390,15 @@ class TestAccumulatorRails:
         it in would fragment one tool's priors across every argument it saw."""
         acc = ToolOutcomeAccumulator()
         acc.observe(AcpEvent(kind="tool_call", tool_call_id="c1", title="Bash"))
-        acc.observe(AcpEvent(kind="tool_call_update", tool_call_id="c1", title="npm run build"))
+        acc.observe(
+            AcpEvent(kind="tool_call_update", tool_call_id="c1", title="npm run build")
+        )
         acc.observe(AcpEvent(kind=EVENT_TOOL_RESULT, tool_call_id="c1"))
         assert acc.drain() == [("Bash", "success")]
 
     def test_accumulation_is_bounded(self):
         """Same 200 ceiling the native accumulator enforces."""
-        from gideon.acp.outcomes import MAX_OUTCOMES
+        from gideon.integrations.acp.outcomes import MAX_OUTCOMES
 
         acc = ToolOutcomeAccumulator()
         for i in range(MAX_OUTCOMES + 25):

@@ -26,30 +26,27 @@ from unittest.mock import patch
 
 import pytest
 
-from gideon import suggestions
+from gideon.cognition import suggestions
 
-# (label, frozen date) — chosen by measuring the OLD context length these produced.
-# `Wednesday, September` is the longest weekday+month pair in the year; `Fri, May` the shortest.
 _STRADDLE_DATES = [
-    ("shortest — fell back even when buggy", datetime(2026, 5, 1, 7, 30)),  # len 44
-    ("one under the old threshold", datetime(2026, 1, 6, 7, 30)),  # len 49
-    ("exactly the old threshold", datetime(2026, 1, 1, 7, 30)),  # len 50
-    ("longest — called the LLM when buggy", datetime(2026, 9, 2, 7, 30)),  # len 53
+    ("shortest — fell back even when buggy", datetime(2026, 5, 1, 7, 30)),
+    ("one under the old threshold", datetime(2026, 1, 6, 7, 30)),
+    ("exactly the old threshold", datetime(2026, 1, 1, 7, 30)),
+    ("longest — called the LLM when buggy", datetime(2026, 9, 2, 7, 30)),
 ]
 
 
 @pytest.fixture
 def empty_state(tmp_path, monkeypatch):
-    """A DashboardState stand-in for an instance that knows nothing yet.
+    """A ConsoleState stand-in for an instance that knows nothing yet.
 
     Every source `_build_context` reads is neutralised, and `config_dir` is pointed at `tmp_path`
     so the automations read cannot reach the real `~/.gideon`. `config_dir` is imported
     INSIDE the function under test, so patching the loader's attribute is what actually takes
     effect — patching a name bound at import time in this module would not.
     """
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     memory = SimpleNamespace(
-        # The pristine templates `_build_context` compares against verbatim.
         read_preferences=lambda: "# User Preferences\n\n<!-- Learned from conversations -->",
         read_projects=lambda: "# Active Projects\n\n<!-- Current work context -->",
         read_recent_history=lambda days=2: "",
@@ -60,10 +57,9 @@ def empty_state(tmp_path, monkeypatch):
             "an empty instance took the background agent session — the guard let it through"
         )
 
-    # A named failure, not an AttributeError. Mutation-testing this file showed the difference:
-    # with a bare namespace, restoring the bug made the end-to-end test die on a missing attribute,
-    # which reads like a broken test rather than a caught regression.
-    with patch("gideon.context.ContextBuilder.get_memory_for", return_value=memory):
+    with patch(
+        "gideon.cognition.context.PromptAssembler.get_memory_for", return_value=memory
+    ):
         yield SimpleNamespace(
             conversation_log=None,
             sessions=SimpleNamespace(
@@ -72,9 +68,11 @@ def empty_state(tmp_path, monkeypatch):
         )
 
 
-@pytest.mark.parametrize("label,when", _STRADDLE_DATES, ids=[d[0] for d in _STRADDLE_DATES])
+@pytest.mark.parametrize(
+    "label,when", _STRADDLE_DATES, ids=[d[0] for d in _STRADDLE_DATES]
+)
 def test_empty_instance_builds_no_context_on_any_date(empty_state, label, when):
-    with patch("gideon.suggestions.datetime") as dt:
+    with patch("gideon.cognition.suggestions.datetime") as dt:
         dt.now.return_value = when
         ctx = suggestions._build_context(empty_state)
     assert ctx == "", (
@@ -84,10 +82,12 @@ def test_empty_instance_builds_no_context_on_any_date(empty_state, label, when):
     )
 
 
-@pytest.mark.parametrize("label,when", _STRADDLE_DATES, ids=[d[0] for d in _STRADDLE_DATES])
+@pytest.mark.parametrize(
+    "label,when", _STRADDLE_DATES, ids=[d[0] for d in _STRADDLE_DATES]
+)
 def test_the_timestamp_never_reaches_the_guard(empty_state, label, when):
     """The specific regression: the time section must not be what gets the guard over 50."""
-    with patch("gideon.suggestions.datetime") as dt:
+    with patch("gideon.cognition.suggestions.datetime") as dt:
         dt.now.return_value = when
         ctx = suggestions._build_context(empty_state)
     assert "Current Time" not in ctx, (
@@ -98,19 +98,25 @@ def test_the_timestamp_never_reaches_the_guard(empty_state, label, when):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("label,when", _STRADDLE_DATES, ids=[d[0] for d in _STRADDLE_DATES])
-async def test_empty_instance_returns_the_fallback_without_an_llm_turn(empty_state, label, when):
+@pytest.mark.parametrize(
+    "label,when", _STRADDLE_DATES, ids=[d[0] for d in _STRADDLE_DATES]
+)
+async def test_empty_instance_returns_the_fallback_without_an_llm_turn(
+    empty_state, label, when
+):
     """End to end: no prompt is rendered and no session is taken, on any date."""
     with (
-        patch("gideon.suggestions.datetime") as dt,
-        patch("gideon.prompt_providers.runtime.render_use_case_prompt") as render,
+        patch("gideon.cognition.suggestions.datetime") as dt,
+        patch(
+            "gideon.integrations.prompt_providers.runtime.render_use_case_prompt"
+        ) as render,
     ):
         dt.now.return_value = when
         got = await suggestions.generate_suggestions(empty_state)
 
-    assert got == suggestions._FALLBACK_SUGGESTIONS, f"{label}: expected the canned list"
-    # The real assertion. Reaching the prompt means reaching `sessions.get_or_create` and a 45s
-    # await on the very first /api/suggestions call.
+    assert (
+        got == suggestions._FALLBACK_SUGGESTIONS
+    ), f"{label}: expected the canned list"
     assert not render.called, (
         f"{label}: an empty instance rendered the suggestions prompt, which means it took the "
         f"background session and blocked the first request for up to 45s."
@@ -121,7 +127,6 @@ def test_the_time_section_still_reaches_a_real_context():
     """The clock is not lost — it moved. A context that EARNED an LLM turn must still carry it."""
     section = suggestions._time_context()
     assert section.startswith("## Current Time\n")
-    # And the length that caused all this, asserted so the straddle range above stays honest.
     assert 40 <= len(section) <= 60, (
         f"the lone time section is {len(section)} chars; the parametrised dates above were chosen "
         f"to straddle a 50-char guard, so re-measure them if this moved."

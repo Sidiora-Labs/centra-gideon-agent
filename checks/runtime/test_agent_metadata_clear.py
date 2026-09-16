@@ -18,8 +18,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from gideon import agent_metadata
-from gideon.dashboard.handlers.agents import api_agent_metadata_put
+from gideon.engine import agent_metadata
+from gideon.interfaces.dashboard.handlers.agents import api_agent_metadata_put
 
 
 @pytest.fixture(autouse=True)
@@ -30,11 +30,11 @@ def home(tmp_path):
 
 @pytest.fixture(autouse=True)
 def _quiet_side_effects():
-    # Orchestrator regen reads the real AppConfig; SEL logs to the real ledger.
-    # Neither is under test — the contract here is the PUT's store effect + status.
     with (
-        patch("gideon.dashboard.handlers.agents._regen_orchestrator"),
-        patch("gideon.dashboard.handlers.agents._sel", return_value=MagicMock()),
+        patch("gideon.interfaces.dashboard.handlers.agents._regen_orchestrator"),
+        patch(
+            "gideon.interfaces.dashboard.handlers.agents._sel", return_value=MagicMock()
+        ),
     ):
         yield
 
@@ -64,7 +64,6 @@ def test_an_empty_put_clears_an_existing_note(home):
     resp = _run(api_agent_metadata_put(_req("router-a", {"content": ""})))
     assert resp.status == 200
     assert _body(resp)["ok"] is True
-    # Canonical empty is "absent": the file is gone and load() reads "".
     assert agent_metadata.load("router-a") == ""
     assert not (home / "router-a.md").exists()
 
@@ -77,7 +76,9 @@ def test_a_whitespace_only_put_also_clears(home):
 
 
 def test_a_non_empty_put_still_saves(home):
-    resp = _run(api_agent_metadata_put(_req("router-c", {"content": "prefers refactors"})))
+    resp = _run(
+        api_agent_metadata_put(_req("router-c", {"content": "prefers refactors"}))
+    )
     assert resp.status == 200
     assert agent_metadata.load("router-c") == "prefers refactors"
 

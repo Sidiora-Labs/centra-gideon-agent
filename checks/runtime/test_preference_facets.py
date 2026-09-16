@@ -8,20 +8,17 @@ from pathlib import Path
 
 import pytest
 
-import gideon.preference_facets as pf
-from gideon.vector_memory import VectorMemoryStore
+import gideon.cognition.preference_facets as pf
+from gideon.cognition.vector_memory import SemanticArchive
 
 NOW = datetime(2026, 6, 15, tzinfo=timezone.utc)
 
 
 @pytest.fixture
 def vs():
-    store = VectorMemoryStore(db_path=Path(tempfile.mkdtemp()) / "m.db")
+    store = SemanticArchive(db_path=Path(tempfile.mkdtemp()) / "m.db")
     store.init()
     return store
-
-
-# ── decay + state machine ──
 
 
 def test_style_decays_faster_than_identity():
@@ -30,28 +27,37 @@ def test_style_decays_faster_than_identity():
     ident = pf.Facet(cls="identity", text="Alex", stability=1.0, updated_at=old)
     s_style = pf.decayed_stability(style, now=NOW)
     s_ident = pf.decayed_stability(ident, now=NOW)
-    assert s_style < s_ident  # 30d vs 90d half-life
-    assert abs(s_style - 0.25) < 0.02  # 60d / 30d = 2 half-lives → ~0.25
+    assert s_style < s_ident
+    assert abs(s_style - 0.25) < 0.02
 
 
 def test_fresh_facet_is_active_when_explicit():
     f = pf.Facet(
-        cls="style", text="x", stability=pf.base_stability("explicit"), updated_at=NOW.isoformat()
+        cls="style",
+        text="x",
+        stability=pf.base_stability("explicit"),
+        updated_at=NOW.isoformat(),
     )
     assert pf.facet_state(f, now=NOW) == "Active"
 
 
 def test_decayed_facet_drops_through_states():
     f = pf.Facet(
-        cls="channel", text="x", stability=1.0, updated_at=(NOW - timedelta(days=21)).isoformat()
+        cls="channel",
+        text="x",
+        stability=1.0,
+        updated_at=(NOW - timedelta(days=21)).isoformat(),
     )
-    # channel half-life 7d → 21d = 3 half-lives → ~0.125 → Dropped
     assert pf.facet_state(f, now=NOW) == "Dropped"
 
 
 def test_pinned_is_active_regardless_of_age():
     f = pf.Facet(
-        cls="channel", text="x", stability=0.01, updated_at="2000-01-01T00:00:00+00:00", pinned=True
+        cls="channel",
+        text="x",
+        stability=0.01,
+        updated_at="2000-01-01T00:00:00+00:00",
+        pinned=True,
     )
     assert pf.decayed_stability(f, now=NOW) == 1.0
     assert pf.facet_state(f, now=NOW) == "Active"
@@ -59,27 +65,36 @@ def test_pinned_is_active_regardless_of_age():
 
 def test_forgotten_is_dropped():
     f = pf.Facet(
-        cls="identity", text="x", stability=1.0, updated_at=NOW.isoformat(), forgotten=True
+        cls="identity",
+        text="x",
+        stability=1.0,
+        updated_at=NOW.isoformat(),
+        forgotten=True,
     )
     assert pf.decayed_stability(f, now=NOW) == 0.0
     assert pf.facet_state(f, now=NOW) == "Dropped"
 
 
 def test_veto_does_not_decay():
-    f = pf.Facet(cls="veto", text="never X", stability=0.8, updated_at="2000-01-01T00:00:00+00:00")
+    f = pf.Facet(
+        cls="veto",
+        text="never X",
+        stability=0.8,
+        updated_at="2000-01-01T00:00:00+00:00",
+    )
     assert pf.decayed_stability(f, now=NOW) == 0.8
 
 
 def test_reinforce_raises_stability():
     f = pf.Facet(
-        cls="style", text="x", stability=0.3, updated_at=(NOW - timedelta(days=10)).isoformat()
+        cls="style",
+        text="x",
+        stability=0.3,
+        updated_at=(NOW - timedelta(days=10)).isoformat(),
     )
     before = pf.decayed_stability(f, now=NOW)
     pf.reinforce(f, "explicit", now=NOW)
     assert f.stability > before
-
-
-# ── heuristic producers ──
 
 
 def test_detect_never_is_veto():
@@ -120,12 +135,14 @@ def test_detect_style_text_is_distilled_not_raw_message():
     assert cand is not None and cand[0] == "style"
     text = cand[1].lower()
     assert "keep responses brief" in text
-    assert "echo" not in text and "report" not in text  # task instruction excluded
+    assert "echo" not in text and "report" not in text
 
 
 def test_detect_veto_text_is_distilled_clause():
     """A veto captures just the 'never …' clause, not trailing task text."""
-    cand = pf.detect_facet_candidate("Never use emoji. Also, summarize the file for me.")
+    cand = pf.detect_facet_candidate(
+        "Never use emoji. Also, summarize the file for me."
+    )
     assert cand is not None and cand[0] == "veto"
     assert "emoji" in cand[1].lower() and "summarize" not in cand[1].lower()
 
@@ -133,25 +150,17 @@ def test_detect_veto_text_is_distilled_clause():
 @pytest.mark.parametrize(
     "msg",
     [
-        # G16: the reported defect — "never" as a degree adverb. The old matcher took
-        # everything up to the final period and learned the fragment "never more".
         "Reply in exactly one sentence from now on, never more.",
         "in exactly one sentence, never more",
-        # A quantity nudge, not a prohibition — deliberately NOT a veto (the style
-        # detector / the after-turn summarizer own preferences of this shape).
         "never more than one sentence please",
         "never again",
-        # Fixed idioms whose head is a verb but whose phrase prohibits nothing.
         "never mind the tests, just run them",
         "never say never",
         "better late than never",
         "now or never",
-        # Counterfactual narration, not a standing rule.
         "I would never have guessed",
-        # A trigger with no complement at all.
         "never",
         "never.",
-        # stripping the emphatic run must not manufacture a veto out of nothing
         "never, ever",
         "never ever more",
     ],
@@ -171,9 +180,14 @@ def test_veto_requires_a_prohibited_action(msg):
         ("don't ever delete my notes", "don't ever delete my notes"),
         ("do not ever push to main", "do not ever push to main"),
         ("never deploy on friday", "never deploy on friday"),
-        ("remember to never commit secrets to the repo", "never commit secrets to the repo"),
-        ("always avoid rebasing shared branches", "always avoid rebasing shared branches"),
-        # emphatic doubling: the clause head is the intensifier, the action follows it
+        (
+            "remember to never commit secrets to the repo",
+            "never commit secrets to the repo",
+        ),
+        (
+            "always avoid rebasing shared branches",
+            "always avoid rebasing shared branches",
+        ),
         ("never, ever do that again", "never, ever do that again"),
         ("never ever push to main", "never ever push to main"),
     ],
@@ -190,7 +204,9 @@ def test_veto_recovers_after_a_non_prohibitive_trigger():
     """Every trigger occurrence is tried, so an adverbial "never more" earlier in the
     message does not mask the real veto after it (the old single-search matcher
     returned the fragment and stopped)."""
-    cand = pf.detect_facet_candidate("In one sentence, never more. Also never use emoji.")
+    cand = pf.detect_facet_candidate(
+        "In one sentence, never more. Also never use emoji."
+    )
     assert cand is not None and cand[0] == "veto"
     assert cand[1].lower() == "never use emoji"
 
@@ -202,11 +218,12 @@ def test_veto_clause_is_the_public_rule():
 
 
 def test_detect_no_false_positive_on_plain_questions():
-    for msg in ("What is the capital of France?", "Explain how TCP works", "I like pizza"):
+    for msg in (
+        "What is the capital of France?",
+        "Explain how TCP works",
+        "I like pizza",
+    ):
         assert pf.detect_facet_candidate(msg) is None, f"false positive: {msg!r}"
-
-
-# ── persistence + render ──
 
 
 def test_veto_not_stored_as_facet(vs):
@@ -224,7 +241,7 @@ def test_upsert_reinforces_existing(vs):
     k = pf.upsert_facet(vs, "style", "terse", "recurrence", now=NOW)
     s1 = pf.load_facets(vs)[0][1].stability
     k2 = pf.upsert_facet(vs, "style", "terse", "explicit", now=NOW)
-    assert k == k2  # same key (same text)
+    assert k == k2
     s2 = pf.load_facets(vs)[0][1].stability
     assert s2 >= s1
 
@@ -239,9 +256,11 @@ def test_render_profile_groups_by_class(vs):
 
 
 def test_render_excludes_dropped(vs):
-    pf.upsert_facet(vs, "channel", "old pref", "recurrence", now=NOW - timedelta(days=60))
+    pf.upsert_facet(
+        vs, "channel", "old pref", "recurrence", now=NOW - timedelta(days=60)
+    )
     block = pf.render_profile_block(vs, now=NOW)
-    assert "old pref" not in block  # decayed below Active
+    assert "old pref" not in block
 
 
 def test_render_empty_when_no_active(vs):

@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gideon.dashboard.handlers.memory import api_memory_context_preview
+from gideon.interfaces.dashboard.handlers.memory import api_memory_context_preview
 
 
 class _FakeProvider:
@@ -28,7 +28,6 @@ class _FakeProvider:
 
     def get_semantic_context(self, query_text: str = "", cap: int = 1500) -> str:
         self.semantic_query = query_text
-        # the real scorer returns matching facts for a multi-word query
         if "tictactoe" in query_text:
             return "[Semantic]\nproject.tictactoe.design_tokens: two-tier ramps"
         return "[Semantic]\n(all facts)"
@@ -41,9 +40,9 @@ class _FakeProvider:
 @pytest.fixture
 def _state_with_provider(monkeypatch):
     provider = _FakeProvider()
-    # the handler resolves the provider via _get_provider(state)
     monkeypatch.setattr(
-        "gideon.dashboard.handlers.memory._get_provider", lambda _state: provider
+        "gideon.interfaces.dashboard.handlers.memory._get_provider",
+        lambda _state: provider,
     )
     state = MagicMock()
     request = MagicMock()
@@ -60,9 +59,7 @@ async def test_multiword_query_surfaces_semantic_context(_state_with_provider):
     resp = await api_memory_context_preview(request)
     data = json.loads(resp.body)
 
-    # the query is passed THROUGH to the scorer (not a post-hoc substring filter)
     assert provider.semantic_query == "tictactoe design tokens"
-    # and a multi-word query now returns the matching fact, not empty
     assert "tictactoe" in data["semantic_context"]
     assert data["semantic_context"] != ""
 
@@ -74,7 +71,6 @@ async def test_query_threaded_to_both_semantic_and_episodic(_state_with_provider
 
     await api_memory_context_preview(request)
 
-    # both sides score against the SAME query (consistency — was the bug)
     assert provider.semantic_query == "design tokens"
     assert provider.episodic_query == "design tokens"
 
@@ -87,6 +83,6 @@ async def test_empty_query_still_returns_full_semantic(_state_with_provider):
     resp = await api_memory_context_preview(request)
     data = json.loads(resp.body)
 
-    assert provider.semantic_query == ""  # no query → full dump
+    assert provider.semantic_query == ""
     assert data["semantic_context"] != ""
-    assert data["episodic_context"] == ""  # episodic only when a query is given
+    assert data["episodic_context"] == ""

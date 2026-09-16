@@ -1,19 +1,5 @@
 "use strict";
 
-/**
- * DC-3 T3.1 — the push-to-talk chord and the capturing indicator.
- *
- * What this file can and cannot prove, stated up front so nobody reads a green run as
- * more than it is:
- *
- *  - PROVEN here: the chord grammar, the bind/conflict/rebind state machine, that the
- *    shell forwards a press rather than opening the microphone itself, that the
- *    indicator follows the RENDERER's report and nothing else, and that a toggled
- *    capture is bounded by the timeout.
- *  - NOT proven here: that macOS actually delivers the chord to us. `globalShortcut`
- *    is a stub below. A real key press on a real machine is V3's job and has not been
- *    performed — see the plan's execution log.
- */
 
 const { test, describe } = require("node:test");
 const assert = require("node:assert/strict");
@@ -26,11 +12,9 @@ const {
   validateChord,
   makePushToTalk,
   registerPushToTalkIpc,
-} = require("../pushToTalk");
-const { CAPABILITIES, IPC_CHANNELS, SPECS, makeCapabilities } = require("../capabilities");
+} = require("../src/native/push-to-talk");
+const { CAPABILITIES, IPC_CHANNELS, SPECS, makeCapabilities } = require("../src/native/capabilities");
 
-/** A `globalShortcut` stub that records registrations and can pretend a chord is
- * already owned by another app. */
 function shortcutStub({ taken = [], refuse = false } = {}) {
   const registered = new Map();
   return {
@@ -55,7 +39,6 @@ function shortcutStub({ taken = [], refuse = false } = {}) {
   };
 }
 
-/** A controller wired to stubs, with the sent payloads and indicator flips recorded. */
 function harness(opts = {}) {
   const sent = [];
   const indicator = [];
@@ -85,8 +68,6 @@ describe("chord grammar", () => {
   test("a chord needs a modifier — a bare global key is refused", () => {
     const r = validateChord("Space");
     assert.equal(r.ok, false);
-    // The reason has to say WHY, because "invalid" on a chord the user can obviously
-    // type is the kind of refusal people work around by giving up.
     assert.match(r.reason, /modifier/i);
     assert.match(r.reason, /every app/i);
   });
@@ -142,12 +123,9 @@ describe("binding the chord", () => {
     const { ptt, shortcuts } = harness({ taken: ["CommandOrControl+Shift+Space"] });
     const r = ptt.bind("CommandOrControl+Shift+Space");
     assert.equal(r.ok, false);
-    // `conflict` is what lets Settings say "that one is taken" instead of "invalid" —
-    // the two failures need different sentences.
     assert.equal(r.conflict, true);
     assert.match(r.reason, /already used by another app/i);
     assert.match(r.reason, /CommandOrControl\+Shift\+Space/);
-    // Nothing was bound, so the old chord is not silently lost either.
     assert.equal(ptt.boundChord(), "");
     assert.equal(shortcuts.registered.size, 0);
   });
@@ -162,8 +140,6 @@ describe("binding the chord", () => {
   test("re-binding the same chord succeeds — it does not conflict with itself", () => {
     const { ptt } = harness();
     assert.equal(ptt.bind("Alt+F13").ok, true);
-    // Without the unbind-first step this reads as "already registered" against our own
-    // registration, and the user cannot re-save their own shortcut.
     const again = ptt.bind("Alt+F13");
     assert.equal(again.ok, true);
     assert.equal(again.conflict, false);
@@ -211,9 +187,6 @@ describe("the shell forwards the press and never opens the microphone", () => {
   });
 
   test("a press does NOT move the indicator by itself", () => {
-    // The indicator must describe the microphone, not our intent. If a press lit it,
-    // a renderer that refused the capture (mic denied) would leave a lit indicator over
-    // a dead stream — the exact lie the clause exists to prevent.
     const { ptt, indicator, shortcuts } = harness();
     ptt.bind("Alt+F13");
     shortcuts.fire("Alt+F13");
@@ -222,10 +195,7 @@ describe("the shell forwards the press and never opens the microphone", () => {
   });
 
   test("the module never references getUserMedia or a media stream", () => {
-    const src = readFileSync(join(__dirname, "..", "pushToTalk.js"), "utf8");
-    // A source-level rail: the split of responsibility (renderer captures, shell
-    // forwards) is the property, and the cheapest way to keep it is to assert the
-    // shell has no capture API in it at all.
+    const src = readFileSync(join(__dirname, "..", "src/native/push-to-talk.js"), "utf8");
     assert.ok(!/getUserMedia|mediaDevices|MediaRecorder/.test(src));
   });
 });
@@ -250,8 +220,6 @@ describe("the capturing indicator follows the renderer's report", () => {
   });
 
   test("a lost renderer takes the indicator down with it", () => {
-    // The window closing kills the stream, so an indicator left lit would outlive the
-    // capture it describes.
     const { ptt, indicator } = harness();
     ptt.setCapturing(true);
     ptt.clearCapturing();
@@ -279,8 +247,6 @@ describe("a toggled capture is bounded", () => {
     ptt.setCapturing(true);
     timers[0].fn();
     assert.deepEqual(sent, [{ action: "stop", reason: "capture-timeout" }]);
-    // Still lit: the renderer holds the stream, so until it reports the stop the
-    // microphone really is still open, and the indicator must keep saying so.
     assert.deepEqual(indicator, [true]);
     assert.equal(ptt.isCapturing(), true);
     ptt.setCapturing(false);
@@ -322,11 +288,8 @@ describe("IPC surface", () => {
   });
 
   test("the preload exposes push-to-talk with no start method", () => {
-    const src = readFileSync(join(__dirname, "..", "preload.js"), "utf8");
+    const src = readFileSync(join(__dirname, "..", "src/bridge/dashboard-preload.js"), "utf8");
     assert.match(src, /pushToTalk:/);
-    // The absence is the point: nothing on the bridge lets the shell (or an app
-    // reaching the bridge) open the microphone. Only the renderer can, and only from a
-    // user gesture.
     assert.ok(!/pushToTalk:[\s\S]{0,600}?\bstart:/.test(src));
   });
 });
@@ -342,7 +305,6 @@ describe("system audio is refused honestly, not half-shipped (T3.3)", () => {
     assert.equal(s.available, false);
     assert.equal(s.granted, "unavailable");
     assert.equal(s.requestable, false);
-    // The reason must explain the trade rather than read as an unfinished port.
     assert.match(s.reason, /Screen Recording/i);
     assert.match(s.reason, /microphone only/i);
   });
@@ -363,10 +325,8 @@ describe("system audio is refused honestly, not half-shipped (T3.3)", () => {
   });
 
   test("no source file captures system audio", () => {
-    for (const f of ["main.js", "capabilities.js", "pushToTalk.js", "preload.js"]) {
+    for (const f of ["src/application/main.js", "src/application/desktop-application.js", "src/application/window-workspace.js", "src/native/capabilities.js", "src/native/push-to-talk.js", "src/bridge/dashboard-preload.js"]) {
       const src = readFileSync(join(__dirname, "..", f), "utf8");
-      // The census that keeps T3.3 honest: the doc says mic-only, so there must be no
-      // system-audio capture call anywhere for the doc to be wrong about.
       assert.ok(
         !/desktopCapturer|audioLoopback|systemAudio\s*[:=]\s*true/.test(src),
         `${f} must not capture system audio`
@@ -376,7 +336,7 @@ describe("system audio is refused honestly, not half-shipped (T3.3)", () => {
 
   test("the guide states mic-only, so doc and probe agree", () => {
     const guide = readFileSync(
-      join(__dirname, "..", "..", "docs", "guides", "desktop.md"),
+      join(__dirname, "..", "..", "..", "docs", "guides", "desktop.md"),
       "utf8"
     );
     assert.match(guide, /microphone only/i);

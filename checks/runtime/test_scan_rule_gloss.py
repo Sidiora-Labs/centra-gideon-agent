@@ -1,15 +1,15 @@
 """The scanner-rule gloss has ONE home, and it survives packaging (#2633).
 
 ``gideon skills install`` refused a skill and printed one bare row per finding —
-``- [high] python_exec in scripts/fetch.py: subprocess.run([...])`` — then stopped at
+``- [high] python_exec in tooling/scripts/fetch.py: subprocess.run([...])`` — then stopped at
 eight with nothing said. Two defects on the one output whose entire job is to justify a
 refusal: the row names the scanner's pattern but never says what the skill could DO, and a
 ninth finding vanished silently.
 
-The gloss already existed, in TypeScript (``web/src/lib/scanFindings.ts``), and the CLI is
+The gloss already existed, in TypeScript (``apps/console/src/lib/scanFindings.ts``), and the CLI is
 Python. Duplicating the map in Python is the defect #2535 removed — two literals for one
 fact, which drift — and reading the TS at runtime cannot work, because the wheel ships
-``web/dist``, not ``web/src``. So the map moved to a language-neutral
+``apps/console/dist``, not ``apps/console/src``. So the map moved to a language-neutral
 ``gideon/scan_rule_gloss.json``: the CLI reads it at RUNTIME, the Vite build imports
 it at BUILD time, one literal for every consumer.
 
@@ -35,21 +35,17 @@ from pathlib import Path
 
 import pytest
 
-import gideon.supply_chain as sc
-from gideon.skills.marketplace import (
+import gideon.security.supply_chain as sc
+from gideon.extensions.skills.marketplace import (
     SkillDetail,
     SkillsMarketplace,
     SkillsRegistry,
 )
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 _GLOSS_JSON = Path(sc.__file__).with_name("scan_rule_gloss.json")
-_SCAN_FINDINGS_TS = _REPO_ROOT / "web" / "src" / "lib" / "scanFindings.ts"
-#: Where the file lands inside a wheel — the path the CLI resolves at runtime.
+_SCAN_FINDINGS_TS = _REPO_ROOT / "apps/console" / "src" / "lib" / "scanFindings.ts"
 _WHEEL_MEMBER = "gideon/scan_rule_gloss.json"
-
-
-# ── One home, read by every consumer ────────────────────────────────────────
 
 
 def test_the_map_is_data_not_a_python_literal() -> None:
@@ -66,17 +62,20 @@ def test_an_unglossed_rule_reads_as_empty_never_as_its_own_name() -> None:
     back as though it explained something is the defect, not the fix."""
     assert sc.rule_gloss("no_such_rule_exists") == ""
     assert sc.rule_gloss("") == ""
-    assert sc.rule_gloss("python_exec") == "This code runs an external program on your machine."
+    assert (
+        sc.rule_gloss("python_exec")
+        == "This code runs an external program on your machine."
+    )
 
 
 def test_the_frontend_reads_the_same_file_rather_than_a_second_literal() -> None:
     """The whole point of the move. If ``scanFindings.ts`` ever re-declares the sentences
-    inline, there are two copies of one fact again and the CLI drifts from the dialog."""
+    inline, there are two copies of one fact again and the CLI drifts from the dialog.
+    """
     src = _SCAN_FINDINGS_TS.read_text(encoding="utf-8")
     assert re.search(
-        r"import \w+ from '(\.\./)+src/gideon/scan_rule_gloss\.json'", src
-    ), "web/src/lib/scanFindings.ts must import the canonical gloss JSON"
-    # Sampled from all three bands, so a partial re-inlining is caught too.
+        r"import \w+ from '(\.\./)+runtime/gideon/scan_rule_gloss\.json'", src
+    ), "apps/console/src/lib/scanFindings.ts must import the canonical gloss JSON"
     for rule in ("python_exec", "destructive_root", "injection_ignore"):
         sentence = sc.load_scan_rule_gloss()[rule]
         assert (
@@ -89,18 +88,15 @@ def test_the_cli_cap_matches_the_frontend_cap() -> None:
     NOT move into the shared data file. That makes it exactly the kind of number that
     drifts unnoticed, so it is pinned here instead: a user comparing the CLI's list against
     the dialog's must not be shown different amounts of the same refusal."""
-    from gideon.cli import _SKILL_FINDINGS_SHOWN
+    from gideon.interfaces.cli.main import _SKILL_FINDINGS_SHOWN
 
     ts = _SCAN_FINDINGS_TS.read_text(encoding="utf-8")
     m = re.search(r"export const SCAN_FINDINGS_SHOWN = (\d+)", ts)
-    assert m, "SCAN_FINDINGS_SHOWN not found in web/src/lib/scanFindings.ts"
+    assert m, "SCAN_FINDINGS_SHOWN not found in apps/console/src/lib/scanFindings.ts"
     assert _SKILL_FINDINGS_SHOWN == int(m.group(1)), (
         f"the CLI shows {_SKILL_FINDINGS_SHOWN} findings but the consent surfaces show "
         f"{m.group(1)} — one refusal, two different amounts of it"
     )
-
-
-# ── The map cannot go silently missing ──────────────────────────────────────
 
 
 def test_a_reachable_but_empty_map_is_a_hard_error(tmp_path, monkeypatch) -> None:
@@ -127,7 +123,9 @@ def test_pyproject_declares_the_gloss_as_package_data() -> None:
     declaration can be right while the build still drops the file, which is why the test
     below opens a real wheel."""
     text = (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    block = re.search(r"^\[tool\.setuptools\.package-data\](.*?)(?=^\[|\Z)", text, re.S | re.M)
+    block = re.search(
+        r"^\[tool\.setuptools\.package-data\](.*?)(?=^\[|\Z)", text, re.S | re.M
+    )
     assert block, "pyproject has no [tool.setuptools.package-data]"
     assert '"scan_rule_gloss.json"' in block.group(0), (
         "scan_rule_gloss.json is not declared as package data — a non-.py file is not "
@@ -169,13 +167,11 @@ def test_the_gloss_ships_inside_a_built_wheel(tmp_path) -> None:
         packaged = json.loads(z.read(_WHEEL_MEMBER).decode("utf-8"))
 
     shipped = {k: v for k, v in packaged.items() if not k.startswith("_")}
-    assert shipped == sc.load_scan_rule_gloss(), "the wheel's gloss differs from the source's"
-    # The sentences themselves survived, not just a well-formed empty object.
+    assert (
+        shipped == sc.load_scan_rule_gloss()
+    ), "the wheel's gloss differs from the source's"
     assert shipped.get("python_exec", "").endswith(".")
     assert len(shipped) >= 15
-
-
-# ── The CLI, driven against a real refusal ──────────────────────────────────
 
 
 class _FakeMarketplace(SkillsMarketplace):
@@ -206,9 +202,10 @@ def _drive_install(monkeypatch, capsys, tmp_path, files: list[dict[str, str]]) -
     registry = SkillsRegistry()
     registry.register("fake", _FakeMarketplace(files))
     monkeypatch.setattr(
-        "gideon.skills.marketplace.get_default_skills_registry", lambda: registry
+        "gideon.extensions.skills.marketplace.get_default_skills_registry",
+        lambda: registry,
     )
-    from gideon.cli import _handle_skills
+    from gideon.interfaces.cli.main import _handle_skills
 
     _handle_skills(
         Namespace(
@@ -227,7 +224,7 @@ def _many_python_exec(n: int) -> list[dict[str, str]]:
     files = [{"path": "SKILL.md", "contents": "---\nname: suspect\n---\n\n# suspect\n"}]
     files += [
         {
-            "path": f"scripts/step{i}.py",
+            "path": f"tooling/scripts/step{i}.py",
             "contents": f'import subprocess\nsubprocess.run(["echo", "{i}"])\n',
         }
         for i in range(n)
@@ -239,7 +236,8 @@ def test_a_refused_install_explains_each_rule_in_plain_language(
     monkeypatch, capsys, tmp_path
 ) -> None:
     """The defect, end to end. A real refusal on real content must not stop at the
-    scanner's own vocabulary: the sentence a non-expert can act on has to be on screen."""
+    scanner's own vocabulary: the sentence a non-expert can act on has to be on screen.
+    """
     out = _drive_install(
         monkeypatch,
         capsys,
@@ -247,27 +245,32 @@ def test_a_refused_install_explains_each_rule_in_plain_language(
         [
             {"path": "SKILL.md", "contents": "---\nname: suspect\n---\n\n# suspect\n"},
             {
-                "path": "scripts/fetch.py",
+                "path": "tooling/scripts/fetch.py",
                 "contents": 'import subprocess\nsubprocess.run(["curl", "-s", "http://x/y"])\n',
             },
         ],
     )
     assert "❌ Install refused" in out
-    # The technical row is untouched — the gloss complements the evidence, never replaces it.
-    assert "python_exec" in out and "scripts/fetch.py" in out
+    assert "python_exec" in out and "tooling/scripts/fetch.py" in out
     assert (
         "This code runs an external program on your machine." in out
     ), f"the refused install printed no plain-language gloss:\n{out}"
 
 
-def test_a_ninth_finding_is_never_dropped_in_silence(monkeypatch, capsys, tmp_path) -> None:
+def test_a_ninth_finding_is_never_dropped_in_silence(
+    monkeypatch, capsys, tmp_path
+) -> None:
     """Nine findings printed eight and said nothing, so a user counting the rows got a wrong
     answer about what the scanner found — on the output whose only job is to justify the
     refusal. The cap stays; the silence does not."""
     out = _drive_install(monkeypatch, capsys, tmp_path, _many_python_exec(9))
     rows = [ln for ln in out.splitlines() if ln.lstrip().startswith("- [")]
-    assert len(rows) == 8, f"expected the cap to hold at 8 rows, got {len(rows)}:\n{out}"
-    assert "+1 more finding not shown" in out, f"the ninth finding vanished silently:\n{out}"
+    assert (
+        len(rows) == 8
+    ), f"expected the cap to hold at 8 rows, got {len(rows)}:\n{out}"
+    assert (
+        "+1 more finding not shown" in out
+    ), f"the ninth finding vanished silently:\n{out}"
 
 
 def test_a_full_but_untruncated_list_claims_nothing_is_hidden(
@@ -278,4 +281,6 @@ def test_a_full_but_untruncated_list_claims_nothing_is_hidden(
     out = _drive_install(monkeypatch, capsys, tmp_path, _many_python_exec(8))
     rows = [ln for ln in out.splitlines() if ln.lstrip().startswith("- [")]
     assert len(rows) == 8
-    assert "not shown" not in out, f"nothing was hidden, so nothing may be claimed:\n{out}"
+    assert (
+        "not shown" not in out
+    ), f"nothing was hidden, so nothing may be claimed:\n{out}"

@@ -10,7 +10,7 @@ What these tests hold down, in priority order:
    called and still decides. Pre-existing ``tool_meta`` keys survive. Each of these
    rails carries a vacuity assertion proving it reds under the change it forbids.
 3. **One vocabulary, two languages.** The facet words and hint lists are parsed out
-   of ``web/src/pages/chat/approvalMeta.ts`` (OU-7/OU-8) and compared to this
+   of ``apps/console/src/pages/chat/approvalMeta.ts`` (OU-7/OU-8) and compared to this
    module's, so the phone brief and the dashboard chips cannot drift.
 4. **The honesty contract** — every boolean a positive claim, ``None`` when nothing
    was established, ``readOnly`` never over an established write.
@@ -24,7 +24,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from gideon.approval_brief import (
+from gideon.integrations.llm_helpers import LLMEvent
+from gideon.security.approval_brief import (
     APPROVAL_BRIEF_META_KEY,
     BLAST_RADIUS_FACET_ORDER,
     DESTRUCTIVE_HINTS,
@@ -39,9 +40,10 @@ from gideon.approval_brief import (
     derive_blast_radius,
     established_facets,
 )
-from gideon.llm_helpers import LLMEvent
 
-_TS_SOURCE = Path(__file__).resolve().parents[1] / "web/src/pages/chat/approvalMeta.ts"
+_TS_SOURCE = (
+    Path(__file__).resolve().parents[2] / "apps/console/src/pages/chat/approvalMeta.ts"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -58,7 +60,7 @@ def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    from gideon.config.loader import config_dir
+    from gideon.core.config.loader import config_dir
 
     assert str(config_dir()).startswith(
         str(home)
@@ -67,10 +69,10 @@ def _isolated_home(tmp_path, monkeypatch):
 
 
 def _make_gateway():
-    """The core approval harness, mirroring ``tests/test_approval_threading.py``."""
-    from gideon.gateway import GatewayOrchestrator
+    """The core approval harness, mirroring ``checks/runtime/test_approval_threading.py``."""
+    from gideon.engine.gateway import RuntimeCoordinator
 
-    gateway = GatewayOrchestrator.__new__(GatewayOrchestrator)
+    gateway = RuntimeCoordinator.__new__(RuntimeCoordinator)
     gateway.sessions = MagicMock()
     gateway.sessions.get_pid = MagicMock(return_value=None)
     gateway._channel_delivery = MagicMock()
@@ -97,12 +99,9 @@ def _event(title: str, **kw) -> LLMEvent:
 
 async def _drive(gateway, event) -> bool:
     """Run the real approval callback once, through the channel branch."""
-    with patch("gideon.trust_mode.is_yolo_active", return_value=False):
+    with patch("gideon.security.trust_mode.is_yolo_active", return_value=False):
         approve_fn = gateway._interactive_approval("subagent")
         return await approve_fn(event, "1775113012.860459")
-
-
-# ── 1. The call site ─────────────────────────────────────────────────────────────
 
 
 class TestCallSiteCarriesTheBrief:
@@ -140,8 +139,8 @@ class TestCallSiteCarriesTheBrief:
 
         delivered = gateway._channel_delivery.request_approval.call_args.args[0]
         brief = delivered.tool_meta[APPROVAL_BRIEF_META_KEY]
-        assert event.risk_level == "destructive"  # the declaration is untouched
-        assert brief["risk"] == "safe"  # …and the brief carries the resolution
+        assert event.risk_level == "destructive"
+        assert brief["risk"] == "safe"
         assert brief["blastRadius"] == {
             "writes": False,
             "network": False,
@@ -201,9 +200,6 @@ class TestCallSiteCarriesTheBrief:
         assert set(kwargs) == {"tool_input", "tool_purpose", "session"}
 
 
-# ── 2. Additive, with vacuity proofs ────────────────────────────────────────────
-
-
 class _OldShapedChannel:
     """A channel written against the signature that shipped BEFORE this atom.
 
@@ -240,7 +236,6 @@ class TestAdditiveOnly:
 
         assert await _drive(gateway, _event("web_fetch")) is True
         assert channel.calls == 1
-        # It CAN see the brief if it looks — it simply does not have to.
         assert APPROVAL_BRIEF_META_KEY in (channel.saw_tool_meta or {})
 
     @pytest.mark.asyncio
@@ -257,7 +252,7 @@ class TestAdditiveOnly:
             await channel.request_approval(
                 _event("web_fetch"),
                 source="subagent",
-                brief={"tool": "web_fetch"},  # the shape this atom deliberately avoids
+                brief={"tool": "web_fetch"},
             )
         assert channel.calls == 0
 
@@ -265,7 +260,9 @@ class TestAdditiveOnly:
     async def test_preexisting_tool_meta_keys_survive(self) -> None:
         """The brief is added BESIDE existing meta, never in place of it."""
         gateway = _make_gateway()
-        event = _event("web_fetch", tool_meta={"ok": False, "content_type": "text/plain"})
+        event = _event(
+            "web_fetch", tool_meta={"ok": False, "content_type": "text/plain"}
+        )
         assert await _drive(gateway, event) is True
 
         delivered = gateway._channel_delivery.request_approval.call_args.args[0]
@@ -278,13 +275,11 @@ class TestAdditiveOnly:
         original = {"ok": False, "content_type": "text/plain"}
         event = _event("web_fetch", tool_meta=dict(original))
 
-        # What `attach_approval_brief` actually does: one added key.
         assert attach_approval_brief(event) is not None
         assert dict(event.tool_meta, **{APPROVAL_BRIEF_META_KEY: None}) != original
         for key, value in original.items():
             assert event.tool_meta[key] == value
 
-        # What a REPLACING implementation would do — the rail above would fail.
         replaced = _event("web_fetch", tool_meta=dict(original))
         replaced.tool_meta = {APPROVAL_BRIEF_META_KEY: compose_approval_brief(replaced)}
         for key in original:
@@ -318,9 +313,6 @@ class TestAdditiveOnly:
 
     def test_an_event_with_no_tool_identity_gets_no_brief(self) -> None:
         assert compose_approval_brief(_event("")) is None
-
-
-# ── 3. One vocabulary, two languages ───────────────────────────────────────────
 
 
 def _ts_text() -> str:
@@ -383,7 +375,9 @@ class TestOneVocabularyAcrossLanguages:
         assert _ts_facet_copy() == FACET_COPY
 
     def test_render_order_agrees_with_the_frontend(self) -> None:
-        assert _ts_string_array("BLAST_RADIUS_FACET_ORDER") == list(BLAST_RADIUS_FACET_ORDER)
+        assert _ts_string_array("BLAST_RADIUS_FACET_ORDER") == list(
+            BLAST_RADIUS_FACET_ORDER
+        )
 
     def test_every_facet_has_words(self) -> None:
         """A fifth facet cannot be silently dropped from the brief."""
@@ -391,16 +385,12 @@ class TestOneVocabularyAcrossLanguages:
 
     def test_the_write_hints_are_derived_from_the_gates_own_tuple(self) -> None:
         """Not a hand-copied list: adding a hint to task_modes flows into the brief."""
-        from gideon.task_modes import _MUTATING_NAME_HINTS
+        from gideon.engine.task_modes import _MUTATING_NAME_HINTS
 
         assert "schedule" in _MUTATING_NAME_HINTS and "schedule" in WRITE_HINTS
-        # Re-homed to another facet, so they must NOT also mean "writes".
         for rehomed in ("exec", "spawn", "delete", "remove", "run"):
             assert rehomed in _MUTATING_NAME_HINTS or rehomed in DESTRUCTIVE_HINTS
             assert rehomed not in WRITE_HINTS
-
-
-# ── 4. The honesty contract ────────────────────────────────────────────────────
 
 
 class TestHonestyContract:
@@ -409,7 +399,12 @@ class TestHonestyContract:
 
     def test_an_established_write_never_claims_read_only(self) -> None:
         radius = derive_blast_radius("file_write", risk="safe")
-        assert radius == {"writes": True, "network": False, "shell": False, "readOnly": False}
+        assert radius == {
+            "writes": True,
+            "network": False,
+            "shell": False,
+            "readOnly": False,
+        }
 
     def test_a_negative_screening_verdict_rules_the_read_claim_out(self) -> None:
         radius = derive_blast_radius("bash", risk="safe", read_only_command=False)
@@ -421,7 +416,12 @@ class TestHonestyContract:
     def test_a_read_verb_beats_a_broad_write_hint(self) -> None:
         """`schedule_list` matches the write fragment "schedule" but is plainly a read."""
         radius = derive_blast_radius("schedule_list")
-        assert radius == {"writes": False, "network": False, "shell": False, "readOnly": True}
+        assert radius == {
+            "writes": False,
+            "network": False,
+            "shell": False,
+            "readOnly": True,
+        }
 
     def test_a_destructive_verb_wins_outright(self) -> None:
         radius = derive_blast_radius("memory_forget", risk="safe")
@@ -484,7 +484,6 @@ class TestHonestyContract:
             "shell": False,
             "readOnly": True,
         }
-        # The frontend agrees, which is why this is drift-free but still wrong.
         assert "get" in "widget"
         assert "get" in _ts_string_array("READ_VERB_HINTS")
 
@@ -497,12 +496,18 @@ class TestHonestyContract:
         """
         import ast
 
-        source = Path(__file__).resolve().parents[1] / "src/gideon/approval_brief.py"
+        source = (
+            Path(__file__).resolve().parents[2]
+            / "runtime/gideon/security/approval_brief.py"
+        )
         tree = ast.parse(source.read_text(encoding="utf-8"))
-        referenced = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)} | {
-            node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)
-        }
-        for owned_elsewhere in ("is_read_only_bash", "extract_bash_command", "classify_invocation"):
+        referenced = {
+            node.id for node in ast.walk(tree) if isinstance(node, ast.Name)
+        } | {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
+        for owned_elsewhere in (
+            "is_read_only_bash",
+            "extract_bash_command",
+            "classify_invocation",
+        ):
             assert owned_elsewhere not in referenced
-        # Vacuity: the walk really does see this module's identifiers.
         assert "resolve_effective_risk" in referenced

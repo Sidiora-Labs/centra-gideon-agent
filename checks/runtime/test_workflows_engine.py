@@ -20,8 +20,8 @@ import asyncio
 
 import pytest
 
-from gideon.workflows.bindings import BindingContext
-from gideon.workflows.engine import (
+from gideon.automation.workflows.bindings import BindingContext
+from gideon.automation.workflows.engine import (
     DEFAULT_MODEL_TIERS,
     MAX_JUDGE_SAMPLES,
     MAX_WF_DEPTH,
@@ -39,8 +39,13 @@ from gideon.workflows.engine import (
     dispatch_wait,
     resolve_use_case,
 )
-from gideon.workflows.judge_contract import hints_from_dict
-from gideon.workflows.models import FailureClass, InstanceState, Node, NodeKind
+from gideon.automation.workflows.judge_contract import hints_from_dict
+from gideon.automation.workflows.models import (
+    FailureClass,
+    InstanceState,
+    Node,
+    NodeKind,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -71,25 +76,43 @@ class TestTransform:
         """`{{nodes.x.output}}` alone hands the real object through; stringifying it would
         turn a list into text a downstream pipe cannot operate on."""
         r = await dispatch_transform(
-            _n({"kind": "transform", "id": "t", "config": {"expr": "{{nodes.x.output}}"}}),
+            _n(
+                {
+                    "kind": "transform",
+                    "id": "t",
+                    "config": {"expr": "{{nodes.x.output}}"},
+                }
+            ),
             _ctx(node_outputs={"x": [1, 2, 3]}),
         )
         assert r.output == [1, 2, 3]
 
     async def test_an_unresolvable_ref_is_a_user_failure_not_an_exception(self) -> None:
         r = await dispatch_transform(
-            _n({"kind": "transform", "id": "t", "config": {"expr": "{{nodes.gone.output}}"}}),
+            _n(
+                {
+                    "kind": "transform",
+                    "id": "t",
+                    "config": {"expr": "{{nodes.gone.output}}"},
+                }
+            ),
             _ctx(),
         )
         assert r.state == InstanceState.FAILED
         assert r.failure.failure_class == FailureClass.USER
-        assert r.failure.remediation  # actionable, not just an error string
+        assert r.failure.remediation
 
     async def test_a_null_upstream_output_flows_through_as_a_value(self) -> None:
         """The distinction that matters: "produced nothing" is data, "does not exist" is
         an error."""
         r = await dispatch_transform(
-            _n({"kind": "transform", "id": "t", "config": {"expr": "{{nodes.x.output}}"}}),
+            _n(
+                {
+                    "kind": "transform",
+                    "id": "t",
+                    "config": {"expr": "{{nodes.x.output}}"},
+                }
+            ),
             _ctx(node_outputs={"x": None}),
         )
         assert r.state == InstanceState.DONE
@@ -130,7 +153,7 @@ class TestInfer:
         assert r.state == InstanceState.DONE
         assert r.output == "answer"
         assert seen["prompt"] == "sum 7"
-        assert r.resolved_prompt == "sum 7"  # journaled for trajectory replay
+        assert r.resolved_prompt == "sum 7"
 
     async def test_the_tier_selects_a_use_case_never_a_model(self) -> None:
         """Templates name an intent; the use-case bridge owns the model. That is what
@@ -142,14 +165,26 @@ class TestInfer:
             return "x"
 
         await dispatch_infer(
-            _n({"kind": "infer", "id": "i", "config": {"prompt": "p", "model_tier": "reasoning"}}),
+            _n(
+                {
+                    "kind": "infer",
+                    "id": "i",
+                    "config": {"prompt": "p", "model_tier": "reasoning"},
+                }
+            ),
             _ctx(),
             completion=fake,
         )
         assert seen["uc"] == "reasoning"
 
     async def test_a_custom_tier_map_overrides_the_default(self) -> None:
-        node = _n({"kind": "infer", "id": "i", "config": {"prompt": "p", "model_tier": "fast"}})
+        node = _n(
+            {
+                "kind": "infer",
+                "id": "i",
+                "config": {"prompt": "p", "model_tier": "fast"},
+            }
+        )
         assert resolve_use_case(node, {"fast": "loops"}) == "loops"
         assert resolve_use_case(node) == DEFAULT_MODEL_TIERS["fast"]
 
@@ -185,7 +220,13 @@ class TestInfer:
             return "I think the answer is probably yes"
 
         r = await dispatch_infer(
-            _n({"kind": "infer", "id": "i", "config": {"prompt": "p", "output": "json"}}),
+            _n(
+                {
+                    "kind": "infer",
+                    "id": "i",
+                    "config": {"prompt": "p", "output": "json"},
+                }
+            ),
             _ctx(),
             completion=prose,
         )
@@ -252,8 +293,8 @@ class TestVisualize:
             completion=fake,
         )
         assert r.state == InstanceState.DONE
-        assert seen["use_case"] == "reasoning"  # never chat/code_tools (agency-free)
-        assert "as a tile" in seen["prompt"]  # the hint reached the prompt
+        assert seen["use_case"] == "reasoning"
+        assert "as a tile" in seen["prompt"]
         assert r.output["dsl"].startswith("stat = StatTile")
         assert '<widget kind="genui"' in r.output["widget"]
 
@@ -312,13 +353,21 @@ class TestStage:
         nothing in particular, and homogeneity would stop being the default."""
         sp = self._Spawner(self._Info())
         await dispatch_stage(
-            _n({"kind": "stage", "id": "s", "config": {"prompt": "p"}}), _ctx(), subagents=sp
+            _n({"kind": "stage", "id": "s", "config": {"prompt": "p"}}),
+            _ctx(),
+            subagents=sp,
         )
         assert sp.calls[0]["model"] is None
 
         pinned = self._Spawner(self._Info())
         await dispatch_stage(
-            _n({"kind": "stage", "id": "s", "config": {"prompt": "p", "model": "Prov:some-id"}}),
+            _n(
+                {
+                    "kind": "stage",
+                    "id": "s",
+                    "config": {"prompt": "p", "model": "Prov:some-id"},
+                }
+            ),
             _ctx(),
             subagents=pinned,
         )
@@ -336,7 +385,7 @@ class TestStage:
         )
         assert r.state == InstanceState.FAILED
         assert r.failure.failure_class == FailureClass.PERMISSION
-        assert not sp.calls  # refused BEFORE spawning
+        assert not sp.calls
 
     async def test_capacity_backpressure_is_not_a_failure(self) -> None:
         """At capacity the node stays ready for the next tick; failing it would lose work
@@ -383,7 +432,10 @@ class TestBranch:
 
     async def test_a_default_case_catches_an_unlisted_value(self) -> None:
         node = _n(
-            {**self.NODE, "default": {"kind": "transform", "id": "d", "config": {"expr": "0"}}}
+            {
+                **self.NODE,
+                "default": {"kind": "transform", "id": "d", "config": {"expr": "0"}},
+            }
         )
         r = await dispatch_branch(node, _ctx(inputs={"k": "zzz"}))
         assert r.output == {"case": "__default__"}
@@ -397,7 +449,9 @@ class TestBranch:
         assert r.failure.failure_class == FailureClass.USER
 
     async def test_a_missing_on_binding_is_rejected(self) -> None:
-        r = await dispatch_branch(_n({"kind": "branch", "id": "r", "cases": {}}), _ctx())
+        r = await dispatch_branch(
+            _n({"kind": "branch", "id": "r", "cases": {}}), _ctx()
+        )
         assert r.state == InstanceState.FAILED
 
     BOOL_NODE = {
@@ -531,12 +585,16 @@ class TestWaitAndGate:
 
     async def test_an_already_past_deadline_completes_immediately(self) -> None:
         r = await dispatch_wait(
-            _n({"kind": "wait", "id": "w", "config": {"until_ts": 500}}), _ctx(), now=1000.0
+            _n({"kind": "wait", "id": "w", "config": {"until_ts": 500}}),
+            _ctx(),
+            now=1000.0,
         )
         assert r.state == InstanceState.DONE
 
     async def test_a_wait_with_no_deadline_is_rejected(self) -> None:
-        r = await dispatch_wait(_n({"kind": "wait", "id": "w", "config": {}}), _ctx(), now=0.0)
+        r = await dispatch_wait(
+            _n({"kind": "wait", "id": "w", "config": {}}), _ctx(), now=0.0
+        )
         assert r.state == InstanceState.FAILED
 
     async def test_an_expression_gate_is_decided_by_the_engine(self) -> None:
@@ -555,7 +613,13 @@ class TestWaitAndGate:
     async def test_an_approval_gate_parks_with_a_typed_ask(self) -> None:
         """One typed payload means one FE renderer covers every human-input node."""
         r = await dispatch_gate(
-            _n({"kind": "gate", "id": "g", "config": {"kind": "approval", "prompt": "Ship it?"}}),
+            _n(
+                {
+                    "kind": "gate",
+                    "id": "g",
+                    "config": {"kind": "approval", "prompt": "Ship it?"},
+                }
+            ),
             _ctx(),
             now=0.0,
         )
@@ -566,7 +630,13 @@ class TestWaitAndGate:
 
     async def test_a_gate_timeout_becomes_a_wake_deadline(self) -> None:
         r = await dispatch_gate(
-            _n({"kind": "gate", "id": "g", "config": {"kind": "approval", "timeout_secs": 60}}),
+            _n(
+                {
+                    "kind": "gate",
+                    "id": "g",
+                    "config": {"kind": "approval", "timeout_secs": 60},
+                }
+            ),
             _ctx(),
             now=100.0,
         )
@@ -654,7 +724,9 @@ class TestJudgePreTier:
         assert r.output["pretier"] is True
 
     async def test_a_stub_artifact_is_rejected_without_a_model_call(self) -> None:
-        r, calls = await self._judge({"prompt": "judge it", "evidence": "TODO: implement this"})
+        r, calls = await self._judge(
+            {"prompt": "judge it", "evidence": "TODO: implement this"}
+        )
         assert r.state == InstanceState.FAILED and calls == 0
         assert r.output["failure_class"] == "stubbed_output"
 
@@ -677,7 +749,11 @@ class TestJudgePreTier:
     async def test_min_chars_is_the_authors_substance_knob(self) -> None:
         """A gate can demand more than the 20-char floor; below it, no model call."""
         r, calls = await self._judge(
-            {"prompt": "judge it", "evidence": "short but real enough usually", "min_chars": 200}
+            {
+                "prompt": "judge it",
+                "evidence": "short but real enough usually",
+                "min_chars": 200,
+            }
         )
         assert r.state == InstanceState.FAILED and calls == 0
         assert r.output["failure_class"] == "empty_output"
@@ -690,7 +766,12 @@ class TestJudgePreTier:
         assert r_off.state == InstanceState.DONE and calls_off == 1
 
         r_on, calls_on = await self._judge(
-            {"prompt": "j", "evidence": text, "evidence_artifacts": 0, "evidence_commits": 0}
+            {
+                "prompt": "j",
+                "evidence": text,
+                "evidence_artifacts": 0,
+                "evidence_commits": 0,
+            }
         )
         assert r_on.state == InstanceState.FAILED and calls_on == 0
 
@@ -709,7 +790,9 @@ class TestOutputContract:
 
     def test_required_keys_are_checked_on_parsed_text_too(self) -> None:
         assert check_output_contract('{"a": 1}', {"required_keys": ["a"]}) == ""
-        assert "missing required keys" in check_output_contract({"a": 1}, {"required_keys": ["b"]})
+        assert "missing required keys" in check_output_contract(
+            {"a": 1}, {"required_keys": ["b"]}
+        )
 
     def test_length_bounds(self) -> None:
         assert check_output_contract("abc", {"min_length": 5}) != ""
@@ -732,14 +815,13 @@ class TestDispatchTable:
     async def test_every_leaf_kind_routes_somewhere(self) -> None:
         """A kind with no dispatcher would fail at runtime instead of at review — this is
         the drift guard for the table."""
-        from gideon.workflows.models import CONTAINER_KINDS
+        from gideon.automation.workflows.models import CONTAINER_KINDS
 
         for kind in NodeKind:
             if kind in CONTAINER_KINDS or kind == NodeKind.SUBWORKFLOW:
                 continue
             node = Node(kind=kind, id="x", config={})
             r = await dispatch(node, _ctx(), now=1.0)
-            # Some fail for want of config; none may report "no dispatcher".
             assert "no dispatcher" not in (r.failure.cause_plain if r.failure else "")
 
     async def test_a_container_reaching_dispatch_is_an_engine_bug(self) -> None:
@@ -763,15 +845,10 @@ class TestDispatchTable:
         assert "supervisor" in r.failure.cause_plain
 
 
-#: Wrap a bare verdict WORD into the contract object the judge gate asks for since WF2LOO-13.
-#: The gate no longer speaks one-word answers — a bare `PASS` reads as "the judge could not
-#: answer in the required shape", which is a PROTOCOL failure — so these tests state the verdict
-#: they mean and let this add the proof the contract requires of a PASS. Anything that is not a
-#: verdict word passes through untouched, which is how "banana" stays genuinely unparseable.
 def _judge_answer(value: str) -> str:
     import json as _json
 
-    from gideon.workflows.judge_contract import Verdict
+    from gideon.automation.workflows.judge_contract import Verdict
 
     if value in {v.value for v in Verdict}:
         return _json.dumps({"verdict": value, "proof": "re-ran the command; exit 0"})
@@ -796,9 +873,7 @@ class TestJudgeSamples:
     restatement deleted, so these tests now pin the shared function.
     """
 
-    _EVIDENCE = (
-        "A substantial deliverable with plenty of characters for the pre-tier to allow through."
-    )
+    _EVIDENCE = "A substantial deliverable with plenty of characters for the pre-tier to allow through."
 
     async def _judge(self, cfg, seq):
         calls = {"n": 0}
@@ -863,7 +938,8 @@ class TestJudgeSamples:
 
     async def test_an_unparseable_sample_fails_the_whole_gate(self) -> None:
         """A terminal accept decided from 2 of 3 samples is a quieter version of the single-sample
-        bug this session exists to fix, so an unparseable sample stops the gate where it stands."""
+        bug this session exists to fix, so an unparseable sample stops the gate where it stands.
+        """
         r, calls = await self._judge({"judge_samples": 3}, ["PASS", "banana", "PASS"])
         assert calls == 2, "it must stop at the bad sample, not press on"
         assert r.state == InstanceState.FAILED
@@ -885,7 +961,8 @@ class TestJudgeSamples:
     async def test_tokens_are_summed_over_EVERY_sample(self) -> None:
         """🔴 Found in my own first draft: a 3-sample gate reported one sample's tokens, so the loop
         breaker's `max_tokens` and the run cost cap under-counted 3x exactly where sampling makes a
-        gate most expensive. A meter that reads low on the expensive path is worse than none."""
+        gate most expensive. A meter that reads low on the expensive path is worse than none.
+        """
         one, _ = await self._judge({}, ["PASS"])
         three, _ = await self._judge({"judge_samples": 3}, ["PASS", "PASS", "PASS"])
         assert one.tokens > 0
@@ -901,14 +978,19 @@ class TestTheRubricRatchetOnTheLiveGate:
     `execution_hints.from_runtime_hints` does for the execution half.
     """
 
-    _EVIDENCE = "A substantial deliverable, long enough for the pre-tier to allow it through."
+    _EVIDENCE = (
+        "A substantial deliverable, long enough for the pre-tier to allow it through."
+    )
 
     def _hints(self):
         return hints_from_dict(
             {
                 "rubric": [
                     {"criterion": "progress is real and evidenced", "target_score": 2},
-                    {"criterion": "claims cite artifacts, not prose", "target_score": 2},
+                    {
+                        "criterion": "claims cite artifacts, not prose",
+                        "target_score": 2,
+                    },
                 ],
                 "ratchet": "strict",
             }
@@ -925,10 +1007,16 @@ class TestTheRubricRatchetOnTheLiveGate:
             {
                 "kind": "gate",
                 "id": "accept",
-                "config": {"kind": "judge", "prompt": "accept?", "evidence": self._EVIDENCE},
+                "config": {
+                    "kind": "judge",
+                    "prompt": "accept?",
+                    "evidence": self._EVIDENCE,
+                },
             }
         )
-        r = await dispatch_gate(node, _ctx(), now=0.0, completion=completion, judge_hints=hints)
+        r = await dispatch_gate(
+            node, _ctx(), now=0.0, completion=completion, judge_hints=hints
+        )
         return r, seen.get("instruction", "")
 
     async def test_the_declared_criteria_reach_the_judge_as_KEYS(self) -> None:
@@ -952,7 +1040,9 @@ class TestTheRubricRatchetOnTheLiveGate:
             "claims cite artifacts, not prose: 1 < 2"
         ]
 
-    async def test_a_PASS_at_target_completes_and_the_overall_is_engine_computed(self) -> None:
+    async def test_a_PASS_at_target_completes_and_the_overall_is_engine_computed(
+        self,
+    ) -> None:
         answer = (
             '{"verdict": "PASS", "proof": "read the report", "overall": 99, '
             '"scores": {"progress is real and evidenced": 2, '
@@ -960,15 +1050,15 @@ class TestTheRubricRatchetOnTheLiveGate:
         )
         r, _ = await self._judge(answer, self._hints())
         assert r.state == InstanceState.DONE
-        # The model claimed 99. The engine recomputes from the dimension scores and keeps the
-        # model's own number beside it, so the drift is visible instead of resolved in its favour.
         assert r.output["judge_verdict"]["overall"] == 2.0
         assert r.output["judge_verdict"]["model_overall"] == 99.0
 
     async def test_a_gate_whose_run_declares_NO_rubric_is_untouched(self) -> None:
         """🔴 The anti-outage rule: 6 of the 7 bundled judge gates declare no rubric, so the
         ratchet has nothing to compare and must not manufacture a shortfall."""
-        r, instruction = await self._judge('{"verdict": "PASS", "proof": "cited"}', None)
+        r, instruction = await self._judge(
+            '{"verdict": "PASS", "proof": "cited"}', None
+        )
         assert r.state == InstanceState.DONE
         assert "target" not in instruction
 
@@ -997,7 +1087,9 @@ class TestTheJudgeStageSeam:
 
     def test_a_node_that_does_not_declare_it_is_untouched(self) -> None:
         result = NodeResult(state=InstanceState.DONE, output={"verdict": "PASS"})
-        assert apply_judge_contract(self._node(), result, None).output == {"verdict": "PASS"}
+        assert apply_judge_contract(self._node(), result, None).output == {
+            "verdict": "PASS"
+        }
 
     def test_an_honest_REJECT_still_succeeds_and_is_bound(self) -> None:
         result = NodeResult(
@@ -1006,7 +1098,9 @@ class TestTheJudgeStageSeam:
         )
         out = apply_judge_contract(self._node(judge_contract=True), result, None).output
         assert out["verdict"] == "REJECT"
-        assert out["contract_valid"] is True, "a REJECT is a verdict, not a contract violation"
+        assert (
+            out["contract_valid"] is True
+        ), "a REJECT is a verdict, not a contract violation"
         assert out["passed"] is False
 
     def test_a_PASS_with_no_proof_is_bound_as_INVALID(self) -> None:
@@ -1035,16 +1129,28 @@ class TestTheJudgeStageSeam:
 
     def test_an_already_failed_node_is_left_alone(self) -> None:
         failed = NodeResult(state=InstanceState.FAILED, output={"verdict": "PASS"})
-        assert apply_judge_contract(self._node(judge_contract=True), failed, None) is failed
+        assert (
+            apply_judge_contract(self._node(judge_contract=True), failed, None)
+            is failed
+        )
 
     def test_the_rubric_applies_to_a_stage_too(self) -> None:
         hints = hints_from_dict(
-            {"rubric": [{"criterion": "the tests pass", "target_score": 2}], "ratchet": "strict"}
+            {
+                "rubric": [{"criterion": "the tests pass", "target_score": 2}],
+                "ratchet": "strict",
+            }
         )
         result = NodeResult(
             state=InstanceState.DONE,
-            output={"verdict": "PASS", "proof": "exit 1", "scores": {"the tests pass": 0}},
+            output={
+                "verdict": "PASS",
+                "proof": "exit 1",
+                "scores": {"the tests pass": 0},
+            },
         )
-        out = apply_judge_contract(self._node(judge_contract=True), result, hints).output
+        out = apply_judge_contract(
+            self._node(judge_contract=True), result, hints
+        ).output
         assert out["contract_valid"] is False
         assert out["shortfalls"] == ["the tests pass: 0 < 2"]

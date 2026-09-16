@@ -19,7 +19,7 @@ import subprocess
 
 import pytest
 
-from gideon.workflows.worktrees import (
+from gideon.automation.workflows.worktrees import (
     INFRASTRUCTURE_PATHS,
     MAX_PRESERVE_BYTES,
     PRESERVE_DENYLIST,
@@ -59,13 +59,6 @@ def repo(tmp_path, monkeypatch):
     (ws / "a.txt").write_text("one\n")
     git(ws, "add", "-A")
     git(ws, "commit", "-qm", "init")
-    # Isolate via GIDEON_HOME, which `config.loader` honors, rather than monkeypatching
-    # `config.loader.config_dir` itself. Measured: the module-attribute patch redirected EVERY
-    # consumer for the duration, and `cli_doctor` then read a `project_dir` out of a tmp home that
-    # pytest deleted — so `TestDoctor::test_doctor_with_agent` reported "stale project_dir" and
-    # exited 1. A failure in a test with nothing to do with worktrees, deterministic in the full
-    # xdist mix and invisible in isolation. `worktree.py` imports `config_dir` inside its function,
-    # so there is no module attribute to patch narrowly; the env var is the real seam.
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     monkeypatch.setenv("GIDEON_HOME", str(home))
@@ -74,14 +67,13 @@ def repo(tmp_path, monkeypatch):
 
 @pytest.fixture()
 def worktree(repo, tmp_path):
-    from gideon.loop import worktree as wt_machinery
+    from gideon.automation.loop import worktree as wt_machinery
 
     path = wt_machinery.add_worktree(str(repo), "run-52", project_id="p-1")
-    assert path, "the proven machinery must produce a worktree for these tests to mean anything"
+    assert (
+        path
+    ), "the proven machinery must produce a worktree for these tests to mean anything"
     return path
-
-
-# ── the proven machinery's properties, measured not assumed ──
 
 
 def test_adding_a_worktree_TWICE_returns_the_same_path(repo):
@@ -89,7 +81,7 @@ def test_adding_a_worktree_TWICE_returns_the_same_path(repo):
     skip it — and the detection would be a second source of truth about whether the
     worktree exists.
     """
-    from gideon.loop import worktree as wt_machinery
+    from gideon.automation.loop import worktree as wt_machinery
 
     first = wt_machinery.add_worktree(str(repo), "run-x", project_id="p-1")
     second = wt_machinery.add_worktree(str(repo), "run-x", project_id="p-1")
@@ -102,9 +94,6 @@ def test_an_untracked_local_config_file_is_ABSENT_from_a_fresh_worktree(repo, wo
 
     (repo / ".env").write_text("SECRET=1\n")
     assert not (Path(worktree) / ".env").exists()
-
-
-# ── preserve copies IN, never OUT ──
 
 
 def test_a_preserved_file_lands_in_the_worktree(repo, worktree):
@@ -163,9 +152,6 @@ def test_preserve_into_a_missing_target_returns_empty(repo, tmp_path):
     assert preserve(repo, tmp_path / "gone", [".env"]).copied == []
 
 
-# ── setup idempotency ──
-
-
 def test_setup_splits_on_NEWLINES_only():
     """Splitting on `&&` or `;` would shred a single shell command that legitimately chains,
     and each
@@ -203,7 +189,7 @@ def test_an_EDITED_step_re_runs(worktree):
 def test_setup_failure_NEVER_blocks_the_run():
     """Refusing to run the workflow because `npm install` failed would make declaring setup a
     liability, and a user would stop declaring it."""
-    from gideon.workflows.worktrees import SetupResult
+    from gideon.automation.workflows.worktrees import SetupResult
 
     assert SetupResult(failed=["npm ci"]).blocked_run is False
 
@@ -217,9 +203,6 @@ def test_markers_can_be_cleared_for_a_REUSED_workspace(worktree):
     mark_setup_done(worktree, "b")
     assert cleanup_markers(worktree) == 2
     assert cleanup_markers(worktree) == 0
-
-
-# ── resume safety ──
 
 
 def test_a_live_worktree_is_RESUMABLE(worktree):
@@ -240,9 +223,6 @@ def test_the_resume_reason_reports_the_setup_SPLIT(worktree):
     mark_setup_done(worktree, "echo one")
     _ok, why = resume_safe(worktree, "echo one\necho two")
     assert "1 setup step(s) already done" in why
-
-
-# ── teardown order ──
 
 
 def test_teardown_runs_BEFORE_deletion():
@@ -275,15 +255,15 @@ def test_keep_open_SKIPS_deletion():
 def test_teardown_still_runs_when_the_workspace_is_kept():
     """A service the run started must still be stopped — keeping the directory is not keeping the
     processes."""
-    assert any("echo bye" in s for s in plan_teardown(teardown="echo bye", keep_open=True).steps)
+    assert any(
+        "echo bye" in s
+        for s in plan_teardown(teardown="echo bye", keep_open=True).steps
+    )
 
 
 def test_a_non_ephemeral_workspace_does_not_commit():
     """A named workspace the user owns must not have a run's commit forced onto it."""
     assert not any("per-run branch" in s for s in plan_teardown(ephemeral=False).steps)
-
-
-# ── the per-run branch ──
 
 
 def test_the_branch_name_is_DETERMINISTIC():
@@ -294,7 +274,7 @@ def test_the_branch_name_is_DETERMINISTIC():
 
 def test_the_branch_prefix_distinguishes_runs_from_loop_tasks():
     """A user reading `git branch` should be able to tell which subsystem made a branch."""
-    from gideon.loop.worktree import branch_name
+    from gideon.automation.loop.worktree import branch_name
 
     assert not run_branch("x").startswith(branch_name("x").rsplit("-", 1)[0])
 
@@ -305,9 +285,6 @@ def test_an_unsafe_run_id_is_sanitized_into_a_valid_branch():
 
 def test_an_empty_run_id_still_yields_a_branch():
     assert run_branch("") == f"{RUN_BRANCH_PREFIX}unknown"
-
-
-# ── the status parser, against REAL git output ──
 
 
 def test_the_parser_handles_every_real_status_shape(repo):
@@ -328,11 +305,16 @@ def test_the_parser_handles_every_real_status_shape(repo):
     git(repo, "mv", "ren.txt", "renamed.txt")
 
     entries = {e.path: e for e in parse_status(git(repo, "status", "--porcelain"))}
-    assert entries["mod.txt"].status == "modified" and entries["mod.txt"].staged is False
+    assert (
+        entries["mod.txt"].status == "modified" and entries["mod.txt"].staged is False
+    )
     assert entries["del.txt"].status == "deleted" and entries["del.txt"].staged is True
-    assert entries["staged.txt"].status == "added" and entries["staged.txt"].staged is True
-    assert entries["new.txt"].status == "untracked" and entries["new.txt"].staged is False
-    # A rename reads as `R  old -> new`; the NEW path is what the user reviews.
+    assert (
+        entries["staged.txt"].status == "added" and entries["staged.txt"].staged is True
+    )
+    assert (
+        entries["new.txt"].status == "untracked" and entries["new.txt"].staged is False
+    )
     assert entries["renamed.txt"].status == "renamed"
 
 
@@ -347,9 +329,6 @@ def test_an_unknown_status_code_is_KEPT():
 def test_a_short_or_empty_line_is_skipped():
     assert parse_status("") == []
     assert parse_status("M\n") == []
-
-
-# ── the review diff excludes machinery ──
 
 
 def test_the_review_diff_excludes_the_ENGINES_OWN_markers(repo, worktree):
@@ -376,13 +355,17 @@ def test_the_review_diff_excludes_PRESERVED_files(repo, worktree):
     result = preserve(repo, worktree, [".env"])
     (Path(worktree) / "a.txt").write_text("the real change\n")
     state = inspect_worktree(
-        "run-52", worktree, git(worktree, "status", "--porcelain"), preserved=result.copied
+        "run-52",
+        worktree,
+        git(worktree, "status", "--porcelain"),
+        preserved=result.copied,
     )
     assert [c.path for c in state.changed] == ["a.txt"]
 
 
 @pytest.mark.parametrize(
-    "path", [".gideon-setup", ".gideon-setup/", ".gideon-setup/abc.done", "./.gideon-setup/x"]
+    "path",
+    [".gideon-setup", ".gideon-setup/", ".gideon-setup/abc.done", "./.gideon-setup/x"],
 )
 def test_every_marker_path_FORM_is_recognized(path):
     assert is_infrastructure(path) is True
@@ -398,12 +381,9 @@ def test_a_real_file_is_not_mistaken_for_machinery(path):
 def test_the_marker_dir_name_is_SHARED_with_the_planner():
     """Two names for one convention would mean setup re-running because the performer looked in the
     wrong place."""
-    from gideon.workflows.workspace import SETUP_MARKER_DIR
+    from gideon.automation.workflows.workspace import SETUP_MARKER_DIR
 
     assert SETUP_MARKER_DIR in INFRASTRUCTURE_PATHS
-
-
-# ── state, substrate and the boot sweep ──
 
 
 def test_a_live_worktree_reports_ALIVE(worktree):
@@ -451,12 +431,14 @@ def test_the_substrate_feeds_S46s_sweep_from_ONE_source(repo, worktree):
     computing
     that would eventually disagree, and the disagreement shows up as a run aborted despite having
     recoverable work."""
-    from gideon.workflows.containers import BoardState, sweep_decision
-    from gideon.workflows.models import RunStatus, WorkflowRun
+    from gideon.automation.workflows.containers import BoardState, sweep_decision
+    from gideon.automation.workflows.models import RunStatus, WorkflowRun
 
     state = inspect_worktree("run-52", worktree)
     decision = sweep_decision(
-        WorkflowRun(id="run-52", workflow_name="code", status=RunStatus.RUNNING, started_at="x"),
+        WorkflowRun(
+            id="run-52", workflow_name="code", status=RunStatus.RUNNING, started_at="x"
+        ),
         substrate_for(state),
     )
     assert decision.board_state is BoardState.SUSPENDED
@@ -464,19 +446,18 @@ def test_the_substrate_feeds_S46s_sweep_from_ONE_source(repo, worktree):
 
 
 def test_a_DEAD_worktree_makes_the_sweep_abort_honestly(tmp_path):
-    from gideon.workflows.containers import BoardState, sweep_decision
-    from gideon.workflows.models import RunStatus, WorkflowRun
+    from gideon.automation.workflows.containers import BoardState, sweep_decision
+    from gideon.automation.workflows.models import RunStatus, WorkflowRun
 
     state = inspect_worktree("run-52", tmp_path / "gone")
     decision = sweep_decision(
-        WorkflowRun(id="run-52", workflow_name="code", status=RunStatus.RUNNING, started_at="x"),
+        WorkflowRun(
+            id="run-52", workflow_name="code", status=RunStatus.RUNNING, started_at="x"
+        ),
         substrate_for(state),
     )
     assert decision.board_state is BoardState.DONE
     assert decision.resumable is False
-
-
-# ── reintegration is offered, never performed ──
 
 
 def test_BOTH_verbs_are_offered():
@@ -484,7 +465,10 @@ def test_BOTH_verbs_are_offered():
     lands" exists
     to prevent."""
     verbs = {v["verb"] for v in reintegration_offer("r-1", changed=3)["verbs"]}
-    assert verbs == {Reintegration.APPLY_LOCALLY.value, Reintegration.CHECKOUT_BRANCH.value}
+    assert verbs == {
+        Reintegration.APPLY_LOCALLY.value,
+        Reintegration.CHECKOUT_BRANCH.value,
+    }
 
 
 def test_the_offer_says_nothing_is_applied_automatically():
@@ -515,9 +499,6 @@ def test_CHECKOUT_stays_safe_even_with_conflicts():
 
 def test_the_offer_names_the_branch():
     assert reintegration_offer("r-9")["branch"] == run_branch("r-9")
-
-
-# ── stage env ──
 
 
 def test_the_stage_env_sets_PWD_as_well_as_the_path():

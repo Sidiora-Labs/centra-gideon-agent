@@ -6,7 +6,8 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.dashboard.handlers import api_channel_profile, api_send_message  # noqa: E402
+from gideon.interfaces.dashboard.handlers import api_send_message  # noqa: E402
+from gideon.interfaces.dashboard.handlers import api_channel_profile
 
 
 def _make_app(state) -> web.Application:
@@ -26,13 +27,10 @@ def _mock_state(channel_delivery=None, owner_id=""):
 
 @pytest.fixture
 def mock_sel():
-    with patch("gideon.sel.sel") as m:
+    with patch("gideon.security.sel.sel") as m:
         instance = MagicMock()
         m.return_value = instance
         yield instance
-
-
-# ── send_message targeting ──
 
 
 class TestTargetedChannel:
@@ -45,7 +43,8 @@ class TestTargetedChannel:
         app = _make_app(state)
 
         with patch(
-            "gideon.dashboard.handlers.messaging._is_tracked_channel", return_value=True
+            "gideon.interfaces.dashboard.handlers.messaging._is_tracked_channel",
+            return_value=True,
         ):
             async with TestClient(TestServer(app)) as client:
                 resp = await client.post(
@@ -77,7 +76,8 @@ class TestTargetedChannel:
         app = _make_app(state)
 
         with patch(
-            "gideon.dashboard.handlers.messaging._is_tracked_channel", return_value=False
+            "gideon.interfaces.dashboard.handlers.messaging._is_tracked_channel",
+            return_value=False,
         ):
             async with TestClient(TestServer(app)) as client:
                 resp = await client.post(
@@ -100,7 +100,10 @@ class TestTargetedUser:
         state = _mock_state(channel_delivery=slack, owner_id="U_OWNER")
         app = _make_app(state)
 
-        with patch("gideon.dashboard.handlers.messaging._is_owner_user", return_value=True):
+        with patch(
+            "gideon.interfaces.dashboard.handlers.messaging._is_owner_user",
+            return_value=True,
+        ):
             async with TestClient(TestServer(app)) as client:
                 resp = await client.post(
                     "/api/send-message",
@@ -131,7 +134,10 @@ class TestTargetedUser:
         state = _mock_state(channel_delivery=slack, owner_id="U_OWNER")
         app = _make_app(state)
 
-        with patch("gideon.dashboard.handlers.messaging._is_owner_user", return_value=False):
+        with patch(
+            "gideon.interfaces.dashboard.handlers.messaging._is_owner_user",
+            return_value=False,
+        ):
             async with TestClient(TestServer(app)) as client:
                 resp = await client.post(
                     "/api/send-message",
@@ -199,9 +205,6 @@ class TestFallbackToOwnerDM:
             )
 
 
-# ── api_channel_profile tests (#7) ──
-
-
 class TestUnfurlControl:
     @pytest.mark.asyncio
     async def test_unfurl_links_false_passes_through(self, mock_sel):
@@ -215,7 +218,11 @@ class TestUnfurlControl:
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
                 "/api/send-message",
-                json={"text": "no previews", "unfurl_links": False, "unfurl_media": False},
+                json={
+                    "text": "no previews",
+                    "unfurl_links": False,
+                    "unfurl_media": False,
+                },
             )
             assert resp.status == 200
             slack.deliver_text.assert_called_once_with(
@@ -302,7 +309,9 @@ class TestUnfurlControl:
                 "/api/send-message",
                 json={
                     "text": "fallback",
-                    "blocks": [{"type": "section", "text": {"type": "mrkdwn", "text": "hi"}}],
+                    "blocks": [
+                        {"type": "section", "text": {"type": "mrkdwn", "text": "hi"}}
+                    ],
                     "unfurl_links": False,
                     "unfurl_media": False,
                 },
@@ -336,9 +345,14 @@ class TestSlackProfile:
         state = _mock_state(channel_delivery=slack)
         app = _make_app(state)
 
-        with patch("gideon.dashboard.handlers.messaging._is_owner_user", return_value=True):
+        with patch(
+            "gideon.interfaces.dashboard.handlers.messaging._is_owner_user",
+            return_value=True,
+        ):
             async with TestClient(TestServer(app)) as client:
-                resp = await client.post("/api/channel/profile", json={"user": "U0123ABC456"})
+                resp = await client.post(
+                    "/api/channel/profile", json={"user": "U0123ABC456"}
+                )
                 assert resp.status == 200
                 data = await resp.json()
                 assert data["profile"]["name"] == "testuser"
@@ -360,7 +374,9 @@ class TestSlackProfile:
         app = _make_app(state)
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.post("/api/channel/profile", json={"user": "not-a-slack-id"})
+            resp = await client.post(
+                "/api/channel/profile", json={"user": "not-a-slack-id"}
+            )
             assert resp.status == 400
 
     @pytest.mark.asyncio
@@ -381,9 +397,14 @@ class TestSlackProfile:
         state = _mock_state(channel_delivery=slack)
         app = _make_app(state)
 
-        with patch("gideon.dashboard.handlers.messaging._is_owner_user", return_value=True):
+        with patch(
+            "gideon.interfaces.dashboard.handlers.messaging._is_owner_user",
+            return_value=True,
+        ):
             async with TestClient(TestServer(app)) as client:
-                resp = await client.post("/api/channel/profile", json={"user": "U0123ABC456"})
+                resp = await client.post(
+                    "/api/channel/profile", json={"user": "U0123ABC456"}
+                )
                 assert resp.status == 502
                 mock_sel.log_tool_invocation.assert_called_with(
                     session_key="dashboard",
@@ -399,9 +420,14 @@ class TestSlackProfile:
         state = _mock_state(channel_delivery=None)
         app = _make_app(state)
 
-        with patch("gideon.dashboard.handlers.messaging._is_owner_user", return_value=True):
+        with patch(
+            "gideon.interfaces.dashboard.handlers.messaging._is_owner_user",
+            return_value=True,
+        ):
             async with TestClient(TestServer(app)) as client:
-                resp = await client.post("/api/channel/profile", json={"user": "U0123ABC456"})
+                resp = await client.post(
+                    "/api/channel/profile", json={"user": "U0123ABC456"}
+                )
                 assert resp.status == 503
 
     @pytest.mark.asyncio
@@ -410,9 +436,14 @@ class TestSlackProfile:
         state = _mock_state(channel_delivery=MagicMock())
         app = _make_app(state)
 
-        with patch("gideon.dashboard.handlers.messaging._is_owner_user", return_value=False):
+        with patch(
+            "gideon.interfaces.dashboard.handlers.messaging._is_owner_user",
+            return_value=False,
+        ):
             async with TestClient(TestServer(app)) as client:
-                resp = await client.post("/api/channel/profile", json={"user": "U0123ABC456"})
+                resp = await client.post(
+                    "/api/channel/profile", json={"user": "U0123ABC456"}
+                )
                 assert resp.status == 403
                 data = await resp.json()
                 assert data == {"error": "user not in allowlist"}
@@ -431,13 +462,17 @@ class TestSlackProfile:
 
         slack = MagicMock()
         state = _mock_state(channel_delivery=slack)
-        # Pre-fill 5 lookups to trigger rate limit
         state._profile_lookup_times = [time.monotonic()] * 5
         app = _make_app(state)
 
-        with patch("gideon.dashboard.handlers.messaging._is_owner_user", return_value=True):
+        with patch(
+            "gideon.interfaces.dashboard.handlers.messaging._is_owner_user",
+            return_value=True,
+        ):
             async with TestClient(TestServer(app)) as client:
-                resp = await client.post("/api/channel/profile", json={"user": "U0123ABC456"})
+                resp = await client.post(
+                    "/api/channel/profile", json={"user": "U0123ABC456"}
+                )
                 assert resp.status == 429
                 mock_sel.log_tool_invocation.assert_called_once_with(
                     session_key="dashboard",
@@ -451,7 +486,6 @@ class TestSlackProfile:
     async def test_profile_redaction(self, mock_sel):
         """Status text with exfiltration URL gets redacted."""
         slack = MagicMock()
-        # Use a URL with a long base64-like query that triggers exfil detection
         exfil_url = "https://evil.com/steal?d=" + "A" * 200
         slack.resolve_user_profile = AsyncMock(
             return_value={
@@ -463,13 +497,17 @@ class TestSlackProfile:
         state = _mock_state(channel_delivery=slack)
         app = _make_app(state)
 
-        with patch("gideon.dashboard.handlers.messaging._is_owner_user", return_value=True):
+        with patch(
+            "gideon.interfaces.dashboard.handlers.messaging._is_owner_user",
+            return_value=True,
+        ):
             async with TestClient(TestServer(app)) as client:
-                resp = await client.post("/api/channel/profile", json={"user": "U0123ABC456"})
+                resp = await client.post(
+                    "/api/channel/profile", json={"user": "U0123ABC456"}
+                )
                 assert resp.status == 200
                 data = await resp.json()
                 status = data["profile"].get("status_text", "")
-                # The exfiltration URL payload should be redacted
                 assert "REDACTED" in status
                 assert "A" * 200 not in status
 
@@ -579,7 +617,8 @@ class TestThreadTsAndBroadcast:
         app = _make_app(state)
 
         with patch(
-            "gideon.dashboard.handlers.messaging._is_tracked_channel", return_value=True
+            "gideon.interfaces.dashboard.handlers.messaging._is_tracked_channel",
+            return_value=True,
         ):
             async with TestClient(TestServer(app)) as client:
                 resp = await client.post(

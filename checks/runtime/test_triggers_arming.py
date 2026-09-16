@@ -31,8 +31,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.dashboard.handlers import triggers as T
-from gideon.hooks import (
+from gideon.engine.hooks import (
     BLOCKING_EVENTS,
     ENFORCEMENT_ADVISORY,
     ENFORCEMENT_ENFORCING,
@@ -43,13 +42,14 @@ from gideon.hooks import (
     ScriptHookStore,
     hook_enforcement,
 )
+from gideon.interfaces.dashboard.handlers import triggers as T
 
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     """An isolated home + workspace. Both are set: an isolated home alone does not confine the
     workspace, and this fixture writes a real ``config.json``."""
-    import gideon.config.loader as loader
+    import gideon.core.config.loader as loader
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     monkeypatch.setenv("GIDEON_WORKSPACE", str(tmp_path / "ws"))
@@ -68,7 +68,9 @@ def store(home, monkeypatch):
 def _bind(home, hook_ids: list[str]) -> None:
     """Write the agent profile the FIRING path reads (``AgentProfile.triggers``)."""
     (home / "config.json").write_text(
-        json.dumps({"default_agent": "coder", "agents": {"coder": {"triggers": hook_ids}}}),
+        json.dumps(
+            {"default_agent": "coder", "agents": {"coder": {"triggers": hook_ids}}}
+        ),
         encoding="utf-8",
     )
 
@@ -87,7 +89,10 @@ def _rows(store) -> dict[str, dict]:
 def _seed(store) -> dict[str, str]:
     """The sweep's shape: one blocking hook and one non-blocking one. Returns name → hook id."""
     ids = {}
-    for name, event in (("pretool", HOOK_EVENT_PRE_TOOL_USE), ("onstop", HOOK_EVENT_STOP)):
+    for name, event in (
+        ("pretool", HOOK_EVENT_PRE_TOOL_USE),
+        ("onstop", HOOK_EVENT_STOP),
+    ):
         hook = store.create(
             {
                 "name": name,
@@ -100,15 +105,14 @@ def _seed(store) -> dict[str, str]:
     return ids
 
 
-# ── the rail ──
-
-
 def test_unbound_blocking_hook_is_reported_not_enforcing(store, home):
     """🔴 The measured state: a PreToolUse hook no agent references cannot block, so the row must
     say so rather than leaving `used_by: []` for the user to interpret."""
     ids = _seed(store)
-    assert len(ids) == 2, "vacuity: the fixture must create hooks for this to measure anything"
-    _bind(home, [])  # a real config with a real agent that references nothing
+    assert (
+        len(ids) == 2
+    ), "vacuity: the fixture must create hooks for this to measure anything"
+    _bind(home, [])
 
     rows = _rows(store)
     assert len(rows) == 2, "vacuity: the handler must return the seeded rows"
@@ -124,7 +128,9 @@ def test_bound_blocking_hook_is_reported_enforcing(store, home):
     _bind(home, [ids["pretool"]])
 
     rows = _rows(store)
-    assert rows["pretool"]["used_by"] == ["coder"], "the real used_by index must see the profile"
+    assert rows["pretool"]["used_by"] == [
+        "coder"
+    ], "the real used_by index must see the profile"
     assert rows["pretool"]["enforcement"] == ENFORCEMENT_ENFORCING
 
 
@@ -168,7 +174,8 @@ def test_disabling_a_bound_blocking_hook_stops_it_enforcing(store, home):
 
 def test_a_freshly_created_blocking_hook_reports_not_enforcing(store, home):
     """POST /api/triggers answers with `_serialize_lifecycle(hook, [])`, so the creation response
-    itself is the first place the user is told. A blocking hook cannot be bound at create time."""
+    itself is the first place the user is told. A blocking hook cannot be bound at create time.
+    """
     app = web.Application()
     app["state"] = object()
     body = {
@@ -190,14 +197,13 @@ def test_a_freshly_created_blocking_hook_reports_not_enforcing(store, home):
     assert created["enforcement"] == ENFORCEMENT_NOT_ENFORCING
 
 
-# ── the derivation ──
-
-
 def test_blocking_events_is_derived_and_non_empty():
     """Vacuity: `BLOCKING_EVENTS` comes from the catalog's `blocking` flag. An empty set would make
     every row `advisory` and this whole rail vacuously green — the exact way `DORMANT_EVENTS`
     silently retired the "Never fires" chip."""
-    assert BLOCKING_EVENTS, "no blocking event in the catalog — every check above would be vacuous"
+    assert (
+        BLOCKING_EVENTS
+    ), "no blocking event in the catalog — every check above would be vacuous"
     assert HOOK_EVENT_PRE_TOOL_USE in BLOCKING_EVENTS
     assert HOOK_EVENT_STOP not in BLOCKING_EVENTS
 
@@ -210,5 +216,6 @@ def test_enforcement_never_claims_enforcing_without_a_binding():
             == ENFORCEMENT_NOT_ENFORCING
         )
     assert (
-        hook_enforcement(HOOK_EVENT_PRE_TOOL_USE, enabled=True, bound=True) == ENFORCEMENT_ENFORCING
+        hook_enforcement(HOOK_EVENT_PRE_TOOL_USE, enabled=True, bound=True)
+        == ENFORCEMENT_ENFORCING
     )

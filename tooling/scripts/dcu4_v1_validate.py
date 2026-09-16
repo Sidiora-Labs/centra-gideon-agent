@@ -25,8 +25,8 @@ the test hook instead of the property. ``--phase absent`` therefore re-execs.
 
 Usage::
 
-    PYTHONPATH=src python scripts/dcu4_v1_validate.py            # both phases, JSON to stdout
-    PYTHONPATH=src python scripts/dcu4_v1_validate.py --phase armed --home /tmp/x
+    PYTHONPATH=src python tooling/scripts/dcu4_v1_validate.py            # both phases, JSON to stdout
+    PYTHONPATH=src python tooling/scripts/dcu4_v1_validate.py --phase armed --home /tmp/x
 
 Exit status 0 only when every clause holds. Anything unproven is reported as ``unproven`` with
 the reason, never silently dropped.
@@ -47,8 +47,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-# The seven-tool surface must all refuse when the enable file is absent; "blocks everything"
-# is a claim about the population, not about whichever tool the validator happened to try.
 _ABSENT_PROBES: tuple[tuple[str, dict[str, Any]], ...] = (
     ("computer_list_apps", {}),
     ("computer_snapshot", {"app": "TextEdit"}),
@@ -71,16 +69,14 @@ class Failure(Exception):
         self.detail = detail
 
 
-#: Every dispatch this run made, so "one SEL row per attempt" is checked against the real
-#: number of attempts rather than a number written down once and left to drift.
 _ATTEMPTS: list[str] = []
 
 
 def _dispatch(tool: str, params: dict[str, Any]) -> tuple[str, Any]:
     """Run one dispatch. Returns ``("ok", result)`` or ``("refused", code)``."""
-    from gideon.computer_use import enable_state
-    from gideon.computer_use import policy as cu_policy
-    from gideon.computer_use import service
+    from gideon.integrations.computer_use import enable_state
+    from gideon.integrations.computer_use import policy as cu_policy
+    from gideon.integrations.computer_use import service
 
     _ATTEMPTS.append(tool)
     try:
@@ -97,7 +93,8 @@ def _dispatch(tool: str, params: dict[str, Any]) -> tuple[str, Any]:
 
 
 def _write_enable(home: Path, apps: list[str]) -> None:
-    from gideon.computer_use.enable_state import ENABLE_FILENAME, GOVERNANCE_DIRNAME
+    from gideon.integrations.computer_use.enable_state import ENABLE_FILENAME
+    from gideon.integrations.computer_use.enable_state import GOVERNANCE_DIRNAME
 
     governance = home / GOVERNANCE_DIRNAME
     governance.mkdir(parents=True, exist_ok=True)
@@ -124,10 +121,11 @@ def _sel_rows(home: Path) -> list[dict[str, Any]]:
 
 def phase_absent(home: Path) -> dict[str, Any]:
     """Clause: an absent enable file blocks everything, and the refusal is still audited."""
-    from gideon.computer_use.enable_state import ENABLE_FILENAME, GOVERNANCE_DIRNAME
+    from gideon.integrations.computer_use.enable_state import ENABLE_FILENAME
+    from gideon.integrations.computer_use.enable_state import GOVERNANCE_DIRNAME
 
     enable_file = home / GOVERNANCE_DIRNAME / ENABLE_FILENAME
-    if enable_file.exists():  # absent means absent; a stale file would make this phase a lie
+    if enable_file.exists():
         enable_file.unlink()
     observed = []
     for tool, params in _ABSENT_PROBES:
@@ -160,7 +158,7 @@ def phase_absent(home: Path) -> dict[str, Any]:
 
 
 def _front_window_present(app: str) -> bool:
-    from gideon.computer_use import macos_ffi
+    from gideon.integrations.computer_use import macos_ffi
 
     try:
         macos_ffi.walk_window(app)
@@ -192,7 +190,7 @@ def _fresh_act(
     action", and a wider window would fail on a human nudging the mouse — a false defect, which
     is as bad as a missed one.
     """
-    from gideon.computer_use import macos_ffi
+    from gideon.integrations.computer_use import macos_ffi
 
     Result = tuple[str, Any, dict[str, Any], tuple[tuple[float, float], tuple[float, float]]]
     last: Result | None = None
@@ -223,7 +221,7 @@ def _fresh_act(
 
 def phase_armed(home: Path) -> dict[str, Any]:
     """Clauses: real app driven by element index, pointer stays put, secure field refused."""
-    from gideon.computer_use import macos_ffi
+    from gideon.integrations.computer_use import macos_ffi
 
     scratch = Path(tempfile.gettempdir()) / "dcu4-v1-scratch.txt"
     scratch.write_text("scratch\n", encoding="utf-8")
@@ -237,14 +235,9 @@ def phase_armed(home: Path) -> dict[str, Any]:
     )
     _write_enable(home, ["TextEdit", "Safari"])
 
-    # Recorded BEFORE launching, because teardown may only kill what this run started. A
-    # validation that quits an app the operator already had open destroys their unsaved work.
     already = set(macos_ffi.list_gui_apps())
     launched = {app for app in ("TextEdit", "Safari") if app not in already}
 
-    # ``-F`` (fresh) matters: without it macOS restores the app's previously open windows,
-    # the front window is some earlier document, and "the window closed" becomes unobservable
-    # because a SECOND window is still there. That cost this script two runs to find.
     subprocess.run(["open", "-F", "-a", "TextEdit", str(scratch)], check=True)
     subprocess.run(["open", "-F", "-a", "Safari", secure_page.as_uri()], check=True)
     for _ in range(30):
@@ -256,7 +249,6 @@ def phase_armed(home: Path) -> dict[str, Any]:
 
     report: dict[str, Any] = {"launched_by_this_run": sorted(launched)}
 
-    # --- the allowlist narrows the listing (step 7), and it is not vacuous --------------------
     outcome, listing = _dispatch("computer_list_apps", {})
     if outcome != "ok":
         raise Failure("list-apps", f"refused: {getattr(listing, 'code', listing)!r}")
@@ -271,17 +263,11 @@ def phase_armed(home: Path) -> dict[str, Any]:
         )
     report["list_apps"] = {"listed": listed, "running": len(running)}
 
-    # --- a non-allowlisted app is refused BY NAME, before any window is walked ---------------
     outcome, refusal = _dispatch("computer_snapshot", {"app": "Finder"})
     if outcome != "refused" or getattr(refusal, "code", "") != "ERR_COMPUTER_USE_APP_NOT_ALLOWED":
         raise Failure("app-allowlist", f"Finder was not refused: {outcome} {refusal!r}")
     report["non_allowlisted_app"] = {"app": "Finder", "code": refusal.code}
 
-    # --- CLICK by element index, on a CLEAN document -----------------------------------------
-    # Ordered before the write deliberately. A press on the close button of an EDITED document
-    # raises the save sheet instead of closing the window, so the clause would read "the press
-    # had no effect" when the press in fact worked perfectly — a false negative that cost this
-    # script one run to find. The clean document makes the effect unambiguous.
     outcome, clicked, close_button, click_pointer = _fresh_act(
         "TextEdit", {"role": "AXButton", "subrole": "AXCloseButton"}, "computer_click", {}
     )
@@ -308,7 +294,6 @@ def phase_armed(home: Path) -> dict[str, Any]:
         "pointer_after": click_pointer[1],
     }
 
-    # --- WRITE by element index, and prove the operator's pointer did not move ----------------
     subprocess.run(["open", "-F", "-a", "TextEdit", str(scratch)], check=True)
     for _ in range(30):
         if _front_window_present("TextEdit"):
@@ -337,7 +322,6 @@ def phase_armed(home: Path) -> dict[str, Any]:
         "pointer_after": write_pointer[1],
     }
 
-    # --- the pointer clause, stated per action ------------------------------------------------
     moved = [
         {"action": name, "before": pair[0], "after": pair[1]}
         for name, pair in (("computer_set_value", write_pointer), ("computer_click", click_pointer))
@@ -352,7 +336,6 @@ def phase_armed(home: Path) -> dict[str, Any]:
         "click": {"before": click_pointer[0], "after": click_pointer[1]},
     }
 
-    # --- a LIVE secure field, refused --------------------------------------------------------
     outcome, refusal, secure, _ = _fresh_act(
         "Safari",
         {"role": "AXTextField", "subrole": "AXSecureTextField"},
@@ -382,7 +365,6 @@ def phase_armed(home: Path) -> dict[str, Any]:
         "field_value_after": live_secure.get("value", ""),
     }
 
-    # --- SEL: one row per attempt, both verdicts present -------------------------------------
     rows = _sel_rows(home)
     approved = [r for r in rows if r.get("outcome") == "approved"]
     denied = [r for r in rows if r.get("outcome") == "denied"]
@@ -406,12 +388,6 @@ def phase_armed(home: Path) -> dict[str, Any]:
         "codes": sorted({r.get("error") for r in rows if r.get("error")}),
     }
 
-    # --- leave the machine as we found it -----------------------------------------------------
-    # Deliberately NOT osascript: `tell application` needs the Apple Events (Automation) TCC
-    # grant, a DIFFERENT grant from Accessibility, and on a machine without it osascript blocks
-    # on a prompt nobody answers. Teardown is also strictly limited to apps this run launched —
-    # see `launched`. The scratch document is left EDITED and unsaved on purpose: quitting the
-    # app is what discards it, and saving it would write a file nobody asked for.
     cleanup: dict[str, Any] = {"scratch_document": "left unsaved; discarded with the app"}
     for app in sorted(launched):
         subprocess.run(["pkill", "-x", app], check=False)
@@ -435,12 +411,10 @@ def _preflight() -> dict[str, Any]:
     """
     if platform.system() != "Darwin":
         raise Failure("preflight", f"V1 is a macOS validation; this is {platform.system()}")
-    from gideon.computer_use import macos_ffi, macos_tcc
+    from gideon.integrations.computer_use import macos_ffi
+    from gideon.integrations.computer_use import macos_tcc
 
     trusted = macos_ffi.is_process_trusted()
-    # AFTER the probe, never before: the row this reads is the one tccd wrote when it answered.
-    # The PATIENT timeout — nothing is waiting on a validator, and an `unknown` recorded because
-    # this script was in a hurry would be the provenance gap all over again.
     responsible = macos_tcc.responsible_process(timeout=macos_tcc.PATIENT_PROBE_TIMEOUT_SECS)
     if not trusted:
         raise Failure(

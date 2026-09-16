@@ -1,0 +1,1187 @@
+{
+  "data": {
+    "generator": "tooling/scripts/generate_inert_surface_baseline.py",
+    "sources": [
+      {
+        "count": 1,
+        "declarations": [
+          {
+            "kind": "enum",
+            "symbol": "Status.RESOLVED"
+          }
+        ],
+        "path": "runtime/gideon/automation/workflows/confirmation.py"
+      },
+      {
+        "count": 1,
+        "declarations": [
+          {
+            "kind": "enum",
+            "symbol": "Completeness.INFERRED"
+          }
+        ],
+        "path": "runtime/gideon/automation/workflows/containers.py"
+      },
+      {
+        "count": 1,
+        "declarations": [
+          {
+            "kind": "enum",
+            "symbol": "Ratchet.RELAXED"
+          }
+        ],
+        "path": "runtime/gideon/automation/workflows/judge_contract.py"
+      },
+      {
+        "count": 1,
+        "declarations": [
+          {
+            "kind": "enum",
+            "symbol": "SessionMode.CONTINUOUS"
+          }
+        ],
+        "path": "runtime/gideon/automation/workflows/models.py"
+      },
+      {
+        "count": 1,
+        "declarations": [
+          {
+            "kind": "enum",
+            "symbol": "MemoryTier.SEGMENT"
+          }
+        ],
+        "path": "runtime/gideon/cognition/memory_record.py"
+      },
+      {
+        "count": 1,
+        "declarations": [
+          {
+            "kind": "enum",
+            "symbol": "DependencyType.REQUIRED_FOR"
+          }
+        ],
+        "path": "runtime/gideon/engine/tasks/models.py"
+      },
+      {
+        "count": 1,
+        "declarations": [
+          {
+            "kind": "enum",
+            "symbol": "ItemStatus.SENT"
+          }
+        ],
+        "path": "runtime/gideon/integrations/inbox.py"
+      },
+      {
+        "count": 1,
+        "declarations": [
+          {
+            "kind": "enum",
+            "symbol": "StructuredOutput.JSON_MODE"
+          }
+        ],
+        "path": "runtime/gideon/integrations/llm/capabilities.py"
+      },
+      {
+        "count": 4,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "is_npx_fallback"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "node_manager_bin_globs"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "provision_acp_adapter"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "resolve_acp_cli"
+          }
+        ],
+        "path": "runtime/gideon/sdk/acp.py"
+      },
+      {
+        "count": 3,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "ActionContext"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "ActionProvider"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "ActionResult"
+          }
+        ],
+        "path": "runtime/gideon/sdk/action.py"
+      },
+      {
+        "count": 106,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "AcpError"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "AcpProcessDied"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "AcpTimeoutError"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "AppConfig"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "BACKGROUND_KEY"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "CANCELLED_STOP_REASONS"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "CANNED_PAIRING_REPLY"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "CRED_OWNER_ID"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "CRED_SLACK_APP_TOKEN"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "CRED_SLACK_BOT_TOKEN"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "ChannelCapabilities"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "ChannelDelivery"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "ChannelMessage"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "ChannelTransportProvider"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "ConversationDirectory"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "ConversationLog"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "DelegationSupervisor"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "EVENT_COMPACTION_STATUS"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "EVENT_COMPLETE"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "EVENT_PERMISSION_REQUEST"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "EVENT_TEXT_CHUNK"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "EVENT_THINKING_CHUNK"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "EVENT_TOOL_CALL"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "GatewayServices"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "HOOK_REPLY"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "HistoryConsolidator"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "LINK_WINDOW_SECS"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "LLMEvent"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "MAX_SESSION_TTL_SECS"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "MemoryService"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "ModelProvider"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "OutboundMessage"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "ProcedureLibrary"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "PromptAssembler"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "ProviderSettings"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "STOP_REASON_CANCELLED"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "STOP_REASON_END_TURN"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "STOP_REASON_STOPPED_BY_USER"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "SessionMap"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "Stats"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "TOOL_AUTO_APPROVE"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "TOOL_DENY"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "Task"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "TriggerStore"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "TrustVerdict"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "__version__"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "active_voice_params"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "allow_sender"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "apply_trust_action"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "atomic_write"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "build_cancelled_turn_preamble"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "compress_thread_history"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "compute_next_run_ts"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "config_dir"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "config_path"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "create_pairing_code"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "dashboard_origin"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "delete_all_automations"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "delete_automation"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "deny_sender"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "describe_cadence"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "devspaces_proxy_url"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "extract_options"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "extract_text"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "fence_channel_content"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "format_schedule"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "generate_token"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "get_update_info"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "is_allowed_sender"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "is_cancelled_stop"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "is_local_bind"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "is_parseable_document"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "is_sensitive_path"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "is_tracked_channel"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "list_servers"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "load_use_case_settings"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "note_unknown_sender"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "parse_dashboard_url"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "parse_duration"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "redact"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "redact_and_truncate"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "redact_credentials"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "redact_exfiltration_urls"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "redeem_pairing_code"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "render_use_case_prompt"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "resolve_bind_host"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "resolve_dashboard_host"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "safe_read_file"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "save_conversation_turn"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "save_credential"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "save_session_to_history"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "save_use_case_settings"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "sel"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "session_restrictions"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "set_automation_paused"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "should_record_observe_history"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "strip_thinking_tags"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "stt_available"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "to_schedule_row"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "track"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "transcribe_audio"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "trust_mode"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "trust_policies"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "untrack"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "validate_file_path"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "voice_reply"
+          }
+        ],
+        "path": "runtime/gideon/sdk/channel.py"
+      },
+      {
+        "count": 1,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "DoctorStatus"
+          }
+        ],
+        "path": "runtime/gideon/sdk/cli.py"
+      },
+      {
+        "count": 2,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "Credential"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "CredentialStore"
+          }
+        ],
+        "path": "runtime/gideon/sdk/credentials.py"
+      },
+      {
+        "count": 5,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "DiarizationModel"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "DiarizationProvider"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "LocalModelProvider"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "SpeakerTurn"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "ensure_ffmpeg_in_path"
+          }
+        ],
+        "path": "runtime/gideon/sdk/diarization.py"
+      },
+      {
+        "count": 2,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "EmbeddingModel"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "EmbeddingProvider"
+          }
+        ],
+        "path": "runtime/gideon/sdk/embedding.py"
+      },
+      {
+        "count": 5,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "FeedbackRecord"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "PRODUCER_KINDS"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "TARGET_KINDS"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "current_verdict"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "record_feedback"
+          }
+        ],
+        "path": "runtime/gideon/sdk/feedback.py"
+      },
+      {
+        "count": 5,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "ImageGenError"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "ImageGenModel"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "ImageGenProvider"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "ImageResult"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "active_image_gen"
+          }
+        ],
+        "path": "runtime/gideon/sdk/image.py"
+      },
+      {
+        "count": 2,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "IncomingMessage"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "MessageSourceProvider"
+          }
+        ],
+        "path": "runtime/gideon/sdk/inbox.py"
+      },
+      {
+        "count": 3,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "KnowledgeItem"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "KnowledgeProvider"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "KnowledgeSource"
+          }
+        ],
+        "path": "runtime/gideon/sdk/knowledge.py"
+      },
+      {
+        "count": 2,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "LocalModel"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "LocalModelProvider"
+          }
+        ],
+        "path": "runtime/gideon/sdk/local_model.py"
+      },
+      {
+        "count": 5,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "AppManifest"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "BackendConfig"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "Permissions"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "ProviderConfig"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "SetupConfig"
+          }
+        ],
+        "path": "runtime/gideon/sdk/manifest.py"
+      },
+      {
+        "count": 3,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "get_current_session_key"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "get_mcp_client_registry"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "infer_risk_from_name"
+          }
+        ],
+        "path": "runtime/gideon/sdk/mcp.py"
+      },
+      {
+        "count": 1,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "MemoryProvider"
+          }
+        ],
+        "path": "runtime/gideon/sdk/memory.py"
+      },
+      {
+        "count": 28,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "AnthropicProvider"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "CancelOutcome"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "Capability"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "Credential"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "CredentialMissing"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "EVENT_COMPLETE"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "EVENT_TEXT_CHUNK"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "EVENT_THINKING_CHUNK"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "EVENT_TOOL_CALL"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "KIND_OUTSIDE"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "LLMEvent"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "MediaCatalog"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "MediaModel"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "ModelCatalog"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "ModelInfo"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "ModelManager"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "ModelProvider"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "OpenAIProvider"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "PromptCache"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "ProviderCapability"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "ProviderEntry"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "PullProgress"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "infer_capabilities"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "make_think_splitter"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "model_context_window"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "openai_compatible_list_models"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "register_media_catalog"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "register_scanner"
+          }
+        ],
+        "path": "runtime/gideon/sdk/model.py"
+      },
+      {
+        "count": 7,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "EgressPolicy"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "GuardDecision"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "WEBHOOK"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "evaluate"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "record_seen_urls"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "web_extract"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "web_fetch"
+          }
+        ],
+        "path": "runtime/gideon/sdk/net.py"
+      },
+      {
+        "count": 5,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "PromptProvider"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "PromptRenderError"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "PromptSnippet"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "PromptTemplate"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "PromptVariable"
+          }
+        ],
+        "path": "runtime/gideon/sdk/prompt.py"
+      },
+      {
+        "count": 3,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "SandboxHandle"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "SandboxProvider"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "SandboxSpec"
+          }
+        ],
+        "path": "runtime/gideon/sdk/sandbox.py"
+      },
+      {
+        "count": 9,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "DEFAULT_DEPTH"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "DEFAULT_SEARCH_USE_CASE"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "FetchResult"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "SearchCapabilities"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "SearchHit"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "SearchResult"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "VALID_DEPTHS"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "VALID_SEARCH_USE_CASES"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "search_with_fallback"
+          }
+        ],
+        "path": "runtime/gideon/sdk/search.py"
+      },
+      {
+        "count": 2,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "PROXY_SIGNATURE_WINDOW_SECS"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "fence_untrusted"
+          }
+        ],
+        "path": "runtime/gideon/sdk/security.py"
+      },
+      {
+        "count": 1,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "ProviderSettings"
+          }
+        ],
+        "path": "runtime/gideon/sdk/settings.py"
+      },
+      {
+        "count": 5,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "SkillDetail"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "SkillEntry"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "SkillsMarketplace"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "get_default_skills_registry"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "read_skill_file_entry"
+          }
+        ],
+        "path": "runtime/gideon/sdk/skill.py"
+      },
+      {
+        "count": 6,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "SttModel"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "SttProvider"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "TranscriptResult"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "TranscriptSegment"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "TranscriptWord"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "ensure_ffmpeg_in_path"
+          }
+        ],
+        "path": "runtime/gideon/sdk/stt.py"
+      },
+      {
+        "count": 3,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "DEFAULT_TOOL_OUTPUT_CAP"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "ProjectionRule"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "project_and_retain"
+          }
+        ],
+        "path": "runtime/gideon/sdk/tool.py"
+      },
+      {
+        "count": 3,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "LocalTtsProvider"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "TtsProvider"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "TtsVoice"
+          }
+        ],
+        "path": "runtime/gideon/sdk/tts.py"
+      },
+      {
+        "count": 4,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "app_data_dir"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "atomic_write"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "config_dir"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "sandbox_wrap_argv"
+          }
+        ],
+        "path": "runtime/gideon/sdk/util.py"
+      },
+      {
+        "count": 5,
+        "declarations": [
+          {
+            "kind": "sdk_export",
+            "symbol": "VideoGenError"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "VideoGenModel"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "VideoGenProvider"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "VideoResult"
+          },
+          {
+            "kind": "sdk_export",
+            "symbol": "active_video_gen"
+          }
+        ],
+        "path": "runtime/gideon/sdk/video.py"
+      }
+    ],
+    "summary": {
+      "kinds": {
+        "config": 0,
+        "editable_config": 0,
+        "enum": 8,
+        "sdk_export": 230,
+        "trigger_kind": 0
+      },
+      "total": 238
+    }
+  },
+  "kind": "gideon.inert-surfaces",
+  "version": 1
+}

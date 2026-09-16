@@ -2,379 +2,67 @@
 requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
-# ── Project metadata (PEP 621) ────────────────────────────────────────────────
 [project]
-name = "gideon"
+name = "gideon-agent-harness"
 version = "0.1.3"
-description = "Personal AI agent — chat via Slack, dashboard, or CLI with pluggable LLM providers"
+description = "Gideon personal agent runtime, automation, knowledge and client applications"
 license = { text = "MIT" }
 requires-python = ">=3.12"
-
-authors = [
-    { name = "Gideon contributors" },
-]
-
-keywords = ["ai", "agent", "llm", "mcp", "acp"]
-
-classifiers = [
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-    "Operating System :: POSIX",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence",
-]
-
-# Runtime dependencies
-dependencies = [
-    "aiohttp>=3.9,<4",
-    "websockets>=12,<18",
-    "cron-descriptor>=1.4,<3",
-    "croniter>=2.0,<7",
-    # numpy is a CORE dep — it's the vector-math substrate for the Tier-1 native
-    # memory app (native-vector-memory), which ships INSIDE core, so its deps are
-    # baked in (not shed). It's small + NOT excluded from the desktop bundle
-    # (unlike faiss/torch). vector_memory.py + memory_record.py still guard the
-    # import so a stripped env degrades to stdlib rather than crashing.
-    "numpy>=1.21,<3",
-    "snowballstemmer>=1.0",
-    "pysqlite3-binary>=0.5.4; sys_platform == 'linux' and platform_machine == 'x86_64'",
-    # sqlite-vec is a CORE dep, and NOT faiss (owner ruling 2026-07-29). The knowledge store
-    # is SQLite-first (items + FTS5 + graph tables in one file), so a vector index shipped as a
-    # SQLite extension lives in that same file and travels with the rows it indexes — no
-    # sidecar artifact with its own consistency story. faiss stays an [embeddings] extra: it is
-    # excluded from the desktop bundle (gideon-backend.spec), so promoting it would hand
-    # desktop users a knowledge search that silently degrades to a full-table scan. sqlite-vec
-    # is small and pure-wheel, so it clears the desktop-bundle bar the reader block clears.
-    # Extension LOADING still is not universal, so knowledge/vector_index.py probes once and
-    # fails soft to the exact scan (correct, just linear) with a Doctor capability line.
-    "sqlite-vec>=0.1,<1",
-    # Knowledge document readers (readers.py): .docx / .pdf / .pptx / .html.
-    # Pure-Python, no native/torch weight — safe as core deps (incl. desktop bundle).
-    # Floor raised to 1.1 by DFE-2: `Paragraph.text` only includes HYPERLINK text from 1.1
-    # onward, and `knowledge/readers.py:229` reads exactly that. On a 0.8.x install our own
-    # reader would silently drop a link's display words — the content loss this plan exists to
-    # prevent. `Paragraph.hyperlinks` (which the docx writer's round-trip test asserts) also
-    # does not exist before 1.1.
-    "python-docx>=1.1,<2",
-    "pdfplumber>=0.11,<1",
-    "python-pptx>=0.6.21,<2",
-    "html2text>=2020.1.16",
-    # Document GENERATION — the PDF writer (documents/writers/pdf_writer.py). CORE, not
-    # an extra (owner decision 2026-07-29), for the same reason codegraph is: "an
-    # accelerator that half the installs lack is one nobody can rely on" — and a document
-    # FORMAT that only exists on some installs is worse than one that exists nowhere,
-    # because the agent will offer it and then fail. Pure Python with prebuilt wheels and
-    # no torch weight, so it clears the same bar the reader block above already cleared.
-    # Deliberately NOT in gideon-backend.spec's excludes (unlike faiss/torch): a
-    # PDF writer that vanished in the desktop build would recreate that same problem.
-    "reportlab>=4,<6",
-    # Web fetch/extract core (web/extract.py): boilerplate-free main-content extraction
-    # (trafilatura, ~0.91 F1 vs html2text ~0.66) + HTML sanitization of untrusted pages
-    # (nh3). Shared by web_fetch and the knowledge web-url connector.
-    "trafilatura>=2,<3",
-    "nh3>=0.2",
-    "openpyxl>=3.1,<4",
-    # Knowledge media thumbnails (media.py): downscale uploaded images to WebP.
-    "Pillow>=10,<13",
-    # Codebase graph (codegraph/): tree-sitter parsers for the code index the agent
-    # queries instead of grepping blind. CORE (owner decision 2026-07-28) rather than
-    # an extra, so `code_map` is simply present everywhere — an accelerator that half
-    # the installs lack is one nobody can rely on. The language pack ships prebuilt
-    # wheels, so there's no compiler requirement. Indexing still fails SOFT: no
-    # parser, no graph, and everything falls back to grep/read.
-    "tree-sitter>=0.21,<1",
-    "tree-sitter-language-pack>=1.0,<2",
-    # NOTE — openai / anthropic are NOT core deps (plan 34 T1.4). Their provider
-    # adapters (llm/openai.py, llm/anthropic.py, stt/tts openai_provider.py) import
-    # the SDK LAZILY and raise MissingSDKError naming the exact remedy when absent.
-    # The SDKs ship via the branded provider apps' manifest `pythonDependencies`
-    # (verified: apps/app_manager.py::_install_python_deps installs them into the
-    # shared venv — plan 32 T2.1), and the `[openai]` / `[anthropic]` extras remain
-    # the documented install path for pip/uv users. This keeps a bare
-    # `pip install gideon` lean without breaking any provider that's actually used.
-    "httpx>=0.27",
-    "PyYAML>=6,<7",
-    # cli.py loads .env (CWD + GIDEON_HOME) so credentials resolve via
-    # os.environ without hand-copying .env — an unconditional import at startup.
-    "python-dotenv>=1.0",
-    # Owner-login password hashing (auth/credentials.py, REMOTE-USER-AUTH T2.1).
-    # CORE rather than an extra, deliberately: a password verifier that only exists on
-    # some installs means `auth.login_enabled` would be a setting that silently cannot
-    # work — and the failure would land on an internet-exposed box, which is the worst
-    # place to discover a missing dependency. argon2id is the current password-hashing
-    # recommendation (memory-hard, tunable); rolling our own PBKDF2 over hashlib to dodge
-    # one small wheel would be the wrong trade on a credential path. Prebuilt wheels, no
-    # compiler, no torch weight — the same bar reportlab/tree-sitter already cleared.
-    "argon2-cffi>=23,<26",
-    # Ed25519 signature verification for signed app bundles (signing.py, SH-3). CORE and
-    # DECLARED, for two reasons. First, asymmetric signing is genuinely required: the
-    # verifying side is every user's machine, so an HMAC over hashlib would have to ship
-    # the signing key to everyone who verifies — i.e. no signature at all. Second, this
-    # wheel was already present transitively (pdfplumber → pdfminer.six → cryptography),
-    # so declaring it adds ZERO install weight; leaving a signature-verification path
-    # resting on someone else's transitive dep is how a security control silently
-    # disappears in a future dependency bump. Verification fails CLOSED if it is ever
-    # missing (a signature that cannot be checked is refused, not accepted).
-    "cryptography>=42",
-    # Config validation. HARD dependency, deliberately, for the same reason as
-    # `cryptography` above: it arrived only transitively through the OPTIONAL [mcp] extra, so
-    # `pip install gideon` had NO enum validation, NO type validation, no unknown-key
-    # warning and no pruning of retired fields — `_validate_config_data` returned at its first
-    # line. Measured: `agent.approval_mode = "NOT_A_MODE"` entered the running config. CI could
-    # not see it because [dev] pulls [mcp].
-    "jsonschema>=4",
-]
-
-# Project URLs — surfaced by `pip show gideon` and the PyPI project page.
-# NOTE: this sub-table MUST come AFTER the bare `dependencies`/`version`/etc. keys
-# of [project] — a `[project.urls]` header placed earlier would capture every
-# subsequent bare key (e.g. `dependencies`) into the urls table (TOML tables run
-# until the next header), silently zeroing out the runtime dependency set.
-[project.urls]
-Homepage      = "https://gideon.dev"
-Documentation = "https://github.com/Gideon/Gideon/tree/main/docs"
-Source        = "https://github.com/Gideon/Gideon"
-Changelog     = "https://github.com/Gideon/Gideon/blob/main/CHANGELOG.md"
-Issues        = "https://github.com/Gideon/Gideon/issues"
+authors = [{ name = "Gideon contributors" }]
+dependencies = ["aiohttp>=3.9,<4", "websockets>=12,<18", "cron-descriptor>=1.4,<3", "croniter>=2.0,<7", "numpy>=1.21,<3", "snowballstemmer>=1.0", "pysqlite3-binary>=0.5.4; sys_platform == 'linux' and platform_machine == 'x86_64'", "sqlite-vec>=0.1,<1", "python-docx>=1.1,<2", "pdfplumber>=0.11,<1", "python-pptx>=0.6.21,<2", "html2text>=2020.1.16", "reportlab>=4,<6", "trafilatura>=2,<3", "nh3>=0.2", "openpyxl>=3.1,<4", "Pillow>=10,<13", "tree-sitter>=0.21,<1", "tree-sitter-language-pack>=1.0,<2", "httpx>=0.27", "PyYAML>=6,<7", "python-dotenv>=1.0", "argon2-cffi>=23,<26", "cryptography>=42", "jsonschema>=4"]
 
 [project.optional-dependencies]
-# Provider SDK extras — install only what your provider requires
 anthropic = ["anthropic>=0.20"]
-openai    = ["openai>=1.0"]
-bedrock   = ["boto3>=1.34"]        # Amazon Bedrock Converse provider
-httpx     = ["httpx>=0.27"]        # Ollama + vLLM providers
-oauth2    = ["cryptography>=42"]   # OIDC / OAuth2 auth mode
-
-# Feature extras.
-# NOTE — these extras are a convenience install path for apps whose Python deps are
-# heavy or commonly pre-provisioned in a server/container image. Apps can ALSO declare
-# `dependencies.pythonDependencies` in their app.json, which the app-install pipeline
-# pip-installs into the shared venv (apps/app_manager.py::_install_python_deps). The
-# slack-channel app declares slack-sdk that way, so a Store install pulls it
-# automatically; this `[slack]` extra remains for pip/uv users who pre-install it (or
-# run headless without the Store). Keep each extra aligned with the app that consumes it.
+openai = ["openai>=1.0"]
+bedrock = ["boto3>=1.34"]
+httpx = ["httpx>=0.27"]
+oauth2 = ["cryptography>=42"]
 slack = ["slack-sdk>=3.27,<4"]
-stt   = ["faster-whisper>=1.0"]    # substrate for apps/faster-whisper (in-process Whisper STT)
-tts   = ["huggingface-hub>=0.23", "piper-tts>=1.2"]  # substrate for apps/piper-tts: voice downloads (ONNX from rhasspy/piper-voices) + the piper synthesis runtime (provides the `piper` binary)
-eval  = ["jinja2>=3.0"]
-embeddings = ["sentence-transformers>=3.0", "faiss-cpu>=1.7"]  # substrate for apps/sentence-transformers (local embeddings). numpy is core (native-vector-memory); faiss stays here — excluded from the desktop bundle, degrades to SQLite-only.
-mcp   = ["mcp>=1.2,<2"]            # external MCP servers in the native agent loop (stdio + SSE/HTTP).
-                                   # Upper bound is load-bearing: mcp 2.0.0 renamed
-                                   # `mcp.client.streamable_http.streamablehttp_client`, which
-                                   # mcp_client.py imports, so an unbounded spec makes a FRESH
-                                   # install resolve 2.0.0 and break the streamable-HTTP transport.
-                                   # CI installs from the lockfile and cannot see that. Supporting
-                                   # 2.x is a migration, not a widened bound.
-js-render = ["playwright>=1.40"]   # web_fetch render=True path for client-rendered (JS) pages (a headless browser; run `playwright install chromium` after install)
-
-# OS keychain credential backend (SECURITY-HARDENING S1). Deliberately OPTIONAL and
-# deliberately NOT in [dev]/[test]: `.env` at 0600 is the supported default, the keychain
-# is an upgrade for installs that have an OS secret service, and a headless box without one
-# must keep working — config/loader.py falls back to `.env` 0600 and doctor says so. Tests
-# stub keyring rather than depend on it, so the suite is identical with or without this extra.
+stt = ["faster-whisper>=1.0"]
+tts = ["huggingface-hub>=0.23", "piper-tts>=1.2"]
+eval = ["jinja2>=3.0"]
+embeddings = ["sentence-transformers>=3.0", "faiss-cpu>=1.7"]
+mcp = ["mcp>=1.2,<2"]
+js-render = ["playwright>=1.40"]
 keychain = ["keyring>=24"]
-
-# Every local-model feature, for installs that run models in-process (dev
-# server + container). Desktop deliberately omits these (torch is too large to
-# bundle — see gideon-backend.spec excludes); its bundles probe as
-# unavailable and the UI guides the user to the server/container build.
-models = ["gideon[embeddings]", "gideon[stt]", "gideon[tts]"]
-
-# Development and testing — superset of test + every local-model feature, so a
-# dev install (and the `make serve` dev gateway) can download/run the native
-# embedding/STT/TTS models the same way the container can.
-dev = [
-    "gideon[test]",
-    "gideon[models]",
-    "gideon[mcp]",
-    "gideon[bedrock]",
-    # Formatter/linter majors are pinned to the SAME major CI resolves from uv.lock,
-    # because CI runs `uv sync --locked` while the documented dev install is
-    # `pip install -e ".[dev]"` — which ignores the lock and resolves freely. An
-    # unbounded spec therefore lets a local gate run a different tool major than the
-    # gate that decides the merge, in either direction:
-    #   * isort was `>=5` and pip resolved 9.0.1, which flags 8 files on a BYTE-CLEAN
-    #     tree at origin/main (measured; 8.0.1 flags zero). Every agent building a
-    #     fresh venv saw that phantom red and had to investigate it.
-    #   * mypy was `>=1.5` while the lock has 2.3.0, so a local gate could type-check
-    #     under 1.x rules against a CI running 2.x — the same skew, aged the other way.
-    # `black` was already bounded for exactly this reason; the others were the oversight.
-    # Upgrading a major is now a deliberate PR (bump lock + bound together) rather than
-    # something that arrives with whoever installed most recently.
-    "black>=26,<27",
-    "isort>=8,<9",
-    "flake8>=7,<8",
-    "mypy>=2,<3",
-    "build>=1.0",
-]
-test = [
-    "pytest>=7",
-    "pytest-asyncio>=0.23",
-    "pytest-xdist>=3",
-    "pytest-timeout>=2",
-    "pytest-cov>=4",
-    # CI shards the test suite into N disjoint groups so each PR's tests finish in ~1/N the
-    # wall-clock (the single `test` job used to serialize every PR at ~40 min). pytest-split's
-    # `--splits N --group G` partitions the collected items completely and disjointly; xdist
-    # then parallelises each shard's slice. See .github/workflows/ci.yml (`test-shard`).
-    "pytest-split>=0.8",
-    "hypothesis>=6",
-]
+models = ["gideon-agent-harness[embeddings]", "gideon-agent-harness[stt]", "gideon-agent-harness[tts]"]
+dev = ["gideon-agent-harness[test]", "gideon-agent-harness[models]", "gideon-agent-harness[mcp]", "gideon-agent-harness[bedrock]", "black>=26,<27", "isort>=8,<9", "flake8>=7,<8", "mypy>=2,<3", "build>=1.0"]
+test = ["pytest>=7", "pytest-asyncio>=0.23", "pytest-xdist>=3", "pytest-timeout>=2", "pytest-cov>=4", "pytest-split>=0.8", "hypothesis>=6"]
 
 [project.scripts]
-gideon = "gideon.cli:main"
+gideon = "gideon.interfaces.cli.main:main"
 
-# Entry-point provider groups loaded via importlib.metadata in
-# gideon.provider_registry.discover_providers(). LLM models, agents,
-# skills, tasks, tools and other entities are resolved through the bundled-app
-# extension registry (providers/registry.py + each bundle's app.json) and
-# import-time self-registration, so they are intentionally not declared here.
 [project.entry-points."gideon.message_source_providers"]
-filesystem = "gideon.inbox_providers.filesystem_source"
-# Channel-specific sources (e.g. Slack) are contributed by their app bundle's
-# transport via ChannelTransportProvider.message_source(), NOT declared here.
-
-# ── Setuptools ────────────────────────────────────────────────────────────────
-[tool.setuptools]
-# zip-safe intentionally NOT set (defaults to unzipped install): the runtime reads
-# packaged files by filesystem path — frontend.py serves gideon/static/dist/*,
-# config/defaults.json is read directly, and bundled skills/apps are globbed on disk.
-# A zipped egg would break those path reads; safe > clever (plan 34 T1.3).
+filesystem = "gideon.integrations.inbox_providers.filesystem_source"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["runtime"]
+include = ["gideon*"]
 
 [tool.setuptools.package-data]
-gideon = [
-    "py.typed",
-    "model_tokens.json",
-    "model_pricing.json",
-    # The baseline bash denylist (SH-6). security.py raises at import if this is missing,
-    # so a wheel without this line does not "degrade to no denylist" — it fails to start.
-    "baseline_denylist.json",
-    # THE scanner-rule gloss (#2633) — the one plain-language map behind all three
-    # finding-row renderers: the app-install consent card, the skills marketplace, and
-    # `gideon skills install`. web/src/lib/scanFindings.ts imports this same file at
-    # BUILD time; the CLI reads it at RUNTIME, where web/src does not exist. A wheel without
-    # this line makes supply_chain.load_scan_rule_gloss() RAISE rather than return {} — a
-    # refused install fails loudly instead of quietly going back to printing bare rule
-    # names, which is the whole defect the map removes. test_scan_rule_gloss.py proves the
-    # file out of a BUILT wheel, not out of the source tree.
-    "scan_rule_gloss.json",
-    # The in-tree signing trust store (SH-3). A wheel without this line ships a verifier
-    # with no trusted keys, so every signed bundle would be refused as "unknown key" —
-    # the safe direction, but it would silently retire first-party signing.
-    "trusted_keys/*.pub",
-    "config/defaults.json",
-    "config/prompts/*.md",
-    "config/prompt_snippets/*.md",
-    "config/design/*.json",
-    "tool_providers/rules_builtin.json",
-    # The shipped Loop-1 scenario library (ES-2). evals/scenarios.py installs these
-    # into ~/.gideon/evals/scenarios/ on first reference; a wheel without this
-    # line ships an empty library, so the line is load-bearing, not cosmetic.
-    "evals/library/*.json",
-    # The shipped judge fixture sets (ES-4). `judge_bench.resolve_fixture_set_path` reads
-    # these straight out of the package (the home only overrides them), so a wheel without
-    # this line ships a judge benchmark with nothing to benchmark — `gideon
-    # judge-bench` would refuse with "shipped sets: <none>" on every install.
-    "evals/benchmarks/judge/*.json",
-    "tests_fixtures/**/*",
-    "skills/bundled/*/SKILL.md",
-    # Progressive-disclosure companions a bundled SKILL.md links to (HC-4's
-    # check-work/references/qa-boundary.md). Without this line the wheel ships a skill
-    # whose own text points at a file that isn't there — a dangling reference, not a
-    # degradation, so the line is load-bearing.
-    "skills/bundled/*/references/*.md",
-    # The bundled template library (WF2 §6). `workflow.json`, not the `WORKFLOW.md` this line
-    # used to name: that filename was never produced by anything, so the wheel shipped an empty
-    # template library and only a real `pip install` would have shown it.
-    "workflows/bundled/*/workflow.json",
-    # The shared conventions blocks templates cite (WF2-R15). Without this line the wheel ships
-    # templates whose `{{block:…}}` references cannot resolve — and an unresolvable reference is
-    # a hard error, so every review template would fail to load rather than degrade.
-    "workflows/bundled/shared/*.md",
-    "apps/native/*/app.json",
-    # The ONE token-lint rule (APE-4), shared by web/src/design/tokenLintRule.ts and
-    # apps/quality.py. The apps-repo CI verifies a `quality.designSystem: "v2"` claim
-    # from an installed wheel with no core checkout on disk, so a wheel without this
-    # line makes `load_token_lint_rules()` raise rather than pass everything — loud,
-    # not silently permissive, which is the direction this atom cares about.
-    "apps/token_lint_rules.json",
-    # The shipped BYO-runner catalog (EXECUTION-ISOLATION §3.1, EI-5). Settings → Agents
-    # renders one row per definition, so a wheel without this line ships an EMPTY runner
-    # catalog: no Claude Code / Codex / Gemini CLI / Kiro rows, no adapter verification to
-    # gate an unattended spawn on. `test_runner_catalog.py` asserts the shipped rows load.
-    "agents/runner_catalog.json",
-    # The bundled source-recipe directory (WATCHED-SOURCES §7.2). These are the create flow's
-    # "is this site already covered?" answers, so a wheel without this line ships an empty
-    # directory and every paste-a-URL looks uncovered — a silent product regression, not a
-    # crash. `test_connector_pack.py` asserts the shipped count is non-zero.
-    "knowledge/sources/recipes/*.json",
-    # The bundled Domain OS packs (AGENT-PACKS §4.1, AP-4) — authored source trees the pack
-    # builder assembles into a `.gideon` on demand. A wheel without these lines ships a Store
-    # with zero bundled packs and `build_bundled` raising "no bundled pack named …", so the
-    # lines are load-bearing. Recursive, because a pack carries skill dirs and runbooks at
-    # depths this glob has to reach.
-    "packs/bundled/**/*.md",
-    "packs/bundled/**/*.json",
-    "packs/bundled/**/*.yaml",
-    "reference/*.md",
-]
+"*" = ["*.json", "*.md", "*.yaml", "*.yml", "*.pub", "py.typed", "*.html", "*.css", "*.js", "*.svg", "*.png", "*.woff2", "**/*.json", "**/*.md", "**/*.yaml", "**/*.yml", "**/*.pub", "**/*.html", "**/*.css", "**/*.js", "**/*.svg", "**/*.png", "**/*.woff2"]
 
-# ── Tool configs ──────────────────────────────────────────────────────────────
 [tool.black]
-line-length = 100
-# Pin the target so formatting is deterministic across runner/local Python versions
-# (an unpinned target is inferred from the interpreter and warns when it is newer
-# than the code's floor). The project floor is 3.12.
+line-length = 88
 target-version = ["py312"]
 
 [tool.isort]
-known_first_party = ["gideon"]
 profile = "black"
-line_length = 100
-
-[tool.mypy]
-mypy_path = "src"
-check_untyped_defs = true
-show_error_codes = true
-pretty = true
-ignore_missing_imports = true
+line_length = 88
+known_first_party = ["gideon"]
 
 [tool.pytest.ini_options]
+testpaths = ["checks/runtime"]
+pythonpath = ["runtime", ".", "checks/runtime"]
 xfail_strict = true
-# "src" makes `gideon` importable; "." makes the repo-root `harness` dev
-# package importable from tests/ (the Self-Verification spec/replay harness lives
-# beside src/, not inside the shipped wheel — see harness/README.md).
-pythonpath = ["src", "."]
-addopts = [
-    "--verbose",
-    "--ignore=build",
-    "-n", "auto",
-    # worksteal (greedy per-test work distribution — the fastest balancer). The
-    # cross-worker flakiness that once forced loadscope here (#8/#10) is fixed at the
-    # root by two autouse fixtures in tests/conftest.py: _reset_sel_singleton clears
-    # the SecurityEventLog process singleton around every test (no test inherits
-    # another's audit dir), and _isolate_single_flight_locks gives each test its own
-    # single-flight lock dir (sibling tests reusing a consolidation key can no longer
-    # contend for one lock file across workers). Both shared-state hazards are gone,
-    # so the suite is deterministic under worksteal with no reruns.
-    "--dist", "worksteal",
-    "--timeout=120",
-    "--cov", "gideon",
-    "--cov-report", "term-missing",
-    "--color=yes",
-]
-testpaths = ["tests"]
+addopts = "-ra"
+asyncio_mode = "auto"
+
+[tool.mypy]
+mypy_path = "runtime"
+check_untyped_defs = true
+ignore_missing_imports = true
 
 [tool.coverage.run]
 branch = true
-parallel = true
-
-[tool.coverage.paths]
-source = [
-    "src/gideon/",
-    "build/lib/*/site-packages/",
-]
+source = ["gideon"]

@@ -32,9 +32,9 @@ from pathlib import Path
 
 import pytest
 
-from gideon.loop.tick import Action
-from gideon.workflows import pool, store
-from gideon.workflows.admission import (
+from gideon.automation.loop.tick import Action
+from gideon.automation.workflows import pool, store
+from gideon.automation.workflows.admission import (
     RANK_CAPACITY,
     RANK_EXCLUSION,
     RANK_INVARIANT,
@@ -54,8 +54,13 @@ from gideon.workflows.admission import (
     compose,
     default_policies,
 )
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.models import InstanceState, Node, RunStatus, WorkflowRun
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.models import (
+    InstanceState,
+    Node,
+    RunStatus,
+    WorkflowRun,
+)
 
 NOW = 1_700_000_000.0
 
@@ -70,14 +75,17 @@ def _node(**config) -> Node:
 
 
 def _step_request(**config) -> AdmissionRequest:
-    return AdmissionRequest(scope=Scope.STEP, key="root.children[1]", node=_node(**config))
+    return AdmissionRequest(
+        scope=Scope.STEP, key="root.children[1]", node=_node(**config)
+    )
 
 
-def _lease_record(holder: str = "run-a:item#0", *, ttl: int = 600, at: float = NOW) -> pool.Lease:
-    return pool.Lease(task_id="endpoint", holder=holder, acquired_at=at, ttl_seconds=ttl)
-
-
-# ── additivity ───────────────────────────────────────────────────────────────
+def _lease_record(
+    holder: str = "run-a:item#0", *, ttl: int = 600, at: float = NOW
+) -> pool.Lease:
+    return pool.Lease(
+        task_id="endpoint", holder=holder, acquired_at=at, ttl_seconds=ttl
+    )
 
 
 def test_default_policies_with_no_state_is_exactly_the_three_pp11_policies():
@@ -85,8 +93,17 @@ def test_default_policies_with_no_state_is_exactly_the_three_pp11_policies():
     same objects it was before this atom."""
     policies = default_policies(Limits(), single_active_feature=True)
     assert [type(p) for p in policies] == [Lane, ContainerConcurrency, Wip]
-    widened = default_policies(Limits(), single_active_feature=True, state=AdmissionState())
-    assert [type(p) for p in widened] == [Lane, ContainerConcurrency, Wip, Lease, Dwell, MetricGate]
+    widened = default_policies(
+        Limits(), single_active_feature=True, state=AdmissionState()
+    )
+    assert [type(p) for p in widened] == [
+        Lane,
+        ContainerConcurrency,
+        Wip,
+        Lease,
+        Dwell,
+        MetricGate,
+    ]
 
 
 @pytest.mark.parametrize("wip", [False, True])
@@ -108,8 +125,6 @@ def test_the_widened_list_decides_lane_and_container_verdicts_identically(
     widened = default_policies(
         limits,
         single_active_feature=wip,
-        # A fully loaded state, so a policy that leaked into the wrong scope would have something
-        # to say rather than abstaining for lack of inputs.
         state=AdmissionState(
             now=NOW,
             holder="run-a:item",
@@ -132,17 +147,20 @@ def test_the_widened_list_decides_lane_and_container_verdicts_identically(
 def test_the_new_policies_abstain_on_the_frontiers_scopes():
     """The same claim at the policy level, where the reason is legible: a policy outside its scope
     abstains, which is how six policies coexist in one list."""
-    state = AdmissionState(now=NOW, holder="run-a:item", leases={"endpoint": _lease_record()})
-    node = Node.from_dict({"id": "fan", "kind": "foreach", "config": {"max_concurrency": 2}})
+    state = AdmissionState(
+        now=NOW, holder="run-a:item", leases={"endpoint": _lease_record()}
+    )
+    node = Node.from_dict(
+        {"id": "fan", "kind": "foreach", "config": {"max_concurrency": 2}}
+    )
     for policy in (Lease(state=state), Dwell(state=state), MetricGate(state=state)):
         assert policy.capacity(AdmissionRequest(scope=Scope.LANE, key="llm")) is None
         assert (
-            policy.capacity(AdmissionRequest(scope=Scope.CONTAINER, key="root.fan", node=node))
+            policy.capacity(
+                AdmissionRequest(scope=Scope.CONTAINER, key="root.fan", node=node)
+            )
             is None
         )
-
-
-# ── the lease is the pool's lease ────────────────────────────────────────────
 
 
 def test_the_lease_policy_decides_with_the_pools_own_acquire():
@@ -164,8 +182,6 @@ def test_the_lease_policy_decides_with_the_pools_own_acquire():
         "Lease must decide with pool.acquire — the compare-and-swap decision the task pool's "
         f"flocked claim path uses. Calls found: {sorted(calls)}"
     )
-    # And it must not have grown its own expiry arithmetic alongside it: two answers to "is this
-    # lease still live" is the drift this atom exists to prevent.
     source = Path(inspect.getsourcefile(Lease) or "").read_text(encoding="utf-8")
     assert "acquired_at" not in source
     assert "def expired" not in source
@@ -197,7 +213,10 @@ def test_a_lease_without_a_holder_abstains_rather_than_stranding_the_resource():
     claim — not this verdict — is what grants the resource."""
     state = AdmissionState(now=NOW, holder="   ", leases={"endpoint": _lease_record()})
     assert (
-        Lease(state=state).capacity(AdmissionRequest(scope=Scope.RESOURCE, key="endpoint")) is None
+        Lease(state=state).capacity(
+            AdmissionRequest(scope=Scope.RESOURCE, key="endpoint")
+        )
+        is None
     )
 
 
@@ -214,9 +233,15 @@ def test_sixteen_concurrent_claims_on_one_resource_produce_exactly_one_holder():
 
     def claim(index: int) -> str:
         holder = f"worker-{index}"
-        verdict = Lease(state=AdmissionState(now=NOW, holder=holder, leases={})).capacity(request)
-        assert verdict == 1, "every worker must see the resource as free — that is the stale read"
-        lease, _error = pool.claim_task("endpoint", holder=holder, now=state.now, ttl_seconds=600)
+        verdict = Lease(
+            state=AdmissionState(now=NOW, holder=holder, leases={})
+        ).capacity(request)
+        assert (
+            verdict == 1
+        ), "every worker must see the resource as free — that is the stale read"
+        lease, _error = pool.claim_task(
+            "endpoint", holder=holder, now=state.now, ttl_seconds=600
+        )
         return holder if lease is not None else ""
 
     with ThreadPoolExecutor(max_workers=16) as pool_exec:
@@ -236,7 +261,7 @@ def test_the_flock_under_the_claim_excludes_THREADS_not_only_PROCESSES():
     (`asyncio.create_task`), so an exclusion that skipped threads would not cap the one shape that
     occurs. Measures the PEAK — a serial count could not tell overlap from fast succession.
     """
-    from gideon.concurrency import single_flight
+    from gideon.core.concurrency import single_flight
 
     guard = threading.Lock()
     inside = 0
@@ -250,17 +275,16 @@ def test_the_flock_under_the_claim_excludes_THREADS_not_only_PROCESSES():
             with guard:
                 inside += 1
                 peak = max(peak, inside)
-            time.sleep(0.02)  # hold it, so any overlap is observable rather than theoretical
+            time.sleep(0.02)
             with guard:
                 inside -= 1
 
     with ThreadPoolExecutor(max_workers=16) as executor:
         list(executor.map(hold, range(16)))
 
-    assert peak == 1, f"{peak} threads were inside one single_flight critical section at once"
-
-
-# ── dwell ────────────────────────────────────────────────────────────────────
+    assert (
+        peak == 1
+    ), f"{peak} threads were inside one single_flight critical section at once"
 
 
 def test_dwell_holds_until_the_bake_floor_elapses_then_abstains():
@@ -273,7 +297,8 @@ def test_dwell_holds_until_the_bake_floor_elapses_then_abstains():
 
 def test_dwell_reads_the_loops_own_parser():
     """`min_dwell_secs: "soon"` must degrade to no-dwell, not to a stalled step. That leniency is
-    `step_config_from_phase`'s, and reusing it is why this policy has no parsing of its own."""
+    `step_config_from_phase`'s, and reusing it is why this policy has no parsing of its own.
+    """
     state = AdmissionState(now=NOW, since={"root.children[1]": NOW - 1})
     assert Dwell(state=state).capacity(_step_request(min_dwell_secs="soon")) is None
     assert Dwell(state=state).capacity(_step_request(min_dwell_secs=-5)) is None
@@ -283,10 +308,10 @@ def test_dwell_reads_the_loops_own_parser():
 def test_dwell_abstains_with_nothing_to_measure_from():
     """The first step of a run has no prior completion. Refusing would hold a run that has not
     started anything yet — a bake floor with no cake."""
-    assert Dwell(state=AdmissionState(now=NOW)).capacity(_step_request(min_dwell_secs=30)) is None
-
-
-# ── the metric gate ──────────────────────────────────────────────────────────
+    assert (
+        Dwell(state=AdmissionState(now=NOW)).capacity(_step_request(min_dwell_secs=30))
+        is None
+    )
 
 
 def test_a_passing_metric_lets_the_step_through():
@@ -329,7 +354,9 @@ def test_the_rollback_cap_turns_a_regression_into_a_refusal_to_keep_trying():
         rollbacks={"root.children[1]": 3},
         rollback_cap=3,
     )
-    decision = MetricGate(state=state).decision(_step_request(metric_pass=0.8, metric_hold=0.6))
+    decision = MetricGate(state=state).decision(
+        _step_request(metric_pass=0.8, metric_hold=0.6)
+    )
     assert decision is not None and decision.action is Action.COMPLETE
     assert "rollback cap" in decision.reason
 
@@ -353,9 +380,6 @@ def test_the_metric_gate_does_not_enforce_the_bake_floor_as_well():
     assert decision is not None and decision.action is Action.ADVANCE
 
 
-# ── ranks and ties ───────────────────────────────────────────────────────────
-
-
 def test_the_rank_order_is_stated_once_and_ordered_deliberately():
     assert RANK_CAPACITY < RANK_INVARIANT < RANK_EXCLUSION < RANK_REGRESSION
 
@@ -375,7 +399,6 @@ def test_a_step_tie_names_the_regression_not_the_bake_floor():
     assert verdict.capacity == 0
     assert isinstance(verdict.binding, MetricGate)
     assert verdict.hold == Hold.REGRESSED
-    # Both really did bind — otherwise this asserts a tie that never happened.
     assert Dwell(state=state).capacity(request) == 0
 
 
@@ -400,22 +423,25 @@ def test_a_lease_outranks_a_same_scope_invariant_on_a_tie():
     lease = Lease(state=AdmissionState(now=NOW, holder="run-a:item#0"))
     request = AdmissionRequest(scope=Scope.RESOURCE, key="endpoint")
     assert compose((_Invariant(), lease), request).binding is lease
-    # …and it is the RANK, not the position, that decided it.
     assert isinstance(compose((lease, _Invariant()), request).binding, Lease)
 
 
 def test_the_container_tie_still_names_wip_under_the_widened_list():
     """`PP-11`'s most refactor-fragile decision, re-asserted with six policies in the list:
-    `max_concurrency: 1` under a run-level WIP=1 must still be reported as `wip_held`."""
-    node = Node.from_dict({"id": "fan", "kind": "foreach", "config": {"max_concurrency": 1}})
+    `max_concurrency: 1` under a run-level WIP=1 must still be reported as `wip_held`.
+    """
+    node = Node.from_dict(
+        {"id": "fan", "kind": "foreach", "config": {"max_concurrency": 1}}
+    )
     request = AdmissionRequest(scope=Scope.CONTAINER, key="root.fan", node=node)
-    state = AdmissionState(now=NOW, holder="run-a:item", leases={"endpoint": _lease_record()})
-    verdict = compose(default_policies(Limits(), single_active_feature=True, state=state), request)
+    state = AdmissionState(
+        now=NOW, holder="run-a:item", leases={"endpoint": _lease_record()}
+    )
+    verdict = compose(
+        default_policies(Limits(), single_active_feature=True, state=state), request
+    )
     assert verdict.capacity == 1
     assert verdict.hold == Hold.WIP_HELD
-
-
-# ── the runtime: a leased fan-out, across a restart ──────────────────────────
 
 
 def _leased_fanout_spec() -> dict:
@@ -444,7 +470,11 @@ def _leased_fanout_spec() -> dict:
                         "kind": "sequence",
                         "children": [
                             {"id": "hold", "kind": "wait", "config": {"seconds": 3600}},
-                            {"id": "after", "kind": "transform", "config": {"expr": "1"}},
+                            {
+                                "id": "after",
+                                "kind": "transform",
+                                "config": {"expr": "1"},
+                            },
                         ],
                     },
                 }
@@ -464,7 +494,11 @@ def _decisions(run_id: str, decision: str) -> list[dict]:
     mirrored, and asserting against the mirror would silently assert nothing.
     """
     path = store.run_dir(run_id) / "journal.jsonl"
-    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+    records = [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line
+    ]
     return [r for r in records if r.get("decision") == decision]
 
 
@@ -488,7 +522,9 @@ async def test_a_leased_fanout_serializes_and_the_claim_survives_a_restart():
 
     started = [p for p, i in live.instances.items() if i.state != InstanceState.PENDING]
     holders = [p for p in started if p.endswith("children[0]")]
-    assert len(holders) == 1, f"a leased fan-out started {len(holders)} items at once: {holders}"
+    assert (
+        len(holders) == 1
+    ), f"a leased fan-out started {len(holders)} items at once: {holders}"
     first_item = holders[0].rsplit(".", 1)[0]
 
     record = pool.read_lease("endpoint")
@@ -497,7 +533,6 @@ async def test_a_leased_fanout_serializes_and_the_claim_survives_a_restart():
     held = _decisions(run.id, "admission_leased")
     assert len(held) == 2, f"expected both refused items in the ledger, got {held}"
 
-    # The restart: a fresh controller with no memory of the claim, re-reading persisted state.
     restarted = _controller(run, spec)
     assert restarted._held_leases == {}
     await restarted._step()
@@ -505,8 +540,6 @@ async def test_a_leased_fanout_serializes_and_the_claim_survives_a_restart():
     assert (
         after is not None and after.holder == record.holder
     ), "a restarted gateway stole a live lease from the item that holds it"
-    # A refused item has no instance row at all — it was never launched — so "exactly one item
-    # started" is the observable, and a second row appearing would mean the restart admitted one.
     assert [
         p for p in restarted.instances if p.endswith("children[0]")
     ] == holders, "a restart admitted a second item into a resource that holds one"
@@ -514,10 +547,6 @@ async def test_a_leased_fanout_serializes_and_the_claim_survives_a_restart():
         "endpoint": record.holder
     }, "a restarted controller must re-adopt its own claim, or only the TTL could release it"
 
-    # The handoff. Each pass settles whatever of item 0 is currently launched: the item holds its
-    # resource across its WHOLE body, so the lease is RENEWED rather than handed on until the last
-    # node of the body is terminal. That renewal is as much the behaviour under test as the
-    # handoff — a lease released between an item's stages would serialize nothing.
     handed = None
     for _ in range(4):
         for path, inst in restarted.instances.items():
@@ -525,9 +554,6 @@ async def test_a_leased_fanout_serializes_and_the_claim_survives_a_restart():
                 inst.state = InstanceState.DONE
         await restarted._step()
         if restarted._inflight:
-            # The launched node's completion is folded in by the tick loop's progress wait, and
-            # `_scope_settled` treats an in-flight node as not settled — driving `_step` alone would
-            # leave the item permanently "still working" and the lease permanently held.
             await restarted._await_progress()
         handed = pool.read_lease("endpoint")
         if handed is not None and handed.holder != record.holder:
@@ -539,7 +565,9 @@ async def test_a_leased_fanout_serializes_and_the_claim_survives_a_restart():
         f"{run.id}:root.children[0].body#"
     ), f"the lease went to something other than another item of the fan-out: {handed.holder}"
     await restarted._finish(RunStatus.CANCELLED)
-    assert pool.read_lease("endpoint") is None, "a terminal run must not strand its resources"
+    assert (
+        pool.read_lease("endpoint") is None
+    ), "a terminal run must not strand its resources"
 
 
 @pytest.mark.anyio
@@ -557,7 +585,11 @@ async def test_a_metric_regression_rolls_the_prior_step_back_inside_a_run():
             "id": "root",
             "kind": "sequence",
             "children": [
-                {"id": "verify", "kind": "transform", "config": {"expr": {"score": 0.4}}},
+                {
+                    "id": "verify",
+                    "kind": "transform",
+                    "config": {"expr": {"score": 0.4}},
+                },
                 {
                     "id": "gated",
                     "kind": "transform",
@@ -583,19 +615,25 @@ async def test_a_metric_regression_rolls_the_prior_step_back_inside_a_run():
         controller._instance("root.children[0]").epoch >= 3
     ), "the prior step was never rolled back: a regression that only HOLDS is a stall, not a gate"
     rollbacks = _decisions(run.id, "metric_rollback")
-    assert rollbacks, "the rollback is a plan change and must be readable back from the ledger"
+    assert (
+        rollbacks
+    ), "the rollback is a plan change and must be readable back from the ledger"
     assert controller._instance("root.children[1]").state == InstanceState.PENDING
 
 
 @pytest.mark.anyio
-async def test_a_spec_declaring_no_admission_keys_never_builds_an_admission_state(monkeypatch):
+async def test_a_spec_declaring_no_admission_keys_never_builds_an_admission_state(
+    monkeypatch,
+):
     """Additivity at the run level, and the reason it is worth asserting separately: the cheapest
     way to break "a spec declaring neither behaves exactly as before" is to make every run pay for
     a state it has no use for. So the construction is made to THROW, and a plain run still passes.
     """
 
     def _boom(self, ready):  # pragma: no cover - the point is that it is never called
-        raise AssertionError("a spec declaring no PP-12 keys must not gather admission state")
+        raise AssertionError(
+            "a spec declaring no PP-12 keys must not gather admission state"
+        )
 
     monkeypatch.setattr(RunController, "_admission_state", _boom)
     spec = {

@@ -23,9 +23,7 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.triggers.nl_kind import route
-
-# ── 🔴 the per-minute-poll trap ──
+from gideon.automation.triggers.nl_kind import route
 
 
 def test_criterion_2s_own_sentence_routes_to_the_file_kind():
@@ -41,7 +39,7 @@ def test_a_star_cron_really_would_have_validated():
     """🔴 Proof the trap is real, not theoretical: `* * * * *` passes the cron validator, so a model
     nudged toward cron with a file-watch request produces a per-minute poll that schedules
     cleanly and reports success."""
-    from gideon.nl_to_cron import parse_cron_response
+    from gideon.automation.nl_to_cron import parse_cron_response
 
     expr, err = parse_cron_response("* * * * *")
     assert (expr, err) == ("* * * * *", "")
@@ -50,7 +48,7 @@ def test_a_star_cron_really_would_have_validated():
 def test_the_cron_path_cannot_parse_a_file_request():
     """The other half of the same finding — the good case, pinned so a future change to
     `nl_to_cron` cannot start silently accepting event language."""
-    from gideon.nl_to_cron import parse_cron_response
+    from gideon.automation.nl_to_cron import parse_cron_response
 
     expr, err = parse_cron_response("when a file in ~/notes changes")
     assert expr == ""
@@ -61,9 +59,6 @@ def test_a_file_request_never_carries_a_cadence():
     """The routing property that keeps the converter unreachable: `cadence` is what the caller
     hands to `nl_to_cron`, and a file route must leave it empty."""
     assert route("when a file in ~/notes changes").cadence == ""
-
-
-# ── ordering: event cues beat cadence cues ──
 
 
 def test_every_file_in_a_path_is_a_watch_not_a_cadence():
@@ -81,7 +76,8 @@ def test_a_real_cadence_still_routes_to_clock():
 
 
 @pytest.mark.parametrize(
-    "text", ["every 30 minutes", "at 5pm", "every day at midnight", "daily at 7am", "hourly"]
+    "text",
+    ["every 30 minutes", "at 5pm", "every day at midnight", "daily at 7am", "hourly"],
 )
 def test_cadences_route_to_clock(text):
     assert route(text).kind == "clock"
@@ -91,9 +87,6 @@ def test_the_clock_route_passes_the_text_through_verbatim():
     """`nl_to_cron` owns cadence→expr; this module must not paraphrase on the way, or the
     converter sees a different request than the user typed."""
     assert route("the first of each month").cadence == "the first of each month"
-
-
-# ── 🔴 a URL is not a path ──
 
 
 def test_a_url_routes_to_web_watch_not_file():
@@ -107,14 +100,13 @@ def test_a_url_routes_to_web_watch_not_file():
 
 
 def test_a_url_with_trailing_punctuation_is_clean():
-    assert route("watch https://news.site/feed.").spec["url"] == "https://news.site/feed"
+    assert (
+        route("watch https://news.site/feed.").spec["url"] == "https://news.site/feed"
+    )
 
 
 def test_an_http_url_also_routes_to_web_watch():
     assert route("when http://intranet/status changes").kind == "web_watch"
-
-
-# ── 🔴 refuse rather than guess a root ──
 
 
 def test_a_pathless_file_request_refuses_instead_of_guessing():
@@ -145,9 +137,6 @@ def test_the_error_names_both_shapes_the_user_could_have_typed():
     """An error that only says "I don't understand" leaves the user guessing at the grammar."""
     err = route("banana").error
     assert "every weekday" in err and "file" in err
-
-
-# ── path normalization ──
 
 
 def test_a_bare_directory_becomes_a_glob():
@@ -184,9 +173,6 @@ def test_a_bare_slash_or_tilde_is_not_a_path():
     assert route("when a file in / changes").kind == ""
 
 
-# ── 🔴 the change-verb vocabulary ──
-
-
 def test_edited_content_routes_and_sets_the_dedup_hint():
     """🔴 MEASURED DEFECT: `edited` appeared in the dedup-hint check but NOT the routing check, so
     this request did not route at all — it fell through to the generic "could not tell" error
@@ -198,7 +184,16 @@ def test_edited_content_routes_and_sets_the_dedup_hint():
 
 @pytest.mark.parametrize(
     "verb",
-    ["changes", "changed", "modified", "edited", "updated", "appears", "added", "gets a new file"],
+    [
+        "changes",
+        "changed",
+        "modified",
+        "edited",
+        "updated",
+        "appears",
+        "added",
+        "gets a new file",
+    ],
 )
 def test_every_change_verb_routes_a_pathed_request(verb):
     """One vocabulary shared by routing and the dedup hint, so the two cannot drift again."""
@@ -209,9 +204,6 @@ def test_a_plain_watch_does_not_set_a_content_dedup():
     """`dedup: content` means hash every file each poll. Defaulting it on would make a `~/**`
     watch expensive without the user asking for content semantics."""
     assert "dedup" not in route("when a file in ~/notes changes").spec
-
-
-# ── the other declared kinds ──
 
 
 def test_a_finished_run_routes_to_run_completed():
@@ -231,7 +223,7 @@ def test_a_webhook_routes_to_webhook():
 def test_every_routed_kind_is_a_kind_the_store_accepts():
     """🔴 A route to a kind the entity rejects would create a trigger that loads broken and never
     fires — the same present-and-inert class this program keeps finding."""
-    from gideon.triggers.models import SPEC_KEYS
+    from gideon.automation.triggers.models import SPEC_KEYS
 
     texts = [
         "when a file in ~/notes changes",
@@ -249,15 +241,12 @@ def test_every_routed_kind_is_a_kind_the_store_accepts():
 def test_a_routed_spec_only_uses_keys_the_kind_declares():
     """The spec this module builds must satisfy the entity's own key set, or the trigger is broken
     on arrival."""
-    from gideon.triggers.models import SPEC_KEYS
+    from gideon.automation.triggers.models import SPEC_KEYS
 
     for text in ("when a file in ~/notes changes", "when https://example.com changes"):
         routed = route(text)
         unknown = set(routed.spec) - set(SPEC_KEYS[routed.kind]) - {"kind"}
         assert not unknown, f"{text!r} produced unknown spec keys {unknown}"
-
-
-# ── the explanation ──
 
 
 def test_a_route_explains_itself():

@@ -1,7 +1,7 @@
 """Shrink-only ratchet for the committed docs-lint baseline (PLATFORM-HARDENING-FLOORS §6.2).
 
 ``docs-lint-baseline.json`` is a GENERATED census (by
-``scripts/generate_docs_lint_baseline.py``) of docs drift across three finding kinds — dead
+``tooling/scripts/generate_docs_lint_baseline.py``) of docs drift across three finding kinds — dead
 relative links, stale ``file.py:NNN`` citations whose file is missing, and plan
 ``**Status:**`` headers that contradict a DONE'd ``## Execution log`` (the "plan headers lie"
 defect). CLAUDE.md and EXECUTION-PROTOCOL §3 demand docs move with the change but nothing
@@ -30,14 +30,14 @@ every per-file finding counter **may only shrink** versus the committed baseline
     Regenerate the committed baseline ONLY when a counter LEGITIMATELY SHRANK (a real doc fix
     landed), and do it in that SAME commit::
 
-        python scripts/generate_docs_lint_baseline.py
+        python tooling/scripts/generate_docs_lint_baseline.py
 """
 
 from __future__ import annotations
 
 import json
 
-from scripts.generate_docs_lint_baseline import (
+from tooling.scripts.generate_docs_lint_baseline import (
     baseline_path,
     build_baseline,
     build_inventory,
@@ -45,8 +45,6 @@ from scripts.generate_docs_lint_baseline import (
     regressions,
 )
 
-# The forbidden-to-raise phrase, asserted present in both the generator and this test so the
-# ``done_when`` "forbidden-to-raise doc line is present" cannot silently be dropped.
 _FORBIDDEN_TO_RAISE = "fix the doc, not the baseline"
 
 
@@ -54,7 +52,7 @@ def _committed_inventory() -> dict:
     path = baseline_path()
     assert path.is_file(), (
         "docs-lint-baseline.json is missing — generate it with "
-        "`python scripts/generate_docs_lint_baseline.py`"
+        "`python tooling/scripts/generate_docs_lint_baseline.py`"
     )
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -72,7 +70,7 @@ def _scanned_doc_count() -> int:
     scanned set is what distinguishes "we looked at 120 docs and found nothing" from "we
     looked at nothing".
     """
-    from scripts.generate_docs_lint_baseline import _docs_md, _tracked_files
+    from tooling.scripts.generate_docs_lint_baseline import _docs_md, _tracked_files
 
     return len(_docs_md(_tracked_files()))
 
@@ -111,13 +109,14 @@ def test_committed_baseline_is_not_stale_on_the_shrink_side():
         f"{rel}: committed {committed['per_file'][rel]['total']} > current "
         f"{current['per_file'].get(rel, {}).get('total', 0)}"
         for rel in committed["per_file"]
-        if committed["per_file"][rel]["total"] > current["per_file"].get(rel, {}).get("total", 0)
+        if committed["per_file"][rel]["total"]
+        > current["per_file"].get(rel, {}).get("total", 0)
     )
     assert not stale_high, (
         "the committed baseline is stale-HIGH — a doc fix shrank the finding population but "
         "docs-lint-baseline.json was not regenerated:\n  "
         + "\n  ".join(stale_high)
-        + "\n\nRun `python scripts/generate_docs_lint_baseline.py` in the fix commit."
+        + "\n\nRun `python tooling/scripts/generate_docs_lint_baseline.py` in the fix commit."
     )
 
 
@@ -130,14 +129,15 @@ def test_committed_baseline_byte_matches_a_fresh_render():
     committed = baseline_path().read_text(encoding="utf-8")
     assert committed == fresh, (
         "docs-lint-baseline.json does not match a fresh render. If a doc fix legitimately "
-        "shrank a counter, regenerate it with `python scripts/generate_docs_lint_baseline.py`"
+        "shrank a counter, regenerate it with `python tooling/scripts/generate_docs_lint_baseline.py`"
         " in the same commit. If a counter ROSE, do NOT regenerate — fix the doc instead."
     )
 
 
 def test_render_is_deterministic():
     """Generating twice yields byte-identical output — no set-ordering, no timestamps, no
-    absolute paths. Determinism is the whole contract; without it the ratchet is noise."""
+    absolute paths. Determinism is the whole contract; without it the ratchet is noise.
+    """
     assert build_baseline() == build_baseline()
 
 
@@ -145,7 +145,7 @@ def test_baseline_is_well_shaped_and_sorted():
     """The committed inventory has the declared shape and every finding list is sorted."""
     inv = _committed_inventory()
     assert set(inv) == {"generated_from", "per_file", "totals"}, inv.keys()
-    assert inv["generated_from"] == "scripts/generate_docs_lint_baseline.py"
+    assert inv["generated_from"] == "tooling/scripts/generate_docs_lint_baseline.py"
     total = 0
     for rel, bucket in inv["per_file"].items():
         assert set(bucket) == {"findings", "total"}, bucket
@@ -197,17 +197,17 @@ def test_a_new_finding_reds_the_ratchet():
     We do NOT add real drift to the tree — we exercise the SHARED comparison the ratchet
     relies on against a synthetic ``current`` that carries one extra finding for a real file,
     and assert the comparison flags it (naming file + finding). This proves the gate would red
-    on a genuine new dead link or stale citation without perturbing the actual census."""
-    # A synthetic PAIR, so the ratchet is exercised whether or not the real corpus currently
-    # carries any drift. Seeding the victim from the committed baseline made this test
-    # delete itself the day the last real finding was fixed — a rail that only works while
-    # the repo is broken.
+    on a genuine new dead link or stale citation without perturbing the actual census.
+    """
     victim = "docs/vision.md"
     per_file = {victim: {"total": 1, "findings": ["dead_link:docs/already-known.md"]}}
     synthetic = {
         victim: {
             "total": 2,
-            "findings": ["dead_link:docs/already-known.md", "dead_link:docs/does-not-exist.md"],
+            "findings": [
+                "dead_link:docs/already-known.md",
+                "dead_link:docs/does-not-exist.md",
+            ],
         }
     }
 
@@ -234,15 +234,10 @@ def test_a_new_file_with_a_finding_reds_the_ratchet():
 def test_a_fix_that_shrinks_a_counter_does_not_red_the_ratchet():
     """The other side of the contract: driving a counter DOWN (a real doc fix) is welcome —
     the rise-only comparison must return no regression for a shrink."""
-    # Synthetic for the same reason as the rise case above: a shrink cannot be demonstrated
-    # from a corpus that has nothing left to shrink.
     victim = "docs/vision.md"
     per_file = {victim: {"total": 2, "findings": ["dead_link:a.md", "dead_link:b.md"]}}
     shrunk = {victim: {"total": 1, "findings": ["dead_link:a.md"]}}
     assert regressions(per_file, shrunk) == []
-
-
-# ── plan-hygiene reproduction (done_when's testable clause) ──────────────────────
 
 
 _SEEDED_STALE_PLAN = """# Some Plan
@@ -290,16 +285,21 @@ def test_plan_hygiene_is_quiet_on_a_correct_header():
     """The complement: a header that matches reality (DONE + a DONE'd log), a stale-shape
     header with NO execution log, and a plan OUTSIDE ``docs/roadmap/plans/`` are all quiet —
     the checker under-reports rather than crying wolf."""
-    assert find_stale_header("docs/roadmap/plans/OK.md", _SEEDED_CORRECT_PLAN_MATCHING) == []
-    assert find_stale_header("docs/roadmap/plans/NOLOG.md", _SEEDED_STALE_HEADER_NO_LOG) == []
-    # Same stale text, but the file is not a plan → not held to the heuristic.
+    assert (
+        find_stale_header("docs/roadmap/plans/OK.md", _SEEDED_CORRECT_PLAN_MATCHING)
+        == []
+    )
+    assert (
+        find_stale_header("docs/roadmap/plans/NOLOG.md", _SEEDED_STALE_HEADER_NO_LOG)
+        == []
+    )
     assert find_stale_header("docs/architecture/overview.md", _SEEDED_STALE_PLAN) == []
 
 
 def test_forbidden_to_raise_doc_line_is_present():
     """done_when: "the forbidden-to-raise doc line is present" — in BOTH the generator and
     this test, so neither can drop it unnoticed."""
-    from scripts import generate_docs_lint_baseline as gen
+    from tooling.scripts import generate_docs_lint_baseline as gen
 
     assert _FORBIDDEN_TO_RAISE in (gen.__doc__ or "").lower()
     assert _FORBIDDEN_TO_RAISE in (__doc__ or "").lower()

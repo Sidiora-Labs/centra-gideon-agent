@@ -37,10 +37,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gideon import learning_report as LR
-from gideon.skills import loader as loader_mod
-from gideon.skills import proposals
-from gideon.skills.loader import AutoSkillProvenance, SkillsLoader
+from gideon.cognition import learning_report as LR
+from gideon.extensions.skills import loader as loader_mod
+from gideon.extensions.skills import proposals
+from gideon.extensions.skills.loader import AutoSkillProvenance, ProcedureLibrary
 
 NOW = datetime(2026, 8, 20, 12, 0, tzinfo=timezone.utc)
 
@@ -55,15 +55,15 @@ def home(tmp_path, monkeypatch):
 
     The assertions are the point. ``skills.loader`` resolves ``config_dir`` lazily, but
     ``inbox``, ``artifacts.native`` and ``providers.entity_routes`` each did
-    ``from gideon.config.loader import config_dir`` at module scope, so their name is
+    ``from gideon.core.config.loader import config_dir`` at module scope, so their name is
     already bound and a single loader patch does not reach them.
     """
-    import gideon.artifacts.native as native_mod
-    import gideon.config.loader as loader_pkg
-    import gideon.dashboard.state as state_mod
-    import gideon.inbox as inbox_mod
-    import gideon.providers.entity_routes as entity_mod
-    import gideon.skills.marketplace as mp
+    import gideon.core.config.loader as loader_pkg
+    import gideon.extensions.providers.entity_routes as entity_mod
+    import gideon.extensions.skills.marketplace as mp
+    import gideon.integrations.inbox as inbox_mod
+    import gideon.interfaces.dashboard.state as state_mod
+    import gideon.workspace.artifacts.native as native_mod
 
     for mod in (loader_mod, loader_pkg, inbox_mod, native_mod, entity_mod, state_mod):
         monkeypatch.setattr(mod, "config_dir", lambda: tmp_path)
@@ -71,14 +71,12 @@ def home(tmp_path, monkeypatch):
 
     assert loader_mod.skills_dir() == tmp_path / "skills"
     assert str(proposals._proposals_dir()).startswith(str(tmp_path))
-    assert str(entity_mod._entity_settings_path("notifications")).startswith(str(tmp_path))
+    assert str(entity_mod._entity_settings_path("notifications")).startswith(
+        str(tmp_path)
+    )
     assert str(inbox_mod.InboxStore()._path).startswith(str(tmp_path))
     assert str(native_mod.NativeArtifactProvider()._root).startswith(str(tmp_path))
-    # `dashboard.state` is the FIFTH import-bound store, and the one that bites hardest here:
-    # `DashboardState.__init__` calls `_load_notifications()`, so without this patch a fresh
-    # state starts pre-loaded with the developer's REAL `~/.gideon` notification log —
-    # measured, six rows — and `_persist_notification` appends the test's own deliveries to
-    # it. Every `_notification_log == []` assertion below depends on this line.
+    # `ConsoleState.__init__` calls `_load_notifications()`, so without this patch a fresh
     assert str(state_mod._notifications_path()).startswith(str(tmp_path))
     return tmp_path
 
@@ -93,8 +91,8 @@ def artifacts(home, monkeypatch):
     is replaced through ``monkeypatch.setitem`` (restored automatically) rather than left
     for the next test to inherit.
     """
-    from gideon.artifacts import registry
-    from gideon.artifacts.native import NativeArtifactProvider
+    from gideon.workspace.artifacts import registry
+    from gideon.workspace.artifacts.native import NativeArtifactProvider
 
     provider = NativeArtifactProvider(root=home / "artifacts")
     monkeypatch.setitem(registry._providers, "native", provider)
@@ -120,27 +118,29 @@ def _embed(text: str) -> list[float]:
 
 def _memory(tmp_path):
     """A real vector store — the backing for both facets and lessons."""
-    from gideon.vector_memory import VectorMemoryStore
+    from gideon.cognition.vector_memory import SemanticArchive
 
     Path(tmp_path).mkdir(parents=True, exist_ok=True)
-    vs = VectorMemoryStore(db_path=Path(tmp_path) / "memory.db", embedding_dim=_EMBED_DIM)
+    vs = SemanticArchive(db_path=Path(tmp_path) / "memory.db", embedding_dim=_EMBED_DIM)
     vs.init()
     vs.embed_fn = _embed
     return vs
 
 
 def _state(tmp_path):
-    from gideon.dashboard.state import DashboardState
-    from gideon.memory import MemoryStore
+    from gideon.cognition.memory import MemoryJournal
+    from gideon.interfaces.dashboard.state import ConsoleState
 
     ws = tmp_path / "ws"
     ws.mkdir(exist_ok=True)
-    mem = MemoryStore(workspace=ws)
+    mem = MemoryJournal(workspace=ws)
     mem.init()
     mem.vector_store = _memory(tmp_path)
     cb = MagicMock()
     cb.memory = mem
-    state = DashboardState(sessions=MagicMock(count=0), start_time=0.0, context_builder=cb)
+    state = ConsoleState(
+        sessions=MagicMock(count=0), start_time=0.0, context_builder=cb
+    )
     return state, mem.vector_store
 
 
@@ -153,11 +153,8 @@ def _req(state, *, query=None, session_key="dashboard:ui"):
     return req
 
 
-# ── seeding, always through the production writer ──────────────────────────────────
-
-
 def _create(slug: str, *, created_at: str) -> str:
-    name = SkillsLoader(install_builtins=False).create_auto_skill(
+    name = ProcedureLibrary(install_builtins=False).create_auto_skill(
         slug,
         description=f"what {slug} does",
         triggers=slug,
@@ -184,18 +181,15 @@ def _enqueue(slug: str) -> None:
 
 
 def _facet(vs, text: str, *, days_ago: float = 1.0, cls: str = "style") -> None:
-    from gideon.preference_facets import upsert_facet
+    from gideon.cognition.preference_facets import upsert_facet
 
     upsert_facet(vs, cls, text, cue="explicit", now=NOW - timedelta(days=days_ago))
 
 
 def _lesson(vs, rule: str) -> None:
-    from gideon.memory_service import MemoryService
+    from gideon.cognition.memory_service import MemoryService
 
     assert MemoryService.over_vector_store(vs).write_lesson(rule, category="process")
-
-
-# ── independent store counts (never a second call to the code under test) ──────────
 
 
 def _store_facet_count(vs) -> int:
@@ -217,13 +211,14 @@ def _store_lesson_count(vs) -> int:
 
 def _store_auto_skill_count(home: Path) -> int:
     root = home / "skills" / "auto"
-    return len([d for d in root.iterdir() if (d / "SKILL.md").is_file()]) if root.is_dir() else 0
+    return (
+        len([d for d in root.iterdir() if (d / "SKILL.md").is_file()])
+        if root.is_dir()
+        else 0
+    )
 
 
 def _store_pending_proposal_count(home: Path) -> int:
-    # `.proposals`, dotted. Spelled literally so this count is independent of the module —
-    # and asserted against the module's constant so a rename fails LOUDLY instead of reading
-    # as an honest zero, which is exactly how the first draft of this helper passed nothing.
     assert proposals._PROPOSALS_DIRNAME == ".proposals", "the proposal store moved"
     d = home / "skills" / ".proposals"
     if not d.is_dir():
@@ -238,9 +233,6 @@ def _store_pending_proposal_count(home: Path) -> int:
     return n
 
 
-# ── 1. counts byte-match store contents ────────────────────────────────────────────
-
-
 def test_every_section_count_matches_what_the_store_holds(home, tmp_path):
     """Four counts, four independent derivations straight out of the store.
 
@@ -250,9 +242,10 @@ def test_every_section_count_matches_what_the_store_holds(home, tmp_path):
     vs = _memory(tmp_path)
     for i in range(3):
         _facet(vs, f"prefers thing {i}")
-    # Semantically distinct on purpose: `write_lesson` dedups on >50% topic-word overlap
-    # within a scope bucket, so "always do step 0"/"step 1" collapse to ONE row — measured.
-    for rule in ("always run make lint before committing", "sqlite beats json for tables"):
+    for rule in (
+        "always run make lint before committing",
+        "sqlite beats json for tables",
+    ):
         _lesson(vs, rule)
     for i in range(4):
         _create(f"skill-{i}", created_at=_iso(3))
@@ -290,7 +283,9 @@ def test_a_count_is_exact_while_the_item_list_is_a_bounded_sample(home, tmp_path
     cannot agree with itself.
     """
     seeded = LR._MAX_ITEMS + 5
-    assert seeded > LR._MAX_ITEMS, "the fixture must exceed the cap or this proves nothing"
+    assert (
+        seeded > LR._MAX_ITEMS
+    ), "the fixture must exceed the cap or this proves nothing"
     vs = _memory(tmp_path)
     for i in range(seeded):
         _facet(vs, f"prefers variant {i:03d}")
@@ -334,11 +329,16 @@ def test_the_facet_state_comes_from_the_decay_not_the_stored_score(home, tmp_pat
     _facet(vs, "fresh preference", days_ago=0)
     _facet(vs, "ancient preference", days_ago=400)
 
-    by_text = {f["text"]: f for f in LR.compose_identity_report(now=NOW, vs=vs).facets.items}
+    by_text = {
+        f["text"]: f for f in LR.compose_identity_report(now=NOW, vs=vs).facets.items
+    }
 
     assert by_text["fresh preference"]["state"] == "Active"
     assert by_text["ancient preference"]["state"] == "Dropped"
-    assert by_text["ancient preference"]["stability"] < by_text["fresh preference"]["stability"]
+    assert (
+        by_text["ancient preference"]["stability"]
+        < by_text["fresh preference"]["stability"]
+    )
 
 
 def test_no_memory_store_degrades_to_the_non_memory_sections(home):
@@ -353,11 +353,14 @@ def test_no_memory_store_degrades_to_the_non_memory_sections(home):
 
 
 def test_the_window_is_clamped_to_the_declared_bounds(home):
-    assert LR.compose_identity_report(window_days=0, now=NOW).window_days == LR.MIN_WINDOW_DAYS
-    assert LR.compose_identity_report(window_days=99999, now=NOW).window_days == LR.MAX_WINDOW_DAYS
-
-
-# ── 2. zero writes to any learning store, inspected before/after ───────────────────
+    assert (
+        LR.compose_identity_report(window_days=0, now=NOW).window_days
+        == LR.MIN_WINDOW_DAYS
+    )
+    assert (
+        LR.compose_identity_report(window_days=99999, now=NOW).window_days
+        == LR.MAX_WINDOW_DAYS
+    )
 
 
 def _witness(home: Path) -> dict[str, str]:
@@ -375,13 +378,10 @@ def _witness(home: Path) -> dict[str, str]:
             continue
         for p in sorted(root.rglob("*")):
             if p.is_file():
-                out[str(p.relative_to(home))] = hashlib.sha256(p.read_bytes()).hexdigest()
+                out[str(p.relative_to(home))] = hashlib.sha256(
+                    p.read_bytes()
+                ).hexdigest()
     for db in sorted(home.glob("memory.db*")):
-        # `-shm` is EXCLUDED: it is SQLite's shared-memory coordination file, rebuilt from
-        # the WAL on every connection, so its bytes move on a pure read. Measured here — it
-        # differed across a read-only compose. `-wal` and `-journal` ARE witnessed, because
-        # those carry uncheckpointed DATA and a write that only reached the WAL is still a
-        # write.
         if db.name.endswith("-shm"):
             continue
         out[str(db.relative_to(home))] = hashlib.sha256(db.read_bytes()).hexdigest()
@@ -407,10 +407,16 @@ def test_the_witness_detects_a_write_so_its_silence_means_something(home, tmp_pa
     _seed_everything(home, tmp_path)
 
     before = _witness(home)
-    assert before, "the witness saw no files at all — every check below would be vacuous"
-    assert any(k.endswith("memory.db") for k in before), "the memory store is not witnessed"
+    assert (
+        before
+    ), "the witness saw no files at all — every check below would be vacuous"
+    assert any(
+        k.endswith("memory.db") for k in before
+    ), "the memory store is not witnessed"
 
-    (home / "skills" / "auto" / "fresh-thing" / "SKILL.md").write_text("tampered", encoding="utf-8")
+    (home / "skills" / "auto" / "fresh-thing" / "SKILL.md").write_text(
+        "tampered", encoding="utf-8"
+    )
 
     assert _witness(home) != before
 
@@ -442,7 +448,9 @@ def test_rendering_and_a_second_compose_are_also_write_free(home, tmp_path):
     assert _witness(home) == before
 
 
-def test_the_witness_ignores_the_inbox_because_list_pending_backfills_it(home, tmp_path):
+def test_the_witness_ignores_the_inbox_because_list_pending_backfills_it(
+    home, tmp_path
+):
     """A named, measured exclusion — not a convenient blind spot.
 
     ``proposals.list_pending()`` calls ``backfill_inbox_items()``, which raises an inbox row
@@ -451,7 +459,7 @@ def test_the_witness_ignores_the_inbox_because_list_pending_backfills_it(home, t
     the criterion's "any learning store" is satisfied. This asserts the boundary explicitly
     so nobody later widens the witness and mistakes a known inbox write for a regression.
     """
-    from gideon.skills import proposals as prop_mod
+    from gideon.extensions.skills import proposals as prop_mod
 
     _seed_everything(home, tmp_path)
     calls: list[int] = []
@@ -463,10 +471,9 @@ def test_the_witness_ignores_the_inbox_because_list_pending_backfills_it(home, t
         prop_mod.backfill_inbox_items = real
 
     assert calls, "list_pending no longer backfills — the exclusion above may be stale"
-    assert not any("inbox" in k for k in _witness(home)), "the witness must not cover the inbox"
-
-
-# ── 3. the no-model floor is real and named ────────────────────────────────────────
+    assert not any(
+        "inbox" in k for k in _witness(home)
+    ), "the witness must not cover the inbox"
 
 
 def _patch_model(monkeypatch, result):
@@ -479,14 +486,16 @@ def _patch_model(monkeypatch, result):
             raise result
         return result
 
-    import gideon.llm_helpers as helpers
+    import gideon.integrations.llm_helpers as helpers
 
     monkeypatch.setattr(helpers, "one_shot_completion", fake)
     return calls
 
 
 @pytest.mark.asyncio
-async def test_no_model_still_produces_every_deterministic_section(home, tmp_path, monkeypatch):
+async def test_no_model_still_produces_every_deterministic_section(
+    home, tmp_path, monkeypatch
+):
     """The floor, both shapes, against a byte-identical comparison.
 
     ``one_shot_completion`` returns a FALSY value rather than raising when nothing
@@ -495,7 +504,9 @@ async def test_no_model_still_produces_every_deterministic_section(home, tmp_pat
     """
     vs = _seed_everything(home, tmp_path)
     deterministic = LR.compose_identity_report(now=NOW, vs=vs).to_payload()
-    numeric = {k: v for k, v in deterministic.items() if k not in ("narrative", "markdown")}
+    numeric = {
+        k: v for k, v in deterministic.items() if k not in ("narrative", "markdown")
+    }
 
     for outcome in ("", RuntimeError("no provider resolved")):
         calls = _patch_model(monkeypatch, outcome)
@@ -510,12 +521,15 @@ async def test_no_model_still_produces_every_deterministic_section(home, tmp_pat
             if k not in ("narrative", "markdown", "narrative_status")
         }
         assert got == {k: v for k, v in numeric.items() if k != "narrative_status"}
-        # NAMED in the document, not swallowed into a blank page.
-        assert "No model was available to summarise this period" in LR.render_markdown(report)
+        assert "No model was available to summarise this period" in LR.render_markdown(
+            report
+        )
 
 
 @pytest.mark.asyncio
-async def test_a_working_model_adds_prose_and_changes_no_figure(home, tmp_path, monkeypatch):
+async def test_a_working_model_adds_prose_and_changes_no_figure(
+    home, tmp_path, monkeypatch
+):
     """The control that makes the floor test above non-vacuous.
 
     If the sections were empty or constant regardless, the comparison would hold either
@@ -576,7 +590,7 @@ async def test_the_prompt_the_model_RECEIVES_is_fenced(home, tmp_path, monkeypat
     ``fence_untrusted`` here and checking its own output would assert a property of the
     helper: it passes byte-identically when the production call site skips the fence
     altogether, which is the one thing this test exists to catch. Measured — dropping the
-    fence from :func:`~gideon.learning_report.narrate_identity_report` reddens this
+    fence from :func:`~gideon.cognition.learning_report.narrate_identity_report` reddens this
     and nothing else in the file.
     """
     vs = _memory(tmp_path)
@@ -589,30 +603,27 @@ async def test_the_prompt_the_model_RECEIVES_is_fenced(home, tmp_path, monkeypat
     assert len(calls) == 1
     prompt = calls[0]
     assert "prefers terse replies" in prompt, "the record reached the model empty"
-    # The provenance attributes, not just the tag: a fence that cannot say WHERE the text
-    # came from is a fence the hygiene parser reads as an unattributed block.
     assert "<untrusted_content" in prompt
     assert "source=learning" in prompt
     assert "source_type=learning_record" in prompt
-    assert "</untrusted_content>" in prompt, "an unclosed fence ends at the model's discretion"
-
-
-# ── 4. delivery: artifact first, then one attention item ───────────────────────────
+    assert (
+        "</untrusted_content>" in prompt
+    ), "an unclosed fence ends at the model's discretion"
 
 
 def _notifications(home: Path, settings: dict) -> None:
-    import gideon.providers.entity_routes as entity_mod
+    import gideon.extensions.providers.entity_routes as entity_mod
 
     entity_mod._save_entity_settings("notifications", settings)
-    assert entity_mod.load_notifications_settings()["quiet_hours_enabled"] == settings.get(
-        "quiet_hours_enabled", False
-    )
+    assert entity_mod.load_notifications_settings()[
+        "quiet_hours_enabled"
+    ] == settings.get("quiet_hours_enabled", False)
 
 
 def _window_around(offset_hours: int) -> tuple[str, str]:
     """A two-hour quiet window centred ``offset_hours`` from LOCAL now.
 
-    ``DashboardState.notify`` calls ``notification_allowed`` without a ``now``, so the gate
+    ``ConsoleState.notify`` calls ``notification_allowed`` without a ``now``, so the gate
     reads the local wall clock. Both directions are derived from ONE read of that clock, so
     the suppressing and delivering cases differ only in where the window sits.
     """
@@ -627,7 +638,7 @@ async def test_delivery_writes_the_artifact_and_links_it_from_the_inbox(
     home, artifacts, tmp_path, monkeypatch
 ):
     """The full delivery: a versioned artifact, and one inbox row that points at it."""
-    from gideon.inbox import InboxStore
+    from gideon.integrations.inbox import InboxStore
 
     state, vs = _state(tmp_path)
     _facet(vs, "prefers terse replies")
@@ -662,7 +673,7 @@ async def test_quiet_hours_suppresses_the_ping_but_not_the_artifact(
     delivered). If the second leg did not deliver, the first leg's silence would be
     meaningless.
     """
-    from gideon.inbox import InboxStore
+    from gideon.integrations.inbox import InboxStore
 
     state, vs = _state(tmp_path)
     _facet(vs, "prefers terse replies")
@@ -671,27 +682,34 @@ async def test_quiet_hours_suppresses_the_ping_but_not_the_artifact(
     start, end = _window_around(0)
     _notifications(
         home,
-        {"quiet_hours_enabled": True, "quiet_hours_start": start, "quiet_hours_end": end},
+        {
+            "quiet_hours_enabled": True,
+            "quiet_hours_start": start,
+            "quiet_hours_end": end,
+        },
     )
     quiet = await LR.deliver_identity_report(state, vs=vs, now=NOW)
 
     assert state._notification_log == [], "quiet hours did not suppress the ping"
-    assert quiet.artifact_slug == LR.ARTIFACT_SLUG, "quiet hours must not lose the artifact"
+    assert (
+        quiet.artifact_slug == LR.ARTIFACT_SLUG
+    ), "quiet hours must not lose the artifact"
     assert artifacts.get(LR.ARTIFACT_SLUG) is not None
     inbox = InboxStore()
     inbox.load()
-    assert [i for i in inbox.items.values() if i.item_kind == "report"], "the durable row was lost"
+    assert [
+        i for i in inbox.items.values() if i.item_kind == "report"
+    ], "the durable row was lost"
 
-    # The floor: move the window off now and the SAME call delivers. Same state, same store,
-    # same function — only the window moved, so a green here cannot come from a different
-    # fixture. `now` advances a month because the dedup key is the calendar month: without
-    # that, the second delivery would be swallowed as a duplicate and the floor would read
-    # like quiet hours were still suppressing.
     state._notification_log.clear()
     start, end = _window_around(6)
     _notifications(
         home,
-        {"quiet_hours_enabled": True, "quiet_hours_start": start, "quiet_hours_end": end},
+        {
+            "quiet_hours_enabled": True,
+            "quiet_hours_start": start,
+            "quiet_hours_end": end,
+        },
     )
     await LR.deliver_identity_report(state, vs=vs, now=NOW + timedelta(days=40))
 
@@ -708,7 +726,7 @@ async def test_a_second_delivery_in_the_same_month_reuses_the_row_and_does_not_r
     a user can run one by hand). The next-month leg is the vacuity floor: if the dedup key
     were a constant, that delivery would also be swallowed.
     """
-    from gideon.inbox import InboxStore
+    from gideon.integrations.inbox import InboxStore
 
     state, vs = _state(tmp_path)
     _facet(vs, "prefers terse replies")
@@ -745,11 +763,10 @@ async def test_an_unchanged_home_does_not_mint_a_new_artifact_version(
     assert again.artifact_version == first.artifact_version
 
     _lesson(vs, "always run make lint")
-    changed = await LR.deliver_identity_report(state, vs=vs, now=NOW + timedelta(days=40))
+    changed = await LR.deliver_identity_report(
+        state, vs=vs, now=NOW + timedelta(days=40)
+    )
     assert changed.artifact_version > first.artifact_version
-
-
-# ── the HTTP surface, and that it is REACHABLE ─────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -757,7 +774,9 @@ async def test_the_get_endpoint_serves_the_report_and_spends_no_model_call(
     home, tmp_path, monkeypatch
 ):
     """A panel mounting must not cost a model call, so GET is deterministic-only."""
-    from gideon.dashboard.handlers.learning import api_learning_identity_report
+    from gideon.interfaces.dashboard.handlers.learning import (
+        api_learning_identity_report,
+    )
 
     state, vs = _state(tmp_path)
     _facet(vs, "prefers terse replies")
@@ -780,7 +799,9 @@ async def test_the_get_endpoint_serves_the_report_and_spends_no_model_call(
 async def test_the_post_endpoint_delivers_and_returns_the_artifact_ref(
     home, artifacts, tmp_path, monkeypatch
 ):
-    from gideon.dashboard.handlers.learning import api_learning_identity_report_deliver
+    from gideon.interfaces.dashboard.handlers.learning import (
+        api_learning_identity_report_deliver,
+    )
 
     state, vs = _state(tmp_path)
     _facet(vs, "prefers terse replies")
@@ -797,7 +818,9 @@ async def test_the_post_endpoint_delivers_and_returns_the_artifact_ref(
 
 @pytest.mark.asyncio
 async def test_a_bad_days_parameter_is_a_400_not_a_500(home, tmp_path):
-    from gideon.dashboard.handlers.learning import api_learning_identity_report
+    from gideon.interfaces.dashboard.handlers.learning import (
+        api_learning_identity_report,
+    )
 
     state, _vs = _state(tmp_path)
     resp = await api_learning_identity_report(_req(state, query={"days": "soon"}))
@@ -805,9 +828,11 @@ async def test_a_bad_days_parameter_is_a_400_not_a_500(home, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_both_endpoints_404_when_learning_is_disabled(home, tmp_path, monkeypatch):
+async def test_both_endpoints_404_when_learning_is_disabled(
+    home, tmp_path, monkeypatch
+):
     """Learning off ⇒ ABSENT, not a page of honest-looking zeros."""
-    import gideon.dashboard.handlers.learning as mod
+    import gideon.interfaces.dashboard.handlers.learning as mod
 
     state, _vs = _state(tmp_path)
     monkeypatch.setattr(mod, "_enabled", lambda: False)
@@ -825,8 +850,10 @@ async def test_a_temporary_session_gets_the_report_without_memory_content(
     Matches `/api/lessons` and `/api/learning/summary`. The control run WITH reads allowed
     is the vacuity floor: without it, an empty store would produce the same assertion.
     """
-    import gideon.dashboard.handlers._shared as shared
-    from gideon.dashboard.handlers.learning import api_learning_identity_report
+    import gideon.interfaces.dashboard.handlers._shared as shared
+    from gideon.interfaces.dashboard.handlers.learning import (
+        api_learning_identity_report,
+    )
 
     state, vs = _state(tmp_path)
     _facet(vs, "prefers terse replies")
@@ -854,7 +881,7 @@ def test_the_identity_report_routes_are_registered_not_merely_defined():
     """
     from aiohttp import web as _web
 
-    from gideon.dashboard.handlers import learning as _learning
+    from gideon.interfaces.dashboard.handlers import learning as _learning
 
     app = _web.Application()
     _learning.register_learning_routes(app)
@@ -876,16 +903,13 @@ def test_the_notification_pair_is_registered_so_it_keeps_its_own_severity():
     quiet hours apply) rather than on the registration line, plus the floor that an
     unregistered pair really does collapse.
     """
-    import gideon.notification_kinds as nk
-    from gideon.providers.entity_routes import _KIND_SEVERITY
+    import gideon.workspace.notification_kinds as nk
+    from gideon.extensions.providers.entity_routes import _KIND_SEVERITY
 
     resolved = nk.resolve_kind(LR.NOTIFY_SOURCE, LR.NOTIFY_KIND)
 
     assert (resolved.source, resolved.kind) == (LR.NOTIFY_SOURCE, LR.NOTIFY_KIND)
     assert resolved.attention is True
     assert nk.kind_for_legacy_pair(LR.NOTIFY_SOURCE, LR.NOTIFY_KIND) == LR.NOTIFY_KIND
-    # Below SEV_ERROR, which is what `notification_allowed` requires for quiet hours to bite.
     assert _KIND_SEVERITY.get(LR.NOTIFY_KIND, nk.SEV_INFO) < nk.SEV_ERROR
-    # The floor: an unregistered sibling DOES collapse, so the assertion above is not
-    # something every pair satisfies.
     assert nk.resolve_kind("learning", "not-a-registered-kind").kind == nk.GENERIC_KIND

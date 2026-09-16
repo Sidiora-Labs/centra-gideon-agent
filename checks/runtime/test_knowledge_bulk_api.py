@@ -20,7 +20,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.knowledge.store import KnowledgeStore
+from gideon.cognition.knowledge.store import KnowledgeStore
 
 
 @pytest.fixture
@@ -45,7 +45,7 @@ def _post(store, body):
         return body
 
     req.json = _json
-    from gideon.dashboard.handlers import knowledge as H
+    from gideon.interfaces.dashboard.handlers import knowledge as H
 
     resp = _run(H.bulk_items(req))
     return resp, json.loads(resp.body)
@@ -55,7 +55,9 @@ def test_a_successful_bulk_returns_per_item_outcomes(store):
     a, b = _item(store, "A"), _item(store, "B")
     store.set_read_state(b, "read")
 
-    resp, body = _post(store, {"op": "read_state", "item_ids": [a, b, "ghost"], "state": "read"})
+    resp, body = _post(
+        store, {"op": "read_state", "item_ids": [a, b, "ghost"], "state": "read"}
+    )
 
     assert resp.status == 200
     assert body["ok"] is True and body["op"] == "read_state"
@@ -82,7 +84,9 @@ def test_missing_item_ids_is_a_typed_400(store):
 
 def test_an_oversized_selection_is_refused_rather_than_served(store):
     """A runaway bulk write over an entire library is a client bug, not an intent."""
-    resp, body = _post(store, {"op": "archive", "item_ids": [f"i{n}" for n in range(501)]})
+    resp, body = _post(
+        store, {"op": "archive", "item_ids": [f"i{n}" for n in range(501)]}
+    )
 
     assert resp.status == 400
     assert body["error"]["code"] == "too_many_items"
@@ -104,7 +108,9 @@ def test_a_smart_shelf_refusal_keeps_its_own_error_code(store):
     a = _item(store, "A")
     smart = store.create_collection(name="All notes", kind="smart", query="note")
 
-    resp, body = _post(store, {"op": "collect", "item_ids": [a], "collection_id": smart})
+    resp, body = _post(
+        store, {"op": "collect", "item_ids": [a], "collection_id": smart}
+    )
 
     assert resp.status == 400
     assert body["error"]["code"] == "smart_collection_immutable"
@@ -119,7 +125,7 @@ def test_invalid_json_is_rejected(store):
         raise ValueError("not json")
 
     req.json = _boom
-    from gideon.dashboard.handlers import knowledge as H
+    from gideon.interfaces.dashboard.handlers import knowledge as H
 
     resp = _run(H.bulk_items(req))
     assert resp.status == 400
@@ -134,7 +140,9 @@ def test_collect_over_many_items_shelves_them_all(store):
     a, b = _item(store, "A"), _item(store, "B")
     shelf = store.create_collection(name="Reading")
 
-    resp, body = _post(store, {"op": "collect", "item_ids": [a, b], "collection_id": shelf})
+    resp, body = _post(
+        store, {"op": "collect", "item_ids": [a, b], "collection_id": shelf}
+    )
 
     assert resp.status == 200
     assert sorted(body["changed"]) == sorted([a, b])
@@ -143,22 +151,24 @@ def test_collect_over_many_items_shelves_them_all(store):
 
 def test_the_route_is_registered(store):
     """A handler nobody can reach is not a feature."""
-    from gideon.dashboard.handlers.knowledge import setup_knowledge_routes
+    from gideon.interfaces.dashboard.handlers.knowledge import setup_knowledge_routes
 
     app = web.Application()
     setup_knowledge_routes(app)
-    paths = {r.resource.canonical for r in app.router.routes() if r.resource is not None}
+    paths = {
+        r.resource.canonical for r in app.router.routes() if r.resource is not None
+    }
     assert "/api/knowledge/bulk" in paths
-
-
-# ── tag taxonomy routes (S2, T2.2) ────────────────────────────────────────────
 
 
 def _tag_req(store, method, path_id=None, body=None):
     app = web.Application()
     app["state"] = SimpleNamespace(knowledge_store=store)
     req = make_mocked_request(
-        method, "/api/knowledge/tags", app=app, match_info={"id": str(path_id)} if path_id else {}
+        method,
+        "/api/knowledge/tags",
+        app=app,
+        match_info={"id": str(path_id)} if path_id else {},
     )
     if body is not None:
 
@@ -176,19 +186,24 @@ def _tag_ids(store) -> dict:
 def test_tag_tree_carries_ids_parents_and_counts(store):
     """Distinct from GET /tags, which stays a flat list[str] for autocomplete."""
     store.create_typed_item(item_type="note", title="N", content="c", tags=["a", "b"])
-    from gideon.dashboard.handlers import knowledge as H
+    from gideon.interfaces.dashboard.handlers import knowledge as H
 
     resp = _run(H.list_tag_taxonomy(_tag_req(store, "GET")))
     body = json.loads(resp.body)
 
     assert resp.status == 200
     assert {t["name"] for t in body["tags"]} == {"a", "b"}
-    assert all({"id", "parent_id", "parent_name", "usage_count"} <= set(t) for t in body["tags"])
+    assert all(
+        {"id", "parent_id", "parent_name", "usage_count"} <= set(t)
+        for t in body["tags"]
+    )
 
 
 def test_rename_route_round_trips_and_returns_the_whole_tree(store):
-    iid = store.create_typed_item(item_type="note", title="N", content="c", tags=["old"])
-    from gideon.dashboard.handlers import knowledge as H
+    iid = store.create_typed_item(
+        item_type="note", title="N", content="c", tags=["old"]
+    )
+    from gideon.interfaces.dashboard.handlers import knowledge as H
 
     tid = _tag_ids(store)["old"]
     resp = _run(H.rename_tag(_tag_req(store, "PATCH", tid, {"name": "new"})))
@@ -200,31 +215,40 @@ def test_rename_route_round_trips_and_returns_the_whole_tree(store):
 
 
 def test_reparent_via_the_rename_route(store):
-    store.create_typed_item(item_type="note", title="N", content="c", tags=["parent", "child"])
-    from gideon.dashboard.handlers import knowledge as H
+    store.create_typed_item(
+        item_type="note", title="N", content="c", tags=["parent", "child"]
+    )
+    from gideon.interfaces.dashboard.handlers import knowledge as H
 
     ids = _tag_ids(store)
-    resp = _run(H.rename_tag(_tag_req(store, "PATCH", ids["child"], {"parent_id": ids["parent"]})))
+    resp = _run(
+        H.rename_tag(
+            _tag_req(store, "PATCH", ids["child"], {"parent_id": ids["parent"]})
+        )
+    )
     body = json.loads(resp.body)
 
     assert resp.status == 200
     by_name = {t["name"]: t for t in body["tags"]}
     assert by_name["child"]["parent_name"] == "parent"
 
-    # null means "make it a root again".
-    resp2 = _run(H.rename_tag(_tag_req(store, "PATCH", ids["child"], {"parent_id": None})))
+    resp2 = _run(
+        H.rename_tag(_tag_req(store, "PATCH", ids["child"], {"parent_id": None}))
+    )
     by_name2 = {t["name"]: t for t in json.loads(resp2.body)["tags"]}
     assert by_name2["child"]["parent_id"] is None
 
 
 def test_a_cycle_is_a_typed_400(store):
     store.create_typed_item(item_type="note", title="N", content="c", tags=["a", "b"])
-    from gideon.dashboard.handlers import knowledge as H
+    from gideon.interfaces.dashboard.handlers import knowledge as H
 
     ids = _tag_ids(store)
     _run(H.rename_tag(_tag_req(store, "PATCH", ids["b"], {"parent_id": ids["a"]})))
 
-    resp = _run(H.rename_tag(_tag_req(store, "PATCH", ids["a"], {"parent_id": ids["b"]})))
+    resp = _run(
+        H.rename_tag(_tag_req(store, "PATCH", ids["a"], {"parent_id": ids["b"]}))
+    )
     body = json.loads(resp.body)
 
     assert resp.status == 400
@@ -233,9 +257,11 @@ def test_a_cycle_is_a_typed_400(store):
 
 def test_a_name_collision_is_a_typed_400(store):
     store.create_typed_item(item_type="note", title="N", content="c", tags=["a", "b"])
-    from gideon.dashboard.handlers import knowledge as H
+    from gideon.interfaces.dashboard.handlers import knowledge as H
 
-    resp = _run(H.rename_tag(_tag_req(store, "PATCH", _tag_ids(store)["a"], {"name": "b"})))
+    resp = _run(
+        H.rename_tag(_tag_req(store, "PATCH", _tag_ids(store)["a"], {"name": "b"}))
+    )
     body = json.loads(resp.body)
 
     assert resp.status == 400
@@ -244,7 +270,7 @@ def test_a_name_collision_is_a_typed_400(store):
 
 def test_an_empty_rename_body_is_refused(store):
     store.create_typed_item(item_type="note", title="N", content="c", tags=["a"])
-    from gideon.dashboard.handlers import knowledge as H
+    from gideon.interfaces.dashboard.handlers import knowledge as H
 
     resp = _run(H.rename_tag(_tag_req(store, "PATCH", _tag_ids(store)["a"], {})))
     assert resp.status == 400
@@ -253,7 +279,7 @@ def test_an_empty_rename_body_is_refused(store):
 
 def test_a_non_numeric_tag_id_is_a_404_not_a_500(store):
     """Tag ids are integers (a surrogate key). A junk path segment must not raise."""
-    from gideon.dashboard.handlers import knowledge as H
+    from gideon.interfaces.dashboard.handlers import knowledge as H
 
     resp = _run(H.rename_tag(_tag_req(store, "PATCH", "not-a-number", {"name": "x"})))
     assert resp.status == 404
@@ -261,11 +287,12 @@ def test_a_non_numeric_tag_id_is_a_404_not_a_500(store):
 
 def test_merge_route_reports_moved_and_already(store):
     a = store.create_typed_item(item_type="note", title="A", content="c", tags=["src"])
-    store.create_typed_item(item_type="note", title="B", content="c", tags=["src", "dst"])
-    from gideon.dashboard.handlers import knowledge as H
+    store.create_typed_item(
+        item_type="note", title="B", content="c", tags=["src", "dst"]
+    )
+    from gideon.interfaces.dashboard.handlers import knowledge as H
 
     ids = _tag_ids(store)
-    # `confirm: true` is required by the route (#606) — merging DELETES the source tag.
     body_in = {"into": ids["dst"], "confirm": True}
     resp = _run(H.merge_tag(_tag_req(store, "POST", ids["src"], body_in)))
     body = json.loads(resp.body)
@@ -278,7 +305,7 @@ def test_merge_route_reports_moved_and_already(store):
 
 def test_merge_without_a_target_is_refused(store):
     store.create_typed_item(item_type="note", title="N", content="c", tags=["a"])
-    from gideon.dashboard.handlers import knowledge as H
+    from gideon.interfaces.dashboard.handlers import knowledge as H
 
     resp = _run(H.merge_tag(_tag_req(store, "POST", _tag_ids(store)["a"], {})))
     assert resp.status == 400
@@ -286,8 +313,10 @@ def test_merge_without_a_target_is_refused(store):
 
 
 def test_delete_route_removes_the_tag_and_returns_the_tree(store):
-    iid = store.create_typed_item(item_type="note", title="N", content="c", tags=["doomed", "kept"])
-    from gideon.dashboard.handlers import knowledge as H
+    iid = store.create_typed_item(
+        item_type="note", title="N", content="c", tags=["doomed", "kept"]
+    )
+    from gideon.interfaces.dashboard.handlers import knowledge as H
 
     resp = _run(H.delete_tag(_tag_req(store, "DELETE", _tag_ids(store)["doomed"])))
     body = json.loads(resp.body)
@@ -298,40 +327,32 @@ def test_delete_route_removes_the_tag_and_returns_the_tree(store):
 
 
 def test_the_tag_routes_are_registered(store):
-    from gideon.dashboard.handlers.knowledge import setup_knowledge_routes
+    from gideon.interfaces.dashboard.handlers.knowledge import setup_knowledge_routes
 
     app = web.Application()
     setup_knowledge_routes(app)
-    paths = {r.resource.canonical for r in app.router.routes() if r.resource is not None}
+    paths = {
+        r.resource.canonical for r in app.router.routes() if r.resource is not None
+    }
     assert "/api/knowledge/tag-tree" in paths
     assert "/api/knowledge/tags/{id}" in paths
     assert "/api/knowledge/tags/{id}/merge" in paths
-    # The flat autocomplete contract must survive untouched.
     assert "/api/knowledge/tags" in paths
 
 
-# ── The tag error's MESSAGE is a sentence, not the code ────────────────────────────────
-#
-# 🔴 `message` used to be the code itself (`"tag_cycle"`, `"tag_name_taken:archive"`), because
-# `TagManager` matched `msg.includes('tag_cycle')` — so the message had to BE the token for the
-# match to fire, and the panel's fallback branch then rendered `Couldn't update the tag:
-# tag_name_taken:archive` to a person. `ApiError` now carries `code` and `lib/api.hasApiCode` exists
-# for exactly that, with its own rule: match on the code, never on the message.
-#
-# The two tests above already pin `code`; NOTHING pinned `message`, which is how it stayed a token
-# for as long as it did. These pin the half a user reads.
 def test_a_cycle_explains_itself_in_words(store):
     store.create_typed_item(item_type="note", title="N", content="c", tags=["a", "b"])
-    from gideon.dashboard.handlers import knowledge as H
+    from gideon.interfaces.dashboard.handlers import knowledge as H
 
     ids = _tag_ids(store)
     _run(H.rename_tag(_tag_req(store, "PATCH", ids["b"], {"parent_id": ids["a"]})))
-    resp = _run(H.rename_tag(_tag_req(store, "PATCH", ids["a"], {"parent_id": ids["b"]})))
+    resp = _run(
+        H.rename_tag(_tag_req(store, "PATCH", ids["a"], {"parent_id": ids["b"]}))
+    )
     body = json.loads(resp.body)
 
     assert body["error"]["code"] == "tag_cycle"
     message = body["error"]["message"]
-    # A sentence, and specifically NOT the code: the whole defect was the two being the same string.
     assert message != "tag_cycle"
     assert "tag_cycle" not in message
     assert message.endswith(".")
@@ -340,16 +361,16 @@ def test_a_cycle_explains_itself_in_words(store):
 
 def test_a_name_collision_names_the_tag_it_collided_with(store):
     store.create_typed_item(item_type="note", title="N", content="c", tags=["a", "b"])
-    from gideon.dashboard.handlers import knowledge as H
+    from gideon.interfaces.dashboard.handlers import knowledge as H
 
-    resp = _run(H.rename_tag(_tag_req(store, "PATCH", _tag_ids(store)["a"], {"name": "b"})))
+    resp = _run(
+        H.rename_tag(_tag_req(store, "PATCH", _tag_ids(store)["a"], {"name": "b"}))
+    )
     body = json.loads(resp.body)
 
     assert body["error"]["code"] == "tag_name_taken"
     message = body["error"]["message"]
     assert "tag_name_taken" not in message
-    # The store appends the colliding name and it is the most useful half of the sentence, so the
-    # handler must actually use it rather than falling back to the generic wording.
     assert '"b"' in message
     assert message.endswith(".")
 
@@ -361,10 +382,12 @@ def test_an_unexpected_argument_error_does_not_leak_python_words(store):
     notification verbatim. `parent_id` that is neither null nor an int is the reachable way in.
     """
     store.create_typed_item(item_type="note", title="N", content="c", tags=["a"])
-    from gideon.dashboard.handlers import knowledge as H
+    from gideon.interfaces.dashboard.handlers import knowledge as H
 
     resp = _run(
-        H.rename_tag(_tag_req(store, "PATCH", _tag_ids(store)["a"], {"parent_id": "not-an-int"}))
+        H.rename_tag(
+            _tag_req(store, "PATCH", _tag_ids(store)["a"], {"parent_id": "not-an-int"})
+        )
     )
     body = json.loads(resp.body)
 
@@ -372,6 +395,5 @@ def test_an_unexpected_argument_error_does_not_leak_python_words(store):
     assert body["error"]["code"] == "invalid_tag_update"
     message = body["error"]["message"]
     assert message.endswith(".")
-    # The tells of a leaked Python message, none of which belong in front of a user.
     for leak in ("invalid literal", "ValueError", "TypeError", "int()", "base 10"):
         assert leak not in message

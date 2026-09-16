@@ -1,28 +1,12 @@
-/**
- * The desktop registry is a PORT of `web/src/lib/endpoints.ts`, so this file's job is to prove the
- * port has not drifted (`CA-8`).
- *
- * 🔑 THIS IS A DIFFERENTIAL, NOT A TEXT SCAN. Node ≥22 strips types from a `.ts` on import, so the
- * TypeScript module is imported and EXECUTED here, and every shared function is run over one vector
- * table with both implementations required to agree. `tests/test_mobile_shell.py` compares the two
- * sides' spellings, which is all it can do from Python; a spelling comparison passes happily when
- * two implementations agree on names and disagree on behaviour — and a behavioural divergence in
- * `endpointKey` is precisely how one gateway's state ends up in another's slot.
- *
- * If the import of the `.ts` ever fails (a Node without type stripping, or `endpoints.ts` growing
- * non-erasable syntax), the FIRST test fails loudly instead of the file quietly skipping. A parity
- * rail that can silently stop comparing is worse than no rail.
- */
 
 const { describe, it, before } = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
 
-const cjs = require("../endpointRegistry");
+const cjs = require("../src/storage/endpoint-registry");
 
-const TS_PATH = path.resolve(__dirname, "..", "..", "web", "src", "lib", "endpoints.ts");
+const TS_PATH = path.resolve(__dirname, "..", "..", "console", "src", "shared", "data", "endpoints.ts");
 
-/** A `KeyValueStore` over a plain object — the five members `endpoints.ts` declares. */
 function fakeStore(initial = {}) {
   const data = { ...initial };
   return {
@@ -43,10 +27,8 @@ function fakeStore(initial = {}) {
 
 let ts = null;
 
-describe("parity with web/src/lib/endpoints.ts", () => {
+describe("parity with apps/console/src/shared/data/endpoints.ts", () => {
   before(async () => {
-    // A bare `import()` of a `.ts` file: Node's type stripping makes this the real module, not a
-    // transpiled copy this test maintains.
     ts = await import(TS_PATH);
     assert.ok(ts, "could not import endpoints.ts");
   });
@@ -125,7 +107,6 @@ describe("parity with web/src/lib/endpoints.ts", () => {
       b = ts.addEndpoint(b, step);
       assert.deepStrictEqual(a, b);
     }
-    // Re-adding replaces in place and keeps position.
     a = cjs.addEndpoint(a, { ...row("two", "remote"), label: "renamed" });
     b = ts.addEndpoint(b, { ...row("two", "remote"), label: "renamed" });
     assert.deepStrictEqual(a, b);
@@ -144,7 +125,7 @@ describe("parity with web/src/lib/endpoints.ts", () => {
 
   it("agrees on endpointSocketUrl, refusals included", () => {
     const vectors = [
-      "https://pc.example.com",
+      "https://gideon.example.com",
       "http://gideon.local:10000",
       "http://10.0.0.4:10000/ignored/path",
       "gideon.local:10000",
@@ -176,8 +157,6 @@ describe("parity with web/src/lib/endpoints.ts", () => {
     cjs.clearEndpointState(s1, "a");
     ts.clearEndpointState(s2, "a");
     assert.deepStrictEqual(s1._data, s2._data);
-    // The neighbour whose id merely SHARES a prefix survives — the length field is what makes that
-    // true, and it is the whole reason the encoding is not `id + ':' + key`.
     assert.strictEqual(s1.getItem(cjs.endpointKey("a:b", "z")), "3");
     assert.strictEqual(s1.getItem("unrelated"), "keep");
   });
@@ -189,7 +168,6 @@ describe("parity with web/src/lib/endpoints.ts", () => {
   });
 
   it("declares the same field vocabularies the TS interfaces do", () => {
-    // Text-level, because interfaces are erased at import time and cannot be reflected on.
     const src = require("node:fs").readFileSync(TS_PATH, "utf8");
     const iface = (name) => {
       const m = src.match(new RegExp(`export interface ${name} \\{([\\s\\S]*?)\\n\\}`));
@@ -203,9 +181,6 @@ describe("parity with web/src/lib/endpoints.ts", () => {
 
 describe("the length-prefixed key is injective where the naive form is not", () => {
   it("keeps {id:'a', key:'b:c'} and {id:'a:b', key:'c'} in different slots", () => {
-    // The naive `id + ':' + key` renders both as `a:b:c`. That collision IS the state bleed the
-    // whole namespacing mechanism exists to prevent, so it gets its own test rather than being
-    // implied by the parity vectors.
     const one = cjs.endpointKey("a", "b:c");
     const two = cjs.endpointKey("a:b", "c");
     assert.notStrictEqual(one, two);

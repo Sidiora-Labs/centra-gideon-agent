@@ -19,23 +19,18 @@ from pathlib import Path
 
 import pytest
 
-from gideon.routing import usage as U
-from gideon.routing.rates import ModelRate
+from gideon.engine.routing import usage as U
+from gideon.engine.routing.rates import ModelRate
 
 DAY1 = "2026-08-01"
 DAY2 = "2026-08-02"
 
-# ── the 50-line fixture (ledger turns) ──────────────────────────────────────────────────
 
-#: (count, date, source, provider, model, in, out, cost, priced) — 20+12+10+5+3 = 50.
 FIXTURE_GROUPS = [
     (20, DAY1, "chat", "anthropic", "claude-x", 400, 40, 0.05, True),
     (12, DAY1, "loop", "ollama-models", "qwen3:8b", 200, 20, 0.0, True),
     (10, DAY2, "subagent", "anthropic", "claude-x", 50, 5, 0.002, True),
-    # priced=False ⇒ an honest 0.0 that must read as a FLOOR, never as "$0 spent".
     (5, DAY2, "cron", "openai", "gpt-x", 10, 1, 0.0, False),
-    # An unrecognized source is an APP NAME (chat_runner sets `source = session._app or "chat"`),
-    # so it buckets to `app` and the name is censused — not treated as corrupt data.
     (3, DAY2, "my-app", "openai", "gpt-x", 7, 2, 0.03, True),
 ]
 
@@ -64,8 +59,6 @@ def _fixture_turns() -> list[dict]:
     return rows
 
 
-#: 12 guarded attempts — CENSUSED, never folded. Four are `loops`, the axis that also produces a
-#: ledger turn; that is the overlap which makes a union unsound.
 AUDIT_GROUPS = [(8, "reasoning", 0.25), (4, "loops", 0.5)]
 
 
@@ -98,8 +91,6 @@ def _fixture_attempts() -> list[dict]:
     return rows
 
 
-#: A deterministic stand-in for the rate table so the fixture's expected cells are genuinely
-#: hand-computed rather than "whatever the shipped rate defaults happen to say today".
 _STUB_RATES = {
     ("anthropic", "claude-x"): ModelRate(3.0, 15.0, source="overlay"),
     ("ollama-models", "qwen3:8b"): ModelRate(0.0, 0.0, source="local"),
@@ -113,7 +104,8 @@ def stub_rates(monkeypatch):
 
 def _cell(calls, t_in, t_out, dollars, *, unpriced=0, local=0):
     """One expected fold cell. A turn carries no "estimated" flag, so the fold treats every dollar
-    as an estimate — hence estimated_dollars == dollars_est and estimated_calls == calls."""
+    as an estimate — hence estimated_dollars == dollars_est and estimated_calls == calls.
+    """
     return {
         "calls": calls,
         "tokens_in": t_in,
@@ -126,13 +118,6 @@ def _cell(calls, t_in, t_out, dollars, *, unpriced=0, local=0):
     }
 
 
-#: HAND-COMPUTED from FIXTURE_GROUPS, group by group:
-#:   day1 anthropic/interactive = 20 turns, 20*400=8000 in, 20*40=800 out, 20*0.05=$1.00
-#:   day1 ollama/loop           = 12 turns, 12*200=2400 in, 12*20=240 out, $0.00, all 12 local
-#:   day2 anthropic/background  = 10 turns, 10*50=500 in,  10*5=50 out,   10*0.002=$0.02
-#:   day2 openai/background     = 5 turns,  5*10=50 in,    5*1=5 out,     $0.00, all 5 UNPRICED
-#:   day2 openai/app            = 3 turns,  3*7=21 in,     3*2=6 out,     3*0.03=$0.09
-#: openai:gpt-x carries TWO purpose cells on the same day — a ref is not a purpose.
 EXPECTED_DAYS = {
     DAY1: {
         "anthropic:claude-x": {"interactive": _cell(20, 8000, 800, 1.0)},
@@ -147,7 +132,6 @@ EXPECTED_DAYS = {
     },
 }
 
-#: HAND-COMPUTED census: 12 rows, 8*0.25 + 4*0.5 = $4.00, all on DAY2.
 EXPECTED_UNCOUNTED = {
     "calls": 12,
     "dollars_est": 4.0,
@@ -165,20 +149,20 @@ def _write(tmp_path: Path, name: str, rows: list[dict]) -> Path:
 def _rebuild(tmp_path: Path, *, turns=None, attempts=None):
     return U.rebuild(
         tmp_path,
-        ledger_path=_write(tmp_path, "turns.jsonl", _fixture_turns() if turns is None else turns),
-        audit_path=_write(tmp_path, "model_calls.jsonl", [] if attempts is None else attempts),
+        ledger_path=_write(
+            tmp_path, "turns.jsonl", _fixture_turns() if turns is None else turns
+        ),
+        audit_path=_write(
+            tmp_path, "model_calls.jsonl", [] if attempts is None else attempts
+        ),
     )
 
 
-# ── the fixture assertions ──────────────────────────────────────────────────────────────
-
-
 def test_fold_matches_hand_computed_fixture(tmp_path, stub_rates):
-    assert len(_fixture_turns()) == 50  # the clause's 50 recorded lines
+    assert len(_fixture_turns()) == 50
     fold = _rebuild(tmp_path)
 
     assert fold["days"] == EXPECTED_DAYS
-    # An app-initiated turn's source is censused by name, so "which app spent" is answerable.
     assert fold["app_sources"] == {"my-app": 3}
     assert fold["unmapped"] == {}
     assert fold["sources"] == {"usage_ledger": 50}
@@ -188,12 +172,13 @@ def test_query_totals_match_the_hand_computed_fixture(tmp_path, stub_rates):
     fold = _rebuild(tmp_path)
     got = U.query(fold, window="week", group="purpose", today=DAY2)
     total = got["total"]
-    # Hand-computed: 50 turns; 8000+2400+500+50+21 = 10971 in; 800+240+50+5+6 = 1101 out;
-    # $1.00 + $0.00 + $0.02 + $0.00 + $0.09 = $1.11.
-    assert (total["calls"], total["tokens_in"], total["tokens_out"]) == (50, 10971, 1101)
+    assert (total["calls"], total["tokens_in"], total["tokens_out"]) == (
+        50,
+        10971,
+        1101,
+    )
     assert total["dollars_est"] == 1.11
     assert total["tokens"] == 12072
-    # Every dollar is an estimate; 5 unpriced turns make the total a FLOOR — separate disclosures.
     assert got["estimated_share"] == 1.0
     assert total["unpriced_calls"] == 5
     assert total["priced"] is False
@@ -202,33 +187,38 @@ def test_query_totals_match_the_hand_computed_fixture(tmp_path, stub_rates):
     assert [(r["key"], r["calls"], r["dollars_est"]) for r in got["rows"]] == [
         ("interactive", 20, 1.0),
         ("app", 3, 0.09),
-        ("background", 15, 0.02),  # 10 subagent + 5 cron
+        ("background", 15, 0.02),
         ("loop", 12, 0.0),
     ]
     by_model = U.query(fold, window="week", group="model", today=DAY2)
     assert [(r["key"], r["dollars_est"]) for r in by_model["rows"]] == [
-        ("anthropic:claude-x", 1.02),  # $1.00 (day1 chat) + $0.02 (day2 subagent)
+        ("anthropic:claude-x", 1.02),
         ("openai:gpt-x", 0.09),
         ("ollama-models:qwen3:8b", 0.0),
     ]
     by_provider = U.query(fold, window="week", group="provider", today=DAY2)
-    assert [r["key"] for r in by_provider["rows"]] == ["anthropic", "openai", "ollama-models"]
+    assert [r["key"] for r in by_provider["rows"]] == [
+        "anthropic",
+        "openai",
+        "ollama-models",
+    ]
 
 
 def test_window_narrows_to_the_reference_day(tmp_path, stub_rates):
     fold = _rebuild(tmp_path)
     day = U.query(fold, window="day", group="model", today=DAY2)
-    # DAY2 only: 10 + 5 + 3 = 18 turns at $0.02 + $0.00 + $0.09 = $0.11.
     assert (day["total"]["calls"], day["total"]["dollars_est"]) == (18, 0.11)
     assert day["dates"] == [DAY2]
 
     week = U.query(fold, window="week", group="model", today=DAY2)
     assert len(week["series"]) == 7
-    assert week["series"][-1] == {"date": DAY2, "calls": 18, "dollars_est": 0.11, "tokens": 632}
-    assert week["series"][0]["calls"] == 0  # a day with no traffic is a zero, not a gap
-
-
-# ── the census: what the fold refuses to sum ────────────────────────────────────────────
+    assert week["series"][-1] == {
+        "date": DAY2,
+        "calls": 18,
+        "dollars_est": 0.11,
+        "tokens": 632,
+    }
+    assert week["series"][0]["calls"] == 0
 
 
 def test_a_guarded_attempt_is_censused_never_summed(tmp_path, stub_rates):
@@ -238,13 +228,11 @@ def test_a_guarded_attempt_is_censused_never_summed(tmp_path, stub_rates):
     fold = _rebuild(tmp_path, attempts=_fixture_attempts())
 
     assert fold["uncounted"] == EXPECTED_UNCOUNTED
-    # The money is IDENTICAL with and without the audit file — proof it is not being summed in.
     without = _rebuild(tmp_path, attempts=[])
     assert fold["days"] == without["days"] == EXPECTED_DAYS
 
     got = U.query(fold, window="day", group="purpose", today=DAY2)
-    assert got["total"]["dollars_est"] == 0.11  # not 0.11 + 4.00
-    # ...but the gap is STATED, with the overlapping axis named.
+    assert got["total"]["dollars_est"] == 0.11
     assert got["uncounted"]["calls"] == 12
     assert got["uncounted"]["total_dollars_est"] == 4.0
     assert got["uncounted"]["by_use_case"] == {"reasoning": 8, "loops": 4}
@@ -252,11 +240,13 @@ def test_a_guarded_attempt_is_censused_never_summed(tmp_path, stub_rates):
 
 def test_the_census_is_empty_when_no_attempts_were_recorded(tmp_path, stub_rates):
     fold = _rebuild(tmp_path, attempts=[])
-    assert fold["uncounted"] == {"calls": 0, "dollars_est": 0.0, "by_use_case": {}, "days": {}}
+    assert fold["uncounted"] == {
+        "calls": 0,
+        "dollars_est": 0.0,
+        "by_use_case": {},
+        "days": {},
+    }
     assert U.query(fold, window="day", today=DAY2)["uncounted"]["calls"] == 0
-
-
-# ── reproducible after delete ───────────────────────────────────────────────────────────
 
 
 def test_deleting_the_fold_rebuilds_the_same_values(tmp_path, stub_rates):
@@ -267,12 +257,11 @@ def test_deleting_the_fold_rebuilds_the_same_values(tmp_path, stub_rates):
     assert before["days"] == EXPECTED_DAYS
 
     (tmp_path / "usage_stats.json").unlink()
-    assert U.load_usage(tmp_path)["days"] == {}  # gone, not cached in memory
+    assert U.load_usage(tmp_path)["days"] == {}
 
     after = U.refresh(tmp_path, audit_path=audit, ledger_path=ledger)
     assert after["days"] == before["days"] == EXPECTED_DAYS
     assert after["uncounted"] == EXPECTED_UNCOUNTED
-    # Byte-identical on disk too — the fold is a deterministic function of its inputs.
     assert (tmp_path / "usage_stats.json").read_text(encoding="utf-8") == persisted
 
 
@@ -283,36 +272,37 @@ def test_refresh_keeps_a_day_that_aged_out_of_the_capped_jsonl(tmp_path, stub_ra
     audit = _write(tmp_path, "model_calls.jsonl", [])
     U.refresh(tmp_path, audit_path=audit, ledger_path=ledger)
 
-    # Simulate the trim: DAY1's rows roll off the tail.
-    _write(tmp_path, "turns.jsonl", [r for r in _fixture_turns() if not r["ts"].startswith(DAY1)])
+    _write(
+        tmp_path,
+        "turns.jsonl",
+        [r for r in _fixture_turns() if not r["ts"].startswith(DAY1)],
+    )
     kept = U.refresh(tmp_path, audit_path=audit, ledger_path=ledger)
 
-    assert kept["days"][DAY1] == EXPECTED_DAYS[DAY1]  # archived, not recomputed away
+    assert kept["days"][DAY1] == EXPECTED_DAYS[DAY1]
     assert kept["days"][DAY2] == EXPECTED_DAYS[DAY2]
-
-
-# ── purpose mapping + unattributable rows ───────────────────────────────────────────────
 
 
 def test_an_unknown_source_is_an_app_and_is_named(tmp_path):
     assert U.purpose_for_source("chat") == ("interactive", "")
     assert U.purpose_for_source("loop") == ("loop", "")
     assert U.purpose_for_source("weather-app") == ("app", "weather-app")
-    # A blank source still lands in a real bucket and is still named, so it cannot vanish.
     assert U.purpose_for_source("") == ("app", "(unnamed)")
 
 
 def test_a_row_with_no_usable_day_is_counted_not_silently_discarded(tmp_path):
     fold = U.empty_fold()
-    # False = "did not land in a day cell" — but it is still ACCOUNTED FOR in `unmapped`, which is
-    # the difference between a visible gap and a silently shrinking total.
-    landed = U.fold_turn_row(fold, {"provider": "x", "model": "y"}, look=lambda p, m: (True, False))
+    landed = U.fold_turn_row(
+        fold, {"provider": "x", "model": "y"}, look=lambda p, m: (True, False)
+    )
     assert landed is False
     assert fold["days"] == {}
     assert fold["unmapped"] == {"row:no_date": 1}
 
     no_ref = U.empty_fold()
-    U.fold_turn_row(no_ref, {"ts": f"{DAY1}T00:00:00+00:00"}, look=lambda p, m: (True, False))
+    U.fold_turn_row(
+        no_ref, {"ts": f"{DAY1}T00:00:00+00:00"}, look=lambda p, m: (True, False)
+    )
     assert no_ref["unmapped"] == {"row:no_ref": 1}
 
 
@@ -344,13 +334,15 @@ def test_every_mapping_target_is_in_the_fixed_vocabulary():
 def test_purpose_mapping_covers_every_documented_ledger_source():
     """`TurnUsage.source`'s documented vocabulary is the contract. A new literal added there must
     be mapped deliberately, not fall through to `app` and read as an app's spend."""
-    from gideon import usage_ledger
+    from gideon.operations import usage_ledger
 
     text = Path(usage_ledger.__file__).read_text(encoding="utf-8")
     m = re.search(r"source: str  # (.+)", text)
     assert m, "TurnUsage.source's documented vocabulary moved"
     sources = [s.strip() for s in m.group(1).split("|")]
-    assert len(sources) >= 5, "vacuity guard: the documented source list must be non-trivial"
+    assert (
+        len(sources) >= 5
+    ), "vacuity guard: the documented source list must be non-trivial"
     assert set(sources) <= set(
         U.PURPOSE_BY_SOURCE
     ), f"sources that would be mistaken for app names: {set(sources) - set(U.PURPOSE_BY_SOURCE)}"
@@ -358,19 +350,22 @@ def test_purpose_mapping_covers_every_documented_ledger_source():
 
 def test_the_guarded_use_cases_are_all_accounted_for_in_the_census():
     """`provider_bridge` decides which use_cases reach the attempt audit. They are censused, not
-    folded, so this rail only has to prove the set is still the one the docstring names."""
-    src = Path(__import__("gideon.providers.provider_bridge", fromlist=["x"]).__file__)
+    folded, so this rail only has to prove the set is still the one the docstring names.
+    """
+    src = Path(
+        __import__(
+            "gideon.extensions.providers.provider_bridge", fromlist=["x"]
+        ).__file__
+    )
     text = src.read_text(encoding="utf-8")
     m = re.search(r'if use_case in \(([^)]*)\):\n\s+kwargs\["_guard_use_case"\]', text)
-    assert m, "the guarded use_case tuple moved — re-read the census rationale before trusting it"
+    assert (
+        m
+    ), "the guarded use_case tuple moved — re-read the census rationale before trusting it"
     guarded = set(re.findall(r'"([^"]+)"', m.group(1)))
     assert guarded, "vacuity guard: the rail must actually match some use_cases"
     assert guarded == {"reasoning", "background", "loops", "orchestration"}, guarded
-    # `loops` being in that set is exactly why a union would double-count.
     assert "loops" in guarded
-
-
-# ── unpriced vs local vs estimated ──────────────────────────────────────────────────────
 
 
 def test_priced_false_wins_over_the_rate_table(tmp_path, stub_rates):
@@ -378,17 +373,26 @@ def test_priced_false_wins_over_the_rate_table(tmp_path, stub_rates):
     disclosure is authoritative, so those turns are NOT reported as unpriced."""
     fold = _rebuild(tmp_path)
     day2 = fold["days"][DAY2]["openai:gpt-x"]
-    assert day2["app"]["unpriced_calls"] == 0  # priced: True
-    assert day2["background"]["unpriced_calls"] == 5  # priced: False
+    assert day2["app"]["unpriced_calls"] == 0
+    assert day2["background"]["unpriced_calls"] == 5
 
 
 def test_local_and_unpriced_come_from_the_real_rate_table(tmp_path):
     """The stubbed fixture proves the arithmetic; this proves the fold actually asks rates.py."""
     fold = U.empty_fold()
     look = U._rate_lookup(tmp_path)
-    base = {"ts": f"{DAY1}T00:00:00+00:00", "source": "chat", "input_tokens": 1, "output_tokens": 1}
-    U.fold_turn_row(fold, {**base, "provider": "ollama", "model": "qwen3:8b"}, look=look)
-    U.fold_turn_row(fold, {**base, "provider": "nonesuch", "model": "no-such-model-xyz"}, look=look)
+    base = {
+        "ts": f"{DAY1}T00:00:00+00:00",
+        "source": "chat",
+        "input_tokens": 1,
+        "output_tokens": 1,
+    }
+    U.fold_turn_row(
+        fold, {**base, "provider": "ollama", "model": "qwen3:8b"}, look=look
+    )
+    U.fold_turn_row(
+        fold, {**base, "provider": "nonesuch", "model": "no-such-model-xyz"}, look=look
+    )
     cells = fold["days"][DAY1]
     assert cells["ollama:qwen3:8b"]["interactive"]["local_calls"] == 1
     assert cells["ollama:qwen3:8b"]["interactive"]["unpriced_calls"] == 0
@@ -401,7 +405,7 @@ def test_an_empty_or_missing_jsonl_is_an_empty_fold_not_an_error(tmp_path):
     )
     assert fold["days"] == {}
     assert fold["sources"] == {"usage_ledger": 0}
-    assert U.query(fold, window="month")["estimated_share"] == 0.0  # no dollars ⇒ no share to claim
+    assert U.query(fold, window="month")["estimated_share"] == 0.0
 
 
 def test_a_corrupt_line_is_skipped_and_the_rest_still_folds(tmp_path, stub_rates):
@@ -412,13 +416,8 @@ def test_a_corrupt_line_is_skipped_and_the_rest_still_folds(tmp_path, stub_rates
     assert fold["sources"]["usage_ledger"] == 2
 
 
-# ── the recap ───────────────────────────────────────────────────────────────────────────
-
-
 def test_usage_recap_renders_verbatim_predictable(tmp_path, stub_rates):
     fold = _rebuild(tmp_path, attempts=_fixture_attempts())
-    # Hand-computed from the same fixture: $1.11 over 50 turns, 12 local (24%), interactive $1.00
-    # ahead of app $0.09, biggest line item anthropic:claude-x at $1.02, 5 unpriced, 12 uncounted.
     assert U.usage_recap("2026-08", fold=fold) == (
         "August 2026: ~$1.11 across 50 turns."
         " 24% of those turns ran locally at $0."
@@ -429,13 +428,13 @@ def test_usage_recap_renders_verbatim_predictable(tmp_path, stub_rates):
         " Separately, 12 unattended model calls were recorded this month but are not included"
         " above — they cannot be merged with turns without double-counting loops."
     )
-    # Deterministic: same fold in, same sentence out (no LLM, no clock).
     assert U.usage_recap("2026-08", fold=fold) == U.usage_recap("2026-08", fold=fold)
 
 
 def test_usage_recap_on_an_empty_month_says_so_instead_of_zero_dollars(tmp_path):
     assert (
-        U.usage_recap("2026-09", fold=U.empty_fold()) == "September 2026: no model turns recorded."
+        U.usage_recap("2026-09", fold=U.empty_fold())
+        == "September 2026: no model turns recorded."
     )
 
 

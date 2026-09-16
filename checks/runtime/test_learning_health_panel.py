@@ -19,16 +19,16 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.learning import measure
-from gideon.learning.staging import FlushOutcome, StagingStore
-from gideon.learning.surfacing import ABLATABLE, Candidate, ablation_deltas
-from gideon.workflows import judge_calibration as jc
+from gideon.automation.workflows import judge_calibration as jc
+from gideon.cognition.learning import measure
+from gideon.cognition.learning.staging import FlushOutcome, StagingStore
+from gideon.cognition.learning.surfacing import ABLATABLE, Candidate, ablation_deltas
 
 
 @pytest.fixture(autouse=True)
 def _isolated_home(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
 
 
 @pytest.fixture
@@ -36,9 +36,6 @@ def store(tmp_path):
     s = StagingStore(tmp_path)
     yield s
     s.close()
-
-
-# ── Budget utilization: the writer that did not exist ──
 
 
 def test_utilization_is_unmeasured_before_any_render(store):
@@ -65,9 +62,6 @@ def test_allocation_samples_are_a_rolling_window(store):
     assert store.utilization()["samples"] <= store.ALLOCATION_KEEP
 
 
-# ── Per-op cost (R19e) ──
-
-
 def test_cost_by_op_splits_by_the_cadence_the_writer_records(store):
     ok = FlushOutcome.FLUSH_OK
     store.record_flush(cadence="session_end", outcome=ok, cost_usd=0.02)
@@ -80,9 +74,6 @@ def test_cost_by_op_splits_by_the_cadence_the_writer_records(store):
 
 def test_cost_by_op_is_empty_not_zero_when_nothing_ran(store):
     assert store.cost_by_op() == []
-
-
-# ── The composite ──
 
 
 def test_the_composite_excludes_unmeasured_components_rather_than_scoring_them():
@@ -115,13 +106,13 @@ def test_the_composite_reweights_around_a_missing_component():
 @pytest.mark.parametrize(
     "utilization,expected",
     [
-        (0.50, 100.0),  # the band's floor is ideal, not marginal
+        (0.50, 100.0),
         (0.65, 100.0),
-        (0.80, 100.0),  # …and so is its ceiling
-        (0.25, 50.0),  # halfway to the floor
-        (0.90, 50.0),  # halfway past the ceiling
+        (0.80, 100.0),
+        (0.25, 50.0),
+        (0.90, 50.0),
         (0.0, 0.0),
-        (1.0, 0.0),  # a fully-consumed budget crowds out on every turn
+        (1.0, 0.0),
     ],
 )
 def test_the_ideal_utilization_band_is_50_to_80_percent(utilization, expected):
@@ -140,9 +131,6 @@ def test_the_ideal_utilization_band_is_50_to_80_percent(utilization, expected):
 def test_the_composite_weights_sum_to_one():
     """Otherwise "of 100" is a lie in whichever direction the weights drift."""
     assert sum(measure.HEALTH_WEIGHTS.values()) == pytest.approx(1.0)
-
-
-# ── Judge MAE (R10d) ──
 
 
 def _verdict(node: str, verdict: str, samples: list[str], run: str = "r1"):
@@ -179,12 +167,15 @@ def test_a_human_override_labels_the_bucket_it_lands_in():
     verdicts = [_verdict("g", "pass", ["pass", "pass", "pass"])]
     divergences = [
         jc.DivergenceRecord(
-            run_id="r1", node_id="g", template="t", judge_verdict="pass", human_verdict="fail"
+            run_id="r1",
+            node_id="g",
+            template="t",
+            judge_verdict="pass",
+            human_verdict="fail",
         )
     ]
     got = jc.mae_buckets(verdicts, divergences)
     top = next(row for row in got["buckets"] if row["bucket"] == "0.75-1.00")
-    # Predicted P(pass)=1.0, actual 0.0 — a confidently wrong judge, error 1.0.
     assert top["mae"] == 1.0
     assert got["labelled"] == 1
 
@@ -200,7 +191,11 @@ def test_a_label_from_one_run_does_not_label_another_run():
     verdicts = [_verdict("g", "pass", ["pass"], run="r1")]
     divergences = [
         jc.DivergenceRecord(
-            run_id="r2", node_id="g", template="t", judge_verdict="pass", human_verdict="fail"
+            run_id="r2",
+            node_id="g",
+            template="t",
+            judge_verdict="pass",
+            human_verdict="fail",
         )
     ]
     assert jc.mae_buckets(verdicts, divergences)["labelled"] == 0
@@ -221,20 +216,23 @@ def test_samples_are_parsed_from_where_the_controller_writes_them():
     assert parsed[0].samples == ["pass", "fail"]
 
 
-# ── Ablation-delta sweep (§2.5) ──
-
-
 def _pool() -> dict[str, list[Candidate]]:
     """Enough candidates per source that the diversification cap can bite."""
     return {
         "skills": [
             Candidate(
-                kind="skill", key=f"s{i}", score=0.9 - i * 0.05, l0=f"skill {i} deploy", l1=""
+                kind="skill",
+                key=f"s{i}",
+                score=0.9 - i * 0.05,
+                l0=f"skill {i} deploy",
+                l1="",
             )
             for i in range(5)
         ],
         "memory": [
-            Candidate(kind="memory", key=f"m{i}", score=0.8, l0=f"memory {i} deploy", l1="")
+            Candidate(
+                kind="memory", key=f"m{i}", score=0.8, l0=f"memory {i} deploy", l1=""
+            )
             for i in range(4)
         ],
     }
@@ -244,7 +242,6 @@ def test_the_sweep_reports_every_heuristic():
     rows = ablation_deltas(_pool(), query="deploy the thing", budget_tokens=200)
     assert {r["heuristic"] for r in rows} == set(ABLATABLE)
     assert all(0.0 <= r["delta"] <= 1.0 for r in rows)
-    # Weakest first, so the removal candidates are what a reader sees at the top.
     deltas = [r["delta"] for r in rows]
     assert deltas == sorted(deltas)
 
@@ -266,13 +263,13 @@ def test_diversification_measurably_changes_what_is_injected():
 def test_an_unknown_ablation_raises_rather_than_ablating_nothing():
     """A typo'd name would report delta 0.0 — the same reading as a useless heuristic."""
     with pytest.raises(ValueError, match="unknown ablation"):
-        from gideon.learning.surfacing import allocate
+        from gideon.cognition.learning.surfacing import allocate
 
         allocate(_pool(), query="x", budget_tokens=100, ablate="intnet")
 
 
 def test_the_live_path_is_unchanged_by_the_parameters_existence():
-    from gideon.learning.surfacing import allocate
+    from gideon.cognition.learning.surfacing import allocate
 
     plain = allocate(_pool(), query="deploy", budget_tokens=400)
     explicit = allocate(_pool(), query="deploy", budget_tokens=400, ablate="")
@@ -300,5 +297,4 @@ def test_the_sweep_cadence_gates_itself(store):
         [{"heuristic": "intent", "delta": 0.5, "verdict": "earns_its_place"}], now=now
     )
     assert store.ablation_due(now=now) is False, "just ran — not due"
-    # …and due again a day later. The cadence is what makes the sweep affordable at all.
     assert store.ablation_due(now=now + 86401) is True

@@ -13,7 +13,7 @@ And the hazard is reachable, not theoretical: a clock trigger's `bash` action re
 `BashActionProvider.execute`, which runs `/bin/sh -c command` and screens nothing itself, while
 `gideon restart`/`stop` are SERVICE-FIRST (`cli_server._restart` calls
 `service_controller.restart_service()` first) — so they bounce the installed service, i.e. the
-process hosting the run. The fire's `ScheduleRunStore` row never reaches a terminal state, and
+process hosting the run. The fire's `ExecutionJournal` row never reaches a terminal state, and
 what the user sees afterwards is a hung run, not a self-inflicted stop.
 
 Two things this file is careful about, because both are ways a guard like this goes wrong:
@@ -36,46 +36,36 @@ import types
 
 import pytest
 
-import gideon.action_providers as AP
-from gideon.guardrails.policy import unattended_dispatch_key
-from gideon.guardrails.self_destruct import classify_host_effect, unattended_host_effect
+import gideon.integrations.action_providers as AP
+from gideon.security.guardrails.policy import unattended_dispatch_key
+from gideon.security.guardrails.self_destruct import (
+    classify_host_effect,
+    unattended_host_effect,
+)
 
-#: A sessionless unattended identity, exactly what `gateway._fire_store_trigger` threads.
 UNATTENDED = unattended_dispatch_key("trigger:clock:nightly")
-#: An ordinary chat session key: matches no unattended prefix, so a human is watching.
 INTERACTIVE = "main"
 
 
-# --------------------------------------------------------------------------------------
-# The effect classification itself.
-# --------------------------------------------------------------------------------------
-
-#: Every one of these ends the process that would run it. Grouped by WHY they are here.
 SELF_DESTRUCT = [
-    # The plain spellings. Only the first was screened before this atom.
     "gideon restart",
     "gideon stop",
     "gideon update",
     "gideon service uninstall",
     "gideon service install",
-    # The service managers, which is what SERVICE-FIRST actually reaches.
-    "sudo systemctl restart gideon.service",
+    "sudo systemctl restart gideon.operations.service",
     "systemctl stop gideon",
-    "launchctl unload ~/Library/LaunchAgents/io.gideon.gateway.plist",
-    "launchctl kickstart -k gui/501/io.gideon.gateway",
+    "launchctl unload ~/Library/LaunchAgents/io.gideon.engine.gateway.plist",
+    "launchctl kickstart -k gui/501/io.gideon.engine.gateway",
     "pkill -f gideon",
-    # Reached through a wrapper, which must not launder it.
     "nohup sudo -u root env FOO=1 gideon restart &",
     "timeout 30 gideon stop",
     "/bin/sh -c 'gideon   stop'",
     "python -m gideon restart",
     "uv run gideon stop",
-    # An innocent prefix does not launder what follows it.
     "gideon doctor && gideon stop",
 ]
 
-#: THE EVASION SHAPES the atom names, one per id. A screening rule matched against literal text
-#: passes every one of these, which is why the guard classifies the effect instead.
 EVASIONS = {
     "respelled_absolute_path": "/usr/local/bin/gideon restart --port 10000",
     "respelled_relative_path": "./gideon stop",
@@ -89,18 +79,15 @@ EVASIONS = {
     "env_assignment_prefix": "FOO=bar gideon update",
 }
 
-#: Legitimate work. A guard that refuses any of these is an outage, so each is asserted.
 BENIGN = [
     "echo nightly backup done",
     "gideon status --json",
     "gideon snapshot",
     "gideon doctor",
-    # Same VERB spelling, nested under a different subcommand — not the host process.
     "gideon cron update nightly",
     "gideon agent update research",
     "gideon skills install summarize",
     "gideon service status",
-    # A DIFFERENT service, and a container. The atom's mandatory negative.
     "systemctl --user restart nginx.service",
     "sudo systemctl restart postgresql",
     "service sshd restart",
@@ -109,10 +96,8 @@ BENIGN = [
     "brew services restart postgresql",
     "pkill -f node",
     "kill 999999",
-    # Prose that mentions us. Arguments to a data program are never code.
     'echo "gideon restart is dangerous"',
     "grep -r restart /var/log/app.log",
-    # Ordinary automation.
     "git commit -am wip && git push",
     "rsync -a /data /backup",
     "$EDITOR notes.md",
@@ -124,8 +109,12 @@ BENIGN = [
 def test_a_command_that_would_kill_the_runner_is_classified_as_self(command):
     """🔴 THE CONTROL. Each of these acts on THIS process, so each must classify as `self`."""
     effect = classify_host_effect(command)
-    assert effect.refuses, f"{command!r} would kill its own runner and was not classified"
-    assert effect.target == "self", f"{command!r} classified as target={effect.target!r}"
+    assert (
+        effect.refuses
+    ), f"{command!r} would kill its own runner and was not classified"
+    assert (
+        effect.target == "self"
+    ), f"{command!r} classified as target={effect.target!r}"
 
 
 @pytest.mark.parametrize("shape", sorted(EVASIONS), ids=sorted(EVASIONS))
@@ -161,14 +150,11 @@ def test_the_refusal_NAMES_WHAT_IT_TRIED_TO_DO():
 
 def test_the_refusal_NAMES_THE_INTERACTIVE_PATH():
     """The guard is about unattended self-destruction, not about forbidding restarts — so the
-    refusal has to say where the operation IS available, or it reads as "never allowed"."""
+    refusal has to say where the operation IS available, or it reads as "never allowed".
+    """
     reason = classify_host_effect("gideon restart").reason()
     assert "interactive" in reason.lower(), reason
 
-
-# --------------------------------------------------------------------------------------
-# Fail closed.
-# --------------------------------------------------------------------------------------
 
 UNCLASSIFIABLE = {
     "unresolved_program_beside_a_lifecycle_verb": "$CMD restart",
@@ -182,7 +168,8 @@ UNCLASSIFIABLE = {
 @pytest.mark.parametrize("shape", sorted(UNCLASSIFIABLE), ids=sorted(UNCLASSIFIABLE))
 def test_an_unclassifiable_action_FAILS_CLOSED(shape):
     """Refused, and refused as `unknown` rather than mislabelled as a known effect — the reason
-    a user reads must say the guard could not tell, not invent an operation it never saw."""
+    a user reads must say the guard could not tell, not invent an operation it never saw.
+    """
     effect = classify_host_effect(UNCLASSIFIABLE[shape])
     assert effect.refuses, f"{shape} was admitted: {UNCLASSIFIABLE[shape]!r}"
     assert effect.kind == "unknown", effect
@@ -191,14 +178,10 @@ def test_an_unclassifiable_action_FAILS_CLOSED(shape):
 
 def test_failing_closed_is_BOUNDED_and_not_a_blanket_refusal():
     """The other half of fail-closed, and the half that turns a guard into an outage if missed:
-    an unresolvable variable OUTSIDE lifecycle territory is not this guard's business."""
+    an unresolvable variable OUTSIDE lifecycle territory is not this guard's business.
+    """
     for command in ("$EDITOR notes.md", "$PYTHON script.py", "cat $LOGFILE"):
         assert not classify_host_effect(command).refuses, command
-
-
-# --------------------------------------------------------------------------------------
-# Unattended only — and the ONE unattendedness decision.
-# --------------------------------------------------------------------------------------
 
 
 def test_an_unattended_dispatch_is_refused():
@@ -219,24 +202,21 @@ def test_an_EMPTY_session_key_is_treated_as_unattended():
     assert unattended_host_effect("gideon stop", "") is not None
 
 
-def test_unattendedness_comes_from_is_unattended_session_and_NOT_a_SECOND_NOTION(monkeypatch):
+def test_unattendedness_comes_from_is_unattended_session_and_NOT_a_SECOND_NOTION(
+    monkeypatch,
+):
     """Proven by outcome: flipping the shared predicate flips this guard.
 
     If the guard had minted its own notion of "unattended" — a prefix list of its own, an env
     check — this monkeypatch would not reach it and the assertion below would fail.
     """
-    import gideon.guardrails.policy as policy
+    import gideon.security.guardrails.policy as policy
 
     monkeypatch.setattr(policy, "is_unattended_session", lambda key: False)
     assert unattended_host_effect("gideon restart", UNATTENDED) is None
 
     monkeypatch.setattr(policy, "is_unattended_session", lambda key: True)
     assert unattended_host_effect("gideon restart", INTERACTIVE) is not None
-
-
-# --------------------------------------------------------------------------------------
-# Distinct from WF2AUT-9's liveness guard.
-# --------------------------------------------------------------------------------------
 
 
 def test_WF2AUT9s_liveness_guard_ADMITS_the_fire_this_guard_refuses():
@@ -248,23 +228,21 @@ def test_WF2AUT9s_liveness_guard_ADMITS_the_fire_this_guard_refuses():
     actually writes — is NOT busy by that guard's reckoning, so it would fire. This guard refuses
     it. Neither subsumes the other, so neither is a duplicate of the other.
     """
-    from gideon.triggers.liveness import is_target_active
+    from gideon.automation.triggers.liveness import is_target_active
 
     active, reason = is_target_active(None, now=0.0, base_dir=None)
-    assert (active, reason) == (False, ""), "WF2AUT-9's guard should admit an unguarded trigger"
+    assert (active, reason) == (
+        False,
+        "",
+    ), "WF2AUT-9's guard should admit an unguarded trigger"
     assert unattended_host_effect("gideon restart", UNATTENDED) is not None
-
-
-# --------------------------------------------------------------------------------------
-# The seam: the guard must run BEFORE the provider executes.
-# --------------------------------------------------------------------------------------
 
 
 def _orch():
     """The construction `test_triggers_denylist` uses: the fire path needs no __init__ state."""
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.gateway import RuntimeCoordinator
 
-    return object.__new__(GatewayOrchestrator)
+    return object.__new__(RuntimeCoordinator)
 
 
 def _trigger(config: dict, *, tid: str = "clock:nightly"):
@@ -298,10 +276,10 @@ def _fire(trigger):
 
 
 def _rows(tid: str) -> list[dict]:
-    from gideon.config.loader import config_dir
-    from gideon.schedule_history import ScheduleRunStore
+    from gideon.automation.schedule_history import ExecutionJournal
+    from gideon.core.config.loader import config_dir
 
-    rows, _total = asyncio.run(ScheduleRunStore(config_dir()).list_for_job(tid))
+    rows, _total = asyncio.run(ExecutionJournal(config_dir()).list_for_job(tid))
     return rows
 
 
@@ -336,4 +314,6 @@ def test_the_guard_reaches_actions_whose_command_lives_under_another_key(provide
     into that same collection — so an app provider that names its field `cmd` inherits this
     without knowing it exists, exactly as the denylist's contract promises."""
     _fire(_trigger({"cmd": "gideon service uninstall"}, tid="clock:altkey"))
-    assert provider.calls == [], "a self-destructing action under `cmd` was not screened"
+    assert (
+        provider.calls == []
+    ), "a self-destructing action under `cmd` was not screened"

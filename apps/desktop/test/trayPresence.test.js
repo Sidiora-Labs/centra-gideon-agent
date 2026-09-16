@@ -11,9 +11,8 @@ const {
   shouldHideOnClose,
   shouldQuitOnAllWindowsClosed,
   makeTrayPresence,
-} = require("../trayPresence");
+} = require("../src/native/tray-presence");
 
-/** Flatten a template (including submenus) to every row carrying a click handler. */
 function clickableRows(template) {
   const out = [];
   for (const row of template) {
@@ -72,9 +71,6 @@ describe("summarizePresence", () => {
 
 describe("composeTrayTitle — the single writer for the menu-bar title", () => {
   it("capture beats the approvals badge", () => {
-    // DC-3's indicator and DC-4's badge both want `tray.setTitle`. The privacy
-    // signal wins; without one composer the later caller would silently erase the
-    // other's text.
     assert.equal(composeTrayTitle({ capturing: true, approvals: 4 }), "● Listening");
   });
 
@@ -112,8 +108,6 @@ describe("buildTrayMenuTemplate", () => {
       actions: a,
     });
 
-    // VACUITY FLOOR: deleting the feature must not make this suite pass by matching
-    // nothing. A menu shorter than this cannot carry the atom's five commitments.
     assert.ok(template.length >= 10, `expected a full menu, got ${template.length} rows`);
     assert.ok(clickableRows(template).length >= 5, "at least five rows must actually do something");
 
@@ -199,7 +193,6 @@ describe("buildTrayMenuTemplate", () => {
     const withTiles = buildTrayMenuTemplate({ tiles: [{ label: "Next meeting: 3pm" }] });
     assert.ok(!labels(without).includes("Next meeting: 3pm"));
     assert.ok(labels(withTiles).includes("Next meeting: 3pm"));
-    // Non-blocking: an absent tile registry must not leave an empty section behind.
     assert.equal(withTiles.length, without.length + 2);
   });
 
@@ -271,7 +264,6 @@ describe("makeTrayPresence", () => {
     assert.equal(presence.start(), true);
     assert.equal(presence.available, true);
     assert.equal(calls.menus.length, 1);
-    // Vacuity floor: an empty template would satisfy "a menu was set".
     assert.ok(calls.menus[0].template.length >= 10);
     assert.deepStrictEqual(calls.icon, { resized: true }, "the icon must be resized for the menu bar");
   });
@@ -289,7 +281,6 @@ describe("makeTrayPresence", () => {
     assert.equal(presence.start(), false);
     assert.equal(presence.available, false);
     assert.ok(logs.some((m) => /icon/.test(m)));
-    // And the fallback is reachable: with no tray, closing the window must close it.
     assert.equal(shouldHideOnClose({ trayAvailable: presence.available, isQuitting: false }), false);
   });
 
@@ -415,21 +406,6 @@ describe("makeTrayPresence", () => {
   });
 });
 
-// ── INU-9: the quick-capture row must reach a capability, not a bare navigation ────────────
-//
-// DC-4 shipped the row and its deep link; nothing read the flag, so the menu item opened the
-// inbox and wrote nothing. Measured at the time: `capture=1` appeared in exactly one place in
-// the product (`main.js`) and zero places in `web/src`.
-//
-// Two gaps this closes, both of which let that ship:
-//
-//   1. The row had NO behavioural test. `buildTrayMenuTemplate` was asserted to CONTAIN the
-//      label ("Quick Capture Note"), and the only thing that ever invoked its handler was the
-//      blanket "survives being built with no actions at all" case — which calls every row
-//      against noops and therefore cannot tell a wired row from a dead one.
-//   2. The deep link's URL was untested entirely, in either repo half. So the tray and the SPA
-//      could drift on the flag NAME with nothing to catch it — one renames `capture`, the
-//      other keeps reading it, and the row silently reverts to a navigation.
 describe("quick capture reaches the note capability", () => {
   const spy = () => {
     const calls = [];
@@ -453,8 +429,6 @@ describe("quick capture reaches the note capability", () => {
   });
 
   it("no OTHER row fires quickCapture", () => {
-    // Otherwise the assertion above could pass on a menu that captures a note when the user
-    // meant to open the dashboard.
     const template = buildTrayMenuTemplate({ presence: EMPTY_PRESENCE, actions: spy() });
     const rows = template.filter((r) => /Quick Capture Note/.test(r.label || ""));
     assert.equal(rows.length, 1, "exactly one row owns the capture intent");
@@ -464,13 +438,12 @@ describe("quick capture reaches the note capability", () => {
 describe("main.js quick-capture deep link agrees with the SPA that reads it", () => {
   const fs = require("node:fs");
   const path = require("node:path");
-  const root = path.join(__dirname, "..", "..");
-  const main = fs.readFileSync(path.join(__dirname, "..", "main.js"), "utf8");
+  const root = path.join(__dirname, "..", "..", "..");
+  const main = fs.readFileSync(path.join(__dirname, "..", "src/application/desktop-application.js"), "utf8");
   const inboxPage = fs.readFileSync(
-    path.join(root, "web", "src", "pages", "inbox", "InboxPage.tsx"),
+    path.join(root, "apps", "console", "src", "features", "inbox", "InboxPage.tsx"),
     "utf8",
   );
-  /** Comments stripped: main.js DISCUSSES the flag in prose, and this rail is about code. */
   const mainCode = main.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 
   it("reads a main.js that actually wires the tray (vacuity floor)", () => {
@@ -479,26 +452,22 @@ describe("main.js quick-capture deep link agrees with the SPA that reads it", ()
   });
 
   it("the shell builds the inbox deep link with ?capture=1", () => {
-    assert.match(mainCode, /quickCapture:\s*\(\)\s*=>\s*deepLink\(`\$\{DEEP_LINKS\.inbox\}\?capture=1`\)/);
+    assert.match(mainCode, /quickCapture:\s*\(\)\s*=>\s*this\.deepLink\(`\$\{DEEP_LINKS\.inbox\}\?capture=1`\)/);
     assert.equal(DEEP_LINKS.inbox, "#/inbox", "the SPA route the flag rides on");
   });
 
   it("and the SPA reads that exact flag, so the row is not a navigation", () => {
-    // The two halves live in different repo directories and ship together; this is the only
-    // place that can see both. `useQueryFlag` treats '1' as on, which is what `?capture=1`
-    // sends — asserted here rather than assumed, because a flag read as a truthy STRING would
-    // also accept `?capture=0`.
     assert.match(inboxPage, /useQueryFlag\(query,\s*setQuery,\s*'capture'\)/);
     const hook = fs.readFileSync(
-      path.join(root, "web", "src", "app", "useQueryState.ts"),
+      path.join(root, "apps", "console", "src", "app", "shell", "useQueryState.ts"),
       "utf8",
     );
-    assert.match(hook, /query\[key\] === '1'/);
+    assert.match(hook, /const \[value, write\] = useQueryParam\(query, setQuery, key/);
+    assert.match(hook, /value === '1'/);
+    assert.match(hook, /qget = [^\n]+query\[key\]/);
   });
 
   it("the shell still mints no endpoint of its own", () => {
-    // The capability is core's. A shell that started POSTing would be a consumer defining
-    // its owner's contract — the thing DC-4 correctly refused to do.
     assert.ok(
       !/\/api\/inbox/.test(mainCode),
       "the desktop shell must reach the inbox through the SPA, not by calling the API",

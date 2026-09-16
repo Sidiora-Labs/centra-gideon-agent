@@ -1,16 +1,3 @@
-/**
- * Connect-mode's decisions, against real files and real sockets (`CA-8`).
- *
- * 🔑 THE RECONNECT LEG KILLS A REAL LISTENER. `probeEndpoint` is driven against an `http.Server`
- * bound on loopback, which is then genuinely torn down (`closeAllConnections()` + `close()`), probed
- * again, and rebound on the same port. A reconnect test that hands the prober a fake returning
- * `{status:'unreachable'}` proves that the fake works; only an actual `ECONNREFUSED` from an actual
- * closed port proves the shell notices a gateway going away and comes back when it returns.
- *
- * 🔑 THE STORE LEG WRITES REAL FILES. `absent`, `empty`, `unparseable` and `unreadable` are four
- * separate facts with four separate behaviours, so each one is produced on disk (a missing file, a
- * zero-length file, a file of garbage, a file with its read bit removed) rather than stubbed.
- */
 
 const { describe, it, before, after } = require("node:test");
 const assert = require("node:assert/strict");
@@ -49,12 +36,11 @@ const {
   sanitizeLabel,
   adoptGatewayLabel,
   LABEL_MAX,
-} = require("../connectMode");
+} = require("../src/connection/controller");
 
-const { openShellStore, readStoreFile, inspect, storePath, STORE_ABSENT, STORE_EMPTY, STORE_UNPARSEABLE, STORE_UNREADABLE, STORE_OK } = require("../shellStore");
-const { loadRegistry, endpointScope, endpointKey } = require("../endpointRegistry");
+const { openShellStore, readStoreFile, inspect, storePath, STORE_ABSENT, STORE_EMPTY, STORE_UNPARSEABLE, STORE_UNREADABLE, STORE_OK } = require("../src/storage/shell-store");
+const { loadRegistry, endpointScope, endpointKey } = require("../src/storage/endpoint-registry");
 
-// ── helpers ────────────────────────────────────────────────────────────────────────────────────
 
 let tmpRoots = [];
 function tmpHome() {
@@ -67,19 +53,11 @@ after(() => {
     try {
       fs.rmSync(dir, { recursive: true, force: true });
     } catch {
-      /* a temp dir left behind is not a test failure */
     }
   }
   tmpRoots = [];
 });
 
-/**
- * Write a store fixture the way the shell would: 0700 directory, 0600 file.
- *
- * A hand-written fixture at the default 0644 is world-READABLE, and the permission rail correctly
- * refuses to trust rows in it — which made three tests here fail for the right reason and the wrong
- * subject. Keeping the fixture faithful is what lets those tests measure what they name.
- */
 function seedStore(file, body) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   fs.writeFileSync(file, body, { mode: 0o600 });
@@ -87,7 +65,6 @@ function seedStore(file, body) {
   fs.chmodSync(path.dirname(file), 0o700);
 }
 
-/** A real loopback HTTP server. `handler(req,res)` decides what it is pretending to be. */
 function listen(handler, port = 0) {
   return new Promise((resolve, reject) => {
     const server = http.createServer(handler);
@@ -99,7 +76,6 @@ function listen(handler, port = 0) {
   });
 }
 
-/** Take a listener down for real, not just stop accepting. */
 function kill({ server }) {
   return new Promise((resolve) => {
     server.closeAllConnections?.();
@@ -121,7 +97,6 @@ const lookupOf = (map) => async (host) => {
   return map[host].map((address) => ({ address, family: address.includes(":") ? 6 : 4 }));
 };
 
-// ── the credential rails ───────────────────────────────────────────────────────────────────────
 
 describe("assertLoopbackTarget — the rail that keeps .local_secret on this machine", () => {
   it("passes for the shapes the spawned gateway actually takes", () => {
@@ -131,7 +106,7 @@ describe("assertLoopbackTarget — the rail that keeps .local_secret on this mac
   });
 
   it("throws for a LAN host, a public host, and a name that merely resolves to loopback", () => {
-    for (const url of ["http://10.0.0.4:10000", "https://pc.example.com", "http://gideon.local:10000", "http://lh.0x41.pw"]) {
+    for (const url of ["http://10.0.0.4:10000", "https://gideon.example.com", "http://gideon.local:10000", "http://lh.0x41.pw"]) {
       assert.throws(() => assertLoopbackTarget(url, "capability manifest"), /non-loopback target/, url);
     }
   });
@@ -149,7 +124,7 @@ describe("shouldAttachBridge — the capability bridge is loopback-only", () => 
   });
 
   it("does NOT attach for a LAN or remote gateway", () => {
-    for (const url of ["http://10.0.0.4:10000", "http://gideon.local:10000", "https://pc.example.com", "http://brain.ts.net"]) {
+    for (const url of ["http://10.0.0.4:10000", "http://gideon.local:10000", "https://gideon.example.com", "http://brain.ts.net"]) {
       assert.strictEqual(shouldAttachBridge(url), false, url);
     }
   });
@@ -164,7 +139,6 @@ describe("shouldAttachBridge — the capability bridge is loopback-only", () => 
   });
 });
 
-// ── the store: four facts, four behaviours ─────────────────────────────────────────────────────
 
 describe("shellStore — absent, empty, unparseable and unreadable are four different facts", () => {
   it("reports ABSENT for a file that is not there", () => {
@@ -266,7 +240,6 @@ describe("shellStore — absent, empty, unparseable and unreadable are four diff
   });
 });
 
-// ── startup: spawn-local is the default, and every fallback says which reason ───────────────────
 
 describe("describeStartup — spawn-local unless connect is fully justified", () => {
   const confirmedStore = (origin, { trust = "private", scheme = "http:", addresses = "" } = {}) => {
@@ -325,8 +298,6 @@ describe("describeStartup — spawn-local unless connect is fully justified", ()
   });
 
   it("refuses a confirmed row whose URL no longer passes policy — no grandfathering", () => {
-    // A row confirmed while it was plaintext-on-the-LAN, then hand-edited to a plaintext PUBLIC
-    // host. The confirmation record must not carry the old verdict forward.
     const store = openShellStore({ home: tmpHome() });
     confirmEndpoint(store, { origin: "http://93.184.216.34:10000", trust: "private", scheme: "http:", host: "93.184.216.34", fingerprint: "" }, { label: "x" });
     const startup = describeStartup({ store });
@@ -335,20 +306,17 @@ describe("describeStartup — spawn-local unless connect is fully justified", ()
   });
 
   it("treats an UNCONFIRMED row, an UNPARSEABLE confirmation and a MOVED host as three reasons", () => {
-    // (a) never confirmed: write the row without a confirmation record.
     const a = openShellStore({ home: tmpHome() });
-    const { saveRegistry, addEndpoint } = require("../endpointRegistry");
+    const { saveRegistry, addEndpoint } = require("../src/storage/endpoint-registry");
     saveRegistry(a, addEndpoint({ active: "", endpoints: [] }, { id: "ep_x", label: "x", base_url: "http://10.0.0.4:10000", kind: "remote", device_session_ref: "" }));
     let s = describeStartup({ store: a });
     assert.strictEqual(s.reason, "active_endpoint_unconfirmed");
     assert.strictEqual(s.warnings[0].detail, "unconfirmed:absent");
 
-    // (b) a confirmation record that will not parse — not the same as never having confirmed.
     endpointScope(a, "ep_x").set("connect.confirmed", "{not json");
     s = describeStartup({ store: a });
     assert.strictEqual(s.warnings[0].detail, "unconfirmed:unparseable");
 
-    // (c) confirmed, but the name now resolves elsewhere.
     const c = openShellStore({ home: tmpHome() });
     confirmEndpoint(c, { origin: "http://gideon.local:10000", trust: "private", scheme: "http:", host: "gideon.local", fingerprint: "10.0.0.4" }, { label: "Home" });
     assert.strictEqual(describeStartup({ store: c, currentFingerprint: "10.0.0.4" }).mode, "connect");
@@ -360,7 +328,7 @@ describe("describeStartup — spawn-local unless connect is fully justified", ()
   });
 
   it("distinguishes a row with NO url from a row with an unusable one", () => {
-    const { saveRegistry, addEndpoint } = require("../endpointRegistry");
+    const { saveRegistry, addEndpoint } = require("../src/storage/endpoint-registry");
     const none = openShellStore({ home: tmpHome() });
     saveRegistry(none, addEndpoint({ active: "", endpoints: [] }, { id: "ep_a", label: "a", base_url: "", kind: "remote", device_session_ref: "" }));
     assert.strictEqual(describeStartup({ store: none }).reason, "active_endpoint_has_no_url");
@@ -379,7 +347,6 @@ describe("describeStartup — spawn-local unless connect is fully justified", ()
   });
 });
 
-// ── adding an endpoint ─────────────────────────────────────────────────────────────────────────
 
 describe("prepareEndpoint — validate and classify BEFORE anything is dialed", () => {
   it("reads a pairing link into an origin, a code and a pair target", async () => {
@@ -393,14 +360,14 @@ describe("prepareEndpoint — validate and classify BEFORE anything is dialed", 
   });
 
   it("navigates to the bare origin when no code came with the input", async () => {
-    const plan = await prepareEndpoint("https://pc.example.com", { lookup: lookupOf({ "pc.example.com": ["93.184.216.34"] }) });
+    const plan = await prepareEndpoint("https://gideon.example.com", { lookup: lookupOf({ "gideon.example.com": ["93.184.216.34"] }) });
     assert.ok(plan.ok, plan.code);
-    assert.strictEqual(plan.navigateTo, "https://pc.example.com");
+    assert.strictEqual(plan.navigateTo, "https://gideon.example.com");
     assert.strictEqual(plan.trust, "public");
   });
 
   it("REFUSES plaintext to a public host", async () => {
-    const plan = await prepareEndpoint("http://pc.example.com", { lookup: lookupOf({ "pc.example.com": ["93.184.216.34"] }) });
+    const plan = await prepareEndpoint("http://gideon.example.com", { lookup: lookupOf({ "gideon.example.com": ["93.184.216.34"] }) });
     assert.strictEqual(plan.ok, false);
     assert.strictEqual(plan.code, "PLAINTEXT_PUBLIC_REFUSED");
   });
@@ -429,10 +396,8 @@ describe("confirmEndpoint + switchTo", () => {
   it("records the confirmation in the endpoint's OWN namespace, not as a registry field", () => {
     const store = openShellStore({ home: tmpHome() });
     const { id } = confirmEndpoint(store, { origin: "http://10.0.0.4:10000", trust: "private", scheme: "http:", host: "10.0.0.4", fingerprint: "10.0.0.4" }, { label: "Work" });
-    // The registry row carries exactly the five contract fields and nothing else.
     const row = loadRegistry(store).endpoints.find((e) => e.id === id);
     assert.deepStrictEqual(Object.keys(row).sort(), ["base_url", "device_session_ref", "id", "kind", "label"]);
-    // The confirmation lives under the namespaced key.
     assert.ok(store.getItem(endpointKey(id, "connect.confirmed")));
     const rec = readConfirmation(store, id);
     assert.strictEqual(rec.present, true);
@@ -516,9 +481,6 @@ describe("currentFingerprintFor - the guard's only source of a current answer", 
   });
 
   it("fingerprints an IP literal as ITSELF, so the check is a trivial match rather than a skip", async () => {
-    // Measured, not guessed: `resolveHostTrust` answers with the literal for an IP, so the
-    // fingerprint recorded at confirm time and the one computed later are the same string. A change
-    // to the literal is caught by the origin comparison instead, so nothing is lost.
     assert.strictEqual(await currentFingerprintFor("http://10.0.0.4:10000"), "10.0.0.4");
     const store = openShellStore({ home: tmpHome() });
     const plan = await prepareEndpoint("http://10.0.0.4:10000");
@@ -528,9 +490,6 @@ describe("currentFingerprintFor - the guard's only source of a current answer", 
   });
 
   it("answers empty on a FAILED lookup, so a DNS outage is not reported as a moved host", async () => {
-    // The distinction matters: an empty fingerprint makes `confirmationHolds` skip the comparison,
-    // so the endpoint stays usable. Treating a lookup failure as a move would demand a
-    // re-confirmation the user cannot give while their resolver is down.
     assert.strictEqual(await currentFingerprintFor("http://gone.example.com", { lookup: lookupOf({}) }), "");
   });
 
@@ -600,7 +559,6 @@ describe("labels — the gateway may name itself, but only over a name the SHELL
   });
 });
 
-// ── probing a real server ──────────────────────────────────────────────────────────────────────
 
 describe("probeEndpoint — against real listeners, carrying no credential", () => {
   it("recognises a real Gideon healthz and reads its version", async () => {
@@ -693,8 +651,6 @@ describe("probeEndpoint — against real listeners, carrying no credential", () 
       gatewayHandler()(req, res);
     });
     try {
-      // A plaintext PUBLIC address is refused by `transportPolicy`, so nothing is dialed. Using a
-      // real listener here is the point: the assertion is that it was never contacted.
       const r = await probeEndpoint("http://93.184.216.34:1/");
       assert.strictEqual(r.status, HEALTH_REFUSED_BY_POLICY);
       assert.strictEqual(hit, 0);
@@ -706,7 +662,6 @@ describe("probeEndpoint — against real listeners, carrying no credential", () 
   it("does not read an unbounded body from a hostile endpoint", async () => {
     const s = await listen((req, res) => {
       res.writeHead(200, { "Content-Type": "application/json" });
-      // 5 MB of junk. The probe caps its buffer, so this must resolve rather than grow.
       res.end("x".repeat(5 * 1024 * 1024));
     });
     try {
@@ -719,31 +674,26 @@ describe("probeEndpoint — against real listeners, carrying no credential", () 
   });
 });
 
-// ── the reconnect path, against a connection that really dies ───────────────────────────────────
 
 describe("reconnect — driven by killing a real listener", () => {
   it("goes reachable → unreachable → reachable across a genuine drop and rebind", async () => {
     const s1 = await listen(gatewayHandler("1.0.0"));
     const { port, origin } = s1;
 
-    // 1. A live gateway.
     const before = await probeEndpoint(origin);
     assert.strictEqual(before.status, HEALTH_REACHABLE, "the fixture gateway did not answer");
     assert.strictEqual(nextReconnectStep({ status: before.status }).action, "stay");
 
-    // 2. Kill it for real — connections aborted, listener closed, port released.
     await kill(s1);
     const during = await probeEndpoint(origin);
     assert.strictEqual(during.status, HEALTH_UNREACHABLE, `expected a dead port, got ${during.status}`);
     assert.strictEqual(during.detail, "ECONNREFUSED", "the drop was not a real TCP refusal");
 
-    // 3. The shell schedules a bounded retry rather than giving up or re-presenting anything.
     const step = nextReconnectStep({ status: during.status, attempt: 0 });
     assert.strictEqual(step.action, "retry");
     assert.strictEqual(step.attempt, 1);
     assert.strictEqual(step.delayMs, BACKOFF_BASE_MS * 2);
 
-    // 4. It comes back on the same port.
     const s2 = await listen(gatewayHandler("1.0.1"), port);
     try {
       const after = await probeEndpoint(origin);
@@ -756,7 +706,6 @@ describe("reconnect — driven by killing a real listener", () => {
   });
 
   it("drives the real backoff loop to recovery and counts the probes", async () => {
-    // The whole loop, unmocked: the endpoint is down for the first two probes and up for the third.
     const s0 = await listen(gatewayHandler(), 0);
     const { port, origin } = s0;
     await kill(s0);
@@ -771,7 +720,7 @@ describe("reconnect — driven by killing a real listener", () => {
       const step = nextReconnectStep({ status: probe.status, attempt });
       action = step.action;
       attempt = step.attempt;
-      if (probes === 2) revived = await listen(gatewayHandler(), port); // the gateway comes back
+      if (probes === 2) revived = await listen(gatewayHandler(), port);
       if (action === "retry") await new Promise((r) => setTimeout(r, Math.min(step.delayMs, 20)));
     }
     try {
@@ -838,7 +787,6 @@ describe("reconnect — driven by killing a real listener", () => {
     }
     assert.strictEqual(action, "give_up");
     assert.strictEqual(delays.length, MAX_RECONNECT_ATTEMPTS);
-    // The curve is the SPA's own: `250 * 2 ** min(attempt, 6)`.
     assert.deepStrictEqual(delays.slice(0, 3), [500, 1000, 2000]);
     assert.strictEqual(delays[delays.length - 1], BACKOFF_BASE_MS * 2 ** BACKOFF_CEILING);
   });
@@ -852,7 +800,6 @@ describe("reconnect — driven by killing a real listener", () => {
   });
 });
 
-// ── revoking one gateway breaks only that entry (T4.4's acceptance bar) ─────────────────────────
 
 describe("one gateway's revocation touches only its own row", () => {
   let work;
@@ -861,9 +808,6 @@ describe("one gateway's revocation touches only its own row", () => {
   let ids;
 
   before(async () => {
-    // Two REAL gateways. One has had its device session revoked (it answers 401); the other is
-    // healthy. Two live listeners rather than one fake, because the claim under test is that the
-    // two rows are independent — and a single stubbed prober cannot be independent of itself.
     work = await listen((req, res) => res.writeHead(403).end());
     home = await listen(gatewayHandler("2.0.0"));
     store = openShellStore({ home: tmpHome() });
@@ -889,15 +833,14 @@ describe("one gateway's revocation touches only its own row", () => {
   it("leaves the healthy row's registry entry, confirmation and namespaced state untouched", async () => {
     await probeAll(loadRegistry(store));
     const reg = loadRegistry(store);
-    assert.strictEqual(reg.endpoints.length, 2); // the two paired rows; no local row in this fixture
+    assert.strictEqual(reg.endpoints.length, 2);
     assert.strictEqual(readConfirmation(store, ids.home).present, true);
     assert.strictEqual(endpointScope(store, ids.home).get("last.route"), "#/inbox");
-    // And it is still switchable — one endpoint's 403 is not a reason to re-pair the other.
     assert.strictEqual(switchTo(store, ids.home).ok, true);
   });
 
   it("reports a row with no URL as UNKNOWN, not as unreachable", async () => {
-    const { saveRegistry, addEndpoint } = require("../endpointRegistry");
+    const { saveRegistry, addEndpoint } = require("../src/storage/endpoint-registry");
     const s = openShellStore({ home: tmpHome() });
     saveRegistry(s, addEndpoint({ active: "", endpoints: [] }, { id: "ep_nourl", label: "x", base_url: "", kind: "remote", device_session_ref: "" }));
     const health = await probeAll(loadRegistry(s));

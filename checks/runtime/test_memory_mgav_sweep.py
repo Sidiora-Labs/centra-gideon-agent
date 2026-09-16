@@ -33,23 +33,16 @@ from typing import Any
 
 import pytest
 
-from gideon.context_engine import DefaultContextEngine
-from gideon.memory_service import MemoryService, service_for
-from gideon.memory_vault import MemoryVault, split_page
-from gideon.vector_memory import VectorMemoryStore
+from gideon.cognition.context_engine import DefaultContextEngine
+from gideon.cognition.memory_service import MemoryService, service_for
+from gideon.cognition.memory_vault import MemoryVault, split_page
+from gideon.cognition.vector_memory import SemanticArchive
 
-# The record the whole sweep follows, and the entity it names. One fact, one entity, so
-# every leg below can be read as "what happened to THIS fact".
 KEY = "project.atlas.cadence"
 FACT = "Atlas ships on Fridays"
 EDITED = "Atlas ships on Tuesdays"
 ENTITY = "Atlas"
 ALIAS = "Sparrow"
-# A second record that ONLY the graph arm can surface: neither its key nor its text shares
-# a word with the query below, and it reaches the entity through the ALIAS. That is what
-# makes the recall leg falsifiable — `project.atlas.cadence` would come back on keyword
-# overlap alone ("atlas" is in its key), so asserting on it would pass with the graph off
-# and prove nothing about §2.1's third arm.
 GRAPH_ONLY_KEY = "pref.facet.release.freeze"
 GRAPH_ONLY_FACT = f"{ALIAS} freezes in December"
 QUERY = f"what about {ENTITY}?"
@@ -64,7 +57,7 @@ def home(tmp_path, monkeypatch):
     `~/workplace`. The config file is written empty so `AppConfig.load()` reads defaults
     from THIS directory rather than the developer's own settings.
     """
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     monkeypatch.setenv("GIDEON_WORKSPACE", str(tmp_path / "ws"))
     (tmp_path / "ws").mkdir(exist_ok=True)
@@ -76,7 +69,7 @@ def _set_memory_config(home: Path, **fields: Any) -> None:
     """Write `memory.*` keys into the isolated config.json, as the PATCH allowlist does.
 
     Writing the FILE rather than patching an `AppConfig` object is the point: both
-    `VectorMemoryStore.graph_enabled` and `context_engine._push_settings` re-read config
+    `SemanticArchive.graph_enabled` and `context_engine._push_settings` re-read config
     per call so the Settings toggles are live switches, and only a file write exercises
     that. A monkeypatched config object would pass even if the live read regressed to a
     boot-time capture.
@@ -99,7 +92,7 @@ def store(home):
     lying. Without an embedder recall is keyword + graph, which is what §2.1 degrades
     between.
     """
-    vs = VectorMemoryStore(db_path=home / "memory.db", embedding_dim=3)
+    vs = SemanticArchive(db_path=home / "memory.db", embedding_dim=3)
     vs.init()
     return vs
 
@@ -110,7 +103,7 @@ def svc(store):
 
 
 class _Builder:
-    """The `ContextBuilder` collaborator `assemble` needs, and nothing more.
+    """The `PromptAssembler` collaborator `assemble` needs, and nothing more.
 
     A stand-in for the builder, NOT for the code under test: `assemble` +
     `push_context_block` + `service_for` + the store all run for real. `build_message`
@@ -120,12 +113,16 @@ class _Builder:
 
     def __init__(self, provider: Any) -> None:
         self._provider = provider
-        self.conversation_log = None  # no prior turns; the current message is the window
+        self.conversation_log = (
+            None  # no prior turns; the current message is the window
+        )
 
     def get_memory_for(self, cwd: Any, memory_store: Any) -> Any:
         return self._provider
 
-    def build_message(self, text: str, is_new_session: bool, **kwargs: Any) -> tuple[str, None]:
+    def build_message(
+        self, text: str, is_new_session: bool, **kwargs: Any
+    ) -> tuple[str, None]:
         return (text, None)
 
 
@@ -139,11 +136,11 @@ class _Projection:
     need.
     """
 
-    def __init__(self, vs: VectorMemoryStore) -> None:
+    def __init__(self, vs: SemanticArchive) -> None:
         self.vector_store = vs
 
 
-def _write_and_link(svc: MemoryService, store: VectorMemoryStore) -> str:
+def _write_and_link(svc: MemoryService, store: SemanticArchive) -> str:
     """Leg 1+2 of the sweep: declare the entity, write both facts, get them linked.
 
     `set_semantic` returns a reject tuple rather than raising, so both writes are checked
@@ -158,7 +155,7 @@ def _write_and_link(svc: MemoryService, store: VectorMemoryStore) -> str:
     return entity_id
 
 
-def _events_for(store: VectorMemoryStore, key: str) -> list[dict]:
+def _events_for(store: SemanticArchive, key: str) -> list[dict]:
     return [e for e in store.read_events(limit=200) if e.get("memory_key") == key]
 
 
@@ -179,35 +176,36 @@ def _rewrite_body(page: Path, new_body: str) -> None:
     page.write_text(f"---\n{block}\n---\n\n{new_body.rstrip()}\n", encoding="utf-8")
 
 
-# ── the sweep ────────────────────────────────────────────────────────────────
-
-
-def test_the_sweep_runs_write_link_recall_volunteer_editvault_undo_in_order(home, svc, store):
+def test_the_sweep_runs_write_link_recall_volunteer_editvault_undo_in_order(
+    home, svc, store
+):
     """`MGAV-9`'s last clause, one leg at a time, each fed the previous leg's output.
 
     Every assertion carries the leg name, because the failure that matters here is
     "which link in the chain broke", not "something about memory is wrong".
     """
-    _set_memory_config(home, graph_enabled=True, push_context=True, push_min_confidence=0.5)
+    _set_memory_config(
+        home, graph_enabled=True, push_context=True, push_min_confidence=0.5
+    )
 
-    # ── write ──
     entity_id = _write_and_link(svc, store)
     assert _semantic_value(svc, KEY) == FACT, "write: the fact did not land"
 
-    # ── link ── the write path linked both facts to the entity they name, and typed the
-    # edges differently: a `project.atlas.*` key naming a project entity is affiliation,
-    # while the alias mention in a `pref.*` key is only a mention.
     backlinks = {b["from_ref"]: b["link_type"] for b in svc.graph_backlinks(entity_id)}
-    assert backlinks == {KEY: "same_project", GRAPH_ONLY_KEY: "mentions"}, f"link: {backlinks}"
+    assert backlinks == {
+        KEY: "same_project",
+        GRAPH_ONLY_KEY: "mentions",
+    }, f"link: {backlinks}"
 
-    # ── recall ── the graph arm surfaces the record whose wording shares NOTHING with the
-    # question, and the evidence tag names the entity that got it there.
     recalled = svc.semantic_context(QUERY, cap=1500)
-    assert GRAPH_ONLY_FACT in recalled, f"recall: the graph arm surfaced nothing — {recalled!r}"
+    assert (
+        GRAPH_ONLY_FACT in recalled
+    ), f"recall: the graph arm surfaced nothing — {recalled!r}"
     evidence = svc.graph_recall_evidence(QUERY)
-    assert evidence.get(GRAPH_ONLY_KEY) == [ENTITY], f"recall: no evidence tag — {evidence}"
+    assert evidence.get(GRAPH_ONLY_KEY) == [
+        ENTITY
+    ], f"recall: no evidence tag — {evidence}"
 
-    # ── volunteer ── the CALL SITE: what a real turn assembles, not `push_context`.
     engine = DefaultContextEngine()
     assembled = engine.assemble(
         _Builder(_Projection(store)),
@@ -215,22 +213,30 @@ def test_the_sweep_runs_write_link_recall_volunteer_editvault_undo_in_order(home
         is_new_session=False,
         session_key="sweep",
     )
-    assert FACT in assembled.message, f"volunteer: not in the assembled turn — {assembled.message}"
-    assert assembled.injected_chars > 0, "volunteer: the block was not counted as injected"
+    assert (
+        FACT in assembled.message
+    ), f"volunteer: not in the assembled turn — {assembled.message}"
+    assert (
+        assembled.injected_chars > 0
+    ), "volunteer: the block was not counted as injected"
 
-    # ── edit-vault ── mirror out, edit the page as a human would, absorb it back.
     vault = MemoryVault(svc, home / "vault", mode="two_way")
     vault.sync()
     page = home / "vault" / "facts" / f"{KEY}.md"
-    assert page.exists() and FACT in page.read_text(encoding="utf-8"), "edit-vault: no page"
+    assert page.exists() and FACT in page.read_text(
+        encoding="utf-8"
+    ), "edit-vault: no page"
     _rewrite_body(page, f"# {KEY}\n\n{EDITED}")
     absorbed = vault.sync()
-    assert absorbed["absorbed"] == 1, f"edit-vault: the edit was not detected — {absorbed}"
+    assert (
+        absorbed["absorbed"] == 1
+    ), f"edit-vault: the edit was not detected — {absorbed}"
     assert _semantic_value(svc, KEY) == EDITED, "edit-vault: the edit was not absorbed"
 
-    # ── undo ── the vault edit is a logged memory event, so it is reversible.
     updates = [e for e in _events_for(store, KEY) if e["event_type"] == "update"]
-    assert updates, f"undo: the vault edit logged no update event — {_events_for(store, KEY)}"
+    assert (
+        updates
+    ), f"undo: the vault edit logged no update event — {_events_for(store, KEY)}"
     ok, msg = store.undo_event(int(updates[0]["id"]))
     assert ok, f"undo: {msg}"
     assert _semantic_value(svc, KEY) == FACT, "undo: the prior value was not restored"
@@ -244,7 +250,9 @@ def test_the_push_toggle_gates_the_assembled_turn_live(home, svc, store):
     have seen the same call produce the block when it was on. `_push_settings` re-reads
     config per turn precisely so this works without a restart.
     """
-    _set_memory_config(home, graph_enabled=True, push_context=True, push_min_confidence=0.5)
+    _set_memory_config(
+        home, graph_enabled=True, push_context=True, push_min_confidence=0.5
+    )
     _write_and_link(svc, store)
     engine = DefaultContextEngine()
     builder = _Builder(_Projection(store))
@@ -265,7 +273,9 @@ def test_a_temporary_session_gets_no_volunteered_memory(home, svc, store):
     Beside the toggle test because they fail differently: this one is the branch in
     `assemble`, and it is the one an "always volunteer" refactor would quietly drop.
     """
-    _set_memory_config(home, graph_enabled=True, push_context=True, push_min_confidence=0.5)
+    _set_memory_config(
+        home, graph_enabled=True, push_context=True, push_min_confidence=0.5
+    )
     _write_and_link(svc, store)
     engine = DefaultContextEngine()
     builder = _Builder(_Projection(store))
@@ -273,10 +283,9 @@ def test_a_temporary_session_gets_no_volunteered_memory(home, svc, store):
 
     assert FACT in engine.assemble(builder, text, is_new_session=False).message
     blocked = engine.assemble(builder, text, is_new_session=False, blocks_reads=True)
-    assert blocked.message == text, f"a temporary session was volunteered memory — {blocked}"
-
-
-# ── degradation ──────────────────────────────────────────────────────────────
+    assert (
+        blocked.message == text
+    ), f"a temporary session was volunteered memory — {blocked}"
 
 
 def test_the_sweep_degrades_cleanly_with_the_graph_disabled(home, svc, store):
@@ -287,17 +296,20 @@ def test_the_sweep_degrades_cleanly_with_the_graph_disabled(home, svc, store):
     change. Recall, the vault and undo are the positive control — a store that had
     simply failed to load would take them down too.
     """
-    _set_memory_config(home, graph_enabled=True, push_context=True, push_min_confidence=0.5)
+    _set_memory_config(
+        home, graph_enabled=True, push_context=True, push_min_confidence=0.5
+    )
     entity_id = _write_and_link(svc, store)
     engine = DefaultContextEngine()
     builder = _Builder(_Projection(store))
     turn = f"any news on {ENTITY}?"
-    assert svc.has_graph and svc.graph_backlinks(entity_id), "control: the graph was never live"
+    assert svc.has_graph and svc.graph_backlinks(
+        entity_id
+    ), "control: the graph was never live"
     assert FACT in engine.assemble(builder, turn, is_new_session=False).message
 
     _set_memory_config(home, graph_enabled=False)
 
-    # The graph legs go quiet — empty shapes, not exceptions.
     assert svc.has_graph is False
     assert svc.entity_graph() == {"nodes": [], "edges": []}
     assert svc.graph_backlinks(entity_id) == []
@@ -306,10 +318,6 @@ def test_the_sweep_degrades_cleanly_with_the_graph_disabled(home, svc, store):
     assert svc.graph_proposals() == []
     assert engine.assemble(builder, turn, is_new_session=False).message == turn
 
-    # Recall DEGRADES rather than breaks: the keyword-reachable fact still comes back, the
-    # graph-only one drops out. Both halves matter — "recall still returns something" would
-    # pass even if the graph arm had stayed on, and "the graph record is gone" would pass if
-    # recall had died entirely.
     degraded = svc.semantic_context(QUERY, cap=1500)
     assert FACT in degraded, f"recall broke with the graph off — {degraded!r}"
     assert GRAPH_ONLY_FACT not in degraded, f"the graph arm still ran — {degraded!r}"
@@ -331,10 +339,14 @@ def test_a_foreign_provider_reports_no_graph_instead_of_failing(home, store):
     every §7 surface must answer with its empty shape. Asserted against the SAME calls
     on the wired store, so "everything was empty" cannot be the test wiring nothing.
     """
-    _set_memory_config(home, graph_enabled=True, push_context=True, push_min_confidence=0.5)
+    _set_memory_config(
+        home, graph_enabled=True, push_context=True, push_min_confidence=0.5
+    )
     wired = MemoryService.over_vector_store(store)
     entity_id = _write_and_link(wired, store)
-    assert wired.has_graph and wired.graph_backlinks(entity_id), "control: no graph to lose"
+    assert wired.has_graph and wired.graph_backlinks(
+        entity_id
+    ), "control: no graph to lose"
 
     class _ForeignProvider:
         """No `vector_store` attribute — the one thing `_vs` discovers."""
@@ -355,8 +367,9 @@ def test_a_foreign_provider_reports_no_graph_instead_of_failing(home, store):
     assert foreign.slots() == []
     assert foreign.push_context([f"any news on {ENTITY}?"], session_key="s") == ("", [])
 
-    # The seam a real turn goes through, over the foreign provider: no block, no raise.
     engine = DefaultContextEngine()
     turn = f"any news on {ENTITY}?"
-    assembled = engine.assemble(_Builder(_ForeignProvider()), turn, is_new_session=False)
+    assembled = engine.assemble(
+        _Builder(_ForeignProvider()), turn, is_new_session=False
+    )
     assert assembled.message == turn

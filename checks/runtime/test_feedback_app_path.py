@@ -27,10 +27,10 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon import feedback as fb
-from gideon.apps import manager
-from gideon.apps.permissions import APP_SCOPED_PREFIXES, app_request_denial
-from gideon.dashboard.handlers.feedback import api_feedback_record
+from gideon.cognition import feedback as fb
+from gideon.extensions.apps import manager
+from gideon.extensions.apps.permissions import APP_SCOPED_PREFIXES, app_request_denial
+from gideon.interfaces.dashboard.handlers.feedback import api_feedback_record
 
 FIXTURE_APP = "feedback-fixture"
 
@@ -52,8 +52,6 @@ def _write_fixture_app(tmp_path, *, api_scope: list[str]) -> None:
         encoding="utf-8",
     )
     (appdir / "installed.json").write_text(
-        # No `installed.json` means NOT installed (`_read_installed`), which the boundary
-        # now refuses — a fixture without one models a partial install.
         json.dumps({"name": FIXTURE_APP, "version": "1.0.0", "enabled": True}),
         encoding="utf-8",
     )
@@ -72,13 +70,8 @@ async def _client(tmp_path, *, api_scope: list[str]):
         request["app"] = FIXTURE_APP
         return await handler(request)
 
-    # Mirror server.py's app_permission_middleware (the enforcement half).
     @web.middleware
     async def app_permission_middleware(request, handler):
-        # Calls the REAL decision (`permissions.app_request_denial`) rather than
-        # re-deriving it. The old copy inlined `if c is not None and ...`, which is the
-        # fail-open shape the boundary itself had: a mirror that reproduces the bug it is
-        # meant to catch. Only the logging/response half is local, as in `server.py`.
         app_name = request.get("app", "")
         if app_name and request.path.startswith(APP_SCOPED_PREFIXES):
             if app_request_denial(app_name, request.path):
@@ -86,17 +79,16 @@ async def _client(tmp_path, *, api_scope: list[str]):
         return await handler(request)
 
     with (
-        patch("gideon.config.loader.config_dir", return_value=tmp_path),
+        patch("gideon.core.config.loader.config_dir", return_value=tmp_path),
         patch.object(manager, "config_dir", return_value=tmp_path),
     ):
-        fb._invalidate()  # drop any cross-test index cached against a prior config_dir
+        fb._invalidate()
 
         async def _ok(request: web.Request) -> web.Response:
             return web.json_response({"ok": True})
 
         app = web.Application(middlewares=[stub_identity, app_permission_middleware])
         app.router.add_post("/api/feedback", api_feedback_record)
-        # An app path the fixture never declares — used for the 403 case.
         app.router.add_get("/api/secrets", _ok)
         app.router.add_post("/api/secrets", _ok)
         async with TestClient(TestServer(app)) as client:
@@ -118,7 +110,6 @@ async def test_declared_app_path_stamps_source_app_and_forces_producer(tmp_path)
                 "target_id": "widget-42",
                 "verdict": "down",
                 "reason": "wrong answer",
-                # The app tries to CLAIM a core producer; the server must override it.
                 "producer_kind": "prompt",
                 "producer_id": "classifier",
             },
@@ -130,9 +121,7 @@ async def test_declared_app_path_stamps_source_app_and_forces_producer(tmp_path)
         rec = fb.current_verdict("app_judgment", "widget-42")
         assert rec is not None
         assert rec.verdict == "down"
-        # source_app is stamped server-side from request["app"] — not the body.
         assert rec.source_app == FIXTURE_APP
-        # Producer forced into the app namespace; the claimed "prompt" is discarded.
         assert rec.producer_kind == "app"
         assert rec.producer_id == f"{FIXTURE_APP}:classifier"
 
@@ -157,19 +146,17 @@ async def test_undeclared_app_path_is_forbidden(tmp_path):
     """An app path outside the declared permissions.api scope 403s before the handler."""
     async with _client(tmp_path, api_scope=["/api/feedback"]) as c:
         assert (await c.get("/api/secrets")).status == 403
-        # And a feedback scope alone does NOT admit an unrelated path.
         assert (await c.post("/api/secrets", json={})).status in (403, 405)
 
 
 class TestSdkInProcessPath:
-    """The sdk/feedback in-process path lands an equivalent app-namespaced record."""
+    """The packages/python-client/feedback in-process path lands an equivalent app-namespaced record."""
 
     def test_sdk_record_feedback_lands_app_record(self, tmp_path):
-        with patch("gideon.config.loader.config_dir", return_value=tmp_path):
+        with patch("gideon.core.config.loader.config_dir", return_value=tmp_path):
             fb._invalidate()
             from gideon.sdk import feedback as sdk_fb
 
-            # SDK contract: an in-process app caller namespaces its own producer.
             rec = sdk_fb.record_feedback(
                 target_kind="app_judgment",
                 target_id="sdk-1",
@@ -183,6 +170,5 @@ class TestSdkInProcessPath:
             assert rec.source_app == FIXTURE_APP
             assert rec.producer_kind == "app"
             assert rec.producer_id == f"{FIXTURE_APP}:sdk-producer"
-            # Re-export identity: the SDK surface IS core's record_feedback.
             assert sdk_fb.record_feedback is fb.record_feedback
             fb._invalidate()

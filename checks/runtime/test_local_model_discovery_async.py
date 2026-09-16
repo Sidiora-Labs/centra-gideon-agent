@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 
-from gideon.embedding_providers import registry as emb_reg
+from gideon.integrations.embedding_providers import registry as emb_reg
 
 
 class _FakeModel:

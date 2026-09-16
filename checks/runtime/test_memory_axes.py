@@ -8,31 +8,39 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.memory_record import MemoryKind, MemoryRecord, MemoryScope, MemoryTier
-from gideon.vector_memory import VectorMemoryStore
+from gideon.cognition.memory_record import (
+    MemoryKind,
+    MemoryRecord,
+    MemoryScope,
+    MemoryTier,
+)
+from gideon.cognition.vector_memory import SemanticArchive
 
 
 @pytest.fixture
 def store(tmp_path):
-    s = VectorMemoryStore(db_path=tmp_path / "m.db", embedding_dim=3)
+    s = SemanticArchive(db_path=tmp_path / "m.db", embedding_dim=3)
     s.init()
     s.embed_fn = lambda t: [1.0, 0.0, 0.0]
     return s
 
 
 def test_migration_v6_applied(store):
-    versions = {r[0] for r in store.db.execute("SELECT version FROM schema_version").fetchall()}
+    versions = {
+        r[0] for r in store.db.execute("SELECT version FROM schema_version").fetchall()
+    }
     assert 6 in versions
 
 
 def test_axis_columns_exist_on_both_tables(store):
     for table in ("semantic_memory", "episodic_memories"):
-        cols = {r[1] for r in store.db.execute(f"PRAGMA table_info({table})").fetchall()}
+        cols = {
+            r[1] for r in store.db.execute(f"PRAGMA table_info({table})").fetchall()
+        }
         assert {"tier", "scope", "scope_ref", "category", "visit_count"} <= cols
 
 
 def test_legacy_write_keeps_global_durable_defaults(store):
-    # The legacy set_semantic path is untouched → global + durable.
     store.set_semantic("pref.editor", "vim", 0.9, "user_explicit")
     rec = store.get_record("pref.editor")
     assert rec.scope == MemoryScope.GLOBAL
@@ -87,7 +95,6 @@ def test_put_episodic_persists_scope(store):
 
 
 def test_query_filters_by_scope(store):
-    # Keys must be allow-listed (pref.*/project.*/user.*/lesson.*).
     store.put(
         [
             MemoryRecord(

@@ -8,7 +8,7 @@ docstring). This suite is the enforcement, clause by clause:
 
 * clause 1 — an overlay is DATA: a closed key set, typed values, nothing that executes.
 * clause 2 — an unknown component / bad prop is refused, not dropped (the FE half owns
-  this one; `web/src/ui/surfaces/overlay.test.tsx` asserts it against the real registry).
+  this one; `apps/console/src/ui/surfaces/overlay.test.tsx` asserts it against the real registry).
 * clause 3 — shadowing goes through the SAME `registerLayerComponent` (FE half too).
 * clause 5 — **path containment, asserted with a really planted symlink.**
 
@@ -25,8 +25,8 @@ from pathlib import Path
 
 import pytest
 
-from gideon import surface_overlay as so
-from gideon.errors import ERROR_CODES
+from gideon.core.errors import ERROR_CODES
+from gideon.workspace import surface_overlay as so
 
 CODE_PATH = "ERR_SURFACE_OVERLAY_PATH"
 CODE_INVALID = "ERR_SURFACE_OVERLAY_INVALID"
@@ -42,8 +42,8 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """
     root = tmp_path / "home"
     root.mkdir()
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: root)
-    monkeypatch.setattr("gideon.config.config_dir", lambda: root)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: root)
+    monkeypatch.setattr("gideon.core.config.config_dir", lambda: root)
     surfaces = root / so.OVERLAY_DIRNAME
     surfaces.mkdir()
     return surfaces
@@ -65,9 +65,6 @@ def _ok(surface: str = "dashboard", **extra: object) -> dict:
     return doc
 
 
-# ── the file-wide vacuity assertion ────────────────────────────────────────────
-
-
 def test_the_home_is_redirected(home: Path, tmp_path: Path):
     """`surfaces_dir()` resolves under the TMP home, never the real one.
 
@@ -79,9 +76,6 @@ def test_the_home_is_redirected(home: Path, tmp_path: Path):
     assert so.surfaces_dir() == home
     assert str(tmp_path) in str(so.surfaces_dir())
     assert ".gideon" not in str(so.surfaces_dir())
-
-
-# ── the accepting path (the vacuity leg every refusal below leans on) ───────────
 
 
 def test_a_valid_overlay_loads(home: Path):
@@ -99,8 +93,8 @@ def test_a_missing_directory_is_no_overlays_not_an_error(
 ):
     root = tmp_path / "bare"
     root.mkdir()
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: root)
-    monkeypatch.setattr("gideon.config.config_dir", lambda: root)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: root)
+    monkeypatch.setattr("gideon.core.config.config_dir", lambda: root)
     assert not (root / so.OVERLAY_DIRNAME).exists()
     assert so.load_overlays() == ([], [])
 
@@ -121,9 +115,6 @@ def test_load_order_is_by_file_name(home: Path):
     assert [o.file for o in accepted] == ["a.json", "b.json"]
 
 
-# ── clause 5: path containment, with a really planted symlink ──────────────────
-
-
 def test_a_symlink_out_of_surfaces_is_refused_and_the_same_content_inline_is_not(
     home: Path, tmp_path: Path
 ):
@@ -141,7 +132,7 @@ def test_a_symlink_out_of_surfaces_is_refused_and_the_same_content_inline_is_not
 
     link = home / "linked.json"
     link.symlink_to(outside / "evil.json")
-    assert link.is_symlink()  # the plant took
+    assert link.is_symlink()
 
     accepted, refused = so.load_overlays()
     assert accepted == []
@@ -149,7 +140,6 @@ def test_a_symlink_out_of_surfaces_is_refused_and_the_same_content_inline_is_not
     assert refused[0].error.code == CODE_PATH
     assert "outside surfaces/" in refused[0].error.what
 
-    # Vacuity leg: identical BYTES, real file, inside the directory ⇒ accepted.
     link.unlink()
     _write(home, "linked.json", payload)
     accepted, refused = so.load_overlays()
@@ -190,9 +180,6 @@ def test_a_directory_named_like_an_overlay_is_refused(home: Path):
     assert "not a regular file" in refused[0].error.what
 
 
-# ── clause 1: an overlay is DATA with a closed key set ─────────────────────────
-
-
 def test_an_unknown_top_level_key_is_refused_and_removing_it_loads(home: Path):
     doc = _ok()
     doc["onLoad"] = "alert(1)"
@@ -202,7 +189,6 @@ def test_an_unknown_top_level_key_is_refused_and_removing_it_loads(home: Path):
     assert refused[0].error.code == CODE_INVALID
     assert "onLoad" in refused[0].error.what
 
-    # Vacuity: the SAME document without the extra key is accepted.
     del doc["onLoad"]
     _write(home, "mine.json", doc)
     accepted, refused = so.load_overlays()
@@ -210,7 +196,9 @@ def test_an_unknown_top_level_key_is_refused_and_removing_it_loads(home: Path):
 
 
 def test_a_body_that_is_not_a_string_is_refused(home: Path):
-    _write(home, "mine.json", {"surface": "dashboard", "body": {"component": "Callout"}})
+    _write(
+        home, "mine.json", {"surface": "dashboard", "body": {"component": "Callout"}}
+    )
     _, refused = so.load_overlays()
     assert refused[0].error.code == CODE_INVALID
     assert '"body" must be a string' in refused[0].error.what
@@ -243,7 +231,6 @@ def test_an_unknown_surface_id_is_refused_and_a_known_one_loads(home: Path):
     assert accepted == []
     assert refused[0].error.code == CODE_INVALID
     assert "'settings'" in refused[0].error.what
-    # Vacuity: the one declared id goes through.
     _write(home, "mine.json", _ok(surface="dashboard"))
     accepted, refused = so.load_overlays()
     assert refused == [] and len(accepted) == 1
@@ -256,7 +243,6 @@ def test_the_size_ceiling_refuses_over_and_accepts_under(home: Path):
     _, refused = so.load_overlays()
     assert refused[0].error.code == CODE_INVALID
     assert "overlay ceiling" in refused[0].error.what
-    # Vacuity: a document just under the ceiling loads through the same code path.
     doc["title"] = "x" * 100
     _write(home, "big.json", doc)
     accepted, refused = so.load_overlays()
@@ -272,14 +258,13 @@ def test_one_bad_file_does_not_hide_a_good_one(home: Path):
     assert [r.file for r in refused] == ["b-bad.json"]
 
 
-# ── clause 3's data half: the `define` block ────────────────────────────────────
-
-
 def test_a_valid_define_loads(home: Path):
     _write(
         home,
         "mine.json",
-        _ok(define=[{"name": "MyPanel", "body": 'x = Callout(tone: "info", text: "y")'}]),
+        _ok(
+            define=[{"name": "MyPanel", "body": 'x = Callout(tone: "info", text: "y")'}]
+        ),
     )
     accepted, refused = so.load_overlays()
     assert refused == []
@@ -294,7 +279,10 @@ def test_a_valid_define_loads(home: Path):
         ({"name": "My-Panel", "body": "x = Callout()"}, "CamelCase"),
         ({"name": "MyPanel", "body": ""}, "non-empty DSL string"),
         ({"name": "MyPanel", "body": {"k": 1}}, "non-empty DSL string"),
-        ({"name": "MyPanel", "body": "x = Callout()", "component": "() => 1"}, "unknown key"),
+        (
+            {"name": "MyPanel", "body": "x = Callout()", "component": "() => 1"},
+            "unknown key",
+        ),
         (
             {"name": "MyPanel", "body": "x = Callout()", "description": 7},
             "description must be a string",
@@ -312,7 +300,9 @@ def test_a_malformed_define_entry_is_refused(home: Path, entry: dict, fragment: 
 def test_define_refuses_a_duplicate_name(home: Path):
     body = 'x = Callout(tone: "info", text: "y")'
     _write(
-        home, "mine.json", _ok(define=[{"name": "P", "body": body}, {"name": "P", "body": body}])
+        home,
+        "mine.json",
+        _ok(define=[{"name": "P", "body": body}, {"name": "P", "body": body}]),
     )
     _, refused = so.load_overlays()
     assert "twice" in refused[0].error.what
@@ -322,9 +312,6 @@ def test_define_must_be_a_list(home: Path):
     _write(home, "mine.json", _ok(define={"MyPanel": "x = Callout()"}))
     _, refused = so.load_overlays()
     assert '"define" must be a list' in refused[0].error.what
-
-
-# ── the envelope + the wire shape ──────────────────────────────────────────────
 
 
 def test_every_code_this_module_emits_is_a_registered_error_code():
@@ -356,11 +343,9 @@ def test_the_endpoint_returns_the_payload(home: Path):
     """The BACKEND call site: the handler the router points at returns the loader's answer."""
     import asyncio
 
-    from gideon.dashboard.handlers.surfaces import api_surface_overlays
+    from gideon.interfaces.dashboard.handlers.surfaces import api_surface_overlays
 
     _write(home, "good.json", _ok())
-    # The handler reads nothing off the request, so `None` is the honest argument here — a
-    # fabricated aiohttp Request would only be scaffolding.
     response = asyncio.run(api_surface_overlays(None))  # type: ignore[arg-type]
     body = json.loads(response.body.decode("utf-8"))
     assert [o["file"] for o in body["overlays"]] == ["good.json"]
@@ -387,7 +372,7 @@ def test_every_overlayable_surface_has_a_frontend_call_site():
     ``<SurfaceOverlay surface="…" />`` on a real page. Adding an id without the call site
     reddens here rather than accepting overlays that render nowhere.
     """
-    web = Path(__file__).resolve().parents[1] / "web" / "src"
+    web = Path(__file__).resolve().parents[2] / "apps/console" / "src"
     sources = "\n".join(
         p.read_text(encoding="utf-8")
         for p in web.rglob("*.tsx")

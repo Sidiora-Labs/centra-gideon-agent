@@ -9,15 +9,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from gideon.config import AppConfig
-from gideon.session import SessionManager
-from gideon.subagent import SubagentManager
-
-# ── Helpers ──
+from gideon.core.config import AppConfig
+from gideon.engine.session import ConversationDirectory
+from gideon.engine.subagent import DelegationSupervisor
 
 
 def _make_provider(
-    pid: int, child_pids: dict[int, int | None] | None = None, start_time: int | None = 100
+    pid: int,
+    child_pids: dict[int, int | None] | None = None,
+    start_time: int | None = 100,
 ):
     """Create a mock provider with a _client that has _pid, _child_pids, _start_time."""
     provider = AsyncMock()
@@ -57,9 +57,6 @@ def _mock_ctx_builder() -> MagicMock:
     return ctx
 
 
-# ── session.reset() tests ──
-
-
 class TestResetProcessTreeKill:
     """Tests for session.reset() process tree cleanup."""
 
@@ -73,17 +70,18 @@ class TestResetProcessTreeKill:
     async def test_reset_killpg_on_surviving_process(self, cfg):
         """reset() uses killpg when root PID survives shutdown."""
         provider = _make_provider(pid=12345, child_pids={12346: 100, 12347: 200})
-        mgr = SessionManager(cfg, provider_factory=_provider_factory(provider))
+        mgr = ConversationDirectory(cfg, provider_factory=_provider_factory(provider))
         await mgr.get_or_create("t1")
 
         with (
-            patch("gideon.session.os.kill") as mock_kill,
-            patch("gideon.session.os.killpg") as mock_killpg,
-            patch("gideon.session.os.getpgid", return_value=12345),
-            patch("gideon.acp.client._get_child_pids", return_value=[]),
-            patch("gideon.acp.client._kill_escaped_children") as mock_sweep,
+            patch("gideon.engine.session.os.kill") as mock_kill,
+            patch("gideon.engine.session.os.killpg") as mock_killpg,
+            patch("gideon.engine.session.os.getpgid", return_value=12345),
+            patch("gideon.integrations.acp.client._get_child_pids", return_value=[]),
+            patch(
+                "gideon.integrations.acp.client._kill_escaped_children"
+            ) as mock_sweep,
         ):
-            # os.kill(pid, 0) succeeds → process survived shutdown
             mock_kill.return_value = None
             mock_killpg.return_value = None
             await mgr.reset("t1")
@@ -96,21 +94,19 @@ class TestResetProcessTreeKill:
     async def test_reset_fallback_kill_when_killpg_fails(self, cfg):
         """reset() falls back to os.kill when killpg raises OSError."""
         provider = _make_provider(pid=12345)
-        mgr = SessionManager(cfg, provider_factory=_provider_factory(provider))
+        mgr = ConversationDirectory(cfg, provider_factory=_provider_factory(provider))
         await mgr.get_or_create("t1")
 
         with (
-            patch("gideon.session.os.kill") as mock_kill,
-            patch("gideon.session.os.killpg", side_effect=OSError),
-            patch("gideon.session.os.getpgid", return_value=12345),
-            patch("gideon.acp.client._get_child_pids", return_value=[]),
-            patch("gideon.acp.client._kill_escaped_children"),
+            patch("gideon.engine.session.os.kill") as mock_kill,
+            patch("gideon.engine.session.os.killpg", side_effect=OSError),
+            patch("gideon.engine.session.os.getpgid", return_value=12345),
+            patch("gideon.integrations.acp.client._get_child_pids", return_value=[]),
+            patch("gideon.integrations.acp.client._kill_escaped_children"),
         ):
             mock_kill.return_value = None
             await mgr.reset("t1")
 
-        # First call: os.kill(pid, 0) to check alive
-        # Second call: os.kill(pid, SIGKILL) fallback
         kill_calls = [c for c in mock_kill.call_args_list if c[0][1] == signal.SIGKILL]
         assert len(kill_calls) == 1
         assert kill_calls[0][0][0] == 12345
@@ -119,26 +115,29 @@ class TestResetProcessTreeKill:
     async def test_reset_merges_fresh_child_scan(self, cfg):
         """reset() merges stored _child_pids with fresh _get_child_pids scan."""
         provider = _make_provider(pid=12345, child_pids={12346: 100})
-        mgr = SessionManager(cfg, provider_factory=_provider_factory(provider))
+        mgr = ConversationDirectory(cfg, provider_factory=_provider_factory(provider))
         await mgr.get_or_create("t1")
 
         with (
-            patch("gideon.session.os.kill", side_effect=ProcessLookupError),
-            patch("gideon.acp.client._get_child_pids", return_value=[12347, 12348]),
-            patch("gideon.acp.client._get_start_time", return_value=999),
-            patch("gideon.acp.client._kill_escaped_children") as mock_sweep,
+            patch("gideon.engine.session.os.kill", side_effect=ProcessLookupError),
+            patch(
+                "gideon.integrations.acp.client._get_child_pids",
+                return_value=[12347, 12348],
+            ),
+            patch("gideon.integrations.acp.client._get_start_time", return_value=999),
+            patch(
+                "gideon.integrations.acp.client._kill_escaped_children"
+            ) as mock_sweep,
         ):
             await mgr.reset("t1")
 
         provider.shutdown.assert_awaited_once()
-        # Sweep runs even when root PID is dead (ProcessLookupError) because
-        # children in different PGIDs may outlive the root.
         mock_sweep.assert_called_once()
         swept = mock_sweep.call_args[0][0]
-        assert 12346 in swept  # from stored _child_pids
-        assert 12347 in swept  # from fresh scan
-        assert 12348 in swept  # from fresh scan
-        assert swept[12347] == 999  # start_time from _get_start_time
+        assert 12346 in swept
+        assert 12347 in swept
+        assert 12348 in swept
+        assert swept[12347] == 999
 
     @pytest.mark.asyncio
     async def test_reset_skips_kill_for_non_int_pid(self, cfg):
@@ -147,11 +146,10 @@ class TestResetProcessTreeKill:
         provider.start = AsyncMock()
         provider.shutdown = AsyncMock()
         provider.context_usage_pct = MagicMock(return_value=0.0)
-        # _client._pid is an AsyncMock (not int) — should be skipped
-        mgr = SessionManager(cfg, provider_factory=_provider_factory(provider))
+        mgr = ConversationDirectory(cfg, provider_factory=_provider_factory(provider))
         await mgr.get_or_create("t1")
 
-        with patch("gideon.session.os.kill") as mock_kill:
+        with patch("gideon.engine.session.os.kill") as mock_kill:
             await mgr.reset("t1")
 
         mock_kill.assert_not_called()
@@ -161,21 +159,18 @@ class TestResetProcessTreeKill:
     async def test_reset_skips_kill_for_zero_pid(self, cfg):
         """reset() skips kill logic when _pid is 0 (kernel scheduler)."""
         provider = _make_provider(pid=0)
-        mgr = SessionManager(cfg, provider_factory=_provider_factory(provider))
+        mgr = ConversationDirectory(cfg, provider_factory=_provider_factory(provider))
         await mgr.get_or_create("t1")
 
-        with patch("gideon.session.os.kill") as mock_kill:
+        with patch("gideon.engine.session.os.kill") as mock_kill:
             await mgr.reset("t1")
 
         mock_kill.assert_not_called()
         provider.shutdown.assert_awaited_once()
 
 
-# ── subagent._sigkill_session() tests ──
-
-
 class TestSigkillSessionProcessTree:
-    """Tests for SubagentManager._sigkill_session() process tree cleanup."""
+    """Tests for DelegationSupervisor._sigkill_session() process tree cleanup."""
 
     def _make_manager(
         self,
@@ -185,11 +180,10 @@ class TestSigkillSessionProcessTree:
     ):
         provider = _make_provider(pid, child_pids, start_time=start_time)
         sessions = _mock_sessions_with_provider(provider)
-        # Put a session in the internal dict so _sigkill_session can find it
         mock_session = MagicMock()
         mock_session.provider = provider
         sessions._sessions = {"subagent:test1": mock_session}
-        mgr = SubagentManager(
+        mgr = DelegationSupervisor(
             sessions=sessions,
             ctx_builder=_mock_ctx_builder(),
             on_done=AsyncMock(),
@@ -203,12 +197,14 @@ class TestSigkillSessionProcessTree:
         mgr = self._make_manager(pid=54321, child_pids={54322: 100})
 
         with (
-            patch("gideon.subagent.os.killpg") as mock_killpg,
-            patch("gideon.subagent.os.getpgid", return_value=54321),
-            patch("gideon.acp.client._get_child_pids", return_value=[]),
-            patch("gideon.acp.client._kill_escaped_children") as mock_sweep,
-            patch("gideon.acp.client._get_start_time", return_value=100),
-            patch("gideon.acp.client._is_our_child", return_value=True),
+            patch("gideon.engine.subagent.os.killpg") as mock_killpg,
+            patch("gideon.engine.subagent.os.getpgid", return_value=54321),
+            patch("gideon.integrations.acp.client._get_child_pids", return_value=[]),
+            patch(
+                "gideon.integrations.acp.client._kill_escaped_children"
+            ) as mock_sweep,
+            patch("gideon.integrations.acp.client._get_start_time", return_value=100),
+            patch("gideon.integrations.acp.client._is_our_child", return_value=True),
         ):
             mgr._sigkill_session("subagent:test1")
 
@@ -220,13 +216,13 @@ class TestSigkillSessionProcessTree:
         mgr = self._make_manager(pid=54321)
 
         with (
-            patch("gideon.subagent.os.killpg", side_effect=ProcessLookupError),
-            patch("gideon.subagent.os.kill") as mock_kill,
-            patch("gideon.subagent.os.getpgid", return_value=54321),
-            patch("gideon.acp.client._get_child_pids", return_value=[]),
-            patch("gideon.acp.client._kill_escaped_children"),
-            patch("gideon.acp.client._get_start_time", return_value=100),
-            patch("gideon.acp.client._is_our_child", return_value=True),
+            patch("gideon.engine.subagent.os.killpg", side_effect=ProcessLookupError),
+            patch("gideon.engine.subagent.os.kill") as mock_kill,
+            patch("gideon.engine.subagent.os.getpgid", return_value=54321),
+            patch("gideon.integrations.acp.client._get_child_pids", return_value=[]),
+            patch("gideon.integrations.acp.client._kill_escaped_children"),
+            patch("gideon.integrations.acp.client._get_start_time", return_value=100),
+            patch("gideon.integrations.acp.client._is_our_child", return_value=True),
         ):
             mgr._sigkill_session("subagent:test1")
 
@@ -237,16 +233,19 @@ class TestSigkillSessionProcessTree:
         mgr = self._make_manager(pid=54321, child_pids={54322: 100})
 
         with (
-            patch("gideon.subagent.os.killpg"),
-            patch("gideon.subagent.os.getpgid", return_value=54321),
-            patch("gideon.acp.client._get_child_pids", return_value=[54323]),
-            patch("gideon.acp.client._get_start_time", return_value=200),
-            patch("gideon.acp.client._is_our_child", return_value=True),
-            patch("gideon.acp.client._kill_escaped_children") as mock_sweep,
+            patch("gideon.engine.subagent.os.killpg"),
+            patch("gideon.engine.subagent.os.getpgid", return_value=54321),
+            patch(
+                "gideon.integrations.acp.client._get_child_pids", return_value=[54323]
+            ),
+            patch("gideon.integrations.acp.client._get_start_time", return_value=200),
+            patch("gideon.integrations.acp.client._is_our_child", return_value=True),
+            patch(
+                "gideon.integrations.acp.client._kill_escaped_children"
+            ) as mock_sweep,
         ):
             mgr._sigkill_session("subagent:test1")
 
-        # Sweep should receive merged dict: stored 54322 + fresh 54323
         swept = mock_sweep.call_args[0][0]
         assert 54322 in swept
         assert 54323 in swept
@@ -256,27 +255,31 @@ class TestSigkillSessionProcessTree:
         mgr = self._make_manager(pid=54321, child_pids={54322: 100})
 
         with (
-            patch("gideon.subagent.os.killpg") as mock_killpg,
-            patch("gideon.acp.client._get_child_pids", return_value=[]),
-            patch("gideon.acp.client._get_start_time", return_value=100),
-            patch("gideon.acp.client._is_our_child", return_value=False),
-            patch("gideon.acp.client._kill_escaped_children") as mock_sweep,
+            patch("gideon.engine.subagent.os.killpg") as mock_killpg,
+            patch("gideon.integrations.acp.client._get_child_pids", return_value=[]),
+            patch("gideon.integrations.acp.client._get_start_time", return_value=100),
+            patch("gideon.integrations.acp.client._is_our_child", return_value=False),
+            patch(
+                "gideon.integrations.acp.client._kill_escaped_children"
+            ) as mock_sweep,
         ):
             mgr._sigkill_session("subagent:test1")
 
         mock_killpg.assert_not_called()
         mock_sweep.assert_called_once()
-        assert 54322 in mock_sweep.call_args[0][0]  # stored children swept
+        assert 54322 in mock_sweep.call_args[0][0]
 
     def test_sigkill_sweeps_children_when_pid_already_dead(self):
         """_sigkill_session skips killpg but sweeps children when PID is dead."""
         mgr = self._make_manager(pid=54321, child_pids={54322: 100}, start_time=None)
 
         with (
-            patch("gideon.subagent.os.killpg") as mock_killpg,
-            patch("gideon.acp.client._get_child_pids", return_value=[]),
-            patch("gideon.acp.client._get_start_time", return_value=None),
-            patch("gideon.acp.client._kill_escaped_children") as mock_sweep,
+            patch("gideon.engine.subagent.os.killpg") as mock_killpg,
+            patch("gideon.integrations.acp.client._get_child_pids", return_value=[]),
+            patch("gideon.integrations.acp.client._get_start_time", return_value=None),
+            patch(
+                "gideon.integrations.acp.client._kill_escaped_children"
+            ) as mock_sweep,
         ):
             mgr._sigkill_session("subagent:test1")
 
@@ -287,7 +290,7 @@ class TestSigkillSessionProcessTree:
         """_sigkill_session returns early when session not found."""
         sessions = MagicMock()
         sessions._sessions = {}
-        mgr = SubagentManager(
+        mgr = DelegationSupervisor(
             sessions=sessions,
             ctx_builder=_mock_ctx_builder(),
             on_done=AsyncMock(),
@@ -295,7 +298,7 @@ class TestSigkillSessionProcessTree:
             is_yolo=lambda: True,
         )
 
-        with patch("gideon.subagent.os.killpg") as mock_killpg:
+        with patch("gideon.engine.subagent.os.killpg") as mock_killpg:
             mgr._sigkill_session("subagent:nonexistent")
 
         mock_killpg.assert_not_called()
@@ -309,7 +312,7 @@ class TestSigkillSessionProcessTree:
         mock_session = MagicMock()
         mock_session.provider = provider
         sessions._sessions = {"subagent:test1": mock_session}
-        mgr = SubagentManager(
+        mgr = DelegationSupervisor(
             sessions=sessions,
             ctx_builder=_mock_ctx_builder(),
             on_done=AsyncMock(),
@@ -317,7 +320,7 @@ class TestSigkillSessionProcessTree:
             is_yolo=lambda: True,
         )
 
-        with patch("gideon.subagent.os.killpg") as mock_killpg:
+        with patch("gideon.engine.subagent.os.killpg") as mock_killpg:
             mgr._sigkill_session("subagent:test1")
 
         mock_killpg.assert_not_called()

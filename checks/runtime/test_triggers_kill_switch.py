@@ -27,12 +27,12 @@ import asyncio
 
 import pytest
 
-from gideon.guardrails import incident
-from gideon.triggers import service as svc
-from gideon.triggers import tools as T
-from gideon.triggers.firepath import GATE_ORDER, FireContext, evaluate
-from gideon.triggers.models import Outcome, Trigger
-from gideon.triggers.store import TriggerStore
+from gideon.automation.triggers import service as svc
+from gideon.automation.triggers import tools as T
+from gideon.automation.triggers.firepath import GATE_ORDER, FireContext, evaluate
+from gideon.automation.triggers.models import Outcome, Trigger
+from gideon.automation.triggers.store import TriggerStore
+from gideon.security.guardrails import incident
 
 NOW = 1_800_000_000.0
 
@@ -45,7 +45,7 @@ def _isolate_incident(tmp_path, monkeypatch):
     reads and resets the process-global mirror both ways (see the test-isolation-hazards memory:
     a cached mirror leaking between tests is exactly how a kill-switch test poisons its neighbours).
     """
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     incident.reset_incident_mirror()
     yield
     incident.reset_incident_mirror()
@@ -75,9 +75,6 @@ def _tick(store, tmp_path):
     return asyncio.run(svc.tick(store, now=NOW, base_dir=tmp_path, persist=False))
 
 
-# ── the gate itself ──
-
-
 def test_the_kill_switch_is_the_FIRST_gate():
     """Ahead of the injection screen, because an incident halts everything unconditionally.
 
@@ -90,7 +87,7 @@ def test_the_kill_switch_is_the_FIRST_gate():
 def test_the_gate_vocabulary_covers_the_new_gate():
     """§7 criterion 8's zero-silent-drops rule is enforced structurally: a gate with no outcome
     raises `KeyError` mid-fire, which loses the fire instead of refusing it."""
-    from gideon.triggers.firepath import gate_order_is_intact
+    from gideon.automation.triggers.firepath import gate_order_is_intact
 
     assert gate_order_is_intact() == []
 
@@ -132,9 +129,6 @@ def test_resuming_lets_fires_through_again():
     assert asyncio.run(evaluate(FireContext(trigger_id="clock:x"))).allowed is True
 
 
-# ── driven through a real tick ──
-
-
 def test_a_due_clock_trigger_does_NOT_fire_during_an_incident(store, tmp_path):
     """🔴 THE DEFECT, pinned end to end. This exact assertion failed before this session."""
     _due(store)
@@ -155,7 +149,8 @@ def test_the_same_trigger_fires_once_the_incident_is_over(store, tmp_path):
 
 def test_a_refused_fire_still_writes_a_LEDGER_ROW(store, tmp_path):
     """§7 criterion 8: zero silent drops. An operator must be able to see that the switch is what
-    stopped the work — a suspended automation with no row is indistinguishable from a broken one."""
+    stopped the work — a suspended automation with no row is indistinguishable from a broken one.
+    """
     _due(store)
     incident.activate(reason="test")
     result = _tick(store, tmp_path)
@@ -176,9 +171,6 @@ def test_EVERY_due_trigger_is_refused_not_just_the_first(store, tmp_path):
     assert {r["outcome"] for r in result.ledger_rows} == {Outcome.REFUSED.value}
 
 
-# ── the manual paths ──
-
-
 def test_the_manual_bypass_set_NEVER_includes_the_kill_switch():
     """Declared as data so the intent survives a refactor. The legacy path already recorded the
     reasoning: a `/test` that ignored incident mode would run unattended work during the incident
@@ -193,7 +185,9 @@ def test_a_MANUAL_run_is_refused_during_an_incident(store, tmp_path):
     _due(store, tid="clock:x")
     incident.activate(reason="test")
     calls = []
-    result = T.run(store, trigger_id="clock:x", runner=lambda p: calls.append(p) or "LAUNCHED")
+    result = T.run(
+        store, trigger_id="clock:x", runner=lambda p: calls.append(p) or "LAUNCHED"
+    )
     assert result.ok is False
     assert calls == [], "the runner must not be reached"
     assert "incident mode" in result.text
@@ -202,7 +196,9 @@ def test_a_MANUAL_run_is_refused_during_an_incident(store, tmp_path):
 def test_a_manual_run_works_normally_when_there_is_no_incident(store, tmp_path):
     _due(store, tid="clock:x")
     calls = []
-    result = T.run(store, trigger_id="clock:x", runner=lambda p: calls.append(p) or "LAUNCHED")
+    result = T.run(
+        store, trigger_id="clock:x", runner=lambda p: calls.append(p) or "LAUNCHED"
+    )
     assert result.ok is True
     assert len(calls) == 1
 
@@ -221,7 +217,8 @@ def test_a_DRY_RUN_still_reports_during_an_incident(store, tmp_path):
 def test_the_plan_the_tool_REPORTS_matches_what_it_ENFORCES():
     """The invariant the inert plan violated: every gate named "enforced" must have an enforcement
     point. `incident` is the one this session wired; the rest are enforced where their inputs exist
-    (documented on `manual_refusal`), so this asserts the specific claim that was false."""
+    (documented on `manual_refusal`), so this asserts the specific claim that was false.
+    """
     plan = T.manual_gate_plan()
     assert "incident" in plan["enforced"]
     incident.activate(reason="test")
@@ -230,9 +227,6 @@ def test_the_plan_the_tool_REPORTS_matches_what_it_ENFORCES():
 
 def test_manual_refusal_is_SILENT_with_no_incident():
     assert T.manual_refusal() == ""
-
-
-# ── the fail-open contract this gate inherits ──
 
 
 def test_an_UNREADABLE_flag_does_not_halt_all_automation(store, tmp_path, monkeypatch):
@@ -245,7 +239,7 @@ def test_an_UNREADABLE_flag_does_not_halt_all_automation(store, tmp_path, monkey
     like the scheduler being broken. This gate inherits that contract, it does not second-guess it.
     """
     monkeypatch.setattr(
-        "gideon.guardrails.incident._read_file",
+        "gideon.security.guardrails.incident._read_file",
         lambda: (_ for _ in ()).throw(OSError("unreadable")),
     )
     incident.reset_incident_mirror()

@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from gideon.acp.client import AcpProcessDied
+from gideon.integrations.acp.client import AcpProcessDied
 
 
 async def _simulate_inject_with_retry(

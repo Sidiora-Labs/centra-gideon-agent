@@ -27,8 +27,8 @@ import pathlib
 
 import pytest
 
-from gideon.workflows import admission, pool
-from gideon.workflows.admission import (
+from gideon.automation.workflows import admission, pool
+from gideon.automation.workflows.admission import (
     OBSERVER,
     PRIORITY_WEIGHT,
     AdmissionState,
@@ -42,9 +42,6 @@ from gideon.workflows.admission import (
 )
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures" / "pool_frontier_golden"
-
-
-# ── the seed, and the two sides that must agree over it ──
 
 
 def _seed() -> dict:
@@ -85,7 +82,10 @@ def _leases(seed: dict, *, live: bool = True) -> dict[str, pool.Lease]:
     acquired = (now - 60) if live else (now - ttl - 60)
     return {
         c["task_id"]: pool.Lease(
-            task_id=c["task_id"], holder=c["leased_by"], acquired_at=acquired, ttl_seconds=ttl
+            task_id=c["task_id"],
+            holder=c["leased_by"],
+            acquired_at=acquired,
+            ttl_seconds=ttl,
         )
         for c in seed["candidates"]
         if c["leased_by"]
@@ -99,12 +99,11 @@ def _observer_policies(seed: dict, *, live: bool = True) -> tuple:
         Limits(),
         single_active_feature=False,
         state=AdmissionState(
-            now=seed["now"], holder=seed["board_holder"], leases=_leases(seed, live=live)
+            now=seed["now"],
+            holder=seed["board_holder"],
+            leases=_leases(seed, live=live),
         ),
     )
-
-
-# ── the equivalence proof ──
 
 
 def test_the_seeded_fixture_is_not_VACUOUS():
@@ -120,7 +119,9 @@ def test_the_seeded_fixture_is_not_VACUOUS():
     exclusive = [r for r in golden if r["scenario"] == "exclusive"]
     inclusive = [r for r in golden if r["scenario"] == "inclusive"]
 
-    assert len(exclusive) >= 5, f"only {len(exclusive)} ready rows — too few to have an order"
+    assert (
+        len(exclusive) >= 5
+    ), f"only {len(exclusive)} ready rows — too few to have an order"
     assert len(inclusive) > len(
         exclusive
     ), "the leased scenarios must differ, or the lease is inert"
@@ -130,14 +131,24 @@ def test_the_seeded_fixture_is_not_VACUOUS():
     blocked = {tid for tid, c in seeded.items() if not c["unblocked"]}
     leased = {tid for tid, c in seeded.items() if c["leased_by"]}
 
-    assert len(blocked) >= 1 and not (blocked & set(ranked_ids)), "no blocked item was excluded"
-    assert len(leased) >= 2 and not (leased & set(ranked_ids)), "no leased item was excluded"
-    assert any(r["urgency"] == Urgency.OVERDUE.value for r in exclusive), "no overdue item ranked"
+    assert len(blocked) >= 1 and not (
+        blocked & set(ranked_ids)
+    ), "no blocked item was excluded"
+    assert len(leased) >= 2 and not (
+        leased & set(ranked_ids)
+    ), "no leased item was excluded"
+    assert any(
+        r["urgency"] == Urgency.OVERDUE.value for r in exclusive
+    ), "no overdue item ranked"
     assert any(r["urgency"] == Urgency.BLOCKING_OTHERS.value for r in exclusive)
-    assert len({r["score"] for r in exclusive}) >= 4, "too few distinct scores to order by score"
+    assert (
+        len({r["score"] for r in exclusive}) >= 4
+    ), "too few distinct scores to order by score"
 
     scores = [r["score"] for r in exclusive]
-    assert len(scores) != len(set(scores)), "no score TIE, so neither tie-breaker is exercised"
+    assert len(scores) != len(
+        set(scores)
+    ), "no score TIE, so neither tie-breaker is exercised"
     assert ranked_ids != [
         c["task_id"] for c in seed["candidates"] if c["task_id"] in ranked_ids
     ], "the ranked order equals the seed order — the sort could be a no-op"
@@ -156,17 +167,21 @@ def test_the_ready_set_is_IDENTICAL_to_the_retired_projection_order_included():
 
     computed = {
         "exclusive": ready(items, _observer_policies(seed)),
-        # No `AdmissionState` means no `Lease` policy at all, so nothing speaks to a RESOURCE
-        # bucket and every leased item is admitted — exactly what `include_leased=True` meant.
-        "inclusive": ready(items, default_policies(Limits(), single_active_feature=False)),
+        "inclusive": ready(
+            items, default_policies(Limits(), single_active_feature=False)
+        ),
     }
 
     for scenario, ranked in computed.items():
         expected = [r for r in _golden() if r["scenario"] == scenario]
-        assert len(ranked) == len(expected), f"{scenario}: {len(ranked)} rows vs {len(expected)}"
+        assert len(ranked) == len(
+            expected
+        ), f"{scenario}: {len(ranked)} rows vs {len(expected)}"
         for row, item in zip(expected, ranked):
             where = f"{scenario}[{row['position']}]"
-            assert item.item_id == row["task_id"], f"{where}: {item.item_id} != {row['task_id']}"
+            assert (
+                item.item_id == row["task_id"]
+            ), f"{where}: {item.item_id} != {row['task_id']}"
             assert item.urgency().value == row["urgency"], f"{where}: urgency"
             assert item.score() == pytest.approx(row["score"]), f"{where}: score"
             assert explain(item) == row["explain"], f"{where}: explanation"
@@ -188,9 +203,6 @@ def test_next_ready_is_the_ready_HEAD_by_construction():
     assert next_ready(items, policies) is ready(items, policies)[0]
 
 
-# ── the one behaviour the retirement deliberately does NOT preserve ──
-
-
 def test_an_EXPIRED_lease_no_longer_hides_work():
     """`pool.frontier` filtered on `leased_by` being truthy, so it hid work whose holder was already
     gone — the board said "taken" about work that was free, and only a sweep could correct it. The
@@ -201,15 +213,19 @@ def test_an_EXPIRED_lease_no_longer_hides_work():
     seed = _seed()
     held = [r["task_id"] for r in _golden() if r["scenario"] == "inclusive"]
     live = [item.item_id for item in ready(_items(seed), _observer_policies(seed))]
-    dead = [item.item_id for item in ready(_items(seed), _observer_policies(seed, live=False))]
+    dead = [
+        item.item_id
+        for item in ready(_items(seed), _observer_policies(seed, live=False))
+    ]
 
     leased = {c["task_id"] for c in seed["candidates"] if c["leased_by"]}
     assert not (leased & set(live)), "a LIVE lease must still exclude"
-    assert leased <= set(dead), f"an expired lease still hid {sorted(leased - set(dead))}"
-    assert dead == held, "with every lease expired the projection is the include-leased view"
-
-
-# ── the leases themselves: still one implementation, still surviving a kill ──
+    assert leased <= set(
+        dead
+    ), f"an expired lease still hid {sorted(leased - set(dead))}"
+    assert (
+        dead == held
+    ), "with every lease expired the projection is the include-leased view"
 
 
 def test_the_projection_reuses_pool_acquire_rather_than_re_deciding():
@@ -243,11 +259,16 @@ def test_a_lease_SURVIVES_a_gateway_kill(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     seed = _seed()
     now = seed["now"]
-    items = [ReadyItem(item_id="t-a", priority="high"), ReadyItem(item_id="t-b", priority="high")]
+    items = [
+        ReadyItem(item_id="t-a", priority="high"),
+        ReadyItem(item_id="t-b", priority="high"),
+    ]
 
     def _project(at: float) -> list[str]:
         """Everything a restarted process knows: the clock, and the lease files on disk."""
-        rehydrated = {i.item_id: lease for i in items if (lease := pool.read_lease(i.item_id))}
+        rehydrated = {
+            i.item_id: lease for i in items if (lease := pool.read_lease(i.item_id))
+        }
         policies = default_policies(
             Limits(),
             single_active_feature=False,
@@ -257,19 +278,21 @@ def test_a_lease_SURVIVES_a_gateway_kill(tmp_path, monkeypatch):
 
     assert _project(now) == ["t-a", "t-b"], "nothing is leased yet"
 
-    lease, error = pool.claim_task("t-a", holder="session-doomed", now=now, ttl_seconds=900)
+    lease, error = pool.claim_task(
+        "t-a", holder="session-doomed", now=now, ttl_seconds=900
+    )
     assert lease is not None and not error, f"claim refused: {error}"
-    assert pool.leases_dir().joinpath("t-a.json").is_file(), "the lease was never persisted"
+    assert (
+        pool.leases_dir().joinpath("t-a.json").is_file()
+    ), "the lease was never persisted"
 
-    # The kill: no state at all beyond the filesystem.
     assert _project(now + 1) == ["t-b"], "a persisted lease did not survive the restart"
     assert _project(now + 901) == ["t-a", "t-b"], "the lease outlived its own TTL"
 
 
-# ── the retired names are GONE, and the surviving ones are where they moved ──
-
-
-@pytest.mark.parametrize("name", ["frontier", "next_task", "Candidate", "Urgency", "explain"])
+@pytest.mark.parametrize(
+    "name", ["frontier", "next_task", "Candidate", "Urgency", "explain"]
+)
 def test_the_retired_projection_is_DELETED_from_pool(name):
     """Retiring a legacy path is never a pure deletion, so this rail is two-directional: the name
     must be gone from `pool` AND present on the core. A deletion that left the name importable would
@@ -280,21 +303,35 @@ def test_the_retired_projection_is_DELETED_from_pool(name):
 
 @pytest.mark.parametrize(
     "name",
-    ["ready", "next_ready", "rank_key", "ReadyItem", "Urgency", "explain", "PRIORITY_WEIGHT"],
+    [
+        "ready",
+        "next_ready",
+        "rank_key",
+        "ReadyItem",
+        "Urgency",
+        "explain",
+        "PRIORITY_WEIGHT",
+    ],
 )
 def test_the_projection_now_lives_on_the_admission_core(name):
     assert hasattr(admission, name), f"admission.{name} is missing after the move"
 
 
 @pytest.mark.parametrize(
-    "name", ["acquire", "renew", "release", "sweep_expired", "read_lease", "claim_task", "Lease"]
+    "name",
+    [
+        "acquire",
+        "renew",
+        "release",
+        "sweep_expired",
+        "read_lease",
+        "claim_task",
+        "Lease",
+    ],
 )
 def test_the_lease_DECISION_functions_survive(name):
     """They are the `Lease` policy's implementation. Only the duplicate projection went."""
     assert hasattr(pool, name), f"pool.{name} was deleted with the projection"
-
-
-# ── the relocated behaviour, verbatim in intent (was tests/test_workflows_pool.py) ──
 
 
 def _item(**kw) -> ReadyItem:
@@ -307,7 +344,9 @@ def _free() -> tuple:
     """Policies with a lease state that holds nothing — the projection asking about an empty pool of
     claims, so only the ordering is under test."""
     return default_policies(
-        Limits(), single_active_feature=False, state=AdmissionState(now=0.0, holder=OBSERVER)
+        Limits(),
+        single_active_feature=False,
+        state=AdmissionState(now=0.0, holder=OBSERVER),
     )
 
 
@@ -338,12 +377,22 @@ def test_the_board_can_ASK_for_leased_items():
         holder=OBSERVER,
         leases={"b": pool.Lease(task_id="b", holder="session-x", acquired_at=100.0)},
     )
-    assert ready(items, default_policies(Limits(), single_active_feature=False, state=state)) == []
-    assert len(ready(items, default_policies(Limits(), single_active_feature=False))) == 1
+    assert (
+        ready(
+            items, default_policies(Limits(), single_active_feature=False, state=state)
+        )
+        == []
+    )
+    assert (
+        len(ready(items, default_policies(Limits(), single_active_feature=False))) == 1
+    )
 
 
 def test_higher_priority_ranks_first():
-    items = [_item(item_id="low", priority="low"), _item(item_id="critical", priority="critical")]
+    items = [
+        _item(item_id="low", priority="low"),
+        _item(item_id="critical", priority="critical"),
+    ]
     assert ready(items, _free())[0].item_id == "critical"
 
 
@@ -355,7 +404,10 @@ def test_an_item_BLOCKING_others_outranks_an_equal_that_blocks_nothing():
 
 
 def test_OVERDUE_beats_priority():
-    items = [_item(item_id="high", priority="high"), _item(item_id="late", overdue=True)]
+    items = [
+        _item(item_id="high", priority="high"),
+        _item(item_id="late", overdue=True),
+    ]
     assert ready(items, _free())[0].item_id == "late"
 
 
@@ -376,7 +428,7 @@ def test_next_ready_on_an_all_blocked_pool_is_None():
 
 def test_the_priority_vocabulary_matches_the_TASK_model():
     """Two priority scales would disagree about a task, and the looser one would win."""
-    from gideon.tasks.models import TaskPriority
+    from gideon.engine.tasks.models import TaskPriority
 
     assert set(PRIORITY_WEIGHT) == {p.value for p in TaskPriority}
 
@@ -395,15 +447,15 @@ def test_the_explanation_names_the_reasons():
     assert "t-9" in line and "overdue" in line and "blocks 3" in line
 
 
-# ── the unblock machinery the retirement had to leave alone ──
-
-
 def test_the_dependency_failed_CASCADE_still_fires_after_the_retirement():
     """`plan_unblock` was never part of the projection, but "retiring a legacy path is never a pure
     deletion" is a claim about the whole module, so the cascade is re-measured here rather than
     assumed from the file that no longer imports the projection."""
     out = pool.plan_unblock(
-        blocker_id="a", blocker_status="failed", blocker_reason="disk full", dependents={"b": ["a"]}
+        blocker_id="a",
+        blocker_status="failed",
+        blocker_reason="disk full",
+        dependents={"b": ["a"]},
     )
     assert len(out) == 1
     assert out[0].kind is pool.UnblockKind.CASCADE_FAILED
@@ -425,9 +477,6 @@ def test_BURST_coalescing_still_fires_after_the_retirement():
     assert "upstream died" in summary
 
 
-# ── the wired surface: the Work board's ready projection actually reads the core ──
-
-
 class TestReadyTasksIsRanked:
     """`registry.ready_tasks` is the one funnel `/api/tasks/ready`, the dashboard slice and the
     agent's next-task tool all share. Before `PP-13` it returned PROVIDER order — so the complete
@@ -440,17 +489,17 @@ class TestReadyTasksIsRanked:
         yield
 
     def _run(self, monkeypatch, tasks):
-        from gideon.tasks import registry
+        from gideon.engine.tasks import registry
 
         async def _list(**kwargs):
             return list(tasks), len(tasks)
 
         monkeypatch.setattr(registry, "list_all_tasks", _list)
-        monkeypatch.setattr("gideon.identity.current_username", lambda: "")
+        monkeypatch.setattr("gideon.cognition.identity.current_username", lambda: "")
         return [t.id for t in asyncio.run(registry.ready_tasks())]
 
     def _task(self, tid: str, **kw):
-        from gideon.tasks.models import Task, TaskPriority
+        from gideon.engine.tasks.models import Task, TaskPriority
 
         return Task(
             id=tid,
@@ -466,12 +515,20 @@ class TestReadyTasksIsRanked:
             self._task("t-medium"),
             self._task("t-high", priority="high"),
         ]
-        assert self._run(monkeypatch, tasks) == ["t-critical", "t-high", "t-medium", "t-trivial"]
+        assert self._run(monkeypatch, tasks) == [
+            "t-critical",
+            "t-high",
+            "t-medium",
+            "t-trivial",
+        ]
 
-    def test_a_blocking_task_is_ranked_by_its_DEPENDENTS_not_its_peers(self, monkeypatch):
+    def test_a_blocking_task_is_ranked_by_its_DEPENDENTS_not_its_peers(
+        self, monkeypatch
+    ):
         """`blocks_count` is counted over the FULL task map. Counting only among ready peers would
-        score every bottleneck at zero, because a bottleneck's dependents are the BLOCKED tasks."""
-        from gideon.tasks.models import TaskDependency
+        score every bottleneck at zero, because a bottleneck's dependents are the BLOCKED tasks.
+        """
+        from gideon.engine.tasks.models import TaskDependency
 
         deps = [TaskDependency(depends_on_task_id="t-blocker")]
         tasks = [
@@ -496,9 +553,6 @@ class TestReadyTasksIsRanked:
         "overdue beats priority" flatly would have passed against a comparator that clamped the
         bump, and it would have been wrong about the shipped rule.
         """
-        # Deliberately NOT in the expected order. Measured: with the input pre-sorted, this test
-        # stayed green while the funnel was mutated to skip the core entirely — provider order and
-        # the ranked order were the same list, so it proved nothing about the wiring.
         tasks = [
             self._task("t-future", priority="medium", due="2999-01-01T00:00:00+00:00"),
             self._task("t-high", priority="high"),
@@ -508,8 +562,13 @@ class TestReadyTasksIsRanked:
         out = self._run(monkeypatch, tasks)
         assert out == ["t-critical", "t-late", "t-high", "t-future"], out
 
-    def test_a_MALFORMED_due_date_costs_a_tie_break_not_the_projection(self, monkeypatch):
-        tasks = [self._task("t-a", due="not a date"), self._task("t-b", updated_at="also not")]
+    def test_a_MALFORMED_due_date_costs_a_tie_break_not_the_projection(
+        self, monkeypatch
+    ):
+        tasks = [
+            self._task("t-a", due="not a date"),
+            self._task("t-b", updated_at="also not"),
+        ]
         assert sorted(self._run(monkeypatch, tasks)) == ["t-a", "t-b"]
 
     def test_the_funnel_EXCLUDES_a_task_another_holder_is_leasing(self, monkeypatch):
@@ -517,7 +576,10 @@ class TestReadyTasksIsRanked:
         real claim on disk removes the task from the one funnel every picker reads."""
         import time as _time
 
-        tasks = [self._task("t-free", priority="high"), self._task("t-held", priority="critical")]
+        tasks = [
+            self._task("t-free", priority="high"),
+            self._task("t-held", priority="critical"),
+        ]
         assert self._run(monkeypatch, tasks) == ["t-held", "t-free"]
         lease, error = pool.claim_task(
             "t-held", holder="session-other", now=_time.time(), ttl_seconds=900

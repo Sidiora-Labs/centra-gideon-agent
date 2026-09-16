@@ -23,9 +23,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-from gideon.triggers import tools as T
-from gideon.triggers.store import TriggerStore
-from gideon.triggers.wakeup import RESUME_TARGET_KEY, resume_target_of
+from gideon.automation.triggers import tools as T
+from gideon.automation.triggers.store import TriggerStore
+from gideon.automation.triggers.wakeup import RESUME_TARGET_KEY, resume_target_of
 
 
 @pytest.fixture
@@ -39,9 +39,6 @@ def _cron(expr="0 9 * * 1-5"):
 
 def _epoch(iso: str) -> float:
     return datetime.fromisoformat(iso).timestamp()
-
-
-# ── mandatory TTL on every agent-created trigger ──
 
 
 def test_agent_recurring_trigger_gets_default_ttl(store):
@@ -105,7 +102,7 @@ def test_explicit_ttl_is_honoured_and_clamped(store):
         message="check",
         created_by="agent",
         cadence_to_cron=_cron("0 10 * * 1-5"),
-        ttl_secs=1,  # below the 60s floor
+        ttl_secs=1,
     )
     saved2 = store.get(clamped.data["trigger"]["id"]).trigger
     remaining2 = _epoch(saved2.expires_at) - datetime.now(timezone.utc).timestamp()
@@ -126,9 +123,6 @@ def test_user_created_trigger_keeps_optin_expiry(store):
     assert store.get(result.data["trigger"]["id"]).trigger.expires_at == ""
 
 
-# ── the resume-target write side (AUTO-R11's counterpart) ──
-
-
 def test_resume_target_roundtrips_through_the_store(store):
     """`resume=` becomes `workflow.resume`, and the READ side normalizes it back."""
     result = T.create(
@@ -147,7 +141,6 @@ def test_resume_target_roundtrips_through_the_store(store):
     assert saved.workflow.get(RESUME_TARGET_KEY, {}).get("run_id") == "r-monitor-7"
     target = resume_target_of(saved)
     assert target["run_id"] == "r-monitor-7"
-    # The message rode as the gate ANSWER — what the woken run reads — not as an action.
     assert target["answers_gate"] is True
     assert target["gate_answer"] == "time for the next check"
     assert "provider" not in saved.workflow
@@ -209,12 +202,10 @@ def test_cap_counts_resume_triggers_too(store):
     assert str(cap) in over.text
 
 
-# ── criterion 7's restart half: substrate persistence ──
-
-
 def test_resume_trigger_survives_a_store_reload(store, tmp_path):
     """A gateway restart re-reads triggers from disk: the resume target and the TTL must both
-    come back — this is what lets a parked monitor outlive the process that parked it."""
+    come back — this is what lets a parked monitor outlive the process that parked it.
+    """
     created = T.create(
         store,
         name="restart survivor",
@@ -226,20 +217,19 @@ def test_resume_trigger_survives_a_store_reload(store, tmp_path):
     )
     assert created.ok
 
-    fresh = TriggerStore(base_dir=tmp_path)  # a new process's view of the same disk
+    fresh = TriggerStore(base_dir=tmp_path)
     loaded = fresh.get(created.data["trigger"]["id"])
-    assert loaded is not None and loaded.ok, "a well-formed resume target must re-read clean"
+    assert (
+        loaded is not None and loaded.ok
+    ), "a well-formed resume target must re-read clean"
     saved = loaded.trigger
     assert resume_target_of(saved)["run_id"] == "r-parked-42"
     assert saved.expires_at, "the mandatory TTL must persist across restarts"
     assert saved.created_by == "agent", "provenance must persist across restarts"
 
 
-# ── the tool surface (mcp_automation) ──
-
-
 def test_self_resolves_from_leaf_lineage_env(monkeypatch):
-    from gideon.mcp_automation import _resolve_resume_target
+    from gideon.integrations.mcp_automation import _resolve_resume_target
 
     monkeypatch.setenv("__wf_run_id", "r-lineage-9")
     target, err = _resolve_resume_target({"resume_run_id": "self"})
@@ -248,7 +238,7 @@ def test_self_resolves_from_leaf_lineage_env(monkeypatch):
 
 
 def test_self_without_lineage_is_a_typed_error(monkeypatch):
-    from gideon.mcp_automation import _resolve_resume_target
+    from gideon.integrations.mcp_automation import _resolve_resume_target
 
     monkeypatch.delenv("__wf_run_id", raising=False)
     target, err = _resolve_resume_target({"resume_run_id": "self"})
@@ -257,7 +247,7 @@ def test_self_without_lineage_is_a_typed_error(monkeypatch):
 
 
 def test_explicit_run_id_passes_through():
-    from gideon.mcp_automation import _resolve_resume_target
+    from gideon.integrations.mcp_automation import _resolve_resume_target
 
     target, err = _resolve_resume_target({"resume_run_id": "r-explicit"})
     assert err == ""
@@ -267,11 +257,8 @@ def test_explicit_run_id_passes_through():
     assert none_target is None and none_err == ""
 
 
-# ── the template + its alias ──
-
-
 def test_monitor_template_ships_and_parses():
-    from gideon.workflows.bundled_defs import read_template, template_names
+    from gideon.automation.workflows.bundled_defs import read_template, template_names
 
     assert "goal-pursuit-monitor" in template_names()
     wf = read_template("goal-pursuit-monitor")
@@ -280,13 +267,16 @@ def test_monitor_template_ships_and_parses():
 
 def test_monitor_template_parks_on_an_event_gate_and_self_schedules():
     """The template's mechanism, held structurally: an `event` park gate inside the watch
-    loop, and both scheduling stages instructing `set_onetime_task` with `resume_run_id`."""
+    loop, and both scheduling stages instructing `set_onetime_task` with `resume_run_id`.
+    """
     import json
     from pathlib import Path
 
-    from gideon.workflows.bundled_defs import bundled_root
+    from gideon.automation.workflows.bundled_defs import bundled_root
 
-    raw = json.loads((Path(bundled_root()) / "goal-pursuit-monitor" / "workflow.json").read_text())
+    raw = json.loads(
+        (Path(bundled_root()) / "goal-pursuit-monitor" / "workflow.json").read_text()
+    )
     children = raw["root"]["children"]
     intake, watch = children[0], children[1]
     assert "set_onetime_task" in intake["config"]["prompt"]
@@ -295,20 +285,19 @@ def test_monitor_template_parks_on_an_event_gate_and_self_schedules():
     park, check = watch["body"]["children"]
     assert park["kind"] == "gate"
     assert park["config"]["kind"] == "event"
-    assert park["config"]["timeout_secs"] > 0, "a parked gate needs its safety-net deadline"
+    assert (
+        park["config"]["timeout_secs"] > 0
+    ), "a parked gate needs its safety-net deadline"
     assert 'resume_run_id="self"' in check["config"]["prompt"]
-    # Self-scheduling creates triggers, which is mutating — a research leaf would be denied.
     assert intake["config"]["capability"] == "mutating"
     assert check["config"]["capability"] == "mutating"
-    # The watch ends only when a check says the goal is met.
     assert watch["config"]["mode"] == "until"
     assert "goal_met" in watch["config"]["condition"]
 
 
 def test_goal_monitor_alias_resolves():
-    from gideon.workflows.loop_aliases import resolve_kind
+    from gideon.automation.workflows.loop_aliases import resolve_kind
 
     assert resolve_kind("goal", variant="monitor") == "goal-pursuit-monitor"
-    # The bare kinds keep their existing meanings.
     assert resolve_kind("goal") == "goal-pursuit-open-ended"
     assert resolve_kind("goal", has_verify_command=True) == "goal-pursuit-verifiable"

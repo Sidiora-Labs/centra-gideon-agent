@@ -5,7 +5,7 @@ symptom: >
   A backend `.py` change appears to have "no effect" — the API still returns the old
   behavior, or a new endpoint 404s — even though the file was clearly edited and saved.
 appliesTo:
-  - src/gideon/**/*.py
+  - runtime/gideon/**/*.py
 requiredRules: []
 acceptance:
   - The dev gateway was restarted after the backend edit and the new behavior is observed.

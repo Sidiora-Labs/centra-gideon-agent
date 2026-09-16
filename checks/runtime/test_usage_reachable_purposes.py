@@ -19,37 +19,25 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from gideon.routing.usage import (
+from gideon.engine.routing.usage import (
     APP_PURPOSE,
     PURPOSE_BY_SOURCE,
     UNWRITTEN_PURPOSES,
     reachable_purposes,
 )
 
-_SRC = Path(__file__).resolve().parents[1] / "src" / "gideon"
+_SRC = Path(__file__).resolve().parents[2] / "runtime" / "gideon"
 
-#: The seam every turn row goes through. Both spellings appear (a direct call and the thin
-#: chat wrapper), so the census keys on the seam name rather than on any one module.
 _SEAM = re.compile(r"record_from_event\s*\(")
-#: `source=` as passed at a call site: a literal, or an expression we resolve by hand below.
-_SOURCE_ARG = re.compile(r"source\s*=\s*(?:\"([a-z_]+)\"|'([a-z_]+)'|([A-Za-z_][\w.]*))")
+_SOURCE_ARG = re.compile(
+    r"source\s*=\s*(?:\"([a-z_]+)\"|'([a-z_]+)'|([A-Za-z_][\w.]*))"
+)
 
-#: Expressions (not literals) that reach the seam, resolved by reading the code once:
-#:   gateway.py       `source=_src`                                → "channel" | "cron"
-#:   chat_runner.py   `source=source` ← `session._app or "chat"`    → "chat" | an app name
-#: The app-name half is NOT resolvable to a fixed purpose by hand — see :func:`_app_names`. It
-#: used to be hand-resolved here as "an app name → APP_PURPOSE", which was wrong and hid a real
-#: writer for a whole purpose; the app names are now censused out of the source instead.
 _RESOLVED_EXPRESSIONS = {
     "_src": ("channel", "cron"),
-    "source": ("chat",),  # plus every `app=` literal — see `_app_names`
+    "source": ("chat",),
 }
 
-#: A non-empty ``app=`` string literal. ``dashboard/state.py``'s ``session._app = app`` is the
-#: ONE assignment of the field the chat seam forwards, so every ``app=`` literal in the tree is a
-#: value ``source`` can take. Comment lines are stripped first: three comments in `gateway.py` /
-#: `chat_runner.py` describe `app="loop"` in prose, and a text scan that counted those would look
-#: like it had measured something when the real call sites had moved.
 _APP_ARG = re.compile(r"""app\s*=\s*["']([a-z][a-z0-9_-]*)["']""")
 
 
@@ -112,7 +100,6 @@ def _writer_sources() -> set[str]:
                 elif expression in _RESOLVED_EXPRESSIONS:
                     found.update(_RESOLVED_EXPRESSIONS[expression])
                     if expression == "source":
-                        # The chat seam forwards `session._app`, so every app name is a source.
                         found.update(_app_names())
     return found
 
@@ -120,8 +107,9 @@ def _writer_sources() -> set[str]:
 def test_the_writer_census_is_not_vacuous() -> None:
     """The floor: if the census finds nothing, every assertion below passes for free."""
     sources = _writer_sources()
-    assert len(sources) >= 4, f"census found only {sources} — the seam or regex has drifted"
-    # Sources we know are live; if these ever vanish the census is measuring the wrong thing.
+    assert (
+        len(sources) >= 4
+    ), f"census found only {sources} — the seam or regex has drifted"
     assert {"background", "subagent", "cli"} <= sources, sources
 
 
@@ -137,10 +125,13 @@ def test_the_census_is_scoped_to_the_call_and_not_the_file() -> None:
     assert (
         "dashboard" not in sources and "gateway" not in sources
     ), f"census leaked non-seam sources {sources} — it is matching per FILE, not per CALL"
-    # The innocent line really is there, so the exclusion above is doing work, not vacuous.
     watchdog = (_SRC / "loop" / "watchdog.py").read_text(encoding="utf-8")
-    assert 'source="loop"' in watchdog, "the innocent inbox line moved; re-derive this guard"
-    assert not _SEAM.search(watchdog), "watchdog gained a turn-ledger call; re-scope this guard"
+    assert (
+        'source="loop"' in watchdog
+    ), "the innocent inbox line moved; re-derive this guard"
+    assert not _SEAM.search(
+        watchdog
+    ), "watchdog gained a turn-ledger call; re-scope this guard"
 
 
 def test_every_unwritten_purpose_really_has_no_writer() -> None:
@@ -163,15 +154,14 @@ def test_every_unwritten_purpose_really_has_no_writer() -> None:
 def test_the_app_name_census_is_not_vacuous() -> None:
     """The floor for the app half: an empty app census re-hides the writer it exists to find."""
     apps = _app_names()
-    assert apps, "no `app=` literal found — the regex or the worker-session call sites moved"
-    # `loops` is plan_walkthrough's planner session: a real app name that is NOT a source key, so
-    # it proves the census sees BOTH kinds and the collision test below is discriminating.
+    assert (
+        apps
+    ), "no `app=` literal found — the regex or the worker-session call sites moved"
     assert "loops" in apps, apps
-    # Comments must not be readable as call sites. `gateway.py` mentions `app="loop"` in prose and
-    # creates no session with it, so it is the live proof that the stripping discriminates: the raw
-    # text matches and the code-only text must not.
     gw = (_SRC / "gateway.py").read_text(encoding="utf-8")
-    assert _APP_ARG.findall(gw), "gateway.py no longer mentions an app name; re-derive this guard"
+    assert _APP_ARG.findall(
+        gw
+    ), "gateway.py no longer mentions an app name; re-derive this guard"
     assert not _APP_ARG.findall(
         _code_lines(gw)
     ), "comment stripping is broken — gateway.py's prose is counting as a writer"
@@ -189,11 +179,17 @@ def test_loop_has_a_turn_ledger_writer_via_the_worker_session_app() -> None:
     ``app``.
     """
     manager = (_SRC / "loop" / "manager.py").read_text(encoding="utf-8")
-    assert manager.count('app="loop"') >= 2, "the main worker + task worker app names moved"
+    assert (
+        manager.count('app="loop"') >= 2
+    ), "the main worker + task worker app names moved"
     state = (_SRC / "dashboard" / "state.py").read_text(encoding="utf-8")
-    assert "session._app = app" in state, "the _app assignment moved; re-derive this chain"
+    assert (
+        "session._app = app" in state
+    ), "the _app assignment moved; re-derive this chain"
     runner = (_SRC / "dashboard" / "chat_runner.py").read_text(encoding="utf-8")
-    assert 'source=getattr(session, "_app", "") or "chat"' in runner, "the chat seam moved"
+    assert (
+        'source=getattr(session, "_app", "") or "chat"' in runner
+    ), "the chat seam moved"
 
     assert "loop" in _writer_sources()
     assert PURPOSE_BY_SOURCE["loop"] == "loop"
@@ -203,13 +199,16 @@ def test_loop_has_a_turn_ledger_writer_via_the_worker_session_app() -> None:
 
 def test_reachable_purposes_omits_the_unwritten_and_keeps_the_rest() -> None:
     got = set(reachable_purposes())
-    assert not (got & UNWRITTEN_PURPOSES), f"{got & UNWRITTEN_PURPOSES} cannot be filled"
-    # The ones with live writers are all present, so the exclusion is narrow, not a blanket.
+    assert not (
+        got & UNWRITTEN_PURPOSES
+    ), f"{got & UNWRITTEN_PURPOSES} cannot be filled"
     assert {"interactive", "background", APP_PURPOSE} <= got, got
     assert got, "reachable_purposes() must never be empty — a chart with no rows at all"
 
 
-def test_the_app_names_that_collide_with_the_source_vocabulary_are_exactly_these() -> None:
+def test_the_app_names_that_collide_with_the_source_vocabulary_are_exactly_these() -> (
+    None
+):
     """A ratchet, because a colliding app name silently RE-BUCKETS spend.
 
     An ``app=`` literal that is also a ``PURPOSE_BY_SOURCE`` key does not land in ``app`` — it
@@ -225,8 +224,9 @@ def test_the_app_names_that_collide_with_the_source_vocabulary_are_exactly_these
         f"spend is bucketed as {sorted(PURPOSE_BY_SOURCE[a] for a in colliding)} rather than "
         f"censused under `app`. Confirm that is intended."
     )
-    # The complement is non-empty, so the collision filter is discriminating rather than total.
-    assert _app_names() - colliding, "every app name collides — the filter is measuring nothing"
+    assert (
+        _app_names() - colliding
+    ), "every app name collides — the filter is measuring nothing"
 
 
 def test_an_app_source_still_reaches_the_app_purpose() -> None:

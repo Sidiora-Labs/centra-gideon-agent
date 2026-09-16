@@ -10,10 +10,8 @@ import json
 
 import pytest
 
-# Import the package so provider modules' register_type side effects populate
-# the default registry's type table (the real gateway import order).
-import gideon.llm  # noqa: F401
-from gideon.llm import registry as R
+import gideon.integrations.llm  # noqa: F401
+from gideon.integrations.llm import registry as R
 
 
 @pytest.fixture
@@ -34,21 +32,16 @@ def cfg_with_provider(tmp_path, monkeypatch):
             }
         )
     )
-    monkeypatch.setattr("gideon.config.loader.config_path", lambda: cfg)
+    monkeypatch.setattr("gideon.core.config.loader.config_path", lambda: cfg)
     return cfg
 
 
 def test_sync_registers_config_providers(cfg_with_provider):
     reg = R.get_default_registry()
-    # Clean any same-named leftovers from a prior test run.
     reg.unregister_entry("TestAli")
     reg.unregister_entry("LocalLlama")
 
-    # ``openai_compatible`` is its OWN registered type now (the generic
-    # openai-compatible APP registers it, installed by default). Core tests don't
-    # load apps, so register the type here to simulate that app being installed —
-    # after the alias collapse there is NO mapping to "openai".
-    from gideon.llm.capabilities import Capability, ProviderCapability
+    from gideon.integrations.llm.capabilities import Capability, ProviderCapability
 
     if "openai_compatible" not in reg._capabilities:  # noqa: SLF001
         reg.register_type(
@@ -69,12 +62,10 @@ def test_sync_registers_config_providers(cfg_with_provider):
 
     by_name = {e.name: e for e in reg.list_entries()}
     assert "TestAli" in by_name and "LocalLlama" in by_name
-    # No alias collapse: the entry keeps its own type; no _original_type rewrite.
     assert by_name["TestAli"].type == "openai_compatible"
     assert by_name["TestAli"].options.get("_original_type") is None
     assert by_name["LocalLlama"].type == "ollama"
 
-    # Idempotent — a second call registers nothing new.
     assert R.sync_entries_from_config() == 0
 
     reg.unregister_entry("TestAli")
@@ -82,5 +73,7 @@ def test_sync_registers_config_providers(cfg_with_provider):
 
 
 def test_sync_no_config_is_safe(tmp_path, monkeypatch):
-    monkeypatch.setattr("gideon.config.loader.config_path", lambda: tmp_path / "missing.json")
+    monkeypatch.setattr(
+        "gideon.core.config.loader.config_path", lambda: tmp_path / "missing.json"
+    )
     assert R.sync_entries_from_config() == 0

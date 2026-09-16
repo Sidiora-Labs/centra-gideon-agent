@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 import pytest
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.dashboard.handlers import files as F
+from gideon.interfaces.dashboard.handlers import files as F
 
 
 @pytest.fixture
@@ -18,7 +18,6 @@ def root(tmp_path, monkeypatch):
     (tmp_path / "alps").mkdir()
     (tmp_path / "beta").mkdir()
     (tmp_path / "afile.txt").write_text("x")
-    # Allow anything under tmp_path.
     monkeypatch.setattr(F, "_dashboard_roots", lambda: [("R", str(tmp_path))])
     monkeypatch.setattr(
         F,
@@ -63,19 +62,12 @@ def test_outside_roots_returns_empty(root, monkeypatch):
     assert body["suggestions"] == []
 
 
-# ── Screenshot capture endpoint (POST /api/screenshot) ──────────────────────
-# The desktop screenshot bridge: macOS `screencapture -i` → attach the PNG. The
-# interactive crosshair + a real display can't run headlessly, so these cover the
-# two deterministic branches: non-macOS degradation (400) and user-cancel (empty
-# path, no error). The success path is exercised as-a-user via Chrome DevTools MCP.
-
-
 def test_screenshot_unavailable_off_macos(monkeypatch):
     """Non-macOS hosts have no `screencapture` — degrade with a clear 400, never
     spawn a subprocess. This is the server half of the FE `useIsMac` gate."""
     monkeypatch.setattr(F.sys, "platform", "linux")
 
-    def _boom(*a, **k):  # must never be called on a non-mac host
+    def _boom(*a, **k):
         raise AssertionError("screencapture must not be spawned off macOS")
 
     monkeypatch.setattr(F.asyncio, "create_subprocess_exec", _boom)
@@ -97,7 +89,7 @@ def test_screenshot_cancel_returns_empty_path(monkeypatch):
             return 0
 
     async def _fake_exec(*a, **k):
-        return _Proc()  # note: writes NO file → dest.exists() is False
+        return _Proc()
 
     monkeypatch.setattr(F.asyncio, "create_subprocess_exec", _fake_exec)
     req = make_mocked_request("POST", "/api/screenshot")

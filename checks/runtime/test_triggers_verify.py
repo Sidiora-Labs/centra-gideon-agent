@@ -25,8 +25,8 @@ from pathlib import Path
 
 import pytest
 
-from gideon.triggers import verify as V
-from gideon.triggers.store import TriggerStore
+from gideon.automation.triggers import verify as V
+from gideon.automation.triggers.store import TriggerStore
 
 
 def _crons(*jobs):
@@ -69,9 +69,6 @@ def _migrated(home, payload):
     return store
 
 
-# ── before the migration: everything is missing ──
-
-
 def test_an_unmigrated_store_reports_every_job_missing(home):
     """The one true data-loss class, and what a row-for-row diff exists to make impossible
     to miss."""
@@ -89,25 +86,22 @@ def test_the_render_tells_the_user_crons_json_is_intact(home):
     assert "crons.json is still intact" in text
 
 
-# ── 🔴 the paused-but-lossless gap ──
-
-
 def test_a_paused_row_makes_verify_NOT_ok_even_though_the_migration_was_lossless(home):
     """🔴 THE finding, reproduced. `migrate_crons` reports `lossless: true` for an `every` cron
     because nothing was LOST — the data is all there, the automation just is not running. A user
     asking "did my migration work" means "are my automations still running", and answering the
     narrower question is how someone's 5-minute job stops silently.
     """
-    from gideon.triggers.migrate import migrate_crons
+    from gideon.automation.triggers.migrate import migrate_crons
 
     payload = _crons(_job("j-every", "every"))
     migration = migrate_crons(payload)
-    assert migration.lossless is True  # the migration's own verdict
+    assert migration.lossless is True
 
     _migrated(home, payload)
     report = V.verify_home(home)
     assert report.paused == ["j-every"]
-    assert report.ok is False  # verify's verdict differs, deliberately
+    assert report.ok is False
 
 
 def test_the_paused_row_carries_the_migrations_own_note(home):
@@ -147,16 +141,12 @@ def test_re_enabling_makes_the_report_clean(home):
     assert "migrated cleanly" in V.render(report)
 
 
-# ── field drift ──
-
-
 def test_a_dropped_timing_field_is_reported(home):
     """§1.3's quietly-losable class: "a dropped `skip_dates` fires on a holiday and nobody knows
     why".
     """
     store = _migrated(home, _crons(_job("a", skip_dates=["2026-12-25"])))
     row = next(r for r in V.verify_home(home).rows if r.job_id == "a")
-    # The migration DOES carry skip_dates, so this asserts the check does not false-positive.
     assert row.field_drift == []
     assert store.get("a").trigger.spec.get("skip_dates") == ["2026-12-25"]
 
@@ -181,14 +171,13 @@ def test_drift_is_detected_when_a_field_really_is_absent(home):
     """Driven by comparing against a trigger whose spec genuinely lacks the field, so the check is
     shown to be capable of failing rather than merely never firing.
     """
-    from gideon.triggers.models import Trigger
+    from gideon.automation.triggers.models import Trigger
 
-    trigger = Trigger(id="a", name="A", kind="clock", spec={"kind": "cron", "expr": "0 9 * * *"})
+    trigger = Trigger(
+        id="a", name="A", kind="clock", spec={"kind": "cron", "expr": "0 9 * * *"}
+    )
     drift = V._field_drift({"skip_dates": ["2026-12-25"], "timezone": "UTC"}, trigger)
     assert sorted(drift) == ["skip_dates", "timezone"]
-
-
-# ── damage after the fact ──
 
 
 def test_a_row_deleted_from_the_new_store_shows_up_as_missing(home):
@@ -207,14 +196,13 @@ def test_a_broken_migrated_row_is_reported_as_unparseable(home):
     _write_crons(home, _crons(_job("a")))
     store = TriggerStore(base_dir=home)
     store.path.write_text(
-        json.dumps({"version": 1, "triggers": [{"id": "a", "name": "A", "kind": "clok"}]})
+        json.dumps(
+            {"version": 1, "triggers": [{"id": "a", "name": "A", "kind": "clok"}]}
+        )
     )
     report = V.verify_home(home)
     assert report.broken == ["a"]
     assert "UNPARSEABLE" in V.render(report)
-
-
-# ── degradation, never a false green ──
 
 
 def test_a_missing_crons_file_is_not_a_clean_migration(home):
@@ -267,9 +255,6 @@ def test_the_render_states_the_legacy_file_was_not_modified(home):
     assert "READ-ONLY" in V.render(V.verify_home(home))
 
 
-# ── the whole legacy vocabulary, in the owner's real shape ──
-
-
 def test_every_legacy_clock_kind_verifies(home):
     """The shape of the owner's real store: a cron, an interval, a one-shot, and a sequence."""
     store = _migrated(
@@ -284,7 +269,6 @@ def test_every_legacy_clock_kind_verifies(home):
     report = V.verify_home(home)
     assert report.missing == []
     assert report.drifted == []
-    # The two that need review are exactly the interval and the sequence.
     assert sorted(report.paused) == ["j-every", "j-seq"]
     for tid in report.paused:
         store.set_enabled(tid, True)
@@ -307,13 +291,10 @@ def test_the_report_serializes(home):
     assert payload["rows"][0]["note"]
 
 
-# ── the CLI command ──
-
-
 def _run_cli(home, *args):
     """Drive the real console entry point, not `python -m`.
 
-    Measured: `python -m gideon.cli` exits 0 doing NOTHING — the module has no `__main__`
+    Measured: `python -m gideon.interfaces.cli.main` exits 0 doing NOTHING — the module has no `__main__`
     guard, so `main()` never runs. A test invoking it that way would pass against a command that
     does not exist.
     """

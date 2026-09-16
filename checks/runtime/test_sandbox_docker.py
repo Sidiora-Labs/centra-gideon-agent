@@ -18,20 +18,20 @@ import subprocess
 
 import pytest
 
-from gideon.sandbox import ResourceCeilings
-from gideon.sandbox_providers import (
+from gideon.integrations.sandbox_providers import (
     SandboxUnavailableError,
     list_providers,
     resolve_provider,
 )
-from gideon.sandbox_providers.base import SandboxSpec
-from gideon.sandbox_providers.docker import (
+from gideon.integrations.sandbox_providers.base import SandboxSpec
+from gideon.integrations.sandbox_providers.docker import (
     DOCKER_PROVIDER_NAME,
     DockerSandboxProvider,
     build_docker_argv,
     docker_available,
     sandbox_image,
 )
+from gideon.security.sandbox import ResourceCeilings
 
 _MODELS_DIR = os.path.expanduser("~/.gideon/models")
 
@@ -44,9 +44,6 @@ def _argv(spec: SandboxSpec, inner=("echo", "hi"), *, workspace="/ws", ceilings=
         spec=spec,
         container_name="gideon-sbx-test",
     )
-
-
-# ── registry wiring ───────────────────────────────────────────────────────────
 
 
 def test_docker_is_registered_as_a_builtin():
@@ -63,20 +60,15 @@ def test_unknown_name_still_fails_open_to_none():
     assert resolve_provider("does-not-exist").name == "none"
 
 
-# ── command construction (SC1/SC2) ──────────────────────────────────────────────
-
-
 def test_argv_uid_aligned_bind_mount_over_workspace():
     argv = _argv(SandboxSpec(), workspace="/work/tree")
     assert argv[:3] == ["docker", "run", "--rm"]
     assert "--init" in argv
     uid, gid = os.getuid(), os.getgid()
     assert argv[argv.index("--user") + 1] == f"{uid}:{gid}"
-    # Same-path bind mount + workdir over the worktree.
     joined = " ".join(argv)
     assert "/work/tree:/work/tree" in joined
     assert argv[argv.index("--workdir") + 1] == "/work/tree"
-    # The image precedes the inner command, which comes last verbatim.
     assert sandbox_image() in argv
     assert argv[-2:] == ["echo", "hi"]
 
@@ -89,7 +81,9 @@ def test_argv_maps_ceilings_to_native_docker_limits():
 
 
 def test_argv_no_ceiling_flags_when_unset():
-    argv = _argv(SandboxSpec(), ceilings=ResourceCeilings(nofile=1024, max_pids=0, max_rss_mb=0))
+    argv = _argv(
+        SandboxSpec(), ceilings=ResourceCeilings(nofile=1024, max_pids=0, max_rss_mb=0)
+    )
     assert "--pids-limit" not in argv
     assert "--memory" not in argv
 
@@ -115,7 +109,7 @@ def test_allowed_write_paths_are_mounted_and_others_are_not():
     joined = " ".join(_argv(spec, workspace="/ws"))
     assert "/ws:/ws" in joined
     assert "/data/out:/data/out" in joined
-    assert "/etc/passwd" not in joined  # nothing outside the declared set is mounted
+    assert "/etc/passwd" not in joined
 
 
 def test_expose_ports_and_env_are_threaded():
@@ -141,27 +135,24 @@ def test_image_env_override(monkeypatch):
     assert sandbox_image() == "ghcr.io/acme/sbx:1"
 
 
-# ── failure honesty (SC1: no silent host downgrade) ─────────────────────────────
-
-
 def test_wrap_refuses_with_typed_error_when_docker_unavailable(monkeypatch):
     monkeypatch.setattr(
-        "gideon.sandbox_providers.docker.docker_available", lambda *a, **k: False
+        "gideon.integrations.sandbox_providers.docker.docker_available",
+        lambda *a, **k: False,
     )
     provider = DockerSandboxProvider()
     assert provider.available() is False
     with pytest.raises(SandboxUnavailableError) as ei:
         provider.wrap(SandboxSpec(), ["echo", "hi"])
-    # WHAT/WHY/FIX shape so a consumer can surface it verbatim (unattended parks needs-input).
     err = ei.value
     assert err.what and err.why and err.fix
     assert "Docker" in str(err) and "Fix:" in str(err)
 
 
-# ── integration (real daemon) ───────────────────────────────────────────────────
-
 _HAS_DOCKER = shutil.which("docker") is not None and docker_available(refresh=True)
-_docker_only = pytest.mark.skipif(not _HAS_DOCKER, reason="docker CLI/daemon unavailable")
+_docker_only = pytest.mark.skipif(
+    not _HAS_DOCKER, reason="docker CLI/daemon unavailable"
+)
 
 
 @pytest.fixture

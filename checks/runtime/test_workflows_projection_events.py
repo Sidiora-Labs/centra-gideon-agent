@@ -24,7 +24,7 @@ import pathlib
 
 import pytest
 
-from gideon.workflows.journal import (
+from gideon.automation.workflows.journal import (
     CASCADE_BLOCKED,
     CONFIRMATION_PENDING,
     CONFIRMATION_RESOLVED,
@@ -62,23 +62,23 @@ PROJECTION_KINDS = (
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
     """Journal writes go under a tmp home. `store.config_dir` is the module-level bind that
-    matters — patching only `config.loader.config_dir` leaves the store on the real home."""
+    matters — patching only `config.loader.config_dir` leaves the store on the real home.
+    """
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.workflows import store as wstore
+    from gideon.automation.workflows import store as wstore
 
     monkeypatch.setattr(wstore, "config_dir", lambda: tmp_path)
     yield
 
 
 def _controller(published: list):
-    from gideon.workflows.controller import EngineServices, RunController
-    from gideon.workflows.models import WorkflowRun
+    from gideon.automation.workflows.controller import EngineServices, RunController
+    from gideon.automation.workflows.models import WorkflowRun
 
     services = EngineServices(publish=lambda ev, body: published.append((ev, body)))
-    return RunController(WorkflowRun(id="r-1", workflow_name="t"), SPEC, services=services)
-
-
-# ── the ledger vocabulary ──
+    return RunController(
+        WorkflowRun(id="r-1", workflow_name="t"), SPEC, services=services
+    )
 
 
 @pytest.mark.parametrize("kind", PROJECTION_KINDS)
@@ -94,12 +94,11 @@ def test_the_kind_names_have_no_workflow_prefix():
     assert not any(k.startswith("workflow_") for k in PROJECTION_KINDS)
 
 
-# ── the journal emitters ──
-
-
 def test_materialization_records_the_task_and_its_fingerprint():
     """ "Why does this task exist" is a question the ledger is the only place to answer."""
-    Journal("r-1").task_materialized("root.children[0]", "a", task_id="t-1", fingerprint="fp")
+    Journal("r-1").task_materialized(
+        "root.children[0]", "a", task_id="t-1", fingerprint="fp"
+    )
     row = ledger("r-1")[0]
     assert row["kind"] == TASK_MATERIALIZED
     assert row["task_id"] == "t-1"
@@ -174,9 +173,6 @@ def test_a_cascade_is_ONE_event_carrying_every_blocked_id():
     assert "boom" in rows[0]["cause"]
 
 
-# ── both channels, one vocabulary ──
-
-
 def test_the_controller_emits_on_BOTH_channels():
     """The live stream and the replayable ledger must carry the same fact. A consumer folding the
     stream and one reconstructing from history would otherwise need two vocabularies."""
@@ -197,7 +193,9 @@ def test_every_stream_name_is_the_ledger_kind_PREFIXED():
         "root.children[0]", "a", confirmation_id="cr-1", verb="approve", approved=True
     )
     ctl.publish_task_verified("root.children[0]", "a", task_id="t-1", passed=True)
-    ctl.publish_cascade_blocked("root.children[0]", "a", blocked_task_ids=["t-2"], cause="x")
+    ctl.publish_cascade_blocked(
+        "root.children[0]", "a", blocked_task_ids=["t-2"], cause="x"
+    )
     stream = [e for e, _b in published]
     kinds = [r["kind"] for r in ledger("r-1")]
     assert stream == [f"workflow_{k}" for k in kinds]
@@ -217,42 +215,44 @@ def test_a_BROKEN_observer_does_not_kill_the_run():
     """A publish observer is exactly the kind of thing that fails in the field, and
     `_publish` already swallows — this asserts the projection emitters inherit that
     rather than bypassing it."""
-    from gideon.workflows.controller import EngineServices, RunController
-    from gideon.workflows.models import WorkflowRun
+    from gideon.automation.workflows.controller import EngineServices, RunController
+    from gideon.automation.workflows.models import WorkflowRun
 
     def boom(_event, _body):
         raise RuntimeError("observer exploded")
 
     ctl = RunController(
-        WorkflowRun(id="r-1", workflow_name="t"), SPEC, services=EngineServices(publish=boom)
+        WorkflowRun(id="r-1", workflow_name="t"),
+        SPEC,
+        services=EngineServices(publish=boom),
     )
     ctl.publish_task_materialized("root.children[0]", "a", task_id="t-1")
-    # The ledger write still happened: the durable record must not depend on a live observer.
     assert [r["kind"] for r in ledger("r-1")] == [TASK_MATERIALIZED]
 
 
 def test_NO_publish_service_still_writes_the_ledger():
     """A run with no observer (a CLI run, a replay) must still produce its history."""
-    from gideon.workflows.controller import RunController
-    from gideon.workflows.models import WorkflowRun
+    from gideon.automation.workflows.controller import RunController
+    from gideon.automation.workflows.models import WorkflowRun
 
     ctl = RunController(WorkflowRun(id="r-1", workflow_name="t"), SPEC)
-    ctl.publish_cascade_blocked("root.children[0]", "a", blocked_task_ids=["t-2"], cause="x")
+    ctl.publish_cascade_blocked(
+        "root.children[0]", "a", blocked_task_ids=["t-2"], cause="x"
+    )
     assert [r["kind"] for r in ledger("r-1")] == [CASCADE_BLOCKED]
-
-
-# ── the FE union is the only gate ──
 
 
 def test_the_FE_union_REGISTERS_every_projection_event():
     """EventSource SILENTLY DROPS an event type nobody listened for, and `_publish` has no
     server-side allowlist — so this array is the only thing between an emitted event and
     a frontend that never sees it. A missing member produces no error anywhere."""
-    source = pathlib.Path("web/src/pages/workflows/useWorkflowStream.ts").read_text(
-        encoding="utf-8"
-    )
+    source = pathlib.Path(
+        "apps/console/src/pages/workflows/useWorkflowStream.ts"
+    ).read_text(encoding="utf-8")
     for kind in PROJECTION_KINDS:
-        assert f"'workflow_{kind}'" in source, f"workflow_{kind} is emitted but never registered"
+        assert (
+            f"'workflow_{kind}'" in source
+        ), f"workflow_{kind} is emitted but never registered"
 
 
 def test_the_publish_seam_has_no_server_side_allowlist():
@@ -261,7 +261,7 @@ def test_the_publish_seam_has_no_server_side_allowlist():
     guard."""
     import inspect
 
-    from gideon.workflows.controller import RunController
+    from gideon.automation.workflows.controller import RunController
 
     source = inspect.getsource(RunController._publish)
     assert "ALLOWED" not in source and "allowlist" not in source.lower()

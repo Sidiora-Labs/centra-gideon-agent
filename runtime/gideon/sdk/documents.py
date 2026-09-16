@@ -1,7 +1,7 @@
 """SDK: the document-generation seam — markdown/HTML in, a real file out.
 
-Stable re-export of ``gideon.documents`` (the declarative document/deck/sheet
-models + the format→writer registry) plus ``gideon.documents.from_markup``
+Stable re-export of ``gideon.workspace.documents`` (the declarative document/deck/sheet
+models + the format→writer registry) plus ``gideon.workspace.documents.from_markup``
 (markdown/HTML → a model). An app that *fronts* document generation — a brief-to-deck
 app, a report exporter — composes a model and asks the SHIPPED writer to render it,
 instead of vendoring python-pptx/python-docx and becoming a second backend that drifts
@@ -21,7 +21,7 @@ why no app needs to learn OOXML. HTML arriving there is treated as untrusted and
 through core's existing sanitizer and credential redactor.
 """
 
-from gideon.documents import (  # noqa: F401
+from gideon.workspace.documents import (
     Block,
     Bullet,
     Cell,
@@ -44,16 +44,12 @@ from gideon.documents import (  # noqa: F401
     sheet_from_dict,
     sheet_to_dict,
 )
-from gideon.documents.from_markup import (  # noqa: F401
+from gideon.workspace.documents.from_markup import (
     deck_from_markdown,
     document_from_html,
     document_from_markdown,
 )
 
-# ``register_writer`` is deliberately NOT promoted. A format an app registers would be
-# visible to every other caller of the shared registry while that app is enabled and
-# gone when it is disabled, so ``available_formats()`` would stop being a property of
-# the build. Apps render through the writers core ships; adding a format is a core change.
 __all__ = [
     "document_from_markdown",
     "document_from_html",

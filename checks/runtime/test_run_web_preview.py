@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from gideon.workflows import web_preview as wp
+from gideon.automation.workflows import web_preview as wp
 
 
 def _free_port() -> int:
@@ -69,25 +69,20 @@ needs_lsof = pytest.mark.skipif(
 )
 
 
-# ── attribution: a port belongs to the run whose workspace owns the process ────────
-
-
 @needs_lsof
 def test_a_dev_server_in_the_runs_workspace_surfaces_as_an_openable_url(server):
     root, port = server
     scan = wp.discover_ports(root)
 
     assert scan.scanned
-    # VACUITY FLOOR: this whole file is meaningless if the scan finds nothing, and a scan
-    # that found nothing would satisfy every "is not present" assertion below forever.
-    assert scan.ports, f"the fixture's server on {port} was not discovered ({scan.reason})"
+    assert (
+        scan.ports
+    ), f"the fixture's server on {port} was not discovered ({scan.reason})"
     found = {p.port: p for p in scan.ports}
     assert port in found, sorted(found)
     hit = found[port]
     assert hit.url == f"http://localhost:{port}"
     assert hit.pid > 0
-    # The port was found even though the process's cwd is a SUBDIRECTORY of the root — a
-    # dev server is routinely started from a package subdir, not the worktree top.
     assert scan.reason == ""
 
 
@@ -100,7 +95,9 @@ def test_the_url_actually_serves_so_the_affordance_is_not_a_dead_link(server):
     scan = wp.discover_ports(root)
     assert scan.ports, scan.reason
     url = scan.ports[0].url
-    with urllib.request.urlopen(url, timeout=10) as resp:  # noqa: S310 — a loopback literal
+    with urllib.request.urlopen(
+        url, timeout=10
+    ) as resp:  # noqa: S310 — a loopback literal
         assert resp.status == 200
 
 
@@ -111,17 +108,11 @@ def test_a_port_is_not_attributed_to_an_unrelated_root(server, tmp_path):
     other = tmp_path / "unrelated"
     other.mkdir()
 
-    # Vacuity: prove the port IS discoverable from its own root before asserting it is not
-    # discoverable from a different one. Without this the assertion below would also pass on
-    # a scanner that never finds anything at all.
     assert port in {p.port for p in wp.discover_ports(root).ports}
 
     scan = wp.discover_ports(other)
     assert port not in {p.port for p in scan.ports}
     assert scan.reason, "an empty result must say why it is empty"
-
-
-# ── honest degradation: "nothing running" and "nothing looked" differ ──────────────
 
 
 def test_a_torn_down_workspace_reports_that_rather_than_an_empty_list(tmp_path):
@@ -133,7 +124,9 @@ def test_a_torn_down_workspace_reports_that_rather_than_an_empty_list(tmp_path):
     assert "gone" in scan.reason
 
 
-def test_a_host_with_no_port_scanner_says_so_instead_of_reporting_no_servers(tmp_path, monkeypatch):
+def test_a_host_with_no_port_scanner_says_so_instead_of_reporting_no_servers(
+    tmp_path, monkeypatch
+):
     """The difference a user acts on. An empty list with no reason would tell them their dev
     server is not running when the truth is that nothing was able to look."""
     monkeypatch.setattr(wp.shutil, "which", lambda _name: None)
@@ -168,9 +161,6 @@ def test_preview_scan_reads_the_workspace_path_off_the_run_record(server):
     assert port in {p.port for p in scan.ports}, scan.reason
 
 
-# ── only a URL localhost can actually reach is offered ────────────────────────────
-
-
 def test_a_lan_bound_listener_is_not_offered_as_a_localhost_link(tmp_path, monkeypatch):
     """A listener on a specific LAN address is a real listener and a DEAD localhost link.
 
@@ -185,15 +175,10 @@ def test_a_lan_bound_listener_is_not_offered_as_a_localhost_link(tmp_path, monke
     assert scan.ports == []
     assert "no dev server" in scan.reason
 
-    # VACUITY FLOOR: the same harness with a loopback bind must find the port, otherwise the
-    # assertion above would pass because the fake output is simply unparseable.
     monkeypatch.setattr(wp, "_run", lambda argv: "p999\nn127.0.0.1:3000\n")
     monkeypatch.setattr(wp, "_cwds", lambda pids: {999: str(tmp_path)})
     monkeypatch.setattr(wp, "_command", lambda pid: "node")
     assert [p.port for p in wp.discover_ports(tmp_path).ports] == [3000]
-
-
-# ── the two -F parsers, from fixtures (the ss tier cannot run on Darwin) ───────────
 
 
 def test_the_lsof_listener_parser_binds_each_socket_to_the_pid_that_precedes_it():
@@ -206,7 +191,9 @@ def test_the_lsof_listener_parser_binds_each_socket_to_the_pid_that_precedes_it(
 
 
 def test_the_lsof_cwd_parser_maps_each_pid_to_its_directory():
-    assert wp.parse_lsof_cwds("p47709\nfcwd\nn/private/tmp/run-a/sub\np1\nfcwd\nn/\n") == {
+    assert wp.parse_lsof_cwds(
+        "p47709\nfcwd\nn/private/tmp/run-a/sub\np1\nfcwd\nn/\n"
+    ) == {
         47709: "/private/tmp/run-a/sub",
         1: "/",
     }
@@ -223,14 +210,13 @@ def test_the_ss_listener_parser_reads_the_linux_format():
         (77, "*", 8080),
         (88, "192.168.1.9", 9000),
     ]
-    # The LAN row is PARSED (the parser reports what the host said) and filtered later, so
-    # the filter stays one testable decision rather than a silent omission in the parser.
     assert "192.168.1.9" not in wp._LOOPBACK_ADDRS
 
 
 def test_an_empty_pid_list_never_reaches_lsof(monkeypatch):
     """Measured hazard, not a hypothetical: ``lsof -a -p "" -d cwd`` does not select nothing,
-    it selects EVERY process on the host — a scoped probe silently becoming host-wide."""
+    it selects EVERY process on the host — a scoped probe silently becoming host-wide.
+    """
     called: list[list[str]] = []
     monkeypatch.setattr(wp, "_run", lambda argv: called.append(argv) or "")
     assert wp._cwds([]) == {}

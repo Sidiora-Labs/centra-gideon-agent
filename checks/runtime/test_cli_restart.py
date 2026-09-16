@@ -11,13 +11,15 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from gideon import cli_server
+from gideon.interfaces.cli import server as cli_server
 
 
 def test_restart_uses_service_when_present():
     """restart_service() True → service owns the lifecycle; no spawn."""
     with (
-        patch.object(cli_server.service_controller, "restart_service", return_value=True) as rs,
+        patch.object(
+            cli_server.service_controller, "restart_service", return_value=True
+        ) as rs,
         patch.object(cli_server, "_spawn_detached_gateway") as spawn,
         patch.object(cli_server, "_stop") as stop,
     ):
@@ -30,7 +32,9 @@ def test_restart_uses_service_when_present():
 def test_restart_foreground_stops_then_spawns():
     """No service + running gateway → _stop then spawn a fresh one."""
     with (
-        patch.object(cli_server.service_controller, "restart_service", return_value=False),
+        patch.object(
+            cli_server.service_controller, "restart_service", return_value=False
+        ),
         patch.object(cli_server, "_stop") as stop,
         patch.object(cli_server, "_spawn_detached_gateway") as spawn,
     ):
@@ -42,11 +46,13 @@ def test_restart_foreground_stops_then_spawns():
 def test_restart_swallows_stop_systemexit_and_still_spawns():
     """_stop exits nonzero when nothing is running → swallowed, gateway still spawned."""
     with (
-        patch.object(cli_server.service_controller, "restart_service", return_value=False),
+        patch.object(
+            cli_server.service_controller, "restart_service", return_value=False
+        ),
         patch.object(cli_server, "_stop", side_effect=SystemExit(1)) as stop,
         patch.object(cli_server, "_spawn_detached_gateway") as spawn,
     ):
-        cli_server._restart(7777)  # must not raise
+        cli_server._restart(7777)
     stop.assert_called_once_with(7777)
     spawn.assert_called_once_with(7777)
 
@@ -61,12 +67,9 @@ def test_spawn_detached_gateway_launches_gideon_gateway():
     assert popen.call_args.kwargs.get("start_new_session") is True
 
 
-# ── platform restart dispatch (mirror stop_service's branch shape) ───────────
-
-
 def test_restart_service_systemd_active():
-    from gideon.service import controller
-    from gideon.service.common import Platform
+    from gideon.operations.service import controller
+    from gideon.operations.service.common import Platform
 
     with (
         patch.object(controller, "current_platform", return_value=Platform.SYSTEMD),
@@ -78,8 +81,8 @@ def test_restart_service_systemd_active():
 
 
 def test_restart_service_none_when_inactive():
-    from gideon.service import controller
-    from gideon.service.common import Platform
+    from gideon.operations.service import controller
+    from gideon.operations.service.common import Platform
 
     with (
         patch.object(controller, "current_platform", return_value=Platform.SYSTEMD),

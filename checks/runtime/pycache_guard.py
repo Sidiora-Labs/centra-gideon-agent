@@ -25,7 +25,7 @@ absurdity it would have been reported as a clean pass.
 this while the masking continues. ``-p no:cacheprovider``, which this repo already
 passes to pytest, disables pytest's own ``.pytest_cache`` and has no bearing on
 ``__pycache__``. Both are covered by executable cases in
-``tests/test_pycache_guard.py`` rather than left as prose.
+``checks/runtime/test_pycache_guard.py`` rather than left as prose.
 
 **The mechanism: a per-run cache directory outside the tree.** ``activate()``
 points ``PYTHONPYCACHEPREFIX`` / ``sys.pycache_prefix`` at a fresh temp directory
@@ -33,7 +33,7 @@ created at the start of each run. Nothing an earlier run wrote is *reachable*, s
 there is no cache entry to validate incorrectly — the collision is removed by
 construction rather than detected. It needs no cooperation from the author of a
 mutation, costs no source change, and holds for every invocation of the suite:
-``make test``, a targeted ``pytest tests/test_x.py::test_y``, CI.
+``make test``, a targeted ``pytest checks/runtime/test_x.py::test_y``, CI.
 
 Why not hash-based invalidation (``py_compile`` with ``CHECKED_HASH``), the other
 candidate the issue names — three measured reasons, all on this interpreter
@@ -53,11 +53,11 @@ candidate the issue names — three measured reasons, all on this interpreter
    cost as a cold prefix, minus the immunity.
 3. **Coverage is only as wide as the file list you remember to pass.** Anything
    the interpreter compiles for the first time itself — a newly added module, a
-   dependency under ``site-packages``, ``harness/``, ``scripts/`` — gets a
+   dependency under ``site-packages``, ``checks/harness/``, ``tooling/scripts/`` — gets a
    timestamp ``.pyc``, and mutating it is unprotected. A prefix has no list.
 
 What the cold cache costs, measured rather than assumed: compiling the whole of
-``src/gideon`` plus ``tests`` is 1.6 s wall / 5.3 s CPU, and importing the
+``runtime/gideon`` plus ``tests`` is 1.6 s wall / 5.3 s CPU, and importing the
 gateway's full graph cold is ~1.9 s slower than warm. ``activate()`` reuses a
 prefix inherited from the process that spawned it, so the xdist controller sets
 the variable once and every worker starts with it already in the environment —
@@ -65,7 +65,7 @@ the tree is compiled once per run, not once per worker.
 
 The detector half (``cached_outside``) is a pure function over module objects so
 the rail can be driven against a fake and proven to fire — see
-``tests/test_pycache_guard.py``. A guard that can only ever be exercised by the
+``checks/runtime/test_pycache_guard.py``. A guard that can only ever be exercised by the
 thing it guards is indistinguishable from one that never fires.
 
 WHAT THIS DOES NOT COVER, because "mutation evidence is trustworthy now" would be
@@ -83,13 +83,13 @@ and this fixes one:
 
 Three files are outside this rail by construction, and they are named rather than
 glossed: ``conftest.py``, this module, and ``real_home_guard.py`` are imported
-before the prefix can exist, so their bytecode does land in ``tests/__pycache__``
+before the prefix can exist, so their bytecode does land in ``checks/runtime/__pycache__``
 (measured: those three ``.pyc`` files and nothing else). Something has to run
 first and cannot protect itself. ``real_home_guard`` in particular must stay an
 eager import — it resolves ``Path.home()`` at import time on purpose, before a test
 can patch it. Everything else is covered: after a full run there is no
-``__pycache__`` anywhere under ``src/gideon`` and none for any
-``tests/test_*.py``.
+``__pycache__`` anywhere under ``runtime/gideon`` and none for any
+``checks/runtime/test_*.py``.
 
 Scope of the doubt, stated plainly: this makes no claim that any past "N caught"
 result was wrong. It says that nothing enforced the invariant, so no past claim
@@ -105,17 +105,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Iterable
 
-#: The interpreter-level knob. Set in ``os.environ`` as well as on ``sys`` so that
-#: subprocesses (xdist workers above all) inherit it at *startup* — before they
-#: import anything — instead of having to re-derive it after the fact.
 ENV_VAR = "PYTHONPYCACHEPREFIX"
 
-#: Directory-name marker identifying a prefix as one of *ours*, i.e. created for
-#: one run and thrown away with it. The check matters: a developer who exports a
-#: STABLE ``PYTHONPYCACHEPREFIX`` in their shell has relocated the cache without
-#: making it fresh, which masks exactly as well as ``__pycache__`` does (there is
-#: a case for that in the test file). Inheriting is only safe when the inherited
-#: directory carries this marker.
 DIR_MARKER = "gideon-pycache-"
 
 
@@ -140,9 +131,6 @@ def activate() -> Path:
     prefix = Path(tempfile.mkdtemp(prefix=DIR_MARKER))
     os.environ[ENV_VAR] = str(prefix)
     sys.pycache_prefix = str(prefix)
-    # Only the process that created the directory removes it. A process that
-    # inherited one returns above without registering anything, so no worker can
-    # delete the cache its siblings are still reading.
     atexit.register(shutil.rmtree, prefix, ignore_errors=True)
     return prefix
 
@@ -174,11 +162,13 @@ def format_report(prefix: Path | None, outside: list[str]) -> str:
             "bytecode-cache rail DISARMED: sys.pycache_prefix is unset, so this run is "
             "reading __pycache__ beside the source. A same-length edit made inside one "
             "second is masked — mutation results from this run are not evidence. "
-            "tests/conftest.py must call pycache_guard.activate() before it imports "
+            "checks/runtime/conftest.py must call pycache_guard.activate() before it imports "
             "anything under test (see #2659)."
         )
     if not outside:
-        return f"bytecode-cache rail: every loaded module read its bytecode from {prefix}."
+        return (
+            f"bytecode-cache rail: every loaded module read its bytecode from {prefix}."
+        )
     return "\n".join(
         [
             f"bytecode-cache rail FAILED: {len(outside)} modules were imported before the "

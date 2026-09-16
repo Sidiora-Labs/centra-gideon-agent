@@ -20,8 +20,8 @@ from pathlib import Path
 
 import pytest
 
-from gideon.memory_service import MemoryService
-from gideon.memory_vault import (
+from gideon.cognition.memory_service import MemoryService
+from gideon.cognition.memory_vault import (
     MemoryVault,
     body_hash,
     extract_edited_value,
@@ -30,12 +30,12 @@ from gideon.memory_vault import (
     starter_seeds,
     timeline_lines,
 )
-from gideon.vector_memory import VectorMemoryStore
+from gideon.cognition.vector_memory import SemanticArchive
 
 
 @pytest.fixture
 def service(tmp_path):
-    vs = VectorMemoryStore(db_path=tmp_path / "mem.db", embedding_dim=3)
+    vs = SemanticArchive(db_path=tmp_path / "mem.db", embedding_dim=3)
     vs.init()
     vs.embed_fn = lambda t: [1.0, 0.0, 0.0]
     return MemoryService.over_vector_store(vs)
@@ -73,9 +73,6 @@ def _edit(vault: MemoryVault, rel: str, new_body: str) -> None:
     path.write_text(f"---\n{block}\n---\n\n{new_body.rstrip()}\n", encoding="utf-8")
 
 
-# ── property 2: source_hash covers the body, and only the body ───────────────
-
-
 class TestHashDetectsEditsExactlyOnce:
     def test_an_untouched_page_is_a_noop(self, vault, service):
         service.set_semantic("pref.editor", "vim", 0.9, "user_explicit")
@@ -96,7 +93,6 @@ class TestHashDetectsEditsExactlyOnce:
         assert absorbed["conflicts"] == 0
         assert _value(service, "pref.editor") == "helix"
 
-        # The re-projection stamped a fresh hash, so the SAME edit is not re-applied.
         again = vault.sync()
         assert again["absorbed"] == 0
         assert again["conflicts"] == 0
@@ -113,15 +109,14 @@ class TestHashDetectsEditsExactlyOnce:
         vault.sync()
         path = vault.path / "facts/pref.editor.md"
         block, body = split_page(path.read_text(encoding="utf-8"))
-        path.write_text(f'---\n{block}\nhand_added: "noise"\n---\n\n{body}', encoding="utf-8")
+        path.write_text(
+            f'---\n{block}\nhand_added: "noise"\n---\n\n{body}', encoding="utf-8"
+        )
         assert vault.sync()["absorbed"] == 0
 
     def test_body_hash_ignores_trailing_whitespace_only(self):
         assert body_hash("a\nb\n") == body_hash("a\nb\n\n\n")
-        assert body_hash("a\nb") != body_hash("a\n b")  # interior change IS an edit
-
-
-# ── property 1: a page we cannot read is never overwritten ───────────────────
+        assert body_hash("a\nb") != body_hash("a\n b")
 
 
 class TestUnparseablePagesAreLeftAlone:
@@ -130,7 +125,6 @@ class TestUnparseablePagesAreLeftAlone:
         service.set_semantic("pref.editor", "vim", 0.9, "user_explicit")
         vault.sync()
         rel = "facts/pref.editor.md"
-        # No H1 → the parser cannot tell the human's value from the page furniture.
         mangled = "helix, and also some notes I typed under here\n\nwho knows\n"
         _edit(vault, rel, mangled)
 
@@ -141,9 +135,7 @@ class TestUnparseablePagesAreLeftAlone:
         fm, body = _page(vault, rel)
         assert body.strip() == mangled.strip(), "the human's bytes were altered"
         assert "H1" in str(fm["sync_conflict"]) or "value" in str(fm["sync_conflict"])
-        # The store was NOT touched.
         assert _value(service, "pref.editor") == "vim"
-        # And it is reported, not just flagged in a file nobody opens.
         checks = {c for c, _, _ in vault.lint_flags()}
         assert "vault_conflict" in checks
 
@@ -161,7 +153,9 @@ class TestUnparseablePagesAreLeftAlone:
         before = (vault.path / "facts/pref.editor.md").read_text(encoding="utf-8")
         second = vault.sync()
         assert second["conflicts"] == 1
-        assert (vault.path / "facts/pref.editor.md").read_text(encoding="utf-8") == before
+        assert (vault.path / "facts/pref.editor.md").read_text(
+            encoding="utf-8"
+        ) == before
 
     def test_an_emptied_page_is_a_conflict_not_a_deletion(self, vault, service):
         service.set_semantic("pref.editor", "vim", 0.9, "user_explicit")
@@ -175,7 +169,8 @@ class TestUnparseablePagesAreLeftAlone:
         service.write_episodic("shipped v2", conversation_id="s1", source="user")
         vault.sync()
         rel = next(
-            p.relative_to(vault.path).as_posix() for p in (vault.path / "episodic").glob("*.md")
+            p.relative_to(vault.path).as_posix()
+            for p in (vault.path / "episodic").glob("*.md")
         )
         _edit(vault, rel, "# rewritten\n\nshipped v3")
         summary = vault.sync()
@@ -204,16 +199,15 @@ class TestModeGatesTheReadBack:
         assert summary["absorbed"] == 0
         assert summary["conflicts"] == 0
         assert _value(service, "pref.editor") == "vim"
-        assert "helix" not in (mirror.path / "facts/pref.editor.md").read_text(encoding="utf-8")
+        assert "helix" not in (mirror.path / "facts/pref.editor.md").read_text(
+            encoding="utf-8"
+        )
 
     def test_absorb_edits_is_a_noop_off_two_way(self, mirror, service):
         service.set_semantic("pref.editor", "vim", 0.9, "user_explicit")
         mirror.sync()
         _edit(mirror, "facts/pref.editor.md", "# pref.editor\n\nhelix")
         assert mirror.absorb_edits() == {"absorbed": 0, "conflicts": {}, "rejected": 0}
-
-
-# ── the write path an edit rides ─────────────────────────────────────────────
 
 
 class TestEditsRideTheNormalWritePath:
@@ -248,7 +242,10 @@ class TestEditsRideTheNormalWritePath:
         redundant with the deeper default.
         """
         payload = "helix \u202e is the editor"
-        assert service._vs.validate_semantic("pref.editor", payload, 1.0, "vault_edit") is None, (
+        assert (
+            service._vs.validate_semantic("pref.editor", payload, 1.0, "vault_edit")
+            is None
+        ), (
             "the deeper validator now catches this too — pick a payload only S5 refuses, "
             "or this test has stopped measuring the S5 call"
         )
@@ -273,7 +270,9 @@ class TestEditsRideTheNormalWritePath:
     def test_an_edit_is_undoable_through_the_wal(self, service):
         service.set_semantic("pref.editor", "vim", 1.0, "user_explicit")
         assert service.apply_vault_edit("pref.editor", "helix")[0]
-        event = next(e for e in service.get_events(limit=20) if e["source"] == "vault_edit")
+        event = next(
+            e for e in service.get_events(limit=20) if e["source"] == "vault_edit"
+        )
         ok, _ = service.undo_event(event["id"])
         assert ok
         assert _value(service, "pref.editor") == "vim"
@@ -284,12 +283,11 @@ class TestEditsRideTheNormalWritePath:
         assert not ok and "rejected" in detail
 
 
-# ── property 4: wikilinks come from mem_links ────────────────────────────────
-
-
 class TestWikilinksComeFromTheGraph:
     def test_a_mentioned_name_the_graph_lacks_gets_no_link(self, vault, service):
-        service.set_semantic("project.notes", "Ana owns the migration", 0.9, "user_explicit")
+        service.set_semantic(
+            "project.notes", "Ana owns the migration", 0.9, "user_explicit"
+        )
         vault.sync()
         content = (vault.path / "facts/project.notes.md").read_text(encoding="utf-8")
         assert "[[Ana]]" not in content
@@ -297,21 +295,20 @@ class TestWikilinksComeFromTheGraph:
 
     def test_a_declared_entity_becomes_a_link_on_both_pages(self, vault, service):
         service.graph_add_entity("Ana", "person")
-        service.set_semantic("project.notes", "Ana owns the migration", 0.9, "user_explicit")
+        service.set_semantic(
+            "project.notes", "Ana owns the migration", 0.9, "user_explicit"
+        )
         vault.sync()
         fact = (vault.path / "facts/project.notes.md").read_text(encoding="utf-8")
         assert "**Entities:** [[Ana]]" in fact
         entity = (vault.path / "entities/Ana.md").read_text(encoding="utf-8")
-        assert "[[project.notes]]" in entity  # symmetry, by construction
+        assert "[[project.notes]]" in entity
         assert not [f for f in vault.lint_flags() if f[0] == "vault_backlink_asymmetry"]
 
     def test_the_entity_roster_reaches_every_entity_page(self, vault, service):
         service.graph_add_entity("Ana", "person")
         vault.sync()
         assert "[[Ana]]" in (vault.path / "MEMORY.md").read_text(encoding="utf-8")
-
-
-# ── property 3: the timeline is append-only ──────────────────────────────────
 
 
 class TestTimelineIsAppendOnly:
@@ -329,7 +326,9 @@ class TestTimelineIsAppendOnly:
     """
 
     def _entity_body(self, vault: MemoryVault) -> str:
-        return split_page((vault.path / "entities/Ana.md").read_text(encoding="utf-8"))[1]
+        return split_page((vault.path / "entities/Ana.md").read_text(encoding="utf-8"))[
+            1
+        ]
 
     def _insert_history(self, vault: MemoryVault, line: str) -> None:
         path = vault.path / "entities/Ana.md"
@@ -347,7 +346,9 @@ class TestTimelineIsAppendOnly:
         service.set_semantic("project.a", "Ana started", 0.9, "user_explicit")
         mirror.sync()
         before = timeline_lines(self._entity_body(mirror))
-        assert before, "fixture produced no history — the assertion below would be vacuous"
+        assert (
+            before
+        ), "fixture produced no history — the assertion below would be vacuous"
 
         service._vs.graph.drop_links_for("semantic", "project.a")
         mirror.sync()
@@ -363,9 +364,6 @@ class TestTimelineIsAppendOnly:
         service.graph_add_entity("Ana", "person")
         service.set_semantic("project.a", "Ana started", 0.9, "user_explicit")
         mirror.sync()
-        # Dated in the FUTURE on purpose: a merge that re-sorted the section would
-        # move this to the END, and a 2020 date would have sorted first anyway —
-        # making the position assertion below pass under a reordering merge.
         mine = "- 2099-12-31 — `hand written` — I typed this"
         self._insert_history(mirror, mine)
 
@@ -373,7 +371,7 @@ class TestTimelineIsAppendOnly:
         mirror.sync()
         after = timeline_lines(self._entity_body(mirror))
         assert after[0] == mine, f"my line moved or vanished: {after[:2]}"
-        assert len(after) == 3  # mine + the two generated lines, appended after it
+        assert len(after) == 3
 
     def test_later_syncs_append_rather_than_reorder(self, mirror, service):
         service.graph_add_entity("Ana", "person")
@@ -404,9 +402,6 @@ class TestTimelineIsAppendOnly:
         assert timeline_lines(body) == ["- 2026 — `a`"]
 
 
-# ── §5.5: raw/ capture routes to KNOWLEDGE, never to memory ──────────────────
-
-
 class _FakeKnowledge:
     def __init__(self) -> None:
         self.items: list[dict] = []
@@ -422,7 +417,9 @@ class _FakeKnowledge:
 
 
 class TestRawSweep:
-    def test_a_dropped_file_becomes_a_knowledge_item_and_not_a_memory(self, vault, service):
+    def test_a_dropped_file_becomes_a_knowledge_item_and_not_a_memory(
+        self, vault, service
+    ):
         (vault.path / "raw").mkdir(parents=True)
         (vault.path / "raw" / "notes.md").write_text("meeting notes", encoding="utf-8")
         store = _FakeKnowledge()
@@ -436,7 +433,6 @@ class TestRawSweep:
         assert store.items[0]["provider"] == "native"
         assert queued == ["k-0"]
         assert store.statuses["k-0"] == "queued"
-        # THE boundary: nothing landed in memory.
         assert len(service.get_records()) == before
 
     def test_the_file_is_moved_not_deleted(self, vault):
@@ -460,13 +456,12 @@ class TestRawSweep:
         assert vault.sweep_raw() == {"ingested": 0, "failed": 0}
 
 
-# ── §5.5: starter seeding writes only missing or pristine files ──────────────
-
-
 class TestSeeding:
     def test_missing_files_are_written(self, vault):
         seeds = starter_seeds("two_way")
-        assert seeds, "the starter set must not be empty — an empty seed passes vacuously"
+        assert (
+            seeds
+        ), "the starter set must not be empty — an empty seed passes vacuously"
         out = vault.seed(seeds)
         assert out["written"] == len(seeds)
         assert (vault.path / "README.md").is_file()
@@ -509,9 +504,6 @@ class TestSeeding:
         assert (vault.path / "README.md").is_file()
 
 
-# ── §5.3: vault lints ───────────────────────────────────────────────────────
-
-
 class TestVaultLints:
     def test_an_edited_page_is_reported_before_it_is_absorbed(self, mirror, service):
         service.set_semantic("pref.editor", "vim", 0.9, "user_explicit")
@@ -523,14 +515,20 @@ class TestVaultLints:
     def test_a_broken_wikilink_is_reported(self, vault, service):
         service.set_semantic("pref.editor", "vim", 0.9, "user_explicit")
         vault.sync()
-        (vault.path / "facts" / "mine.md").write_text("# mine\n\n[[nowhere]]\n", encoding="utf-8")
+        (vault.path / "facts" / "mine.md").write_text(
+            "# mine\n\n[[nowhere]]\n", encoding="utf-8"
+        )
         flags = [f for f in vault.lint_flags() if f[0] == "vault_broken_link"]
         assert flags and "nowhere" in flags[0][2]
 
-    def test_a_page_the_user_created_is_reported_as_theirs_not_deleted(self, vault, service):
+    def test_a_page_the_user_created_is_reported_as_theirs_not_deleted(
+        self, vault, service
+    ):
         service.set_semantic("pref.editor", "vim", 0.9, "user_explicit")
         vault.sync()
-        (vault.path / "facts" / "mine.md").write_text("# mine\n\nnotes\n", encoding="utf-8")
+        (vault.path / "facts" / "mine.md").write_text(
+            "# mine\n\nnotes\n", encoding="utf-8"
+        )
         vault.sync()
         assert (vault.path / "facts" / "mine.md").is_file()
         assert "vault_orphan_page" in {c for c, _, _ in vault.lint_flags()}
@@ -557,7 +555,9 @@ class TestVaultLints:
         assert vault.lint_flags() == []
 
     def test_no_vault_dir_reports_nothing(self, service, tmp_path):
-        assert MemoryVault(service, tmp_path / "absent", mode="two_way").lint_flags() == []
+        assert (
+            MemoryVault(service, tmp_path / "absent", mode="two_way").lint_flags() == []
+        )
 
     def test_the_health_surface_actually_asks_the_vault(self, service, monkeypatch):
         """🔴 The CALL SITE, not the mechanism.
@@ -567,7 +567,7 @@ class TestVaultLints:
         calls — redded NOTHING. The whole vault check could be correct and never reach
         the Health tab. This drives the surface the route drives.
         """
-        from gideon import memory_vault as mv
+        from gideon.cognition import memory_vault as mv
 
         class _Fake:
             def lint_flags(self):
@@ -577,9 +577,11 @@ class TestVaultLints:
         checks = {f["check"] for f in service.lint()["flags"]}
         assert "vault_conflict" in checks
 
-    def test_the_health_surface_survives_a_vault_that_cannot_be_built(self, service, monkeypatch):
+    def test_the_health_surface_survives_a_vault_that_cannot_be_built(
+        self, service, monkeypatch
+    ):
         """A broken vault must not take the whole Health report down with it."""
-        from gideon import memory_vault as mv
+        from gideon.cognition import memory_vault as mv
 
         def _boom(_svc):
             raise RuntimeError("vault path is gone")
@@ -588,7 +590,7 @@ class TestVaultLints:
         assert "flags" in service.lint()
 
     def test_the_lint_report_carries_them(self, vault, service):
-        from gideon.memory_lint import lint_memory
+        from gideon.cognition.memory_lint import lint_memory
 
         service.set_semantic("pref.editor", "vim", 0.9, "user_explicit")
         vault.sync()
@@ -596,12 +598,8 @@ class TestVaultLints:
         vault.sync()
         checks = {f["check"] for f in lint_memory(service._vs, vault=vault).flags}
         assert "vault_conflict" in checks
-        # And with no vault the checks are simply absent, not empty-flagged.
         plain = {f["check"] for f in lint_memory(service._vs).flags}
         assert not {c for c in plain if c.startswith("vault_")}
-
-
-# ── page-shape helpers ──────────────────────────────────────────────────────
 
 
 class TestPageShapeHelpers:
@@ -618,7 +616,7 @@ class TestPageShapeHelpers:
         assert block == "" and body.startswith("---")
 
     def test_extract_edited_value_stops_at_the_generated_marker(self):
-        from gideon.memory_vault import GENERATED_MARKER
+        from gideon.cognition.memory_vault import GENERATED_MARKER
 
         body = f"# t\n\nmy value\n\n{GENERATED_MARKER}\n\n**Tags:** [[tag-x]]\n"
         assert extract_edited_value(body) == "my value"
@@ -633,24 +631,20 @@ class TestPageShapeHelpers:
         }
 
 
-# ── the vault dir is declared state ─────────────────────────────────────────
-
-
 def test_the_vault_dir_is_claimed_by_the_state_inventory():
     """`audit_home()` reported `memory-vault/` unclaimed the moment a user turned the
     vault on — the guard could not see the store because its fixture never had one."""
-    from gideon.durability import inventory as inv
+    from gideon.operations.durability import inventory as inv
 
     claim = inv.claim_for("memory-vault/facts/pref.editor.md")
     assert claim is not None and claim.id == "memory_vault"
     assert claim.domain == "memory"
-    # NOT derived: a two_way page can hold an unsynced edit that exists nowhere else.
     assert not claim.derived
     assert "memory-vault" in {e.path for e in inv.backup_entries()}
 
 
 def test_a_home_with_a_vault_passes_the_audit(tmp_path):
-    from gideon.durability import inventory as inv
+    from gideon.operations.durability import inventory as inv
 
     home = tmp_path / "home"
     (home / "memory-vault" / "facts").mkdir(parents=True)
@@ -662,26 +656,23 @@ def test_a_home_with_a_vault_passes_the_audit(tmp_path):
 
 def test_a_snapshot_carries_the_vault(tmp_path):
     """Declaring without capturing is the inert half — assert the projection reaches it."""
-    import gideon.snapshot as snap
+    import gideon.workspace.snapshot as snap
 
     (tmp_path / "memory-vault").mkdir()
     assert "memory-vault" in snap._everything_paths(tmp_path)
 
 
-# ── mode resolution ─────────────────────────────────────────────────────────
-
-
 def test_vault_for_is_none_when_off(service, monkeypatch):
-    from gideon import memory_vault as mv
+    from gideon.cognition import memory_vault as mv
 
     monkeypatch.setattr(mv, "vault_mode_from_config", lambda: "off")
     assert mv.vault_for(service) is None
     assert mv.vault_dir_from_config() is None
-    mv.mirror_after_consolidation(service)  # guarded — never raises
+    mv.mirror_after_consolidation(service)
 
 
 def test_vault_for_carries_the_mode(service, monkeypatch, tmp_path):
-    from gideon import memory_vault as mv
+    from gideon.cognition import memory_vault as mv
 
     monkeypatch.setattr(mv, "vault_mode_from_config", lambda: "two_way")
     monkeypatch.setattr(mv, "vault_path_from_config", lambda: tmp_path / "v")
@@ -690,14 +681,14 @@ def test_vault_for_carries_the_mode(service, monkeypatch, tmp_path):
 
 
 def test_an_unreadable_config_fails_to_off(monkeypatch):
-    from gideon import memory_vault as mv
+    from gideon.cognition import memory_vault as mv
 
     class _Boom:
         @staticmethod
         def load():
             raise RuntimeError("unreadable")
 
-    monkeypatch.setattr("gideon.config.loader.AppConfig", _Boom)
+    monkeypatch.setattr("gideon.core.config.loader.AppConfig", _Boom)
     assert mv.vault_mode_from_config() == "off"
 
 
@@ -757,7 +748,6 @@ def test_a_record_edit_written_by_a_stale_page_still_wins(vault, service):
     service.set_semantic("pref.editor", "vim", 1.0, "user_explicit")
     vault.sync()
     _edit(vault, "facts/pref.editor.md", "# pref.editor\n\nhelix")
-    # The store moves on underneath the page.
     service.set_semantic("pref.editor", "nano", 1.0, "user_explicit")
     assert vault.sync()["absorbed"] == 1
     assert _value(service, "pref.editor") == "helix"

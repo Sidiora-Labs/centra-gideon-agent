@@ -8,18 +8,18 @@ silently skipped); a held seq stops contiguity so seq+1 isn't pulled past its pr
 
 from __future__ import annotations
 
-from gideon.durability import inventory as inv
-from gideon.durability.cursor import CONSUMED, PREREQ_ABSENT, Cursor
-from gideon.durability.pull_engine import pull_from_peers
-from gideon.durability.registry import Registry, shard_prefix
-from gideon.durability.shards import export_shards
-from gideon.sync_transports.base import (
+from gideon.integrations.sync_transports.base import (
     ConnectionResult,
     PushResult,
     RemoteRef,
     SyncObject,
     SyncTransportProvider,
 )
+from gideon.operations.durability import inventory as inv
+from gideon.operations.durability.cursor import CONSUMED, PREREQ_ABSENT, Cursor
+from gideon.operations.durability.pull_engine import pull_from_peers
+from gideon.operations.durability.registry import Registry, shard_prefix
+from gideon.operations.durability.shards import export_shards
 
 
 class FakeTransport(SyncTransportProvider):
@@ -41,7 +41,9 @@ class FakeTransport(SyncTransportProvider):
             prefix = shard_prefix(peer_id, seq)
             for p in out.rglob("*"):
                 if p.is_file():
-                    self.objects[prefix + p.relative_to(out).as_posix()] = p.read_bytes()
+                    self.objects[prefix + p.relative_to(out).as_posix()] = (
+                        p.read_bytes()
+                    )
 
     def push(self, objects):  # pragma: no cover - not exercised by the pull engine
         for o in objects:
@@ -50,12 +52,16 @@ class FakeTransport(SyncTransportProvider):
 
     def list_remote(self, prefix: str = ""):
         return [
-            RemoteRef(key=k, size=len(v)) for k, v in self.objects.items() if k.startswith(prefix)
+            RemoteRef(key=k, size=len(v))
+            for k, v in self.objects.items()
+            if k.startswith(prefix)
         ]
 
     def pull(self, refs):
         return [
-            SyncObject(key=r.key, data=self.objects[r.key]) for r in refs if r.key in self.objects
+            SyncObject(key=r.key, data=self.objects[r.key])
+            for r in refs
+            if r.key in self.objects
         ]
 
     def cas_registry(self, expected_sha, data):  # pragma: no cover
@@ -88,13 +94,13 @@ class TestPullSweep:
         tr.stage_export(peer_home, "peerA", 1)
 
         reg = Registry()
-        reg.bump("peerA", manifest_sha="s", now="t")  # peer published seq 1
+        reg.bump("peerA", manifest_sha="s", now="t")
         local = tmp_path / "local"
         cursor = Cursor(tmp_path / "sync")
         report = pull_from_peers(tr, local, reg, cursor, self_id="me")
 
         assert report.advanced == 1
-        assert (local / "tasks" / "peer-task.json").exists()  # peer's row is now live
+        assert (local / "tasks" / "peer-task.json").exists()
         assert cursor.seq_of("peerA") == 1
 
     def test_cursor_skips_already_seen(self, tmp_path):
@@ -104,12 +110,11 @@ class TestPullSweep:
         reg = Registry()
         reg.bump("peerA", manifest_sha="s", now="t")
         cursor = Cursor(tmp_path / "sync")
-        cursor.record("peerA", 1, CONSUMED)  # already consumed seq 1
+        cursor.record("peerA", 1, CONSUMED)
         report = pull_from_peers(tr, tmp_path / "local", reg, cursor, self_id="me")
-        assert report.outcomes == []  # nothing new to pull
+        assert report.outcomes == []
 
     def test_partial_push_holds_the_seq(self, tmp_path):
-        # Registry says peerA is at seq 1, but no objects were staged (push not finished).
         tr = FakeTransport()
         reg = Registry()
         reg.bump("peerA", manifest_sha="s", now="t")
@@ -117,26 +122,24 @@ class TestPullSweep:
         report = pull_from_peers(tr, tmp_path / "local", reg, cursor, self_id="me")
         assert report.advanced == 0 and report.held == 1
         assert report.outcomes[0].verdict == PREREQ_ABSENT
-        assert cursor.seq_of("peerA") == 0  # not advanced — retried next cycle
+        assert cursor.seq_of("peerA") == 0
 
     def test_held_seq_stops_contiguity(self, tmp_path):
-        # peerA at seq 2: seq 1 staged, seq 2 NOT (partial). Pulling must consume 1 and stop.
         tr = FakeTransport()
         _entity(tmp_path / "peer", "tasks", "t1", {})
         tr.stage_export(tmp_path / "peer", "peerA", 1)
         reg = Registry()
         reg.bump("peerA", manifest_sha="s", now="t")
-        reg.bump("peerA", manifest_sha="s2", now="t2")  # seq 2 announced, not staged
+        reg.bump("peerA", manifest_sha="s2", now="t2")
         cursor = Cursor(tmp_path / "sync")
         report = pull_from_peers(tr, tmp_path / "local", reg, cursor, self_id="me")
-        assert cursor.seq_of("peerA") == 1  # consumed 1, held 2, did not skip to 2
+        assert cursor.seq_of("peerA") == 1
         verdicts = [o.verdict for o in report.outcomes]
         assert verdicts == [CONSUMED, PREREQ_ABSENT]
 
 
 class TestDbSeam:
     def test_db_entry_holds_without_a_merger(self, tmp_path):
-        # Stage a peer export that includes a real sqlite entry (memory.db), no db_merger.
         import sqlite3
 
         peer_home = tmp_path / "peer"
@@ -153,7 +156,7 @@ class TestDbSeam:
         reg.bump("peerA", manifest_sha="s", now="t")
         cursor = Cursor(tmp_path / "sync")
         report = pull_from_peers(tr, tmp_path / "local", reg, cursor, self_id="me")
-        assert report.advanced == 0  # held — a DB entry can't be row-merged
+        assert report.advanced == 0
         assert "memory_db" in report.outcomes[0].deferred_db
         assert cursor.seq_of("peerA") == 0
 
@@ -178,6 +181,8 @@ class TestDbSeam:
             seen_entries.append(entry.id)
             return CONSUMED
 
-        pull_from_peers(tr, tmp_path / "local", reg, cursor, self_id="me", db_merger=merger)
-        assert cursor.seq_of("peerA") == 1  # advanced with the seam
+        pull_from_peers(
+            tr, tmp_path / "local", reg, cursor, self_id="me", db_merger=merger
+        )
+        assert cursor.seq_of("peerA") == 1
         assert "memory_db" in seen_entries

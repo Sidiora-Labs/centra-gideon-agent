@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from gideon.workflows.judge_contract import (
+from gideon.automation.workflows.judge_contract import (
     JudgeHints,
     JudgeVerdict,
     Verdict,
@@ -47,9 +47,6 @@ def _raw_pass(refs: list[str], proof: str = "") -> dict:
     }
 
 
-# ── the T04 regression fixture: reproduces, then passes ──
-
-
 def test_t04_fixture_fabricated_pass_was_previously_accepted() -> None:
     """REPRODUCE: without the evidence slice (the pre-ES-12 calling convention), the same
     fabricated PASS sails through — nothing in the record even distinguishes it."""
@@ -69,26 +66,27 @@ def test_t04_fixture_fabricated_pass_is_now_rejected() -> None:
     assert v.unanswerable_refs == fabricated
 
 
-# ── grounding rules ──
-
-
 def test_verbatim_span_grounds_a_citation() -> None:
-    v = validate_verdict(_raw_pass(["14 passed in 2.31s"]), JudgeHints(), evidence_text=EVIDENCE)
+    v = validate_verdict(
+        _raw_pass(["14 passed in 2.31s"]), JudgeHints(), evidence_text=EVIDENCE
+    )
     assert v.verdict is Verdict.PASS and not v.protocol_error
     assert v.unanswerable_refs == []
 
 
 def test_grounding_normalizes_whitespace_and_case() -> None:
-    v = validate_verdict(_raw_pass(["14  PASSED   in 2.31s"]), JudgeHints(), evidence_text=EVIDENCE)
+    v = validate_verdict(
+        _raw_pass(["14  PASSED   in 2.31s"]), JudgeHints(), evidence_text=EVIDENCE
+    )
     assert v.unanswerable_refs == []
 
 
 def test_declared_observation_commands_are_sanctioned_citations() -> None:
     """The judge is TOLD to run proof_command / hidden_validation_commands itself and cite
     their output — those citations are legitimately outside the slice."""
-    hints = JudgeHints(proof_command="pytest tests/test_retry.py -q")
+    hints = JudgeHints(proof_command="pytest checks/runtime/test_retry.py -q")
     v = validate_verdict(
-        _raw_pass(["ran pytest tests/test_retry.py -q: 14 passed"]),
+        _raw_pass(["ran pytest checks/runtime/test_retry.py -q: 14 passed"]),
         hints,
         evidence_text=EVIDENCE,
     )
@@ -103,7 +101,6 @@ def test_partially_grounded_pass_is_flagged_not_rejected() -> None:
 
 
 def test_short_fragments_are_never_flagged() -> None:
-    # "passed" grounds against almost anything; flagging it would be noise.
     assert ungrounded_refs(["passed"], "unrelated", None) == []
 
 
@@ -127,11 +124,10 @@ def test_pass_with_grounded_proof_survives_fabricated_refs() -> None:
     assert v.unanswerable_refs == ["fabricated citation entirely"]
 
 
-# ── the evidence hash on the record ──
-
-
 def test_verdict_records_carry_the_evidence_hash_they_judged() -> None:
-    v = validate_verdict(_raw_pass(["14 passed in 2.31s"]), JudgeHints(), evidence_text=EVIDENCE)
+    v = validate_verdict(
+        _raw_pass(["14 passed in 2.31s"]), JudgeHints(), evidence_text=EVIDENCE
+    )
     assert v.evidence_hash == evidence_hash_of(EVIDENCE)
     assert len(v.evidence_hash) == 16
     d = v.to_dict()
@@ -158,7 +154,6 @@ def test_adjudicate_carries_hash_and_flags_from_the_primary() -> None:
 
 
 def test_field_defaults_keep_legacy_construction_working() -> None:
-    # Every existing construction site builds JudgeVerdict without the new fields.
     v = JudgeVerdict(verdict=Verdict.PASS)
     assert v.evidence_hash == "" and v.unanswerable_refs == []
     assert dataclasses.asdict(v)["evidence_hash"] == ""

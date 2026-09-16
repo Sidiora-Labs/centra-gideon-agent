@@ -1,0 +1,23 @@
+{
+  "copies": {
+    "apps/desktop/assets/gideon-dark.png": "assets/identity/dark/logo-512.png",
+    "apps/console/public/icons/gideon-dark.png": "assets/identity/dark/logo-512.png",
+    "apps/mobile/www/assets/gideon-dark.png": "assets/identity/dark/logo-512.png",
+    "apps/desktop/assets/tray-dark.png": "assets/identity/dark/logo-24.png",
+    "apps/console/public/icons/gideon-dark-32.png": "assets/identity/dark/logo-32.png",
+    "apps/desktop/assets/gideon-light.png": "assets/identity/light/logo-512.png",
+    "apps/console/public/icons/gideon-light.png": "assets/identity/light/logo-512.png",
+    "apps/mobile/www/assets/gideon-light.png": "assets/identity/light/logo-512.png",
+    "apps/desktop/assets/tray-light.png": "assets/identity/light/logo-24.png",
+    "apps/console/public/icons/gideon-light-32.png": "assets/identity/light/logo-32.png",
+    "apps/desktop/assets/gideon.png": "assets/identity/dark/logo-512.png",
+    "apps/console/public/icons/icon-512.png": "assets/identity/dark/logo-512.png",
+    "apps/console/public/icons/icon-192.png": "assets/identity/dark/logo-192.png"
+  },
+  "mobile_rendering": {
+    "source_size": 512,
+    "launcher_size": 1024,
+    "splash_size": 2732,
+    "reason": "Supplied iOS exports flatten the mark into the background; Android exports retain all artwork and transparency."
+  }
+}

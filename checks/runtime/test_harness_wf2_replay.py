@@ -22,19 +22,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from harness import baselines, replay
-from gideon import trace_recorder
+from checks.harness import baselines, replay
+from gideon.assurance import trace_recorder
 
-# The two required WF2 scenarios this atom lands.
 _WJP = "workflow-journal-projection"
 _RWD = "rewind-during-stream"
 
 
 def _traces() -> Path:
     return baselines.traces_dir()
-
-
-# ── 1. both scenarios recorded + green against baseline ───────────────────────
 
 
 def test_workflow_scenarios_present_and_green() -> None:
@@ -49,7 +45,6 @@ def test_workflow_journal_projection_fold_is_pinned() -> None:
     """The journal-projection baseline pins the event-fold terminal state (the gate itself)."""
     m = replay.metrics_for_scenario(_traces() / _WJP)
     assert m.fold is not None, "the scenario must produce a workflow fold"
-    # A clean 3-node run folds to a complete run with all nodes done and nothing dropped.
     assert m.fold["status"] == "complete"
     assert m.fold["done"] == m.fold["total"] == 3
     assert m.fold["dropped"] == 0
@@ -59,13 +54,9 @@ def test_rewind_scenario_proves_epoch_supersede_drop() -> None:
     """The rewind scenario's fold DROPS the stale epoch-0 event and lands on epoch 1."""
     m = replay.metrics_for_scenario(_traces() / _RWD)
     assert m.fold is not None
-    # The stale epoch-0 node_done that arrived after the rewind bumped the epoch is dropped.
     assert m.fold["dropped"] == 1, "the epoch supersede-drop guard must fire"
     assert m.fold["epoch"] == 1
     assert m.fold["status"] == "complete" and m.fold["done"] == 3
-
-
-# ── 2. a broken event-fold law fails the compare ──────────────────────────────
 
 
 def test_broken_fold_law_fails_compare(tmp_path: Path) -> None:
@@ -77,7 +68,6 @@ def test_broken_fold_law_fails_compare(tmp_path: Path) -> None:
     """
     scen = tmp_path / "wf-corrupt"
     scen.mkdir()
-    # A run that never completes its second node — the divergence a fold-law break produces.
     lines = [
         {
             "ts": 1.0,
@@ -125,7 +115,6 @@ def test_broken_fold_law_fails_compare(tmp_path: Path) -> None:
     (scen / "sse-workflow_c.ndjson").write_text(
         "\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8"
     )
-    # The baseline pins a DIFFERENT (complete, 2/2 done) terminal fold — the pre-change law.
     (tmp_path / "baselines.json").write_text(
         json.dumps(
             {
@@ -135,7 +124,10 @@ def test_broken_fold_law_fails_compare(tmp_path: Path) -> None:
                             "latency_p95": {},
                             "fold": {
                                 "status": "complete",
-                                "nodes": {"root.children[0]": "done", "root.children[1]": "done"},
+                                "nodes": {
+                                    "root.children[0]": "done",
+                                    "root.children[1]": "done",
+                                },
                                 "done": 2,
                                 "total": 2,
                                 "progress": 1.0,
@@ -167,25 +159,34 @@ def test_missing_projection_when_fold_pinned_fails(tmp_path: Path) -> None:
     """
     scen = tmp_path / "no-projection"
     scen.mkdir()
-    # An SSE trace on a NON-workflow key: produces metrics but no workflow fold.
     (scen / "sse-loop_x.ndjson").write_text(
         json.dumps(
-            {"ts": 1.0, "stream": "sse", "key": "loop:x", "type": "queued", "seq": 0, "payload": {}}
+            {
+                "ts": 1.0,
+                "stream": "sse",
+                "key": "loop:x",
+                "type": "queued",
+                "seq": 0,
+                "payload": {},
+            }
         )
         + "\n",
         encoding="utf-8",
     )
     (tmp_path / "baselines.json").write_text(
-        json.dumps({"scenarios": {"no-projection": {"metrics": {"fold": {"status": "complete"}}}}}),
+        json.dumps(
+            {
+                "scenarios": {
+                    "no-projection": {"metrics": {"fold": {"status": "complete"}}}
+                }
+            }
+        ),
         encoding="utf-8",
     )
     results = baselines.check_baselines(tmp_path)
     reg = next(r for r in results if r.scenario == "no-projection")
     assert not reg.ok
     assert any("fold invariant missing" in f for f in reg.failures), reg.failures
-
-
-# ── 3. a missing required scenario fails the run ──────────────────────────────
 
 
 def test_missing_required_scenario_fails(tmp_path: Path) -> None:
@@ -195,8 +196,9 @@ def test_missing_required_scenario_fails(tmp_path: Path) -> None:
     baseline entry are gone, which a disk scan alone would read as 'simply not present'.
     The named required set is what turns that silent drop into a failure.
     """
-    # An empty traces dir with an empty baselines file: no recordings, no baseline entries.
-    (tmp_path / "baselines.json").write_text(json.dumps({"scenarios": {}}), encoding="utf-8")
+    (tmp_path / "baselines.json").write_text(
+        json.dumps({"scenarios": {}}), encoding="utf-8"
+    )
     results = baselines.check_baselines(tmp_path)
     by_scen = {r.scenario: r for r in results}
     for scen in (_WJP, _RWD):
@@ -211,10 +213,9 @@ def test_required_set_contains_both_workflow_scenarios() -> None:
     assert _RWD in baselines.REQUIRED_SCENARIOS
 
 
-# ── 4. the journal→SSE projection is recordable through the existing tap ──────
-
-
-def test_workflow_projection_recordable_via_sse_tap(tmp_path: Path, monkeypatch) -> None:
+def test_workflow_projection_recordable_via_sse_tap(
+    tmp_path: Path, monkeypatch
+) -> None:
     """Recording a workflow projection needs NO engine change — the SSE tap covers it.
 
     The gateway publishes workflow events through ``SseRegistry.publish`` on a
@@ -229,7 +230,13 @@ def test_workflow_projection_recordable_via_sse_tap(tmp_path: Path, monkeypatch)
     frames = [
         (
             "workflow_run_update",
-            {"run_id": "live", "event_id": "live-evt-1", "seq": 1, "epoch": 0, "status": "running"},
+            {
+                "run_id": "live",
+                "event_id": "live-evt-1",
+                "seq": 1,
+                "epoch": 0,
+                "status": "running",
+            },
         ),
         (
             "workflow_node_started",
@@ -265,7 +272,6 @@ def test_workflow_projection_recordable_via_sse_tap(tmp_path: Path, monkeypatch)
             },
         ),
     ]
-    # This is exactly what dashboard/sse.py:148 does inside SseRegistry.publish.
     for event, payload in frames:
         trace_recorder.record("sse", key, event, payload)
     trace_recorder.reset_for_test()
@@ -282,8 +288,6 @@ def test_fold_is_deterministic_and_pure() -> None:
     events = replay.load_scenario(_traces() / _WJP)
     wf = [e for e in events if e.stream == "sse" and e.key.startswith("workflow:")]
     assert replay.fold_workflow(wf) == replay.fold_workflow(wf)
-    # A full replay (reconnect) of the same events is idempotent: every re-delivery is a
-    # dedup no-op, so the terminal fold is unchanged and only 'dropped' grows.
     once = replay.fold_workflow(wf)
     twice = replay.fold_workflow(wf + wf)
     assert twice["status"] == once["status"]

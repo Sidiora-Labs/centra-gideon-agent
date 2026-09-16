@@ -26,11 +26,11 @@ import asyncio
 
 import pytest
 
-from gideon.triggers import claims
-from gideon.triggers import service as svc
-from gideon.triggers.models import Outcome, Trigger
-from gideon.triggers.scheduling import Claim
-from gideon.triggers.store import TriggerStore
+from gideon.automation.triggers import claims
+from gideon.automation.triggers import service as svc
+from gideon.automation.triggers.models import Outcome, Trigger
+from gideon.automation.triggers.scheduling import Claim
+from gideon.automation.triggers.store import TriggerStore
 
 NOW = 1_800_000_000.0
 
@@ -69,9 +69,6 @@ def _tick(store, tmp_path, at=NOW):
     return asyncio.run(svc.tick(store, now=at, base_dir=tmp_path, persist=False))
 
 
-# ── the defect ──
-
-
 def test_a_CONTENDED_slot_DEFERS_the_second_fire(store, tmp_path):
     """🔴 THE DEFECT, pinned. Both fired before this."""
     _add(store, "clock:index", ["local-llm"])
@@ -83,10 +80,13 @@ def test_a_CONTENDED_slot_DEFERS_the_second_fire(store, tmp_path):
 
 def test_the_HOLDER_itself_still_fires(store, tmp_path):
     """A trigger never blocks on a slot IT already holds — re-entering its own slot is what a retry
-    inside one run looks like, and refusing that would deadlock a trigger against itself."""
+    inside one run looks like, and refusing that would deadlock a trigger against itself.
+    """
     _add(store, "clock:index", ["local-llm"])
     _hold("clock:index", tmp_path)
-    assert [f.trigger.id for f in _tick(store, tmp_path, NOW + 1).fires] == ["clock:index"]
+    assert [f.trigger.id for f in _tick(store, tmp_path, NOW + 1).fires] == [
+        "clock:index"
+    ]
 
 
 def test_an_UNRELATED_slot_is_unaffected(store, tmp_path):
@@ -94,7 +94,9 @@ def test_an_UNRELATED_slot_is_unaffected(store, tmp_path):
     _add(store, "clock:index", ["local-llm"])
     _add(store, "clock:other", ["gpu"])
     _hold("clock:index", tmp_path)
-    assert "clock:other" in [f.trigger.id for f in _tick(store, tmp_path, NOW + 1).fires]
+    assert "clock:other" in [
+        f.trigger.id for f in _tick(store, tmp_path, NOW + 1).fires
+    ]
 
 
 def test_a_trigger_with_NO_slots_is_unaffected(store, tmp_path):
@@ -109,9 +111,6 @@ def test_NOBODY_holding_means_everyone_fires(store, tmp_path):
     _add(store, "clock:a", ["local-llm"])
     _add(store, "clock:b", ["local-llm"])
     assert len(_tick(store, tmp_path).fires) == 2
-
-
-# ── the refusal is typed and legible ──
 
 
 def test_the_outcome_is_DEFERRED_not_a_skip(store, tmp_path):
@@ -140,7 +139,7 @@ def test_the_reason_NAMES_THE_HOLDER(store, tmp_path):
 def test_the_slot_gate_is_in_GATE_ORDER_with_an_outcome():
     """A gate with no outcome raises `KeyError` mid-fire, which loses the fire instead of refusing
     it — the structural check `gate_order_is_intact` exists for."""
-    from gideon.triggers.firepath import GATE_ORDER, gate_order_is_intact
+    from gideon.automation.triggers.firepath import GATE_ORDER, gate_order_is_intact
 
     assert "slot" in GATE_ORDER
     assert gate_order_is_intact() == []
@@ -150,12 +149,9 @@ def test_the_slot_gate_runs_AFTER_the_claim():
     """Deliberate: a slot is only contended by a fire that would otherwise proceed. Checking earlier
     would refuse a fire the overlap gate was about to skip anyway — two reasons for one suppression,
     with the less useful one reported."""
-    from gideon.triggers.firepath import GATE_ORDER
+    from gideon.automation.triggers.firepath import GATE_ORDER
 
     assert GATE_ORDER.index("slot") > GATE_ORDER.index("claim")
-
-
-# ── the holder map ──
 
 
 def test_slot_holders_reports_only_RUNNING_triggers(store, tmp_path):
@@ -171,7 +167,8 @@ def test_slot_holders_reports_only_RUNNING_triggers(store, tmp_path):
 
 def test_an_EXPIRED_claim_frees_its_slot(store, tmp_path):
     """🔴 Inherited from `read_claim`'s read-time expiry, and the reason slots ride on claims rather
-    than a second sidecar: a crashed run must not hold `gpu` hostage until a janitor notices."""
+    than a second sidecar: a crashed run must not hold `gpu` hostage until a janitor notices.
+    """
     _add(store, "clock:index", ["local-llm"])
     _hold("clock:index", tmp_path, at=NOW - 99_999)
     assert claims.slot_holders(store, now=NOW, base_dir=tmp_path) == {}
@@ -188,7 +185,8 @@ def test_a_trigger_can_hold_MULTIPLE_slots(store, tmp_path):
 
 def test_the_FIRST_holder_wins_and_is_stable(store, tmp_path):
     """The answer to "who has the gpu" must be the same across two calls in one tick; a later row
-    silently replacing an earlier holder would make the refusal name the wrong trigger."""
+    silently replacing an earlier holder would make the refusal name the wrong trigger.
+    """
     _add(store, "clock:a", ["gpu"])
     _add(store, "clock:b", ["gpu"])
     _hold("clock:a", tmp_path)
@@ -209,9 +207,6 @@ def test_a_BROKEN_row_is_skipped(store, tmp_path):
     assert claims.slot_holders(fresh, now=NOW + 1, base_dir=tmp_path) == {}
 
 
-# ── busy_slot's own contract ──
-
-
 def test_busy_slot_is_EMPTY_when_nothing_is_held():
     trigger = Trigger(id="t", name="t", kind="clock", resource_slots=["gpu"])
     assert claims.busy_slot(trigger, holders={}) == ("", "")
@@ -224,8 +219,13 @@ def test_busy_slot_ignores_a_SELF_held_slot():
 
 def test_busy_slot_returns_the_FIRST_contended_slot():
     """Deterministic, so the reason names the same slot twice."""
-    trigger = Trigger(id="t", name="t", kind="clock", resource_slots=["gpu", "local-llm"])
-    assert claims.busy_slot(trigger, holders={"gpu": "o", "local-llm": "o"}) == ("gpu", "o")
+    trigger = Trigger(
+        id="t", name="t", kind="clock", resource_slots=["gpu", "local-llm"]
+    )
+    assert claims.busy_slot(trigger, holders={"gpu": "o", "local-llm": "o"}) == (
+        "gpu",
+        "o",
+    )
 
 
 def test_busy_slot_survives_a_NON_LIST_declaration():
@@ -249,22 +249,24 @@ def test_the_slot_gate_is_CLASSIFIED_fail_open():
     would silence
     real automations. Contention costs a slow run; a stuck-closed slot gate costs the automation.
     """
-    from gideon.triggers.models import FAIL_OPEN_GATES, gate_failure_mode
+    from gideon.automation.triggers.models import FAIL_OPEN_GATES, gate_failure_mode
 
     assert "slot" in FAIL_OPEN_GATES
     assert gate_failure_mode("slot") == "open"
 
 
-def test_an_UNREADABLE_claim_store_does_not_block_a_slotted_fire(store, tmp_path, monkeypatch):
+def test_an_UNREADABLE_claim_store_does_not_block_a_slotted_fire(
+    store, tmp_path, monkeypatch
+):
     """The fail-open direction, driven rather than asserted from the table."""
     _add(store, "clock:index", ["local-llm"])
     monkeypatch.setattr(
-        "gideon.triggers.claims.read_claim",
+        "gideon.automation.triggers.claims.read_claim",
         lambda *a, **k: (_ for _ in ()).throw(OSError("unreadable")),
     )
     with pytest.raises(OSError):
         claims.slot_holders(store, now=NOW, base_dir=tmp_path)
-    # The GATE itself still permits when the map comes back empty, which is what a swallowed read
-    # produces at the call site in `service.tick`.
-    trigger = Trigger(id="clock:index", name="i", kind="clock", resource_slots=["local-llm"])
+    trigger = Trigger(
+        id="clock:index", name="i", kind="clock", resource_slots=["local-llm"]
+    )
     assert claims.busy_slot(trigger, holders={}) == ("", "")

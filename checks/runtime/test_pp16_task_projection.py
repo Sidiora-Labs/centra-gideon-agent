@@ -18,9 +18,9 @@ rather than one function under two names.
 
 from __future__ import annotations
 
-from gideon.loop import tasks_link
-from gideon.tasks.models import TERMINAL_STATUSES, TaskStatus
-from gideon.workflows import materialize
+from gideon.automation.loop import tasks_link
+from gideon.automation.workflows import materialize
+from gideon.engine.tasks.models import TERMINAL_STATUSES, TaskStatus
 
 
 def test_loop_side_and_run_side_are_one_vocabulary() -> None:
@@ -29,7 +29,9 @@ def test_loop_side_and_run_side_are_one_vocabulary() -> None:
     member added later cannot slip through with a divergent ruling.
     """
     for status in TaskStatus:
-        assert tasks_link._is_resolved(status) == materialize.is_resolved(status), status
+        assert tasks_link._is_resolved(status) == materialize.is_resolved(
+            status
+        ), status
         assert tasks_link._is_done(status) == materialize.is_done(status), status
 
 
@@ -50,7 +52,6 @@ def test_every_status_the_projection_mints_has_a_terminality_ruling() -> None:
     minted = set(materialize.STATE_TO_STATUS.values())
     assert minted, "the projection table is empty — this rail would assert nothing"
     for status in minted:
-        # A ruling exists (the predicate returns a real bool, not None-ish) for everything minted.
         assert isinstance(materialize.is_resolved(status), bool), status
         assert materialize.normalize_status(status) is status, status
 
@@ -62,8 +63,6 @@ def test_foreign_provider_vocabulary_is_normalized() -> None:
     """
     assert materialize.is_done("completed") is True
     assert materialize.is_resolved("completed") is True
-    # Case and surrounding whitespace are provider noise, not a different state. A case-sensitive
-    # normalizer is a latent version of the very bug the alias row exists to prevent.
     assert materialize.is_done("DONE") is True
     assert materialize.is_resolved(" cancelled ") is True
 
@@ -79,12 +78,6 @@ def test_unknown_status_is_not_terminal() -> None:
         assert materialize.normalize_status(junk) is None, junk
 
 
-# ── vacuity floor ────────────────────────────────────────────────────────────────────────────
-# Everything above is an AGREEMENT rail, and agreement is the easiest property in the world to
-# satisfy vacuously: two functions that both return False agree on every input. These three prove
-# the rail is measuring something.
-
-
 def test_vacuity_floor_predicates_actually_discriminate() -> None:
     """Neither predicate is constant. A constant `is_resolved` would satisfy every agreement
     assertion above while making the loop's phase gate either never close or close instantly.
@@ -96,7 +89,9 @@ def test_vacuity_floor_predicates_actually_discriminate() -> None:
 
     done = {s for s in TaskStatus if materialize.is_done(s)}
     assert done, "is_done is constant False — the agreement rails are vacuous"
-    assert done != set(TaskStatus), "is_done is constant True — the agreement rails are vacuous"
+    assert done != set(
+        TaskStatus
+    ), "is_done is constant True — the agreement rails are vacuous"
 
 
 def test_vacuity_floor_the_two_predicates_are_different_notions() -> None:
@@ -127,4 +122,6 @@ def test_vacuity_floor_the_loop_side_holds_no_logic_of_its_own() -> None:
         )
     finally:
         materialize.is_resolved = original  # type: ignore[assignment]
-    assert materialize.is_resolved(TaskStatus.OPEN) is False, "monkeypatch was not restored"
+    assert (
+        materialize.is_resolved(TaskStatus.OPEN) is False
+    ), "monkeypatch was not restored"

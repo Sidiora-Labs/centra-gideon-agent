@@ -27,8 +27,8 @@ from pathlib import Path
 import pytest
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.dashboard.handlers.decisions import api_decision_journal
-from gideon.decisions import (
+from gideon.automation.triggers.store import TriggerStore
+from gideon.cognition.decisions import (
     CALIBRATION_MIN_N,
     calibration,
     horizon_from_days,
@@ -36,10 +36,10 @@ from gideon.decisions import (
     log_decision,
     resolve_decision,
 )
-from gideon.knowledge.store import KnowledgeStore
-from gideon.triggers.store import TriggerStore
+from gideon.cognition.knowledge.store import KnowledgeStore
+from gideon.interfaces.dashboard.handlers.decisions import api_decision_journal
 
-SRC = Path(__file__).resolve().parents[1] / "src" / "gideon"
+SRC = Path(__file__).resolve().parents[2] / "runtime" / "gideon"
 
 
 @pytest.fixture
@@ -54,10 +54,10 @@ def triggers(tmp_path: Path) -> TriggerStore:
 
 @pytest.fixture
 def memory(tmp_path: Path):
-    from gideon.memory_service import MemoryService
-    from gideon.vector_memory import VectorMemoryStore
+    from gideon.cognition.memory_service import MemoryService
+    from gideon.cognition.vector_memory import SemanticArchive
 
-    vs = VectorMemoryStore(db_path=tmp_path / "memory.db")
+    vs = SemanticArchive(db_path=tmp_path / "memory.db")
     vs.init()
     return MemoryService.over_vector_store(vs)
 
@@ -66,13 +66,13 @@ def memory(tmp_path: Path):
 def served(monkeypatch, store):
     """Point the handler's live-singleton read at the tmp store, and PROVE it landed.
 
-    ``decisions._knowledge_store`` late-imports ``gideon.knowledge.get_knowledge_store``
+    ``decisions._knowledge_store`` late-imports ``gideon.cognition.knowledge.get_knowledge_store``
     inside the call, so patching that module attribute is what reaches the handler. The
     assertion below is the point: without it a patch aimed at the wrong binding leaves this
     whole file reading the real home, where every count is somebody's actual journal.
     """
-    import gideon.knowledge as knowledge_pkg
-    from gideon.decisions import _knowledge_store
+    import gideon.cognition.knowledge as knowledge_pkg
+    from gideon.cognition.decisions import _knowledge_store
 
     monkeypatch.setattr(knowledge_pkg, "get_knowledge_store", lambda *a, **k: store)
     assert (
@@ -83,7 +83,9 @@ def served(monkeypatch, store):
 
 async def _get(**params) -> tuple[int, dict]:
     qs = "&".join(f"{k}={v}" for k, v in params.items())
-    req = make_mocked_request("GET", f"/api/knowledge/decisions{'?' + qs if qs else ''}")
+    req = make_mocked_request(
+        "GET", f"/api/knowledge/decisions{'?' + qs if qs else ''}"
+    )
     resp = await api_decision_journal(req)
     return resp.status, json.loads(resp.body)
 
@@ -112,29 +114,24 @@ def _resolve(store, triggers, memory, item_id: str, grade: str) -> None:
     )
 
 
-# ── the route exists and is reachable ────────────────────────────────────────
-
-
 class TestRegistration:
     def test_the_route_is_registered_and_points_at_this_handler(self) -> None:
         """A handler nothing routes to is the defect this repo keeps finding: its own tests are
         green and the surface is unreachable. Asserted against ``server.py`` because that is the
         one file that decides whether a URL exists."""
         src = (SRC / "dashboard" / "server.py").read_text()
-        assert 'add_get("/api/knowledge/decisions", handlers.api_decision_journal)' in src
-        # Vacuity floor: if the probe string above ever stops matching the file's real spelling,
-        # this line says so instead of the assertion silently passing on a renamed route.
+        assert (
+            'add_get("/api/knowledge/decisions", handlers.api_decision_journal)' in src
+        )
         assert src.count("/api/knowledge/decisions") == 1
 
     def test_the_handler_is_exported_from_the_facade(self) -> None:
         """``server.py`` reaches handlers as ``handlers.X``, so an unexported handler is an
-        AttributeError at route-registration time — i.e. at gateway boot, not in a test."""
-        from gideon.dashboard import handlers
+        AttributeError at route-registration time — i.e. at gateway boot, not in a test.
+        """
+        from gideon.interfaces.dashboard import handlers
 
         assert handlers.api_decision_journal is api_decision_journal
-
-
-# ── one payload, one definition of the numbers ───────────────────────────────
 
 
 class TestOneReadPath:
@@ -166,7 +163,9 @@ class TestOneReadPath:
         assert body["decisions"] == list_decisions(store=store, limit=200)
 
     @pytest.mark.asyncio
-    async def test_the_strip_ignores_the_list_filter(self, served, store, triggers, memory) -> None:
+    async def test_the_strip_ignores_the_list_filter(
+        self, served, store, triggers, memory
+    ) -> None:
         """``status``/``domain`` narrow the LIST only. The strip is the user's calibration across
         everything they resolved; recomputing it per filter would silently redefine the claim it
         makes as the user clicked around — the same number meaning different things."""
@@ -175,7 +174,6 @@ class TestOneReadPath:
         status, body = await _get(status="pending")
         assert status == 200
         assert [d["status"] for d in body["decisions"]] == ["pending"]
-        # The resolved career decision is absent from the list and PRESENT in the strip.
         assert "career" in body["calibration"]
 
     @pytest.mark.asyncio
@@ -190,24 +188,30 @@ class TestOneReadPath:
 
     def test_the_handler_does_not_carry_its_own_copy_of_the_threshold(self) -> None:
         """The static half of the test above: a literal ten in the handler is a second spelling
-        even while the values agree, and it agrees only until somebody tunes one of them."""
+        even while the values agree, and it agrees only until somebody tunes one of them.
+        """
         src = (SRC / "dashboard" / "handlers" / "decisions.py").read_text()
         assert "CALIBRATION_MIN_N" in src
         body = src.split("def api_decision_journal")[1]
-        assert "10" not in body, "the handler spells the threshold itself instead of forwarding it"
+        assert (
+            "10" not in body
+        ), "the handler spells the threshold itself instead of forwarding it"
 
     @pytest.mark.asyncio
-    async def test_the_vocabularies_ride_the_payload(self, served, store, triggers) -> None:
+    async def test_the_vocabularies_ride_the_payload(
+        self, served, store, triggers
+    ) -> None:
         """A client with its own copy of the domain list offers a filter the server rejects."""
-        from gideon.decisions import CALIBRATED_GRADES, DECISION_DOMAINS, DECISION_STATUSES
+        from gideon.cognition.decisions import (
+            CALIBRATED_GRADES,
+            DECISION_DOMAINS,
+            DECISION_STATUSES,
+        )
 
         _, body = await _get()
         assert body["statuses"] == list(DECISION_STATUSES)
         assert body["domains"] == list(DECISION_DOMAINS)
         assert body["grades"] == list(CALIBRATED_GRADES)
-
-
-# ── the three calibration states, distinguishable at the wire ────────────────
 
 
 class TestThreeStatesAtTheWire:
@@ -228,7 +232,9 @@ class TestThreeStatesAtTheWire:
         _log(store, triggers)
         _, body = await _get()
         assert body["calibration"] == {}
-        assert body["decisions"], "vacuity floor: an empty journal would satisfy the line above"
+        assert body[
+            "decisions"
+        ], "vacuity floor: an empty journal would satisfy the line above"
 
     @pytest.mark.asyncio
     async def test_under_the_threshold_is_marked_dishonest_with_its_real_count(
@@ -237,7 +243,9 @@ class TestThreeStatesAtTheWire:
         """Three resolved: a bucket EXISTS (so the view knows there is data) and
         ``count_honest`` is False (so the view knows not to draw a rate)."""
         for _ in range(3):
-            _resolve(store, triggers, memory, _log(store, triggers)["id"], "as_expected")
+            _resolve(
+                store, triggers, memory, _log(store, triggers)["id"], "as_expected"
+            )
         _, body = await _get()
         bucket = body["calibration"]["career"]
         assert bucket["n"] == 3
@@ -248,7 +256,9 @@ class TestThreeStatesAtTheWire:
         self, served, store, triggers, memory
     ) -> None:
         for _ in range(CALIBRATION_MIN_N):
-            _resolve(store, triggers, memory, _log(store, triggers)["id"], "as_expected")
+            _resolve(
+                store, triggers, memory, _log(store, triggers)["id"], "as_expected"
+            )
         _, body = await _get()
         assert body["calibration"]["career"]["count_honest"] is True
 
@@ -268,11 +278,15 @@ class TestThreeStatesAtTheWire:
         _, body = await _get()
         seen.append(json.dumps(body["calibration"], sort_keys=True))
         for _ in range(3):
-            _resolve(store, triggers, memory, _log(store, triggers)["id"], "as_expected")
+            _resolve(
+                store, triggers, memory, _log(store, triggers)["id"], "as_expected"
+            )
         _, body = await _get()
         seen.append(json.dumps(body["calibration"], sort_keys=True))
         for _ in range(CALIBRATION_MIN_N - 3):
-            _resolve(store, triggers, memory, _log(store, triggers)["id"], "as_expected")
+            _resolve(
+                store, triggers, memory, _log(store, triggers)["id"], "as_expected"
+            )
         _, body = await _get()
         seen.append(json.dumps(body["calibration"], sort_keys=True))
         assert len(set(seen)) == 3, f"two states serialize identically: {seen}"
@@ -282,7 +296,8 @@ class TestThreeStatesAtTheWire:
         self, served, store, triggers, memory
     ) -> None:
         """``mixed`` is excluded from the calibration grades, so resolving everything as mixed
-        leaves the strip empty rather than inventing the verdict the user declined to give."""
+        leaves the strip empty rather than inventing the verdict the user declined to give.
+        """
         for _ in range(CALIBRATION_MIN_N):
             _resolve(store, triggers, memory, _log(store, triggers)["id"], "mixed")
         _, body = await _get()
@@ -290,23 +305,24 @@ class TestThreeStatesAtTheWire:
         assert len(body["decisions"]) == CALIBRATION_MIN_N
 
 
-# ── failure reads as failure ─────────────────────────────────────────────────
-
-
 class TestFailureIsNotEmptiness:
     @pytest.mark.asyncio
-    async def test_an_unknown_status_is_a_422_carrying_the_vocabulary(self, served, store) -> None:
+    async def test_an_unknown_status_is_a_422_carrying_the_vocabulary(
+        self, served, store
+    ) -> None:
         status, body = await _get(status="nonsense")
         assert status == 422
         assert body["error"]["code"] == "invalid_request"
-        # The message is composed ONCE, by `decisions`, so it names the accepted values.
         assert "pending" in body["error"]["message"]
 
     @pytest.mark.asyncio
-    async def test_a_broken_store_is_an_error_never_an_empty_journal(self, monkeypatch) -> None:
+    async def test_a_broken_store_is_an_error_never_an_empty_journal(
+        self, monkeypatch
+    ) -> None:
         """ "You have never decided anything" is the most confident possible way to say the
-        opposite of what is known. A read that raises must not be able to render as a journal."""
-        import gideon.knowledge as knowledge_pkg
+        opposite of what is known. A read that raises must not be able to render as a journal.
+        """
+        import gideon.cognition.knowledge as knowledge_pkg
 
         def boom(*a, **k):
             raise RuntimeError("knowledge.db is locked")
@@ -318,15 +334,14 @@ class TestFailureIsNotEmptiness:
         assert "decisions" not in body
 
     @pytest.mark.asyncio
-    async def test_every_failure_uses_the_structured_envelope(self, served, store) -> None:
+    async def test_every_failure_uses_the_structured_envelope(
+        self, served, store
+    ) -> None:
         """`AGENTS.md` §"Shared conventions": the flat ``{"error": "<prose>"}`` shape is a
         ratcheted, shrinking population, so a new route emitting it would be a new site a client
         can only branch on by matching prose."""
         _, body = await _get(domain="not-a-domain")
         assert isinstance(body["error"], dict) and "code" in body["error"]
-
-
-# ── criterion 5's grep audit: neither store writes the other ─────────────────
 
 
 class TestStoresStayUncoupled:
@@ -350,7 +365,10 @@ class TestStoresStayUncoupled:
     def test_the_memory_side_never_reaches_for_the_knowledge_store(self) -> None:
         for name in ("memory_service.py", "vector_memory.py"):
             src = (SRC / name).read_text()
-            assert "get_knowledge_store" not in src, f"{name} reaches into the knowledge store"
-            assert "from gideon.decisions" not in src, f"{name} imports the journal"
-        # Vacuity floor: the files were actually read and are the real ones.
+            assert (
+                "get_knowledge_store" not in src
+            ), f"{name} reaches into the knowledge store"
+            assert (
+                "from gideon.cognition.decisions" not in src
+            ), f"{name} imports the journal"
         assert "def write_lesson" in (SRC / "memory_service.py").read_text()

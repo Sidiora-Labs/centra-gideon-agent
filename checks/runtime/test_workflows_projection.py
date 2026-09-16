@@ -21,9 +21,14 @@ from pathlib import Path
 
 import pytest
 
-from gideon.workflows import store
-from gideon.workflows.models import InstanceState, NodeInstance, RunStatus, WorkflowRun
-from gideon.workflows.projection import (
+from gideon.automation.workflows import store
+from gideon.automation.workflows.models import (
+    InstanceState,
+    NodeInstance,
+    RunStatus,
+    WorkflowRun,
+)
+from gideon.automation.workflows.projection import (
     NODE_FIELDS,
     RUN_FIELDS,
     project,
@@ -35,7 +40,7 @@ from gideon.workflows.projection import (
 def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
 
 
@@ -80,12 +85,15 @@ class TestValidShapes:
         """A projection that only carries the required core is still usable — the FE defaults
         tokens/elapsed to zero. Demanding them would make the validator reject snapshots the
         widget renders fine."""
-        snap = {k: v for k, v in _valid().items() if k in {f[0] for f in RUN_FIELDS if f[2]}}
+        snap = {
+            k: v for k, v in _valid().items() if k in {f[0] for f in RUN_FIELDS if f[2]}
+        }
         assert validate_snapshot(snap) == []
 
     def test_an_anonymous_node_keeps_an_empty_id(self) -> None:
         """`node_id` is required-but-possibly-empty: a node without an id is legal, and the
-        FE falls back to the instance path for its label. Absent is the bug, empty is not."""
+        FE falls back to the instance path for its label. Absent is the bug, empty is not.
+        """
         snap = _valid()
         snap["nodes"][0]["node_id"] = ""
         assert validate_snapshot(snap) == []
@@ -149,7 +157,9 @@ class TestProject:
     def test_a_real_run_projects_cleanly(self) -> None:
         run = store.create(WorkflowRun(id="", workflow_name="proj"))
         store.write_spec(run.id, SPEC)
-        store.write_state(run.id, {"root.children[0]": NodeInstance(path="root.children[0]")})
+        store.write_state(
+            run.id, {"root.children[0]": NodeInstance(path="root.children[0]")}
+        )
         snap, issues = project(run.id)
         assert issues == []
         assert snap["run_id"] == run.id
@@ -181,14 +191,16 @@ class TestProject:
         """The delivery rule: validation reports, it does not block. Withholding a snapshot
         over one bad optional field would show the user nothing at all — strictly worse than
         showing them something slightly wrong."""
-        from gideon.workflows import service
+        from gideon.automation.workflows import service
 
         monkeypatch.setattr(
-            service, "status", lambda run_id: {"ok": True, "run_id": run_id, "nodes": "broken"}
+            service,
+            "status",
+            lambda run_id: {"ok": True, "run_id": run_id, "nodes": "broken"},
         )
         snap, issues = project("abc12345")
         assert issues, "expected the malformed projection to be reported"
-        assert snap["run_id"] == "abc12345"  # …and shipped anyway
+        assert snap["run_id"] == "abc12345"
 
 
 def test_the_field_table_matches_the_frontend_type() -> None:
@@ -197,17 +209,18 @@ def test_the_field_table_matches_the_frontend_type() -> None:
     Python test sees the .ts file. So the projection's field table is compared to
     `WorkflowRunDetailData` directly.
     """
-    root = Path(__file__).resolve().parents[1]
-    api = (root / "web/src/lib/api.ts").read_text(encoding="utf-8")
+    root = Path(__file__).resolve().parents[2]
+    api = (root / "apps/console/src/lib/api.ts").read_text(encoding="utf-8")
 
-    run_iface = re.search(r"export interface WorkflowRunDetailData \{(.*?)\n\}", api, re.S)
+    run_iface = re.search(
+        r"export interface WorkflowRunDetailData \{(.*?)\n\}", api, re.S
+    )
     node_iface = re.search(r"export interface WorkflowNodeState \{(.*?)\n\}", api, re.S)
-    assert run_iface and node_iface, "couldn't find the FE workflow snapshot types in api.ts"
+    assert (
+        run_iface and node_iface
+    ), "couldn't find the FE workflow snapshot types in api.ts"
 
     def fields(block: str) -> set[str]:
-        # The FE declares several fields per line, separated by `;`. Nested object literals
-        # are stripped first so an inner `class?:` cannot masquerade as a top-level field and
-        # mask a genuinely missing one.
         flat = re.sub(r"\{[^{}]*\}", "", block)
         return set(re.findall(r"(?:^|[;{])\s*([a-z_]+)\s*\??:", flat, re.M))
 
@@ -218,4 +231,6 @@ def test_the_field_table_matches_the_frontend_type() -> None:
         backend = {f[0] for f in table}
         frontend = fields(block)
         missing = backend - frontend
-        assert not missing, f"{label}: projected fields the FE type does not declare: {missing}"
+        assert (
+            not missing
+        ), f"{label}: projected fields the FE type does not declare: {missing}"

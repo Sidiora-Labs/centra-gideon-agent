@@ -23,7 +23,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
-from gideon import surface_layers
+from gideon.workspace import surface_layers
 
 
 def _run(coro):
@@ -39,9 +39,6 @@ def _clean_latch():
     surface_layers.reset_for_tests()
     yield
     surface_layers.reset_for_tests()
-
-
-# ── the latch ────────────────────────────────────────────────────────────────
 
 
 class TestTheLatch:
@@ -70,8 +67,6 @@ class TestTheMetaTag:
         surface_layers.set_safe_surfaces(True)
         out = surface_layers.inject_safe_meta(self.HTML)
         assert f'<meta name="{surface_layers.SAFE_META_NAME}" content="1">' in out
-        # Inside <head>, and before the title — the SPA reads it synchronously at boot, so a
-        # tag appended after </body> would be read AFTER the first module resolved.
         assert out.index(surface_layers.SAFE_META_NAME) < out.index("<title>")
 
     def test_injection_is_idempotent(self) -> None:
@@ -87,7 +82,10 @@ class TestTheMetaTag:
     def test_the_frontend_reads_the_SAME_meta_name(self) -> None:
         """A wire contract with two spellings is a flag that silently does nothing. Asserted
         against the FE source because the name is a literal on both sides."""
-        src = Path(__file__).resolve().parent.parent / "web/src/ui/surfaces/layers.ts"
+        src = (
+            Path(__file__).resolve().parent.parent.parent
+            / "apps/console/src/ui/surfaces/layers.ts"
+        )
         assert f"'{surface_layers.SAFE_META_NAME}'" in src.read_text(encoding="utf-8")
 
 
@@ -110,7 +108,7 @@ class TestTheCliFlag:
             capture_output=True,
             text=True,
             timeout=90,
-            cwd=str(Path(__file__).resolve().parent.parent),
+            cwd=str(Path(__file__).resolve().parent.parent.parent),
         )
         return proc.stdout + proc.stderr
 
@@ -122,7 +120,7 @@ class TestTheCliFlag:
         assert "core" in out.lower()
 
     def test_it_is_threaded_into_the_gateway_kwargs(self) -> None:
-        from gideon import cli
+        from gideon.interfaces.cli import main as cli
 
         args = argparse.Namespace(safe_surfaces=True)
         assert cli._resolve_gateway_args(args)["safe_surfaces"] is True
@@ -130,7 +128,7 @@ class TestTheCliFlag:
     def test_it_is_absent_by_default_and_NOT_bundled_into_test_mode(self) -> None:
         """`--test-mode` deliberately does not imply it: a harness that ran with no app layer
         would pass while the layer it never loaded was broken."""
-        from gideon import cli
+        from gideon.interfaces.cli import main as cli
 
         plain = cli._resolve_gateway_args(argparse.Namespace())
         harness = cli._resolve_gateway_args(argparse.Namespace(test_mode=True))
@@ -143,14 +141,17 @@ class TestTheCliFlag:
         never reaches `_gateway` cannot latch anything."""
         import inspect
 
-        from gideon import cli, cli_server
+        from gideon.interfaces.cli import main as cli
+        from gideon.interfaces.cli import server as cli_server
 
         params = set(inspect.signature(cli_server._gateway).parameters)
         resolved = cli._resolve_gateway_args(argparse.Namespace())
         assert set(resolved) <= params
         assert "safe_surfaces" in params
 
-    def test_the_entrypoint_latches_before_it_boots_anything(self, monkeypatch, tmp_path) -> None:
+    def test_the_entrypoint_latches_before_it_boots_anything(
+        self, monkeypatch, tmp_path
+    ) -> None:
         """The last link: `_gateway(safe_surfaces=True)` must latch BEFORE anything serves.
 
         🪤 `_gateway` is NOT called here. An earlier version of this test called it with
@@ -167,7 +168,7 @@ class TestTheCliFlag:
         """
         import inspect
 
-        from gideon import cli_server
+        from gideon.interfaces.cli import server as cli_server
 
         src = inspect.getsource(cli_server._gateway)
         assert "set_safe_surfaces(True)" in src, "the latch call is gone from _gateway"
@@ -183,14 +184,11 @@ class TestTheCliFlag:
 
 class TestTheStatusReport:
     def test_the_status_handler_reports_the_latch(self) -> None:
-        from gideon.dashboard import handlers_system
+        from gideon.interfaces.dashboard import handlers_system
 
         assert handlers_system._safe_surfaces_flag() is False
         surface_layers.set_safe_surfaces(True)
         assert handlers_system._safe_surfaces_flag() is True
-
-
-# ── the tile-action route ────────────────────────────────────────────────────
 
 
 class TestTheTileActionRoute:
@@ -203,8 +201,8 @@ class TestTheTileActionRoute:
         a registered path pointing at a name that does not exist still fails here."""
         import ast
 
-        import gideon.dashboard.server as server_mod
-        from gideon.dashboard.handlers import views as views_mod
+        import gideon.interfaces.dashboard.server as server_mod
+        from gideon.interfaces.dashboard.handlers import views as views_mod
 
         tree = ast.parse(Path(server_mod.__file__).read_text(encoding="utf-8"))
         paths = {
@@ -221,7 +219,9 @@ class TestTheTileActionRoute:
         assert callable(views_mod.api_dashboard_view_tile_action)
 
     def test_a_missing_ref_is_a_400(self) -> None:
-        from gideon.dashboard.handlers.views import api_dashboard_view_tile_action
+        from gideon.interfaces.dashboard.handlers.views import (
+            api_dashboard_view_tile_action,
+        )
 
         req = make_mocked_request(
             "POST", "/api/dashboard/views/overview/tiles/action", app=web.Application()
@@ -233,8 +233,12 @@ class TestTheTileActionRoute:
         assert _body(resp)["error"]["code"] == "tile_ref_required"
 
     def test_a_missing_tile_is_a_404(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setattr("gideon.dashboard.views_store.config_dir", lambda: tmp_path)
-        from gideon.dashboard.handlers.views import api_dashboard_view_tile_action
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.views_store.config_dir", lambda: tmp_path
+        )
+        from gideon.interfaces.dashboard.handlers.views import (
+            api_dashboard_view_tile_action,
+        )
 
         req = make_mocked_request(
             "POST", "/api/dashboard/views/overview/tiles/action", app=web.Application()
@@ -245,12 +249,18 @@ class TestTheTileActionRoute:
         resp = _run(api_dashboard_view_tile_action(req))
         assert resp.status == 404
 
-    def test_a_capability_refusal_is_a_200_with_a_code(self, tmp_path, monkeypatch) -> None:
+    def test_a_capability_refusal_is_a_200_with_a_code(
+        self, tmp_path, monkeypatch
+    ) -> None:
         """A refusal is a NORMAL answer here: the FE renders it beside the control that
         raised it, and a 4xx would be indistinguishable from a broken request."""
-        monkeypatch.setattr("gideon.dashboard.views_store.config_dir", lambda: tmp_path)
-        from gideon.dashboard import views_store
-        from gideon.dashboard.handlers.views import api_dashboard_view_tile_action
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.views_store.config_dir", lambda: tmp_path
+        )
+        from gideon.interfaces.dashboard import views_store
+        from gideon.interfaces.dashboard.handlers.views import (
+            api_dashboard_view_tile_action,
+        )
 
         views_store.add_tile("overview", "artifact:sales")
         views_store.set_tile_refresh(
@@ -260,7 +270,9 @@ class TestTheTileActionRoute:
                 "mode": "ttl",
                 "ttl_secs": 60,
                 "skeleton": "sk",
-                "data": [{"id": "health", "provider": "knowledge-health", "config": {}}],
+                "data": [
+                    {"id": "health", "provider": "knowledge-health", "config": {}}
+                ],
             },
         )
         req = make_mocked_request(
@@ -284,11 +296,8 @@ def _json_returning(payload: dict):
     return _json
 
 
-# ── the app components declaration ──────────────────────────────────────────
-
-
 def _manifest(**over):
-    from gideon.apps.manifest import AppManifest
+    from gideon.extensions.apps.manifest import AppManifest
 
     data = {
         "name": "acme",
@@ -302,12 +311,14 @@ def _manifest(**over):
 
 class TestTheComponentsDeclaration:
     def test_the_capability_is_in_the_closed_vocabulary(self) -> None:
-        from gideon.apps.manifest import UI_CAPABILITIES
+        from gideon.extensions.apps.manifest import UI_CAPABILITIES
 
         assert "generative-component" in UI_CAPABILITIES
 
     def test_a_components_module_round_trips(self) -> None:
-        m = _manifest(ui={"components": "genui.mjs"}, uiCapabilities=["generative-component"])
+        m = _manifest(
+            ui={"components": "genui.mjs"}, uiCapabilities=["generative-component"]
+        )
         assert m.ui.components == "genui.mjs"
         assert m.to_dict()["ui"]["components"] == "genui.mjs"
         assert m.validate() == []
@@ -320,7 +331,8 @@ class TestTheComponentsDeclaration:
 
     def test_a_traversing_components_path_is_refused(self) -> None:
         errors = _manifest(
-            ui={"components": "../../etc/passwd"}, uiCapabilities=["generative-component"]
+            ui={"components": "../../etc/passwd"},
+            uiCapabilities=["generative-component"],
         ).validate()
         assert any("path traversal" in e for e in errors)
 
@@ -329,13 +341,13 @@ class TestTheComponentsDeclaration:
         page bundle instead. The pairing rule runs one way only."""
         assert _manifest(uiCapabilities=["generative-component"]).validate() == []
 
-    def test_the_apps_list_exposes_the_module_and_the_capabilities(self, monkeypatch) -> None:
+    def test_the_apps_list_exposes_the_module_and_the_capabilities(
+        self, monkeypatch
+    ) -> None:
         """The shell decides whether to load a module from THIS wire; a field the API drops is
         a components module nothing can ever fetch."""
-        # The handler imports `list_apps` INSIDE the function body, so the name it resolves is
-        # the manager module's — patching the handler module would leave the real one running.
-        from gideon.apps import manager as manager_mod
-        from gideon.dashboard.handlers import apps as apps_handlers
+        from gideon.extensions.apps import manager as manager_mod
+        from gideon.interfaces.dashboard.handlers import apps as apps_handlers
 
         monkeypatch.setattr(
             manager_mod,

@@ -25,14 +25,14 @@ from pathlib import Path
 
 import pytest
 
-from gideon import security
-from gideon.sel import SecurityEventLog
+from gideon.security import security
+from gideon.security.sel import SecurityEventLog
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
-#: The baseline content, pinned. A change to the shipped patterns must be a deliberate
-#: edit to this line — a drive-by edit to the data file turns this red.
-EXPECTED_BASELINE_SHA256 = "2b7db3c6d0be84890aff1ad3bf2bcbcbf3bdf5cb6b991079734db1ee10c6e872"
+EXPECTED_BASELINE_SHA256 = (
+    "2b7db3c6d0be84890aff1ad3bf2bcbcbf3bdf5cb6b991079734db1ee10c6e872"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -62,7 +62,11 @@ def _sel_types(home: Path) -> list[str]:
     path = home / "security_events.jsonl"
     if not path.exists():
         return []
-    return [json.loads(ln)["event_type"] for ln in path.read_text().splitlines() if ln.strip()]
+    return [
+        json.loads(ln)["event_type"]
+        for ln in path.read_text().splitlines()
+        if ln.strip()
+    ]
 
 
 def _sel_events(home: Path, event_type: str) -> list[dict]:
@@ -77,7 +81,9 @@ class TestPackagedSource:
     def test_the_file_ships_and_its_declared_hash_matches_its_patterns(self):
         version, declared, patterns = security._read_packaged_baseline()
         assert version == security.BASELINE_DENYLIST_VERSION == 1
-        assert declared == security._baseline_digest(patterns) == EXPECTED_BASELINE_SHA256
+        assert (
+            declared == security._baseline_digest(patterns) == EXPECTED_BASELINE_SHA256
+        )
         assert len(patterns) == len(set(patterns)) == 112
 
     def test_the_loaded_list_is_the_packaged_file(self):
@@ -89,26 +95,45 @@ class TestPackagedSource:
         for pat in security.baseline_denied_command_patterns():
             re.compile(pat)
 
-    def test_a_declared_hash_that_disagrees_with_the_patterns_is_refused(self, monkeypatch):
+    def test_a_declared_hash_that_disagrees_with_the_patterns_is_refused(
+        self, monkeypatch
+    ):
         """Corruption / a partial write / an edit that forgot the digest — all fail loudly."""
-        good = json.dumps({"version": 1, "sha256": "0" * 64, "patterns": ["rm -rf /.*"]})
-        monkeypatch.setattr(security, "_read_packaged_baseline", _reader_returning(good))
+        good = json.dumps(
+            {"version": 1, "sha256": "0" * 64, "patterns": ["rm -rf /.*"]}
+        )
+        monkeypatch.setattr(
+            security, "_read_packaged_baseline", _reader_returning(good)
+        )
         with pytest.raises(ValueError, match="integrity failure"):
             security._read_packaged_baseline()
 
     def test_an_empty_pattern_list_is_refused(self, monkeypatch):
         """Fail closed: "the file parsed but shipped nothing" must not mean "deny nothing"."""
-        empty = json.dumps({"version": 1, "sha256": security._baseline_digest([]), "patterns": []})
-        monkeypatch.setattr(security, "_read_packaged_baseline", _reader_returning(empty))
+        empty = json.dumps(
+            {"version": 1, "sha256": security._baseline_digest([]), "patterns": []}
+        )
+        monkeypatch.setattr(
+            security, "_read_packaged_baseline", _reader_returning(empty)
+        )
         with pytest.raises(ValueError, match="ships no patterns"):
             security._read_packaged_baseline()
 
     def test_both_packaging_surfaces_declare_the_data_file(self):
-        """A data file must reach the wheel AND the frozen binary — PyInstaller's import
-        analysis cannot see one, so the spec needs it spelled out separately."""
-        assert '"baseline_denylist.json"' in (REPO_ROOT / "pyproject.toml").read_text()
-        spec = (REPO_ROOT / "gideon-backend.spec").read_text()
-        assert '("src/gideon/baseline_denylist.json", "gideon")' in spec
+        import fnmatch
+        import tomllib
+
+        from tooling.packaging.runtime_bundle import RuntimeBundlePlan
+
+        project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
+        patterns = project["tool"]["setuptools"]["package-data"]["*"]
+        resource = REPO_ROOT / "runtime/gideon/security/baseline_denylist.json"
+        assert resource.is_file()
+        assert any(fnmatch.fnmatch(resource.name, pattern) for pattern in patterns)
+        plan = RuntimeBundlePlan.for_recipe(
+            REPO_ROOT / "tooling/packaging/runtime-bundle.spec"
+        )
+        assert (str(resource), "gideon/security") in plan.runtime_resources()
 
 
 def _reader_returning(raw: str):
@@ -146,8 +171,9 @@ class TestSelfHealing:
 
         assert len(effective) == 112
         assert set(effective) == set(security._BASELINE_PATTERNS)
-        # healed in place, so every consumer holding the list object sees the repair
-        assert list(security.BUILTIN_DENIED_COMMAND_PATTERNS) == list(security._BASELINE_PATTERNS)
+        assert list(security.BUILTIN_DENIED_COMMAND_PATTERNS) == list(
+            security._BASELINE_PATTERNS
+        )
         events = _sel_events(tmp_path, "baseline_denylist_reasserted")
         assert len(events) == 1
         assert events[0]["outcome"] == "healed"
@@ -171,7 +197,9 @@ class TestSelfHealing:
         baseline, so a shuffle is drift even though the set is unchanged."""
         security.BUILTIN_DENIED_COMMAND_PATTERNS.reverse()
         security.denied_command_patterns()
-        assert list(security.BUILTIN_DENIED_COMMAND_PATTERNS) == list(security._BASELINE_PATTERNS)
+        assert list(security.BUILTIN_DENIED_COMMAND_PATTERNS) == list(
+            security._BASELINE_PATTERNS
+        )
         assert len(_sel_events(tmp_path, "baseline_denylist_reasserted")) == 1
 
     def test_healing_survives_a_rebound_snapshot_by_rereading_the_file(self, tmp_path):
@@ -206,9 +234,10 @@ class TestSelfHealing:
         assert security.denied_command_reason("rm -rf /") is not None
         events = _sel_events(tmp_path, "baseline_denylist_tamper_attempt")
         assert events[0]["outcome"] == "rejected"
-        assert events[0]["metadata"]["reason"] == "snapshot_and_packaged_file_both_unverified"
-        # The broken state survives the read, and a bash-heavy session reads this per
-        # command — one report per distinct broken state, not one per screened command.
+        assert (
+            events[0]["metadata"]["reason"]
+            == "snapshot_and_packaged_file_both_unverified"
+        )
         for _ in range(5):
             security.denied_command_patterns()
         assert len(_sel_events(tmp_path, "baseline_denylist_tamper_attempt")) == 1
@@ -227,7 +256,9 @@ class TestSelfHealing:
                 "patterns": ["only-this-one"],
             }
         )
-        monkeypatch.setattr(security, "_read_packaged_baseline", _reader_returning(rewritten))
+        monkeypatch.setattr(
+            security, "_read_packaged_baseline", _reader_returning(rewritten)
+        )
         security.verify_baseline_denylist()
         assert _sel_types(tmp_path) == [
             "baseline_denylist_reasserted",
@@ -260,7 +291,9 @@ class TestPeriodicReverify:
                 "patterns": ["harmless"],
             }
         )
-        monkeypatch.setattr(security, "_read_packaged_baseline", _reader_returning(rewritten))
+        monkeypatch.setattr(
+            security, "_read_packaged_baseline", _reader_returning(rewritten)
+        )
 
         report = security.verify_baseline_denylist()
 
@@ -269,7 +302,9 @@ class TestPeriodicReverify:
         assert security.denied_command_reason("rm -rf /") is not None
         assert len(_sel_events(tmp_path, "baseline_denylist_tamper_attempt")) == 1
 
-    def test_a_missing_file_does_not_shrink_what_is_enforced(self, tmp_path, monkeypatch):
+    def test_a_missing_file_does_not_shrink_what_is_enforced(
+        self, tmp_path, monkeypatch
+    ):
         def boom() -> tuple[int, str, tuple[str, ...]]:
             raise FileNotFoundError("baseline_denylist.json")
 
@@ -284,7 +319,7 @@ class TestPeriodicReverify:
 
     @pytest.mark.asyncio
     async def test_the_doctor_probe_reports_the_verified_state(self):
-        from gideon.resilience import doctor
+        from gideon.operations.resilience import doctor
 
         probe = {p.id: p for p in doctor.all_probes()}["security.baseline_denylist"]
         assert probe.capability == "security"
@@ -298,12 +333,18 @@ class TestPeriodicReverify:
 
     @pytest.mark.asyncio
     async def test_the_doctor_probe_goes_red_on_a_diverged_file(self, monkeypatch):
-        from gideon.resilience import doctor
+        from gideon.operations.resilience import doctor
 
         rewritten = json.dumps(
-            {"version": 7, "sha256": security._baseline_digest(["x"]), "patterns": ["x"]}
+            {
+                "version": 7,
+                "sha256": security._baseline_digest(["x"]),
+                "patterns": ["x"],
+            }
         )
-        monkeypatch.setattr(security, "_read_packaged_baseline", _reader_returning(rewritten))
+        monkeypatch.setattr(
+            security, "_read_packaged_baseline", _reader_returning(rewritten)
+        )
 
         probe = {p.id: p for p in doctor.all_probes()}["security.baseline_denylist"]
         res = await probe.run(doctor.DoctorContext())
@@ -317,7 +358,9 @@ def _write_config(home: Path, security_section: dict) -> None:
 
 
 class TestStrictlyAdditiveUserConfig:
-    def test_the_effective_set_is_a_superset_of_the_baseline_for_any_user_config(self, tmp_path):
+    def test_the_effective_set_is_a_superset_of_the_baseline_for_any_user_config(
+        self, tmp_path
+    ):
         """The property, over a generated + adversarial input space.
 
         Inputs swept: no config at all; an empty list; a single addition; every baseline
@@ -335,9 +378,7 @@ class TestStrictlyAdditiveUserConfig:
             {"denied_commands": ["my-secret-tool .*"]},
             {"denied_commands": ["dup", "dup", "dup"]},
         ]
-        # Every shipped entry, echoed back by the user one at a time.
         configs += [{"denied_commands": [entry]} for entry in baseline]
-        # Every shape a config could use to try to shrink the merged view.
         for key in (
             "removed_denied_commands",
             "denied_commands_override",
@@ -346,10 +387,11 @@ class TestStrictlyAdditiveUserConfig:
             "allowed_commands",
         ):
             configs.append({"denied_commands": [], key: list(baseline)})
-        # Random mixes.
         for _ in range(200):
             picks = rng.sample(list(baseline), rng.randint(0, 5))
-            fresh = [f"generated-{rng.randrange(10**6)} .*" for _ in range(rng.randint(0, 3))]
+            fresh = [
+                f"generated-{rng.randrange(10**6)} .*" for _ in range(rng.randint(0, 3))
+            ]
             entries = picks + fresh + picks
             rng.shuffle(entries)
             configs.append({"denied_commands": entries})
@@ -360,12 +402,12 @@ class TestStrictlyAdditiveUserConfig:
 
             assert set(baseline).issubset(set(effective)), section
             assert len(effective) >= len(baseline), section
-            # No shrink path: the baseline keeps its exact order at the head of the set,
-            # so first-match-wins screening cannot be reordered by a user addition either.
             assert effective[: len(baseline)] == list(baseline), section
             assert len(effective) == len(set(effective)), section
 
-    def test_a_user_pattern_identical_to_a_baseline_entry_does_not_shorten_the_set(self, tmp_path):
+    def test_a_user_pattern_identical_to_a_baseline_entry_does_not_shorten_the_set(
+        self, tmp_path
+    ):
         baseline = security.baseline_denied_command_patterns()
         _write_config(tmp_path, {"denied_commands": [baseline[0], baseline[-1]]})
 
@@ -375,7 +417,9 @@ class TestStrictlyAdditiveUserConfig:
         assert effective == list(baseline)
 
     def test_user_additions_still_merge(self, tmp_path):
-        _write_config(tmp_path, {"denied_commands": ["my-secret-tool .*", "another .*"]})
+        _write_config(
+            tmp_path, {"denied_commands": ["my-secret-tool .*", "another .*"]}
+        )
 
         effective = security.denied_command_patterns()
 
@@ -408,7 +452,7 @@ class TestSharedSource:
         """The action-provider path used to concatenate its own copy of the constant. It
         now calls the shared accessor, so it inherits the heal: clearing the live list
         must not open a hole in provider dispatch."""
-        from gideon.guardrails import denylist
+        from gideon.security.guardrails import denylist
 
         security.BUILTIN_DENIED_COMMAND_PATTERNS.clear()
 
@@ -421,7 +465,7 @@ class TestSharedSource:
     def test_no_module_keeps_a_second_in_code_copy_of_the_baseline(self):
         """Two copies is how the two paths drift. Only ``security.py`` may name the
         packaged file, and nothing may re-declare the patterns."""
-        src = REPO_ROOT / "src" / "gideon"
+        src = REPO_ROOT / "runtime" / "gideon"
         namers = sorted(
             p.relative_to(src).as_posix()
             for p in src.rglob("*.py")
@@ -431,7 +475,13 @@ class TestSharedSource:
 
     def test_the_security_panel_payload_reads_the_shared_accessor(self, tmp_path):
         core = (
-            REPO_ROOT / "src" / "gideon" / "dashboard" / "handlers" / "core.py"
+            REPO_ROOT
+            / "runtime"
+            / "gideon"
+            / "interfaces"
+            / "dashboard"
+            / "handlers"
+            / "core.py"
         ).read_text()
         assert "baseline_denied_command_patterns" in core
 
@@ -490,7 +540,9 @@ class TestSecurityPanelPayload:
     async def _payload() -> dict:
         from aiohttp.test_utils import make_mocked_request
 
-        from gideon.dashboard.handlers.core import api_security_denied_commands
+        from gideon.interfaces.dashboard.handlers.core import (
+            api_security_denied_commands,
+        )
 
         req = make_mocked_request("GET", "/api/security/denied-commands")
         resp = await api_security_denied_commands(req)
@@ -525,7 +577,9 @@ class TestSecurityPanelPayload:
                 "patterns": ["only-this-one"],
             }
         )
-        monkeypatch.setattr(security, "_read_packaged_baseline", _reader_returning(rewritten))
+        monkeypatch.setattr(
+            security, "_read_packaged_baseline", _reader_returning(rewritten)
+        )
 
         after = await self._payload()
 
@@ -533,8 +587,6 @@ class TestSecurityPanelPayload:
         assert after["baseline"]["detail"] == (
             "packaged file no longer matches the verified baseline"
         )
-        # The identity shown stays the VERIFIED one — the diverged file is reported, never
-        # adopted, so the panel must not start advertising the attacker's version 7.
         assert after["baseline"]["version"] == 1
         assert after["baseline"]["sha256"] == EXPECTED_BASELINE_SHA256
         assert after["baseline"]["count"] == 112
@@ -554,9 +606,13 @@ class TestSecurityPanelPayload:
         assert body["baseline"]["count"] == 112
 
     @pytest.mark.asyncio
-    async def test_user_additions_counts_the_patterns_that_widen_the_set(self, tmp_path):
+    async def test_user_additions_counts_the_patterns_that_widen_the_set(
+        self, tmp_path
+    ):
         (tmp_path / "config.json").write_text(
-            json.dumps({"security": {"denied_commands": ["my-secret-tool .*", "danger-cmd"]}})
+            json.dumps(
+                {"security": {"denied_commands": ["my-secret-tool .*", "danger-cmd"]}}
+            )
         )
 
         body = await self._payload()
@@ -565,7 +621,9 @@ class TestSecurityPanelPayload:
         assert body["user_additions"] == 2
 
     @pytest.mark.asyncio
-    async def test_a_user_pattern_duplicating_a_baseline_entry_is_not_an_addition(self, tmp_path):
+    async def test_a_user_pattern_duplicating_a_baseline_entry_is_not_an_addition(
+        self, tmp_path
+    ):
         """🪤 The count a naive ``len(config.denied_commands)`` gets WRONG.
 
         ``denied_command_patterns()`` dedupes a user entry equal to a built-in, so it
@@ -574,12 +632,13 @@ class TestSecurityPanelPayload:
         """
         echoed = security.BUILTIN_DENIED_COMMAND_PATTERNS[0]
         (tmp_path / "config.json").write_text(
-            json.dumps({"security": {"denied_commands": [echoed, "genuinely-new", echoed]}})
+            json.dumps(
+                {"security": {"denied_commands": [echoed, "genuinely-new", echoed]}}
+            )
         )
 
         body = await self._payload()
 
-        # Three entries in config, exactly one of which widens the effective set.
         assert len(body["user"]) == 3
         assert body["user_additions"] == 1
         assert len(body["builtin"]) == 112
@@ -589,7 +648,7 @@ class TestSecurityPanelPayload:
         """Read-only is a property of the API surface, not just of the UI: the only
         writable field in this area is ``security.denied_commands`` (the user list),
         reachable through the config PATCH allowlist. Nothing addresses the baseline."""
-        from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+        from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
         writable = [k for k in _EDITABLE_CONFIG if "denied" in k or "baseline" in k]
         assert writable == ["security.denied_commands"]

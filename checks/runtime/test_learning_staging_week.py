@@ -17,7 +17,7 @@ from datetime import datetime
 
 import pytest
 
-from gideon.learning.staging import FlushOutcome, StagingStore
+from gideon.cognition.learning.staging import FlushOutcome, StagingStore
 
 DAY = 86400.0
 
@@ -31,23 +31,24 @@ def store(tmp_path):
     s.close()
 
 
-def _record(store, monkeypatch, *, outcome, at, proposal_ids=None, cost=0.01, cadence="turn_end"):
+def _record(
+    store, monkeypatch, *, outcome, at, proposal_ids=None, cost=0.01, cadence="turn_end"
+):
     """Record one flush AT a chosen time.
 
     `record_flush` stamps `time.time()` itself, so the clock is patched per row rather than the
     timestamp being passed — patching lets a test build a week of history without waiting one.
     """
-    import gideon.learning.staging as module
+    import gideon.cognition.learning.staging as module
 
     monkeypatch.setattr(module.time, "time", lambda: at)
-    store.record_flush(cadence=cadence, outcome=outcome, proposal_ids=proposal_ids, cost_usd=cost)
+    store.record_flush(
+        cadence=cadence, outcome=outcome, proposal_ids=proposal_ids, cost_usd=cost
+    )
 
 
 def _day(ts: float) -> str:
     return datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
-
-
-# ── the measured gap ──
 
 
 def test_a_silent_day_is_named(store, monkeypatch):
@@ -75,7 +76,9 @@ def test_health_alone_cannot_see_a_silent_day(store, monkeypatch):
     """
     now = time.time()
     for offset in (0, 3):
-        _record(store, monkeypatch, outcome=FlushOutcome.FLUSH_OK, at=now - offset * DAY)
+        _record(
+            store, monkeypatch, outcome=FlushOutcome.FLUSH_OK, at=now - offset * DAY
+        )
 
     health = store.health(days=4, now=now)
     assert health["passes"] == 2
@@ -97,12 +100,11 @@ def test_buckets_come_back_in_date_order(store, monkeypatch):
     that forgets renders a scrambled week."""
     now = time.time()
     for offset in range(5):
-        _record(store, monkeypatch, outcome=FlushOutcome.FLUSH_OK, at=now - offset * DAY)
+        _record(
+            store, monkeypatch, outcome=FlushOutcome.FLUSH_OK, at=now - offset * DAY
+        )
     days = [b["day"] for b in store.week(days=5, now=now)["buckets"]]
     assert days == sorted(days)
-
-
-# ── per-outcome accounting ──
 
 
 def test_outcomes_are_counted_per_day(store, monkeypatch):
@@ -111,7 +113,9 @@ def test_outcomes_are_counted_per_day(store, monkeypatch):
     _record(store, monkeypatch, outcome=FlushOutcome.FLUSH_OK, at=now)
     _record(store, monkeypatch, outcome=FlushOutcome.FLUSH_ERROR, at=now)
 
-    today = next(b for b in store.week(days=2, now=now)["buckets"] if b["day"] == _day(now))
+    today = next(
+        b for b in store.week(days=2, now=now)["buckets"] if b["day"] == _day(now)
+    )
     assert today["passes"] == 3
     assert today["by_outcome"] == {"flush_ok": 2, "flush_error": 1}
     assert today["errors"] == 1
@@ -132,11 +136,10 @@ def test_every_flush_outcome_is_representable(store, monkeypatch):
     now = time.time()
     for outcome in FlushOutcome:
         _record(store, monkeypatch, outcome=outcome, at=now)
-    today = next(b for b in store.week(days=1, now=now)["buckets"] if b["day"] == _day(now))
+    today = next(
+        b for b in store.week(days=1, now=now)["buckets"] if b["day"] == _day(now)
+    )
     assert set(today["by_outcome"]) == {o.value for o in FlushOutcome}
-
-
-# ── proposal ids: "produced WHAT" ──
 
 
 def test_proposal_ids_link_a_day_to_its_inbox_rows(store, monkeypatch):
@@ -150,7 +153,9 @@ def test_proposal_ids_link_a_day_to_its_inbox_rows(store, monkeypatch):
         at=now,
         proposal_ids=["p1", "p2"],
     )
-    today = next(b for b in store.week(days=1, now=now)["buckets"] if b["day"] == _day(now))
+    today = next(
+        b for b in store.week(days=1, now=now)["buckets"] if b["day"] == _day(now)
+    )
     assert today["proposal_ids"] == ["p1", "p2"]
     assert today["produced"] == 2
 
@@ -187,21 +192,20 @@ def test_malformed_proposal_ids_do_not_break_the_panel(store, monkeypatch):
     assert week["buckets"] and week["produced_total"] == 0
 
 
-# ── staged entries and cost ──
-
-
 def test_staged_entries_are_bucketed_too(store, monkeypatch):
     """A day that STAGED but never flushed is a different failure from one that never ran: the
     signal arrived and nothing consumed it."""
-    import gideon.learning.staging as module
+    import gideon.cognition.learning.staging as module
 
     now = time.time()
     monkeypatch.setattr(module.time, "time", lambda: now)
     store.stage(kind="lesson", cadence="turn_end", content="x", session_key="s")
 
-    today = next(b for b in store.week(days=1, now=now)["buckets"] if b["day"] == _day(now))
+    today = next(
+        b for b in store.week(days=1, now=now)["buckets"] if b["day"] == _day(now)
+    )
     assert today["staged"] == 1
-    assert today["passes"] == 0  # staged, never flushed
+    assert today["passes"] == 0
 
 
 def test_cost_is_summed_per_day_and_overall(store, monkeypatch):
@@ -215,12 +219,10 @@ def test_cost_is_summed_per_day_and_overall(store, monkeypatch):
     assert today["cost_usd"] == pytest.approx(0.02)
 
 
-# ── never-ran vs ran-then-died (LEARN-1) ──
-
-
 def test_has_ever_run_is_false_with_zero_recorded_runs(store):
     """A fresh install's silent week is a zero-state, not a warning — the panel needs a field
-    that says so, because the window rows alone cannot tell never-ran from ran-then-died."""
+    that says so, because the window rows alone cannot tell never-ran from ran-then-died.
+    """
     week = store.week(days=7, now=time.time())
     assert week["has_ever_run"] is False
     assert len(week["silent_days"]) == 7
@@ -239,11 +241,8 @@ def test_has_ever_run_is_unbounded_not_a_window_proxy(store, monkeypatch):
     now = time.time()
     _record(store, monkeypatch, outcome=FlushOutcome.FLUSH_OK, at=now - 30 * DAY)
     week = store.week(days=3, now=now)
-    assert all(b["passes"] == 0 for b in week["buckets"])  # the window is silent…
-    assert week["has_ever_run"] is True  # …but the instance ran and died: still a warning
-
-
-# ── window handling ──
+    assert all(b["passes"] == 0 for b in week["buckets"])
+    assert week["has_ever_run"] is True
 
 
 def test_records_outside_the_window_are_excluded(store, monkeypatch):

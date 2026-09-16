@@ -6,9 +6,9 @@ import json
 
 import pytest
 
-from gideon.dashboard.handlers.terminal import api_sandbox_providers
-from gideon.sandbox_providers import register_provider, unregister_provider
-from gideon.sandbox_providers.lima import create_provider
+from gideon.integrations.sandbox_providers import register_provider, unregister_provider
+from gideon.integrations.sandbox_providers.lima import create_provider
+from gideon.interfaces.dashboard.handlers.terminal import api_sandbox_providers
 
 
 class _Req:
@@ -36,12 +36,11 @@ async def test_requires_auth():
 async def test_lists_host_first_with_availability():
     providers = await _providers(_Req())
     assert providers, "at least the host tier must be present"
-    assert providers[0]["name"] == "none"  # host tier is always first
+    assert providers[0]["name"] == "none"
     for p in providers:
         assert set(p) == {"name", "display_name", "available"}
         assert isinstance(p["available"], bool)
-        assert p["display_name"]  # never blank
-    # The host tier is always available.
+        assert p["display_name"]
     assert next(p for p in providers if p["name"] == "none")["available"] is True
 
 
@@ -49,7 +48,7 @@ async def test_lists_host_first_with_availability():
 async def test_enabled_lima_tier_appears_greyed_when_down(monkeypatch):
     """A registered but non-Running lima tier surfaces as available=False (greyed-with-reason)."""
     monkeypatch.setattr(
-        "gideon.sandbox_providers.lima._cached_probe",
+        "gideon.integrations.sandbox_providers.lima._cached_probe",
         lambda instance, *, refresh: (False, "instance stopped"),
     )
     register_provider(create_provider())

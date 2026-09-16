@@ -22,11 +22,9 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.workflows import mutations as M
-from gideon.workflows.models import InstanceState, Node, NodeInstance
+from gideon.automation.workflows import mutations as M
+from gideon.automation.workflows.models import InstanceState, Node, NodeInstance
 
-# A spec whose SIBLING binds an earlier node's output — the WF2-R2 shape. `report` is not
-# a tree descendant of `gather`, but it consumes its output.
 SPEC = {
     "name": "cascade",
     "root": {
@@ -68,15 +66,12 @@ def _instances(**states: str) -> dict[str, NodeInstance]:
     return out
 
 
-# ── the binding graph ────────────────────────────────────────────────────────
-
-
 class TestBindingGraph:
     def test_the_consumer_graph_is_built_from_bindings(self) -> None:
         graph = M.dependents_graph(_root())
         assert graph["gather"] == {"analyze"}
         assert graph["analyze"] == {"report"}
-        assert "unrelated" not in graph  # nothing consumes it
+        assert "unrelated" not in graph
 
     def test_the_closure_reaches_transitive_consumers(self) -> None:
         assert M.binding_closure(_root(), {"gather"}) == {"gather", "analyze", "report"}
@@ -85,11 +80,13 @@ class TestBindingGraph:
         """The point of a binding closure: don't re-run work that cannot have changed."""
         assert "unrelated" not in M.binding_closure(_root(), {"gather"})
 
-    def test_a_sibling_consumer_is_in_the_closure_though_not_a_tree_descendant(self) -> None:
+    def test_a_sibling_consumer_is_in_the_closure_though_not_a_tree_descendant(
+        self,
+    ) -> None:
         """WF2-R2's core correction. `report` is a SIBLING of `gather`, not a descendant —
         a tree-based reset would leave it holding a stale input."""
         tree_descendants = {n.id for _p, n in M.walk(_root()) if n.id} - {"s"}
-        assert "report" in tree_descendants  # it IS in the tree, as a sibling
+        assert "report" in tree_descendants
         closure = M.binding_closure(_root(), {"gather"})
         assert "report" in closure
 
@@ -99,8 +96,16 @@ class TestBindingGraph:
             "kind": "sequence",
             "id": "s",
             "children": [
-                {"kind": "transform", "id": "a", "config": {"expr": "{{nodes.b.output}}"}},
-                {"kind": "transform", "id": "b", "config": {"expr": "{{nodes.a.output}}"}},
+                {
+                    "kind": "transform",
+                    "id": "a",
+                    "config": {"expr": "{{nodes.b.output}}"},
+                },
+                {
+                    "kind": "transform",
+                    "id": "b",
+                    "config": {"expr": "{{nodes.a.output}}"},
+                },
             ],
         }
         assert M.binding_closure(Node.from_dict(cyclic), {"a"}) == {"a", "b"}
@@ -124,39 +129,50 @@ class TestCascadePreview:
 
     def test_committed_effects_in_the_cascade_are_surfaced(self) -> None:
         """Surfaced, never silently re-fired — this is what `redo_effects` gates."""
-        from gideon.workflows.effects import EffectRecord, EffectStatus
+        from gideon.automation.workflows.effects import EffectRecord, EffectStatus
 
         effects = {
             "root.children[1]": [
-                EffectRecord(idempotency_key="k", effect_status=EffectStatus.COMMITTED, epoch=0)
+                EffectRecord(
+                    idempotency_key="k", effect_status=EffectStatus.COMMITTED, epoch=0
+                )
             ]
         }
         preview = M.cascade_preview(
-            _root(), _instances(gather="done", analyze="done"), {"gather"}, effects=effects
+            _root(),
+            _instances(gather="done", analyze="done"),
+            {"gather"},
+            effects=effects,
         )
         assert "analyze" in preview.committed_effects
 
     def test_a_compensated_effect_is_not_surfaced(self) -> None:
-        from gideon.workflows.effects import EffectRecord, EffectStatus
+        from gideon.automation.workflows.effects import EffectRecord, EffectStatus
 
         effects = {
             "root.children[1]": [
-                EffectRecord(idempotency_key="k", effect_status=EffectStatus.COMMITTED, epoch=0),
-                EffectRecord(idempotency_key="k", effect_status=EffectStatus.COMPENSATED),
+                EffectRecord(
+                    idempotency_key="k", effect_status=EffectStatus.COMMITTED, epoch=0
+                ),
+                EffectRecord(
+                    idempotency_key="k", effect_status=EffectStatus.COMPENSATED
+                ),
             ]
         }
         preview = M.cascade_preview(
-            _root(), _instances(gather="done", analyze="done"), {"gather"}, effects=effects
+            _root(),
+            _instances(gather="done", analyze="done"),
+            {"gather"},
+            effects=effects,
         )
         assert preview.committed_effects == []
 
 
-# ── grammar hardening (WF2-R20) ──────────────────────────────────────────────
-
-
 class TestOpParsing:
     def test_canonical_ops_parse(self) -> None:
-        op = M.Op.from_dict({"op": "update_node", "node_id": "a", "fields": {"prompt": "x"}})
+        op = M.Op.from_dict(
+            {"op": "update_node", "node_id": "a", "fields": {"prompt": "x"}}
+        )
         assert op.kind == M.OpKind.UPDATE_NODE and op.fields == {"prompt": "x"}
 
     @pytest.mark.parametrize(
@@ -175,7 +191,9 @@ class TestOpParsing:
         assert M.Op.from_dict({"op": alias, "node_id": "a"}).kind == expected
 
     def test_field_aliases_are_normalized(self) -> None:
-        op = M.Op.from_dict({"op": "update_node", "node_id": "a", "fields": {"model": "fast"}})
+        op = M.Op.from_dict(
+            {"op": "update_node", "node_id": "a", "fields": {"model": "fast"}}
+        )
         assert op.fields == {"model_tier": "fast"}
 
     def test_an_unknown_op_raises_rather_than_guessing(self) -> None:
@@ -194,7 +212,12 @@ class TestBatchValidation:
         ops, _ = M.parse_batch(
             [
                 {"op": "update_node", "node_id": "gather", "fields": {"expr": 2}},
-                {"op": "insert", "parent_id": "s", "index": 0, "node": {"kind": "transform"}},
+                {
+                    "op": "insert",
+                    "parent_id": "s",
+                    "index": 0,
+                    "node": {"kind": "transform"},
+                },
             ]
         )
         codes = [i.code for i in M.validate_batch(ops, _root(), {})]
@@ -216,12 +239,16 @@ class TestBatchValidation:
         assert [i.code for i in issues] == ["WF_MUT_UNKNOWN_NODE"]
 
     def test_a_running_node_cannot_be_edited(self) -> None:
-        ops, _ = M.parse_batch([{"op": "update_node", "node_id": "analyze", "fields": {"a": 1}}])
+        ops, _ = M.parse_batch(
+            [{"op": "update_node", "node_id": "analyze", "fields": {"a": 1}}]
+        )
         issues = M.validate_batch(ops, _root(), _instances(analyze="running"))
         assert [i.code for i in issues] == ["WF_MUT_FROZEN_NODE"]
 
     def test_a_completed_node_cannot_be_edited(self) -> None:
-        ops, _ = M.parse_batch([{"op": "update_node", "node_id": "gather", "fields": {"a": 1}}])
+        ops, _ = M.parse_batch(
+            [{"op": "update_node", "node_id": "gather", "fields": {"a": 1}}]
+        )
         issues = M.validate_batch(ops, _root(), _instances(gather="done"))
         assert [i.code for i in issues] == ["WF_MUT_FROZEN_NODE"]
 
@@ -235,22 +262,39 @@ class TestBatchValidation:
         assert M.validate_batch(ops, _root(), _instances(analyze="done")) == []
 
     def test_a_pending_node_is_mutable(self) -> None:
-        ops, _ = M.parse_batch([{"op": "update_node", "node_id": "report", "fields": {"a": 1}}])
+        ops, _ = M.parse_batch(
+            [{"op": "update_node", "node_id": "report", "fields": {"a": 1}}]
+        )
         assert M.validate_batch(ops, _root(), _instances(report="pending")) == []
 
     def test_an_empty_update_is_rejected(self) -> None:
-        ops, _ = M.parse_batch([{"op": "update_node", "node_id": "report", "fields": {}}])
-        assert [i.code for i in M.validate_batch(ops, _root(), {})] == ["WF_MUT_EMPTY_UPDATE"]
+        ops, _ = M.parse_batch(
+            [{"op": "update_node", "node_id": "report", "fields": {}}]
+        )
+        assert [i.code for i in M.validate_batch(ops, _root(), {})] == [
+            "WF_MUT_EMPTY_UPDATE"
+        ]
 
     def test_insert_without_a_node_payload_is_rejected(self) -> None:
         ops, _ = M.parse_batch([{"op": "insert", "parent_id": "s", "index": 0}])
-        assert "WF_MUT_INSERT_NO_NODE" in [i.code for i in M.validate_batch(ops, _root(), {})]
+        assert "WF_MUT_INSERT_NO_NODE" in [
+            i.code for i in M.validate_batch(ops, _root(), {})
+        ]
 
     def test_insert_with_an_invalid_node_is_rejected(self) -> None:
         ops, _ = M.parse_batch(
-            [{"op": "insert", "parent_id": "s", "index": 0, "node": {"kind": "nonsense"}}]
+            [
+                {
+                    "op": "insert",
+                    "parent_id": "s",
+                    "index": 0,
+                    "node": {"kind": "nonsense"},
+                }
+            ]
         )
-        assert "WF_MUT_INSERT_BAD_NODE" in [i.code for i in M.validate_batch(ops, _root(), {})]
+        assert "WF_MUT_INSERT_BAD_NODE" in [
+            i.code for i in M.validate_batch(ops, _root(), {})
+        ]
 
     def test_moving_a_node_into_its_own_subtree_is_rejected(self) -> None:
         """It would silently detach a whole region from the graph."""
@@ -261,7 +305,9 @@ class TestBatchValidation:
                 {
                     "kind": "sequence",
                     "id": "mid",
-                    "children": [{"kind": "transform", "id": "leaf", "config": {"expr": 1}}],
+                    "children": [
+                        {"kind": "transform", "id": "leaf", "config": {"expr": 1}}
+                    ],
                 }
             ],
         }
@@ -271,24 +317,28 @@ class TestBatchValidation:
 
     def test_set_input_needs_overrides(self) -> None:
         ops, _ = M.parse_batch([{"op": "set_input", "overrides": {}}])
-        assert [i.code for i in M.validate_batch(ops, _root(), {})] == ["WF_MUT_EMPTY_OVERRIDES"]
-
-
-# ── application ──────────────────────────────────────────────────────────────
+        assert [i.code for i in M.validate_batch(ops, _root(), {})] == [
+            "WF_MUT_EMPTY_OVERRIDES"
+        ]
 
 
 class TestApply:
     def test_update_node_patches_config_on_a_copy(self) -> None:
         candidate, issues = M.apply_batch(
             M.parse_batch(
-                [{"op": "update_node", "node_id": "gather", "fields": {"expr": {"n": 9}}}]
+                [
+                    {
+                        "op": "update_node",
+                        "node_id": "gather",
+                        "fields": {"expr": {"n": 9}},
+                    }
+                ]
             )[0],
             SPEC,
             {},
         )
         assert issues == []
         assert candidate["root"]["children"][0]["config"]["expr"] == {"n": 9}
-        # The original is untouched — the atomic-failure contract.
         assert SPEC["root"]["children"][0]["config"]["expr"] == {"n": 1}
 
     def test_changing_id_or_kind_is_refused(self) -> None:
@@ -297,7 +347,13 @@ class TestApply:
         for field_name in ("id", "kind"):
             _cand, issues = M.apply_batch(
                 M.parse_batch(
-                    [{"op": "update_node", "node_id": "gather", "fields": {field_name: "x"}}]
+                    [
+                        {
+                            "op": "update_node",
+                            "node_id": "gather",
+                            "fields": {field_name: "x"},
+                        }
+                    ]
                 )[0],
                 SPEC,
                 {},
@@ -323,7 +379,11 @@ class TestApply:
                         "op": "insert",
                         "parent_id": "s",
                         "index": 1,
-                        "node": {"kind": "transform", "id": "new", "config": {"expr": 1}},
+                        "node": {
+                            "kind": "transform",
+                            "id": "new",
+                            "config": {"expr": 1},
+                        },
                     }
                 ]
             )[0],
@@ -339,15 +399,15 @@ class TestApply:
 
     def test_move_detaches_then_reinserts(self) -> None:
         candidate, issues = M.apply_batch(
-            M.parse_batch([{"op": "move", "node_id": "unrelated", "parent_id": "s", "index": 0}])[
-                0
-            ],
+            M.parse_batch(
+                [{"op": "move", "node_id": "unrelated", "parent_id": "s", "index": 0}]
+            )[0],
             SPEC,
             {},
         )
         assert issues == []
         assert [c["id"] for c in candidate["root"]["children"]][0] == "unrelated"
-        assert len(candidate["root"]["children"]) == 4  # moved, not duplicated
+        assert len(candidate["root"]["children"]) == 4
 
     def test_structural_ops_apply_in_descending_index(self) -> None:
         """Coordinate-preserving order (WF2-R20c): otherwise the first delete shifts the
@@ -355,8 +415,16 @@ class TestApply:
         candidate, issues = M.apply_batch(
             M.parse_batch(
                 [
-                    {"op": "insert", "index": 1, "node": {"kind": "transform", "id": "x"}},
-                    {"op": "insert", "index": 3, "node": {"kind": "transform", "id": "y"}},
+                    {
+                        "op": "insert",
+                        "index": 1,
+                        "node": {"kind": "transform", "id": "x"},
+                    },
+                    {
+                        "op": "insert",
+                        "index": 3,
+                        "node": {"kind": "transform", "id": "y"},
+                    },
                 ]
             )[0],
             SPEC,
@@ -387,12 +455,11 @@ class TestApply:
     def test_inline_subworkflow_is_a_typed_refusal(self) -> None:
         """A typed refusal, never a silent no-op that makes a spec look applied."""
         _cand, issues = M.apply_batch(
-            M.parse_batch([{"op": "inline_subworkflow", "node_id": "gather"}])[0], SPEC, {}
+            M.parse_batch([{"op": "inline_subworkflow", "node_id": "gather"}])[0],
+            SPEC,
+            {},
         )
         assert [i.code for i in issues] == ["WF_MUT_UNSUPPORTED"]
-
-
-# ── the whole transaction ────────────────────────────────────────────────────
 
 
 class TestPrepareBatch:
@@ -410,7 +477,9 @@ class TestPrepareBatch:
         result = M.prepare_batch([{"op": "skip", "node_id": "ghost"}], SPEC, {})
         assert not result.ok and result.spec is None
 
-    def test_a_batch_that_breaks_the_spec_is_rejected_after_applying_to_the_copy(self) -> None:
+    def test_a_batch_that_breaks_the_spec_is_rejected_after_applying_to_the_copy(
+        self,
+    ) -> None:
         """Individually legal, collectively broken: deleting `analyze` orphans the binding
         `report` holds on it. Only re-validating the CANDIDATE catches this."""
         result = M.prepare_batch([{"op": "delete", "node_id": "analyze"}], SPEC, {})
@@ -445,24 +514,25 @@ class TestPrepareBatch:
         assert set(d) == {"ok", "issues", "ops", "preview"}
 
 
-# ── history + epoch ──────────────────────────────────────────────────────────
-
-
 class TestHistoryAndEpoch:
     def test_a_history_record_carries_structured_ops_and_a_spec_hash(self) -> None:
         """Structured ops, not a textual diff: a later refiner needs to know what KIND of
         correction a human made, which a diff destroys."""
-        ops, _ = M.parse_batch([{"op": "update_node", "node_id": "report", "fields": {"a": 1}}])
+        ops, _ = M.parse_batch(
+            [{"op": "update_node", "node_id": "report", "fields": {"a": 1}}]
+        )
         record = M.history_record(ops, actor="chat", version=3, spec=SPEC)
         assert record["version"] == 3 and record["actor"] == "chat"
         assert record["ops"][0]["op"] == "update_node"
         assert record["spec_hash"]
 
     def test_the_record_keeps_the_authors_original_payload(self) -> None:
-        ops, _ = M.parse_batch([{"op": "edit_node", "node_id": "report", "fields": {"model": "x"}}])
+        ops, _ = M.parse_batch(
+            [{"op": "edit_node", "node_id": "report", "fields": {"model": "x"}}]
+        )
         record = M.history_record(ops, actor="chat", version=1, spec=SPEC)
-        assert record["ops"][0]["op"] == "update_node"  # what applied
-        assert record["raw_ops"][0]["op"] == "edit_node"  # what was written
+        assert record["ops"][0]["op"] == "update_node"
+        assert record["raw_ops"][0]["op"] == "edit_node"
 
     def test_the_epoch_bumps_only_on_force(self) -> None:
         """WF2-R2 #4: a rewind that did not change inputs must replay from cache rather

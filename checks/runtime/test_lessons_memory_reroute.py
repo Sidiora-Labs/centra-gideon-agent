@@ -9,7 +9,7 @@ onto memory.db ``lesson.*`` records. These tests pin:
   lesson through memory.db;
 * an EMBEDDER-LESS write still persists and is retrievable by key/namespace (the subtle
   correctness point — the context.py fallback path used to write JSONL);
-* the residual-JSONL backfill (``VectorMemoryStore.migrate_from_markdown``) is idempotent.
+* the residual-JSONL backfill (``SemanticArchive.migrate_from_markdown``) is idempotent.
 
 All state is under ``tmp_path`` / a monkeypatched config dir; the real ``~/.gideon``
 is never touched.
@@ -22,27 +22,25 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gideon.dashboard.handlers.schedule import (
+from gideon.cognition.memory import MemoryJournal
+from gideon.cognition.vector_memory import SemanticArchive
+from gideon.interfaces.dashboard.handlers.schedule import (
     api_lessons,
     api_lessons_create,
     api_lessons_delete,
 )
-from gideon.dashboard.state import DashboardState
-from gideon.memory import MemoryStore
-from gideon.vector_memory import VectorMemoryStore
-
-# ── helpers ──────────────────────────────────────────────────────────────────
+from gideon.interfaces.dashboard.state import ConsoleState
 
 
 def _state_with_record_store(tmp_path, *, with_embedder: bool):
-    """A DashboardState whose context_builder.memory carries a memory.db record
+    """A ConsoleState whose context_builder.memory carries a memory.db record
     store — the sole lesson backing. ``with_embedder=False`` exercises the
     embedder-less write path (vector optional; row still persists)."""
     ws = tmp_path / "ws"
     ws.mkdir(exist_ok=True)
-    mem = MemoryStore(workspace=ws)
+    mem = MemoryJournal(workspace=ws)
     mem.init()
-    vs = VectorMemoryStore(db_path=tmp_path / "memory.db", embedding_dim=3)
+    vs = SemanticArchive(db_path=tmp_path / "memory.db", embedding_dim=3)
     vs.init()
     if with_embedder:
         vs.embed_fn = lambda t: [1.0, 0.0, 0.0]
@@ -50,7 +48,7 @@ def _state_with_record_store(tmp_path, *, with_embedder: bool):
 
     cb = MagicMock()
     cb.memory = mem
-    state = DashboardState(
+    state = ConsoleState(
         sessions=MagicMock(count=0),
         start_time=0.0,
         context_builder=cb,
@@ -75,9 +73,6 @@ async def _read_body(resp):
     return json.loads(resp.body)
 
 
-# ── criterion 6: the three consumers round-trip through memory.db ──────────────
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize("with_embedder", [True, False])
 async def test_dashboard_create_list_delete_roundtrip(tmp_path, with_embedder):
@@ -85,33 +80,28 @@ async def test_dashboard_create_list_delete_roundtrip(tmp_path, with_embedder):
     identically with and without an embedder configured."""
     state, vs = _state_with_record_store(tmp_path, with_embedder=with_embedder)
 
-    # create
     resp = await api_lessons_create(
         _req(state, body={"rule": "always run make lint", "category": "process"})
     )
     assert (await _read_body(resp)) == {"ok": True}
-    # the write landed in memory.db as a lesson.* record
-    assert any(json.loads(e["value_json"]) == "always run make lint" for e in vs.get_lessons())
+    assert any(
+        json.loads(e["value_json"]) == "always run make lint" for e in vs.get_lessons()
+    )
 
-    # list (the MCP memory_list / dashboard read path)
     resp = await api_lessons(_req(state))
     data = (await _read_body(resp))["lessons"]
     assert [le["rule"] for le in data] == ["always run make lint"]
 
-    # delete (memory_forget)
     resp = await api_lessons_delete(_req(state, body={"rule": "make lint"}))
     assert (await _read_body(resp))["ok"] is True
     assert vs.get_lessons() == []
-
-
-# ── the subtle correctness point: embedder-less write persists + retrievable ───
 
 
 def test_embedderless_write_persists_and_is_retrievable(tmp_path):
     """A lesson written with NO embedder configured persists to memory.db without a
     vector and is retrievable by its lesson.* key/namespace (the context.py no-embedder
     fallback that used to write JSONL)."""
-    vs = VectorMemoryStore(db_path=tmp_path / "memory.db")  # embed_fn is None
+    vs = SemanticArchive(db_path=tmp_path / "memory.db")
     vs.init()
     assert vs.embed_fn is None
 
@@ -120,16 +110,11 @@ def test_embedderless_write_persists_and_is_retrievable(tmp_path):
     rows = vs.get_lessons()
     assert len(rows) == 1
     row = rows[0]
-    assert row["key"].startswith("lesson.")  # namespaced key
+    assert row["key"].startswith("lesson.")
     assert json.loads(row["value_json"]) == "prefer uv over pip"
-    # No vector was stored (embedder-less), yet the record is fully present.
     assert not row.get("embedding")
-    # Retrievable by key through the semantic read path.
     assert vs.get_semantic(row["key"]) is not None
     vs.close()
-
-
-# ── residual JSONL import is an idempotent backfill ────────────────────────────
 
 
 def test_residual_jsonl_backfill_is_idempotent(tmp_path, monkeypatch):
@@ -137,21 +122,24 @@ def test_residual_jsonl_backfill_is_idempotent(tmp_path, monkeypatch):
     two lesson.* records (no duplicates), and they read back through the reroute."""
     home = tmp_path / "home"
     home.mkdir()
-    # migrate_from_markdown resolves the JSONL under the resolved config home.
-    monkeypatch.setattr("gideon.vector_memory._path_home_gideon", lambda: home)
+    monkeypatch.setattr(
+        "gideon.cognition.vector_memory._path_home_gideon", lambda: home
+    )
     (home / "lessons.jsonl").write_text(
         json.dumps({"ts": "seed", "rule": "use snake_case", "category": "tool"})
         + "\n"
-        + json.dumps({"ts": "seed", "rule": "write tests first", "category": "knowledge"})
+        + json.dumps(
+            {"ts": "seed", "rule": "write tests first", "category": "knowledge"}
+        )
         + "\n"
     )
 
-    vs = VectorMemoryStore(db_path=tmp_path / "memory.db")
+    vs = SemanticArchive(db_path=tmp_path / "memory.db")
     vs.init()
     c1 = vs.migrate_from_markdown()
-    c2 = vs.migrate_from_markdown()  # rerun must not duplicate
+    c2 = vs.migrate_from_markdown()
     assert c1["semantic"] == 2
-    assert c2["semantic"] == 0  # every row already present → skipped
+    assert c2["semantic"] == 0
 
     rules = {json.loads(e["value_json"]) for e in vs.get_lessons()}
     assert rules == {"use snake_case", "write tests first"}

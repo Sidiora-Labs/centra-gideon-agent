@@ -5,13 +5,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from gideon.session_map import SessionMap
+from gideon.engine.session_map import SessionMap
 
 
 @pytest.fixture()
 def session_map(tmp_path):
     """Create a SessionMap backed by a temp directory."""
-    with patch("gideon.session_map.config_dir", return_value=tmp_path):
+    with patch("gideon.engine.session_map.config_dir", return_value=tmp_path):
         yield SessionMap()
 
 
@@ -40,11 +40,11 @@ class TestSessionMapCwd:
         assert session_map.get_cwd("dash:1") == ""
 
     def test_cwd_persists_to_disk(self, tmp_path):
-        with patch("gideon.session_map.config_dir", return_value=tmp_path):
+        with patch("gideon.engine.session_map.config_dir", return_value=tmp_path):
             sm = SessionMap()
             sm.set("dash:1", "sid-abc", cwd="/home/user/project")
 
-        with patch("gideon.session_map.config_dir", return_value=tmp_path):
+        with patch("gideon.engine.session_map.config_dir", return_value=tmp_path):
             sm2 = SessionMap()
             assert sm2.get_cwd("dash:1") == "/home/user/project"
 
@@ -55,19 +55,21 @@ class TestSessionMapCwd:
 
 
 class TestSessionResumeCwdOverride:
-    """Tests for the resume CWD override logic in SessionManager.get_or_create."""
+    """Tests for the resume CWD override logic in ConversationDirectory.get_or_create."""
 
     @pytest.fixture()
     def mock_session_mgr(self, tmp_path):
-        """Minimal mock of SessionManager internals needed for CWD override logic."""
-        with patch("gideon.session_map.config_dir", return_value=tmp_path):
+        """Minimal mock of ConversationDirectory internals needed for CWD override logic."""
+        with patch("gideon.engine.session_map.config_dir", return_value=tmp_path):
             sm = SessionMap()
 
         mgr = MagicMock()
         mgr._session_map = sm
         return mgr
 
-    def test_resume_uses_stored_cwd_when_no_explicit_cwd(self, mock_session_mgr, tmp_path):
+    def test_resume_uses_stored_cwd_when_no_explicit_cwd(
+        self, mock_session_mgr, tmp_path
+    ):
         """When resuming (resume_sid set) with no explicit cwd, stored CWD is used."""
         sm = mock_session_mgr._session_map
         sm.set("dash:1", "sid-abc", provider="acp_agent", cwd=str(tmp_path))
@@ -84,7 +86,9 @@ class TestSessionResumeCwdOverride:
 
         assert effective_cwd == str(tmp_path)
 
-    def test_resume_ignores_stored_cwd_when_explicit_cwd_provided(self, mock_session_mgr, tmp_path):
+    def test_resume_ignores_stored_cwd_when_explicit_cwd_provided(
+        self, mock_session_mgr, tmp_path
+    ):
         """When explicit cwd is passed, stored CWD is not used."""
         sm = mock_session_mgr._session_map
         sm.set("dash:1", "sid-abc", provider="acp_agent", cwd="/old/path")
@@ -163,9 +167,13 @@ class TestGetReturnsTheStoredIdWithoutAFileGate:
     ``session/load`` and falls back to ``session/new`` when it is refused.
     """
 
-    def test_a_stored_id_survives_with_no_session_file_on_disk(self, session_map, tmp_path):
+    def test_a_stored_id_survives_with_no_session_file_on_disk(
+        self, session_map, tmp_path
+    ):
         session_map.set("dashboard:chat-1", "sid-abc")
-        assert not list(tmp_path.glob("sessions/*.json")), "precondition: no session files"
+        assert not list(
+            tmp_path.glob("sessions/*.json")
+        ), "precondition: no session files"
         assert session_map.get("dashboard:chat-1") == "sid-abc"
 
     def test_a_lookup_does_not_delete_the_entry(self, session_map):
@@ -177,7 +185,7 @@ class TestGetReturnsTheStoredIdWithoutAFileGate:
 
     def test_it_survives_a_reload_from_disk(self, tmp_path):
         """The restart path itself: a new process reads the same file."""
-        with patch("gideon.session_map.config_dir", return_value=tmp_path):
+        with patch("gideon.engine.session_map.config_dir", return_value=tmp_path):
             SessionMap().set("dashboard:chat-1", "sid-abc")
             assert SessionMap().get("dashboard:chat-1") == "sid-abc"
 
@@ -206,6 +214,10 @@ class TestPruneNoLongerWipesEveryResumableMapping:
     def test_an_entry_naming_nothing_is_still_pruned(self, session_map):
         """VACUITY FLOOR: prune is not a no-op. An entry with neither a session id
         nor a channel thread names nothing and still goes."""
-        session_map._data["dashboard:empty"] = {"sid": "", "thread_ts": None, "channel_id": None}
+        session_map._data["dashboard:empty"] = {
+            "sid": "",
+            "thread_ts": None,
+            "channel_id": None,
+        }
         assert session_map.prune() == 1
         assert session_map.get("dashboard:empty") is None

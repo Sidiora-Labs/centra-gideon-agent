@@ -12,35 +12,14 @@ import pytest
 import real_home_guard
 from hypothesis import HealthCheck, settings
 
-# ── Bytecode-cache rail (#2659) ─────────────────────────────────────────
-# FIRST STATEMENT AFTER THE IMPORTS, DELIBERATELY. Point this interpreter's bytecode
-# cache at a fresh per-run directory *before* anything a mutation could touch is
-# imported — `gideon`, `harness`, the test modules, and pytest's own rewritten
-# test bytecode all resolve their cache through the prefix this sets. Without it
-# CPython validates a `.pyc` on `(int(mtime), size)`, so a same-length edit made
-# inside one second — the exact shape of a mutation-testing cycle — runs the PREVIOUS
-# bytecode and reports a result for code that is not on disk. `-B` does not fix that
-# (it stops the interpreter WRITING a cache, not reading one). Nothing enforced this
-# before, so no past "N mutations caught" claim was self-certifying; from here the run
-# enforces the bytecode half — an interrupted run that leaves its mutation ON DISK is a
-# different defect this cannot see (#2710). Rationale, measurements, the rejected
-# alternative and the three files outside the rail: tests/pycache_guard.py. Proof that
-# it works: tests/test_pycache_guard.py.
 PYCACHE_PREFIX = pycache_guard.activate()
 
-# NOTE: this suite is standalone — it must collect + pass on a clone of this
-# package alone, with NO sibling apps/ directory. Channel/provider seams are
-# exercised against in-tree fakes (tests/fakes.py); tests of app-INTERNAL
-# behavior (slack_runtime, the ollama provider module) live with their apps
-# (apps/slack-channel/tests/, apps/ollama-models/tests/). Workspace-layout
-# tests (apps import-boundary lint, ACP bundles, web-tools app wiring) skip
-# themselves when apps/ is absent.
 
-# ── Hypothesis profiles ─────────────────────────────────────────────────
-# Default (CI): fast iteration.  Run ``HYPOTHESIS_PROFILE=thorough make build test``
-# for deeper coverage.
 settings.register_profile(
-    "default", max_examples=20, suppress_health_check=[HealthCheck.too_slow], deadline=None
+    "default",
+    max_examples=20,
+    suppress_health_check=[HealthCheck.too_slow],
+    deadline=None,
 )
 settings.register_profile("thorough", max_examples=100)
 settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "default"))
@@ -108,15 +87,13 @@ def _isolate_real_home_writers(tmp_path_factory, monkeypatch):
     ``sel()`` call constructs a fresh ``SecurityEventLog`` — and that construction must
     still find the redirected ``_default_dir``, or the leak comes straight back.
     """
-    import gideon.config.loader as config_loader
-    import gideon.sel as sel_mod
+    import gideon.core.config.loader as config_loader
+    import gideon.security.sel as sel_mod
 
     real_home = real_home_guard.REAL_HOME
     holder: list[Path] = []
 
     def tmp_home() -> Path:
-        # Created lazily: most tests never resolve an unspecified home, and eagerly
-        # minting a tmp dir per test would add thousands of empty dirs to basetemp.
         if not holder:
             holder.append(tmp_path_factory.mktemp("gideon-home"))
         return holder[0]
@@ -130,9 +107,6 @@ def _isolate_real_home_writers(tmp_path_factory, monkeypatch):
     def guarded_config_dir() -> Path:
         if caller_chose_a_home():
             return original_config_dir()
-        # NB: return the tmp dir WITHOUT delegating first — config_dir() mkdirs whatever
-        # it resolves, so delegating would create ~/.gideon on a machine that has
-        # none (the rail's own "absent home" case) before we could redirect it.
         return tmp_home()
 
     def guarded_sel_dir() -> Path:
@@ -142,11 +116,6 @@ def _isolate_real_home_writers(tmp_path_factory, monkeypatch):
 
     monkeypatch.setattr(config_loader, "config_dir", guarded_config_dir)
     monkeypatch.setattr(sel_mod, "_default_dir", guarded_sel_dir)
-    # `from ... import config_dir` at module scope binds the function object into the
-    # importing module, where patching the loader can never reach it (58 such modules).
-    # Re-point every binding of THIS function object — identity-matched, so nothing else
-    # is touched. Function-local imports (95 sites, incl. every `as _cd` alias) resolve
-    # from the loader at call time and are already covered by the patch above.
     for module in list(sys.modules.values()):
         if module is None or not getattr(module, "__name__", "").startswith("gideon"):
             continue
@@ -157,22 +126,23 @@ def _isolate_real_home_writers(tmp_path_factory, monkeypatch):
 @pytest.fixture(autouse=True)
 def _isolate_session_map(tmp_path_factory, monkeypatch):
     """Point the SESSION MAP at a per-test tmp dir so nothing touches the real
-    ~/.gideon/session_map.json. SessionManager.__init__ builds a SessionMap()
+    ~/.gideon/session_map.json. ConversationDirectory.__init__ builds a SessionMap()
     that reads/prunes/REWRITES config_dir()/session_map.json at construction time — so
-    any test that does SessionManager(cfg) without its own home patch mutates the USER's
+    any test that does ConversationDirectory(cfg) without its own home patch mutates the USER's
     real session map (observed: a SessionMap key migration ran against the live file
     during a rename). Scoped to session_map.config_dir only (NOT a global Path.home
     patch, which breaks tests that assert real-home safety rails — seed/loop-validation).
-    A test that patches session_map.config_dir itself still overrides this (last wins)."""
+    A test that patches session_map.config_dir itself still overrides this (last wins).
+    """
     map_home = tmp_path_factory.mktemp("gideon-sessmap")
-    monkeypatch.setattr("gideon.session_map.config_dir", lambda: map_home)
+    monkeypatch.setattr("gideon.engine.session_map.config_dir", lambda: map_home)
 
 
 @pytest.fixture(autouse=True)
 def _isolate_trigger_store(tmp_path_factory, monkeypatch):
     """Point the BOOT TRIGGER MIGRATION at a per-test tmp home (S98).
 
-    Same hazard and same remedy as `_isolate_session_map` above. `GatewayOrchestrator._init_cron`
+    Same hazard and same remedy as `_isolate_session_map` above. `RuntimeCoordinator._init_cron`
     now runs `boot_migrate.migrate_and_arm(config_dir())`, which imports `crons.json` into
     `triggers.json` and ARMS the imported clocks. Three pre-existing tests call `_init_cron` with no
     home isolation at all (`test_gateway`, `test_cron_acp_retry`, `test_cron_thread_routing`) — they
@@ -197,22 +167,28 @@ def _isolate_trigger_store(tmp_path_factory, monkeypatch):
     file and running that one file). Four occurrences of this hazard now; the rule is the docstring
     above, and the check is `ls ~/.gideon` after any suite run that adds a writer."""
     store_home = tmp_path_factory.mktemp("gideon-triggers")
-    monkeypatch.setattr("gideon.triggers.boot_migrate.config_dir", lambda: store_home)
     monkeypatch.setattr(
-        "gideon.dashboard.handlers.triggers.config_dir", lambda: store_home, raising=False
+        "gideon.automation.triggers.boot_migrate.config_dir", lambda: store_home
     )
-    monkeypatch.setattr("gideon.gateway.config_dir", lambda: store_home, raising=False)
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.handlers.triggers.config_dir",
+        lambda: store_home,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "gideon.engine.gateway.config_dir", lambda: store_home, raising=False
+    )
 
 
 @pytest.fixture(autouse=True)
 def _reset_trust_mode():
     """Reset the process-global YOLO/auto-approve trust state around every test.
 
-    ``gideon.trust_mode`` is a deliberate process singleton (one auto-approve
+    ``gideon.security.trust_mode`` is a deliberate process singleton (one auto-approve
     posture per gateway). Tests that flip it must not leak into the next test, so we
     force it OFF before and after each test.
     """
-    import gideon.trust_mode as _tm
+    import gideon.security.trust_mode as _tm
 
     _tm._TRUST.disable()
     yield
@@ -233,20 +209,16 @@ def _reset_model_call_breakers():
     process-global for the same reason: a rung ladder registered by one test would
     otherwise decide ``resolve_rung`` in the next one.
     """
-    from gideon.guardrails.autonomy import reset_action_types
-    from gideon.guardrails.breaker import reset_breakers
-    from gideon.guardrails.budgets import reset_meter
-    from gideon.guardrails.ceiling import reset_ceiling, reset_clamp_reports
-    from gideon.guardrails.incident import reset_incident_mirror
+    from gideon.security.guardrails.autonomy import reset_action_types
+    from gideon.security.guardrails.breaker import reset_breakers
+    from gideon.security.guardrails.budgets import reset_meter
+    from gideon.security.guardrails.ceiling import reset_ceiling, reset_clamp_reports
+    from gideon.security.guardrails.incident import reset_incident_mirror
 
     reset_breakers()
     reset_meter()
     reset_incident_mirror()
     reset_action_types()
-    # The governance ceiling is read once per PROCESS and cached (that caching is the
-    # no-mid-run-widening property). Under xdist a ceiling written by one test's tmp_path
-    # would otherwise bound every later test in the same worker, and the clamp-report
-    # dedup would swallow the second test's SEL assertion.
     reset_ceiling()
     reset_clamp_reports()
     yield
@@ -270,7 +242,7 @@ def _reset_context_engine_breakers():
     in that worker, and the symptom would be an empty block rather than an error. Same
     discipline as the model-call breakers above.
     """
-    import gideon.context_engine as ce
+    import gideon.cognition.context_engine as ce
 
     ce._recall_consecutive_timeouts = 0
     ce._push_consecutive_timeouts = 0
@@ -299,7 +271,7 @@ def _reset_session_restrictions():
     discipline as ``_reset_channel_delivery_registry``: cleared, not snapshot-restored,
     because outside a live gateway the correct state is empty.
     """
-    import gideon.session_restrictions as sr
+    import gideon.engine.session_restrictions as sr
 
     sr._temporary.clear()
     sr._incognito.clear()
@@ -379,7 +351,7 @@ def _reset_sel_singleton():
     Clearing the class-level state before + after each test gives every test a fresh SEL
     bound to its own isolated home — the same discipline as ``_reset_trust_mode`` above.
     """
-    from gideon.sel import SecurityEventLog as _SEL
+    from gideon.security.sel import SecurityEventLog as _SEL
 
     def _clear() -> None:
         _SEL._instance = None
@@ -406,7 +378,7 @@ def _isolate_single_flight_locks(tmp_path_factory, monkeypatch):
     tests can collide regardless of worker placement. A test that patches the locks
     dir itself still overrides this (last wins)."""
     locks_home = tmp_path_factory.mktemp("gideon-locks")
-    monkeypatch.setattr("gideon.concurrency._locks_dir", lambda: locks_home)
+    monkeypatch.setattr("gideon.core.concurrency._locks_dir", lambda: locks_home)
 
 
 @pytest.fixture(autouse=True)
@@ -424,7 +396,7 @@ def _forbid_real_model_roots(monkeypatch):
     rather than to all of ``$HOME``: a developer's checkout usually lives under ``$HOME``,
     so a blanket home-rejection would fire on an ordinary relative path and get disabled.
     Detection is a separate module so it can be driven against a fake root and proven to
-    fire (``tests/test_local_model_root_guard.py``) — the same reason the real-home rail
+    fire (``checks/runtime/test_local_model_root_guard.py``) — the same reason the real-home rail
     keeps its detection in ``real_home_guard``.
 
     The reach is ONE attribute lookup deep, which is the rail's one soft edge: a module-level
@@ -436,11 +408,13 @@ def _forbid_real_model_roots(monkeypatch):
     """
     import real_model_root_guard
 
-    from gideon.local_models import layouts
+    from gideon.integrations.local_models import layouts
 
     for fn_name in real_model_root_guard.GUARDED_FUNCTIONS:
         original = getattr(layouts, fn_name, None)
-        if original is None:  # pragma: no cover — a renamed entry point must be re-listed
+        if (
+            original is None
+        ):  # pragma: no cover — a renamed entry point must be re-listed
             raise AssertionError(
                 f"layouts.{fn_name} no longer exists; update GUARDED_FUNCTIONS so the "
                 f"model-root rail keeps covering every cache-root entry point."
@@ -469,7 +443,7 @@ def _reset_knowledge_store_singleton():
     contain its query string. Clearing the global gives each test its own store, the
     same discipline as ``_reset_sel_singleton``.
     """
-    import gideon.knowledge as knowledge_pkg
+    import gideon.cognition.knowledge as knowledge_pkg
 
     def _clear() -> None:
         knowledge_pkg._store = None
@@ -518,9 +492,12 @@ def _close_sqlite_connections(monkeypatch):
     """
     import sqlite3 as stdlib_sqlite3
 
-    from gideon import sqlite_compat
+    from gideon.core import sqlite_compat
 
-    drivers = {id(stdlib_sqlite3): stdlib_sqlite3, id(sqlite_compat.sqlite3): sqlite_compat.sqlite3}
+    drivers = {
+        id(stdlib_sqlite3): stdlib_sqlite3,
+        id(sqlite_compat.sqlite3): sqlite_compat.sqlite3,
+    }
     opened: list = []
 
     for driver in drivers.values():
@@ -619,7 +596,7 @@ def _restore_provider_registry() -> object:
     * a leaked `acp_agent` entry made `cli_doctor` exit 1 in `test_cli.py`.
 
     The singleton IDENTITY is restored too, and this is what the sharded suite exposed. Provider
-    modules register their TYPES at IMPORT time — `gideon.llm.__init__` eager-imports
+    modules register their TYPES at IMPORT time — `gideon.integrations.llm.__init__` eager-imports
     `acp_agent`, wiring the `acp_agent` type — and those modules are then cached in `sys.modules`.
     So a test that calls `reset_default_registry()` / `set_default_registry(...)` (several do, in
     their own autouse fixtures: `test_ea5_capture_proxy`, `test_ea5_capture_client_upstream`,
@@ -635,7 +612,7 @@ def _restore_provider_registry() -> object:
     a type can only be a reset/swap, which this catches): `register_type` is how a test simulates
     an installed provider app, it is idempotent, and a type with no entry resolves nothing.
     """
-    from gideon.llm import registry as _registry_mod
+    from gideon.integrations.llm import registry as _registry_mod
 
     original = _registry_mod.get_default_registry()
     entries = getattr(original, "_entries", None)
@@ -664,7 +641,7 @@ def _reset_channel_delivery_registry() -> object:
     snapshot-restored, because unlike the provider registries nothing legitimately pre-registers a
     channel at import time: outside a live gateway the correct state is empty.
     """
-    from gideon.channel_delivery import register
+    from gideon.integrations.channel_delivery import register
 
     register(None)
     yield
@@ -686,7 +663,7 @@ def _restore_workflow_def_registry() -> object:
     Snapshot-and-restore rather than a name list, for the reason the provider-registry guard above
     records: a list stops covering the next name someone adds.
     """
-    from gideon.workflows import defs as _defs
+    from gideon.automation.workflows import defs as _defs
 
     before = set(_defs.list_providers())
     yield
@@ -720,7 +697,7 @@ def _restore_knowledge_provider_registry() -> object:
     today, so this reduces to dropping leaked entries after each test, but snapshotting keeps it
     correct if a legitimate import-time registration is ever added.
     """
-    from gideon.knowledge_providers import registry as _kp_registry
+    from gideon.integrations.knowledge_providers import registry as _kp_registry
 
     before = dict(_kp_registry._providers)
     yield
@@ -728,23 +705,6 @@ def _restore_knowledge_provider_registry() -> object:
     _kp_registry._providers.update(before)
 
 
-# (The slack-suite autouse fixtures — enterprise bypass, emoji reset, allowlist
-# reset — moved to apps/slack-channel/tests/conftest.py with the slack tests.)
-
-
-# ── Real-home rail (CRE-8) ──────────────────────────────────────────────
-# `_isolate_real_home_writers` above fixes the leaks that exist today; this pair of
-# hooks is what NOTICES the next one. Detection lives in `tests/real_home_guard.py`
-# so it can be driven against a fake root and proven to fire
-# (`tests/test_real_home_guard.py`) — a guard that only ever runs against the tree it
-# guards cannot be distinguished from a guard that never fires.
-#
-# TEETH, deliberately: this fails the run rather than printing a warning. The
-# population after the fixture above is ZERO (measured over the full suite), so the
-# rail has nothing to grandfather, and a report nobody is forced to read is how the
-# 44,402-byte leak survived long enough to need this atom. `ALLOWED_RESIDUE` exists
-# for a NAMED, individually justified residue and is currently empty; a blanket
-# allowance would turn the rail back into a baseline.
 _real_home_since_ns: int | None = None
 
 

@@ -1,13 +1,13 @@
 """SDK: the skills-marketplace contract + data types.
 
 Stable re-export of the generic skills-source infrastructure
-(``gideon.skills.marketplace``) — a skills-source app (e.g. skills.sh)
+(``gideon.extensions.skills.marketplace``) — a skills-source app (e.g. skills.sh)
 implements ``SkillsMarketplace`` (a read-only ``search`` + ``fetch`` source) via
 these, not the core module directly. Provider-agnostic: any skills registry is an
 implementation of this one contract.
 """
 
-from gideon.skills.marketplace import (  # noqa: F401
+from gideon.extensions.skills.marketplace import (
     SkillDetail,
     SkillEntry,
     SkillsMarketplace,

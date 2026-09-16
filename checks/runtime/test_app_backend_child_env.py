@@ -29,21 +29,15 @@ from pathlib import Path
 
 import pytest
 
-from gideon.apps import manager
-from gideon.apps.backend_runtime import BackendSupervisor
-from gideon.apps.manifest import AppManifest
+from gideon.extensions.apps import manager
+from gideon.extensions.apps.backend_runtime import BackendSupervisor
+from gideon.extensions.apps.manifest import AppManifest
 from gideon.sdk.security import APP_SECRET_ENV
 
-#: A credential shape a name-pattern denylist would have caught.
 _PLANTED = "ACME_CLOUD_API_KEY"
-#: A shape no name-pattern denylist in the tree recognises — the false-negative class the
-#: allowlist exists to close.
 _PLANTED_UNGUESSABLE = "ACME_DEPLOY_PAT"
 _SECRET_VALUE = "planted-secret-value-4c71"
 
-#: The spawn is a fresh interpreter through the ceiling shim, then the app's own
-#: interpreter. Under full-suite xdist load a 0.3s spawn can take tens of seconds of wall
-#: time from CPU contention — same headroom the sibling child-env suite uses.
 _WAIT_SECS = 90
 
 
@@ -55,7 +49,7 @@ def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     secret store and the data-dir helper are reached through import-bound module state that
     a `config_dir` patch alone does not always cover.
     """
-    from gideon.config import loader
+    from gideon.core.config import loader
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
@@ -91,7 +85,8 @@ def _install_backend_app(
     }
     (appdir / "app.json").write_text(json.dumps(manifest), encoding="utf-8")
     (appdir / "installed.json").write_text(
-        json.dumps({"name": name, "version": "1.0.0", "enabled": True}), encoding="utf-8"
+        json.dumps({"name": name, "version": "1.0.0", "enabled": True}),
+        encoding="utf-8",
     )
     (appdir / "backend" / "server.py").write_text(
         "import json, os\n"
@@ -102,10 +97,14 @@ def _install_backend_app(
     return AppManifest.from_json_file(appdir / "app.json")
 
 
-def _child_env(sup: BackendSupervisor, manifest: AppManifest, dump_to: Path) -> dict[str, str]:
+def _child_env(
+    sup: BackendSupervisor, manifest: AppManifest, dump_to: Path
+) -> dict[str, str]:
     """Start the real backend and return the environment the CHILD reported."""
     rb = sup.start(manifest)
-    assert rb is not None, "the backend never started — the spawn, not the filter, is broken"
+    assert (
+        rb is not None
+    ), "the backend never started — the spawn, not the filter, is broken"
     try:
         deadline = time.monotonic() + _WAIT_SECS
         while time.monotonic() < deadline:
@@ -121,29 +120,24 @@ def _child_env(sup: BackendSupervisor, manifest: AppManifest, dump_to: Path) -> 
         sup.stop(manifest.name)
 
 
-# ── the real spawn ──
-
-
 def test_an_app_backend_cannot_read_a_planted_gateway_secret(tmp_path: Path) -> None:
     """Driven through `BackendSupervisor.start`, asserted from the child's own os.environ."""
     dump = tmp_path / "env-dump.json"
-    manifest = _install_backend_app(tmp_path, "envprobe", dump, permissions={"storage": True})
+    manifest = _install_backend_app(
+        tmp_path, "envprobe", dump, permissions={"storage": True}
+    )
     env = _child_env(BackendSupervisor(), manifest, dump)
 
-    # Non-vacuity FIRST: the child really started and really received its contract.
     assert "PATH" in env, "the child got no PATH — the spawn, not the filter, is broken"
     assert env.get("GIDEON_APP_NAME") == "envprobe"
     assert int(env["PORT"]) > 0
     assert env.get(APP_SECRET_ENV), "the backend lost its proxy secret"
     assert env.get("GIDEON_APP_DATA_DIR") == str(manager.app_data_dir("envprobe"))
 
-    # The planted gateway secrets are absent — by name and by value.
     assert _PLANTED not in env
     assert _PLANTED_UNGUESSABLE not in env
     assert _SECRET_VALUE not in env.values()
 
-    # And it is an allowlist, not a wider copy that happens to miss these two: the child's
-    # environment is a small set, not the gateway's population.
     assert len(env) < len(os.environ), (len(env), len(os.environ))
 
 
@@ -172,7 +166,9 @@ def _platform_injected_names() -> set[str]:
     return set(json.loads(out.stdout))
 
 
-def test_the_backend_env_is_the_allowlist_plus_only_the_computed_four(tmp_path: Path) -> None:
+def test_the_backend_env_is_the_allowlist_plus_only_the_computed_four(
+    tmp_path: Path,
+) -> None:
     """Nothing outside `CHILD_ENV_BASE_NAMES` + the four computed names may arrive.
 
     The blunt form of the assertion, and the one that makes this suite more than a
@@ -180,17 +176,20 @@ def test_the_backend_env_is_the_allowlist_plus_only_the_computed_four(tmp_path: 
     the base to make some app boot — reds here, rather than passing because the two names
     this suite happens to plant are still missing.
     """
-    from gideon.sandbox import CHILD_ENV_BASE_NAMES
+    from gideon.security.sandbox import CHILD_ENV_BASE_NAMES
 
     dump = tmp_path / "env-dump.json"
-    manifest = _install_backend_app(tmp_path, "envprobe2", dump, permissions={"storage": True})
+    manifest = _install_backend_app(
+        tmp_path, "envprobe2", dump, permissions={"storage": True}
+    )
     env = _child_env(BackendSupervisor(), manifest, dump)
 
     computed = {"PORT", "GIDEON_APP_NAME", APP_SECRET_ENV, "GIDEON_APP_DATA_DIR"}
     allowed = set(CHILD_ENV_BASE_NAMES) | computed | _platform_injected_names()
     unexpected = set(env) - allowed
-    assert not unexpected, f"a backend received undeclared variables: {sorted(unexpected)}"
-    # The exclusion above must not be able to swallow the planted secrets.
+    assert (
+        not unexpected
+    ), f"a backend received undeclared variables: {sorted(unexpected)}"
     assert _PLANTED not in allowed and _PLANTED_UNGUESSABLE not in allowed
 
 
@@ -203,8 +202,10 @@ def test_withheld_names_are_logged_against_the_app_backend_site(
     indistinguishable from a bug in the app.
     """
     dump = tmp_path / "env-dump.json"
-    manifest = _install_backend_app(tmp_path, "envprobe3", dump, permissions={"storage": True})
-    with caplog.at_level("DEBUG", logger="gideon.sandbox"):
+    manifest = _install_backend_app(
+        tmp_path, "envprobe3", dump, permissions={"storage": True}
+    )
+    with caplog.at_level("DEBUG", logger="gideon.security.sandbox"):
         _child_env(BackendSupervisor(), manifest, dump)
 
     assert any(
@@ -215,16 +216,13 @@ def test_withheld_names_are_logged_against_the_app_backend_site(
     ), "no withheld-name line named the app-backend site"
 
 
-# ── the P3 storage gate survives the allowlist ──
-
-
 def test_a_backend_without_storage_still_gets_no_data_dir(tmp_path: Path) -> None:
     dump = tmp_path / "env-dump.json"
     manifest = _install_backend_app(tmp_path, "nostore", dump, permissions={})
     env = _child_env(BackendSupervisor(), manifest, dump)
 
     assert "GIDEON_APP_DATA_DIR" not in env
-    assert env.get("GIDEON_APP_NAME") == "nostore"  # non-vacuity: it did run
+    assert env.get("GIDEON_APP_NAME") == "nostore"
 
 
 def test_a_declared_passthrough_cannot_reopen_the_storage_gate(
@@ -239,12 +237,14 @@ def test_a_declared_passthrough_cannot_reopen_the_storage_gate(
     """
     monkeypatch.setenv("GIDEON_APP_DATA_DIR", str(tmp_path / "leaked"))
     monkeypatch.setattr(
-        "gideon.sandbox._declared_env_passthrough",
+        "gideon.security.sandbox._declared_env_passthrough",
         lambda site: {"GIDEON_APP_DATA_DIR"},
     )
     dump = tmp_path / "env-dump.json"
     manifest = _install_backend_app(tmp_path, "nostore2", dump, permissions={})
     env = _child_env(BackendSupervisor(), manifest, dump)
 
-    assert "GIDEON_APP_DATA_DIR" not in env, "the P3 storage gate was reopened by config"
-    assert env.get("GIDEON_APP_NAME") == "nostore2"  # non-vacuity: it did run
+    assert (
+        "GIDEON_APP_DATA_DIR" not in env
+    ), "the P3 storage gate was reopened by config"
+    assert env.get("GIDEON_APP_NAME") == "nostore2"

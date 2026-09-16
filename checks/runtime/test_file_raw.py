@@ -10,7 +10,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.dashboard.handlers import api_file_raw
+from gideon.interfaces.dashboard.handlers import api_file_raw
 
 
 def _make_app() -> web.Application:
@@ -22,15 +22,13 @@ def _make_app() -> web.Application:
 @pytest.fixture
 def mock_sel():
     with (
-        patch("gideon.sel.sel") as m,
-        patch("gideon.security.is_sensitive_path", return_value=False),
+        patch("gideon.security.sel.sel") as m,
+        patch("gideon.security.security.is_sensitive_path", return_value=False),
     ):
         instance = MagicMock()
         m.return_value = instance
         yield instance
 
-
-# --- Magic bytes: accepted formats ---
 
 _PNG_HEADER = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
 _JPEG_HEADER = b"\xff\xd8\xff\xe0" + b"\x00" * 100
@@ -60,7 +58,10 @@ _SVG_WITH_BOM = b"\xef\xbb\xbf<svg></svg>"
 async def test_serves_valid_image_formats(tmp_path, mock_sel, ext, data):
     f = tmp_path / f"test.{ext}"
     f.write_bytes(data)
-    with patch("gideon.dashboard.handlers._validate_dashboard_path", return_value=str(f)):
+    with patch(
+        "gideon.interfaces.dashboard.handlers._validate_dashboard_path",
+        return_value=str(f),
+    ):
         async with TestClient(TestServer(_make_app())) as client:
             resp = await client.get(f"/api/file-raw?path={f}")
             assert resp.status == 200
@@ -72,7 +73,10 @@ async def test_serves_valid_image_formats(tmp_path, mock_sel, ext, data):
 async def test_serves_svg(tmp_path, mock_sel, data):
     f = tmp_path / "test.svg"
     f.write_bytes(data)
-    with patch("gideon.dashboard.handlers._validate_dashboard_path", return_value=str(f)):
+    with patch(
+        "gideon.interfaces.dashboard.handlers._validate_dashboard_path",
+        return_value=str(f),
+    ):
         async with TestClient(TestServer(_make_app())) as client:
             resp = await client.get(f"/api/file-raw?path={f}")
             assert resp.status == 200
@@ -82,21 +86,24 @@ async def test_serves_svg(tmp_path, mock_sel, data):
 async def test_serves_pdf(tmp_path, mock_sel):
     f = tmp_path / "test.pdf"
     f.write_bytes(b"%PDF-1.4\n" + b"\x00" * 100)
-    with patch("gideon.dashboard.handlers._validate_dashboard_path", return_value=str(f)):
+    with patch(
+        "gideon.interfaces.dashboard.handlers._validate_dashboard_path",
+        return_value=str(f),
+    ):
         async with TestClient(TestServer(_make_app())) as client:
             resp = await client.get(f"/api/file-raw?path={f}")
             assert resp.status == 200
             assert resp.headers["Content-Type"] == "application/pdf"
 
 
-# --- Rejected cases ---
-
-
 @pytest.mark.asyncio
 async def test_rejects_non_image_mime(tmp_path, mock_sel):
     f = tmp_path / "test.txt"
     f.write_text("not an image")
-    with patch("gideon.dashboard.handlers._validate_dashboard_path", return_value=str(f)):
+    with patch(
+        "gideon.interfaces.dashboard.handlers._validate_dashboard_path",
+        return_value=str(f),
+    ):
         async with TestClient(TestServer(_make_app())) as client:
             resp = await client.get(f"/api/file-raw?path={f}")
             assert resp.status == 403
@@ -108,7 +115,10 @@ async def test_rejects_wrong_magic_bytes(tmp_path, mock_sel):
     """File with .png extension but non-image content."""
     f = tmp_path / "fake.png"
     f.write_bytes(b"this is not a png file at all")
-    with patch("gideon.dashboard.handlers._validate_dashboard_path", return_value=str(f)):
+    with patch(
+        "gideon.interfaces.dashboard.handlers._validate_dashboard_path",
+        return_value=str(f),
+    ):
         async with TestClient(TestServer(_make_app())) as client:
             resp = await client.get(f"/api/file-raw?path={f}")
             assert resp.status == 403
@@ -117,7 +127,10 @@ async def test_rejects_wrong_magic_bytes(tmp_path, mock_sel):
 
 @pytest.mark.asyncio
 async def test_rejects_invalid_path(mock_sel):
-    with patch("gideon.dashboard.handlers._validate_dashboard_path", return_value=None):
+    with patch(
+        "gideon.interfaces.dashboard.handlers._validate_dashboard_path",
+        return_value=None,
+    ):
         async with TestClient(TestServer(_make_app())) as client:
             resp = await client.get("/api/file-raw?path=../../etc/passwd")
             assert resp.status == 400
@@ -126,7 +139,10 @@ async def test_rejects_invalid_path(mock_sel):
 @pytest.mark.asyncio
 async def test_rejects_missing_file(tmp_path, mock_sel):
     missing = str(tmp_path / "nope.png")
-    with patch("gideon.dashboard.handlers._validate_dashboard_path", return_value=missing):
+    with patch(
+        "gideon.interfaces.dashboard.handlers._validate_dashboard_path",
+        return_value=missing,
+    ):
         async with TestClient(TestServer(_make_app())) as client:
             resp = await client.get(f"/api/file-raw?path={missing}")
             assert resp.status == 404
@@ -138,7 +154,10 @@ async def test_rejects_symlink(tmp_path, mock_sel):
     real.write_bytes(_PNG_HEADER)
     link = tmp_path / "link.png"
     link.symlink_to(real)
-    with patch("gideon.dashboard.handlers._validate_dashboard_path", return_value=str(link)):
+    with patch(
+        "gideon.interfaces.dashboard.handlers._validate_dashboard_path",
+        return_value=str(link),
+    ):
         async with TestClient(TestServer(_make_app())) as client:
             resp = await client.get(f"/api/file-raw?path={link}")
             assert resp.status == 403
@@ -150,8 +169,11 @@ async def test_rejects_sensitive_path(tmp_path, mock_sel):
     f = tmp_path / "creds.png"
     f.write_bytes(_PNG_HEADER)
     with (
-        patch("gideon.dashboard.handlers._validate_dashboard_path", return_value=str(f)),
-        patch("gideon.security.is_sensitive_path", return_value=True),
+        patch(
+            "gideon.interfaces.dashboard.handlers._validate_dashboard_path",
+            return_value=str(f),
+        ),
+        patch("gideon.security.security.is_sensitive_path", return_value=True),
     ):
         async with TestClient(TestServer(_make_app())) as client:
             resp = await client.get(f"/api/file-raw?path={f}")
@@ -159,16 +181,11 @@ async def test_rejects_sensitive_path(tmp_path, mock_sel):
             assert "sensitive" in (await resp.json())["error"]
 
 
-# --- resolve=1: relative chat file-mentions serve raw bytes (regression) ---
-# A chat file-mention is often WORKSPACE-RELATIVE (the agent's cwd). file-read
-# already resolved these; file-raw did NOT — so a relative-path MEDIA file (image/
-# pdf/video/binary) loaded fine as text but 400'd on the raw serve. That was the
-# "some files fail to load in the chat side panel" bug: text worked, binaries broke.
 @pytest.mark.asyncio
 async def test_resolve_serves_relative_workspace_media(tmp_path, mock_sel):
     import os
 
-    from gideon.config.loader import workspace_root
+    from gideon.core.config.loader import workspace_root
 
     ws = str(workspace_root())
     os.makedirs(os.path.join(ws, "sub"), exist_ok=True)
@@ -176,13 +193,12 @@ async def test_resolve_serves_relative_workspace_media(tmp_path, mock_sel):
     with open(img, "wb") as fh:
         fh.write(_PNG_HEADER)
     try:
-        # NOT mocking _validate_dashboard_path — exercise the real resolver+allowlist.
         async with TestClient(TestServer(_make_app())) as client:
-            # Without resolve=1 a bare relative path is forbidden (not in an allowed root).
             denied = await client.get("/api/file-raw?path=sub/pic_raw_resolve.png")
             assert denied.status == 400
-            # With resolve=1 it resolves against the workspace and serves.
-            ok = await client.get("/api/file-raw?path=sub/pic_raw_resolve.png&resolve=1")
+            ok = await client.get(
+                "/api/file-raw?path=sub/pic_raw_resolve.png&resolve=1"
+            )
             assert ok.status == 200
             assert ok.headers["X-Content-Type-Options"] == "nosniff"
     finally:

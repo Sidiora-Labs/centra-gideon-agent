@@ -20,17 +20,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from gideon.dashboard.chat_runner import run_chat
-from gideon.dashboard.state import DashboardState, _ChatSession
-from gideon.history import ConversationLog
-from gideon.hooks import ToolHookResult
-from gideon.llm.acp_agent import AcpAgentProvider, _factory
-from gideon.llm.base import EVENT_COMPLETE, LLMEvent
-from gideon.llm.registry import ProviderEntry
+from gideon.cognition.history import ConversationLog
+from gideon.engine.hooks import ToolHookResult
+from gideon.integrations.llm.acp_agent import AcpAgentProvider, _factory
+from gideon.integrations.llm.base import EVENT_COMPLETE, LLMEvent
+from gideon.integrations.llm.registry import ProviderEntry
+from gideon.interfaces.dashboard.chat_runner import run_chat
+from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
 
-# The measured `O7` shape: the claude-code bundle registers the entry as
-# ``acp:claude-code`` but launches the ADAPTER, whose basename is
-# ``claude-agent-acp`` — and under the npx fallback, ``npx``.
 ADAPTER_ARGV = ["/opt/homebrew/bin/claude-agent-acp"]
 NPX_ARGV = ["npx", "-y", "@zed-industries/claude-code-acp"]
 
@@ -51,9 +48,6 @@ def _built(name: str, command: list[str]) -> AcpAgentProvider:
     return provider
 
 
-# ── G14: the runtime label names the runtime the user picked ─────────────────
-
-
 class TestRuntimeLabelNamesTheConfiguredRuntime:
     """`G14` — ``provider_id`` is the configured entry name, not an inference."""
 
@@ -72,7 +66,9 @@ class TestRuntimeLabelNamesTheConfiguredRuntime:
         The inference is not deleted — it is demoted. This is the inverse floor:
         the fix is "prefer the configured id", not "never infer".
         """
-        assert AcpAgentProvider(command=ADAPTER_ARGV).provider_id == "acp:claude-agent-acp"
+        assert (
+            AcpAgentProvider(command=ADAPTER_ARGV).provider_id == "acp:claude-agent-acp"
+        )
         assert AcpAgentProvider(command=NPX_ARGV).provider_id == "acp:npx"
 
     def test_acp_prefix_is_an_invariant_not_decoration(self):
@@ -85,15 +81,12 @@ class TestRuntimeLabelNamesTheConfiguredRuntime:
     def test_agrees_with_the_pooled_provider_on_the_same_runtime(self):
         """One runtime id, one value. ``AcpSessionProvider`` already returned the
         configured ``runtime_id``; the two classes must not disagree."""
-        from gideon.llm.acp_session_provider import AcpSessionProvider
+        from gideon.integrations.llm.acp_session_provider import AcpSessionProvider
 
         built = _built("acp:claude-code", NPX_ARGV)
         pooled = AcpSessionProvider.__new__(AcpSessionProvider)
         pooled._runtime_id = "acp:claude-code"
         assert built.provider_id == pooled.provider_id
-
-
-# ── the harness: one turn, capture the broadcast sentence ────────────────────
 
 
 async def _async_iter(items):
@@ -129,7 +122,7 @@ def _state(tmp_path, *, provider_id: str, is_new: bool, resumed: bool, history=N
     sessions.get_or_create = AsyncMock(return_value=(client, is_new, resumed))
     sessions.record_failure = AsyncMock()
     sessions.check_context_usage = MagicMock()
-    state = DashboardState(
+    state = ConsoleState(
         sessions=sessions,
         start_time=0.0,
         conversation_log=ConversationLog(base_dir=tmp_path),
@@ -168,29 +161,36 @@ async def _one_turn(
     tmp_path, *, provider_id: str, is_new: bool, resumed: bool, history=None
 ) -> list[str]:
     state, _client = _state(
-        tmp_path, provider_id=provider_id, is_new=is_new, resumed=resumed, history=history
+        tmp_path,
+        provider_id=provider_id,
+        is_new=is_new,
+        resumed=resumed,
+        history=history,
     )
     session = _ChatSession("chat-1-g1415")
     session._trust = True
-    with patch("gideon.dashboard.chat_runner.sel", MagicMock()):
+    with patch("gideon.interfaces.dashboard.chat_runner.sel", MagicMock()):
         await run_chat(state, session, "hello")
     return _session_lines(state)
 
 
-async def _turn_and_state(tmp_path, *, provider_id: str, is_new: bool, resumed: bool, history=None):
+async def _turn_and_state(
+    tmp_path, *, provider_id: str, is_new: bool, resumed: bool, history=None
+):
     """Like :func:`_one_turn` but also hands back the state, so a test can assert what
     the turn DID (whether the history bootstrap ran) beside what it SAID."""
     state, _client = _state(
-        tmp_path, provider_id=provider_id, is_new=is_new, resumed=resumed, history=history
+        tmp_path,
+        provider_id=provider_id,
+        is_new=is_new,
+        resumed=resumed,
+        history=history,
     )
     session = _ChatSession("chat-1-g1415")
     session._trust = True
-    with patch("gideon.dashboard.chat_runner.sel", MagicMock()):
+    with patch("gideon.interfaces.dashboard.chat_runner.sel", MagicMock()):
         await run_chat(state, session, "hello")
     return _session_lines(state), state
-
-
-# ── G14 at the call site: the sentence itself ───────────────────────────────
 
 
 class TestRenderedSentenceNamesTheRuntime:
@@ -198,21 +198,28 @@ class TestRenderedSentenceNamesTheRuntime:
     ``provider_id`` so a revert of the property reds *this sentence*."""
 
     @pytest.mark.asyncio
-    async def test_sentence_names_the_configured_runtime_not_the_adapter(self, tmp_path):
+    async def test_sentence_names_the_configured_runtime_not_the_adapter(
+        self, tmp_path
+    ):
         provider_id = _built("acp:claude-code", ADAPTER_ARGV).provider_id
-        lines = await _one_turn(tmp_path, provider_id=provider_id, is_new=True, resumed=False)
-        assert lines == ["Session created · default · auto · via acp:claude-code"], lines
+        lines = await _one_turn(
+            tmp_path, provider_id=provider_id, is_new=True, resumed=False
+        )
+        assert lines == [
+            "Session created · default · auto · via acp:claude-code"
+        ], lines
         assert "claude-agent-acp" not in lines[0]
 
     @pytest.mark.asyncio
     async def test_sentence_under_the_npx_fallback_never_says_acp_npx(self, tmp_path):
         provider_id = _built("acp:claude-code", NPX_ARGV).provider_id
-        lines = await _one_turn(tmp_path, provider_id=provider_id, is_new=True, resumed=False)
-        assert lines == ["Session created · default · auto · via acp:claude-code"], lines
+        lines = await _one_turn(
+            tmp_path, provider_id=provider_id, is_new=True, resumed=False
+        )
+        assert lines == [
+            "Session created · default · auto · via acp:claude-code"
+        ], lines
         assert "npx" not in lines[0]
-
-
-# ── G15: created vs resumed vs continued ────────────────────────────────────
 
 
 class TestSentenceVerbMatchesWhatHappened:
@@ -220,14 +227,24 @@ class TestSentenceVerbMatchesWhatHappened:
     floor so the rail reads as a requirement rather than one hard-coded word."""
 
     @pytest.mark.asyncio
-    async def test_a_started_runner_with_a_fresh_conversation_says_created(self, tmp_path):
-        lines = await _one_turn(tmp_path, provider_id="acp:claude-code", is_new=True, resumed=False)
-        assert lines == ["Session created · default · auto · via acp:claude-code"], lines
+    async def test_a_started_runner_with_a_fresh_conversation_says_created(
+        self, tmp_path
+    ):
+        lines = await _one_turn(
+            tmp_path, provider_id="acp:claude-code", is_new=True, resumed=False
+        )
+        assert lines == [
+            "Session created · default · auto · via acp:claude-code"
+        ], lines
 
     @pytest.mark.asyncio
     async def test_a_loaded_session_says_resumed_not_created(self, tmp_path):
-        lines = await _one_turn(tmp_path, provider_id="acp:claude-code", is_new=True, resumed=True)
-        assert lines == ["Session resumed · default · auto · via acp:claude-code"], lines
+        lines = await _one_turn(
+            tmp_path, provider_id="acp:claude-code", is_new=True, resumed=True
+        )
+        assert lines == [
+            "Session resumed · default · auto · via acp:claude-code"
+        ], lines
         assert "created" not in lines[0]
 
     @pytest.mark.asyncio
@@ -238,17 +255,25 @@ class TestSentenceVerbMatchesWhatHappened:
         lines = await _one_turn(
             tmp_path, provider_id="acp:claude-code", is_new=False, resumed=False
         )
-        assert lines == ["Session continued · default · auto · via acp:claude-code"], lines
+        assert lines == [
+            "Session continued · default · auto · via acp:claude-code"
+        ], lines
         assert "created" not in lines[0]
         assert "resumed" not in lines[0]
 
     @pytest.mark.asyncio
     async def test_the_native_runtime_gets_the_same_three_verbs(self, tmp_path):
         """The line is not ACP-only — the same sentence labels a native turn."""
-        created = await _one_turn(tmp_path, provider_id="native", is_new=True, resumed=False)
-        continued = await _one_turn(tmp_path, provider_id="native", is_new=False, resumed=False)
+        created = await _one_turn(
+            tmp_path, provider_id="native", is_new=True, resumed=False
+        )
+        continued = await _one_turn(
+            tmp_path, provider_id="native", is_new=False, resumed=False
+        )
         assert created == ["Session created · default · auto · via native"], created
-        assert continued == ["Session continued · default · auto · via native"], continued
+        assert continued == [
+            "Session continued · default · auto · via native"
+        ], continued
 
     @pytest.mark.asyncio
     async def test_exactly_one_session_sentence_per_turn(self, tmp_path):
@@ -259,9 +284,6 @@ class TestSentenceVerbMatchesWhatHappened:
                 tmp_path, provider_id="acp:claude-code", is_new=is_new, resumed=resumed
             )
             assert len(lines) == 1, (is_new, resumed, lines)
-
-
-# ── AAP-7 / `G156`: the fourth verb — a history restore is not a protocol resume ──
 
 
 class TestARestoreFromHistoryIsNotCalledResumed:
@@ -278,7 +300,9 @@ class TestARestoreFromHistoryIsNotCalledResumed:
     """
 
     @pytest.mark.asyncio
-    async def test_a_fresh_runner_over_prior_history_says_restored_from_history(self, tmp_path):
+    async def test_a_fresh_runner_over_prior_history_says_restored_from_history(
+        self, tmp_path
+    ):
         lines = await _one_turn(
             tmp_path,
             provider_id="acp:claude-code",
@@ -294,13 +318,19 @@ class TestARestoreFromHistoryIsNotCalledResumed:
     async def test_it_never_claims_resumed_or_created(self, tmp_path):
         """The two words the sentence is not allowed to reach for on this path."""
         lines = await _one_turn(
-            tmp_path, provider_id="acp:codex", is_new=True, resumed=False, history=_PRIOR_TURNS
+            tmp_path,
+            provider_id="acp:codex",
+            is_new=True,
+            resumed=False,
+            history=_PRIOR_TURNS,
         )
         assert "resumed" not in lines[0], lines
         assert "created" not in lines[0], lines
 
     @pytest.mark.asyncio
-    async def test_a_real_protocol_resume_still_says_resumed_over_the_same_history(self, tmp_path):
+    async def test_a_real_protocol_resume_still_says_resumed_over_the_same_history(
+        self, tmp_path
+    ):
         """VACUITY FLOOR for the new verb: prior history present AND ``resumed=True``
         (what ``session/load`` returns) must still read "resumed". If the new branch
         were ordered above the resume branch, this reds — which is the whole point:
@@ -312,7 +342,9 @@ class TestARestoreFromHistoryIsNotCalledResumed:
             resumed=True,
             history=_PRIOR_TURNS,
         )
-        assert lines == ["Session resumed · default · auto · via acp:claude-code"], lines
+        assert lines == [
+            "Session resumed · default · auto · via acp:claude-code"
+        ], lines
         assert "restored from history" not in lines[0]
 
     @pytest.mark.asyncio
@@ -343,7 +375,9 @@ class TestARestoreFromHistoryIsNotCalledResumed:
             resumed=False,
             history=_PRIOR_TURNS,
         )
-        assert lines == ["Session continued · default · auto · via acp:claude-code"], lines
+        assert lines == [
+            "Session continued · default · auto · via acp:claude-code"
+        ], lines
 
     @pytest.mark.asyncio
     async def test_the_sentence_and_the_bootstrap_read_ONE_predicate(self, tmp_path):
@@ -358,7 +392,8 @@ class TestARestoreFromHistoryIsNotCalledResumed:
         loaded.
         """
         with patch(
-            "gideon.context.compress_thread_history", new=AsyncMock(return_value="summary")
+            "gideon.cognition.context.compress_thread_history",
+            new=AsyncMock(return_value="summary"),
         ) as compress:
             said, _state_restored = await _turn_and_state(
                 tmp_path,
@@ -368,10 +403,13 @@ class TestARestoreFromHistoryIsNotCalledResumed:
                 history=_PRIOR_TURNS,
             )
             assert "restored from history" in said[0], said
-            assert compress.await_count == 1, "the label claimed a restore that never ran"
+            assert (
+                compress.await_count == 1
+            ), "the label claimed a restore that never ran"
 
         with patch(
-            "gideon.context.compress_thread_history", new=AsyncMock(return_value="summary")
+            "gideon.cognition.context.compress_thread_history",
+            new=AsyncMock(return_value="summary"),
         ) as compress:
             said, _state_created = await _turn_and_state(
                 tmp_path,
@@ -381,4 +419,6 @@ class TestARestoreFromHistoryIsNotCalledResumed:
                 history=[],
             )
             assert "created" in said[0], said
-            assert compress.await_count == 0, "a restore ran on a turn labelled 'created'"
+            assert (
+                compress.await_count == 0
+            ), "a restore ran on a turn labelled 'created'"

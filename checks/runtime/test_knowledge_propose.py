@@ -21,13 +21,15 @@ from pathlib import Path
 
 import pytest
 
-from gideon.action_providers.base import ActionContext
-from gideon.action_providers.knowledge_propose_provider import (
+from gideon.cognition.learning import proposals
+from gideon.integrations.action_providers.base import ActionContext
+from gideon.integrations.action_providers.knowledge_propose_provider import (
     KnowledgeProposeActionProvider,
 )
-from gideon.learning import proposals
 
-BUNDLED = Path(__file__).resolve().parents[1] / "src/gideon/workflows/bundled"
+BUNDLED = (
+    Path(__file__).resolve().parents[2] / "runtime/gideon/automation/workflows/bundled"
+)
 
 
 def run(coro):
@@ -43,13 +45,15 @@ def home(tmp_path, monkeypatch):
     """An isolated home. Filing writes a durable proposal row and an inbox item — never the
     developer's own store."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     return tmp_path
 
 
 @pytest.fixture
 def ctx():
-    return ActionContext(event="workflow_node", payload={"node_id": "file", "run_id": "run-1"})
+    return ActionContext(
+        event="workflow_node", payload={"node_id": "file", "run_id": "run-1"}
+    )
 
 
 def _gap_healing() -> dict:
@@ -63,9 +67,6 @@ def _node(spec: dict, node_id: str) -> dict:
     raise AssertionError(f"no node {node_id!r}")
 
 
-# ── the kind exists (the silent-drop guard) ──
-
-
 def test_the_knowledge_draft_kind_exists():
     """The atom's own blocker. Without this value `enqueue` returns SKIP and logs at debug,
     so routing would ship as a declared-but-inert path that drops every draft."""
@@ -76,7 +77,7 @@ def test_the_knowledge_draft_kind_exists():
 def test_an_unknown_kind_still_skips(home):
     """The closed enum still refuses a typo — the guard the new value must not have loosened."""
     verdict, prop = proposals.enqueue(
-        kind="knowledge_drafts",  # plural typo
+        kind="knowledge_drafts",
         title="T",
         body="B" * 60,
         provenance="human",
@@ -88,12 +89,9 @@ def test_an_unknown_kind_still_skips(home):
 def test_the_new_kind_has_an_inbox_headline():
     """A kind with no label surfaces as the generic "Proposal", which is the one card a
     reviewer cannot triage without opening it."""
-    from gideon.learning.proposals import _KIND_LABELS
+    from gideon.cognition.learning.proposals import _KIND_LABELS
 
     assert _KIND_LABELS[proposals.Kind.KNOWLEDGE_DRAFT.value] != "Proposal"
-
-
-# ── a draft reaches the queue ──
 
 
 def test_a_draft_reaches_enqueue_under_the_knowledge_draft_kind(home, ctx):
@@ -124,13 +122,13 @@ def test_a_draft_reaches_enqueue_under_the_knowledge_draft_kind(home, ctx):
     assert filed.title == "Retrieval cascade"
     assert filed.source_cadence == "gap-healing"
     assert filed.run_id == "run-1"
-    # The excerpt is what makes the proposal checkable; `enqueue` fences it on the way in.
     assert "FTS runs first" in filed.source_excerpt
 
 
 def test_it_writes_nothing_into_the_knowledge_store(home, ctx):
     """The whole point of the atom: propose, don't write. The pre-WF2KNO-8 node persisted a
-    TTL'd probe, so an assertion that the store stays untouched is the regression guard."""
+    TTL'd probe, so an assertion that the store stays untouched is the regression guard.
+    """
     run(
         KnowledgeProposeActionProvider().execute(
             {
@@ -151,9 +149,16 @@ def test_a_json_string_batch_is_accepted(home, ctx):
         KnowledgeProposeActionProvider().execute(
             {
                 "drafts": json.dumps(
-                    [{"title": "Vector floor", "body": "Token similarity is the floor metric."}]
+                    [
+                        {
+                            "title": "Vector floor",
+                            "body": "Token similarity is the floor metric.",
+                        }
+                    ]
                 ),
-                "evidence": json.dumps({"Vector floor": ["[i2] tokens when no embedder."]}),
+                "evidence": json.dumps(
+                    {"Vector floor": ["[i2] tokens when no embedder."]}
+                ),
             },
             ctx,
         )
@@ -169,7 +174,11 @@ def test_an_ungrounded_draft_is_not_filed(home, ctx):
         KnowledgeProposeActionProvider().execute(
             {
                 "drafts": [
-                    {"title": "Thin", "body": "Not much here.", "sufficient_evidence": False},
+                    {
+                        "title": "Thin",
+                        "body": "Not much here.",
+                        "sufficient_evidence": False,
+                    },
                     {
                         "title": "Solid",
                         "body": "Grounded in excerpts.",
@@ -193,17 +202,18 @@ def test_nothing_to_file_is_a_failure_not_a_silent_success(home, ctx):
     assert "nothing to file" in result.error
 
 
-# ── SKIP is success ──
-
-
 def test_a_prior_decision_skip_is_reported_as_success(home, ctx):
     """`enqueue`'s own docstring: a SKIP means a prior decision forbids it and nothing was
-    written, and the caller should treat that as success — not nagging is the feature."""
-    cfg = {"drafts": [{"title": "Retrieval cascade", "body": "The cascade, described at length."}]}
+    written, and the caller should treat that as success — not nagging is the feature.
+    """
+    cfg = {
+        "drafts": [
+            {"title": "Retrieval cascade", "body": "The cascade, described at length."}
+        ]
+    }
     first = run(KnowledgeProposeActionProvider().execute(cfg, ctx))
     assert body(first)["counts"]["filed"] == 1
 
-    # Reject it, which records a cooling-down decision, then re-file the identical draft.
     proposals.reject(proposals.list_pending()[0].id)
 
     second = run(KnowledgeProposeActionProvider().execute(cfg, ctx))
@@ -217,10 +227,19 @@ def test_a_prior_decision_skip_is_reported_as_success(home, ctx):
 
 def test_an_inferred_draft_below_the_evidence_floor_skips_successfully(home, ctx):
     """The floor applies to INFERRED drafts, which is what a gap-healing pass produces. One
-    mention is not a phantom hub, and a node that failed on it would fail on every quiet run."""
+    mention is not a phantom hub, and a node that failed on it would fail on every quiet run.
+    """
     result = run(
         KnowledgeProposeActionProvider().execute(
-            {"drafts": [{"title": "One-off", "body": "Mentioned exactly once.", "mentions": 1}]},
+            {
+                "drafts": [
+                    {
+                        "title": "One-off",
+                        "body": "Mentioned exactly once.",
+                        "mentions": 1,
+                    }
+                ]
+            },
             ctx,
         )
     )
@@ -229,26 +248,22 @@ def test_an_inferred_draft_below_the_evidence_floor_skips_successfully(home, ctx
     assert proposals.list_pending() == []
 
 
-# ── the wiring (all three registration points + the template) ──
-
-
 def test_the_provider_is_registered_everywhere_it_must_be():
     """A provider in one set but not the other validates, saves, and then fails at run time."""
-    from gideon.action_providers.registry import (
-        _ensure_default_providers_registered,
-        get_action_provider,
-    )
-    from gideon.triggers.screen import (
+    from gideon.assurance.validation import ALLOWED_HOOK_PROVIDERS
+    from gideon.automation.triggers.screen import (
         READ_ONLY_PROVIDERS,
         WRITE_CAPABLE_PROVIDERS,
         provider_is_read_only,
     )
-    from gideon.validation import ALLOWED_HOOK_PROVIDERS
+    from gideon.integrations.action_providers.registry import (
+        _ensure_default_providers_registered,
+        get_action_provider,
+    )
 
     _ensure_default_providers_registered()
     assert get_action_provider("knowledge-propose") is not None
     assert "knowledge-propose" in ALLOWED_HOOK_PROVIDERS
-    # Filing writes a durable row and raises an inbox item, so it needs the explicit opt-in.
     assert "knowledge-propose" in WRITE_CAPABLE_PROVIDERS
     assert "knowledge-propose" not in READ_ONLY_PROVIDERS
     assert not provider_is_read_only("knowledge-propose")
@@ -268,7 +283,6 @@ def test_the_session_37_workaround_is_gone():
     assert "ttl" not in with_args
     assert with_args.get("kind") != "probe"
     assert "proposal" not in with_args.get("tags", [])
-    # And no OTHER node in the template writes the store either.
     providers = {
         c.get("config", {}).get("provider")
         for c in spec["root"]["children"]
@@ -282,7 +296,7 @@ def test_a_schema_edit_routes_through_the_same_kind(home, ctx):
     overwritten from the system's side and that schema-edit proposals route through the
     learning queue — this is the route that claim depends on, targeted at the file so a
     reviewer sees WHICH conventions document an accepted edit would change."""
-    from gideon.knowledge.schema_conventions import SCHEMA_FILENAME
+    from gideon.cognition.knowledge.schema_conventions import SCHEMA_FILENAME
 
     result = run(
         KnowledgeProposeActionProvider().execute(
@@ -291,7 +305,7 @@ def test_a_schema_edit_routes_through_the_same_kind(home, ctx):
                 "body": "Three corrections in a row retitled an entry to the store's spelling.",
                 "target": SCHEMA_FILENAME,
                 "source_cadence": "schema-edit",
-                "provenance": "human",  # a repeated user override IS the evidence
+                "provenance": "human",
             },
             ctx,
         )
@@ -300,5 +314,4 @@ def test_a_schema_edit_routes_through_the_same_kind(home, ctx):
     filed = proposals.list_pending()[0]
     assert filed.kind == proposals.Kind.KNOWLEDGE_DRAFT.value
     assert filed.target == SCHEMA_FILENAME
-    # The conventions file itself is untouched: proposing is not writing.
     assert not (home / "workspace/knowledge" / SCHEMA_FILENAME).exists()

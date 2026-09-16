@@ -1,7 +1,7 @@
 """Tests for empty-response detection (the auto-retry predicate in chat_runner)."""
 
-from gideon.acp.types import STOP_REASON_CANCELLED, STOP_REASON_END_TURN
-from gideon.dashboard.chat_runner import is_empty_turn
+from gideon.integrations.acp.types import STOP_REASON_CANCELLED, STOP_REASON_END_TURN
+from gideon.interfaces.dashboard.chat_runner import is_empty_turn
 
 
 def _call(**over):

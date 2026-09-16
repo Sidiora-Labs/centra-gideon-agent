@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Gideon</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #eaf2ff; background: #07111f; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; -webkit-app-region: drag; user-select: none; background: radial-gradient(ellipse at 50% 35%, #143047, transparent 65%); }
+    main { width: 300px; text-align: center; }
+    .mark { width: 82px; height: 82px; }
+    h1 { font-size: 27px; font-weight: 550; letter-spacing: -.04em; margin: 16px 0 8px; }
+    p { margin: 0; color: #94adc8; font-size: 13px; line-height: 1.7; }
+    .progress { height: 2px; margin: 30px auto 20px; width: 144px; overflow: hidden; background: #21374c; border-radius: 2px; }
+    .progress::after { content: ''; display: block; height: 100%; width: 55%; background: linear-gradient(90deg,#68a8ff,#5ce0c1); animation: travel 1.4s ease-in-out infinite alternate; }
+    @keyframes travel { from { transform: translateX(-100%); } to { transform: translateX(180%); } }
+    @media (prefers-reduced-motion: reduce) { .progress::after { animation: none; width: 100%; } }
+  </style>
+</head>
+<body>
+  <main aria-live="polite">
+    <img class="mark" src="../assets/gideon-dark.png" alt="Gideon">
+    <h1>Gideon</h1>
+    <p>Your workspace is coming online.</p>
+    <div class="progress" role="progressbar" aria-label="Starting gateway"></div>
+    <p id="status">Checking gateway…</p>
+  </main>
+  <script>
+    window.gideonDesktop?.onStatus?.((message) => {
+      document.getElementById('status').textContent = message;
+    });
+  </script>
+</body>
+</html>

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 
-from gideon.channel_transports.base import ChannelMessage, OutboundMessage
-from gideon.channel_transports.reference_echo import ReferenceEchoTransport
+from gideon.integrations.channel_transports.base import ChannelMessage, OutboundMessage
+from gideon.integrations.channel_transports.reference_echo import ReferenceEchoTransport
 
 
 def _run(coro):
@@ -21,7 +21,7 @@ def test_identity_and_capabilities():
 
 def test_send_requires_connect():
     t = ReferenceEchoTransport()
-    assert _run(t.send(OutboundMessage(channel_id="c", text="hi"))) is False  # not connected
+    assert _run(t.send(OutboundMessage(channel_id="c", text="hi"))) is False
 
 
 def test_send_records_and_echoes_inbound():
@@ -30,7 +30,6 @@ def test_send_records_and_echoes_inbound():
         await t.connect()
         ok = await t.send(OutboundMessage(channel_id="c", text="hello"))
         assert ok and t.sent[0].text == "hello"
-        # the echo surfaces back via receive()
         msg = await anext(t.receive())
         await t.disconnect()
         return msg

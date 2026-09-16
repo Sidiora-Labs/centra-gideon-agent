@@ -12,14 +12,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from gideon import usage_ledger as ul
-from gideon.usage_ledger import TurnUsage
+from gideon.operations import usage_ledger as ul
+from gideon.operations.usage_ledger import TurnUsage
 
 
 @pytest.fixture(autouse=True)
 def _home(tmp_path, monkeypatch):
     """Isolated config_dir so the ledger writes under tmp, never the real home."""
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     return tmp_path
 
 
@@ -62,7 +62,6 @@ def test_rollup_groups_by_each_key(_home):
     for key in ("model", "source", "agent", "provider", "day"):
         rows = ul.rollup(group_by=key)
         assert rows, f"rollup by {key} returned nothing"
-        # Every group's cost is the sum of its members; the grand total is invariant.
         assert round(sum(r["cost_usd"] for r in rows), 6) == 3.5
     by_model = {r["model"]: r for r in ul.rollup(group_by="model")}
     assert by_model["m-a"]["cost_usd"] == 3.0 and by_model["m-a"]["turns"] == 2
@@ -76,9 +75,11 @@ def test_rollup_rejects_unknown_group_key(_home):
 
 def test_unpriced_row_taints_group_and_total(_home):
     ul.record_turn(_u(model="m-a", cost_usd=1.0, priced=True))
-    ul.record_turn(_u(model="m-a", cost_usd=0.0, priced=False))  # unpriced constituent
+    ul.record_turn(_u(model="m-a", cost_usd=0.0, priced=False))
     grp = {r["model"]: r for r in ul.rollup(group_by="model")}["m-a"]
-    assert grp["priced"] is False, "a group with any unpriced row must report priced=False"
+    assert (
+        grp["priced"] is False
+    ), "a group with any unpriced row must report priced=False"
     assert ul.totals()["priced"] is False
 
 
@@ -92,7 +93,6 @@ def test_priced_total_stays_true_when_all_priced(_home):
 def test_rollup_window_filters_by_ts(_home):
     ul.record_turn(_u(ts="2026-08-01T00:00:00+00:00", cost_usd=1.0))
     ul.record_turn(_u(ts="2026-08-05T00:00:00+00:00", cost_usd=2.0))
-    # [since, until) half-open window.
     rows = ul.rollup(since="2026-08-03T00:00:00+00:00", group_by="day")
     assert len(rows) == 1 and rows[0]["day"] == "2026-08-05"
 
@@ -104,7 +104,6 @@ def test_record_turn_is_fail_open(monkeypatch, _home):
         raise OSError("disk full")
 
     monkeypatch.setattr("builtins.open", _boom)
-    # Must not raise despite the write blowing up.
     ul.record_turn(_u())
 
 
@@ -116,41 +115,40 @@ def test_iter_rows_tolerates_a_corrupt_line(_home):
         f.write("{not valid json\n")
     ul.record_turn(_u(model="good2"))
     rows = ul._iter_rows()
-    assert [r["model"] for r in rows] == ["good", "good2"]  # bad line skipped, rest kept
-
-
-# ── inventory registration (done-when: audit passes WITH, fails WITHOUT) ──
+    assert [r["model"] for r in rows] == [
+        "good",
+        "good2",
+    ]
 
 
 def test_usage_path_is_registered_in_inventory():
-    from gideon.durability.inventory import by_id
+    from gideon.operations.durability.inventory import by_id
 
     e = by_id("usage_ledger")
     assert e is not None and e.path == "usage"
-    assert e.derived is True and e.secret is False  # telemetry-of-self, disposable
+    assert e.derived is True and e.secret is False
 
 
 def test_audit_home_passes_with_registration(_home):
-    from gideon.durability.inventory import audit_home
+    from gideon.operations.durability.inventory import audit_home
 
-    ul.record_turn(_u())  # creates usage/turns.jsonl under the home
+    ul.record_turn(_u())
     result = audit_home(_home)
-    assert "usage/" not in result.unclaimed, f"usage should be claimed, got {result.unclaimed}"
+    assert (
+        "usage/" not in result.unclaimed
+    ), f"usage should be claimed, got {result.unclaimed}"
 
 
 def test_audit_home_fails_without_registration(_home, monkeypatch):
     """Prove the registration is load-bearing: drop the usage entry and the audit
     reports usage/ as unclaimed."""
-    import gideon.durability.inventory as inv
+    import gideon.operations.durability.inventory as inv
 
     ul.record_turn(_u())
     stripped = tuple(e for e in inv.INVENTORY if e.id != "usage_ledger")
     monkeypatch.setattr(inv, "INVENTORY", stripped)
     result = inv.audit_home(_home)
     assert "usage/" in result.unclaimed
-
-
-# ── CATO-2: the chat write-site (_record_turn_usage) ──────────────────────────
 
 
 class TestChatWriteSite:
@@ -169,7 +167,7 @@ class TestChatWriteSite:
         return SimpleNamespace(**base)
 
     def _call(self, event, model="claude-opus-4.5"):
-        from gideon.dashboard.chat_runner import _record_turn_usage
+        from gideon.interfaces.dashboard.chat_runner import _record_turn_usage
 
         _record_turn_usage(
             event,
@@ -190,8 +188,6 @@ class TestChatWriteSite:
         assert r["cost_usd"] == 0.42 and r["priced"] is True
 
     def test_priced_model_with_zero_cost_still_priced(self, _home):
-        # No provider cost, but the model HAS a price row → priced=True (cost may be
-        # a real estimate the caller already set, or 0.0 for a tiny turn).
         self._call(self._event(cost_usd=0.0), model="claude-opus-4.5")
         r = ul._iter_rows()[0]
         assert r["priced"] is True
@@ -203,16 +199,16 @@ class TestChatWriteSite:
 
     def test_write_site_is_fail_open(self, monkeypatch, _home):
         """A ledger write failure must not raise into the turn."""
-        import gideon.usage_ledger as _ul
+        import gideon.operations.usage_ledger as _ul
 
         def _boom(*a, **k):
             raise OSError("disk full")
 
         monkeypatch.setattr(_ul, "_path", _boom)
-        self._call(self._event(cost_usd=0.1))  # must not raise
+        self._call(self._event(cost_usd=0.1))
 
 
-# ── CATO-3: the subagent write-site (SubagentManager._record_subagent_usage) ──
+# ── CATO-3: the subagent write-site (DelegationSupervisor._record_subagent_usage) ──
 
 
 class TestSubagentWriteSite:
@@ -220,7 +216,7 @@ class TestSubagentWriteSite:
     fan-out's cost is attributable per child (source='subagent')."""
 
     def _info(self, **over):
-        from gideon.subagent import SubagentInfo
+        from gideon.engine.subagent import SubagentInfo
 
         base = dict(id="a1", task="do a thing", parent_session_key="dashboard:parent")
         base.update(over)
@@ -239,23 +235,27 @@ class TestSubagentWriteSite:
         return SimpleNamespace(**base)
 
     def test_one_row_keyed_to_parent_session(self, _home):
-        from gideon.subagent import SubagentManager
+        from gideon.engine.subagent import DelegationSupervisor
 
         info = self._info(agent="researcher", model="claude-opus-4.5")
-        SubagentManager._record_subagent_usage(info, "subagent:a1", self._event(cost_usd=0.3))
+        DelegationSupervisor._record_subagent_usage(
+            info, "subagent:a1", self._event(cost_usd=0.3)
+        )
         rows = ul._iter_rows()
         assert len(rows) == 1
         r = rows[0]
         assert r["source"] == "subagent" and r["provider"] == "acp"
-        assert r["session_key"] == "dashboard:parent"  # parent, not the child session
-        assert r["agent"] == "researcher" and r["cost_usd"] == 0.3 and r["priced"] is True
+        assert r["session_key"] == "dashboard:parent"
+        assert (
+            r["agent"] == "researcher" and r["cost_usd"] == 0.3 and r["priced"] is True
+        )
 
     def test_fanout_of_three_yields_three_rows(self, _home):
-        from gideon.subagent import SubagentManager
+        from gideon.engine.subagent import DelegationSupervisor
 
         for i in range(3):
             info = self._info(id=f"a{i}", model="claude-opus-4.5")
-            SubagentManager._record_subagent_usage(
+            DelegationSupervisor._record_subagent_usage(
                 info, f"subagent:a{i}", self._event(cost_usd=0.1)
             )
         rows = ul._iter_rows()
@@ -264,20 +264,21 @@ class TestSubagentWriteSite:
         assert round(ul.totals()["cost_usd"], 6) == 0.3
 
     def test_unpriced_subagent_model_is_priced_false(self, _home):
-        from gideon.subagent import SubagentManager
+        from gideon.engine.subagent import DelegationSupervisor
 
         info = self._info(model="some-unknown-local-model")
-        SubagentManager._record_subagent_usage(info, "subagent:a1", self._event(cost_usd=0.0))
+        DelegationSupervisor._record_subagent_usage(
+            info, "subagent:a1", self._event(cost_usd=0.0)
+        )
         r = ul._iter_rows()[0]
         assert r["priced"] is False and r["cost_usd"] == 0.0
 
     def test_subagent_info_carries_tokens_after_capture(self):
         """SubagentInfo gained the token/cost fields (default 0.0) for delivery."""
         info = self._info()
-        assert info.input_tokens == 0 and info.output_tokens == 0 and info.cost_usd == 0.0
-
-
-# ── CATO-4: the shared record_from_event seam + the non-run_chat sources ──────
+        assert (
+            info.input_tokens == 0 and info.output_tokens == 0 and info.cost_usd == 0.0
+        )
 
 
 class TestRecordFromEvent:
@@ -297,12 +298,13 @@ class TestRecordFromEvent:
         return SimpleNamespace(**base)
 
     def test_vendor_cost_wins_and_is_priced(self, _home):
-        ul.record_from_event(self._event(cost_usd=0.7), source="cli", model="claude-opus-4.5")
+        ul.record_from_event(
+            self._event(cost_usd=0.7), source="cli", model="claude-opus-4.5"
+        )
         r = ul._iter_rows()[0]
         assert r["source"] == "cli" and r["cost_usd"] == 0.7 and r["priced"] is True
 
     def test_cost_estimated_when_provider_reports_none(self, _home):
-        # A priced model with tokens but no provider cost → estimate_cost fills it.
         ul.record_from_event(
             self._event(cost_usd=0.0, input_tokens=1_000_000),
             source="background",
@@ -312,20 +314,24 @@ class TestRecordFromEvent:
         assert r["priced"] is True and r["cost_usd"] > 0
 
     def test_unpriced_model_is_honest_zero(self, _home):
-        ul.record_from_event(self._event(cost_usd=0.0), source="cron", model="unknown-local")
+        ul.record_from_event(
+            self._event(cost_usd=0.0), source="cron", model="unknown-local"
+        )
         r = ul._iter_rows()[0]
         assert r["priced"] is False and r["cost_usd"] == 0.0
 
     def test_each_source_appears_in_rollup_by_source(self, _home):
         """CATO-4 done-when: every write-site's source string is a distinct group."""
         for src in ("chat", "subagent", "background", "channel", "cron", "cli"):
-            ul.record_from_event(self._event(cost_usd=0.1), source=src, model="claude-opus-4.5")
+            ul.record_from_event(
+                self._event(cost_usd=0.1), source=src, model="claude-opus-4.5"
+            )
         by_source = {r["source"] for r in ul.rollup(group_by="source")}
         assert {"chat", "subagent", "background", "channel", "cron", "cli"} <= by_source
 
     def test_fail_open_on_broken_ledger(self, monkeypatch, _home):
         monkeypatch.setattr(ul, "_path", lambda: (_ for _ in ()).throw(OSError("boom")))
-        ul.record_from_event(self._event(), source="cli", model="m")  # must not raise
+        ul.record_from_event(self._event(), source="cli", model="m")
 
 
 class TestStreamAndCollectOnComplete:
@@ -335,14 +341,20 @@ class TestStreamAndCollectOnComplete:
     def test_on_complete_fires_with_the_complete_event(self):
         import asyncio
 
-        from gideon.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK, LLMEvent
-        from gideon.llm_helpers import stream_and_collect
+        from gideon.integrations.llm.base import (
+            EVENT_COMPLETE,
+            EVENT_TEXT_CHUNK,
+            LLMEvent,
+        )
+        from gideon.integrations.llm_helpers import stream_and_collect
 
         class _Provider:
             async def stream(self, _message):
                 yield LLMEvent(kind=EVENT_TEXT_CHUNK, text="hello ")
                 yield LLMEvent(kind=EVENT_TEXT_CHUNK, text="world")
-                yield LLMEvent(kind=EVENT_COMPLETE, input_tokens=42, output_tokens=7, cost_usd=0.05)
+                yield LLMEvent(
+                    kind=EVENT_COMPLETE, input_tokens=42, output_tokens=7, cost_usd=0.05
+                )
 
         seen = {}
 
@@ -357,8 +369,12 @@ class TestStreamAndCollectOnComplete:
     def test_on_complete_none_is_byte_identical_text(self):
         import asyncio
 
-        from gideon.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK, LLMEvent
-        from gideon.llm_helpers import stream_and_collect
+        from gideon.integrations.llm.base import (
+            EVENT_COMPLETE,
+            EVENT_TEXT_CHUNK,
+            LLMEvent,
+        )
+        from gideon.integrations.llm_helpers import stream_and_collect
 
         class _Provider:
             async def stream(self, _message):
@@ -368,15 +384,12 @@ class TestStreamAndCollectOnComplete:
         assert asyncio.run(stream_and_collect(_Provider(), "hi")) == "abc"
 
 
-# ── CATO-6: the "Turn complete" cost line composer ────────────────────────────
-
-
 class TestTurnCompleteLine:
     """`_turn_complete_line` shows real USD + tokens, honest 'unpriced', and the
     cache fragment only when cache tokens are non-zero."""
 
     def _line(self, **over):
-        from gideon.dashboard.chat_runner import _turn_complete_line
+        from gideon.interfaces.dashboard.chat_runner import _turn_complete_line
 
         base = dict(
             events=3,
@@ -402,36 +415,29 @@ class TestTurnCompleteLine:
         assert "$0.00" not in line and "$" not in line
 
     def test_cache_fragment_only_when_nonzero(self):
-        # This used to assert the pre-summed rendering — `cache_tokens=2000` →
-        # "2,000 cached". PCS-7 deleted that keyword: reads and writes are reported
-        # separately (a read is the saving, a write is its cost), so the sum could
-        # state neither the hit rate nor the saved USD. The rule under test is
-        # unchanged and still load-bearing: NO cache activity renders NO fragment.
         assert "cache" not in self._line(cache_read_tokens=0, cache_creation_tokens=0)
         assert "1,400 read / 600 written" in self._line(
             cache_read_tokens=1400, cache_creation_tokens=600
         )
 
     def test_no_tokens_is_backward_compatible_bare_line(self):
-        # A turn with no token counts renders exactly the pre-CATO-6 line.
         line = self._line(input_tokens=0, output_tokens=0, cost_usd=0.0, priced=False)
         assert line == "Turn complete: 3 events, 1 tool calls, context 42%"
 
     def test_priced_zero_cost_still_shows_dollar_not_unpriced(self):
-        # A priced model whose tiny turn rounds to $0.0000 is still PRICED — show the
-        # dollar amount, not "unpriced" (which means "no price row").
         line = self._line(cost_usd=0.0, priced=True)
         assert "$0.0000" in line and "unpriced" not in line
-
-
-# ── CATO-7: session-scoped rollup/totals ──────────────────────────────────────
 
 
 class TestSessionScopedAggregation:
     """rollup/totals accept a session_key filter — the session-total surface."""
 
     def _seed(self):
-        for sk, cost in (("dashboard:a", 1.0), ("dashboard:a", 2.0), ("dashboard:b", 0.5)):
+        for sk, cost in (
+            ("dashboard:a", 1.0),
+            ("dashboard:a", 2.0),
+            ("dashboard:b", 0.5),
+        ):
             ul.record_turn(_u(session_key=sk, cost_usd=cost))
 
     def test_totals_scoped_to_one_session(self, _home):
@@ -439,12 +445,9 @@ class TestSessionScopedAggregation:
         assert ul.totals(session_key="dashboard:a")["cost_usd"] == 3.0
         assert ul.totals(session_key="dashboard:a")["turns"] == 2
         assert ul.totals(session_key="dashboard:b")["cost_usd"] == 0.5
-        # No filter = the whole ledger.
         assert ul.totals()["cost_usd"] == 3.5 and ul.totals()["turns"] == 3
 
     def test_session_total_matches_sum_of_its_turns(self, _home):
-        # The done-when invariant: a multi-turn session's reported total == the sum
-        # of the individual turn rows for that session.
         self._seed()
         rows = [r for r in ul._iter_rows() if r["session_key"] == "dashboard:a"]
         expected = round(sum(r["cost_usd"] for r in rows), 6)

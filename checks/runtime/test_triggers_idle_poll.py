@@ -20,11 +20,11 @@ import asyncio
 
 import pytest
 
-from gideon.triggers import idle_poll as IP
-from gideon.triggers import loop as L
-from gideon.triggers import wakeup as WK
-from gideon.triggers.models import Trigger
-from gideon.triggers.store import TriggerStore
+from gideon.automation.triggers import idle_poll as IP
+from gideon.automation.triggers import loop as L
+from gideon.automation.triggers import wakeup as WK
+from gideon.automation.triggers.models import Trigger
+from gideon.automation.triggers.store import TriggerStore
 
 NOW = 1_800_000_000.0
 
@@ -35,16 +35,18 @@ class _Provider:
 
 
 def _manager(*keys):
-    from gideon.session import SessionManager, _Session
+    from gideon.engine.session import ConversationDirectory, _Session
 
-    manager = SessionManager.__new__(SessionManager)
+    manager = ConversationDirectory.__new__(ConversationDirectory)
     manager._sessions = {}
     for key in keys:
         manager._sessions[key] = _Session(provider=_Provider())
     return manager
 
 
-def _idle(tid="idle:standup", *, idle_secs=60, first_idle_secs=0, scope="", enabled=True):
+def _idle(
+    tid="idle:standup", *, idle_secs=60, first_idle_secs=0, scope="", enabled=True
+):
     spec = {"idle_secs": idle_secs, "first_idle_secs": first_idle_secs}
     if scope:
         spec["scope"] = scope
@@ -64,23 +66,26 @@ def _no_nudge_service(monkeypatch):
     """No nudge service in a test process. Asserted explicitly rather than assumed: a leaked
     singleton from another test would route any message-bearing row in these stores to a dead
     deliverer instead of surfacing it as a typed skip."""
-    monkeypatch.setattr("gideon.triggers.nudge._INSTANCE", None)
+    monkeypatch.setattr("gideon.automation.triggers.nudge._INSTANCE", None)
 
 
-def _nudge_row(tid="nudge:worker", *, session="chat-1", idle_secs=60, message="next cycle"):
+def _nudge_row(
+    tid="nudge:worker", *, session="chat-1", idle_secs=60, message="next cycle"
+):
     """A message-bearing idle row — what a loop-worker nudge is after WF2AUT-11 half 2."""
     return Trigger(
         id=tid,
         name=f"N-{tid}",
         kind="idle",
         created_by="system",
-        spec={"scope": f"session:{session}", "idle_secs": idle_secs, "message": message},
+        spec={
+            "scope": f"session:{session}",
+            "idle_secs": idle_secs,
+            "message": message,
+        },
         session=f"conversation:{session}",
         overlap="skip",
     )
-
-
-# ── 🔴 the wiring: a kind:idle trigger fires through the REAL tick ──
 
 
 def test_kind_idle_FIRES_THROUGH_TICK_ONCE(tmp_path):
@@ -95,18 +100,20 @@ def test_kind_idle_FIRES_THROUGH_TICK_ONCE(tmp_path):
         ran.append(payload.get("trigger_id", ""))
         return {"status": "ok"}
 
-    # First tick ARMS (a trigger just seen has observed no quiet period) and must not fire.
     result = asyncio.run(
         L.tick_once(store, runner=runner, sessions=manager, base_dir=tmp_path, now=NOW)
     )
     assert result.fires == []
     assert ran == [], "an unarmed idle trigger fired on sight"
 
-    # Second tick, a full quiet period later: it fires, through the tick, with no clock involved.
     asyncio.run(
-        L.tick_once(store, runner=runner, sessions=manager, base_dir=tmp_path, now=NOW + 61)
+        L.tick_once(
+            store, runner=runner, sessions=manager, base_dir=tmp_path, now=NOW + 61
+        )
     )
-    assert ran == ["idle:standup"], "kind:idle still has no firing path through the tick"
+    assert ran == [
+        "idle:standup"
+    ], "kind:idle still has no firing path through the tick"
 
 
 def test_the_tick_SURVIVES_a_broken_idle_poll(tmp_path, monkeypatch):
@@ -128,32 +135,32 @@ async def _ok(_payload):
     return {"status": "ok"}
 
 
-# ── 🔴 delivered-only counting + the mid-turn drop ──
-
-
 def test_a_MID_TURN_fire_is_dropped_and_does_NOT_increment_the_counter(tmp_path):
     """🔴 The rule autonudge lines 343-352 exist for: "skipped nudges (e.g. session mid-turn) inflate
-    cycle_count and prematurely trip max_cycles". A dropped fire must advance NOTHING."""
+    cycle_count and prematurely trip max_cycles". A dropped fire must advance NOTHING.
+    """
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(_idle())
     key = WK.session_key_for("idle:standup")
     manager = _manager(key)
     IP.save_state("idle:standup", IP.IdleState(armed_at=NOW), base_dir=tmp_path)
 
-    # Mid-turn: the per-session semaphore is HELD, which is what `wakeup.is_running` reads.
     asyncio.run(manager._sessions[key].semaphore.acquire())
     assert WK.is_running(manager, key) is True
 
-    delivered, skipped = asyncio.run(IP.poll(store, manager, _ok, now=NOW + 61, base_dir=tmp_path))
+    delivered, skipped = asyncio.run(
+        IP.poll(store, manager, _ok, now=NOW + 61, base_dir=tmp_path)
+    )
     assert delivered == 0
     assert [r["reason"] for r in skipped] == [WK.Disposition.SKIPPED_RUNNING.value]
 
     state = IP.load_state("idle:standup", base_dir=tmp_path)
     assert state.cycle_count == 0, "a dropped mid-turn fire inflated cycle_count"
     assert state.last_fire == 0.0
-    assert state.armed_at == NOW, "a dropped fire re-armed, so the retry waits another full period"
+    assert (
+        state.armed_at == NOW
+    ), "a dropped fire re-armed, so the retry waits another full period"
 
-    # And because nothing advanced, it is STILL due — the retry the drop must not cost.
     due, _why = IP.is_idle(_idle(), state, now=NOW + 61)
     assert due is True
 
@@ -165,14 +172,13 @@ def test_a_DELIVERED_fire_increments_the_counter(tmp_path):
     manager = _manager(WK.session_key_for("idle:standup"))
     IP.save_state("idle:standup", IP.IdleState(armed_at=NOW), base_dir=tmp_path)
 
-    delivered, _skipped = asyncio.run(IP.poll(store, manager, _ok, now=NOW + 61, base_dir=tmp_path))
+    delivered, _skipped = asyncio.run(
+        IP.poll(store, manager, _ok, now=NOW + 61, base_dir=tmp_path)
+    )
     assert delivered == 1
     state = IP.load_state("idle:standup", base_dir=tmp_path)
     assert state.cycle_count == 1
     assert state.last_fire == NOW + 61
-
-
-# ── 🔴 reactive re-arm ──
 
 
 def test_a_fire_RE_ARMS_from_the_fire_instant(tmp_path):
@@ -187,9 +193,7 @@ def test_a_fire_RE_ARMS_from_the_fire_instant(tmp_path):
     state = IP.load_state("idle:standup", base_dir=tmp_path)
     assert state.armed_at == NOW + 61
 
-    # Immediately after: NOT due again. The quiet period restarted at the fire.
     assert IP.is_idle(_idle(), state, now=NOW + 62)[0] is False
-    # A full period after the FIRE (not after the original arm): due again.
     assert IP.is_idle(_idle(), state, now=NOW + 122)[0] is True
 
 
@@ -199,22 +203,28 @@ def test_user_activity_RE_ARMS(tmp_path):
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(_idle(scope="session:chat-1"))
     IP.save_state("idle:standup", IP.IdleState(armed_at=NOW), base_dir=tmp_path)
-    assert IP.is_idle(_idle(), IP.load_state("idle:standup", base_dir=tmp_path), now=NOW + 61)[0]
+    assert IP.is_idle(
+        _idle(), IP.load_state("idle:standup", base_dir=tmp_path), now=NOW + 61
+    )[0]
 
-    rearmed = IP.notify_activity(session_key="chat-1", store=store, now=NOW + 50, base_dir=tmp_path)
+    rearmed = IP.notify_activity(
+        session_key="chat-1", store=store, now=NOW + 50, base_dir=tmp_path
+    )
     assert rearmed == ["idle:standup"]
     state = IP.load_state("idle:standup", base_dir=tmp_path)
     assert state.armed_at == NOW + 50
-    assert IP.is_idle(_idle(), state, now=NOW + 61)[0] is False, "user input did not re-arm"
+    assert (
+        IP.is_idle(_idle(), state, now=NOW + 61)[0] is False
+    ), "user input did not re-arm"
 
 
 def test_activity_on_an_UNRELATED_session_re_arms_nothing(tmp_path):
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(_idle(scope="session:chat-1"))
-    assert IP.notify_activity(session_key="other", store=store, now=NOW, base_dir=tmp_path) == []
-
-
-# ── 🔴 first_idle_secs: honored on the FIRST fire, and 0 disables it ──
+    assert (
+        IP.notify_activity(session_key="other", store=store, now=NOW, base_dir=tmp_path)
+        == []
+    )
 
 
 def test_first_idle_secs_is_HONORED_on_the_first_fire(tmp_path):
@@ -222,19 +232,24 @@ def test_first_idle_secs_is_HONORED_on_the_first_fire(tmp_path):
     trigger = _idle(idle_secs=600, first_idle_secs=10)
     state = IP.IdleState(armed_at=NOW)
     assert IP.wait_secs(trigger, state) == 10
-    assert IP.is_idle(trigger, state, now=NOW + 11)[0] is True, "first_idle_secs was ignored"
+    assert (
+        IP.is_idle(trigger, state, now=NOW + 11)[0] is True
+    ), "first_idle_secs was ignored"
 
 
 def test_first_idle_secs_is_a_ONE_SHOT_spent_by_a_DELIVERED_fire(tmp_path):
     """Autonudge clears it after the first fire so later fires wait the full `idle_secs`. Keyed on
-    `cycle_count`, which only a DELIVERED fire moves — so a mid-turn drop does NOT spend it."""
+    `cycle_count`, which only a DELIVERED fire moves — so a mid-turn drop does NOT spend it.
+    """
     trigger = _idle(idle_secs=600, first_idle_secs=10)
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(trigger)
     manager = _manager(WK.session_key_for("idle:standup"))
     IP.save_state("idle:standup", IP.IdleState(armed_at=NOW), base_dir=tmp_path)
 
-    delivered, _ = asyncio.run(IP.poll(store, manager, _ok, now=NOW + 11, base_dir=tmp_path))
+    delivered, _ = asyncio.run(
+        IP.poll(store, manager, _ok, now=NOW + 11, base_dir=tmp_path)
+    )
     assert delivered == 1
     state = IP.load_state("idle:standup", base_dir=tmp_path)
     assert state.cycle_count == 1
@@ -262,13 +277,12 @@ def test_a_mid_turn_drop_does_NOT_spend_the_short_first_wait(tmp_path):
     asyncio.run(manager._sessions[key].semaphore.acquire())
     IP.save_state("idle:standup", IP.IdleState(armed_at=NOW), base_dir=tmp_path)
 
-    delivered, _ = asyncio.run(IP.poll(store, manager, _ok, now=NOW + 11, base_dir=tmp_path))
+    delivered, _ = asyncio.run(
+        IP.poll(store, manager, _ok, now=NOW + 11, base_dir=tmp_path)
+    )
     assert delivered == 0
     state = IP.load_state("idle:standup", base_dir=tmp_path)
     assert IP.wait_secs(trigger, state) == 10
-
-
-# ── 🔴 the anti-double-fire fence (post-port: one store, so the fence is a row scan) ──
 
 
 def test_a_session_a_NUDGE_ROW_owns_is_SKIPPED_with_a_reason(tmp_path):
@@ -282,7 +296,9 @@ def test_a_session_a_NUDGE_ROW_owns_is_SKIPPED_with_a_reason(tmp_path):
     IP.save_state("nudge:worker", IP.IdleState(armed_at=NOW), base_dir=tmp_path)
 
     fires, skipped = IP.due_fires(store, now=NOW + 61, base_dir=tmp_path)
-    assert [f.trigger.id for f in fires] == ["nudge:worker"], "the nudge row itself must still fire"
+    assert [f.trigger.id for f in fires] == [
+        "nudge:worker"
+    ], "the nudge row itself must still fire"
     assert {(r["trigger_id"], r["reason"]) for r in skipped} == {
         ("idle:standup", IP.SKIP_AUTONUDGE)
     }, "an idle trigger double-fired a session a nudge loop already drives"
@@ -301,7 +317,8 @@ def test_a_session_no_nudge_row_owns_still_fires(tmp_path):
 def test_a_DEACTIVATED_nudge_row_releases_its_session(tmp_path):
     """A deliberate delta from the two-store era, and the safe direction: a deactivated loop is
     not nudging anyone, so the user's own idle trigger on that session may speak again. (The old
-    probe deferred to a deactivated loop too, because it could not see whether it was live.)"""
+    probe deferred to a deactivated loop too, because it could not see whether it was live.)
+    """
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(_idle(scope="session:chat-1"))
     row = _nudge_row(session="chat-1")
@@ -324,7 +341,8 @@ def test_a_GATEWAY_scoped_nudge_row_fences_nothing(tmp_path):
 def test_a_due_nudge_row_with_NO_service_is_a_typed_skip_never_the_wake_path(tmp_path):
     """The routing rule at the poll: a message-bearing row must never fall through to
     `wakeup.dispatch_fires` — waking a loop worker's inbox instead of nudging it would be a
-    silent behavior change. With no service registered, the skip is TYPED and nothing counts."""
+    silent behavior change. With no service registered, the skip is TYPED and nothing counts.
+    """
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(_nudge_row(session="chat-1"))
     IP.save_state("nudge:worker", IP.IdleState(armed_at=NOW), base_dir=tmp_path)
@@ -343,9 +361,6 @@ def test_a_due_nudge_row_with_NO_service_is_a_typed_skip_never_the_wake_path(tmp
     assert ran == [], "a nudge fire leaked into the wake/action path"
     assert [r["reason"] for r in skipped] == [IP.SKIP_NUDGE_UNAVAILABLE]
     assert IP.load_state("nudge:worker", base_dir=tmp_path).cycle_count == 0
-
-
-# ── the ordinary refusals ──
 
 
 def test_a_DISABLED_idle_trigger_never_fires(tmp_path):
@@ -370,7 +385,9 @@ def test_NO_SESSION_MANAGER_is_reported_not_counted_as_a_delivery(tmp_path):
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(_idle())
     IP.save_state("idle:standup", IP.IdleState(armed_at=NOW), base_dir=tmp_path)
-    delivered, skipped = asyncio.run(IP.poll(store, None, _ok, now=NOW + 61, base_dir=tmp_path))
+    delivered, skipped = asyncio.run(
+        IP.poll(store, None, _ok, now=NOW + 61, base_dir=tmp_path)
+    )
     assert delivered == 0
     assert [r["reason"] for r in skipped] == ["no_session_manager"]
     assert IP.load_state("idle:standup", base_dir=tmp_path).cycle_count == 0
@@ -410,7 +427,7 @@ def test_notify_activity_HAS_A_CALL_SITE_on_the_user_input_path(tmp_path):
     knows the user just spoke."""
     import inspect
 
-    from gideon.dashboard.chat_handlers import api_chat
+    from gideon.interfaces.dashboard.chat_handlers import api_chat
 
     src = inspect.getsource(api_chat)
     assert "notify_activity" in src, "kind:idle has no re-arm-on-user-input writer"

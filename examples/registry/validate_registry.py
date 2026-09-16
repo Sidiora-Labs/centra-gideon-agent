@@ -9,7 +9,7 @@ The four checks the front-door policy promises (``CONTRIBUTING.md``):
 
 1. **repo liveness** — ``git ls-remote`` reaches the repo and it has a branch.
 2. **manifest fetch + parse** — a shallow clone must carry an ``app.json`` that
-   ``gideon.apps.manifest.AppManifest`` parses AND validates. The row's
+   ``gideon.extensions.apps.manifest.AppManifest`` parses AND validates. The row's
    ``types`` and ``permissions_declared`` must match what that manifest actually
    declares, because those two fields are the pre-install consent surface the
    registry publishes on the user's behalf.
@@ -52,12 +52,14 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 from urllib.parse import urlsplit
 
-from gideon.apps.manifest import PROVIDER_TYPES, AppManifest
-from gideon.supply_chain import ScanReport, SkillScanner, TrustTier, Verdict
+from gideon.extensions.apps.manifest import PROVIDER_TYPES
+from gideon.extensions.apps.manifest import AppManifest
+from gideon.security.supply_chain import ScanReport
+from gideon.security.supply_chain import SkillScanner
+from gideon.security.supply_chain import TrustTier
+from gideon.security.supply_chain import Verdict
 
-# ── The schema (the authority; app-registry.schema.json is its published mirror) ──
 
-#: Fields a listing PR must supply. Everything else is CI-owned or rejected.
 REQUIRED_FIELDS: tuple[str, ...] = (
     "name",
     "repo",
@@ -67,28 +69,16 @@ REQUIRED_FIELDS: tuple[str, ...] = (
     "maintainer",
     "added",
 )
-#: Fields a listing PR MAY supply. Author-owned exactly like the required ones — they
-#: feed :func:`_identity`, so editing one re-validates the row instead of reading as an
-#: untouched listing.
 OPTIONAL_FIELDS: tuple[str, ...] = ("signer",)
 AUTHOR_FIELDS: tuple[str, ...] = REQUIRED_FIELDS + OPTIONAL_FIELDS
-#: Fields only this script writes (``--write``). A PR may leave them out, and a PR
-#: that supplies them is not trusted — they are overwritten from the actual run.
 CI_OWNED_FIELDS: tuple[str, ...] = ("last_validated", "last_scan_verdict")
 KNOWN_FIELDS: tuple[str, ...] = AUTHOR_FIELDS + CI_OWNED_FIELDS
 
-#: Capability types a row may claim. Derived from core's ``PROVIDER_TYPES`` so a new
-#: upstream capability type is listable the day core ships it, plus the two
-#: non-provider surfaces an app can be (a backend process, a UI page).
 NON_PROVIDER_TYPES = frozenset({"backend", "ui"})
 ALLOWED_TYPES = frozenset(PROVIDER_TYPES) | NON_PROVIDER_TYPES
 
-#: The one verdict that blocks. Everything below it lists and is displayed.
 BLOCKING_VERDICT = Verdict.DANGEROUS
 
-#: A listing repo must be a plain ``https`` URL. ``file://`` is a TEST affordance
-#: behind ``--allow-file-repos``: the CI workflow never passes it, so a PR cannot
-#: aim the fetcher at the runner's filesystem.
 HTTPS_SCHEME = "https"
 FILE_SCHEME = "file"
 
@@ -102,42 +92,19 @@ LICENSE_FILENAMES: tuple[str, ...] = (
     "COPYING.md",
 )
 
-#: Caps so one hostile listing cannot wedge or drown a CI runner.
 MAX_REPO_BYTES = 50 * 1024 * 1024
 MAX_REPO_FILES = 5_000
 LS_REMOTE_TIMEOUT_SECS = 60
 CLONE_TIMEOUT_SECS = 180
 
-# ── signer identity: recorded per listing, verified nowhere in this script ────
-#
-# The field is OPTIONAL on purpose. Most community apps are not signed and that is a
-# supported state, not a defect, so a required field would be answered by whatever the
-# example in CONTRIBUTING.md happens to say — turning "this author never told us" into a
-# confident-looking answer nobody actually made. The cost of optional is that absence
-# must stay legible, which is what the four states below buy.
-#
-# Nothing is INFERRED either. A shallow clone of a source repository is not the release
-# bundle a signature covers, so "no signature file in the checkout" would not mean "the
-# release is unsigned" — recording that guess as a fact would be the same lie one step
-# further along.
 
-#: The reserved ``signer`` value an author writes to state, on the record, that this
-#: app's bundles are not signed. Reserved because it is also a legal identity shape: a
-#: signer may therefore not be *named* ``unsigned``.
 UNSIGNED_DECLARATION = "unsigned"
 
-#: What a row says about who signs its bundles. FOUR states, never two — "the author
-#: declared no signature" and "the author said nothing" are different published facts and
-#: a reader must be able to tell them apart, the same reason core's manifest emits
-#: ``network: false`` rather than omitting a false value.
-SIGNER_NAMED = "named"  # ``signer`` names an identity — the author's claim, not proof
+SIGNER_NAMED = "named"
 SIGNER_UNSIGNED = "unsigned"  # the author declared the reserved value: no signature
 SIGNER_UNDECLARED = "undeclared"  # the field was omitted: no claim in either direction
 SIGNER_INVALID = "invalid"  # present but refused; never read as any of the other three
 
-#: Upstream a signer identity IS a trust-store filename stem
-#: (``trusted_keys/<Signer>.pub``), so a row may only name something that could be one.
-#: The shape doubles as the reason the value is safe to echo into the PR comment verbatim.
 SIGNER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 KEBAB_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -172,20 +139,10 @@ class RowResult:
     name: str
     repo: str
     listable: bool = False
-    #: The scanner verdict, or ``None`` when validation stopped before the scan
-    #: ran. ``None`` is never "clean" — a row that never reached the scanner is
-    #: blocked by whatever stopped it.
     verdict: str | None = None
-    #: What the ROW claims about who signs this app's bundles — one of the four
-    #: ``SIGNER_*`` states. Set on every row, including blocked ones, so a reviewer sees
-    #: the claim even when something else refused the listing. This is the authority:
-    #: never infer the state from ``signer``, which is ``None`` for three of the four.
     signer_state: str = SIGNER_UNDECLARED
-    #: The declared identity, set only when ``signer_state`` is :data:`SIGNER_NAMED`. A
-    #: CLAIM — nothing here verified a signature, so it must never render as proof.
     signer: str | None = None
     blocking: list[Reason] = field(default_factory=list)
-    #: Recorded, shown, and deliberately NOT blocking (scanner warnings).
     display: list[Reason] = field(default_factory=list)
     findings: list[dict[str, Any]] = field(default_factory=list)
 
@@ -208,10 +165,7 @@ class RegistryResult:
     """The verdict on a whole ``app-registry.json`` (or on the rows a PR changed)."""
 
     rows: list[RowResult] = field(default_factory=list)
-    #: File-level problems (not a valid registry document, duplicate names).
     blocking: list[Reason] = field(default_factory=list)
-    #: How many rows this run actually fetched and scanned. Reported explicitly so
-    #: "nothing changed" can never be mistaken for "everything checked out".
     rows_validated: int = 0
     rows_skipped_unchanged: int = 0
 
@@ -233,7 +187,6 @@ class RegistryResult:
         }
 
 
-# ── git (the one fetch mechanism: https in production, file:// under test) ────
 
 
 def _git_env() -> dict[str, str]:
@@ -271,9 +224,6 @@ def _git_error(proc: subprocess.CompletedProcess[str]) -> str:
     return text[-1][:200] if text else f"git exited {proc.returncode}"
 
 
-#: What git says when the fetch was refused rather than answered. Reaching one of
-#: these is also proof the no-prompt environment worked: git gave up instead of
-#: waiting for a password nobody was there to type.
 _AUTH_REFUSAL_MARKERS: tuple[str, ...] = (
     "authentication failed",
     "could not read username",
@@ -282,8 +232,6 @@ _AUTH_REFUSAL_MARKERS: tuple[str, ...] = (
     "permission denied",
 )
 
-#: Appended when the refusal above happens, because the verbatim git message sends a
-#: contributor who simply mistyped their repo name looking for a credentials problem.
 _PRIVATE_OR_MISSING_HINT = (
     " A forge answers a private repository and a nonexistent one the same way, so check"
     " the URL and that the repository is public."
@@ -662,8 +610,6 @@ def check_row_schema(row: object, *, allow_file_repos: bool) -> list[Reason]:
 def validate_row(row: dict[str, Any], *, allow_file_repos: bool) -> RowResult:
     """Validate one row end to end. Returns a result; never raises."""
     result = RowResult(name=str(row.get("name", "(unnamed)")), repo=str(row.get("repo", "")))
-    # Recorded before anything can return early, so the claim is echoed on blocked rows
-    # too — a reviewer reading a refusal still sees what the row said about signing.
     result.signer_state, result.signer = classify_signer(row)
     schema_reasons = check_row_schema(row, allow_file_repos=allow_file_repos)
     if schema_reasons:
@@ -909,12 +855,8 @@ def apply_validation_stamps(apps: list[Any], result: RegistryResult, *, now: str
         row["last_scan_verdict"] = row_result.verdict
 
 
-# ── reporting (this markdown IS the PR comment — read it as UI copy) ──────────
 
 
-#: How each signer state reads in the PR comment. Three distinguishable phrases plus a
-#: refusal: "no claim" must never be able to read as "declared unsigned", or the comment
-#: would attribute a statement to an author who never made one.
 _SIGNER_CELLS: dict[str, str] = {
     SIGNER_UNSIGNED: "declared unsigned",
     SIGNER_UNDECLARED: "no claim",

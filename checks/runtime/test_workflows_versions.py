@@ -15,11 +15,13 @@ from typing import Any, cast
 
 import pytest
 
-from gideon.action_providers.run_workflow_provider import RunWorkflowActionProvider
-from gideon.workflows import defs as defs_mod
-from gideon.workflows import store, versions
-from gideon.workflows.models import RunStatus, WorkflowRun
-from gideon.workflows.watchdog import WorkflowWatchdog
+from gideon.automation.workflows import defs as defs_mod
+from gideon.automation.workflows import store, versions
+from gideon.automation.workflows.models import RunStatus, WorkflowRun
+from gideon.automation.workflows.watchdog import WorkflowWatchdog
+from gideon.integrations.action_providers.run_workflow_provider import (
+    RunWorkflowActionProvider,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -27,7 +29,7 @@ def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
 
 
@@ -39,12 +41,11 @@ def _spec(version: int, *, node_id: str = "only", expr: str = "done") -> dict[st
     }
 
 
-# ── monotonic append + rollback (the falsification target) ───────────────────
-
-
 def test_record_version_appends_monotonically_and_pins_latest() -> None:
     assert versions.record_version("sample", _spec(1), source=versions.SOURCE_USER) == 1
-    assert versions.record_version("sample", _spec(2), source=versions.SOURCE_REFINER) == 2
+    assert (
+        versions.record_version("sample", _spec(2), source=versions.SOURCE_REFINER) == 2
+    )
     assert [r.version for r in versions.list_versions("sample")] == [1, 2]
     assert versions.latest_version("sample") == 2
     assert versions.pinned_version("sample") == 2
@@ -61,11 +62,9 @@ def test_rollback_moves_the_pointer_and_keeps_history_intact() -> None:
     assert versions.rollback("sample", 1) is True
 
     assert versions.pinned_version("sample") == 1
-    # History is intact — neither snapshot was rewritten or removed.
     assert versions.get_version("sample", 1) is not None
     assert versions.get_version("sample", 2) is not None
     assert [r.version for r in versions.list_versions("sample")] == [1, 2]
-    # The v2 snapshot still carries its original spec (not clobbered by the re-pin).
     assert versions.get_version("sample", 2).spec["root"]["id"] == "only"
 
 
@@ -77,12 +76,8 @@ def test_repin_refuses_a_version_that_was_never_recorded() -> None:
 
 def test_record_never_overwrites_an_existing_snapshot() -> None:
     versions.record_version("sample", _spec(1, expr="first"))
-    # A repeat record of the same version number does NOT rewrite the stored bytes.
     versions.record_version("sample", _spec(1, expr="second"))
     assert versions.get_version("sample", 1).spec["root"]["config"]["expr"] == "first"
-
-
-# ── typed-op diff + maturity (the Versions tab surface) ──────────────────────
 
 
 def test_diff_emits_typed_ops_between_versions() -> None:
@@ -124,35 +119,34 @@ def test_maturity_is_l0_for_a_bare_template_and_l3_when_proven() -> None:
             ],
         },
         "runtime_hints": {
-            "execution": {"escalation": {"attempt_cap": 3}, "breaker": {"no_progress_stop": 5}},
+            "execution": {
+                "escalation": {"attempt_cap": 3},
+                "breaker": {"no_progress_stop": 5},
+            },
             "judge": {"stop_condition": {"consecutive_clean": 1}},
         },
     }
-    mature = versions.template_maturity(proven_spec, clean_runs=5, evaluator_rejected=True)
+    mature = versions.template_maturity(
+        proven_spec, clean_runs=5, evaluator_rejected=True
+    )
     assert mature["level"] == 3 and mature["label"] == "mature"
-    # Same spec, but the gate has never rejected a bad run → not yet proven.
-    unproven = versions.template_maturity(proven_spec, clean_runs=5, evaluator_rejected=False)
+    unproven = versions.template_maturity(
+        proven_spec, clean_runs=5, evaluator_rejected=False
+    )
     assert unproven["level"] == 2
-
-
-# ── the live writer: save_def records a version ──────────────────────────────
 
 
 @pytest.mark.anyio
 async def test_save_def_records_a_version_snapshot() -> None:
-    from gideon.workflows.native_defs import NativeWorkflowDefProvider
+    from gideon.automation.workflows.native_defs import NativeWorkflowDefProvider
 
     provider = NativeWorkflowDefProvider()
     root = {"kind": "transform", "id": "only", "config": {"expr": "hi"}}
     await provider.save_def(name="authored", root=root, description="x")
     await provider.save_def(name="authored", root=root, description="y")
 
-    # save_def advances version on every save (1 then 2); each is snapshotted, pinned latest.
     assert [r.version for r in versions.list_versions("authored")] == [1, 2]
     assert versions.pinned_version("authored") == 2
-
-
-# ── run pins the executed version (reproducibility) ──────────────────────────
 
 
 class _StubDefs(defs_mod.WorkflowDefProvider):
@@ -171,7 +165,9 @@ class _StubDefs(defs_mod.WorkflowDefProvider):
 
 
 @pytest.mark.anyio
-async def test_a_trigger_fired_run_pins_the_def_version_it_executed(monkeypatch) -> None:
+async def test_a_trigger_fired_run_pins_the_def_version_it_executed(
+    monkeypatch,
+) -> None:
     """The gap the atom names: the trigger-fired path constructed a run WITHOUT spec_version,
     so a hook-launched refiner run always recorded version 1. With the fix, the launched run
     pins the def's real version — proven via the queue policy, which persists a run and does
@@ -184,11 +180,12 @@ async def test_a_trigger_fired_run_pins_the_def_version_it_executed(monkeypatch)
     }
     defs_mod.register_provider(_StubDefs(spec))
     monkeypatch.setattr(
-        "gideon.action_providers.services.get_action_services",
+        "gideon.integrations.action_providers.services.get_action_services",
         lambda: SimpleNamespace(workflows=WorkflowWatchdog()),
     )
-    # A prior RUNNING run forces the `queue` branch: a durable DRAFT row, nothing launched.
-    prior = store.create(WorkflowRun(id="", workflow_name="sample", status=RunStatus.RUNNING))
+    prior = store.create(
+        WorkflowRun(id="", workflow_name="sample", status=RunStatus.RUNNING)
+    )
     store.write_spec(prior.id, spec)
     try:
         ctx = cast(Any, SimpleNamespace(context="trigger-wf2lea6"))
@@ -202,9 +199,12 @@ async def test_a_trigger_fired_run_pins_the_def_version_it_executed(monkeypatch)
 @pytest.mark.anyio
 async def test_accepting_a_template_diff_records_a_new_refiner_version() -> None:
     """§3.1 "Accept → new template VERSION": applying an accepted refiner diff saves the target
-    through the writable provider, which appends an immutable v2 (source=refiner) and pins it."""
-    from gideon.dashboard.handlers.learning import _apply_accepted_template_diff
-    from gideon.workflows.native_defs import NativeWorkflowDefProvider
+    through the writable provider, which appends an immutable v2 (source=refiner) and pins it.
+    """
+    from gideon.automation.workflows.native_defs import NativeWorkflowDefProvider
+    from gideon.interfaces.dashboard.handlers.learning import (
+        _apply_accepted_template_diff,
+    )
 
     provider = NativeWorkflowDefProvider()
     defs_mod.register_provider(provider)
@@ -214,7 +214,9 @@ async def test_accepting_a_template_diff_records_a_new_refiner_version() -> None
             "id": "root",
             "children": [{"kind": "stage", "id": "build", "config": {"prompt": "go"}}],
         }
-        await provider.save_def(name="refine-me", root=root, description="a refinable template")
+        await provider.save_def(
+            name="refine-me", root=root, description="a refinable template"
+        )
         assert versions.pinned_version("refine-me") == 1
 
         prop = SimpleNamespace(
@@ -222,7 +224,11 @@ async def test_accepting_a_template_diff_records_a_new_refiner_version() -> None
             target="refine-me",
             change_manifest={
                 "targeted_fix": [
-                    {"op": "update_node", "node_id": "build", "fields": {"model_tier": "reasoning"}}
+                    {
+                        "op": "update_node",
+                        "node_id": "build",
+                        "fields": {"model_tier": "reasoning"},
+                    }
                 ]
             },
         )
@@ -231,13 +237,9 @@ async def test_accepting_a_template_diff_records_a_new_refiner_version() -> None
         assert result["applied"] is True and result["version"] == 2
         assert versions.pinned_version("refine-me") == 2
         assert versions.get_version("refine-me", 2).source == versions.SOURCE_REFINER
-        # History intact: v1 still there.
         assert versions.get_version("refine-me", 1) is not None
     finally:
         defs_mod.unregister_provider(provider.name)
-
-
-# ── the HTTP endpoints the FE tabs call ──────────────────────────────────────
 
 
 def _req(method: str, path: str, *, match_info=None, body=None):
@@ -262,16 +264,20 @@ def _resp_body(resp):
 
 @pytest.mark.anyio
 async def test_versions_and_repin_endpoints_round_trip() -> None:
-    from gideon.workflows import defs as defs_mod
-    from gideon.workflows import handlers as H
-    from gideon.workflows.native_defs import NativeWorkflowDefProvider
+    from gideon.automation.workflows import defs as defs_mod
+    from gideon.automation.workflows import handlers as H
+    from gideon.automation.workflows.native_defs import NativeWorkflowDefProvider
 
     provider = NativeWorkflowDefProvider()
     defs_mod.register_provider(provider)
     try:
         root = {"kind": "transform", "id": "only", "config": {"expr": "a"}}
-        await provider.save_def(name="ep", root=root, description="endpoint template one")
-        await provider.save_def(name="ep", root=root, description="endpoint template two")  # v2
+        await provider.save_def(
+            name="ep", root=root, description="endpoint template one"
+        )
+        await provider.save_def(
+            name="ep", root=root, description="endpoint template two"
+        )
 
         resp = await H.api_def_versions(
             _req("GET", "/api/workflows/ep/versions", match_info={"name": "ep"})
@@ -281,7 +287,6 @@ async def test_versions_and_repin_endpoints_round_trip() -> None:
         assert body["pinned"] == 2
         assert "level" in body["maturity"]
 
-        # Roll back to v1 — the pointer moves, history intact.
         repin = await H.api_def_repin(
             _req(
                 "POST",
@@ -298,7 +303,6 @@ async def test_versions_and_repin_endpoints_round_trip() -> None:
         )
         assert after["pinned"] == 1 and len(after["versions"]) == 2
 
-        # A version that was never recorded is a 404, not a silent no-op.
         missing = await H.api_def_repin(
             _req(
                 "POST",
@@ -309,7 +313,6 @@ async def test_versions_and_repin_endpoints_round_trip() -> None:
         )
         assert missing.status == 404
 
-        # The ledger endpoint answers even with no runs recorded.
         ledger = await H.api_def_ledger(
             _req("GET", "/api/workflows/ep/ledger", match_info={"name": "ep"})
         )
@@ -321,7 +324,7 @@ async def test_versions_and_repin_endpoints_round_trip() -> None:
 def test_the_versions_and_refine_routes_are_registered() -> None:
     from aiohttp import web
 
-    from gideon.workflows import handlers as H
+    from gideon.automation.workflows import handlers as H
 
     app = web.Application()
     H.register_workflow_routes(app)

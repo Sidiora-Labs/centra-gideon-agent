@@ -29,17 +29,18 @@ from pathlib import Path
 
 import pytest
 
-from gideon.routing import gap, policy, proposals, stats
+from gideon.engine.routing import gap, policy, proposals, stats
 
 UC = "chat"
 QC = "general"
 CLOUDY = "cloudy:big"
 LOCAL = "ollama:small"
-#: ``detect_gap`` derives its candidate pool as ``sorted(fold rows)``, which is this order.
 REFS = [CLOUDY, LOCAL]
 
 
-def _rec(*, provider: str = "ollama", model: str = "small", audit_id: str = "aud-1") -> dict:
+def _rec(
+    *, provider: str = "ollama", model: str = "small", audit_id: str = "aud-1"
+) -> dict:
     """One ``AttemptRecord.to_json_line`` dict, the shape the fold hook is handed."""
     return {
         "audit_id": audit_id,
@@ -99,7 +100,9 @@ def _table(home: Path, mode: str, **extra) -> None:
     entry.update(extra)
     pol.setdefault("use_cases", {})[UC] = entry
     policy.save_policy(home, pol)
-    assert policy.mode_for(UC, home=home) == mode, "the fixture did not set the mode it meant to"
+    assert (
+        policy.mode_for(UC, home=home) == mode
+    ), "the fixture did not set the mode it meant to"
 
 
 @pytest.fixture()
@@ -111,10 +114,12 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     rather than the detector. ``test_the_master_switch_is_what_the_fixture_overrides`` pins that
     premise, and ``test_the_detector_is_gated_on_the_master_switch`` proves the gate is live.
     """
-    from gideon.config.loader import config_dir
+    from gideon.core.config.loader import config_dir
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    assert Path(config_dir()).resolve() == tmp_path.resolve(), "GIDEON_HOME did not bind"
+    assert (
+        Path(config_dir()).resolve() == tmp_path.resolve()
+    ), "GIDEON_HOME did not bind"
     monkeypatch.setattr(policy, "master_enabled", lambda: True)
     monkeypatch.setattr(policy, "_default_home", lambda: tmp_path)
     monkeypatch.setattr(proposals, "_default_home", lambda: tmp_path)
@@ -123,16 +128,13 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_the_master_switch_is_what_the_fixture_overrides() -> None:
-    from gideon.config.loader import RoutingConfig
+    from gideon.core.config.loader import RoutingConfig
 
     assert RoutingConfig().enabled is False
 
 
 def _policy_bytes(home: Path) -> bytes:
     return (home / "routing_policy.json").read_bytes()
-
-
-# ── the wire: the fold write is the trigger point ───────────────────────────────
 
 
 class TestTheWire:
@@ -156,12 +158,15 @@ class TestTheWire:
         _table(home, "heuristic")
         _fold(home, {CLOUDY: (20, 0.40), LOCAL: (19, 0.95)})
         for i in range(3):
-            stats.record_routing_stats(_rec(audit_id=f"aud-{i}"), home=home, now=f"2026-08-25T0{i}")
+            stats.record_routing_stats(
+                _rec(audit_id=f"aud-{i}"), home=home, now=f"2026-08-25T0{i}"
+            )
         assert len(proposals.pending(home=home)) == 1
 
     def test_an_unclassified_attempt_proposes_nothing(self, home: Path) -> None:
         """A row with no ``query_class`` is not attributable to a cell — the fold skips it, and so
-        must the detector (it would otherwise propose against a bucket that does not exist)."""
+        must the detector (it would otherwise propose against a bucket that does not exist).
+        """
         _table(home, "heuristic")
         _decisive(home)
         rec = _rec()
@@ -173,7 +178,8 @@ class TestTheWire:
         self, home: Path, monkeypatch: pytest.MonkeyPatch, caplog
     ) -> None:
         """The fold write is best-effort observability that must not break a model call — and a
-        detector failure must be attributable to the DETECTOR, not read as a lost fold."""
+        detector failure must be attributable to the DETECTOR, not read as a lost fold.
+        """
 
         def boom(*a, **kw):
             raise RuntimeError("detector exploded")
@@ -189,11 +195,10 @@ class TestTheWire:
         assert folded[LOCAL]["n"] == 21, "the fold itself must still have landed"
 
 
-# ── propose-don't-write, end to end ─────────────────────────────────────────────
-
-
 class TestProposeDoesNotWriteTheTable:
-    def test_the_fold_write_leaves_routing_policy_byte_identical(self, home: Path) -> None:
+    def test_the_fold_write_leaves_routing_policy_byte_identical(
+        self, home: Path
+    ) -> None:
         """The atom's central negative, asserted over the whole path rather than over ``propose``.
 
         A proposal is enqueued in the same call, so this is not the trivially-true "nothing
@@ -205,10 +210,14 @@ class TestProposeDoesNotWriteTheTable:
 
         stats.record_routing_stats(_rec(), home=home, now="2026-08-25T00:00:00Z")
 
-        assert proposals.pending(home=home), "nothing was proposed — this would pass vacuously"
+        assert proposals.pending(
+            home=home
+        ), "nothing was proposed — this would pass vacuously"
         assert _policy_bytes(home) == before
 
-    def test_the_byte_harness_can_see_the_write_that_accepting_makes(self, home: Path) -> None:
+    def test_the_byte_harness_can_see_the_write_that_accepting_makes(
+        self, home: Path
+    ) -> None:
         """The floor for the test above, and the ``accept`` half of the clause in one drive:
         the table updates, carries the ``proposal_id`` basis, and the bytes move."""
         _table(home, "heuristic")
@@ -223,7 +232,9 @@ class TestProposeDoesNotWriteTheTable:
         assert policy.table_order(UC, QC, home=home) == [LOCAL, CLOUDY]
         assert policy.order_basis(UC, QC, home=home)["proposal_id"] == prop.id
 
-    def test_rejecting_writes_no_table_and_suppresses_the_repropose(self, home: Path) -> None:
+    def test_rejecting_writes_no_table_and_suppresses_the_repropose(
+        self, home: Path
+    ) -> None:
         """Reject means "the table was right": no write, and the finding is silenced for the
         cooldown even though the fold still says the same thing on the next call."""
         _table(home, "heuristic")
@@ -236,11 +247,12 @@ class TestProposeDoesNotWriteTheTable:
         assert _policy_bytes(home) == before
         assert proposals.pending(home=home) == []
 
-        stats.record_routing_stats(_rec(audit_id="aud-2"), home=home, now="2026-08-25T01:00:00Z")
-        assert proposals.pending(home=home) == [], "the cooldown did not suppress the re-propose"
-
-
-# ── the floors: n >= min_samples, and the hysteresis band ───────────────────────
+        stats.record_routing_stats(
+            _rec(audit_id="aud-2"), home=home, now="2026-08-25T01:00:00Z"
+        )
+        assert (
+            proposals.pending(home=home) == []
+        ), "the cooldown did not suppress the re-propose"
 
 
 class TestTheConfidenceFloor:
@@ -266,7 +278,11 @@ class TestTheConfidenceFloor:
         monkeypatch.setattr(
             policy,
             "_routing_knobs",
-            lambda: {"hysteresis": 0.05, "cloud_quality_margin": 0.10, "min_samples": 6},
+            lambda: {
+                "hysteresis": 0.05,
+                "cloud_quality_margin": 0.10,
+                "min_samples": 6,
+            },
         )
         fold = _fold(home, {CLOUDY: (5, 0.40), LOCAL: (5, 0.95)})
         assert gap.detect_gap(fold, UC, QC, home=home) is None
@@ -287,16 +303,16 @@ class TestTheQualityGap:
         assert gap.detect_gap(fold, UC, QC, home=home) is not None
 
 
-# ── what "a gap" means: the finding is not what routing does ────────────────────
-
-
 class TestOnlyWhenTheFindingIsNotInEffect:
-    def test_no_proposal_when_the_learned_stage_is_already_live(self, home: Path) -> None:
+    def test_no_proposal_when_the_learned_stage_is_already_live(
+        self, home: Path
+    ) -> None:
         """Under ``learned`` with no recorded order the stage reorders on every call, so there is
-        nothing to decide — the machine does not ask permission for what it already does."""
+        nothing to decide — the machine does not ask permission for what it already does.
+        """
         _table(home, "learned")
         fold = _decisive(home)
-        assert policy.route_refs(UC, QC, REFS, home=home) == [LOCAL, CLOUDY]  # premise
+        assert policy.route_refs(UC, QC, REFS, home=home) == [LOCAL, CLOUDY]
         assert gap.detect_gap(fold, UC, QC, home=home) is None
 
     def test_the_learned_stage_is_idempotent(self, home: Path) -> None:
@@ -314,18 +330,25 @@ class TestOnlyWhenTheFindingIsNotInEffect:
         the table has an order a proposal is the ONLY route to changing it."""
         _table(home, "learned")
         policy.set_order(
-            UC, QC, REFS, home=home, basis={"source": "proposal", "proposal_id": "rp-older"}
+            UC,
+            QC,
+            REFS,
+            home=home,
+            basis={"source": "proposal", "proposal_id": "rp-older"},
         )
         fold = _decisive(home)
-        assert policy.route_refs(UC, QC, REFS, home=home) == REFS  # premise: the table wins
+        assert policy.route_refs(UC, QC, REFS, home=home) == REFS
 
         prop = gap.detect_gap(fold, UC, QC, home=home)
         assert prop is not None
         assert prop.current == REFS and prop.proposed == [LOCAL, CLOUDY]
 
-    def test_a_hand_set_order_is_refused_rather_than_overwritten(self, home: Path) -> None:
+    def test_a_hand_set_order_is_refused_rather_than_overwritten(
+        self, home: Path
+    ) -> None:
         """A user-set order is theirs. The proposal is still enqueued (the finding is real), but
-        accepting it refuses and says why, instead of the machine overwriting the decision."""
+        accepting it refuses and says why, instead of the machine overwriting the decision.
+        """
         _table(home, "learned")
         policy.set_order(UC, QC, REFS, home=home, basis={"source": "user"})
         fold = _decisive(home)
@@ -354,7 +377,7 @@ class TestTheGatesThatSilenceIt:
     def test_a_pinned_use_case_proposes_nothing(self, home: Path) -> None:
         """A pin short-circuits ordering entirely, so a recorded order under one would be dead."""
         _table(home, "heuristic", pin="cloud")
-        assert policy.pin_for(UC, home=home) == "cloud"  # premise
+        assert policy.pin_for(UC, home=home) == "cloud"
         assert gap.detect_gap(_decisive(home), UC, QC, home=home) is None
 
     @pytest.mark.parametrize(
@@ -375,9 +398,6 @@ class TestTheGatesThatSilenceIt:
         assert gap.detect_gap(fold, UC, QC, home=home) is None
 
 
-# ── the evidence (§6.3): reviewable without re-running anything ─────────────────
-
-
 class TestEvidence:
     def _audit(self, home: Path, rows: list[dict]) -> None:
         (home / "model_calls.jsonl").write_text(
@@ -387,14 +407,18 @@ class TestEvidence:
     def _proposal(self, home: Path):
         _table(home, "heuristic")
         fold = _decisive(
-            home, latency={CLOUDY: 900.0, LOCAL: 120.0}, cost={CLOUDY: 0.004, LOCAL: 0.0}
+            home,
+            latency={CLOUDY: 900.0, LOCAL: 120.0},
+            cost={CLOUDY: 0.004, LOCAL: 0.0},
         )
         self._audit(
             home,
             [
-                {**_rec(provider="cloudy", model="big", audit_id="aud-c"), "latency_ms": 900.0},
+                {
+                    **_rec(provider="cloudy", model="big", audit_id="aud-c"),
+                    "latency_ms": 900.0,
+                },
                 {**_rec(audit_id="aud-l"), "latency_ms": 120.0},
-                # A different cell, and a different ref — neither may be sampled.
                 {**_rec(audit_id="aud-other"), "query_class": "summarize"},
                 {**_rec(provider="third", model="party", audit_id="aud-third")},
             ],
@@ -407,7 +431,11 @@ class TestEvidence:
         ev = self._proposal(home).evidence
         assert ev["n"] == {CLOUDY: 20, LOCAL: 20}
         assert ev["scores"] == {CLOUDY: 0.4, LOCAL: 0.95}
-        assert (ev["min_samples"], ev["hysteresis"], ev["cloud_quality_margin"]) == (5, 0.05, 0.10)
+        assert (ev["min_samples"], ev["hysteresis"], ev["cloud_quality_margin"]) == (
+            5,
+            0.05,
+            0.10,
+        )
 
     def test_the_deltas_are_promoted_minus_demoted(self, home: Path) -> None:
         """Negative is better on both axes: the promoted ref is faster and cheaper here. p50 comes
@@ -418,11 +446,14 @@ class TestEvidence:
 
     def test_sample_audit_ids_correlate_to_this_cell_only(self, home: Path) -> None:
         """§6.4's correlation handle: a reviewer pastes one into the audit reader. Ids from another
-        query_class or another ref would send them to a call the proposal was not built from."""
+        query_class or another ref would send them to a call the proposal was not built from.
+        """
         ev = self._proposal(home).evidence
-        assert ev["sample_audit_ids"] == ["aud-l", "aud-c"]  # newest first
+        assert ev["sample_audit_ids"] == ["aud-l", "aud-c"]
 
-    def test_a_missing_audit_tail_thins_the_evidence_but_still_proposes(self, home: Path) -> None:
+    def test_a_missing_audit_tail_thins_the_evidence_but_still_proposes(
+        self, home: Path
+    ) -> None:
         """The tail is a forensic convenience; the fold is the durable record. No tail must not
         cost the user the proposal."""
         _table(home, "heuristic")
@@ -434,20 +465,22 @@ class TestEvidence:
         assert prop.evidence["p50_delta_ms"] == 0.0
 
 
-# ── SC #8: deleting the state files degrades, and touches no database ───────────
-
-
 class TestDegradation:
     def _dbs(self, home: Path) -> list[str]:
         return sorted(str(p.relative_to(home)) for p in home.rglob("*.db"))
 
-    def test_deleting_both_files_degrades_and_writes_no_database(self, home: Path) -> None:
+    def test_deleting_both_files_degrades_and_writes_no_database(
+        self, home: Path
+    ) -> None:
         """The clause in one drive: with the fold and the table gone, routing keeps the bound order,
         the detector proposes nothing, and the whole path writes no ``memory.db``/``knowledge.db``.
         """
         _table(home, "learned")
         _decisive(home)
-        assert policy.route_refs(UC, QC, REFS, home=home) == [LOCAL, CLOUDY]  # premise: deciding
+        assert policy.route_refs(UC, QC, REFS, home=home) == [
+            LOCAL,
+            CLOUDY,
+        ]
 
         (home / "routing_stats.json").unlink()
         (home / "routing_policy.json").unlink()

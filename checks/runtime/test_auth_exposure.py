@@ -20,11 +20,11 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.auth import credentials as creds
-from gideon.auth import enrollment
-from gideon.config.loader import AppConfig
-from gideon.dashboard import exposure, token_auth
-from gideon.dashboard.handlers import auth as auth_h
+from gideon.core.config.loader import AppConfig
+from gideon.interfaces.dashboard import exposure, token_auth
+from gideon.interfaces.dashboard.handlers import auth as auth_h
+from gideon.security.auth import credentials as creds
+from gideon.security.auth import enrollment
 
 GOOD_PASSWORD = "correct-horse-battery-staple"
 PORT = 10000
@@ -32,8 +32,8 @@ PORT = 10000
 
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
-    import gideon.config.loader as loader
-    from gideon.dashboard import session_store
+    import gideon.core.config.loader as loader
+    from gideon.interfaces.dashboard import session_store
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(creds, "config_dir", lambda: tmp_path)
@@ -49,11 +49,9 @@ def _isolated(tmp_path, monkeypatch):
 
 def _write_config(home, **dashboard) -> None:
     (home / "config.json").write_text(
-        json.dumps({"dashboard": dashboard, "auth": {"login_enabled": True}}), encoding="utf-8"
+        json.dumps({"dashboard": dashboard, "auth": {"login_enabled": True}}),
+        encoding="utf-8",
     )
-
-
-# ── The exposure signal ───────────────────────────────────────────────────
 
 
 def test_a_local_install_is_not_exposed() -> None:
@@ -65,7 +63,7 @@ def test_a_local_install_is_not_exposed() -> None:
 def test_dashboard_public_url_declares_exposure(_isolated) -> None:
     _write_config(_isolated, public_url="https://pc.example.com")
     assert exposure.is_exposed() is True
-    assert exposure.public_host() == "pc.example.com"
+    assert exposure.public_host() == "gideon.example.com"
     assert exposure.is_https() is True
 
 
@@ -76,7 +74,7 @@ def test_external_access_public_url_is_honored_as_a_fallback(_isolated) -> None:
         encoding="utf-8",
     )
     assert exposure.is_exposed() is True
-    assert exposure.public_host() == "pc.example.com"
+    assert exposure.public_host() == "gideon.example.com"
 
 
 def test_dashboard_url_alone_does_NOT_declare_exposure(_isolated) -> None:
@@ -91,9 +89,9 @@ def test_dashboard_url_alone_does_NOT_declare_exposure(_isolated) -> None:
 
 
 def test_a_bare_host_is_assumed_https(_isolated) -> None:
-    _write_config(_isolated, public_url="pc.example.com")
+    _write_config(_isolated, public_url="gideon.example.com")
     assert exposure.is_https() is True
-    assert exposure.public_host() == "pc.example.com"
+    assert exposure.public_host() == "gideon.example.com"
 
 
 def test_an_http_public_url_does_not_get_a_secure_cookie(_isolated) -> None:
@@ -108,9 +106,6 @@ def test_a_corrupt_config_reports_not_exposed(_isolated) -> None:
     (_isolated / "config.json").write_text("{ not json", encoding="utf-8")
     assert exposure.is_exposed() is False
     assert token_auth.secure_cookies() is False
-
-
-# ── The Secure cookie ─────────────────────────────────────────────────────
 
 
 def test_secure_is_off_by_default() -> None:
@@ -137,8 +132,10 @@ async def test_the_login_cookie_carries_secure_when_exposed(_isolated) -> None:
             "/api/auth/login", json={"username": "jordan", "password": GOOD_PASSWORD}
         )
         assert resp.status == 200
-        morsel = resp.cookies[f"pc_token_{PORT}"]
-        assert morsel["secure"], "an exposed instance must set Secure on the session cookie"
+        morsel = resp.cookies[f"gideon_token_{PORT}"]
+        assert morsel[
+            "secure"
+        ], "an exposed instance must set Secure on the session cookie"
         assert morsel["httponly"]
 
 
@@ -156,21 +153,18 @@ async def test_the_login_cookie_omits_secure_locally(_isolated) -> None:
         resp = await client.post(
             "/api/auth/login", json={"username": "jordan", "password": GOOD_PASSWORD}
         )
-        assert not resp.cookies[f"pc_token_{PORT}"]["secure"]
-
-
-# ── The WS CSP ────────────────────────────────────────────────────────────
+        assert not resp.cookies[f"gideon_token_{PORT}"]["secure"]
 
 
 def test_the_csp_is_unchanged_for_a_local_install() -> None:
-    from gideon.dashboard.server import _ws_csp_sources
+    from gideon.interfaces.dashboard.server import _ws_csp_sources
 
     assert _ws_csp_sources() == ""
 
 
 def test_the_csp_names_the_public_host_when_exposed(_isolated) -> None:
     """Without this the dashboard renders and then silently receives no events."""
-    from gideon.dashboard.server import _ws_csp_sources
+    from gideon.interfaces.dashboard.server import _ws_csp_sources
 
     _write_config(_isolated, public_url="https://pc.example.com")
     sources = _ws_csp_sources()
@@ -179,13 +173,10 @@ def test_the_csp_names_the_public_host_when_exposed(_isolated) -> None:
 
 
 def test_the_csp_keeps_the_port_when_one_is_given(_isolated) -> None:
-    from gideon.dashboard.server import _ws_csp_sources
+    from gideon.interfaces.dashboard.server import _ws_csp_sources
 
     _write_config(_isolated, public_url="https://pc.example.com:8443")
     assert "wss://pc.example.com:8443" in _ws_csp_sources()
-
-
-# ── Trusted proxies (the sharp edge) ──────────────────────────────────────
 
 
 def test_nothing_is_trusted_by_default(_isolated) -> None:
@@ -197,36 +188,45 @@ def test_nothing_is_trusted_by_default(_isolated) -> None:
 
 
 def test_a_configured_proxy_is_trusted(_isolated) -> None:
-    _write_config(_isolated, public_url="https://pc.example.com", trusted_proxies=["10.0.0.9"])
+    _write_config(
+        _isolated, public_url="https://pc.example.com", trusted_proxies=["10.0.0.9"]
+    )
     assert exposure.is_trusted_proxy("10.0.0.9") is True
     assert exposure.is_trusted_proxy("10.0.0.10") is False
 
 
 def test_a_cidr_block_is_supported(_isolated) -> None:
-    _write_config(_isolated, public_url="https://pc.example.com", trusted_proxies=["172.18.0.0/16"])
+    _write_config(
+        _isolated,
+        public_url="https://pc.example.com",
+        trusted_proxies=["172.18.0.0/16"],
+    )
     assert exposure.is_trusted_proxy("172.18.4.7") is True
     assert exposure.is_trusted_proxy("172.19.4.7") is False
 
 
 def test_an_unparseable_proxy_entry_is_skipped_not_fatal(_isolated) -> None:
     _write_config(
-        _isolated, public_url="https://pc.example.com", trusted_proxies=["nonsense", "10.0.0.9"]
+        _isolated,
+        public_url="https://pc.example.com",
+        trusted_proxies=["nonsense", "10.0.0.9"],
     )
     assert exposure.is_trusted_proxy("10.0.0.9") is True
     assert exposure.is_trusted_proxy("10.0.0.8") is False
 
 
 def test_a_non_ip_peer_is_never_trusted(_isolated) -> None:
-    _write_config(_isolated, public_url="https://pc.example.com", trusted_proxies=["10.0.0.9"])
+    _write_config(
+        _isolated, public_url="https://pc.example.com", trusted_proxies=["10.0.0.9"]
+    )
     assert exposure.is_trusted_proxy("unknown") is False
     assert exposure.is_trusted_proxy("") is False
 
 
-# ── Forwarded headers through the real middleware ─────────────────────────
-
-
 @pytest.mark.asyncio
-async def test_forwarded_header_ignored_from_an_untrusted_peer_when_exposed(_isolated) -> None:
+async def test_forwarded_header_ignored_from_an_untrusted_peer_when_exposed(
+    _isolated,
+) -> None:
     """THE T4.1 property: a spoofed X-Real-IP must not set the session's bound address.
 
     Asserted through IP binding, which is what the header actually influences: bind a token
@@ -234,7 +234,7 @@ async def test_forwarded_header_ignored_from_an_untrusted_peer_when_exposed(_iso
     believed, the binding would be to the forged value and the second request would be
     refused — so a 200 here proves the header was ignored.
     """
-    _write_config(_isolated, public_url="https://pc.example.com")  # exposed, no trusted proxies
+    _write_config(_isolated, public_url="https://pc.example.com")
     mw = token_auth.token_auth_middleware(port=PORT)
 
     async def _handler(_req):
@@ -254,7 +254,6 @@ async def test_forwarded_header_ignored_from_an_untrusted_peer_when_exposed(_iso
 
     first = await mw(_req("10.0.0.5", "203.0.113.99"), _handler)
     assert first.status == 200
-    # Same real peer, no header: must still be accepted (bound to 10.0.0.5, not the forgery).
     second = await mw(_req("10.0.0.5", None), _handler)
     assert second.status == 200
 
@@ -262,7 +261,9 @@ async def test_forwarded_header_ignored_from_an_untrusted_peer_when_exposed(_iso
 @pytest.mark.asyncio
 async def test_forwarded_header_honored_from_a_trusted_proxy(_isolated) -> None:
     """The legitimate case must keep working, or nobody can run behind a tunnel."""
-    _write_config(_isolated, public_url="https://pc.example.com", trusted_proxies=["10.0.0.5"])
+    _write_config(
+        _isolated, public_url="https://pc.example.com", trusted_proxies=["10.0.0.5"]
+    )
     mw = token_auth.token_auth_middleware(port=PORT)
 
     async def _handler(_req):
@@ -281,16 +282,16 @@ async def test_forwarded_header_honored_from_a_trusted_proxy(_isolated) -> None:
         return r
 
     assert (await mw(_req("10.0.0.5", "203.0.113.99"), _handler)).status == 200
-    # The binding followed the FORWARDED address, so the same real client keeps working…
     assert (await mw(_req("10.0.0.5", "203.0.113.99"), _handler)).status == 200
-    # …and a different forwarded client on the same proxy is refused by IP binding.
     assert (await mw(_req("10.0.0.5", "203.0.113.1"), _handler)).status == 403
 
 
 @pytest.mark.asyncio
 async def test_local_installs_keep_the_legacy_proxy_heuristic(_isolated) -> None:
     """Not exposed ⇒ unchanged behavior. Breaking every compose/nginx user would be worse."""
-    (_isolated / "config.json").write_text(json.dumps({"dashboard": {}}), encoding="utf-8")
+    (_isolated / "config.json").write_text(
+        json.dumps({"dashboard": {}}), encoding="utf-8"
+    )
     mw = token_auth.token_auth_middleware(port=PORT)
 
     async def _handler(_req):
@@ -310,9 +311,6 @@ async def test_local_installs_keep_the_legacy_proxy_heuristic(_isolated) -> None
 
     assert (await mw(_req("172.18.0.2", "203.0.113.99"), _handler)).status == 200
     assert (await mw(_req("172.18.0.2", "203.0.113.1"), _handler)).status == 403
-
-
-# ── Enrollment codes ──────────────────────────────────────────────────────
 
 
 def test_a_code_round_trips_exactly_once(_isolated) -> None:
@@ -363,7 +361,10 @@ def test_an_expired_code_is_refused(_isolated, monkeypatch) -> None:
     code, _exp = enrollment.issue_code()
     real = time.time
     monkeypatch.setattr(
-        enrollment.time, "time", lambda: real() + enrollment.CODE_TTL_SECS + 1, raising=False
+        enrollment.time,
+        "time",
+        lambda: real() + enrollment.CODE_TTL_SECS + 1,
+        raising=False,
     )
     assert enrollment.redeem_code(code) is False
 
@@ -401,9 +402,6 @@ def test_active_codes_never_returns_the_codes(_isolated) -> None:
     assert isinstance(enrollment.active_codes(), int)
 
 
-# ── The enrollment endpoints ──────────────────────────────────────────────
-
-
 def _enroll_app() -> web.Application:
     app = web.Application()
     app["port"] = PORT
@@ -423,9 +421,11 @@ async def test_enroll_start_then_complete_yields_a_session(_isolated) -> None:
 
         done = await client.post("/api/auth/enroll/complete", json={"code": code})
         assert done.status == 200
-        cookie = done.cookies.get(f"pc_token_{PORT}")
+        cookie = done.cookies.get(f"gideon_token_{PORT}")
         assert cookie is not None
-        valid, user, _reason = token_auth.validate_token(cookie.value, use_session_exp=True)
+        valid, user, _reason = token_auth.validate_token(
+            cookie.value, use_session_exp=True
+        )
         assert valid is True and user == "enrolled-device"
 
 
@@ -433,8 +433,12 @@ async def test_enroll_start_then_complete_yields_a_session(_isolated) -> None:
 async def test_a_reused_code_is_refused_by_the_endpoint(_isolated) -> None:
     _write_config(_isolated)
     async with TestClient(TestServer(_enroll_app())) as client:
-        code = (await (await client.post("/api/auth/enroll/start", json={})).json())["code"]
-        assert (await client.post("/api/auth/enroll/complete", json={"code": code})).status == 200
+        code = (await (await client.post("/api/auth/enroll/start", json={})).json())[
+            "code"
+        ]
+        assert (
+            await client.post("/api/auth/enroll/complete", json={"code": code})
+        ).status == 200
         second = await client.post("/api/auth/enroll/complete", json={"code": code})
         assert second.status == 401
         assert (await second.json())["error"]["code"] == "auth_enroll_code_invalid"
@@ -444,13 +448,18 @@ async def test_a_reused_code_is_refused_by_the_endpoint(_isolated) -> None:
 async def test_a_wrong_code_counts_toward_lockout(_isolated) -> None:
     """A short credential on an unrated endpoint would be grindable."""
     (_isolated / "config.json").write_text(
-        json.dumps({"auth": {"login_enabled": True, "lockout_threshold": 2}}), encoding="utf-8"
+        json.dumps({"auth": {"login_enabled": True, "lockout_threshold": 2}}),
+        encoding="utf-8",
     )
     async with TestClient(TestServer(_enroll_app())) as client:
         for _ in range(2):
-            resp = await client.post("/api/auth/enroll/complete", json={"code": "AAAABBBB"})
+            resp = await client.post(
+                "/api/auth/enroll/complete", json={"code": "AAAABBBB"}
+            )
             assert resp.status == 401
-        locked = await client.post("/api/auth/enroll/complete", json={"code": "AAAABBBB"})
+        locked = await client.post(
+            "/api/auth/enroll/complete", json={"code": "AAAABBBB"}
+        )
         assert locked.status == 429
         assert int(locked.headers["Retry-After"]) > 0
 
@@ -459,7 +468,9 @@ async def test_a_wrong_code_counts_toward_lockout(_isolated) -> None:
 async def test_enroll_complete_rejects_a_cross_origin_request(_isolated) -> None:
     _write_config(_isolated)
     async with TestClient(TestServer(_enroll_app())) as client:
-        code = (await (await client.post("/api/auth/enroll/start", json={})).json())["code"]
+        code = (await (await client.post("/api/auth/enroll/start", json={})).json())[
+            "code"
+        ]
         resp = await client.post(
             "/api/auth/enroll/complete",
             json={"code": code},
@@ -491,9 +502,6 @@ async def test_enroll_start_requires_a_session() -> None:
     assert (await mw(req, _handler)).status == 403
 
 
-# ── Session revocation reaches the LIVE gateway (bug found in validation) ─
-
-
 def test_logout_is_reachable_without_a_dashboard_session() -> None:
     """`/api/logout` authenticates itself, so the dashboard middleware must not gate it.
 
@@ -504,14 +512,13 @@ def test_logout_is_reachable_without_a_dashboard_session() -> None:
     gateway — a two-process state bug is invisible to in-process tests.
     """
     assert "/api/logout" in token_auth._BYPASS_EXACT
-    # It must sit beside the OTHER self-authenticating route, not among the login exemptions.
     assert "/api/token/local" in token_auth._BYPASS_EXACT
 
 
 @pytest.mark.asyncio
 async def test_logout_passes_the_middleware_then_enforces_its_own_secret() -> None:
     """Exempting it opens nothing: without the secret the handler still refuses."""
-    from gideon.dashboard.handlers import api_logout
+    from gideon.interfaces.dashboard.handlers import api_logout
 
     mw = token_auth.token_auth_middleware(port=PORT)
 
@@ -527,7 +534,6 @@ async def test_logout_passes_the_middleware_then_enforces_its_own_secret() -> No
     req.remote = "127.0.0.1"
     req.app = {"local_secret": "the-real-secret"}
     resp = await mw(req, _handler)
-    # Reached the handler (not a middleware 403 for a missing token) and was refused there.
     assert resp.status == 403
     assert "secret" in (await _body_text(resp)).lower()
 
@@ -543,10 +549,12 @@ def test_revoke_cli_prefers_the_running_gateway(monkeypatch, _isolated) -> None:
     Clearing `sessions.json` from another process leaves the live gateway's in-memory nonce
     set intact, so it keeps honoring the sessions the user just revoked.
     """
-    from gideon.auth import cli as auth_cli
+    from gideon.security.auth import cli as auth_cli
 
     called: list[int] = []
-    monkeypatch.setattr(auth_cli, "_revoke_via_gateway", lambda port: (called.append(port) or True))
+    monkeypatch.setattr(
+        auth_cli, "_revoke_via_gateway", lambda port: (called.append(port) or True)
+    )
 
     class _Args:
         all = True
@@ -556,13 +564,15 @@ def test_revoke_cli_prefers_the_running_gateway(monkeypatch, _isolated) -> None:
     assert called == [12345], "the CLI did not route the revoke through the gateway"
 
 
-def test_revoke_cli_falls_back_when_no_gateway_is_running(monkeypatch, _isolated) -> None:
+def test_revoke_cli_falls_back_when_no_gateway_is_running(
+    monkeypatch, _isolated
+) -> None:
     """Offline, nothing holds contradictory state — refusing would leave no way to revoke."""
-    from gideon.auth import cli as auth_cli
+    from gideon.security.auth import cli as auth_cli
 
     monkeypatch.setattr(auth_cli, "_revoke_via_gateway", lambda port: False)
     cleared: list[bool] = []
-    import gideon.dashboard.token_auth as ta
+    import gideon.interfaces.dashboard.token_auth as ta
 
     monkeypatch.setattr(ta, "revoke_all_sessions", lambda: cleared.append(True))
 
@@ -576,16 +586,13 @@ def test_revoke_cli_falls_back_when_no_gateway_is_running(monkeypatch, _isolated
 
 def test_revoke_requires_the_all_flag(_isolated) -> None:
     """No per-nonce form: printing live nonces to pick one would print credentials."""
-    from gideon.auth import cli as auth_cli
+    from gideon.security.auth import cli as auth_cli
 
     class _Args:
         all = False
         port = 0
 
     assert auth_cli._revoke_cmd(_Args()) == 2
-
-
-# ── The login page offers the device-code path ────────────────────────────
 
 
 @pytest.mark.asyncio

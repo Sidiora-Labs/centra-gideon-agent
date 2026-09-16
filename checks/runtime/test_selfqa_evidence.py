@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from gideon.selfqa import evidence as ev
-from gideon.selfqa import fix_branch as fb
+from gideon.assurance.selfqa import evidence as ev
+from gideon.assurance.selfqa import fix_branch as fb
 
 
 def _write(path: Path, data: bytes) -> None:
@@ -35,16 +35,18 @@ def bundle(tmp_path: Path) -> Path:
     return tmp_path
 
 
-# ── manifest hashing (Criterion #7: "under one SHA256'd manifest") ──────────────
-
-
 def test_manifest_hashes_are_computed_from_the_bytes_on_disk(bundle: Path) -> None:
     manifest = ev.build_manifest(bundle, scenario_id="s1", sha="a" * 40, passed=False)
 
     by_name = {e.name: e for e in manifest.files}
     assert "manifest.json" not in by_name, "the manifest must not list itself"
 
-    for rel in ("screenshots/step1.png", "screenshots/step2.png", "recording.mp4", "run.log"):
+    for rel in (
+        "screenshots/step1.png",
+        "screenshots/step2.png",
+        "recording.mp4",
+        "run.log",
+    ):
         entry = by_name[rel]
         raw = (bundle / rel).read_bytes()
         assert entry.sha256 == hashlib.sha256(raw).hexdigest()
@@ -74,10 +76,9 @@ def test_write_manifest_roundtrips(bundle: Path) -> None:
     assert loaded.kinds() == manifest.kinds()
 
 
-# ── ffmpeg-absent graceful degradation (Criterion: "never a crash") ─────────────
-
-
-def test_ffmpeg_absent_degrades_typed_and_writes_no_file(bundle: Path, monkeypatch) -> None:
+def test_ffmpeg_absent_degrades_typed_and_writes_no_file(
+    bundle: Path, monkeypatch
+) -> None:
     monkeypatch.setattr(ev, "ffmpeg_available", lambda **_: False)
 
     sheet = ev.derive_contact_sheet(bundle)
@@ -86,7 +87,7 @@ def test_ffmpeg_absent_degrades_typed_and_writes_no_file(bundle: Path, monkeypat
     for deriv, kind in ((sheet, ev.KIND_CONTACT_SHEET), (gif, ev.KIND_GIF)):
         assert deriv.kind == kind
         assert deriv.produced is False
-        assert deriv.degraded_reason  # non-empty reason, not an exception
+        assert deriv.degraded_reason
         assert "ffmpeg" in deriv.degraded_reason.lower()
     assert not (bundle / ev.CONTACT_SHEET_NAME).exists()
     assert not (bundle / ev.GIF_NAME).exists()
@@ -100,7 +101,9 @@ def test_missing_recording_degrades_typed(bundle: Path, monkeypatch) -> None:
     assert "recording" in deriv.degraded_reason.lower()
 
 
-def test_degradation_reasons_are_recorded_in_the_manifest(bundle: Path, monkeypatch) -> None:
+def test_degradation_reasons_are_recorded_in_the_manifest(
+    bundle: Path, monkeypatch
+) -> None:
     monkeypatch.setattr(ev, "ffmpeg_available", lambda **_: False)
     derivations = (ev.derive_contact_sheet(bundle), ev.derive_gif(bundle))
     manifest = ev.build_manifest(bundle, degradations=derivations)
@@ -113,18 +116,13 @@ def test_probe_uses_a_none_sentinel_not_a_zero_time() -> None:
     ev.reset_probe_cache()
     assert ev._probe_cache is None
     ev.ffmpeg_available()
-    # After a probe the cache is a (monotonic, bool) pair, never the 0.0 "never yet" the rule
-    # forbids — the None above is what distinguishes "unchecked" from "checked at t≈0".
     assert isinstance(ev._probe_cache, tuple) and len(ev._probe_cache) == 2
     ev.reset_probe_cache()
 
 
-# ── required-kinds completion gate (Criterion #7) ───────────────────────────────
-
-
 def test_gate_passes_when_the_required_kinds_are_present(bundle: Path) -> None:
     manifest = ev.build_manifest(bundle)
-    result = ev.check_required_kinds(manifest)  # DEFAULT = screenshot, recording, manifest
+    result = ev.check_required_kinds(manifest)
     assert result.complete is True
     assert result.missing == []
     assert ev.KIND_MANIFEST in result.present
@@ -139,20 +137,16 @@ def test_gate_blocks_and_names_the_missing_kind(bundle: Path) -> None:
 
 
 def test_gate_treats_the_manifest_kind_as_present_by_construction() -> None:
-    empty = ev.Manifest()  # no files at all
+    empty = ev.Manifest()
     result = ev.check_required_kinds(empty, required_kinds=(ev.KIND_MANIFEST,))
     assert result.complete is True
 
 
 def test_gate_honours_a_configured_required_kind(bundle: Path) -> None:
-    # ffmpeg-derived kinds are NOT in the default set; a caller can still require one.
     manifest = ev.build_manifest(bundle)
     result = ev.check_required_kinds(manifest, required_kinds=(ev.KIND_GIF,))
     assert result.complete is False
     assert result.missing == [ev.KIND_GIF]
-
-
-# ── single-Artifact registration (Criterion #7: "a single Artifact") ────────────
 
 
 class _FakeProvider:
@@ -171,36 +165,44 @@ class _FakeProvider:
         return True
 
 
-def test_register_bundle_creates_exactly_one_artifact(bundle: Path, monkeypatch) -> None:
+def test_register_bundle_creates_exactly_one_artifact(
+    bundle: Path, monkeypatch
+) -> None:
     fake = _FakeProvider()
-    monkeypatch.setattr("gideon.artifacts.registry.get_provider", lambda name=None: fake)
+    monkeypatch.setattr(
+        "gideon.workspace.artifacts.registry.get_provider", lambda name=None: fake
+    )
     manifest = ev.build_manifest(bundle, scenario_id="s1", sha="c" * 40, passed=False)
 
-    registered = ev.register_bundle(bundle, manifest=manifest, scenario_id="s1", sha="c" * 40)
+    registered = ev.register_bundle(
+        bundle, manifest=manifest, scenario_id="s1", sha="c" * 40
+    )
 
     assert len(fake.created) == 1, "the bundle must register as exactly ONE Artifact"
     created = fake.created[0]
     assert created["kind"] == "json"
-    assert created["content"] == manifest.to_json()  # the manifest IS the artifact content
+    assert created["content"] == manifest.to_json()
     assert "self-qa" in created["tags"] and "evidence" in created["tags"]
     assert registered.ref == "artifact:self-qa-evidence-s1"
-    # every manifest file was stored under the artifact dir, content-addressed
     assert registered.stored_files == len(manifest.files)
     assert len(fake.stored) == len(manifest.files)
 
 
-def test_stored_companion_names_are_content_addressed(bundle: Path, monkeypatch) -> None:
-    from gideon.artifacts.native import _MEDIA_NAME_RE
+def test_stored_companion_names_are_content_addressed(
+    bundle: Path, monkeypatch
+) -> None:
+    from gideon.workspace.artifacts.native import _MEDIA_NAME_RE
 
     fake = _FakeProvider()
-    monkeypatch.setattr("gideon.artifacts.registry.get_provider", lambda name=None: fake)
+    monkeypatch.setattr(
+        "gideon.workspace.artifacts.registry.get_provider", lambda name=None: fake
+    )
     manifest = ev.build_manifest(bundle, sha="d" * 40)
     ev.register_bundle(bundle, manifest=manifest)
     for _slug, filename in fake.stored:
-        assert _MEDIA_NAME_RE.fullmatch(filename), f"{filename!r} is not a content-addressed name"
-
-
-# ── optional fix branch (Criterion #8) ──────────────────────────────────────────
+        assert _MEDIA_NAME_RE.fullmatch(
+            filename
+        ), f"{filename!r} is not a content-addressed name"
 
 
 @pytest.fixture()
@@ -236,7 +238,6 @@ def test_fix_branch_not_created_when_disabled(git_repo) -> None:
     assert result.created is False
     assert result.branch == f"gideon/selfqa-{sha[:8]}"
     assert "off" in result.reason.lower()
-    # and nothing was actually created
     listed = subprocess.run(
         ["git", "-C", str(repo), "branch", "--list", result.branch],
         capture_output=True,
@@ -251,7 +252,6 @@ def test_fix_branch_created_when_enabled_and_never_pushed(git_repo) -> None:
     assert result.created is True
     assert result.branch == f"gideon/selfqa-{sha[:8]}"
 
-    # the branch exists locally, pointing at the commit under test
     listed = subprocess.run(
         ["git", "-C", str(repo), "branch", "--list", result.branch],
         capture_output=True,
@@ -264,7 +264,6 @@ def test_fix_branch_created_when_enabled_and_never_pushed(git_repo) -> None:
         text=True,
     ).stdout.strip()
     assert tip == sha
-    # no remote was configured, and nothing pushed one into being
     remotes = subprocess.run(
         ["git", "-C", str(repo), "remote"], capture_output=True, text=True
     ).stdout.strip()

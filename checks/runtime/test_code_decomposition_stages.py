@@ -4,12 +4,13 @@ even when several share a canonical stage id. A code decomposition routinely emi
 stage id (sdlc.phase_key), so identical ids collapse to one key — active_stage_index
 never advances past the first and the worker grinds P1 to the cycle budget (observed live
 on a TicTacToe build). The projection disambiguates repeats: implementation,
-implementation-2, … — distinct keys, recognizably the same stage, verification untouched."""
+implementation-2, … — distinct keys, recognizably the same stage, verification untouched.
+"""
 
 from __future__ import annotations
 
-from gideon.loop import kinds
-from gideon.loop.code_plan_briefs import decomposition_to_stage_plan
+from gideon.automation.loop import kinds
+from gideon.automation.loop.code_plan_briefs import decomposition_to_stage_plan
 
 
 def test_repeated_stage_ids_get_distinct_keys():
@@ -31,17 +32,13 @@ def test_repeated_stage_ids_get_distinct_keys():
         "implementation-4",
         "verification",
     ]
-    # The very thing that was broken: every phase keys distinctly, so active_stage_index
-    # can advance through them one at a time.
     kinds.ensure_loaded()
     s = kinds.get("code")
     keys = [s.phase_key(p) for p in out]
     assert len(set(keys)) == len(keys), "every phase must have a distinct stage key"
-    # verification keeps its exact id (the test-command gate matches it exactly).
     assert "verification" in keys
 
-    # Marking the first implementation phase done advances to the second (not all at once).
-    from gideon.loop.loop import Loop
+    from gideon.automation.loop.loop import Loop
 
     loop = Loop(
         id="x",
@@ -51,11 +48,10 @@ def test_repeated_stage_ids_get_distinct_keys():
         plan=out,
         phase_status={"implementation": "done"},
     )
-    assert s.active_stage_index(loop) == 1  # P2, not stuck on P1, not jumped to verification
+    assert s.active_stage_index(loop) == 1
 
 
 def test_single_stage_each_is_unchanged():
-    # No repeats → no suffixing (the common, already-working case stays byte-identical).
     art = {
         "phases": [
             {"stage": "decomposition", "title": "Plan"},
@@ -64,7 +60,11 @@ def test_single_stage_each_is_unchanged():
         ]
     }
     out = decomposition_to_stage_plan(art)
-    assert [p["stage"] for p in out] == ["decomposition", "implementation", "verification"]
+    assert [p["stage"] for p in out] == [
+        "decomposition",
+        "implementation",
+        "verification",
+    ]
 
 
 def test_gate_commands_lifted_from_test_strategy_ci_gate():
@@ -75,7 +75,7 @@ def test_gate_commands_lifted_from_test_strategy_ci_gate():
     alone (observed live, Run 22). The planner authors the exact commands in the
     test_strategy `ci_gate`; project_to_spec must lift them into kind_config so the
     gate runs the build chain + test runner as ground truth."""
-    from gideon.loop.code_plan_briefs import gate_commands_from_test_strategy
+    from gideon.automation.loop.code_plan_briefs import gate_commands_from_test_strategy
 
     art = {
         "ci_gate": [
@@ -86,14 +86,10 @@ def test_gate_commands_lifted_from_test_strategy_ci_gate():
         ]
     }
     verify, test = gate_commands_from_test_strategy(art)
-    # The test/coverage runner becomes test_command (gates the verification stage).
     assert test == "vitest run --coverage"
-    # The non-test gate steps chain in order as verify_command (gates every stage).
     assert verify == "tsc --noEmit && eslint . --max-warnings=0 && vite build"
 
-    # No ci_gate (or junk) → empty, so the gate falls back to judge-only (unchanged).
     assert gate_commands_from_test_strategy({}) == ("", "")
     assert gate_commands_from_test_strategy({"ci_gate": "nope"}) == ("", "")
-    # A gate with only a test step still yields the test_command (verify stays empty).
     only_test = {"ci_gate": [{"order": 1, "step": "test", "cmd": "npm test"}]}
     assert gate_commands_from_test_strategy(only_test) == ("", "npm test")

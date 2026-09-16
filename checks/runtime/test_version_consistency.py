@@ -21,13 +21,10 @@ from pathlib import Path
 
 import gideon
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 _PYPROJECT = _REPO_ROOT / "pyproject.toml"
 _CHANGELOG = _REPO_ROOT / "CHANGELOG.md"
 
-# ``## [0.1.0] — 2026-07-19`` — first non-Unreleased release heading wins.
-# Accept an em dash, en dash, or a plain hyphen as the date separator, and allow
-# no date (in-progress release headings).
 _RELEASE_HEADING = re.compile(
     r"^##\s*\[(?P<version>\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.]+)?)\]", re.MULTILINE
 )
@@ -89,7 +86,9 @@ def test_changelog_latest_matches_pyproject() -> None:
 
 
 def _client_version() -> str:
-    with (_REPO_ROOT / "packages" / "gideon-client-py" / "pyproject.toml").open("rb") as fh:
+    with (_REPO_ROOT / "packages" / "gideon-client-py" / "pyproject.toml").open(
+        "rb"
+    ) as fh:
         data = tomllib.load(fh)
     return str(data["project"]["version"])
 
@@ -112,7 +111,9 @@ def test_client_version_locksteps_core() -> None:
 
 
 def _acp_client_version() -> str:
-    text = (_REPO_ROOT / "src" / "gideon" / "acp" / "client.py").read_text(encoding="utf-8")
+    text = (
+        _REPO_ROOT / "runtime" / "gideon" / "integrations" / "acp" / "client.py"
+    ).read_text(encoding="utf-8")
     m = re.search(r'^CLIENT_VERSION\s*=\s*"([^"]+)"', text, re.MULTILINE)
     assert m, "CLIENT_VERSION literal not found in acp/client.py"
     return m.group(1)

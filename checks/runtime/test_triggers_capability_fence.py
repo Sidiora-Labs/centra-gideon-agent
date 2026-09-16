@@ -24,16 +24,16 @@ import asyncio
 
 import pytest
 
-from gideon.triggers import service as svc
-from gideon.triggers.models import Trigger
-from gideon.triggers.screen import (
+from gideon.automation.triggers import service as svc
+from gideon.automation.triggers.models import Trigger
+from gideon.automation.triggers.screen import (
     READ_ONLY_PROVIDERS,
     WRITE_CAPABLE_PROVIDERS,
     capabilities_for_action,
     provider_is_read_only,
     requested_capabilities,
 )
-from gideon.triggers.store import TriggerStore
+from gideon.automation.triggers.store import TriggerStore
 
 NOW = 1_800_000_000.0
 
@@ -63,9 +63,6 @@ def _tick(store, tmp_path):
     return asyncio.run(svc.tick(store, now=NOW, base_dir=tmp_path, persist=False))
 
 
-# ── the classification ──
-
-
 def test_the_two_provider_sets_do_not_overlap():
     """A provider in both sets would resolve by dict order — the defect S71 found in `fuse`."""
     assert not (READ_ONLY_PROVIDERS & WRITE_CAPABLE_PROVIDERS)
@@ -75,7 +72,7 @@ def test_every_shipped_provider_is_classified():
     """🔴 An unclassified provider is treated as write-capable, which is the safe direction but a
     silent one: the author of a new read-only action would see it refuse and not know why. So every
     provider the registry actually ships must appear in one of the two sets."""
-    from gideon.action_providers.registry import (
+    from gideon.integrations.action_providers.registry import (
         _ensure_default_providers_registered,
         list_action_providers,
     )
@@ -104,37 +101,41 @@ def test_write_capable_providers_are_recognized():
         assert provider_is_read_only(name) is False, name
 
 
-# ── what a trigger requests ──
-
-
 def test_requested_reads_the_inline_action_shape():
     """A migrated cron nests its action under `workflow.inline`."""
     trigger = Trigger(
-        id="t", name="t", kind="clock", workflow={"inline": {"provider": "bash", "config": {}}}
+        id="t",
+        name="t",
+        kind="clock",
+        workflow={"inline": {"provider": "bash", "config": {}}},
     )
     assert requested_capabilities(trigger) == {"providers": ["bash"]}
 
 
 def test_requested_reads_the_flat_action_shape():
     """S92's chat tools write a flat `{provider, config}`. Reading only one shape would leave half a
-    real store unfenced — the same both-shapes lesson S103 recorded for the week grid."""
-    trigger = Trigger(id="t", name="t", kind="clock", workflow={"provider": "notify", "config": {}})
+    real store unfenced — the same both-shapes lesson S103 recorded for the week grid.
+    """
+    trigger = Trigger(
+        id="t", name="t", kind="clock", workflow={"provider": "notify", "config": {}}
+    )
     assert requested_capabilities(trigger) == {"providers": ["notify"]}
 
 
 def test_a_workflow_REF_requests_nothing():
     """The def's own nodes are fenced by the workflow engine's capability layer. Naming the ref as a
-    provider would refuse every workflow-backed trigger against a set that never lists def names."""
+    provider would refuse every workflow-backed trigger against a set that never lists def names.
+    """
     assert (
-        requested_capabilities(Trigger(id="t", name="t", kind="clock", workflow={"ref": "d"})) == {}
+        requested_capabilities(
+            Trigger(id="t", name="t", kind="clock", workflow={"ref": "d"})
+        )
+        == {}
     )
 
 
 def test_no_action_requests_nothing():
     assert requested_capabilities(Trigger(id="t", name="t", kind="clock")) == {}
-
-
-# ── the fence, driven through a real tick ──
 
 
 def test_a_read_only_action_fires_with_NO_capability_block(store, tmp_path):
@@ -202,16 +203,18 @@ def test_the_production_tick_POPULATES_requested(store, tmp_path):
     against a fence that happened to allow everything."""
     import inspect
 
-    src = inspect.getsource(svc.tick)
+    assert "TickPass(" in inspect.getsource(svc.tick)
+    src = inspect.getsource(svc.TickPass.context_for)
     assert "requested=" in src, "tick must tell the fence what the trigger asks for"
-
-
-# ── the save-time freeze ──
+    assert "screen.requested_capabilities(trigger)" in src
 
 
 def test_capabilities_for_action_grants_a_write_provider():
     trigger = Trigger(
-        id="t", name="t", kind="clock", workflow={"inline": {"provider": "bash", "config": {}}}
+        id="t",
+        name="t",
+        kind="clock",
+        workflow={"inline": {"provider": "bash", "config": {}}},
     )
     assert capabilities_for_action(trigger) == {"providers": ["bash"]}
 
@@ -222,7 +225,10 @@ def test_capabilities_for_action_leaves_a_read_only_action_EMPTY():
     day someone edits that trigger's action to something write-capable and the stale block grants
     it."""
     trigger = Trigger(
-        id="t", name="t", kind="clock", workflow={"inline": {"provider": "notify", "config": {}}}
+        id="t",
+        name="t",
+        kind="clock",
+        workflow={"inline": {"provider": "notify", "config": {}}},
     )
     assert capabilities_for_action(trigger) == {}
 
@@ -230,7 +236,7 @@ def test_capabilities_for_action_leaves_a_read_only_action_EMPTY():
 def test_tools_create_FREEZES_the_capability_set(tmp_path):
     """The chat tools and the API both create through here. Without the freeze, every trigger they
     make would refuse on its next fire."""
-    from gideon.triggers import tools as T
+    from gideon.automation.triggers import tools as T
 
     store = TriggerStore(base_dir=tmp_path)
     T.create(
@@ -246,8 +252,9 @@ def test_tools_create_FREEZES_the_capability_set(tmp_path):
 
 def test_a_created_write_trigger_actually_FIRES(tmp_path):
     """The end-to-end proof that the freeze and the fence agree: create through the real tool, then
-    drive a real tick. If these two disagreed, every new automation would be born refusing."""
-    from gideon.triggers import tools as T
+    drive a real tick. If these two disagreed, every new automation would be born refusing.
+    """
+    from gideon.automation.triggers import tools as T
 
     store = TriggerStore(base_dir=tmp_path)
     T.create(
@@ -271,7 +278,7 @@ def test_the_app_cron_reconciler_freezes_too():
     cron would refuse."""
     import inspect
 
-    from gideon.apps import app_crons
+    from gideon.extensions.apps import app_crons
 
     src = inspect.getsource(app_crons.reconcile_app_crons)
     assert "capabilities_for_action" in src
@@ -280,20 +287,18 @@ def test_the_app_cron_reconciler_freezes_too():
 def test_the_digest_reconciler_freezes_too():
     import inspect
 
-    from gideon.action_providers import digest_provider
+    from gideon.integrations.action_providers import digest_provider
 
     src = inspect.getsource(digest_provider.reconcile_digest_cron)
     assert "capabilities_for_action" in src
 
 
-# ── the boot backfill for pre-S116 rows ──
-
-
 def test_the_backfill_freezes_a_pre_S116_write_row(store):
     """🔴 THE POPULATION THAT WOULD HAVE BROKEN. No writer set `capabilities` before this session,
     so every automation already on a user's disk carries an empty block — and the fence denies on
-    one. Wiring enforcement without this backfill is a 100% outage of existing automations."""
-    from gideon.triggers.boot_migrate import backfill_capabilities
+    one. Wiring enforcement without this backfill is a 100% outage of existing automations.
+    """
+    from gideon.automation.triggers.boot_migrate import backfill_capabilities
 
     _due(store, "clock:old", "run-prompt")
     assert backfill_capabilities(store) == ["clock:old"]
@@ -302,8 +307,9 @@ def test_the_backfill_freezes_a_pre_S116_write_row(store):
 
 def test_the_backfill_grants_only_what_the_CURRENT_action_does(store):
     """A faithful grandfather, not a widening. The row is granted the provider it is already
-    configured to run — so re-pointing that action at something else still needs a fresh opt-in."""
-    from gideon.triggers.boot_migrate import backfill_capabilities
+    configured to run — so re-pointing that action at something else still needs a fresh opt-in.
+    """
+    from gideon.automation.triggers.boot_migrate import backfill_capabilities
 
     _due(store, "clock:old", "run-prompt")
     backfill_capabilities(store)
@@ -314,8 +320,9 @@ def test_the_backfill_grants_only_what_the_CURRENT_action_does(store):
 
 def test_the_backfill_leaves_a_read_only_row_EMPTY(store):
     """Decision 7's default already permits it, and writing a block would imply an opt-in the user
-    never made — which matters the day that action is edited to something write-capable."""
-    from gideon.triggers.boot_migrate import backfill_capabilities
+    never made — which matters the day that action is edited to something write-capable.
+    """
+    from gideon.automation.triggers.boot_migrate import backfill_capabilities
 
     _due(store, "clock:ro", "notify")
     assert backfill_capabilities(store) == []
@@ -324,7 +331,7 @@ def test_the_backfill_leaves_a_read_only_row_EMPTY(store):
 
 def test_the_backfill_never_WIDENS_an_existing_grant(store):
     """An author who deliberately fenced a row tighter than its action must keep that decision."""
-    from gideon.triggers.boot_migrate import backfill_capabilities
+    from gideon.automation.triggers.boot_migrate import backfill_capabilities
 
     _due(store, "clock:tight", "bash", caps={"providers": ["notify"]})
     assert backfill_capabilities(store) == []
@@ -333,7 +340,7 @@ def test_the_backfill_never_WIDENS_an_existing_grant(store):
 
 def test_the_backfill_is_IDEMPOTENT(store):
     """It runs on every boot, so a second pass must be a no-op rather than a re-grant."""
-    from gideon.triggers.boot_migrate import backfill_capabilities
+    from gideon.automation.triggers.boot_migrate import backfill_capabilities
 
     _due(store, "clock:old", "run-prompt")
     assert backfill_capabilities(store) == ["clock:old"]
@@ -342,7 +349,7 @@ def test_the_backfill_is_IDEMPOTENT(store):
 
 def test_a_backfilled_row_actually_FIRES(store, tmp_path):
     """The end-to-end proof, driven through a real tick: the grandfathered row passes the fence."""
-    from gideon.triggers.boot_migrate import backfill_capabilities
+    from gideon.automation.triggers.boot_migrate import backfill_capabilities
 
     _due(store, "clock:old", "run-prompt")
     backfill_capabilities(store)
@@ -352,7 +359,7 @@ def test_a_backfilled_row_actually_FIRES(store, tmp_path):
 def test_boot_RUNS_the_backfill(tmp_path):
     """🔴 The wiring, not the helper. A backfill nothing calls is the inert-control defect this
     whole session exists to close — so assert `migrate_and_arm` reports it."""
-    from gideon.triggers import boot_migrate
+    from gideon.automation.triggers import boot_migrate
 
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(
@@ -376,7 +383,7 @@ def test_the_backfill_SKIPS_a_broken_row(tmp_path):
     The `ok is False` assertion is load-bearing: without it an `if not row.ok` guard in the test
     would make this pass vacuously against a store that parsed the row just fine.
     """
-    from gideon.triggers.boot_migrate import backfill_capabilities
+    from gideon.automation.triggers.boot_migrate import backfill_capabilities
 
     (tmp_path / "triggers.json").write_text(
         '[{"id": "clock:broken", "name": "b", "kind": "clock", "spec": {"kind": "??"},'
@@ -389,11 +396,8 @@ def test_the_backfill_SKIPS_a_broken_row(tmp_path):
     assert store.load()[0].trigger.capabilities == {}
 
 
-# ── the doctor finding for pre-S116 rows ──
-
-
 def _diagnose(store):
-    from gideon.triggers.calendar import diagnose
+    from gideon.automation.triggers.calendar import diagnose
 
     rows = [
         {
@@ -414,27 +418,34 @@ def test_the_doctor_reports_an_unfenced_write_action(store):
     the user's question is "why did my automation stop" — and the doctor is where that is answered.
     """
     _due(store, "clock:old", "bash")
-    finding = next(f for f in _diagnose(store).findings if f.code == "unfenced_write_action")
+    finding = next(
+        f for f in _diagnose(store).findings if f.code == "unfenced_write_action"
+    )
     assert "bash" in finding.detail
     assert "re-save" in finding.fix, "and it must say how to fix it"
 
 
 def test_the_doctor_is_SILENT_for_a_granted_trigger(store):
     _due(store, "clock:ok", "bash", caps={"providers": ["bash"]})
-    assert not [f for f in _diagnose(store).findings if f.code == "unfenced_write_action"]
+    assert not [
+        f for f in _diagnose(store).findings if f.code == "unfenced_write_action"
+    ]
 
 
 def test_the_doctor_is_SILENT_for_a_read_only_trigger(store):
     _due(store, "clock:ro", "notify")
-    assert not [f for f in _diagnose(store).findings if f.code == "unfenced_write_action"]
+    assert not [
+        f for f in _diagnose(store).findings if f.code == "unfenced_write_action"
+    ]
 
 
 def test_the_facade_passes_capabilities_to_the_doctor():
     """🔴 Found by driving the endpoint: the facade's doctor payload omitted `capabilities`, so the
-    check read every trigger as ungranted. The payload has to carry what the check reads."""
+    check read every trigger as ungranted. The payload has to carry what the check reads.
+    """
     import inspect
 
-    from gideon.dashboard.handlers import triggers as T
+    from gideon.interfaces.dashboard.handlers import triggers as T
 
     src = inspect.getsource(T.api_triggers_doctor)
     assert '"capabilities"' in src

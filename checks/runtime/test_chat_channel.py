@@ -9,7 +9,7 @@ from chat_test_helpers import _make_state
 
 
 def _make_channel_app(state):
-    from gideon.dashboard.chat_channel import (
+    from gideon.interfaces.dashboard.chat_channel import (
         api_channel_reply_targets,
         api_chat_session_channel_link,
         api_chat_session_handoff,
@@ -17,16 +17,22 @@ def _make_channel_app(state):
 
     app = web.Application()
     app["state"] = state
-    app.router.add_post("/api/chat/sessions/{session}/channel-link", api_chat_session_channel_link)
+    app.router.add_post(
+        "/api/chat/sessions/{session}/channel-link", api_chat_session_channel_link
+    )
     app.router.add_get("/api/channels/reply-targets", api_channel_reply_targets)
-    app.router.add_post("/api/chat/sessions/{session}/handoff", api_chat_session_handoff)
+    app.router.add_post(
+        "/api/chat/sessions/{session}/handoff", api_chat_session_handoff
+    )
     return app
 
 
 class TestChannelLink:
     @pytest.mark.asyncio
     async def test_session_not_found(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         async with TestClient(TestServer(_make_channel_app(state))) as client:
             resp = await client.post("/api/chat/sessions/nope/channel-link")
@@ -34,7 +40,9 @@ class TestChannelLink:
 
     @pytest.mark.asyncio
     async def test_no_channel_delivery(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         state.get_or_create_session("s1")
         state.channel_delivery = None
@@ -44,7 +52,9 @@ class TestChannelLink:
 
     @pytest.mark.asyncio
     async def test_link_success(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         session = state.get_or_create_session("s1")
         session.append("user", "hello")
@@ -69,7 +79,9 @@ class TestChannelReplyTargets:
     async def test_list_channels_from_channel_delivery(self, tmp_path, monkeypatch):
         """Channel list comes from the active channel app via ChannelDelivery —
         core holds no channel config."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         state.channel_delivery = MagicMock()
         state.channel_delivery.list_reply_channels = MagicMock(
@@ -86,8 +98,12 @@ class TestChannelReplyTargets:
             assert any(c["id"] == "C1" for c in data)
 
     @pytest.mark.asyncio
-    async def test_list_channels_no_delivery_falls_back_to_dm(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+    async def test_list_channels_no_delivery_falls_back_to_dm(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         state.channel_delivery = None
         async with TestClient(TestServer(_make_channel_app(state))) as client:
@@ -99,7 +115,9 @@ class TestChannelReplyTargets:
 class TestHandoff:
     @pytest.mark.asyncio
     async def test_handoff_no_channel(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         state.get_or_create_session("s1")
         state.channel_delivery = None

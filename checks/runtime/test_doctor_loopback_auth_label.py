@@ -21,13 +21,10 @@ from unittest.mock import patch
 
 import pytest
 
-from gideon.dashboard.origin import loopback_requires_token
+from gideon.interfaces.dashboard.origin import loopback_requires_token
 
 _TOKEN_REQUIRED = "🔒 token required"
 _NO_TOKEN = "loopback trusted (no token required)"
-
-
-# ── the predicate: mirrors the token_auth middleware short-circuits ──────────
 
 
 def _clear_auth_env(monkeypatch) -> None:
@@ -37,8 +34,6 @@ def _clear_auth_env(monkeypatch) -> None:
 
 
 def test_default_local_token_gateway_requires_a_token_on_loopback(monkeypatch):
-    # This is the bug: a plain gateway (no bypass env) is `local_token`, and the
-    # middleware returns 403 to a tokenless loopback request — so a token IS required.
     _clear_auth_env(monkeypatch)
     assert loopback_requires_token() is True
 
@@ -61,15 +56,15 @@ def test_bypass_local_networks_needs_no_token(monkeypatch):
     assert loopback_requires_token() is False
 
 
-# ── the doctor line: default loopback vs genuine bypass ──────────────────────
-
-
 def _doctor_output(capsys) -> str:
     """Run ``_doctor()`` with its probes stubbed and a forced local bind."""
-    from gideon.cli_doctor import _doctor
+    from gideon.interfaces.cli.doctor import _doctor
 
     with (
-        patch("gideon.cli_doctor.shutil.which", side_effect=lambda b: f"/usr/local/bin/{b}"),
+        patch(
+            "gideon.interfaces.cli.doctor.shutil.which",
+            side_effect=lambda b: f"/usr/local/bin/{b}",
+        ),
         patch(
             "subprocess.run",
             return_value=type(
@@ -83,8 +78,10 @@ def _doctor_output(capsys) -> str:
                 },
             )(),
         ),
-        patch("urllib.request.urlopen", side_effect=urllib.error.URLError("no gateway")),
-        patch("gideon.cli_doctor.is_local_bind", return_value=True),
+        patch(
+            "urllib.request.urlopen", side_effect=urllib.error.URLError("no gateway")
+        ),
+        patch("gideon.interfaces.cli.doctor.is_local_bind", return_value=True),
     ):
         try:
             _doctor()

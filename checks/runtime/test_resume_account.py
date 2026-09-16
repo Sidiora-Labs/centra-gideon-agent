@@ -26,27 +26,31 @@ from pathlib import Path
 
 import pytest
 
-from gideon import resume_account as ra
-from gideon import turn_checkpoints as tc
-from gideon.context import ContextBuilder
-from gideon.context_compaction import compact, is_resume_account
-from gideon.context_headroom import count_tokens
-from gideon.ledger.reader import read_events
-from gideon.memory import MemoryStore
-from gideon.skills import SkillsLoader
-from gideon.workflows import journal as journal_mod
-from gideon.workflows import ownership
-from gideon.workflows import store as run_store
-from gideon.workflows.models import (
+from gideon.assurance.ledger.reader import read_events
+from gideon.automation.workflows import journal as journal_mod
+from gideon.automation.workflows import ownership
+from gideon.automation.workflows import store as run_store
+from gideon.automation.workflows.models import (
     Failure,
     FailureClass,
     InstanceState,
     WorkflowRun,
 )
+from gideon.cognition import resume_account as ra
+from gideon.cognition.context import PromptAssembler
+from gideon.cognition.context_compaction import compact, is_resume_account
+from gideon.cognition.context_headroom import count_tokens
+from gideon.cognition.memory import MemoryJournal
+from gideon.engine import turn_checkpoints as tc
+from gideon.extensions.skills import ProcedureLibrary
 
-# The five-step task every resume test interrupts. Steps 1-3 finished, step 4 FAILED, step 5 was
-# never reached — so the only correct place for a resumed turn to continue is step 4.
-PLAN = ("fetch/inputs", "transform/rows", "write/report", "publish/upload", "notify/owner")
+PLAN = (
+    "fetch/inputs",
+    "transform/rows",
+    "write/report",
+    "publish/upload",
+    "notify/owner",
+)
 INTERRUPTED_AT = "publish/upload"
 
 
@@ -75,7 +79,6 @@ def _record_interrupted_run() -> str:
         attempt=1,
         retries_exhausted=True,
     )
-    # PLAN[4] is deliberately never journaled: an un-attempted step must be absent, not "pending".
     return run.id
 
 
@@ -91,9 +94,6 @@ def _subjects(account: ra.ResumeAccount, status: str) -> set[str]:
     return {f.subject for f in account.by_status(status)}
 
 
-# ── the behavioural claim: a resumed turn continues at the correct step ──
-
-
 def test_a_resumed_interrupted_task_points_at_the_step_that_did_not_finish():
     """The atom's stated validation: resume a real interrupted multi-step task and assert the
     record the next turn reads identifies the correct step to continue at.
@@ -105,19 +105,16 @@ def test_a_resumed_interrupted_task_points_at_the_step_that_did_not_finish():
     account = _account_for_run(run_id)
 
     done = _subjects(account, "done")
-    assert done == set(PLAN[:3]), f"the ledger's three finished steps should be done, got {done}"
+    assert done == set(
+        PLAN[:3]
+    ), f"the ledger's three finished steps should be done, got {done}"
 
     resume_point = next(step for step in PLAN if step not in done)
     assert resume_point == INTERRUPTED_AT, (
         "the resumed turn must continue at the step that did not finish, not at the first "
         f"step and not past the failure — got {resume_point}"
     )
-    # And the step that was never attempted is absent entirely: inventing a status for it would
-    # be the same fabrication as inventing a completion.
     assert PLAN[4] not in {f.subject for f in account.facts}
-
-
-# ── the load-bearing negative: FAILED is never folded into done ──
 
 
 def test_a_failed_step_is_never_reported_as_done():
@@ -137,8 +134,12 @@ def test_a_failed_step_is_never_reported_as_done():
     assert failed_lines, "the failed step must appear in the rendered account"
     for line in failed_lines:
         assert "FAILED" in line, f"the failed step must be labelled FAILED, got: {line}"
-        assert "DONE" not in line, f"the failed step must never read as done, got: {line}"
-    assert "the endpoint returned 503" in rendered, "the recorded cause is part of the fact"
+        assert (
+            "DONE" not in line
+        ), f"the failed step must never read as done, got: {line}"
+    assert (
+        "the endpoint returned 503" in rendered
+    ), "the recorded cause is part of the fact"
 
 
 def test_a_tool_call_with_no_recorded_result_is_attempted_not_done():
@@ -152,10 +153,15 @@ def test_a_tool_call_with_no_recorded_result_is_attempted_not_done():
                 "role": "assistant",
                 "content": "publishing",
                 "tool_calls": [
-                    {"id": "c1", "function": {"name": "shell", "arguments": '{"cmd": "make dist"}'}}
+                    {
+                        "id": "c1",
+                        "function": {
+                            "name": "shell",
+                            "arguments": '{"cmd": "make dist"}',
+                        },
+                    }
                 ],
             },
-            # no {"role": "tool", "tool_call_id": "c1"} — the turn died mid-call
         ],
     )
     assert _subjects(account, "attempted") == {"shell"}
@@ -166,12 +172,14 @@ def test_a_tool_call_with_no_recorded_result_is_attempted_not_done():
 def test_a_denied_tool_call_is_neither_done_nor_failed():
     """WF2LEA-13's distinction, reused rather than re-derived: a denial is a standing policy, not
     a broken tool. Either way it is not a completion."""
-    from gideon import security
+    from gideon.security import security
 
     _recoverable, observation = security.classify_denial(
         "hard_denylist", "matched the deny list", "shell"
     )
-    assert security.is_denial_observation(observation), "the fixture must be a real denial"
+    assert security.is_denial_observation(
+        observation
+    ), "the fixture must be a real denial"
     account = ra.derive_account(
         ledger_events=ra.NOT_CONSULTED,
         checkpoint_entries=ra.NOT_CONSULTED,
@@ -179,7 +187,9 @@ def test_a_denied_tool_call_is_neither_done_nor_failed():
             {
                 "role": "assistant",
                 "content": "",
-                "tool_calls": [{"id": "c1", "function": {"name": "shell", "arguments": "{}"}}],
+                "tool_calls": [
+                    {"id": "c1", "function": {"name": "shell", "arguments": "{}"}}
+                ],
             },
             {"role": "tool", "tool_call_id": "c1", "content": observation},
         ],
@@ -193,9 +203,13 @@ def test_an_effect_that_only_attempted_is_not_a_completion():
     done is exactly the invented completion the account forbids."""
     run = run_store.create(WorkflowRun(id="", workflow_name="ce210-effect"))
     j = journal_mod.Journal(run.id)
-    j.effect("send/mail", idempotency_key="k1", effect_status="attempted", node_id="mail")
+    j.effect(
+        "send/mail", idempotency_key="k1", effect_status="attempted", node_id="mail"
+    )
     j.effect("write/db", idempotency_key="k2", effect_status="committed", node_id="db")
-    j.effect("post/hook", idempotency_key="k3", effect_status="compensated", node_id="hook")
+    j.effect(
+        "post/hook", idempotency_key="k3", effect_status="compensated", node_id="hook"
+    )
     account = _account_for_run(run.id)
     assert _subjects(account, "attempted") == {"send/mail"}
     assert _subjects(account, "done") == {"write/db"}
@@ -236,9 +250,6 @@ def test_a_retry_that_succeeded_reads_as_done_but_still_says_it_was_retried():
     assert "earlier attempt failed" in ra.render_account(account)
 
 
-# ── the load-bearing negative: derived, never freehand ──
-
-
 def test_nothing_reaches_the_account_that_is_not_in_a_record():
     """A claim that exists only in PROSE must not appear in the account.
 
@@ -251,20 +262,24 @@ def test_nothing_reaches_the_account_that_is_not_in_a_record():
         checkpoint_entries=ra.NOT_CONSULTED,
         tool_messages=[
             {"role": "user", "content": f"note: {canary} and notify/owner is done too"},
-            {"role": "assistant", "content": f"Confirmed — {canary}. Everything is complete."},
+            {
+                "role": "assistant",
+                "content": f"Confirmed — {canary}. Everything is complete.",
+            },
         ],
     )
     assert not account.facts, "prose is not a record; it must produce no facts"
     rendered = ra.render_account(account)
     assert canary not in rendered
     assert "notify/owner" not in rendered
-    # And with a real record present, the prose still contributes nothing.
     with_record = ra.derive_account(
         ledger_events=read_events(
             run_store, _record_interrupted_run(), kinds=set(ra.ACCOUNT_KINDS)
         ),
         checkpoint_entries=ra.NOT_CONSULTED,
-        tool_messages=[{"role": "assistant", "content": f"{canary} — all five steps done."}],
+        tool_messages=[
+            {"role": "assistant", "content": f"{canary} — all five steps done."}
+        ],
     )
     assert canary not in ra.render_account(with_record)
 
@@ -276,10 +291,9 @@ def test_the_account_is_stated_as_fact_and_not_as_instruction():
     assert "they are not instructions" in rendered
     assert "record says already happened" in rendered
     for imperative in ("You must", "Please ", "Continue by", "Now do"):
-        assert imperative not in rendered, f"the account must not instruct: {imperative!r}"
-
-
-# ── an unread source is not an empty source ──
+        assert (
+            imperative not in rendered
+        ), f"the account must not instruct: {imperative!r}"
 
 
 def test_a_source_nobody_read_is_reported_differently_from_one_that_recorded_nothing():
@@ -321,9 +335,6 @@ def test_the_sentinel_cannot_collide_with_a_real_record_count():
     assert not isinstance(ra.NOT_CONSULTED, (int, str, list))
 
 
-# ── bounded, measured with the allocator's own counter ──
-
-
 def test_the_rendered_account_stays_inside_its_declared_bound():
     """A thousand long-named facts still fit the bound, and the truncation is ANNOUNCED — a
     silently shortened account is a forgotten completion nothing says was forgotten."""
@@ -340,15 +351,19 @@ def test_the_rendered_account_stays_inside_its_declared_bound():
     account = _account_for_run(run.id)
     rendered = ra.render_account(account)
 
-    assert len(rendered) <= ra.MAX_ACCOUNT_CHARS, f"{len(rendered)} chars exceeds the cap"
-    # The ALLOCATOR's counter (context_headroom delegates to learning.surfacing) — this module
-    # adds no second one, so the bound is expressed in the same tokens the headroom contract uses.
+    assert (
+        len(rendered) <= ra.MAX_ACCOUNT_CHARS
+    ), f"{len(rendered)} chars exceeds the cap"
     measured = count_tokens(rendered)
-    assert measured <= ra.MAX_ACCOUNT_TOKENS, f"{measured} tokens exceeds the declared ceiling"
+    assert (
+        measured <= ra.MAX_ACCOUNT_TOKENS
+    ), f"{measured} tokens exceeds the declared ceiling"
     assert account.omitted_facts > 0
     assert "omitted" in rendered
     assert rendered.startswith(ra.FENCE_START)
-    assert rendered.rstrip().endswith(ra.FENCE_END), "truncation must never eat the closing fence"
+    assert rendered.rstrip().endswith(
+        ra.FENCE_END
+    ), "truncation must never eat the closing fence"
 
 
 def test_an_account_with_nothing_recorded_renders_nothing():
@@ -359,9 +374,6 @@ def test_an_account_with_nothing_recorded_renders_nothing():
         )
         == ""
     )
-
-
-# ── the load-bearing negative: it survives compaction, beside the live task ──
 
 
 def _folded_conversation(account_block: str | None) -> list[dict]:
@@ -376,7 +388,10 @@ def _folded_conversation(account_block: str | None) -> list[dict]:
                 "tool_calls": [
                     {
                         "id": f"m{i}",
-                        "function": {"name": "file_write", "arguments": f'{{"path": "mid{i}.py"}}'},
+                        "function": {
+                            "name": "file_write",
+                            "arguments": f'{{"path": "mid{i}.py"}}',
+                        },
                     }
                 ],
             }
@@ -404,7 +419,9 @@ def test_the_account_survives_a_compaction_verbatim():
     after = compact(before, protect_head=3, protect_tail=8)
 
     carried = [m for m in after if block in str(m.get("content", ""))]
-    assert len(carried) == 1, "the account must survive compaction exactly once, verbatim"
+    assert (
+        len(carried) == 1
+    ), "the account must survive compaction exactly once, verbatim"
     assert INTERRUPTED_AT in carried[0]["content"]
     assert "FAILED" in carried[0]["content"]
 
@@ -420,13 +437,18 @@ def test_compaction_does_not_let_the_account_evict_the_live_task():
 
     assert after[-8:] == tail_before, "the live task's messages must be byte-identical"
     assert after[:3] == before[:3], "the protected head must be byte-identical"
-    account_chars = sum(len(str(m.get("content", ""))) for m in after if is_resume_account(m))
-    assert account_chars <= 2 * ra.MAX_ACCOUNT_CHARS, "carried + fresh is the declared ceiling"
+    account_chars = sum(
+        len(str(m.get("content", ""))) for m in after if is_resume_account(m)
+    )
+    assert (
+        account_chars <= 2 * ra.MAX_ACCOUNT_CHARS
+    ), "carried + fresh is the declared ceiling"
 
 
 def test_compaction_derives_a_fresh_account_for_the_region_it_folds():
     """A compacted session carries an account even when it had none before: the folded region's
-    tool_calls/results are recorded facts, and leaving them to the summary is the defect."""
+    tool_calls/results are recorded facts, and leaving them to the summary is the defect.
+    """
     before = _folded_conversation(None)
     after = compact(before, protect_head=3, protect_tail=8)
     fresh = [m for m in after if is_resume_account(m)]
@@ -439,33 +461,37 @@ def test_compaction_reads_the_original_tool_results_not_the_pruned_digests():
     """`prune_tool_outputs` rewrites a long result to `[pruned tool result — …]`, which does not
     start with `Error:`. Deriving from the pruned copy would turn a FAILED call into a done one —
     a false completion manufactured by the compressor itself."""
-    from gideon.context_compaction import (
+    from gideon.cognition.context_compaction import (
         _KEEP_RECENT_TOOL_RESULTS,
         _TOOL_RESULT_PRUNE_OVER,
         prune_tool_outputs,
     )
 
     long_error = "Error: the build exploded\n" + ("stack frame\n" * 200)
-    assert len(long_error) > _TOOL_RESULT_PRUNE_OVER, "the fixture must exceed the threshold"
+    assert (
+        len(long_error) > _TOOL_RESULT_PRUNE_OVER
+    ), "the fixture must exceed the threshold"
     msgs: list[dict] = [{"role": "user", "content": f"head {i}"} for i in range(3)]
     msgs.append(
         {
             "role": "assistant",
             "content": "building",
-            "tool_calls": [{"id": "b1", "function": {"name": "shell", "arguments": "{}"}}],
+            "tool_calls": [
+                {"id": "b1", "function": {"name": "shell", "arguments": "{}"}}
+            ],
         }
     )
     msgs.append({"role": "tool", "tool_call_id": "b1", "content": long_error})
-    # The pre-pass keeps the most recent `_KEEP_RECENT_TOOL_RESULTS` results FULL, so the error
-    # must be pushed out of that window or the pruned and original copies are identical and this
-    # test proves nothing. Vacuity is asserted below, not assumed.
     for i in range(_KEEP_RECENT_TOOL_RESULTS + 1):
         msgs.append(
             {
                 "role": "assistant",
                 "content": f"later {i}",
                 "tool_calls": [
-                    {"id": f"l{i}", "function": {"name": "read_file", "arguments": "{}"}}
+                    {
+                        "id": f"l{i}",
+                        "function": {"name": "read_file", "arguments": "{}"},
+                    }
                 ],
             }
         )
@@ -485,10 +511,9 @@ def test_compaction_reads_the_original_tool_results_not_the_pruned_digests():
     shell_lines = [ln for ln in body.splitlines() if "shell" in ln]
     assert shell_lines
     for line in shell_lines:
-        assert "FAILED" in line, f"a long error result must still read as FAILED, got: {line}"
-
-
-# ── the load-bearing negative: an inconsistent tree refuses the resume ──
+        assert (
+            "FAILED" in line
+        ), f"a long error result must still read as FAILED, got: {line}"
 
 
 def _checkpoint_a_write(session_key: str, target: Path, ws: Path) -> None:
@@ -510,28 +535,35 @@ def test_a_record_contradicting_the_tree_refuses_the_resume(tmp_path: Path):
     key = "dashboard:ce210-inconsistent"
     _checkpoint_a_write(key, target, ws)
     assert any(
-        e["path"] == str(target) and e.get("existed") is True for e in tc.recorded_file_entries(key)
+        e["path"] == str(target) and e.get("existed") is True
+        for e in tc.recorded_file_entries(key)
     ), "the live checkpoint store must hold the claim, or the refusal is testing nothing"
 
-    # Consistent first: the same record against the tree it describes must NOT refuse.
-    ra.verify_resume_state(session_key=key, tree_root=ws, tool_messages=ra.NOT_CONSULTED)
+    ra.verify_resume_state(
+        session_key=key, tree_root=ws, tool_messages=ra.NOT_CONSULTED
+    )
 
-    target.unlink()  # the tree moved under the record
+    target.unlink()
 
     with pytest.raises(ra.ResumeStateInconsistent) as excinfo:
-        ra.verify_resume_state(session_key=key, tree_root=ws, tool_messages=ra.NOT_CONSULTED)
+        ra.verify_resume_state(
+            session_key=key, tree_root=ws, tool_messages=ra.NOT_CONSULTED
+        )
     assert "report.md" in str(excinfo.value)
     assert excinfo.value.reasons
 
 
 def test_a_recorded_create_that_never_landed_does_not_refuse(tmp_path: Path):
     """`existed: False` records a CREATE. If that write then failed the file is legitimately
-    absent, and refusing over it would stop a resume for work that correctly did not happen."""
+    absent, and refusing over it would stop a resume for work that correctly did not happen.
+    """
     ws = tmp_path / "ws"
     ws.mkdir()
     key = "dashboard:ce210-create"
     assert tc.capture_pre_edit(key, ws / "brand-new.py", cwd=ws) == "absent"
-    ra.verify_resume_state(session_key=key, tree_root=ws, tool_messages=ra.NOT_CONSULTED)
+    ra.verify_resume_state(
+        session_key=key, tree_root=ws, tool_messages=ra.NOT_CONSULTED
+    )
 
 
 def test_a_recorded_delete_does_not_refuse():
@@ -575,11 +607,18 @@ def test_a_failed_write_is_not_a_presence_claim():
                 "tool_calls": [
                     {
                         "id": "w1",
-                        "function": {"name": "file_write", "arguments": '{"path": "never.py"}'},
+                        "function": {
+                            "name": "file_write",
+                            "arguments": '{"path": "never.py"}',
+                        },
                     }
                 ],
             },
-            {"role": "tool", "tool_call_id": "w1", "content": "Error: permission denied"},
+            {
+                "role": "tool",
+                "tool_call_id": "w1",
+                "content": "Error: permission denied",
+            },
         ],
     )
     assert _subjects(account, "failed") == {"file_write"}
@@ -615,19 +654,21 @@ def test_a_manifest_without_an_existed_key_is_not_read_as_a_negative(tmp_path: P
     assert account.by_status("attempted"), "the entry is still recorded as an attempt"
 
 
-# ── the assembly seam: the call site, not just the function ──
-
-
-def _builder(tmp_path: Path) -> ContextBuilder:
-    return ContextBuilder(
-        memory=MemoryStore(workspace=tmp_path / "mem"),
-        skills=SkillsLoader(skills_path=tmp_path / "skills", install_builtins=False),
+def _builder(tmp_path: Path) -> PromptAssembler:
+    return PromptAssembler(
+        memory=MemoryJournal(workspace=tmp_path / "mem"),
+        skills=ProcedureLibrary(
+            skills_path=tmp_path / "skills", install_builtins=False
+        ),
     )
 
 
-def test_the_resumed_turns_prompt_carries_the_account_as_a_refusable_component(tmp_path: Path):
+def test_the_resumed_turns_prompt_carries_the_account_as_a_refusable_component(
+    tmp_path: Path,
+):
     """Asserts the CALL SITE and the outcome: a resumed `build_message` labels the account as its
-    own component, marks it non-compressible, and the FAILED step is in the text that ships."""
+    own component, marks it non-compressible, and the FAILED step is in the text that ships.
+    """
     run_id = _record_interrupted_run()
     key = ownership.owned_key(run_id, "upload")
     components: list = []
@@ -641,15 +682,18 @@ def test_the_resumed_turns_prompt_carries_the_account_as_a_refusable_component(t
     )
     named = [c for c in components if c.name == "record of already-completed work"]
     assert named, f"no account component in {[c.name for c in components]}"
-    assert named[0].compressible is False, "trimming the account is dropping a completion"
-    # Asserted on the STEP'S OWN LINE, not on the presence of the word: the block's preamble
-    # explains what FAILED means, so `"FAILED" in text` passes even when the failed step has been
-    # relabelled done — a vacuous assertion that would have hidden the mutation.
-    interrupted_lines = [ln for ln in named[0].text.splitlines() if INTERRUPTED_AT in ln]
+    assert (
+        named[0].compressible is False
+    ), "trimming the account is dropping a completion"
+    interrupted_lines = [
+        ln for ln in named[0].text.splitlines() if INTERRUPTED_AT in ln
+    ]
     assert interrupted_lines, f"the interrupted step is missing from {named[0].text}"
     for line in interrupted_lines:
         assert "FAILED" in line and "DONE" not in line, line
-    assert ra.FENCE_START in message, "the account must reach the prompt that is really sent"
+    assert (
+        ra.FENCE_START in message
+    ), "the account must reach the prompt that is really sent"
     assert any(PLAN[0] in ln and "DONE" in ln for ln in named[0].text.splitlines())
 
 
@@ -661,7 +705,7 @@ def test_the_fence_survives_prompt_assembly(tmp_path: Path):
     the block would be folded into the summary and the carry rule would never fire while looking
     perfectly implemented. This is the vacuity guard for that.
     """
-    from gideon.context import _MULTIBYTE_TABLE
+    from gideon.cognition.context import _MULTIBYTE_TABLE
 
     assert ra.FENCE_START.translate(_MULTIBYTE_TABLE) == ra.FENCE_START
     assert ra.FENCE_END.translate(_MULTIBYTE_TABLE) == ra.FENCE_END
@@ -674,7 +718,6 @@ def test_the_fence_survives_prompt_assembly(tmp_path: Path):
         resumed=True,
         cwd=str(tmp_path),
     )
-    # The end-to-end proof: the block as it really ships is one the carrier recognises.
     assert is_resume_account({"content": message})
 
 
@@ -694,7 +737,9 @@ def test_a_non_resumed_turn_does_not_carry_an_account(tmp_path: Path):
     assert not [c for c in components if c.name == "record of already-completed work"]
 
 
-def test_the_assembly_seam_refuses_rather_than_injecting_a_contradicted_account(tmp_path: Path):
+def test_the_assembly_seam_refuses_rather_than_injecting_a_contradicted_account(
+    tmp_path: Path,
+):
     """The stop reaches the seam that builds the prompt, not just the checker."""
     ws = tmp_path / "ws"
     ws.mkdir()
@@ -714,6 +759,8 @@ def test_a_session_with_no_run_says_the_ledger_was_not_consulted(tmp_path: Path)
     """A plain chat key is not run-owned, so there is no ledger to read. Saying NOT CONSULTED is
     honest; rendering "0 records" would assert a run recorded nothing."""
     assert ra.ledger_events_for_session("dashboard:plain") is ra.NOT_CONSULTED
-    events = ra.ledger_events_for_session(ownership.owned_key(_record_interrupted_run(), "upload"))
+    events = ra.ledger_events_for_session(
+        ownership.owned_key(_record_interrupted_run(), "upload")
+    )
     assert events is not ra.NOT_CONSULTED
     assert events, "a run-owned key must reach the run's real ledger"

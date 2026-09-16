@@ -18,7 +18,7 @@ a reimplementation, because two cycle checkers means the looser one lets a deadl
 
 import pytest
 
-from gideon.workflows.pool import (
+from gideon.automation.workflows.pool import (
     DEFAULT_LEASE_SECS,
     HOOK_EVENT_TASK_COMPLETE,
     MAX_LEASE_SECS,
@@ -54,9 +54,6 @@ def _lease(**kw) -> Lease:
     base = dict(task_id="t-1", holder="session-a", acquired_at=NOW, ttl_seconds=600)
     base.update(kw)
     return Lease(**base)
-
-
-# ── leases: the property that prevents double execution ──
 
 
 def test_an_UNCLAIMED_task_can_be_acquired():
@@ -166,9 +163,6 @@ def test_the_sweep_returns_only_EXPIRED_ids():
     assert sweep_expired(leases, NOW) == ["dead"]
 
 
-# ── leases under real contention ──
-
-
 def test_only_ONE_of_many_concurrent_acquires_can_win():
     """The property, measured rather than asserted: given one lease state, N callers racing to claim
     must yield exactly one winner. (The write path is a flocked read-modify-write; this pins the
@@ -181,9 +175,6 @@ def test_only_ONE_of_many_concurrent_acquires_can_win():
             state = lease
             winners.append(holder)
     assert winners == ["s-0"], f"{len(winners)} sessions believed they owned one task"
-
-
-# ── evented unblock ──
 
 
 def test_a_COMPLETED_blocker_unblocks_its_dependent():
@@ -230,7 +221,9 @@ def test_a_FAILED_blocker_CASCADES_with_its_reason():
 
 
 def test_a_CANCELLED_blocker_also_cascades():
-    out = plan_unblock(blocker_id="a", blocker_status="cancelled", dependents={"b": ["a"]})
+    out = plan_unblock(
+        blocker_id="a", blocker_status="cancelled", dependents={"b": ["a"]}
+    )
     assert out[0].kind is UnblockKind.CASCADE_FAILED
 
 
@@ -247,12 +240,16 @@ def test_a_cascade_does_NOT_wait_for_sibling_prerequisites():
 
 
 def test_an_UNRELATED_task_is_untouched():
-    out = plan_unblock(blocker_id="a", blocker_status="done", dependents={"z": ["other"]})
+    out = plan_unblock(
+        blocker_id="a", blocker_status="done", dependents={"z": ["other"]}
+    )
     assert out == []
 
 
 def test_a_NON_TERMINAL_status_changes_nothing():
-    out = plan_unblock(blocker_id="a", blocker_status="in_progress", dependents={"b": ["a"]})
+    out = plan_unblock(
+        blocker_id="a", blocker_status="in_progress", dependents={"b": ["a"]}
+    )
     assert out == []
 
 
@@ -271,7 +268,10 @@ def test_a_cascade_BURST_coalesces_into_one_notification():
 
 def test_a_SINGLE_cascade_keeps_its_specific_reason():
     out = plan_unblock(
-        blocker_id="a", blocker_status="failed", blocker_reason="boom", dependents={"b": ["a"]}
+        blocker_id="a",
+        blocker_status="failed",
+        blocker_reason="boom",
+        dependents={"b": ["a"]},
     )
     _t, summary = coalesce(out)
     assert "boom" in summary
@@ -282,31 +282,29 @@ def test_pure_unblocks_produce_NO_notification():
     assert coalesce(out)[1] == ""
 
 
-# ── task lifecycle events ──
-
-
 def test_the_event_name_is_the_SHIPPED_one():
     """Measured: `TaskComplete` already exists in `hooks.HOOK_EVENTS` and `validation.py`'s
     allowlist, and nothing fires it. A second name here would be a vocabulary the hook UI does not
     render, so a user could never configure against it."""
-    from gideon.hooks import HOOK_EVENTS
+    from gideon.engine.hooks import HOOK_EVENTS
 
     assert HOOK_EVENT_TASK_COMPLETE == "TaskComplete"
     assert HOOK_EVENT_TASK_COMPLETE in HOOK_EVENTS
 
 
 def test_the_event_is_ALLOWLISTED_for_hooks():
-    from gideon.validation import ALLOWED_HOOK_EVENTS
+    from gideon.assurance.validation import ALLOWED_HOOK_EVENTS
 
     assert HOOK_EVENT_TASK_COMPLETE in ALLOWED_HOOK_EVENTS
 
 
 def test_the_payload_matches_the_fire_SIGNATURE():
     """Uses `fire(event, context=...)`'s existing shape rather than adding hook variables: the UI
-    renders a fixed `vars` tuple per event, so a new variable is one no user can discover."""
+    renders a fixed `vars` tuple per event, so a new variable is one no user can discover.
+    """
     import inspect
 
-    from gideon.hooks import ScriptHookStore
+    from gideon.engine.hooks import ScriptHookStore
 
     params = inspect.signature(ScriptHookStore.fire).parameters
     payload = lifecycle_payload(task_id="t-1", title="Ship it", status="done")
@@ -341,15 +339,12 @@ def test_reopening_a_task_does_not_fire():
     assert should_fire_completion("done", "open") is False
 
 
-# ── write-time acyclicity, delegated ──
-
-
 def test_plan_edges_DELEGATES_to_the_shipped_checker():
     """Measured: `tasks/native.py` already calls `reconcile.would_create_cycle` on create AND
     update. A second DFS here would be a second answer, and the looser one lets a deadlock through
     (AionUI's shipped A-blocks-B/B-blocks-A bug)."""
     calls = {}
-    from gideon.tasks import reconcile
+    from gideon.engine.tasks import reconcile
 
     real = reconcile.would_create_cycle
 
@@ -379,16 +374,13 @@ def test_a_MISSING_checker_does_not_read_as_safe(monkeypatch):
     real_import = builtins.__import__
 
     def blocked(name, *args, **kw):
-        if name == "gideon.tasks":
+        if name == "gideon.engine.tasks":
             raise ImportError("nope")
         return real_import(name, *args, **kw)
 
     monkeypatch.setattr(builtins, "__import__", blocked)
     cycle, error = plan_edges({}, task_id="a", new_prereq_ids=["b"])
     assert error.startswith("cycle check unavailable")
-
-
-# ── hand-off edges (R7) ──
 
 
 def test_a_completing_def_SUGGESTS_its_declared_successor():
@@ -402,7 +394,9 @@ def test_review_to_fix_requires_an_EXPLICIT_user_request():
     """The plan calls this out: a review that auto-proposes fixing what it just criticized reads as
     the system arguing with itself."""
     assert suggest_handoffs("code-review") == []
-    assert suggest_handoffs("code-review", user_requested=True)[0].target_def == "bug-fix"
+    assert (
+        suggest_handoffs("code-review", user_requested=True)[0].target_def == "bug-fix"
+    )
 
 
 def test_a_def_with_no_edges_suggests_nothing():
@@ -433,13 +427,12 @@ def test_a_handoff_round_trips_to_dict():
     assert payload["context_fields"] == ["f"]
 
 
-# ── blueprint sessions (R16) ──
-
-
 def test_a_blueprint_numbers_its_steps():
     """The checklist has to be readable as a checklist; unnumbered prose is what the passive digest
     already does."""
-    bp = build_blueprint(def_name="backup", title="Backup", steps=["Snapshot", "Verify"])
+    bp = build_blueprint(
+        def_name="backup", title="Backup", steps=["Snapshot", "Verify"]
+    )
     assert [m["text"] for m in bp.messages] == ["1. Snapshot", "2. Verify"]
 
 
@@ -450,7 +443,9 @@ def test_the_steps_are_ASSISTANT_messages():
 
 
 def test_the_digest_LEADS_so_the_user_reads_why_first():
-    bp = build_blueprint(def_name="d", title="t", steps=["a"], digest="Why this matters")
+    bp = build_blueprint(
+        def_name="d", title="t", steps=["a"], digest="Why this matters"
+    )
     assert bp.messages[0]["text"] == "Why this matters"
 
 
@@ -477,7 +472,9 @@ def test_RE_hydrating_the_same_blueprint_is_a_NO_OP():
     duplicated instructions read as a system that has lost its place."""
     bp = build_blueprint(def_name="d", title="t", steps=["a"])
     _m, record, _r = plan_hydration(bp, session_id="s-1", now=NOW)
-    messages, again, replaced = plan_hydration(bp, session_id="s-1", now=NOW + 5, existing=record)
+    messages, again, replaced = plan_hydration(
+        bp, session_id="s-1", now=NOW + 5, existing=record
+    )
     assert replaced is False
     assert messages == []
     assert again is record
@@ -494,7 +491,9 @@ def test_a_DIFFERENT_blueprint_hydrates_fresh():
     first = build_blueprint(def_name="a", title="t", steps=["x"])
     second = build_blueprint(def_name="b", title="t", steps=["y"])
     _m, record, _r = plan_hydration(first, session_id="s-1", now=NOW)
-    _m2, _r2, replaced = plan_hydration(second, session_id="s-1", now=NOW, existing=record)
+    _m2, _r2, replaced = plan_hydration(
+        second, session_id="s-1", now=NOW, existing=record
+    )
     assert replaced is True
 
 
@@ -503,14 +502,17 @@ def test_the_hydration_record_uses_the_declared_keys():
     assert set(payload) == {"templateId", "sessionId", "hydratedAt"}
 
 
-# ── mode routing ──
-
-
 def test_a_GATED_def_is_a_RUN_not_a_blueprint():
     """A blueprint has no engine, so there is nothing to pause — rendering a gate as a numbered
     message would show the user an approval that approves nothing."""
     assert (
-        route(surface_mode="passive", has_gates=True, max_turns=1, has_schema=False, guided=True)
+        route(
+            surface_mode="passive",
+            has_gates=True,
+            max_turns=1,
+            has_schema=False,
+            guided=True,
+        )
         is SurfaceRoute.RUN
     )
 
@@ -531,7 +533,13 @@ def test_a_SCHEMA_bearing_def_is_a_run():
 
 def test_a_GUIDED_lightweight_def_is_a_BLUEPRINT():
     assert (
-        route(surface_mode="passive", has_gates=False, max_turns=1, has_schema=False, guided=True)
+        route(
+            surface_mode="passive",
+            has_gates=False,
+            max_turns=1,
+            has_schema=False,
+            guided=True,
+        )
         is SurfaceRoute.BLUEPRINT
     )
 
@@ -547,7 +555,13 @@ def test_an_OFF_def_never_routes_to_a_BLUEPRINT():
     """Materializing a guided conversation for a def the user switched off would put it on screen
     anyway — the one thing `off` has to prevent here."""
     assert (
-        route(surface_mode="off", has_gates=False, max_turns=1, has_schema=False, guided=True)
+        route(
+            surface_mode="off",
+            has_gates=False,
+            max_turns=1,
+            has_schema=False,
+            guided=True,
+        )
         is SurfaceRoute.PASSIVE
     )
 
@@ -555,14 +569,17 @@ def test_an_OFF_def_never_routes_to_a_BLUEPRINT():
 def test_STRUCTURE_wins_over_the_mode():
     """Corrected in S61 after measuring it: short-circuiting on `off` first reported a GATED def as
     PASSIVE, which tells a caller it may be injected as text and silently drops the gate. This
-    function answers what a def IS; whether it may surface is `surfacing.veto_reasons`."""
+    function answers what a def IS; whether it may surface is `surfacing.veto_reasons`.
+    """
     assert (
-        route(surface_mode="off", has_gates=True, max_turns=1, has_schema=False) is SurfaceRoute.RUN
+        route(surface_mode="off", has_gates=True, max_turns=1, has_schema=False)
+        is SurfaceRoute.RUN
     )
 
 
 @pytest.mark.parametrize("mode", ["passive", "suggest"])
 def test_routing_is_independent_of_which_surfacing_mode_is_on(mode):
     assert (
-        route(surface_mode=mode, has_gates=True, max_turns=1, has_schema=False) is SurfaceRoute.RUN
+        route(surface_mode=mode, has_gates=True, max_turns=1, has_schema=False)
+        is SurfaceRoute.RUN
     )

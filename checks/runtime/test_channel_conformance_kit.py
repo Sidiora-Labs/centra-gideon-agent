@@ -7,7 +7,7 @@ still say nothing. So each clause here gets a mutant — a fake that violates ex
 obligation — and the test pins which clause name the failure carries.
 
 Imported the way an APP imports it (``gideon.sdk.channel``), not by the
-``gideon.testing`` path, so the export path the four apps depend on is the one core
+``gideon.assurance.testing`` path, so the export path the four apps depend on is the one core
 exercises. See the kit's module docstring for the export-path decision.
 """
 
@@ -20,7 +20,7 @@ import warnings
 
 import pytest
 
-from gideon.channel_transports.base import (
+from gideon.integrations.channel_transports.base import (
     ChannelCapabilities,
     ChannelMessage,
     ChannelTransportProvider,
@@ -36,18 +36,17 @@ from gideon.sdk.channel import (
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
     """Isolate the trust store + SEL to tmp_path — the kit drives the REAL trust seam."""
-    import gideon.config.loader as cfg
-    import gideon.providers.entity_routes as er
+    import gideon.core.config.loader as cfg
+    import gideon.extensions.providers.entity_routes as er
 
     monkeypatch.setattr(cfg, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(
-        er, "_entity_settings_path", lambda entity: tmp_path / "entity_settings" / f"{entity}.json"
+        er,
+        "_entity_settings_path",
+        lambda entity: tmp_path / "entity_settings" / f"{entity}.json",
     )
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     yield tmp_path
-
-
-# ── the conforming reference transport ──────────────────────────────────────
 
 
 class GoodTransport(ChannelTransportProvider):
@@ -59,8 +58,6 @@ class GoodTransport(ChannelTransportProvider):
 
     def __init__(self, *, token: str = "tok") -> None:
         self._token = token
-        # `fenced_text` appears nowhere in this module: an inbound=False transport is
-        # never asked to consume it, which the kit must respect.
 
     @property
     def name(self) -> str:
@@ -107,7 +104,12 @@ class InboundTransport(GoodTransport):
         from gideon.sdk.channel import guard_inbound
 
         verdict = guard_inbound(
-            None, self.name, cm.sender, channel_id=cm.channel_id, is_dm=False, text=cm.text
+            None,
+            self.name,
+            cm.sender,
+            channel_id=cm.channel_id,
+            is_dm=False,
+            text=cm.text,
         )
         if not verdict.allowed:
             return
@@ -129,16 +131,15 @@ def test_unconfigured_transport_still_conforms():
     assert_channel_contract(GoodTransport(token=""))
 
 
-# ── clause 1: identity ──────────────────────────────────────────────────────
-
-
 def test_blank_name_fails_identity():
     class Blank(GoodTransport):
         @property
         def name(self) -> str:
             return "   "
 
-    with pytest.raises(ChannelContractError, match=r"\[identity\].*non-empty string 'name'"):
+    with pytest.raises(
+        ChannelContractError, match=r"\[identity\].*non-empty string 'name'"
+    ):
         assert_channel_contract(Blank())
 
 
@@ -151,9 +152,6 @@ def test_info_that_relabels_itself_fails_identity():
 
     with pytest.raises(ChannelContractError, match=r"\[identity\].*MUST project"):
         assert_channel_contract(Liar())
-
-
-# ── clause 3: capabilities completeness ─────────────────────────────────────
 
 
 def test_incomplete_capability_dict_fails():
@@ -169,7 +167,9 @@ def test_incomplete_capability_dict_fails():
 
             return _Trimmed(**{f: getattr(caps, f) for f in caps.to_dict()})
 
-    with pytest.raises(ChannelContractError, match=r"\[capabilities\].*missing \['reactions'\]"):
+    with pytest.raises(
+        ChannelContractError, match=r"\[capabilities\].*missing \['reactions'\]"
+    ):
         assert_channel_contract(Partial())
 
 
@@ -184,7 +184,9 @@ def test_capability_dict_with_undeclared_key_fails():
 
             return _Extra()
 
-    with pytest.raises(ChannelContractError, match=r"\[capabilities\].*undeclared keys"):
+    with pytest.raises(
+        ChannelContractError, match=r"\[capabilities\].*undeclared keys"
+    ):
         assert_channel_contract(Extended())
 
 
@@ -199,11 +201,10 @@ def test_non_boolean_capability_value_fails():
 
             return _Str()
 
-    with pytest.raises(ChannelContractError, match=r"\[capabilities\].*'threads'.*MUST be a bool"):
+    with pytest.raises(
+        ChannelContractError, match=r"\[capabilities\].*'threads'.*MUST be a bool"
+    ):
         assert_channel_contract(Stringly())
-
-
-# ── clause 2: connect/send ──────────────────────────────────────────────────
 
 
 def test_send_returning_non_bool_fails():
@@ -226,12 +227,7 @@ def test_send_that_raises_fails_rather_than_erroring_out():
             raise RuntimeError("no credentials")
 
     with pytest.raises(RuntimeError, match="no credentials"):
-        # The kit deliberately does NOT swallow this: a transport raising here is a bug
-        # in the transport, and the traceback is more useful than a reworded assertion.
         assert_channel_contract(Exploding())
-
-
-# ── clause 4: inbound honesty ───────────────────────────────────────────────
 
 
 def test_inbound_declared_without_any_receiver_fails():
@@ -239,7 +235,9 @@ def test_inbound_declared_without_any_receiver_fails():
         def capabilities(self):
             return ChannelCapabilities(inbound=True)
 
-    with pytest.raises(ChannelContractError, match=r"\[inbound\].*neither overrides receive"):
+    with pytest.raises(
+        ChannelContractError, match=r"\[inbound\].*neither overrides receive"
+    ):
         assert_channel_contract(Pretender())
 
 
@@ -251,7 +249,9 @@ def test_inbound_declared_but_start_inbound_inherited_fails():
         async def _on_message(self, cm):  # noqa: ANN001
             return None
 
-    with pytest.raises(ChannelContractError, match=r"\[inbound\].*DEFAULT start_inbound"):
+    with pytest.raises(
+        ChannelContractError, match=r"\[inbound\].*DEFAULT start_inbound"
+    ):
         assert_channel_contract(Inert(), inbound_via="_on_message")
 
 
@@ -263,11 +263,10 @@ def test_receiver_without_the_inbound_flag_fails():
         def capabilities(self):
             return ChannelCapabilities(inbound=False)
 
-    with pytest.raises(ChannelContractError, match=r"\[inbound\].*declare inbound=True"):
+    with pytest.raises(
+        ChannelContractError, match=r"\[inbound\].*declare inbound=True"
+    ):
         assert_channel_contract(Hidden(), inbound_via="_on_message")
-
-
-# ── clause 5: health/test ───────────────────────────────────────────────────
 
 
 def test_unmapped_health_state_fails():
@@ -291,9 +290,6 @@ def test_test_disagreeing_with_health_fails():
         assert_channel_contract(Optimist())
 
 
-# ── clause 6: unknown-sender flow ───────────────────────────────────────────
-
-
 def test_unknown_sender_flow_runs_against_the_real_seam():
     """The clause is not self-driven: it exercises core's guard_inbound + notification
     path, so it would fail if the seam regressed even with every fake intact."""
@@ -315,7 +311,7 @@ def test_kit_is_re_entrant_against_one_provider_key():
 def test_kit_notices_a_non_default_dm_policy(tmp_path):
     """An 'open' DM policy makes every stranger allowed — the kit must refuse to
     'pass' under a policy that cannot exercise pairing."""
-    from gideon import channel_trust as ct
+    from gideon.integrations import channel_trust as ct
 
     store = ct._read_store()
     rec = ct._provider_record(store, "conformance-good")
@@ -331,9 +327,6 @@ def test_capturing_state_records_actionable_notifications():
     state.notify("info", "plain", "b")
     assert len(state.notifications) == 2
     assert len(state.with_actions()) == 1
-
-
-# ── clause 7: fencing ───────────────────────────────────────────────────────
 
 
 def test_inbound_transport_ignoring_fenced_text_fails(tmp_path, monkeypatch):
@@ -354,7 +347,7 @@ def test_inbound_transport_ignoring_fenced_text_fails(tmp_path, monkeypatch):
         textwrap.dedent('''
             """A transport that fences nothing — the regression the clause catches."""
 
-            from gideon.channel_transports.base import (
+            from gideon.integrations.channel_transports.base import (
                 ChannelCapabilities,
                 ChannelTransportProvider,
             )
@@ -402,7 +395,9 @@ def test_inbound_transport_ignoring_fenced_text_fails(tmp_path, monkeypatch):
         sys.modules.pop("conformance_raw_transport", None)
 
 
-def test_inbound_transport_routing_through_the_door_passes_fencing(tmp_path, monkeypatch):
+def test_inbound_transport_routing_through_the_door_passes_fencing(
+    tmp_path, monkeypatch
+):
     """EA-7: a transport that hands inbound to ``services.deliver_channel_inbound``
     satisfies the fencing clause BY CONSTRUCTION — core applies the fence inside the
     door, so there is no ``fenced_text`` left for the transport to read. The kit must
@@ -416,7 +411,7 @@ def test_inbound_transport_routing_through_the_door_passes_fencing(tmp_path, mon
         textwrap.dedent('''
             """A transport on the guarded door — the EA-7 target shape."""
 
-            from gideon.channel_transports.base import (
+            from gideon.integrations.channel_transports.base import (
                 ChannelCapabilities,
                 ChannelTransportProvider,
             )
@@ -471,9 +466,6 @@ def test_fencing_clause_is_skipped_for_outbound_only_transports():
     assert_channel_contract(GoodTransport())
 
 
-# ── §C3 delivery obligations ────────────────────────────────────────────────
-
-
 class _FakeBackend:
     def __init__(self) -> None:
         self.sent: list[dict] = []
@@ -507,10 +499,14 @@ class GoodDelivery:
         self._api.sent.append({"channel": channel, "text": text})
         return self._api.next_id()
 
-    async def deliver_rich(self, channel, payload, fallback_text, *, thread_ts="", **kw):
+    async def deliver_rich(
+        self, channel, payload, fallback_text, *, thread_ts="", **kw
+    ):
         return await self.deliver_text(channel, fallback_text, thread_ts)
 
-    async def upload_attachment(self, channel, file_path, *, filename="", thread_ts="", **kw):
+    async def upload_attachment(
+        self, channel, file_path, *, filename="", thread_ts="", **kw
+    ):
         return ""
 
     async def request_approval(self, event, *, source, **kw):
@@ -556,7 +552,9 @@ class StreamingTransport(GoodTransport):
         return "conformance-streaming"
 
     def capabilities(self):
-        return ChannelCapabilities(inbound=False, edits=True, rich_text=True, max_text_len=2000)
+        return ChannelCapabilities(
+            inbound=False, edits=True, rich_text=True, max_text_len=2000
+        )
 
 
 def test_conforming_delivery_and_throttle_pass():
@@ -569,7 +567,9 @@ def test_missing_should_level_delivery_method_fails():
         build_thread_link = None  # type: ignore[assignment]
 
     d = NoThreadLink(_FakeBackend())
-    with pytest.raises(ChannelContractError, match=r"\[delivery\].*build_thread_link is SHOULD"):
+    with pytest.raises(
+        ChannelContractError, match=r"\[delivery\].*build_thread_link is SHOULD"
+    ):
         assert_channel_contract(StreamingTransport(), **_wire(d))
 
 
@@ -601,12 +601,14 @@ def test_throttle_clause_refuses_to_pass_vacuously_without_a_counter():
     class Opaque(GoodDelivery):
         def __init__(self):
             super().__init__(_FakeBackend())
-            self._api = object()  # no `edits` list to count
+            self._api = object()
 
     d = Opaque()
     wired = _wire(d)
     wired["fake_backend"] = None
-    with pytest.raises(ChannelContractError, match=r"\[streaming\].*cannot count edits"):
+    with pytest.raises(
+        ChannelContractError, match=r"\[streaming\].*cannot count edits"
+    ):
         assert_channel_contract(StreamingTransport(), **wired)
 
 
@@ -647,17 +649,11 @@ def test_partial_streaming_trio_fails():
         assert_channel_contract(StreamingTransport(), delivery=NoStop(_FakeBackend()))
 
 
-# ── clause 9: vendor-seam completeness (advisory) ───────────────────────────
-#
-# Driven through `assert_channel_contract`, never by calling the private helper: the whole
-# point of riding the existing entry point is that the four app suites get the advisory
-# with no apps-repo change, and a test that only exercised the helper would prove the
-# mechanism exists without proving anything uses it.
-
-_CHANNEL_PROVIDER = {"type": "channel", "implementation": "fixture_runtime.transport:create"}
+_CHANNEL_PROVIDER = {
+    "type": "channel",
+    "implementation": "fixture_runtime.transport:create",
+}
 _INBOX_PROVIDER = {"type": "inbox", "implementation": "fixture_runtime.source:create"}
-#: CE-10's arm. Generically named, like every other fixture here — the plan's done_when ends
-#: "core contains no vendor names", and a test fixture is a tracked file like any other.
 _TRIGGER_SOURCE_PROVIDER = {
     "type": "trigger_source",
     "implementation": "fixture_runtime.trigger_source:create",
@@ -700,7 +696,9 @@ def _run_capturing_warnings(provider, **kwargs) -> list[str]:
     return _completeness_advisories(record)
 
 
-def test_channel_only_app_warns_about_BOTH_missing_seams_SEPARATELY(tmp_path, monkeypatch):
+def test_channel_only_app_warns_about_BOTH_missing_seams_SEPARATELY(
+    tmp_path, monkeypatch
+):
     """A `channel`-only manifest is missing two seams, and gets two advisories.
 
     Two, not one merged sentence: "you have no inbox" and "you have no trigger source" are
@@ -722,23 +720,24 @@ def test_channel_only_app_warns_about_BOTH_missing_seams_SEPARATELY(tmp_path, mo
     trigger = [m for m in advisories if "no trigger_source provider" in m]
     assert len(inbox) == 1, advisories
     assert len(trigger) == 1, advisories
-    # Each advisory must name the app, the missing seam, the fix, its own exemption and
-    # where the checklist lives — a warning that only says "incomplete" sends the reader
-    # nowhere.
     for message in advisories:
         assert "fixture-channel" in message
         assert "docs/guides/build-a-channel-app.md" in message
     assert "no_inbox_source_reason" in inbox[0]
-    assert "no_trigger_source_reason" not in inbox[0], "the arms must not cross-reference"
+    assert (
+        "no_trigger_source_reason" not in inbox[0]
+    ), "the arms must not cross-reference"
     assert "no_trigger_source_reason" in trigger[0]
-    assert "no_inbox_source_reason" not in trigger[0], "the arms must not cross-reference"
-    # The trigger arm must say the seam is available, not that it is coming: the whole 0/4
-    # window happened because the prose said "once that seam exists" after it existed.
+    assert (
+        "no_inbox_source_reason" not in trigger[0]
+    ), "the arms must not cross-reference"
     assert "WF2AUT-8" in trigger[0]
     assert "once that seam exists" not in trigger[0]
 
 
-def test_a_channel_plus_inbox_app_still_warns_about_the_TRIGGER_SOURCE_arm(tmp_path, monkeypatch):
+def test_a_channel_plus_inbox_app_still_warns_about_the_TRIGGER_SOURCE_arm(
+    tmp_path, monkeypatch
+):
     """🔴 The regression this arm exists for: the CE-8-era slack-channel shape.
 
     `channel` + `inbox` was "full vendor completeness" when CE-8 shipped, and this clause
@@ -762,7 +761,9 @@ def test_a_channel_plus_inbox_app_still_warns_about_the_TRIGGER_SOURCE_arm(tmp_p
     assert "no inbox provider" not in advisories[0]
 
 
-def test_a_channel_plus_trigger_source_app_still_warns_about_the_INBOX_arm(tmp_path, monkeypatch):
+def test_a_channel_plus_trigger_source_app_still_warns_about_the_INBOX_arm(
+    tmp_path, monkeypatch
+):
     """The mirror. Adopting one arm must not silence the other — the failure mode of a
     single merged "seams are incomplete" advisory."""
     provider = _transport_in_app_bundle(
@@ -800,8 +801,6 @@ def test_channel_only_app_still_passes_every_hard_clause(tmp_path, monkeypatch):
     "manifest,tag",
     [
         (
-            # The vendor-completeness shape slack-channel ships after CE-10: canonical
-            # singular `provider` for the transport + both companion seams in `providers[]`.
             {
                 "name": "fixture-complete",
                 "version": "0.1.0",
@@ -811,8 +810,6 @@ def test_channel_only_app_still_passes_every_hard_clause(tmp_path, monkeypatch):
             "complete-singular",
         ),
         (
-            # All three seams in the array. Read one declaration shape only and a complete
-            # app gets reported as channel-only.
             {
                 "name": "fixture-complete-array",
                 "version": "0.1.0",
@@ -834,17 +831,26 @@ def test_each_declared_reason_suppresses_ONLY_ITS_OWN_arm(tmp_path, monkeypatch)
     "seams I skip" string would let an app silence a seam nobody had thought about. Only
     supplying both goes quiet.
     """
-    manifest = {"name": "fixture-channel", "version": "0.1.0", "provider": _CHANNEL_PROVIDER}
-    inbox_only = _transport_in_app_bundle(tmp_path, monkeypatch, manifest, tag="exempt-inbox")
+    manifest = {
+        "name": "fixture-channel",
+        "version": "0.1.0",
+        "provider": _CHANNEL_PROVIDER,
+    }
+    inbox_only = _transport_in_app_bundle(
+        tmp_path, monkeypatch, manifest, tag="exempt-inbox"
+    )
     advisories = _run_capturing_warnings(
         inbox_only, no_inbox_source_reason="this vendor has no message-source semantics"
     )
     assert len(advisories) == 1, advisories
     assert "no trigger_source provider" in advisories[0]
 
-    trigger_only = _transport_in_app_bundle(tmp_path, monkeypatch, manifest, tag="exempt-trigger")
+    trigger_only = _transport_in_app_bundle(
+        tmp_path, monkeypatch, manifest, tag="exempt-trigger"
+    )
     advisories = _run_capturing_warnings(
-        trigger_only, no_trigger_source_reason="this vendor emits nothing an automation can use"
+        trigger_only,
+        no_trigger_source_reason="this vendor emits nothing an automation can use",
     )
     assert len(advisories) == 1, advisories
     assert "no inbox provider" in advisories[0]
@@ -869,7 +875,7 @@ def test_provider_with_no_discoverable_manifest_is_silent(tmp_path, monkeypatch)
 
 
 def test_core_fixture_transport_is_silent():
-    """The same claim for core's OWN fixtures: `GoodTransport` lives under `tests/`, whose
+    """The same claim for core's OWN fixtures: `GoodTransport` lives under `checks/runtime/`, whose
     walk hits the repo root marker before any `app.json`, so core's suite never nags
     itself."""
     assert _run_capturing_warnings(GoodTransport()) == []
@@ -881,7 +887,11 @@ def test_manifest_declaring_no_channel_provider_is_silent(tmp_path, monkeypatch)
     provider = _transport_in_app_bundle(
         tmp_path,
         monkeypatch,
-        {"name": "fixture-notachannel", "version": "0.1.0", "providers": [_INBOX_PROVIDER]},
+        {
+            "name": "fixture-notachannel",
+            "version": "0.1.0",
+            "providers": [_INBOX_PROVIDER],
+        },
         tag="nochannel",
     )
     assert _run_capturing_warnings(provider) == []
@@ -895,5 +905,7 @@ def test_unreadable_manifest_is_silent(tmp_path, monkeypatch):
         {"name": "fixture-broken", "version": "0.1.0", "provider": _CHANNEL_PROVIDER},
         tag="broken",
     )
-    (tmp_path / "apps" / "broken-channel" / "app.json").write_text("{not json", encoding="utf-8")
+    (tmp_path / "apps" / "broken-channel" / "app.json").write_text(
+        "{not json", encoding="utf-8"
+    )
     assert _run_capturing_warnings(provider) == []

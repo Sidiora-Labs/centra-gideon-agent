@@ -31,33 +31,39 @@ from pathlib import Path
 
 import pytest
 
-from gideon.proposer.backends import (
+from gideon.cognition.proposer.backends import (
     SUBAGENT_BACKEND,
     RunnerProposerBackend,
     SubagentProposerBackend,
     normalise,
 )
-from gideon.proposer.brief import build_brief
-from gideon.proposer.contract import CLAIM_MARKER, ProposerBackend, parse_claimed_paths
-from gideon.proposer.selection import select_target
-from gideon.proposer.service import (
+from gideon.cognition.proposer.brief import build_brief
+from gideon.cognition.proposer.contract import (
+    CLAIM_MARKER,
+    ProposerBackend,
+    parse_claimed_paths,
+)
+from gideon.cognition.proposer.selection import select_target
+from gideon.cognition.proposer.service import (
     SEL_OP_FIRE,
     SEL_OP_VERDICT,
     choose_backend,
     run_second_opinion,
 )
-from gideon.proposer.verify import rediff, snapshot_workspace
+from gideon.cognition.proposer.verify import rediff, snapshot_workspace
 
 _ALL_RUNNERS = ("claude-code", "codex", "gemini-cli", "kiro")
 
 
 @pytest.fixture()
-def isolated_home(tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> Path:
+def isolated_home(
+    tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> Path:
     """Redirect GIDEON_HOME and PROVE the redirect bound before any test depends on it."""
     home = Path(str(tmp_path)) / "home"
     home.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    from gideon.agents import runners
+    from gideon.engine.agents import runners
 
     bound = runners.user_catalog_dir()
     assert str(home) in str(bound), (
@@ -72,7 +78,7 @@ def _mark_healthy(runner_id: str, *, ok: bool = True) -> None:
     to the sidecar format cannot make this fixture silently stop being read."""
     from datetime import datetime, timezone
 
-    from gideon.agents.runners import HealthEvidence, record_evidence
+    from gideon.engine.agents.runners import HealthEvidence, record_evidence
 
     record_evidence(
         runner_id,
@@ -87,16 +93,12 @@ def _mark_healthy(runner_id: str, *, ok: bool = True) -> None:
     )
 
 
-# ── 1. the DIFFERENT-runner requirement ───────────────────────────────────────
-
-
-def test_stalled_runner_is_never_selected_even_as_the_only_healthy_one(isolated_home: Path) -> None:
+def test_stalled_runner_is_never_selected_even_as_the_only_healthy_one(
+    isolated_home: Path,
+) -> None:
     """The exclusion is structural: the runner that stalled cannot serve its own second opinion."""
     _mark_healthy("gemini-cli")
 
-    # Vacuity floor FIRST: with a different exclusion, this catalog DOES yield gemini-cli. So the
-    # catalog is populated and the health sidecar is being read — a later empty result is the
-    # exclusion doing work, not an empty universe.
     floor = select_target(exclude_runner="codex")
     assert floor.runner_id == "gemini-cli", (
         "vacuity floor failed: gemini-cli is the only healthy runner and must be selectable "
@@ -115,7 +117,6 @@ def test_runtime_id_spelling_cannot_dodge_the_exclusion(isolated_home: Path) -> 
     """``acp:gemini-cli`` and ``gemini-cli`` name the same runner, so either spelling excludes."""
     _mark_healthy("gemini-cli")
     assert select_target(exclude_runner="acp:gemini-cli").target is None
-    # Floor: an unrelated runtime id does NOT exclude it.
     assert select_target(exclude_runner="acp:codex").runner_id == "gemini-cli"
 
 
@@ -130,7 +131,6 @@ def test_choose_backend_degrades_to_subagent_when_the_exclusion_empties_the_cata
     backend, selection = choose_backend(brief)
     assert backend.name == SUBAGENT_BACKEND
     assert selection.target is None
-    # Floor: a stall in a runner that is NOT the healthy one picks the runner backend instead.
     other_brief = build_brief(
         goal="g", stuck_at="s", workspace=str(isolated_home), origin_runner="codex"
     )
@@ -144,12 +144,9 @@ def test_unhealthy_and_unprobed_runners_are_not_credible_second_opinions(
 ) -> None:
     """No probe on record means NOT MEASURED, and a failed probe means unhealthy — neither is
     silently treated as available."""
-    # Nothing written at all: every runner is unprobed.
     assert select_target(exclude_runner="codex").target is None
     _mark_healthy("gemini-cli", ok=False)
     assert select_target(exclude_runner="codex").target is None
-    # Floor: flipping the SAME runner healthy makes it selectable, so the filter is the
-    # discriminator rather than a blanket refusal.
     _mark_healthy("gemini-cli", ok=True)
     assert select_target(exclude_runner="codex").runner_id == "gemini-cli"
 
@@ -159,9 +156,6 @@ def test_every_cataloged_runner_is_considered(isolated_home: Path) -> None:
     would be one the exclusion never had to exclude."""
     considered = {c.runner_id for c in select_target(exclude_runner="").considered}
     assert set(_ALL_RUNNERS) <= considered, considered
-
-
-# ── 2. the disk-re-diff acceptance gate ───────────────────────────────────────
 
 
 def test_claimed_edit_not_on_disk_is_rejected_and_the_same_claim_landed_is_accepted(
@@ -179,8 +173,6 @@ def test_claimed_edit_not_on_disk_is_rejected_and_the_same_claim_landed_is_accep
     assert lying.missing == ("app.py",)
     assert "not on disk" in lying.reason
 
-    # Vacuity floor: the identical claim over the identical baseline, with the bytes actually
-    # written, verifies. Without this the negative above would also pass an always-reject gate.
     target.write_text("patched\n", encoding="utf-8")
     landed = rediff(baseline, ("app.py",))
     assert landed.verified, landed.reason
@@ -197,7 +189,9 @@ def test_a_proposer_that_claims_nothing_is_not_accepted(tmp_path: Path) -> None:
     (ws / "a.py").write_text("y\n", encoding="utf-8")
     verdict = rediff(baseline, ())
     assert not verdict.verified
-    assert verdict.changed == ("a.py",), "the change WAS observed; the rejection is about claims"
+    assert verdict.changed == (
+        "a.py",
+    ), "the change WAS observed; the rejection is about claims"
 
 
 def test_a_partially_true_claim_set_is_rejected_whole(tmp_path: Path) -> None:
@@ -235,9 +229,12 @@ def test_absolute_and_dotted_claim_spellings_normalise(tmp_path: Path) -> None:
         assert rediff(baseline, (spelling,)).verified, spelling
 
 
-def test_normalise_computes_diff_verified_from_disk_not_from_the_message(tmp_path: Path) -> None:
+def test_normalise_computes_diff_verified_from_disk_not_from_the_message(
+    tmp_path: Path,
+) -> None:
     """``normalise`` is the single place ``diff_verified`` is set. A message that says "done"
-    and lists a file it never touched is ok=True, diff_verified=False — recorded honestly."""
+    and lists a file it never touched is ok=True, diff_verified=False — recorded honestly.
+    """
     ws = tmp_path / "ws"
     ws.mkdir()
     (ws / "a.py").write_text("x\n", encoding="utf-8")
@@ -249,7 +246,9 @@ def test_normalise_computes_diff_verified_from_disk_not_from_the_message(tmp_pat
     assert lying.missing_paths == ("a.py",)
 
     (ws / "a.py").write_text("y\n", encoding="utf-8")
-    honest = normalise(backend="t", runner_id="t", ok=True, text=text, baseline=baseline)
+    honest = normalise(
+        backend="t", runner_id="t", ok=True, text=text, baseline=baseline
+    )
     assert honest.ok and honest.diff_verified
     assert honest.verified_paths == ("a.py",)
 
@@ -261,11 +260,8 @@ def test_prose_claims_are_not_claims() -> None:
     assert parse_claimed_paths(f"{CLAIM_MARKER} a\n{CLAIM_MARKER} a\n") == ("a",)
 
 
-# ── 3. the service: one definition of "accepted", and a SEL row for it ─────────
-
-
 class _FakeManager:
-    """A stand-in SubagentManager: the two methods the fallback backend actually calls."""
+    """A stand-in DelegationSupervisor: the two methods the fallback backend actually calls."""
 
     def __init__(self, workspace: Path, *, claim: str, write: bool) -> None:
         self.workspace = workspace
@@ -277,7 +273,9 @@ class _FakeManager:
     def spawn(self, **kwargs):
         self.spawned.append(kwargs)
         if self.write:
-            (self.workspace / self.claim).write_text("patched by the proposer\n", encoding="utf-8")
+            (self.workspace / self.claim).write_text(
+                "patched by the proposer\n", encoding="utf-8"
+            )
 
         class _Info:
             id = "sub-1"
@@ -292,10 +290,12 @@ class _FakeManager:
         return self._info if agent_id == "sub-1" else None
 
 
-def _run_handoff(workspace: Path, *, write: bool, home: Path) -> tuple[object, _FakeManager]:
+def _run_handoff(
+    workspace: Path, *, write: bool, home: Path
+) -> tuple[object, _FakeManager]:
     manager = _FakeManager(workspace, claim="app.py", write=write)
     backend = SubagentProposerBackend(timeout_secs=5.0, poll_secs=0.01, manager=manager)
-    import gideon.proposer.service as service_mod
+    import gideon.cognition.proposer.service as service_mod
 
     original = service_mod.SubagentProposerBackend
     service_mod.SubagentProposerBackend = lambda **_kw: backend  # type: ignore[assignment]
@@ -346,7 +346,7 @@ def test_the_handoff_writes_a_sel_row_for_the_fire_and_the_verdict(
     isolated_home: Path, tmp_path: Path
 ) -> None:
     """ "SEL-audited" means a row is readable back out of the log — not that a call site exists."""
-    from gideon.sel import sel
+    from gideon.security.sel import sel
 
     _mark_healthy("gemini-cli")
     ws = tmp_path / "ws"
@@ -384,7 +384,6 @@ def test_the_brief_is_written_and_carries_a_fenced_verbatim_error(
     body = brief_path.read_text(encoding="utf-8")
     assert "AssertionError: expected 3, got 4" in body
     assert CLAIM_MARKER in body
-    # The excerpt is fenced, i.e. it is not pasted in as bare instructions.
     assert body.index("AssertionError") > body.index("## What was already tried")
     assert "untrusted" in body.lower() or "data" in body.lower()
 
@@ -396,7 +395,11 @@ def test_the_prepared_invocation_inherits_the_stalled_runs_sandbox_class(
     ws = tmp_path / "ws"
     ws.mkdir()
     brief = build_brief(
-        goal="g", stuck_at="s", workspace=str(ws), origin_runner="codex", sandbox="docker"
+        goal="g",
+        stuck_at="s",
+        workspace=str(ws),
+        origin_runner="codex",
+        sandbox="docker",
     )
     manager = _FakeManager(ws, claim="app.py", write=True)
     backend = SubagentProposerBackend(timeout_secs=1.0, poll_secs=0.01, manager=manager)
@@ -408,7 +411,7 @@ def test_the_prepared_invocation_inherits_the_stalled_runs_sandbox_class(
 
 def test_both_backends_satisfy_the_four_member_contract() -> None:
     """The Protocol is runtime-checkable, so the contract is asserted, not just documented."""
-    from gideon.agents.runners import catalog
+    from gideon.engine.agents.runners import catalog
 
     subagent = SubagentProposerBackend()
     runner = RunnerProposerBackend(catalog()["gemini-cli"])
@@ -421,12 +424,11 @@ def test_both_backends_satisfy_the_four_member_contract() -> None:
 def test_an_undeclared_dialect_refuses_to_prepare_instead_of_guessing_a_flag() -> None:
     """``kiro`` has no declared non-interactive form, so its backend refuses rather than firing
     an interactive process that would block on a TTY and time out."""
-    from gideon.agents.runners import catalog
-    from gideon.proposer.backends import ProposerUnavailable
-    from gideon.proposer.dialects import declared_dialects, one_shot
+    from gideon.cognition.proposer.backends import ProposerUnavailable
+    from gideon.cognition.proposer.dialects import declared_dialects, one_shot
+    from gideon.engine.agents.runners import catalog
 
     assert one_shot("", "kiro") is None
-    # Floor: the dialect table is not empty — three runners DO have a declared form.
     assert set(declared_dialects()) == {"claude-code", "codex", "gemini-cli"}
     brief = build_brief(goal="g", stuck_at="s", workspace=".", origin_runner="codex")
     with pytest.raises(ProposerUnavailable):

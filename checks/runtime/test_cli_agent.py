@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from gideon.cli import main
+from gideon.interfaces.cli.main import main
 
 
 def _write_config(tmp_path: Path, data: dict) -> Path:
@@ -38,25 +38,29 @@ def _base_config() -> dict:
 class TestAgentList:
     """Test ``gideon agent list`` output format."""
 
-    def test_list_output_format(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_list_output_format(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         cfg_path = _write_config(tmp_path, _base_config())
 
         with (
-            unittest.mock.patch("gideon.config.loader.config_path", return_value=cfg_path),
+            unittest.mock.patch(
+                "gideon.core.config.loader.config_path", return_value=cfg_path
+            ),
             unittest.mock.patch("sys.argv", ["gideon", "agent", "list"]),
         ):
             main()
 
         out = capsys.readouterr().out
-        # Header row
         assert "NAME" in out
         assert "PROVIDER_AGENT" in out
         assert "DEFAULT_DIR" in out
         assert "MEMORY_STORE" in out
-        # Default agent marked with *
         assert "default *" in out or "default*" in out
 
-    def test_list_multiple_agents(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_list_multiple_agents(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         data = _base_config()
         data["agents"]["oncall"] = {
             "provider_agent": "oncall-agent",
@@ -66,7 +70,9 @@ class TestAgentList:
         cfg_path = _write_config(tmp_path, data)
 
         with (
-            unittest.mock.patch("gideon.config.loader.config_path", return_value=cfg_path),
+            unittest.mock.patch(
+                "gideon.core.config.loader.config_path", return_value=cfg_path
+            ),
             unittest.mock.patch("sys.argv", ["gideon", "agent", "list"]),
         ):
             main()
@@ -79,11 +85,15 @@ class TestAgentList:
 class TestAgentCreate:
     """Test ``gideon agent create``."""
 
-    def test_create_with_defaults(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_create_with_defaults(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         cfg_path = _write_config(tmp_path, _base_config())
 
         with (
-            unittest.mock.patch("gideon.config.loader.config_path", return_value=cfg_path),
+            unittest.mock.patch(
+                "gideon.core.config.loader.config_path", return_value=cfg_path
+            ),
             unittest.mock.patch(
                 "sys.argv",
                 ["gideon", "agent", "create", "--name", "research"],
@@ -94,11 +104,9 @@ class TestAgentCreate:
         out = capsys.readouterr().out
         assert "Created agent: research" in out
 
-        # Verify persisted to disk
         saved = json.loads(cfg_path.read_text(encoding="utf-8"))
         assert "research" in saved["agents"]
         assert saved["agents"]["research"]["provider_agent"] == "gideon"
-        # --default-dir defaults to "" (empty inherits the workspace root)
         assert saved["agents"]["research"]["default_dir"] == ""
         assert saved["agents"]["research"]["memory_store"] == "default"
 
@@ -108,7 +116,9 @@ class TestAgentCreate:
         cfg_path = _write_config(tmp_path, _base_config())
 
         with (
-            unittest.mock.patch("gideon.config.loader.config_path", return_value=cfg_path),
+            unittest.mock.patch(
+                "gideon.core.config.loader.config_path", return_value=cfg_path
+            ),
             unittest.mock.patch(
                 "sys.argv",
                 ["gideon", "agent", "create", "--name", "default"],
@@ -131,7 +141,9 @@ class TestAgentUpdate:
         cfg_path = _write_config(tmp_path, _base_config())
 
         with (
-            unittest.mock.patch("gideon.config.loader.config_path", return_value=cfg_path),
+            unittest.mock.patch(
+                "gideon.core.config.loader.config_path", return_value=cfg_path
+            ),
             unittest.mock.patch(
                 "sys.argv",
                 ["gideon", "agent", "update", "nonexistent", "--provider-agent", "x"],
@@ -154,7 +166,9 @@ class TestAgentDelete:
         cfg_path = _write_config(tmp_path, _base_config())
 
         with (
-            unittest.mock.patch("gideon.config.loader.config_path", return_value=cfg_path),
+            unittest.mock.patch(
+                "gideon.core.config.loader.config_path", return_value=cfg_path
+            ),
             unittest.mock.patch(
                 "sys.argv",
                 ["gideon", "agent", "delete", "default"],

@@ -8,11 +8,9 @@ one-turn one.
 
 import pytest
 
-from gideon.learning import hygiene
-from gideon.learning.hygiene import MIN_EVIDENCE_DEFAULT
-from gideon.security import fence_untrusted
-
-# ── untrusted content is invisible ──
+from gideon.cognition.learning import hygiene
+from gideon.cognition.learning.hygiene import MIN_EVIDENCE_DEFAULT
+from gideon.security.security import fence_untrusted
 
 
 def test_a_fenced_injection_never_reaches_the_extractor():
@@ -33,7 +31,9 @@ def test_the_source_attribute_does_not_defeat_the_filter():
     passed straight through. Every fence in production names a source.
     """
     for source in ("web", "inbox", "mcp", "webhook"):
-        verdict = hygiene.scrub("Question?\n" + fence_untrusted("PAYLOAD", source=source))
+        verdict = hygiene.scrub(
+            "Question?\n" + fence_untrusted("PAYLOAD", source=source)
+        )
         assert "PAYLOAD" not in verdict.text, source
 
 
@@ -80,9 +80,6 @@ def test_trusted_text_passes_through_untouched():
     assert verdict.removed == []
 
 
-# ── platform scaffolding is invisible ──
-
-
 @pytest.mark.parametrize(
     "text",
     [
@@ -120,9 +117,6 @@ def test_a_marker_appearing_late_is_not_a_system_turn():
     assert not hygiene.is_system_injected(text)
 
 
-# ── environment failures stay denied ──
-
-
 def test_environment_failure_claims_are_denied():
     verdict = hygiene.scrub("the deploy tool is broken and permission denied")
     assert not verdict.usable
@@ -132,14 +126,11 @@ def test_environment_failure_claims_are_denied():
 def test_the_env_filter_shares_one_implementation():
     """Every cadence must inherit the same deny-filter, so hygiene delegates to
     the canonical one rather than restating the pattern."""
-    from gideon.after_turn_review import is_environment_failure_claim
+    from gideon.cognition.after_turn_review import is_environment_failure_claim
 
     text = "command not found"
     assert is_environment_failure_claim(text)
     assert not hygiene.scrub(text).usable
-
-
-# ── grounding ──
 
 
 def test_grounding_requires_both_a_decision_and_evidence():
@@ -151,9 +142,9 @@ def test_grounding_requires_both_a_decision_and_evidence():
 @pytest.mark.parametrize(
     "text",
     [
-        "use ripgrep",  # decision, no evidence, no substance
-        "the build failed again today, which was frustrating to watch",  # evidence only
-        "decided because",  # both regexes, no substance
+        "use ripgrep",
+        "the build failed again today, which was frustrating to watch",
+        "decided because",
     ],
 )
 def test_ungrounded_text_is_rejected_for_per_turn_capture(text):
@@ -167,9 +158,6 @@ def test_grounding_is_opt_in():
     text = "use ripgrep"
     assert hygiene.scrub(text).usable
     assert not hygiene.scrub(text, require_grounding=True).usable
-
-
-# ── session scoring ──
 
 
 def test_a_thin_session_scores_below_a_rich_one():
@@ -192,16 +180,16 @@ def test_scoring_saturates_rather_than_growing_linearly():
     alone clear any threshold."""
     assert hygiene.session_score(turns=500, decisions=0, tool_calls=0) <= 0.20
     assert hygiene.session_score(turns=0, decisions=0) == 0.0
-    assert hygiene.session_score(turns=999, decisions=999, recalls=999, tool_calls=999) <= 1.0
-
-
-# ── shared constants and fingerprints ──
+    assert (
+        hygiene.session_score(turns=999, decisions=999, recalls=999, tool_calls=999)
+        <= 1.0
+    )
 
 
 def test_the_evidence_floor_matches_the_config_default():
     """The claim is "ONE shared number". If the constant and the config default
     disagree, two consumers reading different sources silently diverge."""
-    from gideon.config.learning import LearningConfig
+    from gideon.core.config.learning import LearningConfig
 
     assert LearningConfig().min_evidence == MIN_EVIDENCE_DEFAULT == 3
 

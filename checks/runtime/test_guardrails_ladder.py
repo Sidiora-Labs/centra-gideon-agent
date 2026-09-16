@@ -29,12 +29,16 @@ from typing import Any
 import pytest
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.action_providers.base import ActionContext, ActionProvider, ActionResult
-from gideon.apps.manifest import AppManifest, AutonomyConfig, ProviderConfig
-from gideon.dashboard.handlers import autonomy as api_h
-from gideon.guardrails import autonomy as au
-from gideon.guardrails import ladder as ld
-from gideon.guardrails import rungs as rg
+from gideon.extensions.apps.manifest import AppManifest, AutonomyConfig, ProviderConfig
+from gideon.integrations.action_providers.base import (
+    ActionContext,
+    ActionProvider,
+    ActionResult,
+)
+from gideon.interfaces.dashboard.handlers import autonomy as api_h
+from gideon.security.guardrails import autonomy as au
+from gideon.security.guardrails import ladder as ld
+from gideon.security.guardrails import rungs as rg
 
 APP_KEY = "app:acme.acme-file-task"
 
@@ -50,11 +54,11 @@ def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: home)
     cfg = home / "config.json"
     cfg.write_text("{}", encoding="utf-8")
-    monkeypatch.setattr("gideon.config.loader.config_path", lambda: cfg)
-    from gideon import sel as sel_mod
+    monkeypatch.setattr("gideon.core.config.loader.config_path", lambda: cfg)
+    from gideon.security import sel as sel_mod
 
     sel_mod.SecurityEventLog._instance = None
     sel_mod.SecurityEventLog._initialized = False
@@ -66,15 +70,12 @@ def _isolated_home(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def _clean_registries():
     """Restore the action-provider registry — these tests install a fake app provider."""
-    from gideon.action_providers.registry import _providers
+    from gideon.integrations.action_providers.registry import _providers
 
     before = dict(_providers)
     yield
     _providers.clear()
     _providers.update(before)
-
-
-# ── a real-effect app action: it files a task and can delete it again ──────────
 
 
 class _TaskFilingAction(ActionProvider):
@@ -101,7 +102,7 @@ class _TaskFilingAction(ActionProvider):
     async def execute(
         self, action_config: dict[str, Any], ctx: ActionContext, timeout: int = 30
     ) -> ActionResult:
-        from gideon.tasks.registry import create_task
+        from gideon.engine.tasks.registry import create_task
 
         task = await create_task("native", title="Filed by the acme automation")
         task_id = str(getattr(task, "id", "") or "")
@@ -110,7 +111,7 @@ class _TaskFilingAction(ActionProvider):
         )
 
     async def reverse(self, handle: str) -> ActionResult:
-        from gideon.tasks.registry import delete_task, get_task
+        from gideon.engine.tasks.registry import delete_task, get_task
 
         task_id = handle.rpartition(":")[2]
         if await get_task(task_id, "native") is None:
@@ -121,15 +122,22 @@ class _TaskFilingAction(ActionProvider):
 
 def _install_app_action(*, floor: str, ceiling: str) -> _TaskFilingAction:
     """Register the app provider THROUGH the production app-registration handler."""
-    from gideon.providers.registry import ActionTypeHandler, RegisteredProvider
+    from gideon.extensions.providers.registry import (
+        ActionTypeHandler,
+        RegisteredProvider,
+    )
 
-    manifest = AppManifest(name="acme", version="1.0.0", displayName="Acme", description="d")
+    manifest = AppManifest(
+        name="acme", version="1.0.0", displayName="Acme", description="d"
+    )
     provider_config = ProviderConfig(
         type="action",
         implementation="acme.provider:create",
         autonomy=AutonomyConfig(floor=floor, ceiling=ceiling),
     )
-    ext = RegisteredProvider(name="acme", manifest=manifest, provider_config=provider_config)
+    ext = RegisteredProvider(
+        name="acme", manifest=manifest, provider_config=provider_config
+    )
     instance = _TaskFilingAction()
     ActionTypeHandler().register(ext, instance)
     return instance
@@ -137,7 +145,7 @@ def _install_app_action(*, floor: str, ceiling: str) -> _TaskFilingAction:
 
 def _fire() -> Any:
     """Drive the REAL data-event fire path for the app's action."""
-    from gideon.event_triggers import (
+    from gideon.automation.event_triggers import (
         MEMORY_UPDATE,
         SOURCE_MEMORY,
         EventTrigger,
@@ -164,7 +172,11 @@ def _fire() -> Any:
 
 def _task_files(home: Path) -> list[Path]:
     d = home / "tasks"
-    return sorted(p for p in d.glob("*.json") if not p.name.startswith("_")) if d.exists() else []
+    return (
+        sorted(p for p in d.glob("*.json") if not p.name.startswith("_"))
+        if d.exists()
+        else []
+    )
 
 
 def _inbox_rows(home: Path) -> list[dict]:
@@ -199,9 +211,6 @@ def _row(view: dict, key: str) -> dict:
     return next(t for t in view["types"] if t["key"] == key)
 
 
-# ── done_when 2: the whole round trip, as a user drives it ────────────────────
-
-
 def test_withheld_then_granted_then_undone_through_the_REAL_endpoints(_isolated_home):
     """🔴 THE ATOM, end to end.
 
@@ -212,23 +221,24 @@ def test_withheld_then_granted_then_undone_through_the_REAL_endpoints(_isolated_
     """
     _install_app_action(floor=au.RUNG_DRAFT_ONLY, ceiling=au.RUNG_AUTO_WITH_UNDO)
 
-    # 1. Held at the bottom rung: nothing executed, and a proposal row says what would have.
     _fire()
     assert _task_files(_isolated_home) == []
-    proposals = [r for r in _inbox_rows(_isolated_home) if r.get("item_kind") == "proposal"]
+    proposals = [
+        r for r in _inbox_rows(_isolated_home) if r.get("item_kind") == "proposal"
+    ]
     assert len(proposals) == 1
     assert proposals[0]["refs"]["action_type"] == APP_KEY
 
-    # 2. The click. Through the endpoint, with the rung the panel would send.
     resp = asyncio.run(
         api_h.api_autonomy_grant(
-            _post("/api/autonomy/grant", {"key": APP_KEY, "rung": au.RUNG_AUTO_WITH_UNDO})
+            _post(
+                "/api/autonomy/grant", {"key": APP_KEY, "rung": au.RUNG_AUTO_WITH_UNDO}
+            )
         )
     )
     assert resp.status == 200, _json_body(resp)
     assert _json_body(resp)["rung"] == au.RUNG_AUTO_WITH_UNDO
 
-    # 3. The SAME fire now executes and leaves a real task row + a reversal record.
     _fire()
     tasks = _task_files(_isolated_home)
     assert len(tasks) == 1, "the granted rung must let the action actually run"
@@ -237,22 +247,25 @@ def test_withheld_then_granted_then_undone_through_the_REAL_endpoints(_isolated_
     assert records[0].action_type == APP_KEY
     assert records[0].handle.startswith("task:native:")
 
-    # 4. The undo click: the effect is gone AND the type lost the rung it had earned.
-    resp = asyncio.run(api_h.api_autonomy_undo(_post("/api/autonomy/undo", {"id": records[0].id})))
+    resp = asyncio.run(
+        api_h.api_autonomy_undo(_post("/api/autonomy/undo", {"id": records[0].id}))
+    )
     assert resp.status == 200, _json_body(resp)
     body = _json_body(resp)
     assert body["ok"] is True and body["demoted"] is True
-    assert _task_files(_isolated_home) == [], "undo must delete the row the action created"
+    assert (
+        _task_files(_isolated_home) == []
+    ), "undo must delete the row the action created"
     assert au.granted_rung(APP_KEY) == au.RUNG_DRAFT_ONLY
     state = au.rung_state(APP_KEY)
     assert state is not None and len(state.demotions) == 1
-    assert state.demotions[0].cooldown_until  # a cooldown is running
+    assert state.demotions[0].cooldown_until
 
-    # 5. And the ladder now routes the same fire back to withheld — the demotion is real at
-    #    the dispatch seam, not only in the store.
     _fire()
     assert _task_files(_isolated_home) == []
-    assert ld.reversal_records()[0].reversed_at, "the record is marked, so no second undo"
+    assert ld.reversal_records()[
+        0
+    ].reversed_at, "the record is marked, so no second undo"
 
 
 def test_the_HELD_row_names_the_action_ONCE_and_never_by_its_type_key(_isolated_home):
@@ -270,19 +283,25 @@ def test_the_HELD_row_names_the_action_ONCE_and_never_by_its_type_key(_isolated_
     _install_app_action(floor=au.RUNG_DRAFT_ONLY, ceiling=au.RUNG_ONE_TAP)
     outcome = _fire()
 
-    assert getattr(outcome, "ran", True) is False, "a draft_only action must be withheld"
-    rows = [r for r in _inbox_rows(_isolated_home) if (r.get("refs") or {}).get("action_type")]
+    assert (
+        getattr(outcome, "ran", True) is False
+    ), "a draft_only action must be withheld"
+    rows = [
+        r
+        for r in _inbox_rows(_isolated_home)
+        if (r.get("refs") or {}).get("action_type")
+    ]
     assert len(rows) == 1, rows
     row = rows[0]
     message = str(row.get("message", ""))
 
     assert "did not run" in message, message
     assert "acme-file-task" in message, "the row must still say WHICH action was held"
-    assert APP_KEY not in message, f"the type key is a code identifier, not user copy: {message!r}"
+    assert (
+        APP_KEY not in message
+    ), f"the type key is a code identifier, not user copy: {message!r}"
     assert "drafts only" in message, f"and the rung in user words: {message!r}"
-    # The machine-facing half is untouched: the row is still findable by type.
     assert row["refs"]["action_type"] == APP_KEY
-    # And the seam's own outcome string is framed too, so "this action" has a referent there.
     assert str(getattr(outcome, "reason", "")).startswith("held for your approval: ")
     assert APP_KEY not in str(getattr(outcome, "reason", ""))
 
@@ -299,12 +318,14 @@ def test_the_undo_record_is_what_the_notification_carries(_isolated_home):
 
     class _State:
         def notify(self, kind, title, body, *, meta=None):
-            notes.append({"kind": kind, "title": title, "body": body, "meta": dict(meta or {})})
+            notes.append(
+                {"kind": kind, "title": title, "body": body, "meta": dict(meta or {})}
+            )
 
     class _Services:
         state = _State()
 
-    import gideon.action_providers.services as svc
+    import gideon.integrations.action_providers.services as svc
 
     original = svc.get_action_services
     svc.get_action_services = lambda: _Services()  # type: ignore[assignment]
@@ -322,16 +343,13 @@ def test_the_undo_record_is_what_the_notification_carries(_isolated_home):
     assert "undo" in notes[0]["body"].lower()
 
 
-# ── done_when 1: promotion is a click, and only a click ───────────────────────
-
-
 def _seed_clean_record(key: str, *, approvals: int = 12, days: int = 9) -> None:
     """Write the SEL approval trail a promotion proposal is derived from.
 
     Real rows through the real logger — `promotion_eligibility` reads the SEL tail, so the
     only honest way to give a type a track record is to leave one.
     """
-    from gideon.sel import sel
+    from gideon.security.sel import sel
 
     now = datetime.now(timezone.utc)
     log = sel()
@@ -342,8 +360,6 @@ def _seed_clean_record(key: str, *, approvals: int = 12, days: int = 9) -> None:
             session_key="s",
             metadata={au.SEL_ACTION_TYPE_KEY: key},
         )
-    # Backdate the stamps so the approvals SPAN the required window (they are written in one
-    # instant here, and "ten approvals over seven days" means what it says).
     path = Path(log._path)
     lines = path.read_text(encoding="utf-8").splitlines()
     out: list[str] = []
@@ -352,7 +368,9 @@ def _seed_clean_record(key: str, *, approvals: int = 12, days: int = 9) -> None:
         row = json.loads(line)
         if (row.get("metadata") or {}).get(au.SEL_ACTION_TYPE_KEY) == key:
             row["timestamp"] = (
-                now - timedelta(days=days) + timedelta(days=days * stamped / max(approvals - 1, 1))
+                now
+                - timedelta(days=days)
+                + timedelta(days=days * stamped / max(approvals - 1, 1))
             ).isoformat()
             stamped += 1
         out.append(json.dumps(row))
@@ -382,7 +400,6 @@ def test_the_proposal_scan_offers_a_rung_and_grants_NOTHING(_isolated_home):
     assert len(rows) == 1
     assert rows[0]["refs"]["rung"] == au.RUNG_ONE_TAP
 
-    # Idempotent: a scan every few hours must leave ONE standing row, not a pile.
     ld.propose_promotions()
     rows = [
         r
@@ -422,9 +439,6 @@ def test_nothing_but_the_api_handler_grants_a_rung():
     assert callers == {"dashboard/handlers/autonomy.py"}, callers
 
 
-# ── done_when 4 (the refusals): a grant is validated, never trusted ──────────
-
-
 def test_the_api_refuses_a_grant_ABOVE_the_declared_ceiling(_isolated_home):
     """A client-supplied rung is an ask. The declaration is the answer."""
     _install_app_action(floor=au.RUNG_DRAFT_ONLY, ceiling=au.RUNG_ONE_TAP)
@@ -436,8 +450,6 @@ def test_the_api_refuses_a_grant_ABOVE_the_declared_ceiling(_isolated_home):
     assert resp.status == 400
     body = _json_body(resp)
     assert body["ok"] is False
-    # Re-pointed, not relaxed: this pinned the raw rung KEY (`one_tap`) being in a message the
-    # USER reads. It now asserts the stronger property — the label is there and the key is not.
     assert "ceiling" in body["error"]
     assert rg.rung_label(au.RUNG_ONE_TAP) in body["error"], body["error"]
     assert au.RUNG_ONE_TAP not in body["error"], body["error"]
@@ -476,8 +488,9 @@ def test_the_record_a_DEMOTED_row_shows_says_when_the_cooldown_LIFTS(_isolated_h
     assert row["cooldown_until"], "the wire must still carry the full instant"
     when = row["cooldown_until"][:10]
     assert "cooldown" in row["record"], "it must still say WHAT is blocking promotion"
-    assert when in row["record"], f"the record must name the end date: {row['record']!r}"
-    # And a date, not a machine instant: the panel prints this string as-is.
+    assert (
+        when in row["record"]
+    ), f"the record must name the end date: {row['record']!r}"
     assert "T" not in row["record"] and "+00:00" not in row["record"], row["record"]
 
 
@@ -505,7 +518,9 @@ def test_the_two_cooldown_EXPLANATIONS_agree_on_the_date_and_its_form(_isolated_
     assert when and "T" not in when
     assert when in record and when in refusal, f"{record!r} vs {refusal!r}"
     for sentence in (record, refusal):
-        assert "+00:00" not in sentence, f"a raw instant leaked into user copy: {sentence!r}"
+        assert (
+            "+00:00" not in sentence
+        ), f"a raw instant leaked into user copy: {sentence!r}"
 
 
 def test_an_UNPARSEABLE_cooldown_still_reports_the_cooldown_without_inventing_a_date(
@@ -537,7 +552,10 @@ def test_an_UNPARSEABLE_cooldown_still_reports_the_cooldown_without_inventing_a_
 def test_a_grant_for_an_unknown_type_is_refused_by_name(_isolated_home):
     resp = asyncio.run(
         api_h.api_autonomy_grant(
-            _post("/api/autonomy/grant", {"key": "app:nope.nothing", "rung": au.RUNG_ONE_TAP})
+            _post(
+                "/api/autonomy/grant",
+                {"key": "app:nope.nothing", "rung": au.RUNG_ONE_TAP},
+            )
         )
     )
     assert resp.status == 400
@@ -570,13 +588,12 @@ def test_handing_autonomy_back_is_always_allowed(_isolated_home):
     """The safe direction needs no confirmation — and it starts the same cooldown."""
     _install_app_action(floor=au.RUNG_DRAFT_ONLY, ceiling=au.RUNG_AUTO_WITH_UNDO)
     au.grant_rung(APP_KEY, au.RUNG_AUTO_WITH_UNDO, evidence_window="manual")
-    resp = asyncio.run(api_h.api_autonomy_demote(_post("/api/autonomy/demote", {"key": APP_KEY})))
+    resp = asyncio.run(
+        api_h.api_autonomy_demote(_post("/api/autonomy/demote", {"key": APP_KEY}))
+    )
     assert resp.status == 200
     assert _json_body(resp)["cooldown_until"]
     assert au.granted_rung(APP_KEY) == au.RUNG_DRAFT_ONLY
-
-
-# ── the undo executor fails CLOSED, and never demotes on a refusal ────────────
 
 
 def test_an_unknown_record_id_refuses_and_does_NOT_demote(_isolated_home):
@@ -588,7 +605,9 @@ def test_an_unknown_record_id_refuses_and_does_NOT_demote(_isolated_home):
     _install_app_action(floor=au.RUNG_DRAFT_ONLY, ceiling=au.RUNG_AUTO_WITH_UNDO)
     au.grant_rung(APP_KEY, au.RUNG_AUTO_WITH_UNDO, evidence_window="manual")
     resp = asyncio.run(
-        api_h.api_autonomy_undo(_post("/api/autonomy/undo", {"id": "rev_00000000000000ff"}))
+        api_h.api_autonomy_undo(
+            _post("/api/autonomy/undo", {"id": "rev_00000000000000ff"})
+        )
     )
     assert resp.status == 404
     body = _json_body(resp)
@@ -615,7 +634,9 @@ def test_an_unshaped_id_never_reaches_the_store(_isolated_home, bogus):
     """
     if bogus:
         assert ld.reversal_record(bogus) is None
-    resp = asyncio.run(api_h.api_autonomy_undo(_post("/api/autonomy/undo", {"id": bogus})))
+    resp = asyncio.run(
+        api_h.api_autonomy_undo(_post("/api/autonomy/undo", {"id": bogus}))
+    )
     assert resp.status in (400, 404)
 
 
@@ -672,7 +693,9 @@ def test_a_hand_edited_store_row_with_a_bad_handle_is_dropped(_isolated_home):
     )
     assert ld.reversal_records() == ()
     resp = asyncio.run(
-        api_h.api_autonomy_undo(_post("/api/autonomy/undo", {"id": "rev_00000000000000aa"}))
+        api_h.api_autonomy_undo(
+            _post("/api/autonomy/undo", {"id": "rev_00000000000000aa"})
+        )
     )
     assert resp.status == 404
 
@@ -690,7 +713,9 @@ def test_a_provider_that_refuses_leaves_the_rung_ALONE(_isolated_home):
     for path in _task_files(_isolated_home):
         path.unlink()
 
-    resp = asyncio.run(api_h.api_autonomy_undo(_post("/api/autonomy/undo", {"id": record.id})))
+    resp = asyncio.run(
+        api_h.api_autonomy_undo(_post("/api/autonomy/undo", {"id": record.id}))
+    )
     assert resp.status == 400
     body = _json_body(resp)
     assert body["code"] == "provider_refused"
@@ -704,9 +729,13 @@ def test_undoing_twice_refuses_the_second_time(_isolated_home):
     _install_app_action(floor=au.RUNG_AUTO_WITH_UNDO, ceiling=au.RUNG_AUTO_WITH_UNDO)
     _fire()
     record = ld.reversal_records()[0]
-    first = asyncio.run(api_h.api_autonomy_undo(_post("/api/autonomy/undo", {"id": record.id})))
+    first = asyncio.run(
+        api_h.api_autonomy_undo(_post("/api/autonomy/undo", {"id": record.id}))
+    )
     assert first.status == 200
-    second = asyncio.run(api_h.api_autonomy_undo(_post("/api/autonomy/undo", {"id": record.id})))
+    second = asyncio.run(
+        api_h.api_autonomy_undo(_post("/api/autonomy/undo", {"id": record.id}))
+    )
     assert second.status == 400
     assert _json_body(second)["code"] == "already_reversed"
 
@@ -720,14 +749,16 @@ def test_a_handle_kind_no_provider_claims_is_refused(_isolated_home):
         handle="mailbox:sent:42",
         label="Send",
     )
-    resp = asyncio.run(api_h.api_autonomy_undo(_post("/api/autonomy/undo", {"id": rid})))
+    resp = asyncio.run(
+        api_h.api_autonomy_undo(_post("/api/autonomy/undo", {"id": rid}))
+    )
     assert resp.status == 400
     assert _json_body(resp)["code"] == "no_reverser"
 
 
 def test_every_refusal_is_SEL_audited(_isolated_home):
     """A silent refusal is the failure mode this tree keeps finding. Both outcomes land."""
-    from gideon.sel import sel
+    from gideon.security.sel import sel
 
     _install_app_action(floor=au.RUNG_AUTO_WITH_UNDO, ceiling=au.RUNG_AUTO_WITH_UNDO)
     _fire()
@@ -743,15 +774,14 @@ def test_the_reversal_store_is_bounded(_isolated_home):
     """An undo handle is a small standing liability, so the ring is capped."""
     for i in range(ld._MAX_RECORDS + 12):
         ld.record_reversal_handle(
-            action_type=APP_KEY, rung=au.RUNG_AUTO_WITH_UNDO, handle=f"task:native:{i}", label="t"
+            action_type=APP_KEY,
+            rung=au.RUNG_AUTO_WITH_UNDO,
+            handle=f"task:native:{i}",
+            label="t",
         )
     records = ld.reversal_records()
     assert len(records) == ld._MAX_RECORDS
-    # Newest kept, oldest dropped.
     assert records[0].handle == f"task:native:{ld._MAX_RECORDS + 11}"
-
-
-# ── done_when 3: the chip's sentence ──────────────────────────────────────────
 
 
 def test_the_authority_sentence_names_the_DECLARED_floor(_isolated_home):
@@ -773,9 +803,6 @@ def test_the_authority_sentence_names_YOUR_grant_and_its_evidence(_isolated_home
         )
     )
     row = _row(_ladder(), APP_KEY)
-    # Re-pointed, not relaxed: this used to pin the literal "You promoted this to <label> on
-    # <date>", which is the shape that read "You promoted this to runs on its own on 2026-08-17".
-    # The properties that matter are the same three, asserted individually.
     assert "You promoted it" in row["authority"], row["authority"]
     assert "clean approvals" in row["authority"]
     assert rg.RUNG_LABELS[au.RUNG_ONE_TAP] in row["authority"]
@@ -783,7 +810,7 @@ def test_the_authority_sentence_names_YOUR_grant_and_its_evidence(_isolated_home
 
 def test_the_authority_sentence_says_when_an_incident_HOLDS_a_rung(_isolated_home):
     """The one case where the rung a user was granted is not the rung that applies."""
-    from gideon.guardrails.incident import activate, resume
+    from gideon.security.guardrails.incident import activate, resume
 
     _install_app_action(floor=au.RUNG_AUTONOMOUS, ceiling=au.RUNG_AUTONOMOUS)
     activate("testing")
@@ -809,7 +836,7 @@ def test_EVERY_authority_sentence_gives_the_rung_label_a_subject(_isolated_home)
     defect was in one and the shape was in all three. The rule asserted is the one a reader can
     check without knowing the wording: **the label never directly follows a preposition.**
     """
-    from gideon.guardrails.incident import activate, resume
+    from gideon.security.guardrails.incident import activate, resume
 
     bad_prepositions = ("at ", "to ", "earned ", "granted ")
 
@@ -826,11 +853,9 @@ def test_EVERY_authority_sentence_gives_the_rung_label_a_subject(_isolated_home)
 
     seen: list[str] = []
 
-    # 1. declared floor
     _install_app_action(floor=au.RUNG_AUTO_WITH_UNDO, ceiling=au.RUNG_AUTO_WITH_UNDO)
     seen.append(_row(_ladder(), APP_KEY)["authority"])
 
-    # 2. your grant
     _install_app_action(floor=au.RUNG_DRAFT_ONLY, ceiling=au.RUNG_AUTO_WITH_UNDO)
     _seed_clean_record(APP_KEY)
     asyncio.run(
@@ -840,7 +865,6 @@ def test_EVERY_authority_sentence_gives_the_rung_label_a_subject(_isolated_home)
     )
     seen.append(_row(_ladder(), APP_KEY)["authority"])
 
-    # 3. held by an incident
     _install_app_action(floor=au.RUNG_AUTONOMOUS, ceiling=au.RUNG_AUTONOMOUS)
     activate("testing")
     try:
@@ -848,10 +872,11 @@ def test_EVERY_authority_sentence_gives_the_rung_label_a_subject(_isolated_home)
     finally:
         resume()
 
-    # Vacuity floor: a sweep over sentences that contain no label proves nothing.
     assert len(seen) == 3
     for sentence in seen:
-        assert any(v in sentence for v in rg.RUNG_LABELS.values()), f"no label in {sentence!r}"
+        assert any(
+            v in sentence for v in rg.RUNG_LABELS.values()
+        ), f"no label in {sentence!r}"
         assert offenders(sentence) == [], f"{sentence!r} → {offenders(sentence)}"
 
 
@@ -864,16 +889,15 @@ def test_the_PROPOSAL_title_quotes_the_label_instead_of_mangling_it(_isolated_ho
     _install_app_action(floor=au.RUNG_DRAFT_ONLY, ceiling=au.RUNG_AUTO_WITH_UNDO)
     _seed_clean_record(APP_KEY)
     assert ld.propose_promotions() == [APP_KEY]
-    # 🪤 The persisted field is `message` — the title and body joined with a blank line
-    # (`inbox.py`: "Title FIRST, then the body"). There is no `title` key on the row, so reading
-    # one returns "" and the sweep passes while seeing nothing.
     rows = _inbox_rows(_isolated_home)
     titles = [str(r.get("message", "")).split("\n")[0] for r in rows]
     earned = [t for t in titles if "has earned" in t]
     assert earned, titles
     label = rg.RUNG_LABELS[au.RUNG_ONE_TAP]
     assert f"\u201c{label}\u201d" in earned[0], earned[0]
-    assert f"earned {label}" not in earned[0], "the bare predicate must not follow 'earned'"
+    assert (
+        f"earned {label}" not in earned[0]
+    ), "the bare predicate must not follow 'earned'"
 
 
 def test_the_ladder_view_carries_the_whole_governed_inventory(_isolated_home):
@@ -885,11 +909,6 @@ def test_the_ladder_view_carries_the_whole_governed_inventory(_isolated_home):
     assert [m["key"] for m in view["rung_meta"]] == list(au.RUNGS)
     assert all(m["label"] and m["hint"] for m in view["rung_meta"])
     row = _row(view, "action.create_task")
-    # Exact, not `in`: this row is the sample that proves a row carries its providers, and an
-    # exact list is also the ratchet that makes an unnoticed addition to a governed class red.
-    # `selfqa-file-finding` (SV-9) shares this class deliberately — what it ultimately does is
-    # file a task through the provider beside it — so it is named here rather than the assertion
-    # being loosened to accommodate it.
     assert row["providers"] == ["create-task", "selfqa-file-finding"]
     assert row["record"], "every row explains its track record, eligible or not"
 
@@ -903,9 +922,6 @@ def test_the_ladder_view_lists_a_pending_undo(_isolated_home):
     assert view["reversals"][0]["action_type"] == APP_KEY
 
 
-# ── the shipped create-task provider can reverse its own handle ───────────────
-
-
 def test_create_task_deletes_the_row_it_filed(_isolated_home):
     """The one core provider that writes a reversal handle can also take it back.
 
@@ -913,7 +929,9 @@ def test_create_task_deletes_the_row_it_filed(_isolated_home):
     from `execute` is fed straight back into `reverse`, so the two halves cannot disagree
     about the handle format.
     """
-    from gideon.action_providers.create_task_provider import CreateTaskActionProvider
+    from gideon.integrations.action_providers.create_task_provider import (
+        CreateTaskActionProvider,
+    )
 
     provider = CreateTaskActionProvider()
     assert provider.reversal_kinds == ("task",)
@@ -927,7 +945,6 @@ def test_create_task_deletes_the_row_it_filed(_isolated_home):
     assert undone.success is True
     assert _task_files(_isolated_home) == []
 
-    # A second reversal finds nothing and says so, rather than reporting success.
     again = asyncio.run(provider.reverse(created.reversal))
     assert again.success is False and "already gone" in again.error
 
@@ -935,7 +952,9 @@ def test_create_task_deletes_the_row_it_filed(_isolated_home):
 def test_a_provider_with_no_undo_refuses_by_default(_isolated_home):
     """The base-class default is the right answer for every provider that never sets
     `reversal` — a refusal, not a silent success."""
-    from gideon.action_providers.notify_provider import NotifyActionProvider
+    from gideon.integrations.action_providers.notify_provider import (
+        NotifyActionProvider,
+    )
 
     provider = NotifyActionProvider()
     assert provider.reversal_kinds == ()
@@ -948,9 +967,16 @@ def test_the_gateway_scan_is_the_proposal_paths_production_caller():
     """The proposal scan has a call site on a real loop, not only in this file."""
     import inspect
 
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.background_passes import AutonomySweep, WatchPoll
+    from gideon.engine.gateway import RuntimeCoordinator
 
-    scan = inspect.getsource(GatewayOrchestrator._scan_autonomy_promotions)
+    assert "AutonomySweep" in inspect.getsource(
+        RuntimeCoordinator._scan_autonomy_promotions
+    )
+    scan = inspect.getsource(AutonomySweep)
     assert "propose_promotions" in scan
-    loop = inspect.getsource(GatewayOrchestrator._file_watch_poll_loop)
+    assert "WatchPoll(self, web=False" in inspect.getsource(
+        RuntimeCoordinator._file_watch_poll_loop
+    )
+    loop = inspect.getsource(WatchPoll.cycle)
     assert "_scan_autonomy_promotions" in loop

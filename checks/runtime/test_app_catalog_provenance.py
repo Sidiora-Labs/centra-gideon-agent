@@ -33,11 +33,9 @@ from pathlib import Path
 
 import pytest
 
-from gideon.apps import catalog, manager
-from gideon.providers import loader
+from gideon.extensions.apps import catalog, manager
+from gideon.extensions.providers import loader
 
-# The issue's own measured strings. Kept verbatim so the anchors in the bug report and the
-# anchors in this test are the same bytes.
 LOCAL_DESC = "Ask one question and walk away…"
 REMOTE_DESC = "Unattended research campaigns as an agent tool…"
 COLLIDING_NAME = "deep-research"
@@ -51,9 +49,9 @@ def _isolate(tmp_path, monkeypatch):
     default is the real published repo — without this the tests here would reach
     github.com. The module-global scan caches are process-wide, so they are cleared on both
     sides."""
-    import gideon.config.loader as cfg
-    from gideon import inbox as _inbox
-    from gideon.providers import entity_routes as _er
+    import gideon.core.config.loader as cfg
+    from gideon.extensions.providers import entity_routes as _er
+    from gideon.integrations import inbox as _inbox
 
     monkeypatch.setattr(cfg, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(manager, "config_dir", lambda: tmp_path)
@@ -169,9 +167,6 @@ def _cards(cat: dict) -> list[dict]:
     ]
 
 
-# ── The collision, driven through the real catalog path ──────────────────────
-
-
 def test_a_remote_bundle_does_not_shadow_the_local_one_you_just_added(tmp_path):
     """The measured symptom: ONE card, and it is the copy on disk.
 
@@ -184,13 +179,13 @@ def test_a_remote_bundle_does_not_shadow_the_local_one_you_just_added(tmp_path):
     catalog.add_local_source(str(local_root))
     catalog.add_git_source(url)
 
-    cards = [c for c in _cards(catalog.available_catalog()) if c["name"] == COLLIDING_NAME]
+    cards = [
+        c for c in _cards(catalog.available_catalog()) if c["name"] == COLLIDING_NAME
+    ]
 
-    # Vacuity floor: a fixture that surfaced NOTHING would satisfy "the remote did not win".
     assert len(cards) == 1, cards
     assert cards[0]["description"] == LOCAL_DESC
     assert cards[0]["sourceKind"] == "local"
-    # …and specifically NOT the stale remote copy the issue measured.
     assert cards[0]["description"] != REMOTE_DESC
 
 
@@ -209,18 +204,19 @@ def test_the_permissions_on_the_card_are_the_permissions_that_would_install(tmp_
     catalog.add_local_source(str(local_root))
     catalog.add_git_source(url)
 
-    cards = [c for c in _cards(catalog.available_catalog()) if c["name"] == COLLIDING_NAME]
+    cards = [
+        c for c in _cards(catalog.available_catalog()) if c["name"] == COLLIDING_NAME
+    ]
     assert len(cards) == 1, cards
     card = cards[0]
 
-    # The bytes this card installs, read straight off disk — not off another catalog call.
     install_from = card["pointer"] or card["source"]
     assert install_from == str(local_app), install_from
     on_disk = json.loads((Path(install_from) / "app.json").read_text(encoding="utf-8"))
 
-    assert card["permissions"].get("network") == on_disk["permissions"]["network"] is False
-    # The remote copy asks for strictly more. If it had won, the card would have disclosed
-    # network access for bytes that do not request it — or vice versa.
+    assert (
+        card["permissions"].get("network") == on_disk["permissions"]["network"] is False
+    )
     assert card["permissions"].get("network") is not True
 
 
@@ -234,14 +230,14 @@ def test_a_local_registry_pointer_is_not_shadowed_by_the_remote_one(tmp_path):
     divider) and the stale remote description, which is what the bug report shows."""
     local_root = tmp_path / "local-src"
     _local_copy(local_root, subdir="packages/" + COLLIDING_NAME)
-    _write_index(local_root, subdirectory="packages/" + COLLIDING_NAME, description=LOCAL_DESC)
+    _write_index(
+        local_root, subdirectory="packages/" + COLLIDING_NAME, description=LOCAL_DESC
+    )
     url = _remote_copy_repo(tmp_path / "repo", with_index=True)
     catalog.add_local_source(str(local_root))
     catalog.add_git_source(url)
 
     cat = catalog.available_catalog()
-    # The dir-scan genuinely cannot see it — this is the fixture's own premise, asserted so a
-    # future change that makes localApps carry it turns this into a different test knowingly.
     assert [c for c in cat["localApps"] if c["name"] == COLLIDING_NAME] == []
 
     cards = [c for c in _cards(cat) if c["name"] == COLLIDING_NAME]
@@ -256,14 +252,12 @@ def test_the_docstring_promise_holds_a_dir_scan_beats_an_index(tmp_path):
     survives — the promise, implemented rather than edited away."""
     local_root = tmp_path / "local-src"
     _local_copy(local_root)
-    # The same source's index describes the same app with the stale remote text.
     _write_index(local_root, subdirectory=COLLIDING_NAME, description=REMOTE_DESC)
     catalog.add_local_source(str(local_root))
 
     cat = catalog.available_catalog()
     cards = [c for c in _cards(cat) if c["name"] == COLLIDING_NAME]
     assert len(cards) == 1, cards
-    # The dir-scan card, whose description comes from the real manifest.
     assert cards[0]["description"] == LOCAL_DESC
     assert [c for c in cat["remoteApps"] if c["name"] == COLLIDING_NAME] == []
 
@@ -281,7 +275,9 @@ def test_a_first_party_dir_outranks_a_user_added_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_FIRST_PARTY_APPS_DIR", str(first_party))
     catalog.add_local_source(str(user_dir))
 
-    cards = [c for c in _cards(catalog.available_catalog()) if c["name"] == COLLIDING_NAME]
+    cards = [
+        c for c in _cards(catalog.available_catalog()) if c["name"] == COLLIDING_NAME
+    ]
     assert len(cards) == 1, cards
     assert cards[0]["sourceKind"] == "first-party"
     assert cards[0]["description"] == LOCAL_DESC
@@ -290,12 +286,16 @@ def test_a_first_party_dir_outranks_a_user_added_dir(tmp_path, monkeypatch):
 def test_precedence_is_ordered_most_to_least_vouched_for():
     """The ladder itself, pinned. A reorder that let ``git`` outrank ``local`` would restore
     the defect while every collision test above still had exactly one card."""
-    assert catalog.SOURCE_PRECEDENCE == ("native", "bundled", "first-party", "local", "git")
+    assert catalog.SOURCE_PRECEDENCE == (
+        "native",
+        "bundled",
+        "first-party",
+        "local",
+        "git",
+    )
     ranks = [catalog.precedence_rank(k) for k in catalog.SOURCE_PRECEDENCE]
     assert ranks == sorted(ranks) and len(set(ranks)) == len(ranks)
-    # A remote never outranks anything on disk.
     assert catalog.precedence_rank("git") > catalog.precedence_rank("local")
-    # An unknown kind LOSES rather than winning by accident.
     assert catalog.precedence_rank("something-new") > catalog.precedence_rank("git")
 
 
@@ -304,16 +304,17 @@ def test_an_installed_app_is_not_offered_by_any_source(tmp_path):
     local_root = tmp_path / "local-src"
     _local_copy(local_root)
     catalog.add_local_source(str(local_root))
-    assert [c for c in _cards(catalog.available_catalog()) if c["name"] == COLLIDING_NAME]
+    assert [
+        c for c in _cards(catalog.available_catalog()) if c["name"] == COLLIDING_NAME
+    ]
 
-    from gideon.apps import app_manager
+    from gideon.extensions.apps import app_manager
 
     app_manager.install(str(local_root / COLLIDING_NAME), confirm=True)
     assert COLLIDING_NAME in catalog._installed_names()
-    assert [c for c in _cards(catalog.available_catalog()) if c["name"] == COLLIDING_NAME] == []
-
-
-# ── Provenance vocabulary (2514) ─────────────────────────────────────────────
+    assert [
+        c for c in _cards(catalog.available_catalog()) if c["name"] == COLLIDING_NAME
+    ] == []
 
 
 def test_source_kind_for_origin_never_guesses():
@@ -321,17 +322,16 @@ def test_source_kind_for_origin_never_guesses():
 
     The empty string for an unreadable origin is the point: the Tools page renders NO badge
     for it. Defaulting to a bundled reading is exactly issue 2514 — an absent fact rendered
-    as a claim on the screen where the user is asking "did this ship with the product?"."""
+    as a claim on the screen where the user is asking "did this ship with the product?".
+    """
     assert catalog.source_kind_for_origin("builtin") == "bundled"
     assert catalog.source_kind_for_origin("registry") == "bundled"
     assert catalog.source_kind_for_origin("local") == "local"
     assert catalog.source_kind_for_origin("external") == "git"
     assert catalog.source_kind_for_origin("builtin", native=True) == "native"
     assert catalog.source_kind_for_origin("local", native=True) == "native"
-    # No reading ⇒ no claim.
     assert catalog.source_kind_for_origin("") == ""
     assert catalog.source_kind_for_origin("something-else") == ""
-    # Every value it can return is a term the precedence ladder knows.
     for origin in ("builtin", "registry", "local", "external"):
         assert catalog.source_kind_for_origin(origin) in catalog.SOURCE_PRECEDENCE
 
@@ -340,7 +340,9 @@ def test_the_bundled_default_source_can_be_turned_off(tmp_path, monkeypatch):
     """ "Cannot be turned off" no longer holds. The bundled tuple is folded into every read,
     so there is no row to delete — ``apps.bundled_source_enabled`` is the off switch, and it
     is reachable from the config PATCH allowlist."""
-    monkeypatch.setattr(catalog, "_DEFAULT_GIT_SOURCES", ("https://example.invalid/apps.git",))
+    monkeypatch.setattr(
+        catalog, "_DEFAULT_GIT_SOURCES", ("https://example.invalid/apps.git",)
+    )
     assert "https://example.invalid/apps.git" in catalog.list_git_sources()
 
     (tmp_path / "config.json").write_text(
@@ -350,7 +352,7 @@ def test_the_bundled_default_source_can_be_turned_off(tmp_path, monkeypatch):
     assert catalog.list_git_sources() == []
     assert catalog.builtin_git_sources() == []
 
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
     assert _EDITABLE_CONFIG["apps.bundled_source_enabled"]["type"] == "bool"
 
@@ -365,7 +367,9 @@ def test_an_unparseable_config_still_lists_the_default(tmp_path, monkeypatch):
     dataclass default. Its ``except`` branch is a different mechanism and is covered by the
     test below.
     """
-    monkeypatch.setattr(catalog, "_DEFAULT_GIT_SOURCES", ("https://example.invalid/apps.git",))
+    monkeypatch.setattr(
+        catalog, "_DEFAULT_GIT_SOURCES", ("https://example.invalid/apps.git",)
+    )
     (tmp_path / "config.json").write_text("{ not json", encoding="utf-8")
     assert catalog.bundled_source_enabled() is True
     assert "https://example.invalid/apps.git" in catalog.list_git_sources()
@@ -385,9 +389,11 @@ def test_a_config_read_that_RAISES_still_lists_the_default(tmp_path, monkeypatch
     leave the default listed, because a Store with no sources is worse than a Store showing a
     default the user can see and turn off.
     """
-    monkeypatch.setattr(catalog, "_DEFAULT_GIT_SOURCES", ("https://example.invalid/apps.git",))
+    monkeypatch.setattr(
+        catalog, "_DEFAULT_GIT_SOURCES", ("https://example.invalid/apps.git",)
+    )
 
-    import gideon.config.loader as cfg
+    import gideon.core.config.loader as cfg
 
     def _explode() -> None:
         raise OSError("config unreadable (permissions, bad mount, truncated read)")
@@ -403,10 +409,6 @@ def test_network_source_hosts_names_the_egress_and_stays_silent_when_local(tmp_p
     or nothing at all, never a warning about nothing."""
     url = _remote_copy_repo(tmp_path / "repo")
     catalog.add_git_source(url)
-    # A file:// source is not egress. Asserted in BOTH spellings, because the common
-    # `file:///path` form has an empty hostname anyway — only `file://host/path` actually
-    # exercises the scheme check, and without it that URL would be disclosed as a remote
-    # host the Store never dials.
     assert catalog.network_source_hosts() == []
     assert catalog.available_catalog()["networkSources"] == []
     catalog.add_git_source("file://localhost/srv/apps.git")
@@ -416,9 +418,6 @@ def test_network_source_hosts_names_the_egress_and_stays_silent_when_local(tmp_p
     catalog.add_git_source("git@gitlab.example.org:acme/other.git")
     hosts = catalog.network_source_hosts()
     assert hosts == ["github.com", "gitlab.example.org"], hosts
-
-
-# ── The rails: one owner, and a vacuity floor in both directions ─────────────
 
 
 def _py_census(token: str) -> set[tuple[str, str]]:
@@ -431,8 +430,6 @@ def _py_census(token: str) -> set[tuple[str, str]]:
 
     pkg_root = Path(gideon.__file__).resolve().parent
     files = sorted(p for p in pkg_root.rglob("*.py"))
-    # Vacuity floor #1: a broken glob reads as "no sites" and would make every assertion
-    # below trivially true.
     assert len(files) > 100, f"census walked only {len(files)} files under {pkg_root}"
 
     sites: set[tuple[str, str]] = set()
@@ -450,7 +447,10 @@ def _py_census(token: str) -> set[tuple[str, str]]:
                 continue
             enclosing = [name for start, end, name in owners if start <= lineno <= end]
             sites.add(
-                (path.relative_to(pkg_root).as_posix(), enclosing[-1] if enclosing else "<module>")
+                (
+                    path.relative_to(pkg_root).as_posix(),
+                    enclosing[-1] if enclosing else "<module>",
+                )
             )
     return sites
 
@@ -464,7 +464,9 @@ def _py_raw_count(token: str) -> int:
     import gideon
 
     pkg_root = Path(gideon.__file__).resolve().parent
-    return sum(p.read_text(encoding="utf-8").count(token) for p in pkg_root.rglob("*.py"))
+    return sum(
+        p.read_text(encoding="utf-8").count(token) for p in pkg_root.rglob("*.py")
+    )
 
 
 def test_one_owner_resolves_a_catalog_name_collision():
@@ -487,11 +489,7 @@ def test_one_owner_resolves_a_catalog_name_collision():
         ("apps/catalog.py", "resolve_catalog_entries"),
     }
 
-    # Vacuity, both directions. A token that is not in the package must census EMPTY…
     assert _py_census("_installed_names_for_every_source()") == set()
-    # …and the tokens above must really be present, counted by a mechanism that does not
-    # share the census's parse. An absolute lower bound: the def + its one caller, and the
-    # rank helper's def + its two comparisons.
     assert _py_raw_count("_installed_names()") >= 2
     assert _py_raw_count("precedence_rank(") >= 3
 
@@ -499,13 +497,14 @@ def test_one_owner_resolves_a_catalog_name_collision():
 def _web_census(token: str) -> set[str]:
     """Census ``token`` across the SPA's non-test sources → {relative path}.
 
-    Comment-only lines are skipped, matching ``web/src/design/tokenLint.test.ts``: prose that
+    Comment-only lines are skipped, matching ``apps/console/src/design/tokenLint.test.ts``: prose that
     quotes the old code is not a second implementation of it."""
-    web_src = Path(__file__).resolve().parent.parent / "web" / "src"
+    web_src = Path(__file__).resolve().parent.parent.parent / "apps/console" / "src"
     files = sorted(
-        p for p in web_src.rglob("*.ts*") if not p.name.endswith((".test.ts", ".test.tsx", ".d.ts"))
+        p
+        for p in web_src.rglob("*.ts*")
+        if not p.name.endswith((".test.ts", ".test.tsx", ".d.ts"))
     )
-    # Vacuity floor #1: a wrong root or suffix reads as "no sites".
     assert len(files) > 100, f"census walked only {len(files)} files under {web_src}"
     hits: set[str] = set()
     for path in files:
@@ -521,8 +520,10 @@ def _web_census(token: str) -> set[str]:
 def _web_raw_count(token: str) -> int:
     """Raw occurrence count over the SPA's bytes — vacuity floor #2 for the web census, on a
     different mechanism (no line splitting, no comment filter)."""
-    web_src = Path(__file__).resolve().parent.parent / "web" / "src"
-    return sum(p.read_text(encoding="utf-8").count(token) for p in web_src.rglob("*.ts*"))
+    web_src = Path(__file__).resolve().parent.parent.parent / "apps/console" / "src"
+    return sum(
+        p.read_text(encoding="utf-8").count(token) for p in web_src.rglob("*.ts*")
+    )
 
 
 def test_one_owner_labels_app_provenance():
@@ -556,10 +557,12 @@ def test_one_owner_labels_app_provenance():
     recorded rather than papered over — it is a residual of the split, not something this branch
     should fix by editing code another change just landed. If the census grows a THIRD entry, the
     rail is doing its job and the duplication has stopped being mild."""
-    assert _web_census("'platform'") == {"lib/provenance.ts", "pages/tools/ToolsPage.tsx"}
+    assert _web_census("'platform'") == {
+        "lib/provenance.ts",
+        "pages/tools/ToolsPage.tsx",
+    }
     assert _web_census("'first-party'") == {"lib/provenance.ts", "lib/api.ts"}
 
-    # Vacuity, both directions.
     assert _web_census("'platform-provenance-that-does-not-exist'") == set()
     assert _web_raw_count("'platform'") >= 1
     assert _web_raw_count("'first-party'") >= 2
@@ -573,12 +576,9 @@ def test_one_owner_merges_the_app_catalog():
     the wire TYPE still names the fields, but nothing reads them outside the merge."""
     for token in (".bundled", ".localApps", ".remoteApps", ".gitApps"):
         assert _web_census(f"catalog?{token}") == {"lib/appCatalog.ts"}, token
-    # A consumer spelling its parameter something else still has to go through the merge, so
-    # the bare accessors must not appear anywhere but there either.
     assert _web_census(".remoteApps") == {"lib/appCatalog.ts"}
     assert _web_census(".gitApps") == {"lib/appCatalog.ts"}
 
-    # Vacuity, both directions.
     assert _web_census("catalog?.notAListThatExists") == set()
     assert _web_raw_count(".remoteApps") >= 1
     assert _web_raw_count("catalog?.gitApps") >= 1

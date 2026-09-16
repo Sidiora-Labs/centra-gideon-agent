@@ -14,21 +14,18 @@ import json
 
 import pytest
 
-from gideon.auth import credentials as creds
-from gideon.config import credentials as cred_store
-from gideon.config.loader import AppConfig
+from gideon.core.config import credentials as cred_store
+from gideon.core.config.loader import AppConfig
+from gideon.security.auth import credentials as creds
 
 
 @pytest.fixture(autouse=True)
 def _isolated_home(tmp_path, monkeypatch):
-    import gideon.config.loader as loader
+    import gideon.core.config.loader as loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(creds, "config_dir", lambda: tmp_path)
     return tmp_path
-
-
-# ── Defaults preserve today's behavior ────────────────────────────────────
 
 
 def test_login_is_off_by_default() -> None:
@@ -45,11 +42,10 @@ def test_default_values() -> None:
 
 
 def test_a_config_with_no_auth_section_loads_the_defaults(_isolated_home) -> None:
-    (_isolated_home / "config.json").write_text(json.dumps({"agent": {}}), encoding="utf-8")
+    (_isolated_home / "config.json").write_text(
+        json.dumps({"agent": {}}), encoding="utf-8"
+    )
     assert AppConfig.load().auth == AppConfig().auth
-
-
-# ── Round trip ────────────────────────────────────────────────────────────
 
 
 def test_auth_section_round_trips_through_to_dict(_isolated_home) -> None:
@@ -60,7 +56,9 @@ def test_auth_section_round_trips_through_to_dict(_isolated_home) -> None:
         "lockout_threshold": 3,
         "lockout_window": "5m",
     }
-    (_isolated_home / "config.json").write_text(json.dumps({"auth": written}), encoding="utf-8")
+    (_isolated_home / "config.json").write_text(
+        json.dumps({"auth": written}), encoding="utf-8"
+    )
     assert AppConfig.load().to_dict()["auth"] == written
 
 
@@ -74,20 +72,21 @@ def test_save_then_load_preserves_the_section(_isolated_home) -> None:
     assert reloaded.auth.session_ttl == "12h"
 
 
-# ── Hand-edited nonsense must not brick the gateway ───────────────────────
-
-
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        ({"lockout_threshold": 0}, 1),  # 0 would lock out on the zeroth attempt
+        ({"lockout_threshold": 0}, 1),
         ({"lockout_threshold": -5}, 1),
-        ({"lockout_threshold": "oops"}, 5),  # non-numeric → the default
+        ({"lockout_threshold": "oops"}, 5),
         ({"lockout_threshold": 7}, 7),
     ],
 )
-def test_lockout_threshold_is_clamped_not_fatal(_isolated_home, raw: dict, expected: int) -> None:
-    (_isolated_home / "config.json").write_text(json.dumps({"auth": raw}), encoding="utf-8")
+def test_lockout_threshold_is_clamped_not_fatal(
+    _isolated_home, raw: dict, expected: int
+) -> None:
+    (_isolated_home / "config.json").write_text(
+        json.dumps({"auth": raw}), encoding="utf-8"
+    )
     assert AppConfig.load().auth.lockout_threshold == expected
 
 
@@ -105,11 +104,8 @@ def test_an_empty_session_ttl_falls_back_to_the_default(_isolated_home) -> None:
     assert AppConfig.load().auth.session_ttl == "30d"
 
 
-# ── The PATCH surface ─────────────────────────────────────────────────────
-
-
 def test_the_editable_allowlist_covers_the_intended_knobs() -> None:
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
     for key in (
         "auth.login_enabled",
@@ -121,10 +117,6 @@ def test_the_editable_allowlist_covers_the_intended_knobs() -> None:
         assert key in _EDITABLE_CONFIG, f"{key} should be runtime-editable"
 
 
-#: The one credential-WORDED key that carries no credential material. `security.credential_keychain`
-#: (SH-2) is a boolean naming WHERE secrets are written — the secrets themselves go through
-#: `save_credential`, never through a config PATCH. Listed explicitly so a second such key cannot
-#: appear without someone making the same argument out loud.
 _NON_SECRET_CREDENTIAL_WORDED_KEYS = frozenset({"security.credential_keychain"})
 
 
@@ -145,10 +137,12 @@ def test_no_credential_field_is_ever_patchable() -> None:
     Strictly stronger than the version it replaces: `{"security.api_password": {"type": "str"}}`
     fails on BOTH clauses, and a bool sneaking in unlisted fails on the second.
     """
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
     forbidden = ("password", "credential", "hash", "totp_secret", "secret")
-    worded = [k for k in _EDITABLE_CONFIG if any(word in k.lower() for word in forbidden)]
+    worded = [
+        k for k in _EDITABLE_CONFIG if any(word in k.lower() for word in forbidden)
+    ]
 
     unlisted = [k for k in worded if k not in _NON_SECRET_CREDENTIAL_WORDED_KEYS]
     assert unlisted == [], (
@@ -160,8 +154,6 @@ def test_no_credential_field_is_ever_patchable() -> None:
         f"credential-worded key(s) that are not booleans: {not_bool}. Secret material travels as "
         "a string — a credential-worded key holding one is the defect this rail exists to catch."
     )
-    # Vacuity floor: the population must be non-empty, or both assertions above pass by finding
-    # nothing and the rail says nothing about the allowlist it is meant to police.
     assert worded, "the forbidden-word sweep matched nothing — the rail is vacuous"
 
 
@@ -169,7 +161,7 @@ def test_every_auth_field_is_either_patchable_or_deliberately_not() -> None:
     """Catches a NEW auth field added without deciding whether it is runtime-editable."""
     from dataclasses import fields
 
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
     known = {f.name for f in fields(AppConfig().auth)}
     editable = {k.split(".", 1)[1] for k in _EDITABLE_CONFIG if k.startswith("auth.")}
@@ -179,48 +171,50 @@ def test_every_auth_field_is_either_patchable_or_deliberately_not() -> None:
     )
 
 
-# ── The duration parser used to read session_ttl ──────────────────────────
-
-
 @pytest.mark.parametrize(
     ("raw", "secs"),
-    [("30d", 30 * 86400), ("1d", 86400), ("12h", 12 * 3600), ("15m", 900), (" 7d ", 7 * 86400)],
+    [
+        ("30d", 30 * 86400),
+        ("1d", 86400),
+        ("12h", 12 * 3600),
+        ("15m", 900),
+        (" 7d ", 7 * 86400),
+    ],
 )
 def test_config_duration_parsing(raw: str, secs: int) -> None:
-    from gideon.dashboard.token_auth import parse_config_duration
+    from gideon.interfaces.dashboard.token_auth import parse_config_duration
 
     assert parse_config_duration(raw, default_secs=999) == secs
 
 
-@pytest.mark.parametrize("raw", ["", "d", "30", "30s", "abc", "-1d", "1.5h", "30D", None])
+@pytest.mark.parametrize(
+    "raw", ["", "d", "30", "30s", "abc", "-1d", "1.5h", "30D", None]
+)
 def test_unparseable_config_duration_uses_the_default(raw) -> None:  # noqa: ANN001
     """A typo in config.json must not brick the box — it takes the documented default."""
-    from gideon.dashboard.token_auth import parse_config_duration
+    from gideon.interfaces.dashboard.token_auth import parse_config_duration
 
     assert parse_config_duration(raw, default_secs=4242) == 4242
 
 
 def test_config_duration_is_capped() -> None:
-    from gideon.dashboard.token_auth import MAX_SESSION_TTL_SECS, parse_config_duration
+    from gideon.interfaces.dashboard.token_auth import (
+        MAX_SESSION_TTL_SECS,
+        parse_config_duration,
+    )
 
     assert parse_config_duration("99999d", default_secs=1) == MAX_SESSION_TTL_SECS
 
 
 def test_the_token_duration_parser_is_unchanged() -> None:
     """`parse_duration` serves `--ttl`, where an unknown unit must stay a hard error."""
-    from gideon.dashboard.token_auth import parse_duration
+    from gideon.interfaces.dashboard.token_auth import parse_duration
 
-    assert parse_duration("30d") is None  # deliberately still rejected here
+    assert parse_duration("30d") is None
     assert parse_duration("12h") == 12 * 3600
 
 
-# ── The CLI ───────────────────────────────────────────────────────────────
-
-
-#: `cli.py` has no ``__main__`` guard (it is reached through the ``gideon`` console
-#: script), so a ``-m`` run imports the module and exits silently. Call `main` directly to
-#: exercise the REAL parser rather than a reimplementation of it.
-_RUN_CLI = "from gideon.cli import main; main()"
+_RUN_CLI = "from gideon.interfaces.cli.main import main; main()"
 
 
 class _Args:
@@ -229,7 +223,7 @@ class _Args:
 
 
 def test_status_runs_with_nothing_configured(capsys) -> None:
-    from gideon.auth.cli import auth_cmd
+    from gideon.security.auth.cli import auth_cmd
 
     assert auth_cmd(_Args(auth_command="status")) == 0
     out = capsys.readouterr().out
@@ -239,39 +233,35 @@ def test_status_runs_with_nothing_configured(capsys) -> None:
 
 def test_enable_is_refused_without_a_credential(capsys) -> None:
     """Enabling login with no password would offer a form nobody can pass."""
-    from gideon.auth.cli import auth_cmd
+    from gideon.security.auth.cli import auth_cmd
 
     assert auth_cmd(_Args(auth_command="enable")) == 1
     assert "No credential is set" in capsys.readouterr().out
 
 
 def test_enable_then_disable_writes_only_the_flag(_isolated_home, capsys) -> None:
-    from gideon.auth.cli import auth_cmd
+    from gideon.security.auth.cli import auth_cmd
 
     creds.set_password("jordan", "correct-horse-battery")
     assert auth_cmd(_Args(auth_command="enable")) == 0
 
-    # Read the FILE, not the loaded object: load() materialises every default section in
-    # memory, so asserting on `to_dict()` would report defaults the CLI never wrote. (It no
-    # longer WRITES them back — PHF-15 made load() a pure read — but the in-memory filling
-    # is still there, and that is what this ordering guards against.) The property under
-    # test is that `enable` touches one key.
     on_disk = json.loads((_isolated_home / "config.json").read_text(encoding="utf-8"))
-    assert on_disk == {"auth": {"login_enabled": True}}, "only the flag should be written"
+    assert on_disk == {
+        "auth": {"login_enabled": True}
+    }, "only the flag should be written"
     assert AppConfig.load().auth.login_enabled is True
 
     assert auth_cmd(_Args(auth_command="disable")) == 0
     assert AppConfig.load().auth.login_enabled is False
-    # Disabling must not throw the credential away — that would make "turn it off for a
-    # minute" destructive.
     assert creds.has_credentials() is True
 
 
 def test_enable_preserves_unrelated_config(_isolated_home) -> None:
-    from gideon.auth.cli import auth_cmd
+    from gideon.security.auth.cli import auth_cmd
 
     (_isolated_home / "config.json").write_text(
-        json.dumps({"agent": {"bot_name": "Ada"}, "auth": {"session_ttl": "7d"}}), encoding="utf-8"
+        json.dumps({"agent": {"bot_name": "Ada"}, "auth": {"session_ttl": "7d"}}),
+        encoding="utf-8",
     )
     creds.set_password("jordan", "correct-horse-battery")
     assert auth_cmd(_Args(auth_command="enable")) == 0
@@ -285,7 +275,7 @@ def test_set_password_refuses_a_non_tty(monkeypatch, capsys) -> None:
     """A piped password came from a shell history or a CI log. Point at the env path."""
     import sys
 
-    from gideon.auth.cli import auth_cmd
+    from gideon.security.auth.cli import auth_cmd
 
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False, raising=False)
     assert auth_cmd(_Args(auth_command="set-password", user="jordan")) == 1
@@ -298,7 +288,7 @@ def test_set_password_refuses_a_non_tty(monkeypatch, capsys) -> None:
 def test_set_password_prompts_twice_and_rejects_a_mismatch(monkeypatch, capsys) -> None:
     import sys
 
-    import gideon.auth.cli as cli
+    import gideon.security.auth.cli as cli
 
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
     answers = iter(["correct-horse-battery", "correct-horse-bettery"])
@@ -311,20 +301,21 @@ def test_set_password_prompts_twice_and_rejects_a_mismatch(monkeypatch, capsys) 
 def test_set_password_stores_on_a_match(monkeypatch, capsys) -> None:
     import sys
 
-    import gideon.auth.cli as cli
+    import gideon.security.auth.cli as cli
 
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
-    monkeypatch.setattr(cli.getpass, "getpass", lambda *_a, **_k: "correct-horse-battery")
+    monkeypatch.setattr(
+        cli.getpass, "getpass", lambda *_a, **_k: "correct-horse-battery"
+    )
     assert cli.auth_cmd(_Args(auth_command="set-password", user="jordan")) == 0
     assert creds.verify_password("jordan", "correct-horse-battery") is True
-    # The plaintext must not be echoed back at the user's terminal.
     assert "correct-horse-battery" not in capsys.readouterr().out
 
 
 def test_set_password_reports_a_too_short_password(monkeypatch, capsys) -> None:
     import sys
 
-    import gideon.auth.cli as cli
+    import gideon.security.auth.cli as cli
 
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
     monkeypatch.setattr(cli.getpass, "getpass", lambda *_a, **_k: "short")
@@ -334,7 +325,7 @@ def test_set_password_reports_a_too_short_password(monkeypatch, capsys) -> None:
 
 def test_status_warns_when_login_is_on_but_unconfigured(_isolated_home, capsys) -> None:
     """The one combination that guarantees nobody can log in must be called out."""
-    from gideon.auth.cli import auth_cmd
+    from gideon.security.auth.cli import auth_cmd
 
     (_isolated_home / "config.json").write_text(
         json.dumps({"auth": {"login_enabled": True}}), encoding="utf-8"
@@ -343,42 +334,46 @@ def test_status_warns_when_login_is_on_but_unconfigured(_isolated_home, capsys) 
     assert "cannot succeed" in capsys.readouterr().out
 
 
-def test_status_warns_when_totp_is_required_but_not_enrolled(_isolated_home, capsys) -> None:
-    from gideon.auth.cli import auth_cmd
+def test_status_warns_when_totp_is_required_but_not_enrolled(
+    _isolated_home, capsys
+) -> None:
+    from gideon.security.auth.cli import auth_cmd
 
     creds.set_password("jordan", "correct-horse-battery")
     (_isolated_home / "config.json").write_text(
-        json.dumps({"auth": {"login_enabled": True, "require_totp": True}}), encoding="utf-8"
+        json.dumps({"auth": {"login_enabled": True, "require_totp": True}}),
+        encoding="utf-8",
     )
     assert auth_cmd(_Args(auth_command="status")) == 0
     assert "no TOTP secret is enrolled" in capsys.readouterr().out
 
 
 def test_totp_setup_needs_a_password_first(capsys) -> None:
-    from gideon.auth.cli import auth_cmd
+    from gideon.security.auth.cli import auth_cmd
 
     assert auth_cmd(_Args(auth_command="totp", totp_action="setup")) == 1
     assert "Set a password first" in capsys.readouterr().out
 
 
 def test_totp_setup_prints_the_secret_once(monkeypatch, capsys) -> None:
-    from gideon.auth import totp
-    from gideon.auth.cli import auth_cmd
+    from gideon.security.auth import totp
+    from gideon.security.auth.cli import auth_cmd
 
     saved: dict[str, str] = {}
-    monkeypatch.setattr(cred_store, "save_credential", lambda k, v: saved.update({k: v}))
+    monkeypatch.setattr(
+        cred_store, "save_credential", lambda k, v: saved.update({k: v})
+    )
     creds.set_password("jordan", "correct-horse-battery")
     assert auth_cmd(_Args(auth_command="totp", totp_action="setup")) == 0
 
     out = capsys.readouterr().out
     secret = saved[creds.TOTP_SECRET_KEY]
     assert secret in out and "shown once" in out
-    # The printed secret must be the one that will actually verify.
     assert totp.verify_code(secret, totp.code_now(secret)) is True
 
 
 def test_an_unknown_subcommand_is_a_usage_error(capsys) -> None:
-    from gideon.auth.cli import auth_cmd
+    from gideon.security.auth.cli import auth_cmd
 
     assert auth_cmd(_Args(auth_command="frobnicate")) == 2
     assert "Usage:" in capsys.readouterr().out

@@ -1,137 +1,126 @@
-"""Tests for the process-wide ``shutdown_event`` lazy proxy.
-
-``shutdown_event`` must not be a plain ``asyncio.Event()`` created at import
-time: an Event bound to the import-time loop, awaited later from a different
-loop (e.g. the one ``asyncio.run()`` creates for the gateway), raises
-``RuntimeError: got Future attached to a different loop``. The lazy proxy binds
-to the running loop on first use instead, and re-binds across fresh
-``asyncio.run()`` loops while preserving a pending set() across them.
-"""
+"""Shutdown signaling across event loops, threads, cancellation, and restarts."""
 
 import asyncio
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
+import pytest
 
 import gideon
 
 
 def test_shutdown_event_importable_without_running_loop() -> None:
-    """Importing the module must not require a running event loop."""
-    assert hasattr(gideon, "shutdown_event")
-    assert callable(gideon.shutdown_event.set)
-    assert callable(gideon.shutdown_event.clear)
-    assert callable(gideon.shutdown_event.is_set)
+    assert isinstance(gideon.shutdown_event, gideon.ShutdownLatch)
+    gideon.shutdown_event.clear()
+    assert not gideon.shutdown_event.is_set()
+    gideon.shutdown_event.set()
+    assert gideon.shutdown_event.is_set()
+    gideon.shutdown_event.clear()
 
 
 def test_shutdown_event_survives_fresh_asyncio_run() -> None:
-    """``await shutdown_event.wait()`` must work inside a fresh ``asyncio.run()``.
+    signal = gideon.ShutdownLatch()
 
-    This mirrors the exact pattern that crashed the gateway: the module is
-    imported at top level, then ``asyncio.run()`` creates a new loop and the
-    gateway coroutine awaits ``shutdown_event.wait()``.
-    """
-    gideon.shutdown_event.clear()
+    async def wait_for_request() -> bool:
+        asyncio.get_running_loop().call_soon(signal.set)
+        return await signal.wait()
 
-    async def main() -> None:
-        async def setter() -> None:
-            await asyncio.sleep(0.01)
-            gideon.shutdown_event.set()
-
-        asyncio.create_task(setter())
-        await gideon.shutdown_event.wait()
-
-    asyncio.run(main())
-    assert gideon.shutdown_event.is_set()
-    gideon.shutdown_event.clear()
+    assert asyncio.run(wait_for_request()) is True
+    assert signal.is_set()
 
 
 def test_shutdown_event_survives_multiple_asyncio_runs() -> None:
-    """The proxy must rebind cleanly across successive loops."""
+    signal = gideon.ShutdownLatch()
+
+    async def wait_for_request() -> bool:
+        asyncio.get_running_loop().call_soon(signal.set)
+        return await signal.wait()
+
     for _ in range(3):
-
-        async def main() -> None:
-            async def setter() -> None:
-                await asyncio.sleep(0.01)
-                gideon.shutdown_event.set()
-
-            asyncio.create_task(setter())
-            await gideon.shutdown_event.wait()
-
-        gideon.shutdown_event.clear()
-        asyncio.run(main())
-        assert gideon.shutdown_event.is_set()
-
-    gideon.shutdown_event.clear()
+        signal.clear()
+        assert asyncio.run(wait_for_request()) is True
+        assert signal.is_set()
 
 
 def test_shutdown_event_wait_for_timeout() -> None:
-    """``asyncio.wait_for(shutdown_event.wait(), timeout=...)`` must work."""
-    gideon.shutdown_event.clear()
+    signal = gideon.ShutdownLatch()
 
-    async def main() -> str:
-        try:
-            await asyncio.wait_for(gideon.shutdown_event.wait(), timeout=0.05)
-        except asyncio.TimeoutError:
-            return "timed_out"
-        return "set"
+    async def wait_for_request() -> None:
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(signal.wait(), timeout=0.02)
+        assert not signal.is_set()
+        signal.set()
+        assert await signal.wait() is True
 
-    result = asyncio.run(main())
-    assert result == "timed_out"
+    asyncio.run(wait_for_request())
 
 
 def test_shutdown_event_does_not_bind_to_default_loop_via_get_event_loop() -> None:
-    """The proxy must NOT bind to the default loop on first access."""
-    # Step 1: make sure there's a default loop on the main thread
+    dormant = asyncio.new_event_loop()
+    asyncio.set_event_loop(dormant)
+    signal = gideon.ShutdownLatch()
+
+    async def wait_for_request() -> bool:
+        asyncio.get_running_loop().call_soon(signal.set)
+        return await signal.wait()
+
     try:
-        default_loop = asyncio.get_event_loop_policy().get_event_loop()
-    except RuntimeError:
-        default_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(default_loop)
-    assert default_loop is not None
-
-    # Step 2: reset the proxy's cached Event so it has to rebuild
-    gideon.shutdown_event.clear()
-    gideon.shutdown_event._event = None  # type: ignore[attr-defined]
-    gideon.shutdown_event._loop = None  # type: ignore[attr-defined]
-
-    # Step 3 + 4: fresh loop via asyncio.run, must not cross-loop
-    async def main() -> None:
-        async def setter() -> None:
-            await asyncio.sleep(0.01)
-            gideon.shutdown_event.set()
-
-        asyncio.create_task(setter())
-        await gideon.shutdown_event.wait()
-
-    asyncio.run(main())
-    assert gideon.shutdown_event.is_set()
-    gideon.shutdown_event.clear()
+        assert asyncio.run(wait_for_request()) is True
+    finally:
+        dormant.close()
+        asyncio.set_event_loop(None)
 
 
 def test_shutdown_event_pending_set_preserved_across_loops() -> None:
-    """A ``set()`` call without a running loop must survive until one starts."""
-    # Reset
-    gideon.shutdown_event.clear()
-    gideon.shutdown_event._event = None  # type: ignore[attr-defined]
-    gideon.shutdown_event._loop = None  # type: ignore[attr-defined]
-
-    # Sync set() before any loop runs
-    gideon.shutdown_event.set()
-    assert gideon.shutdown_event.is_set()
-
-    async def main() -> bool:
-        return gideon.shutdown_event.is_set()
-
-    assert asyncio.run(main()) is True
-    gideon.shutdown_event.clear()
+    signal = gideon.ShutdownLatch()
+    signal.set()
+    assert signal.is_set()
+    for _ in range(3):
+        assert asyncio.run(signal.wait()) is True
+    signal.clear()
+    assert not signal.is_set()
 
 
-def test_shutdown_event_get_raises_without_loop() -> None:
-    """``_get()`` must raise RuntimeError when no loop is running."""
-    gideon.shutdown_event._event = None  # type: ignore[attr-defined]
-    gideon.shutdown_event._loop = None  # type: ignore[attr-defined]
+def test_shutdown_wait_rejects_execution_without_a_running_loop() -> None:
+    pending = gideon.ShutdownLatch().wait()
     try:
-        gideon.shutdown_event._get()  # type: ignore[attr-defined]
-        assert False, "Expected RuntimeError"
-    except RuntimeError as e:
-        assert "without a running event loop" in str(e)
+        with pytest.raises(RuntimeError, match="without a running event loop"):
+            pending.send(None)
     finally:
-        gideon.shutdown_event.clear()
+        pending.close()
+
+
+def test_cancelled_waiter_does_not_prevent_delivery_to_other_waiters() -> None:
+    signal = gideon.ShutdownLatch()
+
+    async def wait_for_request() -> None:
+        cancelled = asyncio.create_task(signal.wait())
+        survivor = asyncio.create_task(signal.wait())
+        await asyncio.sleep(0)
+        cancelled.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await cancelled
+        signal.set()
+        assert await asyncio.wait_for(survivor, timeout=1) is True
+
+    asyncio.run(wait_for_request())
+
+
+def test_request_wakes_waiters_on_two_real_threads() -> None:
+    signal = gideon.ShutdownLatch()
+    ready = threading.Barrier(3, timeout=3)
+
+    def worker() -> bool:
+        async def listen() -> bool:
+            pending = asyncio.create_task(signal.wait())
+            await asyncio.sleep(0)
+            ready.wait()
+            return await asyncio.wait_for(pending, timeout=3)
+
+        return asyncio.run(listen())
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        waiting = [pool.submit(worker) for _ in range(2)]
+        ready.wait()
+        signal.set()
+        assert [future.result(timeout=5) for future in waiting] == [True, True]

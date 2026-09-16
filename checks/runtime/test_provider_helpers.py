@@ -19,9 +19,9 @@ import types
 import pytest
 
 import gideon.sdk.model  # noqa: F401 — ensure package import order
-from gideon.llm import branded_specs
-from gideon.llm.capabilities import Capability
-from gideon.llm.registry import ProviderEntry
+from gideon.integrations.llm import branded_specs
+from gideon.integrations.llm.capabilities import Capability
+from gideon.integrations.llm.registry import ProviderEntry
 from gideon.sdk.provider_helpers import (
     BrandedCatalog,
     BrandedProviderSpec,
@@ -91,10 +91,10 @@ def test_factory_strips_credential_and_routing_fields_from_extra_options():
     )
     prov = factory(entry=entry)
     extra = getattr(prov, "_extra_options", {})
-    # Credential/routing fields must NOT reach the SDK call kwargs.
-    assert "api_key" not in extra and "endpoint" not in extra and "base_url" not in extra
+    assert (
+        "api_key" not in extra and "endpoint" not in extra and "base_url" not in extra
+    )
     assert "model" not in extra
-    # Genuine model-call params survive.
     assert extra.get("temperature") == 0.5 and extra.get("top_p") == 0.9
 
 
@@ -119,7 +119,6 @@ def test_factory_uses_per_instance_key_over_env(monkeypatch):
         options={"api_key": "PER-INSTANCE-RIGHT-KEY", "endpoint": "https://z"},
     )
     prov = factory(entry=entry)
-    # the provider must carry the per-instance key, NOT the env key
     assert prov._client.api_key == "PER-INSTANCE-RIGHT-KEY"  # noqa: SLF001
 
 
@@ -147,24 +146,26 @@ def test_anthropic_test_connection_probes_completion(monkeypatch):
     model/validation error → ok (the key authenticated)."""
     spec = _spec("anthropic")
 
-    # Auth failure → ok False.
     async def _auth_fail(*a, **k):
         raise RuntimeError("401 authentication_error: invalid x-api-key")
         yield  # pragma: no cover
 
     cat = BrandedCatalog(spec, endpoint="https://x", api_key="k")
-    import gideon.llm.anthropic as anth
+    import gideon.integrations.llm.anthropic as anth
 
-    monkeypatch.setattr(anth.AnthropicProvider, "complete", lambda self, *a, **k: _auth_fail())
+    monkeypatch.setattr(
+        anth.AnthropicProvider, "complete", lambda self, *a, **k: _auth_fail()
+    )
     res = _run(cat.test_connection())
     assert res.ok is False and "auth" in (res.detail or "").lower()
 
-    # Model-not-found → ok True (credentials authenticated, model is the issue).
     async def _model_bad(*a, **k):
         raise RuntimeError("not_found_error: model: nope")
         yield  # pragma: no cover
 
-    monkeypatch.setattr(anth.AnthropicProvider, "complete", lambda self, *a, **k: _model_bad())
+    monkeypatch.setattr(
+        anth.AnthropicProvider, "complete", lambda self, *a, **k: _model_bad()
+    )
     res = _run(cat.test_connection())
     assert res.ok is True
 
@@ -174,9 +175,6 @@ def test_anthropic_test_connection_no_key_is_not_ok():
     cat = BrandedCatalog(spec, endpoint="https://x", api_key="")
     res = _run(cat.test_connection())
     assert res.ok is False and "key" in (res.detail or "").lower()
-
-
-# ── The pricing map (MRT-2): optional, and it ROUND-TRIPS ────────────────────────────────
 
 
 def test_spec_pricing_defaults_empty_and_round_trips():
@@ -192,7 +190,7 @@ def test_spec_pricing_round_trips_through_json():
     discipline that catches a field added to the dataclass but not to the serializer."""
     import json
 
-    from gideon.llm.prompt_cache import PromptCache
+    from gideon.integrations.llm.prompt_cache import PromptCache
 
     spec = BrandedProviderSpec(
         type="acme",
@@ -222,17 +220,19 @@ def test_spec_with_pricing_is_still_hashable():
     """The spec is frozen and used as a value; a dict field must not break ``hash()``."""
     spec = BrandedProviderSpec(type="acme", pricing={"m": {"in_per_mtok": 1.0}})
     assert hash(spec) == hash(BrandedProviderSpec(type="acme"))
-    assert {spec}  # usable in a set
+    assert {spec}
 
 
 def test_registered_spec_and_spec_pricing_resolve_a_named_instance(monkeypatch):
     """``spec_pricing`` answers for the provider TYPE and for a user-named instance of it, and
     returns an empty map (never a rate) for an unknown provider."""
-    spec = BrandedProviderSpec(type="acme", pricing={"acme-large": {"in_per_mtok": 3.0}})
+    spec = BrandedProviderSpec(
+        type="acme", pricing={"acme-large": {"in_per_mtok": 3.0}}
+    )
     monkeypatch.setattr(branded_specs, "_REGISTERED_SPECS", {"acme": spec})
 
     assert branded_specs.registered_spec("acme") is spec
-    assert branded_specs.registered_spec("acme-work") is spec  # named instance of the type
+    assert branded_specs.registered_spec("acme-work") is spec
     assert branded_specs.registered_spec("unknown") is None
     assert branded_specs.spec_pricing("acme") == {"acme-large": {"in_per_mtok": 3.0}}
     assert branded_specs.spec_pricing("unknown") == {}
@@ -242,7 +242,8 @@ def test_register_branded_app_records_the_spec_for_core_lookup():
     """The registration side effect is what makes app-declared pricing visible to
     routing/rates.py — with no app→core push and no core→app import."""
     spec = BrandedProviderSpec(
-        type="acme-pricing-probe", pricing={"acme-large": {"in_per_mtok": 2.0, "out_per_mtok": 4.0}}
+        type="acme-pricing-probe",
+        pricing={"acme-large": {"in_per_mtok": 2.0, "out_per_mtok": 4.0}},
     )
     try:
         register_branded_app(spec)

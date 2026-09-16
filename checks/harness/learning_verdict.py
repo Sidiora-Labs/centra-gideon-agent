@@ -1,6 +1,6 @@
 """The skills-on/off verdict — `fanout_measure`'s posture, one arm vocabulary wider.
 
-`harness/fanout_measure.py` owns the statistical posture this repo verdicts paired arms
+`checks/harness/fanout_measure.py` owns the statistical posture this repo verdicts paired arms
 with: the 5-point inconclusive band, the 5% token-match tolerance, the 3-trial floor, and
 the rule that within-arm spread beats the delta. The learning benchmark
 (`docs/research/learning-benchmark-protocol.md` §5) is prescribed against exactly
@@ -29,8 +29,8 @@ check order, or an aggregate:
   totals are commensurable only while the counts match, and §6's absent cells are exactly
   what makes them not.
 
-Why this lives in `harness/` and not under `src/gideon/`: `harness` is a repo-root dev
-package that is deliberately NOT in the shipped wheel (`harness/README.md`), so a module under
+Why this lives in `checks/harness/` and not under `runtime/gideon/`: `harness` is a repo-root dev
+package that is deliberately NOT in the shipped wheel (`checks/harness/README.md`), so a module under
 `src/` importing it would strand an import at install time — and `mypy`'s
 `ignore_missing_imports` would not catch it. The consequence is a design rule with teeth: the
 verdict is computed HERE, by the runner, and **written into the report artifact**. The gateway
@@ -44,7 +44,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from harness.fanout_measure import (
+from checks.harness.fanout_measure import (
     INCONCLUSIVE_BAND_POINTS,
     MIN_TRIALS_PER_ARM,
     SPEND_PER_TRIAL,
@@ -82,47 +82,16 @@ __all__ = [
     "verdict_task",
 ]
 
-#: The treatment arm — the approved skill is available to surfacing.
 ARM_SKILLS_ON = "skills_on"
-#: The control arm — the same skill is suppressed in the child, and only there.
 ARM_SKILLS_OFF = "skills_off"
 
-#: The two directional verdicts, renamed off `fanout`/`single` and nothing else changed.
 VERDICT_SKILLS_ON_WINS = "skills_on_wins"
 VERDICT_SKILLS_OFF_WINS = "skills_off_wins"
 
-#: The ONE word this repo uses for "this fact was never recorded", spelled here to match
-#: `src/gideon/evals/provenance.py` and `web/src/lib/unrecorded.ts`. Not IMPORTED from there:
-#: `harness` is a repo-root dev package outside the wheel and this module's whole point is that the
-#: dependency runs one way. `tests/test_evals_unrecorded_vocabulary.py` reds on a second spelling.
 UNRECORDED = "unrecorded"
 
-#: The SIXTH verdict, and the one member of this vocabulary that `fanout_measure` has no
-#: counterpart for — which is why the relabel map below cannot produce it.
-#:
-#: §5 offers a direction only when the two arms were spend-matched. When a contributing cell's
-#: provider did not report its usage (#2540) the token gate has no denominator to divide, so no
-#: direction may be offered — and none of the five existing verdicts can say that honestly:
-#:
-#: * `not_token_matched` asserts a comparison HAPPENED and came out unmatched. Here none happened.
-#:   Widening it would make "the arms differ by 40%" and "we cannot tell" the same published
-#:   string, and the second is the one a reader must not read as the first.
-#: * a `verdict` of `None` means the arms could not be ASSEMBLED (no cell scored). Here they were:
-#:   the scores are real and are published beside this verdict. Collapsing them would hide a
-#:   measured score delta behind "not measured".
-#:
-#: So this is a new word rather than a widened one — the same call #2630 made about `priced`.
 VERDICT_TOKENS_UNRECORDED = f"tokens_{UNRECORDED}"
 
-#: The denominator the token gate divides for THIS design, and the only knob this module declares.
-#: §3 runs `k` trials per arm on identical work, so per-trial and total spend are the same
-#: comparison whenever the run is whole — they diverge in exactly one case, and it is §6's: an arm
-#: that lost cells to `VERIFIER_ABSENT`. Over unequal counts a totals ratio is not a spend
-#: comparison at all; it reports the missing attempts. MEASURED (`learnbench-20260907T003211Z`):
-#: `sk_task_project` lost two `skills_on` cells, was verdicted on 3 trials against 5, and published
-#: `token_ratio` 0.5139 as "a 48.6% spend difference" where the per-trial value is 0.8565, 14.3%.
-#: Recomputing both runs of #2587 on this basis changes no verdict CLASS — it corrects a published
-#: number, which is why it is a miscomputation fix and not a protocol edit.
 SPEND_BASIS = SPEND_PER_TRIAL
 
 
@@ -142,9 +111,6 @@ class IncommensurableSpendError(RuntimeError):
     """
 
 
-#: `fanout_measure`'s verdict → this benchmark's. Three of five are identity: the
-#: withheld verdicts are withheld for reasons that have nothing to do with which arm is
-#: which, so renaming them would mint vocabulary for no gain.
 _RELABEL: dict[str, str] = {
     VERDICT_FANOUT_WINS: VERDICT_SKILLS_ON_WINS,
     VERDICT_SINGLE_WINS: VERDICT_SKILLS_OFF_WINS,
@@ -153,37 +119,11 @@ _RELABEL: dict[str, str] = {
     VERDICT_INSUFFICIENT_TRIALS: VERDICT_INSUFFICIENT_TRIALS,
 }
 
-#: This benchmark's closed verdict set: the five `fanout_measure` verdicts (two relabelled) plus
-#: the one state that design has and fan-out does not — see :data:`VERDICT_TOKENS_UNRECORDED`.
 VERDICTS: frozenset[str] = frozenset(_RELABEL.values()) | {VERDICT_TOKENS_UNRECORDED}
 
-#: The verdict classes V4 reproduction compares on (protocol §8). Two runs "land a verdict
-#: of the same class" when their verdicts are equal as STRINGS — the classes are the verdicts.
-#: Named separately so a future coarsening (e.g. collapsing the three withheld verdicts into
-#: one class) is one edit here rather than a second definition of "same class" per caller.
 VERDICT_CLASS = {v: v for v in VERDICTS}
 
-#: Words that only mean something in a FAN-OUT comparison. `compare()` writes its `notes` in that
-#: vocabulary, and the verdict relabel above never touched them — so a measured skills report
-#: published this, verbatim, about a suppressed SKILL:
-#:
-#:     "token spend differs by 13.7% (fanout 42517 vs single 37409) … give the cheaper arm more
-#:      budget (more single-agent samples, or a wider fan-out) and re-measure; the largest published
-#:      fan-out win was ~3.75x tokens…"
-#:
-#: §8 publishes the verdict WITH its notes, so that sentence is not a log line — it is part of the
-#: published result, and it points a reader at a lever this experiment does not have. A note
-#: carrying any of these is REPLACED by :func:`_arm_note`, not forwarded.
-#:
-#: Detected by VOCABULARY rather than by matching `compare()`'s exact prose: an upstream wording
-#: change would silently stop matching a prose-keyed rule, and would still be caught by this one
-#: (and by the test that asserts no published note contains any of these words).
 _FANOUT_VOCABULARY: tuple[str, ...] = ("fanout", "fan-out", "single-agent", "topology")
-
-#: NOT in the list above, deliberately: the inconclusive-band note's parenthetical "scorer swaps
-#: move scores further than architecture does" is the literature citation that JUSTIFIES the
-#: 5-point band this module imports. Rewording a citation to suit a different experiment would
-#: misquote it, and the band is not this experiment's to restate. It passes through as written.
 
 
 def _has_fanout_vocabulary(note: str) -> bool:
@@ -210,10 +150,6 @@ def _arm_note(verdict: str, payload: dict) -> str:
                 f"{off_tokens}) — a comparison against an arm that called no model measures "
                 "nothing about the skill"
             )
-        # PER TRIAL, on `SPEND_BASIS`, and derived from the same quantity the gate divided rather
-        # than from the payload's 4-decimal `token_ratio`: rounding the ratio first moves the last
-        # digit (13.6% became 13.7% on one real pair), and two published numbers about the same
-        # spend must not disagree, even by a tenth.
         on_rate = on_tokens / on_n
         off_rate = off_tokens / off_n
         drift = f"{abs(on_rate / off_rate - 1.0) * 100:.1f}% "
@@ -284,25 +220,12 @@ class TaskVerdict:
     reason: str = ""
     delta_points: float | None = None
     token_ratio: float | None = None
-    #: Per-arm aggregates, straight off `Comparison.to_dict()["arms"]` (trials, mean_score,
-    #: spread, tokens, tokens_per_point) — keyed by THIS module's arm names.
     arms: dict[str, dict] = field(default_factory=dict)
-    #: Cells the matrix mapped to VERIFIER_ABSENT. §6 reports these as a count, never drops them.
     absent_cells: int = 0
-    #: Total tool calls observed per arm (protocol §4's third metric, reachable since G3).
     tool_calls: dict[str, int] = field(default_factory=dict)
-    #: `True` only when every contributing cell actually observed its own spend rows. A
-    #: `token_ratio` computed over unobserved spend is not a token match, it is a guess.
     spend_observed: bool = False
-    #: Carried from `AttemptRecord.estimated`: tokens are heuristic, not provider-reported (§4).
     spend_estimated: bool = False
-    #: `False` when a contributing cell's PROVIDER did not report its usage (#2540) — a different
-    #: fact from `spend_observed`, which is about whether the cell could read its own audit file
-    #: at all. `spend_observed=True, tokens_recorded=False` is the exact state that published a
-    #: silent zero: the cell ran, its rows were read, and the provider omitted the numbers.
     tokens_recorded: bool = True
-    #: How many contributing cells that was. A count, so the absence is legible rather than only
-    #: boolean, and so a reader can see it was one cell of ten rather than all ten.
     unrecorded_spend_cells: int = 0
     notes: list[str] = field(default_factory=list)
 
@@ -311,7 +234,9 @@ class TaskVerdict:
             "task_id": self.task_id,
             "skill": self.skill,
             "verdict": self.verdict,
-            "verdict_class": None if self.verdict is None else verdict_class(self.verdict),
+            "verdict_class": (
+                None if self.verdict is None else verdict_class(self.verdict)
+            ),
             "reason": self.reason,
             "delta_points": self.delta_points,
             "token_ratio": self.token_ratio,
@@ -359,10 +284,6 @@ def verdict_task(
     """
     tool_calls = dict(tool_calls or {})
     if not tokens_recorded and on_trials and off_trials:
-        # The score aggregates come off `Arm`, which is `fanout_measure`'s own accessor set — the
-        # means and spreads are not re-derived here. `.tokens` / `.spend()` / `token_ratio` are
-        # the ones that would read the placeholder zeros, and none of them is touched: the arm
-        # dicts below carry `None` where `compare()` would have carried a number.
         on_arm = Arm(name=ARM_SKILLS_ON, trials=list(on_trials))
         off_arm = Arm(name=ARM_SKILLS_OFF, trials=list(off_trials))
         return TaskVerdict(
@@ -400,7 +321,10 @@ def verdict_task(
     if not on_trials or not off_trials:
         empty = [
             name
-            for name, trials in ((ARM_SKILLS_ON, on_trials), (ARM_SKILLS_OFF, off_trials))
+            for name, trials in (
+                (ARM_SKILLS_ON, on_trials),
+                (ARM_SKILLS_OFF, off_trials),
+            )
             if not trials
         ]
         return TaskVerdict(
@@ -408,11 +332,6 @@ def verdict_task(
             skill=skill,
             verdict=None,
             reason=(
-                # 🔑 `empty` holds ONE or TWO arm names, and one is the ordinary case: a paired
-                # run where a single arm produced no scored cell. So `arm(s)` was wrong on its
-                # commonest input — and this string is not a log line. The runner writes it into
-                # the persisted report, `GET /api/evals/learning-benchmark` serves it as
-                # `BenchmarkTaskRow.reason`, and `learning/BenchmarkPanel.tsx` renders it VERBATIM.
                 f"arm{'s' if len(empty) != 1 else ''} {', '.join(empty)} produced no scored "
                 "cell — this task was not measured, which is not a tie and not a zero delta"
             ),
@@ -426,21 +345,13 @@ def verdict_task(
 
     on_arm = Arm(name=ARM_SKILLS_ON, trials=list(on_trials))
     off_arm = Arm(name=ARM_SKILLS_OFF, trials=list(off_trials))
-    # The SECOND rail, and it guards the same class of edit as the basis rail below. `Trial.tokens`
-    # is an `int`, so a cell whose provider reported no usage arrives as a `0`; deleting the refusal
-    # above would hand those zeros to `compare()` and publish a ratio over them. A crash the tests
-    # catch beats a number a reader believes.
     if not tokens_recorded:
         raise IncommensurableSpendError(
             f"the token-match gate was reached for {task_id!r} with {unrecorded_spend_cells} "
             f"contributing cell(s) whose token usage is {UNRECORDED} — `Trial.tokens` carries a "
             "placeholder 0 for those, and dividing it publishes an absence as a spend match"
         )
-    # `compare(work, a, b)` treats its second argument as the arm a positive delta favours.
-    # Passing the treatment arm there is what makes a positive delta mean "the skill helped".
     comparison = compare(task_id, on_arm, off_arm, spend_basis=SPEND_BASIS)
-    # The rail. See `IncommensurableSpendError`: `compare()`'s default basis is TOTALS, so this
-    # cannot be left to the argument above staying where it is.
     if comparison.spend_basis != SPEND_PER_TRIAL:
         raise IncommensurableSpendError(
             f"the token-match gate ran on {comparison.spend_basis!r} for {task_id!r}, over "
@@ -448,9 +359,9 @@ def verdict_task(
             f"{ARM_SKILLS_OFF} — a paired design's arms are only comparable per trial"
         )
     payload = comparison.to_dict()
-    # Forward every upstream note that is about THIS experiment; replace the ones written in
-    # fan-out vocabulary with the same numbers in skills-arm words. See `_FANOUT_VOCABULARY`.
-    notes = [n for n in (payload.get("notes") or []) if not _has_fanout_vocabulary(str(n))]
+    notes = [
+        n for n in (payload.get("notes") or []) if not _has_fanout_vocabulary(str(n))
+    ]
     if len(notes) != len(payload.get("notes") or []):
         notes.append(_arm_note(str(payload.get("verdict") or ""), payload))
     imbalance = _imbalance_note(payload)

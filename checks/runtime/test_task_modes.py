@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.dashboard.chat_utils import task_mode_denies, task_mode_framing
+from gideon.interfaces.dashboard.chat_utils import task_mode_denies, task_mode_framing
 
 
 class _S:
@@ -17,78 +17,96 @@ class _S:
         self._task_mode = mode
 
 
-# (mode, title, tool_kind, tool_input, expect_denied)
 _CASES = [
-    # agent: unrestricted
     ("agent", "write_file", "edit", "{}", False),
     ("agent", "bash", "command", '{"command":"rm -rf x"}', False),
-    # plan: read-only inspection ALLOWED (so the plan is grounded), mutation DENIED
-    ("plan", "read_file", "read", "{}", False),  # inspect to plan
+    ("plan", "read_file", "read", "{}", False),
     ("plan", "grep", "read", "{}", False),
-    ("plan", "bash", "command", '{"command":"ls -la"}', False),  # read-only bash
-    ("plan", "write_file", "edit", "{}", True),  # no execution
+    ("plan", "bash", "command", '{"command":"ls -la"}', False),
+    ("plan", "write_file", "edit", "{}", True),
     ("plan", "bash", "command", '{"command":"rm -rf x"}', True),
-    ("plan", "artifact_save", "", "{}", True),  # plan != build
-    # ask: read-only allowed, every mutation denied (deny-by-default)
+    ("plan", "artifact_save", "", "{}", True),
     ("ask", "read_file", "read", "{}", False),
     ("ask", "grep", "read", "{}", False),
-    ("ask", "bash", "command", '{"command":"ls -la"}', False),  # read-only bash
-    ("ask", "bash", "command", '{"command":"rm -rf x"}', True),  # mutating bash
-    ("ask", "bash", "command", '{"command":"cat a > b"}', True),  # redirect = write
+    ("ask", "bash", "command", '{"command":"ls -la"}', False),
+    ("ask", "bash", "command", '{"command":"rm -rf x"}', True),
+    ("ask", "bash", "command", '{"command":"cat a > b"}', True),
     ("ask", "write_file", "edit", "{}", True),
-    ("ask", "artifact_save", "", "{}", True),  # 'save' verb
-    ("ask", "memory_recall", "", "{}", False),  # read-ish name
+    ("ask", "artifact_save", "", "{}", True),
+    ("ask", "memory_recall", "", "{}", False),
     ("ask", "delete_thing", "delete", "{}", True),
-    ("ask", "subagent_run", "", "{}", True),  # 'run'/'subagent'
-    # build: read-only + artifact/widget/skill producers; other mutations denied
+    ("ask", "subagent_run", "", "{}", True),
     ("build", "read_file", "read", "{}", False),
-    ("build", "artifact_save", "", "{}", False),  # producer
-    ("build", "widget_create", "", "{}", False),  # 'widget' hint
-    ("build", "skill_invoke", "", "{}", False),  # 'skill' hint
+    ("build", "artifact_save", "", "{}", False),
+    ("build", "widget_create", "", "{}", False),
+    ("build", "skill_invoke", "", "{}", False),
     ("build", "bash", "command", '{"command":"rm -rf x"}', True),
     ("build", "write_file", "edit", "{}", True),
-    ("build", "delete_artifact", "", "{}", True),  # TM11: destructive, NOT a producer
-    ("build", "remove_widget", "", "{}", True),  # TM11: destructive despite 'widget' hint
-    ("ask", "delete_artifact", "", "{}", True),  # ask never honors build hints
-    # image_generate: a media PRODUCER (creates a kind:image artifact + paid call) —
-    # NOT read-only, so ask/plan block it; build allows it (producing is the point).
-    ("ask", "image_generate", "", '{"prompt":"a cat"}', True),  # GAP6: was wrongly read-only
+    ("build", "delete_artifact", "", "{}", True),
+    (
+        "build",
+        "remove_widget",
+        "",
+        "{}",
+        True,
+    ),
+    ("ask", "delete_artifact", "", "{}", True),
+    (
+        "ask",
+        "image_generate",
+        "",
+        '{"prompt":"a cat"}',
+        True,
+    ),
     ("plan", "image_generate", "", '{"prompt":"a cat"}', True),
-    ("build", "image_generate", "", '{"prompt":"a cat"}', False),  # 'image' producer hint
+    (
+        "build",
+        "image_generate",
+        "",
+        '{"prompt":"a cat"}',
+        False,
+    ),
     ("agent", "image_generate", "", '{"prompt":"a cat"}', False),
-    ("ask", "prompt_render", "read", "{}", False),  # regression: read-only stays allowed
+    (
+        "ask",
+        "prompt_render",
+        "read",
+        "{}",
+        False,
+    ),
 ]
 
 
 @pytest.mark.parametrize("mode,title,kind,inp,want_deny", _CASES)
 def test_task_mode_gate(mode, title, kind, inp, want_deny):
     denied = bool(task_mode_denies(_S(mode), title, kind, inp))
-    assert denied is want_deny, f"[{mode}] {title}/{kind}: got deny={denied} want={want_deny}"
+    assert (
+        denied is want_deny
+    ), f"[{mode}] {title}/{kind}: got deny={denied} want={want_deny}"
 
 
 def test_agent_mode_never_denies():
     s = _S("agent")
-    for title, kind in [("anything", "edit"), ("bash", "command"), ("delete_all", "delete")]:
+    for title, kind in [
+        ("anything", "edit"),
+        ("bash", "command"),
+        ("delete_all", "delete"),
+    ]:
         assert task_mode_denies(s, title, kind, "{}") == ""
 
 
 def test_framing_per_mode():
-    # Every mode (including Agent) states its posture explicitly — Agent's block is
-    # what lifts a stale Ask/Plan/Build refusal when the user switches mid-chat.
     for mode in ("agent", "ask", "plan", "build"):
         f = task_mode_framing(_S(mode))
-        assert f and mode.capitalize() in f  # mode-named framing block present
-    # Agent framing must actively countermand a prior restriction, not just exist.
+        assert f and mode.capitalize() in f
     agent_f = task_mode_framing(_S("agent")).lower()
     assert "lifted" in agent_f or "full execution" in agent_f
-    # Restricted modes teach the one-click escalation marker (TM8); Agent doesn't.
     for mode in ("ask", "plan", "build"):
         assert "SWITCH_TO_AGENT" in task_mode_framing(_S(mode))
     assert "SWITCH_TO_AGENT" not in task_mode_framing(_S("agent"))
 
 
 def test_framing_unknown_mode_is_empty():
-    # A mode string with no framing entry returns '' (no spurious injection).
     assert task_mode_framing(_S("nonsense")) == ""
 
 
@@ -97,9 +115,9 @@ def test_framing_layers_on_default_system_prompt_not_replaces(tmp_path):
     the resolved default-agent prompt — folding it into system_prompt_override
     (the old wiring) made the 4-line posture block the ENTIRE system prompt,
     silently dropping identity ({{bot_name}}), widgets, and safety rules."""
-    from gideon.context import ContextBuilder
+    from gideon.cognition.context import PromptAssembler
 
-    cb = ContextBuilder()
+    cb = PromptAssembler()
     out, _ = cb.build_message(
         "hello",
         True,
@@ -107,11 +125,8 @@ def test_framing_layers_on_default_system_prompt_not_replaces(tmp_path):
         agent="gideon",
         system_prompt_suffix=task_mode_framing(_S("agent")),
     )
-    # identity line from the resolved chat prompt survived
     assert "You are " in out
-    # ... and the framing is layered on top of it
     assert "Task mode: Agent" in out
-    # override + suffix: both present (custom-agent path)
     out2, _ = cb.build_message(
         "hello",
         True,

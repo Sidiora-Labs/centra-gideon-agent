@@ -12,10 +12,10 @@ from __future__ import annotations
 
 from dataclasses import fields
 
-from gideon.acp.adapter import acp_event_to_agent_event
-from gideon.acp.types import AcpEvent
-from gideon.llm.base import LLMEvent
-from gideon.llm.events import EVENT_TOOL_CALL, AgentEvent
+from gideon.integrations.acp.adapter import acp_event_to_agent_event
+from gideon.integrations.acp.types import AcpEvent
+from gideon.integrations.llm.base import LLMEvent
+from gideon.integrations.llm.events import EVENT_TOOL_CALL, AgentEvent
 
 
 def test_llm_event_is_agent_event_not_acp():
@@ -47,14 +47,12 @@ def test_agent_event_full_field_union():
     )
     assert ev.kind == EVENT_TOOL_CALL
     assert ev.input_tokens == 10 and ev.cost_usd == 0.01
-    assert ev.tool_input == {"x": 1}  # native loop may pass structured input
+    assert ev.tool_input == {"x": 1}
 
 
 def test_agent_event_field_names_superset_of_acp():
     acp_field_names = {f.name for f in fields(AcpEvent)}
     agent_field_names = {f.name for f in fields(AgentEvent)}
-    # Every AcpEvent field exists on AgentEvent (so the adapter maps 1:1 and the
-    # chat_runner reads either without change).
     missing = acp_field_names - agent_field_names
     assert not missing, f"AgentEvent missing AcpEvent fields: {missing}"
 
@@ -92,8 +90,8 @@ def test_adapter_maps_every_field():
 def test_event_constants_parity():
     """acp.types and llm.events define the same EVENT_* values (duplicated to
     avoid a circular import; this pins they never drift)."""
-    import gideon.acp.types as at
-    import gideon.llm.events as le
+    import gideon.integrations.acp.types as at
+    import gideon.integrations.llm.events as le
 
     for name in (
         "EVENT_TEXT_CHUNK",
@@ -110,12 +108,9 @@ def test_event_constants_parity():
 
 
 def test_http_providers_are_model_providers():
-    # openai/anthropic are the core-resident PROTOCOL clients. Model-provider
-    # APPS (ollama/bedrock/vllm/…) assert their ModelProvider subclassing in
-    # their own apps/<name>-models/tests/.
-    from gideon.llm.anthropic import AnthropicProvider
-    from gideon.llm.base import ModelProvider
-    from gideon.llm.openai import OpenAIProvider
+    from gideon.integrations.llm.anthropic import AnthropicProvider
+    from gideon.integrations.llm.base import ModelProvider
+    from gideon.integrations.llm.openai import OpenAIProvider
 
     for P in (OpenAIProvider, AnthropicProvider):
         assert issubclass(P, ModelProvider)

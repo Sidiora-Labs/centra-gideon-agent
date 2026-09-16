@@ -31,23 +31,24 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gideon.dashboard.handlers.schedule import api_lessons, api_lessons_create
-from gideon.dashboard.state import DashboardState
-from gideon.memory import MemoryStore
-from gideon.memory_record import MemoryScope
-from gideon.memory_service import (
+from gideon.cognition.memory import MemoryJournal
+from gideon.cognition.memory_record import MemoryScope
+from gideon.cognition.memory_service import (
     normalize_workspace_ref,
     resolve_lesson_scope,
     service_for,
 )
-from gideon.vector_memory import VectorMemoryStore
-
-# ── helpers ──────────────────────────────────────────────────────────────────
+from gideon.cognition.vector_memory import SemanticArchive
+from gideon.interfaces.dashboard.handlers.schedule import (
+    api_lessons,
+    api_lessons_create,
+)
+from gideon.interfaces.dashboard.state import ConsoleState
 
 
 @pytest.fixture
 def wired(tmp_path):
-    """A DashboardState over a real memory.db, plus the two workspace dirs.
+    """A ConsoleState over a real memory.db, plus the two workspace dirs.
 
     Returns ``(state, db_path, ws_a, ws_b)``. ``ws_a``/``ws_b`` are real
     directories so ``realpath`` normalization is exercised rather than dodged.
@@ -60,16 +61,18 @@ def wired(tmp_path):
     ws_b.mkdir(parents=True)
 
     db_path = tmp_path / "memory.db"
-    mem = MemoryStore(workspace=ws)
+    mem = MemoryJournal(workspace=ws)
     mem.init()
-    vs = VectorMemoryStore(db_path=db_path, embedding_dim=3)
+    vs = SemanticArchive(db_path=db_path, embedding_dim=3)
     vs.init()
     vs.embed_fn = lambda _t: [1.0, 0.0, 0.0]
     mem.vector_store = vs
 
     cb = MagicMock()
     cb.memory = mem
-    state = DashboardState(sessions=MagicMock(count=0), start_time=0.0, context_builder=cb)
+    state = ConsoleState(
+        sessions=MagicMock(count=0), start_time=0.0, context_builder=cb
+    )
     return state, db_path, str(ws_a), str(ws_b)
 
 
@@ -90,19 +93,16 @@ async def _post(state, body):
     return await api_lessons_create(_req(state, body=body))
 
 
-def _fresh_store(db_path) -> VectorMemoryStore:
+def _fresh_store(db_path) -> SemanticArchive:
     """A brand-new store over the same file — proves the scope is PERSISTED, not
     an artifact of the writing instance's in-memory state."""
-    vs = VectorMemoryStore(db_path=db_path, embedding_dim=3)
+    vs = SemanticArchive(db_path=db_path, embedding_dim=3)
     vs.init()
     return vs
 
 
 def _rules(rows) -> set[str]:
     return {json.loads(r["value_json"]) for r in rows}
-
-
-# ── the round trip: write scoped, read back scoped ────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -124,7 +124,6 @@ async def test_workspace_lesson_persists_workspace_scope_and_ref(wired):
     assert len(rows) == 1
     assert rows[0]["scope"] == MemoryScope.WORKSPACE.value
     assert rows[0]["scope_ref"] == normalize_workspace_ref(ws_a)
-    # The typed record view agrees with the row — the axis is not row-only trivia.
     rec = _fresh_store(db_path).get_record(rows[0]["key"])
     assert rec is not None and rec.scope is MemoryScope.WORKSPACE
     assert rec.scope_ref == normalize_workspace_ref(ws_a)
@@ -135,7 +134,8 @@ async def test_workspace_lesson_is_invisible_to_another_workspace(wired):
     """(ii) The property that matters: no leak into an unrelated workspace."""
     state, db_path, ws_a, ws_b = wired
     await _post(
-        state, {"rule": "alpha builds with make dev", "scope": "workspace", "workspace": ws_a}
+        state,
+        {"rule": "alpha builds with make dev", "scope": "workspace", "workspace": ws_a},
     )
 
     vs = _fresh_store(db_path)
@@ -143,9 +143,7 @@ async def test_workspace_lesson_is_invisible_to_another_workspace(wired):
         "alpha builds with make dev"
     }
     assert vs.lessons_visible_in(normalize_workspace_ref(ws_b)) == []
-    # A reader with NO workspace identity is fail-closed too.
     assert vs.lessons_visible_in(None) == []
-    # …while the inventory still sees it, so it remains listable and deletable.
     assert len(vs.get_lessons()) == 1
 
 
@@ -153,7 +151,7 @@ async def test_workspace_lesson_is_invisible_to_another_workspace(wired):
 async def test_global_lesson_is_still_visible_to_everyone(wired):
     """(iii) Existing lessons are all global and must keep reaching every reader."""
     state, db_path, ws_a, ws_b = wired
-    await _post(state, {"rule": "always use dark mode"})  # no scope → global, as before
+    await _post(state, {"rule": "always use dark mode"})
 
     vs = _fresh_store(db_path)
     assert vs.get_lessons()[0]["scope"] == MemoryScope.GLOBAL.value
@@ -167,8 +165,12 @@ async def test_mixed_store_shows_global_everywhere_and_workspace_only_at_home(wi
     """The composite: one global + two workspace lessons, three different views."""
     state, db_path, ws_a, ws_b = wired
     await _post(state, {"rule": "prefer tabs nowhere"})
-    await _post(state, {"rule": "alpha pins node 22", "scope": "workspace", "workspace": ws_a})
-    await _post(state, {"rule": "beta pins node 18", "scope": "workspace", "workspace": ws_b})
+    await _post(
+        state, {"rule": "alpha pins node 22", "scope": "workspace", "workspace": ws_a}
+    )
+    await _post(
+        state, {"rule": "beta pins node 18", "scope": "workspace", "workspace": ws_b}
+    )
 
     vs = _fresh_store(db_path)
     assert _rules(vs.lessons_visible_in(normalize_workspace_ref(ws_a))) == {
@@ -192,13 +194,16 @@ async def test_same_rule_text_global_and_workspace_do_not_collide(wired):
     """
     state, db_path, ws_a, ws_b = wired
     await _post(state, {"rule": "run the linter"})
-    await _post(state, {"rule": "run the linter", "scope": "workspace", "workspace": ws_a})
+    await _post(
+        state, {"rule": "run the linter", "scope": "workspace", "workspace": ws_a}
+    )
 
     vs = _fresh_store(db_path)
     scopes = sorted((r["scope"] or "global") for r in vs.get_lessons())
     assert scopes == ["global", "workspace"]
-    # The global one still reaches the unrelated workspace.
-    assert _rules(vs.lessons_visible_in(normalize_workspace_ref(ws_b))) == {"run the linter"}
+    assert _rules(vs.lessons_visible_in(normalize_workspace_ref(ws_b))) == {
+        "run the linter"
+    }
 
 
 @pytest.mark.asyncio
@@ -223,24 +228,23 @@ async def test_workspace_write_never_supersedes_a_global_lesson(wired):
     assert _rules(vs.lessons_visible_in(normalize_workspace_ref(ws_b))) == {"run tests"}
 
 
-# ── the injection path: the prompt a session actually gets ────────────────────
-
-
 @pytest.mark.asyncio
-async def test_injected_lessons_block_differs_by_working_directory(wired, tmp_path, monkeypatch):
+async def test_injected_lessons_block_differs_by_working_directory(
+    wired, tmp_path, monkeypatch
+):
     """Through the REAL `build_session_context`: cwd decides what is injected.
 
     `get_memory_for(cwd)` partitions memory by working directory, but that partition
     is COARSE — the gateway registers its one store under both the no-cwd `_default`
-    key and the running workspace key (see `ContextBuilder.__init__`), so a single
+    key and the running workspace key (see `PromptAssembler.__init__`), so a single
     store backs several working directories in production. That is exactly where the
     leak lived, so the store here is registered under BOTH cwd keys: one memory.db,
     two working directories, and only the scope filter separates them.
     """
-    from gideon import context as context_mod
-    from gideon.config.loader import memory_dir_for_cwd
-    from gideon.context import ContextBuilder
-    from gideon.skills.loader import SkillsLoader
+    from gideon.cognition import context as context_mod
+    from gideon.cognition.context import PromptAssembler
+    from gideon.core.config.loader import memory_dir_for_cwd
+    from gideon.extensions.skills.loader import ProcedureLibrary
 
     state, _db_path, ws_a, ws_b = wired
     home = tmp_path / "home"
@@ -256,12 +260,18 @@ async def test_injected_lessons_block_differs_by_working_directory(wired, tmp_pa
     await _post(state, {"rule": "global rule: never force-push main"})
     await _post(
         state,
-        {"rule": "alpha rule: seed the fixture first", "scope": "workspace", "workspace": ws_a},
+        {
+            "rule": "alpha rule: seed the fixture first",
+            "scope": "workspace",
+            "workspace": ws_a,
+        },
     )
 
-    builder = ContextBuilder(
+    builder = PromptAssembler(
         memory=mem,
-        skills=SkillsLoader(skills_path=tmp_path / "skills", install_builtins=False),
+        skills=ProcedureLibrary(
+            skills_path=tmp_path / "skills", install_builtins=False
+        ),
     )
     in_alpha = builder.build_session_context(cwd=ws_a)
     in_beta = builder.build_session_context(cwd=ws_b)
@@ -276,17 +286,15 @@ async def test_injected_lessons_block_differs_by_working_directory(wired, tmp_pa
 async def test_lessons_context_service_leg_is_fail_closed(wired):
     """`MemoryService.lessons_context` normalizes its argument and defaults closed."""
     state, _db_path, ws_a, ws_b = wired
-    await _post(state, {"rule": "alpha only rule", "scope": "workspace", "workspace": ws_a})
+    await _post(
+        state, {"rule": "alpha only rule", "scope": "workspace", "workspace": ws_a}
+    )
 
     svc = service_for(state.context_builder.memory)
     assert "alpha only rule" in svc.lessons_context(ws_a)
     assert "alpha only rule" not in svc.lessons_context(ws_b)
     assert "alpha only rule" not in svc.lessons_context()
-    # A trailing separator / an unnormalized path still resolves to the same ref.
     assert "alpha only rule" in svc.lessons_context(ws_a + "/")
-
-
-# ── the list surface ─────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -302,7 +310,9 @@ async def test_list_reports_scope_and_filters_on_request(wired):
     assert by_rule["alpha rule"]["scope"] == "workspace"
     assert by_rule["alpha rule"]["workspace"] == normalize_workspace_ref(ws_a)
 
-    scoped = json.loads((await api_lessons(_req(state, query={"workspace": ws_b}))).body)
+    scoped = json.loads(
+        (await api_lessons(_req(state, query={"workspace": ws_b}))).body
+    )
     assert {e["rule"] for e in scoped["lessons"]} == {"everyone rule"}
 
 
@@ -315,14 +325,19 @@ async def test_list_refuses_a_relative_workspace_filter(wired):
 
 def test_memory_list_labels_a_workspace_lesson(monkeypatch):
     """The MCP inventory tool must not present a project-local rule as a universal one."""
-    import gideon.mcp_memory as mcp_memory
+    import gideon.integrations.mcp_memory as mcp_memory
 
     monkeypatch.setattr(
         mcp_memory,
         "_get",
         lambda _url: {
             "lessons": [
-                {"rule": "everywhere", "category": "knowledge", "scope": "global", "workspace": ""},
+                {
+                    "rule": "everywhere",
+                    "category": "knowledge",
+                    "scope": "global",
+                    "workspace": "",
+                },
                 {
                     "rule": "only here",
                     "category": "tool",
@@ -338,16 +353,12 @@ def test_memory_list_labels_a_workspace_lesson(monkeypatch):
     assert "[tool] only here (workspace: /w/alpha)" in out
 
 
-# ── refusals: never silently downgrade ───────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_workspace_scope_without_a_workspace_is_a_400(wired):
     state, db_path, _ws_a, _ws_b = wired
     resp = await _post(state, {"rule": "scoped but nameless", "scope": "workspace"})
     assert resp.status == 400
     assert "workspace is required" in json.loads(resp.body)["error"]
-    # Refused, not widened: nothing was written at all.
     assert _fresh_store(db_path).get_lessons() == []
 
 
@@ -356,7 +367,9 @@ async def test_non_absolute_workspace_is_a_400(wired):
     """A bare project name would realpath against the GATEWAY's cwd — a ref that
     matches nothing. Silent invisibility is as dishonest as a silent downgrade."""
     state, db_path, _ws_a, _ws_b = wired
-    resp = await _post(state, {"rule": "relative", "scope": "workspace", "workspace": "alpha"})
+    resp = await _post(
+        state, {"rule": "relative", "scope": "workspace", "workspace": "alpha"}
+    )
     assert resp.status == 400
     assert "absolute working-directory path" in json.loads(resp.body)["error"]
     assert _fresh_store(db_path).get_lessons() == []
@@ -386,9 +399,6 @@ async def test_absent_or_blank_scope_is_the_documented_default(wired, blank):
     assert _fresh_store(db_path).get_lessons()[0]["scope"] == MemoryScope.GLOBAL.value
 
 
-# ── the closed enum, enumerated ──────────────────────────────────────────────
-
-
 def test_every_memory_scope_member_is_mapped_explicitly(tmp_path):
     """No default branch: each member either resolves or raises with a reason.
 
@@ -405,19 +415,20 @@ def test_every_memory_scope_member_is_mapped_explicitly(tmp_path):
 
     assert resolve_lesson_scope("global", None) == (MemoryScope.GLOBAL, None)
     assert resolve_lesson_scope(None, None) == (MemoryScope.GLOBAL, None)
-    # A workspace supplied with scope=global is ignored, not smuggled into scope_ref.
     assert resolve_lesson_scope("global", str(tmp_path)) == (MemoryScope.GLOBAL, None)
     assert resolve_lesson_scope("workspace", str(tmp_path)) == (
         MemoryScope.WORKSPACE,
         normalize_workspace_ref(str(tmp_path)),
     )
-    assert resolve_lesson_scope(" WorkSpace ", str(tmp_path))[0] is MemoryScope.WORKSPACE
+    assert (
+        resolve_lesson_scope(" WorkSpace ", str(tmp_path))[0] is MemoryScope.WORKSPACE
+    )
 
 
 def test_normalize_workspace_ref_is_exact_never_fuzzy(tmp_path):
     """Two same-named checkouts under different parents must not share a ref."""
-    a = tmp_path / "one" / "web"
-    b = tmp_path / "two" / "web"
+    a = tmp_path / "one" / "apps/console"
+    b = tmp_path / "two" / "apps/console"
     a.mkdir(parents=True)
     b.mkdir(parents=True)
     assert normalize_workspace_ref(str(a)) != normalize_workspace_ref(str(b))

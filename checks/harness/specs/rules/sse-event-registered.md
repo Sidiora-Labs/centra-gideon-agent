@@ -6,8 +6,8 @@ statement: >
   event, data)`) must appear in the frontend lifecycle union that consumes that stream
   (`RUN_LIFECYCLE` in `useRunStream.ts`), or `EventSource` silently drops it.
 appliesTo:
-  - src/gideon/dashboard/sse.py
-  - web/src/pages/loops/useRunStream.ts
+  - runtime/gideon/dashboard/sse.py
+  - apps/console/src/pages/loops/useRunStream.ts
 scanner: sse-event-registered
 source: >
   `EventSource` delivers only events for which a named listener is registered. A backend
@@ -21,7 +21,7 @@ expiry_condition: >
 # SSE event types must be registered on both ends
 
 The loop/run stream uses one `EventSource` listener **per event-type string**
-(`web/src/pages/loops/useRunStream.ts` registers a listener for each name in the
+(`apps/console/src/pages/loops/useRunStream.ts` registers a listener for each name in the
 `RUN_LIFECYCLE` const array). The backend publishes named events through
 `SseRegistry.publish(key, event, data)` (`dashboard/sse.py`). If the backend introduces a
 new `event` name that isn't in `RUN_LIFECYCLE`, the browser's `EventSource` receives it

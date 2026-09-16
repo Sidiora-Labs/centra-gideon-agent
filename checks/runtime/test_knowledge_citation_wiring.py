@@ -13,7 +13,7 @@ So the tests here are about the seam, not the parser: the numbering the model re
 numbering the persist step resolves against, markers that resolve to nothing never reach a
 reader, and an item that cited nothing is refused unless it says `unsourced: true`.
 
-`gideon.knowledge.citations` (`MARKER_RE`, `SourceRef`, `Citation`, `Resolution`,
+`gideon.cognition.knowledge.citations` (`MARKER_RE`, `SourceRef`, `Citation`, `Resolution`,
 `register_sources`, `strip_markers`, `parse_markers`, `resolve`, `persist_form`,
 `parse_persist_form`) is landing separately in the same change. Where it is not importable
 yet, `_build_fake()` below stands in — a faithful, minimal implementation of that contract, so
@@ -31,19 +31,17 @@ from dataclasses import dataclass
 
 import pytest
 
-from gideon.action_providers.base import ActionContext
-from gideon.action_providers.knowledge_persist_provider import (
+from gideon.automation.workflows.bindings import BindingContext, resolve
+from gideon.cognition.knowledge import semantics as sem
+from gideon.integrations.action_providers.base import ActionContext
+from gideon.integrations.action_providers.knowledge_persist_provider import (
     KnowledgePersistActionProvider,
     _coerce_source_refs,
     _resolve_citations,
     _write_item_citations,
 )
-from gideon.knowledge import semantics as sem
-from gideon.workflows.bindings import BindingContext, resolve
 
-# ── the frozen contract, as a stand-in ──
-
-_MODULE_PATH = "gideon.knowledge.citations"
+_MODULE_PATH = "gideon.cognition.knowledge.citations"
 
 
 @dataclass(frozen=True)
@@ -116,7 +114,9 @@ def _build_fake() -> types.ModuleType:
         return _Resolution(
             citations=tuple(kept),
             dropped=tuple(dropped),
-            warnings=tuple(f"citation [{n}] names no registered source" for n in dropped),
+            warnings=tuple(
+                f"citation [{n}] names no registered source" for n in dropped
+            ),
             text=out,
         )
 
@@ -128,7 +128,7 @@ def _build_fake() -> types.ModuleType:
         for value in values or []:
             head, _, tail = str(value).partition(":")
             if not head.isdigit():
-                continue  # legacy bare "item:<id>" — skipped, per the contract
+                continue
             out.append(_Citation(marker=int(head), item_id=tail))
         return tuple(out)
 
@@ -150,13 +150,13 @@ def kcit(monkeypatch):
     """The citations module every lazy import in the wiring will see.
 
     Installed into `sys.modules` AND onto the package, because both import spellings are used
-    (`from gideon.knowledge import citations`). Yields the REAL module untouched once it
+    (`from gideon.cognition.knowledge import citations`). Yields the REAL module untouched once it
     exists, so this file becomes an end-to-end test of the shipped parser without an edit.
     """
-    import gideon.knowledge as pkg
+    import gideon.cognition.knowledge as pkg
 
     try:  # pragma: no cover — one branch or the other, depending on merge order
-        from gideon.knowledge import citations as real
+        from gideon.cognition.knowledge import citations as real
 
         return real
     except ImportError:
@@ -178,8 +178,9 @@ def isolated_home(tmp_path, monkeypatch):
 
 def _knob(monkeypatch, *, required: bool) -> None:
     """Patch the config object the check reads, rather than writing a config file and hoping
-    the loader picks it up — an unread file would make these assertions pass either way."""
-    from gideon.config.loader import AppConfig, KnowledgeConfig
+    the loader picks it up — an unread file would make these assertions pass either way.
+    """
+    from gideon.core.config.loader import AppConfig, KnowledgeConfig
 
     class _Cfg:
         knowledge = KnowledgeConfig(require_citations=required)
@@ -189,12 +190,13 @@ def _knob(monkeypatch, *, required: bool) -> None:
 
 ITEMS = [
     {"item_id": "k-1", "title": "Cold start", "content": "p50 held at 40ms."},
-    {"item_id": "k-2", "title": "p99", "content": "As shown in [1], the p99 rose to 900ms."},
+    {
+        "item_id": "k-2",
+        "title": "p99",
+        "content": "As shown in [1], the p99 rose to 900ms.",
+    },
     {"item_id": "k-3", "title": "Rollout", "content": "Shipped on the 14th."},
 ]
-
-
-# ── the headline claim: an output that cites nothing is refused ──
 
 
 def test_an_output_that_cites_nothing_is_refused(monkeypatch):
@@ -211,8 +213,6 @@ def test_an_output_that_cites_nothing_is_refused(monkeypatch):
     assert not check.ok
     assert "cited nothing" in check.error
     assert "[n]" in check.error and "unsourced" in check.error
-    # And it still tells the caller WHICH item it would have been, so a retry knows whether it
-    # is creating or updating.
     assert check.logical_key and check.content_hash
 
 
@@ -231,7 +231,8 @@ def test_the_same_output_passes_when_it_says_it_is_unsourced(monkeypatch):
 
 def test_storing_the_whole_retrieved_set_no_longer_satisfies_the_rule(monkeypatch):
     """What the template used to do: `citations = every item I recalled`. Non-empty, so the old
-    presence check passed — while "which source supports this sentence" stayed unanswerable."""
+    presence check passed — while "which source supports this sentence" stayed unanswerable.
+    """
     _knob(monkeypatch, required=True)
     whole_set = ["cite:1:-1:k-1", "cite:2:-1:k-2", "cite:3:-1:k-3"]
     refused = sem.check_persist(
@@ -242,8 +243,6 @@ def test_storing_the_whole_retrieved_set_no_longer_satisfies_the_rule(monkeypatc
         marker_citations=[],
     )
     assert not refused.ok and "cited nothing" in refused.error
-    # The contrast that names what changed: the SAME non-empty list, with no marker pass having
-    # run, is still accepted — that is the legacy/manual path, and it is the only one left.
     assert sem.check_persist(
         kind="insight",
         title="Latency review",
@@ -276,10 +275,9 @@ def test_every_synthesized_kind_is_covered(kind, monkeypatch):
 def test_an_observed_kind_is_untouched(monkeypatch):
     """A `fact` is not a synthesis, and a marker pass over one must not start gating it."""
     _knob(monkeypatch, required=True)
-    assert sem.check_persist(kind="fact", title="T", content="c", marker_citations=[]).ok
-
-
-# ── the knob is live ──
+    assert sem.check_persist(
+        kind="fact", title="T", content="c", marker_citations=[]
+    ).ok
 
 
 def test_the_require_citations_knob_is_read(monkeypatch):
@@ -293,7 +291,7 @@ def test_the_require_citations_knob_is_read(monkeypatch):
 def test_the_knob_fails_to_on_when_config_is_unreadable(monkeypatch):
     """A control that keeps unsourced synthesis out of the store must not be relaxed by an
     unreadable config file."""
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     def _boom():
         raise OSError("config unreadable")
@@ -304,7 +302,8 @@ def test_the_knob_fails_to_on_when_config_is_unreadable(monkeypatch):
 
 def test_the_knob_off_falls_back_to_the_presence_check(monkeypatch):
     """Off means today's rule, not no rule: any citation evidence counts, and an item with none
-    at all is still refused. `unsourced: true` remains the way to say "I have nothing"."""
+    at all is still refused. `unsourced: true` remains the way to say "I have nothing".
+    """
     _knob(monkeypatch, required=False)
     assert sem.check_persist(
         kind="insight", title="T", content="c", citations=["1:k-1"], marker_citations=[]
@@ -319,11 +318,10 @@ def test_no_existing_caller_changes_behaviour(monkeypatch):
     """`marker_citations` defaults to None — "no marker pass ran", which is a different state
     from "one ran and resolved nothing" and must not collapse into it."""
     _knob(monkeypatch, required=True)
-    assert sem.check_persist(kind="insight", title="Why", content="c", citations=["t-1"]).ok
+    assert sem.check_persist(
+        kind="insight", title="Why", content="c", citations=["t-1"]
+    ).ok
     assert not sem.check_persist(kind="insight", title="Why", content="c").ok
-
-
-# ── the numbering: one set of markers, two consumers ──
 
 
 def test_fenced_sources_strips_an_items_own_markers_before_numbering():
@@ -332,23 +330,27 @@ def test_fenced_sources_strips_an_items_own_markers_before_numbering():
     because it looks answerable."""
     out = resolve("{{inputs.k | fenced_sources}}", BindingContext(inputs={"k": ITEMS}))
     assert re.findall(r"\[(\d+)\]", out) == ["1", "2", "3"]
-    assert "As shown in, the p99 rose" in out  # the body survives; only the marker went,
-    # and `strip_markers` repairs the hole rather than leaving an orphan space.
+    assert "As shown in, the p99 rose" in out
 
 
 def test_source_refs_mirrors_the_numbering_the_model_reads():
     """The whole seam: `[3]` in the prompt and ref 3 in the persist step must name one item."""
-    fenced = resolve("{{inputs.k | fenced_sources}}", BindingContext(inputs={"k": ITEMS}))
+    fenced = resolve(
+        "{{inputs.k | fenced_sources}}", BindingContext(inputs={"k": ITEMS})
+    )
     refs = resolve("{{inputs.k | source_refs}}", BindingContext(inputs={"k": ITEMS}))
-    assert [r["marker"] for r in refs] == [int(n) for n in re.findall(r"\[(\d+)\]", fenced)]
+    assert [r["marker"] for r in refs] == [
+        int(n) for n in re.findall(r"\[(\d+)\]", fenced)
+    ]
     assert [r["item_id"] for r in refs] == ["k-1", "k-2", "k-3"]
     assert set(refs[0]) == {"marker", "item_id", "chunk_index", "excerpt"}
-    assert json.dumps(refs)  # crosses into an action config as JSON, so it must serialize
+    assert json.dumps(refs)
 
 
 def test_source_refs_suppresses_the_default_sibling_view():
     """`fenced_sources` opts out of the bounded view. If `source_refs` did not, the two pipes
-    would enumerate different lists and every marker past the bound would name the wrong item."""
+    would enumerate different lists and every marker past the bound would name the wrong item.
+    """
     outputs = [{"findings": [{"item_id": f"k-{n}", "content": "x"} for n in range(60)]}]
     refs = resolve(
         "{{siblings.main.output | source_refs}}",
@@ -361,12 +363,9 @@ def test_an_empty_retrieval_registers_no_sources():
     assert resolve("{{inputs.k | source_refs}}", BindingContext(inputs={"k": []})) == []
 
 
-# ── the template ──
-
-
 def _store_node_config() -> dict:
-    from gideon.workflows.bundled_defs import read_template
-    from gideon.workflows.models import Node, walk
+    from gideon.automation.workflows.bundled_defs import read_template
+    from gideon.automation.workflows.models import Node, walk
 
     spec = read_template("knowledge-synthesis")
     root = spec.root if isinstance(spec.root, Node) else Node.from_dict(spec.root)
@@ -388,20 +387,19 @@ def test_the_template_no_longer_stores_the_whole_retrieved_set():
 def test_the_templates_two_halves_number_the_same_set():
     """The prompt says "cite as [n]" over `fenced_sources`; the persist step resolves against
     `source_refs`. Both read `nodes.recall.output.items`, so `[n]` means one thing."""
-    from gideon.workflows.bundled_defs import read_template
-    from gideon.workflows.models import Node, walk
+    from gideon.automation.workflows.bundled_defs import read_template
+    from gideon.automation.workflows.models import Node, walk
 
     spec = read_template("knowledge-synthesis")
     root = spec.root if isinstance(spec.root, Node) else Node.from_dict(spec.root)
-    prompts = " ".join(str((n.config or {}).get("prompt", "") or "") for _p, n in walk(root))
+    prompts = " ".join(
+        str((n.config or {}).get("prompt", "") or "") for _p, n in walk(root)
+    )
     assert "nodes.recall.output.items | fenced_sources" in prompts
     assert "cite as [n]" in prompts
     ctx = BindingContext(node_outputs={"recall": {"items": ITEMS}})
     refs = resolve(_store_node_config()["citation_sources"], ctx)
     assert [r["item_id"] for r in refs] == ["k-1", "k-2", "k-3"]
-
-
-# ── the provider derives citations by parsing ──
 
 
 def test_the_provider_derives_citations_from_the_markers():
@@ -448,10 +446,12 @@ def test_a_summary_that_cites_is_resolved_too():
 def test_the_legacy_path_is_left_alone():
     """A hand-written `citations` list with no `citation_sources`: taken at face value, no pass
     ran, so `records` stays None and the check keeps its presence rule."""
-    cited = _resolve_citations({"citations": ["notebook p14"]}, body="text [4]", summary="")
+    cited = _resolve_citations(
+        {"citations": ["notebook p14"]}, body="text [4]", summary=""
+    )
     assert cited.records is None
     assert cited.stored == ["notebook p14"]
-    assert cited.content == "text [4]"  # nothing parsed, so nothing rewritten
+    assert cited.content == "text [4]"
 
 
 def test_a_ref_that_cannot_name_a_source_is_dropped():
@@ -483,16 +483,13 @@ def test_per_marker_records_are_offered_to_the_store(kcit):
     class _Older:
         """A store that predates the per-marker table."""
 
-    _write_item_citations(_Older(), "abc123", records)  # must not raise
+    _write_item_citations(_Older(), "abc123", records)
 
     class _Broken:
         def set_item_citations(self, item_id, citations):
             raise RuntimeError("no such table")
 
-    _write_item_citations(_Broken(), "abc123", records)  # must not raise either
-
-
-# ── end to end, through the real provider ──
+    _write_item_citations(_Broken(), "abc123", records)
 
 
 async def _persist(cfg: dict) -> tuple[bool, dict, str]:
@@ -504,7 +501,7 @@ async def _persist(cfg: dict) -> tuple[bool, dict, str]:
 
 
 def _row(item_id: str) -> tuple[str, str, dict]:
-    from gideon.knowledge.store import KnowledgeStore, knowledge_db_path
+    from gideon.cognition.knowledge.store import KnowledgeStore, knowledge_db_path
 
     store = KnowledgeStore(db_path=str(knowledge_db_path()))
     rows = list(
@@ -531,16 +528,16 @@ async def test_a_write_stores_what_the_prose_cited(isolated_home, monkeypatch):
     )
     assert ok, error
     content, summary, metadata = _row(payload["item_id"])
-    # Only what resolved, and in marker order — not the three items that were retrieved.
     assert metadata["citations"] == ["cite:1:-1:k-1", "cite:2:-1:k-2"]
-    # The write-back: the dangling marker never reaches a reader, in either field.
     assert "[9]" not in content and "[2]" in content
     assert "[2]" in summary
     assert payload["citation_warnings"] and "[9]" in payload["citation_warnings"][0]
 
 
 @pytest.mark.asyncio
-async def test_a_write_that_cites_nothing_is_refused_end_to_end(isolated_home, monkeypatch):
+async def test_a_write_that_cites_nothing_is_refused_end_to_end(
+    isolated_home, monkeypatch
+):
     """The retrieved set is present and the prose cites none of it — the exact shape the old
     template produced on every run."""
     _knob(monkeypatch, required=True)
@@ -572,11 +569,13 @@ async def test_the_unsourced_opt_out_still_writes(isolated_home, monkeypatch):
     )
     assert ok, error
     _content, _summary, metadata = _row(payload["item_id"])
-    assert metadata["citations"] == []  # honest: it cited nothing and claims nothing
+    assert metadata["citations"] == []
 
 
 @pytest.mark.asyncio
-async def test_a_rewrite_cannot_keep_the_previous_writes_citations(isolated_home, monkeypatch):
+async def test_a_rewrite_cannot_keep_the_previous_writes_citations(
+    isolated_home, monkeypatch
+):
     """Same logical key, new body that cites less. A stale list left standing would attribute
     the new text to sources it never named."""
     _knob(monkeypatch, required=True)

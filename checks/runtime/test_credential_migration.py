@@ -24,10 +24,10 @@ from pathlib import Path
 
 import pytest
 
-from gideon.config import credential_migration as mig
-from gideon.config import credentials as cred
-from gideon.config import loader
-from gideon.config.credentials import CREDENTIAL_BACKEND_ENV, get_credential
+from gideon.core.config import credential_migration as mig
+from gideon.core.config import credentials as cred
+from gideon.core.config import loader
+from gideon.core.config.credentials import CREDENTIAL_BACKEND_ENV, get_credential
 
 _ENV_BODY = (
     "# provider credentials — do not edit by hand\n"
@@ -37,9 +37,6 @@ _ENV_BODY = (
     "# a trailing comment\n"
 )
 _KEYS = ("SH2_ALPHA", "SH2_BETA")
-
-
-# ── doubles ──────────────────────────────────────────────────────────────────
 
 
 class _ImportBlocker:
@@ -86,7 +83,9 @@ def _stub_keyring(
     def set_password(service: str, key: str, value: str) -> None:
         if set_raises:
             raise RuntimeError("secret service is locked")
-        values[f"{service}\x00{key}"] = "corrupted-on-the-way-in" if key in lying_keys else value
+        values[f"{service}\x00{key}"] = (
+            "corrupted-on-the-way-in" if key in lying_keys else value
+        )
 
     def delete_password(service: str, key: str) -> None:
         if key in undeletable:
@@ -107,17 +106,11 @@ def home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """An isolated credential home. Never the real one — these tests write secrets."""
     cfg = tmp_path / "home"
     cfg.mkdir()
-    # BOTH bindings. `loader.config_dir` is what `loader.env_path` resolves at call time
-    # (which is why `credentials` may bind `env_path` and still be redirected); the env var
-    # covers anything that calls `config_dir` through a different binding.
     monkeypatch.setenv("GIDEON_HOME", str(cfg))
     monkeypatch.setattr(loader, "config_dir", lambda: cfg)
     monkeypatch.delenv(CREDENTIAL_BACKEND_ENV, raising=False)
     for key in _KEYS:
         monkeypatch.delenv(key, raising=False)
-    # 🪤 ASSERT THE REDIRECT, before a single secret is written. A fixture that silently
-    # failed to redirect would run this whole file against the developer's real home and
-    # every assertion would still pass.
     assert loader.env_path() == cfg / ".env", "the .env redirect must hold"
     assert mig.rollback_snapshot_path() == cfg / ".env.pre-keychain"
     assert tmp_path in mig.rollback_snapshot_path().parents
@@ -130,7 +123,9 @@ def keychain_on(home: Path, monkeypatch: pytest.MonkeyPatch):
     _write_env(home)
     store = _stub_keyring(monkeypatch)
     monkeypatch.setenv(CREDENTIAL_BACKEND_ENV, "keychain")
-    assert cred.credential_backend() == "keychain", "the premise: the keychain is ACTIVE"
+    assert (
+        cred.credential_backend() == "keychain"
+    ), "the premise: the keychain is ACTIVE"
     return store
 
 
@@ -153,9 +148,6 @@ def _kc(store: dict[str, str], key: str) -> str | None:
     return store.get(f"gideon\x00{key}")
 
 
-# ── the move ─────────────────────────────────────────────────────────────────
-
-
 def test_the_migration_moves_env_secrets_into_the_keychain_and_removes_the_keys(
     keychain_on, home: Path
 ) -> None:
@@ -166,12 +158,12 @@ def test_the_migration_moves_env_secrets_into_the_keychain_and_removes_the_keys(
     for key, value in (("SH2_ALPHA", "alpha-secret"), ("SH2_BETA", "beta-secret")):
         assert _kc(keychain_on, key) == value, "the secret is IN the keychain"
         assert f"{key}=" not in (home / ".env").read_text(), "and GONE from .env"
-        # The point of the whole exercise: the read is backend-transparent, so every
-        # existing caller keeps working across the move without knowing it happened.
         assert get_credential(key) == value
 
 
-def test_the_moved_env_keeps_its_comments_and_its_0600_mode(keychain_on, home: Path) -> None:
+def test_the_moved_env_keeps_its_comments_and_its_0600_mode(
+    keychain_on, home: Path
+) -> None:
     mig.migrate_credentials_to_keychain(confirm=True)
     body = (home / ".env").read_text()
     assert "# provider credentials — do not edit by hand" in body
@@ -179,7 +171,9 @@ def test_the_moved_env_keeps_its_comments_and_its_0600_mode(keychain_on, home: P
     assert _mode(home / ".env") == 0o600, "the removal path shares the write contract"
 
 
-def test_a_second_run_is_a_no_op_and_does_not_clobber_the_snapshot(keychain_on, home: Path) -> None:
+def test_a_second_run_is_a_no_op_and_does_not_clobber_the_snapshot(
+    keychain_on, home: Path
+) -> None:
     first = mig.migrate_credentials_to_keychain(confirm=True)
     snap_after_first = mig.rollback_snapshot_path().read_bytes()
 
@@ -187,18 +181,20 @@ def test_a_second_run_is_a_no_op_and_does_not_clobber_the_snapshot(keychain_on, 
 
     assert second.ok and second.moved == [] and second.already == []
     assert second.rollback_available, "a completed migration stays reversible"
-    # 🪤 THE REAL IDEMPOTENCY HAZARD. A second run that re-snapshotted would replace the
-    # pre-migration .env with the post-migration one, and rollback would then restore an
-    # EMPTY credential store while reporting success.
-    assert mig.rollback_snapshot_path().read_bytes() == snap_after_first == _ENV_BODY.encode()
+    assert (
+        mig.rollback_snapshot_path().read_bytes()
+        == snap_after_first
+        == _ENV_BODY.encode()
+    )
     assert first.moved == list(_KEYS)
 
 
-def test_verify_passes_after_the_migration_and_reports_what_it_checked(keychain_on) -> None:
+def test_verify_passes_after_the_migration_and_reports_what_it_checked(
+    keychain_on,
+) -> None:
     mig.migrate_credentials_to_keychain(confirm=True)
     ok, evidence = mig.verify_credential_migration()
     assert ok
-    # A vacuity floor: "verified" must be distinguishable from "verified nothing".
     assert evidence == {"checked": 2, "missing": [], "still_in_dotenv": []}
 
 
@@ -213,9 +209,6 @@ def test_verify_fails_when_the_keychain_lost_a_key_it_was_handed(keychain_on) ->
     keychain_on.pop("gideon\x00SH2_ALPHA")
     ok, evidence = mig.verify_credential_migration()
     assert not ok and evidence["missing"] == ["SH2_ALPHA"]
-
-
-# ── no key leaves .env unverified ────────────────────────────────────────────
 
 
 def test_a_keychain_that_lies_about_a_write_keeps_that_key_in_env(
@@ -237,7 +230,9 @@ def test_a_keychain_that_lies_about_a_write_keeps_that_key_in_env(
     body = (home / ".env").read_text()
     assert "SH2_ALPHA=alpha-secret" in body, "the unverified key is STILL THERE"
     assert "SH2_BETA=" not in body, "and the verified one moved"
-    assert get_credential("SH2_ALPHA") == "alpha-secret", "so the credential is not lost"
+    assert (
+        get_credential("SH2_ALPHA") == "alpha-secret"
+    ), "so the credential is not lost"
 
 
 def test_a_locked_secret_service_moves_nothing_and_loses_nothing(
@@ -250,10 +245,9 @@ def test_a_locked_secret_service_moves_nothing_and_loses_nothing(
     res = mig.migrate_credentials_to_keychain(confirm=True)
 
     assert not res.ok and sorted(res.failed) == list(_KEYS) and res.moved == []
-    assert (home / ".env").read_text() == _ENV_BODY, "byte-identical — nothing was rewritten"
-
-
-# ── consent and the fail-closed premise ──────────────────────────────────────
+    assert (
+        home / ".env"
+    ).read_text() == _ENV_BODY, "byte-identical — nothing was rewritten"
 
 
 def test_without_confirmation_the_migration_does_not_even_read_the_store(
@@ -288,16 +282,15 @@ def test_a_headless_box_that_asked_for_a_keychain_refuses_with_the_honest_reason
     monkeypatch.delitem(sys.modules, "keyring", raising=False)
     monkeypatch.setenv(CREDENTIAL_BACKEND_ENV, "keychain")
     assert cred.requested_credential_backend() == "keychain"
-    assert cred.credential_backend() == "dotenv", "the premise: requested but unavailable"
+    assert (
+        cred.credential_backend() == "dotenv"
+    ), "the premise: requested but unavailable"
 
     res = mig.migrate_credentials_to_keychain(confirm=True)
 
     assert not res.ok and "no usable OS keyring backend" in res.reason
     assert (home / ".env").read_text() == _ENV_BODY, "the .env fallback is untouched"
     assert _mode(home / ".env") == 0o600
-
-
-# ── rollback ─────────────────────────────────────────────────────────────────
 
 
 def test_rollback_restores_env_byte_for_byte_and_clears_the_keychain(
@@ -310,14 +303,14 @@ def test_rollback_restores_env_byte_for_byte_and_clears_the_keychain(
     res = mig.rollback_credentials_to_keychain(confirm=True)
 
     assert res.ok and res.moved == list(_KEYS)
-    # 🪤 A BYTE COMPARISON, not a key-by-key one. A "field-for-field" restore is exactly how
-    # a comment, an ordering or an unparsed line goes missing without any assertion noticing.
     assert (home / ".env").read_bytes() == original
     assert _mode(home / ".env") == 0o600
     for key in _KEYS:
         assert _kc(keychain_on, key) is None, "the keychain copy is gone"
     assert not mig.rollback_snapshot_path().exists(), "and so is the plaintext snapshot"
-    assert cred._keychain_index() == [], "the index no longer names a key it does not hold"
+    assert (
+        cred._keychain_index() == []
+    ), "the index no longer names a key it does not hold"
 
 
 def test_rollback_leaves_a_credential_the_user_added_after_migrating(
@@ -329,7 +322,9 @@ def test_rollback_leaves_a_credential_the_user_added_after_migrating(
 
     mig.rollback_credentials_to_keychain(confirm=True)
 
-    assert _kc(keychain_on, "SH2_LATER") == "later-secret", "not this operation's business"
+    assert (
+        _kc(keychain_on, "SH2_LATER") == "later-secret"
+    ), "not this operation's business"
     assert cred._keychain_index() == ["SH2_LATER"]
 
 
@@ -348,7 +343,9 @@ def test_rollback_needs_confirmation_too(keychain_on, home: Path) -> None:
     assert mig.rollback_snapshot_path().exists()
 
 
-def test_a_partial_rollback_keeps_the_snapshot(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_partial_rollback_keeps_the_snapshot(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A snapshot deleted after a half-cleared keychain would strand the user with both."""
     _write_env(home)
     _stub_keyring(monkeypatch, undeletable=frozenset({"SH2_BETA"}))
@@ -359,17 +356,18 @@ def test_a_partial_rollback_keeps_the_snapshot(home: Path, monkeypatch: pytest.M
 
     assert not res.ok and res.failed == ["SH2_BETA"]
     assert res.rollback_available and mig.rollback_snapshot_path().exists()
-    assert (home / ".env").read_bytes() == _ENV_BODY.encode(), ".env came back regardless"
+    assert (
+        home / ".env"
+    ).read_bytes() == _ENV_BODY.encode(), ".env came back regardless"
 
 
-def test_the_snapshot_is_0600_and_holds_the_pre_migration_bytes(keychain_on, home: Path) -> None:
+def test_the_snapshot_is_0600_and_holds_the_pre_migration_bytes(
+    keychain_on, home: Path
+) -> None:
     mig.migrate_credentials_to_keychain(confirm=True)
     snap = mig.rollback_snapshot_path()
     assert snap.read_bytes() == _ENV_BODY.encode()
     assert _mode(snap) == 0o600, "a second plaintext copy of every secret — same floor"
-
-
-# ── the config gate is the persisted request ─────────────────────────────────
 
 
 def test_the_config_gate_turns_the_keychain_on_without_the_env_var(
@@ -377,7 +375,9 @@ def test_the_config_gate_turns_the_keychain_on_without_the_env_var(
 ) -> None:
     _stub_keyring(monkeypatch)
     assert cred.requested_credential_backend() == "dotenv", "off by default"
-    (home / "config.json").write_text(json.dumps({"security": {"credential_keychain": True}}))
+    (home / "config.json").write_text(
+        json.dumps({"security": {"credential_keychain": True}})
+    )
     assert cred.requested_credential_backend() == "keychain"
     assert cred.credential_backend() == "keychain"
 
@@ -387,7 +387,9 @@ def test_an_explicit_env_dotenv_overrides_the_config_gate(
 ) -> None:
     """The recovery lever: a machine whose secret service broke can be forced back."""
     _stub_keyring(monkeypatch)
-    (home / "config.json").write_text(json.dumps({"security": {"credential_keychain": True}}))
+    (home / "config.json").write_text(
+        json.dumps({"security": {"credential_keychain": True}})
+    )
     monkeypatch.setenv(CREDENTIAL_BACKEND_ENV, "dotenv")
     assert cred.requested_credential_backend() == "dotenv"
 
@@ -410,7 +412,9 @@ def test_only_a_real_json_true_opens_the_gate(
     what a user depends on; the docstring names the real enforcer so the next reader does not
     mistake the loader line for it."""
     _stub_keyring(monkeypatch)
-    (home / "config.json").write_text(json.dumps({"security": {"credential_keychain": raw}}))
+    (home / "config.json").write_text(
+        json.dumps({"security": {"credential_keychain": raw}})
+    )
     assert loader.AppConfig.load().security.credential_keychain is False
     assert cred.requested_credential_backend() == "dotenv"
 
@@ -422,16 +426,13 @@ def test_the_gate_round_trips_through_load_and_to_dict(home: Path) -> None:
     assert loader.AppConfig.load().security.credential_keychain is True
 
 
-# ── the export exclusion still holds ─────────────────────────────────────────
-
-
 def test_the_rollback_snapshot_is_claimed_and_excluded_from_every_export() -> None:
     """The snapshot is a second plaintext copy of every credential. It must never leave.
 
     Asserted through the INVENTORY, which is what ``portability.EXPORT_EXCLUDE`` projects —
     so this pins the mechanism that excludes it, not a hand-copied literal that could drift.
     """
-    from gideon.durability import inventory as inv
+    from gideon.operations.durability import inventory as inv
 
     entry = next(e for e in inv.INVENTORY if e.path == mig.ROLLBACK_FILENAME)
     assert entry.secret, "secret=True is what puts it in EXPORT_EXCLUDE"
@@ -442,11 +443,10 @@ def test_the_rollback_snapshot_is_claimed_and_excluded_from_every_export() -> No
 def test_the_export_exclude_set_covers_both_credential_files() -> None:
     from pathlib import PurePosixPath
 
-    from gideon.portability import EXPORT_EXCLUDE, _is_excluded
+    from gideon.workspace.portability import EXPORT_EXCLUDE, _is_excluded
 
     assert ".env" in EXPORT_EXCLUDE
     assert _is_excluded(PurePosixPath(mig.ROLLBACK_FILENAME)), "the snapshot too"
-    # Vacuity floor: the predicate must be able to say NO.
     assert not _is_excluded(PurePosixPath("config.json"))
 
 
@@ -457,19 +457,18 @@ def test_a_migrated_export_carries_no_secret_at_all(
     import io
     import zipfile
 
-    from gideon import portability
+    from gideon.workspace import portability
 
     mig.migrate_credentials_to_keychain(confirm=True)
-    assert mig.rollback_snapshot_path().exists(), "the premise: a snapshot exists to leak"
+    assert (
+        mig.rollback_snapshot_path().exists()
+    ), "the premise: a snapshot exists to leak"
     blob, _manifest = portability.create_export_zip()
     with zipfile.ZipFile(io.BytesIO(blob)) as zf:
         names = zf.namelist()
     assert names, "vacuity floor: an empty archive would pass every assertion below"
     assert not [n for n in names if n.endswith(".env")], names
     assert not [n for n in names if "pre-keychain" in n], names
-
-
-# ── the surface a user actually touches ──────────────────────────────────────
 
 
 def test_status_reports_the_resolved_backend_not_the_request(
@@ -498,21 +497,21 @@ def test_the_gate_has_a_write_path_and_the_patch_allowlist_declares_it() -> None
     """The config round-trip contract's WRITE point, pinned here because nothing else does.
 
     🪤 MEASURED: deleting `"security.credential_keychain"` from `_EDITABLE_CONFIG` left
-    `tests/test_config_roundtrip.py` fully GREEN (17 passed). That file covers the dataclass,
+    `checks/runtime/test_config_roundtrip.py` fully GREEN (17 passed). That file covers the dataclass,
     `load()` and `to_dict()`; the PATCH allowlist is the point it does not reach, and a field
     absent from it is silently dropped by the handler — the Settings toggle would report
     success and change nothing. So the write path gets its own rail.
     """
-    from gideon.config.edit_spec import ConfigValueError, coerce_edit_value
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.core.config.edit_spec import ConfigValueError, coerce_edit_value
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
     key = "security.credential_keychain"
     spec = _EDITABLE_CONFIG.get(key)
-    assert spec is not None, "the Settings toggle PATCHes this path — it must be allowlisted"
+    assert (
+        spec is not None
+    ), "the Settings toggle PATCHes this path — it must be allowlisted"
     assert spec == {"type": "bool"}
     assert coerce_edit_value(key, True, spec) is True
     assert coerce_edit_value(key, False, spec) is False
-    # Vacuity floor: the spec must be able to REFUSE. A string that coerced to True here
-    # would put the fail-open the loader rejects back at the write boundary.
     with pytest.raises(ConfigValueError):
         coerce_edit_value(key, "keychain", spec)

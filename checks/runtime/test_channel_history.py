@@ -3,7 +3,7 @@
 import json
 import time
 
-from gideon.channel_history import ChannelHistory
+from gideon.integrations.channel_history import ChannelHistory
 
 
 class TestChannelHistory:
@@ -47,7 +47,7 @@ class TestChannelHistory:
         h.push("C1", "a", "msg1")
         h.push("C1", "b", "msg2")
         h.push("C1", "c", "msg3")
-        h.push("C1", "d", "msg4")  # should evict msg1
+        h.push("C1", "d", "msg4")
 
         ctx = h.context_for("C1")
         assert "msg1" not in ctx
@@ -59,7 +59,6 @@ class TestChannelHistory:
         h = ChannelHistory(ttl_secs=1)
         h.push("C1", "alice", "old message")
 
-        # Fake the timestamp to be in the past
         h._channels["C1"][0].timestamp = time.monotonic() - 5
 
         h.push("C1", "bob", "new message")
@@ -107,7 +106,6 @@ class TestChannelHistory:
         h.push("C1", "alice", long_msg)
 
         ctx = h.context_for("C1")
-        # Should contain truncated version (300 chars + …)
         assert "…" in ctx
         assert "x" * 301 not in ctx
 
@@ -115,7 +113,6 @@ class TestChannelHistory:
         """Age strings show seconds for recent, minutes for older."""
         h = ChannelHistory()
         h.push("C1", "alice", "just now")
-        # Recent message should show "Xs ago"
         ctx = h.context_for("C1")
         assert "s ago" in ctx
 
@@ -190,7 +187,6 @@ class TestObservePersistence:
 
     def test_load_observe_restores_history(self, tmp_path):
         """set_observe loads persisted history from disk."""
-        # Write some history to disk
         path = tmp_path / "C1.jsonl"
         now = time.time()
         entries = [
@@ -214,7 +210,12 @@ class TestObservePersistence:
         path = tmp_path / "C1.jsonl"
         now = time.time()
         entries = [
-            {"user": "alice", "text": "old", "thread_ts": None, "ts": now - 700000},  # expired
+            {
+                "user": "alice",
+                "text": "old",
+                "thread_ts": None,
+                "ts": now - 700000,
+            },
             {"user": "bob", "text": "recent", "thread_ts": None, "ts": now - 10},
         ]
         with path.open("w") as f:
@@ -244,7 +245,6 @@ class TestObservePersistence:
         h = ChannelHistory(history_dir=tmp_path)
         h.set_observe("C1")
 
-        # File should be compacted — only the recent entry remains
         lines = path.read_text().strip().split("\n")
         assert len(lines) == 1
         data = json.loads(lines[0])
@@ -257,7 +257,10 @@ class TestObservePersistence:
         with path.open("w") as f:
             f.write("not valid json\n")
             f.write(
-                json.dumps({"user": "bob", "text": "good", "thread_ts": None, "ts": now}) + "\n"
+                json.dumps(
+                    {"user": "bob", "text": "good", "thread_ts": None, "ts": now}
+                )
+                + "\n"
             )
 
         h = ChannelHistory(history_dir=tmp_path)
@@ -289,7 +292,6 @@ class TestObservePersistence:
         data = json.loads(path.read_text().strip())
         assert data["thread_ts"] == "T1"
 
-        # Reload and verify
         h2 = ChannelHistory(history_dir=tmp_path)
         h2.set_observe("C1")
         ctx = h2.context_for("C1", thread_ts="T1")
@@ -308,7 +310,6 @@ class TestObservePersistence:
         h.set_observe("C1")
         h.push("C1", "alice", "msg")
 
-        # Fake the wall_ts to be in the past
         h._channels["C1"][0].wall_ts = time.time() - 120
 
         h.push("C1", "bob", "new")
@@ -319,17 +320,17 @@ class TestObservePersistence:
 
 
 class TestChannelHistoryContext:
-    """Integration tests for ContextBuilder + ChannelHistory."""
+    """Integration tests for PromptAssembler + ChannelHistory."""
 
     def test_context_builder_injects_channel_history(self):
-        """ContextBuilder includes channel history when channel_id is provided."""
-        from gideon.context import ContextBuilder
+        """PromptAssembler includes channel history when channel_id is provided."""
+        from gideon.cognition.context import PromptAssembler
 
         h = ChannelHistory()
         h.push("C123", "alice", "pipeline broke")
         h.push("C123", "bob", "checking us-west-2")
 
-        builder = ContextBuilder(channel_history=h)
+        builder = PromptAssembler(channel_history=h)
         msg, _ = builder.build_message("what's going on?", False, channel_id="C123")
 
         assert "pipeline broke" in msg
@@ -337,22 +338,22 @@ class TestChannelHistoryContext:
         assert "what's going on?" in msg
 
     def test_context_builder_no_injection_without_channel_id(self):
-        """ContextBuilder does NOT inject channel history for DMs (no channel_id)."""
-        from gideon.context import ContextBuilder
+        """PromptAssembler does NOT inject channel history for DMs (no channel_id)."""
+        from gideon.cognition.context import PromptAssembler
 
         h = ChannelHistory()
         h.push("C123", "alice", "secret channel message")
 
-        builder = ContextBuilder(channel_history=h)
+        builder = PromptAssembler(channel_history=h)
         msg, _ = builder.build_message("hello", False)
 
         assert "secret channel message" not in msg
 
     def test_context_builder_no_injection_without_history(self):
-        """ContextBuilder works fine with no channel_history set."""
-        from gideon.context import ContextBuilder
+        """PromptAssembler works fine with no channel_history set."""
+        from gideon.cognition.context import PromptAssembler
 
-        builder = ContextBuilder()
+        builder = PromptAssembler()
         msg, _ = builder.build_message("hello", False, channel_id="C123")
 
         assert msg.startswith("hello")

@@ -24,8 +24,8 @@ import json
 
 import pytest
 
-from gideon.action_providers.base import ActionContext
-from gideon.action_providers.registry import (
+from gideon.integrations.action_providers.base import ActionContext
+from gideon.integrations.action_providers.registry import (
     _ensure_default_providers_registered,
     get_action_provider,
 )
@@ -43,9 +43,7 @@ def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    # The artifact registry caches its native provider against the old root, so it has to be
-    # cleared or every test in this file writes into the first test's home.
-    from gideon.artifacts import registry as art_registry
+    from gideon.workspace.artifacts import registry as art_registry
 
     art_registry._providers.clear()
     return home
@@ -63,7 +61,7 @@ CTX = ActionContext(event="workflow_node")
 
 
 def _store():
-    from gideon.artifacts.registry import get_provider
+    from gideon.workspace.artifacts.registry import get_provider
 
     return get_provider()
 
@@ -73,15 +71,15 @@ class TestRegistration:
         """The two-step the plan warns about: a provider in the registry but not in
         `ALLOWED_HOOK_PROVIDERS` validates on a trigger, saves, and then fails at run time — and
         the reverse is a name the UI offers that dispatches to nothing."""
-        from gideon.validation import ALLOWED_HOOK_PROVIDERS
+        from gideon.assurance.validation import ALLOWED_HOOK_PROVIDERS
 
         assert provider.name == "artifact-update"
         assert "artifact-update" in ALLOWED_HOOK_PROVIDERS
 
     def test_no_registered_provider_is_missing_from_the_allowlist(self) -> None:
         """The general form of the same check, so the NEXT provider cannot land half-registered."""
-        from gideon.action_providers.registry import list_action_providers
-        from gideon.validation import ALLOWED_HOOK_PROVIDERS
+        from gideon.assurance.validation import ALLOWED_HOOK_PROVIDERS
+        from gideon.integrations.action_providers.registry import list_action_providers
 
         _ensure_default_providers_registered()
         missing = set(list_action_providers()) - set(ALLOWED_HOOK_PROVIDERS)
@@ -102,14 +100,17 @@ class TestUpsert:
 
     async def test_a_known_slug_is_UPDATED(self, provider) -> None:
         """The reason this is upsert: a recurring workflow's first run creates and its hundredth
-        updates, and making the TEMPLATE branch on that is a `branch` node in every spec."""
+        updates, and making the TEMPLATE branch on that is a `branch` node in every spec.
+        """
         await provider.execute({"slug": "dash", "content": "v1"}, CTX)
         result = await provider.execute({"slug": "dash", "content": "v2"}, CTX)
         assert result.success, result.error
         assert json.loads(result.stdout)["created"] is False
         assert _store().get("dash").content == "v2"
 
-    async def test_a_refresh_does_not_bump_the_version_by_default(self, provider) -> None:
+    async def test_a_refresh_does_not_bump_the_version_by_default(
+        self, provider
+    ) -> None:
         """A dashboard refreshed every five minutes would otherwise accumulate a version per
         refresh and bury the ones a human actually wants."""
         await provider.execute({"slug": "dash", "content": "v1"}, CTX)
@@ -126,12 +127,18 @@ class TestUpsert:
     async def test_a_refresh_preserves_the_users_own_name(self, provider) -> None:
         """A template that reasserted its metadata on every refresh would silently revert a
         rename the user made in the UI."""
-        await provider.execute({"slug": "dash", "content": "v1", "name": "Original"}, CTX)
+        await provider.execute(
+            {"slug": "dash", "content": "v1", "name": "Original"}, CTX
+        )
         _store().update("dash", name="What the user renamed it to")
-        await provider.execute({"slug": "dash", "content": "v2", "name": "Original"}, CTX)
+        await provider.execute(
+            {"slug": "dash", "content": "v2", "name": "Original"}, CTX
+        )
         assert _store().get("dash").name == "What the user renamed it to"
 
-    async def test_the_stdout_carries_what_a_downstream_node_binds_to(self, provider) -> None:
+    async def test_the_stdout_carries_what_a_downstream_node_binds_to(
+        self, provider
+    ) -> None:
         """A dashboard's "last updated v7" line reads this rather than re-fetching."""
         result = await provider.execute({"slug": "dash", "content": "v1"}, CTX)
         body = json.loads(result.stdout)
@@ -150,7 +157,9 @@ class TestContent:
     async def test_a_dict_is_rendered_as_stable_JSON(self, provider) -> None:
         """A transform binding often yields a dict. `str(dict)` would put Python repr (single
         quotes, `True`) into an artifact a browser may parse as JSON."""
-        await provider.execute({"slug": "data", "content": {"b": 2, "a": 1, "ok": True}}, CTX)
+        await provider.execute(
+            {"slug": "data", "content": {"b": 2, "a": 1, "ok": True}}, CTX
+        )
         body = _store().get("data").content
         assert json.loads(body) == {"a": 1, "b": 2, "ok": True}
         assert "'" not in body and "True" not in body
@@ -173,7 +182,9 @@ class TestRefusals:
             ({"slug": "dash", "content": "x", "kind": "bogus"}, "kind"),
         ],
     )
-    async def test_a_missing_or_bad_field_names_itself(self, provider, config, expect) -> None:
+    async def test_a_missing_or_bad_field_names_itself(
+        self, provider, config, expect
+    ) -> None:
         """The provider's error is what an author reads at the node that caused it, so it has to
         name the field rather than say "invalid configuration"."""
         result = await provider.execute(config, CTX)
@@ -181,9 +192,12 @@ class TestRefusals:
         assert expect in result.error
 
     @pytest.mark.parametrize(
-        "slug", ["../etc/passwd", "/absolute", "Has Spaces", "UPPER", "dot.dot", "a" * 80]
+        "slug",
+        ["../etc/passwd", "/absolute", "Has Spaces", "UPPER", "dot.dot", "a" * 80],
     )
-    async def test_a_dangerous_or_malformed_slug_is_refused(self, provider, slug) -> None:
+    async def test_a_dangerous_or_malformed_slug_is_refused(
+        self, provider, slug
+    ) -> None:
         """The slug arrives from a model-authorable config and becomes a directory name. The
         store's writer guards traversal too, but failing HERE gives the author the error at the
         node that named it."""
@@ -191,10 +205,12 @@ class TestRefusals:
         assert result.success is False
         assert "valid id" in result.error
 
-    async def test_a_store_failure_is_reported_not_raised(self, provider, monkeypatch) -> None:
+    async def test_a_store_failure_is_reported_not_raised(
+        self, provider, monkeypatch
+    ) -> None:
         """An action provider that raised would be wrapped in a generic envelope; naming the slug
         is what makes it debuggable."""
-        from gideon.artifacts import registry as art_registry
+        from gideon.workspace.artifacts import registry as art_registry
 
         class Broken:
             def get(self, slug, **kw):
@@ -208,8 +224,10 @@ class TestRefusals:
         assert result.success is False
         assert "dash" in result.error and "disk is full" in result.error
 
-    async def test_no_artifact_provider_is_reported_clearly(self, provider, monkeypatch) -> None:
-        from gideon.artifacts import registry as art_registry
+    async def test_no_artifact_provider_is_reported_clearly(
+        self, provider, monkeypatch
+    ) -> None:
+        from gideon.workspace.artifacts import registry as art_registry
 
         monkeypatch.setattr(art_registry, "get_provider", lambda name=None: None)
         result = await provider.execute({"slug": "dash", "content": "x"}, CTX)
@@ -226,11 +244,17 @@ class TestZeroToken:
         """
         import inspect
 
-        from gideon.action_providers import artifact_update_provider as mod
+        from gideon.integrations.action_providers import artifact_update_provider as mod
 
         source = inspect.getsource(mod)
-        for forbidden in ("one_shot_completion", "SubagentManager", "get_provider_for_use_case"):
-            assert forbidden not in source, f"{forbidden} would make this a token-spending node"
+        for forbidden in (
+            "one_shot_completion",
+            "DelegationSupervisor",
+            "get_provider_for_use_case",
+        ):
+            assert (
+                forbidden not in source
+            ), f"{forbidden} would make this a token-spending node"
 
     async def test_it_reports_a_duration(self, provider) -> None:
         """The Run Ledger records per-node duration; a provider that left it zero would make a

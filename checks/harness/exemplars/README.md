@@ -1,4 +1,4 @@
-# harness/exemplars/ — milestone exemplars (§4.1)
+# checks/harness/exemplars/ — milestone exemplars (§4.1)
 
 Per-slice runnable exemplars for the Workflows-v2 build-out. This is a **process obligation
 on WORKFLOWS-V2 sessions**, enforced by this harness (the same-PR rule flags a slice merged
@@ -12,15 +12,15 @@ exemplars/<slice>/
 ```
 
 Exemplars are triple-duty: **regression anchors** (the `exemplars` profile runs their smoke
-scripts — `python -m harness.exemplars`, or `harness run <task>` for a task that requires
+scripts — `python -m checks.harness.exemplars`, or `harness run <task>` for a task that requires
 it), **recorded-trace sources** for the replay scenarios in `../traces/`, and **tutorials**
 for future coding agents (the easy-agent `step/` pattern).
 
 Each `slice_*/` is a package: `exemplar.py` exposes a `main()` that drives the run and
 self-asserts (exit 0 = the mechanism behaved), runnable as
-`python -m harness.exemplars.slice_N.exemplar`. `smoke.sh` isolates a throwaway
+`python -m checks.harness.exemplars.slice_N.exemplar`. `smoke.sh` isolates a throwaway
 `GIDEON_HOME` and invokes it. `discover_exemplars()` in this package's `__init__.py` is
-the single enumeration the proving test (`tests/test_harness_exemplars.py`) and the
+the single enumeration the proving test (`checks/runtime/test_harness_exemplars.py`) and the
 `exemplars` profile share, and `incomplete_slices()` is the mechanical same-PR check (a slice
 merged without its full bundle is flagged, not silently skipped).
 
@@ -43,7 +43,7 @@ exemplar had a home and the same-PR obligation was in force; the backfill of the
 slices is atom `SV-8`. New WF2 slices add their `slice_N/` here in the same PR.
 
 The two WF2-gated **replay scenarios** (`workflow-journal-projection`, `rewind-during-stream`)
-landed in `SV-5` and live under [`../traces/`](../traces/) — the location the `replay` gate
+landed in `SV-5` and live under [`../traces/`](../traces) — the location the `replay` gate
 reads — each with a checked-in baseline that pins the event-fold law (the pre-migration
 journal-format gate). They are not runnable exemplars, so they are not under this dir; a
 future exemplar that exercises the same slice can reuse them as its recorded-trace source.

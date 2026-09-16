@@ -18,27 +18,23 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.apps import backend_runtime, manager
-from gideon.dashboard.handlers.apps import register_app_routes
+from gideon.extensions.apps import backend_runtime, manager
+from gideon.interfaces.dashboard.handlers.apps import register_app_routes
 
 
 @asynccontextmanager
 async def _client(tmp_path):
-    from gideon import inbox as _inbox
-    from gideon.apps import catalog as _catalog
-    from gideon.providers import entity_routes as _er
+    from gideon.extensions.apps import catalog as _catalog
+    from gideon.extensions.providers import entity_routes as _er
+    from gideon.integrations import inbox as _inbox
 
     with (
-        patch("gideon.config.loader.config_dir", return_value=tmp_path),
+        patch("gideon.core.config.loader.config_dir", return_value=tmp_path),
         patch.object(manager, "config_dir", return_value=tmp_path),
-        # catalog / entity_routes / inbox each bind config_dir at import into their own
-        # namespace; patch those too so the APE-7 update-surfacing read path (local
-        # sources + notified high-water mark + inbox fallback) stays in the sandbox.
         patch.object(_catalog, "config_dir", return_value=tmp_path),
         patch.object(_er, "config_dir", return_value=tmp_path),
         patch.object(_inbox, "config_dir", return_value=tmp_path),
     ):
-        # Fresh supervisor per test so backend processes don't leak between tests.
         backend_runtime._supervisor = backend_runtime.BackendSupervisor()
         app = web.Application()
         register_app_routes(app)
@@ -75,8 +71,6 @@ def _app_src(
         mani["backend"] = backend
     if platform:
         mani["platform"] = platform
-    # APE-4: `None` means "declare no quality block at all", which is a DIFFERENT
-    # fixture from `{}` — the wire must be able to tell them apart.
     if quality is not None:
         mani["quality"] = quality
     (d / "app.json").write_text(json.dumps(mani), encoding="utf-8")
@@ -113,7 +107,6 @@ async def test_list_hasconfig_from_provider_settings_schema(tmp_path):
     where such apps (native-vector-memory/tasks/skills/notifications) reported
     hasConfig=false so the Apps UI hid their Configure action."""
     async with _client(tmp_path) as client:
-        # A provider app with settings under provider.settingsSchema, NO setup.configSchema.
         d = tmp_path / "src" / "cfgprov"
         d.mkdir(parents=True)
         (d / "app.json").write_text(
@@ -143,7 +136,9 @@ async def test_list_hasconfig_from_provider_settings_schema(tmp_path):
 
         apps = (await (await client.get("/api/apps")).json())["apps"]
         row = next(a for a in apps if a["name"] == "cfgprov")
-        assert row["hasConfig"] is True, "provider.settingsSchema must make hasConfig true"
+        assert (
+            row["hasConfig"] is True
+        ), "provider.settingsSchema must make hasConfig true"
         assert row["isProvider"] is True
 
 
@@ -164,13 +159,13 @@ async def test_list_carries_the_declared_quality_block(tmp_path):
     can badge them. Without this leg the block would validate, round-trip and be
     verified in CI while never reaching a single pixel."""
     async with _client(tmp_path) as client:
-        src = _app_src(tmp_path, "badged", quality={"tested": True, "designSystem": "legacy"})
+        src = _app_src(
+            tmp_path, "badged", quality={"tested": True, "designSystem": "legacy"}
+        )
         await client.post("/api/apps", json={"source": src})
         apps = (await (await client.get("/api/apps")).json())["apps"]
         row = next(a for a in apps if a["name"] == "badged")
         assert row["quality"] == {"tested": True, "designSystem": "legacy"}
-        # Per-axis, not per-block: `a11y` was never declared, so it must not appear —
-        # a defaulted `a11y: false` here would put a miss badge on a silent app.
         assert "a11y" not in row["quality"]
 
 
@@ -186,11 +181,14 @@ async def test_list_reports_no_quality_block_for_an_app_that_declares_none(tmp_p
         apps = (await (await client.get("/api/apps")).json())["apps"]
         row = next(a for a in apps if a["name"] == "quiet")
         assert row["quality"] == {}
-        # …and the two shapes are genuinely distinguishable on the wire.
-        src2 = _app_src(tmp_path, "honest-miss", subdir="src2", quality={"tested": False})
+        src2 = _app_src(
+            tmp_path, "honest-miss", subdir="src2", quality={"tested": False}
+        )
         await client.post("/api/apps", json={"source": src2})
         apps = (await (await client.get("/api/apps")).json())["apps"]
-        assert next(a for a in apps if a["name"] == "honest-miss")["quality"] == {"tested": False}
+        assert next(a for a in apps if a["name"] == "honest-miss")["quality"] == {
+            "tested": False
+        }
 
 
 @pytest.mark.asyncio
@@ -212,12 +210,14 @@ async def test_client_install_returns_200_with_one_liner(tmp_path):
             },
         )
         r = await client.post("/api/apps", json={"source": src})
-        assert r.status == 200, await r.text()  # directive, not a 400 bad-request
+        assert r.status == 200, await r.text()
         body = await r.json()
         assert body["ok"] is False
         assert body["needs_client_install"] is True
-        assert body["client_install"]["shell"] == "curl -fsSL https://example.invalid/i.sh | sh"
-        # NOT committed to the live tree
+        assert (
+            body["client_install"]["shell"]
+            == "curl -fsSL https://example.invalid/i.sh | sh"
+        )
         apps = (await (await client.get("/api/apps")).json())["apps"]
         assert not any(a["name"] == "clientapp" for a in apps)
 
@@ -234,7 +234,11 @@ async def test_install_missing_source_400(tmp_path):
 @pytest.mark.asyncio
 async def test_dangerous_install_refused(tmp_path):
     async with _client(tmp_path) as client:
-        src = _app_src(tmp_path, "evil", files={"scripts/x.sh": "rm -rf / --no-preserve-root\n"})
+        src = _app_src(
+            tmp_path,
+            "evil",
+            files={"tooling/scripts/x.sh": "rm -rf / --no-preserve-root\n"},
+        )
         r = await client.post("/api/apps", json={"source": src, "confirm": True})
         assert r.status == 400
         body = await r.json()
@@ -247,9 +251,13 @@ async def test_enable_disable(tmp_path):
         src = _app_src(tmp_path, "notes")
         await client.post("/api/apps", json={"source": src})
         assert (await client.post("/api/apps/notes/disable")).status == 200
-        assert not (await (await client.get("/api/apps/notes")).json())["installed"]["enabled"]
+        assert not (await (await client.get("/api/apps/notes")).json())["installed"][
+            "enabled"
+        ]
         assert (await client.post("/api/apps/notes/enable")).status == 200
-        assert (await (await client.get("/api/apps/notes")).json())["installed"]["enabled"]
+        assert (await (await client.get("/api/apps/notes")).json())["installed"][
+            "enabled"
+        ]
 
 
 @pytest.mark.asyncio
@@ -266,23 +274,21 @@ async def test_config_get_put_validated(tmp_path):
         src = _app_src(tmp_path, "notes", setup={"configSchema": schema})
         await client.post("/api/apps", json={"source": src})
 
-        # empty config initially; schema returned
         r = await client.get("/api/apps/notes/config")
         body = await r.json()
         assert body["config"] == {} and body["schema"]["required"] == ["apiKey"]
 
-        # invalid: wrong type + missing required
         r = await client.put("/api/apps/notes/config", json={"maxItems": "lots"})
         assert r.status == 400
 
-        # valid
-        r = await client.put("/api/apps/notes/config", json={"apiKey": "sk-1", "maxItems": 10})
+        r = await client.put(
+            "/api/apps/notes/config", json={"apiKey": "sk-1", "maxItems": 10}
+        )
         assert r.status == 200
         assert (await client.get("/api/apps/notes/config")).status == 200
         saved = (await (await client.get("/api/apps/notes/config")).json())["config"]
         assert saved == {"apiKey": "sk-1", "maxItems": 10}
 
-        # unknown key rejected
         r = await client.put("/api/apps/notes/config", json={"apiKey": "x", "bogus": 1})
         assert r.status == 400
 
@@ -296,7 +302,10 @@ async def test_sensitive_config_field_is_write_only(tmp_path):
     schema = {
         "type": "object",
         "properties": {
-            "api_key": {"type": "string", "x-meta": {"label": "API Key", "sensitive": True}},
+            "api_key": {
+                "type": "string",
+                "x-meta": {"label": "API Key", "sensitive": True},
+            },
             "endpoint": {"type": "string"},
         },
     }
@@ -304,47 +313,45 @@ async def test_sensitive_config_field_is_write_only(tmp_path):
         src = _app_src(tmp_path, "sec", setup={"configSchema": schema})
         await client.post("/api/apps", json={"source": src})
 
-        # set a real secret + a normal field
         r = await client.put(
-            "/api/apps/sec/config", json={"api_key": "sk-REALSECRET-123", "endpoint": "https://x"}
+            "/api/apps/sec/config",
+            json={"api_key": "sk-REALSECRET-123", "endpoint": "https://x"},
         )
         assert r.status == 200
         put_body = await r.json()
-        # the PUT response must NOT echo the raw secret back
         assert put_body["config"]["api_key"] != "sk-REALSECRET-123"
         assert "api_key" in put_body["_secret_set"]
 
-        # GET masks the secret (raw value never leaves the backend) but keeps endpoint
         body = await (await client.get("/api/apps/sec/config")).json()
         assert body["config"]["api_key"] != "sk-REALSECRET-123"
-        assert body["config"]["api_key"]  # a non-empty mask sentinel
+        assert body["config"]["api_key"]
         assert body["config"]["endpoint"] == "https://x"
         assert body["_secret_set"] == ["api_key"]
         mask = body["config"]["api_key"]
 
-        # PUT the mask sentinel back (with a changed endpoint) → secret PRESERVED
         r = await client.put(
             "/api/apps/sec/config", json={"api_key": mask, "endpoint": "https://y"}
         )
         assert r.status == 200
 
-        # confirm on-disk stored secret is still the real one (via the manager's raw read)
-        from gideon.apps.app_config import read_config
+        from gideon.extensions.apps.app_config import read_config
 
         raw = read_config("sec")
-        assert raw["api_key"] == "sk-REALSECRET-123"  # NOT overwritten by the sentinel
-        assert raw["endpoint"] == "https://y"  # normal field updated
+        assert raw["api_key"] == "sk-REALSECRET-123"
+        assert raw["endpoint"] == "https://y"
 
-        # a genuinely new secret value DOES overwrite
         r = await client.put(
-            "/api/apps/sec/config", json={"api_key": "sk-NEW-456", "endpoint": "https://y"}
+            "/api/apps/sec/config",
+            json={"api_key": "sk-NEW-456", "endpoint": "https://y"},
         )
         assert r.status == 200
         assert read_config("sec")["api_key"] == "sk-NEW-456"
 
 
 @pytest.mark.asyncio
-async def test_the_app_detail_route_masks_the_same_secret_the_config_route_does(tmp_path):
+async def test_the_app_detail_route_masks_the_same_secret_the_config_route_does(
+    tmp_path,
+):
     """``GET /api/apps/{name}`` serves the SAME stored config as ``.../config``.
 
     The test above has pinned the write-only rule on ``/config`` since #43, and this route —
@@ -354,12 +361,15 @@ async def test_the_app_detail_route_masks_the_same_secret_the_config_route_does(
     (``test_provider_instance_secrets.py``) rather than by inspection, which is the whole
     argument for deriving the population instead of listing the routes.
     """
-    from gideon.apps.secret_fields import SECRET_MASK
+    from gideon.extensions.apps.secret_fields import SECRET_MASK
 
     schema = {
         "type": "object",
         "properties": {
-            "api_key": {"type": "string", "x-meta": {"label": "API Key", "sensitive": True}},
+            "api_key": {
+                "type": "string",
+                "x-meta": {"label": "API Key", "sensitive": True},
+            },
             "endpoint": {"type": "string"},
         },
     }
@@ -378,11 +388,12 @@ async def test_the_app_detail_route_masks_the_same_secret_the_config_route_does(
         ), "the app detail route handed out the stored secret while /config masked it"
         body = json.loads(raw)
         assert body["config"]["api_key"] == SECRET_MASK
-        assert body["config"]["endpoint"] == "https://x", "a normal field still passes through"
+        assert (
+            body["config"]["endpoint"] == "https://x"
+        ), "a normal field still passes through"
         assert body["_secret_set"] == ["api_key"]
 
-        # …and the stored value is untouched.
-        from gideon.apps.app_config import read_config
+        from gideon.extensions.apps.app_config import read_config
 
         assert read_config("sec")["api_key"] == "sk-DETAIL-SECRET-789"
 
@@ -402,8 +413,6 @@ async def test_config_route_rejects_traversal_name_cleanly(tmp_path):
 
 @pytest.mark.asyncio
 async def test_config_falls_back_to_provider_settings_schema(tmp_path):
-    # A provider app declares its settings under provider.settingsSchema (not
-    # setup.configSchema); the config UI/API must surface + validate against it.
     import json as _json
 
     async with _client(tmp_path) as client:
@@ -436,13 +445,13 @@ async def test_config_falls_back_to_provider_settings_schema(tmp_path):
         )
         await client.post("/api/apps", json={"source": str(d)})
 
-        # schema surfaced from provider.settingsSchema (NOT empty)
         body = await (await client.get("/api/apps/wiki/config")).json()
         assert set(body["schema"].get("properties", {})) == {"lang", "timeout_secs"}
 
-        # validated against it: valid saves, wrong type rejected
         assert (
-            await client.put("/api/apps/wiki/config", json={"lang": "en", "timeout_secs": 20})
+            await client.put(
+                "/api/apps/wiki/config", json={"lang": "en", "timeout_secs": 20}
+            )
         ).status == 200
         assert (
             await client.put("/api/apps/wiki/config", json={"timeout_secs": "slow"})
@@ -457,15 +466,13 @@ async def test_uninstall_deactivates_force_removes(tmp_path):
         r = await client.get("/api/apps/notes/uninstall-preview")
         body = await r.json()
         assert r.status == 200 and "dependencies" in body
-        # The preview reports the app's data/ facts so the confirm dialogs can name the
-        # trade. `present` and `entries` are separate: install mints an EMPTY data/.
-        assert body["data"]["present"] is True and body["data"]["entries"] == 0, body["data"]
-        # Plain DELETE = deactivate: still installed (present), but disabled.
+        assert body["data"]["present"] is True and body["data"]["entries"] == 0, body[
+            "data"
+        ]
         assert (await client.delete("/api/apps/notes")).status == 200
         got = await client.get("/api/apps/notes")
         assert got.status == 200
         assert (await got.json())["installed"]["enabled"] is False
-        # force=1 = real removal → gone (404 afterwards).
         assert (await client.delete("/api/apps/notes?force=1")).status == 200
         assert (await client.get("/api/apps/notes")).status == 404
 
@@ -482,19 +489,19 @@ async def test_remove_rung_removes_the_app_and_keeps_its_data(tmp_path):
         src = _app_src(tmp_path, "notes")
         assert (await client.post("/api/apps", json={"source": src})).status == 201
 
-        from gideon.apps import manager as app_store
+        from gideon.extensions.apps import manager as app_store
 
-        (app_store.app_dir("notes") / "data" / "note.md").write_text("kept\n", encoding="utf-8")
+        (app_store.app_dir("notes") / "data" / "note.md").write_text(
+            "kept\n", encoding="utf-8"
+        )
 
         r = await client.delete("/api/apps/notes?remove=1")
         assert r.status == 200
         payload = await r.json()
         assert payload["removed"] is True and payload["forced"] is False, payload
         assert payload["dataPreserved"] is True, payload
-        # Gone, not deactivated.
         assert (await client.get("/api/apps/notes")).status == 404
 
-        # Reinstall through the same endpoint a user would, and read the note back.
         assert (await client.post("/api/apps", json={"source": src})).status == 201
         assert (app_store.app_dir("notes") / "data" / "note.md").read_text(
             encoding="utf-8"
@@ -512,9 +519,11 @@ async def test_force_wins_when_a_request_asks_for_both_rungs(tmp_path):
         src = _app_src(tmp_path, "notes")
         assert (await client.post("/api/apps", json={"source": src})).status == 201
 
-        from gideon.apps import manager as app_store
+        from gideon.extensions.apps import manager as app_store
 
-        (app_store.app_dir("notes") / "data" / "doomed.md").write_text("bye\n", encoding="utf-8")
+        (app_store.app_dir("notes") / "data" / "doomed.md").write_text(
+            "bye\n", encoding="utf-8"
+        )
 
         r = await client.delete("/api/apps/notes?force=1&remove=1")
         assert r.status == 200
@@ -539,16 +548,16 @@ async def test_proxy_404_when_not_installed(tmp_path):
 async def test_ui_asset_served_and_traversal_guarded(tmp_path):
     async with _client(tmp_path) as client:
         src = _app_src(
-            tmp_path, "widget", files={"ui/index.js": "export function mount(){return null}\n"}
+            tmp_path,
+            "widget",
+            files={"ui/index.js": "export function mount(){return null}\n"},
         )
         assert (await client.post("/api/apps", json={"source": src})).status == 201
         r = await client.get("/apps/widget/ui/index.js")
         assert r.status == 200
         assert "mount" in await r.text()
         assert r.headers["Content-Type"].startswith("text/javascript")
-        # path traversal is rejected
         assert (await client.get("/apps/widget/ui/../app.json")).status == 404
-        # disabled app serves no UI
         await client.post("/api/apps/widget/disable")
         assert (await client.get("/apps/widget/ui/index.js")).status == 403
 
@@ -566,7 +575,7 @@ async def test_ui_asset_sibling_prefix_dir_is_rejected(tmp_path):
     """
     from aiohttp.test_utils import make_mocked_request
 
-    from gideon.dashboard.handlers.apps import api_app_ui_asset
+    from gideon.interfaces.dashboard.handlers.apps import api_app_ui_asset
 
     async def _get(name: str, tail: str) -> web.StreamResponse:
         req = make_mocked_request("GET", f"/apps/{name}/ui/{tail}")
@@ -575,22 +584,22 @@ async def test_ui_asset_sibling_prefix_dir_is_rejected(tmp_path):
 
     async with _client(tmp_path) as client:
         src = _app_src(
-            tmp_path, "widget", files={"ui/index.js": "export function mount(){return null}\n"}
+            tmp_path,
+            "widget",
+            files={"ui/index.js": "export function mount(){return null}\n"},
         )
         assert (await client.post("/api/apps", json={"source": src})).status == 201
-        # Drop a SIBLING dir that shares the ``ui`` prefix into the installed app dir.
         installed_ui_bak = manager.app_dir("widget") / "ui.bak"
         installed_ui_bak.mkdir()
-        (installed_ui_bak / "secret.js").write_text("SECRET_SIBLING\n", encoding="utf-8")
-        # A legitimate asset inside ui/ still serves.
+        (installed_ui_bak / "secret.js").write_text(
+            "SECRET_SIBLING\n", encoding="utf-8"
+        )
         assert (await _get("widget", "index.js")).status == 200
-        # The sibling escaping ui/ is rejected by real path containment.
         assert (await _get("widget", "../ui.bak/secret.js")).status == 404
 
 
 @pytest.mark.asyncio
 async def test_backend_proxy_round_trip(tmp_path):
-    # A real Python backend: an http.server that echoes the path on /health and /ping.
     backend_py = textwrap.dedent("""
         import json, os
         from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -607,13 +616,16 @@ async def test_backend_proxy_round_trip(tmp_path):
         src = _app_src(
             tmp_path,
             "svc",
-            backend={"entryPoint": "backend/server.py", "type": "python", "healthCheck": "/health"},
+            backend={
+                "entryPoint": "backend/server.py",
+                "type": "python",
+                "healthCheck": "/health",
+            },
             files={"backend/server.py": backend_py},
         )
         r = await client.post("/api/apps", json={"source": src})
         assert r.status == 201, await r.text()
 
-        # Backend was launched on install; poll until the proxy gets through.
         import asyncio
 
         got = None
@@ -626,7 +638,6 @@ async def test_backend_proxy_round_trip(tmp_path):
         assert got is not None, "backend never became reachable through the proxy"
         assert got["path"] == "/ping"
 
-        # Disabling the app stops the backend → proxy 403 (disabled) or 502.
         await client.post("/api/apps/svc/disable")
         resp = await client.get("/apps/svc/api/ping")
         assert resp.status in (403, 502)
@@ -634,12 +645,6 @@ async def test_backend_proxy_round_trip(tmp_path):
 
 @pytest.mark.asyncio
 async def test_startup_relaunches_enabled_backends(tmp_path, monkeypatch):
-    # Regression: enabled apps' backend subprocesses don't survive a gateway
-    # restart; start_enabled_app_backends() relaunches them at startup so the
-    # reverse-proxy is live without a manual re-enable.
-    # This test exercises the startup launcher itself, so the global test guard
-    # (GIDEON_SKIP_APP_BACKENDS, set in conftest) must be lifted — safe
-    # here because _client() isolates config_dir to tmp_path.
     monkeypatch.delenv("GIDEON_SKIP_APP_BACKENDS", raising=False)
     backend_py = textwrap.dedent("""
         import json, os
@@ -655,7 +660,7 @@ async def test_startup_relaunches_enabled_backends(tmp_path, monkeypatch):
     """)
     import asyncio
 
-    from gideon.apps import app_manager
+    from gideon.extensions.apps import app_manager
 
     async with _client(tmp_path) as client:
         src = _app_src(
@@ -665,11 +670,9 @@ async def test_startup_relaunches_enabled_backends(tmp_path, monkeypatch):
             files={"backend/server.py": backend_py},
         )
         assert (await client.post("/api/apps", json={"source": src})).status == 201
-        # Simulate a gateway restart: drop the supervisor (kills tracked procs).
         backend_runtime.get_backend_supervisor().stop_all()
         backend_runtime._supervisor = backend_runtime.BackendSupervisor()
         assert backend_runtime.get_backend_supervisor().get("svc2") is None
-        # Startup relaunch brings the enabled app's backend back.
         started = app_manager.start_enabled_app_backends()
         assert "svc2" in started
         got = None
@@ -687,21 +690,17 @@ async def test_apps_list_flags_available_update(tmp_path, monkeypatch):
     """APE-7 end-to-end over HTTP: install v1.0.0, register a local source carrying a
     v1.1.0 copy, and GET /api/apps → the installed app is flagged updateAvailable with
     the newer latestVersion (computed on the read path, no polling)."""
-    # Neutralize the always-present first-party default source so this test's source set
-    # is exactly the one it adds (env → nonexistent dir disables the default).
     monkeypatch.setenv("GIDEON_FIRST_PARTY_APPS_DIR", str(tmp_path / "no-first-party"))
-    from gideon.apps import catalog
+    from gideon.extensions.apps import catalog
 
     async with _client(tmp_path) as client:
         src = _app_src(tmp_path, "notes", version="1.0.0")
         assert (await client.post("/api/apps", json={"source": src})).status == 201
 
-        # No newer source yet → no update flagged.
         apps = (await (await client.get("/api/apps")).json())["apps"]
         notes = next(a for a in apps if a["name"] == "notes")
         assert notes["updateAvailable"] is False and notes["latestVersion"] == ""
 
-        # A local source now carries a NEWER copy of the same app.
         newer = _app_src(tmp_path, "notes", version="1.1.0", subdir="newer-src")
         catalog.add_local_source(str(Path(newer).parent))
 

@@ -15,7 +15,7 @@ The two claims this suite exists to hold:
 2. **Every unrepresentable construct is named.** `_COVERED_BY` maps every member of
    `LOSS_KINDS` to the test that exercises it, and `test_every_loss_kind_has_a_test`
    reds when a kind is added without one. `LOSS_KINDS` is shared with the .xlsx parser,
-   so that registry names tests in `tests/test_sheets.py` too — one registry covering the
+   so that registry names tests in `checks/runtime/test_sheets.py` too — one registry covering the
    whole tuple, because two would let a kind fall between them.
 """
 
@@ -30,31 +30,24 @@ from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
 from docx.shared import Inches
 
-from gideon.documents.docx_parser import (
+from checks.runtime import test_decks as _deck_suite
+from checks.runtime import test_sheets as _sheet_suite
+from gideon.workspace.documents.docx_parser import (
     LOSS_KINDS,
     LossItem,
     LossReport,
     parse_docx,
 )
-from gideon.documents.model import (
+from gideon.workspace.documents.model import (
     Block,
     DocumentModel,
     PageSetup,
     ParagraphStyle,
     Run,
 )
-from gideon.documents.writers.docx_writer import render_docx
-
-# `LOSS_KINDS` is ONE vocabulary shared by the .docx and .xlsx parsers (see the comment on
-# the tuple itself), so the spreadsheet kinds are exercised by the spreadsheet suite. The
-# coverage rail below reads that module's namespace so a single registry can still be
-# asserted complete against the whole tuple — two registries could leave a kind in neither.
-from tests import test_decks as _deck_suite
-from tests import test_sheets as _sheet_suite
+from gideon.workspace.documents.writers.docx_writer import render_docx
 
 _W = nsdecls("w")
-#: VML is not in python-docx's namespace map, so a legacy shape's declaration is spelled
-#: out. Word still emits VML text boxes for compatibility-mode documents.
 _V = 'xmlns:v="urn:schemas-microsoft-com:vml"'
 _URL = "https://example.invalid/docs"
 
@@ -65,7 +58,9 @@ def _bytes(doc) -> bytes:
     return buf.getvalue()
 
 
-def _paragraph_doc(*fragments: str, text: str = "body", style: str | None = None) -> bytes:
+def _paragraph_doc(
+    *fragments: str, text: str = "body", style: str | None = None
+) -> bytes:
     """A one-paragraph .docx with raw OOXML appended to that paragraph."""
     doc = Document()
     para = doc.add_paragraph(text)
@@ -103,11 +98,6 @@ def _numbered_doc(
             )
         )
     return _bytes(doc)
-
-
-# --------------------------------------------------------------------------------------
-# document order — the claim that a two-sequence parser cannot make
-# --------------------------------------------------------------------------------------
 
 
 def _interleaved_bytes() -> bytes:
@@ -167,11 +157,6 @@ def test_the_two_sequence_reading_would_reorder_that_fixture():
     assert naive != walked
 
 
-# --------------------------------------------------------------------------------------
-# block kinds
-# --------------------------------------------------------------------------------------
-
-
 def test_title_paragraph_becomes_the_model_title():
     model, _ = parse_docx(render_docx(DocumentModel(title="Report", blocks=[])))
 
@@ -183,7 +168,9 @@ def test_heading_style_carries_its_level():
     model, _ = parse_docx(
         render_docx(
             DocumentModel(
-                blocks=[Block(kind="heading", text=f"h{n}", level=n) for n in range(1, 7)]
+                blocks=[
+                    Block(kind="heading", text=f"h{n}", level=n) for n in range(1, 7)
+                ]
             )
         )
     )
@@ -218,7 +205,9 @@ def test_a_word_shaped_bulleted_list_is_read_from_its_numbering():
     """numId 1 resolves to a `bullet` numFmt in python-docx's default numbering part."""
     model, report = parse_docx(_numbered_doc("a", "b", num_id="1"))
 
-    assert [(block.kind, block.items) for block in model.blocks] == [("bullets", ["a", "b"])]
+    assert [(block.kind, block.items) for block in model.blocks] == [
+        ("bullets", ["a", "b"])
+    ]
     assert report.kinds() == []
 
 
@@ -226,7 +215,9 @@ def test_a_word_shaped_numbered_list_is_read_from_its_numbering():
     """numId 5 resolves to a `decimal` numFmt in the same part."""
     model, _ = parse_docx(_numbered_doc("one", "two", num_id="5"))
 
-    assert [(block.kind, block.items) for block in model.blocks] == [("numbered", ["one", "two"])]
+    assert [(block.kind, block.items) for block in model.blocks] == [
+        ("numbered", ["one", "two"])
+    ]
 
 
 def test_a_direct_numbering_reference_outranks_a_contradicting_style_name():
@@ -236,15 +227,19 @@ def test_a_direct_numbering_reference_outranks_a_contradicting_style_name():
     supplies, and Word renders it that way — so when the two disagree, the reference is the
     one that matches what the user sees. Word produces this disagreement routinely: typing
     at the end of a numbered list and clicking the bullet button leaves "List Number" on a
-    paragraph with a bullet reference. `tests/test_docx_word_authored.py` owns the same
+    paragraph with a bullet reference. `checks/runtime/test_docx_word_authored.py` owns the same
     claim on a file Word actually saved; this is the fast synthetic version, and it asserts
     the mirror case too so the fix cannot be a hardcoded "bullet".
     """
     bulleted, _ = parse_docx(_numbered_doc("a", num_id="1", style="List Number"))
     numbered, _ = parse_docx(_numbered_doc("b", num_id="5", style="List Bullet"))
 
-    assert [(block.kind, block.items) for block in bulleted.blocks] == [("bullets", ["a"])]
-    assert [(block.kind, block.items) for block in numbered.blocks] == [("numbered", ["b"])]
+    assert [(block.kind, block.items) for block in bulleted.blocks] == [
+        ("bullets", ["a"])
+    ]
+    assert [(block.kind, block.items) for block in numbered.blocks] == [
+        ("numbered", ["b"])
+    ]
 
 
 def test_an_unresolvable_numbering_reference_falls_back_to_the_style_name():
@@ -272,7 +267,9 @@ def test_an_unresolvable_numbering_reference_reads_as_numbered():
 
 
 def test_an_all_monospace_paragraph_reads_as_a_code_block():
-    model, report = parse_docx(render_docx(DocumentModel(blocks=[Block(kind="code", text="f(1)")])))
+    model, report = parse_docx(
+        render_docx(DocumentModel(blocks=[Block(kind="code", text="f(1)")]))
+    )
 
     assert [(block.kind, block.text, block.runs) for block in model.blocks] == [
         ("code", "f(1)", [])
@@ -287,7 +284,11 @@ def test_a_partly_monospace_paragraph_stays_a_paragraph_with_a_code_run():
                 blocks=[
                     Block(
                         kind="paragraph",
-                        runs=[Run(text="call "), Run(text="f(1)", code=True), Run(text=" now")],
+                        runs=[
+                            Run(text="call "),
+                            Run(text="f(1)", code=True),
+                            Run(text=" now"),
+                        ],
                     )
                 ]
             )
@@ -305,10 +306,14 @@ def test_a_partly_monospace_paragraph_stays_a_paragraph_with_a_code_run():
 
 def test_the_image_placeholder_paragraph_reads_back_as_an_image_block():
     model, report = parse_docx(
-        render_docx(DocumentModel(blocks=[Block(kind="image", artifact_slug="hero-shot")]))
+        render_docx(
+            DocumentModel(blocks=[Block(kind="image", artifact_slug="hero-shot")])
+        )
     )
 
-    assert [(block.kind, block.artifact_slug) for block in model.blocks] == [("image", "hero-shot")]
+    assert [(block.kind, block.artifact_slug) for block in model.blocks] == [
+        ("image", "hero-shot")
+    ]
     assert report.kinds() == []
 
 
@@ -325,7 +330,11 @@ def test_a_page_break_paragraph_reads_back_as_a_pagebreak_block():
         )
     )
 
-    assert [block.kind for block in model.blocks] == ["paragraph", "pagebreak", "paragraph"]
+    assert [block.kind for block in model.blocks] == [
+        "paragraph",
+        "pagebreak",
+        "paragraph",
+    ]
     assert report.kinds() == []
 
 
@@ -344,11 +353,6 @@ def test_an_empty_paragraph_is_kept_not_dropped():
     )
 
     assert [block.text for block in model.blocks] == ["a", "", "b"]
-
-
-# --------------------------------------------------------------------------------------
-# runs, styles, tables, page
-# --------------------------------------------------------------------------------------
 
 
 def test_run_formatting_and_hyperlink_position_survive():
@@ -379,8 +383,6 @@ def test_run_formatting_and_hyperlink_position_survive():
         ("link", False, False, False, _URL),
         ("tail", False, False, False, ""),
     ]
-    # The link's colour + underline are the writer's own decoration and are consumed by
-    # `link`; reporting them would make every link this repo writes look lossy.
     assert report.kinds() == []
 
 
@@ -441,22 +443,23 @@ def test_paragraph_style_alignment_and_spacing_are_read():
 
 def test_an_unstyled_paragraph_has_no_style_object():
     """None keeps the writer's "the template decides" reading."""
-    model, _ = parse_docx(render_docx(DocumentModel(blocks=[Block(kind="paragraph", text="x")])))
+    model, _ = parse_docx(
+        render_docx(DocumentModel(blocks=[Block(kind="paragraph", text="x")]))
+    )
 
     assert model.blocks[0].style is None
 
 
 def test_table_cells_are_read_with_the_header_bold_on_the_runs():
     model, report = parse_docx(
-        render_docx(DocumentModel(blocks=[Block(kind="table", rows=[["h1", "h2"], ["a", "b"]])]))
+        render_docx(
+            DocumentModel(blocks=[Block(kind="table", rows=[["h1", "h2"], ["a", "b"]])])
+        )
     )
 
     (block,) = model.blocks
     assert block.rows == [["h1", "h2"], ["a", "b"]]
     header, body = block.cells
-    # Bold lives on the RUNS, never on `Cell.bold`: the writer bolds every header cell by
-    # contract, so a cell-level flag read back from row 0 could not be told apart from
-    # that convention.
     assert [(cell.text, cell.bold) for cell in header] == [("h1", False), ("h2", False)]
     assert all(run.bold for cell in header for run in cell.runs)
     assert [(cell.text, cell.runs) for cell in body] == [("a", []), ("b", [])]
@@ -473,7 +476,9 @@ def test_page_setup_orientation_and_margins_are_read():
         margin_right_pt=54.0,
     )
     model, report = parse_docx(
-        render_docx(DocumentModel(page=page, blocks=[Block(kind="paragraph", text="x")]))
+        render_docx(
+            DocumentModel(page=page, blocks=[Block(kind="paragraph", text="x")])
+        )
     )
 
     assert model.page == page
@@ -486,11 +491,6 @@ def test_page_setup_is_always_populated():
 
     assert model.page is not None
     assert model.page.orientation == "portrait"
-
-
-# --------------------------------------------------------------------------------------
-# LossReport — the record of what the model cannot hold
-# --------------------------------------------------------------------------------------
 
 
 def test_loss_item_rejects_an_unknown_kind():
@@ -508,7 +508,6 @@ def test_loss_report_shape():
     report.add("comment", "three")
 
     assert report.lossless is False
-    # `LOSS_KINDS` order, not insertion order, so a caller's branching is stable.
     assert report.kinds() == ["footnote", "comment"]
     assert [item.detail for item in report.of_kind("comment")] == ["one", "three"]
     assert report.summary() == "footnote×1, comment×2"
@@ -524,7 +523,9 @@ def test_a_loss_item_names_the_block_and_paragraph_it_came_from():
     doc = Document()
     doc.add_paragraph("intro")
     doc.add_paragraph("second")
-    doc.paragraphs[1]._p.append(parse_xml(f'<w:r {_W}><w:footnoteReference w:id="2"/></w:r>'))
+    doc.paragraphs[1]._p.append(
+        parse_xml(f'<w:r {_W}><w:footnoteReference w:id="2"/></w:r>')
+    )
 
     _, report = parse_docx(_bytes(doc))
 
@@ -544,11 +545,6 @@ def test_a_paragraph_ordinal_counts_paragraphs_a_block_index_cannot_reach():
 
     (item,) = report.of_kind("comment")
     assert (item.block_index, item.paragraph_ordinal) == (0, 2)
-
-
-# --------------------------------------------------------------------------------------
-# one loss family per construct
-# --------------------------------------------------------------------------------------
 
 
 def test_footnote_and_endnote_references_are_reported():
@@ -584,7 +580,9 @@ def test_a_text_box_is_reported_once_and_not_also_as_an_image():
 def test_an_embedded_image_is_reported():
     """An `image` block REFERENCES an artifact, so pixel data has nowhere to go."""
     _, report = parse_docx(
-        _paragraph_doc(f'<w:r {_W}><w:drawing><wp:inline {nsdecls("wp")}/></w:drawing></w:r>')
+        _paragraph_doc(
+            f'<w:r {_W}><w:drawing><wp:inline {nsdecls("wp")}/></w:drawing></w:r>'
+        )
     )
 
     assert report.kinds() == ["embedded_image"]
@@ -604,7 +602,9 @@ def test_an_embedded_ole_object_is_reported():
 
 def test_a_tracked_insertion_is_reported():
     _, report = parse_docx(
-        _paragraph_doc(f'<w:ins {_W} w:id="9" w:author="a"><w:r><w:t>new</w:t></w:r></w:ins>')
+        _paragraph_doc(
+            f'<w:ins {_W} w:id="9" w:author="a"><w:r><w:t>new</w:t></w:r></w:ins>'
+        )
     )
 
     assert report.kinds() == ["tracked_change"]
@@ -622,7 +622,9 @@ def test_a_field_is_reported():
 
 
 def test_a_bookmark_is_reported():
-    _, report = parse_docx(_paragraph_doc(f'<w:bookmarkStart {_W} w:id="0" w:name="anchor"/>'))
+    _, report = parse_docx(
+        _paragraph_doc(f'<w:bookmarkStart {_W} w:id="0" w:name="anchor"/>')
+    )
 
     assert report.kinds() == ["bookmark"]
 
@@ -646,14 +648,14 @@ def test_a_block_level_content_control_is_reported_and_its_content_kept():
     model, report = parse_docx(_bytes(doc))
 
     assert report.kinds() == ["content_control"]
-    # The wrapper is unrepresentable; its TEXT is not, and dropping it would be the one
-    # failure a loss report must never cover for.
     assert [block.text for block in model.blocks] == ["inside"]
 
 
 def test_an_internal_anchor_link_is_reported_and_its_text_kept_unlinked():
     model, report = parse_docx(
-        _paragraph_doc(f'<w:hyperlink {_W} w:anchor="top"><w:r><w:t>up</w:t></w:r></w:hyperlink>')
+        _paragraph_doc(
+            f'<w:hyperlink {_W} w:anchor="top"><w:r><w:t>up</w:t></w:r></w:hyperlink>'
+        )
     )
 
     assert report.kinds() == ["internal_link"]
@@ -676,7 +678,9 @@ def test_an_internal_anchor_link_is_reported_and_its_text_kept_unlinked():
     ],
 )
 def test_a_character_property_outside_the_model_is_reported(fragment, expected):
-    _, report = parse_docx(_paragraph_doc(f"<w:r {_W}><w:rPr>{fragment}</w:rPr><w:t>x</w:t></w:r>"))
+    _, report = parse_docx(
+        _paragraph_doc(f"<w:r {_W}><w:rPr>{fragment}</w:rPr><w:t>x</w:t></w:r>")
+    )
 
     assert report.kinds() == ["run_property"]
     (item,) = report.of_kind("run_property")
@@ -711,7 +715,9 @@ def test_the_writers_own_link_colour_and_underline_are_not_reported_outside_a_li
 def test_an_unmodelled_paragraph_property_is_reported():
     """A border, not an indent: `w:ind` and `w:keepNext` are MODELLED now, so using either
     here would have quietly turned this rail into one that can no longer fail."""
-    _, report = parse_docx(_pPr_doc(f'<w:pBdr {_W}><w:top {_W} w:val="single"/></w:pBdr>'))
+    _, report = parse_docx(
+        _pPr_doc(f'<w:pBdr {_W}><w:top {_W} w:val="single"/></w:pBdr>')
+    )
 
     assert report.kinds() == ["paragraph_property"]
     assert "paragraph border" in report.of_kind("paragraph_property")[0].detail
@@ -726,8 +732,11 @@ def test_indentation_is_READ_not_reported():
     assert report.kinds() == []
     style = model.blocks[0].style
     assert style is not None
-    # 720 twips = 0.5in = 36pt; 360 = 18pt; 240 = 12pt.
-    assert (style.indent_left_pt, style.indent_right_pt, style.first_line_indent_pt) == (
+    assert (
+        style.indent_left_pt,
+        style.indent_right_pt,
+        style.first_line_indent_pt,
+    ) == (
         36.0,
         18.0,
         12.0,
@@ -753,7 +762,6 @@ def test_a_header_the_model_cannot_hold_is_reported():
 
     assert "header_footer" in report.kinds()
     assert "table" in report.of_kind("header_footer")[0].detail
-    # Reported, and therefore NOT silently half-kept.
     assert model.page is not None and model.page.header_text == ""
 
 
@@ -766,7 +774,9 @@ def test_an_explicit_zero_spacing_is_reported():
 
 
 def test_an_absolute_line_spacing_rule_is_reported():
-    _, report = parse_docx(_pPr_doc(f'<w:spacing {_W} w:line="360" w:lineRule="exact"/>'))
+    _, report = parse_docx(
+        _pPr_doc(f'<w:spacing {_W} w:line="360" w:lineRule="exact"/>')
+    )
 
     assert report.kinds() == ["line_spacing_exact"]
 
@@ -809,7 +819,9 @@ def test_a_formatted_list_item_is_reported():
     model, report = parse_docx(_bytes(doc))
 
     assert report.kinds() == ["list_item_formatting"]
-    assert [(block.kind, block.items) for block in model.blocks] == [("bullets", ["shouted"])]
+    assert [(block.kind, block.items) for block in model.blocks] == [
+        ("bullets", ["shouted"])
+    ]
 
 
 def test_a_nested_list_level_is_reported():
@@ -829,10 +841,11 @@ def test_table_hazards_each_add_their_own_item():
 
     model, report = parse_docx(_bytes(doc))
 
-    assert set(report.kinds()) == {"nested_table", "merged_cells", "multi_paragraph_cell"}
-    # Short rows are padded to the widest, exactly as the writer normalizes on the way
-    # out — otherwise a merged table would parse ragged and re-parse padded, and the
-    # round trip would disagree with itself.
+    assert set(report.kinds()) == {
+        "nested_table",
+        "merged_cells",
+        "multi_paragraph_cell",
+    }
     (block,) = model.blocks
     assert [len(row) for row in block.cells] == [2, 2]
 
@@ -888,9 +901,6 @@ def test_multiple_sections_and_a_header_are_reported():
     model, report = parse_docx(_bytes(doc))
 
     assert "multi_section" in report.kinds()
-    # The header itself is no longer a loss — it is plain text in the first section, which
-    # `PageSetup.header_text` holds. The SECTION COUNT is still reported, because the model
-    # holds one page setup and the second section's geometry really is dropped.
     assert "header_footer" not in report.kinds()
     assert model.page is not None and model.page.header_text == "confidential"
 
@@ -931,11 +941,6 @@ def test_a_page_size_the_model_cannot_hold_is_reported():
 
     assert report.kinds() == ["page_property"]
     assert "page size 5.83x8.27in" in report.of_kind("page_property")[0].detail
-
-
-# --------------------------------------------------------------------------------------
-# constructs Word emits — read the docstring before believing this is a Word file
-# --------------------------------------------------------------------------------------
 
 
 def test_a_word_construct_fixture_reports_every_loss_honestly():
@@ -990,23 +995,12 @@ def test_a_word_construct_fixture_reports_every_loss_honestly():
         "field",
         "text_box",
         "nested_table",
-        # python-docx appends a trailing empty paragraph after a table inside a cell (a
-        # cell must not end with a table), so the nesting brings a second paragraph with
-        # it — reported, correctly, as its own loss.
         "multi_paragraph_cell",
     }
-    # Honesty is the point: the report NAMES each one rather than the parse looking clean.
     assert not report.lossless
     assert all(item.detail for item in report.items)
 
 
-# --------------------------------------------------------------------------------------
-# the coverage rail
-# --------------------------------------------------------------------------------------
-
-#: Every `LOSS_KINDS` member and the test that exercises it. A new kind with no test is
-#: a kind nobody has shown fires, which is the exact defect this atom closes — so the
-#: mapping is asserted complete rather than left as a convention.
 _COVERED_BY = {
     "footnote": "test_footnote_and_endnote_references_are_reported",
     "endnote": "test_footnote_and_endnote_references_are_reported",
@@ -1038,13 +1032,11 @@ _COVERED_BY = {
     "heading_level_clamped": "test_a_heading_deeper_than_the_model_allows_is_reported",
     "multi_paragraph_cell": "test_table_hazards_each_add_their_own_item",
     "inline_page_break": "test_an_inline_page_break_is_reported",
-    # ── spreadsheet kinds — exercised in tests/test_sheets.py ──────────────────────────
     "sheet_feature": "test_a_sheet_feature_the_model_cannot_hold_is_reported_not_dropped",
     "cell_style": "test_a_cell_style_with_no_model_field_is_reported",
     "formula_cached_value": "test_a_formula_reports_that_its_cached_result_is_not_carried",
     "date_value": "test_a_date_format_survives_but_says_its_value_became_text",
     "row_height": "test_an_explicit_row_height_is_reported_per_row_and_located_at_that_row",
-    # ── deck kinds — exercised in tests/test_decks.py ──────────────────────────────────
     "slide_layout": "test_a_layout_the_shipped_template_cannot_re_create_is_reported",
     "slide_placeholder": "test_a_placeholder_the_model_has_no_field_for_is_reported_with_its_text",
     "slide_shape": "test_a_free_shape_is_reported_not_dropped_silently",
@@ -1055,9 +1047,6 @@ _COVERED_BY = {
 
 def test_every_loss_kind_has_a_test():
     assert sorted(_COVERED_BY) == sorted(LOSS_KINDS)
-    # A name must resolve to a callable in one of the three suites that own the
-    # vocabulary's producers — stricter than a bare namespace membership check, which a
-    # same-named constant or an accidental import would have satisfied.
     known = {**vars(_sheet_suite), **vars(_deck_suite), **globals()}
     missing = [
         name

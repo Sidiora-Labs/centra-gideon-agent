@@ -31,8 +31,8 @@ from pathlib import Path
 import pytest
 
 import gideon
-from gideon.local_models import registry as lm_registry
-from gideon.local_models.provider import LocalModel
+from gideon.integrations.local_models import registry as lm_registry
+from gideon.integrations.local_models.provider import LocalModel
 
 
 class _Bundled:
@@ -55,10 +55,9 @@ def _snapshot(mod) -> dict:
     return dict(mod._providers)
 
 
-# ── (a) The two-population invariant, one case per registry ───────────────────
-
-
-@pytest.mark.parametrize("mod_path", ["gideon.stt.registry", "gideon.tts.registry"])
+@pytest.mark.parametrize(
+    "mod_path", ["gideon.integrations.stt.registry", "gideon.integrations.tts.registry"]
+)
 def test_refresh_keeps_the_bundled_population_remote_tracked(mod_path, monkeypatch):
     """stt / tts track their config-built adapters in ``_remote_names``; only those go."""
     import importlib
@@ -79,9 +78,7 @@ def test_refresh_keeps_the_bundled_population_remote_tracked(mod_path, monkeypat
     mod.refresh_providers()
 
     after = _snapshot(mod)
-    # The bundled provider survives — and it is the SAME object, not a rebuild.
     assert mod.get_provider(bundled.name) is bundled
-    # Vacuity guard: something really was dropped.
     assert mod.get_provider(transient.name) is None
     assert len(before) - len(after) == 1
     assert set(before) - set(after) == {transient.name}
@@ -89,8 +86,8 @@ def test_refresh_keeps_the_bundled_population_remote_tracked(mod_path, monkeypat
 
 def test_image_gen_refresh_keeps_a_manifest_bundle(monkeypatch):
     """image_gen names its transient population (OpenAI family + ``stub``) explicitly."""
-    from gideon.image_gen import registry as ir
-    from gideon.providers import use_cases
+    from gideon.extensions.providers import use_cases
+    from gideon.integrations.image_gen import registry as ir
 
     monkeypatch.setattr(ir, "_providers", {}, raising=False)
     monkeypatch.setattr(use_cases, "openai_family_providers", lambda: [], raising=False)
@@ -113,7 +110,7 @@ def test_image_gen_refresh_keeps_a_manifest_bundle(monkeypatch):
 
 def test_video_gen_refresh_keeps_a_manifest_bundle(monkeypatch):
     """video_gen tracks its scanner-contributed population in ``_scanner_names``."""
-    from gideon.video_gen import registry as vr
+    from gideon.integrations.video_gen import registry as vr
 
     monkeypatch.setattr(vr, "_providers", {}, raising=False)
     monkeypatch.setattr(vr, "_scanner_names", set(), raising=False)
@@ -155,7 +152,8 @@ def _modules_defining_refresh_providers() -> set[str]:
         except SyntaxError:  # pragma: no cover — the lint gate owns syntax
             continue
         if not any(
-            isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "refresh_providers"
+            isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and n.name == "refresh_providers"
             for n in tree.body
         ):
             continue
@@ -179,18 +177,17 @@ def test_every_use_case_registry_that_refreshes_declares_a_transient_population(
     import importlib
 
     markers = {
-        "gideon.stt.registry": "_remote_names",
-        "gideon.tts.registry": "_remote_names",
-        "gideon.video_gen.registry": "_scanner_names",
-        "gideon.image_gen.registry": "_auto_registered",
+        "gideon.integrations.stt.registry": "_remote_names",
+        "gideon.integrations.tts.registry": "_remote_names",
+        "gideon.integrations.video_gen.registry": "_scanner_names",
+        "gideon.integrations.image_gen.registry": "_auto_registered",
     }
 
     discovered = _modules_defining_refresh_providers()
-    # Vacuity: an empty discovery would make the subset check below trivially true. The
-    # four known refreshers are the floor, and stt is asserted by name because it is the
-    # registry the original two-population bug actually broke.
-    assert len(discovered) >= 4, f"the refresh_providers scan found only {sorted(discovered)}"
-    assert "gideon.stt.registry" in discovered, sorted(discovered)
+    assert (
+        len(discovered) >= 4
+    ), f"the refresh_providers scan found only {sorted(discovered)}"
+    assert "gideon.integrations.stt.registry" in discovered, sorted(discovered)
 
     undeclared = discovered - set(markers)
     assert not undeclared, (
@@ -211,16 +208,14 @@ def test_every_use_case_registry_that_refreshes_declares_a_transient_population(
         assert hasattr(mod, marker), f"{mod_path} lost its transient-population marker"
 
 
-# ── (b) Registry drift: the APP-name key + duck-type + refresh survival ───────
-
-
 class _SidecarProxy:
     """A sidecar proxy: the management contract, with an INTERNAL name that differs from
     the app's. Shaped exactly like the real ones (``faster_whisper`` for the
-    ``faster-whisper`` app) because that mismatch is what the APP-name key exists for."""
+    ``faster-whisper`` app) because that mismatch is what the APP-name key exists for.
+    """
 
     def __init__(self) -> None:
-        self.name = "faster_whisper"  # internal spelling — NOT the app name
+        self.name = "faster_whisper"
         self.display_name = "Faster Whisper (sidecar)"
 
     async def is_available(self) -> bool:
@@ -237,7 +232,7 @@ class _SidecarProxy:
 
 
 def _ext(name: str, capabilities: list[str]):
-    from gideon.providers.registry import RegisteredProvider
+    from gideon.extensions.providers.registry import RegisteredProvider
 
     class _Cfg:
         pass
@@ -254,9 +249,9 @@ def test_sidecar_proxy_satisfies_the_local_model_duck_type():
     """Gate one: the proxy is recognized WITHOUT subclassing ``LocalModelProvider``."""
     proxy = _SidecarProxy()
     assert lm_registry.is_local_model_provider(proxy, capabilities=["stt"]) is True
-    # And the second gate really is a gate: a hosted-only capability set is excluded even
-    # though the contract methods are all present.
-    assert lm_registry.is_local_model_provider(proxy, capabilities=["image_gen"]) is False
+    assert (
+        lm_registry.is_local_model_provider(proxy, capabilities=["image_gen"]) is False
+    )
 
 
 def test_model_type_handler_keys_a_sidecar_proxy_by_the_app_name(monkeypatch):
@@ -265,7 +260,7 @@ def test_model_type_handler_keys_a_sidecar_proxy_by_the_app_name(monkeypatch):
     A binding ref is ``"<app>:<model>"``, so keying by the proxy's internal name strands
     every ref the UI writes — the model reads as not-installed while it is loaded.
     """
-    from gideon.providers.registry import ModelTypeHandler
+    from gideon.extensions.providers.registry import ModelTypeHandler
 
     monkeypatch.setattr(lm_registry, "_providers", {}, raising=False)
     monkeypatch.setattr(lm_registry, "_capabilities", {}, raising=False)
@@ -285,8 +280,8 @@ def test_a_registered_sidecar_proxy_survives_a_use_case_refresh(monkeypatch):
     """Gate three: the two invariants meet — the proxy the handler registered is still
     there in BOTH registries after the use-case registry refreshes its config population.
     """
-    from gideon.providers.registry import ModelTypeHandler
-    from gideon.stt import registry as sr
+    from gideon.extensions.providers.registry import ModelTypeHandler
+    from gideon.integrations.stt import registry as sr
 
     monkeypatch.setattr(lm_registry, "_providers", {}, raising=False)
     monkeypatch.setattr(lm_registry, "_capabilities", {}, raising=False)
@@ -295,9 +290,6 @@ def test_a_registered_sidecar_proxy_survives_a_use_case_refresh(monkeypatch):
 
     proxy = _SidecarProxy()
     ModelTypeHandler().register(_ext("faster-whisper", ["stt"]), proxy)
-    # The stt registration branch is isinstance-guarded against SttProvider, which this
-    # duck-typed proxy is not — so put it in the use-case registry the way the real app's
-    # loader does and assert the refresh spares it.
     sr.register_provider(proxy)
     sr.register_provider(_Transient("openai"))
     sr._remote_names.add("openai")

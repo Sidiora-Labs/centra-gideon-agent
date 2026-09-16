@@ -1,6 +1,6 @@
 """The `council` template's shape contract: independent fan-out, attributed fan-in.
 
-`tests/test_workflows_bundled.py` already holds every bundled template to the library-wide
+`checks/runtime/test_workflows_bundled.py` already holds every bundled template to the library-wide
 bar (it validates, it lints clean, its inputs are documented, its action nodes name
 registered providers). None of that can tell whether a *council* is still a council, and
 the two ways this template rots are both invisible to a validator:
@@ -32,28 +32,25 @@ from typing import Any
 
 import pytest
 
-from gideon.workflows.bundled_defs import bundled_root
-from gideon.workflows.models import CONTAINER_KINDS, Node, walk
-from gideon.workflows.validator import dep_edges_for_root
+from gideon.automation.workflows.bundled_defs import bundled_root
+from gideon.automation.workflows.models import CONTAINER_KINDS, Node, walk
+from gideon.automation.workflows.validator import dep_edges_for_root
 
 TEMPLATE = "council"
 SIBLING = "best-of-n"
 
-#: The member node ids, in seat order. Named explicitly rather than derived from an id prefix:
-#: the property under test is that THESE THREE exist and stay independent, and a prefix-derived
-#: set would silently shrink to one seat — or to none — and then pass.
 MEMBERS = ("member_1", "member_2", "member_3")
 
-#: The fan-in's own nodes: the zero-token collector and the synthesizing call it feeds.
 COLLECTOR = "positions"
 SYNTHESIS = "synthesis"
 
-#: `{{nodes.<id>…}}` — every node output a binding reaches.
 _NODE_REF = re.compile(r"\{\{\s*nodes\.([A-Za-z0-9_-]+)")
 
 
 def _raw(name: str) -> dict[str, Any]:
-    return json.loads((bundled_root() / name / "workflow.json").read_text(encoding="utf-8"))
+    return json.loads(
+        (bundled_root() / name / "workflow.json").read_text(encoding="utf-8")
+    )
 
 
 def _root(name: str) -> Node:
@@ -74,15 +71,16 @@ def _refs_in(obj: Any) -> set[str]:
     return set(_NODE_REF.findall(json.dumps(obj)))
 
 
-# ── the fan-out is genuinely parallel, and genuinely independent ──────────────
-
-
 def test_the_members_are_siblings_under_one_parallel() -> None:
     """A `sequence` here would still validate and still answer — while serializing three calls
     that have no reason to wait for each other AND putting each member downstream of the last,
     which is where the independence quietly goes."""
     nodes = _by_id(TEMPLATE)
-    parents = {path.rsplit(".children[", 1)[0] for path, _n in (nodes[m] for m in MEMBERS) if path}
+    parents = {
+        path.rsplit(".children[", 1)[0]
+        for path, _n in (nodes[m] for m in MEMBERS)
+        if path
+    }
     assert len(parents) == 1, f"the members are spread across {sorted(parents)}"
     container = dict(walk(_root(TEMPLATE)))[parents.pop()]
     assert container.kind.value == "parallel", (
@@ -125,16 +123,11 @@ def test_the_default_roles_actually_differ() -> None:
     defaults = [str(inputs[f"{m}_role"]["default"]).strip() for m in MEMBERS]
     assert all(defaults), "a seat ships with no default role"
     assert len(set(defaults)) == len(MEMBERS), "two seats ship the same default role"
-    # Distinct STRINGS are cheap; distinct framings are the point. Overlap is measured on
-    # content words so that the shared scaffolding ("the … — …") cannot pass for difference.
     words = [{w for w in re.findall(r"[a-z]{5,}", d.lower())} for d in defaults]
     for i, first in enumerate(words):
         for second in words[i + 1 :]:
             shared = first & second
             assert len(shared) <= 2, f"two default roles overlap on {sorted(shared)}"
-
-
-# ── the fan-in merges and attributes, rather than selecting ───────────────────
 
 
 def test_every_member_reaches_the_synthesis() -> None:
@@ -155,9 +148,13 @@ def test_the_synthesis_is_ordered_after_every_member() -> None:
     mid-run binding failure after every member has already paid for its call."""
     edges = dep_edges_for_root(_root(TEMPLATE))
     reachable = {SYNTHESIS, COLLECTOR}
-    for _ in MEMBERS:  # one widening pass per hop is enough for this depth
-        reachable |= {e.producer_id for e in edges if e.reader_id in reachable and e.producer_id}
-    assert set(MEMBERS) <= reachable, f"{sorted(set(MEMBERS) - reachable)} are not upstream"
+    for _ in MEMBERS:
+        reachable |= {
+            e.producer_id for e in edges if e.reader_id in reachable and e.producer_id
+        }
+    assert (
+        set(MEMBERS) <= reachable
+    ), f"{sorted(set(MEMBERS) - reachable)} are not upstream"
     for edge in edges:
         assert (
             edge.ordered
@@ -176,7 +173,9 @@ def test_the_fan_in_attributes_every_position() -> None:
     for field in ("disagreements", "dissent"):
         assert field in schema, f"the synthesis returns no {field!r}"
     prompt = str((_by_id(TEMPLATE)[SYNTHESIS][1].config or {}).get("prompt", ""))
-    assert "attribut" in prompt.lower(), "the synthesis prompt never asks for attribution"
+    assert (
+        "attribut" in prompt.lower()
+    ), "the synthesis prompt never asks for attribution"
 
 
 def test_nothing_selects_a_single_member_as_the_answer() -> None:
@@ -184,8 +183,6 @@ def test_nothing_selects_a_single_member_as_the_answer() -> None:
     at one member's output turns a council into a best-of-N whose losing candidates were charged
     for and then discarded."""
     for path, node in walk(_root(TEMPLATE)):
-        # Leaves only: `to_dict()` on a container serializes its whole subtree, so scanning one
-        # would report every binding its children make as a read of its own.
         if node.id in MEMBERS or node.kind in CONTAINER_KINDS:
             continue
         read = _refs_in(node.to_dict())
@@ -200,14 +197,13 @@ def test_the_sibling_fails_the_attribution_contract() -> None:
     """Vacuity floor. `best-of-n` is the nearest shape and it SELECTS — if it satisfied the
     attribution check above, that check is matching any template at all and the leg proves
     nothing about this one."""
-    sibling_schemas = [(n.config or {}).get("schema") or {} for _p, n in walk(_root(SIBLING))]
+    sibling_schemas = [
+        (n.config or {}).get("schema") or {} for _p, n in walk(_root(SIBLING))
+    ]
     assert not any("attributed" in s for s in sibling_schemas), (
         f"{SIBLING} appears to attribute positions, so the attribution detector does not "
         "discriminate between selecting and synthesizing"
     )
-
-
-# ── what the declared risk tier promises ─────────────────────────────────────
 
 
 def test_the_council_only_ever_thinks() -> None:
@@ -242,4 +238,4 @@ def test_it_is_shipped_from_the_package_and_not_a_stray_file() -> None:
     directory has to be where `bundled_root()` looks, or an editable checkout passes every
     assertion above while `pip install gideon` ships no council at all."""
     assert (bundled_root() / TEMPLATE / "workflow.json").is_file()
-    assert bundled_root().is_relative_to(Path(__file__).resolve().parents[1] / "src")
+    assert bundled_root().is_relative_to(Path(__file__).resolve().parents[2] / "src")

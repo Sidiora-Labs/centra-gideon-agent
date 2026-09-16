@@ -1,0 +1,93 @@
+.gideon-workspace {
+  min-height: 0;
+  margin: 10px 10px 10px 0;
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 58%, transparent);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+
+.gideon-topbar {
+  border-bottom: 1px solid color-mix(in srgb, var(--color-outline-variant) 38%, transparent);
+}
+
+.gideon-corner-left {
+  padding: 10px 6px;
+}
+
+.gideon-corner-left > button {
+  width: 32px;
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 50%, transparent);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-low);
+  backdrop-filter: none;
+}
+
+.gideon-corner-right {
+  padding: 7px 8px 7px 4px;
+}
+
+.gideon-corner-right > div {
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 3px;
+  background: var(--color-surface);
+  backdrop-filter: none;
+}
+
+.gideon-chat-welcome {
+  padding: 32px clamp(16px, 5vw, 72px);
+}
+
+.gideon-chat-intro {
+  width: 100%;
+  max-width: var(--content-width);
+  justify-content: flex-start;
+  margin-inline: auto;
+  margin-bottom: 28px;
+}
+
+.gideon-chat-intro h1 {
+  letter-spacing: -0.035em;
+  line-height: 1.25;
+}
+
+.gideon-chat-emblem {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 65%, transparent);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-low);
+}
+
+.gideon-chat-eyebrow {
+  margin-bottom: 7px;
+  color: var(--color-on-surface-low);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.gideon-dashboard-section {
+  padding: var(--spacing-l);
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 50%, transparent);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-low);
+}
+
+@media (max-width: 767px) {
+  .gideon-workspace {
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .gideon-corner-left { padding-inline: 4px; }
+  .gideon-corner-right { padding-right: 3px; }
+  .gideon-chat-welcome { padding: 24px 16px; }
+  .gideon-chat-intro { gap: 12px; margin-bottom: 20px; }
+  .gideon-chat-intro h1 { font-size: 1.5rem; }
+  .gideon-chat-emblem { width: 56px; height: 56px; }
+  .gideon-chat-emblem img { width: 34px; height: 34px; }
+}

@@ -21,27 +21,27 @@ and no vendor SDK.
 
 ```bash
 pip install -e ".[dev]"
-python -m pytest -n 0 --no-cov tests/security/
+python -m pytest -n 0 --no-cov checks/runtime/security/
 ```
 
 `-n 0` is not required — the corpus is parallel-safe — but it keeps the
 integrity-race output readable. To run one class:
 
 ```bash
-python -m pytest -n 0 --no-cov tests/security/ -k invisible-char
+python -m pytest -n 0 --no-cov checks/runtime/security/ -k invisible-char
 ```
 
 The corpus also runs unattended: `.github/workflows/full.yml` carries a
-`security-corpus` job that executes `tests/security/` plus the scanner unit tests on
+`security-corpus` job that executes `checks/runtime/security/` plus the scanner unit tests on
 every nightly `schedule:` run (07:00 UTC), on pushes to `main`, and on
 `workflow_dispatch`. It is a separate job so a corpus regression is legible on its
 own rather than buried in the full-suite matrix.
 
 ## What the corpus is made of
 
-Cases live in `tests/security/corpus/<class>/<case>.json` — one directory per attack
+Cases live in `checks/runtime/security/corpus/<class>/<case>.json` — one directory per attack
 class, one JSON file per case. The harness is
-`tests/security/test_scanner_adversarial.py`.
+`checks/runtime/security/test_scanner_adversarial.py`.
 
 A case is **inert data**, never a program. It describes a payload
 (`files[].path` + `files[].contents`, or `variants[]` of script text) and names, in
@@ -75,7 +75,7 @@ actually stops it — reds immediately instead of leaving a size-gated bypass.
 
 `baseline-tamper` is the odd one out and deliberately so: the other five attack an
 incoming *artifact*, this one attacks the *denylist that judges it*. Added by **SH-7**
-alongside the mode-independence matrix in `tests/security/test_mode_independence.py`,
+alongside the mode-independence matrix in `checks/runtime/security/test_mode_independence.py`,
 which proves no approval mode — `default`, `auto`, `yolo`, `acceptEdits` — and no trust
 simulator can let a baseline-matched command run. That matrix is worthless if the
 baseline can be quietly shortened underneath it, so the two ship together.
@@ -94,7 +94,7 @@ Every `baseline-tamper` case asserts the same **triple**, and all three legs mat
 The class also drives the tamper through the **real** `_read_packaged_baseline` by
 rooting `security.resources` at a temp copy of the data file, rather than substituting a
 reader that re-implements the parse. The installed
-`src/gideon/baseline_denylist.json` is never written to — the copy lives under
+`runtime/gideon/baseline_denylist.json` is never written to — the copy lives under
 `tmp_path`, and `TestBaselineTamperClass::test_the_tamper_never_touches_the_installed_data_file`
 reds if a case ever leaks into the checkout.
 
@@ -180,7 +180,7 @@ The predicate is stated on the AST and **never on a filename**. That is the whol
 of it: "skip test files" would create a place to park a payload, whereas "nothing here
 can execute this" cannot — parking a payload requires something that executes it.
 Renaming a payload `test_evil.py` therefore buys an attacker nothing, and the attack
-table in `tests/security/test_scanner_reachability.py` asserts exactly that.
+table in `checks/runtime/security/test_scanner_reachability.py` asserts exactly that.
 
 Five conjunctive clauses, default-deny. Fail any one — or fail to *evaluate* one — and
 the finding stays `DANGEROUS`:
@@ -202,7 +202,7 @@ non-reachability cannot be proved and the default-deny answer stands.
 Re-measure any checkout of bundles with:
 
 ```bash
-PYTHONPATH=src:. python tools/measure_scanner_scope.py /path/to/GideonApps
+PYTHONPATH=src:. python tooling/measure_scanner_scope.py /path/to/GideonApps
 ```
 
 Every re-scored finding prints the clauses that granted it, so a downgrade nobody can
@@ -210,7 +210,7 @@ check is not possible.
 
 ### Proving each clause is load-bearing
 
-`TestRedsOnAWeakenedCheck` in `tests/security/test_scanner_reachability.py` neuters one
+`TestRedsOnAWeakenedCheck` in `checks/runtime/security/test_scanner_reachability.py` neuters one
 clause at a time, in process via `monkeypatch`, and asserts the matching rail fails.
 Each row is also the recipe for reproducing it by hand.
 
@@ -236,7 +236,7 @@ is stated at module scope and why both shapes are pinned separately.
 ## The terminal band is not shell-only: native destruction
 
 Everything above is about **precision** — not refusing benign content. The other direction
-has its own rail, `tests/security/test_scanner_recall.py`, because nothing asserted the
+has its own rail, `checks/runtime/security/test_scanner_recall.py`, because nothing asserted the
 scanner still *catches* anything and the terminal band could have rotted to nothing with
 every suite green. It had: `destructive_root` could not fire inside a quoted string for as
 long as it had shipped, and the entire band was shell syntax, so destruction written in the
@@ -262,7 +262,7 @@ out, and a name the file binds **exactly once** is followed one hop, so the two-
 `home = expanduser("~"); rmtree(home)` spelling is not either. A file that does not parse
 yields nothing here — the text catalogs still judge every byte of it. The family runs on any
 script surface whose extension does not name **another** language, so an extension-less
-`scripts/setup` is covered and a `.js` file is not: requiring a `.py` suffix would itself be a
+`tooling/scripts/setup` is covered and a `.js` file is not: requiring a `.py` suffix would itself be a
 parking spot, and every other `_SCRIPT_EXTS` member has syntax `ast.parse` refuses anyway.
 
 **The severity turns on the TARGET, not the call.** `shutil.rmtree` is legitimate; all nine
@@ -308,7 +308,7 @@ one second is masked by `(mtime, size)` validation. All 24 red.
 | Force the `.glob` branch's `**` check true | the precision floor — a single-level glob becomes a tree sweep |
 | Let a `glob.glob` pattern with nothing before its first `*` fall back to `/` | the precision floor — a relative `.pyc` cleanup loop becomes terminal |
 | Drop the language gate entirely | the precision floor — a `.js` file is judged by Python rules |
-| Require a `.py` SUFFIX rather than "not another language" | the extension-less payload — `scripts/setup` with a python shebang |
+| Require a `.py` SUFFIX rather than "not another language" | the extension-less payload — `tooling/scripts/setup` with a python shebang |
 | Force `_BundleReach.decide` to answer `UNREACHABLE` for the family | every native payload becomes a consentable warning |
 | Add a native rule without a gloss | the plain-language-gloss rail |
 
@@ -318,7 +318,7 @@ pinned by a fixture. The relative-glob row was a real false positive found by re
 branch: a pattern with nothing before its first `*` is relative to the working directory, and
 reading it as `/` made `glob.glob("**/*.pyc", recursive=True)` + `os.remove(p)` terminal. The
 suffix row is the mirror image — a recall hole rather than a false positive: gating on a `.py`
-SUFFIX left `scripts/setup` with a python shebang unscanned, which is a payload parking spot,
+SUFFIX left `tooling/scripts/setup` with a python shebang unscanned, which is a payload parking spot,
 so the gate asks "is this some OTHER language?" instead. And one mutation found dead code — a
 literal set of root spellings POSIX normalisation already reached — which was deleted rather
 than tested.
@@ -376,11 +376,11 @@ auditable rather than invisible. They are accepted, not unnoticed.
 
 ## Adding a case
 
-1. Drop a JSON file in `tests/security/corpus/<class>/`. Required keys: `id` (prefixed
+1. Drop a JSON file in `checks/runtime/security/corpus/<class>/`. Required keys: `id` (prefixed
    with the class), `class`, `summary`, `expect`, and either `files` or `variants`.
 2. Point `expect` at an existing handler, or write a new one and register it in
    `HANDLERS`. An unregistered `expect` reds — deliberately.
-3. Run `python -m pytest -n 0 --no-cov tests/security/`.
+3. Run `python -m pytest -n 0 --no-cov checks/runtime/security/`.
 4. If the new case reveals a real bypass, it is a finding: fix the control in the same
    change, or record it under **Residual risks** above with the reasoning. A corpus
    case is never weakened to make the suite green.

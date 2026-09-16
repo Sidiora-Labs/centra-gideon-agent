@@ -24,8 +24,8 @@ import asyncio
 
 import pytest
 
-from gideon.workflows.journal import TASK_MATERIALIZED, ledger
-from gideon.workflows.materialize import reject_write
+from gideon.automation.workflows.journal import TASK_MATERIALIZED, ledger
+from gideon.automation.workflows.materialize import reject_write
 
 
 def _spec(children: list) -> dict:
@@ -43,10 +43,10 @@ def _action(node_id: str, **config) -> dict:
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.workflows import store as wstore
+    from gideon.automation.workflows import store as wstore
 
     monkeypatch.setattr(wstore, "config_dir", lambda: tmp_path)
-    from gideon.action_providers import registry as apreg
+    from gideon.integrations.action_providers import registry as apreg
 
     apreg._ensure_default_providers_registered()
     yield
@@ -58,9 +58,9 @@ async def _run_and_settle(spec: dict, run_id: str = "r-1"):
     The writes are scheduled on the loop, so a test that returned immediately would race them. The
     controller tracks them for exactly this reason.
     """
-    from gideon.workflows import store as wstore
-    from gideon.workflows.controller import EngineServices, RunController
-    from gideon.workflows.models import WorkflowRun
+    from gideon.automation.workflows import store as wstore
+    from gideon.automation.workflows.controller import EngineServices, RunController
+    from gideon.automation.workflows.models import WorkflowRun
 
     run = WorkflowRun(id=run_id, workflow_name="t")
     wstore.create(run)
@@ -72,13 +72,10 @@ async def _run_and_settle(spec: dict, run_id: str = "r-1"):
 
 
 async def _tasks() -> list:
-    from gideon.tasks.registry import list_all_tasks
+    from gideon.engine.tasks.registry import list_all_tasks
 
     rows = await list_all_tasks()
     return rows[0] if isinstance(rows, tuple) else rows
-
-
-# ── the row appears ──
 
 
 def test_running_a_workflow_puts_a_ROW_ON_THE_BOARD():
@@ -135,7 +132,15 @@ def test_the_EVENT_carries_the_real_task_id():
 def test_a_CONTAINER_gets_no_row():
     async def go():
         await _run_and_settle(
-            _spec([{"kind": "parallel", "id": "fan", "children": [_action("one"), _action("two")]}])
+            _spec(
+                [
+                    {
+                        "kind": "parallel",
+                        "id": "fan",
+                        "children": [_action("one"), _action("two")],
+                    }
+                ]
+            )
         )
         return sorted(t.title for t in await _tasks())
 
@@ -144,7 +149,9 @@ def test_a_CONTAINER_gets_no_row():
 
 def test_an_OPT_OUT_node_gets_no_row():
     async def go():
-        await _run_and_settle(_spec([_action("kept"), _action("hidden", materialize_task=False)]))
+        await _run_and_settle(
+            _spec([_action("kept"), _action("hidden", materialize_task=False)])
+        )
         return [t.title for t in await _tasks()]
 
     assert asyncio.run(go()) == ["kept"]
@@ -168,9 +175,6 @@ def test_a_FAILED_node_gets_no_row():
         return await _tasks()
 
     assert asyncio.run(go()) == []
-
-
-# ── the actor asymmetry ──
 
 
 def test_the_ENGINE_write_lands_while_a_USER_status_write_is_REFUSED():
@@ -206,7 +210,7 @@ def test_an_UNMANAGED_task_is_not_governed_by_the_matrix():
     independent."""
 
     async def go():
-        from gideon.tasks.registry import create_task
+        from gideon.engine.tasks.registry import create_task
 
         return await create_task("native", title="mine")
 
@@ -214,13 +218,10 @@ def test_an_UNMANAGED_task_is_not_governed_by_the_matrix():
     assert reject_write(task, {"status": "done"}) == ""
 
 
-# ── failure containment ──
-
-
 def test_a_WRITE_FAILURE_does_not_fail_the_run(monkeypatch):
     """The node has already succeeded and its output is journaled. Losing real work over a board row
     would be the wrong trade."""
-    import gideon.tasks.registry as treg
+    import gideon.engine.tasks.registry as treg
 
     async def boom(*_a, **_kw):
         raise RuntimeError("task store unavailable")
@@ -239,7 +240,7 @@ def test_a_write_failure_still_EMITS_with_an_empty_id(monkeypatch):
     """Honest rather than silent: the projection was attempted and did not land, and the next
     rebuild recovers it. Suppressing the event entirely would hide that anything was meant to
     happen."""
-    import gideon.tasks.registry as treg
+    import gideon.engine.tasks.registry as treg
 
     async def boom(*_a, **_kw):
         raise RuntimeError("nope")
@@ -255,7 +256,7 @@ def test_a_write_failure_still_EMITS_with_an_empty_id(monkeypatch):
 
 
 def test_the_step_is_journaled_even_when_the_write_fails(monkeypatch):
-    import gideon.tasks.registry as treg
+    import gideon.engine.tasks.registry as treg
 
     async def boom(*_a, **_kw):
         raise RuntimeError("nope")
@@ -267,9 +268,6 @@ def test_the_step_is_journaled_even_when_the_write_fails(monkeypatch):
 
     asyncio.run(go())
     assert any(r["kind"] == "step_completed" for r in ledger("r-1"))
-
-
-# ── the in-flight bookkeeping ──
 
 
 def test_in_flight_writes_are_TRACKED_then_cleared():
@@ -289,15 +287,12 @@ def test_the_dedup_set_is_recorded_BEFORE_the_write_is_scheduled():
     still in flight — and the board would grow two rows for one node."""
     import inspect
 
-    from gideon.workflows.controller import RunController
+    from gideon.automation.workflows.controller import RunController
 
     source = inspect.getsource(RunController._project_task)
     appended = source.index("self._projected.append(")
     scheduled = source.index("self._schedule_task_write(")
     assert appended < scheduled
-
-
-# ── the drain (a measured defect) ──
 
 
 def test_completion_DRAINS_the_projection_write():
@@ -312,14 +307,16 @@ def test_completion_DRAINS_the_projection_write():
     Deliberately does NOT drain manually: that is the whole point. If a caller has to know to drain,
     every caller that does not is silently broken.
     """
-    from gideon.workflows import store as wstore
-    from gideon.workflows.controller import EngineServices, RunController
-    from gideon.workflows.models import WorkflowRun
+    from gideon.automation.workflows import store as wstore
+    from gideon.automation.workflows.controller import EngineServices, RunController
+    from gideon.automation.workflows.models import WorkflowRun
 
     async def go():
         run = WorkflowRun(id="r-1", workflow_name="t")
         wstore.create(run)
-        controller = RunController(run, _spec([_action("impl")]), services=EngineServices())
+        controller = RunController(
+            run, _spec([_action("impl")]), services=EngineServices()
+        )
         await controller.run_to_completion()
         return controller
 
@@ -341,9 +338,9 @@ def test_the_drain_is_BOUNDED(monkeypatch):
     The write is left running rather than cancelled: a cancelled write may already have created the
     task, and cancelling would lose the id without undoing the row.
     """
-    from gideon.workflows import store as wstore
-    from gideon.workflows.controller import EngineServices, RunController
-    from gideon.workflows.models import WorkflowRun
+    from gideon.automation.workflows import store as wstore
+    from gideon.automation.workflows.controller import EngineServices, RunController
+    from gideon.automation.workflows.models import WorkflowRun
 
     async def go():
         run = WorkflowRun(id="r-1", workflow_name="t")
@@ -364,9 +361,9 @@ def test_the_drain_is_BOUNDED(monkeypatch):
 
 
 def test_draining_with_nothing_in_flight_is_a_no_op():
-    from gideon.workflows import store as wstore
-    from gideon.workflows.controller import EngineServices, RunController
-    from gideon.workflows.models import WorkflowRun
+    from gideon.automation.workflows import store as wstore
+    from gideon.automation.workflows.controller import EngineServices, RunController
+    from gideon.automation.workflows.models import WorkflowRun
 
     async def go():
         run = WorkflowRun(id="r-1", workflow_name="t")

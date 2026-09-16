@@ -14,17 +14,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from gideon.legibility import discover as dc
+from gideon.assurance.legibility import discover as dc
 
-_APP_TSX = Path("web/src/app/App.tsx")
+_APP_TSX = Path("apps/console/src/app/App.tsx")
 
-# Top-level routes the SPA renders but immediately navigates away from, so a tip
-# pointing at one never lands where its label promised:
-#   loops — LoopsSection redirects the bare route to the `loop` composer; it survives
-#           only as the transient plan-review address. The loop LIST is `loops/history`.
 _REDIRECTING_ROUTES = {"loops"}
-
-# ── catalog integrity ────────────────────────────────────────────────────────
 
 
 def test_catalog_ids_are_unique():
@@ -33,11 +27,11 @@ def test_catalog_ids_are_unique():
 
 
 def test_every_engaged_key_is_registered():
-    # A tip that names an engaged_key must have a matching check, or auto-hide is
-    # silently dead for it.
     for tip in dc.CATALOG:
         if tip.engaged_key:
-            assert tip.engaged_key in dc._ENGAGEMENT_CHECKS, f"{tip.id} → {tip.engaged_key}"
+            assert (
+                tip.engaged_key in dc._ENGAGEMENT_CHECKS
+            ), f"{tip.id} → {tip.engaged_key}"
 
 
 def test_every_tip_has_a_deep_link():
@@ -76,7 +70,9 @@ def _routable_routes() -> set[str]:
     """
     src = _APP_TSX.read_text(encoding="utf-8")
     nav = re.search(r"const NAV: NavItem\[\] = \[(.*?)\n\]", src, re.S)
-    extras = re.search(r"const ROUTABLE = new Set\(\[\.\.\.NAV\.map\(.*?\)(.*?)\]\)", src, re.S)
+    extras = re.search(
+        r"const ROUTABLE = new Set\(\[\.\.\.NAV\.map\(.*?\)(.*?)\]\)", src, re.S
+    )
     assert nav and extras, "App.tsx NAV / ROUTABLE shape changed — update this parser"
     ids = set(re.findall(r"\bid: '([^']+)'", nav.group(1)))
     ids |= set(re.findall(r"'([^']+)'", extras.group(1)))
@@ -95,9 +91,6 @@ def test_try_helper_copies_query():
     built = dc._try("tools", "Open", q)
     q["open"] = "mutated"
     assert built["query"] == {"open": "x"}, "try_it must not alias the caller's dict"
-
-
-# ── visible selection (pure) ─────────────────────────────────────────────────
 
 
 def test_select_visible_drops_dismissed():
@@ -127,60 +120,60 @@ def test_select_visible_all_gone_is_empty():
 
 def test_group_by_area_collapses_consecutive_and_keeps_order():
     groups = dc._group_by_area(list(dc.CATALOG))
-    # Areas appear in first-seen order, each with the tips that belong to it.
-    assert [g["area"] for g in groups] == list(dict.fromkeys(t.area for t in dc.CATALOG))
+    assert [g["area"] for g in groups] == list(
+        dict.fromkeys(t.area for t in dc.CATALOG)
+    )
     flat = [tip["id"] for g in groups for tip in g["tips"]]
     assert flat == [t.id for t in dc.CATALOG]
 
 
-# ── engagement checks (isolation) ────────────────────────────────────────────
-
-
 def test_compute_engaged_isolates_failures(monkeypatch: pytest.MonkeyPatch):
-    # A check that raises must read False, never propagate.
     def _boom(_state):
         raise RuntimeError("boom")
 
     monkeypatch.setitem(dc._ENGAGEMENT_CHECKS, "chat", _boom)
     engaged = dc.compute_engaged(None)
     assert engaged["chat"] is False
-    # Every registered key is present in the result.
     assert set(engaged) == set(dc._ENGAGEMENT_CHECKS)
 
 
 def test_engaged_chat_reads_conversation_log():
-    state = SimpleNamespace(conversation_log=SimpleNamespace(list_sessions=lambda: ["s1"]))
+    state = SimpleNamespace(
+        conversation_log=SimpleNamespace(list_sessions=lambda: ["s1"])
+    )
     assert dc._engaged_chat(state) is True
     empty = SimpleNamespace(conversation_log=SimpleNamespace(list_sessions=lambda: []))
     assert dc._engaged_chat(empty) is False
-    assert dc._engaged_chat(SimpleNamespace()) is False  # no log attr
+    assert dc._engaged_chat(SimpleNamespace()) is False
 
 
 def test_engaged_knowledge_reads_stats():
-    state = SimpleNamespace(knowledge_store=SimpleNamespace(get_stats=lambda: {"items": 3}))
+    state = SimpleNamespace(
+        knowledge_store=SimpleNamespace(get_stats=lambda: {"items": 3})
+    )
     assert dc._engaged_knowledge(state) is True
-    zero = SimpleNamespace(knowledge_store=SimpleNamespace(get_stats=lambda: {"items": 0}))
+    zero = SimpleNamespace(
+        knowledge_store=SimpleNamespace(get_stats=lambda: {"items": 0})
+    )
     assert dc._engaged_knowledge(zero) is False
 
 
 def test_engaged_memory_uses_initialized_provider_only():
-    # Reads the already-initialized vector store off the context builder; must not
-    # touch any standalone-store creation path.
-    vs = SimpleNamespace(memory_stats=lambda: {"semantic_active": 2, "episodic_active": 0})
+    vs = SimpleNamespace(
+        memory_stats=lambda: {"semantic_active": 2, "episodic_active": 0}
+    )
     state = SimpleNamespace(
         context_builder=SimpleNamespace(memory=SimpleNamespace(vector_store=vs))
     )
     assert dc._engaged_memory(state) is True
-    # No context builder → not engaged, no crash.
     assert dc._engaged_memory(SimpleNamespace()) is False
-
-
-# ── dismissal persistence (entity_settings/legibility.json) ──────────────────
 
 
 @pytest.fixture
 def _entity_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setattr("gideon.providers.entity_routes.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gideon.extensions.providers.entity_routes.config_dir", lambda: tmp_path
+    )
     return tmp_path
 
 
@@ -188,30 +181,34 @@ def test_dismiss_persists_and_loads(_entity_home: Path):
     assert dc.load_dismissed() == set()
     dc.dismiss("chat")
     assert dc.load_dismissed() == {"chat"}
-    # accumulates without dupes
     dc.dismiss("tasks")
     dc.dismiss("chat")
     assert dc.load_dismissed() == {"chat", "tasks"}
     assert (_entity_home / "entity_settings" / "legibility.json").exists()
 
 
-# ── compute_discover wiring ──────────────────────────────────────────────────
-
-
 def _stub_config(monkeypatch: pytest.MonkeyPatch, *, enabled: bool) -> None:
     cfg = SimpleNamespace(legibility=SimpleNamespace(discover_tips=enabled))
-    monkeypatch.setattr("gideon.config.loader.AppConfig.load", classmethod(lambda cls: cfg))
+    monkeypatch.setattr(
+        "gideon.core.config.loader.AppConfig.load", classmethod(lambda cls: cfg)
+    )
 
 
 def test_compute_respects_kill_switch(monkeypatch: pytest.MonkeyPatch):
     _stub_config(monkeypatch, enabled=False)
     out = dc.compute_discover()
-    assert out == {"enabled": False, "areas": [], "visible_count": 0, "total": len(dc.CATALOG)}
+    assert out == {
+        "enabled": False,
+        "areas": [],
+        "visible_count": 0,
+        "total": len(dc.CATALOG),
+    }
 
 
-def test_compute_returns_grouped_visible_tips(_entity_home: Path, monkeypatch: pytest.MonkeyPatch):
+def test_compute_returns_grouped_visible_tips(
+    _entity_home: Path, monkeypatch: pytest.MonkeyPatch
+):
     _stub_config(monkeypatch, enabled=True)
-    # Nothing engaged, one dismissed → catalog minus one, grouped by area.
     monkeypatch.setattr(dc, "compute_engaged", lambda state=None: {})
     dc.dismiss("chat")
 
@@ -224,9 +221,13 @@ def test_compute_returns_grouped_visible_tips(_entity_home: Path, monkeypatch: p
     assert len(flat_ids) == out["visible_count"]
 
 
-def test_compute_auto_hides_engaged(monkeypatch: pytest.MonkeyPatch, _entity_home: Path):
+def test_compute_auto_hides_engaged(
+    monkeypatch: pytest.MonkeyPatch, _entity_home: Path
+):
     _stub_config(monkeypatch, enabled=True)
-    monkeypatch.setattr(dc, "compute_engaged", lambda state=None: {"chat": True, "loops": True})
+    monkeypatch.setattr(
+        dc, "compute_engaged", lambda state=None: {"chat": True, "loops": True}
+    )
     out = dc.compute_discover()
     flat_ids = [tip["id"] for g in out["areas"] for tip in g["tips"]]
     assert "chat" not in flat_ids and "loops" not in flat_ids

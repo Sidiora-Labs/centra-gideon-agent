@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from gideon.agent import rebuild_agent_config
+from gideon.engine.agent import rebuild_agent_config
 
 
 def _bundled_defaults(tmp_path: Path) -> Path:
@@ -40,16 +40,15 @@ def _run_install(tmp_path: Path, cfg_dir: Path, managed_mcps: dict | None = None
     agents_dir.mkdir(exist_ok=True)
     prompt = cfg_dir / "prompt.md"
 
-    # Isolate tests from the caller's real ~/.gideon/hooks/ by disabling
-    # autoimport in the patched config.  Tests that want to exercise autoimport
-    # should override config_path themselves.
-    pc_config = tmp_path / "empty_pc_config.json"
-    if not pc_config.exists():
-        pc_config.write_text(json.dumps({"agent": {"agent_hooks_autoimport": False}}))
+    runtime_config_file = tmp_path / "empty_runtime_config_file.json"
+    if not runtime_config_file.exists():
+        runtime_config_file.write_text(
+            json.dumps({"agent": {"agent_hooks_autoimport": False}})
+        )
 
     patches = [
         patch.multiple(
-            "gideon.agent",
+            "gideon.engine.agent",
             AGENTS_DIR=agents_dir,
             _BUNDLED_CFG_DIR=cfg_dir,
             _GIDEON_BIN="/usr/bin/gideon",
@@ -58,14 +57,15 @@ def _run_install(tmp_path: Path, cfg_dir: Path, managed_mcps: dict | None = None
                 managed_mcps if managed_mcps is not None else _DEFAULT_MANAGED_MCPS
             ),
         ),
-        patch("gideon.agent._prompt_path", return_value=prompt),
-        patch("gideon.agent._shipped_defaults", return_value=cfg_dir / "defaults.json"),
-        patch("gideon.agent._project_dir", return_value=None),
-        patch("gideon.agent._all_skill_paths", return_value=[]),
-        patch("gideon.agent.shutil.which", side_effect=lambda c, **kw: c),
-        # Patched at definition site: agent.py uses a local `from gideon.config import
-        # config_path` inside function bodies, so the from-import re-resolves each call.
-        patch("gideon.config.config_path", return_value=pc_config),
+        patch("gideon.engine.agent._prompt_path", return_value=prompt),
+        patch(
+            "gideon.engine.agent._shipped_defaults",
+            return_value=cfg_dir / "defaults.json",
+        ),
+        patch("gideon.engine.agent._project_dir", return_value=None),
+        patch("gideon.engine.agent._all_skill_paths", return_value=[]),
+        patch("gideon.engine.agent.shutil.which", side_effect=lambda c, **kw: c),
+        patch("gideon.core.config.config_path", return_value=runtime_config_file),
     ]
     with ExitStack() as stack:
         for p in patches:
@@ -104,7 +104,7 @@ class TestInstallAgent:
     def test_existing_config_refreshes_security_fields(self, tmp_path: Path):
         """hooks are always overwritten from bundled config on refresh.
 
-        (Bash command screening is enforced natively in ``gideon.security``;
+        (Bash command screening is enforced natively in ``gideon.security.security``;
         the agent file no longer carries a per-agent ``deniedCommands`` list.)
         """
         cfg_dir = _bundled_defaults(tmp_path)
@@ -122,8 +122,9 @@ class TestInstallAgent:
         path = _run_install(tmp_path, cfg_dir)
         config = json.loads(path.read_text())
         assert config["hooks"] == {"preToolUse": "audit"}
-        # The legacy per-agent denylist is no longer injected.
-        assert "deniedCommands" not in config.get("toolsSettings", {}).get("execute_bash", {})
+        assert "deniedCommands" not in config.get("toolsSettings", {}).get(
+            "execute_bash", {}
+        )
 
     def test_existing_config_refreshes_dynamic_mcp_servers(self, tmp_path: Path):
         """gideon-schedule and gideon-core commands are always refreshed."""
@@ -180,16 +181,13 @@ class TestInstallAgent:
 
         path = _run_install(tmp_path, cfg_dir)
         config = json.loads(path.read_text())
-        # gideon-schedule/core: command refreshed, autoApprove preserved
         assert config["mcpServers"]["gideon-schedule"]["command"] == "/usr/bin/gideon"
         assert config["mcpServers"]["gideon-schedule"]["autoApprove"] == [
             "schedule_list",
             "schedule_add",
         ]
         assert config["mcpServers"]["gideon-core"]["autoApprove"] == ["memory_list"]
-        # other MCP servers: untouched
         assert config["mcpServers"]["my-mcp-server"]["autoApprove"] == ["ReadFile"]
-        # hooks must always be refreshed from bundled defaults
         assert config["hooks"] == {"preToolUse": "audit"}
 
     def test_gideon_mcp_json_overrides_legacy_mcp(self, tmp_path: Path):
@@ -197,7 +195,6 @@ class TestInstallAgent:
         cfg_dir = _bundled_defaults(tmp_path)
         agents_dir = tmp_path / "agents"
         agents_dir.mkdir(exist_ok=True)
-        # Pre-existing agent config with my-mcp-server from legacy settings
         existing = {
             "model": "claude-user-custom",
             "tools": [],
@@ -211,10 +208,9 @@ class TestInstallAgent:
             },
         }
         (agents_dir / "gideon.json").write_text(json.dumps(existing))
-        # gideon mcp.json overrides args (removes --include-tools)
-        pc_home = tmp_path / "gideon_home"
-        pc_home.mkdir(exist_ok=True)
-        (pc_home / "mcp.json").write_text(
+        runtime_home = tmp_path / "gideon_home"
+        runtime_home.mkdir(exist_ok=True)
+        (runtime_home / "mcp.json").write_text(
             json.dumps(
                 {
                     "mcpServers": {
@@ -226,11 +222,8 @@ class TestInstallAgent:
         )
         path = _run_install(tmp_path, cfg_dir)
         config = json.loads(path.read_text())
-        # my-mcp-server args overridden by gideon mcp.json
         assert config["mcpServers"]["my-mcp-server"]["args"] == []
-        # autoApprove preserved (not in gideon mcp.json)
         assert config["mcpServers"]["my-mcp-server"]["autoApprove"] == ["ReadFile"]
-        # new server added from gideon mcp.json
         assert config["mcpServers"]["new-server"]["command"] == "new-cmd"
 
     def test_new_managed_server_seeds_auto_approve(self, tmp_path: Path):
@@ -246,14 +239,15 @@ class TestInstallAgent:
         }
         path = _run_install(tmp_path, cfg_dir, managed_mcps=mcps)
         config = json.loads(path.read_text())
-        assert config["mcpServers"]["example-governance"]["autoApprove"] == ["search_example"]
+        assert config["mcpServers"]["example-governance"]["autoApprove"] == [
+            "search_example"
+        ]
 
     def test_new_managed_server_seeds_auto_approve_on_refresh(self, tmp_path: Path):
         """When a managed server is new to an existing config, autoApprove is seeded."""
         cfg_dir = _bundled_defaults(tmp_path)
         agents_dir = tmp_path / "agents"
         agents_dir.mkdir(exist_ok=True)
-        # Existing config has gideon-schedule/core but NOT example-governance
         existing = {
             "model": "claude-user-custom",
             "tools": [],
@@ -277,15 +271,15 @@ class TestInstallAgent:
         }
         path = _run_install(tmp_path, cfg_dir, managed_mcps=mcps)
         config = json.loads(path.read_text())
-        # example-governance is genuinely new → autoApprove should be seeded
-        assert config["mcpServers"]["example-governance"]["autoApprove"] == ["search_example"]
+        assert config["mcpServers"]["example-governance"]["autoApprove"] == [
+            "search_example"
+        ]
 
     def test_user_removed_auto_approve_not_re_added(self, tmp_path: Path):
         """If user deliberately removed autoApprove, refresh must not re-add it."""
         cfg_dir = _bundled_defaults(tmp_path)
         agents_dir = tmp_path / "agents"
         agents_dir.mkdir(exist_ok=True)
-        # Existing config has example-governance but user removed autoApprove
         existing = {
             "model": "claude-user-custom",
             "tools": [],
@@ -311,8 +305,10 @@ class TestInstallAgent:
         }
         path = _run_install(tmp_path, cfg_dir, managed_mcps=mcps)
         config = json.loads(path.read_text())
-        # command/args refreshed, but autoApprove NOT re-added
-        assert config["mcpServers"]["example-governance"]["command"] == "/usr/bin/example-tool"
+        assert (
+            config["mcpServers"]["example-governance"]["command"]
+            == "/usr/bin/example-tool"
+        )
         assert "autoApprove" not in config["mcpServers"]["example-governance"]
 
     def test_clean_flag_ignores_existing(self, tmp_path: Path):
@@ -355,14 +351,17 @@ class TestInstallAgent:
         config = json.loads(path.read_text())
         assert config["model"] == "claude-default"
 
-    def test_missing_bundled_defaults_raises_when_existing_config_present(self, tmp_path: Path):
+    def test_missing_bundled_defaults_raises_when_existing_config_present(
+        self, tmp_path: Path
+    ):
         """Error propagates when bundled defaults are absent during refresh."""
         cfg_dir = tmp_path / "config"
         cfg_dir.mkdir()
-        # No defaults.json written — bundled config is absent
         agents_dir = tmp_path / "agents"
         agents_dir.mkdir()
-        (agents_dir / "gideon.json").write_text(json.dumps({"model": "x", "mcpServers": {}}))
+        (agents_dir / "gideon.json").write_text(
+            json.dumps({"model": "x", "mcpServers": {}})
+        )
 
         with pytest.raises(RuntimeError, match="Cannot build agent config"):
             _run_install(tmp_path, cfg_dir)
@@ -372,7 +371,7 @@ class TestAtomicJsonWrite:
     """Test 1.3: _atomic_json_write preserves permissions and handles new files."""
 
     def test_preserves_existing_permissions(self, tmp_path: Path):
-        from gideon.agent import _atomic_json_write
+        from gideon.engine.agent import _atomic_json_write
 
         target = tmp_path / "test.json"
         target.write_text("{}")
@@ -386,7 +385,7 @@ class TestAtomicJsonWrite:
         assert json.loads(target.read_text()) == {"key": "value"}
 
     def test_new_file_gets_0o644(self, tmp_path: Path):
-        from gideon.agent import _atomic_json_write
+        from gideon.engine.agent import _atomic_json_write
 
         target = tmp_path / "new.json"
         _atomic_json_write(target, {"new": True})
@@ -397,7 +396,7 @@ class TestAtomicJsonWrite:
         assert json.loads(target.read_text()) == {"new": True}
 
     def test_no_temp_file_left_on_success(self, tmp_path: Path):
-        from gideon.agent import _atomic_json_write
+        from gideon.engine.agent import _atomic_json_write
 
         target = tmp_path / "clean.json"
         _atomic_json_write(target, {"a": 1})
@@ -411,11 +410,9 @@ class TestResolveGideonBin:
 
     def test_finds_bin_in_parent_hierarchy(self, tmp_path: Path):
         """Walks up from package dir to find bin/gideon."""
-        import gideon.agent as agent_mod
-        from gideon.agent import _resolve_gideon_bin
+        import gideon.engine.agent as agent_mod
+        from gideon.engine.agent import _resolve_gideon_bin
 
-        # Create structure: venv/lib/python3.x/site-packages/gideon
-        #                   venv/bin/gideon
         venv = tmp_path / "venv"
         pkg_dir = venv / "lib" / "python3.11" / "site-packages" / "gideon"
         pkg_dir.mkdir(parents=True)
@@ -427,21 +424,21 @@ class TestResolveGideonBin:
         gideon_bin.write_text("#!/bin/bash\necho gideon")
         gideon_bin.chmod(0o755)
 
-        # Mock gideon.__file__ to point to our fake package
-        mock_pc = unittest.mock.MagicMock()
-        mock_pc.__file__ = str(pkg_dir / "__init__.py")
+        package_module = unittest.mock.MagicMock()
+        package_module.__file__ = str(pkg_dir / "__init__.py")
 
-        # Reset global and mock the import
         old_val = agent_mod._GIDEON_BIN
         try:
             agent_mod._GIDEON_BIN = None
-            with patch.dict("sys.modules", {"gideon": mock_pc}):
+            with patch.dict("sys.modules", {"gideon": package_module}):
                 result = _resolve_gideon_bin()
             assert result == str(gideon_bin)
         finally:
             agent_mod._GIDEON_BIN = old_val
 
-    def test_finds_bin_alongside_interpreter_when_venv_outside_source_tree(self, tmp_path: Path):
+    def test_finds_bin_alongside_interpreter_when_venv_outside_source_tree(
+        self, tmp_path: Path
+    ):
         """Regression: the dev layout has a repo-root ``.venv`` while the package
         lives under ``Gideon/src/gideon`` — so the step-1 parent walk
         from the package never crosses the sibling ``.venv/bin`` and misses the
@@ -449,58 +446,51 @@ class TestResolveGideonBin:
         boot. Step 2 resolves it via ``sys.prefix``/``sys.executable`` (the venv
         root) instead. MUST NOT ``resolve()`` the interpreter symlink (that jumps
         to the base python, out of the venv bin)."""
-        import gideon.agent as agent_mod
-        from gideon.agent import _resolve_gideon_bin
+        import gideon.engine.agent as agent_mod
+        from gideon.engine.agent import _resolve_gideon_bin
 
-        # A source tree with NO bin/gideon anywhere in the package's parents.
-        src_pkg = tmp_path / "repo" / "Core" / "src" / "gideon"
+        src_pkg = tmp_path / "repo" / "Core" / "runtime" / "gideon"
         src_pkg.mkdir(parents=True)
         (src_pkg / "__init__.py").write_text("")
 
-        # The venv lives at the repo root — a SIBLING of the source tree, not a
-        # parent of the package (so the step-1 walk can't reach it).
         venv_bin = tmp_path / "repo" / ".venv" / "bin"
         venv_bin.mkdir(parents=True)
-        pc = venv_bin / "gideon"
-        pc.write_text("#!/bin/sh\n")
-        pc.chmod(0o755)
+        launcher = venv_bin / "gideon"
+        launcher.write_text("#!/bin/sh\n")
+        launcher.chmod(0o755)
 
-        mock_pc = unittest.mock.MagicMock()
-        mock_pc.__file__ = str(src_pkg / "__init__.py")
+        package_module = unittest.mock.MagicMock()
+        package_module.__file__ = str(src_pkg / "__init__.py")
 
         old_val = agent_mod._GIDEON_BIN
         try:
             agent_mod._GIDEON_BIN = None
-            with patch.dict("sys.modules", {"gideon": mock_pc}):
-                # sys.executable points at the venv's python (a symlink in reality);
-                # sys.prefix is the venv root. Either must find venv_bin/gideon.
+            with patch.dict("sys.modules", {"gideon": package_module}):
                 with (
                     patch.object(agent_mod.sys, "executable", str(venv_bin / "python")),
-                    patch.object(agent_mod.sys, "prefix", str(tmp_path / "repo" / ".venv")),
+                    patch.object(
+                        agent_mod.sys, "prefix", str(tmp_path / "repo" / ".venv")
+                    ),
                 ):
                     result = _resolve_gideon_bin()
-            assert result == str(pc)
+            assert result == str(launcher)
         finally:
             agent_mod._GIDEON_BIN = old_val
 
     def test_falls_back_to_shutil_which(self, tmp_path: Path):
         """Falls back to PATH lookup when bin/ not found in hierarchy."""
-        import gideon.agent as agent_mod
-        from gideon.agent import _resolve_gideon_bin
+        import gideon.engine.agent as agent_mod
+        from gideon.engine.agent import _resolve_gideon_bin
 
-        # Package dir with no bin/ sibling anywhere (use /tmp which has no bin/)
-        mock_pc = unittest.mock.MagicMock()
-        mock_pc.__file__ = str(tmp_path / "gideon" / "__init__.py")
+        package_module = unittest.mock.MagicMock()
+        package_module.__file__ = str(tmp_path / "gideon" / "__init__.py")
         (tmp_path / "gideon").mkdir()
         (tmp_path / "gideon" / "__init__.py").write_text("")
 
-        # Create the fallback binary so _usable() validation passes
         fallback_bin = tmp_path / "usr_local_bin_gideon"
         fallback_bin.write_text("#!/bin/sh\n")
         fallback_bin.chmod(0o755)
 
-        # Selective isfile mock: only the explicit fallback passes validation;
-        # any real /bin/gideon the walk might find gets rejected.
         _real_isfile = os.path.isfile
 
         def _fake_isfile(p):
@@ -509,9 +499,9 @@ class TestResolveGideonBin:
         old_val = agent_mod._GIDEON_BIN
         try:
             agent_mod._GIDEON_BIN = None
-            with patch.dict("sys.modules", {"gideon": mock_pc}):
+            with patch.dict("sys.modules", {"gideon": package_module}):
                 with patch("os.path.isfile", side_effect=_fake_isfile):
-                    # Skip pkg-path branch
+
                     def _which(cmd: str) -> str | None:
                         if cmd == "pkg-path":
                             return None
@@ -527,19 +517,18 @@ class TestResolveGideonBin:
 
     def test_returns_gideon_when_not_found(self, tmp_path: Path):
         """Returns 'gideon' string when not found anywhere."""
-        import gideon.agent as agent_mod
-        from gideon.agent import _resolve_gideon_bin
+        import gideon.engine.agent as agent_mod
+        from gideon.engine.agent import _resolve_gideon_bin
 
-        mock_pc = unittest.mock.MagicMock()
-        mock_pc.__file__ = str(tmp_path / "gideon" / "__init__.py")
+        package_module = unittest.mock.MagicMock()
+        package_module.__file__ = str(tmp_path / "gideon" / "__init__.py")
         (tmp_path / "gideon").mkdir(exist_ok=True)
         (tmp_path / "gideon" / "__init__.py").write_text("")
 
         old_val = agent_mod._GIDEON_BIN
         try:
             agent_mod._GIDEON_BIN = None
-            with patch.dict("sys.modules", {"gideon": mock_pc}):
-                # Blanket isfile=False blocks walk, pkg-path, and which fallback
+            with patch.dict("sys.modules", {"gideon": package_module}):
                 with patch("os.path.isfile", return_value=False):
                     with patch("shutil.which", return_value=None):
                         result = _resolve_gideon_bin()
@@ -553,18 +542,17 @@ class TestResolveGideonBin:
         package manager migration). Regression: ~/.local/bin/gideon was
         removed but a stale path was still cached in the PATH lookup.
         """
-        import gideon.agent as agent_mod
-        from gideon.agent import _resolve_gideon_bin
+        import gideon.engine.agent as agent_mod
+        from gideon.engine.agent import _resolve_gideon_bin
 
-        mock_pc = unittest.mock.MagicMock()
-        mock_pc.__file__ = str(tmp_path / "gideon" / "__init__.py")
+        package_module = unittest.mock.MagicMock()
+        package_module.__file__ = str(tmp_path / "gideon" / "__init__.py")
         (tmp_path / "gideon").mkdir(exist_ok=True)
         (tmp_path / "gideon" / "__init__.py").write_text("")
 
-        # Stub pkg-path so its subprocess call doesn't resolve to a real binary
         def _which(cmd: str) -> str | None:
             if cmd == "pkg-path":
-                return None  # skip pkg-path branch
+                return None
             if cmd == "gideon":
                 return "/home/user/.local/bin/gideon-DELETED"
             return None
@@ -572,21 +560,19 @@ class TestResolveGideonBin:
         old_val = agent_mod._GIDEON_BIN
         try:
             agent_mod._GIDEON_BIN = None
-            with patch.dict("sys.modules", {"gideon": mock_pc}):
-                # Blanket isfile=False — the stale path must not pass validation
+            with patch.dict("sys.modules", {"gideon": package_module}):
                 with patch("os.path.isfile", return_value=False):
                     with patch("shutil.which", side_effect=_which):
                         result = _resolve_gideon_bin()
-            # Must NOT cache the stale path — falls through to bare 'gideon'
             assert result == "gideon"
-            assert agent_mod._GIDEON_BIN is None  # didn't cache fallback
+            assert agent_mod._GIDEON_BIN is None
         finally:
             agent_mod._GIDEON_BIN = old_val
 
     def test_caches_result(self):
         """Result is cached in global _GIDEON_BIN."""
-        import gideon.agent as agent_mod
-        from gideon.agent import _resolve_gideon_bin
+        import gideon.engine.agent as agent_mod
+        from gideon.engine.agent import _resolve_gideon_bin
 
         old_val = agent_mod._GIDEON_BIN
         try:
@@ -598,13 +584,13 @@ class TestResolveGideonBin:
 
     def test_accepts_binary_in_install_tree(self, tmp_path: Path):
         """Resolves bin/gideon by walking up from the package __file__."""
-        import gideon.agent as agent_mod
-        from gideon.agent import _resolve_gideon_bin
+        import gideon.engine.agent as agent_mod
+        from gideon.engine.agent import _resolve_gideon_bin
 
-        # Mirror a venv-style layout: lib/.../site-packages/gideon with a
-        # bin/gideon sibling several directories up.
         runtime = tmp_path / "env" / "runtime"
-        (runtime / "lib" / "python3.12" / "site-packages" / "gideon").mkdir(parents=True)
+        (runtime / "lib" / "python3.12" / "site-packages" / "gideon").mkdir(
+            parents=True
+        )
         (
             runtime / "lib" / "python3.12" / "site-packages" / "gideon" / "__init__.py"
         ).write_text("")
@@ -615,24 +601,23 @@ class TestResolveGideonBin:
         gideon_bin.write_bytes(b"#!/usr/bin/env python3\nimport sys\n")
         gideon_bin.chmod(0o755)
 
-        mock_pc = unittest.mock.MagicMock()
-        mock_pc.__file__ = str(
+        package_module = unittest.mock.MagicMock()
+        package_module.__file__ = str(
             runtime / "lib" / "python3.12" / "site-packages" / "gideon" / "__init__.py"
         )
 
         old_val = agent_mod._GIDEON_BIN
         try:
             agent_mod._GIDEON_BIN = None
-            with patch.dict("sys.modules", {"gideon": mock_pc}):
+            with patch.dict("sys.modules", {"gideon": package_module}):
                 result = _resolve_gideon_bin()
-            # Should accept — bin/gideon is a sibling up the install tree
             assert result == str(gideon_bin)
         finally:
             agent_mod._GIDEON_BIN = old_val
 
     def test_accepts_shell_wrapper_binary(self, tmp_path: Path):
         """Accepts a bin/gideon that is a shell wrapper script."""
-        from gideon.agent import _bin_is_usable
+        from gideon.engine.agent import _bin_is_usable
 
         workspace = tmp_path / "workspace"
         workspace.mkdir()
@@ -684,11 +669,8 @@ class TestAgentHooksMerge:
     ) -> dict:
         """Install agent with agent_hooks in config.json and return the result."""
         cfg_dir = self._bundled_with_hooks(tmp_path)
-        pc_config = tmp_path / "pc_config.json"
-        # Disable autoimport in this helper: these tests target the explicit
-        # agent_hooks merge path only. The autoimport path is covered by
-        # TestDefaultDialectHooksAutoimport below.
-        pc_config.write_text(
+        runtime_config_file = tmp_path / "runtime_config_file.json"
+        runtime_config_file.write_text(
             json.dumps(
                 {
                     "agent": {
@@ -707,18 +689,21 @@ class TestAgentHooksMerge:
         prompt = cfg_dir / "prompt.md"
         patches = [
             patch.multiple(
-                "gideon.agent",
+                "gideon.engine.agent",
                 AGENTS_DIR=agents_dir,
                 _BUNDLED_CFG_DIR=cfg_dir,
                 _GIDEON_BIN="/usr/bin/gideon",
                 _MANAGED_MCP_SERVERS=_DEFAULT_MANAGED_MCPS,
             ),
-            patch("gideon.agent._prompt_path", return_value=prompt),
-            patch("gideon.agent._shipped_defaults", return_value=cfg_dir / "defaults.json"),
-            patch("gideon.agent._project_dir", return_value=None),
-            patch("gideon.agent._all_skill_paths", return_value=[]),
-            patch("gideon.agent.shutil.which", side_effect=lambda c, **kw: c),
-            patch("gideon.config.config_path", return_value=pc_config),
+            patch("gideon.engine.agent._prompt_path", return_value=prompt),
+            patch(
+                "gideon.engine.agent._shipped_defaults",
+                return_value=cfg_dir / "defaults.json",
+            ),
+            patch("gideon.engine.agent._project_dir", return_value=None),
+            patch("gideon.engine.agent._all_skill_paths", return_value=[]),
+            patch("gideon.engine.agent.shutil.which", side_effect=lambda c, **kw: c),
+            patch("gideon.core.config.config_path", return_value=runtime_config_file),
         ]
         with ExitStack() as stack:
             for p in patches:
@@ -736,8 +721,11 @@ class TestAgentHooksMerge:
             },
         )
         post = config["hooks"]["postToolUse"]
-        assert post[0] == {"matcher": "execute_bash", "command": "audit.sh"}  # bundled first
-        assert post[1] == {"matcher": "*", "command": hook}  # user appended
+        assert post[0] == {
+            "matcher": "execute_bash",
+            "command": "audit.sh",
+        }
+        assert post[1] == {"matcher": "*", "command": hook}
 
     def test_user_hooks_new_event_type(self, tmp_path: Path):
         """User agent_hooks can add hooks for event types not in bundled."""
@@ -771,7 +759,7 @@ class TestAgentHooksMerge:
 
     def test_user_hooks_dedup_against_bundled(self, tmp_path: Path):
         """User hook whose command+matcher matches a bundled hook is not added twice."""
-        from gideon.agent import _merge_agent_hooks
+        from gideon.engine.agent import _merge_agent_hooks
 
         hook = self._make_hook(tmp_path, "audit.sh")
         bundled = {"postToolUse": [{"matcher": "execute_bash", "command": hook}]}
@@ -801,7 +789,7 @@ class TestAgentHooksMerge:
             tmp_path,
             {
                 "preToolUse": [
-                    {"matcher": "*"},  # no command
+                    {"matcher": "*"},
                     {"command": hook},
                 ],
             },
@@ -820,46 +808,48 @@ class TestAgentHooksMerge:
         }
         config = self._run_with_agent_hooks(
             tmp_path,
-            {"preToolUse": [{"matcher": "*", "command": self._make_hook(tmp_path, "guardian.sh")}]},
+            {
+                "preToolUse": [
+                    {
+                        "matcher": "*",
+                        "command": self._make_hook(tmp_path, "guardian.sh"),
+                    }
+                ]
+            },
             existing=existing,
         )
-        # Bundled hooks overwrite old hooks
         assert config["hooks"]["postToolUse"] == [
             {"matcher": "execute_bash", "command": "audit.sh"},
         ]
-        # User hooks appended
         assert len(config["hooks"]["preToolUse"]) == 1
         assert config["hooks"]["preToolUse"][0]["matcher"] == "*"
 
-    # -- Direct unit tests for _merge_agent_hooks defensive branches --
     def test_merge_agent_hooks_non_dict_user_hooks_returns_original(self):
-        from gideon.agent import _merge_agent_hooks
+        from gideon.engine.agent import _merge_agent_hooks
 
         bundled = {"postToolUse": [{"command": "audit.sh"}]}
         assert _merge_agent_hooks(bundled, ["bad"]) == bundled
 
     def test_merge_agent_hooks_non_list_event_entries_skipped(self):
-        from gideon.agent import _merge_agent_hooks
+        from gideon.engine.agent import _merge_agent_hooks
 
         bundled = {"postToolUse": [{"command": "audit.sh"}]}
         result = _merge_agent_hooks(bundled, {"postToolUse": "not-a-list"})
         assert result == bundled
 
     def test_merge_agent_hooks_non_dict_entry_in_list_skipped(self):
-        from gideon.agent import _merge_agent_hooks
+        from gideon.engine.agent import _merge_agent_hooks
 
         result = _merge_agent_hooks({}, {"preToolUse": ["just-a-string"]})
         assert result["preToolUse"] == []
 
-    # -- Direct unit tests for _validate_hook_command --
-
     def test_validate_rejects_relative_path(self, tmp_path: Path):
-        from gideon.agent import _validate_hook_command
+        from gideon.engine.agent import _validate_hook_command
 
         assert _validate_hook_command("relative/hook.sh", "test") is None
 
     def test_validate_rejects_shell_metacharacters(self, tmp_path: Path):
-        from gideon.agent import _validate_hook_command
+        from gideon.engine.agent import _validate_hook_command
 
         hook = self._make_hook(tmp_path)
         assert _validate_hook_command(hook + "; rm -rf /", "test") is None
@@ -867,28 +857,32 @@ class TestAgentHooksMerge:
         assert _validate_hook_command(hook + " $(evil)", "test") is None
 
     def test_validate_rejects_nonexistent_file(self):
-        from gideon.agent import _validate_hook_command
+        from gideon.engine.agent import _validate_hook_command
 
         assert _validate_hook_command("/nonexistent/hook.sh", "test") is None
 
     def test_validate_accepts_valid_hook(self, tmp_path: Path):
-        from gideon.agent import _validate_hook_command
+        from gideon.engine.agent import _validate_hook_command
 
         hook = self._make_hook(tmp_path)
         assert _validate_hook_command(hook, "test") is not None
 
     def test_merge_strips_extra_fields(self, tmp_path: Path):
         """Only command and matcher fields are kept; arbitrary keys are stripped."""
-        from gideon.agent import _merge_agent_hooks
+        from gideon.engine.agent import _merge_agent_hooks
 
         hook = self._make_hook(tmp_path)
-        user = {"preToolUse": [{"command": hook, "matcher": "*", "shell": True, "env": {"X": "1"}}]}
+        user = {
+            "preToolUse": [
+                {"command": hook, "matcher": "*", "shell": True, "env": {"X": "1"}}
+            ]
+        }
         result = _merge_agent_hooks({}, user)
         assert result["preToolUse"] == [{"command": hook, "matcher": "*"}]
 
     def test_validate_rejects_symlink_to_sensitive(self, tmp_path: Path):
         """Symlinks resolving to sensitive paths are rejected."""
-        from gideon.agent import _validate_hook_command
+        from gideon.engine.agent import _validate_hook_command
 
         sensitive = tmp_path / ".ssh" / "key"
         sensitive.parent.mkdir(parents=True)
@@ -897,12 +891,14 @@ class TestAgentHooksMerge:
         link = tmp_path / "hooks" / "sneaky.sh"
         link.parent.mkdir(parents=True)
         link.symlink_to(sensitive)
-        with patch("gideon.agent.is_sensitive_path", side_effect=lambda p: ".ssh" in p):
+        with patch(
+            "gideon.engine.agent.is_sensitive_path", side_effect=lambda p: ".ssh" in p
+        ):
             assert _validate_hook_command(str(link), "test") is None
 
     def test_merge_rejects_non_string_matcher(self, tmp_path: Path):
         """Non-string matcher values are skipped (prevents TypeError and injection)."""
-        from gideon.agent import _merge_agent_hooks
+        from gideon.engine.agent import _merge_agent_hooks
 
         hook = self._make_hook(tmp_path)
         user = {
@@ -918,7 +914,7 @@ class TestAgentHooksMerge:
 
     def test_merge_agent_hooks_max_per_event_limit(self, tmp_path: Path):
         """At most _MAX_USER_HOOKS_PER_EVENT hooks are accepted per event."""
-        from gideon.agent import _MAX_USER_HOOKS_PER_EVENT, _merge_agent_hooks
+        from gideon.engine.agent import _MAX_USER_HOOKS_PER_EVENT, _merge_agent_hooks
 
         hooks = [
             {"command": self._make_hook(tmp_path, f"hook_{i}.sh")}
@@ -929,14 +925,14 @@ class TestAgentHooksMerge:
 
     def test_merge_agent_hooks_unknown_event_rejected(self):
         """Unknown event types are silently dropped."""
-        from gideon.agent import _merge_agent_hooks
+        from gideon.engine.agent import _merge_agent_hooks
 
         result = _merge_agent_hooks({}, {"onBadEvent": [{"command": "/bin/true"}]})
         assert "onBadEvent" not in result
 
     def test_merge_rejects_matcher_with_shell_metacharacters(self, tmp_path: Path):
         """Matchers with shell metacharacters are rejected."""
-        from gideon.agent import _merge_agent_hooks
+        from gideon.engine.agent import _merge_agent_hooks
 
         hook = self._make_hook(tmp_path)
         user = {
@@ -945,7 +941,7 @@ class TestAgentHooksMerge:
                 {"command": hook, "matcher": "tool | cat"},
                 {"command": hook, "matcher": "$(evil)"},
                 {"command": hook, "matcher": "tool name with spaces"},
-                {"command": hook, "matcher": "*"},  # valid
+                {"command": hook, "matcher": "*"},
             ]
         }
         result = _merge_agent_hooks({}, user)
@@ -954,7 +950,7 @@ class TestAgentHooksMerge:
 
     def test_merge_rejects_oversized_matcher(self, tmp_path: Path):
         """Matchers exceeding max length are rejected."""
-        from gideon.agent import _MAX_MATCHER_LEN, _merge_agent_hooks
+        from gideon.engine.agent import _MAX_MATCHER_LEN, _merge_agent_hooks
 
         hook = self._make_hook(tmp_path)
         user = {
@@ -969,7 +965,7 @@ class TestAgentHooksMerge:
 
     def test_merge_global_hooks_limit(self, tmp_path: Path):
         """Total hooks across all events are capped at _MAX_TOTAL_USER_HOOKS."""
-        from gideon.agent import _MAX_TOTAL_USER_HOOKS, _merge_agent_hooks
+        from gideon.engine.agent import _MAX_TOTAL_USER_HOOKS, _merge_agent_hooks
 
         user = {}
         for event in ("preToolUse", "postToolUse", "userPromptSubmit"):
@@ -986,7 +982,7 @@ class TestToolBloatFixes:
     """Tests for tool bloat prevention: rename migration, fresh_install gating, dedup."""
 
     def test_existing_config_tools_untouched(self, tmp_path: Path):
-        """Existing tools/allowedTools are preserved exactly as-is (no renames, no additions)."""
+        """Existing tooling/allowedTools are preserved exactly as-is (no renames, no additions)."""
         cfg_dir = _bundled_defaults(tmp_path)
         agents_dir = tmp_path / "agents"
         agents_dir.mkdir(exist_ok=True)
@@ -1000,7 +996,13 @@ class TestToolBloatFixes:
 
         path = _run_install(tmp_path, cfg_dir)
         config = json.loads(path.read_text())
-        assert config["tools"] == ["bash", "read_file", "write_file", "grep", "@my-server"]
+        assert config["tools"] == [
+            "bash",
+            "read_file",
+            "write_file",
+            "grep",
+            "@my-server",
+        ]
         assert config["allowedTools"] == ["read_file", "grep"]
 
     def test_existing_config_no_managed_mcp_added(self, tmp_path: Path):
@@ -1058,7 +1060,6 @@ class TestToolBloatFixes:
 
         path = _run_install(tmp_path, cfg_dir)
         config = json.loads(path.read_text())
-        # Should get defaults (fresh install path)
         assert config["model"] == "claude-default"
         assert "@gideon-schedule" in config["tools"]
 
@@ -1093,7 +1094,7 @@ class TestDefaultDialectHooksAutoimport:
 
     def test_agent_hooks_autoimport_loads_executable_scripts(self, tmp_path: Path):
         """Two executable scripts both land under preToolUse with their absolute paths."""
-        from gideon.agent import _autoimport_agent_hooks
+        from gideon.engine.agent import _autoimport_agent_hooks
 
         hooks_dir = tmp_path / "hooks"
         s1 = self._make_script(hooks_dir, "a.sh")
@@ -1107,7 +1108,7 @@ class TestDefaultDialectHooksAutoimport:
 
     def test_agent_hooks_autoimport_parses_event_header(self, tmp_path: Path):
         """A ``# event: PostToolUse`` header routes the script to postToolUse."""
-        from gideon.agent import _autoimport_agent_hooks
+        from gideon.engine.agent import _autoimport_agent_hooks
 
         hooks_dir = tmp_path / "hooks"
         self._make_script(hooks_dir, "audit.sh", body="# event: PostToolUse\nexit 0\n")
@@ -1120,7 +1121,7 @@ class TestDefaultDialectHooksAutoimport:
 
     def test_agent_hooks_autoimport_parses_matcher_header(self, tmp_path: Path):
         """A ``# matcher:`` header is preserved on the resulting entry."""
-        from gideon.agent import _autoimport_agent_hooks
+        from gideon.engine.agent import _autoimport_agent_hooks
 
         hooks_dir = tmp_path / "hooks"
         self._make_script(hooks_dir, "guard.sh", body="# matcher: shell\nexit 0\n")
@@ -1133,24 +1134,25 @@ class TestDefaultDialectHooksAutoimport:
         """Non-executable ``.sh`` files are skipped; executable siblings still load."""
         import logging
 
-        from gideon.agent import _autoimport_agent_hooks
+        from gideon.engine.agent import _autoimport_agent_hooks
 
         hooks_dir = tmp_path / "hooks"
         self._make_script(hooks_dir, "ok.sh")
         self._make_script(hooks_dir, "disabled.sh", executable=False)
 
-        with caplog.at_level(logging.INFO, logger="gideon.agent"):
+        with caplog.at_level(logging.INFO, logger="gideon.engine.agent"):
             result = _autoimport_agent_hooks(hooks_dir)
 
         assert len(result["preToolUse"]) == 1
         assert result["preToolUse"][0]["command"].endswith("/ok.sh")
         assert any("not executable" in rec.message for rec in caplog.records)
 
-    def test_agent_hooks_autoimport_skips_sensitive_path(self, tmp_path: Path, monkeypatch):
+    def test_agent_hooks_autoimport_skips_sensitive_path(
+        self, tmp_path: Path, monkeypatch
+    ):
         """Scripts resolving into a sensitive path (~/.ssh) are rejected."""
-        from gideon.agent import _autoimport_agent_hooks
+        from gideon.engine.agent import _autoimport_agent_hooks
 
-        # Pretend HOME is tmp_path so ~/.ssh is fabricated and isolated.
         monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
 
         sensitive = tmp_path / ".ssh" / "evil.sh"
@@ -1168,20 +1170,20 @@ class TestDefaultDialectHooksAutoimport:
 
     def test_agent_hooks_autoimport_dedupes_with_explicit_config(self, tmp_path: Path):
         """A script listed both explicitly and in the autoimport dir yields one entry."""
-        from gideon.agent import _apply_user_agent_hooks
+        from gideon.engine.agent import _apply_user_agent_hooks
 
         hooks_dir = tmp_path / "hooks"
         script = self._make_script(hooks_dir, "shared.sh")
 
         config: dict = {"hooks": {}}
-        pc_cfg = {
+        runtime_config = {
             "agent": {
                 "agent_hooks": {"preToolUse": [{"command": str(script)}]},
                 "agent_hooks_dir": str(hooks_dir),
             }
         }
 
-        _apply_user_agent_hooks(config, pc_cfg)
+        _apply_user_agent_hooks(config, runtime_config)
 
         entries = config["hooks"]["preToolUse"]
         assert len(entries) == 1
@@ -1189,34 +1191,34 @@ class TestDefaultDialectHooksAutoimport:
 
     def test_agent_hooks_autoimport_respects_disable_flag(self, tmp_path: Path):
         """``agent.agent_hooks_autoimport=False`` skips the scan even when scripts exist."""
-        from gideon.agent import _apply_user_agent_hooks
+        from gideon.engine.agent import _apply_user_agent_hooks
 
         hooks_dir = tmp_path / "hooks"
         self._make_script(hooks_dir, "a.sh")
 
         config: dict = {"hooks": {}}
-        pc_cfg = {
+        runtime_config = {
             "agent": {
                 "agent_hooks_autoimport": False,
                 "agent_hooks_dir": str(hooks_dir),
             }
         }
 
-        _apply_user_agent_hooks(config, pc_cfg)
+        _apply_user_agent_hooks(config, runtime_config)
 
         assert config["hooks"] == {}
 
     def test_agent_hooks_autoimport_honors_custom_dir(self, tmp_path: Path):
         """``agent.agent_hooks_dir`` overrides the default ~/.gideon/hooks path."""
-        from gideon.agent import _apply_user_agent_hooks
+        from gideon.engine.agent import _apply_user_agent_hooks
 
         custom = tmp_path / "custom-hooks"
         self._make_script(custom, "only.sh")
 
         config: dict = {"hooks": {}}
-        pc_cfg = {"agent": {"agent_hooks_dir": str(custom)}}
+        runtime_config = {"agent": {"agent_hooks_dir": str(custom)}}
 
-        _apply_user_agent_hooks(config, pc_cfg)
+        _apply_user_agent_hooks(config, runtime_config)
 
         assert len(config["hooks"]["preToolUse"]) == 1
         assert config["hooks"]["preToolUse"][0]["command"].endswith("/only.sh")
@@ -1225,11 +1227,8 @@ class TestDefaultDialectHooksAutoimport:
         """More scripts than ``_MAX_TOTAL_USER_HOOKS`` get capped; one WARNING logged."""
         import logging
 
-        from gideon.agent import _MAX_TOTAL_USER_HOOKS, _apply_user_agent_hooks
+        from gideon.engine.agent import _MAX_TOTAL_USER_HOOKS, _apply_user_agent_hooks
 
-        # Spread across events so the per-event cap (10) does not fire first.
-        # Filename suffixes are used so the scripts route to different events
-        # without needing to write headers.
         hooks_dir = tmp_path / "hooks"
         suffixes = ["-pre.sh", "-post.sh", "-prompt.sh", "-spawn.sh", "-stop.sh"]
         total = _MAX_TOTAL_USER_HOOKS + 5
@@ -1237,23 +1236,18 @@ class TestDefaultDialectHooksAutoimport:
             self._make_script(hooks_dir, f"h{i:02d}{suffixes[i % len(suffixes)]}")
 
         config: dict = {"hooks": {}}
-        pc_cfg = {"agent": {"agent_hooks_dir": str(hooks_dir)}}
+        runtime_config = {"agent": {"agent_hooks_dir": str(hooks_dir)}}
 
-        with caplog.at_level(logging.WARNING, logger="gideon.agent"):
-            _apply_user_agent_hooks(config, pc_cfg)
+        with caplog.at_level(logging.WARNING, logger="gideon.engine.agent"):
+            _apply_user_agent_hooks(config, runtime_config)
 
-        merged_total = sum(len(v) for v in config["hooks"].values() if isinstance(v, list))
+        merged_total = sum(
+            len(v) for v in config["hooks"].values() if isinstance(v, list)
+        )
         assert merged_total == _MAX_TOTAL_USER_HOOKS
-        cap_warnings = [r for r in caplog.records if "global limit" in r.message.lower()]
-        # Note: `_merge_agent_hooks` re-checks the cap at the
-        # start of each event's inner loop, so the number of WARNINGs
-        # depends on how scripts are distributed across events -- which
-        # shifts with dict ordering changes or minor test edits.  The
-        # invariant we actually care about is `merged_total == cap`
-        # (asserted above); at least one cap WARNING must fire as
-        # evidence the branch was exercised, but the exact count is not
-        # the contract.  This matches the sibling test
-        # `test_agent_hooks_total_limit_shared_across_explicit_and_autoimport`.
+        cap_warnings = [
+            r for r in caplog.records if "global limit" in r.message.lower()
+        ]
         assert cap_warnings, (
             "expected at least one global-limit WARNING when scripts exceed "
             "_MAX_TOTAL_USER_HOOKS; the merged_total cap is the real invariant"
@@ -1284,16 +1278,14 @@ class TestDefaultDialectHooksAutoimport:
         """
         import logging
 
-        from gideon.agent import _MAX_TOTAL_USER_HOOKS, _apply_user_agent_hooks
+        from gideon.engine.agent import _MAX_TOTAL_USER_HOOKS, _apply_user_agent_hooks
 
-        # Build explicit agent_hooks with _MAX_TOTAL_USER_HOOKS entries,
-        # spread across events so the per-event cap (10) is not what
-        # limits the explicit source.  These scripts are real files on
-        # disk so ``_validate_hook_command`` accepts them.
         explicit_dir = tmp_path / "explicit-scripts"
         explicit_dir.mkdir(parents=True, exist_ok=True)
         explicit_events = ["preToolUse", "postToolUse", "userPromptSubmit"]
-        explicit_hooks: dict[str, list[dict[str, str]]] = {ev: [] for ev in explicit_events}
+        explicit_hooks: dict[str, list[dict[str, str]]] = {
+            ev: [] for ev in explicit_events
+        }
         for i in range(_MAX_TOTAL_USER_HOOKS):
             script = explicit_dir / f"e{i:02d}.sh"
             script.write_text("#!/bin/sh\nexit 0\n")
@@ -1302,9 +1294,6 @@ class TestDefaultDialectHooksAutoimport:
                 {"command": str(script)}
             )
 
-        # Autoimport dir: _MAX_TOTAL_USER_HOOKS more scripts, also spread
-        # across events via filename suffix so per-event cap doesn't fire
-        # within the autoimport source alone.
         autoimport_dir = tmp_path / "hooks"
         autoimport_suffixes = [
             "-pre.sh",
@@ -1320,21 +1309,20 @@ class TestDefaultDialectHooksAutoimport:
             )
 
         config: dict = {"hooks": {}}
-        pc_cfg = {
+        runtime_config = {
             "agent": {
                 "agent_hooks": explicit_hooks,
                 "agent_hooks_dir": str(autoimport_dir),
-                # Default is True, but set explicitly so the test does
-                # not silently become a single-source test if the
-                # default ever flips.
                 "agent_hooks_autoimport": True,
             }
         }
 
-        with caplog.at_level(logging.WARNING, logger="gideon.agent"):
-            _apply_user_agent_hooks(config, pc_cfg)
+        with caplog.at_level(logging.WARNING, logger="gideon.engine.agent"):
+            _apply_user_agent_hooks(config, runtime_config)
 
-        merged_total = sum(len(v) for v in config["hooks"].values() if isinstance(v, list))
+        merged_total = sum(
+            len(v) for v in config["hooks"].values() if isinstance(v, list)
+        )
         assert merged_total == _MAX_TOTAL_USER_HOOKS, (
             f"regression: combined explicit + autoimport hooks exceeded "
             f"_MAX_TOTAL_USER_HOOKS ({_MAX_TOTAL_USER_HOOKS}); got "
@@ -1342,19 +1330,17 @@ class TestDefaultDialectHooksAutoimport:
             f"_merge_agent_hooks pass so the total cap is enforced across "
             f"the combined set, not per-source."
         )
-        # The cap warning should fire at least once because the single
-        # merge pass trips the global-limit branch when the combined input
-        # exceeds the cap.  It can fire multiple times because
-        # ``_merge_agent_hooks`` iterates events and re-checks the cap per
-        # event after it is reached; the count is not the invariant here,
-        # the total-merged count above is.
-        cap_warnings = [r for r in caplog.records if "global limit" in r.message.lower()]
+        cap_warnings = [
+            r for r in caplog.records if "global limit" in r.message.lower()
+        ]
         assert cap_warnings, (
             "expected at least one global-limit WARNING from the single "
             "merge pass when combined input exceeds _MAX_TOTAL_USER_HOOKS"
         )
 
-    def test_agent_hooks_per_event_cap_emits_sel_audit(self, tmp_path: Path, monkeypatch, caplog):
+    def test_agent_hooks_per_event_cap_emits_sel_audit(
+        self, tmp_path: Path, monkeypatch, caplog
+    ):
         """Regression: per-event cap break must emit SEL audit.
 
         Hardening (agent.py:682): when ``_merge_agent_hooks`` hits the per-event
@@ -1369,14 +1355,14 @@ class TestDefaultDialectHooksAutoimport:
         """
         import logging
 
-        from gideon import agent as _agent_mod
-        from gideon.agent import _MAX_USER_HOOKS_PER_EVENT, _apply_user_agent_hooks
+        from gideon.engine import agent as _agent_mod
+        from gideon.engine.agent import (
+            _MAX_USER_HOOKS_PER_EVENT,
+            _apply_user_agent_hooks,
+        )
 
-        # Configure more scripts on a single event than the per-event cap.
-        # All scripts route to preToolUse so the per-event cap fires before
-        # the total cap (which is higher).
-        explicit_dir = tmp_path / "scripts"
-        explicit_dir.mkdir()
+        explicit_dir = tmp_path / "tooling/scripts"
+        explicit_dir.mkdir(parents=True)
         over_cap = _MAX_USER_HOOKS_PER_EVENT + 3
         explicit_hooks: dict[str, list[dict[str, str]]] = {"preToolUse": []}
         for i in range(over_cap):
@@ -1393,36 +1379,28 @@ class TestDefaultDialectHooksAutoimport:
         monkeypatch.setattr(_agent_mod, "_sel_hook_rejected", _record_sel)
 
         config: dict = {"hooks": {}}
-        pc_cfg = {
+        runtime_config = {
             "agent": {
                 "agent_hooks": explicit_hooks,
                 "agent_hooks_autoimport": False,
             }
         }
 
-        with caplog.at_level(logging.WARNING, logger="gideon.agent"):
-            _apply_user_agent_hooks(config, pc_cfg)
+        with caplog.at_level(logging.WARNING, logger="gideon.engine.agent"):
+            _apply_user_agent_hooks(config, runtime_config)
 
-        # Exactly _MAX_USER_HOOKS_PER_EVENT scripts should have been
-        # merged for preToolUse (the cap); the other 3 must be dropped.
         assert len(config["hooks"]["preToolUse"]) == _MAX_USER_HOOKS_PER_EVENT
-        # The per-event cap path must have emitted at least one SEL
-        # audit tagged with the event (preToolUse) and the
-        # "per-event limit exceeded" reason.  Under the pre-fix code
-        # this assertion failed with zero SEL calls tagged that reason.
         cap_sel = [c for c in sel_calls if "per-event limit exceeded" in c[2].lower()]
         assert cap_sel, (
             f"regression: per-event cap must emit _sel_hook_rejected; got "
             f"zero calls with reason 'per-event limit exceeded'.  All SEL "
             f"calls: {sel_calls!r}"
         )
-        # The tag should be the event name, not the literal "autoimport",
-        # since this is inside _merge_agent_hooks which uses the inferred
-        # event as the SEL tag (consistent with other branches in this
-        # function).
         assert cap_sel[0][0] == "preToolUse"
 
-    def test_agent_hooks_global_cap_emits_sel_audit(self, tmp_path: Path, monkeypatch, caplog):
+    def test_agent_hooks_global_cap_emits_sel_audit(
+        self, tmp_path: Path, monkeypatch, caplog
+    ):
         """Regression: global cap break must emit SEL audit.
 
         Hardening (agent.py:688): sibling to the per-event cap gap.  When the
@@ -1433,13 +1411,11 @@ class TestDefaultDialectHooksAutoimport:
         """
         import logging
 
-        from gideon import agent as _agent_mod
-        from gideon.agent import _MAX_TOTAL_USER_HOOKS, _apply_user_agent_hooks
+        from gideon.engine import agent as _agent_mod
+        from gideon.engine.agent import _MAX_TOTAL_USER_HOOKS, _apply_user_agent_hooks
 
-        # Spread over-cap scripts across events so the per-event cap (10)
-        # does not fire first; only the global cap (20) gates.
-        explicit_dir = tmp_path / "scripts"
-        explicit_dir.mkdir()
+        explicit_dir = tmp_path / "tooling/scripts"
+        explicit_dir.mkdir(parents=True)
         over_cap = _MAX_TOTAL_USER_HOOKS + 3
         events = ["preToolUse", "postToolUse", "userPromptSubmit"]
         explicit_hooks: dict[str, list[dict[str, str]]] = {e: [] for e in events}
@@ -1457,21 +1433,20 @@ class TestDefaultDialectHooksAutoimport:
         monkeypatch.setattr(_agent_mod, "_sel_hook_rejected", _record_sel)
 
         config: dict = {"hooks": {}}
-        pc_cfg = {
+        runtime_config = {
             "agent": {
                 "agent_hooks": explicit_hooks,
                 "agent_hooks_autoimport": False,
             }
         }
 
-        with caplog.at_level(logging.WARNING, logger="gideon.agent"):
-            _apply_user_agent_hooks(config, pc_cfg)
+        with caplog.at_level(logging.WARNING, logger="gideon.engine.agent"):
+            _apply_user_agent_hooks(config, runtime_config)
 
-        merged_total = sum(len(v) for v in config["hooks"].values() if isinstance(v, list))
+        merged_total = sum(
+            len(v) for v in config["hooks"].values() if isinstance(v, list)
+        )
         assert merged_total == _MAX_TOTAL_USER_HOOKS
-        # Global-cap SEL audit must fire at least once.  The reason
-        # string is the contract; the exact count depends on how many
-        # events the loop visits after the cap is reached.
         cap_sel = [c for c in sel_calls if "global limit exceeded" in c[2].lower()]
         assert cap_sel, (
             f"regression: global cap must emit _sel_hook_rejected; got "
@@ -1495,8 +1470,8 @@ class TestDefaultDialectHooksAutoimport:
         """
         import logging
 
-        from gideon import agent as _agent_mod
-        from gideon.agent import _apply_user_agent_hooks
+        from gideon.engine import agent as _agent_mod
+        from gideon.engine.agent import _apply_user_agent_hooks
 
         sel_calls: list[tuple[str, str, str]] = []
 
@@ -1506,9 +1481,7 @@ class TestDefaultDialectHooksAutoimport:
         monkeypatch.setattr(_agent_mod, "_sel_hook_rejected", _record_sel)
 
         config: dict = {"hooks": {}}
-        # "bogusEvent" is not in _VALID_HOOK_EVENTS; bucket must be
-        # dropped with SEL audit.
-        pc_cfg = {
+        runtime_config = {
             "agent": {
                 "agent_hooks": {
                     "bogusEvent": [{"command": "/bin/true"}],
@@ -1517,13 +1490,14 @@ class TestDefaultDialectHooksAutoimport:
             }
         }
 
-        with caplog.at_level(logging.WARNING, logger="gideon.agent"):
-            _apply_user_agent_hooks(config, pc_cfg)
+        with caplog.at_level(logging.WARNING, logger="gideon.engine.agent"):
+            _apply_user_agent_hooks(config, runtime_config)
 
         assert config["hooks"] == {}
         unknown_sel = [c for c in sel_calls if "unknown event" in c[2].lower()]
         assert unknown_sel, (
-            f"regression: unknown event type must emit _sel_hook_rejected; " f"got {sel_calls!r}"
+            f"regression: unknown event type must emit _sel_hook_rejected; "
+            f"got {sel_calls!r}"
         )
         event_tag, _command, reason = unknown_sel[0]
         assert event_tag == "bogusEvent"
@@ -1542,8 +1516,8 @@ class TestDefaultDialectHooksAutoimport:
         """
         import logging
 
-        from gideon import agent as _agent_mod
-        from gideon.agent import _apply_user_agent_hooks
+        from gideon.engine import agent as _agent_mod
+        from gideon.engine.agent import _apply_user_agent_hooks
 
         sel_calls: list[tuple[str, str, str]] = []
 
@@ -1553,9 +1527,7 @@ class TestDefaultDialectHooksAutoimport:
         monkeypatch.setattr(_agent_mod, "_sel_hook_rejected", _record_sel)
 
         config: dict = {"hooks": {}}
-        # ``preToolUse`` is a valid event, but a string is not a list;
-        # bucket must be dropped with SEL audit.
-        pc_cfg = {
+        runtime_config = {
             "agent": {
                 "agent_hooks": {
                     "preToolUse": "not-a-list-but-a-string",
@@ -1564,12 +1536,13 @@ class TestDefaultDialectHooksAutoimport:
             }
         }
 
-        with caplog.at_level(logging.WARNING, logger="gideon.agent"):
-            _apply_user_agent_hooks(config, pc_cfg)
+        with caplog.at_level(logging.WARNING, logger="gideon.engine.agent"):
+            _apply_user_agent_hooks(config, runtime_config)
 
         non_list_sel = [c for c in sel_calls if "not a list" in c[2].lower()]
         assert non_list_sel, (
-            f"regression: non-list entries must emit _sel_hook_rejected; " f"got {sel_calls!r}"
+            f"regression: non-list entries must emit _sel_hook_rejected; "
+            f"got {sel_calls!r}"
         )
         event_tag, _command, reason = non_list_sel[0]
         assert event_tag == "preToolUse"
@@ -1579,11 +1552,11 @@ class TestDefaultDialectHooksAutoimport:
         """Missing directory returns empty dict with only a DEBUG log (no WARNINGs)."""
         import logging
 
-        from gideon.agent import _autoimport_agent_hooks
+        from gideon.engine.agent import _autoimport_agent_hooks
 
         missing = tmp_path / "does-not-exist"
 
-        with caplog.at_level(logging.DEBUG, logger="gideon.agent"):
+        with caplog.at_level(logging.DEBUG, logger="gideon.engine.agent"):
             result = _autoimport_agent_hooks(missing)
 
         assert result == {}
@@ -1609,11 +1582,10 @@ class TestDefaultDialectHooksAutoimport:
         """
         import logging
 
-        from gideon import agent as _agent_mod
-        from gideon.agent import _autoimport_agent_hooks
+        from gideon.engine import agent as _agent_mod
+        from gideon.engine.agent import _autoimport_agent_hooks
 
         hooks_dir = tmp_path / "hooks"
-        # Matcher with a space is rejected by _SAFE_MATCHER_RE.
         entry = self._make_script(
             hooks_dir, "bad.sh", body="# matcher: tool name with spaces\nexit 0\n"
         )
@@ -1625,7 +1597,7 @@ class TestDefaultDialectHooksAutoimport:
 
         monkeypatch.setattr(_agent_mod, "_sel_hook_rejected", _record_sel)
 
-        with caplog.at_level(logging.WARNING, logger="gideon.agent"):
+        with caplog.at_level(logging.WARNING, logger="gideon.engine.agent"):
             result = _autoimport_agent_hooks(hooks_dir)
 
         assert result == {}
@@ -1633,9 +1605,6 @@ class TestDefaultDialectHooksAutoimport:
             "matcher" in rec.message.lower() and "invalid" in rec.message.lower()
             for rec in caplog.records
         )
-        # Note: SEL tag must be the literal "autoimport",
-        # not the variable ``event`` (e.g. "preToolUse").  Under the
-        # pre-fix code this assertion failed with event_tag == "preToolUse".
         assert len(sel_calls) == 1, (
             f"expected exactly one _sel_hook_rejected for invalid matcher; "
             f"got {len(sel_calls)}: {sel_calls!r}"
@@ -1673,14 +1642,13 @@ class TestDefaultDialectHooksAutoimport:
         """
         import logging
 
-        from gideon import agent as _agent_mod
-        from gideon.agent import _autoimport_agent_hooks
+        from gideon.engine import agent as _agent_mod
+        from gideon.engine.agent import _autoimport_agent_hooks
 
         hooks_dir = tmp_path / "hooks"
-        # ``NoSuchEvent`` is not in _HOOK_EVENT_CANONICAL, so _infer_hook_event
-        # returns None and this rejection branch fires.  The filename has no
-        # known suffix so fallback inference does not rescue it either.
-        script = self._make_script(hooks_dir, "bogus.sh", body="# event: NoSuchEvent\nexit 0\n")
+        script = self._make_script(
+            hooks_dir, "bogus.sh", body="# event: NoSuchEvent\nexit 0\n"
+        )
 
         sel_calls: list[tuple[str, str, str]] = []
 
@@ -1689,12 +1657,10 @@ class TestDefaultDialectHooksAutoimport:
 
         monkeypatch.setattr(_agent_mod, "_sel_hook_rejected", _record_sel)
 
-        with caplog.at_level(logging.WARNING, logger="gideon.agent"):
+        with caplog.at_level(logging.WARNING, logger="gideon.engine.agent"):
             result = _autoimport_agent_hooks(hooks_dir)
 
         assert result == {}
-        # The SEL audit must fire exactly once for this one rejected script,
-        # tagged with the ``"autoimport"`` log label and the script path.
         assert len(sel_calls) == 1, (
             f"regression: expected exactly one _sel_hook_rejected call when a "
             f"script's '# event:' header is unknown; got {len(sel_calls)}: "
@@ -1726,16 +1692,12 @@ class TestDefaultDialectHooksAutoimport:
         """
         import logging
 
-        from gideon import agent as _agent_mod
-        from gideon.agent import _autoimport_agent_hooks
+        from gideon.engine import agent as _agent_mod
+        from gideon.engine.agent import _autoimport_agent_hooks
 
         hooks_dir = tmp_path / "hooks"
         entry = self._make_script(hooks_dir, "broken.sh")
 
-        # Patch Path.resolve to raise OSError ONLY for the entry path,
-        # letting hooks_dir.resolve() (the first resolve() call in
-        # _autoimport_agent_hooks) succeed.  Otherwise the function
-        # returns early before the loop even starts.
         real_resolve = Path.resolve
 
         def _raising_resolve(self, *args, **kwargs):
@@ -1752,7 +1714,7 @@ class TestDefaultDialectHooksAutoimport:
 
         monkeypatch.setattr(_agent_mod, "_sel_hook_rejected", _record_sel)
 
-        with caplog.at_level(logging.WARNING, logger="gideon.agent"):
+        with caplog.at_level(logging.WARNING, logger="gideon.engine.agent"):
             result = _autoimport_agent_hooks(hooks_dir)
 
         assert result == {}
@@ -1781,34 +1743,17 @@ class TestDefaultDialectHooksAutoimport:
         """
         import logging
 
-        from gideon import agent as _agent_mod
-        from gideon.agent import _autoimport_agent_hooks
+        from gideon.engine import agent as _agent_mod
+        from gideon.engine.agent import _autoimport_agent_hooks
 
         hooks_dir = tmp_path / "hooks"
         entry = self._make_script(hooks_dir, "broken.sh")
 
-        # Arm the stat failure only AFTER ``entry.is_file()`` has been
-        # observed on this path.  The production loop calls ``is_file()``
-        # first (internally a stat), then later ``resolved_entry.stat()``
-        # explicitly.  We want only the explicit call to fail.
-        #
-        # Previous version used ``call_count >= 3`` which worked on
-        # CPython 3.12 but is fragile: pathlib's internal stat-usage per
-        # ``is_file()`` varies between 3.10, 3.11, 3.12, 3.13 (3.12
-        # rewrote pathlib internals), so a hard-coded threshold is a
-        # time bomb.  Gating on ``is_file`` being called instead is
-        # stable across versions — no matter how many stats ``is_file``
-        # makes internally, we only raise on stats that happen *after*
-        # it completes, which is when ``resolved_entry.stat()`` runs.
         real_stat = Path.stat
         real_is_file = Path.is_file
         armed = False
 
         def _arming_is_file(self, *args, **kwargs):
-            # Arm by Path identity (self == entry) rather than by
-            # self.name, which would also fire on any path whose
-            # basename happens to be "broken.sh" (e.g. a sibling
-            # fixture in a future multi-script variant of this test).
             nonlocal armed
             rv = real_is_file(self, *args, **kwargs)
             if self == entry:
@@ -1830,7 +1775,7 @@ class TestDefaultDialectHooksAutoimport:
 
         monkeypatch.setattr(_agent_mod, "_sel_hook_rejected", _record_sel)
 
-        with caplog.at_level(logging.WARNING, logger="gideon.agent"):
+        with caplog.at_level(logging.WARNING, logger="gideon.engine.agent"):
             result = _autoimport_agent_hooks(hooks_dir)
 
         assert result == {}
@@ -1869,8 +1814,8 @@ class TestDefaultDialectHooksAutoimport:
         """
         import logging
 
-        from gideon import agent as _agent_mod
-        from gideon.agent import _autoimport_agent_hooks
+        from gideon.engine import agent as _agent_mod
+        from gideon.engine.agent import _autoimport_agent_hooks
 
         hooks_dir = tmp_path / "hooks"
         entry = self._make_script(hooks_dir, "disabled.sh", executable=False)
@@ -1882,7 +1827,7 @@ class TestDefaultDialectHooksAutoimport:
 
         monkeypatch.setattr(_agent_mod, "_sel_hook_rejected", _record_sel)
 
-        with caplog.at_level(logging.INFO, logger="gideon.agent"):
+        with caplog.at_level(logging.INFO, logger="gideon.engine.agent"):
             result = _autoimport_agent_hooks(hooks_dir)
 
         assert result == {}
@@ -1926,14 +1871,10 @@ class TestDefaultDialectHooksAutoimport:
         """
         import logging
 
-        from gideon.agent import _apply_user_agent_hooks
+        from gideon.engine.agent import _apply_user_agent_hooks
 
-        # ``_isolate_home`` fixture already sets Path.home() -> tmp_path.
-        # Re-route the default fallback so failure does not touch the real
-        # ~/.gideon/hooks.  Place an executable script directly at HOME root
-        # to prove that home-root scanning would pick it up.
         monkeypatch.setattr(
-            "gideon.agent._DEFAULT_HOOKS_DIR",
+            "gideon.engine.agent._DEFAULT_HOOKS_DIR",
             tmp_path / ".gideon" / "hooks",
         )
         evil = tmp_path / "evil.sh"
@@ -1941,16 +1882,11 @@ class TestDefaultDialectHooksAutoimport:
         evil.chmod(0o755)
 
         config: dict = {"hooks": {}}
-        # ``agent_hooks_dir: "~"`` expands to HOME, which equals tmp_path
-        # after the _isolate_home fixture runs.  Under the pre-fix code
-        # this passed validation; under the fix it's rejected.
-        pc_cfg = {"agent": {"agent_hooks_dir": str(tmp_path)}}
+        runtime_config = {"agent": {"agent_hooks_dir": str(tmp_path)}}
 
-        with caplog.at_level(logging.WARNING, logger="gideon.agent"):
-            _apply_user_agent_hooks(config, pc_cfg)
+        with caplog.at_level(logging.WARNING, logger="gideon.engine.agent"):
+            _apply_user_agent_hooks(config, runtime_config)
 
-        # Critical invariant: nothing from HOME-root got auto-registered.
-        # The "evil" script must NOT appear in config["hooks"].
         assert config["hooks"] == {}, (
             f"regression: agent_hooks_dir resolving to HOME itself was accepted, "
             f"causing home-root scan; expected empty hooks dict, got "
@@ -1974,41 +1910,35 @@ class TestDefaultDialectHooksAutoimport:
         """
         import logging
 
-        from gideon.agent import _apply_user_agent_hooks
+        from gideon.engine.agent import _apply_user_agent_hooks
 
-        # Stage a fake HOME so our default hooks dir doesn't exist and so
-        # tmp_path's /private/var/folders path is *outside* HOME.
         fake_home = tmp_path / "home"
         fake_home.mkdir()
         monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
-        # Also re-route the default hooks dir into the fake HOME so fallback
-        # does not hit the caller's real ~/.gideon/hooks directory.
         monkeypatch.setattr(
-            "gideon.agent._DEFAULT_HOOKS_DIR",
+            "gideon.engine.agent._DEFAULT_HOOKS_DIR",
             fake_home / ".gideon" / "hooks",
         )
 
-        # This dir is genuinely outside fake_home, since tmp_path itself is
-        # the parent directory of fake_home.
         outside = tmp_path / "outside-hooks"
         outside.mkdir()
         self._make_script(outside, "evil.sh")
 
         config: dict = {"hooks": {}}
-        pc_cfg = {"agent": {"agent_hooks_dir": str(outside)}}
+        runtime_config = {"agent": {"agent_hooks_dir": str(outside)}}
 
-        with caplog.at_level(logging.WARNING, logger="gideon.agent"):
-            _apply_user_agent_hooks(config, pc_cfg)
+        with caplog.at_level(logging.WARNING, logger="gideon.engine.agent"):
+            _apply_user_agent_hooks(config, runtime_config)
 
-        # Fallback is fake_home/.gideon/hooks (doesn't exist), so nothing gets
-        # merged.  Critically: the "evil" script is not merged.
         assert config["hooks"] == {}
         assert any(
             "agent_hooks_dir" in rec.message and "rejected" in rec.message.lower()
             for rec in caplog.records
         )
 
-    def test_agent_hooks_autoimport_rejects_symlink_escaping_dir(self, tmp_path: Path, caplog):
+    def test_agent_hooks_autoimport_rejects_symlink_escaping_dir(
+        self, tmp_path: Path, caplog
+    ):
         """A symlink inside hooks_dir pointing at an outside script is rejected.
 
         Regression guard: entry.is_file() follows symlinks, and
@@ -2019,19 +1949,17 @@ class TestDefaultDialectHooksAutoimport:
         """
         import logging
 
-        from gideon.agent import _autoimport_agent_hooks
+        from gideon.engine.agent import _autoimport_agent_hooks
 
         hooks_dir = tmp_path / "hooks"
         hooks_dir.mkdir()
-        # Outside target, inside HOME so the is_sensitive_path check alone
-        # wouldn't reject it - only the containment check does.
         outside_target = tmp_path / "elsewhere" / "attacker.sh"
         outside_target.parent.mkdir(parents=True, exist_ok=True)
         outside_target.write_text("#!/bin/sh\nexit 0\n")
         outside_target.chmod(0o755)
         (hooks_dir / "guard.sh").symlink_to(outside_target)
 
-        with caplog.at_level(logging.WARNING, logger="gideon.agent"):
+        with caplog.at_level(logging.WARNING, logger="gideon.engine.agent"):
             result = _autoimport_agent_hooks(hooks_dir)
 
         assert result == {}
@@ -2063,17 +1991,15 @@ class TestDefaultDialectHooksAutoimport:
         """
         import logging
 
-        from gideon import agent as _agent_mod
-        from gideon.agent import _autoimport_agent_hooks
+        from gideon.engine import agent as _agent_mod
+        from gideon.engine.agent import _autoimport_agent_hooks
 
-        # One legitimate script inside hooks_dir (passes containment).
         hooks_dir = tmp_path / "hooks"
         script = self._make_script(hooks_dir, "ok.sh")
 
-        # Force _validate_hook_command to reject everything.  This isolates
-        # the reorder: if header parsing ran before validation, we'd still
-        # see a call; with the reorder, validation rejects first.
-        monkeypatch.setattr(_agent_mod, "_validate_hook_command", lambda *_a, **_kw: None)
+        monkeypatch.setattr(
+            _agent_mod, "_validate_hook_command", lambda *_a, **_kw: None
+        )
 
         header_calls: list[str] = []
 
@@ -2081,12 +2007,10 @@ class TestDefaultDialectHooksAutoimport:
             header_calls.append(str(path))
             return None, None
 
-        monkeypatch.setattr(_agent_mod, "_parse_hook_script_headers", _record_header_call)
+        monkeypatch.setattr(
+            _agent_mod, "_parse_hook_script_headers", _record_header_call
+        )
 
-        # Spy on the SEL audit sink so we can assert a rejection was
-        # recorded with the ``"autoimport"`` source tag.  Without this,
-        # a future refactor that silently drops the audit call would
-        # still let the monkeypatched validate-to-None path pass.
         sel_calls: list[tuple[str, str, str]] = []
 
         def _record_sel(event: str, command: str, reason: str) -> None:
@@ -2094,7 +2018,7 @@ class TestDefaultDialectHooksAutoimport:
 
         monkeypatch.setattr(_agent_mod, "_sel_hook_rejected", _record_sel)
 
-        with caplog.at_level(logging.WARNING, logger="gideon.agent"):
+        with caplog.at_level(logging.WARNING, logger="gideon.engine.agent"):
             result = _autoimport_agent_hooks(hooks_dir)
 
         assert result == {}
@@ -2103,9 +2027,6 @@ class TestDefaultDialectHooksAutoimport:
             "_validate_hook_command rejected the script. Validation must "
             "run first so no file reads happen on rejected paths."
         )
-        # Exactly one SEL rejection recorded for the autoimport rejection
-        # branch, tagged with the ``"autoimport"`` log label (a log-only
-        # tag; see agent.py:562-570 note).
         assert len(sel_calls) == 1, (
             f"expected exactly one _sel_hook_rejected call for the rejected "
             f"script; got {len(sel_calls)}: {sel_calls!r}"
@@ -2138,10 +2059,9 @@ class TestDefaultDialectHooksAutoimport:
         and assert it was invoked with the *resolved* path, not the
         symlinked ``requested`` path.
         """
-        from gideon import agent as _agent_mod
-        from gideon.agent import _apply_user_agent_hooks
+        from gideon.engine import agent as _agent_mod
+        from gideon.engine.agent import _apply_user_agent_hooks
 
-        # Real hooks directory plus a user-facing symlink that points at it.
         real_hooks = tmp_path / "real" / "hooks"
         real_hooks.mkdir(parents=True)
         link_hooks = tmp_path / "link-hooks"
@@ -2149,10 +2069,6 @@ class TestDefaultDialectHooksAutoimport:
 
         captured: list[Path] = []
 
-        # Spy on _autoimport_agent_hooks to capture what `hooks_dir` value
-        # _apply_user_agent_hooks stores and forwards.  Under the old
-        # `hooks_dir = requested` code, we would see `link_hooks`; under
-        # the new `hooks_dir = resolved` code, we see `real_hooks`.
         def _spy(hooks_dir: Path) -> dict:
             captured.append(hooks_dir)
             return {}
@@ -2160,33 +2076,28 @@ class TestDefaultDialectHooksAutoimport:
         monkeypatch.setattr(_agent_mod, "_autoimport_agent_hooks", _spy)
 
         config: dict = {"hooks": {}}
-        # Explicit ``agent_hooks_autoimport: True`` so the test does not
-        # silently become a no-op if the default ever flips.
-        pc_cfg = {
+        runtime_config = {
             "agent": {
                 "agent_hooks_autoimport": True,
                 "agent_hooks_dir": str(link_hooks),
             }
         }
 
-        _apply_user_agent_hooks(config, pc_cfg)
+        _apply_user_agent_hooks(config, runtime_config)
 
         assert len(captured) == 1, "autoimport should have been invoked exactly once"
         forwarded = captured[0]
-        # The forwarded path must equal the real (resolved) directory, NOT
-        # the symlink requested by the user.  Comparing by resolve() on
-        # both sides would mask the bug (since resolve(link) == real);
-        # comparing the raw Path confirms the resolved form was stored.
         assert forwarded == real_hooks, (
             f"regression: _autoimport_agent_hooks received {forwarded!r}; "
             f"expected the resolved path {real_hooks!r}. _apply_user_agent_hooks "
             "must store the resolved path so the downstream resolve() is a "
             "no-op even under adversarial symlink swaps."
         )
-        # Sanity: it really is NOT the symlink form (would be the bug).
         assert forwarded != link_hooks
 
-    def test_agent_hooks_dir_null_byte_does_not_crash(self, tmp_path: Path, monkeypatch):
+    def test_agent_hooks_dir_null_byte_does_not_crash(
+        self, tmp_path: Path, monkeypatch
+    ):
         """Regression: ``agent_hooks_dir`` with a null byte must not crash.
 
         Adversarial hardening: ``Path("\\x00")``
@@ -2201,20 +2112,17 @@ class TestDefaultDialectHooksAutoimport:
         ``~/.gideon/hooks``).  Under the pre-fix code, ``ValueError`` would
         escape and the test body would fail with an unhandled exception.
         """
-        from gideon.agent import _apply_user_agent_hooks
+        from gideon.engine.agent import _apply_user_agent_hooks
 
-        # Re-route the default so fallback doesn't touch caller's HOME.
         monkeypatch.setattr(
-            "gideon.agent._DEFAULT_HOOKS_DIR",
+            "gideon.engine.agent._DEFAULT_HOOKS_DIR",
             tmp_path / "nonexistent" / "hooks",
         )
 
         config: dict = {"hooks": {}}
-        pc_cfg = {"agent": {"agent_hooks_dir": "\x00"}}
+        runtime_config = {"agent": {"agent_hooks_dir": "\x00"}}
 
-        # Must not raise.  Under pre-fix code this line propagates
-        # ``ValueError: embedded null byte`` from Path.resolve().
-        _apply_user_agent_hooks(config, pc_cfg)
+        _apply_user_agent_hooks(config, runtime_config)
 
         assert config["hooks"] == {}
 
@@ -2233,14 +2141,12 @@ class TestDefaultDialectHooksAutoimport:
         """
         import logging
 
-        from gideon import agent as _agent_mod
-        from gideon.agent import _autoimport_agent_hooks
+        from gideon.engine import agent as _agent_mod
+        from gideon.engine.agent import _autoimport_agent_hooks
 
         hooks_dir = tmp_path / "hooks"
         hooks_dir.mkdir()
 
-        # Force iterdir() to raise OSError (simulating permission
-        # denial).  Narrow the patch to Path.iterdir only.
         def _raising_iterdir(self):
             raise OSError("simulated permission denied")
 
@@ -2253,7 +2159,7 @@ class TestDefaultDialectHooksAutoimport:
 
         monkeypatch.setattr(_agent_mod, "_sel_hook_rejected", _record_sel)
 
-        with caplog.at_level(logging.WARNING, logger="gideon.agent"):
+        with caplog.at_level(logging.WARNING, logger="gideon.engine.agent"):
             result = _autoimport_agent_hooks(hooks_dir)
 
         assert result == {}
@@ -2266,7 +2172,9 @@ class TestDefaultDialectHooksAutoimport:
         assert command == str(hooks_dir)
         assert "cannot read" in reason.lower()
 
-    def test_agent_hooks_dir_non_string_ignored_without_sel(self, tmp_path: Path, monkeypatch):
+    def test_agent_hooks_dir_non_string_ignored_without_sel(
+        self, tmp_path: Path, monkeypatch
+    ):
         """Regression: non-string ``agent_hooks_dir`` reverts to default silently.
 
         Coverage hardening: an LLM-writable
@@ -2281,12 +2189,11 @@ class TestDefaultDialectHooksAutoimport:
         This test asserts: (a) fallback to default, (b) no SEL call,
         (c) no crash.
         """
-        from gideon import agent as _agent_mod
-        from gideon.agent import _apply_user_agent_hooks
+        from gideon.engine import agent as _agent_mod
+        from gideon.engine.agent import _apply_user_agent_hooks
 
-        # Re-route default so fallback is empty (hooks dir doesn't exist).
         monkeypatch.setattr(
-            "gideon.agent._DEFAULT_HOOKS_DIR",
+            "gideon.engine.agent._DEFAULT_HOOKS_DIR",
             tmp_path / "nonexistent" / "hooks",
         )
 
@@ -2299,11 +2206,12 @@ class TestDefaultDialectHooksAutoimport:
 
         for bogus in (None, [], 42, {"foo": "bar"}):
             config: dict = {"hooks": {}}
-            pc_cfg = {"agent": {"agent_hooks_dir": bogus}}
+            runtime_config = {"agent": {"agent_hooks_dir": bogus}}
             # Must not raise.
-            _apply_user_agent_hooks(config, pc_cfg)
+            _apply_user_agent_hooks(config, runtime_config)
             assert config["hooks"] == {}, (
-                f"non-string agent_hooks_dir={bogus!r} produced hooks: " f"{config['hooks']!r}"
+                f"non-string agent_hooks_dir={bogus!r} produced hooks: "
+                f"{config['hooks']!r}"
             )
 
         assert sel_calls == [], (
@@ -2332,37 +2240,28 @@ class TestDefaultDialectHooksAutoimport:
         """
         import logging
 
-        from gideon.agent import _apply_user_agent_hooks
+        from gideon.engine.agent import _apply_user_agent_hooks
 
-        # Construct a real directory and a symlink to it.
         real_home = tmp_path / "real_home"
         real_home.mkdir()
         symlink_home = tmp_path / "link_home"
         symlink_home.symlink_to(real_home)
 
-        # Path.home() returns the symlink; .resolve() inside the code
-        # should canonicalize it to real_home.
         monkeypatch.setattr(Path, "home", classmethod(lambda cls: symlink_home))
-        # Re-route default so fallback doesn't touch caller's real HOME.
         monkeypatch.setattr(
-            "gideon.agent._DEFAULT_HOOKS_DIR",
+            "gideon.engine.agent._DEFAULT_HOOKS_DIR",
             symlink_home / ".gideon" / "hooks",
         )
 
-        # Plant an executable at the canonical HOME root to prove it
-        # would be scanned under a buggy containment check.
         evil = real_home / "evil.sh"
         evil.write_text("#!/bin/sh\nexit 0\n")
         evil.chmod(0o755)
 
         config: dict = {"hooks": {}}
-        # User points agent_hooks_dir directly at the canonical HOME
-        # (bypassing the symlink) -- should still be rejected because
-        # resolved == canonical HOME.
-        pc_cfg = {"agent": {"agent_hooks_dir": str(real_home)}}
+        runtime_config = {"agent": {"agent_hooks_dir": str(real_home)}}
 
-        with caplog.at_level(logging.WARNING, logger="gideon.agent"):
-            _apply_user_agent_hooks(config, pc_cfg)
+        with caplog.at_level(logging.WARNING, logger="gideon.engine.agent"):
+            _apply_user_agent_hooks(config, runtime_config)
 
         assert config["hooks"] == {}, (
             f"regression: agent_hooks_dir resolving to canonical HOME "
@@ -2393,8 +2292,8 @@ class TestDefaultDialectHooksAutoimport:
         """
         import logging
 
-        from gideon import agent as _agent_mod
-        from gideon.agent import _autoimport_agent_hooks
+        from gideon.engine import agent as _agent_mod
+        from gideon.engine.agent import _autoimport_agent_hooks
 
         hooks_dir = tmp_path / "hooks"
         hooks_dir.mkdir()
@@ -2402,7 +2301,6 @@ class TestDefaultDialectHooksAutoimport:
         real_resolve = Path.resolve
 
         def _raising_resolve(self, *args, **kwargs):
-            # Fire only on the hooks_dir, not on entries or Path.home().
             if self == hooks_dir:
                 raise OSError("simulated resolve failure on hooks_dir")
             return real_resolve(self, *args, **kwargs)
@@ -2416,7 +2314,7 @@ class TestDefaultDialectHooksAutoimport:
 
         monkeypatch.setattr(_agent_mod, "_sel_hook_rejected", _record_sel)
 
-        with caplog.at_level(logging.DEBUG, logger="gideon.agent"):
+        with caplog.at_level(logging.DEBUG, logger="gideon.engine.agent"):
             result = _autoimport_agent_hooks(hooks_dir)
 
         assert result == {}
@@ -2446,8 +2344,8 @@ class TestDefaultDialectHooksAutoimport:
         ``ValueError`` and asserts the code rejects cleanly (no crash,
         SEL audited).
         """
-        from gideon import agent as _agent_mod
-        from gideon.agent import _autoimport_agent_hooks
+        from gideon.engine import agent as _agent_mod
+        from gideon.engine.agent import _autoimport_agent_hooks
 
         hooks_dir = tmp_path / "hooks"
         entry = self._make_script(hooks_dir, "bad.sh")
@@ -2468,7 +2366,6 @@ class TestDefaultDialectHooksAutoimport:
 
         monkeypatch.setattr(_agent_mod, "_sel_hook_rejected", _record_sel)
 
-        # Must not raise.
         result = _autoimport_agent_hooks(hooks_dir)
 
         assert result == {}
@@ -2482,7 +2379,9 @@ class TestDefaultDialectHooksAutoimport:
         assert command == str(entry)
         assert "cannot resolve" in reason.lower()
 
-    def test_agent_hooks_dir_resolve_oserror_falls_back(self, tmp_path: Path, monkeypatch, caplog):
+    def test_agent_hooks_dir_resolve_oserror_falls_back(
+        self, tmp_path: Path, monkeypatch, caplog
+    ):
         """Regression: OSError from ``Path.resolve()`` falls back cleanly.
 
         Coverage hardening: if
@@ -2500,23 +2399,17 @@ class TestDefaultDialectHooksAutoimport:
         """
         import logging
 
-        from gideon import agent as _agent_mod
-        from gideon.agent import _apply_user_agent_hooks
+        from gideon.engine import agent as _agent_mod
+        from gideon.engine.agent import _apply_user_agent_hooks
 
-        # Re-route default so fallback is inert.
         monkeypatch.setattr(
-            "gideon.agent._DEFAULT_HOOKS_DIR",
+            "gideon.engine.agent._DEFAULT_HOOKS_DIR",
             tmp_path / "nonexistent" / "hooks",
         )
 
-        # Force Path.resolve to raise OSError.  Narrow the patch so only
-        # resolve() on the "requested" path fails; Path.home() still
-        # works so home=None comes from resolved=None cascade.
         real_resolve = Path.resolve
 
         def _raising_resolve(self, *args, **kwargs):
-            # Raise only on the user-supplied path (a custom fake-home
-            # target we pass below).  Leave other resolve() calls alone.
             if self.name == "too-long":
                 raise OSError("ENAMETOOLONG simulated")
             return real_resolve(self, *args, **kwargs)
@@ -2531,30 +2424,22 @@ class TestDefaultDialectHooksAutoimport:
         monkeypatch.setattr(_agent_mod, "_sel_hook_rejected", _record_sel)
 
         config: dict = {"hooks": {}}
-        # A path whose name triggers our resolve-fail shim.
-        pc_cfg = {"agent": {"agent_hooks_dir": str(tmp_path / "too-long")}}
+        runtime_config = {"agent": {"agent_hooks_dir": str(tmp_path / "too-long")}}
 
-        with caplog.at_level(logging.WARNING, logger="gideon.agent"):
-            # Must not raise.
-            _apply_user_agent_hooks(config, pc_cfg)
+        with caplog.at_level(logging.WARNING, logger="gideon.engine.agent"):
+            _apply_user_agent_hooks(config, runtime_config)
 
         assert config["hooks"] == {}
-        # Exactly one SEL call for the rejection.
         assert len(sel_calls) == 1, (
             f"expected exactly one _sel_hook_rejected on OSError resolve; "
             f"got {len(sel_calls)}: {sel_calls!r}"
         )
         event_tag, _command, reason = sel_calls[0]
         assert event_tag == "autoimport"
-        # Reason currently says "outside HOME or sensitive" which is
-        # broadly accurate (resolved=None does land in that branch),
-        # but a future refinement may split OSError into its own
-        # reason string -- either shape is acceptable here.
         assert (
             "agent_hooks_dir" in reason.lower()
             or "hooks_dir" in reason.lower()
             or "home" in reason.lower()
             or "sensitive" in reason.lower()
         )
-        # A warning mentioning "rejected" must be logged.
         assert any("rejected" in rec.message.lower() for rec in caplog.records)

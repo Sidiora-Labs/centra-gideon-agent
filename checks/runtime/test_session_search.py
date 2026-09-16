@@ -11,9 +11,9 @@ Two properties carry this feature, so most tests assert one of them:
 
 import pytest
 
-from gideon import session_restrictions
-from gideon import session_search as ss
-from gideon.history import ConversationLog
+from gideon.cognition.history import ConversationLog
+from gideon.engine import session_restrictions
+from gideon.engine import session_search as ss
 
 
 @pytest.fixture(autouse=True)
@@ -34,9 +34,6 @@ def log(tmp_path):
     log.append("chat-2", "user", "Remind me about the quarterly planning document")
     log.append("chat-3", "user", "Bedrock throttling errors keep appearing in the logs")
     return log
-
-
-# ── Indexing ──
 
 
 class TestIndexing:
@@ -104,9 +101,6 @@ class TestIndexing:
         assert ss.stats()["indexed_chars"] <= 200_000
 
 
-# ── Restrictions ──
-
-
 class TestRestrictions:
     def test_incognito_session_is_never_indexed(self, tmp_path):
         log = ConversationLog(base_dir=tmp_path / "h")
@@ -130,22 +124,26 @@ class TestRestrictions:
 
     def test_memory_mode_argument_blocks_indexing(self):
         for mode in ("incognito", "temporary", "INCOGNITO"):
-            assert ss.index_session("k", "t", "sensitive body", memory_mode=mode) is False
+            assert (
+                ss.index_session("k", "t", "sensitive body", memory_mode=mode) is False
+            )
         assert ss.search_sessions("sensitive") == []
 
     def test_persistent_mode_indexes_normally(self):
-        assert ss.index_session("k", "t", "ordinary body", memory_mode="persistent") is True
+        assert (
+            ss.index_session("k", "t", "ordinary body", memory_mode="persistent")
+            is True
+        )
 
     def test_reclassifying_purges_an_already_indexed_session(self):
         ss.index_session("k1", "Title", "previously indexed content")
         assert ss.search_sessions("previously")
         session_restrictions.mark_incognito("k1")
         try:
-            # Hidden at READ time, before any reindex — the mode is honored as it is
-            # NOW, not as it was when the rows were written.
             assert ss.search_sessions("previously") == []
-            # And the rows are dropped on the next indexing attempt.
-            assert ss.index_session("k1", "Title", "previously indexed content") is False
+            assert (
+                ss.index_session("k1", "Title", "previously indexed content") is False
+            )
         finally:
             session_restrictions.clear("k1")
 
@@ -158,7 +156,6 @@ class TestRestrictions:
         try:
             ss.index_turn("t1", "user", "more text")
             session_restrictions.clear("t1")
-            # The purge happened while restricted, so it's gone even after clearing.
             assert ss.search_sessions("watermelon") == []
         finally:
             session_restrictions.clear("t1")
@@ -168,9 +165,6 @@ class TestRestrictions:
         assert ss.is_restricted("x", memory_mode="temporary") is True
         assert ss.is_restricted("x", memory_mode="persistent") is False
         assert ss.is_restricted("x", memory_mode="") is False
-
-
-# ── Querying ──
 
 
 class TestSearch:
@@ -191,7 +185,9 @@ class TestSearch:
 
     def test_multi_token_query_requires_all_terms(self, log):
         ss.reindex_all(log)
-        assert {r["key"] for r in ss.search_sessions("bedrock throttling")} == {"chat-3"}
+        assert {r["key"] for r in ss.search_sessions("bedrock throttling")} == {
+            "chat-3"
+        }
 
     def test_case_insensitive(self, log):
         ss.reindex_all(log)
@@ -235,14 +231,11 @@ class TestSearch:
     def test_fts_syntax_in_user_input_cannot_break_the_query(self, log, hostile):
         """Every token is quoted, so operators arrive as literals, not syntax."""
         ss.reindex_all(log)
-        ss.search_sessions(hostile)  # must not raise
+        ss.search_sessions(hostile)
 
     def test_query_with_no_indexable_tokens(self, log):
         ss.reindex_all(log)
         assert ss.search_sessions("!!!!") == []
-
-
-# ── Degradation ──
 
 
 class TestDegradation:
@@ -259,13 +252,15 @@ class TestDegradation:
         the FTS5 question once via ``probe().fts5`` before it ever opens a connection, so a
         no-FTS5 build is detected up front rather than by a mid-CREATE OperationalError.
         Patch the name ``session_search`` imported so the guard sees ``fts5=False``."""
-        from gideon.sqlite_compat import SqliteCapabilities
+        from gideon.core.sqlite_compat import SqliteCapabilities
 
         ss.reset_for_tests()
         monkeypatch.setattr(
             ss,
             "probe",
-            lambda: SqliteCapabilities(driver="sqlite3", version="3", fts5=False, json1=True),
+            lambda: SqliteCapabilities(
+                driver="sqlite3", version="3", fts5=False, json1=True
+            ),
         )
         assert ss.search_sessions("anything") == []
         assert ss.index_session("k", "t", "b") is False
@@ -273,9 +268,11 @@ class TestDegradation:
 
     def test_index_turn_never_raises(self, monkeypatch):
         monkeypatch.setattr(
-            ss, "reindex_session", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+            ss,
+            "reindex_session",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
         )
-        ss.index_turn("k", "user", "text")  # must not raise
+        ss.index_turn("k", "user", "text")
 
     def test_reindex_all_survives_an_unreadable_log(self):
         class _Broken:
@@ -299,16 +296,13 @@ class TestDegradation:
         ss.forget_session("")
 
 
-# ── The endpoint ──
-
-
 class TestEndpoint:
     def _app(self, log):
         from types import SimpleNamespace
 
         from aiohttp import web
 
-        from gideon.dashboard.handlers.sessions import api_sessions_search
+        from gideon.interfaces.dashboard.handlers.sessions import api_sessions_search
 
         app = web.Application()
         app["state"] = SimpleNamespace(conversation_log=log)
@@ -329,7 +323,6 @@ class TestEndpoint:
     async def test_falls_back_to_the_scan_when_the_index_is_empty(self, log):
         from aiohttp.test_utils import TestClient, TestServer
 
-        # No reindex — the index has nothing, so the scan must answer.
         async with TestClient(TestServer(self._app(log))) as client:
             body = await (await client.get("/api/sessions/search?q=throttling")).json()
         assert body["source"] == "scan"
@@ -361,7 +354,7 @@ class TestEndpoint:
         from aiohttp import web
         from aiohttp.test_utils import TestClient, TestServer
 
-        from gideon.dashboard.handlers.sessions import api_sessions_search
+        from gideon.interfaces.dashboard.handlers.sessions import api_sessions_search
 
         app = web.Application()
         app["state"] = SimpleNamespace(conversation_log=None)
@@ -371,12 +364,9 @@ class TestEndpoint:
         assert body["sessions"] == []
 
 
-# ── Heartbeat wiring ──
-
-
 class TestHeartbeatWiring:
     def test_reindex_cadence_is_declared(self):
-        from gideon import heartbeat
+        from gideon.engine import heartbeat
 
         assert heartbeat._SESSION_INDEX_TICKS >= 1
         assert heartbeat._SESSION_INDEX_MAX_PER_PASS >= 1
@@ -388,14 +378,14 @@ class TestHeartbeatWiring:
         Drives the real ``_beat`` rather than inspecting source, so deleting the
         call site fails this test.
         """
-        from gideon import heartbeat
+        from gideon.engine import heartbeat
 
         calls: list = []
         monkeypatch.setattr(ss, "reindex_all", lambda **kw: calls.append(kw) or 3)
 
         service = heartbeat.HeartbeatService.__new__(heartbeat.HeartbeatService)
-        service._tick = heartbeat._SESSION_INDEX_TICKS  # a tick the sweep runs on
-        service._processing = True  # skip the heartbeat-file work
+        service._tick = heartbeat._SESSION_INDEX_TICKS
+        service._processing = True
         service._consolidator = None
         service._on_due_commitments = None
         service._interval = 60
@@ -406,7 +396,7 @@ class TestHeartbeatWiring:
 
     @pytest.mark.asyncio
     async def test_a_reindex_failure_does_not_kill_the_tick(self, monkeypatch):
-        from gideon import heartbeat
+        from gideon.engine import heartbeat
 
         def _boom(**kwargs):
             raise RuntimeError("index exploded")
@@ -419,10 +409,7 @@ class TestHeartbeatWiring:
         service._on_due_commitments = None
         service._interval = 60
 
-        await service._beat()  # must not raise
-
-
-# ── Regressions found by driving the real gateway ────────────────────────────
+        await service._beat()
 
 
 class TestValidationRegressions:
@@ -442,7 +429,6 @@ class TestValidationRegressions:
         log = ConversationLog(base_dir=tmp_path / "persisted")
         log.append("m1", "user", "watermelon notes here")
         log.rewrite_session("m1", log.read_messages("m1"))
-        # Directly stamp the persisted mode, as an incognito session would carry.
         path = next((tmp_path / "persisted").glob("m1*"))
         lines = path.read_text().splitlines()
         import json as _json
@@ -459,12 +445,12 @@ class TestValidationRegressions:
         for the first five minutes — including the initial history sweep."""
         import asyncio as _asyncio
 
-        from gideon import heartbeat
+        from gideon.engine import heartbeat
 
         calls: list = []
         monkeypatch.setattr(ss, "reindex_all", lambda **kw: calls.append(kw) or 0)
         service = heartbeat.HeartbeatService.__new__(heartbeat.HeartbeatService)
-        service._tick = 1  # the very first wake-up
+        service._tick = 1
         service._processing = True
         service._consolidator = None
         service._on_due_commitments = None
@@ -491,7 +477,6 @@ class TestCoarseMtimeFilesystems:
         ss.reindex_all(log)
 
         log.append("chat-1", "user", "second message about zebras")
-        # Force the timestamps EQUAL, the condition CI produces naturally.
         path = log._path("chat-1")
         stat = path.stat()
         os.utime(path, (stat.st_atime, stat.st_mtime))
@@ -509,9 +494,9 @@ class TestCoarseMtimeFilesystems:
         log.append("chat-1", "user", "hello")
         ss.reindex_all(log)
         conn = ss._connect()
-        stored = conn.execute("SELECT mtime FROM indexed WHERE session_key = 'chat-1'").fetchone()[
-            0
-        ]
+        stored = conn.execute(
+            "SELECT mtime FROM indexed WHERE session_key = 'chat-1'"
+        ).fetchone()[0]
         file_mtime = log._path("chat-1").stat().st_mtime
         assert abs(float(stored) - file_mtime) < 0.001
         assert float(stored) <= _time.time()

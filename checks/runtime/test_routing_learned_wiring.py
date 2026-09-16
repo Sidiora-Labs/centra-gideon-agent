@@ -17,12 +17,15 @@ from pathlib import Path
 
 import pytest
 
-from gideon.routing import policy, stats
+from gideon.engine.routing import policy, stats
 
 
 def _fold(home: Path, rows: dict[str, tuple[int, float]]) -> None:
     """A real routing_stats.json, written through the producer's own shape."""
-    fold: dict = {"version": stats.STATS_VERSION, "use_cases": {"chat": {"general": {}}}}
+    fold: dict = {
+        "version": stats.STATS_VERSION,
+        "use_cases": {"chat": {"general": {}}},
+    }
     for ref, (n, sr) in rows.items():
         fold["use_cases"]["chat"]["general"][ref] = {
             "n": n,
@@ -46,9 +49,6 @@ def _policy(home: Path, use_case: str, mode: str) -> None:
     ``off`` — which passes an "off returns the bound order" test for entirely the wrong reason.
     """
     pol = policy.load_policy(home)
-    # `_use_case_entry` is a READ accessor: it returns `{}` for a use case the table does not
-    # list and does NOT insert it, so mutating its result writes into a throwaway dict. Build the
-    # nesting explicitly.
     pol.setdefault("use_cases", {})[use_case] = {"mode": mode}
     policy.save_policy(home, pol)
     assert (
@@ -73,8 +73,9 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def test_the_master_switch_is_what_the_fixture_overrides() -> None:
     """The fixture above asserts its own premise: with `routing.enabled` at its default, every
-    mode reads `off`, so none of the tests below would be measuring the learned stage."""
-    from gideon.config.loader import RoutingConfig
+    mode reads `off`, so none of the tests below would be measuring the learned stage.
+    """
+    from gideon.core.config.loader import RoutingConfig
 
     assert RoutingConfig().enabled is False
 
@@ -95,7 +96,9 @@ def test_heuristic_mode_does_not_consult_the_fold(home: Path) -> None:
     _policy(home, "chat", "heuristic")
     _fold(home, {"cloudy:big": (20, 0.40), "ollama:small": (20, 0.95)})
     heuristic = policy.route_refs("chat", "general", REFS, home=home)
-    assert heuristic == REFS, "a bare home has no local providers, so the heuristic is a no-op here"
+    assert (
+        heuristic == REFS
+    ), "a bare home has no local providers, so the heuristic is a no-op here"
     _policy(home, "chat", "learned")
     assert policy.route_refs("chat", "general", REFS, home=home) != heuristic
 
@@ -113,7 +116,7 @@ def test_deleting_the_fold_degrades_to_the_heuristic(home: Path) -> None:
     heuristic = policy.route_refs("chat", "general", REFS, home=home)
     _policy(home, "chat", "learned")
     _fold(home, {"cloudy:big": (20, 0.40), "ollama:small": (20, 0.95)})
-    assert policy.route_refs("chat", "general", REFS, home=home) != heuristic  # vacuity floor
+    assert policy.route_refs("chat", "general", REFS, home=home) != heuristic
     (home / "routing_stats.json").unlink()
     assert policy.route_refs("chat", "general", REFS, home=home) == heuristic
 
@@ -142,13 +145,17 @@ def test_the_knob_fail_open_floor_matches_the_declared_defaults() -> None:
     differently from a healthy one."""
     from dataclasses import fields
 
-    from gideon.config.loader import RoutingConfig
+    from gideon.core.config.loader import RoutingConfig
 
     declared = {f.name: f.default for f in fields(RoutingConfig)}
     floor = policy._routing_knobs.__doc__ or ""
     assert "declared defaults" in floor
     cfg = RoutingConfig()
-    assert (cfg.hysteresis, cfg.cloud_quality_margin, cfg.min_samples) == (0.05, 0.10, 5), declared
+    assert (cfg.hysteresis, cfg.cloud_quality_margin, cfg.min_samples) == (
+        0.05,
+        0.10,
+        5,
+    ), declared
 
 
 def test_an_unpriced_model_is_not_free(home: Path) -> None:
@@ -156,19 +163,6 @@ def test_an_unpriced_model_is_not_free(home: Path) -> None:
     each within-band cost tie — the opposite of the local-first posture."""
     probe = policy._cost_of(home)
     assert probe("nosuchprovider:nosuchmodel") == float("inf")
-
-
-# ── the feedback overlay: `policy::_overlay_feedback` (§4.2) ─────────────────────
-#
-# `_learned_order` folds the ledger-derived feedback onto the in-memory fold before scoring
-# (`policy.py`'s `_overlay_feedback(fold, ...)` call). A wire-depth check found that call railed by
-# nothing: deleting it left 425 tests green, because every fold this suite writes carries
-# `feedback_n: 0` and the overlay is the ONLY thing that ever raises it — so with the overlay gone
-# `_score` renormalizes onto `success_rate` alone and every existing assertion still holds.
-#
-# The two rails below therefore drive a REAL ledger event and assert the resulting ORDER, which is
-# the effect. Asserting that `_overlay_feedback` was called would not do: it passes for an overlay
-# that writes into a copy of the fold, or onto a cell nothing scores.
 
 
 def _judge_verdict(home: Path, *, ref: str, verdict: str, run: str = "run-1") -> None:
@@ -180,7 +174,7 @@ def _judge_verdict(home: Path, *, ref: str, verdict: str, run: str = "run-1") ->
     built on an unattributable event would drive an EMPTY overlay and pass identically whether or
     not `_learned_order` overlays anything.
     """
-    from gideon.routing.feedback import feedback_index
+    from gideon.engine.routing.feedback import feedback_index
 
     run_dir = home / "workflows" / "runs" / run
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -213,15 +207,21 @@ def test_a_reject_verdict_in_the_ledger_demotes_the_ref(home: Path) -> None:
     _policy(home, "chat", "learned")
     _fold(home, {"cloudy:big": (20, 0.95), "ollama:small": (20, 0.80)})
 
-    # Vacuity floor: the SAME fold with no verdict in the ledger leaves `cloudy:big` first, so the
-    # flip below is caused by the feedback and not by the fold or by the heuristic.
-    from gideon.routing.feedback import feedback_index
+    from gideon.engine.routing.feedback import feedback_index
 
-    assert feedback_index(home=home) == {}, "the home already held a verdict — nothing is isolated"
-    assert policy.route_refs("chat", "general", REFS, home=home) == ["cloudy:big", "ollama:small"]
+    assert (
+        feedback_index(home=home) == {}
+    ), "the home already held a verdict — nothing is isolated"
+    assert policy.route_refs("chat", "general", REFS, home=home) == [
+        "cloudy:big",
+        "ollama:small",
+    ]
 
     _judge_verdict(home, ref="cloudy:big", verdict="REJECT")
-    assert policy.route_refs("chat", "general", REFS, home=home) == ["ollama:small", "cloudy:big"]
+    assert policy.route_refs("chat", "general", REFS, home=home) == [
+        "ollama:small",
+        "cloudy:big",
+    ]
 
 
 def test_a_pass_verdict_in_the_ledger_promotes_the_ref(home: Path) -> None:
@@ -235,10 +235,16 @@ def test_a_pass_verdict_in_the_ledger_promotes_the_ref(home: Path) -> None:
     _policy(home, "chat", "learned")
     _fold(home, {"cloudy:big": (20, 0.60), "ollama:small": (20, 0.50)})
 
-    assert policy.route_refs("chat", "general", REFS, home=home) == ["cloudy:big", "ollama:small"]
+    assert policy.route_refs("chat", "general", REFS, home=home) == [
+        "cloudy:big",
+        "ollama:small",
+    ]
 
     _judge_verdict(home, ref="ollama:small", verdict="PASS")
-    assert policy.route_refs("chat", "general", REFS, home=home) == ["ollama:small", "cloudy:big"]
+    assert policy.route_refs("chat", "general", REFS, home=home) == [
+        "ollama:small",
+        "cloudy:big",
+    ]
 
 
 def test_the_overlay_is_scoped_to_the_cell_it_was_recorded_for(home: Path) -> None:
@@ -259,7 +265,7 @@ def test_the_overlay_is_scoped_to_the_cell_it_was_recorded_for(home: Path) -> No
                 "kind": "judge_verdict",
                 "event_id": "run-elsewhere-evt-1",
                 "use_case": "chat",
-                "query_class": "long_reasoning",  # NOT the class being routed below
+                "query_class": "long_reasoning",
                 "ref": "cloudy:big",
                 "verdict": "REJECT",
             }
@@ -267,8 +273,13 @@ def test_the_overlay_is_scoped_to_the_cell_it_was_recorded_for(home: Path) -> No
         + "\n",
         encoding="utf-8",
     )
-    # Vacuity floor: the event IS attributable, so "no flip" means scoping and not a dropped event.
-    from gideon.routing.feedback import feedback_index
+    from gideon.engine.routing.feedback import feedback_index
 
-    assert feedback_index(home=home).get(("chat", "long_reasoning", "cloudy:big")) == (0.0, 1)
-    assert policy.route_refs("chat", "general", REFS, home=home) == ["cloudy:big", "ollama:small"]
+    assert feedback_index(home=home).get(("chat", "long_reasoning", "cloudy:big")) == (
+        0.0,
+        1,
+    )
+    assert policy.route_refs("chat", "general", REFS, home=home) == [
+        "cloudy:big",
+        "ollama:small",
+    ]

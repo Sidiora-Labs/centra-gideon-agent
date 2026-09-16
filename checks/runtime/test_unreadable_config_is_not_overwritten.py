@@ -26,11 +26,9 @@ from pathlib import Path
 
 import pytest
 
-# ── 1. ~/.claude.json and Gideon's own mcp.json ────────────────────────────────────────────
-
 
 def _mcp():
-    from gideon.dashboard.handlers import mcp
+    from gideon.interfaces.dashboard.handlers import mcp
 
     return mcp
 
@@ -71,7 +69,9 @@ def test_unreadable_file_raises(tmp_path: Path) -> None:
         p.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
 
-def test_set_scope_entry_refuses_and_leaves_the_file_byte_identical(tmp_path: Path) -> None:
+def test_set_scope_entry_refuses_and_leaves_the_file_byte_identical(
+    tmp_path: Path,
+) -> None:
     """🔴 THE DEFECT ITSELF. A malformed ~/.claude.json holding other servers' secrets must come
     out of an enable attempt UNCHANGED, not replaced by a one-server dict."""
     m = _mcp()
@@ -103,23 +103,29 @@ def test_set_scope_entry_still_works_on_a_readable_file(tmp_path: Path) -> None:
     assert outcome == "added"
     data = json.loads(p.read_text(encoding="utf-8"))
     assert data["mcpServers"]["newsrv"] == {"command": "new"}
-    assert data["projects"]["/work"]["history"] == ["keep me"], "unrelated keys must survive"
+    assert data["projects"]["/work"]["history"] == [
+        "keep me"
+    ], "unrelated keys must survive"
 
 
 def test_set_scope_entry_creates_an_absent_file(tmp_path: Path) -> None:
     m = _mcp()
     p = tmp_path / "nested" / "claude.json"
     assert m._set_scope_entry(p, "srv", enabled=True, spec={"command": "x"}) == "added"
-    assert json.loads(p.read_text(encoding="utf-8"))["mcpServers"]["srv"] == {"command": "x"}
+    assert json.loads(p.read_text(encoding="utf-8"))["mcpServers"]["srv"] == {
+        "command": "x"
+    }
 
 
 # ── 2. AppConfig.save() ──────────────────────────────────────────────────────────────────────────
 
 
-def test_save_refuses_when_the_existing_config_is_unreadable(tmp_path, monkeypatch) -> None:
+def test_save_refuses_when_the_existing_config_is_unreadable(
+    tmp_path, monkeypatch
+) -> None:
     """🔴 THE SECOND DEFECT. `providers` holds the user's model-provider API keys; a failed read
     must abort the save rather than write a config without them."""
-    from gideon.config import loader as L
+    from gideon.core.config import loader as L
 
     home = tmp_path / "home"
     home.mkdir()
@@ -135,12 +141,16 @@ def test_save_refuses_when_the_existing_config_is_unreadable(tmp_path, monkeypat
     with pytest.raises(L.ConfigPreserveError):
         c.save()
 
-    assert cfg.read_bytes() == before, "the config was rewritten without its providers block"
+    assert (
+        cfg.read_bytes() == before
+    ), "the config was rewritten without its providers block"
     assert b"sk-ant-DO-NOT-LOSE" in cfg.read_bytes()
 
 
-def test_save_still_preserves_the_blocks_on_a_readable_config(tmp_path, monkeypatch) -> None:
-    from gideon.config import loader as L
+def test_save_still_preserves_the_blocks_on_a_readable_config(
+    tmp_path, monkeypatch
+) -> None:
+    from gideon.core.config import loader as L
 
     home = tmp_path / "home"
     home.mkdir()
@@ -168,7 +178,7 @@ def test_save_still_preserves_the_blocks_on_a_readable_config(tmp_path, monkeypa
 
 def test_save_creates_a_config_that_does_not_exist_yet(tmp_path, monkeypatch) -> None:
     """Absent is the one case where writing without the blocks is correct."""
-    from gideon.config import loader as L
+    from gideon.core.config import loader as L
 
     cfg = tmp_path / "home" / "config.json"
     monkeypatch.setattr(L, "config_path", lambda: cfg)
@@ -178,7 +188,9 @@ def test_save_creates_a_config_that_does_not_exist_yet(tmp_path, monkeypatch) ->
 
 
 @pytest.mark.parametrize("blank", ["", "   ", "\n\n", "\t \n"])
-def test_save_treats_an_EMPTY_file_as_absent_not_unreadable(tmp_path, monkeypatch, blank) -> None:
+def test_save_treats_an_EMPTY_file_as_absent_not_unreadable(
+    tmp_path, monkeypatch, blank
+) -> None:
     """Zero bytes hold no block to preserve, so refusing would be a dead end, not a guard.
 
     A config truncated to nothing — a crashed write, a full disk, a bare `touch` — has no
@@ -187,7 +199,7 @@ def test_save_treats_an_EMPTY_file_as_absent_not_unreadable(tmp_path, monkeypatc
     than the data loss this guard exists to prevent. The refusal is for a file whose CONTENT
     cannot be known; a file that HAS no content is the `absent` case one line up.
     """
-    from gideon.config import loader as L
+    from gideon.core.config import loader as L
 
     cfg = tmp_path / "config.json"
     cfg.write_text(blank, encoding="utf-8")
@@ -195,13 +207,14 @@ def test_save_treats_an_EMPTY_file_as_absent_not_unreadable(tmp_path, monkeypatc
     L.AppConfig().save()
     written = json.loads(cfg.read_text(encoding="utf-8"))
     assert "meta" in written
-    # And it must not invent the blocks it had nothing to preserve.
     assert "providers" not in written and "use_cases" not in written
 
 
-def test_a_file_holding_only_whitespace_and_junk_is_still_REFUSED(tmp_path, monkeypatch) -> None:
+def test_a_file_holding_only_whitespace_and_junk_is_still_REFUSED(
+    tmp_path, monkeypatch
+) -> None:
     """The empty carve-out must not widen into "unparseable is fine if it is short"."""
-    from gideon.config import loader as L
+    from gideon.core.config import loader as L
 
     cfg = tmp_path / "config.json"
     cfg.write_text("   {oops   ", encoding="utf-8")

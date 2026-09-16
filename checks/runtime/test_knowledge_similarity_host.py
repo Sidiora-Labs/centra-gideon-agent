@@ -38,9 +38,9 @@ import types
 
 import pytest
 
-from gideon import knowledge as knowledge_pkg
-from gideon.knowledge import maintenance, maintenance_passes
-from gideon.knowledge.store import KnowledgeStore
+from gideon.cognition import knowledge as knowledge_pkg
+from gideon.cognition.knowledge import maintenance, maintenance_passes
+from gideon.cognition.knowledge.store import KnowledgeStore
 
 
 @pytest.fixture
@@ -72,14 +72,14 @@ def _install_pass(monkeypatch, fn):
     """Install a stand-in `knowledge.similarity_edges` whose `similarity_pass` is `fn`.
 
     The real module is a sibling atom's file and is deliberately not created here. This works
-    because `from gideon.knowledge import similarity_edges` resolves the package ATTRIBUTE
+    because `from gideon.cognition.knowledge import similarity_edges` resolves the package ATTRIBUTE
     before the import system attempts a submodule import, so setting the attribute is enough for
     the registered pass's lazy import to find the stand-in. It is also durable in the other
     direction: once the real module lands, `monkeypatch.setattr` shadows it for the duration of
     the test and restores it afterwards, so these assertions keep measuring the HOST rather than
     silently starting to measure the pass.
     """
-    module = types.ModuleType("gideon.knowledge.similarity_edges")
+    module = types.ModuleType("gideon.cognition.knowledge.similarity_edges")
     module.similarity_pass = fn  # type: ignore[attr-defined]
     monkeypatch.setattr(knowledge_pkg, "similarity_edges", module, raising=False)
     return module
@@ -100,9 +100,6 @@ def _recorder(returns: list[int]):
     return calls, _run
 
 
-# ── it is registered on the host ──────────────────────────────────────────
-
-
 def test_the_similarity_pass_registers(home):
     names = maintenance_passes.register_all()
     assert maintenance_passes.PASS_SIMILARITY_EDGES in names
@@ -120,13 +117,12 @@ def test_registering_twice_does_not_double_the_similarity_pass(home, monkeypatch
     assert calls == [5], f"a re-registered similarity pass ran {len(calls)} times"
 
 
-# ── it is RESUMABLE, not a whole-store sweep ──────────────────────────────
-
-
 def test_the_similarity_pass_is_registered_as_RESUMABLE_not_a_sweep(home):
     maintenance_passes.register_all()
     entry = maintenance._PASSES[maintenance_passes.PASS_SIMILARITY_EDGES]
-    assert entry.batched is True, "a real backlog marked single-sweep drains one batch per tick"
+    assert (
+        entry.batched is True
+    ), "a real backlog marked single-sweep drains one batch per tick"
 
 
 def test_the_similarity_pass_DRAINS_across_sub_batches(home, monkeypatch):
@@ -160,13 +156,17 @@ def test_a_similarity_backlog_that_never_finishes_is_bounded(home, monkeypatch):
     maintenance.mark_dirty(now=1000.0)
     maintenance_passes.register_all()
     maintenance.execute(max_batches=4)
-    assert len(calls) == 4, f"an always-more similarity pass ran {len(calls)} times, not the cap"
+    assert (
+        len(calls) == 4
+    ), f"an always-more similarity pass ran {len(calls)} times, not the cap"
 
 
 # ── the call site, not the registration ───────────────────────────────────
 
 
-def test_the_registered_pass_REACHES_similarity_pass_with_the_hosts_batch_size(home, monkeypatch):
+def test_the_registered_pass_REACHES_similarity_pass_with_the_hosts_batch_size(
+    home, monkeypatch
+):
     """A registered name proves a dict entry; it does not prove the callable reaches the work.
 
     This drives `execute` and asserts `similarity_edges.similarity_pass` was the thing invoked,
@@ -179,7 +179,9 @@ def test_the_registered_pass_REACHES_similarity_pass_with_the_hosts_batch_size(h
 
     maintenance.execute(batch_size=7)
 
-    assert calls == [7], f"the registered pass did not reach similarity_pass with 7: {calls}"
+    assert calls == [
+        7
+    ], f"the registered pass did not reach similarity_pass with 7: {calls}"
 
 
 def test_a_batch_size_of_zero_defers_to_the_passs_own_default(home, monkeypatch):
@@ -210,7 +212,9 @@ def test_a_broken_similarity_module_does_not_cost_the_other_passes(home, monkeyp
     """
 
     def _boom(*, batch_size: int = 0) -> int:
-        raise ModuleNotFoundError("No module named 'gideon.knowledge.similarity_edges'")
+        raise ModuleNotFoundError(
+            "No module named 'gideon.cognition.knowledge.similarity_edges'"
+        )
 
     _install_pass(monkeypatch, _boom)
     sentinel, run = _recorder([])
@@ -222,10 +226,9 @@ def test_a_broken_similarity_module_does_not_cost_the_other_passes(home, monkeyp
 
     name = maintenance_passes.PASS_SIMILARITY_EDGES
     assert name in result.errors and "ModuleNotFoundError" in result.errors[name]
-    assert sentinel == [5], "a failing similarity pass cost an independent pass its cadence"
-
-
-# ── never inline on the write path ────────────────────────────────────────
+    assert sentinel == [
+        5
+    ], "a failing similarity pass cost an independent pass its cadence"
 
 
 def test_the_similarity_pass_does_NOT_run_inline_on_the_write_path(store, monkeypatch):
@@ -246,16 +249,18 @@ def test_the_similarity_pass_does_NOT_run_inline_on_the_write_path(store, monkey
 
     n = 5
     for i in range(n):
-        assert store.create_typed_item(item_type="note", title=f"note {i}", content="body")
+        assert store.create_typed_item(
+            item_type="note", title=f"note {i}", content="body"
+        )
 
     assert calls == [], f"{len(calls)} similarity passes ran INLINE during {n} writes"
     assert maintenance.is_dirty(), "the writes left no watermark for the host to act on"
 
     result = maintenance.execute(batch_size=9)
 
-    # Two asserts, not one: a single `calls == [9]` reports "expected exactly 1" even when the
-    # count is right and only the batch size is wrong, which sends a reader after the wrong bug.
-    assert len(calls) == 1, f"{n} writes drove {len(calls)} host passes; expected exactly 1"
+    assert (
+        len(calls) == 1
+    ), f"{n} writes drove {len(calls)} host passes; expected exactly 1"
     assert calls == [9], f"the host's batch size did not reach the pass: {calls}"
     assert result.per_pass[maintenance_passes.PASS_SIMILARITY_EDGES] == 0
     assert not maintenance.is_dirty()
@@ -275,10 +280,9 @@ def test_the_inline_assertion_is_sensitive_to_a_call(store, monkeypatch):
 
     maintenance._PASSES[maintenance_passes.PASS_SIMILARITY_EDGES].run(batch_size=3)
 
-    assert calls == [3], "the recorder cannot observe a call, so the inline assertion is vacuous"
-
-
-# ── the seam that closes at assembly ──────────────────────────────────────
+    assert calls == [
+        3
+    ], "the recorder cannot observe a call, so the inline assertion is vacuous"
 
 
 def test_the_real_similarity_module_satisfies_the_registered_contract():
@@ -291,11 +295,8 @@ def test_the_real_similarity_module_satisfies_the_registered_contract():
     rather than at the first live maintenance tick.
     """
     try:
-        from gideon.knowledge import similarity_edges
+        from gideon.cognition.knowledge import similarity_edges
     except ImportError:
-        # ImportError, not ModuleNotFoundError: `from <package> import <absent submodule>` fails
-        # in the fromlist resolution, which raises the parent class. Catching only the narrower
-        # one turned this skip into an ERROR — measured, not assumed.
         pytest.skip(
             "knowledge/similarity_edges.py is a sibling atom's file and is not on this branch, "
             "so the registered pass is UNVERIFIED against the real callable — everything else "
@@ -305,9 +306,13 @@ def test_the_real_similarity_module_satisfies_the_registered_contract():
         )
 
     run = getattr(similarity_edges, "similarity_pass", None)
-    assert run is not None, "similarity_edges has no similarity_pass for the registration to call"
+    assert (
+        run is not None
+    ), "similarity_edges has no similarity_pass for the registration to call"
     param = inspect.signature(run).parameters.get("batch_size")
-    assert param is not None, "similarity_pass takes no batch_size; the host's bound is ignored"
+    assert (
+        param is not None
+    ), "similarity_pass takes no batch_size; the host's bound is ignored"
     assert (
         param.kind is inspect.Parameter.KEYWORD_ONLY
     ), "the registered pass calls similarity_pass(batch_size=...) by keyword"

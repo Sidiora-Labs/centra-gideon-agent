@@ -21,8 +21,8 @@ from unittest.mock import patch
 
 import pytest
 
-from gideon import portability as port
-from gideon.portability import (
+from gideon.workspace import portability as port
+from gideon.workspace.portability import (
     MANIFEST_VERSION,
     apply_import_zip,
     create_export_zip,
@@ -31,9 +31,6 @@ from gideon.portability import (
     validate_import_zip,
 )
 
-# Distinctive byte markers. A substring search for these in the whole zip is the only
-# honest way to ask "did this leak?" — a filename check misses a value copied into a
-# database page or a nested tree file.
 SECRET_ENV = "sk-ant-api03-DSARLEAKCANARY0001"
 SECRET_LOCAL = "DSARLOCALSECRETCANARY0002"
 SECRET_CRED = "DSARCREDSTORECANARY0003"
@@ -67,7 +64,6 @@ def seeded_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
 
-    # ── secret=True entries (must NEVER travel) ──
     (home / ".env").write_text(f"ANTHROPIC_API_KEY={SECRET_ENV}\n")
     (home / ".local_secret").write_text(SECRET_LOCAL)
     (home / "sel_hmac.key").write_bytes(b"hmac-key-bytes")
@@ -76,7 +72,6 @@ def seeded_home(tmp_path, monkeypatch):
     (home / "credentials").mkdir()
     (home / "credentials" / "store.json").write_text(json.dumps({"key": SECRET_CRED}))
 
-    # ── derived=True entries (rebuildable; must NEVER travel) ──
     (home / "memory.ids.json").write_text(json.dumps([DERIVED_IDS]))
     (home / "memory.faiss").mkdir()
     (home / "memory.faiss" / "index.bin").write_text(DERIVED_FAISS)
@@ -85,19 +80,18 @@ def seeded_home(tmp_path, monkeypatch):
     (home / "models").mkdir()
     (home / "models" / "weights.bin").write_text(DERIVED_ROW)
 
-    # ── real state, one entry per domain ──
-    _db(home / "memory.db", MEMORY_ROW)  # memory
+    _db(home / "memory.db", MEMORY_ROW)
     (home / "workspace" / "knowledge" / "files").mkdir(parents=True)
-    (home / "workspace" / "knowledge" / "files" / "resume.txt").write_text(USER_DOC)  # knowledge
+    (home / "workspace" / "knowledge" / "files" / "resume.txt").write_text(USER_DOC)
     (home / "workspace" / "memory").mkdir(parents=True)
-    (home / "workspace" / "memory" / "notes.md").write_text(PLATFORM_NOTE)  # platform
+    (home / "workspace" / "memory" / "notes.md").write_text(PLATFORM_NOTE)
     (home / "tasks").mkdir()
-    (home / "tasks" / "t1.json").write_text(json.dumps({"id": "t1", "title": "a task"}))  # work
-    (home / "triggers.json").write_text(json.dumps({"triggers": []}))  # automation
-    (home / "config.json").write_text(json.dumps({"theme": "dark"}))  # config
+    (home / "tasks" / "t1.json").write_text(json.dumps({"id": "t1", "title": "a task"}))
+    (home / "triggers.json").write_text(json.dumps({"triggers": []}))
+    (home / "config.json").write_text(json.dumps({"theme": "dark"}))
 
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    with patch("gideon.portability.config_dir", return_value=home):
+    with patch("gideon.workspace.portability.config_dir", return_value=home):
         yield home
 
 
@@ -107,9 +101,6 @@ def _zip_of(blob: bytes) -> tuple[list[str], bytes]:
     names = sorted(n.split("/", 1)[1] for n in zf.namelist() if "/" in n)
     body = b"".join(zf.read(n) for n in zf.namelist())
     return names, body
-
-
-# ── the exclusion property ───────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -145,11 +136,12 @@ def test_export_omits_the_derived_database_entry(seeded_home):
     names, _ = _zip_of(create_export_zip()[0])
     assert "memory_index.db" not in names
     assert "session_search.db" not in names
-    # …while the real store it is derived FROM does travel.
     assert "memory.db" in names
 
 
-def test_import_refuses_a_hand_built_archive_carrying_a_credential(seeded_home, tmp_path):
+def test_import_refuses_a_hand_built_archive_carrying_a_credential(
+    seeded_home, tmp_path
+):
     """A merge import never writes a `secret ∪ derived` path, even when the zip has one.
 
     Our own exports cannot produce this archive; a hand-built or tampered one can, and
@@ -167,7 +159,7 @@ def test_import_refuses_a_hand_built_archive_carrying_a_credential(seeded_home, 
         zf.writestr("gideon-export-hand/memory.ids.json", DERIVED_IDS)
         zf.writestr("gideon-export-hand/MANIFEST.json", json.dumps({"version": 2}))
 
-    with patch("gideon.portability.config_dir", return_value=target):
+    with patch("gideon.workspace.portability.config_dir", return_value=target):
         with patch.dict(os.environ, {"GIDEON_HOME": str(target)}):
             summary = apply_import_zip(hostile, "merge")
 
@@ -176,9 +168,6 @@ def test_import_refuses_a_hand_built_archive_carrying_a_credential(seeded_home, 
     assert not (target / "memory.ids.json").exists()
     assert (target / "config.json").exists(), "the legitimate file should still arrive"
     assert ".env" in summary.get("refused", []), summary
-
-
-# ── per-domain export (criterion 9's export half) ────────────────────────────
 
 
 def test_knowledge_export_carries_the_user_documents_and_nothing_else(seeded_home):
@@ -251,9 +240,6 @@ def test_domain_of_uses_the_longest_declared_match():
     assert domain_of("memory.db") == "memory"
 
 
-# ── MANIFEST v3 + v1|v2 back-compat ─────────────────────────────────────────
-
-
 def test_v3_manifest_carries_the_integrity_shape(seeded_home):
     """§2's manifest fields, inside the export: schema version, machine id, per-member sha."""
     _, manifest = create_export_zip()
@@ -265,7 +251,6 @@ def test_v3_manifest_carries_the_integrity_shape(seeded_home):
     for member in manifest["members"]:
         assert len(member["sha256"]) == 64
         assert member["bytes"] >= 0
-    # The excluded set is named IN the artifact, so the exclusion is auditable offline.
     assert "memory_index.db" in manifest["excluded"]
     assert ".env" in manifest["excluded"]
 
@@ -356,12 +341,11 @@ def test_v1_archive_still_validates_and_imports(tmp_path):
     ok, err, manifest = validate_import_zip(archive)
     assert ok, err
     assert manifest["version"] == 1
-    # There are no hashes in a v1 archive, so it must NOT claim to have been verified.
     assert manifest["verified"] is False
 
     target = tmp_path / "target"
     target.mkdir()
-    with patch("gideon.portability.config_dir", return_value=target):
+    with patch("gideon.workspace.portability.config_dir", return_value=target):
         with patch.dict(os.environ, {"GIDEON_HOME": str(target)}):
             apply_import_zip(archive, "merge")
     assert json.loads((target / "config.json").read_text())["theme"] == "v1-era"
@@ -387,10 +371,9 @@ def test_an_unknown_future_version_is_refused(tmp_path):
     assert "9" in err
 
 
-# ── the round trip, and the unhappy path ─────────────────────────────────────
-
-
-def test_round_trip_into_a_fresh_home_restores_every_claimed_domain(seeded_home, tmp_path):
+def test_round_trip_into_a_fresh_home_restores_every_claimed_domain(
+    seeded_home, tmp_path
+):
     """Export → fresh home → import → the claimed domains are EQUAL.
 
     The property that makes an export worth having. A test that only checked the zip was
@@ -403,26 +386,24 @@ def test_round_trip_into_a_fresh_home_restores_every_claimed_domain(seeded_home,
 
     fresh = tmp_path / "fresh"
     fresh.mkdir()
-    with patch("gideon.portability.config_dir", return_value=fresh):
+    with patch("gideon.workspace.portability.config_dir", return_value=fresh):
         with patch.dict(os.environ, {"GIDEON_HOME": str(fresh)}):
             ok, err, _ = validate_import_zip(archive)
             assert ok, err
             apply_import_zip(archive, "merge")
 
-    # knowledge: the user's document, byte-identical.
-    assert (fresh / "workspace" / "knowledge" / "files" / "resume.txt").read_text() == USER_DOC
-    # work + automation + config + platform.
+    assert (
+        fresh / "workspace" / "knowledge" / "files" / "resume.txt"
+    ).read_text() == USER_DOC
     assert json.loads((fresh / "tasks" / "t1.json").read_text())["id"] == "t1"
     assert json.loads((fresh / "triggers.json").read_text()) == {"triggers": []}
     assert json.loads((fresh / "config.json").read_text())["theme"] == "dark"
     assert (fresh / "workspace" / "memory" / "notes.md").read_text() == PLATFORM_NOTE
-    # memory: the row survives the backup-API copy.
     conn = sqlite3.connect(str(fresh / "memory.db"))
     try:
         assert conn.execute("SELECT v FROM rows_t").fetchone()[0] == MEMORY_ROW
     finally:
         conn.close()
-    # …and the derived index did NOT come back.
     assert not (fresh / "memory_index.db").exists()
     assert manifest["scope"] == "full"
 
@@ -433,10 +414,12 @@ def test_a_domain_round_trip_restores_only_that_domain(seeded_home, tmp_path):
     archive.write_bytes(blob)
     fresh = tmp_path / "fresh-know"
     fresh.mkdir()
-    with patch("gideon.portability.config_dir", return_value=fresh):
+    with patch("gideon.workspace.portability.config_dir", return_value=fresh):
         with patch.dict(os.environ, {"GIDEON_HOME": str(fresh)}):
             apply_import_zip(archive, "merge")
-    assert (fresh / "workspace" / "knowledge" / "files" / "resume.txt").read_text() == USER_DOC
+    assert (
+        fresh / "workspace" / "knowledge" / "files" / "resume.txt"
+    ).read_text() == USER_DOC
     assert not (fresh / "config.json").exists()
     assert not (fresh / "memory.db").exists()
 
@@ -453,10 +436,9 @@ def test_merge_never_overwrites_what_the_home_already_has(seeded_home, tmp_path)
     target = tmp_path / "occupied"
     target.mkdir()
     (target / "config.json").write_text(json.dumps({"theme": "MINE"}))
-    with patch("gideon.portability.config_dir", return_value=target):
+    with patch("gideon.workspace.portability.config_dir", return_value=target):
         with patch.dict(os.environ, {"GIDEON_HOME": str(target)}):
             apply_import_zip(archive, "merge")
-            # Idempotent: a second run changes nothing either.
             apply_import_zip(archive, "merge")
     assert json.loads((target / "config.json").read_text())["theme"] == "MINE"
     assert (target / "tasks" / "t1.json").exists(), "absent stores should still arrive"
@@ -488,7 +470,7 @@ def test_a_failed_replace_leaves_the_displaced_state_recoverable(seeded_home, tm
         real_replace(snap, pc, components)
         raise OSError("disk full part-way through the replace")
 
-    with patch("gideon.portability.config_dir", return_value=target):
+    with patch("gideon.workspace.portability.config_dir", return_value=target):
         with patch.dict(os.environ, {"GIDEON_HOME": str(target)}):
             with patch.object(port, "_do_replace", exploding_replace):
                 with pytest.raises(OSError):
@@ -510,7 +492,7 @@ def test_replace_reports_where_the_displaced_state_went(seeded_home, tmp_path):
     target = tmp_path / "replaced"
     target.mkdir()
     (target / "config.json").write_text(json.dumps({"theme": "old"}))
-    with patch("gideon.portability.config_dir", return_value=target):
+    with patch("gideon.workspace.portability.config_dir", return_value=target):
         with patch.dict(os.environ, {"GIDEON_HOME": str(target)}):
             summary = apply_import_zip(archive, "replace")
     assert summary["pre_restore"].startswith("pre-restore-")
@@ -541,15 +523,6 @@ def test_the_real_home_is_never_touched(seeded_home, tmp_path):
     assert port._pc_dir() == seeded_home
 
 
-# ── a declared database leaves through the backup API, or not at all ─────────
-#
-# The suite above seeds its databases at the top of the home, where only ONE write site
-# can reach them. Two of the inventory's declared sqlite stores
-# (`workspace/knowledge/knowledge.db`, `workspace/lexicon/lexicon.db`) live INSIDE the
-# `workspace` tree, which a second write site walks — so they were written twice, and
-# the fixture's shape made that invisible.
-
-
 @pytest.fixture
 def home_with_a_db_inside_the_workspace_tree(tmp_path, monkeypatch):
     """A home whose declared database sits inside the `workspace` tree, with a real
@@ -566,12 +539,11 @@ def home_with_a_db_inside_the_workspace_tree(tmp_path, monkeypatch):
         conn.execute("CREATE TABLE terms (v TEXT)")
         for i in range(500):
             conn.execute("INSERT INTO terms (v) VALUES (?)", (f"term {i}",))
-        conn.commit()  # committed into the WAL and deliberately NOT checkpointed
+        conn.commit()
         assert Path(str(lex) + "-wal").exists(), "fixture did not produce a WAL"
         monkeypatch.setenv("GIDEON_HOME", str(home))
-        # An isolated home does not confine the workspace; both are pinned.
         monkeypatch.setenv("GIDEON_WORKSPACE", str(home / "workspace"))
-        with patch("gideon.portability.config_dir", return_value=home):
+        with patch("gideon.workspace.portability.config_dir", return_value=home):
             yield home
     finally:
         conn.close()
@@ -581,10 +553,14 @@ def _entries(blob: bytes) -> list[str]:
     """Every archive entry, prefix stripped, DUPLICATES PRESERVED. `_zip_of` sorts into a
     set-like list, which is precisely what hid a path written twice."""
     zf = zipfile.ZipFile(io.BytesIO(blob))
-    return [n.split("/", 1)[1] for n in zf.namelist() if "/" in n and not n.endswith("/")]
+    return [
+        n.split("/", 1)[1] for n in zf.namelist() if "/" in n and not n.endswith("/")
+    ]
 
 
-def test_a_declared_database_is_written_exactly_once(home_with_a_db_inside_the_workspace_tree):
+def test_a_declared_database_is_written_exactly_once(
+    home_with_a_db_inside_the_workspace_tree,
+):
     """No archive entry appears twice, and the manifest's member count matches the zip.
 
     Measured before the fix: 6 entries against 5 declared members, and zipfile raised
@@ -595,13 +571,13 @@ def test_a_declared_database_is_written_exactly_once(home_with_a_db_inside_the_w
     blob, manifest = create_export_zip()
     entries = _entries(blob)
 
-    # Vacuity floor: an empty (or database-free) export satisfies "no duplicates" forever.
-    assert "workspace/lexicon/lexicon.db" in entries, "the declared database did not travel"
+    assert (
+        "workspace/lexicon/lexicon.db" in entries
+    ), "the declared database did not travel"
     assert len(entries) >= 3, f"export carried only {len(entries)} entries: {entries}"
 
     dupes = sorted({n for n in entries if entries.count(n) > 1})
     assert dupes == [], f"written more than once: {dupes}"
-    # +1 for MANIFEST.json, which the manifest cannot declare itself.
     assert (
         len(entries) == len(manifest["members"]) + 1
     ), f"{len(entries)} zip entries against {len(manifest['members'])} declared members"
@@ -613,7 +589,9 @@ def test_wal_sidecars_never_travel(home_with_a_db_inside_the_workspace_tree):
     excluded them; the tree walk shipped both."""
     blob, _ = create_export_zip()
     entries = _entries(blob)
-    assert "workspace/lexicon/lexicon.db" in entries, "vacuity: no database in this export"
+    assert (
+        "workspace/lexicon/lexicon.db" in entries
+    ), "vacuity: no database in this export"
     sidecars = [n for n in entries if n.endswith("-wal") or n.endswith("-shm")]
     assert sidecars == [], f"sqlite sidecars travelled: {sidecars}"
 
@@ -635,9 +613,12 @@ def test_a_database_the_backup_api_skipped_does_not_travel_raw(
     entries = _entries(blob)
     declared = [m["path"] if isinstance(m, dict) else m for m in manifest["members"]]
 
-    assert "workspace/lexicon/lexicon.db" not in entries, "a skipped database still travelled"
-    assert "workspace/lexicon/lexicon.db" not in declared, "the manifest declared a skipped store"
-    # Vacuity floor: the rest of the export must still be there, or this passes trivially.
+    assert (
+        "workspace/lexicon/lexicon.db" not in entries
+    ), "a skipped database still travelled"
+    assert (
+        "workspace/lexicon/lexicon.db" not in declared
+    ), "the manifest declared a skipped store"
     assert "config.json" in entries, f"nothing else survived either: {entries}"
 
 

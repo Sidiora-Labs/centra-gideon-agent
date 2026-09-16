@@ -1,0 +1,24 @@
+:root {
+  color-scheme: light dark;
+  --gideon-safe-top: env(safe-area-inset-top, 0px);
+  --gideon-safe-right: env(safe-area-inset-right, 0px);
+  --gideon-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --gideon-safe-left: env(safe-area-inset-left, 0px);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: Canvas; color: CanvasText; font: 16px/1.6 system-ui, sans-serif; }
+#shell { display: grid; align-content: center; gap: 1.25rem; min-height: 100dvh; max-width: 30rem; margin: auto; }
+#shell > * { margin: 0 1.5rem; }
+.identity { display: flex; align-items: center; gap: 0.7rem; color: AccentColor; }
+.identity img { display: block; }
+h1 { margin: 0; font-size: 2rem; font-weight: 650; letter-spacing: -0.04em; }
+.lede { opacity: 0.8; }
+form { display: grid; gap: 0.75rem; }
+label { font-size: 0.875rem; font-weight: 600; }
+input, button { font: inherit; min-height: 48px; padding: 0.7rem 1rem; border-radius: 0.75rem; }
+input { background: Field; color: FieldText; border: 1px solid color-mix(in srgb, CanvasText 30%, transparent); }
+button { background: AccentColor; color: AccentColorText; border: 0; font-weight: 650; cursor: pointer; }
+:focus-visible { outline: 2px solid AccentColor; outline-offset: 3px; }
+#status { color: CanvasText; background: Field; border-inline-start: 3px solid AccentColor; padding: 0.75rem 1rem; border-radius: 0.25rem; }
+.hint { font-size: 0.8rem; opacity: 0.7; }
+code { font-family: ui-monospace, monospace; }

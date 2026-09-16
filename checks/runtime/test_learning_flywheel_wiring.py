@@ -35,11 +35,10 @@ import pathlib
 
 import pytest
 
-from gideon import learning
+from gideon.cognition import learning
 
-PKG = pathlib.Path(learning.__file__).resolve().parent.parent  # src/gideon
+PKG = pathlib.Path(learning.__file__).resolve().parent.parent  # runtime/gideon
 
-#: Modules whose whole point is a call site elsewhere, with the atom that wired each.
 WIRED_MODULES = {
     "learning/accountability.py": "WF2LEA-5 (criterion 9 — the accountability verdict)",
     "learning/detectors.py": "WF2LEA-7 (ad-hoc→template + tier-migration detectors)",
@@ -47,7 +46,7 @@ WIRED_MODULES = {
 
 
 def _importers(module_rel: str) -> set[str]:
-    """Files under ``src/gideon`` importing ``module_rel``, excluding itself.
+    """Files under ``runtime/gideon`` importing ``module_rel``, excluding itself.
 
     AST, not grep, and that is load-bearing: `detectors.py` shares its stem with the word
     "detectors" in ordinary prose and with an unrelated `web_source.DETECTOR_ORDER`, both of which a
@@ -55,10 +54,6 @@ def _importers(module_rel: str) -> set[str]:
     files, none of which imported the module.
     """
     stem = module_rel[: -len(".py")].replace("/", ".")
-    # A package module is imported by its PACKAGE name: `learning/__init__.py` is
-    # `gideon.learning`, never `gideon.learning.__init__`. Missing this made the
-    # vacuity floor below report zero importers for a module dozens of files import — the floor
-    # caught it, which is what a floor is for.
     if stem.endswith(".__init__"):
         stem = stem[: -len(".__init__")]
     want = {stem, f"gideon.{stem}"}
@@ -69,7 +64,9 @@ def _importers(module_rel: str) -> set[str]:
         if rel == module_rel:
             continue
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"), filename=str(path))
+            tree = ast.parse(
+                path.read_text(encoding="utf-8", errors="replace"), filename=str(path)
+            )
         except SyntaxError:  # pragma: no cover - the lint job owns syntax
             continue
         pkg = ["gideon", *path.relative_to(PKG).parent.parts]
@@ -78,13 +75,15 @@ def _importers(module_rel: str) -> set[str]:
             if isinstance(node, ast.Import):
                 dotted = [a.name for a in node.names]
             elif isinstance(node, ast.ImportFrom):
-                if node.level:  # relative — resolve against this file's package
+                if node.level:
                     base = pkg[: len(pkg) - node.level + 1]
                     head = [*base, node.module] if node.module else base
                     dotted = [".".join(head)]
                     dotted += [".".join([*head, a.name]) for a in node.names]
                 elif node.module:
-                    dotted = [node.module] + [f"{node.module}.{a.name}" for a in node.names]
+                    dotted = [node.module] + [
+                        f"{node.module}.{a.name}" for a in node.names
+                    ]
             if any(d in want or d.endswith(suffix) for d in dotted):
                 found.add(rel)
                 break
@@ -99,7 +98,7 @@ def test_the_module_has_a_production_importer(module_rel: str, atom: str):
     )
     importers = _importers(module_rel)
     assert importers, (
-        f"{module_rel} has NO production importer under src/gideon. It shipped orphaned once "
+        f"{module_rel} has NO production importer under runtime/gideon. It shipped orphaned once "
         f"(AST audit 2026-08-04) and {atom} wired it; this rail exists because nothing else pins "
         f"that. The module's own unit tests still pass with every call site deleted, so the "
         f"behaviour it exists for stops silently. Restore the call site, or retire the module and "
@@ -117,12 +116,9 @@ def test_the_detector_is_not_fooled_by_the_module_name_in_prose():
     """
     fake = "learning/__init__.py"
     assert (PKG / fake).exists(), "the control module moved; re-derive this floor"
-    # `learning/__init__.py` is imported as `gideon.learning` by many modules, so a working
-    # AST index MUST find importers for it — proving the index resolves real imports at all.
     assert _importers(
         fake
     ), "the AST index found no importer for learning/__init__.py — the index is broken"
-    # …and it must NOT credit a module nothing imports.
     assert _importers("learning/_nonexistent_probe.py") == set(), (
         "the index credited importers to a module that does not exist — it is matching text, "
         "not imports."

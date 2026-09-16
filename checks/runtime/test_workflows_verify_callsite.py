@@ -21,7 +21,7 @@ import asyncio
 
 import pytest
 
-from gideon.workflows.journal import TASK_VERIFIED, ledger
+from gideon.automation.workflows.journal import TASK_VERIFIED, ledger
 
 
 def _spec(children: list) -> dict:
@@ -38,19 +38,19 @@ def _action(node_id: str, criterion: str | None = None) -> dict:
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.workflows import store as wstore
+    from gideon.automation.workflows import store as wstore
 
     monkeypatch.setattr(wstore, "config_dir", lambda: tmp_path)
-    from gideon.action_providers import registry as apreg
+    from gideon.integrations.action_providers import registry as apreg
 
     apreg._ensure_default_providers_registered()
     yield
 
 
 def _run(spec: dict, run_id: str = "r-1"):
-    from gideon.workflows import store as wstore
-    from gideon.workflows.controller import EngineServices, RunController
-    from gideon.workflows.models import WorkflowRun
+    from gideon.automation.workflows import store as wstore
+    from gideon.automation.workflows.controller import EngineServices, RunController
+    from gideon.automation.workflows.models import WorkflowRun
 
     run = WorkflowRun(id=run_id, workflow_name="t")
     wstore.create(run)
@@ -61,9 +61,6 @@ def _run(spec: dict, run_id: str = "r-1"):
 
 def _verified(run_id: str = "r-1") -> list[dict]:
     return [r for r in ledger(run_id) if r["kind"] == TASK_VERIFIED]
-
-
-# ── the call site fires ──
 
 
 def test_a_PASSING_criterion_verifies_true():
@@ -88,7 +85,7 @@ def test_an_UNRUNNABLE_criterion_is_NOT_reported_as_a_failure():
     _run(_spec([_action("ghost", "definitely-not-a-real-binary-xyz")]))
     row = _verified()[0]
     assert row["unrunnable"] is True
-    assert row["passed"] is False  # it did not pass — but see the flag above for WHY
+    assert row["passed"] is False
 
 
 def test_the_three_outcomes_are_DISTINGUISHABLE():
@@ -113,7 +110,8 @@ def test_the_three_outcomes_are_DISTINGUISHABLE():
 
 def test_a_node_with_NO_criterion_emits_NOTHING():
     """`Task.can_mark_complete`'s rule is that a task with no exit criteria is freely completable.
-    Emitting `passed=True` for a node nobody wrote a check for would manufacture evidence."""
+    Emitting `passed=True` for a node nobody wrote a check for would manufacture evidence.
+    """
     _run(_spec([_action("plain")]))
     assert _verified() == []
 
@@ -135,15 +133,12 @@ def test_a_long_criterion_is_bounded_in_the_record():
     assert len(_verified()[0]["criterion"]) <= 200
 
 
-# ── the tristate at the decision layer ──
-
-
 def test_an_unparseable_criterion_is_UNRUNNABLE_not_failed():
     """The author wrote something the engine could not read, which is a different problem from the
     work being wrong — and a different fix."""
-    from gideon.workflows import store as wstore
-    from gideon.workflows.controller import EngineServices, RunController
-    from gideon.workflows.models import WorkflowRun
+    from gideon.automation.workflows import store as wstore
+    from gideon.automation.workflows.controller import EngineServices, RunController
+    from gideon.automation.workflows.models import WorkflowRun
 
     run = WorkflowRun(id="r-1", workflow_name="t")
     wstore.create(run)
@@ -152,9 +147,9 @@ def test_an_unparseable_criterion_is_UNRUNNABLE_not_failed():
 
 
 def test_a_criterion_of_None_is_unrunnable():
-    from gideon.workflows import store as wstore
-    from gideon.workflows.controller import EngineServices, RunController
-    from gideon.workflows.models import WorkflowRun
+    from gideon.automation.workflows import store as wstore
+    from gideon.automation.workflows.controller import EngineServices, RunController
+    from gideon.automation.workflows.models import WorkflowRun
 
     run = WorkflowRun(id="r-1", workflow_name="t")
     wstore.create(run)
@@ -167,13 +162,13 @@ def test_an_UNREADABLE_file_check_is_unrunnable_not_a_missing_phrase():
     file this process cannot see, and reporting "the phrase is missing" would be a claim
     about content
     nobody read."""
-    from gideon.workflows.controller import RunController
+    from gideon.automation.workflows.controller import RunController
 
     assert RunController._read_criterion_file("/nonexistent/path/xyz") is None
 
 
 def test_a_readable_file_is_returned_as_text(tmp_path):
-    from gideon.workflows.controller import RunController
+    from gideon.automation.workflows.controller import RunController
 
     target = tmp_path / "out.txt"
     target.write_text("all green")
@@ -183,11 +178,15 @@ def test_a_readable_file_is_returned_as_text(tmp_path):
 def test_the_projection_maps_the_tristate_to_DIFFERENT_blocked_kinds():
     """The reason the collapse mattered: §1 sends a failed check and an unrunnable one to different
     remedies. `capability` points at the environment; the other points at the work."""
-    from gideon.tasks.models import TaskStatus
-    from gideon.workflows import verified_done as vd
+    from gideon.automation.workflows import verified_done as vd
+    from gideon.engine.tasks.models import TaskStatus
 
-    failed = vd.Verdict(results=[vd.CheckResult(kind="command", passed=False, weight=1.0)])
-    unrunnable = vd.Verdict(results=[vd.CheckResult(kind="command", passed=None, weight=1.0)])
+    failed = vd.Verdict(
+        results=[vd.CheckResult(kind="command", passed=False, weight=1.0)]
+    )
+    unrunnable = vd.Verdict(
+        results=[vd.CheckResult(kind="command", passed=None, weight=1.0)]
+    )
     _s1, kind_failed = vd.project_verified_status(failed)
     status_unrunnable, kind_unrunnable = vd.project_verified_status(unrunnable)
     assert kind_failed != kind_unrunnable
@@ -197,15 +196,12 @@ def test_the_projection_maps_the_tristate_to_DIFFERENT_blocked_kinds():
 
 def test_a_criterion_free_verdict_is_freely_completable():
     """Matching the shipped `Task.can_mark_complete` seam rather than inventing a parallel rule."""
-    from gideon.tasks.models import TaskStatus
-    from gideon.workflows import verified_done as vd
+    from gideon.automation.workflows import verified_done as vd
+    from gideon.engine.tasks.models import TaskStatus
 
     status, kind = vd.project_verified_status(vd.Verdict())
     assert status is TaskStatus.DONE
     assert kind == ""
-
-
-# ── containment ──
 
 
 def test_verification_does_not_block_the_TICK():
@@ -214,7 +210,7 @@ def test_verification_does_not_block_the_TICK():
     scheduled like the write."""
     import inspect
 
-    from gideon.workflows.controller import RunController
+    from gideon.automation.workflows.controller import RunController
 
     source = inspect.getsource(RunController._schedule_verification)
     assert "loop.create_task" in source
@@ -224,7 +220,7 @@ def test_a_VERIFICATION_FAILURE_does_not_fail_the_run(monkeypatch):
     """The node succeeded and its output is journaled. A broken criterion must not
     retroactively fail
     work that completed."""
-    from gideon.loop import gates
+    from gideon.automation.loop import gates
 
     async def boom(*_a, **_kw):
         raise RuntimeError("verifier exploded")
@@ -237,6 +233,7 @@ def test_a_VERIFICATION_FAILURE_does_not_fail_the_run(monkeypatch):
 def test_verification_is_awaited_by_the_completion_DRAIN():
     """Tracked in the same in-flight set as the writes, so `run_to_completion` drains it —
     otherwise a
-    caller that closed its loop would lose the verification exactly as S61g lost the board row."""
+    caller that closed its loop would lose the verification exactly as S61g lost the board row.
+    """
     _run(_spec([_action("good", "true")]))
     assert _verified()

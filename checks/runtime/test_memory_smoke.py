@@ -11,30 +11,29 @@ Verifies that memory (semantic, episodic, lessons) is truly useful:
 import json
 from pathlib import Path
 
-from gideon.context import ContextBuilder
-from gideon.hooks import ContextRule, HookManager, HooksConfig, TransformHook
-from gideon.memory import MemoryStore
-from gideon.skills import SkillsLoader
-from gideon.vector_memory import VectorMemoryStore
+from gideon.cognition.context import PromptAssembler
+from gideon.cognition.memory import MemoryJournal
+from gideon.cognition.vector_memory import SemanticArchive
+from gideon.engine.hooks import ContextRule, HookManager, HooksConfig, TransformHook
+from gideon.extensions.skills import ProcedureLibrary
 
 
-def _builder(tmp_path: Path, **kw: object) -> ContextBuilder:
-    """Create a ContextBuilder with minimal fixtures."""
+def _builder(tmp_path: Path, **kw: object) -> PromptAssembler:
+    """Create a PromptAssembler with minimal fixtures."""
     ws = tmp_path / "ws"
-    store = kw.get("memory") or MemoryStore(workspace=ws)
-    return ContextBuilder(
+    store = kw.get("memory") or MemoryJournal(workspace=ws)
+    return PromptAssembler(
         memory=store,  # type: ignore[arg-type]
-        skills=SkillsLoader(skills_path=tmp_path / "skills", install_builtins=False),
+        skills=ProcedureLibrary(
+            skills_path=tmp_path / "skills", install_builtins=False
+        ),
         hooks=kw.get("hooks") or HookManager(),  # type: ignore[arg-type]
     )
 
 
-# ── Semantic context: complex values render as JSON ──
-
-
 class TestSemanticContextJsonFormat:
     def test_dict_value_renders_as_json(self, tmp_path: Path) -> None:
-        store = VectorMemoryStore(db_path=tmp_path / "mem.db")
+        store = SemanticArchive(db_path=tmp_path / "mem.db")
         store.init()
         store.set_semantic(
             "project.team.info",
@@ -43,39 +42,39 @@ class TestSemanticContextJsonFormat:
             "user_explicit",
         )
         ctx = store.get_semantic_context()
-        # Must contain valid JSON, not Python repr with single quotes
         assert '"alias"' in ctx
         assert "{'alias'" not in ctx
 
     def test_list_value_renders_as_json(self, tmp_path: Path) -> None:
-        store = VectorMemoryStore(db_path=tmp_path / "mem.db")
+        store = SemanticArchive(db_path=tmp_path / "mem.db")
         store.init()
-        store.set_semantic("project.services", ["ServiceA", "ServiceB"], 1.0, "user_explicit")
+        store.set_semantic(
+            "project.services", ["ServiceA", "ServiceB"], 1.0, "user_explicit"
+        )
         ctx = store.get_semantic_context()
         assert '["ServiceA"' in ctx
 
     def test_string_value_renders_plain(self, tmp_path: Path) -> None:
-        store = VectorMemoryStore(db_path=tmp_path / "mem.db")
+        store = SemanticArchive(db_path=tmp_path / "mem.db")
         store.init()
         store.set_semantic("pref.color", "red", 1.0, "user_explicit")
         ctx = store.get_semantic_context()
         assert "pref.color: red" in ctx
 
 
-# ── Episodic text-hash dedup ──
-
-
 class TestEpisodicTextHashDedup:
     def test_exact_prefix_duplicate_rejected(self, tmp_path: Path) -> None:
-        store = VectorMemoryStore(db_path=tmp_path / "mem.db")
+        store = SemanticArchive(db_path=tmp_path / "mem.db")
         store.init()
-        text = "User decided to use Python for the backend service and deploy to us-west-2"
+        text = (
+            "User decided to use Python for the backend service and deploy to us-west-2"
+        )
         assert store.write_episodic(text)
         assert not store.write_episodic(text)
         assert len(store.get_episodic_list()) == 1
 
     def test_same_prefix_different_suffix_rejected(self, tmp_path: Path) -> None:
-        store = VectorMemoryStore(db_path=tmp_path / "mem.db")
+        store = SemanticArchive(db_path=tmp_path / "mem.db")
         store.init()
         base = "Rebuilt PV Law Review spreadsheet from 20 to 193 rows after discovering original"
         assert store.write_episodic(base + " logic was wrong")
@@ -83,14 +82,13 @@ class TestEpisodicTextHashDedup:
         assert len(store.get_episodic_list()) == 1
 
     def test_different_text_accepted(self, tmp_path: Path) -> None:
-        store = VectorMemoryStore(db_path=tmp_path / "mem.db")
+        store = SemanticArchive(db_path=tmp_path / "mem.db")
         store.init()
-        assert store.write_episodic("User decided to use Python for the backend service")
+        assert store.write_episodic(
+            "User decided to use Python for the backend service"
+        )
         assert store.write_episodic("Team agreed on PostgreSQL for the database layer")
         assert len(store.get_episodic_list()) == 2
-
-
-# ── Memory injection for all agent types ──
 
 
 class TestMemoryInjectionAllAgents:
@@ -98,7 +96,7 @@ class TestMemoryInjectionAllAgents:
 
     def test_gideon_agent_gets_everything(self, tmp_path: Path) -> None:
         ws = tmp_path / "ws"
-        store = MemoryStore(workspace=ws)
+        store = MemoryJournal(workspace=ws)
         store.write("# Memory\n\nUser likes Python.")
         builder = _builder(tmp_path, memory=store)
         ctx = builder.build_session_context(agent="gideon")
@@ -107,7 +105,7 @@ class TestMemoryInjectionAllAgents:
 
     def test_custom_agent_gets_memory(self, tmp_path: Path) -> None:
         ws = tmp_path / "ws"
-        store = MemoryStore(workspace=ws)
+        store = MemoryJournal(workspace=ws)
         store.write("# Memory\n\nUser prefers dark mode.")
         builder = _builder(tmp_path, memory=store)
         ctx = builder.build_session_context(agent="my-custom-agent")
@@ -126,9 +124,11 @@ class TestMemoryInjectionAllAgents:
         (skills_dir / "SKILL.md").write_text(
             "---\nname: test\ndescription: Test\nalways: true\n---\n# Test\nDo stuff."
         )
-        builder = ContextBuilder(
-            memory=MemoryStore(workspace=tmp_path / "ws"),
-            skills=SkillsLoader(skills_path=tmp_path / "skills", install_builtins=False),
+        builder = PromptAssembler(
+            memory=MemoryJournal(workspace=tmp_path / "ws"),
+            skills=ProcedureLibrary(
+                skills_path=tmp_path / "skills", install_builtins=False
+            ),
         )
         ctx = builder.build_session_context(agent="my-custom-agent")
         assert "Do stuff." not in ctx
@@ -139,11 +139,9 @@ class TestMemoryInjectionAllAgents:
         assert "WORKSPACE IDENTITY" not in ctx
 
     def test_custom_agent_gets_lessons(self, tmp_path: Path) -> None:
-        # Lessons inject from the vector store (the ONE injection source after the
-        # lesson-unification); a custom agent still receives them.
-        mem = MemoryStore(workspace=tmp_path / "ws")
+        mem = MemoryJournal(workspace=tmp_path / "ws")
         mem.init()
-        vs = VectorMemoryStore(db_path=tmp_path / "mem.db")
+        vs = SemanticArchive(db_path=tmp_path / "mem.db")
         vs.init()
         vs.write_lesson("always use pytest-asyncio strict mode", "tool")
         mem.vector_store = vs
@@ -153,10 +151,14 @@ class TestMemoryInjectionAllAgents:
 
     def test_custom_agent_gets_hooks(self, tmp_path: Path) -> None:
         hooks_cfg = HooksConfig(
-            context_rules=[ContextRule(triggers=["pipeline"], context="Use pipeline tool.")]
+            context_rules=[
+                ContextRule(triggers=["pipeline"], context="Use pipeline tool.")
+            ]
         )
         builder = _builder(tmp_path, hooks=HookManager(hooks_cfg))
-        msg, hook = builder.build_message("check pipeline", is_new_session=False, agent="custom")
+        msg, hook = builder.build_message(
+            "check pipeline", is_new_session=False, agent="custom"
+        )
         assert "pipeline tool" in msg
 
     def test_turn_prompt_never_asks_for_options_marker(self, tmp_path: Path) -> None:
@@ -168,20 +170,21 @@ class TestMemoryInjectionAllAgents:
         assert "OPTIONS" not in msg
 
     def test_custom_agent_gets_hook_transform(self, tmp_path: Path) -> None:
-        hooks_cfg = HooksConfig(transforms=[TransformHook(pattern="deploy", prefix="[DEPLOY]")])
+        hooks_cfg = HooksConfig(
+            transforms=[TransformHook(pattern="deploy", prefix="[DEPLOY]")]
+        )
         builder = _builder(tmp_path, hooks=HookManager(hooks_cfg))
-        msg, _ = builder.build_message("deploy app", is_new_session=False, agent="custom")
+        msg, _ = builder.build_message(
+            "deploy app", is_new_session=False, agent="custom"
+        )
         assert msg.startswith("[DEPLOY]")
-
-
-# ── Episodic memory injection for all agents ──
 
 
 class TestEpisodicInjectionAllAgents:
     def test_custom_agent_gets_episodic_on_new_session(self, tmp_path: Path) -> None:
         ws = tmp_path / "ws"
-        store = MemoryStore(workspace=ws)
-        vs = VectorMemoryStore(db_path=tmp_path / "mem.db")
+        store = MemoryJournal(workspace=ws)
+        vs = SemanticArchive(db_path=tmp_path / "mem.db")
         vs.init()
         vs.write_episodic("User decided to use PostgreSQL for the database layer")
         store._vector_store = vs
@@ -195,8 +198,8 @@ class TestEpisodicInjectionAllAgents:
 
     def test_gideon_agent_gets_episodic_on_new_session(self, tmp_path: Path) -> None:
         ws = tmp_path / "ws"
-        store = MemoryStore(workspace=ws)
-        vs = VectorMemoryStore(db_path=tmp_path / "mem.db")
+        store = MemoryJournal(workspace=ws)
+        vs = SemanticArchive(db_path=tmp_path / "mem.db")
         vs.init()
         vs.write_episodic("User decided to use PostgreSQL for the database layer")
         store._vector_store = vs
@@ -211,8 +214,8 @@ class TestEpisodicInjectionAllAgents:
     def test_episodic_skipped_on_followup(self, tmp_path: Path) -> None:
         """Episodic memory not injected on follow-up messages (trust ACP)."""
         ws = tmp_path / "ws"
-        store = MemoryStore(workspace=ws)
-        vs = VectorMemoryStore(db_path=tmp_path / "mem.db")
+        store = MemoryJournal(workspace=ws)
+        vs = SemanticArchive(db_path=tmp_path / "mem.db")
         vs.init()
         vs.write_episodic("User decided to use PostgreSQL for the database layer")
         store._vector_store = vs
@@ -224,14 +227,11 @@ class TestEpisodicInjectionAllAgents:
         assert "PostgreSQL" not in msg
 
 
-# ── Semantic memory with vector store in session context ──
-
-
 class TestSemanticMemoryInSessionContext:
     def test_semantic_memory_in_custom_agent_session(self, tmp_path: Path) -> None:
         ws = tmp_path / "ws"
-        store = MemoryStore(workspace=ws)
-        vs = VectorMemoryStore(db_path=tmp_path / "mem.db")
+        store = MemoryJournal(workspace=ws)
+        vs = SemanticArchive(db_path=tmp_path / "mem.db")
         vs.init()
         vs.set_semantic("pref.language", "Python", 1.0, "user_explicit")
         store._vector_store = vs
@@ -241,8 +241,8 @@ class TestSemanticMemoryInSessionContext:
 
     def test_lessons_in_vector_store_for_custom_agent(self, tmp_path: Path) -> None:
         ws = tmp_path / "ws"
-        store = MemoryStore(workspace=ws)
-        vs = VectorMemoryStore(db_path=tmp_path / "mem.db")
+        store = MemoryJournal(workspace=ws)
+        vs = SemanticArchive(db_path=tmp_path / "mem.db")
         vs.init()
         vs.write_lesson("always run tests before committing", "tool")
         store._vector_store = vs
@@ -251,20 +251,17 @@ class TestSemanticMemoryInSessionContext:
         assert "always run tests" in ctx
 
 
-# ── Cross-session memory persistence ──
-
-
 class TestCrossSessionMemory:
     """Memory written in one session is available in the next."""
 
     def test_semantic_persists_across_store_instances(self, tmp_path: Path) -> None:
         db = tmp_path / "mem.db"
-        s1 = VectorMemoryStore(db_path=db)
+        s1 = SemanticArchive(db_path=db)
         s1.init()
         s1.set_semantic("user.name", "Bolin", 1.0, "user_explicit")
         s1.close()
 
-        s2 = VectorMemoryStore(db_path=db)
+        s2 = SemanticArchive(db_path=db)
         s2.init()
         entry = s2.get_semantic("user.name")
         assert entry is not None
@@ -272,12 +269,12 @@ class TestCrossSessionMemory:
 
     def test_episodic_persists_across_store_instances(self, tmp_path: Path) -> None:
         db = tmp_path / "mem.db"
-        s1 = VectorMemoryStore(db_path=db)
+        s1 = SemanticArchive(db_path=db)
         s1.init()
         s1.write_episodic("Discussed migration strategy for the database layer")
         s1.close()
 
-        s2 = VectorMemoryStore(db_path=db)
+        s2 = SemanticArchive(db_path=db)
         s2.init()
         entries = s2.get_episodic_list()
         assert len(entries) == 1
@@ -285,26 +282,23 @@ class TestCrossSessionMemory:
 
     def test_lessons_persist_across_store_instances(self, tmp_path: Path) -> None:
         db = tmp_path / "mem.db"
-        s1 = VectorMemoryStore(db_path=db)
+        s1 = SemanticArchive(db_path=db)
         s1.init()
         s1.write_lesson("always use type hints", "preference")
         s1.close()
 
-        s2 = VectorMemoryStore(db_path=db)
+        s2 = SemanticArchive(db_path=db)
         s2.init()
         lessons = s2.get_lessons()
         assert len(lessons) == 1
         assert "type hints" in json.loads(lessons[0]["value_json"])
 
 
-# ── MMR diversity reranking ──
-
-
 class TestMMRReranking:
     """MMR reranking balances relevance with diversity in episodic results."""
 
     def test_mmr_rerank_promotes_diversity(self) -> None:
-        from gideon.vector_memory import _mmr_rerank
+        from gideon.cognition.vector_memory import _mmr_rerank
 
         candidates = [
             {"text": "deployed H2C to prod fixed IAM role", "score": 0.92},
@@ -315,27 +309,24 @@ class TestMMRReranking:
         ]
         result = _mmr_rerank(candidates, limit=3)
         assert len(result) == 3
-        # First pick is always highest score
         assert result[0]["score"] == 0.92
-        # The diverse "blue green" entry should be promoted over the 3rd IAM duplicate
         texts = [r["text"] for r in result]
         assert any("blue green" in t for t in texts)
-        # The 3rd IAM duplicate (score 0.87) should be pushed out
         assert not any("wrong scope" in t for t in texts)
 
     def test_mmr_rerank_single_item(self) -> None:
-        from gideon.vector_memory import _mmr_rerank
+        from gideon.cognition.vector_memory import _mmr_rerank
 
         result = _mmr_rerank([{"text": "only one", "score": 0.5}], limit=3)
         assert len(result) == 1
 
     def test_mmr_rerank_empty(self) -> None:
-        from gideon.vector_memory import _mmr_rerank
+        from gideon.cognition.vector_memory import _mmr_rerank
 
         assert _mmr_rerank([], limit=3) == []
 
     def test_mmr_rerank_respects_limit(self) -> None:
-        from gideon.vector_memory import _mmr_rerank
+        from gideon.cognition.vector_memory import _mmr_rerank
 
         candidates = [{"text": f"item {i}", "score": 1.0 - i * 0.1} for i in range(10)]
         result = _mmr_rerank(candidates, limit=4)
@@ -343,19 +334,17 @@ class TestMMRReranking:
 
     def test_episodic_search_uses_mmr(self, tmp_path: Path) -> None:
         """Episodic search applies MMR by default (keyword fallback path)."""
-        store = VectorMemoryStore(db_path=tmp_path / "mem.db")
+        store = SemanticArchive(db_path=tmp_path / "mem.db")
         store.init()
-        # Write several topically similar entries
         store.write_episodic("deployed the app to production successfully")
         store.write_episodic("user prefers dark mode for all editors")
         store.write_episodic("database migration completed for PostgreSQL")
         results = store.search_episodic(query_text="deploy production app", limit=3)
-        # Should return results (keyword fallback)
         assert len(results) >= 1
 
     def test_episodic_search_mmr_disabled(self, tmp_path: Path) -> None:
         """Can disable MMR for raw relevance ordering."""
-        store = VectorMemoryStore(db_path=tmp_path / "mem.db")
+        store = SemanticArchive(db_path=tmp_path / "mem.db")
         store.init()
         store.write_episodic("deployed the app to production successfully")
         store.write_episodic("database migration completed for PostgreSQL")
@@ -363,15 +352,12 @@ class TestMMRReranking:
         assert len(results) >= 1
 
 
-# ── Hybrid semantic retrieval ──
-
-
 class TestHybridSemanticRetrieval:
     """Semantic context uses hybrid vector+keyword scoring when embeddings available."""
 
     def test_keyword_only_without_embeddings(self, tmp_path: Path) -> None:
         """Without embed_fn, falls back to keyword-only scoring."""
-        store = VectorMemoryStore(db_path=tmp_path / "mem.db")
+        store = SemanticArchive(db_path=tmp_path / "mem.db")
         store.init()
         store.set_semantic("pref.language", "Python", 1.0, "user_explicit")
         store.set_semantic("project.name", "Gideon", 1.0, "user_explicit")
@@ -385,50 +371,44 @@ class TestHybridSemanticRetrieval:
         def mock_embed(text: str) -> list[float]:
             nonlocal call_count
             call_count += 1
-            # Simple deterministic embedding: hash-based
             h = hash(text) % 1000
             return [float(h % (i + 1)) / (i + 1) for i in range(8)]
 
-        store = VectorMemoryStore(db_path=tmp_path / "mem.db")
+        store = SemanticArchive(db_path=tmp_path / "mem.db")
         store.init()
         store.embed_fn = mock_embed
         store.set_semantic("pref.language", "Python", 1.0, "user_explicit")
         store.set_semantic("project.name", "Gideon", 1.0, "user_explicit")
         store.set_semantic("user.timezone", "PST", 1.0, "user_explicit")
         ctx = store.get_semantic_context(query_text="what language do you prefer")
-        # Should return results — hybrid scoring should find relevant entries
         assert "Semantic Memory" in ctx
-        # embed_fn was called (query + entries)
         assert call_count > 0
 
     def test_no_query_returns_recent(self, tmp_path: Path) -> None:
         """Without query, returns most recent entries regardless of embeddings."""
-        store = VectorMemoryStore(db_path=tmp_path / "mem.db")
+        store = SemanticArchive(db_path=tmp_path / "mem.db")
         store.init()
         store.set_semantic("pref.color", "blue", 1.0, "user_explicit")
         ctx = store.get_semantic_context(query_text="")
         assert "pref.color: blue" in ctx
 
 
-# ── Jaccard similarity helper ──
-
-
 class TestJaccardSimilarity:
     def test_identical_texts(self) -> None:
-        from gideon.vector_memory import _jaccard, _tokenize
+        from gideon.cognition.vector_memory import _jaccard, _tokenize
 
         a = _tokenize("deployed the app to production")
         assert _jaccard(a, a) == 1.0
 
     def test_disjoint_texts(self) -> None:
-        from gideon.vector_memory import _jaccard, _tokenize
+        from gideon.cognition.vector_memory import _jaccard, _tokenize
 
         a = _tokenize("deployed the app")
         b = _tokenize("migration database schema")
         assert _jaccard(a, b) == 0.0
 
     def test_partial_overlap(self) -> None:
-        from gideon.vector_memory import _jaccard, _tokenize
+        from gideon.cognition.vector_memory import _jaccard, _tokenize
 
         a = _tokenize("deployed app to production")
         b = _tokenize("deployed service to staging")
@@ -436,13 +416,10 @@ class TestJaccardSimilarity:
         assert 0.0 < sim < 1.0
 
     def test_empty_sets(self) -> None:
-        from gideon.vector_memory import _jaccard
+        from gideon.cognition.vector_memory import _jaccard
 
         assert _jaccard(set(), set()) == 0.0
         assert _jaccard({"a"}, set()) == 0.0
-
-
-# ── Lesson embedding storage ──
 
 
 class TestLessonEmbeddingStorage:
@@ -451,11 +428,11 @@ class TestLessonEmbeddingStorage:
     def test_migration_v2_idempotent(self, tmp_path: Path) -> None:
         """Double init() does not crash on duplicate embedding column."""
         db = tmp_path / "mem.db"
-        s = VectorMemoryStore(db_path=db)
+        s = SemanticArchive(db_path=db)
         s.init()
         s.close()
-        s2 = VectorMemoryStore(db_path=db)
-        s2.init()  # should not raise
+        s2 = SemanticArchive(db_path=db)
+        s2.init()
         s2.close()
 
     def test_write_lesson_stores_embedding(self, tmp_path: Path) -> None:
@@ -463,9 +440,8 @@ class TestLessonEmbeddingStorage:
         import struct
 
         db = tmp_path / "mem.db"
-        s = VectorMemoryStore(db_path=db)
+        s = SemanticArchive(db_path=db)
         s.init()
-        # Mock embed_fn to return a known vector
         s.embed_fn = lambda text: [0.1, 0.2, 0.3]
         s.write_lesson("always write tests", "preference")
 
@@ -481,7 +457,7 @@ class TestLessonEmbeddingStorage:
     def test_write_lesson_no_embed_fn_still_works(self, tmp_path: Path) -> None:
         """Without embed_fn, lesson is saved but no embedding stored."""
         db = tmp_path / "mem.db"
-        s = VectorMemoryStore(db_path=db)
+        s = SemanticArchive(db_path=db)
         s.init()
         assert s.write_lesson("no embedding available", "knowledge")
 
@@ -495,14 +471,12 @@ class TestLessonEmbeddingStorage:
         """Semantic dedup reads stored embedding, does not call embed_fn for existing lessons."""
 
         db = tmp_path / "mem.db"
-        s = VectorMemoryStore(db_path=db)
+        s = SemanticArchive(db_path=db)
         s.init()
 
-        # Write first lesson with embedding
         s.embed_fn = lambda text: [1.0, 0.0, 0.0]
         s.write_lesson("always use type hints in Python", "preference")
 
-        # Track embed calls — should only be called once (for the new rule)
         call_count = 0
         original_fn = s.embed_fn
 
@@ -513,9 +487,7 @@ class TestLessonEmbeddingStorage:
 
         s.embed_fn = counting_embed
 
-        # Write a second lesson — dedup loop should read stored embedding, not recompute
         s.write_lesson("something completely different", "knowledge")
-        # 1 call for the new rule's embedding, 0 for existing lessons
         assert call_count == 1
         # Both lessons survive (different text, sim=1.0 but second is longer → first deleted, second saved)  # noqa: E501
         assert len(s.get_lessons()) == 1
@@ -524,42 +496,39 @@ class TestLessonEmbeddingStorage:
         """Legacy lesson without embedding gets backfilled on next write_lesson."""
 
         db = tmp_path / "mem.db"
-        s = VectorMemoryStore(db_path=db)
+        s = SemanticArchive(db_path=db)
         s.init()
 
-        # Write first lesson WITHOUT embed_fn (simulates legacy)
         s.write_lesson("legacy rule without embedding", "preference")
         row = s.db.execute(
             "SELECT embedding FROM semantic_memory WHERE key LIKE 'lesson.%'"
         ).fetchone()
         assert row["embedding"] is None
 
-        # Now enable embed_fn and write a second lesson
         s.embed_fn = lambda text: [0.5, 0.5, 0.5]
         s.write_lesson("totally new unrelated rule", "knowledge")
 
-        # Legacy lesson should now have an embedding (backfilled)
         rows = s.db.execute(
             "SELECT key, embedding FROM semantic_memory WHERE key LIKE 'lesson.%' AND is_deleted = 0"  # noqa: E501
         ).fetchall()
         for row in rows:
-            assert row["embedding"] is not None, f"{row['key']} missing embedding after backfill"
+            assert (
+                row["embedding"] is not None
+            ), f"{row['key']} missing embedding after backfill"
 
     def test_semantic_dedup_with_stored_embedding(self, tmp_path: Path) -> None:
         """Stored embedding triggers cosine similarity dedup (sim > 0.85)."""
         db = tmp_path / "mem.db"
-        s = VectorMemoryStore(db_path=db)
+        s = SemanticArchive(db_path=db)
         s.init()
 
-        # embed_fn returns near-identical vectors for any text
         s.embed_fn = lambda text: [0.9, 0.1, 0.0]
         s.write_lesson("prefer composition over inheritance in design", "preference")
 
-        # Second lesson: semantically similar embedding but no substring/keyword overlap
         s.write_lesson(
-            "favor composing objects rather than inheriting from base classes", "preference"
+            "favor composing objects rather than inheriting from base classes",
+            "preference",
         )
-        # Longer rule replaces shorter → first deleted, second saved
         lessons = [
             dict(r)
             for r in s.db.execute(
@@ -572,13 +541,12 @@ class TestLessonEmbeddingStorage:
     def test_backfill_cap(self, tmp_path: Path) -> None:
         """Lazy backfill stops after _MAX_BACKFILLS_PER_CALL legacy lessons."""
 
-        from gideon.vector_memory import _MAX_BACKFILLS_PER_CALL
+        from gideon.cognition.vector_memory import _MAX_BACKFILLS_PER_CALL
 
         db = tmp_path / "mem.db"
-        s = VectorMemoryStore(db_path=db)
+        s = SemanticArchive(db_path=db)
         s.init()
 
-        # Write 7 legacy lessons without embed_fn (unique keywords to avoid topic dedup)
         topics = [
             "python type hints improve readability",
             "docker containers isolate dependencies",
@@ -591,7 +559,6 @@ class TestLessonEmbeddingStorage:
         for t in topics:
             s.write_lesson(t, "knowledge")
 
-        # Enable embed_fn (returns unique orthogonal vectors to avoid cosine dedup)
         _vecs = {}
         _dims = [
             [1, 0, 0, 0, 0, 0, 0, 0],
@@ -618,16 +585,14 @@ class TestLessonEmbeddingStorage:
             "SELECT embedding FROM semantic_memory WHERE key LIKE 'lesson.%' AND is_deleted = 0"
         ).fetchall()
         backfilled = sum(1 for r in rows if r["embedding"] is not None)
-        # 5 legacy backfilled + 1 new = 6 with embeddings, 2 legacy without
         assert backfilled == _MAX_BACKFILLS_PER_CALL + 1
 
     def test_stale_backfill_purged_on_delete(self, tmp_path: Path) -> None:
         """Pending backfill is purged when lesson is deleted via semantic dedup."""
         db = tmp_path / "mem.db"
-        s = VectorMemoryStore(db_path=db)
+        s = SemanticArchive(db_path=db)
         s.init()
 
-        # Write a legacy lesson without embedding
         s.write_lesson("short rule about composing", "preference")
         assert (
             s.db.execute(
@@ -636,14 +601,12 @@ class TestLessonEmbeddingStorage:
             is None
         )
 
-        # Enable embed_fn, write longer rule that triggers cosine dedup → deletes short one
         s.embed_fn = lambda text: [0.9, 0.1, 0.0]
         s.write_lesson(
             "a much longer rule about composing objects in software design patterns",
             "preference",
         )
 
-        # Only the longer lesson should survive, with embedding
         rows = s.db.execute(
             "SELECT key, embedding, is_deleted FROM semantic_memory WHERE key LIKE 'lesson.%'"
         ).fetchall()
@@ -652,6 +615,7 @@ class TestLessonEmbeddingStorage:
         assert alive[0]["embedding"] is not None
         assert "longer rule" in str(
             s.db.execute(
-                "SELECT value_json FROM semantic_memory WHERE key = ?", (alive[0]["key"],)
+                "SELECT value_json FROM semantic_memory WHERE key = ?",
+                (alive[0]["key"],),
             ).fetchone()["value_json"]
         )

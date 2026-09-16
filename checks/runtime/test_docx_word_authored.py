@@ -1,6 +1,6 @@
 """DFE-3's V1 gate clause: a fixture **Word** authored, reporting its losses honestly.
 
-`tests/fixtures/word_authored.docx` was written by Microsoft Word (Word for Mac 16.111)
+`checks/runtime/fixtures/word_authored.docx` was written by Microsoft Word (Word for Mac 16.111)
 driven over AppleScript. It was not written by python-docx and its constructs were not
 hand-injected as raw OOXML. That distinction is the entire point of the clause: a synthetic
 fixture can only contain what its author remembered to inject, while a file Word saved
@@ -42,53 +42,38 @@ from pathlib import Path
 
 from docx import Document
 
-from gideon.documents.docx_parser import LOSS_KINDS, LossItem, parse_docx
-from gideon.documents.model import Block, Cell, DocumentModel, PageSetup
-from gideon.documents.writers.docx_writer import render_docx
+from gideon.workspace.documents.docx_parser import LOSS_KINDS, LossItem, parse_docx
+from gideon.workspace.documents.model import Block, Cell, DocumentModel, PageSetup
+from gideon.workspace.documents.writers.docx_writer import render_docx
 
 FIXTURE = Path(__file__).parent / "fixtures" / "word_authored.docx"
 
-#: Markers that separate a file Word saved from one python-docx wrote. Every one was
-#: MEASURED against both before being listed: `w:rsid*` and `customXml/item1.xml` are
-#: deliberately absent from this list because python-docx inherits them from its default
-#: template (which Word made), so a rail on them would hold for both files and prove
-#: nothing. Each entry maps a name to a predicate over the opened archive.
 _WORD_MARKERS = {
-    # Word stamps a revision-stable id pair on every paragraph it writes.
     "w14:paraId": lambda z, doc: "w14:paraId" in doc and "w14:textId" in doc,
-    # The 2012+/2018+ namespace families python-docx's template does not declare.
     "w15/w16 namespaces": lambda z, doc: "w16du" in doc or "w15" in doc,
     "app.xml names Word": lambda z, doc: "<Application>Microsoft Office Word</Application>"
     in z.read("docProps/app.xml").decode(),
     "app.xml names Word 16": lambda z, doc: "<AppVersion>16.0000</AppVersion>"
     in z.read("docProps/app.xml").decode(),
-    # Word always writes both note parts; python-docx's template carries neither.
     "footnotes part": lambda z, doc: "word/footnotes.xml" in z.namelist(),
     "endnotes part": lambda z, doc: "word/endnotes.xml" in z.namelist(),
-    # python-docx signs its output; Word's privacy scrub blanks the field instead.
     "not signed python-docx": lambda z, doc: "<dc:creator>python-docx</dc:creator>"
     not in z.read("docProps/core.xml").decode(),
 }
 
-#: Strings that must not survive in a committed fixture. `Author` is what Word's
-#: `remove personal information` leaves behind in `w:ins/@w:author`, and is the evidence
-#: the scrub ran rather than a name that slipped through.
 _PERSONAL = ("Keyur", "Golani", "golani", "keyur", "@", "Users/", "Macintosh HD")
 
 
 def _markers(data: bytes) -> dict[str, bool]:
     archive = zipfile.ZipFile(io.BytesIO(data))
     document = archive.read("word/document.xml").decode()
-    return {name: bool(check(archive, document)) for name, check in _WORD_MARKERS.items()}
+    return {
+        name: bool(check(archive, document)) for name, check in _WORD_MARKERS.items()
+    }
 
 
 def _fixture_bytes() -> bytes:
     return FIXTURE.read_bytes()
-
-
-# --------------------------------------------------------------------------------------
-# provenance — the claim the rest of the suite rests on
-# --------------------------------------------------------------------------------------
 
 
 def test_the_fixture_is_word_authored_and_carries_no_personal_data():
@@ -107,8 +92,6 @@ def test_the_fixture_is_word_authored_and_carries_no_personal_data():
         if found:
             leaked[name] = found
     assert leaked == {}, f"personal data in the committed fixture: {leaked}"
-    # The scrub ran, rather than the document never having had an author: Word rewrote the
-    # revision's author to the literal "Author" and dropped the people part entirely.
     document = archive.read("word/document.xml").decode()
     assert 'w:author="Author"' in document
     assert "word/people.xml" not in archive.namelist()
@@ -122,14 +105,11 @@ def test_the_word_provenance_markers_reject_a_python_docx_file():
     for python-docx too (a template change, a new namespace), it stops discriminating and
     belongs out of `_WORD_MARKERS`, which this failing here would say.
     """
-    ours = render_docx(DocumentModel(blocks=[Block(kind="paragraph", text="not from Word")]))
+    ours = render_docx(
+        DocumentModel(blocks=[Block(kind="paragraph", text="not from Word")])
+    )
 
     assert _markers(ours) == dict.fromkeys(_WORD_MARKERS, False)
-
-
-# --------------------------------------------------------------------------------------
-# what the model CAN hold came back
-# --------------------------------------------------------------------------------------
 
 
 def test_the_word_authored_document_parses_into_the_shipped_model_classes():
@@ -138,9 +118,6 @@ def test_the_word_authored_document_parses_into_the_shipped_model_classes():
     assert type(model) is DocumentModel
     assert model.title == "DFE-3 Word fixture"
     assert type(model.page) is PageSetup
-    # Word's template is Letter portrait with uniform 1in (72pt) margins, all of which the
-    # per-edge `PageSetup` now holds — so this fixture carries no `page_property` item and
-    # the loss set below can be exact.
     assert (model.page.size, model.page.orientation) == ("letter", "portrait")
     assert model.page.margin_top_pt == 72.0
     assert model.page.margin_left_pt == 72.0
@@ -180,7 +157,6 @@ def test_paragraph_and_table_order_is_preserved_on_words_own_xml():
         [["x", "y"], ["z", "w"]],
     ]
 
-    # The fixture discriminates: the naive two-sequence reading really does reorder it.
     document = Document(io.BytesIO(_fixture_bytes()))
     body = [
         child.tag.rsplit("}", 1)[-1]
@@ -204,11 +180,6 @@ def test_words_inline_formatting_survives_as_runs():
     ]
 
 
-# --------------------------------------------------------------------------------------
-# what the model CANNOT hold is named — and nothing else is
-# --------------------------------------------------------------------------------------
-
-
 def test_the_word_authored_fixture_reports_exactly_its_real_losses():
     """Honesty runs both ways.
 
@@ -226,12 +197,10 @@ def test_the_word_authored_fixture_reports_exactly_its_real_losses():
     assert all(item.detail for item in report.items)
     assert all(item.kind in LOSS_KINDS for item in report.items)
 
-    # Each item is located, not just counted — "something was lost somewhere" is not a
-    # report a user can act on.
     footnote = report.of_kind("footnote")[0]
     assert (footnote.block_index, footnote.paragraph_ordinal) == (0, 0)
     tracked = report.of_kind("tracked_change")[0]
-    assert tracked.block_index == 2  # the first table, which is where Word put it
+    assert tracked.block_index == 2
     assert tracked.where == "block 2"
 
 
@@ -243,7 +212,9 @@ def test_the_dropped_tracked_insertion_is_a_real_drop_the_report_names():
     honest if the report says so, and only *provable* by reading the words out of the
     archive and showing the model does not have them.
     """
-    document = zipfile.ZipFile(io.BytesIO(_fixture_bytes())).read("word/document.xml").decode()
+    document = (
+        zipfile.ZipFile(io.BytesIO(_fixture_bytes())).read("word/document.xml").decode()
+    )
     assert "<w:ins " in document
     assert "Tracked insertion." in document
 
@@ -253,11 +224,6 @@ def test_the_dropped_tracked_insertion_is_a_real_drop_the_report_names():
     assert cell.text == "r1c1"
     assert "Tracked insertion." not in cell.text
     assert report.of_kind("tracked_change")[0].detail.startswith("1 tracked change")
-
-
-# --------------------------------------------------------------------------------------
-# the defect this fixture found
-# --------------------------------------------------------------------------------------
 
 
 def test_words_own_numbering_outranks_a_contradicting_style_name():
@@ -273,7 +239,9 @@ def test_words_own_numbering_outranks_a_contradicting_style_name():
     """
     document = Document(io.BytesIO(_fixture_bytes()))
     conflicted = [
-        paragraph for paragraph in document.paragraphs if paragraph.text.startswith("Word bullet")
+        paragraph
+        for paragraph in document.paragraphs
+        if paragraph.text.startswith("Word bullet")
     ]
     assert [paragraph.style.name for paragraph in conflicted] == ["List Number"] * 2
     assert all(

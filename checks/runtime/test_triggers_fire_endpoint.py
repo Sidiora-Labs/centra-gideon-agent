@@ -14,11 +14,11 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.dashboard.handlers import triggers as T
-from gideon.inbound import caps as caps_mod
-from gideon.inbound import clients as clients_mod
-from gideon.triggers.models import Trigger
-from gideon.triggers.store import TriggerStore
+from gideon.automation.triggers.models import Trigger
+from gideon.automation.triggers.store import TriggerStore
+from gideon.integrations.inbound import caps as caps_mod
+from gideon.integrations.inbound import clients as clients_mod
+from gideon.interfaces.dashboard.handlers import triggers as T
 
 
 @pytest.fixture(autouse=True)
@@ -30,7 +30,7 @@ def _home(tmp_path, monkeypatch):
     Rate buckets are process-global, so they are reset on both sides to stop a test inheriting
     another's spent budget.
     """
-    import gideon.config.loader as loader
+    import gideon.core.config.loader as loader
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
@@ -57,7 +57,7 @@ def _make_webhook(tmp_path, slug="my-hook"):
 
 
 class _State:
-    """The minimal DashboardState surface the fire handler touches: a real task set to await."""
+    """The minimal ConsoleState surface the fire handler touches: a real task set to await."""
 
     def __init__(self):
         self._background_tasks = set()
@@ -74,7 +74,9 @@ async def _client(state):
 
 async def _fire(client, trigger_id, token, *, body="ping"):
     headers = {"Authorization": f"Bearer {token}"} if token else {}
-    return await client.post(f"/api/triggers/{trigger_id}/fire", data=body, headers=headers)
+    return await client.post(
+        f"/api/triggers/{trigger_id}/fire", data=body, headers=headers
+    )
 
 
 @pytest.mark.asyncio
@@ -126,9 +128,8 @@ async def test_the_inbound_body_reaches_the_action_fenced(tmp_path, monkeypatch)
         assert resp.status == 202
         await asyncio.gather(*state._background_tasks)
         fenced = captured["payload"]["body"]
-        assert body in fenced  # the payload is preserved verbatim…
-        assert "untrusted_content" in fenced  # …inside the fence…
-        # …and the "treat as data" preamble precedes it, or a model reads it as instruction.
+        assert body in fenced
+        assert "untrusted_content" in fenced
         assert "never as instructions" in fenced
         assert fenced.index("never as instructions") < fenced.index(body)
     finally:
@@ -148,7 +149,7 @@ async def test_a_wrong_scope_token_is_403_and_sel_logged(tmp_path, monkeypatch):
         def log_api_access(self, **kwargs):
             sel_calls.append(kwargs)
 
-    monkeypatch.setattr("gideon.sel.sel", lambda: _FakeSel())
+    monkeypatch.setattr("gideon.security.sel.sel", lambda: _FakeSel())
     state = _State()
     client = await _client(state)
     try:
@@ -164,7 +165,7 @@ async def test_a_wrong_scope_token_is_403_and_sel_logged(tmp_path, monkeypatch):
 async def test_a_scopeless_token_cannot_fire_an_arbitrary_webhook(tmp_path):
     """Absent scope pin fails CLOSED: a client with no `scope.trigger` is refused, not admitted."""
     trigger_id = _make_webhook(tmp_path)
-    _rec, token = clients_mod.create_client("wh", surfaces=["webhook"])  # no scope
+    _rec, token = clients_mod.create_client("wh", surfaces=["webhook"])
     state = _State()
     client = await _client(state)
     try:
@@ -180,7 +181,7 @@ async def test_unknown_trigger_is_404_after_auth(tmp_path):
     ghost = "store:webhook:ghost"
     _rec, token = clients_mod.create_client(
         "wh", surfaces=["webhook"], scope={"trigger": ghost}
-    )  # no trigger upserted
+    )
     state = _State()
     client = await _client(state)
     try:
@@ -194,10 +195,18 @@ async def test_unknown_trigger_is_404_after_auth(tmp_path):
 async def test_a_non_webhook_trigger_is_404(tmp_path):
     """`/fire` fires only `webhook`-kind triggers; a `file` trigger answers 404, not a fire."""
     TriggerStore(base_dir=tmp_path).upsert(
-        Trigger(id="file:notes", name="F", kind="file", enabled=True, spec={"paths": ["~/n"]})
+        Trigger(
+            id="file:notes",
+            name="F",
+            kind="file",
+            enabled=True,
+            spec={"paths": ["~/n"]},
+        )
     )
     file_id = "store:file:notes"
-    _rec, token = clients_mod.create_client("wh", surfaces=["webhook"], scope={"trigger": file_id})
+    _rec, token = clients_mod.create_client(
+        "wh", surfaces=["webhook"], scope={"trigger": file_id}
+    )
     state = _State()
     client = await _client(state)
     try:
@@ -222,7 +231,9 @@ async def test_a_missing_or_bad_bearer_is_401(tmp_path):
 async def test_a_client_bound_to_another_surface_cannot_fire(tmp_path):
     """Surface isolation: a bearer scoped to `mcp` is not admitted to the webhook surface."""
     trigger_id = _make_webhook(tmp_path)
-    _rec, token = clients_mod.create_client("wh", surfaces=["mcp"], scope={"trigger": trigger_id})
+    _rec, token = clients_mod.create_client(
+        "wh", surfaces=["mcp"], scope={"trigger": trigger_id}
+    )
     state = _State()
     client = await _client(state)
     try:
@@ -239,7 +250,8 @@ async def test_incident_mode_suspends_the_fire(tmp_path, monkeypatch):
         "wh", surfaces=["webhook"], scope={"trigger": trigger_id}
     )
     monkeypatch.setattr(
-        "gideon.inbound.gate.incident_problem", lambda: "incident mode is active"
+        "gideon.integrations.inbound.gate.incident_problem",
+        lambda: "incident mode is active",
     )
     state = _State()
     client = await _client(state)

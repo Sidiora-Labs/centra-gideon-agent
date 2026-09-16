@@ -32,12 +32,8 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.security import redact_credentials, redact_url_userinfo
+from gideon.security.security import redact_credentials, redact_url_userinfo
 
-#: Credential-bearing URLs whose secret is NOT a recognisable provider-key shape,
-#: so nothing but a positional rule can catch them. `hunter2` and `s3cr3t` are
-#: deliberate: a planted string the patterns already match would make every
-#: assertion below vacuous, which is how this shipped.
 LEAKY = [
     "https://user:s3cr3t@github.com/acme/repo.git",
     "git clone https://alice:hunter2@git.example.com/x.git",
@@ -46,8 +42,6 @@ LEAKY = [
     "http://svc:pw@internal.host/path",
 ]
 
-#: Text that must come through UNTOUCHED. Redacting any of these makes the logs
-#: worse, not safer.
 CLEAN = [
     "https://github.com/acme/repo.git",
     "mail alice@example.com about it",
@@ -138,7 +132,7 @@ class TestIdempotence:
         """The tag contains a space and the userinfo character class excludes
         whitespace, so a second match is impossible rather than merely prevented.
         Pinned so nobody "simplifies" the tag into something matchable."""
-        from gideon.security import _URL_USERINFO_CORE_RE, _URL_USERINFO_TAG
+        from gideon.security.security import _URL_USERINFO_CORE_RE, _URL_USERINFO_TAG
 
         assert " " in _URL_USERINFO_TAG
         assert not _URL_USERINFO_CORE_RE.search(f"https://{_URL_USERINFO_TAG}@host/x")
@@ -159,15 +153,12 @@ class TestTheAuditLogIsScreened:
     def test_sel_log_redacts_resources_and_error(self):
         import inspect
 
-        from gideon.dashboard.handlers import apps as A
+        from gideon.interfaces.dashboard.handlers import apps as A
 
         src = inspect.getsource(A._sel_log)
         assert "redact_credentials(resources)" in src
         assert "redact_credentials(error)" in src
         assert "resources=safe_resources" in src
-
-
-# ── the source that gets persisted in the first place (#406 + #280) ──────────
 
 
 class TestGitSourceValidation:
@@ -200,13 +191,13 @@ class TestGitSourceValidation:
         remote — a rule that only understood `https://` would break both, and
         `ssh://git@host` shows why the refusal has to tell a USERNAME from a
         SECRET."""
-        from gideon.apps.catalog import _validate_git_source
+        from gideon.extensions.apps.catalog import _validate_git_source
 
         assert _validate_git_source(url) == url.strip()
 
     @pytest.mark.parametrize("url", REFUSED, ids=lambda u: (u or "(empty)")[:32])
     def test_a_credential_or_a_non_remote_is_refused(self, url):
-        from gideon.apps.catalog import _validate_git_source
+        from gideon.extensions.apps.catalog import _validate_git_source
 
         with pytest.raises(ValueError):
             _validate_git_source(url)
@@ -215,7 +206,7 @@ class TestGitSourceValidation:
         """A 400 a user cannot act on is a 400 they retype. The password case names
         the audit log, because that is the reason it cannot simply be accepted and
         redacted later."""
-        from gideon.apps.catalog import _validate_git_source
+        from gideon.extensions.apps.catalog import _validate_git_source
 
         with pytest.raises(ValueError, match="append-only"):
             _validate_git_source("https://user:s3cr3t@github.com/a/b.git")

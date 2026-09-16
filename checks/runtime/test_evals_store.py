@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.evals import store
-from gideon.evals.matrix import (
+from gideon.assurance.evals import store
+from gideon.assurance.evals.matrix import (
     FAILED,
     PASSED,
     VERIFIER_ABSENT,
@@ -20,7 +20,7 @@ from gideon.evals.matrix import (
     MatrixSpec,
     aggregate,
 )
-from gideon.evals.pinning import RunPin
+from gideon.assurance.evals.pinning import RunPin
 
 
 @pytest.fixture()
@@ -34,9 +34,6 @@ def eval_home(tmp_path, monkeypatch):
     return tmp_path
 
 
-# ── MatrixSpec round-trip ─────────────────────────────────────────────────────
-
-
 def test_matrix_spec_roundtrips_through_dict():
     spec = MatrixSpec(
         subject="wf-triage",
@@ -47,7 +44,6 @@ def test_matrix_spec_roundtrips_through_dict():
     )
     restored = MatrixSpec.from_dict(spec.to_dict())
     assert restored == spec
-    # axes is JSON-safe (a dict of lists) and independent of the source mapping.
     d = spec.to_dict()
     d["axes"]["model"].append("mutated")
     assert spec.axes["model"] == ["A:x", "B:y"], "to_dict must copy axes, not alias"
@@ -66,9 +62,6 @@ def test_matrix_result_roundtrips():
     assert restored.cells[1].score is None
 
 
-# ── three-state aggregation ───────────────────────────────────────────────────
-
-
 def test_aggregate_excludes_verifier_absent_from_the_mean():
     """The load-bearing rule: passed=0.8 / failed=0.2 / verifier_absent=None →
     the mean is over the TWO real scores (0.5), and verifier_absent is a separate
@@ -79,7 +72,7 @@ def test_aggregate_excludes_verifier_absent_from_the_mean():
         CellResult(coords={}, outcome=VERIFIER_ABSENT, score=None),
     ]
     agg = aggregate(cells)
-    assert agg["mean_score"] == pytest.approx(0.5)  # (0.8 + 0.2) / 2, NOT / 3
+    assert agg["mean_score"] == pytest.approx(0.5)
     assert agg["scored_count"] == 2
     assert agg["counts"][VERIFIER_ABSENT] == 1
     assert agg["counts"][PASSED] == 1 and agg["counts"][FAILED] == 1
@@ -87,7 +80,9 @@ def test_aggregate_excludes_verifier_absent_from_the_mean():
 
 
 def test_aggregate_all_verifier_absent_has_no_mean():
-    cells = [CellResult(coords={}, outcome=VERIFIER_ABSENT, score=None) for _ in range(3)]
+    cells = [
+        CellResult(coords={}, outcome=VERIFIER_ABSENT, score=None) for _ in range(3)
+    ]
     agg = aggregate(cells)
     assert agg["mean_score"] is None
     assert agg["scored_count"] == 0
@@ -101,18 +96,12 @@ def test_aggregate_empty():
     assert agg["counts"] == {PASSED: 0, FAILED: 0, VERIFIER_ABSENT: 0}
 
 
-# ── store path helpers ─────────────────────────────────────────────────────────
-
-
 def test_path_helpers_resolve_under_the_isolated_home(eval_home):
     assert store.evals_root() == eval_home / "evals"
     assert store.matrices_dir() == eval_home / "evals" / "matrices"
     assert store.matrix_dir("m-1") == eval_home / "evals" / "matrices" / "m-1"
     assert store.matrix_dir("m-1").is_dir()
     assert store.results_path() == eval_home / "evals" / "results.tsv"
-
-
-# ── the append-only results ledger ─────────────────────────────────────────────
 
 
 def _pin(**over):
@@ -130,16 +119,25 @@ def _pin(**over):
 
 def test_append_result_is_append_only(eval_home):
     store.append_result(
-        {"study_id": "st-1", "kind": "template_ab", "verdict": "pass", "score_new": "0.8"},
+        {
+            "study_id": "st-1",
+            "kind": "template_ab",
+            "verdict": "pass",
+            "score_new": "0.8",
+        },
         pin=_pin(),
     )
     store.append_result(
-        {"study_id": "st-2", "kind": "template_ab", "verdict": "fail", "score_new": "0.2"},
+        {
+            "study_id": "st-2",
+            "kind": "template_ab",
+            "verdict": "fail",
+            "score_new": "0.2",
+        },
         pin=_pin(),
     )
     text = store.results_path().read_text(encoding="utf-8")
     lines = text.splitlines()
-    # header + two data rows — the second append did NOT rewrite the first.
     assert lines[0].split("\t") == list(store.RESULTS_COLUMNS)
     assert len(lines) == 3
     rows = store.read_results()
@@ -191,9 +189,6 @@ def test_read_results_empty_when_absent(eval_home):
     assert store.read_results() == []
 
 
-# ── per-matrix JSON artifacts ──────────────────────────────────────────────────
-
-
 def test_matrix_experiment_and_aggregates_roundtrip(eval_home):
     spec = MatrixSpec(subject="wf-x", axes={"model": ["A:x"]}, scorer="judge")
     store.write_matrix_experiment("m-9", spec.to_dict())
@@ -204,6 +199,5 @@ def test_matrix_experiment_and_aggregates_roundtrip(eval_home):
     store.write_matrix_aggregates("m-9", agg)
     assert store.read_matrix_aggregates("m-9") == agg
 
-    # Absent reads are None, not an error.
     assert store.read_matrix_experiment("nope") is None
     assert store.read_matrix_aggregates("nope") is None

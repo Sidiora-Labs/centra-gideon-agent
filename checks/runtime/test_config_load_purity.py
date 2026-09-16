@@ -6,7 +6,7 @@ merely read config rewrote the user's file and dropped a ``.bak`` beside it — 
 module that resolves config into a module-level constant at import time, which on this
 repo's CI happened during pytest **collection**::
 
-    import gideon.mcp_artifacts
+    import gideon.integrations.mcp_artifacts
       → mcp_core.py:111   _API = _resolve_api_base()   # module level
         → mcp_core.py:106 cfg = AppConfig.load()
           → the migration write-back → the REAL ~/.gideon/config.json
@@ -25,7 +25,7 @@ Three things made it maximally hard to catch, and each one shapes a test below.
   already-migrated config would have passed throughout the defect's life.
 * **It under-reported.** ``copy2`` preserves the source mtime, so the ``.bak`` looked
   older than the run and the real-home rail named only ONE of the two changed entries.
-  ``tests/test_real_home_guard.py`` owns that half.
+  ``checks/runtime/test_real_home_guard.py`` owns that half.
 
 The pairing is the point. "``load()`` writes nothing" is trivially satisfiable by deleting
 the migration, which would silently strand every existing config. So the purity rails here
@@ -42,28 +42,27 @@ from pathlib import Path
 
 import pytest
 
-from gideon.config.loader import AppConfig, config_path
-from gideon.config.migrations import apply_config_migrations, load_and_persist_migrations
+from gideon.core.config.loader import AppConfig, config_path
+from gideon.core.config.migrations import (
+    apply_config_migrations,
+    load_and_persist_migrations,
+)
 
-#: A config.json that is genuinely PRE-migration, so the migration has a reason to write.
-#: ``default_agent`` naming an agent that does not exist is one of the conditions the
-#: migration repairs ("if not cfg.default_agent or cfg.default_agent not in cfg.agents"),
-#: and an empty ``agents`` map is another (the built-in profiles get seeded).
 _PRE_MIGRATION_CONFIG = {"default_agent": "a-name-no-agent-has", "agents": {}}
 
-#: Modules whose *import* must not write the config. ``mcp_core`` is the one that regressed
-#: — it still resolves its API base into a module-level constant, which calls
-#: ``AppConfig.load()`` at import time. That is fine now precisely because ``load()`` is
-#: pure; this rail is what keeps it fine. ``mcp_artifacts`` is the importer that dragged it
-#: in during collection, so it pins the real entry path rather than only the owning module.
-_IMPORT_MUST_NOT_WRITE = ("gideon.mcp_core", "gideon.mcp_artifacts")
+_IMPORT_MUST_NOT_WRITE = (
+    "gideon.integrations.mcp_core",
+    "gideon.integrations.mcp_artifacts",
+)
 
 
 def _seed_pre_migration_home(root: Path) -> Path:
     """A home holding a pre-migration ``config.json``. Returns the home."""
     home = root / "gideon-home"
     home.mkdir()
-    (home / "config.json").write_text(json.dumps(_PRE_MIGRATION_CONFIG), encoding="utf-8")
+    (home / "config.json").write_text(
+        json.dumps(_PRE_MIGRATION_CONFIG), encoding="utf-8"
+    )
     return home
 
 
@@ -92,15 +91,10 @@ def _run_snippet(home: Path, snippet: str) -> subprocess.CompletedProcess[str]:
         env={
             "GIDEON_HOME": str(home),
             "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
-            "PYTHONPATH": str(Path(__file__).resolve().parent.parent / "src"),
+            "PYTHONPATH": str(Path(__file__).resolve().parent.parent.parent / "src"),
             "HOME": str(home.parent),
         },
     )
-
-
-# --------------------------------------------------------------------------------------
-# The purity rails — fresh interpreter, no fixture in play.
-# --------------------------------------------------------------------------------------
 
 
 def test_load_writes_nothing_on_a_pre_migration_config(tmp_path: Path) -> None:
@@ -111,10 +105,8 @@ def test_load_writes_nothing_on_a_pre_migration_config(tmp_path: Path) -> None:
 
     proc = _run_snippet(
         home,
-        "from gideon.config.loader import AppConfig\n" "cfg = AppConfig.load()\n"
-        # Prove the load actually did the work whose write-back we are forbidding: if the
-        # migration had been deleted rather than made pure, this would fail here instead of
-        # passing the assertions below for the wrong reason.
+        "from gideon.core.config.loader import AppConfig\n"
+        "cfg = AppConfig.load()\n"
         "assert cfg.default_agent in cfg.agents, cfg.default_agent\n",
     )
     assert proc.returncode == 0, (
@@ -137,7 +129,9 @@ def test_load_writes_nothing_on_a_pre_migration_config(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("module", _IMPORT_MUST_NOT_WRITE)
-def test_importing_a_module_that_reads_config_writes_nothing(tmp_path: Path, module: str) -> None:
+def test_importing_a_module_that_reads_config_writes_nothing(
+    tmp_path: Path, module: str
+) -> None:
     """The delivery mechanism the defect actually used: a module-level ``AppConfig.load()``.
 
     Kept as a rail over the real modules rather than a synthetic one, because the value is
@@ -176,10 +170,12 @@ def test_the_explicit_entry_point_can_be_seen_to_write(tmp_path: Path) -> None:
 
     proc = _run_snippet(
         home,
-        "from gideon.config.migrations import load_and_persist_migrations\n"
+        "from gideon.core.config.migrations import load_and_persist_migrations\n"
         "load_and_persist_migrations()\n",
     )
-    assert proc.returncode == 0, f"the positive control itself failed:\n{proc.stderr[-3000:]}"
+    assert (
+        proc.returncode == 0
+    ), f"the positive control itself failed:\n{proc.stderr[-3000:]}"
 
     assert _config_state(home) != before, (
         "load_and_persist_migrations() on a PRE-MIGRATION config did NOT rewrite "
@@ -193,12 +189,9 @@ def test_the_explicit_entry_point_can_be_seen_to_write(tmp_path: Path) -> None:
     ).exists(), "the explicit write-back did not back the original aside"
 
 
-# --------------------------------------------------------------------------------------
-# The migration must still run — the half that makes purity mean something.
-# --------------------------------------------------------------------------------------
-
-
-def test_load_still_applies_the_migration_in_memory(monkeypatch, tmp_path: Path) -> None:
+def test_load_still_applies_the_migration_in_memory(
+    monkeypatch, tmp_path: Path
+) -> None:
     """Purity must not have been bought by deleting the migration.
 
     ``load()`` returns a config of the CURRENT shape even though it wrote nothing, so every
@@ -218,7 +211,9 @@ def test_load_still_applies_the_migration_in_memory(monkeypatch, tmp_path: Path)
     )
 
 
-def test_load_does_not_call_save_even_when_a_migration_applies(monkeypatch, tmp_path: Path) -> None:
+def test_load_does_not_call_save_even_when_a_migration_applies(
+    monkeypatch, tmp_path: Path
+) -> None:
     """Behavioural, not textual: make ``save()`` fatal and require ``load()`` to succeed.
 
     A text scan for ``cfg.save()`` inside ``load()`` reads comments and docstrings too, and
@@ -232,23 +227,23 @@ def test_load_does_not_call_save_even_when_a_migration_applies(monkeypatch, tmp_
 
     monkeypatch.setattr(AppConfig, "save", _explode)
 
-    cfg = AppConfig.load()  # must not raise
+    cfg = AppConfig.load()
     assert cfg.default_agent in cfg.agents
 
-    # And the control: save() really is fatal, so the pass above is not because the patch
-    # missed its target.
     with pytest.raises(AssertionError, match="pure read"):
         AppConfig().save()
 
 
-def test_the_gateway_boot_path_persists_the_migration(monkeypatch, tmp_path: Path) -> None:
+def test_the_gateway_boot_path_persists_the_migration(
+    monkeypatch, tmp_path: Path
+) -> None:
     """A pre-migration config IS migrated on disk when the gateway boots.
 
     Drives the real startup seam — ``cli_server._boot_config()``, the only caller of the
     writing entry point — with the home pointed at ``tmp_path``. The original is preserved
     as ``config.json.bak`` so a bad migration is recoverable.
     """
-    from gideon.cli_server import _boot_config
+    from gideon.interfaces.cli.server import _boot_config
 
     home = _seed_pre_migration_home(tmp_path)
     monkeypatch.setenv("GIDEON_HOME", str(home))
@@ -263,7 +258,9 @@ def test_the_gateway_boot_path_persists_the_migration(monkeypatch, tmp_path: Pat
         "load-bearing for real upgrades; making load() pure must not have retired it."
     )
     backup = home / "config.json.bak"
-    assert backup.exists(), "boot migrated the config without backing the original aside"
+    assert (
+        backup.exists()
+    ), "boot migrated the config without backing the original aside"
     assert backup.read_text(encoding="utf-8") == original, (
         "config.json.bak does not hold the pre-migration bytes, so it is not a recovery "
         "point — the copy must happen BEFORE the save."
@@ -272,10 +269,11 @@ def test_the_gateway_boot_path_persists_the_migration(monkeypatch, tmp_path: Pat
 
 def test_a_second_boot_writes_nothing(monkeypatch, tmp_path: Path) -> None:
     """One-shot. An already-current config must not be rewritten on every restart, or the
-    ``.bak`` becomes a copy of itself and the real-home rail reds on every gateway start."""
+    ``.bak`` becomes a copy of itself and the real-home rail reds on every gateway start.
+    """
     home = _seed_pre_migration_home(tmp_path)
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    from gideon.cli_server import _boot_config
+    from gideon.interfaces.cli.server import _boot_config
 
     _boot_config()
     (home / "config.json.bak").unlink()
@@ -283,25 +281,34 @@ def test_a_second_boot_writes_nothing(monkeypatch, tmp_path: Path) -> None:
 
     _boot_config()
 
-    assert _config_state(home) == settled, "a second boot rewrote an already-migrated config"
+    assert (
+        _config_state(home) == settled
+    ), "a second boot rewrote an already-migrated config"
     assert not (
         home / "config.json.bak"
     ).exists(), "a second boot re-created the backup, so the migration is not one-shot"
 
 
-def test_apply_config_migrations_is_idempotent_and_reports_no_change(tmp_path: Path) -> None:
+def test_apply_config_migrations_is_idempotent_and_reports_no_change(
+    tmp_path: Path,
+) -> None:
     """The flag ``load_and_persist_migrations`` gates the write on. A second application on
     the same object must report False — that is what makes the write one-shot."""
     cfg = AppConfig()
-    assert apply_config_migrations(cfg) is True, "a bare default needs the built-ins seeded"
+    assert (
+        apply_config_migrations(cfg) is True
+    ), "a bare default needs the built-ins seeded"
     assert (
         apply_config_migrations(cfg) is False
     ), "re-applying reported a change, so every boot would rewrite the config"
 
 
-def test_a_corrupt_config_is_never_rewritten_by_boot(monkeypatch, tmp_path: Path) -> None:
+def test_a_corrupt_config_is_never_rewritten_by_boot(
+    monkeypatch, tmp_path: Path
+) -> None:
     """Unparseable config.json is left exactly as the user left it — no migration, no
-    ``.bak``, no overwrite. Rewriting it would destroy the only copy of their settings."""
+    ``.bak``, no overwrite. Rewriting it would destroy the only copy of their settings.
+    """
     home = tmp_path / "gideon-home"
     home.mkdir()
     (home / "config.json").write_text("{not json at all", encoding="utf-8")
@@ -310,6 +317,8 @@ def test_a_corrupt_config_is_never_rewritten_by_boot(monkeypatch, tmp_path: Path
 
     cfg = load_and_persist_migrations()
 
-    assert isinstance(cfg, AppConfig), "a corrupt config must still yield usable defaults"
+    assert isinstance(
+        cfg, AppConfig
+    ), "a corrupt config must still yield usable defaults"
     assert _config_state(home) == before, "boot overwrote an unparseable config.json"
     assert not (home / "config.json.bak").exists()

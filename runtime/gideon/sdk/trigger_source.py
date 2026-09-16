@@ -12,10 +12,7 @@ a trigger picks from what the source actually produces. It never chooses its own
 prefix is derived from the registered app name, so one app cannot emit into another's.
 """
 
-from gideon.trigger_sources.base import (  # noqa: F401
-    SourceEvent,
-    TriggerSourceProvider,
-)
+from gideon.automation.trigger_sources.base import SourceEvent, TriggerSourceProvider
 
 __all__ = [
     "TriggerSourceProvider",

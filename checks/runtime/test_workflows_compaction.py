@@ -28,15 +28,15 @@ import json
 
 import pytest
 
-from gideon.workflows import compaction as C
-from gideon.workflows import store
-from gideon.workflows.bindings import BindingContext
-from gideon.workflows.blocks import resolve_spec
-from gideon.workflows.bundled_defs import bundled_root
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.engine import dispatch_gate, dispatch_infer
-from gideon.workflows.macros import expand_spec
-from gideon.workflows.models import InstanceState, Node, WorkflowRun
+from gideon.automation.workflows import compaction as C
+from gideon.automation.workflows import store
+from gideon.automation.workflows.bindings import BindingContext
+from gideon.automation.workflows.blocks import resolve_spec
+from gideon.automation.workflows.bundled_defs import bundled_root
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.engine import dispatch_gate, dispatch_infer
+from gideon.automation.workflows.macros import expand_spec
+from gideon.automation.workflows.models import InstanceState, Node, WorkflowRun
 
 pytestmark = pytest.mark.anyio
 
@@ -63,14 +63,11 @@ def isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
 
 
-#: A model with a genuinely small window in the shipped table (8192 tokens), so the
-#: threshold can be crossed by a prompt small enough to keep a test readable.
 SMALL_MODEL = "gpt-4"
-#: 1,000,000 tokens in the same table — the same prompt must NOT trip this one.
 BIG_MODEL = "claude-opus-4.8"
 
 
@@ -94,9 +91,12 @@ class TestBudget:
         assert small == int(8192 * C.CHARS_PER_TOKEN * C.COMPACT_AT_FRACTION)
         assert big > small * 100
 
-    def test_an_unresolvable_model_falls_back_to_a_real_budget_not_to_unbounded(self) -> None:
+    def test_an_unresolvable_model_falls_back_to_a_real_budget_not_to_unbounded(
+        self,
+    ) -> None:
         """A missing table entry must not silently DISABLE the ladder. `model_windows`'
-        conservative default applies, so an unknown model still gets compacted eventually."""
+        conservative default applies, so an unknown model still gets compacted eventually.
+        """
         budget = C.prompt_char_budget("no-such-model-anywhere")
         assert budget > 0
         assert budget == int(200_000 * C.CHARS_PER_TOKEN * C.COMPACT_AT_FRACTION)
@@ -122,7 +122,9 @@ class TestSegmentation:
 
 
 class TestCompactPrompt:
-    def test_it_shrinks_a_long_prompt_and_keeps_the_frame_and_the_instruction(self) -> None:
+    def test_it_shrinks_a_long_prompt_and_keeps_the_frame_and_the_instruction(
+        self,
+    ) -> None:
         """Head and tail protection is what makes this safe for a CONCATENATED prompt: the
         framing the reader needs first and the instruction it must act on are the two
         things that cannot be folded away."""
@@ -163,7 +165,8 @@ class TestCompactPrompt:
 
     def test_a_compaction_that_would_grow_the_prompt_is_discarded(self) -> None:
         """A summarizer returning something longer than what it replaced is not an
-        improvement, and shipping it as one would push the prompt further over budget."""
+        improvement, and shipping it as one would push the prompt further over budget.
+        """
         prompt = _long_prompt(blocks=8, block_chars=10)
 
         def bloat(middle: list[dict]) -> str:
@@ -177,12 +180,13 @@ class TestCompactPrompt:
 class TestDegradeToPlaceholder:
     """The rung that decides whether a long-horizon node dies or survives."""
 
-    def test_a_raising_summarizer_degrades_to_a_placeholder_instead_of_failing(self) -> None:
+    def test_a_raising_summarizer_degrades_to_a_placeholder_instead_of_failing(
+        self,
+    ) -> None:
         def broken(middle: list[dict]) -> str:
             raise RuntimeError("summarizer provider is down")
 
         out, saved = C.compact_prompt(_long_prompt(), summarize_fn=broken)
-        # It did not raise, it still shrank, and both ends survived.
         assert saved > 0.5
         assert "FRAME: you are auditing a target." in out
         assert "INSTRUCTION: answer the question." in out
@@ -199,8 +203,6 @@ class TestDegradeToPlaceholder:
         assert "DROPPED (not summarized)" in out
         assert "were REMOVED" in out
         assert "do not infer that it was empty" in out
-        # And it does NOT masquerade as the deterministic digest, which would read as a
-        # successful summary of content that was actually thrown away.
         assert "## Earlier conversation (compacted)" not in out
 
     def test_no_summarizer_is_not_a_failure(self) -> None:
@@ -234,7 +236,9 @@ class TestOverflowDetection:
             "the model returned malformed json",
         ],
     )
-    def test_it_does_not_claim_failures_compaction_cannot_fix(self, message: str) -> None:
+    def test_it_does_not_claim_failures_compaction_cannot_fix(
+        self, message: str
+    ) -> None:
         """This is the discrimination layer 2 depends on. Treating a 429 as an overflow
         would burn a second model call on something a smaller prompt cannot fix."""
         assert C.is_context_overflow(RuntimeError(message)) is False
@@ -312,14 +316,16 @@ class TestTheLadder:
         )
         assert seen == [prompt]
 
-    async def test_layer_2_recompacts_and_retries_once_on_a_length_rejection(self) -> None:
+    async def test_layer_2_recompacts_and_retries_once_on_a_length_rejection(
+        self,
+    ) -> None:
         seen: list[str] = []
         fn = self._fn(seen, fail_first=RuntimeError("context_length_exceeded"))
         out = await C.complete_with_compaction(
             fn,
             _long_prompt(),
             use_case="reasoning",
-            model_resolver=lambda uc: BIG_MODEL,  # layer 1 stays out of the way
+            model_resolver=lambda uc: BIG_MODEL,
         )
         assert out == "ok"
         assert len(seen) == 2, "exactly one retry — not zero, and not a loop"
@@ -330,7 +336,10 @@ class TestTheLadder:
         fn = self._fn(seen, fail_first=RuntimeError("429 rate limit exceeded"))
         with pytest.raises(RuntimeError, match="rate limit"):
             await C.complete_with_compaction(
-                fn, _long_prompt(), use_case="reasoning", model_resolver=lambda uc: BIG_MODEL
+                fn,
+                _long_prompt(),
+                use_case="reasoning",
+                model_resolver=lambda uc: BIG_MODEL,
             )
         assert len(seen) == 1, "a 429 must not cost a second call"
 
@@ -396,7 +405,7 @@ class TestAntiThrashing:
         backstop if the provider objects."""
         seen: list[str] = []
         prompt = _long_prompt()
-        saves = [0.01, 0.02]  # the history the rule reads
+        saves = [0.01, 0.02]
         summarized: list[int] = []
 
         def summarize(middle: list[dict]) -> str:
@@ -447,7 +456,9 @@ class TestTheEngineSeam:
         assert r.state == InstanceState.DONE
         assert "[CONTEXT COMPACTION — REFERENCE ONLY" in seen[0]
 
-    async def test_infer_survives_a_length_rejection_it_used_to_die_on(self, monkeypatch) -> None:
+    async def test_infer_survives_a_length_rejection_it_used_to_die_on(
+        self, monkeypatch
+    ) -> None:
         """🔴 The atom's reason for existing: before this, a length rejection was a FAILED
         node. Layer 1 is disabled here (a huge budget) so the assertion is specifically
         about layer 2 rescuing the call."""
@@ -481,7 +492,9 @@ class TestTheEngineSeam:
         assert r.state == InstanceState.FAILED
         assert r.failure is not None
 
-    async def test_a_judge_gate_routes_through_the_ladder_too(self, monkeypatch) -> None:
+    async def test_a_judge_gate_routes_through_the_ladder_too(
+        self, monkeypatch
+    ) -> None:
         """A judge on a long-horizon loop reads the accumulated evidence, so its
         instruction is the other prompt that grows toward the window."""
         monkeypatch.setattr(C, "prompt_char_budget", lambda *a, **k: 500)
@@ -492,10 +505,13 @@ class TestTheEngineSeam:
             return "PASS"
 
         node = _n(
-            {"kind": "gate", "id": "g", "config": {"kind": "judge", "prompt": _long_prompt()}}
+            {
+                "kind": "gate",
+                "id": "g",
+                "config": {"kind": "judge", "prompt": _long_prompt()},
+            }
         )
         r = await dispatch_gate(node, BindingContext(), now=0.0, completion=fn)
-        # Whatever the gate decides, the PROMPT it sent must have gone through the ladder.
         assert seen, f"the judge never called the model (state={r.state})"
         assert "[CONTEXT COMPACTION — REFERENCE ONLY" in seen[0]
 
@@ -514,8 +530,9 @@ class TestOnARealLongHorizonTemplate:
     """
 
     def _spec(self) -> dict:
-        raw = json.loads((bundled_root() / "audit-sweep" / "workflow.json").read_text("utf-8"))
-        # Macros expanded THEN blocks resolved — the order the bundled provider uses.
+        raw = json.loads(
+            (bundled_root() / "audit-sweep" / "workflow.json").read_text("utf-8")
+        )
         return resolve_spec(expand_spec(raw))
 
     def _run(self, spec: dict, target: str) -> WorkflowRun:
@@ -532,8 +549,6 @@ class TestOnARealLongHorizonTemplate:
     def _fn(self, sent: list[str]):
         async def fn(prompt, *, use_case="background", output_type=None, model=""):
             sent.append(prompt)
-            # The finders and the critic all want JSON; one shape satisfies every schema
-            # in this template, and an empty findings list is what makes the loop go dry.
             return json.dumps({"findings": [], "new_findings": [], "uncovered": []})
 
         return fn
@@ -542,9 +557,6 @@ class TestOnARealLongHorizonTemplate:
         self, isolated_home, monkeypatch
     ) -> None:
         spec = self._spec()
-        # A target big enough to push each finder's bound prompt over the threshold — the
-        # same thing accumulated loop context does to a real long-horizon run, arrived at
-        # in one step so the test does not need 40 live cycles to reach it.
         target = "\n\n".join(f"module {i}: " + ("y" * 900) for i in range(30))
         monkeypatch.setattr(C, "prompt_char_budget", lambda *a, **k: 5_000)
 
@@ -553,31 +565,26 @@ class TestOnARealLongHorizonTemplate:
         c = RunController(run, spec, services=EngineServices(completion=self._fn(sent)))
         status = await c.run_to_completion(timeout=60)
 
-        # 1. The engine really compacted, on the real template's real prompts.
         compacted = [p for p in sent if "[CONTEXT COMPACTION — REFERENCE ONLY" in p]
         assert compacted, "no node's prompt went through the ladder"
-        assert len(sent) >= 12, f"the loop did not run its cycles (only {len(sent)} calls)"
+        assert (
+            len(sent) >= 12
+        ), f"the loop did not run its cycles (only {len(sent)} calls)"
 
-        # 2. Every prompt that went out respected the budget. This is the assertion that
-        #    would have caught a ladder that ran but did not actually shrink anything.
         assert max(len(p) for p in sent) <= 6_000, "a prompt went out over budget"
         assert len(target) > 20_000, "the pre-compaction target was not actually large"
 
-        # 3. 🔴 The nodes COMPLETED. A compacted prompt that produced no usable output
-        #    would be a worse outcome than the context error this replaces.
-        for node_id in ("find_correctness", "find_safety", "find_clarity", "completeness_critic"):
+        for node_id in (
+            "find_correctness",
+            "find_safety",
+            "find_clarity",
+            "completeness_critic",
+        ):
             assert node_id in c._outputs, f"{node_id} produced no output"
 
-        # 4. The per-node save history accumulated ACROSS the loop's iterations — which is
-        #    only possible because the controller keys it by node id, not by instance path.
-        #    Keyed by path, iteration 2 would have started from an empty list every cycle
-        #    and the anti-thrashing rule could never observe repetition at all.
         assert len(c._compaction_saves["find_correctness"]) > 1
         assert all(s > 0.5 for s in c._compaction_saves["find_correctness"])
 
-        # 5. Compaction did not change the run's OUTCOME. Asserted against the same
-        #    template driven with a small target below, so the bar is "identical to
-        #    uncompacted", not a status hardcoded into this test.
         small_run = self._run(spec, "small")
         baseline_sent: list[str] = []
         monkeypatch.setattr(C, "prompt_char_budget", lambda *a, **k: 10_000_000)
@@ -585,7 +592,9 @@ class TestOnARealLongHorizonTemplate:
             small_run, spec, services=EngineServices(completion=self._fn(baseline_sent))
         )
         baseline_status = await baseline.run_to_completion(timeout=60)
-        assert not [p for p in baseline_sent if "CONTEXT COMPACTION" in p], "baseline compacted"
+        assert not [
+            p for p in baseline_sent if "CONTEXT COMPACTION" in p
+        ], "baseline compacted"
         assert status == baseline_status
         assert set(c._outputs) == set(baseline._outputs)
 
@@ -611,6 +620,5 @@ class TestOnARealLongHorizonTemplate:
         await c.run_to_completion(timeout=60)
 
         assert rejected, "the rejection never fired — the test proved nothing"
-        # The node whose first call was rejected still produced output.
         assert "find_correctness" in c._outputs or "find_safety" in c._outputs
         assert "completeness_critic" in c._outputs, "the loop never reached its critic"

@@ -18,7 +18,7 @@ holds it tells the user the work is taken when it is free — worse than no badg
 
 import pytest
 
-from gideon.workflows.containers import (
+from gideon.automation.workflows.containers import (
     BOARD_ORDER,
     COLLAPSED_ORIGINS,
     DEFAULT_LEASE_SECS,
@@ -40,7 +40,12 @@ from gideon.workflows.containers import (
     release,
     sweep_decision,
 )
-from gideon.workflows.models import OriginKind, RunOrigin, RunStatus, WorkflowRun
+from gideon.automation.workflows.models import (
+    OriginKind,
+    RunOrigin,
+    RunStatus,
+    WorkflowRun,
+)
 
 
 def run(
@@ -61,9 +66,6 @@ def run(
     )
 
 
-# ── the board is a projection, not a second source ──
-
-
 def test_needs_input_is_pinned_first():
     """The only group where the run is stopped waiting on the person reading the board. Burying it
     under twelve working rows is how a run sits blocked overnight."""
@@ -75,13 +77,19 @@ def test_a_blocked_run_projects_to_needs_input():
 
 
 def test_a_started_running_run_is_WORKING():
-    assert board_state_for(run(status=RunStatus.RUNNING, started=True)) is BoardState.WORKING
+    assert (
+        board_state_for(run(status=RunStatus.RUNNING, started=True))
+        is BoardState.WORKING
+    )
 
 
 def test_a_running_run_with_no_start_time_is_QUEUED():
     """This is what §5.2's record-before-slot ordering buys. Without the distinction the board
     reports work in flight that has not begun, and the user waits on nothing."""
-    assert board_state_for(run(status=RunStatus.RUNNING, started=False)) is BoardState.QUEUED
+    assert (
+        board_state_for(run(status=RunStatus.RUNNING, started=False))
+        is BoardState.QUEUED
+    )
 
 
 def test_a_draft_run_is_queued_not_done():
@@ -100,12 +108,11 @@ def test_an_escalated_run_lands_in_REVIEW():
     assert board_state_for(run(status=RunStatus.ESCALATED)) is BoardState.REVIEW
 
 
-@pytest.mark.parametrize("status", [RunStatus.COMPLETE, RunStatus.FAILED, RunStatus.CANCELLED])
+@pytest.mark.parametrize(
+    "status", [RunStatus.COMPLETE, RunStatus.FAILED, RunStatus.CANCELLED]
+)
 def test_terminal_statuses_are_done(status):
     assert board_state_for(run(status=status)) is BoardState.DONE
-
-
-# ── the origin rules have to key on the REAL enum ──
 
 
 def test_the_collapse_rule_reads_the_run_origins_ENUM_VALUE():
@@ -145,7 +152,9 @@ def test_a_blocked_UNATTENDED_origin_run_does_not_raise_a_badge():
 def test_a_collapsed_run_can_still_want_attention():
     """Collapsed is visual noise; attention is "someone is blocked". A subagent batch waiting on an
     approval is still waiting."""
-    row = board_row(run(status=RunStatus.NEEDS_INPUT, origin=OriginKind.SUBAGENT_TOOL), now=0.0)
+    row = board_row(
+        run(status=RunStatus.NEEDS_INPUT, origin=OriginKind.SUBAGENT_TOOL), now=0.0
+    )
     assert row.collapsed is True
     assert row.attention is True
 
@@ -153,13 +162,12 @@ def test_a_collapsed_run_can_still_want_attention():
 def test_the_count_pill_counts_only_real_attention():
     rows = [
         board_row(run("a", status=RunStatus.NEEDS_INPUT), now=0.0),
-        board_row(run("b", status=RunStatus.NEEDS_INPUT, origin=OriginKind.IDLE), now=0.0),
+        board_row(
+            run("b", status=RunStatus.NEEDS_INPUT, origin=OriginKind.IDLE), now=0.0
+        ),
         board_row(run("c", status=RunStatus.RUNNING), now=0.0),
     ]
     assert attention_count(rows) == 1
-
-
-# ── grouping ──
 
 
 def test_groups_come_back_in_board_order():
@@ -180,7 +188,9 @@ def test_an_empty_group_is_OMITTED():
 def test_a_group_reports_its_own_attention_count():
     rows = [
         board_row(run("a", status=RunStatus.NEEDS_INPUT), now=0.0),
-        board_row(run("b", status=RunStatus.NEEDS_INPUT, origin=OriginKind.IDLE), now=0.0),
+        board_row(
+            run("b", status=RunStatus.NEEDS_INPUT, origin=OriginKind.IDLE), now=0.0
+        ),
     ]
     group = group_board(rows)[0]
     assert group["count"] == 2
@@ -191,12 +201,11 @@ def test_an_empty_board_groups_to_nothing():
     assert group_board([]) == []
 
 
-# ── the boot sweep checks the SUBSTRATE first ──
-
-
 def test_an_isolated_run_whose_worktree_SURVIVED_is_suspended_not_aborted():
     """The measurement §5.2 turns on. Aborting it destroys recoverable work and reports success."""
-    decision = sweep_decision(run(status=RunStatus.RUNNING), Substrate(kind="worktree", alive=True))
+    decision = sweep_decision(
+        run(status=RunStatus.RUNNING), Substrate(kind="worktree", alive=True)
+    )
     assert decision.board_state is BoardState.SUSPENDED
     assert decision.status is RunStatus.PAUSED
     assert decision.resumable is True
@@ -214,18 +223,25 @@ def test_an_isolated_run_whose_substrate_DIED_is_honestly_aborted():
 
 def test_an_INLINE_run_can_never_be_suspended():
     """Its substrate IS the process, so it cannot have survived a restart. Reporting it as suspended
-    would offer a Resume that cannot work — an affordance that fails is worse than none."""
-    decision = sweep_decision(run(status=RunStatus.RUNNING), Substrate(kind="inline", alive=True))
+    would offer a Resume that cannot work — an affordance that fails is worse than none.
+    """
+    decision = sweep_decision(
+        run(status=RunStatus.RUNNING), Substrate(kind="inline", alive=True)
+    )
     assert decision.board_state is BoardState.DONE
     assert decision.reason == "server restarted"
     assert decision.resumable is False
 
 
-@pytest.mark.parametrize("status", [RunStatus.COMPLETE, RunStatus.FAILED, RunStatus.CANCELLED])
+@pytest.mark.parametrize(
+    "status", [RunStatus.COMPLETE, RunStatus.FAILED, RunStatus.CANCELLED]
+)
 def test_a_terminal_run_is_left_ALONE_by_the_sweep(status):
     """Re-deciding a completed run would let a boot sweep overwrite a real outcome with an inferred
     one — the board would then disagree with the run's own record."""
-    decision = sweep_decision(run(status=status), Substrate(kind="worktree", alive=True))
+    decision = sweep_decision(
+        run(status=status), Substrate(kind="worktree", alive=True)
+    )
     assert decision.status is status
     assert "left untouched" in decision.reason
 
@@ -234,9 +250,6 @@ def test_the_sweep_decision_states_its_REASON():
     """A run that silently changed state at boot is a support question; one marked with "server
     restarted" is legible."""
     assert sweep_decision(run(), Substrate()).reason
-
-
-# ── claim leases ──
 
 
 def test_a_free_claim_is_granted():
@@ -291,7 +304,8 @@ def test_an_anonymous_claim_is_refused():
 
 def test_only_the_holder_may_RELEASE():
     """A release that let anyone drop anyone's claim would make the lease advisory in the one
-    direction that matters — a second worker could steal work mid-execution by releasing first."""
+    direction that matters — a second worker could steal work mid-execution by releasing first.
+    """
     held = Claim(holder="session-a", expires_at=2000.0)
     still_held, why = release(held, "session-b")
     assert still_held is held
@@ -319,12 +333,10 @@ def test_a_live_claim_IS_rendered():
     assert board_row(run(), claim_record=live, now=1000.0).claim is live
 
 
-# ── per-section isolation in the /work aggregation ──
-
-
 def test_one_failing_source_degrades_ONE_section():
     """Five heterogeneous sources fail independently. A single try/catch around the aggregate would
-    let a stale legacy-loop reader take down the run list — and the whole first paint."""
+    let a stale legacy-loop reader take down the run list — and the whole first paint.
+    """
 
     def boom():
         raise RuntimeError("legacy loop store is unreachable")
@@ -340,7 +352,9 @@ def test_one_failing_source_degrades_ONE_section():
 
 
 def test_a_failed_section_reports_WHAT_failed():
-    sections, _ = collect_sections({"loops": lambda: (_ for _ in ()).throw(ValueError("bad row"))})
+    sections, _ = collect_sections(
+        {"loops": lambda: (_ for _ in ()).throw(ValueError("bad row"))}
+    )
     assert "bad row" in sections[0]["error"]
 
 
@@ -376,13 +390,13 @@ def test_no_sources_is_complete_rather_than_an_error():
     assert collect_sections({})[1] is Completeness.COMPLETE
 
 
-# ── the project block ──
-
-
 def test_the_three_fields_stay_DISTINGUISHABLE():
     """Brief is what/why, overview is current state, instructions are procedure. An agent that
-    cannot tell the goal from the current state treats a finished sub-goal as still open."""
-    block = project_block(brief="ship the thing", overview="auth is done", instructions="use uv")
+    cannot tell the goal from the current state treats a finished sub-goal as still open.
+    """
+    block = project_block(
+        brief="ship the thing", overview="auth is done", instructions="use uv"
+    )
     assert block.index("BRIEF") < block.index("OVERVIEW") < block.index("INSTRUCTIONS")
     assert "current state" in block
 
@@ -397,9 +411,6 @@ def test_a_partially_filled_project_omits_the_empty_labels():
     block = project_block(brief="ship it", overview="", instructions="")
     assert "BRIEF" in block
     assert "OVERVIEW" not in block
-
-
-# ── the wayfinder ledgers ──
 
 
 def test_the_three_ledgers_each_state_what_they_are_FOR():
@@ -419,13 +430,16 @@ def test_an_unknown_ledger_is_REFUSED():
 
 def test_an_out_of_scope_entry_always_carries_a_reason():
     """One without a reason is indistinguishable from something that was forgotten, and the whole
-    value of the bucket is that revisiting it later is cheap because the reasoning is recorded."""
+    value of the bucket is that revisiting it later is cheap because the reasoning is recorded.
+    """
     entry = ledger_entry("out_of_scope", "mobile app")
     assert entry["reason"] == "no reason recorded"
 
 
 def test_a_stated_reason_is_kept_verbatim():
-    entry = ledger_entry("out_of_scope", "mobile app", reason="no iOS device to test on")
+    entry = ledger_entry(
+        "out_of_scope", "mobile app", reason="no iOS device to test on"
+    )
     assert entry["reason"] == "no iOS device to test on"
 
 
@@ -437,4 +451,6 @@ def test_a_decisions_entry_carries_its_link():
 def test_a_fog_entry_needs_no_reason():
     """A fog entry is a question nobody can state precisely yet. Demanding a reason for it would be
     demanding the precision the bucket exists to defer."""
-    assert "reason" not in ledger_entry("fog", "how should retries interact with the cache?")
+    assert "reason" not in ledger_entry(
+        "fog", "how should retries interact with the cache?"
+    )

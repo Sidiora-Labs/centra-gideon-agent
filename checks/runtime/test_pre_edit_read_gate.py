@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from gideon.agents.native import read_gate
-from gideon.agents.native.builtin_tools import (
+from gideon.engine.agents.native import read_gate
+from gideon.engine.agents.native.builtin_tools import (
     _READ_GATED_WRITE_TOOLS,
     NativeBuiltinToolProvider,
 )
@@ -29,8 +29,6 @@ _BUILTIN_TOOLS_SRC = Path(read_gate.__file__).with_name("builtin_tools.py")
 
 @pytest.fixture(autouse=True)
 def _clean_ledger():
-    # The ledger is process-global; reset around every test so a leaked observation from
-    # one test cannot admit a write another test asserts is refused (or vice versa).
     read_gate.reset_all()
     yield
     read_gate.reset_all()
@@ -47,15 +45,13 @@ def _p(ws, key="sess-ag14"):
     return NativeBuiltinToolProvider(ws, session_key=key)
 
 
-# ── the closed failure: an edit against content never observed ──────────────────
-
-
 @pytest.mark.asyncio
 async def test_edit_without_reading_is_refused(ws):
-    r = await _p(ws).invoke("edit_file", {"path": "a.txt", "old_str": "hello", "new_str": "HI"})
+    r = await _p(ws).invoke(
+        "edit_file", {"path": "a.txt", "old_str": "hello", "new_str": "HI"}
+    )
     assert not r.success
     assert r.metadata["read_gate"] == "not_observed"
-    # unchanged on disk — refused, not applied optimistically
     assert (ws / "a.txt").read_text() == "hello world\nsecond line\n"
 
 
@@ -63,7 +59,9 @@ async def test_edit_without_reading_is_refused(ws):
 async def test_edit_after_reading_is_admitted(ws):
     p = _p(ws)
     assert (await p.invoke("read_file", {"path": "a.txt"})).success
-    r = await p.invoke("edit_file", {"path": "a.txt", "old_str": "hello", "new_str": "HI"})
+    r = await p.invoke(
+        "edit_file", {"path": "a.txt", "old_str": "hello", "new_str": "HI"}
+    )
     assert r.success, r.error
     assert (ws / "a.txt").read_text().startswith("HI world")
 
@@ -71,14 +69,13 @@ async def test_edit_after_reading_is_admitted(ws):
 @pytest.mark.asyncio
 async def test_refusal_names_the_path_and_the_read_to_perform(ws):
     """The refusal is a NEXT ACTION, not an opaque denial — one step to self-correct."""
-    r = await _p(ws).invoke("edit_file", {"path": "a.txt", "old_str": "hello", "new_str": "HI"})
+    r = await _p(ws).invoke(
+        "edit_file", {"path": "a.txt", "old_str": "hello", "new_str": "HI"}
+    )
     text = r.error + " " + " ".join(r.recovery_hints)
-    assert "a.txt" in text  # the path
-    assert "read_file" in text  # the verb/tool to call
-    assert "retry" in text  # and that retrying then works
-
-
-# ── the call-count defect: a read must be OF THIS FILE, and COVER the region ────
+    assert "a.txt" in text
+    assert "read_file" in text
+    assert "retry" in text
 
 
 @pytest.mark.asyncio
@@ -86,7 +83,9 @@ async def test_reading_a_different_file_does_not_license_the_edit(ws):
     """A read-tool-was-called check would admit this. The content check must not."""
     p = _p(ws)
     assert (await p.invoke("read_file", {"path": "b.txt"})).success
-    r = await p.invoke("edit_file", {"path": "a.txt", "old_str": "hello", "new_str": "HI"})
+    r = await p.invoke(
+        "edit_file", {"path": "a.txt", "old_str": "hello", "new_str": "HI"}
+    )
     assert not r.success and r.metadata["read_gate"] == "not_observed"
     assert (ws / "a.txt").read_text() == "hello world\nsecond line\n"
 
@@ -99,17 +98,22 @@ async def test_truncated_read_does_not_license_an_edit_past_the_shown_region(ws)
     p = _p(ws)
     r = await p.invoke("read_file", {"path": "big.txt"})
     assert r.truncated, "fixture must exceed the output cap or the test is vacuous"
-    assert "line 002000 filler" not in r.output, "the mid region must NOT have been shown"
+    assert (
+        "line 002000 filler" not in r.output
+    ), "the mid region must NOT have been shown"
 
     mid = await p.invoke(
-        "edit_file", {"path": "big.txt", "old_str": "line 002000 filler", "new_str": "MID"}
+        "edit_file",
+        {"path": "big.txt", "old_str": "line 002000 filler", "new_str": "MID"},
     )
     assert not mid.success and mid.metadata["read_gate"] == "region_not_observed"
-    assert "line 002000 filler" in (ws / "big.txt").read_text(), "must not have been applied"
+    assert (
+        "line 002000 filler" in (ws / "big.txt").read_text()
+    ), "must not have been applied"
 
-    # ...while the region that WAS shown edits fine, so the gate is not just "big files off".
     head = await p.invoke(
-        "edit_file", {"path": "big.txt", "old_str": "line 000001 filler", "new_str": "HEAD"}
+        "edit_file",
+        {"path": "big.txt", "old_str": "line 000001 filler", "new_str": "HEAD"},
     )
     assert head.success, head.error
 
@@ -123,14 +127,14 @@ async def test_retrieving_the_dropped_slice_makes_the_refusal_actionable(ws):
     r = await p.invoke("read_file", {"path": "big.txt"})
     rid = r.metadata.get("raw_ref")
     assert rid, "a projected read must retain its raw or the recovery route is fiction"
-    assert (await p.invoke("tool_result_get", {"result_id": rid, "grep": "line 002000"})).success
+    assert (
+        await p.invoke("tool_result_get", {"result_id": rid, "grep": "line 002000"})
+    ).success
     ok = await p.invoke(
-        "edit_file", {"path": "big.txt", "old_str": "line 002000 filler", "new_str": "MID"}
+        "edit_file",
+        {"path": "big.txt", "old_str": "line 002000 filler", "new_str": "MID"},
     )
     assert ok.success, ok.error
-
-
-# ── three operations: edit / overwrite-existing / create-new ────────────────────
 
 
 @pytest.mark.asyncio
@@ -147,14 +151,18 @@ async def test_overwriting_an_existing_file_is_gated_like_an_edit(ws):
     assert not blind.success and blind.metadata["read_gate"] == "not_observed"
     assert (ws / "a.txt").read_text() == "hello world\nsecond line\n"
     assert (await p.invoke("read_file", {"path": "a.txt"})).success
-    assert (await p.invoke("write_file", {"path": "a.txt", "content": "CLOBBER"})).success
+    assert (
+        await p.invoke("write_file", {"path": "a.txt", "content": "CLOBBER"})
+    ).success
     assert (ws / "a.txt").read_text() == "CLOBBER"
 
 
 @pytest.mark.asyncio
 async def test_overwrite_of_a_partly_observed_file_is_refused(ws):
     """An overwrite's region is the WHOLE file, so a truncated read licenses nothing."""
-    (ws / "big.txt").write_text("\n".join(f"line {i:06d} pad pad pad" for i in range(4000)))
+    (ws / "big.txt").write_text(
+        "\n".join(f"line {i:06d} pad pad pad" for i in range(4000))
+    )
     p = _p(ws)
     assert (await p.invoke("read_file", {"path": "big.txt"})).truncated
     r = await p.invoke("write_file", {"path": "big.txt", "content": "tiny"})
@@ -162,16 +170,17 @@ async def test_overwrite_of_a_partly_observed_file_is_refused(ws):
     assert len((ws / "big.txt").read_text()) > 60_000
 
 
-# ── currency: the observation must be of the CURRENT content ────────────────────
-
-
 @pytest.mark.asyncio
 async def test_a_concurrent_write_invalidates_the_observation(ws):
     """The closed failure itself: an edit that would silently revert someone else."""
     p = _p(ws)
     assert (await p.invoke("read_file", {"path": "a.txt"})).success
-    (ws / "a.txt").write_text("hello world\nsecond line\nTHEIR NEW LINE\n")  # another writer
-    r = await p.invoke("edit_file", {"path": "a.txt", "old_str": "hello", "new_str": "HI"})
+    (ws / "a.txt").write_text(
+        "hello world\nsecond line\nTHEIR NEW LINE\n"
+    )  # another writer
+    r = await p.invoke(
+        "edit_file", {"path": "a.txt", "old_str": "hello", "new_str": "HI"}
+    )
     assert not r.success and r.metadata["read_gate"] == "changed_on_disk"
     assert "THEIR NEW LINE" in (ws / "a.txt").read_text(), "their change must survive"
 
@@ -182,9 +191,13 @@ async def test_the_agents_own_write_keeps_its_observation_current(ws):
     p = _p(ws)
     assert (await p.invoke("read_file", {"path": "a.txt"})).success
     assert (
-        await p.invoke("edit_file", {"path": "a.txt", "old_str": "hello", "new_str": "HI"})
+        await p.invoke(
+            "edit_file", {"path": "a.txt", "old_str": "hello", "new_str": "HI"}
+        )
     ).success
-    second = await p.invoke("edit_file", {"path": "a.txt", "old_str": "second", "new_str": "2nd"})
+    second = await p.invoke(
+        "edit_file", {"path": "a.txt", "old_str": "second", "new_str": "2nd"}
+    )
     assert second.success, second.error
     assert (ws / "a.txt").read_text() == "HI world\n2nd line\n"
 
@@ -194,7 +207,9 @@ async def test_a_new_turn_drops_the_observations(ws):
     p = _p(ws, key="turny")
     assert (await p.invoke("read_file", {"path": "a.txt"})).success
     read_gate.begin_turn("turny")
-    r = await p.invoke("edit_file", {"path": "a.txt", "old_str": "hello", "new_str": "HI"})
+    r = await p.invoke(
+        "edit_file", {"path": "a.txt", "old_str": "hello", "new_str": "HI"}
+    )
     assert not r.success and r.metadata["read_gate"] == "not_observed"
 
 
@@ -211,7 +226,9 @@ async def test_an_expired_observation_is_refused(ws):
         at=obs.at - read_gate.OBSERVATION_TTL_SECS - 10,
         fragments=obs.fragments,
     )
-    r = await p.invoke("edit_file", {"path": "a.txt", "old_str": "hello", "new_str": "HI"})
+    r = await p.invoke(
+        "edit_file", {"path": "a.txt", "old_str": "hello", "new_str": "HI"}
+    )
     assert not r.success and r.metadata["read_gate"] == "expired"
 
 
@@ -219,7 +236,11 @@ def test_undeterminable_content_fails_closed(ws, monkeypatch):
     """If the gate cannot tell what is there now, it refuses — it does not wave through."""
     monkeypatch.setattr(read_gate, "file_sha256", lambda _p: None)
     read_gate.record_read(
-        "s", ws / "a.txt", observed_text="hello world\n", content_sha256="deadbeef", complete=True
+        "s",
+        ws / "a.txt",
+        observed_text="hello world\n",
+        content_sha256="deadbeef",
+        complete=True,
     )
     refusal = read_gate.admit_write(
         "s", ws / "a.txt", operation="edit", display_path="a.txt", required_text="hello"
@@ -236,7 +257,11 @@ def test_an_unknown_operation_is_refused(ws):
         complete=True,
     )
     refusal = read_gate.admit_write(
-        "s", ws / "a.txt", operation="append", display_path="a.txt", required_text="hello"
+        "s",
+        ws / "a.txt",
+        operation="append",
+        display_path="a.txt",
+        required_text="hello",
     )
     assert refusal is not None and refusal.reason == "unknown_operation"
 
@@ -247,18 +272,14 @@ async def test_missing_old_str_still_reports_the_tools_own_error(ws):
     blaming the model for a read it already did would teach it the wrong recovery."""
     p = _p(ws)
     assert (await p.invoke("read_file", {"path": "a.txt"})).success
-    r = await p.invoke("edit_file", {"path": "a.txt", "old_str": "nope", "new_str": "x"})
+    r = await p.invoke(
+        "edit_file", {"path": "a.txt", "old_str": "nope", "new_str": "x"}
+    )
     assert not r.success
     assert r.error == "old_str not found in file"
     assert "read_gate" not in r.metadata
 
 
-# ── the bypass rail ────────────────────────────────────────────────────────────
-
-#: Calls that write CONTENT to a filesystem path. A handler performing one of these is a
-#: write path and must be covered by the seam's registry. Deletion/rename (``unlink``,
-#: ``rename``) are deliberately out: the gate is about content computed against a stale
-#: version, and including ``unlink`` credited ``_t_bash`` for deleting its own temp script.
 _CONTENT_WRITE_CALLS = frozenset(
     {
         "write_text",
@@ -268,15 +289,10 @@ _CONTENT_WRITE_CALLS = frozenset(
         "copyfile",
         "copy",
         "copy2",
-        "replace",  # os.replace / shutil.replace — a rename-into-place IS a content write
+        "replace",
     }
 )
 
-#: Write paths that CANNOT be gated on an observed target, declared so the exemption is
-#: visible and tested rather than silently missing from the registry. ``bash`` takes a
-#: command, not a path: ``sed -i`` / ``> file`` mutate files the gate never sees a name
-#: for. It is fenced by approval + risk level + the bash denylist instead, and this row
-#: is the honest statement of the residual hole.
 _UNGATEABLE_WRITE_PATHS = {"bash": "takes an opaque command, not a target path"}
 
 
@@ -299,7 +315,6 @@ def _write_handlers_in_builtin_tools() -> set[str]:
                 continue
             fn = sub.func
             name = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
-            # `str.replace` is pervasive and harmless; only a path receiver mutates.
             if name == "replace" and not (
                 isinstance(fn, ast.Attribute)
                 and isinstance(fn.value, ast.Name)
@@ -313,8 +328,6 @@ def _write_handlers_in_builtin_tools() -> set[str]:
 
 def test_rail_every_write_path_is_covered_by_the_one_seam():
     discovered = _write_handlers_in_builtin_tools()
-    # VACUITY: a scan that matches nothing would "pass" while covering nothing. If the
-    # write handlers get renamed or the call vocabulary drifts, FAIL here.
     assert discovered, (
         "the write-path scan matched ZERO handlers — the rail is vacuous. Update "
         f"_CONTENT_WRITE_CALLS / the _t_ prefix against {_BUILTIN_TOOLS_SRC}."
@@ -322,7 +335,9 @@ def test_rail_every_write_path_is_covered_by_the_one_seam():
     assert {
         "write_file",
         "edit_file",
-    } <= discovered, f"the two known write paths must be discoverable; got {sorted(discovered)}"
+    } <= discovered, (
+        f"the two known write paths must be discoverable; got {sorted(discovered)}"
+    )
     uncovered = discovered - set(_READ_GATED_WRITE_TOOLS) - set(_UNGATEABLE_WRITE_PATHS)
     assert not uncovered, (
         f"write path(s) {sorted(uncovered)} write file content but are not in "
@@ -336,7 +351,9 @@ def test_rail_the_ungateable_write_path_is_declared_not_forgotten():
     so the rail cannot pass by quietly not knowing about it."""
     src = _BUILTIN_TOOLS_SRC.read_text(encoding="utf-8")
     for tool, reason in _UNGATEABLE_WRITE_PATHS.items():
-        assert f"async def _t_{tool}" in src, f"{tool} no longer exists — drop the exemption"
+        assert (
+            f"async def _t_{tool}" in src
+        ), f"{tool} no longer exists — drop the exemption"
         assert (
             tool not in _READ_GATED_WRITE_TOOLS
         ), f"{tool} is now gateable — move it into _READ_GATED_WRITE_TOOLS"
@@ -391,7 +408,9 @@ async def test_rail_every_registered_write_tool_is_actually_refused_when_blind(w
         p = _p(ws, key=f"blind-{tool}")
         r = await p.invoke(tool, dict(a))
         assert not r.success, f"{tool} admitted a write to a file it never read"
-        assert r.metadata.get("read_gate"), f"{tool} failed for some OTHER reason: {r.error}"
+        assert r.metadata.get(
+            "read_gate"
+        ), f"{tool} failed for some OTHER reason: {r.error}"
         assert (ws / "a.txt").read_text() == before, f"{tool} mutated the file anyway"
 
 
@@ -399,7 +418,9 @@ def test_rail_the_read_tool_records_what_it_returns():
     """The recorded observation must be the RETURNED text, not the file's bytes —
     otherwise truncation is not honoured and the gate degrades to a call-count check."""
     src = _BUILTIN_TOOLS_SRC.read_text(encoding="utf-8")
-    body = src[src.index("async def _t_read_file") : src.index("def _checkpoint_pre_edit")]
+    body = src[
+        src.index("async def _t_read_file") : src.index("def _checkpoint_pre_edit")
+    ]
     assert "read_gate.record_read(" in body, "read_file must record its observation"
     assert re.search(
         r"observed_text=res\.output", body

@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import sqlite3
 
-from gideon.durability import inventory as inv
-from gideon.durability.cursor import CONSUMED, PAYLOAD_BAD, PREREQ_ABSENT
-from gideon.durability.db_merge import make_db_merger
+from gideon.operations.durability import inventory as inv
+from gideon.operations.durability.cursor import CONSUMED, PAYLOAD_BAD, PREREQ_ABSENT
+from gideon.operations.durability.db_merge import make_db_merger
 
 
 def _sqlite_entry(entry_id="learning_db", path="learning.db"):
@@ -62,13 +62,13 @@ class TestFreshMachine:
         merger = make_db_merger(home)
         verdict = merger(_sqlite_entry(), shard_dir)
         assert verdict == CONSUMED
-        assert _rows(home / "learning.db") == [(1, "a"), (2, "b")]  # lossless copy
+        assert _rows(home / "learning.db") == [(1, "a"), (2, "b")]
 
 
 class TestMergeIntoExisting:
     def test_insert_or_ignore_union(self, tmp_path):
         home = tmp_path / "home"
-        _make_db(home / "learning.db", [(1, "local")])  # live already has row 1
+        _make_db(home / "learning.db", [(1, "local")])
         shard_dir = tmp_path / "shards"
         peer_db = tmp_path / "peer.db"
         _make_db(peer_db, [(1, "remote"), (2, "remote-only")])
@@ -76,16 +76,14 @@ class TestMergeIntoExisting:
 
         assert make_db_merger(home)(_sqlite_entry(), shard_dir) == CONSUMED
         rows = dict(_rows(home / "learning.db"))
-        assert rows[1] == "local"  # local row kept (INSERT OR IGNORE)
-        assert rows[2] == "remote-only"  # remote-only row brought in
+        assert rows[1] == "local"
+        assert rows[2] == "remote-only"
 
 
 class TestMemoryDbNoResurrection:
     def test_memory_db_routes_through_is_deleted_filter(self, tmp_path, monkeypatch):
-        # memory.db must go through _merge_memory (is_deleted=0), NOT the generic path.
         home = tmp_path / "home"
         (home).mkdir()
-        # A pre-existing live memory.db so the merge path (not the fresh-copy path) is taken.
         (home / "memory.db").write_bytes(b"placeholder")
         shard_dir = tmp_path / "shards"
         (shard_dir / "db").mkdir(parents=True)
@@ -99,7 +97,7 @@ class TestMemoryDbNoResurrection:
         def fake_attach(src, dst, label):
             called["attach"] = label
 
-        from gideon import snapshot
+        from gideon.workspace import snapshot
 
         monkeypatch.setattr(snapshot, "_merge_memory", fake_merge_memory)
         monkeypatch.setattr(snapshot, "_merge_sqlite_attach", fake_attach)
@@ -112,7 +110,7 @@ class TestMemoryDbNoResurrection:
             merge=inv.MERGE_SQLITE_ATTACH_IGNORE,
         )
         assert make_db_merger(home)(entry, shard_dir) == CONSUMED
-        assert "memory" in called and "attach" not in called  # routed to _merge_memory
+        assert "memory" in called and "attach" not in called
 
 
 class TestVerdicts:
@@ -127,10 +125,12 @@ class TestVerdicts:
         assert make_db_merger(tmp_path)(entry, tmp_path / "shards") == CONSUMED
 
     def test_missing_db_copy_holds(self, tmp_path):
-        # A sqlite entry with no staged db/ copy → hold, don't advance past unmerged data.
         shard_dir = tmp_path / "shards"
         shard_dir.mkdir()
-        assert make_db_merger(tmp_path / "home")(_sqlite_entry(), shard_dir) == PREREQ_ABSENT
+        assert (
+            make_db_merger(tmp_path / "home")(_sqlite_entry(), shard_dir)
+            == PREREQ_ABSENT
+        )
 
     def test_corrupt_merge_is_payload_bad(self, tmp_path, monkeypatch):
         home = tmp_path / "home"
@@ -140,7 +140,7 @@ class TestVerdicts:
         _make_db(peer_db, [(2, "y")])
         _stage_db_copy(shard_dir, "learning_db", peer_db)
 
-        from gideon import snapshot
+        from gideon.workspace import snapshot
 
         def boom(src, dst, label):
             raise sqlite3.OperationalError("disk I/O error")
@@ -156,19 +156,18 @@ class TestEndToEndThroughPullEngine:
         import tempfile
         from pathlib import Path
 
-        from gideon.durability.cursor import Cursor
-        from gideon.durability.pull_engine import pull_from_peers
-        from gideon.durability.registry import Registry, shard_prefix
-        from gideon.durability.shards import export_shards
-        from gideon.sync_transports.base import (
+        from gideon.integrations.sync_transports.base import (
             ConnectionResult,
             PushResult,
             RemoteRef,
             SyncObject,
             SyncTransportProvider,
         )
+        from gideon.operations.durability.cursor import Cursor
+        from gideon.operations.durability.pull_engine import pull_from_peers
+        from gideon.operations.durability.registry import Registry, shard_prefix
+        from gideon.operations.durability.shards import export_shards
 
-        # A peer home whose memory.db carries a real row.
         peer_home = tmp_path / "peer"
         peer_home.mkdir()
         conn = sqlite3.connect(str(peer_home / "memory.db"))
@@ -192,11 +191,13 @@ class TestEndToEndThroughPullEngine:
             def stage(self, home, peer_id, seq):
                 with tempfile.TemporaryDirectory() as t:
                     out = Path(t)
-                    export_shards(home, out, include_databases=True)  # DB copies staged
+                    export_shards(home, out, include_databases=True)
                     pre = shard_prefix(peer_id, seq)
                     for p in out.rglob("*"):
                         if p.is_file():
-                            self.objects[pre + p.relative_to(out).as_posix()] = p.read_bytes()
+                            self.objects[pre + p.relative_to(out).as_posix()] = (
+                                p.read_bytes()
+                            )
 
             def push(self, o):  # pragma: no cover
                 return PushResult()
@@ -223,8 +224,7 @@ class TestEndToEndThroughPullEngine:
         report = pull_from_peers(
             tr, local, reg, cursor, self_id="me", db_merger=make_db_merger(local)
         )
-        assert report.advanced == 1  # the DB seq consumed, not held
-        # The peer's memory row is now in the local DB (created fresh via wholesale copy).
+        assert report.advanced == 1
         merged = sqlite3.connect(str(local / "memory.db"))
         keys = [r[0] for r in merged.execute("SELECT key FROM semantic_memory")]
         merged.close()

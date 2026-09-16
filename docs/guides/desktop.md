@@ -71,7 +71,7 @@ Picking a different one reloads the dashboard from that gateway. Nothing is shar
 ### Adding one: paste the pairing link
 
 On the gateway you want to reach, open **Settings → Devices → Pair a device**. It gives you a link
-that looks like `http://gideon.local:10000/pair?code=ABCD-2345`. Paste that whole link into the
+that looks like `http://gateway.local:10000/pair?code=ABCD-2345`. Paste that whole link into the
 switcher.
 
 Paste the *link*, not just the code, because the address in it was composed by that gateway rather
@@ -257,75 +257,44 @@ bug in the rule.
 
 ## Platforms
 
-The shell ships for **macOS** and **Linux x86-64**. There is no Windows build — see
-below for exactly why and what would change that.
+The desktop workspace declares macOS and Linux packaging targets. This checkout does
+not designate a hosted release repository or establish that platform installers have
+been built, signed, published, and exercised on their target systems.
 
-### Linux — AppImage and .deb, unsigned
+### Linux
 
-Every release attaches two Linux artifacts, built by CI from the same tree as the
-release tag:
+`apps/desktop/package.json` defines `dist:linux` for AppImage and Debian packages.
+Packaging requires the prepared backend bundle and the platform's build prerequisites.
+Obtain any prebuilt artifacts from the release channel configured by your operator,
+and verify the integrity information supplied through that channel before installing.
 
-- `Gideon-<version>.AppImage` — self-contained: `chmod +x` it and run it.
-- `gideon-desktop_<version>_amd64.deb` — install with
-  `sudo apt install ./gideon-desktop_<version>_amd64.deb`.
+The tray depends on desktop-environment support. Where it is unavailable, the shell
+must remain reachable through its window; inspect the behavior on the intended system
+as part of native qualification.
 
-**Neither artifact is code-signed, and that is deliberate, not a gap.** Linux has no
-OS-level signing gate — nothing analogous to macOS Gatekeeper consumes a signature on
-an AppImage or a .deb — so a signature would change nothing your system checks. What
-you will actually see:
+### macOS
 
-- The AppImage runs after `chmod +x` with **no provenance prompt at all**, which is
-  exactly why *where you downloaded it* is the whole integrity story. Get it from the
-  GitHub Release page only.
-- `apt` will not warn about the .deb either: repository GPG signing applies to
-  packages served *from an apt repository*, and this file installs directly. Same
-  rule — download from the release page.
+The desktop workspace's `dist` command targets a DMG. Distribution signing and
+notarization are deployment requirements to configure for the actual publisher; this
+checkout makes no claim about available signing credentials or a published installer.
 
-(App *bundles* installed inside Gideon are a separate, signed story — see
-[artifact signing](../security/signing.md).)
+### Windows
 
-One Linux-specific behavior worth knowing: the menu-bar presence above depends on
-your desktop environment offering a tray. On one that does not, the shell notices —
-closing the window then quits for real instead of hiding, exactly as described under
-"Closing the window is not quitting", so you can never strand a running app you
-cannot reach.
-
-### macOS — built from a checkout, for now
-
-The dmg is not attached to releases yet: that step waits on Apple Developer
-signing + notarization credentials that do not exist in CI today. Until they do,
-build from a checkout with `make desktop-dist`. A locally-built, unsigned app gets
-macOS's normal Gatekeeper treatment on first launch.
-
-### Windows — deferred (2026-09-05)
-
-There is no Windows shell, and none is planned until **both** of these change:
-
-1. The [native-Windows audit](../research/windows-native-audit.md) ruled the
-   backend port **no-go** (its "Go / no-go" section): a native port would silently
-   weaken file-permission and sandbox guarantees the rest of the system depends on.
-   That doc's demand-evidence criteria are the flip condition.
-2. Windows code-signing secrets exist. None do — and an unsigned Windows executable
-   is SmartScreen-hostile in a way an unsigned AppImage is not: users would see a
-   scary "unrecognized app" interstitial on every install.
-
-The desktop shell follows platform support, never leads it. Windows users have real,
-tested backend paths today: [WSL2 or Docker Desktop](platforms.md#windows-via-wsl2).
+The workspace has no Windows packaging command. Use the Linux runtime instructions
+for [WSL2 or Docker Desktop](platforms.md#windows-via-wsl2), and qualify that environment
+for the functions you intend to use. A source-level platform path is not a completed
+native Windows release.
 
 ## Updating
 
-**Download the new version and install it over the old one** — from the
-[releases page](https://github.com/Gideon/Gideon/releases), the same place you
-got this one. Replace the AppImage, or `sudo apt install ./gideon-desktop_<new>_amd64.deb`
-over the installed package. Your data lives in `~/.gideon` and is untouched by either.
+Use the operator's configured release channel for packaged updates. If you built from
+source, obtain the intended revision from the configured repository and rebuild its
+backend bundle and desktop package. Keep a backup of the active `GIDEON_HOME` before
+changing an installed runtime.
 
-There is **no in-app update yet**, and the app will not offer you one. Settings → Updates
-tells you when a newer release exists and then points here; it deliberately does not show
-the "Update" button that a pip or git install gets, because the shell owns this install:
-the backend inside the app is a frozen bundle with no interpreter to upgrade, and the
-gateway is a child process that cannot restart itself out from under the window you are
-looking at. An auto-updater is planned — until it ships, the panel says what is actually
-true rather than promising an update that never arrives.
+Release discovery requires an actual `GIDEON_RELEASE_REPOSITORY` setting. A packaged
+backend and its shell must be updated together; Python source-install update commands
+are not a substitute for a desktop package update.
 
 ## Related
 

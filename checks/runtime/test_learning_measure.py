@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.learning.measure import (
+from gideon.cognition.learning.measure import (
     ARM_CONFIDENCE,
     ARM_SPREAD_ALERT,
     ARMS,
@@ -49,9 +49,6 @@ def _events(kind, arm, used, unused):
     ] * unused
 
 
-# ── the arm vocabulary must not fork ──
-
-
 def test_the_shipped_arm_table_is_imported_not_restated():
     """THE regression for a divergence I shipped and then measured.
 
@@ -60,17 +57,19 @@ def test_the_shipped_arm_table_is_imported_not_restated():
     `exact_name` at 0.90 where the shipped one says 0.80 — two confidence scales for one arm name,
     which is exactly the drift this program keeps finding. The shipped values win.
     """
-    from gideon.memory_push import ARM_CONFIDENCE as shipped
-    from gideon.memory_push import RECENCY_BONUS as shipped_bonus
+    from gideon.cognition.memory_push import ARM_CONFIDENCE as shipped
+    from gideon.cognition.memory_push import RECENCY_BONUS as shipped_bonus
 
     for arm, confidence in shipped.items():
-        assert ARM_CONFIDENCE[arm] == confidence, f"{arm} diverged from the shipped table"
+        assert (
+            ARM_CONFIDENCE[arm] == confidence
+        ), f"{arm} diverged from the shipped table"
     assert RECENCY_BONUS == shipped_bonus
 
 
 def test_the_retrieval_arms_extend_rather_than_replace():
     """`memory_push` has no notion of embedding/keyword retrieval, so those arms are additive."""
-    from gideon.memory_push import ARM_CONFIDENCE as shipped
+    from gideon.cognition.memory_push import ARM_CONFIDENCE as shipped
 
     assert set(ARM_CONFIDENCE) > set(shipped)
     for arm in ("embedding", "keyword", "path", "exact_title"):
@@ -102,12 +101,11 @@ def test_confidence_is_clamped_to_one():
     assert arm_confidence("alias", recent=True) <= 1.0
 
 
-# ── clause 1: per-arm precision is reportable ──
-
-
 def test_precision_is_reported_per_kind_and_arm():
     """ "A single scalar can't be calibrated per-arm" (§2.5)."""
-    events = _events("skill", "exact_name", 18, 2) + _events("skill", "embedding", 4, 21)
+    events = _events("skill", "exact_name", 18, 2) + _events(
+        "skill", "embedding", 4, 21
+    )
     stats = {(s.kind, s.arm): s for s in per_arm_precision(events)}
     assert stats[("skill", "exact_name")].precision == pytest.approx(0.9)
     assert stats[("skill", "embedding")].precision == pytest.approx(0.16)
@@ -151,12 +149,9 @@ def test_report_rows_are_stably_ordered():
     assert first == second == sorted(first)
 
 
-# ── clause 2: thresholds tunable from data ──
-
-
 def test_current_thresholds_are_read_from_the_live_profile_table():
     """A second copy would let a proposal recommend a move away from a value nobody uses."""
-    from gideon.learning.surfacing import THRESHOLD_PROFILES
+    from gideon.cognition.learning.surfacing import THRESHOLD_PROFILES
 
     proposals = {p.kind: p for p in propose_thresholds([])}
     for kind, value in THRESHOLD_PROFILES.items():
@@ -166,7 +161,7 @@ def test_current_thresholds_are_read_from_the_live_profile_table():
 def test_the_deliberate_055_062_split_is_preserved():
     """The comments in `surfacing.py` record that this split was calibrated for different text
     profiles. A joint recalibration would silently discard a real decision."""
-    from gideon.learning.surfacing import THRESHOLD_PROFILES
+    from gideon.cognition.learning.surfacing import THRESHOLD_PROFILES
 
     assert THRESHOLD_PROFILES["skill"] == 0.55
     assert THRESHOLD_PROFILES["template"] == 0.62
@@ -174,7 +169,6 @@ def test_the_deliberate_055_062_split_is_preserved():
 
 def test_a_noisy_arm_proposes_a_TIGHTER_threshold():
     events = _events("skill", "embedding", 5, 45)
-    # With no stats at all, nothing moves — the baseline this test contrasts against.
     proposal = next(p for p in propose_thresholds([]) if p.kind == "skill")
     assert proposal.proposed == proposal.current
     stats = per_arm_precision(events)
@@ -254,14 +248,11 @@ def test_the_spread_alert_threshold_is_documented():
 
 def test_proposals_are_proposals_and_apply_nothing():
     """§2.5: recalibration happens "empirically, not by taste" — and also not automatically."""
-    from gideon.learning.surfacing import THRESHOLD_PROFILES
+    from gideon.cognition.learning.surfacing import THRESHOLD_PROFILES
 
     before = dict(THRESHOLD_PROFILES)
     propose_thresholds(per_arm_precision(_events("skill", "embedding", 0, 80)))
     assert THRESHOLD_PROFILES == before
-
-
-# ── clause 3: trust posteriors, and a mute that visibly lowers one ──
 
 
 def test_a_new_entity_starts_at_even_odds():
@@ -283,7 +274,9 @@ def test_a_mute_visibly_lowers_the_posterior():
 def test_a_mute_counts_as_a_full_negative_observation():
     """Anything less would make muting a gesture the numbers ignore."""
     assert MUTE_WEIGHT == 1.0
-    muted = posterior_from_counts(kind="skill", entity="x", surfaced=10, used=10, mutes=1)
+    muted = posterior_from_counts(
+        kind="skill", entity="x", surfaced=10, used=10, mutes=1
+    )
     unmuted = posterior_from_counts(kind="skill", entity="x", surfaced=10, used=10)
     assert muted.beta == unmuted.beta + 1.0
 
@@ -304,9 +297,9 @@ def test_a_lucky_single_hit_does_not_outrank_a_proven_entity():
     """
     lucky = posterior_from_counts(kind="skill", entity="lucky", surfaced=1, used=1)
     proven = posterior_from_counts(kind="skill", entity="proven", surfaced=30, used=27)
-    assert lucky.precision_ratio() == 1.0  # the naive view
+    assert lucky.precision_ratio() == 1.0
     assert proven.precision_ratio() < 1.0
-    assert lucky.lower_bound < proven.lower_bound  # the honest one
+    assert lucky.lower_bound < proven.lower_bound
     assert [p.entity for p in rank_by_trust([lucky, proven])] == ["proven", "lucky"]
 
 
@@ -328,19 +321,18 @@ def test_counts_are_clamped_so_bad_data_cannot_produce_a_nonsense_posterior():
     weird = posterior_from_counts(kind="skill", entity="x", surfaced=5, used=99)
     assert weird.beta >= PRIOR_BETA
     assert 0.0 <= weird.lower_bound <= 1.0
-    negative = posterior_from_counts(kind="skill", entity="x", surfaced=-4, used=-2, mutes=-1)
+    negative = posterior_from_counts(
+        kind="skill", entity="x", surfaced=-4, used=-2, mutes=-1
+    )
     assert negative.mean == pytest.approx(0.5)
 
 
 def test_the_posterior_reads_the_counts_usage_already_persists():
     """No migration and no second store: `UsageRecord` already has surfaced/used."""
-    from gideon.learning.usage import UsageRecord
+    from gideon.cognition.learning.usage import UsageRecord
 
     fields = set(UsageRecord.__dataclass_fields__)
     assert {"surfaced", "used"} <= fields
-
-
-# ── the assembled report ──
 
 
 def test_the_report_answers_is_the_flywheel_working():
@@ -359,13 +351,21 @@ def test_the_report_answers_is_the_flywheel_working():
 def test_the_report_serializes_for_an_api():
     report = build_report(_events("skill", "alias", 3, 1))
     payload = report.to_dict()
-    assert set(payload) >= {"overall_precision", "surfaced", "used", "arms", "proposals", "trusted"}
+    assert set(payload) >= {
+        "overall_precision",
+        "surfaced",
+        "used",
+        "arms",
+        "proposals",
+        "trusted",
+    }
 
 
 def test_the_trust_list_is_bounded():
     """The report is a page; every entity ever surfaced is not one."""
     usage = [
-        {"kind": "skill", "entity": f"e{i}", "surfaced": 10, "used": i % 10} for i in range(50)
+        {"kind": "skill", "entity": f"e{i}", "surfaced": 10, "used": i % 10}
+        for i in range(50)
     ]
     assert len(build_report([], usage=usage, top=5).trusted) == 5
 
@@ -376,11 +376,8 @@ def test_an_empty_corpus_reports_zero_rather_than_dividing_by_it():
     assert report.actionable == []
 
 
-# ── arm attribution through the surfacing pipeline ──
-
-
 def test_candidate_carries_an_arm():
-    from gideon.learning.surfacing import Candidate
+    from gideon.cognition.learning.surfacing import Candidate
 
     assert "arm" in Candidate.__dataclass_fields__
     assert Candidate(kind="skill", key="k", score=0.5, l0="x").arm == ""
@@ -393,12 +390,14 @@ def test_arm_attribution_is_order_independent_through_fusion():
     whichever source dict was iterated FIRST — so an entity matched by both exact-name and
     embedding was attributed by insertion order, so the report would credit the wrong path.
     """
-    from gideon.learning.surfacing import Candidate, fuse
+    from gideon.cognition.learning.surfacing import Candidate, fuse
 
     def survivor(order):
         return fuse(
             {
-                name: [Candidate(kind="skill", key="deploy", score=0.8, l0="x", arm=arm)]
+                name: [
+                    Candidate(kind="skill", key="deploy", score=0.8, l0="x", arm=arm)
+                ]
                 for name, arm in order
             }
         )[0].arm
@@ -411,19 +410,23 @@ def test_arm_attribution_is_order_independent_through_fusion():
 def test_the_stronger_arm_wins_a_dedup():
     """Same rule `memory_push` already applies: being named explicitly once is not undone by also
     being a vector neighbour."""
-    from gideon.learning.surfacing import Candidate, fuse
+    from gideon.cognition.learning.surfacing import Candidate, fuse
 
     out = fuse(
         {
-            "weak": [Candidate(kind="skill", key="k", score=0.9, l0="x", arm="embedding")],
-            "strong": [Candidate(kind="skill", key="k", score=0.9, l0="x", arm="alias")],
+            "weak": [
+                Candidate(kind="skill", key="k", score=0.9, l0="x", arm="embedding")
+            ],
+            "strong": [
+                Candidate(kind="skill", key="k", score=0.9, l0="x", arm="alias")
+            ],
         }
     )
     assert out[0].arm == "alias"
 
 
 def test_an_empty_arm_loses_to_a_real_one_in_either_direction():
-    from gideon.learning.surfacing import Candidate, fuse
+    from gideon.cognition.learning.surfacing import Candidate, fuse
 
     for order in (("", "alias"), ("alias", "")):
         out = fuse(
@@ -436,7 +439,7 @@ def test_an_empty_arm_loses_to_a_real_one_in_either_direction():
 
 
 def test_distinct_entities_keep_their_own_arms():
-    from gideon.learning.surfacing import Candidate, fuse
+    from gideon.cognition.learning.surfacing import Candidate, fuse
 
     out = fuse(
         {

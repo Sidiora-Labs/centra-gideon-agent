@@ -12,15 +12,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gideon.dashboard.chat import _expand_prompt_mention, run_chat
-from gideon.dashboard.handlers import (
+from gideon.interfaces.dashboard.chat import _expand_prompt_mention, run_chat
+from gideon.interfaces.dashboard.handlers import (
     _list_provider_prompts,
     api_prompt_detail,
     api_prompts,
 )
-from gideon.guardrails.loop_breaker import LoopBreaker
-
-# ── Shared fixtures ──
+from gideon.security.guardrails.loop_breaker import LoopBreaker
 
 
 @pytest.fixture(autouse=True)
@@ -32,10 +30,8 @@ def _isolate_home(tmp_path, monkeypatch):
     ``Path.home`` isolates provider storage per-test.
     """
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    monkeypatch.setattr("gideon.agent._project_dir", lambda: None)
+    monkeypatch.setattr("gideon.engine.agent._project_dir", lambda: None)
     monkeypatch.delenv("GIDEON_HOME", raising=False)
-    # These tests assert on a user-only prompt store; skip seeding the bundled
-    # default system prompt so discovery/listing assertions stay deterministic.
     monkeypatch.setenv("GIDEON_SKIP_PROMPT_SEED", "1")
 
 
@@ -43,16 +39,19 @@ def _isolate_home(tmp_path, monkeypatch):
 def mock_sel(monkeypatch):
     """Patch sel() in both chat and handlers modules."""
     m = MagicMock()
-    monkeypatch.setattr("gideon.dashboard.chat.sel", lambda: m)
-    monkeypatch.setattr("gideon.dashboard.handlers.sel", lambda: m)
+    monkeypatch.setattr("gideon.interfaces.dashboard.chat.sel", lambda: m)
+    monkeypatch.setattr("gideon.interfaces.dashboard.handlers.sel", lambda: m)
     return m
 
 
-# ── Helpers ──
-
-
 def _provider_prompt(
-    tmp_path, name, content="Do the thing.", *, description="", variables=None, tags=None
+    tmp_path,
+    name,
+    content="Do the thing.",
+    *,
+    description="",
+    variables=None,
+    tags=None,
 ):
     """Write a native-provider YAML prompt under ~/.gideon/prompts/."""
     d = tmp_path / ".gideon" / "prompts"
@@ -86,12 +85,6 @@ class _Session:
         self.agent = "gideon"
         self.model = None
         self._queue = []
-        # `run_chat` reads the session's ACP loop breaker unconditionally
-        # (ACP-AGENT-PARITY §2.3, `G155` — it lives for the SESSION, not the turn), so a
-        # stub standing in for a session has to carry one. Deliberately NOT made optional
-        # in the runner: a `getattr(..., None) or LoopBreaker()` fallback would silently
-        # restore per-turn counting for any session missing the slot, which is the exact
-        # defect that made the circuit rung unreachable.
         self._acp_breaker = LoopBreaker()
 
     def append(self, role, text, cls):
@@ -131,15 +124,14 @@ def _ss():
     return _State(), _Session()
 
 
-# ── Provider discovery (_list_provider_prompts) ──
-
-
 class TestListProviderPrompts:
     def test_empty(self, tmp_path):
         assert _list_provider_prompts() == []
 
     def test_discovers_user_prompt(self, tmp_path):
-        _provider_prompt(tmp_path, "my-prompt", "Do things.", description="A test prompt")
+        _provider_prompt(
+            tmp_path, "my-prompt", "Do things.", description="A test prompt"
+        )
         r = _list_provider_prompts()
         assert len(r) == 1
         assert (r[0]["name"], r[0]["fullName"], r[0]["source"]) == (
@@ -166,9 +158,6 @@ class TestListProviderPrompts:
         r = _list_provider_prompts()
         assert r[0]["tags"] == ["greet"]
         assert r[0]["variables"][0]["name"] == "who"
-
-
-# ── _expand_prompt_mention (provider-backed @prompt expansion) ──
 
 
 class TestExpandPromptMention:
@@ -228,9 +217,6 @@ class TestExpandPromptMention:
         assert status == "too_large"
 
 
-# ── API handlers ──
-
-
 class TestApiPrompts:
     def test_list(self, tmp_path, mock_sel):
         _provider_prompt(tmp_path, "sop", "Content.")
@@ -260,10 +246,9 @@ class TestApiPrompts:
         """``GET /api/prompts/pkg/name`` resolves the bare ``name`` via the provider."""
         _provider_prompt(tmp_path, "d", "Bare content.")
         resp = asyncio.run(api_prompt_detail(_api_request("some-pkg/d")))
-        assert resp.status == 200 and "Bare content." in json.loads(resp.body)["content"]
-
-
-# ── run_chat prompt paths (/prompts) ──
+        assert (
+            resp.status == 200 and "Bare content." in json.loads(resp.body)["content"]
+        )
 
 
 class TestRunChatPrompts:
@@ -290,7 +275,9 @@ class TestRunChatPrompts:
                 return
             await original_run_chat(state, session, msg, **kw)
 
-        monkeypatch.setattr("gideon.dashboard.chat_runner.run_chat", _mock_run_chat)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.chat_runner.run_chat", _mock_run_chat
+        )
         asyncio.run(_mock_run_chat(s, sl, "/prompts get review"))
         assert any("Loaded prompt" in m[1] for m in sl.messages)
         assert "Do review." in captured.get("expanded", "")
@@ -325,5 +312,6 @@ class TestRunChatPrompts:
         s, sl = _ss()
         asyncio.run(run_chat(s, sl, "/prompts get needvar"))
         assert any(
-            "could not be rendered" in m[1] or "blocked" in m[1].lower() for m in sl.messages
+            "could not be rendered" in m[1] or "blocked" in m[1].lower()
+            for m in sl.messages
         )

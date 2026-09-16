@@ -28,9 +28,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from gideon.evals import field_metrics as fm
-from gideon.guardrails import autonomy as au
-from gideon.guardrails import ladder, trust_record
+from gideon.assurance.evals import field_metrics as fm
+from gideon.security.guardrails import autonomy as au
+from gideon.security.guardrails import ladder, trust_record
 
 
 @pytest.fixture(autouse=True)
@@ -39,15 +39,15 @@ def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: home)
     cfg = home / "config.json"
     cfg.write_text("{}", encoding="utf-8")
-    monkeypatch.setattr("gideon.config.loader.config_path", lambda: cfg)
-    from gideon import sel as sel_mod
+    monkeypatch.setattr("gideon.core.config.loader.config_path", lambda: cfg)
+    from gideon.security import sel as sel_mod
 
     sel_mod.SecurityEventLog._instance = None
     sel_mod.SecurityEventLog._initialized = False
-    from gideon import feedback as fb
+    from gideon.cognition import feedback as fb
 
     fb._invalidate()
     yield home
@@ -60,7 +60,9 @@ def _isolated_home(tmp_path, monkeypatch):
 def _no_runs(monkeypatch):
     """No workflow runs unless a test provides them — the store would otherwise read
     whatever database the suite's other tests left behind."""
-    monkeypatch.setattr("gideon.workflows.store.list_runs", lambda **kw: ([], 0))
+    monkeypatch.setattr(
+        "gideon.automation.workflows.store.list_runs", lambda **kw: ([], 0)
+    )
 
 
 KEY = "action.divergent"
@@ -68,7 +70,9 @@ KEY = "action.divergent"
 
 def _register(key: str = KEY, **kw) -> au.ActionTypeSpec:
     spec = au.ActionTypeSpec(
-        key=key, floor=kw.pop("floor", "draft_only"), ceiling=kw.pop("ceiling", "auto_with_undo")
+        key=key,
+        floor=kw.pop("floor", "draft_only"),
+        ceiling=kw.pop("ceiling", "auto_with_undo"),
     )
     au.register_action_type(spec)
     return spec
@@ -77,12 +81,14 @@ def _register(key: str = KEY, **kw) -> au.ActionTypeSpec:
 def _only_registered(monkeypatch):
     """Keep the subject table to the types THIS test registered — the core inventory's
     twenty-one rows are noise here, and `ensure_core_action_types` would re-add them."""
-    monkeypatch.setattr("gideon.guardrails.rungs.ensure_core_action_types", lambda: None)
+    monkeypatch.setattr(
+        "gideon.security.guardrails.rungs.ensure_core_action_types", lambda: None
+    )
 
 
 def _approve(key: str, *, when: datetime, outcome: str = "approved") -> None:
     """One approval verdict through the production SEL writer, clock moved afterwards."""
-    from gideon.sel import sel
+    from gideon.security.sel import sel
 
     log = sel()
     log.log_tool_invocation(
@@ -103,7 +109,7 @@ def _approve(key: str, *, when: datetime, outcome: str = "approved") -> None:
 
 def _thumb(subject: str, verdict: str, *, at: float) -> None:
     """One 👍/👎 through the production feedback writer, clock moved afterwards."""
-    from gideon import feedback as fb
+    from gideon.cognition import feedback as fb
 
     rec = fb.record_feedback(
         target_kind="loop_finding",
@@ -113,7 +119,6 @@ def _thumb(subject: str, verdict: str, *, at: float) -> None:
         producer_id=subject,
     )
     assert rec is not None
-    # record_feedback stamps now(); rewrite the line so the SERIES order is the test's.
     path = fb._path()
     lines = path.read_text(encoding="utf-8").splitlines()
     last = json.loads(lines[-1])
@@ -123,10 +128,12 @@ def _thumb(subject: str, verdict: str, *, at: float) -> None:
     fb._invalidate()
 
 
-def _lab_row(subject: str, *, old, new, verdict: str = "win", ts: float | None = None) -> None:
+def _lab_row(
+    subject: str, *, old, new, verdict: str = "win", ts: float | None = None
+) -> None:
     """One Loop-1 ledger row through the production writer, behind a complete pin."""
-    from gideon.evals import store
-    from gideon.evals.pinning import RunPin
+    from gideon.assurance.evals import store
+    from gideon.assurance.evals.pinning import RunPin
 
     pin = RunPin(
         scenario_id=subject,
@@ -167,17 +174,11 @@ def _run(name: str, run_id: str, started_at: float):
     return r
 
 
-# ── 1. the field trend reads both directions and refuses a thin sample ───────
-
-
 def test_field_trend_needs_a_sample_and_reads_both_directions():
-    assert fm.field_trend([True, False]) == ""  # below the minimum — unmeasured, not flat
+    assert fm.field_trend([True, False]) == ""
     assert fm.field_trend([True, True, True, False, False, False]) == "falling"
     assert fm.field_trend([False, False, False, True, True, True]) == "rising"
     assert fm.field_trend([True, True, False, True, True, False]) == "flat"
-
-
-# ── 2. the per-source signals ─────────────────────────────────────────────────
 
 
 def test_edit_before_approve_comes_from_the_run_journal(monkeypatch):
@@ -194,8 +195,12 @@ def test_edit_before_approve_comes_from_the_run_journal(monkeypatch):
         ],
         "r2": [{"kind": "gate_resolved", "answer": {"auto": True}}],
     }
-    monkeypatch.setattr("gideon.workflows.store.list_runs", lambda **kw: (runs, 3))
-    monkeypatch.setattr("gideon.workflows.journal.ledger", lambda rid: ledgers[rid])
+    monkeypatch.setattr(
+        "gideon.automation.workflows.store.list_runs", lambda **kw: (runs, 3)
+    )
+    monkeypatch.setattr(
+        "gideon.automation.workflows.journal.ledger", lambda rid: ledgers[rid]
+    )
 
     rows = {r.subject: r for r in fm.subject_rows()}
     row = rows["weekly-report"]
@@ -208,7 +213,8 @@ def test_edit_before_approve_comes_from_the_run_journal(monkeypatch):
 
 def test_an_action_types_edit_rate_is_unmeasured_never_zero(monkeypatch):
     """No record anywhere captures an edit on an action type's output (plan 58 defers
-    edit-before-approve records), so the cell is None — 0.0 would claim a measurement."""
+    edit-before-approve records), so the cell is None — 0.0 would claim a measurement.
+    """
     _only_registered(monkeypatch)
     _register()
     row = {r.subject: r for r in fm.subject_rows()}[KEY]
@@ -232,17 +238,22 @@ def test_thumbs_attach_by_producer_id_and_only_to_their_own_subject(monkeypatch)
     assert rows["action.bystander"].field.thumb_rate is None, "no thumbs, no rate"
 
 
-def test_approvals_rejections_and_undos_come_from_the_earned_autonomy_ledger(monkeypatch):
+def test_approvals_rejections_and_undos_come_from_the_earned_autonomy_ledger(
+    monkeypatch,
+):
     _only_registered(monkeypatch)
     _register()
     now = datetime.now(timezone.utc)
     _approve(KEY, when=now - timedelta(days=2))
     _approve(KEY, when=now - timedelta(days=1), outcome="rejected")
     record_id = ladder.record_reversal_handle(
-        action_type=KEY, rung="auto_with_undo", handle="task:native:abc", label="undo me"
+        action_type=KEY,
+        rung="auto_with_undo",
+        handle="task:native:abc",
+        label="undo me",
     )
     assert record_id
-    ladder._mark_reversed(record_id)  # what a successful reverse_action stamps
+    ladder._mark_reversed(record_id)
 
     row = {r.subject: r for r in fm.subject_rows()}[KEY]
     assert row.field.approvals == 1
@@ -257,22 +268,24 @@ def test_an_unreversed_undo_handle_is_not_an_undo(monkeypatch):
     _only_registered(monkeypatch)
     _register()
     assert ladder.record_reversal_handle(
-        action_type=KEY, rung="auto_with_undo", handle="task:native:xyz", label="pending"
+        action_type=KEY,
+        rung="auto_with_undo",
+        handle="task:native:xyz",
+        label="pending",
     )
     row = {r.subject: r for r in fm.subject_rows()}[KEY]
     assert row.field.undos == 0
     assert row.field.approval_rate is None, "nothing decided means no rate"
 
 
-# ── 3. the lab and gate columns ───────────────────────────────────────────────
-
-
 def test_the_lab_cell_is_the_newest_pinned_row_and_absence_is_none(monkeypatch):
     _only_registered(monkeypatch)
     runs = [_run("weekly-report", "r0", 100.0)]
-    monkeypatch.setattr("gideon.workflows.store.list_runs", lambda **kw: (runs, 1))
     monkeypatch.setattr(
-        "gideon.workflows.journal.ledger",
+        "gideon.automation.workflows.store.list_runs", lambda **kw: (runs, 1)
+    )
+    monkeypatch.setattr(
+        "gideon.automation.workflows.journal.ledger",
         lambda rid: [{"kind": "gate_resolved", "answer": {"choice": "ship"}}],
     )
     _lab_row("weekly-report", old=0.6, new=0.4, verdict="loss", ts=1_000.0)
@@ -300,7 +313,7 @@ def test_an_unmeasured_lab_score_is_none_and_can_never_rise(monkeypatch):
 
 
 def test_the_gate_cell_is_the_newest_proposals_report_via_the_shipped_projection():
-    from gideon.learning import proposals
+    from gideon.cognition.learning import proposals
 
     _verdict, prop = proposals.enqueue(
         kind=proposals.Kind.SKILL.value,
@@ -325,13 +338,10 @@ def test_the_gate_cell_is_the_newest_proposals_report_via_the_shipped_projection
     assert got is not None and got["regressed"] is True
     assert proposals.newest_gate_for_target("someone-else") is None
 
-    from gideon.evals import gate
+    from gideon.assurance.evals import gate
 
     cell = fm._gate_view("weekly-report")
     assert cell == gate.summary(report), "one projection — the inbox row's own"
-
-
-# ── 4. the divergence flag needs all three clauses ────────────────────────────
 
 
 def _divergent_template(monkeypatch, *, name: str = "weekly-report") -> None:
@@ -339,9 +349,11 @@ def _divergent_template(monkeypatch, *, name: str = "weekly-report") -> None:
     _only_registered(monkeypatch)
     _lab_row(name, old=0.4, new=0.7, verdict="win", ts=1_000.0)
     runs = [_run(name, "r0", 900.0)]
-    monkeypatch.setattr("gideon.workflows.store.list_runs", lambda **kw: (runs, 1))
     monkeypatch.setattr(
-        "gideon.workflows.journal.ledger",
+        "gideon.automation.workflows.store.list_runs", lambda **kw: (runs, 1)
+    )
+    monkeypatch.setattr(
+        "gideon.automation.workflows.journal.ledger",
         lambda rid: [{"kind": "gate_resolved", "answer": {"choice": "ship"}}],
     )
     _falling_thumbs(name, start=time.time() - 3_600)
@@ -367,7 +379,13 @@ def test_no_clause_alone_flags_a_subject(monkeypatch):
     _falling_thumbs("action.lab_fell", start=now - 3_600)
 
     _register("action.lab_unmeasured")
-    _lab_row("action.lab_unmeasured", old=None, new=None, verdict="judge_unreliable", ts=1_000.0)
+    _lab_row(
+        "action.lab_unmeasured",
+        old=None,
+        new=None,
+        verdict="judge_unreliable",
+        ts=1_000.0,
+    )
     _falling_thumbs("action.lab_unmeasured", start=now - 3_600)
 
     _register("action.field_rising")
@@ -377,7 +395,7 @@ def test_no_clause_alone_flags_a_subject(monkeypatch):
 
     _register("action.field_thin")
     _lab_row("action.field_thin", old=0.4, new=0.7, verdict="win", ts=1_000.0)
-    _thumb("action.field_thin", "down", at=now - 60)  # one 👎 is not a trend
+    _thumb("action.field_thin", "down", at=now - 60)
 
     _register("action.no_lab")
     _falling_thumbs("action.no_lab", start=now - 3_600)
@@ -398,16 +416,13 @@ def test_field_signals_that_predate_the_lab_row_do_not_diverge(monkeypatch):
     lab row says nothing about the change that row measured."""
     _only_registered(monkeypatch)
     _register()
-    _falling_thumbs(KEY, start=time.time() - 7_200)  # thumbs end ~2h ago, in the window
-    _lab_row(KEY, old=0.4, new=0.7, verdict="win")  # lab row is NOW — newer than all of them
+    _falling_thumbs(KEY, start=time.time() - 7_200)
+    _lab_row(KEY, old=0.4, new=0.7, verdict="win")
 
     row = {r.subject: r for r in fm.subject_rows()}[KEY]
     assert row.field.trend == "falling"
     assert row.lab.get("rose") is True
     assert row.lab_field_divergence is False
-
-
-# ── 5. the mechanical §4.2 demotion signal ────────────────────────────────────
 
 
 @pytest.fixture()
@@ -433,11 +448,16 @@ def _divergent_action_type(monkeypatch, key: str = KEY) -> None:
     _falling_thumbs(key, start=time.time() - 3_600)
 
 
-def test_a_divergent_action_type_loses_its_own_grant_mechanically(monkeypatch, evals_on, notices):
+def test_a_divergent_action_type_loses_its_own_grant_mechanically(
+    monkeypatch, evals_on, notices
+):
     _divergent_action_type(monkeypatch)
     _register("action.bystander")
     assert au.grant_rung(KEY, "one_tap", evidence_window="10 clean") == "one_tap"
-    assert au.grant_rung("action.bystander", "one_tap", evidence_window="10 clean") == "one_tap"
+    assert (
+        au.grant_rung("action.bystander", "one_tap", evidence_window="10 clean")
+        == "one_tap"
+    )
 
     filed = fm.sweep_lab_field_divergence()
 
@@ -474,7 +494,9 @@ def test_nothing_granted_means_the_sweep_files_nothing(monkeypatch, evals_on, no
     assert trust_record.load_record(KEY) is None, "no grant, no record, no demotion"
 
 
-def test_a_divergent_template_revokes_standing_grants_wholesale(monkeypatch, evals_on, notices):
+def test_a_divergent_template_revokes_standing_grants_wholesale(
+    monkeypatch, evals_on, notices
+):
     """Template-scoped divergence carries the failed-study consequence: the evidence
     behind EVERY standing grant ('the system behaves well') is what it contradicts."""
     _divergent_template(monkeypatch)
@@ -534,15 +556,19 @@ def test_the_gateway_sweep_is_the_divergence_paths_production_caller():
     """
     import inspect
 
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.background_passes import AutonomySweep, WatchPoll
+    from gideon.engine.gateway import RuntimeCoordinator
 
-    scan = inspect.getsource(GatewayOrchestrator._scan_autonomy_promotions)
+    assert "AutonomySweep" in inspect.getsource(
+        RuntimeCoordinator._scan_autonomy_promotions
+    )
+    scan = inspect.getsource(AutonomySweep)
     assert "sweep_lab_field_divergence" in scan
-    loop = inspect.getsource(GatewayOrchestrator._file_watch_poll_loop)
+    assert "WatchPoll(self, web=False" in inspect.getsource(
+        RuntimeCoordinator._file_watch_poll_loop
+    )
+    loop = inspect.getsource(WatchPoll.cycle)
     assert "_scan_autonomy_promotions" in loop
-
-
-# ── 6. the E3 discipline: computed by query, stored nowhere new ───────────────
 
 
 def test_the_table_is_a_query_and_writes_no_new_file(monkeypatch, _isolated_home):
@@ -551,9 +577,6 @@ def test_the_table_is_a_query_and_writes_no_new_file(monkeypatch, _isolated_home
     fm.subject_rows()
     after = {p for p in _isolated_home.rglob("*") if p.is_file()}
     assert after == before, "Loop 3 is derived — a new file here is a design regression"
-
-
-# ── 7. the HTTP surface (GET /api/evals/field-metrics) ────────────────────────
 
 
 def _req(path="/api/evals/field-metrics"):
@@ -576,7 +599,7 @@ def _body(resp):
 
 
 def test_the_route_is_a_404_with_its_own_code_when_evals_is_off(monkeypatch):
-    from gideon.dashboard.handlers import evals as E
+    from gideon.interfaces.dashboard.handlers import evals as E
 
     monkeypatch.setattr(E, "_enabled", lambda: False)
     resp = _http(E.api_evals_field_metrics(_req()))
@@ -587,7 +610,7 @@ def test_the_route_is_a_404_with_its_own_code_when_evals_is_off(monkeypatch):
 def test_a_read_failure_is_a_500_not_an_empty_table(monkeypatch):
     """An unreadable SEL/journal tree rendered as an empty table would say "no subject
     has any field record", which is the opposite of what happened."""
-    from gideon.dashboard.handlers import evals as E
+    from gideon.interfaces.dashboard.handlers import evals as E
 
     monkeypatch.setattr(E, "_enabled", lambda: True)
 
@@ -603,7 +626,7 @@ def test_a_read_failure_is_a_500_not_an_empty_table(monkeypatch):
 def test_the_rows_are_served_as_computed_with_divergence_intact(monkeypatch):
     """The divergence verdict travels DECIDED; a frontend re-deriving it from the
     visible numbers would eventually disagree with what the sweep demoted on."""
-    from gideon.dashboard.handlers import evals as E
+    from gideon.interfaces.dashboard.handlers import evals as E
 
     monkeypatch.setattr(E, "_enabled", lambda: True)
     _divergent_action_type(monkeypatch)
@@ -615,5 +638,7 @@ def test_the_rows_are_served_as_computed_with_divergence_intact(monkeypatch):
     assert row["lab_field_divergence"] is True
     assert row["lab"]["score"] == 0.7 and row["lab"]["model_fp"]
     assert row["field"]["trend"] == "falling"
-    assert row["field"]["edit_before_approve_rate"] is None, "unmeasured stays None on the wire"
+    assert (
+        row["field"]["edit_before_approve_rate"] is None
+    ), "unmeasured stays None on the wire"
     assert row["gate"] is None, "no gate run is an absence, not a zero"

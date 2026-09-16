@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gideon.dashboard.state import (
-    DashboardState,
+from gideon.interfaces.dashboard.state import (
+    ConsoleState,
     _fmt_duration,
     _load_notifications,
     _maybe_trim_notifications,
@@ -25,27 +25,25 @@ class TestDashboard:
         assert _fmt_duration(0) == "0m 0s"
 
     def test_state_init(self, monkeypatch, tmp_path) -> None:
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        state = DashboardState(
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        state = ConsoleState(
             sessions=MagicMock(count=3),
             start_time=0.0,
         )
         assert state.sessions.count == 3
-        # `messages_received` used to be asserted here as `== 0`. It was initialized to 0 and never
-        # incremented anywhere, so this line pinned the DEFECT: it could only ever pass, and it
-        # made a writerless counter look covered. The attribute is gone; the session count above is
-        # the state field that is actually populated.
         assert not hasattr(state, "messages_received")
 
     def test_state_init_with_channel_delivery(self, monkeypatch, tmp_path) -> None:
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        state = DashboardState(
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        state = ConsoleState(
             sessions=MagicMock(count=0),
             start_time=0.0,
             owner_id="U123",
         )
-        # channel_delivery is the sole outbound-channel handle, set by the transport
-        # at start_inbound; None until a channel connects.
         assert state.channel_delivery is None
         state.channel_delivery = MagicMock()
         assert state.channel_delivery is not None
@@ -55,7 +53,9 @@ class TestDashboard:
 class TestNotificationPersistence:
     def test_persist_and_load(self, monkeypatch, tmp_path) -> None:
         """Notifications are persisted to JSONL and loaded on restart."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         _persist_notification({"kind": "cron", "title": "Job A", "body": "result"})
         _persist_notification({"kind": "subagent", "title": "Sub B", "body": "done"})
 
@@ -66,12 +66,16 @@ class TestNotificationPersistence:
 
     def test_load_empty(self, monkeypatch, tmp_path) -> None:
         """Loading from nonexistent file returns empty list."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         assert _load_notifications() == []
 
     def test_load_corrupted_lines_skipped(self, monkeypatch, tmp_path) -> None:
         """Corrupted JSON lines are skipped during load."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         path = tmp_path / "notifications.jsonl"
         lines = [
             json.dumps({"kind": "cron", "title": "Good", "body": "ok"}),
@@ -87,10 +91,13 @@ class TestNotificationPersistence:
 
     def test_trim_large_file(self, monkeypatch, tmp_path) -> None:
         """File is trimmed when exceeding 2x max notifications."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        monkeypatch.setattr("gideon.dashboard.state._MAX_PERSISTED_NOTIFICATIONS", 5)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state._MAX_PERSISTED_NOTIFICATIONS", 5
+        )
         path = tmp_path / "notifications.jsonl"
-        # Write 11 lines (> 2 * 5)
         lines: list[str] = []
         for i in range(11):
             lines.append(json.dumps({"kind": "cron", "title": f"n{i}", "body": "x"}))
@@ -100,62 +107,63 @@ class TestNotificationPersistence:
 
         remaining = path.read_text(encoding="utf-8").splitlines()
         assert len(remaining) == 5
-        # Should keep the last 5
         assert json.loads(remaining[0])["title"] == "n6"
         assert json.loads(remaining[-1])["title"] == "n10"
 
     def test_notify_persists(self, monkeypatch, tmp_path) -> None:
-        """DashboardState.notify() persists to disk."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        state = DashboardState(
+        """ConsoleState.notify() persists to disk."""
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        state = ConsoleState(
             sessions=MagicMock(count=0),
             start_time=0.0,
         )
         state.notify("cron", "Test Job", "Result text")
 
-        # Check in-memory
         assert len(state._notification_log) == 1
         assert state._notification_log[0]["title"] == "Test Job"
 
-        # Check on disk
         loaded = _load_notifications()
         assert len(loaded) == 1
         assert loaded[0]["title"] == "Test Job"
-        assert "ts" in loaded[0]  # timestamp added
+        assert "ts" in loaded[0]
 
     def test_delete_notifications_for_loop(self, monkeypatch, tmp_path) -> None:
         """Deleting a loop purges its notifications (no dead 'Open goal' links)."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        state = DashboardState(
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        state = ConsoleState(
             sessions=MagicMock(count=0),
             start_time=0.0,
         )
-        state.notify("success", "Goal loop complete", "done", meta={"loop_id": "aaaa1111"})
+        state.notify(
+            "success", "Goal loop complete", "done", meta={"loop_id": "aaaa1111"}
+        )
         state.notify("error", "Goal loop failed", "boom", meta={"loop_id": "bbbb2222"})
         state.notify("info", "Goal loop progress", "p", meta={"loop_id": "aaaa1111"})
-        state.notify("cron", "Unrelated", "x")  # no loop_id → must survive
+        state.notify("cron", "Unrelated", "x")
         removed = state.delete_notifications_for_loop("aaaa1111")
         assert removed == 2
         titles = [n["title"] for n in state._notification_log]
         assert "Goal loop complete" not in titles and "Goal loop progress" not in titles
         assert "Goal loop failed" in titles and "Unrelated" in titles
-        # persisted
         assert len(_load_notifications()) == 2
-        # no-op for empty/unknown
         assert state.delete_notifications_for_loop("") == 0
 
     def test_state_loads_existing_on_init(self, monkeypatch, tmp_path) -> None:
-        """DashboardState.__init__ loads existing notifications from disk."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        # Pre-persist some notifications
+        """ConsoleState.__init__ loads existing notifications from disk."""
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         _persist_notification({"kind": "cron", "title": "Old", "body": "data"})
         _persist_notification({"kind": "cron", "title": "Old2", "body": "data2"})
 
-        state = DashboardState(
+        state = ConsoleState(
             sessions=MagicMock(count=0),
             start_time=0.0,
         )
-        # Should have loaded existing notifications
         assert len(state._notification_log) == 2
         assert state._notification_log[0]["title"] == "Old"
         assert state._notification_log[1]["title"] == "Old2"
@@ -170,19 +178,18 @@ class TestUnreadDerived:
     and dismissing a toast cleared the badge for outstanding work.
     """
 
-    def _state(self, monkeypatch, tmp_path) -> DashboardState:
-        # BOTH config_dir seams: state.py for the notification log, inbox.py for the item
-        # store. Patching only the first let unread_count() read the DEVELOPER'S real inbox
-        # (observed: a count of 39 in a "fresh" test).
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        monkeypatch.setattr("gideon.inbox.config_dir", lambda: tmp_path)
-        return DashboardState(
+    def _state(self, monkeypatch, tmp_path) -> ConsoleState:
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        monkeypatch.setattr("gideon.integrations.inbox.config_dir", lambda: tmp_path)
+        return ConsoleState(
             sessions=MagicMock(count=0),
             start_time=0.0,
         )
 
     def _add_item(self, tmp_path, status: str, item_id: str = "") -> str:
-        from gideon.inbox import InboxItem, InboxStore
+        from gideon.integrations.inbox import InboxItem, InboxStore
 
         store = InboxStore(tmp_path / "inbox.json")
         store.load()
@@ -205,7 +212,7 @@ class TestUnreadDerived:
         assert state.unread_count() == 0
         self._add_item(tmp_path, "pending")
         self._add_item(tmp_path, "pending")
-        state._inbox_store = None  # force a re-read (a live gateway reloads on write)
+        state._inbox_store = None
         assert state.unread_count() == 2
 
     def test_seen_does_not_count(self, monkeypatch, tmp_path) -> None:
@@ -227,7 +234,9 @@ class TestUnreadDerived:
         state._inbox_store = None
         assert state.unread_count() == 0
 
-    def test_notifications_no_longer_drive_the_badge(self, monkeypatch, tmp_path) -> None:
+    def test_notifications_no_longer_drive_the_badge(
+        self, monkeypatch, tmp_path
+    ) -> None:
         """THE demotion, asserted directly: a delivered toast is not unresolved work.
 
         This is the one accepted state break of plan 42 — a user's badge resets once on
@@ -239,7 +248,9 @@ class TestUnreadDerived:
         assert len(state._notification_log) == 2, "the log still records the delivery"
         assert state.unread_count() == 0, "but it does not claim your attention"
 
-    def test_clearing_notifications_does_not_change_the_badge(self, monkeypatch, tmp_path) -> None:
+    def test_clearing_notifications_does_not_change_the_badge(
+        self, monkeypatch, tmp_path
+    ) -> None:
         """Previously, clearing toasts zeroed the badge — hiding outstanding work."""
         state = self._state(monkeypatch, tmp_path)
         self._add_item(tmp_path, "pending")
@@ -251,11 +262,13 @@ class TestUnreadDerived:
 
     def test_survives_restart(self, monkeypatch, tmp_path) -> None:
         """A fresh state object reads the persisted inbox, not an in-memory counter."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        monkeypatch.setattr("gideon.inbox.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        monkeypatch.setattr("gideon.integrations.inbox.config_dir", lambda: tmp_path)
         self._add_item(tmp_path, "pending")
         self._add_item(tmp_path, "handled")
-        state = DashboardState(
+        state = ConsoleState(
             sessions=MagicMock(count=0),
             start_time=0.0,
         )
@@ -264,7 +277,10 @@ class TestUnreadDerived:
     def test_fails_to_zero_rather_than_raising(self, monkeypatch, tmp_path) -> None:
         """A badge is chrome; a broken read must not break the sessions payload."""
         state = self._state(monkeypatch, tmp_path)
-        monkeypatch.setattr("gideon.inbox.InboxStore", MagicMock(side_effect=OSError("gone")))
+        monkeypatch.setattr(
+            "gideon.integrations.inbox.InboxStore",
+            MagicMock(side_effect=OSError("gone")),
+        )
         state._inbox_store = None
         assert state.unread_count() == 0
 
@@ -289,8 +305,10 @@ class TestNotificationRemovalBroadcast:
     def _state_with_ws(self, monkeypatch, tmp_path):
         from unittest.mock import AsyncMock
 
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        state = DashboardState(
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        state = ConsoleState(
             sessions=MagicMock(count=0),
             start_time=0.0,
         )

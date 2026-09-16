@@ -26,9 +26,9 @@ from unittest.mock import patch
 
 import pytest
 
-from gideon.tasks import registry
-from gideon.tasks.models import Task, WorkflowTaskBinding
-from gideon.workflows import loop_run_map, materialize
+from gideon.automation.workflows import loop_run_map, materialize
+from gideon.engine.tasks import registry
+from gideon.engine.tasks.models import Task, WorkflowTaskBinding
 
 
 @contextmanager
@@ -40,24 +40,25 @@ def _isolated_tasks(tmp_path):
     """
     registry._providers.clear()
     with (
-        patch("gideon.tasks.native.config_dir", return_value=tmp_path),
-        patch("gideon.tasks.hierarchy.config_dir", return_value=tmp_path),
+        patch("gideon.engine.tasks.native.config_dir", return_value=tmp_path),
+        patch("gideon.engine.tasks.hierarchy.config_dir", return_value=tmp_path),
     ):
         yield
     registry._providers.clear()
 
 
-def _bound(node_id: str, list_id: str, *, run_id: str = "run-a", managed: bool = True) -> Task:
+def _bound(
+    node_id: str, list_id: str, *, run_id: str = "run-a", managed: bool = True
+) -> Task:
     """An in-memory bound task, for the legs where the RULE (not persistence) is under test."""
     return Task(
         id=f"t-{node_id}-{list_id}-{managed}",
         title=node_id,
         task_list_id=list_id,
-        workflow_binding=WorkflowTaskBinding(run_id=run_id, node_id=node_id, managed=managed),
+        workflow_binding=WorkflowTaskBinding(
+            run_id=run_id, node_id=node_id, managed=managed
+        ),
     )
-
-
-# ── the constructive direction: real bindings project the plural map ─────────────────────────
 
 
 @pytest.mark.asyncio
@@ -81,10 +82,10 @@ async def test_the_plural_mapping_derives_from_persisted_bindings(tmp_path):
             task_list_id="tl-foreign",
             workflow_binding={"run_id": "run-b", "node_id": "design", "managed": True},
         )
-        # A standalone task in a list must not appear either: no binding, no run, no entry.
-        await registry.create_task("native", title="groceries", task_list_id="tl-personal")
+        await registry.create_task(
+            "native", title="groceries", task_list_id="tl-personal"
+        )
 
-        # Fresh provider → the read below reconstructs everything from the persisted JSON.
         registry._providers.clear()
         tasks, _ = await registry.list_all_tasks(limit=50)
 
@@ -92,7 +93,9 @@ async def test_the_plural_mapping_derives_from_persisted_bindings(tmp_path):
             "design": "tl-design",
             "build": "tl-build",
         }
-        assert materialize.task_list_ids_for_run("run-b", tasks) == {"design": "tl-foreign"}
+        assert materialize.task_list_ids_for_run("run-b", tasks) == {
+            "design": "tl-foreign"
+        }
 
 
 @pytest.mark.asyncio
@@ -109,7 +112,6 @@ async def test_the_engines_own_write_shape_projects_nothing_until_filed(tmp_path
         "permitted user move, and this projection's non-empty case just lost its only writer"
     )
     with _isolated_tasks(tmp_path):
-        # The exact field shape the controller writes (measured against _write_projected_task).
         task = await registry.create_task(
             "native",
             title="Implement the parser",
@@ -125,10 +127,14 @@ async def test_the_engines_own_write_shape_projects_nothing_until_filed(tmp_path
         tasks, _ = await registry.list_all_tasks(limit=50)
         assert materialize.task_list_ids_for_run("run-a", tasks) == {}
 
-        await registry.update_task(task.id, provider_name="native", task_list_id="tl-board")
+        await registry.update_task(
+            task.id, provider_name="native", task_list_id="tl-board"
+        )
         registry._providers.clear()
         tasks, _ = await registry.list_all_tasks(limit=50)
-        assert materialize.task_list_ids_for_run("run-a", tasks) == {"implement": "tl-board"}
+        assert materialize.task_list_ids_for_run("run-a", tasks) == {
+            "implement": "tl-board"
+        }
 
 
 def test_a_managed_binding_wins_over_produced_provenance() -> None:
@@ -141,14 +147,14 @@ def test_a_managed_binding_wins_over_produced_provenance() -> None:
     managed_task = _bound("build", "tl-managed", managed=True)
     produced = _bound("build", "tl-produced", managed=False)
     for ordering in ((managed_task, produced), (produced, managed_task)):
-        assert materialize.task_list_ids_for_run("run-a", ordering) == {"build": "tl-managed"}
-    # Within a class, first wins.
+        assert materialize.task_list_ids_for_run("run-a", ordering) == {
+            "build": "tl-managed"
+        }
     first = _bound("build", "tl-first", managed=True)
     second = _bound("build", "tl-second", managed=True)
-    assert materialize.task_list_ids_for_run("run-a", (first, second)) == {"build": "tl-first"}
-
-
-# ── the empty direction: nothing is manufactured ─────────────────────────────────────────────
+    assert materialize.task_list_ids_for_run("run-a", (first, second)) == {
+        "build": "tl-first"
+    }
 
 
 def test_a_run_with_no_bindings_projects_empty() -> None:
@@ -161,9 +167,14 @@ def test_a_run_with_no_bindings_projects_empty() -> None:
     assert materialize.task_list_ids_for_run("run-a", []) == {}
     standalone = Task(id="t1", title="groceries", task_list_id="tl-personal")
     assert materialize.task_list_ids_for_run("run-a", [standalone]) == {}
-    assert materialize.task_list_ids_for_run("run-a", [_bound("n", "tl", run_id="run-b")]) == {}
-    # A bound task not yet filed into any list contributes nothing — absent, not "".
-    assert materialize.task_list_ids_for_run("run-a", [_bound("n", "", run_id="run-a")]) == {}
+    assert (
+        materialize.task_list_ids_for_run("run-a", [_bound("n", "tl", run_id="run-b")])
+        == {}
+    )
+    assert (
+        materialize.task_list_ids_for_run("run-a", [_bound("n", "", run_id="run-a")])
+        == {}
+    )
 
 
 def test_an_empty_run_id_never_harvests_malformed_bindings() -> None:
@@ -173,9 +184,6 @@ def test_an_empty_run_id_never_harvests_malformed_bindings() -> None:
     """
     malformed = _bound("n", "tl-x", run_id="")
     assert materialize.task_list_ids_for_run("", [malformed]) == {}
-
-
-# ── the declaration keeps up with the shipped code ───────────────────────────────────────────
 
 
 def test_the_field_map_row_names_this_projection() -> None:

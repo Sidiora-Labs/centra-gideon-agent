@@ -1,5 +1,5 @@
 """M2: the v2 MemoryProvider contract — record CRUD + vector ops + WAL +
-capabilities, implemented by the native VectorMemoryStore.
+capabilities, implemented by the native SemanticArchive.
 
 These assert the SEAM (the swappable contract), distinct from the rich typed
 methods the service drives. An alternate provider implements exactly these.
@@ -9,14 +9,14 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.memory_providers.base import MemoryProvider
-from gideon.memory_record import MemoryKind, MemoryRecord
-from gideon.vector_memory import VectorMemoryStore
+from gideon.cognition.memory_record import MemoryKind, MemoryRecord
+from gideon.cognition.vector_memory import SemanticArchive
+from gideon.integrations.memory_providers.base import MemoryProvider
 
 
 @pytest.fixture
 def provider(tmp_path):
-    p = VectorMemoryStore(db_path=tmp_path / "m.db", embedding_dim=3)
+    p = SemanticArchive(db_path=tmp_path / "m.db", embedding_dim=3)
     p.init()
     p.embed_fn = lambda t: [1.0, 0.0, 0.0]
     return p
@@ -25,12 +25,12 @@ def provider(tmp_path):
 def test_vectorstore_is_a_memoryprovider(provider):
     assert isinstance(provider, MemoryProvider)
     assert provider.name == "native-vector"
-    assert not type(provider).__abstractmethods__  # concrete
+    assert not type(provider).__abstractmethods__
 
 
 def test_capabilities_contract(provider):
     caps = provider.capabilities()
-    assert caps.vector is True  # embed_fn wired
+    assert caps.vector is True
     assert caps.event_log is True
     assert caps.transactional_batch is True
 
@@ -90,12 +90,20 @@ def test_query_filters_by_kind(provider):
     )
     provider.write_lesson("always run tests", category="process")
     provider.put(
-        [MemoryRecord(id="", kind=MemoryKind.EPISODIC, text="a fragment here", source="t")]
+        [
+            MemoryRecord(
+                id="", kind=MemoryKind.EPISODIC, text="a fragment here", source="t"
+            )
+        ]
     )
 
-    assert all(r.kind == MemoryKind.SEMANTIC for r in provider.query(kinds={"semantic"}))
+    assert all(
+        r.kind == MemoryKind.SEMANTIC for r in provider.query(kinds={"semantic"})
+    )
     assert all(r.kind == MemoryKind.LESSON for r in provider.query(kinds={"lesson"}))
-    assert all(r.kind == MemoryKind.EPISODIC for r in provider.query(kinds={"episodic"}))
+    assert all(
+        r.kind == MemoryKind.EPISODIC for r in provider.query(kinds={"episodic"})
+    )
 
 
 def test_query_scope_defaults_to_global(provider):
@@ -110,8 +118,6 @@ def test_query_scope_defaults_to_global(provider):
             )
         ]
     )
-    # records default to global today (M5+ adds real scope); a global filter finds it,
-    # a session filter finds nothing yet.
     assert provider.query(scope="global")
     assert provider.query(scope="session") == []
 
@@ -133,8 +139,8 @@ def test_vector_query_and_embed(provider):
 
 
 def test_vector_query_empty_without_embedder(tmp_path):
-    p = VectorMemoryStore(db_path=tmp_path / "m2.db", embedding_dim=3)
-    p.init()  # no embed_fn
+    p = SemanticArchive(db_path=tmp_path / "m2.db", embedding_dim=3)
+    p.init()
     assert p.capabilities().vector is False
     assert p.vector_query(text="x") == []
     assert p.embed("x") is None

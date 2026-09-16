@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from harness import worktree_bench as wb
-from gideon.loop import worktree as wt
+from checks.harness import worktree_bench as wb
+from gideon.automation.loop import worktree as wt
 
 pytestmark = pytest.mark.skipif(not wt.git_available(), reason="git not installed")
 
@@ -32,14 +32,18 @@ def _clear_size_cache():
 
 
 def _row(ms: int, outcome: str = wt.OUTCOME_CREATED) -> wb.TimingRow:
-    return wb.TimingRow(outcome=outcome, task="t-x", ms=ms, files=20_000, size_class="large")
+    return wb.TimingRow(
+        outcome=outcome, task="t-x", ms=ms, files=20_000, size_class="large"
+    )
 
 
 class TestLogLineContract:
     """The benchmark's only input is the production log line. That coupling is deliberate."""
 
     def test_parses_the_line_the_module_actually_emits(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path / "gideon")
+        monkeypatch.setattr(
+            "gideon.core.config.loader.config_dir", lambda: tmp_path / "gideon"
+        )
         repo = tmp_path / "repo"
         repo.mkdir()
         subprocess.run(["git", "init", "-q"], cwd=str(repo), check=True)
@@ -63,7 +67,10 @@ class TestLogLineContract:
         good = f"{wt.TIMING_LOG_PREFIX} outcome=created task=t-a ms=42 files=9 size_class=tiny"
         assert wb.parse_timing_line(good) is not None
         assert (
-            wb.parse_timing_line(f"{wt.TIMING_LOG_PREFIX} outcome=created task=t-a ms=42") is None
+            wb.parse_timing_line(
+                f"{wt.TIMING_LOG_PREFIX} outcome=created task=t-a ms=42"
+            )
+            is None
         )
         assert wb.parse_timing_line("some other log line entirely") is None
         assert wb.parse_timing_line("") is None
@@ -173,9 +180,6 @@ class TestBaseline:
         assert base.max_ms == 4000
         assert base.total_ms == 8000
         assert base.spread_ms == 0
-        # The near-zero reuse row would have made the arm straddle the gate (1ms…4000ms) and
-        # returned `unresolved`; the timeout row would have argued for `proceed` on a FAILURE.
-        # Excluding both has to happen before the verdict, not after.
         assert base.gate().verdict == wb.VERDICT_PROCEED
 
     def test_missing_samples_are_named_in_the_verdict(self):
@@ -255,7 +259,6 @@ class TestEndToEnd:
         assert base.repo_files == 40
         assert base.size_class == "tiny"
         assert len(base.created_ms) == 2
-        # Shape, not threshold: a real checkout takes a positive, finite amount of time.
         assert all(ms >= 0 for ms in base.created_ms)
         assert base.total_ms == sum(base.created_ms)
         verdict = base.gate()

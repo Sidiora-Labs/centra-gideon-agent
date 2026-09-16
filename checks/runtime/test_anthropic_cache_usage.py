@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import types
 
-from gideon.llm.anthropic import _read_cache_usage
+from gideon.integrations.llm.anthropic import _read_cache_usage
 
 
 def test_cache_usage_fields_are_read_when_present():

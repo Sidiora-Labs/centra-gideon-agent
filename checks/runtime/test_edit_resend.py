@@ -14,13 +14,15 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 from chat_test_helpers import _make_state
 
-from gideon.dashboard.chat import api_chat_session_edit_resend
+from gideon.interfaces.dashboard.chat import api_chat_session_edit_resend
 
 
 def _make_app(state) -> web.Application:
     app = web.Application()
     app["state"] = state
-    app.router.add_post("/api/chat/sessions/{session}/edit-resend", api_chat_session_edit_resend)
+    app.router.add_post(
+        "/api/chat/sessions/{session}/edit-resend", api_chat_session_edit_resend
+    )
     return app
 
 
@@ -30,38 +32,44 @@ async def _noop_run_chat(state, session, msg, **kwargs):
 
 @pytest.fixture(autouse=True)
 def _mock_run_chat(monkeypatch):
-    # Edit-resend spawns run_chat (real LLM turn); stub it so the test exercises
-    # only the message-location + re-append logic.
-    monkeypatch.setattr("gideon.dashboard.chat_regenerate.run_chat", _noop_run_chat)
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.chat_regenerate.run_chat", _noop_run_chat
+    )
 
 
 class TestEditResend:
     @pytest.mark.asyncio
-    async def test_falls_back_to_last_user_when_no_ts_or_index(self, tmp_path, monkeypatch):
+    async def test_falls_back_to_last_user_when_no_ts_or_index(
+        self, tmp_path, monkeypatch
+    ):
         """The bug: a live user turn has no ts. Edit & resend with neither ts nor a
         valid index must still work — fall back to the last user message."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         session = state.get_or_create_session("s1")
-        session.append("user", "original question", "msg msg-u")  # server-stamped ts
+        session.append("user", "original question", "msg msg-u")
 
         async with TestClient(TestServer(_make_app(state))) as client:
             resp = await client.post(
                 "/api/chat/sessions/s1/edit-resend",
-                json={"content": "edited question"},  # NO ts, NO index — the bug repro
+                json={"content": "edited question"},
             )
             assert resp.status == 200
             assert (await resp.json())["ok"] is True
 
         users = [m for m in session.messages if m["role"] == "user"]
-        assert len(users) == 1  # original truncated, edited re-appended
+        assert len(users) == 1
         assert users[0]["content"] == "edited question"
 
     @pytest.mark.asyncio
     async def test_client_ts_stored_enables_repeat_edit(self, tmp_path, monkeypatch):
         """A client_ts is stored on the re-appended message, so an immediate SECOND
         edit-resend locates it by ts (the live-turn case that used to 400)."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         session = state.get_or_create_session("s1")
         session.append("user", "q1", "msg msg-u")
@@ -72,12 +80,10 @@ class TestEditResend:
                 json={"content": "q2", "client_ts": "2026-06-30T05:00:00+00:00"},
             )
             assert r1.status == 200
-            # the re-appended message carries the client ts verbatim
             assert [m for m in session.messages if m["role"] == "user"][-1][
                 "ts"
             ] == "2026-06-30T05:00:00+00:00"
 
-            # a SECOND edit, now locating by that ts, succeeds (the original bug)
             r2 = await client.post(
                 "/api/chat/sessions/s1/edit-resend",
                 json={
@@ -95,7 +101,9 @@ class TestEditResend:
     async def test_stale_ts_falls_through_to_last_user(self, tmp_path, monkeypatch):
         """A ts that matches nothing degrades gracefully to the last user message
         rather than 400 'user message not found for ts'."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         session = state.get_or_create_session("s1")
         session.append("user", "q1", "msg msg-u")
@@ -103,27 +111,40 @@ class TestEditResend:
         async with TestClient(TestServer(_make_app(state))) as client:
             resp = await client.post(
                 "/api/chat/sessions/s1/edit-resend",
-                json={"content": "q2", "ts": "1999-01-01T00:00:00+00:00"},  # stale/no-match
+                json={
+                    "content": "q2",
+                    "ts": "1999-01-01T00:00:00+00:00",
+                },
             )
             assert resp.status == 200
-        assert [m for m in session.messages if m["role"] == "user"][-1]["content"] == "q2"
+        assert [m for m in session.messages if m["role"] == "user"][-1][
+            "content"
+        ] == "q2"
 
     @pytest.mark.asyncio
     async def test_empty_content_rejected(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         session = state.get_or_create_session("s1")
         session.append("user", "q1", "msg msg-u")
         async with TestClient(TestServer(_make_app(state))) as client:
-            resp = await client.post("/api/chat/sessions/s1/edit-resend", json={"content": "   "})
+            resp = await client.post(
+                "/api/chat/sessions/s1/edit-resend", json={"content": "   "}
+            )
             assert resp.status == 400
 
     @pytest.mark.asyncio
     async def test_no_user_message_to_edit(self, tmp_path, monkeypatch):
         """A session with no user message yet → clean 400, not a crash."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         state.get_or_create_session("s1")
         async with TestClient(TestServer(_make_app(state))) as client:
-            resp = await client.post("/api/chat/sessions/s1/edit-resend", json={"content": "x"})
+            resp = await client.post(
+                "/api/chat/sessions/s1/edit-resend", json={"content": "x"}
+            )
             assert resp.status == 400

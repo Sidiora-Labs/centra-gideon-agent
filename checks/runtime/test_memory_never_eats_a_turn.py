@@ -29,17 +29,14 @@ def home(tmp_path, monkeypatch):
 
 
 def _builder(monkeypatch, svc):
-    """A ContextBuilder whose memory service is `svc`."""
-    import gideon.context as ctx
-    import gideon.memory_service as memsvc
+    """A PromptAssembler whose memory service is `svc`."""
+    import gideon.cognition.context as ctx
+    import gideon.cognition.memory_service as memsvc
 
-    # `build_message` imports `service_for` INSIDE the function, so the module that owns it is
-    # the only patchable seam — patching `context.service_for` binds nothing and the test would
-    # have exercised the real service while looking like it injected a fake.
     monkeypatch.setattr(memsvc, "service_for", lambda _m: svc, raising=False)
-    from gideon.memory import MemoryStore
+    from gideon.cognition.memory import MemoryJournal
 
-    return ctx.ContextBuilder(MemoryStore()), ctx
+    return ctx.PromptAssembler(MemoryJournal()), ctx
 
 
 class _Svc:
@@ -81,14 +78,16 @@ def test_a_raising_memory_read_still_produces_a_prompt(home, monkeypatch):
 
     assert isinstance(out, str) and out.strip(), "a broken memory read killed the turn"
     assert svc.calls == ["get_context"], "the primary read was never attempted"
-    assert "RECALLED-MEMORY-MARKER" not in out, "recall content appeared despite the failure"
+    assert (
+        "RECALLED-MEMORY-MARKER" not in out
+    ), "recall content appeared despite the failure"
 
 
 def test_a_hanging_memory_read_is_bounded_rather_than_waited_on(home, monkeypatch):
     """The timeout half. Without it the turn waits on the vector index forever."""
     import time
 
-    import gideon.context as ctx
+    import gideon.cognition.context as ctx
 
     monkeypatch.setattr(ctx, "_memory_block_timeout_secs", lambda: 0.2)
     svc = _Svc(mode="hang")
@@ -123,7 +122,7 @@ def test_the_failure_is_logged_at_warning_not_swallowed(home, monkeypatch, caplo
     svc = _Svc(mode="raise")
     builder, _ = _builder(monkeypatch, svc)
 
-    with caplog.at_level(logging.WARNING, logger="gideon.context"):
+    with caplog.at_level(logging.WARNING, logger="gideon.cognition.context"):
         builder.build_session_context(session_key="s1")
 
     assert any(
@@ -133,7 +132,7 @@ def test_the_failure_is_logged_at_warning_not_swallowed(home, monkeypatch, caplo
 
 def test_the_timeout_reuses_the_active_recall_knob(home, monkeypatch):
     """One budget, one name: the config field the active-recall path already owns."""
-    import gideon.context as ctx
+    import gideon.cognition.context as ctx
 
     class _Mem:
         active_recall_timeout_ms = 250
@@ -142,20 +141,22 @@ def test_the_timeout_reuses_the_active_recall_knob(home, monkeypatch):
         memory = _Mem()
 
     monkeypatch.setattr(
-        "gideon.config.loader.AppConfig.load", staticmethod(lambda: _Cfg()), raising=False
+        "gideon.core.config.loader.AppConfig.load",
+        staticmethod(lambda: _Cfg()),
+        raising=False,
     )
     assert ctx._memory_block_timeout_secs() == pytest.approx(0.25)
 
 
 def test_an_unreadable_config_does_not_decide_whether_the_turn_runs(home, monkeypatch):
     """The budget read is itself best-effort; it must never be the thing that raises."""
-    import gideon.context as ctx
+    import gideon.cognition.context as ctx
 
     def boom():
         raise RuntimeError("config.json is mid-rewrite")
 
     monkeypatch.setattr(
-        "gideon.config.loader.AppConfig.load", staticmethod(boom), raising=False
+        "gideon.core.config.loader.AppConfig.load", staticmethod(boom), raising=False
     )
     assert ctx._memory_block_timeout_secs() == pytest.approx(1.5)
 
@@ -173,7 +174,7 @@ def test_the_SHIPPED_recall_timeout_actually_bounds_the_caller(monkeypatch, tmp_
     """
     import time
 
-    import gideon.context_engine as ce
+    import gideon.cognition.context_engine as ce
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
 
@@ -185,15 +186,16 @@ def test_the_SHIPPED_recall_timeout_actually_bounds_the_caller(monkeypatch, tmp_
         memory = _Mem()
 
     monkeypatch.setattr(
-        "gideon.config.loader.AppConfig.load", staticmethod(lambda: _Cfg()), raising=False
+        "gideon.core.config.loader.AppConfig.load",
+        staticmethod(lambda: _Cfg()),
+        raising=False,
     )
 
     def slow_recall(*_a, **_kw):
         time.sleep(5)
         return "late"
 
-    # The worker's FIRST read, imported inside `_recall` — so the owning module is the seam.
-    import gideon.memory_service as memsvc
+    import gideon.cognition.memory_service as memsvc
 
     class _Svc:
         def active_recall(self, *_a, **_kw):
@@ -208,4 +210,6 @@ def test_the_SHIPPED_recall_timeout_actually_bounds_the_caller(monkeypatch, tmp_
     started = time.monotonic()
     ce.active_recall_block(_Builder(), "anything", cwd=str(tmp_path), memory_store=None)
     elapsed = time.monotonic() - started
-    assert elapsed < 3, f"the shipped recall timeout did not bound the caller ({elapsed:.2f}s)"
+    assert (
+        elapsed < 3
+    ), f"the shipped recall timeout did not bound the caller ({elapsed:.2f}s)"

@@ -6,7 +6,7 @@ them changes whether an item exists at the end, so every test here asserts on an
 CALL (how many model calls happened, what config reached the persist step, what was recorded)
 rather than on the store's final contents.
 
-⚠️  `gideon.knowledge.research_reports` is a sibling change that has not landed. The
+⚠️  `gideon.cognition.knowledge.research_reports` is a sibling change that has not landed. The
 runner reaches it through the single `_reports_module()` seam, and this suite substitutes
 `FakeReports` there — a hand-written stand-in for the frozen contract (`FINDING_KIND`,
 `CITE_SOURCE_ONLY`, `ALLOW_CITING_CONTEXT`, `Scope`, `ReportDefinition`, `get_report`,
@@ -31,9 +31,9 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from gideon.action_providers import knowledge_report_provider as krp
-from gideon.action_providers.base import ActionContext, ActionResult
-from gideon.action_providers.knowledge_persist_provider import (
+from gideon.integrations.action_providers import knowledge_report_provider as krp
+from gideon.integrations.action_providers.base import ActionContext, ActionResult
+from gideon.integrations.action_providers.knowledge_persist_provider import (
     KnowledgePersistActionProvider,
     _open_store,
 )
@@ -41,9 +41,6 @@ from gideon.action_providers.knowledge_persist_provider import (
 FINDING_KIND = "research-finding"
 CITE_SOURCE_ONLY = "cite-source-only"
 ALLOW_CITING_CONTEXT = "allow-citing-context"
-
-
-# ── the sibling module's contract, faked ──
 
 
 @dataclass
@@ -80,7 +77,7 @@ class RunRecord:
 
 
 class FakeReports:
-    """Stand-in for `gideon.knowledge.research_reports` (see the module docstring)."""
+    """Stand-in for `gideon.cognition.knowledge.research_reports` (see the module docstring)."""
 
     FINDING_KIND = FINDING_KIND
     CITE_SOURCE_ONLY = CITE_SOURCE_ONLY
@@ -99,10 +96,6 @@ class FakeReports:
     def get_report(self, report_id: str) -> ReportDefinition | None:
         return self.reports.get(report_id)
 
-    #: The dueness answer this double hands back. Default DUE, so every test in this file keeps
-    #: exercising the run path it was written for — the pre-flight is a gate on WHEN the runner
-    #: is invoked, and this file is about what the run then does. The gate itself is driven in
-    #: `test_research_report_scheduling.py`, against the real module.
     due: tuple[bool, str] = (True, "due")
 
     def is_due(self, defn: ReportDefinition, *, now: float) -> tuple[bool, str]:
@@ -119,13 +112,12 @@ class FakeReports:
         self.runs.append(RunRecord(report_id, ok, error, watermark_ts))
 
 
-# ── stubs for the two expensive seams ──
-
-
 class ModelStub:
     """Counts calls. The count IS the assertion for the cap and the empty-scope rule."""
 
-    def __init__(self, reply: str = "a finding [1]", always_continue: bool = False) -> None:
+    def __init__(
+        self, reply: str = "a finding [1]", always_continue: bool = False
+    ) -> None:
         self.reply = reply
         self.always_continue = always_continue
         self.prompts: list[str] = []
@@ -165,14 +157,11 @@ class PersistStub:
         )
 
 
-# ── fixtures ──
-
-
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     """An isolated home. Never the developer's own — this runner WRITES."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     return tmp_path
 
 
@@ -207,14 +196,13 @@ def persist(monkeypatch):
     return stub
 
 
-# ── helpers ──
-
-
 def run(coro):
     return asyncio.run(coro)
 
 
-def seed(ctx, *, title: str, tags, content: str = "some body text", kind: str = "fact") -> str:
+def seed(
+    ctx, *, title: str, tags, content: str = "some body text", kind: str = "fact"
+) -> str:
     """Write a real knowledge item through the real persist provider."""
     result = run(
         KnowledgePersistActionProvider().execute(
@@ -265,9 +253,6 @@ def defn_for(reports, **kw) -> ReportDefinition:
     return reports.add(ReportDefinition(**base))
 
 
-# ── bullet 1: the watermark is taken at scope-resolution time ──
-
-
 def test_the_watermark_is_taken_at_scope_resolution_not_completion(
     home, reports, provider, ctx, model, persist
 ):
@@ -278,7 +263,7 @@ def test_the_watermark_is_taken_at_scope_resolution_not_completion(
     """
     seed(ctx, title="Latency regressed", tags=["perf"])
     defn_for(reports)
-    model.sleep = 0.15  # the model "writes" for 150ms — the window a late stamp would swallow
+    model.sleep = 0.15
 
     before = time.time()
     result = run(provider.execute({"report_id": "rep-1"}, ctx))
@@ -289,19 +274,16 @@ def test_the_watermark_is_taken_at_scope_resolution_not_completion(
     assert record.ok is True
     assert record.watermark_ts is not None
     assert record.watermark_ts >= before
-    # The stamp predates the persist call by roughly the model's writing time. A completion-time
-    # stamp would be LATER than `persist.at`, not 0.1s earlier.
     assert persist.at - record.watermark_ts > 0.1, (persist.at, record.watermark_ts)
 
 
-def test_the_reported_watermark_is_the_recorded_one(home, reports, provider, ctx, model, persist):
+def test_the_reported_watermark_is_the_recorded_one(
+    home, reports, provider, ctx, model, persist
+):
     seed(ctx, title="Latency regressed", tags=["perf"])
     defn_for(reports)
     result = run(provider.execute({"report_id": "rep-1"}, ctx))
     assert body(result)["watermark_ts"] == reports.runs[-1].watermark_ts
-
-
-# ── bullet 2: the source scope ──
 
 
 def test_the_scope_spans_the_tag_subtree(home, reports, provider, ctx, model, persist):
@@ -320,7 +302,9 @@ def test_the_scope_spans_the_tag_subtree(home, reports, provider, ctx, model, pe
     assert child_id in body(dry)["source_items"]
 
 
-def test_an_untagged_sibling_tag_is_out_of_scope(home, reports, provider, ctx, model, persist):
+def test_an_untagged_sibling_tag_is_out_of_scope(
+    home, reports, provider, ctx, model, persist
+):
     seed(ctx, title="In scope", tags=["perf"])
     seed(ctx, title="Elsewhere", tags=["cooking"])
     defn_for(reports)
@@ -351,7 +335,9 @@ def test_a_window_overrides_the_watermark(home, reports, provider, ctx, model, p
     assert body(result)["source_items"] == 1
 
 
-def test_a_report_never_reads_its_own_findings(home, reports, provider, ctx, model, persist):
+def test_a_report_never_reads_its_own_findings(
+    home, reports, provider, ctx, model, persist
+):
     """The infinite regress: a finding is a knowledge item newer than the watermark, so without
     the kind exclusion run two summarizes run one's summary, forever."""
     finding = seed(ctx, title="Last week's finding", tags=["perf"], kind="report")
@@ -364,10 +350,9 @@ def test_a_report_never_reads_its_own_findings(home, reports, provider, ctx, mod
     assert model.calls == 0, "the report fed on its own output"
 
 
-# ── bullet 3: an empty scope is a terminal success ──
-
-
-def test_an_empty_scope_never_calls_the_model(home, reports, provider, ctx, model, persist):
+def test_an_empty_scope_never_calls_the_model(
+    home, reports, provider, ctx, model, persist
+):
     defn_for(reports)
     result = run(provider.execute({"report_id": "rep-1"}, ctx))
 
@@ -378,7 +363,9 @@ def test_an_empty_scope_never_calls_the_model(home, reports, provider, ctx, mode
     assert "nothing new" in note
 
 
-def test_an_empty_scope_still_advances_the_watermark(home, reports, provider, ctx, model, persist):
+def test_an_empty_scope_still_advances_the_watermark(
+    home, reports, provider, ctx, model, persist
+):
     defn_for(reports)
     before = time.time()
     run(provider.execute({"report_id": "rep-1"}, ctx))
@@ -386,9 +373,6 @@ def test_an_empty_scope_still_advances_the_watermark(home, reports, provider, ct
     record = reports.runs[-1]
     assert record.ok is True
     assert record.watermark_ts is not None and record.watermark_ts >= before
-
-
-# ── bullet 4: the loop is bounded by iteration_cap ──
 
 
 @pytest.mark.parametrize("cap", [1, 2, 5])
@@ -408,7 +392,9 @@ def test_the_loop_stops_at_the_iteration_cap(
     assert body(result)["model_calls"] == cap
 
 
-def test_a_nonsense_cap_still_makes_one_call(home, reports, provider, ctx, persist, monkeypatch):
+def test_a_nonsense_cap_still_makes_one_call(
+    home, reports, provider, ctx, persist, monkeypatch
+):
     stub = ModelStub(always_continue=True)
     monkeypatch.setattr(krp, "_one_shot", stub)
     seed(ctx, title="Latency regressed", tags=["perf"])
@@ -450,9 +436,6 @@ def test_the_prompt_forbids_inventing_a_citation_marker(
     prompt = model.prompts[0]
     assert "Do NOT invent a citation marker" in prompt
     assert "[1]" in prompt
-
-
-# ── bullet 5: the citation policy decides which refs are registered ──
 
 
 def _context_report(reports, policy: str) -> ReportDefinition:
@@ -500,8 +483,9 @@ def test_a_context_marker_resolves_only_under_allow_citing_context(
     home, reports, provider, ctx, persist, monkeypatch, policy, resolves
 ):
     """The policy has to BITE, not merely be recorded: run the registered refs through the real
-    citation resolver and check whether `[2]` — the context-only item — is attributable."""
-    from gideon.knowledge import citations
+    citation resolver and check whether `[2]` — the context-only item — is attributable.
+    """
+    from gideon.cognition.knowledge import citations
 
     seed(ctx, title="Latency regressed", tags=["perf"])
     context_id = seed(ctx, title="Service topology", tags=["arch"])
@@ -523,15 +507,12 @@ def test_a_context_marker_resolves_only_under_allow_citing_context(
     cited_ids = [c.item_id for c in resolution.citations]
     assert (context_id in cited_ids) is resolves
     if not resolves:
-        # Not merely unregistered: the marker resolves to nothing, so the write drops it rather
-        # than storing a dangling promise of provenance.
         assert "[2]" not in resolution.text
 
 
-# ── bullet 6: one finding per run, on the one write path ──
-
-
-def test_the_finding_is_written_with_the_finding_kind(home, reports, provider, ctx, model, persist):
+def test_the_finding_is_written_with_the_finding_kind(
+    home, reports, provider, ctx, model, persist
+):
     seed(ctx, title="Latency regressed", tags=["perf"])
     defn_for(reports)
     run(provider.execute({"report_id": "rep-1"}, ctx))
@@ -545,7 +526,9 @@ def test_the_finding_is_written_with_the_finding_kind(home, reports, provider, c
     assert cfg["tags"] == ["perf"]
 
 
-def test_the_write_goes_through_the_persist_provider(home, reports, provider, ctx, model):
+def test_the_write_goes_through_the_persist_provider(
+    home, reports, provider, ctx, model
+):
     """The seam itself, unstubbed: `_persist` must dispatch `knowledge-persist`, not the store.
 
     Asserted against the provider CLASS rather than the stored row because `research-finding`
@@ -568,9 +551,6 @@ def test_the_write_goes_through_the_persist_provider(home, reports, provider, ct
     assert len(seen) == 1 and seen[0]["kind"] == FINDING_KIND
 
 
-# ── bullet 7: failure records the error without advancing the run stamp ──
-
-
 def test_a_refused_persist_records_a_failed_run_and_no_stamp(
     home, reports, provider, ctx, model, monkeypatch
 ):
@@ -588,7 +568,9 @@ def test_a_refused_persist_records_a_failed_run_and_no_stamp(
     assert record.watermark_ts is None, "a failed run advanced the watermark"
 
 
-def test_an_exception_records_a_failed_run(home, reports, provider, ctx, monkeypatch, persist):
+def test_an_exception_records_a_failed_run(
+    home, reports, provider, ctx, monkeypatch, persist
+):
     async def boom(prompt):
         raise RuntimeError("provider chain exhausted")
 
@@ -604,7 +586,9 @@ def test_an_exception_records_a_failed_run(home, reports, provider, ctx, monkeyp
     assert persist.calls == 0
 
 
-def test_an_empty_finding_is_a_failed_run(home, reports, provider, ctx, monkeypatch, persist):
+def test_an_empty_finding_is_a_failed_run(
+    home, reports, provider, ctx, monkeypatch, persist
+):
     monkeypatch.setattr(krp, "_one_shot", ModelStub(reply="   "))
     seed(ctx, title="Latency regressed", tags=["perf"])
     defn_for(reports)
@@ -616,7 +600,9 @@ def test_an_empty_finding_is_a_failed_run(home, reports, provider, ctx, monkeypa
     assert persist.calls == 0
 
 
-def test_an_unreadable_store_records_a_failed_run(home, reports, provider, ctx, monkeypatch):
+def test_an_unreadable_store_records_a_failed_run(
+    home, reports, provider, ctx, monkeypatch
+):
     def boom():
         raise OSError("database is locked")
 
@@ -627,9 +613,6 @@ def test_an_unreadable_store_records_a_failed_run(home, reports, provider, ctx, 
     assert reports.runs[-1].ok is False and reports.runs[-1].watermark_ts is None
 
 
-# ── config surface & registration ──
-
-
 def test_a_missing_report_id_is_an_error(home, reports, provider, ctx, model, persist):
     result = run(provider.execute({}, ctx))
     assert result.success is False
@@ -637,7 +620,9 @@ def test_a_missing_report_id_is_an_error(home, reports, provider, ctx, model, pe
     assert reports.runs == []
 
 
-def test_an_unknown_report_records_nothing(home, reports, provider, ctx, model, persist):
+def test_an_unknown_report_records_nothing(
+    home, reports, provider, ctx, model, persist
+):
     result = run(provider.execute({"report_id": "nope"}, ctx))
     assert result.success is False
     assert "nope" in result.error
@@ -653,7 +638,9 @@ def test_a_disabled_report_does_nothing(home, reports, provider, ctx, model, per
     assert model.calls == 0 and persist.calls == 0 and reports.runs == []
 
 
-def test_a_dry_run_spends_nothing_and_stamps_nothing(home, reports, provider, ctx, model, persist):
+def test_a_dry_run_spends_nothing_and_stamps_nothing(
+    home, reports, provider, ctx, model, persist
+):
     seed(ctx, title="Latency regressed", tags=["perf"])
     defn_for(reports)
     result = run(provider.execute({"report_id": "rep-1", "dry_run": True}, ctx))
@@ -668,8 +655,9 @@ def test_a_dry_run_spends_nothing_and_stamps_nothing(home, reports, provider, ct
 def test_the_provider_is_registered_and_declares_itself(home):
     """`home` is not decoration: registering the defaults constructs every provider, and some
     constructor resolves a store — without the isolated home this test writes to the real one
-    (measured: `memory.db-wal` appeared under `~/.gideon` and the real-home rail red)."""
-    from gideon.action_providers.registry import (
+    (measured: `memory.db-wal` appeared under `~/.gideon` and the real-home rail red).
+    """
+    from gideon.integrations.action_providers.registry import (
         _ensure_default_providers_registered,
         get_action_provider,
     )

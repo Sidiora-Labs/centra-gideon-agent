@@ -21,14 +21,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from gideon.action_providers.base import ActionContext
-from gideon.action_providers.browse_provider import BrowseActionProvider
-from gideon.browse import killswitch
-from gideon.browse import mirror as bmirror
-from gideon.browse.loop import PARK_KILLED, run_browse_loop
-from gideon.dashboard.handlers import browse_mirror as bm
+from gideon.integrations.action_providers.base import ActionContext
+from gideon.integrations.action_providers.browse_provider import BrowseActionProvider
+from gideon.integrations.browse import killswitch
+from gideon.integrations.browse import mirror as bmirror
+from gideon.integrations.browse.loop import PARK_KILLED, run_browse_loop
+from gideon.interfaces.dashboard.handlers import browse_mirror as bm
 
-# A distinctive credential literal so a sweep that finds it has found THAT value, not a substring.
 OAUTH_CODE = "AUTHZ-mirror-CODEVALUE"
 PLAIN_URL = "https://shop.test/catalog"
 CALLBACK_URL = f"https://shop.test/callback?code={OAUTH_CODE}&country=US"
@@ -41,16 +40,14 @@ def _run(coro):
 @pytest.fixture(autouse=True)
 def _isolated_home(tmp_path, monkeypatch):
     """`GIDEON_HOME` isolates the kill flag file, the profiles, and the inbox under a tmp
-    home; the mirror reset drops the in-process kill mirror so one test's engage never leaks."""
+    home; the mirror reset drops the in-process kill mirror so one test's engage never leaks.
+    """
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
     killswitch.reset_browse_kill_mirror()
     yield home
     killswitch.reset_browse_kill_mirror()
-
-
-# ── harness ─────────────────────────────────────────────────────────────────
 
 
 class _FakePage:
@@ -99,7 +96,8 @@ class _Decide:
 
 class _FakeState:
     """Records WS frames and notifications. No `_inbox_svc`, so `emit_attention_item` falls back to
-    a fresh on-disk InboxStore under the isolated home — which the tests then read back."""
+    a fresh on-disk InboxStore under the isolated home — which the tests then read back.
+    """
 
     def __init__(self) -> None:
         self.ws: list[tuple[str, dict]] = []
@@ -108,11 +106,15 @@ class _FakeState:
     def broadcast_ws(self, msg_type: str, data: dict) -> None:
         self.ws.append((msg_type, data))
 
-    def notify(self, kind: str, title: str, body: str, *, meta: dict | None = None) -> None:
+    def notify(
+        self, kind: str, title: str, body: str, *, meta: dict | None = None
+    ) -> None:
         self.notes.append((kind, title, body))
 
 
-def _loop(page: _FakePage, decide: _Decide, *, on_step=None, kill_check=None, start=PLAIN_URL):
+def _loop(
+    page: _FakePage, decide: _Decide, *, on_step=None, kill_check=None, start=PLAIN_URL
+):
     return _run(
         run_browse_loop(
             goal="read the page",
@@ -127,11 +129,6 @@ def _loop(page: _FakePage, decide: _Decide, *, on_step=None, kill_check=None, st
     )
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# The live mirror relay
-# ══════════════════════════════════════════════════════════════════════════════
-
-
 class TestTheStepRelay:
     def test_every_step_is_relayed_with_url_action_and_screenshot(self):
         """The loop calls `on_step` once per completed step with the screenshot PATH, the screened
@@ -139,7 +136,7 @@ class TestTheStepRelay:
         page = _FakePage(
             {PLAIN_URL: "<html><body><h1>Catalog</h1></body></html>"},
             url=PLAIN_URL,
-            shot="/tmp/pc-shot-1.png",
+            shot="/tmp/gideon-shot-1.png",
         )
         seen: list[tuple] = []
         result = _loop(
@@ -149,24 +146,31 @@ class TestTheStepRelay:
         )
         assert result.ok
         assert seen, "the mirror sink was never called"
-        assert [s[0] for s in seen] == list(range(1, len(seen) + 1)), "step indices are dense"
-        assert all(s[3] == "/tmp/pc-shot-1.png" for s in seen), "screenshot path not relayed"
+        assert [s[0] for s in seen] == list(
+            range(1, len(seen) + 1)
+        ), "step indices are dense"
+        assert all(
+            s[3] == "/tmp/gideon-shot-1.png" for s in seen
+        ), "screenshot path not relayed"
         assert seen[-1][2] == "DONE", "the last action reaches the mirror"
 
     def test_a_run_with_no_sink_still_runs(self):
         """CONTROL: `on_step=None` is the pre-BA-5 behaviour, so the relay is additive — the loop
         completes identically whether or not anyone is watching."""
-        page = _FakePage({PLAIN_URL: "<html><body><h1>Catalog</h1></body></html>"}, url=PLAIN_URL)
+        page = _FakePage(
+            {PLAIN_URL: "<html><body><h1>Catalog</h1></body></html>"}, url=PLAIN_URL
+        )
         result = _loop(page, _Decide("DONE"), on_step=None)
         assert result.ok and result.step_count >= 1
 
     def test_a_credential_in_the_url_is_screened_on_the_relayed_step(self):
         """The mirror is a surface a credential could reach, so it gets the same screen as every
-        other: the relayed step URL carries `code=[withheld]`, never the authorization code."""
+        other: the relayed step URL carries `code=[withheld]`, never the authorization code.
+        """
         page = _FakePage(
             {CALLBACK_URL: "<html><body><h1>Signed in</h1></body></html>"},
             url=CALLBACK_URL,
-            shot="/tmp/pc-shot-2.png",
+            shot="/tmp/gideon-shot-2.png",
         )
         seen: list = []
         _loop(
@@ -181,18 +185,23 @@ class TestTheStepRelay:
 
     def test_the_provider_sink_relays_through_the_seam(self, monkeypatch):
         """The provider's `_mirror_sink` builds the `{run_id, step_n, url, action, screenshot}`
-        payload and hands it to the seam — the wiring the loop cannot test on its own."""
+        payload and hands it to the seam — the wiring the loop cannot test on its own.
+        """
         captured: list[dict] = []
         monkeypatch.setattr(
-            bmirror, "broadcast_browse_step", lambda payload, **kw: captured.append(payload)
+            bmirror,
+            "broadcast_browse_step",
+            lambda payload, **kw: captured.append(payload),
         )
         ctx = ActionContext(event="e", payload={"run_id": "r9"})
         sink = BrowseActionProvider()._mirror_sink(ctx)
-        from gideon.browse.loop import BrowseStep
+        from gideon.integrations.browse.loop import BrowseStep
 
         sink(
-            BrowseStep(index=3, url=PLAIN_URL, action="CLICK ab12", fenced=True, note="clicked"),
-            "/tmp/pc-shot-3.png",
+            BrowseStep(
+                index=3, url=PLAIN_URL, action="CLICK ab12", fenced=True, note="clicked"
+            ),
+            "/tmp/gideon-shot-3.png",
         )
         assert captured == [
             {
@@ -200,15 +209,10 @@ class TestTheStepRelay:
                 "step_n": 3,
                 "url": PLAIN_URL,
                 "action": "CLICK ab12",
-                "screenshot": "/tmp/pc-shot-3.png",
+                "screenshot": "/tmp/gideon-shot-3.png",
                 "note": "clicked",
             }
         ]
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# The kill switch — distinct from the incident switch
-# ══════════════════════════════════════════════════════════════════════════════
 
 
 class TestTheKillSwitch:
@@ -223,17 +227,21 @@ class TestTheKillSwitch:
     def test_it_is_distinct_from_the_incident_switch(self):
         """The whole reason it exists: stopping browse must NOT halt every other automation. So
         engaging the browse kill leaves incident mode untouched."""
-        from gideon.guardrails import incident
+        from gideon.security.guardrails import incident
 
         incident.reset_incident_mirror()
         killswitch.engage("stop browse only")
         assert killswitch.browse_killed() is True
-        assert incident.incident_active() is False, "browse kill must not engage incident mode"
+        assert (
+            incident.incident_active() is False
+        ), "browse kill must not engage incident mode"
 
     def test_a_running_loop_parks_when_the_kill_is_engaged(self):
         """`kill_check` is consulted before each model call, so a mid-run kill parks within one
         step — the mirror's stop actually stops an in-flight run."""
-        page = _FakePage({PLAIN_URL: "<html><body><h1>hi</h1></body></html>"}, url=PLAIN_URL)
+        page = _FakePage(
+            {PLAIN_URL: "<html><body><h1>hi</h1></body></html>"}, url=PLAIN_URL
+        )
         decide = _Decide("DONE")
         result = _loop(page, decide, kill_check=lambda: (True, "stopped by human"))
         assert result.parked and result.park_reason == PARK_KILLED
@@ -243,7 +251,9 @@ class TestTheKillSwitch:
     def test_an_unkilled_loop_does_not_park(self):
         """CONTROL: the same harness with `kill_check` reporting not-killed runs to completion, so
         the park above is the kill and not the fixture."""
-        page = _FakePage({PLAIN_URL: "<html><body><h1>hi</h1></body></html>"}, url=PLAIN_URL)
+        page = _FakePage(
+            {PLAIN_URL: "<html><body><h1>hi</h1></body></html>"}, url=PLAIN_URL
+        )
         result = _loop(page, _Decide("DONE"), kill_check=lambda: (False, ""))
         assert not (result.parked and result.park_reason == PARK_KILLED)
 
@@ -272,33 +282,34 @@ class TestTheKillSwitch:
         assert result.agent_error.code != "ERR_BROWSE_KILLED"
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# The mirror seam — broadcasts + the expired surfacing
-# ══════════════════════════════════════════════════════════════════════════════
-
-
 class TestTheSeam:
     def test_broadcast_helpers_relay_to_the_state(self):
         st = _FakeState()
         bmirror.broadcast_browse_step({"step_n": 1, "url": PLAIN_URL}, state=st)
-        bmirror.broadcast_kill(killswitch.BrowseKillState(active=True, reason="x"), state=st)
+        bmirror.broadcast_kill(
+            killswitch.BrowseKillState(active=True, reason="x"), state=st
+        )
         types = [t for t, _ in st.ws]
         assert bmirror.WS_BROWSE_STEP in types and bmirror.WS_BROWSE_KILL in types
 
     def test_broadcast_is_a_noop_without_a_live_state(self):
         """No gateway up → the relay silently no-ops rather than raising into the loop."""
-        bmirror.broadcast_browse_step({"step_n": 1}, state=None)  # must not raise
+        bmirror.broadcast_browse_step({"step_n": 1}, state=None)
 
     def test_surface_auth_expired_raises_banner_and_needs_input(self):
         st = _FakeState()
         bmirror.surface_auth_expired("https://bank.test/x", state=st)
-        assert any(t == bmirror.WS_BROWSE_AUTH_EXPIRED for t, _ in st.ws), "no banner broadcast"
+        assert any(
+            t == bmirror.WS_BROWSE_AUTH_EXPIRED for t, _ in st.ws
+        ), "no banner broadcast"
 
-        from gideon.inbox import InboxStore
+        from gideon.integrations.inbox import InboxStore
 
         store = InboxStore()
         store.load()
-        rows = [i for i in store.items.values() if i.refs.get("browse_auth") == "expired"]
+        rows = [
+            i for i in store.items.values() if i.refs.get("browse_auth") == "expired"
+        ]
         assert rows, "no needs_input inbox row was raised for the expired site"
         assert rows[0].item_kind == "needs_input"
         assert rows[0].refs.get("site") == "bank.test"
@@ -307,23 +318,19 @@ class TestTheSeam:
         """A scheduled watcher re-hits the wall every tick; the row must not stack once per tick."""
         st = _FakeState()
         bmirror.surface_auth_expired("https://bank.test/x", state=st)
-        bmirror.surface_auth_expired("https://bank.test/other", state=st)  # same site slug
+        bmirror.surface_auth_expired("https://bank.test/other", state=st)
 
-        from gideon.inbox import InboxStore
+        from gideon.integrations.inbox import InboxStore
 
         store = InboxStore()
         store.load()
         rows = [
             i
             for i in store.items.values()
-            if i.refs.get("browse_auth") == "expired" and i.refs.get("site") == "bank.test"
+            if i.refs.get("browse_auth") == "expired"
+            and i.refs.get("site") == "bank.test"
         ]
         assert len(rows) == 1, f"expected one deduped row, got {len(rows)}"
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# The routes
-# ══════════════════════════════════════════════════════════════════════════════
 
 
 class _FakeReq:
@@ -343,7 +350,7 @@ def _body_of(resp) -> dict:
 
 class TestTheRoutes:
     def test_status_reports_kill_and_expired(self):
-        from gideon.browse.handoff import mark_expired, record_login
+        from gideon.integrations.browse.handoff import mark_expired, record_login
 
         record_login("https://news.test/home")
         mark_expired("https://news.test/home")
@@ -366,4 +373,6 @@ class TestTheRoutes:
         killswitch.engage("stop")
         resp = _run(bm.api_browse_kill_release(_FakeReq(body={})))
         assert resp.status == 400
-        assert killswitch.browse_killed() is True, "an unconfirmed release must NOT re-enable"
+        assert (
+            killswitch.browse_killed() is True
+        ), "an unconfirmed release must NOT re-enable"

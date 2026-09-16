@@ -24,9 +24,9 @@ import pytest
 
 def _snapshot() -> dict[str, tuple[str, ...]]:
     """The three provider-family collections as sorted tuples (order-independent equality)."""
-    from gideon.apps.manifest import PROVIDER_TYPES
-    from gideon.providers.registry import get_provider_registry
-    from gideon.validation import ALLOWED_HOOK_PROVIDERS
+    from gideon.assurance.validation import ALLOWED_HOOK_PROVIDERS
+    from gideon.extensions.apps.manifest import PROVIDER_TYPES
+    from gideon.extensions.providers.registry import get_provider_registry
 
     return {
         "hook_providers": tuple(sorted(ALLOWED_HOOK_PROVIDERS)),
@@ -66,13 +66,14 @@ class _CloningTts(_StubTts):
 def home(tmp_path, monkeypatch):
     root = tmp_path / "home"
     root.mkdir()
-    monkeypatch.setattr("gideon.voice.profiles.config_dir", lambda: root)
-    monkeypatch.setattr("gideon.voice.bindings.config_dir", lambda: root)
+    monkeypatch.setattr("gideon.integrations.voice.profiles.config_dir", lambda: root)
+    monkeypatch.setattr("gideon.integrations.voice.bindings.config_dir", lambda: root)
     monkeypatch.setattr(
-        "gideon.tts.registry.active_tts", lambda: (_StubTts("piper"), "en_US-amy")
+        "gideon.integrations.tts.registry.active_tts",
+        lambda: (_StubTts("piper"), "en_US-amy"),
     )
     monkeypatch.setattr(
-        "gideon.providers.use_cases.load_use_case_settings",
+        "gideon.extensions.providers.use_cases.load_use_case_settings",
         lambda use_case: {"speed": 1.0, "speech_voice": ""},
     )
     return root
@@ -91,34 +92,35 @@ def _wav(path, seconds=1.2, rate=16000):
 async def _exercise_the_whole_voice_matrix(home):
     """Every voice mutation the capstone spans — profile CRUD × lock × consent × both
     engines × per-surface bindings × migration — with zero model spend."""
-    from gideon.tts.registry import route_synthesis
-    from gideon.voice import bindings as vb
-    from gideon.voice import migration as vm
-    from gideon.voice import profiles as vp
+    from gideon.integrations.tts.registry import route_synthesis
+    from gideon.integrations.voice import bindings as vb
+    from gideon.integrations.voice import migration as vm
+    from gideon.integrations.voice import profiles as vp
 
-    # design + clone CRUD
-    design = vp.create_profile(name="Designed", kind="design", provider="piper", speed=1.1)
+    design = vp.create_profile(
+        name="Designed", kind="design", provider="piper", speed=1.1
+    )
     clone = vp.create_profile(name="Cloned", kind="clone", provider="voice-clone-tts")
     vp.update_profile(design.id, seed=7)
 
-    # lock-from-history
     vp.append_history(clone.id, _wav(home / "gen.wav"), seed=3)
     vp.lock_profile(clone.id, 0)
 
-    # consent record → verify → revoke
     vp.attach_consent_audio(clone.id, _wav(home / "consent.wav"))
     vp.record_consent(clone.id, consent_text="I consent to cloning my own voice.")
     assert vp.recompute_verified(vp.get_profile(clone.id)) is True
     vp.revoke_consent(clone.id)
 
-    # per-surface bindings + migration (§6)
     vb.set_binding("channel:webui", design.id)
     vm.migrate_active_to_default_profile(name="From current")
 
-    # both engines through the capability gate
     await route_synthesis({"provider": _StubTts("piper"), "voice": "en_US-amy"}, "hi")
     await route_synthesis(
-        {"provider": _CloningTts("clone"), "voice": "x", "ref_audio": str(home / "consent.wav")},
+        {
+            "provider": _CloningTts("clone"),
+            "voice": "x",
+            "ref_audio": str(home / "consent.wav"),
+        },
         "hello",
     )
 
@@ -142,7 +144,13 @@ async def test_provider_family_is_byte_identical_before_and_after(home):
 def test_voice_namespace_is_absent_from_every_provider_family():
     """The intent behind the invariant: no voice token is a provider type or hook action."""
     snap = _snapshot()
-    voice_tokens = {"voice", "voice_profile", "voice_profiles", "voice-profile", "voice-migrate"}
+    voice_tokens = {
+        "voice",
+        "voice_profile",
+        "voice_profiles",
+        "voice-profile",
+        "voice-migrate",
+    }
     for collection, members in snap.items():
         leaked = voice_tokens & set(members)
         assert not leaked, f"{collection} leaked voice tokens {leaked}"

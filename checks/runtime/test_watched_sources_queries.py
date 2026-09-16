@@ -19,19 +19,30 @@ import asyncio
 
 import pytest
 
-from gideon.event_triggers import APP_EVENT, SOURCE_APP, EventTrigger, EventTriggerStore
-from gideon.knowledge import source_queries as sq
-from gideon.knowledge.source_engine import SourceEngine
-from gideon.knowledge.source_streams import SOURCE_QUERY_MATCHED, SourceEventSpool
-from gideon.knowledge.store import KnowledgeStore
-from gideon.knowledge_providers.base import (
+from gideon.automation.event_triggers import (
+    APP_EVENT,
+    SOURCE_APP,
+    EventTrigger,
+    EventTriggerStore,
+)
+from gideon.automation.trigger_sources.registry import (
+    NAMESPACE_PREFIX,
+    unregister_source,
+)
+from gideon.cognition.knowledge import source_queries as sq
+from gideon.cognition.knowledge.source_engine import SourceEngine
+from gideon.cognition.knowledge.source_streams import (
+    SOURCE_QUERY_MATCHED,
+    SourceEventSpool,
+)
+from gideon.cognition.knowledge.store import KnowledgeStore
+from gideon.integrations.knowledge_providers.base import (
     KnowledgeItem,
     KnowledgeSource,
     KnowledgeSourceProvider,
     SourceItem,
     SourcePollResult,
 )
-from gideon.trigger_sources.registry import NAMESPACE_PREFIX, unregister_source
 
 
 @pytest.fixture(autouse=True)
@@ -39,12 +50,6 @@ def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    # Deliberately NOT patching `config.loader.config_dir`: a patch live during a consumer
-    # module's FIRST import is baked into that consumer permanently (it does
-    # `from … import config_dir`), and monkeypatch's undo cannot reach the copy. Measured — it
-    # made a sibling test in this atom read the previous test's home under xdist. `config_dir()`
-    # reads GIDEON_HOME per call and caches nothing, so the env var alone is sufficient
-    # AND cannot leak.
     assert sq.queries_path().parent.parent == home
     return home
 
@@ -63,7 +68,7 @@ def _event_store(_isolated_home):
     ``EventTriggerEngine._get_store`` memoizes on first use and ``get_engine()`` is
     process-global, so without the reset the second test in a worker reads the first's store.
     """
-    import gideon.event_triggers as et
+    import gideon.automation.event_triggers as et
 
     et._engine = None
     try:
@@ -112,7 +117,7 @@ class _FakeQueue:
 
 
 def _cfg(**over):
-    from gideon.config.loader import SourcesConfig
+    from gideon.core.config.loader import SourcesConfig
 
     base = dict(
         enabled=True,
@@ -139,7 +144,7 @@ def _engine(store, provider, spool, query_store):
 
 def _fake_provider(calls):
     """The action-provider shape `event_triggers` really calls (`execute(config, ctx, timeout)`)."""
-    from gideon.action_providers import ActionResult
+    from gideon.integrations.action_providers import ActionResult
 
     class _Fake:
         async def execute(self, config, ctx, timeout=30):
@@ -147,9 +152,6 @@ def _fake_provider(calls):
             return ActionResult(success=True)
 
     return _Fake()
-
-
-# ── the grammar ────────────────────────────────────────────────────────────────
 
 
 def test_parse_and_match_the_plan_s_own_example():
@@ -160,7 +162,6 @@ def test_parse_and_match_the_plan_s_own_example():
         ("beta", sq.FIELD_ANY, True),
     ]
     assert sq.matches(terms, title="Release 2.0", content="stable")
-    # Each half is load-bearing: the title term and the negation each reject on their own.
     assert not sq.matches(terms, title="Nightly build", content="stable")
     assert not sq.matches(terms, title="Release 2.0-beta", content="")
     assert not sq.matches(terms, title="Release 2.0", content="this is a beta")
@@ -199,9 +200,6 @@ def test_a_disabled_query_never_matches():
     assert sq.matching_query_ids([enabled, disabled], title="Release 2") == ["a"]
 
 
-# ── persistence ────────────────────────────────────────────────────────────────
-
-
 def test_saved_query_store_round_trips(tmp_path):
     store = sq.SavedQueryStore(tmp_path / "q.json")
     saved = store.add("Releases", "intitle:release !beta")
@@ -221,9 +219,6 @@ def test_a_corrupt_queries_file_reads_as_empty(tmp_path):
     assert sq.SavedQueryStore(path).list_queries() == []
 
 
-# ── the real poll path emits SourceQueryMatched ─────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_poll_emits_query_matched_for_a_matching_item(store, tmp_path):
     spool = SourceEventSpool(tmp_path / "events.jsonl")
@@ -241,8 +236,6 @@ async def test_poll_emits_query_matched_for_a_matching_item(store, tmp_path):
     await _engine(store, provider, spool, queries).tick()
 
     matched = [r for r in spool.read() if r["event"] == SOURCE_QUERY_MATCHED]
-    # EXACTLY the one item that satisfies both halves of the query. The two non-matches are the
-    # vacuity assertion: a matcher that returned True unconditionally would emit three.
     assert len(matched) == 1
     assert matched[0]["payload"] == {
         "query_id": saved.id,
@@ -250,7 +243,9 @@ async def test_poll_emits_query_matched_for_a_matching_item(store, tmp_path):
     }
     ingested = [r for r in spool.read() if r["event"] == "SourceItemIngested"]
     assert len(ingested) == 3, "all three items still ingest; only the QUERY narrowed"
-    assert matched[0]["payload"]["item_id"] in {r["payload"]["item_id"] for r in ingested}
+    assert matched[0]["payload"]["item_id"] in {
+        r["payload"]["item_id"] for r in ingested
+    }
 
 
 @pytest.mark.asyncio
@@ -262,8 +257,10 @@ async def test_matching_spends_zero_tokens(store, tmp_path, monkeypatch):
         calls.append("llm")
         raise AssertionError("a saved-query match must not reach an LLM")
 
-    monkeypatch.setattr("gideon.llm_helpers.one_shot_completion", _explode)
-    monkeypatch.setattr("gideon.llm_helpers.get_completion", _explode, raising=False)
+    monkeypatch.setattr("gideon.integrations.llm_helpers.one_shot_completion", _explode)
+    monkeypatch.setattr(
+        "gideon.integrations.llm_helpers.get_completion", _explode, raising=False
+    )
 
     spool = SourceEventSpool(tmp_path / "events.jsonl")
     queries = sq.SavedQueryStore(tmp_path / "q.json")
@@ -273,11 +270,11 @@ async def test_matching_spends_zero_tokens(store, tmp_path, monkeypatch):
 
     await _engine(store, provider, spool, queries).tick()
 
-    assert [r for r in spool.read() if r["event"] == SOURCE_QUERY_MATCHED], "the match must happen"
+    assert [
+        r for r in spool.read() if r["event"] == SOURCE_QUERY_MATCHED
+    ], "the match must happen"
     assert calls == []
-    # VACUITY: the very same patch DOES fire when something calls it — so `calls == []` above is
-    # evidence of a token-free path, not of a patch that could never trip.
-    import gideon.llm_helpers as llm
+    import gideon.integrations.llm_helpers as llm
 
     with pytest.raises(AssertionError):
         llm.one_shot_completion("hi")
@@ -286,19 +283,24 @@ async def test_matching_spends_zero_tokens(store, tmp_path, monkeypatch):
 
 def test_the_query_module_imports_no_llm_path():
     """Structural, not behavioural: the module's own source names no LLM entry point, so no
-    future edit can add one without this failing (§6.3's "absent, not skipped-by-flag" shape)."""
+    future edit can add one without this failing (§6.3's "absent, not skipped-by-flag" shape).
+    """
     from pathlib import Path
 
     src = Path(sq.__file__).read_text(encoding="utf-8")
-    for banned in ("llm_helpers", "one_shot_completion", "get_completion", "providers.registry"):
+    for banned in (
+        "llm_helpers",
+        "one_shot_completion",
+        "get_completion",
+        "providers.registry",
+    ):
         assert banned not in src.split('"""')[-1], f"{banned} reached the query matcher"
 
 
-# ── a subscribed Trigger fires ─────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
-async def test_a_subscribed_trigger_fires_END_TO_END(store, tmp_path, _event_store, monkeypatch):
+async def test_a_subscribed_trigger_fires_END_TO_END(
+    store, tmp_path, _event_store, monkeypatch
+):
     """🔴 THE CLAUSE. A poll ingests a matching item and a user's `event` trigger runs.
 
     Every link is real: engine → saved-query matcher → `trigger_sources.registry.emit`
@@ -316,17 +318,20 @@ async def test_a_subscribed_trigger_fires_END_TO_END(store, tmp_path, _event_sto
     )
     calls: list = []
     monkeypatch.setattr(
-        "gideon.action_providers.get_action_provider", lambda _n: _fake_provider(calls)
+        "gideon.integrations.action_providers.get_action_provider",
+        lambda _n: _fake_provider(calls),
     )
 
     spool = SourceEventSpool(tmp_path / "events.jsonl")
     queries = sq.SavedQueryStore(tmp_path / "q.json")
     saved = queries.add("Releases", "intitle:release !beta")
     store.create_source(name="s", provider="watched-fixture", kind="feed")
-    provider = FixtureSourceProvider([SourceItem(guid="g1", title="Release 2.0", url="u")])
+    provider = FixtureSourceProvider(
+        [SourceItem(guid="g1", title="Release 2.0", url="u")]
+    )
 
     await _engine(store, provider, spool, queries).tick()
-    for _ in range(50):  # the engine schedules the fire as a task
+    for _ in range(50):
         await asyncio.sleep(0)
         if calls:
             break
@@ -338,13 +343,14 @@ async def test_a_subscribed_trigger_fires_END_TO_END(store, tmp_path, _event_sto
         payload["event_type"]
         == f"{NAMESPACE_PREFIX}:{sq.TRIGGER_SOURCE_NAME}:{SOURCE_QUERY_MATCHED}"
     )
-    # The query id rides `meta` — that is what a per-query subscription binds to.
     assert payload["meta"]["query_id"] == saved.id
     assert _event_store.load()[0].fire_count == 1
 
 
 @pytest.mark.asyncio
-async def test_a_nonmatching_item_fires_no_trigger(store, tmp_path, _event_store, monkeypatch):
+async def test_a_nonmatching_item_fires_no_trigger(
+    store, tmp_path, _event_store, monkeypatch
+):
     """VACUITY GUARD for the test above: same wiring, an item the query rejects, zero fires."""
     _event_store.upsert(
         EventTrigger(
@@ -358,7 +364,8 @@ async def test_a_nonmatching_item_fires_no_trigger(store, tmp_path, _event_store
     )
     calls: list = []
     monkeypatch.setattr(
-        "gideon.action_providers.get_action_provider", lambda _n: _fake_provider(calls)
+        "gideon.integrations.action_providers.get_action_provider",
+        lambda _n: _fake_provider(calls),
     )
 
     spool = SourceEventSpool(tmp_path / "events.jsonl")
@@ -377,7 +384,8 @@ async def test_a_nonmatching_item_fires_no_trigger(store, tmp_path, _event_store
 
 def test_only_the_bridged_event_is_declared():
     """An event declared in the browsable vocabulary but never emitted is the "declared kind
-    without a runtime" defect. Only `SourceQueryMatched` is bridged, so only it is declared."""
+    without a runtime" defect. Only `SourceQueryMatched` is bridged, so only it is declared.
+    """
     assert sq.WatchedSourcesTriggerSource().events == (SOURCE_QUERY_MATCHED,)
 
 
@@ -388,7 +396,6 @@ def test_an_unregistered_source_cannot_emit(monkeypatch):
         f"{NAMESPACE_PREFIX}:{sq.TRIGGER_SOURCE_NAME}:{SOURCE_QUERY_MATCHED}"
     )
     assert sq.fire_query_matched("q1", "i2", title="t") != ""
-    # Vacuity: with the source dropped and re-registration disabled, the emit is refused.
     unregister_source(sq.TRIGGER_SOURCE_NAME)
     monkeypatch.setattr(sq, "ensure_registered", lambda: None)
     assert sq.fire_query_matched("q1", "i3", title="t") == ""

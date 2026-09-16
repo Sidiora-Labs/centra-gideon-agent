@@ -19,17 +19,19 @@ from pathlib import Path
 
 import pytest
 
-from gideon.learning import curator, proposals
-from gideon.learning.proposals import Kind
-from gideon.learning.usage import UsageStore
+from gideon.cognition.learning import curator, proposals
+from gideon.cognition.learning.proposals import Kind
+from gideon.cognition.learning.usage import UsageStore
 
 
 @pytest.fixture(autouse=True)
 def _isolated_home(tmp_path, monkeypatch):
     """Proposals are files under the home — this must never be the real one."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
-    monkeypatch.setattr("gideon.learning.proposals._dir", lambda: tmp_path / "proposals")
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gideon.cognition.learning.proposals._dir", lambda: tmp_path / "proposals"
+    )
 
 
 @pytest.fixture
@@ -45,7 +47,9 @@ def _days(n: int) -> list[str]:
     return [(today - timedelta(days=i)).isoformat() for i in range(n)]
 
 
-def _earn(store: UsageStore, entity: str, *, kind: str = "template", contexts=("a", "b", "c")):
+def _earn(
+    store: UsageStore, entity: str, *, kind: str = "template", contexts=("a", "b", "c")
+):
     """Drive the store through enough real events to pass the multi-gate.
 
     `immediate=True` per event because the store's reinforcement damping halves a
@@ -54,15 +58,16 @@ def _earn(store: UsageStore, entity: str, *, kind: str = "template", contexts=("
     """
     for ctx in contexts:
         for event in ("surfaced", "run", "run_success"):
-            store.record(kind=kind, entity=entity, event=event, context=ctx, immediate=True)
-
-
-# ── the gate, driven through the store ──
+            store.record(
+                kind=kind, entity=entity, event=event, context=ctx, immediate=True
+            )
 
 
 def test_an_earning_entity_becomes_a_suggestion(store):
     _earn(store, "weekly-review")
-    sugs = curator.promotion_suggestions(store.list_kind("template"), active_dates=_days(3))
+    sugs = curator.promotion_suggestions(
+        store.list_kind("template"), active_dates=_days(3)
+    )
     assert [s.entity for s in sugs] == ["weekly-review"]
     assert sugs[0].uses == 3 and sugs[0].contexts == 3
     assert "multi-gate" in sugs[0].why
@@ -71,56 +76,85 @@ def test_an_earning_entity_becomes_a_suggestion(store):
 def test_one_busy_afternoon_is_not_evidence(store):
     """Usage in a SINGLE context fails the diversity gate — the whole point of it."""
     _earn(store, "one-place", contexts=("a", "a", "a", "a"))
-    assert curator.promotion_suggestions(store.list_kind("template"), active_dates=_days(3)) == []
+    assert (
+        curator.promotion_suggestions(
+            store.list_kind("template"), active_dates=_days(3)
+        )
+        == []
+    )
 
 
 def test_too_few_uses_is_not_evidence(store):
     _earn(store, "barely", contexts=("a", "b"))
-    assert curator.promotion_suggestions(store.list_kind("template"), active_dates=_days(3)) == []
+    assert (
+        curator.promotion_suggestions(
+            store.list_kind("template"), active_dates=_days(3)
+        )
+        == []
+    )
 
 
 def test_a_pinned_entity_is_a_settled_question(store):
     _earn(store, "pinned-one")
     store.set_flags("template", "pinned-one", pinned=True)
-    assert curator.promotion_suggestions(store.list_kind("template"), active_dates=_days(3)) == []
+    assert (
+        curator.promotion_suggestions(
+            store.list_kind("template"), active_dates=_days(3)
+        )
+        == []
+    )
 
 
 def test_user_authored_entities_are_never_offered(store):
     _earn(store, "mine")
     store.set_flags("template", "mine", source_type="user")
-    assert curator.promotion_suggestions(store.list_kind("template"), active_dates=_days(3)) == []
-
-
-# ── the wire: writer → the queue's live reader ──
+    assert (
+        curator.promotion_suggestions(
+            store.list_kind("template"), active_dates=_days(3)
+        )
+        == []
+    )
 
 
 def test_a_suggestion_reaches_the_proposal_inbox(store):
     """The live reader is `list_pending` — what `/api/learning/proposals` serves."""
     _earn(store, "weekly-review")
-    sugs = curator.promotion_suggestions(store.list_kind("template"), active_dates=_days(3))
+    sugs = curator.promotion_suggestions(
+        store.list_kind("template"), active_dates=_days(3)
+    )
     assert curator.file_promotion_suggestions(sugs) == 1
 
     pending = proposals.list_pending()
     rows = [p for p in pending if p.target == "weekly-review"]
     assert len(rows) == 1
     row = rows[0]
-    assert row.kind == Kind.TIER_MIGRATION.value, "the kind that had no writer now has one"
-    assert "3 use(s) across 3 distinct context(s)" in row.body, "the evidence must travel"
+    assert (
+        row.kind == Kind.TIER_MIGRATION.value
+    ), "the kind that had no writer now has one"
+    assert (
+        "3 use(s) across 3 distinct context(s)" in row.body
+    ), "the evidence must travel"
     assert "promotion" in row.tags
 
 
 def test_filing_twice_does_not_nag(store):
     """A daily cadence must reinforce a pending row, not stack duplicates."""
     _earn(store, "weekly-review")
-    sugs = curator.promotion_suggestions(store.list_kind("template"), active_dates=_days(3))
+    sugs = curator.promotion_suggestions(
+        store.list_kind("template"), active_dates=_days(3)
+    )
     curator.file_promotion_suggestions(sugs)
     curator.file_promotion_suggestions(sugs)
-    assert len([p for p in proposals.list_pending() if p.target == "weekly-review"]) == 1
+    assert (
+        len([p for p in proposals.list_pending() if p.target == "weekly-review"]) == 1
+    )
 
 
 def test_dry_run_files_nothing(store):
     _earn(store, "weekly-review")
-    sugs = curator.promotion_suggestions(store.list_kind("template"), active_dates=_days(3))
+    sugs = curator.promotion_suggestions(
+        store.list_kind("template"), active_dates=_days(3)
+    )
     assert curator.file_promotion_suggestions(sugs, dry_run=True) == 0
     assert proposals.list_pending() == []
 
@@ -129,13 +163,12 @@ def test_nothing_is_ever_auto_promoted(store):
     """The mechanism ends at the queue. A proposal is pending, never installed."""
     _earn(store, "weekly-review")
     curator.file_promotion_suggestions(
-        curator.promotion_suggestions(store.list_kind("template"), active_dates=_days(3))
+        curator.promotion_suggestions(
+            store.list_kind("template"), active_dates=_days(3)
+        )
     )
     row = [p for p in proposals.list_pending() if p.target == "weekly-review"][0]
     assert row.status == "pending"
-
-
-# ── the call site ──
 
 
 def test_the_consolidation_tick_calls_the_gate():
@@ -144,7 +177,7 @@ def test_the_consolidation_tick_calls_the_gate():
     Testing the functions alone would pass exactly the state this atom found: a
     correct gate, fully tested, that no cadence runs.
     """
-    src = Path("src/gideon/history.py").read_text()
+    src = Path("runtime/gideon/cognition/history.py").read_text()
     tree = ast.parse(src)
     fn = next(
         node

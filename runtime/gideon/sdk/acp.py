@@ -8,13 +8,15 @@ the CLI-/vendor-specific knowledge (binary names, dialect, npm pkg) stays in
 each bundle app, not here.
 """
 
-from gideon.acp.cli_resolve import (  # noqa: F401
+from gideon.integrations.acp.cli_resolve import (
     is_npx_fallback,
     node_manager_bin_globs,
     provision_acp_adapter,
     resolve_acp_cli,
 )
-from gideon.acp_bundles._register import register_acp_cli_entry  # noqa: F401
+from gideon.integrations.acp_bundles._register import (  # noqa: F401
+    register_acp_cli_entry,
+)
 
 __all__ = [
     "resolve_acp_cli",

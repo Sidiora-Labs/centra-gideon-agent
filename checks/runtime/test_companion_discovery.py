@@ -21,7 +21,7 @@ from unittest.mock import patch
 
 import pytest
 
-from gideon.companion import discovery as disc
+from gideon.integrations.companion import discovery as disc
 
 LAN_HOST = "192.168.1.37"
 
@@ -36,8 +36,8 @@ def _isolate(tmp_path):
     cfg = tmp_path / "config.json"
     cfg.write_text("{}", encoding="utf-8")
     with (
-        patch("gideon.config.loader.config_dir", return_value=tmp_path),
-        patch("gideon.config.loader.config_path", return_value=cfg),
+        patch("gideon.core.config.loader.config_dir", return_value=tmp_path),
+        patch("gideon.core.config.loader.config_path", return_value=cfg),
     ):
         disc.shutdown()
         yield tmp_path
@@ -91,9 +91,6 @@ def stub_advertiser(monkeypatch):
     return _StubAdvertiser
 
 
-# ── the TXT record carries nothing sensitive ───────────────────────────────────
-
-
 def test_txt_keys_are_a_closed_set():
     """The record may carry only the four C3 keys — a new one has to be argued for here."""
     txt = disc.build_txt(instance_name="Living room Mac", port=10166)
@@ -125,21 +122,23 @@ def test_advertised_packet_contains_no_credential(_isolate):
     (_isolate / ".local_secret").write_text(local_secret, encoding="utf-8")
     session_token = "tok_" + "9" * 40
     (_isolate / "sessions.json").write_text(
-        json.dumps({"sessions": [{"nonce": session_token, "device": "phone"}]}), encoding="utf-8"
+        json.dumps({"sessions": [{"nonce": session_token, "device": "phone"}]}),
+        encoding="utf-8",
     )
     enroll_code, _expires = _issue_enroll_code()
 
     packet = _service().packet()
 
     for secret in (local_secret, session_token, enroll_code):
-        assert secret.encode() not in packet, f"a credential reached the wire: {secret[:8]}…"
-    # And nothing that merely *looks* like a credential field, either.
+        assert (
+            secret.encode() not in packet
+        ), f"a credential reached the wire: {secret[:8]}…"
     for word in (b"token", b"secret", b"password", b"nonce", b"session"):
         assert word not in packet.lower()
 
 
 def _issue_enroll_code() -> tuple[str, float]:
-    from gideon.auth import enrollment
+    from gideon.security.auth import enrollment
 
     return enrollment.issue_code(label="test")
 
@@ -150,25 +149,22 @@ def test_instance_label_is_one_safe_dns_label():
     assert disc.instance_label("  spaced   out  ") == "spaced out"
     long_ascii = disc.instance_label("x" * 200)
     assert len(long_ascii.encode()) <= 63
-    # Truncation lands on a codepoint boundary, so the label stays valid UTF-8.
     long_utf8 = disc.instance_label("é" * 60)
     assert len(long_utf8.encode()) <= 63
     assert long_utf8.encode().decode("utf-8") == long_utf8
 
 
-# ── the advertise-or-not decision ──────────────────────────────────────────────
-
-
 def test_loopback_only_bind_does_not_advertise_and_logs_why(caplog):
     """The atom's no-op case: announcing 127.0.0.1 to a LAN publishes a broken record."""
-    with caplog.at_level("INFO", logger="gideon.companion.discovery"):
-        decision = disc.decide(enabled=True, bind_host="127.0.0.1", port=10166, instance_name="Mac")
+    with caplog.at_level("INFO", logger="gideon.integrations.companion.discovery"):
+        decision = disc.decide(
+            enabled=True, bind_host="127.0.0.1", port=10166, instance_name="Mac"
+        )
     assert decision.advertise is False
     assert decision.reason == "loopback_only"
     assert decision.service is None
     logged = caplog.text
     assert "loopback" in logged.lower()
-    # The log names the fix, not just the symptom.
     assert "GIDEON_BIND_HOST" in logged
 
 
@@ -179,14 +175,18 @@ def test_disabled_never_probes_the_network(monkeypatch):
         raise AssertionError("interfaces were enumerated while discovery was disabled")
 
     monkeypatch.setattr(disc, "_primary_lan_ipv4", _boom)
-    decision = disc.decide(enabled=False, bind_host="0.0.0.0", port=10166, instance_name="Mac")
+    decision = disc.decide(
+        enabled=False, bind_host="0.0.0.0", port=10166, instance_name="Mac"
+    )
     assert (decision.advertise, decision.reason) == (False, "disabled")
 
 
 def test_no_lan_address_is_a_no_op(monkeypatch, caplog):
     monkeypatch.setattr(disc, "_primary_lan_ipv4", lambda: "")
-    with caplog.at_level("INFO", logger="gideon.companion.discovery"):
-        decision = disc.decide(enabled=True, bind_host="0.0.0.0", port=10166, instance_name="Mac")
+    with caplog.at_level("INFO", logger="gideon.integrations.companion.discovery"):
+        decision = disc.decide(
+            enabled=True, bind_host="0.0.0.0", port=10166, instance_name="Mac"
+        )
     assert (decision.advertise, decision.reason) == (False, "no_lan_address")
     assert "no local-network address" in caplog.text
 
@@ -203,7 +203,9 @@ def test_advertises_when_bound_beyond_loopback():
 
 
 def test_empty_instance_name_falls_back_to_the_hostname():
-    decision = disc.decide(enabled=True, bind_host=LAN_HOST, port=10166, instance_name="")
+    decision = disc.decide(
+        enabled=True, bind_host=LAN_HOST, port=10166, instance_name=""
+    )
     assert decision.service is not None
     assert decision.service.instance_name == socket.gethostname().split(".")[0]
 
@@ -212,9 +214,6 @@ def test_every_reason_has_a_human_sentence():
     """A closed reason set with a missing sentence would raise inside the status route."""
     for reason in ("advertising", "disabled", "loopback_only", "no_lan_address"):
         assert disc.Decision(False, reason).detail
-
-
-# ── wire format ────────────────────────────────────────────────────────────────
 
 
 def test_packet_round_trips_through_the_resolver():
@@ -237,10 +236,7 @@ def test_goodbye_packet_withdraws_the_instance():
 
 def test_parse_message_rejects_malformed_input():
     with pytest.raises(ValueError):
-        disc.parse_message(b"\x00\x01")  # shorter than a header
-    # A compression-pointer loop must raise rather than spin: this parses unauthenticated
-    # multicast traffic from any host on the network. The pointer at offset 12 targets
-    # offset 12, so a naive decoder follows it forever.
+        disc.parse_message(b"\x00\x01")
     header = b"\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00"
     with pytest.raises(ValueError):
         disc.parse_message(header + b"\xc0\x0c")
@@ -248,9 +244,6 @@ def test_parse_message_rejects_malformed_input():
 
 def test_collect_ignores_unparseable_packets():
     assert disc.collect([b"garbage", _service().packet()])[0].name == "Living room Mac"
-
-
-# ── real sockets ───────────────────────────────────────────────────────────────
 
 
 @pytest.fixture()
@@ -292,9 +285,9 @@ def test_malformed_traffic_does_not_stop_the_responder(live_advertiser):
     finally:
         sender.close()
     time.sleep(0.2)
-    assert [i.name for i in disc.resolve(timeout=2.0, unicast_to=("127.0.0.1", port))] == [
-        "Living room Mac"
-    ]
+    assert [
+        i.name for i in disc.resolve(timeout=2.0, unicast_to=("127.0.0.1", port))
+    ] == ["Living room Mac"]
 
 
 def test_resolver_returns_empty_when_nothing_answers():
@@ -309,11 +302,8 @@ def test_stopped_advertiser_stops_answering(live_advertiser):
     assert disc.resolve(timeout=0.5, unicast_to=("127.0.0.1", port)) == []
 
 
-# ── the gateway-facing lifecycle ───────────────────────────────────────────────
-
-
 def _enable_discovery(enabled: bool, name: str = "Living room Mac") -> None:
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     cfg = AppConfig.load()
     cfg.companion.discovery_enabled = enabled
@@ -372,7 +362,7 @@ def test_reconcile_without_a_running_gateway_is_a_no_op(stub_advertiser):
 
 def test_unreadable_config_fails_closed(stub_advertiser, monkeypatch):
     """This surface ANNOUNCES on a network: a broken read is not permission to broadcast."""
-    from gideon.config import loader
+    from gideon.core.config import loader
 
     disc.set_gateway_bind(LAN_HOST, 10166)
 
@@ -391,9 +381,6 @@ def test_shutdown_stops_advertising_and_forgets_the_bind(stub_advertiser):
     disc.shutdown()
     assert stub_advertiser.instances[0].stopped is True
     assert disc.status()["reason"] == "gateway_not_running"
-
-
-# ── legibility: the status surface ─────────────────────────────────────────────
 
 
 def test_status_reports_live_state_not_the_config_flag(stub_advertiser):
@@ -435,18 +422,18 @@ def test_discovery_cleanup_is_registered_before_the_app_is_frozen():
     """
     import pathlib
 
-    from gideon.dashboard import server
+    from gideon.interfaces.dashboard import server
 
     src = pathlib.Path(server.__file__).read_text(encoding="utf-8")
-    # Both raise ValueError if absent, so this rail can never pass vacuously.
     append_at = src.index("app.on_cleanup.append(_discovery_shutdown)")
     freeze_at = src.index("await runner.setup()")
     assert append_at < freeze_at, (
         "on_cleanup is frozen by runner.setup(); registering the discovery shutdown after it "
         "raises RuntimeError('Cannot modify frozen list.')"
     )
-    # And the start must stay AFTER the bind decision, which is what it depends on.
-    assert src.index("_discovery.set_gateway_bind(") > src.index("_bind_host = resolve_bind_host()")
+    assert src.index("_discovery.set_gateway_bind(") > src.index(
+        "_bind_host = resolve_bind_host()"
+    )
 
 
 def test_state_change_is_audited(stub_advertiser, monkeypatch):
@@ -456,21 +443,24 @@ def test_state_change_is_audited(stub_advertiser, monkeypatch):
     disc.set_gateway_bind("127.0.0.1", 10166)
     _enable_discovery(True)
     disc.reconcile()
-    disc.reconcile()  # unchanged state: no second row
+    disc.reconcile()
     assert rows == ["loopback_only"]
 
 
 def test_audit_emits_a_real_sel_row(_isolate, stub_advertiser):
-    from gideon.sel import SecurityEventLog
+    from gideon.security.sel import SecurityEventLog
 
     SecurityEventLog._instance = None
     SecurityEventLog._initialized = False
     try:
         log = SecurityEventLog(base_dir=_isolate)
-        with patch("gideon.sel.sel", return_value=log):
+        with patch("gideon.security.sel.sel", return_value=log):
             disc._audit(
                 disc.decide(
-                    enabled=True, bind_host=LAN_HOST, port=10166, instance_name="Living room Mac"
+                    enabled=True,
+                    bind_host=LAN_HOST,
+                    port=10166,
+                    instance_name="Living room Mac",
                 )
             )
         rows = log.recent(limit=10)
@@ -478,31 +468,28 @@ def test_audit_emits_a_real_sel_row(_isolate, stub_advertiser):
         row = next(r for r in rows if r.get("event_type") == "companion_discovery")
         assert row["operation"] == "discovery_advertise_started"
         assert row["outcome"] == "advertising"
-        # An audit row about a broadcast must not itself carry a credential.
         assert "token" not in json.dumps(row).lower()
     finally:
         SecurityEventLog._instance = None
         SecurityEventLog._initialized = False
 
 
-# ── degradability: discovery is never a precondition ───────────────────────────
-
-
-def test_discovery_off_leaves_the_manual_pairing_path_working(_isolate, stub_advertiser):
+def test_discovery_off_leaves_the_manual_pairing_path_working(
+    _isolate, stub_advertiser
+):
     """Success Criterion 5: with discovery off, the typed-URL + code path is untouched.
 
     The manual path is `gideon auth enroll` → redeem the code from the other device,
     reached at a URL the user typed (or scanned from a QR, which renders the same URL). None
     of it consults discovery, and this asserts that by exercising it with discovery off.
     """
-    from gideon.auth import enrollment
+    from gideon.security.auth import enrollment
 
     disc.set_gateway_bind(LAN_HOST, 10166)
     _enable_discovery(False)
     assert disc.reconcile().advertise is False
     assert stub_advertiser.instances == []
 
-    # The code path still mints and redeems, exactly once, with nothing advertised.
     code, expires_at = enrollment.issue_code(label="phone")
     assert expires_at > time.time()
     assert enrollment.redeem_code(code) is True
@@ -518,7 +505,7 @@ def test_pairing_cannot_depend_on_discovery():
     import ast
     import pathlib
 
-    from gideon.auth import enrollment
+    from gideon.security.auth import enrollment
 
     tree = ast.parse(pathlib.Path(enrollment.__file__).read_text(encoding="utf-8"))
     modules: list[str] = []
@@ -548,14 +535,14 @@ def test_discovery_module_never_touches_the_auth_rail():
             imported.append(node.module)
         elif isinstance(node, ast.Import):
             imported += [a.name for a in node.names]
-    assert not [m for m in imported if m.startswith("gideon.auth")], imported
+    assert not [m for m in imported if m.startswith("gideon.security.auth")], imported
 
 
 def test_the_route_returns_the_status_payload(stub_advertiser):
     """The handler is a thin read over status() — no second vocabulary for the same state."""
     import asyncio
 
-    from gideon.dashboard.handlers import api_companion_discovery
+    from gideon.interfaces.dashboard.handlers import api_companion_discovery
 
     disc.set_gateway_bind(LAN_HOST, 10166)
     _enable_discovery(True)

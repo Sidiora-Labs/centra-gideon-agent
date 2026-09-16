@@ -12,36 +12,74 @@ Grouped by concern below. All names are re-exports; see the owning core module f
 the authoritative docs.
 """
 
-# ── Process-global trust + session-restriction state (shared by all surfaces) ──
-from gideon import __version__, session_restrictions, trust_mode
-from gideon.acp.errors import (
-    AcpError,
-    AcpProcessDied,
-    AcpTimeoutError,
+from gideon import __version__
+from gideon.assurance.testing.channel_conformance import (
+    CapturingState,
+    ChannelContractError,
+    assert_channel_contract,
 )
-from gideon.acp.types import (  # noqa: F401
+from gideon.automation.schedule import compute_next_run_ts, format_schedule
+from gideon.automation.triggers.models import Trigger
+from gideon.automation.triggers.schedule_view import describe_cadence, to_schedule_row
+from gideon.automation.triggers.store import TriggerStore
+from gideon.automation.triggers.tools import delete as delete_automation
+from gideon.automation.triggers.tools import delete_all as delete_all_automations
+from gideon.automation.triggers.tools import set_paused as set_automation_paused
+from gideon.cognition.context import (
+    PromptAssembler,
+    build_cancelled_turn_preamble,
+    compress_thread_history,
+)
+from gideon.cognition.doc_parser import extract_text, is_parseable_document
+from gideon.cognition.history import ConversationLog, HistoryConsolidator
+from gideon.cognition.memory_service import MemoryService
+from gideon.core.atomic_write import atomic_write
+from gideon.core.config.credentials import save_credential
+from gideon.core.config.loader import (
+    CRED_OWNER_ID,
+    CRED_SLACK_APP_TOKEN,
+    CRED_SLACK_BOT_TOKEN,
+    AppConfig,
+    config_dir,
+    config_path,
+)
+from gideon.core.textfmt import extract_options, strip_thinking_tags
+from gideon.engine import session_restrictions
+from gideon.engine.gateway_services import GatewayServices
+from gideon.engine.hooks import (
+    HOOK_REPLY,
+    TOOL_AUTO_APPROVE,
+    TOOL_DENY,
+    safe_read_file,
+    validate_file_path,
+)
+
+# ── Session + conversation runtime ──
+from gideon.engine.session import BACKGROUND_KEY, ConversationDirectory, SessionMap
+from gideon.engine.subagent import DelegationSupervisor
+from gideon.engine.task import Task
+from gideon.extensions.providers.settings import ProviderSettings
+from gideon.extensions.providers.use_cases import (
+    load_use_case_settings,
+    save_use_case_settings,
+)
+from gideon.extensions.skills import ProcedureLibrary
+from gideon.integrations.acp.errors import AcpError, AcpProcessDied, AcpTimeoutError
+from gideon.integrations.acp.types import (
     CANCELLED_STOP_REASONS,
     STOP_REASON_CANCELLED,
     STOP_REASON_END_TURN,
     STOP_REASON_STOPPED_BY_USER,
     is_cancelled_stop,
 )
-from gideon.atomic_write import atomic_write
-from gideon.channel_delivery import ChannelDelivery
-
-# ── Transport ABC + data types ──
-from gideon.channel_transports.base import (
+from gideon.integrations.channel_delivery import ChannelDelivery
+from gideon.integrations.channel_transports.base import (
     ChannelCapabilities,
     ChannelMessage,
     ChannelTransportProvider,
     OutboundMessage,
 )
-
-# ── Sender trust (CE-1) — the core seam every channel binds to ──
-# Provider-agnostic: `provider` is an opaque key the transport picks; no vendor lives
-# in core. A channel app consumes the whole trust API through here so its allow/deny,
-# pairing, fencing and unknown-sender flow can never drift per channel.
-from gideon.channel_trust import (
+from gideon.integrations.channel_trust import (
     CANNED_PAIRING_REPLY,
     TrustVerdict,
     allow_sender,
@@ -58,81 +96,7 @@ from gideon.channel_trust import (
     trust_policies,
     untrack,
 )
-
-# ── Config + credentials ──
-# (Channel activation modes are the channel APP's own concept now —
-# slack_runtime.settings owns ACTIVATION_* for the Slack app.)
-# CRED_SLACK_* are the slack app's credential KEYS in the generic cred store;
-# they are defined in config/loader.py (the store's home) and re-exported here
-# as the surface apps import — see the definition site for the layering note.
-from gideon.config.credentials import save_credential
-from gideon.config.loader import (
-    CRED_OWNER_ID,
-    CRED_SLACK_APP_TOKEN,
-    CRED_SLACK_BOT_TOKEN,
-    AppConfig,
-    config_dir,
-    config_path,
-)
-from gideon.context import (
-    ContextBuilder,
-    build_cancelled_turn_preamble,
-    compress_thread_history,
-)
-
-# ── Dashboard integration (link/handoff/mirror/update surfaces a channel drives) ──
-# `save_session_to_history` was `_save_session_to_history` — an underscore-named core
-# internal on a published surface, which is a contradiction the docstring above cannot
-# hold: an app CANNOT be insulated from a name whose spelling says "may move without
-# notice". One bundled channel app drives it, so it was a public contract by use; it is
-# now public by name, at its definition site.
-#
-# `run_chat` is OFF this facade (EA-7 step 3). It was a SECOND route past the
-# sender-trust gate — the exact defect :mod:`gideon.channel_inbound` exists to
-# close — and the chokepoint is only a chokepoint now that the door is the only route:
-# an app starts a channel-originated turn through `services.deliver_channel_inbound`,
-# never by driving the turn itself. `run_chat` could not carry the guard (it has no
-# sender to check; it legitimately serves the owner's own dashboard turns, cron,
-# heartbeat and the CLI, where there is no channel identity and nothing to deny), so
-# removal was the fix. The export could only go once all four bundled channel apps had
-# migrated onto the door and stopped importing it — discord/email/telegram transports
-# and slack's handler, landed as GideonApps #72 and #73 — because the apps repo
-# is a separate release artifact that cannot land atomically with core.
-# `tests/test_channel_inbound_chokepoint.py` now asserts the ABSENCE, so the second
-# route cannot quietly return, and the `gideon.sdk.*`-only import boundary
-# (`tests/test_apps_import_boundary.py`) makes the door structural rather than
-# conventional.
-from gideon.dashboard.chat import save_session_to_history
-from gideon.dashboard.handlers import get_update_info
-from gideon.dashboard.origin import (
-    dashboard_origin,
-    devspaces_proxy_url,
-    is_local_bind,
-    parse_dashboard_url,
-    resolve_bind_host,
-    resolve_dashboard_host,
-)
-from gideon.dashboard.token_auth import (
-    LINK_WINDOW_SECS,
-    MAX_SESSION_TTL_SECS,
-    generate_token,
-    parse_duration,
-)
-from gideon.doc_parser import extract_text, is_parseable_document
-
-# ── The core↔channel seams ──
-from gideon.gateway_services import GatewayServices
-from gideon.history import ConversationLog, HistoryConsolidator
-
-# ── Hooks + LLM streaming events + ACP ──
-from gideon.hooks import (
-    HOOK_REPLY,
-    TOOL_AUTO_APPROVE,
-    TOOL_DENY,
-    safe_read_file,
-    validate_file_path,
-)
-from gideon.llm.base import (
+from gideon.integrations.llm.base import (
     EVENT_COMPACTION_STATUS,
     EVENT_COMPLETE,
     EVENT_PERMISSION_REQUEST,
@@ -142,31 +106,34 @@ from gideon.llm.base import (
     LLMEvent,
     ModelProvider,
 )
-from gideon.llm_helpers import save_conversation_turn
-from gideon.mcp_discovery import list_servers
-from gideon.memory_service import MemoryService
-from gideon.prompt_providers.runtime import render_use_case_prompt
-from gideon.providers.settings import ProviderSettings
-from gideon.providers.use_cases import (
-    load_use_case_settings,
-    save_use_case_settings,
+from gideon.integrations.llm_helpers import save_conversation_turn
+from gideon.integrations.mcp_discovery import list_servers
+from gideon.integrations.prompt_providers.runtime import render_use_case_prompt
+from gideon.integrations.transcribe import is_available as stt_available
+from gideon.integrations.transcribe import transcribe_audio
+from gideon.integrations.tts.registry import active_voice_params
+from gideon.integrations.voice_reply import voice_reply
+from gideon.interfaces.dashboard.chat import save_session_to_history
+from gideon.interfaces.dashboard.handlers import get_update_info
+from gideon.interfaces.dashboard.origin import (
+    dashboard_origin,
+    devspaces_proxy_url,
+    is_local_bind,
+    parse_dashboard_url,
+    resolve_bind_host,
+    resolve_dashboard_host,
 )
-
-# ── Automations (the unified trigger store) ──
-#
-# `ScheduleService` is GONE (S112). A channel app's `/cron` surface reads and mutates automations
-# through the same store, projection and tool functions the API and the chat tools use, so there is
-# exactly one behaviour to reason about — a channel that kept its own scheduler view would drift
-# from the Automations page the moment either changed.
-#
-# `describe_cadence` replaces `format_schedule(job.schedule)`: it takes a `Trigger` and delegates to
-# the same shipped formatter, so the wording stays identical while the input becomes the store's.
-# `to_schedule_row` is the wire projection (id, enabled, message, next_run_ts, last_status) that the
-# API already publishes, which is what a list command needs.
-from gideon.schedule import compute_next_run_ts, format_schedule
+from gideon.interfaces.dashboard.token_auth import (
+    LINK_WINDOW_SECS,
+    MAX_SESSION_TTL_SECS,
+    generate_token,
+    parse_duration,
+)
+from gideon.operations.stats import Stats
+from gideon.security import trust_mode
 
 # ── Security + audit ──
-from gideon.security import (
+from gideon.security.security import (
     is_sensitive_path,
     redact,
     redact_and_truncate,
@@ -174,52 +141,8 @@ from gideon.security import (
     redact_exfiltration_urls,
     should_record_observe_history,
 )
-from gideon.sel import sel
+from gideon.security.sel import sel
 
-# ── Session + conversation runtime ──
-from gideon.session import (
-    BACKGROUND_KEY,
-    SessionManager,
-    SessionMap,
-)
-from gideon.skills import SkillsLoader
-from gideon.stats import Stats
-from gideon.subagent import SubagentManager
-from gideon.task import Task
-
-# ── Conformance kit (CE-6) — the one executable channel contract ──
-# Lives in the INSTALLED package, not core's `tests/`: `tests/` ships in neither the
-# wheel nor the sdist (pyproject `packages.find where = ["src"]`; MANIFEST.in grafts only
-# web/dist), and the apps repo's CI installs core as a distribution — so a kit under
-# `tests/` would be unimportable exactly where the four apps have to call it. Re-exported
-# here because this facade is the only import path an app is allowed to use.
-from gideon.testing.channel_conformance import (
-    CapturingState,
-    ChannelContractError,
-    assert_channel_contract,
-)
-from gideon.textfmt import extract_options, strip_thinking_tags
-
-# ── Media + prompts + discovery ──
-from gideon.transcribe import is_available as stt_available
-from gideon.transcribe import transcribe_audio
-from gideon.triggers.models import Trigger
-from gideon.triggers.schedule_view import (
-    describe_cadence,
-    to_schedule_row,
-)
-from gideon.triggers.store import TriggerStore
-from gideon.triggers.tools import delete as delete_automation
-from gideon.triggers.tools import delete_all as delete_all_automations
-from gideon.triggers.tools import set_paused as set_automation_paused
-from gideon.tts.registry import active_voice_params
-from gideon.voice_reply import voice_reply
-
-# The published surface, declared in ONE place. This module is the only `sdk/` module that
-# used to have no `__all__` — and it is the one that leaked two underscore-prefixed core
-# internals (`_run_chat`, `_save_session_to_history`) onto the app surface for the life of
-# the facade. A name absent from this list is not part of the channel SDK contract;
-# `tests/test_sdk_surface_is_public.py` makes both halves of that a failing build.
 __all__ = [
     "AcpError",
     "AcpProcessDied",
@@ -236,7 +159,7 @@ __all__ = [
     "ChannelDelivery",
     "ChannelMessage",
     "ChannelTransportProvider",
-    "ContextBuilder",
+    "PromptAssembler",
     "ConversationLog",
     "EVENT_COMPACTION_STATUS",
     "EVENT_COMPLETE",
@@ -259,11 +182,11 @@ __all__ = [
     "CANCELLED_STOP_REASONS",
     "STOP_REASON_STOPPED_BY_USER",
     "is_cancelled_stop",
-    "SessionManager",
+    "ConversationDirectory",
     "SessionMap",
-    "SkillsLoader",
+    "ProcedureLibrary",
     "Stats",
-    "SubagentManager",
+    "DelegationSupervisor",
     "TOOL_AUTO_APPROVE",
     "TOOL_DENY",
     "Task",

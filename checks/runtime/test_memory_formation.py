@@ -22,18 +22,20 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gideon import memory_formation as mf
-from gideon import memory_holder, memory_lint, memory_topology
-from gideon.vector_memory import VectorMemoryStore
+from gideon.cognition import memory_formation as mf
+from gideon.cognition import memory_holder, memory_lint, memory_topology
+from gideon.cognition.vector_memory import SemanticArchive
 
-SRC = str(Path(__file__).resolve().parents[1] / "src")
+SRC = str(Path(__file__).resolve().parents[2] / "runtime")
 
 
 @pytest.fixture()
 def store(tmp_path, monkeypatch):
     """A real store on tmp_path — never the user's home."""
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path, raising=False)
-    vs = VectorMemoryStore(db_path=tmp_path / "memory.db", embedding_dim=3)
+    monkeypatch.setattr(
+        "gideon.core.config.loader.config_dir", lambda: tmp_path, raising=False
+    )
+    vs = SemanticArchive(db_path=tmp_path / "memory.db", embedding_dim=3)
     vs.init()
     vs.graph_enabled = True
     yield vs
@@ -41,7 +43,9 @@ def store(tmp_path, monkeypatch):
 
 def _raw(store, key: str) -> dict | None:
     """The row for ``key`` bypassing the is_deleted filter — what "still readable" means."""
-    row = store.db.execute("SELECT * FROM semantic_memory WHERE key = ?", (key,)).fetchone()
+    row = store.db.execute(
+        "SELECT * FROM semantic_memory WHERE key = ?", (key,)
+    ).fetchone()
     return dict(row) if row else None
 
 
@@ -55,12 +59,10 @@ def _events(store, event_type: str) -> list[dict]:
     return [
         dict(r)
         for r in store.db.execute(
-            "SELECT * FROM memory_events WHERE event_type = ? ORDER BY id", (event_type,)
+            "SELECT * FROM memory_events WHERE event_type = ? ORDER BY id",
+            (event_type,),
         ).fetchall()
     ]
-
-
-# ── Clause A1: SUPERSEDE never physically deletes ─────────────────────────────
 
 
 class TestNoPhysicalDeletes:
@@ -71,17 +73,23 @@ class TestNoPhysicalDeletes:
         passes a naive "the new value is live" check, so that alone proves nothing.
         """
         store.set_semantic("project.x.editor", "prefers the vim editor", 0.9, "seed")
-        cands = mf.gather(store, [_cand(0, "project.x.editor_now", "prefers the emacs editor")])
+        cands = mf.gather(
+            store, [_cand(0, "project.x.editor_now", "prefers the emacs editor")]
+        )
         assert cands[0].overlaps, "Gather did not see the collision — premise broken"
         decisions = {
-            0: mf.Decision(index=0, verdict=mf.VERDICT_SUPERSEDE, target="project.x.editor")
+            0: mf.Decision(
+                index=0, verdict=mf.VERDICT_SUPERSEDE, target="project.x.editor"
+            )
         }
         report = mf.apply_decisions(store, cands, decisions, source="test")
 
         assert report.superseded == 1
         old = _raw(store, "project.x.editor")
         assert old is not None, "the superseded row was PHYSICALLY DELETED"
-        assert old["value_json"] == '"prefers the vim editor"', "the old VALUE was destroyed"
+        assert (
+            old["value_json"] == '"prefers the vim editor"'
+        ), "the old VALUE was destroyed"
         assert old["is_deleted"] == 1
         assert old["superseded_by"] == "project.x.editor_now"
         assert old["invalidated_at"]
@@ -95,16 +103,26 @@ class TestNoPhysicalDeletes:
         The population-level version of the property above, so a supersede that deletes
         a DIFFERENT row than the one it names is also caught.
         """
-        for key, val in (("project.x.a", "1"), ("project.x.b", "2"), ("project.x.c", "3")):
+        for key, val in (
+            ("project.x.a", "1"),
+            ("project.x.b", "2"),
+            ("project.x.c", "3"),
+        ):
             store.set_semantic(key, val, 0.9, "seed")
-        before = store.db.execute("SELECT COUNT(*) AS n FROM semantic_memory").fetchone()["n"]
-        cands = mf.gather(store, [_cand(0, "project.x.d", "4"), _cand(1, "project.x.e", "5")])
+        before = store.db.execute(
+            "SELECT COUNT(*) AS n FROM semantic_memory"
+        ).fetchone()["n"]
+        cands = mf.gather(
+            store, [_cand(0, "project.x.d", "4"), _cand(1, "project.x.e", "5")]
+        )
         decisions = {
             0: mf.Decision(index=0, verdict=mf.VERDICT_SUPERSEDE, target="project.x.a"),
             1: mf.Decision(index=1, verdict=mf.VERDICT_SUPERSEDE, target="project.x.b"),
         }
         mf.apply_decisions(store, cands, decisions, source="test")
-        after = store.db.execute("SELECT COUNT(*) AS n FROM semantic_memory").fetchone()["n"]
+        after = store.db.execute(
+            "SELECT COUNT(*) AS n FROM semantic_memory"
+        ).fetchone()["n"]
         assert after == before + 2, "a formation pass removed rows from the table"
 
     def test_extract_phase_delete_is_a_soft_tombstone(self, store):
@@ -115,9 +133,6 @@ class TestNoPhysicalDeletes:
         row = _raw(store, "user.pet_name")
         assert row is not None and row["value_json"] == '"Rex"'
         assert row["is_deleted"] == 1
-
-
-# ── Clause A2: unsure ⇒ keep BOTH, flagged in lint ────────────────────────────
 
 
 class TestKeepBothConflicts:
@@ -151,7 +166,10 @@ class TestKeepBothConflicts:
             cands,
             {
                 0: mf.Decision(
-                    index=0, verdict=mf.VERDICT_SUPERSEDE, target="project.x.status", unsure=True
+                    index=0,
+                    verdict=mf.VERDICT_SUPERSEDE,
+                    target="project.x.status",
+                    unsure=True,
                 )
             },
             source="test",
@@ -171,14 +189,20 @@ class TestKeepBothConflicts:
             cands,
             {
                 0: mf.Decision(
-                    index=0, verdict=mf.VERDICT_SUPERSEDE, target="project.x.a", unsure=True
+                    index=0,
+                    verdict=mf.VERDICT_SUPERSEDE,
+                    target="project.x.a",
+                    unsure=True,
                 )
             },
             source="test",
         )
         wal = _events(store, mf.CONFLICT_EVENT)
         assert len(wal) == 1
-        assert wal[0]["memory_key"] == "project.x.b" and wal[0]["old_value"] == "project.x.a"
+        assert (
+            wal[0]["memory_key"] == "project.x.b"
+            and wal[0]["old_value"] == "project.x.a"
+        )
 
     def test_a_resolved_conflict_stops_being_flagged(self, store):
         """A flag that outlives its cause trains the user to ignore the lint."""
@@ -189,7 +213,10 @@ class TestKeepBothConflicts:
             cands,
             {
                 0: mf.Decision(
-                    index=0, verdict=mf.VERDICT_SUPERSEDE, target="project.x.a", unsure=True
+                    index=0,
+                    verdict=mf.VERDICT_SUPERSEDE,
+                    target="project.x.a",
+                    unsure=True,
                 )
             },
             source="test",
@@ -199,15 +226,15 @@ class TestKeepBothConflicts:
         assert mf.conflicts(store) == []
 
 
-# ── Clause A3: verdict mapping + the ONE added call ───────────────────────────
-
-
 class TestVerdictMapping:
     def test_noop_writes_nothing(self, store):
         store.set_semantic("project.x.a", "1", 0.9, "seed")
         cands = mf.gather(store, [_cand(0, "project.x.a2", "1")])
         report = mf.apply_decisions(
-            store, cands, {0: mf.Decision(index=0, verdict=mf.VERDICT_NOOP)}, source="test"
+            store,
+            cands,
+            {0: mf.Decision(index=0, verdict=mf.VERDICT_NOOP)},
+            source="test",
         )
         assert report.noop == 1 and report.added == 0
         assert store.get_semantic("project.x.a2") is None
@@ -218,11 +245,17 @@ class TestVerdictMapping:
         report = mf.apply_decisions(
             store,
             cands,
-            {0: mf.Decision(index=0, verdict=mf.VERDICT_UPDATE, target="project.x.editor")},
+            {
+                0: mf.Decision(
+                    index=0, verdict=mf.VERDICT_UPDATE, target="project.x.editor"
+                )
+            },
             source="test",
         )
         assert report.updated == 1
-        assert json.loads(store.get_semantic("project.x.editor")["value_json"]) == "emacs"
+        assert (
+            json.loads(store.get_semantic("project.x.editor")["value_json"]) == "emacs"
+        )
         assert store.get_semantic("project.x.text_editor") is None
 
     def test_no_verdict_falls_back_to_add(self, store):
@@ -234,13 +267,16 @@ class TestVerdictMapping:
 
     def test_an_unknown_verdict_is_discarded_not_obeyed(self, store):
         cands = [_cand(0, "pref.new", "x")]
-        parsed = mf.parse_decisions({"verdicts": [{"index": 0, "verdict": "DELETE"}]}, cands)
+        parsed = mf.parse_decisions(
+            {"verdicts": [{"index": 0, "verdict": "DELETE"}]}, cands
+        )
         assert parsed == {}, "an out-of-vocabulary verdict was accepted"
 
     def test_supersede_of_an_unknown_target_degrades_to_add(self, store):
         cands = mf.gather(store, [_cand(0, "pref.new", "x")])
         final = mf.adjudicate(
-            cands[0], mf.Decision(index=0, verdict=mf.VERDICT_SUPERSEDE, target="pref.ghost")
+            cands[0],
+            mf.Decision(index=0, verdict=mf.VERDICT_SUPERSEDE, target="pref.ghost"),
         )
         assert final.verdict == mf.VERDICT_ADD
 
@@ -255,7 +291,9 @@ class TestVerdictMapping:
         cands = mf.gather(store, [_cand(0, "pref.editor", "emacs")])
         assert cands[0].overlaps[0].why == "same_key"
         prompt = mf.build_decide_prompt(cands)
-        assert "SUPERSEDE" in prompt and "pref.editor" in prompt and "same_key" in prompt
+        assert (
+            "SUPERSEDE" in prompt and "pref.editor" in prompt and "same_key" in prompt
+        )
 
 
 class TestGather:
@@ -268,38 +306,41 @@ class TestGather:
 
     def test_keyword_overlap_finds_a_differently_keyed_duplicate(self, store):
         store.set_semantic("pref.editor", "prefers the vim editor", 0.9, "seed")
-        cands = mf.gather(store, [_cand(0, "pref.text_editor", "prefers the vim editor")])
+        cands = mf.gather(
+            store, [_cand(0, "pref.text_editor", "prefers the vim editor")]
+        )
         assert [o.key for o in cands[0].overlaps] == ["pref.editor"]
         assert cands[0].overlaps[0].why == "keyword"
 
     def test_gather_is_deterministic(self, store):
         for i in range(6):
-            store.set_semantic(f"pref.k{i}", "prefers the vim editor daily", 0.9, "seed")
+            store.set_semantic(
+                f"pref.k{i}", "prefers the vim editor daily", 0.9, "seed"
+            )
         runs = [
             [
                 o.key
-                for o in mf.gather(store, [_cand(0, "pref.new", "prefers the vim editor daily")])[
-                    0
-                ].overlaps
+                for o in mf.gather(
+                    store, [_cand(0, "pref.new", "prefers the vim editor daily")]
+                )[0].overlaps
             ]
             for _ in range(4)
         ]
         assert len(set(map(tuple, runs))) == 1
 
 
-# ── Clause B: holder attribution ──────────────────────────────────────────────
-
-
 class TestHolderAxis:
     def test_claim_prefix_is_allowlisted(self, store):
-        assert store.set_semantic("claim.deploy_slips", "the deploy slips", 0.9, "seed") is None
+        assert (
+            store.set_semantic("claim.deploy_slips", "the deploy slips", 0.9, "seed")
+            is None
+        )
         assert store.get_semantic("claim.deploy_slips") is not None
 
     def test_weight_is_quantized_and_capped_per_holder_class(self):
         assert memory_holder.normalize_weight("external", 0.93) == pytest.approx(0.55)
         assert memory_holder.normalize_weight("user", 0.93) == pytest.approx(0.75)
         assert memory_holder.normalize_weight("person:e-1", 1.0) == pytest.approx(0.75)
-        # On the 0.05 grid, under the cap.
         assert memory_holder.normalize_weight("external", 0.42) == pytest.approx(0.40)
         assert memory_holder.normalize_weight("user", 0.31) == pytest.approx(0.30)
 
@@ -329,19 +370,28 @@ class TestHolderAxis:
         store.invalidate_alias_index()
         store.set_semantic("pref.plain", "kept", 0.9, "seed")
         store.set_semantic(
-            "claim.deploy", "the deploy slips", 0.9, "seed", holder=f"person:{alex}", weight=0.4
+            "claim.deploy",
+            "the deploy slips",
+            0.9,
+            "seed",
+            holder=f"person:{alex}",
+            weight=0.4,
         )
         block = store.get_l1_manifest()
         assert "claim.deploy: the deploy slips [Alex believes, weight 0.40]" in block
         assert "pref.plain: kept\n" in block, "a plain fact's rendering changed"
-        assert "is a CLAIM someone holds" in block, "an attributed claim rendered with no fence"
+        assert (
+            "is a CLAIM someone holds" in block
+        ), "an attributed claim rendered with no fence"
 
     def test_the_fence_is_absent_when_nothing_is_attributed(self, store):
         store.set_semantic("pref.plain", "kept", 0.9, "seed")
         assert "is a CLAIM someone holds" not in store.get_l1_manifest()
 
     def test_query_scored_fact_block_also_attributes(self, store):
-        store.set_semantic("claim.deploy", "the deploy slips", 0.9, "seed", holder="external")
+        store.set_semantic(
+            "claim.deploy", "the deploy slips", 0.9, "seed", holder="external"
+        )
         block = store.get_semantic_context(query_text="deploy")
         assert "[reported externally, weight" in block
 
@@ -388,7 +438,12 @@ class TestHolderPrecedenceAtTheDecisionPoint:
 
     def _competing_pair(self, store, *, incumbent_holder: str, challenger_holder: str):
         store.set_semantic(
-            "claim.ship_date", "ships Friday", 0.9, "seed", holder=incumbent_holder, weight=0.7
+            "claim.ship_date",
+            "ships Friday",
+            0.9,
+            "seed",
+            holder=incumbent_holder,
+            weight=0.7,
         )
         cands = mf.gather(
             store,
@@ -403,41 +458,49 @@ class TestHolderPrecedenceAtTheDecisionPoint:
             ],
         )
         decisions = {
-            0: mf.Decision(index=0, verdict=mf.VERDICT_SUPERSEDE, target="claim.ship_date")
+            0: mf.Decision(
+                index=0, verdict=mf.VERDICT_SUPERSEDE, target="claim.ship_date"
+            )
         }
-        return mf.apply_decisions(store, cands, decisions, source="test", holder_attribution=True)
+        return mf.apply_decisions(
+            store, cands, decisions, source="test", holder_attribution=True
+        )
 
     def test_an_external_claim_cannot_supersede_a_user_statement(self, store):
-        report = self._competing_pair(store, incumbent_holder="user", challenger_holder="external")
+        report = self._competing_pair(
+            store, incumbent_holder="user", challenger_holder="external"
+        )
         assert report.superseded == 0, "an outside rumour retired what the user said"
         assert store.get_semantic("claim.ship_date") is not None
         assert report.conflicts == [("claim.ship_date_alt", "claim.ship_date")]
 
     def test_a_user_statement_does_supersede_an_external_claim(self, store):
         """The vacuity guard: precedence must not block EVERY supersede."""
-        report = self._competing_pair(store, incumbent_holder="external", challenger_holder="user")
+        report = self._competing_pair(
+            store, incumbent_holder="external", challenger_holder="user"
+        )
         assert report.superseded == 1
         assert store.get_semantic("claim.ship_date") is None
         assert _raw(store, "claim.ship_date")["superseded_by"] == "claim.ship_date_alt"
         assert report.conflicts == []
 
     def test_equal_precedence_leaves_the_models_verdict_alone(self, store):
-        report = self._competing_pair(store, incumbent_holder="", challenger_holder="assistant")
+        report = self._competing_pair(
+            store, incumbent_holder="", challenger_holder="assistant"
+        )
         assert report.superseded == 1
 
     def test_precedence_ordering_is_user_over_compiled_over_external(self):
         assert memory_holder.precedence("user") > memory_holder.precedence("")
         assert memory_holder.precedence("") == memory_holder.precedence("assistant")
-        assert memory_holder.precedence("assistant") > memory_holder.precedence("external")
-        assert memory_holder.precedence("assistant") > memory_holder.precedence("person:e-1")
+        assert memory_holder.precedence("assistant") > memory_holder.precedence(
+            "external"
+        )
+        assert memory_holder.precedence("assistant") > memory_holder.precedence(
+            "person:e-1"
+        )
 
 
-# ── Clause C: deterministic seeded Louvain + the topology block ───────────────
-
-#: A co-occurrence graph whose partition genuinely DEPENDS on the visit order — found by
-#: sweeping random graphs (dense enough that local moving has real choices). A clean
-#: two-cluster fixture would make the determinism tests vacuous: they would pass with the
-#: seed removed entirely.
 _SEED_SENSITIVE_RECORDS = [
     (0, 3),
     (0, 3),
@@ -509,9 +572,9 @@ class TestLouvainDeterminism:
         code = (
             "import json;"
             "from pathlib import Path;"
-            "from gideon.vector_memory import VectorMemoryStore;"
-            "from gideon import memory_topology as mt;"
-            f"vs=VectorMemoryStore(db_path=Path({db_path!r}), embedding_dim=3);"
+            "from gideon.cognition.vector_memory import SemanticArchive;"
+            "from gideon.cognition import memory_topology as mt;"
+            f"vs=SemanticArchive(db_path=Path({db_path!r}), embedding_dim=3);"
             "vs.init();vs.graph_enabled=True;"
             "print(json.dumps(sorted(mt.detect_communities(vs.db).items())))"
         )
@@ -521,7 +584,11 @@ class TestLouvainDeterminism:
                 [sys.executable, "-c", code],
                 capture_output=True,
                 text=True,
-                env={"PYTHONPATH": SRC, "PYTHONHASHSEED": hashseed, "PATH": "/usr/bin:/bin"},
+                env={
+                    "PYTHONPATH": SRC,
+                    "PYTHONHASHSEED": hashseed,
+                    "PATH": "/usr/bin:/bin",
+                },
                 cwd=str(tmp_path),
             )
             assert proc.returncode == 0, proc.stderr
@@ -533,7 +600,9 @@ class TestLouvainDeterminism:
         graph = store.graph
         for name in ("A", "B", "C", "D", "E"):
             graph.upsert_entity(f"Ent{name}", "project", entity_id=f"e-{name}")
-        for idx, pair in enumerate([("A", "B"), ("B", "C"), ("A", "C"), ("D", "E"), ("D", "E")]):
+        for idx, pair in enumerate(
+            [("A", "B"), ("B", "C"), ("A", "C"), ("D", "E"), ("D", "E")]
+        ):
             for node in pair:
                 graph.add_link(
                     from_kind="semantic",
@@ -550,7 +619,9 @@ class TestLouvainDeterminism:
         graph = store.graph
         for name in "PQRST":
             graph.upsert_entity(f"Ent{name}", "project", entity_id=f"e-{name}")
-        for idx, pair in enumerate([("P", "Q"), ("Q", "R"), ("P", "R"), ("S", "T"), ("S", "T")]):
+        for idx, pair in enumerate(
+            [("P", "Q"), ("Q", "R"), ("P", "R"), ("S", "T"), ("S", "T")]
+        ):
             for node in pair:
                 graph.add_link(
                     from_kind="semantic",
@@ -577,18 +648,21 @@ class TestTopologyPersistenceAndBlock:
         memory_topology.write_communities(store)
         before = {
             r["entity_id"]: r["community"]
-            for r in store.db.execute("SELECT entity_id, community FROM mem_link_stats").fetchall()
+            for r in store.db.execute(
+                "SELECT entity_id, community FROM mem_link_stats"
+            ).fetchall()
         }
         memory_topology.write_communities(store)
         after = {
             r["entity_id"]: r["community"]
-            for r in store.db.execute("SELECT entity_id, community FROM mem_link_stats").fetchall()
+            for r in store.db.execute(
+                "SELECT entity_id, community FROM mem_link_stats"
+            ).fetchall()
         }
         assert before == after
 
     def test_the_block_is_bounded_and_names_communities(self, store):
         graph = store.graph
-        # Six 3-cliques → six communities, more than the block may name.
         for cluster in range(6):
             ids = [f"e-{cluster}{i}" for i in range(3)]
             for eid in ids:
@@ -613,7 +687,10 @@ class TestTopologyPersistenceAndBlock:
             graph.upsert_entity(f"Ent{name}", "project", entity_id=f"e-{name}")
         for node in ("e-A", "e-B"):
             graph.add_link(
-                from_kind="semantic", from_ref="r0", to_entity=node, link_type="mentions"
+                from_kind="semantic",
+                from_ref="r0",
+                to_entity=node,
+                link_type="mentions",
             )
         memory_topology.write_communities(store)
         assert memory_topology.topology_block(store.db) == ""
@@ -630,7 +707,7 @@ class TestTopologyPersistenceAndBlock:
 
 class TestTopologyInjectionGate:
     def _service(self, store):
-        from gideon.memory_service import MemoryService
+        from gideon.cognition.memory_service import MemoryService
 
         return MemoryService.over_vector_store(store)
 
@@ -640,7 +717,7 @@ class TestTopologyInjectionGate:
         assert self._service(store).topology_block() == ""
 
     def test_the_toggle_admits_the_block_into_get_context(self, store, monkeypatch):
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         _seed_graph(store)
         memory_topology.write_communities(store)
@@ -655,7 +732,7 @@ class TestTopologyInjectionGate:
         assert "Memory topology" in svc.get_context(l1_manifest=True)
 
     def test_graph_off_means_no_block_even_with_the_toggle_on(self, store, monkeypatch):
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         _seed_graph(store)
         memory_topology.write_communities(store)
@@ -666,16 +743,16 @@ class TestTopologyInjectionGate:
         assert self._service(store).topology_block() == ""
 
 
-# ── The consolidation seam: exactly ONE added structured call ─────────────────
-
-
 class TestConsolidationSeam:
     def _consolidator(self, store, tmp_path):
-        from gideon.history import HistoryConsolidator
+        from gideon.cognition.history import HistoryConsolidator
 
         log = MagicMock()
         log.get_unconsolidated = MagicMock(
-            return_value=([{"role": "user", "content": "I use emacs now", "ts": "2026-08-15"}], 1)
+            return_value=(
+                [{"role": "user", "content": "I use emacs now", "ts": "2026-08-15"}],
+                1,
+            )
         )
         log.get_metadata = MagicMock(return_value={})
         memory = MagicMock()
@@ -686,7 +763,9 @@ class TestConsolidationSeam:
         )
 
     @pytest.mark.asyncio
-    async def test_a_colliding_candidate_costs_exactly_one_extra_call(self, store, tmp_path):
+    async def test_a_colliding_candidate_costs_exactly_one_extra_call(
+        self, store, tmp_path
+    ):
         """Extract + Decide == 2 calls. A third would be a redesign, not this atom."""
         store.set_semantic("pref.editor", "vim", 0.9, "seed")
         consolidator = self._consolidator(store, tmp_path)
@@ -714,7 +793,9 @@ class TestConsolidationSeam:
 
         async def fake_llm(prompt: str):
             calls.append(prompt)
-            return {"semantic": [{"key": "pref.brand_new", "value": "x", "confidence": 0.9}]}
+            return {
+                "semantic": [{"key": "pref.brand_new", "value": "x", "confidence": 0.9}]
+            }
 
         consolidator._call_llm = fake_llm  # type: ignore[assignment]
         await consolidator._consolidate_locked("k", include_history=False)
@@ -733,13 +814,19 @@ class TestConsolidationSeam:
             if len(calls) == 1:
                 return {
                     "semantic": [
-                        {"key": "pref.editor_new", "value": "emacs vim", "confidence": 0.9}
+                        {
+                            "key": "pref.editor_new",
+                            "value": "emacs vim",
+                            "confidence": 0.9,
+                        }
                     ]
                 }
-            return None  # Decide failed
+            return None
 
         consolidator._call_llm = fake_llm  # type: ignore[assignment]
         await consolidator._consolidate_locked("k", include_history=False)
         assert len(calls) == 2
         assert store.get_semantic("pref.editor_new") is not None
-        assert store.get_semantic("pref.editor") is not None, "a failed Decide retired a row"
+        assert (
+            store.get_semantic("pref.editor") is not None
+        ), "a failed Decide retired a row"

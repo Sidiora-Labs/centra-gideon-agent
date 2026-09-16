@@ -10,18 +10,25 @@ from __future__ import annotations
 
 import json
 
-from gideon import pricing
-from gideon.pricing import _PRICING_FILE, estimate_cost, has_pricing
+from gideon.integrations.model_windows import _TOKENS_FILE
+from gideon.operations import pricing
+from gideon.operations.pricing import _PRICING_FILE, estimate_cost, has_pricing
 
 
 def test_known_model_input_output():
-    # claude-sonnet-4.5: in 3.0 / out 15.0 per 1M
-    cost = estimate_cost("claude-sonnet-4.5", input_tokens=1_000_000, output_tokens=1_000_000)
+    cost = estimate_cost(
+        "claude-sonnet-4.5", input_tokens=1_000_000, output_tokens=1_000_000
+    )
     assert abs(cost - 18.0) < 1e-6
 
 
 def test_unknown_model_is_zero():
-    assert estimate_cost("totally-made-up-xyz", input_tokens=999_999, output_tokens=999_999) == 0.0
+    assert (
+        estimate_cost(
+            "totally-made-up-xyz", input_tokens=999_999, output_tokens=999_999
+        )
+        == 0.0
+    )
     assert not has_pricing("totally-made-up-xyz")
 
 
@@ -30,7 +37,6 @@ def test_empty_model_is_zero():
 
 
 def test_prefix_match_handles_suffix():
-    # A live id with a date suffix maps to its family row.
     base = estimate_cost("claude-sonnet-4.5", input_tokens=1_000_000)
     suffixed = estimate_cost("claude-sonnet-4.5-20991231", input_tokens=1_000_000)
     assert suffixed == base == 3.0
@@ -63,13 +69,15 @@ def test_unknown_stays_unpriced_through_canonicalization():
     """The vacuity partner: canonicalization must never conjure a price. A
     prefixed id whose family has no row, and a non-Anthropic id that merely
     looks region-prefixed, both stay an honest 0.0."""
-    assert estimate_cost("us.anthropic.claude-nonexistent-9-9", input_tokens=1_000_000) == 0.0
+    assert (
+        estimate_cost("us.anthropic.claude-nonexistent-9-9", input_tokens=1_000_000)
+        == 0.0
+    )
     assert estimate_cost("us.meta.llama-4-8", input_tokens=1_000_000) == 0.0
     assert not has_pricing("us.anthropic.claude-nonexistent-9-9")
 
 
 def test_cache_rates_applied():
-    # sonnet-4.5: cache_read 0.3, cache_write 3.75 per 1M
     cost = estimate_cost(
         "claude-sonnet-4.5",
         cache_read_tokens=1_000_000,
@@ -105,9 +113,11 @@ def test_pricing_keys_subset_of_token_table():
     Keeps the two tables aligned — a priced model the rest of the app doesn't
     know about is almost certainly a typo.
     """
-    tokens_file = _PRICING_FILE.parent / "model_tokens.json"
+    tokens_file = _TOKENS_FILE
     tokens = {
-        k for k in json.loads(tokens_file.read_text(encoding="utf-8")) if not k.startswith("_")
+        k
+        for k in json.loads(tokens_file.read_text(encoding="utf-8"))
+        if not k.startswith("_")
     }
     priced = {k for k in pricing._PRICES}
     orphans = priced - tokens

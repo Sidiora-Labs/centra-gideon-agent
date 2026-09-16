@@ -1,7 +1,7 @@
 """Retroactive run/conversation → skill promotion (LEARN E1.3 — WF2LEA-11).
 
 The clauses of the contract, each pinned against the REAL proposal queue, run store and
-SkillsLoader (monkeypatched to a tmp home), not hand-built state:
+ProcedureLibrary (monkeypatched to a tmp home), not hand-built state:
 
 1. a successful run — or a conversation — promotes to a `Kind.SKILL` proposal in the §2.2 queue,
    carrying the rationale a human reads before deciding;
@@ -15,12 +15,12 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.learning import proposals as P
-from gideon.learning import skill_promotion as SP
-from gideon.learning.proposals import Kind, Status
-from gideon.skills.loader import skills_dir
-from gideon.workflows import store as run_store
-from gideon.workflows.models import RunStatus, WorkflowRun
+from gideon.automation.workflows import store as run_store
+from gideon.automation.workflows.models import RunStatus, WorkflowRun
+from gideon.cognition.learning import proposals as P
+from gideon.cognition.learning import skill_promotion as SP
+from gideon.cognition.learning.proposals import Kind, Status
+from gideon.extensions.skills.loader import skills_dir
 
 _PROCEDURE = "1. Fetch the feed.\n2. Render the report.\n3. Publish and verify it."
 
@@ -29,12 +29,12 @@ _PROCEDURE = "1. Fetch the feed.\n2. Render the report.\n3. Publish and verify i
 def home(tmp_path, monkeypatch):
     """Point the queue, the run store and the skills tree at a tmp home. NEVER the real one.
 
-    `GIDEON_HOME` is set (not just the loader symbol patched) because `SkillsLoader` and the
+    `GIDEON_HOME` is set (not just the loader symbol patched) because `ProcedureLibrary` and the
     run store bind `config_dir` at import; only the env var — which `config_dir()` re-reads live on
     every call — isolates every store a promotion touches, not just the proposal queue.
     """
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     monkeypatch.setattr(P, "_surface_in_inbox", lambda prop: None)
     monkeypatch.setattr(P, "_resolve_inbox_item", lambda pid, status: None)
     monkeypatch.setattr(P, "_audit", lambda operation, prop, outcome: None)
@@ -64,20 +64,17 @@ def _skill_files(root) -> list[str]:
     return sorted(str(p.relative_to(root)) for p in root.rglob("SKILL.md"))
 
 
-# ── clause 1: a promotion reaches the one queue ──────────────────────────────
-
-
 class TestPromotionFiles:
     def test_a_conversation_promotes_to_a_skill_proposal(self) -> None:
         """The reserved `Kind.SKILL` slot gets a writer: a conversation becomes one PENDING row."""
-        result = _promote(transcript=[{"role": "user", "content": "publish tonight's report"}])
+        result = _promote(
+            transcript=[{"role": "user", "content": "publish tonight's report"}]
+        )
 
         assert result.filed, result.refusal
         prop = result.proposal
         assert prop.kind == Kind.SKILL.value
         assert prop.status == Status.PENDING.value
-        # The rationale is the title (what a reviewer reads); the procedure is the body (what an
-        # accept writes). Conflated, the rationale would leak into the installed SKILL.md.
         assert prop.title == "We worked this out from scratch and it recurs nightly"
         assert prop.body == _PROCEDURE
         assert SP._decode_target(prop.target) == (
@@ -146,9 +143,6 @@ class TestPromotionFiles:
         assert prop.manifest_issues == []
 
 
-# ── clause 2: propose, never write ──────────────────────────────────────────
-
-
 class TestNeverWrites:
     def test_promotion_writes_no_skill(self, home) -> None:
         before = _skill_files(home)
@@ -182,9 +176,6 @@ def _installer(prop) -> None:
         SP.install_accepted_skill(data)
 
 
-# ── clause 3: the human accept installs, so the queue is not a dead end ─────
-
-
 class TestAcceptInstalls:
     def test_accepting_writes_exactly_one_auto_skill(self, home) -> None:
         prop = _promote().proposal
@@ -194,12 +185,9 @@ class TestAcceptInstalls:
         written = skills_dir() / "auto" / "publish-the-nightly-report" / "SKILL.md"
         assert _skill_files(home) == [str(written.relative_to(home))]
         content = written.read_text(encoding="utf-8")
-        # Frontmatter from the existing auto-skill rail — the description is what makes the
-        # promoted skill discoverable on a later turn, and `source: auto` is what ages it.
         assert "description: Build and publish the nightly report end to end" in content
         assert "source: auto" in content
         assert "3. Publish and verify it." in content
-        # The rationale is review-only; it must not reach the installed file.
         assert "worked this out from scratch" not in content
 
     def test_a_failed_install_does_not_record_the_decision(self, home) -> None:
@@ -220,9 +208,6 @@ class TestAcceptInstalls:
         with pytest.raises(P.AcceptError):
             P.accept(second.id, installer=_installer, actor="user")
         assert second.fingerprint not in P.load_decisions()
-
-
-# ── clause 4: a rejected promotion does not re-surface ──────────────────────
 
 
 class TestDecisionMemory:

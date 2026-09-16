@@ -24,11 +24,11 @@ import json
 
 import pytest
 
-from gideon.workflows import checkpoints as CP
-from gideon.workflows import mutations as M
-from gideon.workflows import store
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.models import (
+from gideon.automation.workflows import checkpoints as CP
+from gideon.automation.workflows import mutations as M
+from gideon.automation.workflows import store
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.models import (
     SUCCESS_STATES,
     InstanceState,
     Node,
@@ -50,7 +50,7 @@ def anyio_backend() -> str:
 def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
 
 
@@ -61,15 +61,17 @@ CHAIN = {
         "id": "s",
         "children": [
             {"kind": "transform", "id": "a", "config": {"expr": {"n": 1}}},
-            {"kind": "infer", "id": "b", "config": {"prompt": "b {{nodes.a.output.n}}"}},
+            {
+                "kind": "infer",
+                "id": "b",
+                "config": {"prompt": "b {{nodes.a.output.n}}"},
+            },
             {"kind": "infer", "id": "c", "config": {"prompt": "c {{nodes.b.output}}"}},
             {"kind": "transform", "id": "iso", "config": {"expr": "static"}},
         ],
     },
 }
 
-#: A nested shape where tree descendants and binding consumers diverge hardest: `outer`
-#: contains `inner`, but the consumer of `inner` sits OUTSIDE `outer` entirely.
 NESTED = {
     "name": "nested",
     "root": {
@@ -115,9 +117,6 @@ async def _completed(spec: dict = CHAIN):
     return c
 
 
-# ── property: the cascade IS the binding closure ─────────────────────────────
-
-
 class TestCascadeEqualsBindingClosure:
     """The plan's headline property: cascade == binding closure, NOT tree descendants."""
 
@@ -152,9 +151,6 @@ class TestCascadeEqualsBindingClosure:
             assert "iso" not in M.binding_closure(Node.from_dict(CHAIN["root"]), {seed})
 
 
-# ── property: rewind idempotence ─────────────────────────────────────────────
-
-
 class TestRewindIdempotence:
     async def test_rewinding_twice_equals_rewinding_once(self) -> None:
         """A retried mutation must not double-archive or lose an output."""
@@ -174,7 +170,6 @@ class TestRewindIdempotence:
         )
 
         assert first == second
-        # Nothing left to archive the second time — the outputs were already cleared.
         assert attic_after_second == attic_after_first
 
     async def test_a_rewound_node_holds_no_stale_output_reference(self) -> None:
@@ -186,14 +181,15 @@ class TestRewindIdempotence:
                 assert inst.output_ref == "", path
 
 
-# ── property: no frozen mutation, acyclicity preserved ───────────────────────
-
-
 class TestInvariantsHold:
-    @pytest.mark.parametrize("state", ["running", "done", "failed", "cancelled", "escalated"])
+    @pytest.mark.parametrize(
+        "state", ["running", "done", "failed", "cancelled", "escalated"]
+    )
     def test_no_op_can_edit_a_frozen_node(self, state: str) -> None:
         instances = {
-            "root.children[1]": NodeInstance(path="root.children[1]", state=InstanceState(state))
+            "root.children[1]": NodeInstance(
+                path="root.children[1]", state=InstanceState(state)
+            )
         }
         for op_name in ("update_node", "delete", "move", "skip"):
             raw = {"op": op_name, "node_id": "b"}
@@ -203,7 +199,9 @@ class TestInvariantsHold:
                 raw["parent_id"] = "s"
             ops, _ = M.parse_batch([raw])
             issues = M.validate_batch(ops, Node.from_dict(CHAIN["root"]), instances)
-            assert "WF_MUT_FROZEN_NODE" in [i.code for i in issues], f"{op_name}/{state}"
+            assert "WF_MUT_FROZEN_NODE" in [
+                i.code for i in issues
+            ], f"{op_name}/{state}"
 
     def test_every_accepted_batch_leaves_the_spec_acyclic(self) -> None:
         """Acyclicity is re-checked on the CANDIDATE, so a batch cannot smuggle in a cycle."""
@@ -223,15 +221,10 @@ class TestInvariantsHold:
             CHAIN,
             {},
         )
-        # Either rejected outright, or accepted with a spec the validator calls acyclic —
-        # never accepted with a cycle in it.
         if result.ok:
-            from gideon.workflows.validator import validate_spec
+            from gideon.automation.workflows.validator import validate_spec
 
             assert validate_spec(result.spec).ok
-
-
-# ── checkpoints ──────────────────────────────────────────────────────────────
 
 
 class TestCheckpoints:
@@ -266,9 +259,6 @@ class TestCheckpoints:
 
     def test_listing_a_run_with_no_checkpoints_is_empty(self) -> None:
         assert CP.list_checkpoints("nope") == []
-
-
-# ── property: fork isolation ─────────────────────────────────────────────────
 
 
 class TestForkIsolation:
@@ -310,8 +300,9 @@ class TestForkIsolation:
         for inst in child_instances.values():
             inst.state = InstanceState.PENDING
         store.write_state(result.child.id, child_instances)
-        # The parent's nodes are still done.
-        assert all(i.state in SUCCESS_STATES for i in store.read_state(c.run.id).values())
+        assert all(
+            i.state in SUCCESS_STATES for i in store.read_state(c.run.id).values()
+        )
 
     async def test_the_shared_axes_are_surfaced_not_hidden(self) -> None:
         """A caller who believes a fork is a sandbox will corrupt both runs."""
@@ -342,9 +333,12 @@ class TestForkIsCheap:
         assert result.cached_prefix > 0
         assert store.read_jsonl(result.child.id, "journal.jsonl")
 
-    async def test_the_outputs_come_along_so_a_cache_hit_reads_a_real_file(self) -> None:
+    async def test_the_outputs_come_along_so_a_cache_hit_reads_a_real_file(
+        self,
+    ) -> None:
         """Without the outputs, a hit (keys match) reads a MISSING file and resolves a
-        binding to None — a silent wrong answer, the exact failure this slice prevents."""
+        binding to None — a silent wrong answer, the exact failure this slice prevents.
+        """
         c = await _completed()
         result = CP.fork_run(c.run, c.spec, c.instances)
         for path, inst in store.read_state(result.child.id).items():
@@ -360,13 +354,14 @@ class TestForkIsCheap:
             store.get(result.child.id), c.spec, services=EngineServices(completion=fn)
         )
         assert await child.run_to_completion(timeout=20) == RunStatus.COMPLETE
-        assert fn.calls == []  # everything served from the copied journal
+        assert fn.calls == []
 
     async def test_a_fork_from_a_checkpoint_uses_that_snapshot(self) -> None:
         c = await _completed()
-        # A checkpoint taken when only `a` was done.
         partial = {
-            "root.children[0]": NodeInstance(path="root.children[0]", state=InstanceState.DONE)
+            "root.children[0]": NodeInstance(
+                path="root.children[0]", state=InstanceState.DONE
+            )
         }
         cp = CP.save_checkpoint(c.run, partial, note="early")
         result = CP.fork_run(c.run, c.spec, c.instances, checkpoint_id=cp.id)
@@ -383,14 +378,15 @@ class TestForkThroughTheMutationQueue:
     async def test_the_fork_op_branches_a_child_and_leaves_this_run_alone(self) -> None:
         c = await _completed()
         before = {p: i.state for p, i in store.read_state(c.run.id).items()}
-        body = c.submit_mutation([{"op": "fork", "note": "stricter judge"}], confirm=True)
+        body = c.submit_mutation(
+            [{"op": "fork", "note": "stricter judge"}], confirm=True
+        )
         assert body["ok"]
         c._drain_mutations()
         children, _total = store.list_runs()
         forks = [r for r in children if r.parent_run_id == c.run.id]
         assert len(forks) == 1
         assert forks[0].forked_from["note"] == "stricter judge"
-        # This run is untouched — the whole point of fork versus rewind.
         assert {p: i.state for p, i in store.read_state(c.run.id).items()} == before
 
     async def test_a_forked_child_starts_in_draft(self) -> None:
@@ -403,7 +399,7 @@ class TestForkThroughTheMutationQueue:
         assert child.status == RunStatus.DRAFT
 
     async def test_the_fork_is_journaled_as_a_child_attach(self) -> None:
-        from gideon.workflows.journal import CHILD_RUN_ATTACH, ledger
+        from gideon.automation.workflows.journal import CHILD_RUN_ATTACH, ledger
 
         c = await _completed()
         c.submit_mutation([{"op": "fork"}], confirm=True)
@@ -411,15 +407,19 @@ class TestForkThroughTheMutationQueue:
         attaches = [e for e in ledger(c.run.id) if e.get("kind") == CHILD_RUN_ATTACH]
         assert len(attaches) == 1 and attaches[0]["parent_run_id"] == c.run.id
 
-    async def test_an_unknown_checkpoint_is_journaled_as_rejected_not_raised(self) -> None:
+    async def test_an_unknown_checkpoint_is_journaled_as_rejected_not_raised(
+        self,
+    ) -> None:
         """A bad checkpoint id must not take the controller's tick loop down."""
-        from gideon.workflows.journal import MUTATION_REJECTED, ledger
+        from gideon.automation.workflows.journal import MUTATION_REJECTED, ledger
 
         c = await _completed()
         c.submit_mutation([{"op": "fork", "checkpoint_id": "999"}], confirm=True)
         c._drain_mutations()
         rejects = [e for e in ledger(c.run.id) if e.get("kind") == MUTATION_REJECTED]
-        assert rejects and rejects[0]["issues"][0]["code"] == "WF_MUT_UNKNOWN_CHECKPOINT"
+        assert (
+            rejects and rejects[0]["issues"][0]["code"] == "WF_MUT_UNKNOWN_CHECKPOINT"
+        )
 
 
 class TestPruneFork:
@@ -440,9 +440,6 @@ class TestPruneFork:
     def test_a_traversal_id_is_refused(self) -> None:
         """A stored run id is not a trust boundary (WF2-R13 deletion-sweep contract)."""
         assert not CP.prune_fork("../../etc")
-
-
-# ── revert ───────────────────────────────────────────────────────────────────
 
 
 class TestRevert:
@@ -470,7 +467,9 @@ class TestRevert:
     async def test_reverting_archives_the_output(self) -> None:
         c = await _completed()
         paths, _conflict = CP.revert_node(c.root, c.instances, "c")
-        reset = CP.revert_paths(c.run.id, c.instances, paths, version=c.run.spec_version)
+        reset = CP.revert_paths(
+            c.run.id, c.instances, paths, version=c.run.spec_version
+        )
         assert reset == 1
         assert c.instances["root.children[2]"].state == InstanceState.PENDING
         assert list((store.run_dir(c.run.id) / "outputs" / "attic").rglob("*.json"))

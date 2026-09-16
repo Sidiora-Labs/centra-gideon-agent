@@ -20,8 +20,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from gideon import notification_kinds as nk
-from gideon.inbox import (
+from gideon.integrations.inbox import (
     NON_CHANNEL_KINDS,
     Classification,
     InboxItem,
@@ -31,6 +30,7 @@ from gideon.inbox import (
     emit_attention_item,
     make_item_id,
 )
+from gideon.workspace import notification_kinds as nk
 
 
 @pytest.fixture()
@@ -57,9 +57,6 @@ def _channel_item(**over):
     )
     base.update(over)
     return InboxItem(**base)
-
-
-# ── T2.1: additive extension ────────────────────────────────────────────
 
 
 def test_new_fields_have_back_compat_defaults():
@@ -121,9 +118,6 @@ def test_sent_status_survives_the_extension():
     assert ItemStatus.SENT.value == "sent"
 
 
-# ── T2.1: the id contract ───────────────────────────────────────────────
-
-
 def test_generated_id_keeps_the_trailing_timestamp_contract():
     """`InboxItem.ts` rsplits on the last underscore; sorting/retention read it."""
     item_id = make_item_id(ItemKind.NEEDS_INPUT.value, now=1700000000.5)
@@ -144,8 +138,8 @@ def test_generated_ids_are_unique_within_the_same_instant():
 
 def test_generated_id_has_exactly_the_expected_shape():
     parts = make_item_id("needs_input", now=1700000000.0).split("_")
-    assert parts[0] == "needs"  # kind itself contains an underscore…
-    assert parts[1] == "input"  # …which is fine: only the LAST segment is the ts
+    assert parts[0] == "needs"
+    assert parts[1] == "input"
     assert len(parts[2]) == 8
     assert float(parts[3]) == 1700000000.0
 
@@ -154,9 +148,6 @@ def test_non_channel_kinds_are_enumerated():
     assert ItemKind.NEEDS_INPUT.value in NON_CHANNEL_KINDS
     assert ItemKind.MESSAGE.value not in NON_CHANNEL_KINDS
     assert ItemKind.MENTION.value not in NON_CHANNEL_KINDS
-
-
-# ── T2.2: emit_attention_item ───────────────────────────────────────────
 
 
 def test_emit_creates_a_pending_item_and_notifies_once(store, state):
@@ -179,14 +170,21 @@ def test_emit_creates_a_pending_item_and_notifies_once(store, state):
 
 def test_emit_notifies_with_the_resolvable_wire_kind(store, state):
     """The wire value must map back to the registered pair, or the rule is lost."""
-    emit_attention_item(state, source="loop", kind="needs_input", title="T", body="B", store=store)
+    emit_attention_item(
+        state, source="loop", kind="needs_input", title="T", body="B", store=store
+    )
     wire_kind = state.notify.call_args[0][0]
     assert nk.kind_for_legacy(wire_kind).key == "loop/needs_input"
 
 
 def test_emit_links_the_notification_to_its_item(store, state):
     item_id = emit_attention_item(
-        state, source="loop", kind="needs_input", title="T", refs={"loop": "L1"}, store=store
+        state,
+        source="loop",
+        kind="needs_input",
+        title="T",
+        refs={"loop": "L1"},
+        store=store,
     )
     meta = state.notify.call_args.kwargs["meta"]
     assert meta["inbox_item"] == item_id
@@ -196,25 +194,33 @@ def test_emit_links_the_notification_to_its_item(store, state):
 
 def test_emit_persists_immediately(store, state):
     """A crash between add() and flush() would lose a standing request."""
-    item_id = emit_attention_item(state, source="loop", kind="needs_input", title="T", store=store)
+    item_id = emit_attention_item(
+        state, source="loop", kind="needs_input", title="T", store=store
+    )
     on_disk = json.loads(store._path.read_text())
     assert [i["id"] for i in on_disk["items"]] == [item_id]
 
 
 def test_emitted_item_cannot_be_replied_to(store, state):
     """No channel behind it — a Send button here would be a dead control."""
-    item_id = emit_attention_item(state, source="loop", kind="needs_input", title="T", store=store)
+    item_id = emit_attention_item(
+        state, source="loop", kind="needs_input", title="T", store=store
+    )
     assert store.items[item_id].can_reply is False
 
 
 def test_emitted_item_is_classified_as_needing_a_reply(store, state):
     """It must not be filtered out as noise by the classification-based views."""
-    item_id = emit_attention_item(state, source="loop", kind="needs_input", title="T", store=store)
+    item_id = emit_attention_item(
+        state, source="loop", kind="needs_input", title="T", store=store
+    )
     assert store.items[item_id].classification == Classification.NEEDS_REPLY.value
 
 
 def test_item_kind_defaults_to_the_notification_kind(store, state):
-    item_id = emit_attention_item(state, source="skills", kind="proposal", title="T", store=store)
+    item_id = emit_attention_item(
+        state, source="skills", kind="proposal", title="T", store=store
+    )
     assert store.items[item_id].item_kind == "proposal"
 
 
@@ -238,16 +244,23 @@ def test_body_falls_back_to_the_title(store, state):
     assert store.items[item_id].message == "Only"
 
 
-# ── T2.2: dedup ─────────────────────────────────────────────────────────
-
-
 def test_dedup_returns_the_same_item_and_does_not_renotify(store, state):
     """A watchdog re-observing the same wait must not stack rows or re-interrupt."""
     first = emit_attention_item(
-        state, source="loop", kind="needs_input", title="T", store=store, dedup_key="loop:L1:wait"
+        state,
+        source="loop",
+        kind="needs_input",
+        title="T",
+        store=store,
+        dedup_key="loop:L1:wait",
     )
     second = emit_attention_item(
-        state, source="loop", kind="needs_input", title="T", store=store, dedup_key="loop:L1:wait"
+        state,
+        source="loop",
+        kind="needs_input",
+        title="T",
+        store=store,
+        dedup_key="loop:L1:wait",
     )
     assert first == second
     assert len(store.items) == 1
@@ -256,17 +269,29 @@ def test_dedup_returns_the_same_item_and_does_not_renotify(store, state):
 
 def test_dedup_is_scoped_to_its_key(store, state):
     emit_attention_item(
-        state, source="loop", kind="needs_input", title="T", store=store, dedup_key="loop:L1:wait"
+        state,
+        source="loop",
+        kind="needs_input",
+        title="T",
+        store=store,
+        dedup_key="loop:L1:wait",
     )
     emit_attention_item(
-        state, source="loop", kind="needs_input", title="T", store=store, dedup_key="loop:L2:wait"
+        state,
+        source="loop",
+        kind="needs_input",
+        title="T",
+        store=store,
+        dedup_key="loop:L2:wait",
     )
     assert len(store.items) == 2
 
 
 def test_no_dedup_key_means_every_emission_is_distinct(store, state):
     for _ in range(3):
-        emit_attention_item(state, source="loop", kind="needs_input", title="T", store=store)
+        emit_attention_item(
+            state, source="loop", kind="needs_input", title="T", store=store
+        )
     assert len(store.items) == 3
     assert state.notify.call_count == 3
 
@@ -293,7 +318,12 @@ def test_a_seen_item_still_suppresses(store, state):
     store.items[first].status = ItemStatus.SEEN
     assert (
         emit_attention_item(
-            state, source="loop", kind="needs_input", title="T", store=store, dedup_key="k"
+            state,
+            source="loop",
+            kind="needs_input",
+            title="T",
+            store=store,
+            dedup_key="k",
         )
         == first
     )
@@ -321,9 +351,6 @@ def test_dedup_key_is_recorded_on_the_item(store, state):
     assert store.items[item_id].refs["dedup_key"] == "k"
 
 
-# ── T2.2: failure isolation ─────────────────────────────────────────────
-
-
 def test_a_store_write_failure_still_delivers_the_notification(store, state):
     """Failing to persist must not ALSO lose the user's only signal."""
     with patch.object(store, "add", side_effect=OSError("disk full")):
@@ -337,42 +364,42 @@ def test_a_store_write_failure_still_delivers_the_notification(store, state):
 def test_a_notify_failure_still_persists_the_item(store, state):
     """The durable record is the more important half — it survives alone."""
     state.notify.side_effect = RuntimeError("no clients")
-    item_id = emit_attention_item(state, source="loop", kind="needs_input", title="T", store=store)
+    item_id = emit_attention_item(
+        state, source="loop", kind="needs_input", title="T", store=store
+    )
     assert item_id in store.items
 
 
 def test_no_state_still_creates_the_item(store):
     """Called before the dashboard exists (early startup) — the item still lands."""
-    item_id = emit_attention_item(None, source="loop", kind="needs_input", title="T", store=store)
+    item_id = emit_attention_item(
+        None, source="loop", kind="needs_input", title="T", store=store
+    )
     assert item_id in store.items
 
 
-# ── T2.2: the loop watchdog wiring ──────────────────────────────────────
-
-
 def test_watchdog_attention_events_are_all_registered_kinds():
-    from gideon.loop.watchdog import LoopWatchdog
+    from gideon.automation.loop.watchdog import LoopWatchdog
 
     for event, kind in LoopWatchdog._ATTENTION_EVENTS.items():
-        assert nk.kind_for_legacy(kind).kind != nk.GENERIC_KIND, f"{event} → {kind} unregistered"
+        assert (
+            nk.kind_for_legacy(kind).kind != nk.GENERIC_KIND
+        ), f"{event} → {kind} unregistered"
 
 
 def test_watchdog_attention_events_are_a_subset_of_its_notify_events():
     """An attention event with no title would notify with an empty string."""
-    from gideon.loop.watchdog import LoopWatchdog
+    from gideon.automation.loop.watchdog import LoopWatchdog
 
     assert set(LoopWatchdog._ATTENTION_EVENTS) <= set(LoopWatchdog._NOTIFY_EVENTS)
 
 
 def test_watchdog_outcome_events_are_not_attention_events():
     """complete/failed/stage_advance already happened — an inbox row would be busywork."""
-    from gideon.loop.watchdog import LoopWatchdog
+    from gideon.automation.loop.watchdog import LoopWatchdog
 
     for event in ("complete", "failed", "stage_advance", "judge_blind", "ship_blocked"):
         assert event not in LoopWatchdog._ATTENTION_EVENTS
-
-
-# ── T2.3: API — kind filtering, chips, mark-SEEN ─────────────────────────
 
 
 def _api_request(store, *, query=None, body=None):
@@ -412,7 +439,7 @@ async def _payload(resp):
 
 @pytest.mark.asyncio
 async def test_list_without_a_filter_returns_everything(store):
-    from gideon.dashboard import handlers_inbox as h
+    from gideon.interfaces.dashboard import handlers_inbox as h
 
     _seed(store)
     req, _ = _api_request(store)
@@ -421,7 +448,7 @@ async def test_list_without_a_filter_returns_everything(store):
 
 @pytest.mark.asyncio
 async def test_list_filters_by_kind(store):
-    from gideon.dashboard import handlers_inbox as h
+    from gideon.interfaces.dashboard import handlers_inbox as h
 
     _seed(store)
     req, _ = _api_request(store, query={"kind": "needs_input"})
@@ -431,7 +458,7 @@ async def test_list_filters_by_kind(store):
 
 @pytest.mark.asyncio
 async def test_list_accepts_several_kinds(store):
-    from gideon.dashboard import handlers_inbox as h
+    from gideon.interfaces.dashboard import handlers_inbox as h
 
     _seed(store)
     req, _ = _api_request(store, query={"kind": "needs_input,proposal"})
@@ -442,7 +469,7 @@ async def test_list_accepts_several_kinds(store):
 @pytest.mark.asyncio
 async def test_an_unknown_kind_filters_to_nothing(store):
     """Returning everything for a typo would read as "the filter is broken"."""
-    from gideon.dashboard import handlers_inbox as h
+    from gideon.interfaces.dashboard import handlers_inbox as h
 
     _seed(store)
     req, _ = _api_request(store, query={"kind": "no-such-kind"})
@@ -452,10 +479,10 @@ async def test_an_unknown_kind_filters_to_nothing(store):
 @pytest.mark.asyncio
 async def test_an_item_with_no_kind_counts_as_a_message(store):
     """Items on disk from before this field existed must still match the message chip."""
-    from gideon.dashboard import handlers_inbox as h
+    from gideon.interfaces.dashboard import handlers_inbox as h
 
     legacy = _channel_item(id="C1_50.0", created_at=50.0)
-    legacy.item_kind = ""  # what a tolerant read of a pre-field item yields
+    legacy.item_kind = ""
     store.add(legacy)
     store.save()
     req, _ = _api_request(store, query={"kind": "message"})
@@ -464,22 +491,23 @@ async def test_an_item_with_no_kind_counts_as_a_message(store):
 
 @pytest.mark.asyncio
 async def test_pending_endpoint_also_filters(store):
-    from gideon.dashboard import handlers_inbox as h
+    from gideon.interfaces.dashboard import handlers_inbox as h
 
     _seed(store)
     req, _ = _api_request(store, query={"kind": "needs_input"})
     got = await _payload(await h.api_inbox_pending(req))
-    # Only the PENDING needs_input — the SEEN one is not "needs attention now".
     assert len(got) == 1 and got[0]["status"] == "pending"
 
 
 @pytest.mark.asyncio
 async def test_kinds_endpoint_counts_open_as_pending_plus_seen(store):
-    from gideon.dashboard import handlers_inbox as h
+    from gideon.interfaces.dashboard import handlers_inbox as h
 
     _seed(store)
     req, _ = _api_request(store)
-    rows = {r["kind"]: r for r in (await _payload(await h.api_inbox_kinds(req)))["kinds"]}
+    rows = {
+        r["kind"]: r for r in (await _payload(await h.api_inbox_kinds(req)))["kinds"]
+    }
     assert rows["needs_input"] == {
         "kind": "needs_input",
         "total": 2,
@@ -493,7 +521,7 @@ async def test_kinds_endpoint_counts_open_as_pending_plus_seen(store):
 @pytest.mark.asyncio
 async def test_kinds_endpoint_omits_kinds_with_no_items(store):
     """A chip for an empty kind is a dead control."""
-    from gideon.dashboard import handlers_inbox as h
+    from gideon.interfaces.dashboard import handlers_inbox as h
 
     _seed(store)
     req, _ = _api_request(store)
@@ -503,34 +531,36 @@ async def test_kinds_endpoint_omits_kinds_with_no_items(store):
 
 @pytest.mark.asyncio
 async def test_kinds_endpoint_flags_channel_backed_kinds(store):
-    from gideon.dashboard import handlers_inbox as h
+    from gideon.interfaces.dashboard import handlers_inbox as h
 
     _seed(store)
     req, _ = _api_request(store)
-    rows = {r["kind"]: r for r in (await _payload(await h.api_inbox_kinds(req)))["kinds"]}
+    rows = {
+        r["kind"]: r for r in (await _payload(await h.api_inbox_kinds(req)))["kinds"]
+    }
     assert rows["message"]["channel"] is True
     assert rows["needs_input"]["channel"] is False
 
 
 @pytest.mark.asyncio
 async def test_seen_advances_only_pending_items(store):
-    from gideon.dashboard import handlers_inbox as h
+    from gideon.interfaces.dashboard import handlers_inbox as h
 
     _seed(store)
     req, st = _api_request(store, body={})
     result = await _payload(await h.api_inbox_seen(req))
     assert result["seen"] == 2, "exactly the two PENDING items advanced"
-    # Three SEEN afterwards, not two: the seed already contains one SEEN needs_input, and
-    # it is left alone rather than re-counted.
     statuses = sorted(i.status for i in store.items.values())
     assert statuses == ["dismissed", "handled", "seen", "seen", "seen"]
-    assert st.broadcast_ws.call_count == 2, "only the items that actually changed broadcast"
+    assert (
+        st.broadcast_ws.call_count == 2
+    ), "only the items that actually changed broadcast"
 
 
 @pytest.mark.asyncio
 async def test_seen_never_drags_a_resolved_item_backwards(store):
     """HANDLED → SEEN would resurrect it in every unresolved view."""
-    from gideon.dashboard import handlers_inbox as h
+    from gideon.interfaces.dashboard import handlers_inbox as h
 
     item = _channel_item(id="message_x_1.0")
     item.status = ItemStatus.HANDLED.value
@@ -542,7 +572,7 @@ async def test_seen_never_drags_a_resolved_item_backwards(store):
 
 @pytest.mark.asyncio
 async def test_seen_is_idempotent(store):
-    from gideon.dashboard import handlers_inbox as h
+    from gideon.interfaces.dashboard import handlers_inbox as h
 
     _seed(store)
     req, _ = _api_request(store, body={})
@@ -553,10 +583,12 @@ async def test_seen_is_idempotent(store):
 
 @pytest.mark.asyncio
 async def test_seen_can_target_specific_ids(store):
-    from gideon.dashboard import handlers_inbox as h
+    from gideon.interfaces.dashboard import handlers_inbox as h
 
     _seed(store)
-    target = next(i for i in store.items.values() if i.status == ItemStatus.PENDING.value)
+    target = next(
+        i for i in store.items.values() if i.status == ItemStatus.PENDING.value
+    )
     req, _ = _api_request(store, body={"ids": [target.id]})
     assert (await _payload(await h.api_inbox_seen(req)))["seen"] == 1
     assert store.items[target.id].status == ItemStatus.SEEN.value
@@ -564,34 +596,35 @@ async def test_seen_can_target_specific_ids(store):
 
 @pytest.mark.asyncio
 async def test_seen_can_target_a_kind(store):
-    from gideon.dashboard import handlers_inbox as h
+    from gideon.interfaces.dashboard import handlers_inbox as h
 
     _seed(store)
     req, _ = _api_request(store, body={"kind": "needs_input"})
     assert (await _payload(await h.api_inbox_seen(req)))["seen"] == 1
     msg = next(
-        i for i in store.items.values() if i.item_kind == "message" and i.created_at == 100.0
+        i
+        for i in store.items.values()
+        if i.item_kind == "message" and i.created_at == 100.0
     )
     assert msg.status == ItemStatus.PENDING.value, "another kind must be untouched"
 
 
 @pytest.mark.asyncio
 async def test_seen_persists_to_disk(store):
-    from gideon.dashboard import handlers_inbox as h
+    from gideon.interfaces.dashboard import handlers_inbox as h
 
     _seed(store)
     req, _ = _api_request(store, body={})
     await h.api_inbox_seen(req)
     reloaded = InboxStore(path=store._path)
     reloaded.load()
-    # 3 = the two just advanced + the one the seed already had SEEN.
     assert sum(1 for i in reloaded.items.values() if i.status == "seen") == 3
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("bad", ["not-json", ["a"], {"ids": "x"}])
 async def test_seen_rejects_a_malformed_body(store, bad):
-    from gideon.dashboard import handlers_inbox as h
+    from gideon.interfaces.dashboard import handlers_inbox as h
 
     if bad == "not-json":
         req, _ = _api_request(store)
@@ -611,10 +644,12 @@ async def test_seen_ignores_an_id_that_cannot_be_an_item_id(store, junk):
     `seen` is idempotent, so silently skipping junk is the honest behavior: a real id
     alongside it still advances.
     """
-    from gideon.dashboard import handlers_inbox as h
+    from gideon.interfaces.dashboard import handlers_inbox as h
 
     _seed(store)
-    target = next(i for i in store.items.values() if i.status == ItemStatus.PENDING.value)
+    target = next(
+        i for i in store.items.values() if i.status == ItemStatus.PENDING.value
+    )
     req, _ = _api_request(store, body={"ids": [junk, target.id]})
     resp = await h.api_inbox_seen(req)
     assert resp.status == 200

@@ -1,18 +1,10 @@
-/**
- * The switcher's display model and its IPC adaptor (`CA-8` / T4.4).
- *
- * The dialog itself is a static document that builds every row with `textContent`, so what is worth
- * testing here is the model it renders from — in particular that the health states a user must act
- * on stay distinguishable from the ones they should ignore, and that the IPC layer answers a shaped
- * refusal instead of leaking a main-process stack into a window.
- */
 
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const { CONNECT_CHANNELS, healthCopy, describeRow, describeList, makeConnectDialog } = require("../connectDialog");
+const { CONNECT_CHANNELS, healthCopy, describeRow, describeList, makeConnectDialog } = require("../src/connection/dialog");
 const {
   LOCAL_ENDPOINT_ID,
   HEALTH_STATES,
@@ -20,7 +12,7 @@ const {
   HEALTH_REACHABLE,
   HEALTH_UNREACHABLE,
   HEALTH_NEEDS_PAIRING,
-} = require("../connectMode");
+} = require("../src/connection/controller");
 
 const row = (over = {}) => ({ id: "ep_a", label: "Work brain", base_url: "http://10.0.0.4:10000", kind: "remote", device_session_ref: "", ...over });
 
@@ -61,7 +53,6 @@ describe("describeRow", () => {
   });
 
   it("shows the LIVE local URL for the reserved row, not the one that was persisted last launch", () => {
-    // The spawn-local port is OS-assigned, so the stored value is stale by definition on relaunch.
     const r = describeRow(row({ id: LOCAL_ENDPOINT_ID, kind: "local", base_url: "http://localhost:1111" }), {
       activeId: LOCAL_ENDPOINT_ID,
       localBaseUrl: "http://localhost:52222",
@@ -176,11 +167,9 @@ describe("the IPC adaptor", () => {
 });
 
 describe("the dialog document", () => {
-  const html = fs.readFileSync(path.join(__dirname, "..", "connectDialog.html"), "utf8");
+  const html = fs.readFileSync(path.join(__dirname, "..", "views/connection.html"), "utf8");
 
   it("builds every row with textContent and never with innerHTML", () => {
-    // A registry label or URL is exactly the string a tampered store controls, so the document must
-    // have no HTML-string sink at all.
     for (const sink of ["innerHTML", "outerHTML", "insertAdjacentHTML", "document.write"]) {
       assert.strictEqual(html.includes(sink), false, `connectDialog.html uses ${sink}`);
     }
@@ -188,9 +177,6 @@ describe("the dialog document", () => {
   });
 
   it("carries a CSP that denies this window a network of its own", () => {
-    // Read the policy out of the meta tag rather than scanning the whole file: the document's own
-    // comment mentions `connect-src` to explain its absence, and a file-wide grep cannot tell an
-    // explanation from a directive.
     const meta = html.match(/http-equiv="Content-Security-Policy"[\s\S]*?content="([^"]+)"/);
     assert.ok(meta, "connectDialog.html has no CSP meta tag");
     const policy = meta[1];
@@ -202,7 +188,7 @@ describe("the dialog document", () => {
 
   it("is listed in electron-builder's files, or the packaged app opens a blank switcher", () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8"));
-    for (const f of ["connectDialog.html", "connectPreload.js", "connectDialog.js", "connectMode.js", "gatewayUrl.js", "endpointRegistry.js", "shellStore.js"]) {
+    for (const f of ["views/connection.html", "src/bridge/connection-preload.js", "src/connection/dialog.js", "src/connection/controller.js", "src/connection/address.js", "src/storage/endpoint-registry.js", "src/storage/shell-store.js"]) {
       assert.ok(pkg.build.files.includes(f), `build.files is missing ${f}`);
     }
   });

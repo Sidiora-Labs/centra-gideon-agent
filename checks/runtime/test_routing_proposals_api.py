@@ -1,7 +1,7 @@
 """The routing-proposal review surface — list / accept / reject (MRT-5 §6.3).
 
 Before this, ``accept``/``reject``/``pending`` were **library functions reachable from
-``tests/test_routing_proposals.py`` alone**: ``model_telemetry.py`` registered only the policy GET
+``checks/runtime/test_routing_proposals.py`` alone**: ``model_telemetry.py`` registered only the policy GET
 and PUT, and no handler in ``dashboard/`` imported ``routing.proposals`` at all. A queue a user
 cannot see or decide is not a propose-don't-write mechanism — it is a mechanism with no surface.
 
@@ -22,8 +22,10 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.dashboard.handlers.model_telemetry import register_model_telemetry_routes
-from gideon.routing import policy, proposals
+from gideon.engine.routing import policy, proposals
+from gideon.interfaces.dashboard.handlers.model_telemetry import (
+    register_model_telemetry_routes,
+)
 
 UC = "chat"
 QC = "general"
@@ -49,10 +51,12 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     which is exactly the binding a real request uses — so the redirect is the env var, and it is
     asserted rather than assumed.
     """
-    from gideon.config.loader import config_dir
+    from gideon.core.config.loader import config_dir
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    assert Path(config_dir()).resolve() == tmp_path.resolve(), "GIDEON_HOME did not bind"
+    assert (
+        Path(config_dir()).resolve() == tmp_path.resolve()
+    ), "GIDEON_HOME did not bind"
     assert (
         Path(str(proposals._default_home())).resolve() == tmp_path.resolve()
     ), "the queue's own home accessor did not follow the redirect"
@@ -89,9 +93,12 @@ def _policy_bytes(home: Path) -> bytes:
 
 class TestList:
     @pytest.mark.asyncio
-    async def test_the_queue_is_listed_with_its_evidence_and_a_badge_count(self, home: Path):
+    async def test_the_queue_is_listed_with_its_evidence_and_a_badge_count(
+        self, home: Path
+    ):
         """§6.3's badge, and the reason evidence rides along: a proposal a user cannot inspect is
-        not reviewable, and the queue is capped at 50 so there is no second round-trip to save."""
+        not reviewable, and the queue is capped at 50 so there is no second round-trip to save.
+        """
         prop = _queue(home)
         c = await _client()
         try:
@@ -135,7 +142,9 @@ class TestList:
 
 class TestAccept:
     @pytest.mark.asyncio
-    async def test_accepting_writes_the_table_with_the_proposal_as_its_basis(self, home: Path):
+    async def test_accepting_writes_the_table_with_the_proposal_as_its_basis(
+        self, home: Path
+    ):
         """The outcome is read off DISK: a handler that answered 200 and called nothing would pass
         a body-only assertion."""
         prop = _queue(home)
@@ -151,7 +160,9 @@ class TestAccept:
         assert proposals.pending(home=home) == []
 
     @pytest.mark.asyncio
-    async def test_a_hand_set_order_answers_200_with_the_refusal_reason(self, home: Path):
+    async def test_a_hand_set_order_answers_200_with_the_refusal_reason(
+        self, home: Path
+    ):
         """A refusal is a correct answer to a legitimate request, not a client error — and the
         surface has to be able to say WHY rather than appearing to do nothing."""
         policy.set_order(UC, QC, CURRENT, home=home, basis={"source": "user"})
@@ -168,7 +179,9 @@ class TestAccept:
         assert _policy_bytes(home) == before, "a refusal must write no table"
 
     @pytest.mark.asyncio
-    async def test_the_byte_comparison_above_can_see_an_accepted_write(self, home: Path):
+    async def test_the_byte_comparison_above_can_see_an_accepted_write(
+        self, home: Path
+    ):
         """Vacuity floor for the refusal test: the same bytes DO move when the cell is not
         hand-set, so ``==`` there is a measurement rather than a tautology."""
         prop = _queue(home)
@@ -208,7 +221,9 @@ class TestAccept:
 
 class TestReject:
     @pytest.mark.asyncio
-    async def test_rejecting_writes_no_table_and_suppresses_the_finding(self, home: Path):
+    async def test_rejecting_writes_no_table_and_suppresses_the_finding(
+        self, home: Path
+    ):
         """Reject means the table was right: no write, and ``propose`` refuses the same finding
         for ``reproposal_cooldown_days`` — asserted by re-proposing it."""
         prop = _queue(home)

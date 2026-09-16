@@ -31,7 +31,7 @@ route is the boundary a client is on the far side of.
 unnoticed, so nothing here enumerates a route. :func:`scan` walks the tree, learns which store
 functions return a config-or-instance object *from those stores' own return annotations*, taints
 their results through each route handler, and reports every tainted value that reaches a
-``json_response`` payload without passing through :mod:`gideon.apps.secret_fields`. Add a
+``json_response`` payload without passing through :mod:`gideon.extensions.apps.secret_fields`. Add a
 sixth config-carrying route and it is classified whether or not anyone remembers this file.
 
 A derived rail that finds nothing is indistinguishable from a clean tree, so the census carries
@@ -55,22 +55,22 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.apps.secret_fields import SECRET_MASK
+from gideon.extensions.apps.secret_fields import SECRET_MASK
 
-SRC = pathlib.Path(__file__).resolve().parent.parent / "src" / "gideon"
+SRC = pathlib.Path(__file__).resolve().parent.parent.parent / "runtime" / "gideon"
 
 _SECRET = "sk-proj-NOT-A-REAL-KEY-just-a-fixture"
 
 _SCHEMA = {
     "type": "object",
     "properties": {
-        "api_key": {"type": "string", "x-meta": {"label": "API Key", "sensitive": True}},
+        "api_key": {
+            "type": "string",
+            "x-meta": {"label": "API Key", "sensitive": True},
+        },
         "default_model": {"type": "string"},
     },
 }
-
-
-# ── behaviour: the five surfaces, driven through the real route table ──────────
 
 
 class _FakeProviderConfig:
@@ -83,7 +83,7 @@ class _FakeProviderConfig:
 
 class _FakeExt:
     name = "fake-models"
-    enabled = False  # keep the registry re-cycle / tool-refresh paths out of the way
+    enabled = False
     error = ""
     provider_config = _FakeProviderConfig()
 
@@ -101,11 +101,14 @@ class _FakeRegistry:
 
 @asynccontextmanager
 async def _client(tmp_path: Path):
-    from gideon.providers import instance_routes
+    from gideon.extensions.providers import instance_routes
 
     with (
-        patch("gideon.config.loader.config_dir", return_value=tmp_path),
-        patch("gideon.providers.registry.get_provider_registry", lambda: _FakeRegistry()),
+        patch("gideon.core.config.loader.config_dir", return_value=tmp_path),
+        patch(
+            "gideon.extensions.providers.registry.get_provider_registry",
+            lambda: _FakeRegistry(),
+        ),
     ):
         app = web.Application()
         instance_routes.register_instance_routes(app)
@@ -132,13 +135,16 @@ async def _create(client, **config) -> tuple[str, str]:
 @pytest.mark.asyncio
 async def test_create_does_not_echo_the_key_it_was_just_given(tmp_path):
     async with _client(tmp_path) as client:
-        instance_id, raw = await _create(client, api_key=_SECRET, default_model="gpt-4o")
+        instance_id, raw = await _create(
+            client, api_key=_SECRET, default_model="gpt-4o"
+        )
         assert _SECRET not in raw, "POST echoed the API key it had just been handed"
         body = json.loads(raw)["instance"]
         assert body["config"]["api_key"] == SECRET_MASK
-        assert body["config"]["default_model"] == "gpt-4o", "a non-sensitive field passes through"
+        assert (
+            body["config"]["default_model"] == "gpt-4o"
+        ), "a non-sensitive field passes through"
         assert body["_secret_set"] == ["api_key"]
-        # …and the real value is on disk, unharmed.
         assert _stored(tmp_path, instance_id)["api_key"] == _SECRET
 
 
@@ -150,7 +156,9 @@ async def test_the_list_route_masks_every_instance(tmp_path):
         await _create(client, api_key=_SECRET + "-second", default_model="gpt-4o-mini")
 
         raw = await (await client.get(_BASE)).text()
-        assert _SECRET not in raw, "the list route handed out stored API keys in the clear"
+        assert (
+            _SECRET not in raw
+        ), "the list route handed out stored API keys in the clear"
         instances = json.loads(raw)["instances"]
         assert len(instances) == 2, "the fixture did not produce two instances"
         for inst in instances:
@@ -179,7 +187,9 @@ async def test_the_single_read_route_refuses_an_unregistered_provider(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_an_unregistered_provider_is_refused_even_when_the_instance_exists(tmp_path):
+async def test_an_unregistered_provider_is_refused_even_when_the_instance_exists(
+    tmp_path,
+):
     """The same guard, pinned so the 404 cannot come from anywhere else.
 
     404 for a provider with no instances proves nothing: the missing-instance branch two
@@ -208,7 +218,9 @@ async def test_an_unregistered_provider_is_refused_even_when_the_instance_exists
         r = await client.get("/api/providers/ghost-models/instances/abc123")
         raw = await r.text()
         assert r.status == 404, raw
-        assert _SECRET not in raw, "answered with a stored key for a provider it has no schema for"
+        assert (
+            _SECRET not in raw
+        ), "answered with a stored key for a provider it has no schema for"
 
 
 @pytest.mark.asyncio
@@ -281,7 +293,9 @@ async def test_the_mask_sentinel_is_never_stored_as_a_credential(tmp_path):
     work, and whose "credential" is a constant published in this repo.
     """
     async with _client(tmp_path) as client:
-        instance_id, raw = await _create(client, api_key=SECRET_MASK, default_model="gpt-4o")
+        instance_id, raw = await _create(
+            client, api_key=SECRET_MASK, default_model="gpt-4o"
+        )
         assert "api_key" not in json.loads(raw)["instance"]["config"]
         assert "api_key" not in _stored(tmp_path, instance_id)
 
@@ -297,78 +311,37 @@ async def test_a_refused_write_does_not_quote_the_submitted_value_back(tmp_path)
     async with _client(tmp_path) as client:
         r = await client.post(
             _BASE,
-            json={"display_name": "Bad", "config": {"api_key": _SECRET, "default_model": 12345}},
+            json={
+                "display_name": "Bad",
+                "config": {"api_key": _SECRET, "default_model": 12345},
+            },
         )
         raw = await r.text()
         assert r.status == 422, raw
-        assert _SECRET not in raw, "a validation refusal quoted the submitted secret back"
-        assert "12345" not in raw, "a validation refusal quoted the submitted value back"
+        assert (
+            _SECRET not in raw
+        ), "a validation refusal quoted the submitted secret back"
+        assert (
+            "12345" not in raw
+        ), "a validation refusal quoted the submitted value back"
 
 
-# ── the derived rail: which routes carry a config, and do they all mask? ───────
-#
-# Nothing below names a route. The population is re-derived on every run from the stores'
-# own type annotations and the handlers' own dataflow, because a hand-written list is the
-# mechanism that let three of the five leaks above survive a fix aimed at the other two.
-
-#: The modules whose public functions hand out a provider/extension config-or-instance
-#: object. This is the census's one seed, and it is the smallest honest one: "a provider
-#: config object" has to be defined somewhere, and it is defined by the modules that read,
-#: write and transform the store. It is not a route list — no route name, method or path
-#: appears anywhere in this file — and it is self-checking:
-#: :func:`test_the_store_derivation_still_discriminates` fails if any of these stops existing
-#: or stops exposing a config-bearing reader, and
-#: :func:`test_no_config_carrying_wire_shape_escapes_the_census` independently catches a config
-#: reaching the wire from a source this set does not know about.
-#:
-#: ``secret_fields`` belongs here for a reason that is easy to miss: ``mask_instance`` is
-#: recognised as a MASKER, but ``preserve_unchanged_secrets`` RETURNS a config into which the
-#: real stored credential has just been folded back. Omitting it would leave the very dict a
-#: write route is about to persist untainted.
 CONFIG_SOURCE_MODULES = {
-    "gideon.providers.settings",
-    "gideon.providers.instances",
-    "gideon.providers.mcp_instances",
-    "gideon.apps.app_config",
-    "gideon.apps.secret_fields",
+    "gideon.extensions.providers.settings",
+    "gideon.extensions.providers.instances",
+    "gideon.extensions.providers.mcp_instances",
+    "gideon.extensions.apps.app_config",
+    "gideon.extensions.apps.secret_fields",
 }
 
-#: The masking owner. One module, by construction — pinned by
-#: ``test_provider_config_secrets.py::test_the_masking_policy_has_exactly_one_implementation``.
 MASKERS = {"mask_secrets", "mask_instance"}
 
-#: Payload keys that carry a config-or-instance object on the wire. Used ONLY by the
-#: independent completeness check, whose job is to catch a store ``CONFIG_SOURCE_MODULES`` does not
-#: know. Keys are the wire vocabulary, not route identities: a new route that answers with a
-#: ``config`` is caught by name-of-field, whatever its path is.
 WIRE_KEYS = {"config", "instance", "instances"}
 
-#: Vacuity floor for the walk. Measured at 1097 modules on this tree; a scan that walks a
-#: handful would report zero violations for the wrong reason.
 FILES_SCANNED_FLOOR = 800
 
-#: Emitted values the census REFUSES to classify, because the config passed through a
-#: consuming call on its way to the payload. A CEILING (may only shrink) — a site the scanner
-#: declines to classify must not be a site it declines to COUNT, or laundering a config
-#: through one helper would become the way around the rail above.
-#:
-#: Measured at **1** on this tree: ``providers/routes.py``'s ``handle_patch_config`` emits
-#: ``errors = ProviderSettings.validate(body, schema)``, where ``body`` carries the restored
-#: real secret. It is not a leak, and that is a MEASURED claim rather than an assumption —
-#: ``apps/schema_validate.py`` builds every message from the field's label and the SCHEMA's
-#: own expectations (``must be one of {enum}``, ``at least {min_len} characters``) and never
-#: interpolates the submitted value. Driven against a live gateway, a 422 carrying a real key
-#: answered ``["OpenAI API Key: must be a string"]``. The 1 is bought and then PINNED by
-#: :func:`test_a_refused_write_does_not_quote_the_submitted_value_back`, so the slack cannot
-#: later be spent on a genuine echo.
 DECLASSIFIED_CEILING = 1
 
-#: Vacuity floor for the derivation itself. Measured at **9** classified surfaces on this tree:
-#: the five listed in the module docstring plus the four ``295b48f7b`` had already masked
-#: (``api_app_config_get``/``_put`` and ``providers/routes.py``'s ``handle_get_config``/
-#: ``handle_patch_config``). The floor is set below the measurement on purpose — it exists to
-#: catch a taint analysis that stopped resolving, not to pin an exact population, and a new
-#: config-carrying route is expected to raise the measured count without touching this number.
 CONFIG_BEARING_SURFACE_FLOOR = 5
 
 
@@ -401,7 +374,7 @@ def _config_bearing_producers() -> dict[str, dict[str, Any]]:
         path = SRC.parent / (dotted.replace(".", "/") + ".py")
         info: dict[str, Any] = {"functions": set(), "classes": {}}
         out[dotted] = info
-        if not path.is_file():  # surfaced by test_the_store_derivation_still_discriminates
+        if not path.is_file():
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in tree.body:
@@ -443,14 +416,12 @@ def _seed_spellings(tree: ast.Module) -> set[str]:
         if isinstance(node, ast.ImportFrom) and node.module:
             for alias in node.names:
                 local = alias.asname or alias.name
-                # `from <store> import <symbol>`
                 info = producers.get(node.module)
                 if info is not None:
                     if alias.name in info["functions"]:
                         seeds.add(local)
                     for method in info["classes"].get(alias.name, set()):
                         seeds.add(f"{local}.{method}")
-                # `from <package> import <store module>`
                 sub = producers.get(f"{node.module}.{alias.name}")
                 if sub is not None:
                     _from_module(local, sub)
@@ -459,7 +430,6 @@ def _seed_spellings(tree: ast.Module) -> set[str]:
                 info = producers.get(alias.name)
                 if info is None:
                     continue
-                # `import a.b.c` binds `a`, and calls spell the full dotted path.
                 _from_module(alias.asname or alias.name, info)
     return seeds
 
@@ -471,12 +441,7 @@ class Surface:
     module: str
     handler: str
     line: int
-    #: ``(line, expression)`` for every tainted value reaching a payload WITHOUT masking.
     unmasked: list[tuple[int, str]] = field(default_factory=list)
-    #: ``(line, binding)`` for every emitted value the census REFUSES to classify: it was
-    #: derived from a config but through a consuming call, so whether it still carries a
-    #: secret cannot be read statically. Loud by construction — see
-    #: :data:`DECLASSIFIED_CEILING`.
     declassified: list[tuple[int, str]] = field(default_factory=list)
 
     @property
@@ -488,8 +453,6 @@ class Surface:
 class Census:
     files_scanned: int = 0
     surfaces: list[Surface] = field(default_factory=list)
-    #: ``(module, line, key)`` for every ``json_response`` payload dict carrying a WIRE_KEYS
-    #: key — the independent completeness net (see the module docstring).
     wire_shaped: list[tuple[str, int, str]] = field(default_factory=list)
 
     @property
@@ -514,7 +477,8 @@ def _is_json_response(call: ast.Call) -> bool:
 
 def _spelling(call: ast.Call) -> str:
     """The callee exactly as written: ``f()`` → ``f``, ``_mcp.get_instance()`` →
-    ``_mcp.get_instance``. Matched against :func:`_seed_spellings`, so the binding counts."""
+    ``_mcp.get_instance``. Matched against :func:`_seed_spellings`, so the binding counts.
+    """
     try:
         return ast.unparse(call.func)
     except Exception:  # pragma: no cover - defensive
@@ -583,13 +547,13 @@ def _flow(value: ast.expr, tainted: set[str], seeds: set[str]) -> _Flow:
         return _flow(value.value, tainted, seeds)
     if isinstance(value, ast.Call):
         if _is_masker(value):
-            inner = any(_flow(a, tainted, seeds).carries for a in value.args) or _mentions_seed(
-                value, seeds
-            )
+            inner = any(
+                _flow(a, tainted, seeds).carries for a in value.args
+            ) or _mentions_seed(value, seeds)
             return _Flow(carries=inner, masked=inner)
         if _is_seed(value, seeds):
             return _Flow(carries=True)
-        return _Flow()  # a consuming call: whatever comes back is not the config
+        return _Flow()
     if isinstance(value, (ast.Tuple, ast.List, ast.Set)):
         flows = [_flow(e, tainted, seeds) for e in value.elts]
         return _Flow(
@@ -607,15 +571,20 @@ def _flow(value: ast.expr, tainted: set[str], seeds: set[str]) -> _Flow:
     if isinstance(value, ast.DictComp):
         return _flow(value.value, tainted, seeds)
     if isinstance(value, ast.IfExp):
-        body, orelse = _flow(value.body, tainted, seeds), _flow(value.orelse, tainted, seeds)
+        body, orelse = _flow(value.body, tainted, seeds), _flow(
+            value.orelse, tainted, seeds
+        )
         return _Flow(
             carries=body.carries or orelse.carries,
-            masked=(body.masked or not body.carries) and (orelse.masked or not orelse.carries),
+            masked=(body.masked or not body.carries)
+            and (orelse.masked or not orelse.carries),
         )
     return _Flow()
 
 
-def _taint(fn: ast.AST, seeds: set[str]) -> tuple[set[str], set[str], dict[str, tuple[int, str]]]:
+def _taint(
+    fn: ast.AST, seeds: set[str]
+) -> tuple[set[str], set[str], dict[str, tuple[int, str]]]:
     """``(tainted, sanitized, declassified)`` for the names bound inside one handler.
 
     A name is TAINTED when it is bound to an expression that still *is* a config object
@@ -657,14 +626,15 @@ def _taint(fn: ast.AST, seeds: set[str]) -> tuple[set[str], set[str], dict[str, 
             if isinstance(node, (ast.Assign, ast.AnnAssign)):
                 if node.value is None:
                     continue
-                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                targets = (
+                    node.targets if isinstance(node, ast.Assign) else [node.target]
+                )
                 for target in targets:
                     grew |= _bind(target, node.value, node.lineno)
             elif isinstance(node, ast.comprehension):
                 grew |= _bind(node.target, node.iter, getattr(node.iter, "lineno", 0))
         if not grew:
             break
-    # A name that ended up genuinely tainted is not also a declassification.
     for name in tainted:
         declassified.pop(name, None)
     return tainted, sanitized, declassified
@@ -722,7 +692,9 @@ def scan_source(source: str, rel: str, census: Census) -> None:
         surface = Surface(module=rel, handler=fn.name, line=fn.lineno)
         reaches = False
         for node in ast.walk(fn):
-            if not (isinstance(node, ast.Call) and _is_json_response(node) and node.args):
+            if not (
+                isinstance(node, ast.Call) and _is_json_response(node) and node.args
+            ):
                 continue
             for leaf, masked in _emitted(node.args[0]):
                 if isinstance(leaf, ast.Name) and leaf.id in declassified:
@@ -743,7 +715,7 @@ def scan_source(source: str, rel: str, census: Census) -> None:
 
 
 def scan() -> Census:
-    """Walk every module under ``src/gideon`` and classify its config-bearing routes."""
+    """Walk every module under ``runtime/gideon`` and classify its config-bearing routes."""
     census = Census()
     for path in sorted(SRC.rglob("*.py")):
         if "__pycache__" in path.parts:
@@ -757,9 +729,6 @@ def scan() -> Census:
         except SyntaxError:  # pragma: no cover - defensive
             continue
     return census
-
-
-# ── vacuity: a census that measures nothing must not read as clean ────────────
 
 
 def test_the_store_derivation_still_discriminates():
@@ -778,29 +747,25 @@ def test_the_store_derivation_still_discriminates():
             f"annotations were dropped, and every seed derived from it is now empty"
         )
 
-    settings = producers["gideon.providers.settings"]
-    instances = producers["gideon.providers.instances"]
-    app_config = producers["gideon.apps.app_config"]
+    settings = producers["gideon.extensions.providers.settings"]
+    instances = producers["gideon.extensions.providers.instances"]
+    app_config = producers["gideon.extensions.apps.app_config"]
 
-    # The positive: the readers the shipped handlers actually call.
     assert {"load", "update"} <= settings["classes"].get("ProviderSettings", set())
-    assert {"list_instances", "get_instance", "create_instance", "update_instance"} <= instances[
-        "functions"
-    ]
+    assert {
+        "list_instances",
+        "get_instance",
+        "create_instance",
+        "update_instance",
+    } <= instances["functions"]
     assert {"read_config", "write_config"} <= app_config["functions"]
 
-    # The negative, which is what makes the rule a rule and not a name filter: these return a
-    # bool / None / list[str] / Path, so they cannot carry a secret to the wire. A census that
-    # flagged the DELETE route would be demanding masking on a `{"ok": true}` body — which is
-    # how a rail teaches people to route around it.
     assert "delete_instance" not in instances["functions"]
     for dropped in ("save", "validate", "config_path"):
-        assert dropped not in settings["classes"].get("ProviderSettings", set()), dropped
+        assert dropped not in settings["classes"].get(
+            "ProviderSettings", set()
+        ), dropped
 
-    # And the reason seeds are matched by SPELLING rather than by name: `to_dict` IS a
-    # producer, so a bare-name match would make every `.to_dict()` in the tree a config
-    # source. Measured on the first draft: ~60 unrelated handlers, none of them provider
-    # surfaces. It must stay reachable only as `ExtensionInstance.to_dict`.
     assert "to_dict" in instances["classes"].get("ExtensionInstance", set())
     assert "to_dict" not in instances["functions"]
 
@@ -819,15 +784,17 @@ def test_the_scan_is_not_vacuous():
         f"analysis stopped resolving, so the ratchet below is passing on an empty set. "
         f"Found: {[(s.module, s.handler) for s in census.surfaces]}"
     )
-    assert census.wire_shaped, "no config-shaped payload found at all — the matcher is broken"
+    assert (
+        census.wire_shaped
+    ), "no config-shaped payload found at all — the matcher is broken"
 
 
 _SYNTHETIC = '''
 from aiohttp import web
 
-from gideon.apps.secret_fields import mask_instance, mask_secrets
-from gideon.providers.instances import delete_instance, get_instance, list_instances
-from gideon.providers.settings import ProviderSettings
+from gideon.extensions.apps.secret_fields import mask_instance, mask_secrets
+from gideon.extensions.providers.instances import delete_instance, get_instance, list_instances
+from gideon.extensions.providers.settings import ProviderSettings
 
 
 async def leaks_an_instance(request):
@@ -877,12 +844,22 @@ def test_the_census_counts_a_leak_and_clears_a_masked_route():
     scan_source(_SYNTHETIC, "synthetic.py", census)
     by_name = {s.handler: s for s in census.surfaces}
 
-    for leaky in ("leaks_an_instance", "leaks_a_list", "leaks_a_config_through_a_local"):
-        assert leaky in by_name, f"{leaky} was not classified as a config-bearing surface"
-        assert not by_name[leaky].masked, f"{leaky} reads as masked — the detector is blind"
+    for leaky in (
+        "leaks_an_instance",
+        "leaks_a_list",
+        "leaks_a_config_through_a_local",
+    ):
+        assert (
+            leaky in by_name
+        ), f"{leaky} was not classified as a config-bearing surface"
+        assert not by_name[
+            leaky
+        ].masked, f"{leaky} reads as masked — the detector is blind"
 
     for clean in ("masks_an_instance", "masks_a_config_through_a_local"):
-        assert clean in by_name, f"{clean} was not classified as a config-bearing surface"
+        assert (
+            clean in by_name
+        ), f"{clean} was not classified as a config-bearing surface"
         assert by_name[clean].masked, (
             f"{clean} routes through secret_fields and still reads as a violation: "
             f"{by_name[clean].unmasked}"
@@ -894,9 +871,10 @@ def test_the_census_counts_a_leak_and_clears_a_masked_route():
     )
 
 
-#: The line the plant swaps out — a REAL masked emit in the shipped instance list route.
 _INSTANCE_ROUTES = SRC / "providers" / "instance_routes.py"
-_MASKED_LINE = '            "instances": [mask_instance(inst, schema) for inst in instances],'
+_MASKED_LINE = (
+    '            "instances": [mask_instance(inst, schema) for inst in instances],'
+)
 _PLANTED_LINE = '            "instances": [inst.to_dict() for inst in instances],'
 
 
@@ -914,17 +892,16 @@ def test_reverting_the_mask_in_instance_routes_is_counted():
     """
     real = _INSTANCE_ROUTES.read_text(encoding="utf-8")
 
-    # 1) The module as it ships is clean, so a red below is the plant and not the tree.
     baseline = Census()
     scan_source(real, "providers/instance_routes.py", baseline)
-    assert baseline.surfaces, "the census classified no surface in instance_routes.py at all"
+    assert (
+        baseline.surfaces
+    ), "the census classified no surface in instance_routes.py at all"
     assert not baseline.violations, (
         "instance_routes.py already reports a violation, so this floor cannot attribute the "
         f"plant: {[(s.handler, s.unmasked) for s in baseline.violations]}"
     )
 
-    # 2) The plant APPLIED. A swap that silently matched nothing would make step 3 a
-    #    tautology about unmodified source — the exact shape of a vacuous guard.
     planted = real.replace(_MASKED_LINE, _PLANTED_LINE, 1)
     assert planted != real, (
         f"the planted-regression swap matched nothing in {_INSTANCE_ROUTES.name}; "
@@ -933,7 +910,6 @@ def test_reverting_the_mask_in_instance_routes_is_counted():
     )
     assert len(planted) != len(real), "the swap applied but changed no bytes"
 
-    # 3) The detector sees it.
     census = Census()
     scan_source(planted, "providers/instance_routes.py", census)
     assert len(census.violations) == 1, (
@@ -944,14 +920,11 @@ def test_reverting_the_mask_in_instance_routes_is_counted():
     assert census.violations[0].handler == "handle_list_instances", census.violations[0]
 
 
-# ── the ratchets ──────────────────────────────────────────────────────────────
-
-
 def test_no_route_hands_a_provider_config_to_the_wire_unmasked():
     """The rail. Derived population, zero tolerance.
 
     Every route handler that lets a config-or-instance object reach a ``json_response``
-    payload must route it through :mod:`gideon.apps.secret_fields`. Five handlers
+    payload must route it through :mod:`gideon.extensions.apps.secret_fields`. Five handlers
     failed this on the parked parent; the point of deriving the population rather than
     listing it is that a sixth is classified without anyone remembering to add it here.
     """
@@ -1009,13 +982,19 @@ def test_every_config_bearing_surface_also_preserves_secrets_if_it_writes():
             continue
         rel = str(path.relative_to(SRC.parent.parent))
         for node in ast.walk(tree):
-            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            if not (
+                isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            ):
                 continue
             verb = node.func.attr
             if verb not in ("add_post", "add_put", "add_patch") or len(node.args) < 2:
                 continue
             handler = node.args[1]
-            name = handler.id if isinstance(handler, ast.Name) else getattr(handler, "attr", "")
+            name = (
+                handler.id
+                if isinstance(handler, ast.Name)
+                else getattr(handler, "attr", "")
+            )
             if name:
                 writers.setdefault(rel, set()).add(name)
 
@@ -1028,7 +1007,8 @@ def test_every_config_bearing_surface_also_preserves_secrets_if_it_writes():
         fn = next(
             n
             for n in ast.walk(ast.parse(source))
-            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == surface.handler
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and n.name == surface.handler
         )
         if "preserve_unchanged_secrets" not in ast.unparse(fn):
             offenders.append(f"  {surface.module} {surface.handler}()")

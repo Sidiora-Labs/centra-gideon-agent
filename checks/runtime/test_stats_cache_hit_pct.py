@@ -11,12 +11,15 @@ keys, and computing a per-turn ratio must not touch them.
 
 import pytest
 
-from gideon.stats import Stats, cache_hit_pct
+from gideon.operations.stats import Stats, cache_hit_pct
 
 
 def test_zero_denominator_is_unmeasured_not_zero_percent() -> None:
     """No prompt tokens at all → ``None``. A ``0.0`` would fabricate "0% cached"."""
-    assert cache_hit_pct(cache_read_tokens=0, cache_creation_tokens=0, input_tokens=0) is None
+    assert (
+        cache_hit_pct(cache_read_tokens=0, cache_creation_tokens=0, input_tokens=0)
+        is None
+    )
 
 
 def test_plain_hit_uses_the_whole_prompt_as_denominator() -> None:
@@ -48,14 +51,18 @@ def test_fully_cached_prompt_is_one_hundred_percent() -> None:
 
 def test_uncached_prompt_is_a_measured_zero() -> None:
     """Prompt tokens present, none cached → ``0.0``, a real answer (not ``None``)."""
-    result = cache_hit_pct(cache_read_tokens=0, cache_creation_tokens=0, input_tokens=1_000)
+    result = cache_hit_pct(
+        cache_read_tokens=0, cache_creation_tokens=0, input_tokens=1_000
+    )
     assert result is not None
     assert result == pytest.approx(0.0)
 
 
 def test_write_only_first_turn_is_zero_percent_not_none() -> None:
     """A creation-only turn has a prompt but no hits — measured 0%, not unmeasured."""
-    result = cache_hit_pct(cache_read_tokens=0, cache_creation_tokens=500, input_tokens=0)
+    result = cache_hit_pct(
+        cache_read_tokens=0, cache_creation_tokens=500, input_tokens=0
+    )
     assert result is not None
     assert result == pytest.approx(0.0)
 
@@ -76,7 +83,9 @@ def test_stats_counters_still_carry_both_cache_keys() -> None:
 
 def test_cache_hit_pct_is_module_level_and_stateless() -> None:
     """It derives a ratio from arguments; it must not read or write the singleton."""
-    assert not hasattr(Stats, "cache_hit_pct"), "must not become a method on the singleton"
+    assert not hasattr(
+        Stats, "cache_hit_pct"
+    ), "must not become a method on the singleton"
     before = Stats().snapshot()
     cache_hit_pct(cache_read_tokens=750, cache_creation_tokens=250, input_tokens=1_000)
     assert Stats().snapshot() == before

@@ -4,7 +4,7 @@
 Most of this file exists to make that sentence falsifiable at the place it can break — the
 CALL SITE that builds the payload — rather than at the guard that happens to be next to it.
 So the leak tests assert on the bytes handed to the HTTP layer, downstream of every
-composer: :func:`gideon.push._post` is patched, and what it received is inspected. A
+composer: :func:`gideon.workspace.push._post` is patched, and what it received is inspected. A
 test that asserted only ``assert_content_free`` would pass on a build whose sender bypassed
 it.
 
@@ -22,8 +22,8 @@ What IS proven here is every server-side link of that chain, in one test
 the sender → the wire payload → the deep link the service worker builds from it → the
 approval resolving → **the awaited future returning True, which is the paused run
 proceeding**. The browser half of the tap (payload → notification → click → focused card)
-is proven in ``web/src/app/pushPolicy.test.ts`` and
-``web/src/pages/companion/companionDeepLink.test.tsx``. What remains unproven is only the
+is proven in ``apps/console/src/app/pushPolicy.test.ts`` and
+``apps/console/src/pages/companion/companionDeepLink.test.tsx``. What remains unproven is only the
 radio and the wall clock.
 
 ## Isolation
@@ -43,10 +43,8 @@ from pathlib import Path
 
 import pytest
 
-from gideon import notification_kinds, notification_rules, push
-from gideon.config.loader import config_dir
-
-# ── Fixtures ────────────────────────────────────────────────────────────────
+from gideon.core.config.loader import config_dir
+from gideon.workspace import notification_kinds, notification_rules, push
 
 
 @pytest.fixture()
@@ -99,10 +97,15 @@ def _subscribe_one(device_id: str = "phone-1") -> tuple[str, bytes]:
         device_id,
         {
             "endpoint": "https://push.example/send/abc123",
-            "keys": {"p256dh": push._b64url(ua_public), "auth": push._b64url(auth_secret)},
+            "keys": {
+                "p256dh": push._b64url(ua_public),
+                "auth": push._b64url(auth_secret),
+            },
         },
     )
-    return push._b64url(auth_secret), ua_private.private_numbers().private_value.to_bytes(32, "big")
+    return push._b64url(
+        auth_secret
+    ), ua_private.private_numbers().private_value.to_bytes(32, "big")
 
 
 def _keypair_for_subscribe() -> tuple[str, bytes]:
@@ -116,12 +119,11 @@ def _keypair_for_subscribe() -> tuple[str, bytes]:
             encoding=Encoding.X962, format=PublicFormat.UncompressedPoint
         )
     )
-    return push._b64url(b"0123456789abcdef"), ua_private.private_numbers().private_value.to_bytes(
-        32, "big"
-    )
+    return push._b64url(
+        b"0123456789abcdef"
+    ), ua_private.private_numbers().private_value.to_bytes(32, "big")
 
 
-#: The public half of the keypair :func:`_keypair_for_subscribe` just minted, for the HTTP leg.
 _PENDING: dict[str, str] = {}
 
 
@@ -131,7 +133,7 @@ async def _subscribe_over_http(device_id: str, auth_b64: str) -> None:
     from aiohttp import web
     from aiohttp.test_utils import TestClient, TestServer
 
-    from gideon.dashboard.handlers.push import register_push_routes
+    from gideon.interfaces.dashboard.handlers.push import register_push_routes
 
     app = web.Application()
     register_push_routes(app)
@@ -154,19 +156,19 @@ async def _subscribe_over_http(device_id: str, auth_b64: str) -> None:
 
 
 def _state():  # noqa: ANN201
-    """A real ``DashboardState`` with the two required collaborators stubbed.
+    """A real ``ConsoleState`` with the two required collaborators stubbed.
 
     The real thing on purpose: `notify` and `request_approval` are the call sites under
     test, and a fake state would only prove that the fake pushes.
     """
     from unittest.mock import AsyncMock, MagicMock
 
-    from gideon.dashboard.state import DashboardState
+    from gideon.interfaces.dashboard.state import ConsoleState
 
     sessions = MagicMock(count=0)
     sessions.remove = AsyncMock()
     sessions.get_pid = MagicMock(return_value=None)
-    return DashboardState(sessions=sessions, start_time=0.0)
+    return ConsoleState(sessions=sessions, start_time=0.0)
 
 
 def _decrypt(body: bytes, ua_private_raw: bytes, auth_secret: bytes) -> bytes:
@@ -179,11 +181,15 @@ def _decrypt(body: bytes, ua_private_raw: bytes, auth_secret: bytes) -> bytes:
     as_public_raw = body[21 : 21 + idlen]
     ciphertext = body[21 + idlen :]
 
-    ua_private = ec.derive_private_key(int.from_bytes(ua_private_raw, "big"), ec.SECP256R1())
+    ua_private = ec.derive_private_key(
+        int.from_bytes(ua_private_raw, "big"), ec.SECP256R1()
+    )
     ua_public_raw = ua_private.public_key().public_bytes(
         encoding=Encoding.X962, format=PublicFormat.UncompressedPoint
     )
-    as_public = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), as_public_raw)
+    as_public = ec.EllipticCurvePublicKey.from_encoded_point(
+        ec.SECP256R1(), as_public_raw
+    )
     shared = ua_private.exchange(ec.ECDH(), as_public)
     prk = push._hkdf(
         salt=auth_secret,
@@ -191,16 +197,20 @@ def _decrypt(body: bytes, ua_private_raw: bytes, auth_secret: bytes) -> bytes:
         info=b"WebPush: info\x00" + ua_public_raw + as_public_raw,
         length=32,
     )
-    cek = push._hkdf(salt=salt, ikm=prk, info=b"Content-Encoding: aes128gcm\x00", length=16)
-    nonce = push._hkdf(salt=salt, ikm=prk, info=b"Content-Encoding: nonce\x00", length=12)
+    cek = push._hkdf(
+        salt=salt, ikm=prk, info=b"Content-Encoding: aes128gcm\x00", length=16
+    )
+    nonce = push._hkdf(
+        salt=salt, ikm=prk, info=b"Content-Encoding: nonce\x00", length=12
+    )
     return AESGCM(cek).decrypt(nonce, ciphertext, None).rstrip(b"\x02")
 
 
-# ── The payload contract ────────────────────────────────────────────────────
-
-
 def test_the_payload_constructor_produces_exactly_two_keys() -> None:
-    assert push.content_free_payload("approval", "a1") == {"kind": "approval", "item_id": "a1"}
+    assert push.content_free_payload("approval", "a1") == {
+        "kind": "approval",
+        "item_id": "a1",
+    }
     assert set(push.PAYLOAD_KEYS) == {"kind", "item_id"}
 
 
@@ -233,22 +243,31 @@ def test_an_empty_kind_is_refused_but_an_empty_item_id_is_not() -> None:
     """
     with pytest.raises(push.PushPayloadError):
         push.content_free_payload("", "a1")
-    assert push.content_free_payload("approval", "") == {"kind": "approval", "item_id": ""}
+    assert push.content_free_payload("approval", "") == {
+        "kind": "approval",
+        "item_id": "",
+    }
 
 
 # ── VAPID ───────────────────────────────────────────────────────────────────
 
 
-def test_push_init_stores_a_real_p256_keypair_in_the_credential_store(home: Path) -> None:
+def test_push_init_stores_a_real_p256_keypair_in_the_credential_store(
+    home: Path,
+) -> None:
     from cryptography.hazmat.primitives.asymmetric import ec
 
     public_key, private_key = push.push_init()
 
     stored = json.loads((home / "credentials.json").read_text())
-    assert stored[push.VAPID_PUBLIC_CRED] == {"type": "static_token", "value": public_key}
-    assert stored[push.VAPID_PRIVATE_CRED] == {"type": "static_token", "value": private_key}
-    # A real key, not 32 random bytes: derive it and check the public half matches, which is
-    # what a push service does before accepting the JWT.
+    assert stored[push.VAPID_PUBLIC_CRED] == {
+        "type": "static_token",
+        "value": public_key,
+    }
+    assert stored[push.VAPID_PRIVATE_CRED] == {
+        "type": "static_token",
+        "value": private_key,
+    }
     derived = ec.derive_private_key(
         int.from_bytes(push._b64url_decode(private_key), "big"), ec.SECP256R1()
     )
@@ -257,7 +276,7 @@ def test_push_init_stores_a_real_p256_keypair_in_the_credential_store(home: Path
     assert derived.public_key().public_bytes(
         encoding=Encoding.X962, format=PublicFormat.UncompressedPoint
     ) == push._b64url_decode(public_key)
-    assert len(push._b64url_decode(public_key)) == 65  # uncompressed P-256 point
+    assert len(push._b64url_decode(public_key)) == 65
 
 
 def test_push_init_is_idempotent_and_force_rotates(home: Path) -> None:
@@ -301,20 +320,18 @@ def test_the_vapid_header_is_a_verifiable_es256_jwt_scoped_to_the_endpoint_origi
     assert key_part == public_key
     head_b64, claims_b64, sig_b64 = token.split(".")
     claims = json.loads(push._b64url_decode(claims_b64))
-    # ORIGIN, not the full URL — path and query must not be in `aud`.
     assert claims["aud"] == "https://push.example"
     assert claims["sub"] == push.VAPID_SUBJECT
     assert claims["exp"] > 0
 
     raw = push._b64url_decode(sig_b64)
     assert len(raw) == 64, "ES256 wants raw r||s, not DER"
-    der = encode_dss_signature(int.from_bytes(raw[:32], "big"), int.from_bytes(raw[32:], "big"))
+    der = encode_dss_signature(
+        int.from_bytes(raw[:32], "big"), int.from_bytes(raw[32:], "big")
+    )
     ec.EllipticCurvePublicKey.from_encoded_point(
         ec.SECP256R1(), push._b64url_decode(public_key)
     ).verify(der, f"{head_b64}.{claims_b64}".encode(), ec.ECDSA(hashes.SHA256()))
-
-
-# ── Subscriptions ───────────────────────────────────────────────────────────
 
 
 def test_a_subscription_needs_an_https_endpoint_and_both_keys(home: Path) -> None:
@@ -368,9 +385,6 @@ def test_only_the_three_sender_fields_are_stored(home: Path) -> None:
     row = push.load_subscriptions()["phone-1"]
     assert set(row) == {"endpoint", "keys", "created_at"}
     assert set(row["keys"]) == {"p256dh", "auth"}
-
-
-# ── The wire: ids only, both backends ───────────────────────────────────────
 
 
 def test_the_webpush_ciphertext_decrypts_to_exactly_the_two_ids(
@@ -466,7 +480,7 @@ def test_a_missing_mobile_section_does_not_read_as_backend_none(home: Path) -> N
     the section. Measured, then pinned.
     """
     (home / "config.json").write_text(json.dumps({"agent": {}}))
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     assert AppConfig.load().mobile.push_backend == "webpush"
     assert push.push_backend() == "webpush"
@@ -495,10 +509,9 @@ def test_a_dead_endpoint_is_pruned_rather_than_retried_forever(
     assert push.load_subscriptions() == {}
 
 
-# ── Plan 42's `push` target ─────────────────────────────────────────────────
-
-
-def test_the_approval_kind_is_registered_and_carries_no_default_push_target(home: Path) -> None:
+def test_the_approval_kind_is_registered_and_carries_no_default_push_target(
+    home: Path,
+) -> None:
     """The rules matrix must carry a row for "a run is blocked waiting on me".
 
     And that row's UNCONFIGURED state must be dashboard-only. This atom first shipped a
@@ -512,7 +525,9 @@ def test_the_approval_kind_is_registered_and_carries_no_default_push_target(home
     registered = notification_kinds.resolve_kind("approval", "requested")
     assert (registered.source, registered.kind) == ("approval", "requested")
     assert notification_kinds.kind_for_legacy("approval").key == "approval/requested"
-    assert notification_rules.resolve_rule("approval", "requested").targets == ("dashboard",)
+    assert notification_rules.resolve_rule("approval", "requested").targets == (
+        "dashboard",
+    )
     assert notification_rules.DEFAULT_TARGETS == ("dashboard",)
 
 
@@ -529,17 +544,24 @@ def test_ensure_target_configures_an_unset_rule_and_never_overrides_a_set_one(
     assert rule.targets == ("dashboard", "push")
     assert rule.mode == "immediate"
 
-    # Idempotent: a second subscribe writes nothing.
     assert notification_rules.ensure_target("approval", "requested", "push") is False
 
-    # And an explicit "no push" survives.
     (home / "entity_settings" / "notification_rules.json").write_text(
         json.dumps(
-            {"rules": {"approval/requested": {"mode": "immediate", "targets": ["dashboard"]}}}
+            {
+                "rules": {
+                    "approval/requested": {
+                        "mode": "immediate",
+                        "targets": ["dashboard"],
+                    }
+                }
+            }
         )
     )
     assert notification_rules.ensure_target("approval", "requested", "push") is False
-    assert notification_rules.resolve_rule("approval", "requested").targets == ("dashboard",)
+    assert notification_rules.resolve_rule("approval", "requested").targets == (
+        "dashboard",
+    )
 
     with pytest.raises(ValueError):
         notification_rules.ensure_target("approval", "requested", "not-a-target")
@@ -549,7 +571,9 @@ def test_ensure_target_leaves_every_other_rule_alone(home: Path) -> None:
     """A vacuity floor: prove the write is SCOPED, not a rules-file rewrite."""
     (home / "entity_settings").mkdir(parents=True, exist_ok=True)
     (home / "entity_settings" / "notification_rules.json").write_text(
-        json.dumps({"rules": {"cron/result": {"mode": "digest", "targets": ["dashboard"]}}})
+        json.dumps(
+            {"rules": {"cron/result": {"mode": "digest", "targets": ["dashboard"]}}}
+        )
     )
     notification_rules.ensure_target("approval", "requested", "push")
     cron = notification_rules.resolve_rule("cron", "result")
@@ -561,11 +585,13 @@ def test_ensure_target_leaves_every_other_rule_alone(home: Path) -> None:
 def test_notify_pushes_only_when_the_rule_targets_push(
     home: Path, sent: list[dict[str, object]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`DashboardState.notify` is the chokepoint plan 42 routes every emitter through."""
+    """`ConsoleState.notify` is the chokepoint plan 42 routes every emitter through."""
     push.push_init()
     _subscribe_one("phone-1")
     delivered: list[tuple[str, str]] = []
-    monkeypatch.setattr(push, "deliver_async", lambda kind, item: delivered.append((kind, item)))
+    monkeypatch.setattr(
+        push, "deliver_async", lambda kind, item: delivered.append((kind, item))
+    )
 
     state = _state()
     state.notify("cron", "Job finished", "all good")
@@ -574,7 +600,14 @@ def test_notify_pushes_only_when_the_rule_targets_push(
     (home / "entity_settings").mkdir(parents=True, exist_ok=True)
     (home / "entity_settings" / "notification_rules.json").write_text(
         json.dumps(
-            {"rules": {"cron/result": {"mode": "immediate", "targets": ["dashboard", "push"]}}}
+            {
+                "rules": {
+                    "cron/result": {
+                        "mode": "immediate",
+                        "targets": ["dashboard", "push"],
+                    }
+                }
+            }
         )
     )
     state.notify("cron", "Job finished", "all good", meta={"item_id": "run-9"})
@@ -596,7 +629,14 @@ def test_notify_never_forwards_the_title_or_body_to_the_sender(
     (home / "entity_settings").mkdir(parents=True, exist_ok=True)
     (home / "entity_settings" / "notification_rules.json").write_text(
         json.dumps(
-            {"rules": {"cron/result": {"mode": "immediate", "targets": ["dashboard", "push"]}}}
+            {
+                "rules": {
+                    "cron/result": {
+                        "mode": "immediate",
+                        "targets": ["dashboard", "push"],
+                    }
+                }
+            }
         )
     )
 
@@ -605,8 +645,6 @@ def test_notify_never_forwards_the_title_or_body_to_the_sender(
     state._push_target(
         "cron", {"kind": "cron", "title": secret, "body": secret, "item_id": "run-9"}
     )
-    # `_push_target` hands off to a daemon thread; drive `deliver` directly for determinism,
-    # having just proven the dict it would have passed carries only ids.
     push.deliver("cron", "run-9")
 
     for call in sent:
@@ -616,9 +654,6 @@ def test_notify_never_forwards_the_title_or_body_to_the_sender(
         plaintext = _decrypt(body, ua_private_raw, push._b64url_decode(auth_b64))
         assert set(json.loads(plaintext)) == {"kind", "item_id"}
         assert secret not in plaintext.decode()
-
-
-# ── The chain ───────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -642,31 +677,26 @@ async def test_the_whole_push_to_approval_chain_advances_a_paused_run(
 
     push.push_init()
 
-    # 0. THE PHONE SUBSCRIBES — through the real route, not by calling the store, because the
-    #    route does two things and only one of them is obvious: it stores the subscription AND
-    #    routes `approval/requested` to the push target. Starting the chain at the store would
-    #    skip the half that makes the rest of the chain fire at all.
     auth_b64, ua_private_raw = _keypair_for_subscribe()
     await _subscribe_over_http("phone-1", auth_b64)
     assert "push" in notification_rules.resolve_rule("approval", "requested").targets
     state = _state()
 
-    # The push fires from `request_approval`; capture the id it pinged rather than assuming
-    # it matches the one we passed in.
     pinged: list[tuple[str, str]] = []
-    monkeypatch.setattr(push, "deliver_async", lambda kind, item: pinged.append((kind, item)))
+    monkeypatch.setattr(
+        push, "deliver_async", lambda kind, item: pinged.append((kind, item))
+    )
 
     approval_id = "appr-chain-1"
     pending = asyncio.create_task(
-        state.request_approval(approval_id, source="cron", tool="Bash", tool_input="rm -rf /tmp/x")
+        state.request_approval(
+            approval_id, source="cron", tool="Bash", tool_input="rm -rf /tmp/x"
+        )
     )
-    await asyncio.sleep(0)  # let request_approval register the future and broadcast
+    await asyncio.sleep(0)
 
-    # 1. the ping happened, and carries the approval id
     assert pinged == [("approval", approval_id)]
 
-    # 2. what a real send puts on the wire is ids only — including for THIS approval, whose
-    #    tool_input is exactly the sort of string that must never leave the machine
     push.deliver(*pinged[0])
     body = sent[-1]["body"]
     assert isinstance(body, bytes)
@@ -674,22 +704,13 @@ async def test_the_whole_push_to_approval_chain_advances_a_paused_run(
     assert payload == {"kind": "approval", "item_id": approval_id}
     assert b"rm -rf" not in body
 
-    # 3. the id the service worker will put in `#/companion?approval=<id>` is THIS approval's
-    #    id. Asserted as the id, not as a hand-built URL string: comparing two f-strings both
-    #    composed here would be a rail that matches nothing. The URL SHAPE lives on the side
-    #    that builds it and is pinned by `pushPolicy.test.ts::the deep link`, and the
-    #    `?approval=` param name is pinned on the reading side by
-    #    `companionDeepLink.test.tsx` — so a rename on either half reds a real test.
     assert payload["item_id"] == approval_id
     assert approval_id in state._pending_approvals
 
-    # 4. the queue the phone fetches over the user's own link lists it, with the context the
-    #    push deliberately omitted
     listed = list(state._pending_approvals.values())
     assert [row["id"] for row in listed] == [approval_id]
     assert listed[0]["tool"] == "Bash"
 
-    # 5. approve → the paused run proceeds
     assert state.resolve_approval(approval_id, True) is True
     assert await asyncio.wait_for(pending, timeout=5) is True
 
@@ -706,17 +727,18 @@ async def test_a_rule_that_says_never_stops_the_approval_push(
         json.dumps({"rules": {"approval/requested": {"mode": "never"}}})
     )
     pinged: list[tuple[str, str]] = []
-    monkeypatch.setattr(push, "deliver_async", lambda kind, item: pinged.append((kind, item)))
+    monkeypatch.setattr(
+        push, "deliver_async", lambda kind, item: pinged.append((kind, item))
+    )
 
     state = _state()
-    pending = asyncio.create_task(state.request_approval("appr-quiet", source="cron", tool="Bash"))
+    pending = asyncio.create_task(
+        state.request_approval("appr-quiet", source="cron", tool="Bash")
+    )
     await asyncio.sleep(0)
     assert pinged == []
     assert state.resolve_approval("appr-quiet", False) is True
     assert await asyncio.wait_for(pending, timeout=5) is False
-
-
-# ── The routes ──────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -725,7 +747,7 @@ async def test_the_subscription_routes_round_trip(home: Path) -> None:
     from aiohttp import web
     from aiohttp.test_utils import TestClient, TestServer
 
-    from gideon.dashboard.handlers.push import register_push_routes
+    from gideon.interfaces.dashboard.handlers.push import register_push_routes
 
     push.push_init()
     app = web.Application()
@@ -744,10 +766,9 @@ async def _drive_routes(client) -> None:  # noqa: ANN001
     assert status["backend"] == "webpush"
     assert status["vapid_ready"] is True
     assert status["vapid_public_key"] == push.vapid_public_key()
-    assert "vapid_private_key" not in status and push.VAPID_PRIVATE_CRED not in str(status)
-    # The wire contract, pinned as a SET. The handler spells the payload out as a literal
-    # (an allowlist over `push_status()`), so a dropped field would otherwise be invisible —
-    # the frontend would read `undefined` and paint a wrong state rather than fail.
+    assert "vapid_private_key" not in status and push.VAPID_PRIVATE_CRED not in str(
+        status
+    )
     assert set(status) == {
         "backend",
         "vapid_public_key",
@@ -760,7 +781,6 @@ async def _drive_routes(client) -> None:  # noqa: ANN001
         "subscribed",
     }
     assert status["subscribed"] == 0
-    # Nothing routes approvals to the phone yet — the rule is unconfigured.
     assert status["approval_targeted"] is False
 
     good = {
@@ -772,14 +792,10 @@ async def _drive_routes(client) -> None:  # noqa: ANN001
     }
     first = await client.post("/api/push/subscribe", json=good)
     assert first.status == 200
-    # Subscribing IS the "wake me for a blocked run" statement, so the route configures plan
-    # 42's rule for a user who never set one — otherwise the button would be one of two
-    # switches and would read as broken.
     assert (await first.json())["approval_rule_written"] is True
     after = await (await client.get("/api/push")).json()
     assert after["subscribed"] == 1
     assert after["approval_targeted"] is True
-    # ...and a SECOND subscribe writes nothing (idempotent, not an override).
     again = await client.post("/api/push/subscribe", json=good)
     assert (await again.json())["approval_rule_written"] is False
 
@@ -790,7 +806,9 @@ async def _drive_routes(client) -> None:  # noqa: ANN001
     assert bad.status == 400
     assert (await bad.json())["error"]["code"] == "push_subscription_invalid"
 
-    assert (await client.post("/api/push/unsubscribe", json={"device_id": "phone-1"})).status == 200
+    assert (
+        await client.post("/api/push/unsubscribe", json={"device_id": "phone-1"})
+    ).status == 200
     missing = await client.post("/api/push/unsubscribe", json={"device_id": "phone-1"})
     assert missing.status == 404
     assert (await missing.json())["error"]["code"] == "push_not_subscribed"
@@ -804,12 +822,13 @@ def test_the_push_routes_are_not_exempt_from_auth() -> None:
     were there. Asserted as a shape rather than a point-in-time grep so a future addition to
     either bypass list reds here.
     """
-    from gideon.dashboard import token_auth
+    from gideon.interfaces.dashboard import token_auth
 
     for path in ("/api/push", "/api/push/subscribe", "/api/push/unsubscribe"):
         assert path not in getattr(token_auth, "_BYPASS_EXACT", ())
         assert not any(
-            path.startswith(prefix) for prefix in getattr(token_auth, "_BYPASS_PREFIXES", ())
+            path.startswith(prefix)
+            for prefix in getattr(token_auth, "_BYPASS_PREFIXES", ())
         )
 
 
@@ -819,7 +838,7 @@ def test_the_status_route_never_carries_the_private_key(home: Path) -> None:
     status = push.push_status()
     assert status["vapid_public_key"] == public_key
     assert private_key not in json.dumps(status)
-    assert private_key != public_key  # the two halves are genuinely different strings
+    assert private_key != public_key
 
 
 def test_base64url_round_trips_without_padding(home: Path) -> None:

@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 from aiohttp import web
 
-from gideon.dashboard.handlers_inbox import api_inbox_digest
+from gideon.interfaces.dashboard.handlers_inbox import api_inbox_digest
 
 
 def _req(query: dict) -> MagicMock:

@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import pytest
 
-from gideon import session_search
-from gideon.history import ConversationLog
-from gideon.session_search import purge_orphans, search_sessions
+from gideon.cognition.history import ConversationLog
+from gideon.engine import session_search
+from gideon.engine.session_search import purge_orphans, search_sessions
 
 
 @pytest.fixture()
@@ -39,7 +39,8 @@ class TestDeleteThenSearch:
         log = env
         _make_session(log, "dashboard:chat-77-123", "the zebra password is xyzzy")
         assert any(
-            "zebra" in (r.get("snippet", "") + r.get("title", "")) for r in search_sessions("zebra")
+            "zebra" in (r.get("snippet", "") + r.get("title", ""))
+            for r in search_sessions("zebra")
         )
 
         assert log.delete_session("dashboard:chat-77-123") is True
@@ -52,7 +53,6 @@ class TestDeleteThenSearch:
         drop the index row stored under the other."""
         log = env
         _make_session(log, "dashboard:chat-88-456", "unique-fennec-content")
-        # The handlers sometimes carry the underscore (filename) form.
         assert log.delete_session("dashboard_chat-88-456") is True
         assert search_sessions("fennec") == []
 
@@ -71,9 +71,7 @@ class TestDeleteThenSearch:
 class TestBackfill:
     def test_purge_orphans_sweeps_and_counts(self, env) -> None:
         log = env
-        # One live session…
         _make_session(log, "dashboard:chat-1-100", "alive-otter")
-        # …and two orphans: index rows whose transcript never/no-longer exists.
         assert session_search.index_session("dashboard:chat-2-200", "t", "dead-badger")
         assert session_search.index_session("dashboard:chat-3-300", "t", "dead-stoat")
 
@@ -115,5 +113,5 @@ class TestReindexAllRunsTheBackfill:
             "INSERT INTO sessions_fts (session_key, title, body) VALUES (?, ?, ?)",
             ("dashboard:chat-6-600", "t", "orphan-lynx"),
         )
-        session_search.reindex_all(log)  # complete pass (limit=None)
+        session_search.reindex_all(log)
         assert search_sessions("lynx") == []

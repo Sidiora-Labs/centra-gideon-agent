@@ -15,9 +15,9 @@ import os
 
 import pytest
 
-from gideon.knowledge.source_engine import POLL_CEILING_SECS, SourceEngine
-from gideon.knowledge.store import KnowledgeStore
-from gideon.knowledge_providers.base import (
+from gideon.cognition.knowledge.source_engine import POLL_CEILING_SECS, SourceEngine
+from gideon.cognition.knowledge.store import KnowledgeStore
+from gideon.integrations.knowledge_providers.base import (
     KnowledgeItem,
     KnowledgeSource,
     KnowledgeSourceProvider,
@@ -34,9 +34,6 @@ def _isolated_home(tmp_path, monkeypatch):
 @pytest.fixture()
 def store(tmp_path):
     return KnowledgeStore(str(tmp_path / "knowledge.db"))
-
-
-# ── a poll-capable fixture provider (§1.1 shape) ───────────────────────────────
 
 
 class FixtureSourceProvider(KnowledgeSourceProvider):
@@ -101,7 +98,7 @@ class _FakeQueue:
 def _cfg(**over):
     """A plain SourcesConfig-shaped object; overrides let a test force a floor/cap. Uses a
     tiny floor so scheduling is testable without wall-clock waits."""
-    from gideon.config.loader import SourcesConfig
+    from gideon.core.config.loader import SourcesConfig
 
     base = dict(
         enabled=True,
@@ -127,13 +124,12 @@ def _engine(store, provider, **cfg_over):
     return eng, queue
 
 
-# ── migration ──────────────────────────────────────────────────────────────────
-
-
 def test_migration_adds_source_tables_and_columns(store):
     tables = {
         r[0]
-        for r in store.db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        for r in store.db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
     }
     assert {"sources", "source_cursors", "source_seen"} <= tables
     cols = {r[1] for r in store.db.execute("PRAGMA table_info(items)").fetchall()}
@@ -141,11 +137,11 @@ def test_migration_adds_source_tables_and_columns(store):
 
 
 def test_unique_source_guid_index_exists_and_binds(store, tmp_path):
-    # The partial UNIQUE index rejects a second item for one (source_id, guid) — the
-    # never-pruned persist gate on top of the seen-set.
     idx = {
         r[0]
-        for r in store.db.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
+        for r in store.db.execute(
+            "SELECT name FROM sqlite_master WHERE type='index'"
+        ).fetchall()
     }
     assert "idx_items_source_guid" in idx
 
@@ -155,57 +151,67 @@ def test_reopen_is_idempotent_and_keeps_source_columns(tmp_path):
     s1 = KnowledgeStore(path)
     sid = s1.create_source(name="s", provider="watched-fixture", kind="feed")
     s1.db.close()
-    s2 = KnowledgeStore(path)  # reopen → _migrate + _migrate_sources run again
+    s2 = KnowledgeStore(path)
     cols = {r[1] for r in s2.db.execute("PRAGMA table_info(items)").fetchall()}
-    # Source columns survive the reopen (the legacy chunk-model DROP keys on chunk_index
-    # ALONE now, so it can't clobber the reclaimed source_id/guid).
     assert "source_id" in cols and "guid" in cols
     assert s2.get_source(sid) is not None
-
-
-# ── create_typed_item source path (novelty gate) ────────────────────────────────
 
 
 def test_create_typed_item_source_dedups_by_guid(store):
     sid = store.create_source(name="s", provider="watched-fixture", kind="feed")
     a = store.create_typed_item(
-        item_type="bookmark", title="t", source_id=sid, guid="g1", provider="watched-fixture"
+        item_type="bookmark",
+        title="t",
+        source_id=sid,
+        guid="g1",
+        provider="watched-fixture",
     )
     b = store.create_typed_item(
-        item_type="bookmark", title="t again", source_id=sid, guid="g1", provider="watched-fixture"
+        item_type="bookmark",
+        title="t again",
+        source_id=sid,
+        guid="g1",
+        provider="watched-fixture",
     )
-    assert a is not None and b is None  # second sighting deduped
+    assert a is not None and b is None
     seen = store.db.execute(
         "SELECT COUNT(*) FROM source_seen WHERE source_id = ?", (sid,)
     ).fetchone()[0]
     assert seen == 1
-    items = store.db.execute("SELECT COUNT(*) FROM items WHERE source_id = ?", (sid,)).fetchone()[0]
+    items = store.db.execute(
+        "SELECT COUNT(*) FROM items WHERE source_id = ?", (sid,)
+    ).fetchone()[0]
     assert items == 1
 
 
 def test_native_create_still_returns_id_and_leaves_source_null(store):
     iid = store.create_typed_item(item_type="note", title="native", content="x")
     assert iid is not None
-    row = store.db.execute("SELECT source_id, guid FROM items WHERE id = ?", (iid,)).fetchone()
+    row = store.db.execute(
+        "SELECT source_id, guid FROM items WHERE id = ?", (iid,)
+    ).fetchone()
     assert row["source_id"] is None and row["guid"] is None
-
-
-# ── engine polls, writes, enqueues, advances cursor ─────────────────────────────
 
 
 @pytest.mark.asyncio
 async def test_engine_polls_fixture_writes_and_enqueues(store):
     sid = store.create_source(name="s", provider="watched-fixture", kind="feed")
     provider = FixtureSourceProvider(
-        [([SourceItem(guid="g1", title="One"), SourceItem(guid="g2", title="Two")], "cursor-1")]
+        [
+            (
+                [
+                    SourceItem(guid="g1", title="One"),
+                    SourceItem(guid="g2", title="Two"),
+                ],
+                "cursor-1",
+            )
+        ]
     )
     eng, queue = _engine(store, provider)
     n = await eng.poll_source(store.get_source(sid), _cfg())
     assert n == 2
     assert len(queue.enqueued) == 2
-    # The cursor was persisted.
     assert store.get_source_cursor(sid) == "cursor-1"
-    # Rollups updated.
     src = store.get_source(sid)
     assert src["last_new_count"] == 2 and src["health_status"] == "ok"
 
@@ -222,7 +228,6 @@ async def test_engine_replays_persisted_cursor_next_poll(store):
     eng, _ = _engine(store, provider)
     await eng.poll_source(store.get_source(sid), _cfg())
     await eng.poll_source(store.get_source(sid), _cfg())
-    # Second poll was handed the cursor the first poll persisted.
     assert provider.polls == ["", "cursor-1"]
     assert store.get_source_cursor(sid) == "cursor-2"
 
@@ -243,10 +248,13 @@ async def test_provider_error_keeps_cursor_and_degrades_health(store):
 
 @pytest.mark.asyncio
 async def test_tick_only_polls_due_sources_and_returns_capped_sleep(store):
-    store.create_source(name="s", provider="watched-fixture", kind="feed", poll_interval_secs=1)
+    store.create_source(
+        name="s", provider="watched-fixture", kind="feed", poll_interval_secs=1
+    )
     provider = FixtureSourceProvider([([SourceItem(guid="g1", title="One")], "c1")])
-    eng, queue = _engine(store, provider, poll_interval_default_secs=1, network_floor_secs=0)
-    # First tick: never-polled → due now → polls.
+    eng, queue = _engine(
+        store, provider, poll_interval_default_secs=1, network_floor_secs=0
+    )
     sleep_for = await eng.tick()
     assert len(queue.enqueued) == 1
     assert 0.0 <= sleep_for <= POLL_CEILING_SECS
@@ -261,9 +269,6 @@ async def test_tick_skips_when_disabled(store):
     assert queue.enqueued == [] and sleep_for == POLL_CEILING_SECS
 
 
-# ── crash-safety: kill mid-poll + restart → no dup, no loss (SC#4) ──────────────
-
-
 @pytest.mark.asyncio
 async def test_kill_mid_poll_then_restart_no_dup_no_loss(store):
     """Simulate a crash BETWEEN item-persist and cursor-persist: the items are durable
@@ -272,8 +277,6 @@ async def test_kill_mid_poll_then_restart_no_dup_no_loss(store):
     (exactly-once persist) — so the item count is unchanged and nothing is lost."""
     sid = store.create_source(name="s", provider="watched-fixture", kind="feed")
 
-    # Phase 1: write both items directly (as poll_source would) but DO NOT record the
-    # cursor — this is the exact mid-poll crash window.
     for guid, title in (("g1", "One"), ("g2", "Two")):
         iid = store.create_typed_item(
             item_type="bookmark",
@@ -284,41 +287,41 @@ async def test_kill_mid_poll_then_restart_no_dup_no_loss(store):
             extra={"processing_status": "queued"},
         )
         assert iid is not None
-    assert store.get_source_cursor(sid) == ""  # cursor never advanced (the crash)
+    assert store.get_source_cursor(sid) == ""
     items_before = store.db.execute(
         "SELECT COUNT(*) FROM items WHERE source_id = ?", (sid,)
     ).fetchone()[0]
     assert items_before == 2
 
-    # Phase 2: restart. recover_pending re-enqueues the written-but-unprocessed items, and
-    # the next poll re-yields the same guids — the seen-set dedups them entirely.
     provider = FixtureSourceProvider(
-        [([SourceItem(guid="g1", title="One"), SourceItem(guid="g2", title="Two")], "cursor-1")]
+        [
+            (
+                [
+                    SourceItem(guid="g1", title="One"),
+                    SourceItem(guid="g2", title="Two"),
+                ],
+                "cursor-1",
+            )
+        ]
     )
     eng, queue = _engine(store, provider)
     recovered = eng.recover_pending()
-    assert recovered == 2  # no loss: both pending items resume ingestion
+    assert recovered == 2
 
     n = await eng.poll_source(store.get_source(sid), _cfg())
-    assert n == 0  # no dup: the re-yielded items were all already seen
+    assert n == 0
     items_after = store.db.execute(
         "SELECT COUNT(*) FROM items WHERE source_id = ?", (sid,)
     ).fetchone()[0]
-    assert items_after == 2  # still exactly two
-    # And the cursor advances now that the poll completed.
+    assert items_after == 2
     assert store.get_source_cursor(sid) == "cursor-1"
 
 
-# ── SOURCE egress profile ───────────────────────────────────────────────────────
-
-
 def test_source_egress_profile_exists():
-    from gideon.net.policy import SOURCE, get_policy
+    from gideon.security.net.policy import SOURCE, get_policy
 
     assert SOURCE.name == "source"
-    # STRICT posture: public hosts only, IP pinned, redirect re-check inherited.
     assert SOURCE.allow_private is False and SOURCE.pin_resolved_ip is True
-    # Registered so get_policy("source") resolves it (not the STRICT fallback).
     assert get_policy("source") is SOURCE
 
 
@@ -329,17 +332,14 @@ def test_engine_egress_policy_layers_source_profile(store):
     assert pol.name == "source" and pol.allow_private is False
 
 
-# ── SourcesConfig round-trip ─────────────────────────────────────────────────────
-
-
 def test_sources_config_roundtrips(tmp_path, monkeypatch):
     from unittest.mock import patch
 
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     p = tmp_path / "config.json"
     p.write_text("{}", encoding="utf-8")
-    with patch("gideon.config.loader.config_path", return_value=p):
+    with patch("gideon.core.config.loader.config_path", return_value=p):
         cfg = AppConfig()
         cfg.sources.enabled = False
         cfg.sources.poll_interval_default_secs = 7200
@@ -362,7 +362,7 @@ def test_sources_config_roundtrips(tmp_path, monkeypatch):
 
 
 def test_sources_editable_config_keys_present():
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
     for key in (
         "sources.enabled",
@@ -376,7 +376,7 @@ def test_sources_editable_config_keys_present():
 
 
 def test_sources_config_in_to_dict():
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     assert "sources" in AppConfig().to_dict()
-    assert os.environ.get("GIDEON_HOME")  # isolation sentinel
+    assert os.environ.get("GIDEON_HOME")

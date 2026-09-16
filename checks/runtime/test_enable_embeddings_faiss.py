@@ -7,15 +7,17 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-import gideon.dashboard.handlers.memory as mem_mod
+import gideon.interfaces.dashboard.handlers.memory as mem_mod
 
-_MOD = "gideon.dashboard.handlers.memory"
-_REG = "gideon.embedding_providers.registry"
+_MOD = "gideon.interfaces.dashboard.handlers.memory"
+_REG = "gideon.integrations.embedding_providers.registry"
 
 
 def _make_app() -> web.Application:
     app = web.Application()
-    app.router.add_post("/api/memory/enable-embeddings", mem_mod.api_memory_enable_embeddings)
+    app.router.add_post(
+        "/api/memory/enable-embeddings", mem_mod.api_memory_enable_embeddings
+    )
     app["state"] = MagicMock(consolidator=None)
     return app
 
@@ -45,10 +47,9 @@ def _common_patches(cfg_path, faiss_available=False):
             return_value=("native", "all-MiniLM-L6-v2"),
         ),
         "embed_fn": patch(f"{_REG}.get_active_embed_fn", return_value=lambda t: [0.0]),
-        "cfg_path": patch("gideon.config.loader.config_path", return_value=cfg_path),
-        # The native embedding backend is the sentence-transformers APP now: the
-        # handler guards on native_provider() being registered + the model being
-        # downloaded (both via the embedding registry), not the old embedding.py.
+        "cfg_path": patch(
+            "gideon.core.config.loader.config_path", return_value=cfg_path
+        ),
         "native": patch(f"{_REG}.native_provider", return_value=MagicMock()),
         "is_downloaded": patch(
             f"{_REG}.is_native_model_downloaded", new=AsyncMock(return_value=True)
@@ -81,7 +82,6 @@ class TestFaissMissing:
                 body = await resp.json()
                 assert "faiss-cpu is not installed" in body["error"]
 
-        # Status is reset so the user can retry after installing faiss-cpu.
         assert mem_mod._embedding_setup_status["step"] == "idle"
         assert "faiss-cpu" in mem_mod._embedding_setup_status["error"]
 

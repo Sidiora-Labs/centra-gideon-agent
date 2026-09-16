@@ -5,7 +5,7 @@ runs a real first success in-flow — and the CLI wizard stays credentials-first
 wizard's only job here is to say where that flow is, and only where a browser can reach
 it. Two things are pinned:
 
-* :func:`gideon.env.browser_available` — the ONE predicate, previously inlined in
+* :func:`gideon.core.env.browser_available` — the ONE predicate, previously inlined in
   the gateway's auto-open branch. A second copy would drift, and both failures are
   silent (a pointer nobody sees, or an instruction a headless user cannot follow).
 * the CALL SITES — a helper that prints the right line is worthless if ``_setup`` never
@@ -16,9 +16,8 @@ it. Two things are pinned:
 import ast
 from pathlib import Path
 
-from gideon import cli_setup, env
-
-# ── the predicate ────────────────────────────────────────────────────────────
+from gideon.core import env
+from gideon.interfaces.cli import setup as cli_setup
 
 _BROWSER_ENV = ("SSH_CONNECTION", "SSH_CLIENT", "DISPLAY", "WAYLAND_DISPLAY")
 
@@ -67,15 +66,11 @@ def test_browser_available_on_macos_even_over_ssh(monkeypatch):
     assert env.browser_available() is True
 
 
-# ── the printed line ─────────────────────────────────────────────────────────
-
-
 def test_pointer_names_the_dashboard_when_a_browser_is_available(monkeypatch, capsys):
     monkeypatch.setattr(cli_setup, "browser_available", lambda: True)
     cli_setup._print_dashboard_pointer()
     out = capsys.readouterr().out
     assert "dashboard" in out
-    # It has to say what is in there, or it is a signpost with no destination.
     assert "model provider" in out and "first success" in out
 
 
@@ -83,9 +78,6 @@ def test_pointer_is_suppressed_with_no_browser(monkeypatch, capsys):
     monkeypatch.setattr(cli_setup, "browser_available", lambda: False)
     cli_setup._print_dashboard_pointer()
     assert capsys.readouterr().out == ""
-
-
-# ── the call sites ───────────────────────────────────────────────────────────
 
 
 def _fn(module_path: str, name: str) -> ast.FunctionDef:
@@ -122,7 +114,9 @@ def test_setup_prints_the_pointer_on_every_path_that_ends_the_wizard():
         and isinstance(n.args[0].value, str)
         and n.args[0].value.startswith("\nDone!")
     ]
-    assert len(done_prints) == 2, "the wizard's completion lines moved — recount the paths"
+    assert (
+        len(done_prints) == 2
+    ), "the wizard's completion lines moved — recount the paths"
     assert len(pointer_calls) == len(done_prints)
 
 
@@ -131,4 +125,6 @@ def test_gateway_asks_the_shared_predicate_instead_of_its_own_copy():
     src = Path(env.__file__).with_name("gateway.py").read_text(encoding="utf-8")
     assert "browser_available()" in src
     for leaked in ("SSH_CONNECTION", "SSH_CLIENT", "WAYLAND_DISPLAY"):
-        assert leaked not in src, f"gateway.py re-derives browser availability from {leaked}"
+        assert (
+            leaked not in src
+        ), f"gateway.py re-derives browser availability from {leaked}"

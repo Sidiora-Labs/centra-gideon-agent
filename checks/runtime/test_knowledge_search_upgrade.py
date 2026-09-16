@@ -2,7 +2,10 @@
 
 import pytest
 
-from gideon.knowledge.embedder import UnifiedEmbedder, create_embedder_from_config
+from gideon.cognition.knowledge.embedder import (
+    UnifiedEmbedder,
+    create_embedder_from_config,
+)
 
 
 class TestCreateEmbedderFromConfig:
@@ -10,29 +13,29 @@ class TestCreateEmbedderFromConfig:
     (get_active_embed_fn) — provider-agnostic, no per-provider hardcoding."""
 
     def test_returns_none_when_no_active_spec(self, monkeypatch):
-        # Built from the Settings > Models active binding. Nothing bound → no embedder.
         monkeypatch.setattr(
-            "gideon.embedding_providers.registry.get_active_embed_fn",
+            "gideon.integrations.embedding_providers.registry.get_active_embed_fn",
             lambda: None,
         )
-        assert create_embedder_from_config({"memory": {"embedding_provider": "none"}}) is None
+        assert (
+            create_embedder_from_config({"memory": {"embedding_provider": "none"}})
+            is None
+        )
 
     def test_returns_none_when_memory_section_missing(self, monkeypatch):
         monkeypatch.setattr(
-            "gideon.embedding_providers.registry.get_active_embed_fn",
+            "gideon.integrations.embedding_providers.registry.get_active_embed_fn",
             lambda: None,
         )
         assert create_embedder_from_config({}) is None
 
     def test_returns_embedder_when_a_model_is_bound(self, monkeypatch):
-        # ANY bound provider (native/ollama/openai/…) yields a working embedder via
-        # the resolved embed fn — the adapter is provider-agnostic.
         monkeypatch.setattr(
-            "gideon.embedding_providers.registry.get_active_embed_fn",
+            "gideon.integrations.embedding_providers.registry.get_active_embed_fn",
             lambda: (lambda text: [0.5, 0.5]),
         )
         monkeypatch.setattr(
-            "gideon.embedding_providers.registry.get_active_embedding_dim",
+            "gideon.integrations.embedding_providers.registry.get_active_embedding_dim",
             lambda: 2,
         )
         emb = create_embedder_from_config({})
@@ -44,7 +47,7 @@ class TestCreateEmbedderFromConfig:
         """Old knowledge.embeddings.enabled path should NOT activate the embedder —
         only the Settings > Models active binding does."""
         monkeypatch.setattr(
-            "gideon.embedding_providers.registry.get_active_embed_fn",
+            "gideon.integrations.embedding_providers.registry.get_active_embed_fn",
             lambda: None,
         )
         cfg = {"knowledge": {"embeddings": {"enabled": True}}}
@@ -69,7 +72,7 @@ class TestUnifiedEmbedderDegradation:
             raise RuntimeError("provider down")
 
         emb = UnifiedEmbedder(_boom)
-        assert emb.embed("hello") is None  # degrades, never raises
+        assert emb.embed("hello") is None
 
     def test_embed_for_item_combines_title_and_summary(self):
         seen = {}
@@ -86,11 +89,10 @@ class TestUnifiedEmbedderDegradation:
 @pytest.fixture
 def mock_knowledge_app(tmp_path):
     """Create a minimal aiohttp app mock with knowledge store."""
-    from gideon.knowledge.store import KnowledgeStore
+    from gideon.cognition.knowledge.store import KnowledgeStore
 
     db_path = str(tmp_path / "knowledge.db")
     store = KnowledgeStore(db_path)
-    # Add some test items (one logical doc each)
     store.create_typed_item(
         item_type="document",
         title="Auth Token Refresh",
@@ -110,14 +112,13 @@ class TestSearchForContext:
     """search_for_context endpoint logic."""
 
     def test_estimate_tokens(self):
-        # Import the real function from the handler module
-        from gideon.dashboard.handlers.knowledge import _estimate_tokens
+        from gideon.interfaces.dashboard.handlers.knowledge import _estimate_tokens
 
-        assert _estimate_tokens("hello world") == 2  # 11 chars // 4
+        assert _estimate_tokens("hello world") == 2
         assert _estimate_tokens("") == 0
 
     def test_knowledge_fetch_defaults(self):
-        from gideon.dashboard.handlers import knowledge as H
+        from gideon.interfaces.dashboard.handlers import knowledge as H
 
         assert H.KNOWLEDGE_FETCH_TOP_N == 3
         assert H.KNOWLEDGE_FETCH_MAX_TOKENS == 4096
@@ -129,7 +130,7 @@ class TestSearchForContext:
         from aiohttp import web
         from aiohttp.test_utils import make_mocked_request
 
-        from gideon.dashboard.handlers import knowledge as H
+        from gideon.interfaces.dashboard.handlers import knowledge as H
 
         app = web.Application()
         app["state"] = SimpleNamespace(knowledge_store=store)
@@ -143,10 +144,12 @@ class TestSearchForContext:
 
     def test_max_tokens_query_param_overrides_default(self, mock_knowledge_app):
         body = self._ctx(mock_knowledge_app, "q=auth&max_tokens=5")
-        assert body["max_tokens"] == 5  # honored the param, not the 4096 default
+        assert body["max_tokens"] == 5
 
     def test_max_tokens_clamped_to_ceiling(self, mock_knowledge_app):
-        from gideon.dashboard.handlers.knowledge import _CONTEXT_MAX_TOKENS_CEILING
+        from gideon.interfaces.dashboard.handlers.knowledge import (
+            _CONTEXT_MAX_TOKENS_CEILING,
+        )
 
         body = self._ctx(mock_knowledge_app, "q=auth&max_tokens=999999999")
         assert body["max_tokens"] == _CONTEXT_MAX_TOKENS_CEILING
@@ -157,11 +160,11 @@ class TestSearchForContext:
 
     def test_large_item_does_not_starve_other_matches(self, tmp_path):
         """One huge item must not consume the whole token budget and drop the other
-        relevant results — each card gets a capped, even share so breadth is preserved."""
-        from gideon.knowledge.store import KnowledgeStore
+        relevant results — each card gets a capped, even share so breadth is preserved.
+        """
+        from gideon.cognition.knowledge.store import KnowledgeStore
 
         store = KnowledgeStore(str(tmp_path / "k.db"))
-        # Two items both matching 'kafka'; the first is enormous.
         store.create_typed_item(
             item_type="document",
             title="Kafka Deep Dive",
@@ -174,7 +177,6 @@ class TestSearchForContext:
             content="kafka consumer group rebalance gotcha",
             summary="kafka tip",
         )
-        # Small budget the big doc alone would otherwise exhaust.
         body = self._ctx(store, "q=kafka&max_tokens=200")
         titles = [c["title"] for c in body["results"]]
         assert len(body["results"]) >= 2, f"both matches should survive, got {titles}"

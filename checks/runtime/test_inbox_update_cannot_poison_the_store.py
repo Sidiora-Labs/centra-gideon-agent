@@ -43,8 +43,7 @@ from typing import Any
 import pytest
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.dashboard import handlers_inbox as h
-from gideon.inbox import (
+from gideon.integrations.inbox import (
     Confidence,
     InboxFieldTypeError,
     InboxItem,
@@ -54,6 +53,7 @@ from gideon.inbox import (
     redact_item,
     validate_updatable_fields,
 )
+from gideon.interfaces.dashboard import handlers_inbox as h
 
 ITEM_ID = "c1_1700000000.1"
 
@@ -73,7 +73,7 @@ def _item(**over: Any) -> InboxItem:
 
 
 class _State:
-    """The minimum DashboardState surface these handlers touch."""
+    """The minimum ConsoleState surface these handlers touch."""
 
     _inbox_svc = None
 
@@ -88,14 +88,13 @@ class _State:
 
 @pytest.fixture
 def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr("gideon.inbox.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.integrations.inbox.config_dir", lambda: tmp_path)
     store = InboxStore(path=tmp_path / "inbox.json")
     store.add(_item())
     store.save()
     inbox_state = InboxState()
     monkeypatch.setattr(inbox_state, "save", lambda: None, raising=False)
     st = _State(store, inbox_state)
-    # `_get_inbox` re-`load()`s the store off disk, which would discard the in-memory item.
     monkeypatch.setattr(store, "load", lambda: None, raising=False)
     return st, store, inbox_state, tmp_path
 
@@ -104,7 +103,9 @@ _MALFORMED = object()
 
 
 async def _put(st: _State, body: Any, item_id: str = ITEM_ID) -> tuple[int, dict]:
-    req = make_mocked_request("PUT", f"/api/inbox/{item_id}", match_info={"id": item_id})
+    req = make_mocked_request(
+        "PUT", f"/api/inbox/{item_id}", match_info={"id": item_id}
+    )
     req.app["state"] = st
 
     async def _json():
@@ -124,9 +125,6 @@ async def _get(st: _State) -> tuple[int, Any]:
     return resp.status, json.loads(resp.text or "[]")
 
 
-# ── the corruption ───────────────────────────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_an_object_draft_is_refused_and_the_list_still_reads(env):
     """🔑 The reported defect, end to end: the refusal, and the reader that used to die."""
@@ -134,7 +132,10 @@ async def test_an_object_draft_is_refused_and_the_list_still_reads(env):
     status, body = await _put(st, {"draft": {"a": 1}})
     assert status == 400
     assert body == {
-        "error": {"code": "invalid_field_type", "message": "draft must be a string, got object"}
+        "error": {
+            "code": "invalid_field_type",
+            "message": "draft must be a string, got object",
+        }
     }
     assert store.items[ITEM_ID].draft == "", "the refused value was applied anyway"
     assert (await _get(st))[0] == 200, "GET /api/inbox is still broken"
@@ -176,9 +177,6 @@ async def test_every_updatable_field_is_type_checked(env, field, value, expected
     assert body["error"]["message"] == expected
 
 
-# ── the malformed / non-object body ──────────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_a_scalar_body_is_a_400_not_a_500(env):
     st, _, _, _ = env
@@ -201,16 +199,15 @@ async def test_malformed_json_is_a_400(env):
     assert (status, body["error"]["code"]) == (400, "invalid_json")
 
 
-# ── the pre-404 pollution ────────────────────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_dismissing_a_nonexistent_id_persists_nothing(env, monkeypatch):
     """🔑 The pollution, measured: this answered 404 *after* adding the id to
     `inbox_state.dismissed` and recording a dismiss signal for a `None` item."""
     st, _, inbox_state, _ = env
     signals: list[Any] = []
-    monkeypatch.setattr(h, "_record_signal", lambda state, item, kind: signals.append((item, kind)))
+    monkeypatch.setattr(
+        h, "_record_signal", lambda state, item, kind: signals.append((item, kind))
+    )
     status, body = await _put(st, {"status": "dismissed"}, "does_not_exist")
     assert (status, body) == (404, {"error": "not found"})
     assert inbox_state.dismissed == set(), "a 404 persisted a dismissal"
@@ -229,7 +226,9 @@ async def test_a_refused_field_does_not_apply_the_side_effects_either(env):
     st, store, inbox_state, _ = env
     status, _ = await _put(st, {"status": "dismissed", "draft": {"bad": 1}})
     assert status == 400
-    assert inbox_state.dismissed == set(), "the dismissal was persisted by a refused request"
+    assert (
+        inbox_state.dismissed == set()
+    ), "the dismissal was persisted by a refused request"
     assert store.items[ITEM_ID].status == ItemStatus.PENDING
 
 
@@ -239,10 +238,9 @@ async def test_a_multi_field_write_is_all_or_nothing(env):
     part-bad write is not applied."""
     st, store, _, _ = env
     assert (await _put(st, {"draft": "real text", "confidence": 9}))[0] == 400
-    assert store.items[ITEM_ID].draft == "", "the good field of a refused write was applied"
-
-
-# ── what must still work ─────────────────────────────────────────────────────────────────
+    assert (
+        store.items[ITEM_ID].draft == ""
+    ), "the good field of a refused write was applied"
 
 
 @pytest.mark.asyncio
@@ -251,7 +249,9 @@ async def test_the_ordinary_updates_still_work(env):
     st, store, inbox_state, _ = env
     assert (await _put(st, {"draft": "hello"}))[0] == 200
     assert store.items[ITEM_ID].draft == "hello"
-    assert (await _put(st, {"classification": "needs_reply", "confidence": "user"}))[0] == 200
+    assert (await _put(st, {"classification": "needs_reply", "confidence": "user"}))[
+        0
+    ] == 200
     assert (await _put(st, {"status": "handled"}))[0] == 200
     assert (await _put(st, {"favorited": True}))[0] == 200
     assert store.items[ITEM_ID].favorited is True
@@ -289,7 +289,9 @@ def test_the_store_applies_nothing_when_a_later_field_is_bad(env):
     _, store, _, _ = env
     with pytest.raises(InboxFieldTypeError):
         store.update(ITEM_ID, draft="good", confidence=0)
-    assert store.items[ITEM_ID].draft == "", "an earlier field was applied before the refusal"
+    assert (
+        store.items[ITEM_ID].draft == ""
+    ), "an earlier field was applied before the refusal"
 
 
 def test_the_packages_own_enum_writes_are_not_refused(env):
@@ -303,9 +305,6 @@ def test_the_packages_own_enum_writes_are_not_refused(env):
     _, store, _, _ = env
     assert store.update(ITEM_ID, status=ItemStatus.DISMISSED) is not None
     assert store.update(ITEM_ID, confidence=Confidence.NEEDS_REVIEW) is not None
-
-
-# ── the recovery: a store already poisoned by an older build ─────────────────────────────
 
 
 def test_an_already_poisoned_store_loads_and_reads_again(tmp_path: Path):
@@ -343,10 +342,8 @@ def test_an_already_poisoned_store_loads_and_reads_again(tmp_path: Path):
     item = store.items[ITEM_ID]
     assert item.draft == "" and item.confidence == Confidence.NEEDS_REVIEW
     assert item.favorited is False
-    # Only the unusable fields are dropped — the record is repaired, not discarded.
     assert item.message == "the message must survive"
     assert item.status == "pending"
-    # And the reader that used to raise now runs.
     assert redact_item(item.to_dict())["draft"] == ""
 
 
@@ -361,16 +358,13 @@ def test_a_required_field_is_never_silently_invented(tmp_path: Path):
         store.load()
 
 
-# ── the rails ────────────────────────────────────────────────────────────────────────────
-
-
 def test_the_type_map_covers_exactly_the_updatable_fields():
     """🪤 The hand-maintained pair. `_UPDATABLE_FIELDS` (the HTTP allowlist) and
     `_UPDATABLE_FIELD_TYPES` (the type contract) live in different modules, so adding a
     sixth updatable field would otherwise re-open this bug for exactly that field —
     silently, since it would be accepted and only fail later, in a reader.
     """
-    from gideon.inbox import _UPDATABLE_FIELD_TYPES
+    from gideon.integrations.inbox import _UPDATABLE_FIELD_TYPES
 
     assert set(_UPDATABLE_FIELD_TYPES) == h._UPDATABLE_FIELDS
 
@@ -382,7 +376,7 @@ def test_every_typed_field_has_a_dataclass_default():
     """
     import dataclasses
 
-    from gideon.inbox import _UPDATABLE_FIELD_TYPES
+    from gideon.integrations.inbox import _UPDATABLE_FIELD_TYPES
 
     fields = {f.name: f for f in dataclasses.fields(InboxItem)}
     for name in _UPDATABLE_FIELD_TYPES:
@@ -399,34 +393,45 @@ def test_the_declared_type_matches_the_dataclass_annotation():
     """
     import typing
 
-    from gideon.inbox import _UPDATABLE_FIELD_TYPES
+    from gideon.integrations.inbox import _UPDATABLE_FIELD_TYPES
 
     hints = typing.get_type_hints(InboxItem)
     for name, declared in _UPDATABLE_FIELD_TYPES.items():
-        assert hints[name] is declared, f"{name}: map says {declared}, dataclass says {hints[name]}"
+        assert (
+            hints[name] is declared
+        ), f"{name}: map says {declared}, dataclass says {hints[name]}"
 
 
 def test_validation_is_reachable_from_both_call_sites():
     """One implementation, two callers — the handler (before its side effects) and the store
     (for the three callers that never touch HTTP). A guard with one caller is how the other
     path stays broken."""
-    src = (Path(__file__).resolve().parents[1] / "src" / "gideon" / "inbox.py").read_text()
-    handler_src = (
-        Path(__file__).resolve().parents[1]
-        / "src"
+    src = (
+        Path(__file__).resolve().parents[2]
+        / "runtime"
         / "gideon"
+        / "integrations"
+        / "inbox.py"
+    ).read_text()
+    handler_src = (
+        Path(__file__).resolve().parents[2]
+        / "runtime"
+        / "gideon"
+        / "interfaces"
         / "dashboard"
         / "handlers_inbox.py"
     ).read_text()
     assert "validate_updatable_fields(kwargs)" in src, "the store stopped validating"
-    assert "validate_updatable_fields(updates)" in handler_src, "the handler stopped validating"
+    assert (
+        "validate_updatable_fields(updates)" in handler_src
+    ), "the handler stopped validating"
 
 
 def test_the_direct_validator_raises_on_the_first_bad_field():
     with pytest.raises(InboxFieldTypeError) as exc:
         validate_updatable_fields({"draft": 1})
     assert exc.value.field == "draft"
-    validate_updatable_fields({"draft": "ok", "favorited": False})  # no raise
+    validate_updatable_fields({"draft": "ok", "favorited": False})
 
 
 def test_the_refusal_never_echoes_the_callers_value():

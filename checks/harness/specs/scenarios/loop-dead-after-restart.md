@@ -5,8 +5,8 @@ symptom: >
   A loop that was running before a gateway restart doesn't resume — it sits idle, loses its
   place, or can't say what it had done / what's next after the process came back.
 appliesTo:
-  - src/gideon/loop/manager.py
-  - src/gideon/loop/store.py
+  - runtime/gideon/loop/manager.py
+  - runtime/gideon/loop/store.py
 requiredRules: []
 acceptance:
   - "`reap_orphaned_loops` re-arms a RUNNING/PLANNING loop on startup, and the resumed loop answers done/verified/next from persisted state (verified by `harness.resume_audit.audit_loop`)."

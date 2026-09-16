@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from gideon.learning.usage import (
+from gideon.cognition.learning.usage import (
     KIND_EVENTS,
     TRACKED_KINDS,
     UsageRecord,
@@ -23,9 +23,6 @@ def store(tmp_path):
     s = UsageStore(tmp_path)
     yield s
     s.close()
-
-
-# ── per-entity semantics ──
 
 
 def test_lessons_are_exempt_by_design():
@@ -55,9 +52,6 @@ def test_an_empty_entity_is_refused(store):
     assert store.record(kind="skill", entity="", event="loaded") is False
 
 
-# ── flush cadence and damping ──
-
-
 def test_events_are_buffered_until_flushed(store):
     store.record(kind="skill", entity="s1", event="loaded")
     assert store.get("skill", "s1") is None
@@ -70,9 +64,9 @@ def test_a_retrieval_burst_collapses_and_is_damped(store):
     heat distorts every comparison against it — and heat drives eviction."""
     for _ in range(11):
         store.record(kind="skill", entity="s1", event="loaded", context="repo-a")
-    assert store.flush() == 1  # one row, not eleven
+    assert store.flush() == 1
     record = store.get("skill", "s1")
-    assert 1 < record.used < 11  # damped, not discarded
+    assert 1 < record.used < 11
 
 
 def test_immediate_writes_a_one_off_event(store):
@@ -92,9 +86,6 @@ def test_flushing_twice_does_not_double_count(store):
     before = store.get("skill", "s1").used
     store.flush()
     assert store.get("skill", "s1").used == before
-
-
-# ── outcome semantics ──
 
 
 def test_success_rate_distinguishes_never_ran_from_always_failed(store):
@@ -131,9 +122,6 @@ def test_timestamps_track_the_right_event(store):
     assert store.get("skill", "s1").last_used_at
 
 
-# ── context diversity ──
-
-
 def test_contexts_accumulate_and_deduplicate(store):
     store.record(kind="template", entity="t1", event="run", context="repo-a")
     store.record(kind="template", entity="t1", event="run", context="repo-b")
@@ -150,9 +138,6 @@ def test_contexts_survive_across_flushes(store):
     store.record(kind="template", entity="t1", event="run", context="repo-b")
     store.flush()
     assert store.get("template", "t1").context_diversity == 2
-
-
-# ── curator flags ──
 
 
 def test_flags_can_be_set_on_a_never_used_entity(store):
@@ -175,9 +160,6 @@ def test_the_default_source_type_is_agent(store):
     assert store.get("skill", "s1").source_type == "agent"
 
 
-# ── listing and the active-days clock ──
-
-
 def test_listing_is_scoped_by_kind(store):
     store.record(kind="skill", entity="s1", event="loaded")
     store.record(kind="template", entity="t1", event="run")
@@ -196,9 +178,6 @@ def test_marking_active_is_idempotent_per_day(store):
     store.mark_active("2026-07-01")
     store.mark_active("2026-07-01")
     assert store.active_days() == ["2026-07-01"]
-
-
-# ── legacy sidecar import ──
 
 
 def test_the_legacy_sidecar_imports(store, tmp_path):
@@ -241,9 +220,6 @@ def test_a_sidecar_holding_the_wrong_shape_is_ignored(store, tmp_path):
     assert store.import_skill_sidecar(weird) == 0
 
 
-# ── multi-gate promotion ──
-
-
 def _record(**kw) -> UsageRecord:
     return UsageRecord(kind="template", entity="x", **kw)
 
@@ -261,19 +237,24 @@ def test_promotion_needs_context_diversity():
 
 
 def test_promotion_needs_recency():
-    ok, why = promotion_ready(_record(used=9, contexts=["a", "b"]), active_days_idle=400)
+    ok, why = promotion_ready(
+        _record(used=9, contexts=["a", "b"]), active_days_idle=400
+    )
     assert not ok and "idle" in why
 
 
 def test_a_failing_template_is_not_promoted():
     ok, why = promotion_ready(
-        _record(used=9, contexts=["a", "b"], successes=1, failures=8), active_days_idle=1
+        _record(used=9, contexts=["a", "b"], successes=1, failures=8),
+        active_days_idle=1,
     )
     assert not ok and "success" in why
 
 
 def test_all_gates_met_yields_a_suggestion():
-    ok, why = promotion_ready(_record(used=5, contexts=["a", "b"], successes=5), active_days_idle=2)
+    ok, why = promotion_ready(
+        _record(used=5, contexts=["a", "b"], successes=5), active_days_idle=2
+    )
     assert ok and "multi-gate" in why
 
 
@@ -282,9 +263,6 @@ def test_a_never_run_entity_is_not_blocked_by_its_missing_success_rate():
     never-run-but-loaded skill unpromotable."""
     ok, _ = promotion_ready(_record(used=5, contexts=["a", "b"]), active_days_idle=1)
     assert ok
-
-
-# ── storage ──
 
 
 def test_the_store_shares_learning_db_with_staging(tmp_path):

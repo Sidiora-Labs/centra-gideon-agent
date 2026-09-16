@@ -32,8 +32,8 @@ import stat
 
 import pytest
 
-from gideon.action_providers.base import ActionContext
-from gideon.action_providers.bash_provider import (
+from gideon.integrations.action_providers.base import ActionContext
+from gideon.integrations.action_providers.bash_provider import (
     PROTECTED_ENV_NAMES,
     BashActionProvider,
     _payload_env,
@@ -44,9 +44,6 @@ def _ctx(**payload) -> ActionContext:
     return ActionContext(event="trigger.fired", context="web_watch:w", payload=payload)
 
 
-# ── the defect, end to end ──
-
-
 def test_a_payload_PATH_does_NOT_hijack_binary_resolution(tmp_path):
     """🔴 THE DEFECT, pinned by driving a real subprocess. This printed HIJACKED before the fix."""
     fake = tmp_path / "date"
@@ -54,7 +51,9 @@ def test_a_payload_PATH_does_NOT_hijack_binary_resolution(tmp_path):
     fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
 
     result = asyncio.run(
-        BashActionProvider().execute({"command": "date"}, _ctx(PATH=str(tmp_path)), timeout=20)
+        BashActionProvider().execute(
+            {"command": "date"}, _ctx(PATH=str(tmp_path)), timeout=20
+        )
     )
     assert "HIJACKED" not in (result.stdout or "")
 
@@ -65,9 +64,6 @@ def test_the_command_still_RUNS_normally(tmp_path):
         BashActionProvider().execute({"command": "echo ok"}, _ctx(item="x"), timeout=20)
     )
     assert (result.stdout or "").strip() == "ok"
-
-
-# ── the filter ──
 
 
 @pytest.mark.parametrize("name", sorted(PROTECTED_ENV_NAMES))
@@ -87,7 +83,13 @@ def test_the_protected_set_covers_the_LOADER_hijacks():
 def test_the_protected_set_covers_INTERPRETER_entry_points():
     """`BASH_ENV` is sourced by a non-interactive shell before the command; `PYTHONSTARTUP`,
     `NODE_OPTIONS` and `GIT_SSH_COMMAND` are the same shape for their runtimes."""
-    for name in ("BASH_ENV", "PYTHONPATH", "PYTHONSTARTUP", "NODE_OPTIONS", "GIT_SSH_COMMAND"):
+    for name in (
+        "BASH_ENV",
+        "PYTHONPATH",
+        "PYTHONSTARTUP",
+        "NODE_OPTIONS",
+        "GIT_SSH_COMMAND",
+    ):
         assert name in PROTECTED_ENV_NAMES
 
 
@@ -96,9 +98,6 @@ def test_the_protected_set_covers_the_HARNESS_roots():
     controls — worse than running one wrong binary."""
     for name in ("HOME", "GIDEON_HOME", "GIDEON_WORKSPACE"):
         assert name in PROTECTED_ENV_NAMES
-
-
-# ── ordinary payload variables still work ──
 
 
 def test_an_ORDINARY_payload_key_still_becomes_an_env_var():
@@ -125,13 +124,12 @@ def test_a_hostile_payload_VALUE_is_still_just_a_VALUE():
     """The original defence, unbroken. The value reaches the command as data, never as code."""
     evil = '"; rm -rf /tmp/pwned; echo "'
     result = asyncio.run(
-        BashActionProvider().execute({"command": 'echo "got=[$item]"'}, _ctx(item=evil), timeout=20)
+        BashActionProvider().execute(
+            {"command": 'echo "got=[$item]"'}, _ctx(item=evil), timeout=20
+        )
     )
     assert "rm -rf" in (result.stdout or ""), "the text arrived intact"
     assert not pathlib.Path("/tmp/pwned").exists(), "and was not executed"
-
-
-# ── the reachability claim, pinned ──
 
 
 def test_shipped_payload_keys_are_LITERALS_not_derived_from_input():
@@ -140,11 +138,10 @@ def test_shipped_payload_keys_are_LITERALS_not_derived_from_input():
     make the hole live, and this test is where that shows up."""
     import inspect
 
-    from gideon.triggers import chain, pull_on_view, web_poll
+    from gideon.automation.triggers import chain, pull_on_view, web_poll
 
     for module in (web_poll, chain, pull_on_view):
         src = inspect.getsource(module)
-        # No dict-comprehension or dynamic key assignment into a payload dict.
         assert "payload[" not in src, f"{module.__name__} assigns a dynamic payload key"
 
 

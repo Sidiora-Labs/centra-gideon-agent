@@ -27,8 +27,8 @@ would then flake in exactly the direction that HIDES a swallowed write.
 
 import pytest
 
-from gideon.knowledge import maintenance
-from gideon.knowledge.store import KnowledgeStore
+from gideon.cognition.knowledge import maintenance
+from gideon.cognition.knowledge.store import KnowledgeStore
 
 
 class Clock:
@@ -94,16 +94,16 @@ def store(tmp_path, monkeypatch, clock):
 def make_clean(store):
     """Run the host once so the watermark is clean, and prove it before returning."""
     maintenance.execute()
-    assert not maintenance.is_dirty(), "setup failed: the index was still dirty after a run"
+    assert (
+        not maintenance.is_dirty()
+    ), "setup failed: the index was still dirty after a run"
 
 
 def a_source(store) -> str:
     """A real `sources` row. `source_seen` carries a FOREIGN KEY to it, so a made-up
-    `source_id` raises rather than exercising the novelty gate this suite is measuring."""
+    `source_id` raises rather than exercising the novelty gate this suite is measuring.
+    """
     return store.create_source(name="feed", provider="native", kind="rss")
-
-
-# ── the clause: ONE edge pass, not N ────────────────────────────────────────────────
 
 
 def test_bulk_import_of_n_items_performs_one_edge_pass(store):
@@ -113,26 +113,30 @@ def test_bulk_import_of_n_items_performs_one_edge_pass(store):
     n = 7
     first_stamp = None
     for i in range(n):
-        assert store.create_typed_item(item_type="note", title=f"note {i}", content="body")
+        assert store.create_typed_item(
+            item_type="note", title=f"note {i}", content="body"
+        )
         if first_stamp is None:
             opening = maintenance.load_state()
-            assert opening.get("dirty_since"), "the first create left no watermark at all"
+            assert opening.get(
+                "dirty_since"
+            ), "the first create left no watermark at all"
             first_stamp = float(opening["dirty_since"])
 
-    # No graph work happened INLINE. This is the half of the clause that a stamp file cannot
-    # express: the writes did not each do a pass on the way past.
-    assert counter.calls == 0, f"{counter.calls} edge passes ran inline during the import"
+    assert (
+        counter.calls == 0
+    ), f"{counter.calls} edge passes ran inline during the import"
 
     state = maintenance.load_state()
     assert maintenance.is_dirty(state)
-    # The watermark coalesced: `dirty_since` is still the FIRST write's stamp (one unit of
-    # outstanding dirt, not seven), while `dirty_ts` moved to the last.
     assert float(state["dirty_since"]) == first_stamp
     assert float(state["dirty_ts"]) > first_stamp
 
     result = maintenance.execute()
 
-    assert counter.calls == 1, f"{n} writes drove {counter.calls} edge passes; expected exactly 1"
+    assert (
+        counter.calls == 1
+    ), f"{n} writes drove {counter.calls} edge passes; expected exactly 1"
     assert result.ran is True
     assert result.per_pass == {"counting": 0}
     assert not maintenance.is_dirty()
@@ -153,9 +157,6 @@ def test_a_second_host_run_over_an_unchanged_library_does_no_pass(store):
     assert counter.calls == 1, "a clean index still drove an edge pass"
 
 
-# ── a write landing mid-run is not swallowed ────────────────────────────────────────
-
-
 def test_write_landing_mid_pass_is_not_swallowed(store):
     store.create_typed_item(item_type="note", title="seed", content="body")
     assert maintenance.is_dirty()
@@ -165,7 +166,9 @@ def test_write_landing_mid_pass_is_not_swallowed(store):
     result = maintenance.execute()
 
     assert p.calls == 1
-    assert maintenance.is_dirty(), "the write that landed during the pass was cleared away"
+    assert (
+        maintenance.is_dirty()
+    ), "the write that landed during the pass was cleared away"
     assert float(maintenance.load_state()["dirty_ts"]) > result.snapshot
 
 
@@ -181,9 +184,6 @@ def test_the_mid_run_assertion_is_sensitive_to_the_write(store):
 
     assert p.calls == 1
     assert not maintenance.is_dirty()
-
-
-# ── vacuity: what must NOT move the watermark ───────────────────────────────────────
 
 
 def test_a_store_with_no_write_leaves_the_index_clean(store):
@@ -226,9 +226,13 @@ def test_a_pass_output_write_does_not_re_dirty_the_index(store):
     make_clean(store)
 
     store.update_item(item_id, embedding=b"\x00\x01", touch=False)
-    store.update_item(item_id, insights='{"a": 1}', processing_status="done", touch=False)
+    store.update_item(
+        item_id, insights='{"a": 1}', processing_status="done", touch=False
+    )
 
-    assert not maintenance.is_dirty(), "a maintenance pass's own write re-dirtied the index"
+    assert (
+        not maintenance.is_dirty()
+    ), "a maintenance pass's own write re-dirtied the index"
 
 
 def test_an_unknown_field_alone_does_not_mark_dirty(store):
@@ -254,15 +258,16 @@ def test_a_rejected_source_sighting_does_not_mark_dirty(store):
 
     assert (
         store.create_typed_item(
-            item_type="note", title="feed item", content="body", source_id=sid, guid="g1"
+            item_type="note",
+            title="feed item",
+            content="body",
+            source_id=sid,
+            guid="g1",
         )
         is None
     )
 
     assert not maintenance.is_dirty(), "a rolled-back create still moved the watermark"
-
-
-# ── and what MUST move it (the positive controls for the allowlist) ─────────────────
 
 
 @pytest.mark.parametrize(
@@ -283,7 +288,9 @@ def test_an_index_affecting_update_marks_dirty(store, fields):
 
     store.update_item(item_id, **fields)
 
-    assert maintenance.is_dirty(), f"{sorted(fields)} changed the index but left it clean"
+    assert (
+        maintenance.is_dirty()
+    ), f"{sorted(fields)} changed the index but left it clean"
     assert maintenance.is_due(in_flight=0) == (True, "queue drained")
 
 

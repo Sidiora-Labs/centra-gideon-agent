@@ -4,8 +4,8 @@ import io
 import json
 from unittest.mock import patch
 
-import gideon.mcp_shared as mcp_shared
-from gideon.mcp_shared import _read_message, respond
+import gideon.integrations.mcp_shared as mcp_shared
+from gideon.integrations.mcp_shared import _read_message, respond
 
 
 def _make_stdin(data: bytes):
@@ -34,7 +34,7 @@ class TestReadMessageContentLength:
     def test_reads_multibyte_utf8(self):
         msg = {
             "jsonrpc": "2.0",
-            "method": "tools/call",
+            "method": "tooling/call",
             "id": 1,
             "params": {"name": "tëst_émoji_🎉"},
         }
@@ -45,7 +45,7 @@ class TestReadMessageContentLength:
     def test_reads_two_sequential_messages(self):
         """Two Content-Length messages from the same stream are read correctly."""
         msg1 = {"jsonrpc": "2.0", "method": "initialize", "id": 1}
-        msg2 = {"jsonrpc": "2.0", "method": "tools/list", "id": 2}
+        msg2 = {"jsonrpc": "2.0", "method": "tooling/list", "id": 2}
         stdin = _make_stdin(_content_length_frame(msg1) + _content_length_frame(msg2))
         assert _read_message(stdin) == msg1
         assert _read_message(stdin) == msg2
@@ -71,12 +71,10 @@ class TestReadMessageContentLength:
 
     def test_true_truncation_continues(self):
         """Content-Length larger than available body consumes remaining bytes, skips to next."""
-        # Claim 100 bytes but only provide 5 — read(100) returns short, json.loads fails
         bad = b"Content-Length: 100\r\n\r\n{bad}"
         good_msg = {"jsonrpc": "2.0", "id": 4}
         good = json.dumps(good_msg).encode("utf-8") + b"\n"
         stdin = _make_stdin(bad + good)
-        # The truncated read consumes into the next message's bytes, so we get None (EOF)
         result = _read_message(stdin)
         assert result is None
 

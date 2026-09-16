@@ -4,7 +4,7 @@ The gateway serves a REST + WebSocket API on the dashboard port (default `10000`
 All routes live under `/api/*` and require authentication (token or local-network
 bypass, depending on your auth mode) — see `gideon token` for a tokenized URL.
 
-Route registrations live in `src/gideon/dashboard/server.py` plus per-domain
+Route registrations live in `runtime/gideon/dashboard/server.py` plus per-domain
 handler modules (`dashboard/handlers/`, `tasks/handlers.py`, `workflows/handlers.py`,
 `artifacts/handlers.py`, `lexicon/handlers.py`, `providers/*_routes.py`). This page
 lists every route with a one-liner; the handler docstrings are the authoritative

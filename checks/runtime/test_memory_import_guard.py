@@ -18,21 +18,20 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.cli_commands import _memory_cmd
-from gideon.dashboard.handlers.memory import (
+from gideon.interfaces.cli.commands import _memory_cmd
+from gideon.interfaces.dashboard.handlers.memory import (
     api_memory_import,
     api_memory_migrate,
     api_memory_promote,
     api_memory_vault_sync,
 )
 
-# The five shapes measured against a live gateway — all of them used to 500.
 NON_OBJECT_BODIES = [[], "a string", 42, None, True]
 
 
 class _RecordingStore:
     """Records what reached the store, crashing on a non-dict exactly as the real
-    ``VectorMemoryStore.import_memory`` does.
+    ``SemanticArchive.import_memory`` does.
 
     Reproducing the AttributeError matters: a stub that tolerantly accepted any
     shape would return 200 with the guard removed, so the test would pin only the
@@ -44,7 +43,7 @@ class _RecordingStore:
 
     def import_memory(self, data: dict) -> dict[str, int]:
         self.imported.append(data)
-        data.get("semantic", [])  # the line vector_memory.py:2789 dies on
+        data.get("semantic", [])
         return {"semantic": 1, "episodic": 0, "skipped": 0}
 
 
@@ -57,7 +56,8 @@ def _import_request(monkeypatch):
     """
     store = _RecordingStore()
     monkeypatch.setattr(
-        "gideon.dashboard.handlers.memory._get_provider", lambda _state: store
+        "gideon.interfaces.dashboard.handlers.memory._get_provider",
+        lambda _state: store,
     )
 
     def _make(body):
@@ -83,7 +83,7 @@ async def test_non_object_body_is_a_client_error(_import_request, body):
 
     assert resp.status == 400
     assert json.loads(resp.body)["error"] == "JSON body must be an object"
-    assert store.imported == []  # never reached import_memory
+    assert store.imported == []
 
 
 @pytest.mark.asyncio
@@ -100,7 +100,8 @@ async def test_non_object_body_over_real_http_is_400_not_500(monkeypatch, raw):
 
     store = _RecordingStore()
     monkeypatch.setattr(
-        "gideon.dashboard.handlers.memory._get_provider", lambda _state: store
+        "gideon.interfaces.dashboard.handlers.memory._get_provider",
+        lambda _state: store,
     )
     app = web.Application()
     app["state"] = MagicMock()
@@ -149,7 +150,9 @@ def test_cli_import_rejects_a_non_object_file(_home, capsys, raw):
 def test_cli_import_still_accepts_an_object_file(_home, capsys):
     path = _home / "export.json"
     path.write_text(
-        json.dumps({"semantic": [{"key": "project.x", "value_json": '"v"'}], "episodic": []}),
+        json.dumps(
+            {"semantic": [{"key": "project.x", "value_json": '"v"'}], "episodic": []}
+        ),
         encoding="utf-8",
     )
 
@@ -160,16 +163,6 @@ def test_cli_import_still_accepts_an_object_file(_home, capsys):
     assert "Semantic: 1" in out.out
 
 
-# ── #801: restricted-session guard on the three write handlers that skipped it ──
-#
-# ``vault_sync``/``migrate``/``promote`` never ran the ``_is_restricted_session``
-# gate that ``api_memory_import``/``api_memory_consolidate`` enforce — and the
-# first two read no request body at all, so ANY POST (even a garbage body) from an
-# incognito/temporary/guest session ran the full side effect: mirror the whole
-# store to disk, migrate legacy memory, promote episodics. A restricted session is
-# explicitly promised memory writes are OFF. The fix copies ``api_memory_import``'s
-# guard verbatim (403 + ``sel.log_api_access(..., outcome="denied")``).
-
 RESTRICTED_KEY = "dashboard:e1"
 
 
@@ -178,7 +171,7 @@ class _WriteStore:
     the guard-fired case can assert the same write never started."""
 
     def __init__(self):
-        self.embed_fn = object()  # truthy → migrate skips the embed-fn wiring branch
+        self.embed_fn = object()
         self.calls: list[str] = []
 
     def migrate_from_markdown(self) -> dict[str, int]:
@@ -201,16 +194,24 @@ def _restricted_request(path, monkeypatch):
     """
     provider = MagicMock()
     service = MagicMock()
-    monkeypatch.setattr("gideon.dashboard.handlers.memory._get_provider", provider)
-    monkeypatch.setattr("gideon.dashboard.handlers.memory._get_service", service)
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.handlers.memory._get_provider", provider
+    )
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.handlers.memory._get_service", service
+    )
     audit = MagicMock()
-    monkeypatch.setattr("gideon.dashboard.handlers.memory._sel", lambda: audit)
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.handlers.memory._sel", lambda: audit
+    )
 
     app = web.Application()
     state = MagicMock()
     state._restricted_keys = {RESTRICTED_KEY}
     app["state"] = state
-    request = make_mocked_request("POST", path, headers={"X-Session-Key": RESTRICTED_KEY}, app=app)
+    request = make_mocked_request(
+        "POST", path, headers={"X-Session-Key": RESTRICTED_KEY}, app=app
+    )
     return request, provider, service, audit
 
 
@@ -231,9 +232,10 @@ async def test_restricted_session_is_denied_with_no_side_effect(
     resp = await handler(request)
 
     assert resp.status == 403
-    assert json.loads(resp.body)["error"] == "Memory writes are not allowed in this session mode."
-    # The side effect never started: neither the vector provider nor the memory
-    # service was even resolved.
+    assert (
+        json.loads(resp.body)["error"]
+        == "Memory writes are not allowed in this session mode."
+    )
     assert provider.call_count == 0
     assert service.call_count == 0
     audit.log_api_access.assert_called_once_with(
@@ -249,10 +251,11 @@ async def test_restricted_session_is_denied_with_no_side_effect(
 async def test_migrate_normal_session_is_not_blocked(monkeypatch):
     store = _WriteStore()
     monkeypatch.setattr(
-        "gideon.dashboard.handlers.memory._get_provider", lambda _state: store
+        "gideon.interfaces.dashboard.handlers.memory._get_provider",
+        lambda _state: store,
     )
     app = web.Application()
-    app["state"] = MagicMock()  # empty headers → not a restricted session
+    app["state"] = MagicMock()
     request = make_mocked_request("POST", "/api/memory/migrate", app=app)
 
     resp = await api_memory_migrate(request)
@@ -265,7 +268,8 @@ async def test_migrate_normal_session_is_not_blocked(monkeypatch):
 async def test_promote_normal_session_is_not_blocked(monkeypatch):
     store = _WriteStore()
     monkeypatch.setattr(
-        "gideon.dashboard.handlers.memory._get_provider", lambda _state: store
+        "gideon.interfaces.dashboard.handlers.memory._get_provider",
+        lambda _state: store,
     )
     app = web.Application()
     app["state"] = MagicMock()
@@ -300,11 +304,16 @@ async def test_vault_sync_normal_session_is_not_blocked(monkeypatch, tmp_path):
             return {"created": 0, "updated": 0, "deleted": 0}
 
     monkeypatch.setattr(
-        "gideon.dashboard.handlers.memory._get_service", lambda _state: MagicMock()
+        "gideon.interfaces.dashboard.handlers.memory._get_service",
+        lambda _state: MagicMock(),
     )
-    monkeypatch.setattr("gideon.memory_vault.MemoryVault", _FakeVault)
-    monkeypatch.setattr("gideon.memory_vault.vault_mode_from_config", lambda: "off")
-    monkeypatch.setattr("gideon.memory_vault.vault_path_from_config", lambda: tmp_path)
+    monkeypatch.setattr("gideon.cognition.memory_vault.MemoryVault", _FakeVault)
+    monkeypatch.setattr(
+        "gideon.cognition.memory_vault.vault_mode_from_config", lambda: "off"
+    )
+    monkeypatch.setattr(
+        "gideon.cognition.memory_vault.vault_path_from_config", lambda: tmp_path
+    )
 
     app = web.Application()
     app["state"] = MagicMock()
@@ -315,6 +324,4 @@ async def test_vault_sync_normal_session_is_not_blocked(monkeypatch, tmp_path):
     assert resp.status != 403
     assert json.loads(resp.body)["path"] == str(tmp_path)
     assert seen["synced"] is True
-    # An `off` vault exports one-shot but must NOT be silently upgraded to two_way:
-    # a "sync now" button is not how a user chooses to have their files read back.
     assert seen["mode"] == "mirror"

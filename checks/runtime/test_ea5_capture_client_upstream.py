@@ -31,8 +31,8 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.inbound import auth
-from gideon.inbound import capture_proxy as proxy
+from gideon.integrations.inbound import auth
+from gideon.integrations.inbound import capture_proxy as proxy
 
 _SURFACES = ("OPENAI", "MCP", "A2A", "CAPTURE", "BRIDGE")
 
@@ -59,16 +59,20 @@ def _isolate(tmp_path, monkeypatch):
     yield
     for surface in _SURFACES:
         os.environ.pop(f"GIDEON_INBOUND_{surface}_TOKEN", None)
-    from gideon.llm.registry import reset_default_registry
+    from gideon.integrations.llm.registry import reset_default_registry
 
     reset_default_registry()
 
 
 def _enable(monkeypatch, *, allowlist=()):
     """Point ``AppConfig.load()`` at an enabled capture surface with ``allowlist``."""
-    from gideon.config.external_access import ExternalAccessConfig
-    from gideon.config.external_access import ExternalAccessSurfaceConfig as Surface
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.external_access import (
+        ExternalAccessConfig,
+    )
+    from gideon.core.config.external_access import (
+        ExternalAccessSurfaceConfig as Surface,
+    )
+    from gideon.core.config.loader import AppConfig
 
     cfg = AppConfig()
     surface = Surface(enabled=True, allow_remote=False)
@@ -111,9 +115,9 @@ def _register_provider(base_url: str, *, name: str = _PROVIDER_NAME) -> None:
     ``options["api_key"]``: the explicit-key rung is gated behind a registered branded
     spec, and no provider module has imported one in a bare test process.
     """
-    from gideon.config import config_dir
-    from gideon.llm.credentials import CredentialStore
-    from gideon.llm.registry import ProviderEntry, get_default_registry
+    from gideon.core.config import config_dir
+    from gideon.integrations.llm.credentials import CredentialStore
+    from gideon.integrations.llm.registry import ProviderEntry, get_default_registry
 
     CredentialStore(config_dir()).save(
         {_CREDENTIAL_NAME: {"type": "api_key", "value": _PROVIDER_SECRET}}
@@ -131,7 +135,7 @@ def _register_provider(base_url: str, *, name: str = _PROVIDER_NAME) -> None:
 
 def _pinned_client(upstream: str) -> str:
     """A capture-bound client record pinned to ``upstream``. Returns its bearer."""
-    from gideon.inbound import clients as clients_mod
+    from gideon.integrations.inbound import clients as clients_mod
 
     _record, token = clients_mod.create_client(
         "external-agent", surfaces=[proxy.CAPTURE_SURFACE], upstream=upstream
@@ -151,11 +155,10 @@ def _never_forward(monkeypatch) -> list[str]:
     return entered
 
 
-# ── 1. The call site: the record's `upstream` decides the destination ─────────
-
-
 @pytest.mark.asyncio
-async def test_client_record_upstream_selects_the_provider_and_its_credential(monkeypatch):
+async def test_client_record_upstream_selects_the_provider_and_its_credential(
+    monkeypatch,
+):
     """The forward lands on the PINNED provider's base URL, carrying ITS secret.
 
     Four facts in one request because they are one behaviour: the record's name is
@@ -168,7 +171,7 @@ async def test_client_record_upstream_selects_the_provider_and_its_credential(mo
         _enable(monkeypatch, allowlist=("127.0.0.1",))
         base = f"http://127.0.0.1:{upstream.server.port}/v1"
         _register_provider(base)
-        auth.create_surface_token(proxy.CAPTURE_SURFACE)  # surface admission only
+        auth.create_surface_token(proxy.CAPTURE_SURFACE)
         bearer = _pinned_client(_PROVIDER_NAME)
 
         resp = await client.post(
@@ -178,7 +181,9 @@ async def test_client_record_upstream_selects_the_provider_and_its_credential(mo
         )
 
         assert resp.status == 200
-        assert seen["path"] == "/v1/chat/completions", "dialled the pinned provider's base"
+        assert (
+            seen["path"] == "/v1/chat/completions"
+        ), "dialled the pinned provider's base"
         assert seen["headers"]["Authorization"] == f"Bearer {_PROVIDER_SECRET}"
     finally:
         await client.close()
@@ -210,19 +215,16 @@ async def test_the_inbound_bearer_is_never_forwarded_upstream(monkeypatch):
         assert resp.status == 200
         assert bearer not in " ".join(seen["headers"].values())
         assert bearer.encode() not in seen["raw"]
-        # Vacuity floor: the secret we DO expect is present, so the absence above is a
-        # real absence rather than a `seen` dict that was never populated.
         assert _PROVIDER_SECRET in " ".join(seen["headers"].values())
     finally:
         await client.close()
         await upstream.close()
 
 
-# ── 2. The negative that carries the weight: a denied host reaches no socket ──
-
-
 @pytest.mark.asyncio
-async def test_a_pinned_upstream_off_the_allowlist_never_reaches_the_network(monkeypatch):
+async def test_a_pinned_upstream_off_the_allowlist_never_reaches_the_network(
+    monkeypatch,
+):
     """The load-bearing direction. A provider the operator configured is STILL refused
     when its host is not allow-listed, and the refusal precedes every connection.
 
@@ -234,7 +236,6 @@ async def test_a_pinned_upstream_off_the_allowlist_never_reaches_the_network(mon
     upstream, seen = await _stub_upstream()
     client = await _proxy_client()
     try:
-        # The provider is real and resolvable; only the ALLOW-LIST withholds consent.
         _enable(monkeypatch, allowlist=("allowed.example",))
         _register_provider(f"http://127.0.0.1:{upstream.server.port}/v1")
         auth.create_surface_token(proxy.CAPTURE_SURFACE)
@@ -301,7 +302,7 @@ async def test_a_record_with_no_upstream_refuses_rather_than_choosing_one(monkey
         _enable(monkeypatch, allowlist=("127.0.0.1",))
         _register_provider(f"http://127.0.0.1:{upstream.server.port}/v1")
         auth.create_surface_token(proxy.CAPTURE_SURFACE)
-        bearer = _pinned_client("")  # registered, deliberately unpinned
+        bearer = _pinned_client("")
         entered = _never_forward(monkeypatch)
 
         resp = await client.post(
@@ -352,9 +353,6 @@ async def test_an_unresolvable_provider_name_refuses_and_dials_nothing(monkeypat
         await upstream.close()
 
 
-# ── 3. The record shape: the field persists and there is only ONE spelling ───
-
-
 def test_upstream_round_trips_through_the_persisted_record(monkeypatch, tmp_path):
     """``create_client(upstream=...)`` survives save → load.
 
@@ -362,7 +360,7 @@ def test_upstream_round_trips_through_the_persisted_record(monkeypatch, tmp_path
     because the returned record proves the constructor ran, not that the field reached
     the file.
     """
-    from gideon.inbound import clients as clients_mod
+    from gideon.integrations.inbound import clients as clients_mod
 
     record, _token = clients_mod.create_client(
         "external-agent", surfaces=[proxy.CAPTURE_SURFACE], upstream=_PROVIDER_NAME
@@ -371,7 +369,6 @@ def test_upstream_round_trips_through_the_persisted_record(monkeypatch, tmp_path
     assert reloaded.upstream == _PROVIDER_NAME
     assert _PROVIDER_NAME in clients_mod.clients_path().read_text(encoding="utf-8")
 
-    # The default stays empty — "no pinned upstream", never a chosen one.
     bare, _ = clients_mod.create_client("bare", surfaces=[proxy.CAPTURE_SURFACE])
     assert clients_mod.load_clients()[bare.client_id].upstream == ""
 
@@ -384,18 +381,16 @@ def test_scope_is_no_longer_a_second_spelling_of_upstream():
     easier of the two to set without meaning to. Asserted behaviourally against the real
     resolver, so it stays true if the hedge is reintroduced anywhere in its body.
     """
-    from gideon.inbound.clients import InboundClient
+    from gideon.integrations.inbound.clients import InboundClient
 
     only_in_scope = InboundClient(client_id="c1", scope={"upstream": _PROVIDER_NAME})
     assert proxy._client_upstream_name(only_in_scope) == ""
 
-    # Vacuity floor: the resolver DOES read the field, so the "" above is the scope bag
-    # being ignored rather than the function being inert.
-    assert proxy._client_upstream_name(InboundClient(upstream=_PROVIDER_NAME)) == _PROVIDER_NAME
+    assert (
+        proxy._client_upstream_name(InboundClient(upstream=_PROVIDER_NAME))
+        == _PROVIDER_NAME
+    )
     assert proxy._client_upstream_name(None) == ""
-
-
-# ── 4. The operator surface: settable, visible, and refused when unknown ─────
 
 
 @pytest.mark.asyncio
@@ -405,7 +400,7 @@ async def test_the_create_route_pins_a_known_provider_and_reports_it(monkeypatch
     A binding an operator can set but cannot see is the one that goes unnoticed when it
     is wrong, so both halves are asserted together.
     """
-    from gideon.dashboard.handlers import external_access as ea
+    from gideon.interfaces.dashboard.handlers import external_access as ea
 
     _register_provider("https://api.openai.com/v1")
 
@@ -429,14 +424,16 @@ async def test_the_create_route_pins_a_known_provider_and_reports_it(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_the_create_route_refuses_an_unknown_provider_and_creates_nothing(monkeypatch):
+async def test_the_create_route_refuses_an_unknown_provider_and_creates_nothing(
+    monkeypatch,
+):
     """An unknown ``upstream`` is a 400, and no half-made client is left behind.
 
     The second assertion is the one that matters: refusing after the write would leave a
     record the operator was told did not exist.
     """
-    from gideon.dashboard.handlers import external_access as ea
-    from gideon.inbound import clients as clients_mod
+    from gideon.integrations.inbound import clients as clients_mod
+    from gideon.interfaces.dashboard.handlers import external_access as ea
 
     _register_provider("https://api.openai.com/v1")
 
@@ -455,8 +452,6 @@ async def test_the_create_route_refuses_an_unknown_provider_and_creates_nothing(
     assert resp.status == 400
     assert clients_mod.load_clients() == {}
 
-    # Vacuity floor: the SAME route with a configured name succeeds, so the 400 above is
-    # the check firing rather than the route being broken for every body.
     class _Ok(_Req):
         async def json(self):
             return {

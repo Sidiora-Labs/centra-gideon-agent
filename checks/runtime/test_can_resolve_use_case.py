@@ -11,18 +11,13 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import gideon.llm.openai  # noqa: F401 — registers the "openai" type
-import gideon.providers.provider_bridge as pb
-from gideon.llm.registry import ProviderEntry, get_default_registry
+import gideon.extensions.providers.provider_bridge as pb
+import gideon.integrations.llm.openai  # noqa: F401 — registers the "openai" type
+from gideon.integrations.llm.registry import ProviderEntry, get_default_registry
 
 
 def _ensure_registry_entry(name: str, *, type_: str = "ollama") -> None:
-    # Model provider TYPES (openai/anthropic/bedrock) register from their apps now, so
-    # they aren't in the registry in a bare unit test. This probe only needs an entry
-    # that DECLARES a capability — which is exactly the fail-soft path the resolver
-    # takes for a not-yet-registered type — so declare CHAT on the entry directly
-    # instead of reading it from a (possibly-unregistered) type descriptor.
-    from gideon.llm.capabilities import Capability
+    from gideon.integrations.llm.capabilities import Capability
 
     reg = get_default_registry()
     if any(e.name == name for e in reg.list_entries()):
@@ -42,7 +37,8 @@ def test_true_when_active_model_selected():
     """An active model selected for the use case ⇒ resolvable, regardless of
     registry state (the Settings → Models selection the bridge resolves first)."""
     with patch(
-        "gideon.providers.use_cases.active_model_refs", return_value=["MyCloud:gpt-x"]
+        "gideon.extensions.providers.use_cases.active_model_refs",
+        return_value=["MyCloud:gpt-x"],
     ):
         assert pb.can_resolve_use_case("chat") is True
 
@@ -51,7 +47,9 @@ def test_true_when_registry_entry_declares_capability():
     """No active selection, but a configured provider declares CHAT ⇒ resolvable
     (the implicit-fallback path the bridge actually takes)."""
     _ensure_registry_entry("MyCloud")
-    with patch("gideon.providers.use_cases.active_model_refs", return_value=[]):
+    with patch(
+        "gideon.extensions.providers.use_cases.active_model_refs", return_value=[]
+    ):
         assert pb.can_resolve_use_case("chat") is True
 
 
@@ -60,8 +58,10 @@ def test_false_when_no_selection_and_no_capable_entry():
     defer bg. The probe imports ``get_default_registry`` locally from
     ``llm.registry``, so that module path is the patch hook."""
     with (
-        patch("gideon.providers.use_cases.active_model_refs", return_value=[]),
-        patch("gideon.llm.registry.get_default_registry") as gdr,
+        patch(
+            "gideon.extensions.providers.use_cases.active_model_refs", return_value=[]
+        ),
+        patch("gideon.integrations.llm.registry.get_default_registry") as gdr,
     ):
         reg = MagicMock()
         reg.list_entries.return_value = []
@@ -74,8 +74,10 @@ def test_false_when_only_acp_agent_entry_present():
     holding only it must report needs_model=true. This is the subtle case the old
     onboarding heuristic had to special-case; the probe owns it now."""
     with (
-        patch("gideon.providers.use_cases.active_model_refs", return_value=[]),
-        patch("gideon.llm.registry.get_default_registry") as gdr,
+        patch(
+            "gideon.extensions.providers.use_cases.active_model_refs", return_value=[]
+        ),
+        patch("gideon.integrations.llm.registry.get_default_registry") as gdr,
     ):
         entry = MagicMock()
         entry.type = "acp_agent"
@@ -95,7 +97,7 @@ def test_chat_subcategory_falls_back_to_chat_selection():
     parent ``chat`` selection — active_model_refs handles the fallback, so the
     probe reports resolvable."""
     with patch(
-        "gideon.providers.use_cases.load_active_models",
+        "gideon.extensions.providers.use_cases.load_active_models",
         return_value={"chat": ["MyCloud:gpt-x"]},
     ):
         assert pb.can_resolve_use_case("reasoning") is True
@@ -109,7 +111,9 @@ def test_does_not_build_a_provider():
     _ensure_registry_entry("MyCloud2")
     reg = get_default_registry()
     with (
-        patch("gideon.providers.use_cases.active_model_refs", return_value=[]),
+        patch(
+            "gideon.extensions.providers.use_cases.active_model_refs", return_value=[]
+        ),
         patch.object(reg, "build") as build,
         patch.object(pb, "_build_native_runtime") as build_native,
     ):

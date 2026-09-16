@@ -35,12 +35,11 @@ from pathlib import Path
 
 import pytest
 
-from gideon.durability import state_history as sh
+from gideon.operations.durability import state_history as sh
 
-pytestmark = pytest.mark.skipif(not sh.git_available(), reason="git is required for time-travel")
-
-
-# ── fixtures ───────────────────────────────────────────────────────────────
+pytestmark = pytest.mark.skipif(
+    not sh.git_available(), reason="git is required for time-travel"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -85,12 +84,12 @@ def _write(path: Path, text: str) -> None:
 A_V1 = "alpha\nbeta\ngamma\n"
 A_TARGET = "alpha\nBETA-BAD\ngamma\n"
 A_HEAD = "alpha\nBETA-BAD\ngamma\ndelta-later\n"
-#: What a per-file REVERT must produce: the target's line-2 change undone, the
-#: later append kept.
 A_REVERTED = "alpha\nbeta\ngamma\ndelta-later\n"
 
 
-def _memory_fixture(tmp_path: Path, name: str) -> tuple[sh.HistoryRoot, Path, Path, str]:
+def _memory_fixture(
+    tmp_path: Path, name: str
+) -> tuple[sh.HistoryRoot, Path, Path, str]:
     """Three commits over two memory notes. Returns (root, home, ws, target sha).
 
     Shape chosen so the target's hunk and the later edit are SEPARABLE — a
@@ -113,9 +112,6 @@ def _memory_fixture(tmp_path: Path, name: str) -> tuple[sh.HistoryRoot, Path, Pa
     return root, home, ws, target
 
 
-# ── the whole-root path must not move ──────────────────────────────────────
-
-
 class TestWholeRootIsUnchanged:
     """``paths=None`` and ``paths=[]`` both mean the whole root, as shipped."""
 
@@ -131,9 +127,6 @@ class TestWholeRootIsUnchanged:
 
         result = sh.rollback(root, first, paths=subset, home=home)
 
-        # The hard-reset shape: HEAD lands ON the target and the rolled-away
-        # commit LEAVES the timeline. A subset implementation adds a commit
-        # instead, so it cannot satisfy either assertion.
         assert result["head"] == first
         assert result["prior_head"] == second
         assert sh.commit_count(root, home=home) == 1
@@ -156,7 +149,9 @@ class TestWholeRootIsUnchanged:
         result = sh.revert(root, bad, paths=subset, home=home)
 
         assert not (home / "entity_settings" / "bad.json").exists()
-        assert (home / "config.json").read_text() == "cfg-v2", "the later edit must survive"
+        assert (
+            home / "config.json"
+        ).read_text() == "cfg-v2", "the later edit must survive"
         assert sh.commit_count(root, home=home) == 4
         assert result["reverted"] == bad
         assert result["paths"] == []
@@ -186,14 +181,10 @@ class TestWholeRootIsUnchanged:
 
         assert roll["paths"] == []
         assert rev["paths"] == []
-        # The count of commits a whole-root rollback discards is still reported.
         assert roll["commits_rolled_away"] == 1
         assert {f["path"] for f in roll["files"]} == {"memory/a.md", "memory/b.md"}
         assert sh.preview(root, target, operation="rollback", home=home)["paths"] == []
         assert sh.preview(root, target, operation="revert", home=home)["paths"] == []
-
-
-# ── the distinction the panel's copy promises ──────────────────────────────
 
 
 class TestRollbackDiscardsAndRevertKeeps:
@@ -227,7 +218,9 @@ class TestRollbackDiscardsAndRevertKeeps:
         Deliberately not `!=` alone — a broken revert that produced a THIRD wrong
         content would still satisfy an inequality.
         """
-        rolled_root, rolled_home, rolled_ws, rolled_target = _memory_fixture(tmp_path, "pair-roll")
+        rolled_root, rolled_home, rolled_ws, rolled_target = _memory_fixture(
+            tmp_path, "pair-roll"
+        )
         sh.rollback(rolled_root, rolled_target, paths=["memory/a.md"], home=rolled_home)
         rev_root, rev_home, rev_ws, rev_target = _memory_fixture(tmp_path, "pair-rev")
         sh.revert(rev_root, rev_target, paths=["memory/a.md"], home=rev_home)
@@ -237,9 +230,6 @@ class TestRollbackDiscardsAndRevertKeeps:
         assert rolled == A_TARGET
         assert reverted == A_REVERTED
         assert rolled != reverted
-
-
-# ── per-file rollback ──────────────────────────────────────────────────────
 
 
 class TestPerFileRollback:
@@ -253,7 +243,9 @@ class TestPerFileRollback:
             ws / "memory" / "b.md"
         ).read_text() == "b-third-later\n", "sibling edit must survive"
         assert result["paths"] == ["memory/a.md"]
-        changed = _git_out(root, home, "show", "--name-only", "--format=", "HEAD").split()
+        changed = _git_out(
+            root, home, "show", "--name-only", "--format=", "HEAD"
+        ).split()
         assert changed == ["memory/a.md"], "the recorded commit must touch nothing else"
 
     def test_it_adds_a_commit_rather_than_rewriting_history(self, tmp_path):
@@ -265,7 +257,6 @@ class TestPerFileRollback:
         assert sh.commit_count(root, home=home) == 4
         assert result["head"] not in (head_before, target)
         assert result["prior_head"] == head_before
-        # Still reachable: the subset rollback is an ordinary descendant commit.
         assert head_before in _git_out(root, home, "log", "--format=%H").split()
 
     def test_prior_head_is_parked_in_a_service_ref(self, tmp_path):
@@ -277,7 +268,8 @@ class TestPerFileRollback:
 
         assert result["prior_ref"].startswith(sh.REF_PREFIX)
         assert (
-            head_before in _git_out(root, home, "log", "--format=%H", result["prior_ref"]).split()
+            head_before
+            in _git_out(root, home, "log", "--format=%H", result["prior_ref"]).split()
         )
         assert [r["sha"] for r in sh.forward_refs(root, home=home)] == [head_before]
 
@@ -290,14 +282,21 @@ class TestPerFileRollback:
         sh.rollback(root, target, paths=["memory/new.md"], home=home)
 
         assert not (ws / "memory" / "new.md").exists()
-        assert (ws / "memory" / "a.md").read_text() == A_HEAD, "unnamed paths keep later edits"
+        assert (
+            ws / "memory" / "a.md"
+        ).read_text() == A_HEAD, "unnamed paths keep later edits"
 
     def test_several_paths_at_once(self, tmp_path):
         root, home, ws, target = _memory_fixture(tmp_path, "roll-many")
 
-        result = sh.rollback(root, target, paths=["memory/b.md", "memory/a.md"], home=home)
+        result = sh.rollback(
+            root, target, paths=["memory/b.md", "memory/a.md"], home=home
+        )
 
-        assert result["paths"] == ["memory/a.md", "memory/b.md"], "normalized and sorted"
+        assert result["paths"] == [
+            "memory/a.md",
+            "memory/b.md",
+        ], "normalized and sorted"
         assert (ws / "memory" / "a.md").read_text() == A_TARGET
         assert (ws / "memory" / "b.md").read_text() == "b-second\n"
 
@@ -308,13 +307,8 @@ class TestPerFileRollback:
 
         assert [f["path"] for f in prev["files"]] == ["memory/a.md"]
         assert prev["paths"] == ["memory/a.md"]
-        # No commit leaves the timeline for a subset, so the panel must not say one
-        # does. This is the number the confirm dialog renders.
         assert prev["commits_rolled_away"] == 0
         assert "BETA-BAD" in prev["files"][0]["diff"]
-
-
-# ── per-file revert ────────────────────────────────────────────────────────
 
 
 class TestPerFileRevert:
@@ -326,7 +320,9 @@ class TestPerFileRevert:
         assert (ws / "memory" / "b.md").read_text() == "b-third-later\n"
         assert result["reverted"] == target
         assert result["paths"] == ["memory/a.md"]
-        changed = _git_out(root, home, "show", "--name-only", "--format=", "HEAD").split()
+        changed = _git_out(
+            root, home, "show", "--name-only", "--format=", "HEAD"
+        ).split()
         assert changed == ["memory/a.md"]
 
     def test_it_adds_a_commit(self, tmp_path):
@@ -373,15 +369,14 @@ class TestPerFileRevert:
         _write(ws / "memory" / "a.md", A_TARGET)
         _write(ws / "memory" / "b.md", "one\nTWO-BAD\nthree\n")
         target = sh.commit(root, home=home)
-        _write(ws / "memory" / "a.md", A_HEAD)  # a separable later edit
-        _write(ws / "memory" / "b.md", "one\nTWO-LATER\nthree\n")  # ON the reverted hunk
+        _write(ws / "memory" / "a.md", A_HEAD)
+        _write(ws / "memory" / "b.md", "one\nTWO-LATER\nthree\n")
         sh.commit(root, home=home)
 
         with pytest.raises(sh.OverlapError) as exc:
             sh.revert(root, target, paths=["memory/b.md"], home=home)
         assert exc.value.files == ["memory/b.md"]
 
-        # The repo is still usable, and b.md's overlap does not veto a.md.
         sh.revert(root, target, paths=["memory/a.md"], home=home)
         assert (ws / "memory" / "a.md").read_text() == A_REVERTED
         assert (ws / "memory" / "b.md").read_text() == "one\nTWO-LATER\nthree\n"
@@ -398,12 +393,11 @@ class TestPerFileRevert:
     def test_preview_dispatches_the_subset(self, tmp_path):
         root, home, ws, target = _memory_fixture(tmp_path, "rev-dispatch")
         for operation in ("rollback", "revert"):
-            prev = sh.preview(root, target, operation=operation, paths=["memory/a.md"], home=home)
+            prev = sh.preview(
+                root, target, operation=operation, paths=["memory/a.md"], home=home
+            )
             assert prev["paths"] == ["memory/a.md"]
             assert [f["path"] for f in prev["files"]] == ["memory/a.md"]
-
-
-# ── the subset is validated, never silently narrowed ───────────────────────
 
 
 class TestSubsetValidation:
@@ -441,8 +435,6 @@ class TestSubsetValidation:
         assert _git_out(root, home, "rev-parse", "HEAD").strip() == head
         assert sh.commit_count(root, home=home) == 3
         assert (ws / "memory" / "a.md").read_text() == A_HEAD
-        # Validation runs BEFORE the ref is parked: a refused subset leaves no
-        # trace at all, not even a forward-travel entry the panel would render.
         assert sh.forward_refs(root, home=home) == []
 
     def test_a_tracked_path_this_commit_did_not_touch_raises(self, tmp_path):
@@ -460,7 +452,9 @@ class TestSubsetValidation:
         root, home, ws, target = _memory_fixture(tmp_path, "mixed-paths")
 
         with pytest.raises(sh.HistoryError, match="memory/nope.md"):
-            sh.rollback(root, target, paths=["memory/a.md", "memory/nope.md"], home=home)
+            sh.rollback(
+                root, target, paths=["memory/a.md", "memory/nope.md"], home=home
+            )
 
         assert (ws / "memory" / "a.md").read_text() == A_HEAD
         assert sh.commit_count(root, home=home) == 3
@@ -469,14 +463,14 @@ class TestSubsetValidation:
         root, home, ws, target = _memory_fixture(tmp_path, "normalize")
 
         result = sh.rollback(
-            root, target, paths=["./memory/a.md", "memory//a.md", "memory/a.md"], home=home
+            root,
+            target,
+            paths=["./memory/a.md", "memory//a.md", "memory/a.md"],
+            home=home,
         )
 
         assert result["paths"] == ["memory/a.md"]
         assert (ws / "memory" / "a.md").read_text() == A_TARGET
-
-
-# ── secrets survive the new mechanism too ──────────────────────────────────
 
 
 class TestSecretsSurviveASubsetRestore:
@@ -488,8 +482,12 @@ class TestSecretsSurviveASubsetRestore:
 
         sh.rollback(root, target, paths=["memory/a.md"], home=home)
 
-        assert (ws / "memory" / "a.md").read_text() == A_TARGET, "the rollback must have happened"
-        assert secret.is_file(), "the ignored secret was deleted by the per-file rollback"
+        assert (
+            ws / "memory" / "a.md"
+        ).read_text() == A_TARGET, "the rollback must have happened"
+        assert (
+            secret.is_file()
+        ), "the ignored secret was deleted by the per-file rollback"
         assert secret.read_bytes() == before
 
     def test_the_credential_store_survives_a_per_file_rollback(self, tmp_path):
@@ -513,14 +511,18 @@ class TestSecretsSurviveASubsetRestore:
     @pytest.mark.parametrize("operation", ["rollback", "revert"])
     def test_an_untracked_file_is_not_swept_away(self, tmp_path, operation):
         """The same claim in its general form: a subset restore is not a clean."""
-        root, home, ws, target = _memory_fixture(tmp_path, f"subset-untracked-{operation}")
-        stray = ws / "memory" / "scratch.tmp"  # matches NOISE_EXCLUDE
+        root, home, ws, target = _memory_fixture(
+            tmp_path, f"subset-untracked-{operation}"
+        )
+        stray = ws / "memory" / "scratch.tmp"
         stray.write_text("work in progress")
 
         getattr(sh, operation)(root, target, paths=["memory/a.md"], home=home)
 
         assert stray.read_text() == "work in progress"
-        assert (ws / "memory" / "a.md").read_text() != A_HEAD, "the restore must have happened"
+        assert (
+            ws / "memory" / "a.md"
+        ).read_text() != A_HEAD, "the restore must have happened"
 
     def test_the_module_never_invokes_git_clean(self, tmp_path):
         """Asserted over the SYNTAX TREE, not the text.
@@ -543,7 +545,6 @@ class TestSecretsSurviveASubsetRestore:
                 if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                     tokens.add(arg.value)
 
-        # Vacuity floor: a walk that matched nothing would "prove" anything.
         assert calls > 10, f"the _git call walk found only {calls} calls"
         assert {"reset", "checkout", "commit", "apply"} <= tokens, sorted(tokens)
         assert "clean" not in tokens, "a subset restore must never run `git clean`"

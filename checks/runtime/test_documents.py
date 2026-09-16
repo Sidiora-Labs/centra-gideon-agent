@@ -11,14 +11,14 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.documents import available_formats, get_writer
-from gideon.documents.from_markup import (
+from gideon.cognition.knowledge.readers import FileReader
+from gideon.workspace.documents import available_formats, get_writer
+from gideon.workspace.documents.from_markup import (
     deck_from_markdown,
     document_from_html,
     document_from_markdown,
 )
-from gideon.documents.model import Block, DeckModel, DocumentModel, SheetModel
-from gideon.knowledge.readers import FileReader
+from gideon.workspace.documents.model import Block, DeckModel, DocumentModel, SheetModel
 
 
 def _write(tmp_path, fmt: str, model, name="out"):
@@ -26,9 +26,6 @@ def _write(tmp_path, fmt: str, model, name="out"):
     path = tmp_path / f"{name}.{fmt}"
     path.write_bytes(data)
     return path, data
-
-
-# ── the registry ──────────────────────────────────────────────────────────────
 
 
 def test_registry_reports_only_usable_formats():
@@ -67,9 +64,6 @@ def test_block_clamps_the_heading_level():
     assert Block(kind="heading", level=0).level == 1
 
 
-# ── markdown → model ──────────────────────────────────────────────────────────
-
-
 def test_markdown_parses_every_shape_a_generated_document_uses():
     md = """# Title
 
@@ -98,7 +92,7 @@ Closing.
     model = document_from_markdown(md)
     kinds = [b.kind for b in model.blocks]
 
-    assert model.title == "Title"  # a leading H1 becomes the title, not a dup heading
+    assert model.title == "Title"
     assert kinds == [
         "paragraph",
         "heading",
@@ -110,7 +104,7 @@ Closing.
         "paragraph",
     ]
     table = next(b for b in model.blocks if b.kind == "table")
-    assert table.rows == [["A", "B"], ["1", "2"]]  # the |---| separator is not a row
+    assert table.rows == [["A", "B"], ["1", "2"]]
     code = next(b for b in model.blocks if b.kind == "code")
     assert code.text == "x = 1"
 
@@ -156,17 +150,16 @@ def test_html_is_sanitized_and_credentials_redacted():
 
     assert "steal()" not in body
     assert "<script" not in body
-    assert "AKIAIOSFODNN7EXAMPLE" not in body, "a credential must not survive into a file"
-
-
-# ── round trip: our own readers must read what we write ───────────────────────
+    assert (
+        "AKIAIOSFODNN7EXAMPLE" not in body
+    ), "a credential must not survive into a file"
 
 
 def test_a_generated_docx_re_reads_through_the_real_reader(tmp_path):
     md = "# Quarterly\n\nRevenue grew.\n\n## Details\n\n- EMEA up\n- APAC flat\n"
     path, data = _write(tmp_path, "docx", document_from_markdown(md))
 
-    assert len(data) > 1000  # a real OOXML package, not an empty stub
+    assert len(data) > 1000
     text, meta = FileReader().read(str(path))
 
     assert meta["format"] == "docx"
@@ -193,7 +186,9 @@ def test_a_generated_xlsx_re_reads_with_numbers_still_numeric(tmp_path):
     point of generating one."""
     from openpyxl import load_workbook
 
-    model = SheetModel.from_rows({"Sales": [["Region", "Q1"], ["EMEA", 120], ["APAC", 99.5]]})
+    model = SheetModel.from_rows(
+        {"Sales": [["Region", "Q1"], ["EMEA", 120], ["APAC", 99.5]]}
+    )
     path, _ = _write(tmp_path, "xlsx", model)
 
     text, meta = FileReader().read(str(path))
@@ -230,7 +225,7 @@ def test_an_empty_sheet_model_still_produces_a_valid_workbook(tmp_path):
     from openpyxl import load_workbook
 
     path, _ = _write(tmp_path, "xlsx", SheetModel.from_rows({}))
-    assert load_workbook(path).sheetnames  # a workbook with zero sheets is invalid
+    assert load_workbook(path).sheetnames
 
 
 def test_ragged_table_rows_are_normalized_not_truncated(tmp_path):
@@ -252,9 +247,6 @@ def test_an_image_block_renders_a_placeholder_rather_than_vanishing(tmp_path):
     assert "sales-chart" in text
 
 
-# ── deck outline ──────────────────────────────────────────────────────────────
-
-
 def test_deck_from_markdown_splits_slides_and_captures_notes():
     md = """# The Deck
 
@@ -273,8 +265,6 @@ body line
 
     assert deck.title == "The Deck"
     assert [s.title for s in deck.slides] == ["First", "Second"]
-    # `bullets`, not `body`: a slide line carries its indent DEPTH since DFE-8, and the
-    # depth of a flat markdown outline is 0 — which is what these assert.
     assert [(b.text, b.level) for b in deck.slides[0].bullets] == [
         ("point one", 0),
         ("point two", 0),
@@ -300,29 +290,25 @@ def test_empty_deck_markdown_is_a_valid_empty_deck():
     assert isinstance(deck_from_markdown(""), DeckModel)
 
 
-# ── artifact kinds + the coercion hardening ───────────────────────────────────
-
-
 def test_the_new_document_kinds_are_registered_in_both_sets():
     """A binary kind must be in ALLOWED_KINDS *and* BINARY_KINDS. Being in neither is
     exactly how generated video ended up stored as an image (issue #94)."""
-    from gideon.artifacts.models import ALLOWED_KINDS, BINARY_KINDS
+    from gideon.workspace.artifacts.models import ALLOWED_KINDS, BINARY_KINDS
 
     for kind in ("docx", "xlsx", "pdf", "video"):
         assert kind in ALLOWED_KINDS, kind
         assert kind in BINARY_KINDS, kind
-    # csv is a TEXT kind: it round-trips as text and needs no binary body.
     assert "csv" in ALLOWED_KINDS and "csv" not in BINARY_KINDS
 
 
 def test_every_binary_kind_has_a_mime_extension_mapping():
     """The raw endpoint derives Content-Type from the stored extension — an unmapped
     mime serves a download the OS can't open."""
-    from gideon.artifacts.models import _MIME_TO_EXT, BINARY_KINDS
+    from gideon.workspace.artifacts.models import _MIME_TO_EXT, BINARY_KINDS
 
     exts = set(_MIME_TO_EXT.values())
     for kind in BINARY_KINDS:
-        if kind == "image":  # image maps via several mimes, none named "image"
+        if kind == "image":
             continue
         assert kind in exts or kind in {"video"}, f"no mime→ext mapping produces {kind}"
 
@@ -330,7 +316,7 @@ def test_every_binary_kind_has_a_mime_extension_mapping():
 def test_create_binary_raises_on_a_non_binary_kind(tmp_path):
     """This used to coerce silently to "image" — the #94 bug class. A programming error
     must fail loudly so a newly-added kind can't be quietly mis-stored."""
-    from gideon.artifacts.native import NativeArtifactProvider
+    from gideon.workspace.artifacts.native import NativeArtifactProvider
 
     prov = NativeArtifactProvider(root=tmp_path)
     with pytest.raises(ValueError, match="non-binary kind"):
@@ -338,7 +324,7 @@ def test_create_binary_raises_on_a_non_binary_kind(tmp_path):
 
 
 def test_create_binary_accepts_a_registered_document_kind(tmp_path):
-    from gideon.artifacts.native import NativeArtifactProvider
+    from gideon.workspace.artifacts.native import NativeArtifactProvider
 
     prov = NativeArtifactProvider(root=tmp_path)
     art = prov.create_binary(
@@ -348,12 +334,14 @@ def test_create_binary_accepts_a_registered_document_kind(tmp_path):
         kind="docx",
     )
     assert art.kind == "docx", "the kind must survive, not be coerced"
-    assert art.content.startswith("/api/artifacts/"), "content is a raw ref, never bytes"
+    assert art.content.startswith(
+        "/api/artifacts/"
+    ), "content is a raw ref, never bytes"
 
 
 def test_a_generated_document_is_stored_under_its_real_kind(tmp_path):
     """End to end through the writer + store: the artifact keeps its format identity."""
-    from gideon.artifacts.native import NativeArtifactProvider
+    from gideon.workspace.artifacts.native import NativeArtifactProvider
 
     prov = NativeArtifactProvider(root=tmp_path)
     data = get_writer("docx")(document_from_markdown("# T\n\nbody\n"))
@@ -366,9 +354,6 @@ def test_a_generated_document_is_stored_under_its_real_kind(tmp_path):
     stored, mime = prov.raw_bytes(art.slug)
     assert stored == data, "the bytes must round-trip unchanged"
     assert mime.endswith("wordprocessingml.document")
-
-
-# ── S2: pptx ──────────────────────────────────────────────────────────────────
 
 
 def test_pptx_is_available_and_round_trips_titles_bodies_and_notes(tmp_path):
@@ -394,7 +379,7 @@ def test_pptx_is_available_and_round_trips_titles_bodies_and_notes(tmp_path):
     text, meta = FileReader().read(str(path))
 
     assert meta["format"] == "pptx"
-    assert meta["slide_count"] == 3  # title slide + two content slides
+    assert meta["slide_count"] == 3
     assert "First slide" in text and "Second slide" in text
     assert "alpha" in text and "gamma" in text
     assert "mention the numbers" in text, "speaker notes must survive"
@@ -404,18 +389,20 @@ def test_pptx_body_placeholder_is_found_by_index_not_identity(tmp_path):
     """python-pptx returns a NEW proxy on each `shapes.title` access, so
     `shape is slide.shapes.title` is False even for the title placeholder. An identity
     check made the first body line overwrite the title — measured, not assumed."""
-    from gideon.documents.model import DeckModel, Slide
+    from gideon.workspace.documents.model import DeckModel, Slide
 
     deck = DeckModel(slides=[Slide.outline("Real Title", ["first bullet"])])
     path, _ = _write(tmp_path, "pptx", deck)
 
     text, _ = FileReader().read(str(path))
-    assert "Slide 1: Real Title" in text, "the title must not be overwritten by the body"
+    assert (
+        "Slide 1: Real Title" in text
+    ), "the title must not be overwritten by the body"
     assert "first bullet" in text
 
 
 def test_a_slide_with_no_body_still_renders(tmp_path):
-    from gideon.documents.model import DeckModel, Slide
+    from gideon.workspace.documents.model import DeckModel, Slide
 
     path, _ = _write(tmp_path, "pptx", DeckModel(slides=[Slide(title="Only a title")]))
     text, _ = FileReader().read(str(path))
@@ -425,16 +412,13 @@ def test_a_slide_with_no_body_still_renders(tmp_path):
 def test_a_deck_image_reference_is_recorded_in_the_notes(tmp_path):
     """Resolving an artifact to bytes is the caller's job; dropping the block would lose
     the fact that an image belonged on the slide."""
-    from gideon.documents.model import DeckModel, Slide
+    from gideon.workspace.documents.model import DeckModel, Slide
 
     deck = DeckModel(slides=[Slide(title="Chart", artifact_slug="sales-chart")])
     path, _ = _write(tmp_path, "pptx", deck)
 
     text, _ = FileReader().read(str(path))
     assert "sales-chart" in text
-
-
-# ── S2: pdf ───────────────────────────────────────────────────────────────────
 
 
 def test_pdf_is_unconditionally_available():
@@ -476,7 +460,9 @@ def test_pdf_bullets_extract_as_text_not_cid_garbage(tmp_path):
     """reportlab's default bullet is ZapfDingbats char 127, whose CID has no unicode
     mapping — every bullet extracted as the literal string "(cid:127)", corrupting the
     text of any generated PDF later ingested or searched."""
-    path, _ = _write(tmp_path, "pdf", document_from_markdown("# T\n\n- alpha\n- beta\n"))
+    path, _ = _write(
+        tmp_path, "pdf", document_from_markdown("# T\n\n- alpha\n- beta\n")
+    )
 
     text, _ = FileReader().read(str(path))
 
@@ -488,7 +474,9 @@ def test_pdf_escapes_markup_characters_from_document_content(tmp_path):
     """Platypus parses mini-HTML inside Paragraph text, so a raw `<` or `&` from content
     would vanish or raise mid-build."""
     path, _ = _write(
-        tmp_path, "pdf", document_from_markdown("# T\n\nUse <angle> & ampersand chars.\n")
+        tmp_path,
+        "pdf",
+        document_from_markdown("# T\n\nUse <angle> & ampersand chars.\n"),
     )
 
     text, _ = FileReader().read(str(path))
@@ -503,15 +491,12 @@ def test_an_empty_document_model_still_builds_every_format(tmp_path):
         assert data, fmt
 
 
-# ── S2: the round trip (T2.4) ─────────────────────────────────────────────────
-
-
 def test_exporting_a_text_artifact_as_a_document(tmp_path, monkeypatch):
     """The round trip: something already in the library comes back OUT as a real file,
     through the SAME writer path as a fresh generation — no parallel export pipeline."""
-    from gideon.artifacts import registry
-    from gideon.artifacts.native import NativeArtifactProvider
-    from gideon.mcp_artifacts import _resolve_document_source
+    from gideon.integrations.mcp_artifacts import _resolve_document_source
+    from gideon.workspace.artifacts import registry
+    from gideon.workspace.artifacts.native import NativeArtifactProvider
 
     prov = NativeArtifactProvider(root=tmp_path)
     monkeypatch.setitem(registry._providers, "native", prov)
@@ -530,13 +515,15 @@ def test_exporting_a_text_artifact_as_a_document(tmp_path, monkeypatch):
 def test_exporting_a_binary_artifact_is_refused(tmp_path, monkeypatch):
     """A binary artifact's `content` is a raw URL, not text — exporting one would write
     the URL into the document body."""
-    from gideon.artifacts import registry
-    from gideon.artifacts.native import NativeArtifactProvider
-    from gideon.mcp_artifacts import _resolve_document_source
+    from gideon.integrations.mcp_artifacts import _resolve_document_source
+    from gideon.workspace.artifacts import registry
+    from gideon.workspace.artifacts.native import NativeArtifactProvider
 
     prov = NativeArtifactProvider(root=tmp_path)
     monkeypatch.setitem(registry._providers, "native", prov)
-    art = prov.create_binary(name="Pic", data=b"\x89PNG", mime="image/png", kind="image")
+    art = prov.create_binary(
+        name="Pic", data=b"\x89PNG", mime="image/png", kind="image"
+    )
 
     body, _ = _resolve_document_source(prov, art.slug)
 
@@ -544,9 +531,9 @@ def test_exporting_a_binary_artifact_is_refused(tmp_path, monkeypatch):
 
 
 def test_an_unknown_source_resolves_to_none(tmp_path, monkeypatch):
-    from gideon.artifacts import registry
-    from gideon.artifacts.native import NativeArtifactProvider
-    from gideon.mcp_artifacts import _resolve_document_source
+    from gideon.integrations.mcp_artifacts import _resolve_document_source
+    from gideon.workspace.artifacts import registry
+    from gideon.workspace.artifacts.native import NativeArtifactProvider
 
     prov = NativeArtifactProvider(root=tmp_path)
     monkeypatch.setitem(registry._providers, "native", prov)
@@ -555,27 +542,22 @@ def test_an_unknown_source_resolves_to_none(tmp_path, monkeypatch):
 
 
 def test_the_pptx_kind_is_registered_in_both_sets():
-    from gideon.artifacts.models import ALLOWED_KINDS, BINARY_KINDS
+    from gideon.workspace.artifacts.models import ALLOWED_KINDS, BINARY_KINDS
 
     assert "pptx" in ALLOWED_KINDS and "pptx" in BINARY_KINDS
-
-
-# ── Regenerating under an existing slug (the tool path) ──────────────────────
-# This path had NO test, and shipped broken: `_document_create` passed
-# `snapshot=True` to `update_binary`, which accepts no such argument, so every
-# attempt to regenerate a document in place raised TypeError. The writers were
-# all covered; the tool that calls them was not.
 
 
 class TestDocumentRegenerate:
     def _prov(self, tmp_path, monkeypatch):
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        from gideon.artifacts.native import NativeArtifactProvider
+        from gideon.workspace.artifacts.native import NativeArtifactProvider
 
         return NativeArtifactProvider(root=tmp_path / "artifacts")
 
-    def test_regenerating_under_an_existing_slug_bumps_a_version(self, tmp_path, monkeypatch):
-        from gideon.mcp_artifacts import _document_create
+    def test_regenerating_under_an_existing_slug_bumps_a_version(
+        self, tmp_path, monkeypatch
+    ):
+        from gideon.integrations.mcp_artifacts import _document_create
 
         prov = self._prov(tmp_path, monkeypatch)
         audited: list = []
@@ -584,13 +566,16 @@ class TestDocumentRegenerate:
             audited.append((outcome, slug, error))
 
         first = _document_create(
-            prov, "document_create", {"name": "Report", "markdown": "# One"}, "s1", _audit
+            prov,
+            "document_create",
+            {"name": "Report", "markdown": "# One"},
+            "s1",
+            _audit,
         )
         assert "Error" not in first, first
         slug = [a.slug for a in prov.list()][0]
         assert prov.get(slug).version == 1
 
-        # THE regression: same slug again must update in place, not raise.
         second = _document_create(
             prov,
             "document_create",
@@ -605,7 +590,7 @@ class TestDocumentRegenerate:
 
     def test_the_regenerated_bytes_are_the_new_content(self, tmp_path, monkeypatch):
         """A version bump that kept the old bytes would be worse than a crash."""
-        from gideon.mcp_artifacts import _document_create
+        from gideon.integrations.mcp_artifacts import _document_create
 
         prov = self._prov(tmp_path, monkeypatch)
         _document_create(
@@ -633,7 +618,7 @@ class TestDocumentRegenerate:
         assert "Alpha" not in text
 
     def test_the_update_records_an_iterated_event(self, tmp_path, monkeypatch):
-        from gideon.mcp_artifacts import _document_create
+        from gideon.integrations.mcp_artifacts import _document_create
 
         prov = self._prov(tmp_path, monkeypatch)
         _document_create(
@@ -655,15 +640,6 @@ class TestDocumentRegenerate:
         assert "iterated" in types
 
 
-# ── DFE-3's V1 gate, as a rail: generate with the TOOL, parse it back, diff ──
-# `test_docx_roundtrip.py` calls `render_docx` directly, so the seam between the tool
-# the agent actually invokes and the parser is joined by nothing. That is the DFE-2
-# hazard's shape: a round trip that never travels the real call site cannot see a
-# regression introduced there — a tool that quietly picked a different writer, dropped
-# the title, or stored bytes other than the ones it rendered would leave every existing
-# document test green.
-
-
 class TestToolGeneratedDocumentParsesBack:
     """`document_create` → stored bytes → `parse_docx` → diff against the same model."""
 
@@ -680,8 +656,8 @@ class TestToolGeneratedDocumentParsesBack:
 
     def _generate(self, tmp_path, monkeypatch):
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        from gideon.artifacts.native import NativeArtifactProvider
-        from gideon.mcp_artifacts import _document_create
+        from gideon.integrations.mcp_artifacts import _document_create
+        from gideon.workspace.artifacts.native import NativeArtifactProvider
 
         prov = NativeArtifactProvider(root=tmp_path / "artifacts")
         reply = _document_create(
@@ -697,15 +673,17 @@ class TestToolGeneratedDocumentParsesBack:
         assert mime.endswith("wordprocessingml.document"), mime
         return data
 
-    def test_the_stored_bytes_parse_back_to_the_model_the_tool_built(self, tmp_path, monkeypatch):
+    def test_the_stored_bytes_parse_back_to_the_model_the_tool_built(
+        self, tmp_path, monkeypatch
+    ):
         """The diff. Kinds, title and visible text, block for block.
 
         Compared against `document_from_markdown` of the SAME markdown — which is what
         `_document_create` builds internally — so a tool that stored a document other
         than the one it rendered from the caller's input reds here.
         """
-        from gideon.documents.docx_parser import parse_docx
-        from gideon.documents.from_markup import document_from_markdown
+        from gideon.workspace.documents.docx_parser import parse_docx
+        from gideon.workspace.documents.from_markup import document_from_markdown
 
         data = self._generate(tmp_path, monkeypatch)
         authored = document_from_markdown(self._MARKDOWN, title="")
@@ -722,8 +700,6 @@ class TestToolGeneratedDocumentParsesBack:
                 for block in model.blocks
             ]
 
-        # Vacuity floor: the fixture must actually carry the whole span of kinds, or the
-        # equality below could hold over one paragraph — or over two empty lists.
         assert [block.kind for block in authored.blocks] == [
             "paragraph",
             "heading",
@@ -750,7 +726,7 @@ class TestToolGeneratedDocumentParsesBack:
         user that editing it would lose formatting. Four margin fields hold that geometry,
         so the warning now fires only when something really is at risk.
         """
-        from gideon.documents.docx_parser import parse_docx
+        from gideon.workspace.documents.docx_parser import parse_docx
 
         _model, report = parse_docx(self._generate(tmp_path, monkeypatch))
 
@@ -765,7 +741,7 @@ class TestUpdateBinaryContract:
         snapshots, because binary bodies have no held-back draft state."""
         import inspect
 
-        from gideon.artifacts.native import NativeArtifactProvider
+        from gideon.workspace.artifacts.native import NativeArtifactProvider
 
         params = inspect.signature(NativeArtifactProvider.update_binary).parameters
         assert "snapshot" not in params
@@ -775,7 +751,11 @@ class TestUpdateBinaryContract:
         had no test — exactly how this shipped."""
         from pathlib import Path
 
-        src = Path("src/gideon/mcp_artifacts.py").read_text(encoding="utf-8")
+        src = Path("runtime/gideon/integrations/mcp_artifacts.py").read_text(
+            encoding="utf-8"
+        )
         for chunk in src.split("update_binary(")[1:]:
             call = chunk.split(")", 1)[0]
-            assert "snapshot" not in call, f"update_binary call passes snapshot: {call!r}"
+            assert (
+                "snapshot" not in call
+            ), f"update_binary call passes snapshot: {call!r}"

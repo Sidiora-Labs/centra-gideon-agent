@@ -1,11 +1,11 @@
 """Drift guard for the committed config-schema baseline (PLATFORM-HARDENING-FLOORS SH3.1).
 
-``config-baseline.json`` is GENERATED from the ``AppConfig`` dataclass hierarchy and
-its ``_meta`` metadata by ``scripts/generate_config_baseline.py`` — the same source of
+``checks/catalogs/configuration.json`` is GENERATED from the ``AppConfig`` dataclass hierarchy and
+its ``_meta`` metadata by ``tooling/scripts/generate_config_baseline.py`` — the same source of
 truth ``test_config_roundtrip.py`` walks. This suite is what keeps the committed copy
 honest: it regenerates in-memory and byte-compares, so a schema change not regenerated
 (a renamed key, an added field, a dropped ``_meta``) reddens CI. Regenerate with
-``python scripts/generate_config_baseline.py``.
+``python tooling/scripts/generate_config_baseline.py``.
 
 The round-trip test proves each field SURVIVES a save/load cycle; this baseline proves
 the field SET itself has not drifted — the two are complementary.
@@ -15,7 +15,14 @@ from __future__ import annotations
 
 import json
 
-from scripts.generate_config_baseline import baseline_path, build_baseline
+import pytest
+
+from tooling.scripts.generate_config_baseline import (
+    baseline_path,
+    build_baseline,
+    decode_catalog,
+    encode_catalog,
+)
 
 
 def test_committed_baseline_matches_a_fresh_render():
@@ -28,13 +35,13 @@ def test_committed_baseline_matches_a_fresh_render():
     fresh = build_baseline()
     path = baseline_path()
     assert path.is_file(), (
-        "config-baseline.json is missing — generate it with "
-        "`python scripts/generate_config_baseline.py`"
+        "checks/catalogs/configuration.json is missing — generate it with "
+        "`python tooling/scripts/generate_config_baseline.py`"
     )
     committed = path.read_text(encoding="utf-8")
     assert committed == fresh, (
-        "config-baseline.json is stale — a config field was renamed, added, or "
-        "removed without regenerating. Run `python scripts/generate_config_baseline.py`."
+        "checks/catalogs/configuration.json is stale — a config field was renamed, added, or "
+        "removed without regenerating. Run `python tooling/scripts/generate_config_baseline.py`."
     )
 
 
@@ -45,7 +52,7 @@ def test_render_is_deterministic():
 
 def test_baseline_is_flat_sorted_and_well_shaped():
     """Every entry is a flat leaf with the four declared keys, sorted by path."""
-    entries = json.loads(build_baseline())
+    entries = decode_catalog(json.loads(build_baseline()))
     assert entries, "baseline is empty"
     paths = [e["path"] for e in entries]
     assert paths == sorted(paths), "entries are not sorted by path"
@@ -64,18 +71,30 @@ def test_renaming_a_field_is_caught():
     COPY of the fresh render (never the committed file) and confirm the byte-compare
     the drift test relies on would fail.
     """
-    entries = json.loads(build_baseline())
+    entries = decode_catalog(json.loads(build_baseline()))
     assert entries[0]["path"] != "renamed.field"
     entries[0]["path"] = "renamed.field"
-    mutated = json.dumps(entries, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    mutated = (
+        json.dumps(
+            encode_catalog(entries), indent=2, sort_keys=True, ensure_ascii=False
+        )
+        + "\n"
+    )
     assert mutated != build_baseline()
 
 
 def test_adding_a_field_is_caught():
     """Adding an entry changes the render — done_when case (ii)."""
-    entries = json.loads(build_baseline())
-    entries.append({"path": "zzz.new_field", "type": "str", "default": "", "sensitive": False})
-    mutated = json.dumps(entries, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    entries = decode_catalog(json.loads(build_baseline()))
+    entries.append(
+        {"path": "zzz.new_field", "type": "str", "default": "", "sensitive": False}
+    )
+    mutated = (
+        json.dumps(
+            encode_catalog(entries), indent=2, sort_keys=True, ensure_ascii=False
+        )
+        + "\n"
+    )
     assert mutated != build_baseline()
 
 
@@ -86,11 +105,23 @@ def test_baseline_carries_no_secret_values():
     the guarantee explicit. The ``sensitive`` flag records WHICH fields are sensitive
     for future use — it never emits a real secret VALUE.
     """
-    entries = json.loads(build_baseline())
+    entries = decode_catalog(json.loads(build_baseline()))
     for e in entries:
         default = e["default"]
         if isinstance(default, str):
-            # No default should look like a populated token/key/password.
             assert not (
                 len(default) > 20 and default.isalnum() and default.islower()
             ), f"{e['path']} default looks like a credential: {default!r}"
+
+
+def test_catalog_format_round_trips_without_changing_records():
+    document = json.loads(baseline_path().read_text(encoding="utf-8"))
+    assert encode_catalog(decode_catalog(document)) == document
+
+
+@pytest.mark.parametrize("field,value", [("version", 2), ("kind", "unrecognized")])
+def test_catalog_reader_rejects_unknown_formats(field, value):
+    document = json.loads(baseline_path().read_text(encoding="utf-8"))
+    document[field] = value
+    with pytest.raises(ValueError, match="unsupported Gideon"):
+        decode_catalog(document)

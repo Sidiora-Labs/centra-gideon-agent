@@ -9,17 +9,16 @@ from __future__ import annotations
 
 import pytest
 
-from harness import resume_audit
-from harness.replay import FakeMcpServer, TraceEvent
-from gideon.loop import files as loop_files
-from gideon.loop import store
-from gideon.loop.loop import Loop, LoopStatus
+from checks.harness import resume_audit
+from checks.harness.replay import FakeMcpServer, TraceEvent
+from gideon.automation.loop import files as loop_files
+from gideon.automation.loop import store
+from gideon.automation.loop.loop import Loop, LoopStatus
 
 
 @pytest.fixture(autouse=True)
 def _tmp_config(monkeypatch, tmp_path):
-    # Isolate the loop store to a temp dir (destructive-test-isolation rule).
-    monkeypatch.setattr("gideon.loop.files.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.automation.loop.files.config_dir", lambda: tmp_path)
     return tmp_path
 
 
@@ -54,9 +53,6 @@ def _code(**over) -> Loop:
     return store.create(Loop(**base))
 
 
-# ── resume audit ──────────────────────────────────────────────────────────────
-
-
 def test_missing_loop_is_not_answerable() -> None:
     r = resume_audit.audit_loop("nonexistent-id")
     assert not r.exists
@@ -68,10 +64,10 @@ def test_freshly_created_goal_loop_is_fully_answerable() -> None:
     g = _goal()
     r = resume_audit.audit_loop(g.id)
     assert r.exists
-    assert r.done_answerable  # has a status
-    assert r.verified_answerable  # loop dir exists (0 verdicts is a definitive answer)
-    assert r.next_answerable  # non-phased: next cycle derivable from findings count
-    assert r.how_to_verify_answerable  # persisted task text
+    assert r.done_answerable
+    assert r.verified_answerable
+    assert r.next_answerable
+    assert r.how_to_verify_answerable
     assert r.ok
 
 
@@ -80,20 +76,17 @@ def test_phased_loop_names_next_stage_from_disk() -> None:
     r = resume_audit.audit_loop(c.id)
     assert r.ok
     assert r.detail["phased"] is True
-    # design is done → next stage is build, derived from plan vs phase_status on disk.
     assert r.detail["next_stage"] == "build"
 
 
 def test_resume_after_simulated_restart_uses_disk_only() -> None:
-    # Create + advance a loop, then audit WITHOUT any in-memory session — the audit reads
-    # only persisted state, so this models a fresh process after a crash/restart.
     g = _goal()
     store.update_status(g.id, LoopStatus.RUNNING)
     loop_files.write_verdict(g.id, 1, {"roi": 0.8, "summary": "found the N+1 query"})
     r = resume_audit.audit_loop(g.id)
     assert r.ok
     assert r.detail["status"] == LoopStatus.RUNNING.value
-    assert r.detail["verdict_count"] == 1  # verified-from-disk
+    assert r.detail["verdict_count"] == 1
 
 
 def test_complete_loop_is_terminal_answerable() -> None:
@@ -105,15 +98,11 @@ def test_complete_loop_is_terminal_answerable() -> None:
 
 
 def test_loop_with_blank_task_flags_how_to_verify() -> None:
-    # A loop persisted with no task text can't answer "how to verify" from disk.
     g = _goal(task="")
     r = resume_audit.audit_loop(g.id)
     assert not r.how_to_verify_answerable
     assert not r.ok
     assert any("how to verify" in f for f in r.failures())
-
-
-# ── MCP replay-as-fake-server ───────────────────────────────────────────────
 
 
 def _mcp_event(tool: str, arguments: dict, ok: bool, output: str) -> TraceEvent:
@@ -123,7 +112,12 @@ def _mcp_event(tool: str, arguments: dict, ok: bool, output: str) -> TraceEvent:
             "stream": "mcp",
             "key": "srv",
             "type": "call_tool",
-            "payload": {"tool": tool, "arguments": arguments, "ok": ok, "output": output},
+            "payload": {
+                "tool": tool,
+                "arguments": arguments,
+                "ok": ok,
+                "output": output,
+            },
         }
     )
 
@@ -136,7 +130,6 @@ def test_fake_mcp_server_replays_recorded_response() -> None:
 
 def test_fake_mcp_server_arg_order_independent() -> None:
     server = FakeMcpServer([_mcp_event("f", {"a": 1, "b": 2}, True, "ok")])
-    # Different dict order → same canonical key → same recorded response.
     ok, out = server.call_tool("f", {"b": 2, "a": 1})
     assert ok and out == "ok"
 
@@ -150,7 +143,6 @@ def test_fake_mcp_server_returns_successive_responses() -> None:
     )
     assert server.call_tool("t", {})[1] == "first"
     assert server.call_tool("t", {})[1] == "second"
-    # Exhausted → repeats the last (deterministic, never fabricates).
     assert server.call_tool("t", {})[1] == "second"
 
 

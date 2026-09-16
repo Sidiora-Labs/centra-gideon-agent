@@ -2,10 +2,10 @@
 
 Core masks a provider/app setting on the wire only when the manifest marks it
 ``x-meta.sensitive``. That flag is the sole input to every masker core has — verified by
-reading them: :func:`gideon.dashboard.handlers.apps._sensitive_field_names` (which
+reading them: :func:`gideon.interfaces.dashboard.handlers.apps._sensitive_field_names` (which
 feeds ``_mask_secret_config``, whose own comment names the consequence, "leaving the
 backend in cleartext on every config-panel open (#43)"),
-:func:`gideon.config.validation._is_sensitive_path`, and the frontend's
+:func:`gideon.core.config.validation._is_sensitive_path`, and the frontend's
 ``pages/apps/appConfigForm.tsx``, which decides ``type="password"`` and the write-only
 blank-input behaviour from the same flag. So a manifest that declares an ``api_key``
 *without* it gets no masking anywhere, on any route: the maskers are correct and the
@@ -18,7 +18,7 @@ Settings → Providers load actually fetches an instance config for, which made 
 browser-reachable cleartext credential in the set.
 
 **What this rail can and cannot prove — stated up front, because its sibling's history is a
-warning.** ``tests/test_apps_import_boundary.py`` had *never run anywhere* (issue 1777): it
+warning.** ``checks/runtime/test_apps_import_boundary.py`` had *never run anywhere* (issue 1777): it
 resolved a path that was always absent and module-skipped, so the one lint enforcing the
 provider-agnostic-core tenet reported "skipped" on every run while a violation could have
 landed at any time. This rail reuses that file's :func:`_app_roots` so it inherits the fixed
@@ -56,15 +56,8 @@ from typing import Any
 
 import pytest
 
-# The resolution of "where do first-party apps live" has ONE owner already — reuse it rather
-# than re-deriving it here. A second answer to that question is the defect shape this rail
-# exists to catch, and issue 1777 is what a wrong answer costs.
-from tests.test_apps_import_boundary import _app_roots
+from checks.runtime.test_apps_import_boundary import _app_roots
 
-#: Substrings that make a settings key credential-shaped. Matched case-insensitively on the
-#: key NAME, so it fires on `api_key`, `apiKey`, `refresh_token`, `client_secret` alike.
-#: Deliberately broad: a false positive costs one `x-meta.sensitive` annotation, while a false
-#: negative ships a cleartext credential.
 _CRED_HINTS = (
     "api_key",
     "apikey",
@@ -81,7 +74,9 @@ def _is_credential_shaped(key: str) -> bool:
     return any(hint in low for hint in _CRED_HINTS)
 
 
-def _credential_fields(props: dict[str, Any] | None, trail: str = "") -> list[tuple[str, bool]]:
+def _credential_fields(
+    props: dict[str, Any] | None, trail: str = ""
+) -> list[tuple[str, bool]]:
     """Every credential-shaped field under *props*, as ``(dotted_name, is_marked_sensitive)``.
 
     Recurses into nested ``object`` properties. That recursion is the reason this is a parser
@@ -132,11 +127,6 @@ def _manifests() -> list[Path]:
     return out
 
 
-# ---------------------------------------------------------------------------
-# Vacuity floor: the corpus scan must actually have a corpus.
-# ---------------------------------------------------------------------------
-
-
 def test_the_scan_finds_manifests_at_all() -> None:
     """A rail that silently scanned nothing would report the same green as a clean tree.
 
@@ -149,11 +139,6 @@ def test_the_scan_finds_manifests_at_all() -> None:
         "no first-party app manifests were found, so the corpus assertion below proves "
         f"nothing. Roots searched: {[str(r) for r in _app_roots()]}"
     )
-
-
-# ---------------------------------------------------------------------------
-# The invariant, over the real corpus.
-# ---------------------------------------------------------------------------
 
 
 def test_no_credential_field_ships_unmarked() -> None:
@@ -186,7 +171,10 @@ def test_no_credential_field_ships_unmarked() -> None:
     for path in _manifests():
         try:
             manifest = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:  # pragma: no cover - malformed manifest
+        except (
+            OSError,
+            json.JSONDecodeError,
+        ) as exc:  # pragma: no cover - malformed manifest
             pytest.fail(f"{path} is not readable JSON: {exc}")
         if not isinstance(manifest, dict):
             continue
@@ -213,11 +201,6 @@ def test_no_credential_field_ships_unmarked() -> None:
         "or rename it if it does not actually hold a credential:\n  "
         + "\n  ".join(sorted(unmarked))
     )
-
-
-# ---------------------------------------------------------------------------
-# Detector floors: planted fixtures, so these hold in ANY clone.
-# ---------------------------------------------------------------------------
 
 
 def test_the_detector_flags_a_planted_unmarked_field() -> None:

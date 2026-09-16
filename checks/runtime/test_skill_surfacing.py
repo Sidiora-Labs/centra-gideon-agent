@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-import gideon.skills.surfacing as surf
-from gideon.skills.surfacing import _EmbedCache, surface_skills
+import gideon.extensions.skills.surfacing as surf
+from gideon.extensions.skills.surfacing import _EmbedCache, surface_skills
 
 
 def _skill(
@@ -31,12 +31,11 @@ def _no_embedder(monkeypatch):
     monkeypatch.setattr(surf, "_active_embedder", lambda: (None, ""))
 
 
-# ── keyword path (no embedder) — must match legacy get_triggered_skills ──
-
-
 def test_keyword_match():
     skills = [_skill("tiny-url", "shorten a url", "shorten url, tiny url")]
-    assert surface_skills("please shorten this url", skills, max_skills=3) == ["tiny-url"]
+    assert surface_skills("please shorten this url", skills, max_skills=3) == [
+        "tiny-url"
+    ]
 
 
 def test_keyword_miss():
@@ -64,7 +63,6 @@ def test_empty_query():
 
 
 def test_use_count_breaks_keyword_ties():
-    # identical triggers → identical keyword score → higher use_count wins ordering
     skills = [
         _skill("cold", "d", "deploy service", use_count=0),
         _skill("hot", "d", "deploy service", use_count=9),
@@ -73,12 +71,7 @@ def test_use_count_breaks_keyword_ties():
     assert out == ["hot", "cold"]
 
 
-# ── FS-6: feedback suppression withholds a matched skill ──
-
-
 def test_suppressed_skill_is_withheld():
-    # Two skills that both match on keyword; one is feedback-suppressed and must
-    # not surface, the healthy one must.
     skills = [
         _skill("wrong-one", "d", "deploy service"),
         _skill("good-one", "d", "deploy service"),
@@ -89,11 +82,10 @@ def test_suppressed_skill_is_withheld():
         max_skills=5,
         suppressed={("skill_synthesis", "wrong-one")},
     )
-    assert out == ["good-one"]  # the suppressed producer is withheld, the healthy one stays
+    assert out == ["good-one"]
 
 
 def test_default_suppresses_nothing():
-    # Absent the arg (fail-open default), a matched skill surfaces as before.
     skills = [_skill("s", "d", "deploy service")]
     assert surface_skills("deploy service", skills, max_skills=5) == ["s"]
 
@@ -108,15 +100,12 @@ def test_explain_shows_suppression_withheld():
         explain=True,
     )
     row = next(r for r in rows if r["key"] == "wrong-one")
-    # matched but withheld — surfaced with a suppression reason, never dropped silently
     assert row["included"] is False
-    assert row["kw_score"] >= 0.7  # it DID match — this is a withhold, not a miss
+    assert row["kw_score"] >= 0.7
     assert "suppression" in row["reason"]
 
 
 def test_suppression_only_bites_matches():
-    # A skill that would not match anyway is unaffected by being in the set (no crash,
-    # not surfaced for an unrelated reason).
     skills = [_skill("off-topic", "d", "shorten url")]
     out = surface_skills(
         "deploy service",
@@ -127,15 +116,11 @@ def test_suppression_only_bites_matches():
     assert out == []
 
 
-# ── semantic path (stub embedder) ──
-
-
 class _StubEmbedder:
     """Maps text → a 2-d vector by keyword presence, so cosine is predictable."""
 
     def __call__(self, text: str):
         t = text.lower()
-        # axis 0 = "billing", axis 1 = "shipping"
         return [
             1.0 if "bill" in t or "invoice" in t or "charge" in t else 0.0,
             1.0 if "ship" in t or "deliver" in t else 0.0,
@@ -144,31 +129,46 @@ class _StubEmbedder:
 
 def test_semantic_surfaces_paraphrase_keyword_misses(monkeypatch, tmp_path):
     monkeypatch.setattr(surf, "_active_embedder", lambda: (_StubEmbedder(), "stub:v1"))
-    # triggers say "invoice"; query says "charge" — no keyword overlap, but both
-    # embed onto the billing axis → semantic hit.
     skills = [
-        _skill("billing", "handle invoice questions", "invoice help", path=str(tmp_path / "b.md"))
+        _skill(
+            "billing",
+            "handle invoice questions",
+            "invoice help",
+            path=str(tmp_path / "b.md"),
+        )
     ]
     Path(skills[0]["path"]).write_text("x")
     cache = _EmbedCache(path=tmp_path / ".emb.json")
     out = surface_skills(
-        "help me with this charge", skills, max_skills=3, semantic_threshold=0.9, embed_cache=cache
+        "help me with this charge",
+        skills,
+        max_skills=3,
+        semantic_threshold=0.9,
+        embed_cache=cache,
     )
     assert out == ["billing"]
 
 
 def test_semantic_off_topic_excluded(monkeypatch, tmp_path):
     monkeypatch.setattr(surf, "_active_embedder", lambda: (_StubEmbedder(), "stub:v1"))
-    skills = [_skill("shipping", "delivery tracking", "deliver track", path=str(tmp_path / "s.md"))]
+    skills = [
+        _skill(
+            "shipping",
+            "delivery tracking",
+            "deliver track",
+            path=str(tmp_path / "s.md"),
+        )
+    ]
     Path(skills[0]["path"]).write_text("x")
     cache = _EmbedCache(path=tmp_path / ".emb.json")
     out = surface_skills(
-        "question about my invoice", skills, max_skills=3, semantic_threshold=0.9, embed_cache=cache
+        "question about my invoice",
+        skills,
+        max_skills=3,
+        semantic_threshold=0.9,
+        embed_cache=cache,
     )
-    assert out == []  # billing query, shipping skill → orthogonal → no hit
-
-
-# ── embedding cache (mtime + model keyed) ──
+    assert out == []
 
 
 def test_embed_cache_reuses_until_mtime_changes(tmp_path):
@@ -183,11 +183,11 @@ def test_embed_cache_reuses_until_mtime_changes(tmp_path):
     cache = _EmbedCache(path=tmp_path / ".emb.json")
     mt = f.stat().st_mtime
     cache.get_or_embed(str(f), "desc", mt, "m1", embed)
-    cache.get_or_embed(str(f), "desc", mt, "m1", embed)  # same mtime+model → cached
+    cache.get_or_embed(str(f), "desc", mt, "m1", embed)
     assert calls["n"] == 1
-    cache.get_or_embed(str(f), "desc", mt + 1, "m1", embed)  # mtime change → re-embed
+    cache.get_or_embed(str(f), "desc", mt + 1, "m1", embed)
     assert calls["n"] == 2
-    cache.get_or_embed(str(f), "desc", mt + 1, "m2", embed)  # model change → re-embed
+    cache.get_or_embed(str(f), "desc", mt + 1, "m2", embed)
     assert calls["n"] == 3
 
 
@@ -206,10 +206,7 @@ def test_embed_cache_persists_across_instances(tmp_path):
     c1.flush()
     c2 = _EmbedCache(path=p)
     c2.get_or_embed(str(f), "desc", f.stat().st_mtime, "m1", embed)
-    assert calls["n"] == 1  # second instance read from disk
-
-
-# ── search_skills (PT5): discover ANY skill by capability (parity w/ tool_search) ──
+    assert calls["n"] == 1
 
 
 def test_search_skills_ranks_full_library():
@@ -225,7 +222,6 @@ def test_search_skills_ranks_full_library():
 
 
 def test_search_skills_generous_no_gate():
-    # a weak keyword overlap still appears (discovery is generous, unlike surfacing).
     skills = [_skill("thumb", "generate a small preview image", "thumbnail")]
     assert any(h["key"] == "thumb" for h in surf.search_skills("preview", skills))
 

@@ -26,7 +26,7 @@ not agree (`get_local_tz` returned `('UTC', …)` on a PDT host; `calendar._reso
 through to server-local while `arm._trigger_tz` fell through to UTC, so the week grid struck
 a different column than the engine skipped; `report_schedules._effective_tz`, written
 *specifically* to compensate for `arm`'s UTC default, resolved to `'UTC'` itself). They all
-call `gideon.timezones` now, and `test_timezone_resolution_has_one_owner.py` is the
+call `gideon.core.timezones` now, and `test_timezone_resolution_has_one_owner.py` is the
 rail that keeps a seventh from appearing.
 
 Zones are pinned through `TZ` (which `machine_zone_name()` consults first) rather than
@@ -46,17 +46,20 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from gideon import timezones as tzmod
-from gideon.knowledge.report_schedules import _effective_tz, clock_spec
-from gideon.knowledge.research_reports import ReportDefinition, _report_tz
-from gideon.schedule import (
+from gideon.automation.schedule import (
     ScheduleDefinition,
     ScheduleJob,
     _job_tz,
     compute_next_run_ts,
     get_local_tz,
 )
-from gideon.timezones import (
+from gideon.automation.triggers.arm import _trigger_tz, next_fire, semantic_spec_issues
+from gideon.automation.triggers.calendar import _resolve_zone
+from gideon.automation.triggers.models import Trigger
+from gideon.cognition.knowledge.report_schedules import _effective_tz, clock_spec
+from gideon.cognition.knowledge.research_reports import ReportDefinition, _report_tz
+from gideon.core import timezones as tzmod
+from gideon.core.timezones import (
     SOURCE_CONFIG,
     SOURCE_EXPLICIT,
     SOURCE_MACHINE,
@@ -66,15 +69,9 @@ from gideon.timezones import (
     resolve_zone,
     resolve_zone_name,
 )
-from gideon.triggers.arm import _trigger_tz, next_fire, semantic_spec_issues
-from gideon.triggers.calendar import _resolve_zone
-from gideon.triggers.models import Trigger
 
-#: The instant every fire computation below is anchored at — 2026-09-07T04:00Z. Fixed so a
-#: measured epoch can be quoted in an assertion instead of recomputed.
 NOW = datetime(2026, 9, 7, 4, 0, 0, tzinfo=timezone.utc).timestamp()
 
-#: The wall clock a user authoring "remind me at 08:30" means.
 DAILY_0830 = "30 8 * * *"
 
 
@@ -113,10 +110,9 @@ def _independent_expectation(expr: str, zone: str, *, now: float = NOW) -> float
     """
     from croniter import croniter
 
-    return float(croniter(expr, datetime.fromtimestamp(now, tz=ZoneInfo(zone))).get_next(float))
-
-
-# ── branch 1: an ABSENT zone means the machine's wall clock ───────────────────────────
+    return float(
+        croniter(expr, datetime.fromtimestamp(now, tz=ZoneInfo(zone))).get_next(float)
+    )
 
 
 class TestAbsentZoneUsesTheMachineZone:
@@ -128,10 +124,14 @@ class TestAbsentZoneUsesTheMachineZone:
         want = _independent_expectation(DAILY_0830, "Asia/Tokyo")
 
         assert got == want
-        assert datetime.fromtimestamp(got, ZoneInfo("Asia/Tokyo")).strftime("%H:%M") == "08:30"
-        # The pre-fix answer, named so a regression is unambiguous rather than merely unequal.
+        assert (
+            datetime.fromtimestamp(got, ZoneInfo("Asia/Tokyo")).strftime("%H:%M")
+            == "08:30"
+        )
         utc_reading = datetime.fromtimestamp(got, timezone.utc).strftime("%H:%M")
-        assert utc_reading == "23:30", f"08:30 JST is 23:30 UTC the day before, got {utc_reading}"
+        assert (
+            utc_reading == "23:30"
+        ), f"08:30 JST is 23:30 UTC the day before, got {utc_reading}"
 
     def test_the_resolved_zone_reports_where_it_came_from(self, monkeypatch):
         _pin_machine_zone(monkeypatch, "Asia/Tokyo")
@@ -162,15 +162,16 @@ class TestAbsentZoneUsesTheMachineZone:
         """
         _pin_machine_zone(monkeypatch, "Asia/Tokyo")
         armed = next_fire(_reminder(skip_dates=["2026-09-07"]), now=NOW)
-        local_day = datetime.fromtimestamp(armed, ZoneInfo("Asia/Tokyo")).strftime("%Y-%m-%d")
+        local_day = datetime.fromtimestamp(armed, ZoneInfo("Asia/Tokyo")).strftime(
+            "%Y-%m-%d"
+        )
         assert local_day == "2026-09-08", "the skipped local day must be stepped over"
 
 
-# ── branch 2: a CONFIGURED-BUT-INVALID zone is refused, loudly, where it is authored ──
-
-
 class TestInvalidZoneIsRefusedNotDegraded:
-    @pytest.mark.parametrize("bad", ["CEST", "PDT", "Amrica/Los_Angeles", "Mars/Olympus_Mons"])
+    @pytest.mark.parametrize(
+        "bad", ["CEST", "PDT", "Amrica/Los_Angeles", "Mars/Olympus_Mons"]
+    )
     def test_the_owner_raises_rather_than_silently_choosing_a_zone(self, bad):
         with pytest.raises(UnknownTimeZone) as exc:
             resolve_zone(bad)
@@ -181,8 +182,12 @@ class TestInvalidZoneIsRefusedNotDegraded:
         """`CEST`/`PDT` are the mistake people actually make; the refusal has to say so."""
         with pytest.raises(UnknownTimeZone) as exc:
             resolve_zone("CEST")
-        assert "abbreviation" in str(exc.value).lower() or "not IANA zones" in str(exc.value)
-        assert "America/Los_Angeles" in str(exc.value), "the message must show a usable example"
+        assert "abbreviation" in str(exc.value).lower() or "not IANA zones" in str(
+            exc.value
+        )
+        assert "America/Los_Angeles" in str(
+            exc.value
+        ), "the message must show a usable example"
 
     def test_creating_a_trigger_with_a_typod_zone_is_an_authoring_ERROR(self):
         """Refused at the door — `tools.create` rejects on any error-severity spec issue."""
@@ -196,8 +201,6 @@ class TestInvalidZoneIsRefusedNotDegraded:
         assert len(errs) == 1
         assert errs[0].path == "spec.timezone"
         assert "not an IANA timezone name" in errs[0].message
-        # It must also tell the author what "leave it empty" now does, or the refusal reads as
-        # "you must declare a zone" — which was one of the options the owner did NOT choose.
         assert "machine's zone" in errs[0].message
 
     def test_a_valid_zone_is_not_flagged(self):
@@ -208,7 +211,9 @@ class TestInvalidZoneIsRefusedNotDegraded:
         """Absent is not invalid — flagging it would make every existing trigger an error."""
         assert semantic_spec_issues("clock", {"kind": "cron", "expr": DAILY_0830}) == []
 
-    def test_a_stored_typo_is_not_armable_and_does_not_wedge_the_sweep(self, monkeypatch, caplog):
+    def test_a_stored_typo_is_not_armable_and_does_not_wedge_the_sweep(
+        self, monkeypatch, caplog
+    ):
         """A hand-edited row refuses to arm — the same 0.0 an invalid cron produces — and says
         so by name, instead of firing 7 hours off. It must NOT raise: one bad row would then
         take the boot sweep down for every other trigger."""
@@ -216,14 +221,15 @@ class TestInvalidZoneIsRefusedNotDegraded:
         with caplog.at_level("WARNING"):
             assert next_fire(_reminder(timezone="CEST"), now=NOW) == 0.0
         assert any("CEST" in r.getMessage() for r in caplog.records), caplog.text
-        assert any("will not arm" in r.getMessage() for r in caplog.records), caplog.text
-
-
-# ── branch 3: UTC is the LAST RESORT, and the doctor warns about it ───────────────────
+        assert any(
+            "will not arm" in r.getMessage() for r in caplog.records
+        ), caplog.text
 
 
 class TestUtcIsOnlyTheLastResort:
-    def test_utc_when_and_only_when_the_machine_zone_is_unknowable(self, monkeypatch, tmp_path):
+    def test_utc_when_and_only_when_the_machine_zone_is_unknowable(
+        self, monkeypatch, tmp_path
+    ):
         _make_machine_zone_unknowable(monkeypatch, tmp_path)
         assert machine_zone_name() == ""
         assert resolve_zone_name("") == ("UTC", SOURCE_UTC_FALLBACK)
@@ -288,17 +294,26 @@ class TestTheDoctorWarnsAboutTheFallback:
     async def test_the_probe_framework_reports_a_failing_scheduling_row(
         self, monkeypatch, tmp_path
     ):
-        from gideon.resilience.doctor import DoctorContext, all_probes, run_capability
+        from gideon.operations.resilience.doctor import (
+            DoctorContext,
+            all_probes,
+            run_capability,
+        )
 
         _make_machine_zone_unknowable(monkeypatch, tmp_path)
-        assert any(p.id == "scheduling.timezone" for p in all_probes()), "probe not registered"
+        assert any(
+            p.id == "scheduling.timezone" for p in all_probes()
+        ), "probe not registered"
 
         report = await run_capability("scheduling", DoctorContext(home=tmp_path))
         row = next(p for p in report["probes"] if p["id"] == "scheduling.timezone")
 
-        assert row["ok"] is False, "a UTC fallback is a WARNING, not an informational line"
-        assert row["tier"] == 3, "it must degrade the scheduling card only, never the gateway"
-        # It has to name the CONSEQUENCE, in hours — not the condition.
+        assert (
+            row["ok"] is False
+        ), "a UTC fallback is a WARNING, not an informational line"
+        assert (
+            row["tier"] == 3
+        ), "it must degrade the scheduling card only, never the gateway"
         assert "fire at UTC" in row["detail"]
         assert "hour" in row["detail"]
         assert row["evidence"]["source"] == SOURCE_UTC_FALLBACK
@@ -307,7 +322,7 @@ class TestTheDoctorWarnsAboutTheFallback:
     async def test_a_resolved_zone_is_a_passing_row_that_still_names_the_zone(
         self, monkeypatch, tmp_path
     ):
-        from gideon.resilience.doctor import DoctorContext, run_capability
+        from gideon.operations.resilience.doctor import DoctorContext, run_capability
 
         monkeypatch.setenv("TZ", "Asia/Tokyo")
         report = await run_capability("scheduling", DoctorContext(home=tmp_path))
@@ -322,10 +337,12 @@ class TestTheDoctorWarnsAboutTheFallback:
     ):
         """Rule 2 of the resolver: an ambient default degrades instead of raising — but it does
         NOT get to be silent, or we have swapped one invisible default for another."""
-        from gideon.resilience.doctor import DoctorContext, run_capability
+        from gideon.operations.resilience.doctor import DoctorContext, run_capability
 
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        (tmp_path / "config.json").write_text(json.dumps({"timezone": "CEST"}), encoding="utf-8")
+        (tmp_path / "config.json").write_text(
+            json.dumps({"timezone": "CEST"}), encoding="utf-8"
+        )
         monkeypatch.setenv("TZ", "Asia/Tokyo")
 
         report = await run_capability("scheduling", DoctorContext(home=tmp_path))
@@ -333,7 +350,6 @@ class TestTheDoctorWarnsAboutTheFallback:
         assert row["ok"] is False
         assert "CEST" in row["detail"]
         assert row["evidence"]["config_ok"] is False
-        # …and schedules still work, on the machine's zone.
         assert resolve_zone_name("") == ("Asia/Tokyo", SOURCE_MACHINE)
 
     def test_the_cli_doctor_prints_the_zone_and_warns_on_a_fallback(
@@ -342,7 +358,7 @@ class TestTheDoctorWarnsAboutTheFallback:
         """`gideon doctor`'s real body, so the line is proven to render."""
         import urllib.error
 
-        from gideon.cli_doctor import _doctor
+        from gideon.interfaces.cli.doctor import _doctor
 
         _make_machine_zone_unknowable(monkeypatch, tmp_path)
         fake_proc = type(
@@ -357,12 +373,15 @@ class TestTheDoctorWarnsAboutTheFallback:
         )()
         with (
             patch(
-                "gideon.cli_doctor.shutil.which",
+                "gideon.interfaces.cli.doctor.shutil.which",
                 side_effect=lambda b: f"/usr/local/bin/{b}",
             ),
             patch("subprocess.run", return_value=fake_proc),
-            patch("urllib.request.urlopen", side_effect=urllib.error.URLError("no gateway")),
-            patch("gideon.cli_doctor.is_local_bind", return_value=True),
+            patch(
+                "urllib.request.urlopen",
+                side_effect=urllib.error.URLError("no gateway"),
+            ),
+            patch("gideon.interfaces.cli.doctor.is_local_bind", return_value=True),
         ):
             try:
                 _doctor()
@@ -375,11 +394,8 @@ class TestTheDoctorWarnsAboutTheFallback:
         assert "⚠️" in out
 
 
-# ── one owner: every resolver now gives the same answer, because it is one function ───
-
-
 class TestOneOwnerForTheResolution:
-    """The derived owner set (by AST + interprocedural taint over `src/gideon/`):
+    """The derived owner set (by AST + interprocedural taint over `runtime/gideon/`):
 
         triggers/arm.py:44                _trigger_tz()
         schedule.py:432                   get_local_tz()
@@ -393,12 +409,16 @@ class TestOneOwnerForTheResolution:
     `config.timezone`: `UTC`, `UTC`, `UTC`, **server-local**, `UTC`, `'UTC'`.
     """
 
-    def test_all_six_resolvers_name_the_same_zone_for_an_absent_input(self, monkeypatch):
+    def test_all_six_resolvers_name_the_same_zone_for_an_absent_input(
+        self, monkeypatch
+    ):
         monkeypatch.setenv("TZ", "Asia/Tokyo")
         expected = ZoneInfo("Asia/Tokyo")
 
         job = ScheduleJob(
-            id="j", name="n", schedule=ScheduleDefinition(kind="cron", cron_expr=DAILY_0830)
+            id="j",
+            name="n",
+            schedule=ScheduleDefinition(kind="cron", cron_expr=DAILY_0830),
         )
         defn = ReportDefinition(
             id="r",
@@ -420,18 +440,26 @@ class TestOneOwnerForTheResolution:
         monkeypatch.setenv("TZ", "Asia/Tokyo")
         name, zone = get_local_tz()
         assert name == "Asia/Tokyo"
-        assert zone.utcoffset(datetime(2026, 9, 7, tzinfo=timezone.utc)).total_seconds() == 9 * 3600
+        assert (
+            zone.utcoffset(datetime(2026, 9, 7, tzinfo=timezone.utc)).total_seconds()
+            == 9 * 3600
+        )
 
-    def test_the_week_grid_and_the_fire_path_read_the_same_calendar_day(self, monkeypatch):
+    def test_the_week_grid_and_the_fire_path_read_the_same_calendar_day(
+        self, monkeypatch
+    ):
         """`calendar._resolve_zone` fell through to SERVER-LOCAL while `arm._trigger_tz` fell
         through to UTC, so the grid struck one column and the engine skipped another — the one
         thing `calendar.py`'s own docstring promises it will not do."""
         monkeypatch.setenv("TZ", "Asia/Tokyo")
         assert _resolve_zone("") == _trigger_tz(_reminder())
 
-    def test_a_report_schedule_writes_the_resolved_zone_into_the_trigger_spec(self, monkeypatch):
+    def test_a_report_schedule_writes_the_resolved_zone_into_the_trigger_spec(
+        self, monkeypatch
+    ):
         """`_effective_tz` existed to compensate for `arm`'s UTC default and wrote `'UTC'`
-        itself on a stock install, so the compensation did nothing on the hosts it was for."""
+        itself on a stock install, so the compensation did nothing on the hosts it was for.
+        """
         monkeypatch.setenv("TZ", "Asia/Tokyo")
         defn = ReportDefinition(
             id="r",
@@ -441,7 +469,9 @@ class TestOneOwnerForTheResolution:
         )
         assert clock_spec(defn)["timezone"] == "Asia/Tokyo"
 
-    def test_an_explicit_report_zone_still_wins_over_the_resolved_default(self, monkeypatch):
+    def test_an_explicit_report_zone_still_wins_over_the_resolved_default(
+        self, monkeypatch
+    ):
         """Vacuity for `_report_tz`'s fallback, added because a mutant that ignored `defn.tz`
         entirely survived the first falsification pass — every other assertion here drives the
         ABSENT case, so nothing was holding the explicit one."""
@@ -471,12 +501,16 @@ class TestOneOwnerForTheResolution:
         )
         assert _report_tz(defn) == ZoneInfo("Asia/Tokyo")
 
-    def test_the_legacy_scheduler_and_the_trigger_engine_arm_to_the_same_instant(self, monkeypatch):
+    def test_the_legacy_scheduler_and_the_trigger_engine_arm_to_the_same_instant(
+        self, monkeypatch
+    ):
         """`_job_tz` was the issue's named lead. It consulted `config.timezone` first — which
         is blank on a stock install — so it landed on UTC exactly like `arm` did."""
         monkeypatch.setenv("TZ", "Asia/Tokyo")
         job = ScheduleJob(
-            id="j", name="n", schedule=ScheduleDefinition(kind="cron", cron_expr=DAILY_0830)
+            id="j",
+            name="n",
+            schedule=ScheduleDefinition(kind="cron", cron_expr=DAILY_0830),
         )
         assert compute_next_run_ts(job, now=NOW) == next_fire(_reminder(), now=NOW)
         assert compute_next_run_ts(job, now=NOW) == _independent_expectation(
@@ -492,23 +526,23 @@ class TestOneOwnerForTheResolution:
         satisfied. The rail was the wrong instrument for a behaviour deletion — this is the
         right one.
         """
-        from gideon.cli_setup import _detect_system_timezone
+        from gideon.interfaces.cli.setup import _detect_system_timezone
 
         monkeypatch.setenv("TZ", "Asia/Tokyo")
         assert _detect_system_timezone() == "Asia/Tokyo"
 
-    def test_setup_never_offers_an_abbreviation_it_cannot_save(self, monkeypatch, tmp_path):
+    def test_setup_never_offers_an_abbreviation_it_cannot_save(
+        self, monkeypatch, tmp_path
+    ):
         """Its own `/etc` reader returned `TZ` unvalidated, so a `TZ=PDT` shell was 'detected'
-        as `PDT`, offered as the default, and then refused by the retry loop right below it."""
-        from gideon.cli_setup import _detect_system_timezone
+        as `PDT`, offered as the default, and then refused by the retry loop right below it.
+        """
+        from gideon.interfaces.cli.setup import _detect_system_timezone
 
         monkeypatch.setenv("TZ", "PDT")
         monkeypatch.setattr(tzmod, "LOCALTIME_LINK", tmp_path / "absent-localtime")
         monkeypatch.setattr(tzmod, "TIMEZONE_FILE", tmp_path / "absent-timezone")
         assert _detect_system_timezone() == ""
-
-
-# ── the documented gotcha: `spec.at` is epoch seconds, not ISO ────────────────────────
 
 
 class TestSpecAtIsEpochSeconds:
@@ -518,12 +552,16 @@ class TestSpecAtIsEpochSeconds:
 
     def test_an_epoch_at_arms_to_that_instant(self):
         at = NOW + 3600.0
-        t = Trigger(id="t", name="n", kind="clock", enabled=True, spec={"kind": "at", "at": at})
+        t = Trigger(
+            id="t", name="n", kind="clock", enabled=True, spec={"kind": "at", "at": at}
+        )
         assert next_fire(t, now=NOW) == at
 
     def test_an_iso_at_silently_reads_as_never_fires(self):
         iso = datetime.fromtimestamp(NOW + 3600.0, timezone.utc).isoformat()
-        t = Trigger(id="t", name="n", kind="clock", enabled=True, spec={"kind": "at", "at": iso})
+        t = Trigger(
+            id="t", name="n", kind="clock", enabled=True, spec={"kind": "at", "at": iso}
+        )
         assert next_fire(t, now=NOW) == 0.0, (
             "an ISO `spec.at` is not armable — which is exactly why the field's units have to "
             "be written down; every sibling timestamp on the row (`next_fire_at`, `expires_at`, "

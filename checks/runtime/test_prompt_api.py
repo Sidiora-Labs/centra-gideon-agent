@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gideon.dashboard.handlers import (
+from gideon.interfaces.dashboard.handlers import (
     api_campaign_template_launch,
     api_prompt_detail,
     api_prompt_preview,
@@ -34,7 +34,7 @@ def _isolate_home(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _mock_sel(monkeypatch):
-    monkeypatch.setattr("gideon.dashboard.handlers.sel", lambda: MagicMock())
+    monkeypatch.setattr("gideon.interfaces.dashboard.handlers.sel", lambda: MagicMock())
 
 
 def _req(name=None, body=None, query=None):
@@ -56,8 +56,10 @@ def _body(resp):
 
 
 def _provider():
-    from gideon.prompt_providers import get_default_provider
-    from gideon.prompt_providers.registry import _ensure_default_providers_registered
+    from gideon.integrations.prompt_providers import get_default_provider
+    from gideon.integrations.prompt_providers.registry import (
+        _ensure_default_providers_registered,
+    )
 
     _ensure_default_providers_registered()
     return get_default_provider()
@@ -65,9 +67,6 @@ def _provider():
 
 def _run(coro):
     return asyncio.get_event_loop().run_until_complete(coro)
-
-
-# ── snippet CRUD over the API ────────────────────────────────────────────────
 
 
 def test_snippet_create_list_get():
@@ -102,20 +101,19 @@ def test_snippet_create_duplicate_409():
 
 def test_snippet_delete_blocked_while_in_use():
     prov = _provider()
-    from gideon.prompt_providers.base import PromptSnippet, PromptTemplate
+    from gideon.integrations.prompt_providers.base import PromptSnippet, PromptTemplate
 
     prov.create_snippet(PromptSnippet(name="sig", content="— sig"))
-    prov.create_prompt(PromptTemplate(name="letter", kind="user", content="Hi.\n{{> sig}}"))
-    # In-use → 409, snippet NOT deleted, used_by names the includer.
+    prov.create_prompt(
+        PromptTemplate(name="letter", kind="user", content="Hi.\n{{> sig}}")
+    )
     resp = _run(api_snippet_delete(_req("sig")))
     assert resp.status == 409
     body = _body(resp)
     assert "letter" in body["used_by"]["prompts"]
     assert prov.get_snippet("sig") is not None
-    # detail surfaces used_by too
     detail = _body(_run(api_snippet_detail(_req("sig"))))
     assert detail["used_by"]["prompts"] == ["letter"]
-    # force=1 overrides the guard
     forced = _run(api_snippet_delete(_req("sig", query={"force": "1"})))
     assert forced.status == 200
     assert prov.get_snippet("sig") is None
@@ -123,7 +121,7 @@ def test_snippet_delete_blocked_while_in_use():
 
 def test_snippet_delete_unused_ok():
     prov = _provider()
-    from gideon.prompt_providers.base import PromptSnippet
+    from gideon.integrations.prompt_providers.base import PromptSnippet
 
     prov.create_snippet(PromptSnippet(name="orphan", content="nobody includes me"))
     resp = _run(api_snippet_delete(_req("orphan")))
@@ -139,22 +137,33 @@ def test_snippet_detail_missing_404():
 def test_snippet_render_standalone():
     _run(
         api_snippet_create(
-            _req(body={"name": "sig", "content": "— {{author}}", "variables": [{"name": "author"}]})
+            _req(
+                body={
+                    "name": "sig",
+                    "content": "— {{author}}",
+                    "variables": [{"name": "author"}],
+                }
+            )
         )
     )
     resp = _run(api_snippet_render(_req("sig", body={"variables": {"author": "Ada"}})))
     assert _body(resp)["rendered"] == "— Ada"
 
 
-# ── compose-aware prompt render (includes a snippet) ─────────────────────────
-
-
 def test_prompt_render_resolves_snippet_include():
     prov = _provider()
-    from gideon.prompt_providers.base import PromptSnippet, PromptTemplate, PromptVariable
+    from gideon.integrations.prompt_providers.base import (
+        PromptSnippet,
+        PromptTemplate,
+        PromptVariable,
+    )
 
     prov.create_snippet(
-        PromptSnippet(name="sig", content="— {{author}}", variables=[PromptVariable(name="author")])
+        PromptSnippet(
+            name="sig",
+            content="— {{author}}",
+            variables=[PromptVariable(name="author")],
+        )
     )
     prov.create_prompt(
         PromptTemplate(
@@ -165,20 +174,27 @@ def test_prompt_render_resolves_snippet_include():
         )
     )
     resp = _run(
-        api_prompt_render(_req("letter", body={"variables": {"who": "Sam", "author": "Ada"}}))
+        api_prompt_render(
+            _req("letter", body={"variables": {"who": "Sam", "author": "Ada"}})
+        )
     )
     assert _body(resp)["rendered"] == "Dear Sam,\n— Ada"
 
 
-# ── detail surfaces kind, merged variables + includes ────────────────────────
-
-
 def test_prompt_detail_merged_variables_and_includes():
     prov = _provider()
-    from gideon.prompt_providers.base import PromptSnippet, PromptTemplate, PromptVariable
+    from gideon.integrations.prompt_providers.base import (
+        PromptSnippet,
+        PromptTemplate,
+        PromptVariable,
+    )
 
     prov.create_snippet(
-        PromptSnippet(name="sig", content="— {{author}}", variables=[PromptVariable(name="author")])
+        PromptSnippet(
+            name="sig",
+            content="— {{author}}",
+            variables=[PromptVariable(name="author")],
+        )
     )
     prov.create_prompt(
         PromptTemplate(
@@ -191,13 +207,13 @@ def test_prompt_detail_merged_variables_and_includes():
     detail = _body(_run(api_prompt_detail(_req("letter"))))
     assert detail["kind"] == "user"
     names = [v["name"] for v in detail["merged_variables"]]
-    assert names == ["who", "author"]  # host var first, snippet var merged in
+    assert names == ["who", "author"]
     assert detail["includes"] == ["sig"]
 
 
 def test_prompt_list_kind_filter():
     prov = _provider()
-    from gideon.prompt_providers.base import PromptTemplate
+    from gideon.integrations.prompt_providers.base import PromptTemplate
 
     prov.create_prompt(PromptTemplate(name="sysp", kind="system", content="x"))
     prov.create_prompt(PromptTemplate(name="usrp", kind="user", content="y"))
@@ -207,45 +223,47 @@ def test_prompt_list_kind_filter():
     assert [p["name"] for p in user_only] == ["usrp"]
 
 
-# ── context integration: a system prompt composes a snippet include ──────────
-
-
 def test_apply_runtime_vars_resolves_snippet_include():
-    """ContextBuilder._apply_runtime_vars renders {{bot_name}} AND {{> snippet}}
+    """PromptAssembler._apply_runtime_vars renders {{bot_name}} AND {{> snippet}}
     through the one engine path, so a system prompt can compose shared fragments."""
     prov = _provider()
-    from gideon.prompt_providers.base import PromptSnippet
+    from gideon.integrations.prompt_providers.base import PromptSnippet
 
-    prov.create_snippet(PromptSnippet(name="safety", content="Be careful, {{bot_name}}."))
-
-    from gideon.context import ContextBuilder
-    from gideon.memory import MemoryStore
-    from gideon.skills import SkillsLoader
-
-    builder = ContextBuilder(
-        memory=MemoryStore(workspace=Path.home() / "ws"),
-        skills=SkillsLoader(skills_path=Path.home() / "skills", install_builtins=False),
+    prov.create_snippet(
+        PromptSnippet(name="safety", content="Be careful, {{bot_name}}.")
     )
-    builder._bot_name_override = "Claude"  # _bot_name is a live-config property (92a3d43)
+
+    from gideon.cognition.context import PromptAssembler
+    from gideon.cognition.memory import MemoryJournal
+    from gideon.extensions.skills import ProcedureLibrary
+
+    builder = PromptAssembler(
+        memory=MemoryJournal(workspace=Path.home() / "ws"),
+        skills=ProcedureLibrary(
+            skills_path=Path.home() / "skills", install_builtins=False
+        ),
+    )
+    builder._bot_name_override = (
+        "Claude"  # _bot_name is a live-config property (92a3d43)
+    )
     out = builder._apply_runtime_vars("Hi from {{bot_name}}.\n{{> safety}}", "dash:1")
     assert out == "Hi from Claude.\nBe careful, Claude."
 
 
 def test_apply_runtime_vars_missing_snippet_marker():
-    from gideon.context import ContextBuilder
-    from gideon.memory import MemoryStore
-    from gideon.skills import SkillsLoader
+    from gideon.cognition.context import PromptAssembler
+    from gideon.cognition.memory import MemoryJournal
+    from gideon.extensions.skills import ProcedureLibrary
 
-    _provider()  # ensure provider registered (no such snippet)
-    builder = ContextBuilder(
-        memory=MemoryStore(workspace=Path.home() / "ws"),
-        skills=SkillsLoader(skills_path=Path.home() / "skills", install_builtins=False),
+    _provider()
+    builder = PromptAssembler(
+        memory=MemoryJournal(workspace=Path.home() / "ws"),
+        skills=ProcedureLibrary(
+            skills_path=Path.home() / "skills", install_builtins=False
+        ),
     )
     out = builder._apply_runtime_vars("X {{> nope}}", "dash:1")
     assert out == "X [missing snippet: nope]"
-
-
-# ── live preview + syntax reference (authoring UI endpoints) ─────────────────
 
 
 def test_prompt_preview_renders_unsaved_content():
@@ -268,7 +286,10 @@ def test_prompt_preview_renders_unsaved_content():
 
 def test_prompt_preview_detects_inline_typed_variables():
     _provider()
-    body = {"content": "{{ city::text }} {{ mood::select::[happy, sad] }}", "values": {}}
+    body = {
+        "content": "{{ city::text }} {{ mood::select::[happy, sad] }}",
+        "values": {},
+    }
     d = _body(_run(api_prompt_preview(_req(body=body))))
     names = [(v["name"], v["type"]) for v in d["detected_variables"]]
     assert names == [("city", "text"), ("mood", "select")]
@@ -276,7 +297,11 @@ def test_prompt_preview_detects_inline_typed_variables():
 
 def test_prompt_preview_reports_render_error():
     _provider()
-    body = {"content": "{% for x in xs %}{{ x }}", "variables": [], "values": {"xs": [1]}}
+    body = {
+        "content": "{% for x in xs %}{{ x }}",
+        "variables": [],
+        "values": {"xs": [1]},
+    }
     d = _body(_run(api_prompt_preview(_req(body=body))))
     assert d["ok"] is False and d["error"]
 
@@ -284,14 +309,12 @@ def test_prompt_preview_reports_render_error():
 def test_prompt_syntax_lists_functions_and_constructs():
     d = _body(_run(api_prompt_syntax(_req())))
     names = {f["name"] for f in d["functions"]}
-    # Covers original + newly-adopted built-ins.
     assert {"upper", "join", "if", "contains", "get", "uuid"} <= names
-    assert all({"name", "category", "signature", "insert"} <= set(f) for f in d["functions"])
+    assert all(
+        {"name", "category", "signature", "insert"} <= set(f) for f in d["functions"]
+    )
     labels = {c["label"] for c in d["constructs"]}
     assert "If / elif / else" in labels and "Include snippet" in labels
-
-
-# ── runnable "campaign template" launch (#17) ────────────────────────────────
 
 
 class TestCampaignTemplateLaunch:
@@ -301,7 +324,8 @@ class TestCampaignTemplateLaunch:
 
     def _stub_loop_seam(self, monkeypatch, *, can_start=True, blocker=None):
         """Stub validation.validate + store.create + manager.start + autonudge so no
-        real loop engine runs. Returns a list recording the created loop + start call."""
+        real loop engine runs. Returns a list recording the created loop + start call.
+        """
         created: list = []
 
         class _V:
@@ -312,7 +336,8 @@ class TestCampaignTemplateLaunch:
                 return {"errors": ["blocked"] if not self.can_start else []}
 
         monkeypatch.setattr(
-            "gideon.loop.validation.validate", lambda body, **kw: _V(can_start)
+            "gideon.automation.loop.validation.validate",
+            lambda body, **kw: _V(can_start),
         )
 
         def _create(loop):
@@ -320,17 +345,16 @@ class TestCampaignTemplateLaunch:
             created.append(loop)
             return loop
 
-        monkeypatch.setattr("gideon.loop.store.create", _create)
+        monkeypatch.setattr("gideon.automation.loop.store.create", _create)
 
         async def _start(state, svc, lid):
             created.append(("started", lid))
 
-        monkeypatch.setattr("gideon.loop.manager.start", _start)
-        monkeypatch.setattr("gideon.triggers.nudge.get_instance", lambda: object())
-        # Only override the launch_blocker on the resolved strategy (leave the real
-        # kind machinery — default_kind_config etc. — intact so _build_loop_from_body
-        # works). Wrap the real get_or_none so the returned strategy reports `blocker`.
-        import gideon.loop.kinds as K
+        monkeypatch.setattr("gideon.automation.loop.manager.start", _start)
+        monkeypatch.setattr(
+            "gideon.automation.triggers.nudge.get_instance", lambda: object()
+        )
+        import gideon.automation.loop.kinds as K
 
         real_get = K.get_or_none
 
@@ -338,16 +362,19 @@ class TestCampaignTemplateLaunch:
             strat = real_get(kind)
             if strat is not None:
                 monkeypatch.setattr(
-                    strat, "launch_blocker", staticmethod(lambda _lb: blocker), raising=False
+                    strat,
+                    "launch_blocker",
+                    staticmethod(lambda _lb: blocker),
+                    raising=False,
                 )
             return strat
 
-        monkeypatch.setattr("gideon.loop.kinds.get_or_none", _wrapped)
+        monkeypatch.setattr("gideon.automation.loop.kinds.get_or_none", _wrapped)
         return created
 
     def test_launch_plain_prompt_rejected(self):
         prov = _provider()
-        from gideon.prompt_providers.base import PromptTemplate
+        from gideon.integrations.prompt_providers.base import PromptTemplate
 
         prov.create_prompt(
             PromptTemplate(name="plain", kind="user", content="just text, not runnable")
@@ -362,7 +389,10 @@ class TestCampaignTemplateLaunch:
 
     def test_launch_renders_and_starts_loop(self, monkeypatch):
         prov = _provider()
-        from gideon.prompt_providers.base import PromptTemplate, PromptVariable
+        from gideon.integrations.prompt_providers.base import (
+            PromptTemplate,
+            PromptVariable,
+        )
 
         prov.create_prompt(
             PromptTemplate(
@@ -379,24 +409,25 @@ class TestCampaignTemplateLaunch:
         created = self._stub_loop_seam(monkeypatch)
         r = _run(
             api_campaign_template_launch(
-                _req("teardown", body={"variables": {"company": "Acme", "angle": "positioning"}})
+                _req(
+                    "teardown",
+                    body={"variables": {"company": "Acme", "angle": "positioning"}},
+                )
             )
         )
         assert r.status == 201
         d = _body(r)
         assert d["ok"] is True and d["started"] is True and d["loop_id"] == "cafe1234"
-        # The rendered task carried BOTH filled variables into the created loop.
         loop = created[0]
         assert "Acme" in loop.task and "positioning" in loop.task
         assert loop.kind == "goal"
-        # Origin-tagged as a template instance (identifiable in the loop list).
         assert loop.kind_config.get("origin") == "campaign_template"
         assert loop.kind_config.get("template_name") == "teardown"
         assert ("started", "cafe1234") in created
 
     def test_launch_blocked_kind_leaves_draft_unstarted(self, monkeypatch):
         prov = _provider()
-        from gideon.prompt_providers.base import PromptTemplate
+        from gideon.integrations.prompt_providers.base import PromptTemplate
 
         prov.create_prompt(
             PromptTemplate(
@@ -407,7 +438,11 @@ class TestCampaignTemplateLaunch:
             )
         )
         self._stub_loop_seam(monkeypatch, blocker="Pick a workspace first.")
-        r = _run(api_campaign_template_launch(_req("blocked", body={"variables": {"repo": "x"}})))
+        r = _run(
+            api_campaign_template_launch(
+                _req("blocked", body={"variables": {"repo": "x"}})
+            )
+        )
         assert r.status == 422
         d = _body(r)
         assert (
@@ -417,9 +452,6 @@ class TestCampaignTemplateLaunch:
         )
 
 
-# ── PUT /api/skills/{name} input validation (#787 C1) ────────────────────────
-
-
 class TestSkillDetailPut:
     """PUT /api/skills/{name} must reject a non-string ``content`` with a clean
     400 rather than letting ``write_text`` raise deep in the loader → 500. The
@@ -427,9 +459,9 @@ class TestSkillDetailPut:
     the lone site missing the type check (#787 C1)."""
 
     def _put_req(self, tmp_path, name, body):
-        from gideon.skills import SkillsLoader
+        from gideon.extensions.skills import ProcedureLibrary
 
-        loader = SkillsLoader(skills_path=tmp_path, install_builtins=False)
+        loader = ProcedureLibrary(skills_path=tmp_path, install_builtins=False)
         state = SimpleNamespace(context_builder=SimpleNamespace(skills=loader))
         r = _req(name=name, body=body)
         r.method = "PUT"
@@ -442,11 +474,12 @@ class TestSkillDetailPut:
         resp = _run(api_skill_detail(r))
         assert resp.status == 400
         assert "string" in _body(resp)["error"].lower()
-        # The bogus PUT must not have overwritten the skill on disk.
         assert loader.load_skill("editable") == "# Original\nUntouched."
 
     def test_put_valid_string_content_succeeds(self, tmp_path):
-        r, loader = self._put_req(tmp_path, "editable", {"content": "# Updated\nNew body."})
+        r, loader = self._put_req(
+            tmp_path, "editable", {"content": "# Updated\nNew body."}
+        )
         loader.create_skill("editable", "# Original\nUntouched.")
         resp = _run(api_skill_detail(r))
         assert resp.status == 200
@@ -454,19 +487,9 @@ class TestSkillDetailPut:
         assert loader.load_skill("editable") == "# Updated\nNew body."
 
 
-# ── #635: one value-map contract across render/preview (both wire keys accepted) ──
-#
-# Render/launch/snippet-render documented `variables`; preview documented `values`
-# (its `variables` key is the DECLARATIONS list). Each read only its own key: the
-# same well-formed map got a false "missing required variable" on render and a
-# silent no-substitution preview. These rails pin the shared contract: documented
-# key wins, the sibling dict is accepted as an alias, a declarations LIST is never
-# swallowed as a value map, and a non-dict under the documented key still 400s.
-
-
 def _seed_greet():
     prov = _provider()
-    from gideon.prompt_providers.base import PromptTemplate, PromptVariable
+    from gideon.integrations.prompt_providers.base import PromptTemplate, PromptVariable
 
     prov.create_prompt(
         PromptTemplate(
@@ -489,7 +512,9 @@ def test_render_documented_key_wins_over_the_alias():
     _seed_greet()
     resp = _run(
         api_prompt_render(
-            _req("greet", body={"variables": {"who": "Doc"}, "values": {"who": "Alias"}})
+            _req(
+                "greet", body={"variables": {"who": "Doc"}, "values": {"who": "Alias"}}
+            )
         )
     )
     assert resp.status == 200
@@ -505,7 +530,9 @@ def test_render_still_rejects_a_non_dict_under_the_documented_key():
 
 def test_preview_accepts_the_variables_alias_when_it_is_a_map():
     resp = _run(
-        api_prompt_preview(_req(body={"content": "Hi {{who}}!", "variables": {"who": "Sam"}}))
+        api_prompt_preview(
+            _req(body={"content": "Hi {{who}}!", "variables": {"who": "Sam"}})
+        )
     )
     assert resp.status == 200
     body = _body(resp)
@@ -514,12 +541,10 @@ def test_preview_accepts_the_variables_alias_when_it_is_a_map():
 
 
 def test_preview_never_swallows_a_declarations_list_as_the_value_map():
-    # `variables` as a LIST is the declarations payload preview already reads —
-    # it must keep meaning that. A list misrouted into the value map would 400
-    # ("values must be an object"); the 200/ok here plus the unsubstituted body
-    # proves it stayed a declarations list and the render ran with no values.
     resp = _run(
-        api_prompt_preview(_req(body={"content": "Hi {{who}}!", "variables": [{"name": "who"}]}))
+        api_prompt_preview(
+            _req(body={"content": "Hi {{who}}!", "variables": [{"name": "who"}]})
+        )
     )
     assert resp.status == 200
     body = _body(resp)
@@ -531,7 +556,11 @@ def test_snippet_render_accepts_the_values_alias():
     _run(
         api_snippet_create(
             _req(
-                body={"name": "sig2", "content": "— {{author}}", "variables": [{"name": "author"}]}
+                body={
+                    "name": "sig2",
+                    "content": "— {{author}}",
+                    "variables": [{"name": "author"}],
+                }
             )
         )
     )

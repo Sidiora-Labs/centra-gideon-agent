@@ -1,7 +1,7 @@
 """The mcp-tools settings card reads/writes ~/.gideon/mcp.json (#43).
 
 Store reconcile: the generic ``mcp-tools`` multi-instance provider card no
-longer writes the dead ``extensions/mcp-tools/instances/*.json`` store. Its
+longer writes the dead ``extensions/mcp-tooling/instances/*.json`` store. Its
 instance CRUD is repointed to ``~/.gideon/mcp.json`` — the ONE store the
 native MCP client consumes — so a server added via the card is genuinely
 spawnable by the native loop.
@@ -13,15 +13,13 @@ import json
 
 import pytest
 
-from gideon.providers import mcp_instances as mi
+from gideon.extensions.providers import mcp_instances as mi
 
 
 @pytest.fixture(autouse=True)
 def _home(tmp_path, monkeypatch):
     monkeypatch.setattr(mi, "_mcp_json_path", lambda: tmp_path / "mcp.json")
 
-    # _save imports agent._atomic_json_write — stub to a plain write to avoid
-    # pulling the whole agent module / rebuild machinery into a unit test.
     def _fake_save(data):
         (tmp_path / "mcp.json").write_text(json.dumps(data), encoding="utf-8")
 
@@ -50,7 +48,8 @@ def test_create_stdio_writes_mcp_json(_home):
 
 def test_create_sse_writes_url(_home):
     mi.create_instance(
-        "remote", {"transport": "sse", "endpoint": "https://x/sse", "command": "", "args": ""}
+        "remote",
+        {"transport": "sse", "endpoint": "https://x/sse", "command": "", "args": ""},
     )
     assert _read(_home)["mcpServers"]["remote"] == {"url": "https://x/sse"}
 
@@ -84,7 +83,7 @@ def test_list_maps_servers_to_instances(_home):
     assert insts["a"].config["args"] == "x"
     assert insts["b"].config["transport"] == "sse"
     assert insts["b"].config["endpoint"] == "https://b/sse"
-    assert insts["c"].enabled is False  # disabled flag → not enabled
+    assert insts["c"].enabled is False
 
 
 def test_update_preserves_env(_home):
@@ -92,18 +91,23 @@ def test_update_preserves_env(_home):
         json.dumps(
             {
                 "mcpServers": {
-                    "s": {"command": "npx", "args": ["old"], "env": {"API_KEY": "secret"}},
+                    "s": {
+                        "command": "npx",
+                        "args": ["old"],
+                        "env": {"API_KEY": "secret"},
+                    },
                 }
             }
         ),
         encoding="utf-8",
     )
     mi.update_instance(
-        "s", config={"transport": "stdio", "command": "npx", "args": "new", "endpoint": ""}
+        "s",
+        config={"transport": "stdio", "command": "npx", "args": "new", "endpoint": ""},
     )
     spec = _read(_home)["mcpServers"]["s"]
     assert spec["args"] == ["new"]
-    assert spec["env"] == {"API_KEY": "secret"}  # preserved across edit
+    assert spec["env"] == {"API_KEY": "secret"}
 
 
 def test_update_toggle_enabled(_home):

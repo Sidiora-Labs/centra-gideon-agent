@@ -25,14 +25,14 @@ import inspect
 
 import pytest
 
-from gideon.context import ContextBuilder
-from gideon.context_engine import (
+from gideon.cognition.context import PromptAssembler
+from gideon.cognition.context_engine import (
     AssembledContext,
     DefaultContextEngine,
     check_headroom,
     headroom_components,
 )
-from gideon.context_headroom import (
+from gideon.cognition.context_headroom import (
     PRESSURE_CRITICAL_FRACTION,
     PRESSURE_WARN_FRACTION,
     WINDOW_UNKNOWN,
@@ -45,12 +45,15 @@ from gideon.context_headroom import (
     check_for_model,
     resolve_window,
 )
-from gideon.local_models import registry as lm_registry
-from gideon.local_models.budgets import output_budget
-from gideon.local_models.provider import LocalModel, LocalModelProvider
-from gideon.memory import MemoryStore
-from gideon.model_windows import DEFAULT_CONTEXT_WINDOW, model_context_window
-from gideon.skills import SkillsLoader
+from gideon.cognition.memory import MemoryJournal
+from gideon.extensions.skills import ProcedureLibrary
+from gideon.integrations.local_models import registry as lm_registry
+from gideon.integrations.local_models.budgets import output_budget
+from gideon.integrations.local_models.provider import LocalModel, LocalModelProvider
+from gideon.integrations.model_windows import (
+    DEFAULT_CONTEXT_WINDOW,
+    model_context_window,
+)
 
 
 class _FakeLocalProvider(LocalModelProvider):
@@ -111,9 +114,6 @@ def _tiny_window(*, window: int = 8_000, reserve: int = 4_096) -> Window:
     )
 
 
-# ── 1. Three declared states, and the set is closed ────────────────────────────
-
-
 def test_the_state_set_is_exactly_three():
     """A fourth state would break every exhaustive branch a caller writes.
 
@@ -129,12 +129,13 @@ def test_the_state_set_is_exactly_three():
 
 def test_a_small_assembly_fits_and_says_nothing():
     verdict = check(
-        [Component(name="the user's request", text="hi", compressible=False)], window=_tiny_window()
+        [Component(name="the user's request", text="hi", compressible=False)],
+        window=_tiny_window(),
     )
 
     assert verdict.state is HeadroomState.FITS
     assert verdict.level == "ok"
-    assert verdict.notice() == ""  # a healthy turn is silent
+    assert verdict.notice() == ""
     assert verdict.text == "hi"
 
 
@@ -150,9 +151,6 @@ def test_the_decision_is_a_value_not_a_raised_exception():
         assert verdict.state in set(HeadroomState)
 
 
-# ── 2. The output reserve is part of the bound ──────────────────────────────────
-
-
 def test_a_prompt_that_fills_the_window_exactly_does_not_fit():
     """The load-bearing clause: "a prompt that fits exactly leaves no room to answer and
     fails identically to one that does not fit".
@@ -162,11 +160,13 @@ def test_a_prompt_that_fills_the_window_exactly_does_not_fit():
     gets a provider error — which is exactly the failure CE2-8 exists to remove.
     """
     win = _tiny_window(window=8_000, reserve=4_096)
-    exact = Component(name="session context", text="tok " * win.tokens, compressible=False)
+    exact = Component(
+        name="session context", text="tok " * win.tokens, compressible=False
+    )
 
     verdict = check([exact], window=win)
 
-    assert verdict.assembled_tokens >= win.tokens  # it really does fill the window
+    assert verdict.assembled_tokens >= win.tokens
     assert verdict.state is HeadroomState.CANNOT_FIT
     assert "reserved so there is room to reply" in verdict.reason
     assert f"{win.output_reserve_tokens:,}" in verdict.reason
@@ -178,12 +178,15 @@ def test_the_bound_is_the_window_minus_the_reserve():
     win = _tiny_window(window=8_000, reserve=4_096)
     assert win.input_tokens == 3_904
 
-    under = check([Component(name="ctx", text="tok " * 3_800, compressible=False)], window=win)
-    over = check([Component(name="ctx", text="tok " * 4_000, compressible=False)], window=win)
+    under = check(
+        [Component(name="ctx", text="tok " * 3_800, compressible=False)], window=win
+    )
+    over = check(
+        [Component(name="ctx", text="tok " * 4_000, compressible=False)], window=win
+    )
 
     assert under.state is HeadroomState.FITS
     assert over.state is HeadroomState.CANNOT_FIT
-    # …and both are BELOW the raw window, so only the reserve can explain the difference.
     assert under.assembled_tokens < win.tokens
     assert over.assembled_tokens < win.tokens
 
@@ -195,7 +198,8 @@ async def test_the_reserve_is_output_budgets_number_not_a_second_one(clean_regis
     prompt through that the provider then refuses for lack of output room."""
     clean_registry.register_provider(
         _FakeLocalProvider(
-            "FakeLocal", [LocalModel(name="tiny-chat", context_tokens=8_192, output_tokens=1_024)]
+            "FakeLocal",
+            [LocalModel(name="tiny-chat", context_tokens=8_192, output_tokens=1_024)],
         ),
         capabilities=["chat"],
         name="FakeLocal",
@@ -206,16 +210,14 @@ async def test_the_reserve_is_output_budgets_number_not_a_second_one(clean_regis
         assert win.output_reserve_tokens == await output_budget(ref), ref
 
 
-# ── 3. The window came from the registry, not a hardcoded default ───────────────
-
-
 @pytest.mark.asyncio
 async def test_a_catalog_declared_window_is_sourced_to_the_catalog(clean_registry):
     """The strongest form of the vacuity assertion: the figure moves when the model CARD
     moves, so it cannot be a constant."""
     clean_registry.register_provider(
         _FakeLocalProvider(
-            "FakeLocal", [LocalModel(name="tiny-chat", context_tokens=6_000, output_tokens=2_000)]
+            "FakeLocal",
+            [LocalModel(name="tiny-chat", context_tokens=6_000, output_tokens=2_000)],
         ),
         capabilities=["chat"],
         name="FakeLocal",
@@ -237,7 +239,7 @@ async def test_a_table_declared_window_is_the_tables_own_number():
 
     assert win.source == "window-table"
     assert win.tokens == model_context_window("gpt-4o")
-    assert win.tokens != DEFAULT_CONTEXT_WINDOW  # the table really names this one
+    assert win.tokens != DEFAULT_CONTEXT_WINDOW
 
 
 @pytest.mark.asyncio
@@ -257,26 +259,26 @@ async def test_an_unnamed_model_is_unmeasured_never_the_hardcoded_default():
     assert win.measured is False
 
 
-# ── 4. Unknown is neither zero nor infinite ────────────────────────────────────
-
-
 def test_an_unmeasured_window_neither_refuses_nor_claims_headroom():
     """Zero would make a mistyped model id an outage; infinite would reintroduce the exact
     silent failure this contract removes. So: permit the turn, and report the pressure as
     UNKNOWN rather than as comfortable."""
     unmeasured = Window(
-        tokens=None, output_reserve_tokens=4_096, input_tokens=None, source=WINDOW_UNKNOWN
+        tokens=None,
+        output_reserve_tokens=4_096,
+        input_tokens=None,
+        source=WINDOW_UNKNOWN,
     )
 
     verdict = check([Component(name="ctx", text="tok " * 50_000)], window=unmeasured)
 
-    assert verdict.state is HeadroomState.FITS  # not an outage
-    assert verdict.pressure is None  # not "0% used"
+    assert verdict.state is HeadroomState.FITS
+    assert verdict.pressure is None
     assert verdict.headroom_tokens is None
     assert verdict.level == "unmeasured"
-    assert verdict.raw_tokens > 0  # the size WAS counted
+    assert verdict.raw_tokens > 0
     assert "unmeasured" in verdict.reason
-    assert verdict.fix  # and it says how to make it measurable
+    assert verdict.fix
 
 
 def test_unmeasured_is_distinguishable_from_measured_and_full():
@@ -285,21 +287,23 @@ def test_unmeasured_is_distinguishable_from_measured_and_full():
     unmeasured = check(
         [Component(name="ctx", text="x" * 10_000)],
         window=Window(
-            tokens=None, output_reserve_tokens=10, input_tokens=None, source=WINDOW_UNKNOWN
+            tokens=None,
+            output_reserve_tokens=10,
+            input_tokens=None,
+            source=WINDOW_UNKNOWN,
         ),
     )
     measured_and_full = check(
         [Component(name="ctx", text="x" * 10_000, compressible=False)],
-        window=Window(tokens=11, output_reserve_tokens=10, input_tokens=1, source="catalog"),
+        window=Window(
+            tokens=11, output_reserve_tokens=10, input_tokens=1, source="catalog"
+        ),
     )
 
     assert unmeasured.pressure is None
     assert unmeasured.state is HeadroomState.FITS
     assert measured_and_full.pressure is not None
     assert measured_and_full.state is HeadroomState.CANNOT_FIT
-
-
-# ── 5. The user is told what was compressed, at the point it happens ───────────
 
 
 def test_compression_names_what_it_compressed():
@@ -323,7 +327,6 @@ def test_compression_names_what_it_compressed():
     assert told, "a compression the user is never told about is a silent drop"
     assert "episodic memory" in told
     assert f"{note.tokens_before:,}" in told and f"{note.tokens_after:,}" in told
-    # And the compressed text is what will be sent — not the original.
     assert len(verdict.text) < 40_000
     assert verdict.assembled_tokens <= verdict.window.input_tokens
 
@@ -348,16 +351,17 @@ def test_an_incompressible_component_is_refused_rather_than_silently_trimmed():
     assert verdict.text == "", "a refusal must have nothing sendable"
 
 
-# ── 6. A refusal names the specific component, with a reason AND a fix ─────────
-
-
 def test_a_refusal_names_the_specific_oversized_component():
     """ "instead of a generic overflow": the user needs to know WHICH block to remove."""
     verdict = check(
         [
             Component(name="system prompt", text="S" * 200, compressible=False),
-            Component(name="tool result: run_command", text="L" * 100_000, compressible=False),
-            Component(name="retrieved document: notes.md", text="D" * 900, compressible=False),
+            Component(
+                name="tool result: run_command", text="L" * 100_000, compressible=False
+            ),
+            Component(
+                name="retrieved document: notes.md", text="D" * 900, compressible=False
+            ),
             Component(name="the user's request", text="hi", compressible=False),
         ],
         window=_tiny_window(),
@@ -368,10 +372,8 @@ def test_a_refusal_names_the_specific_oversized_component():
     assert verdict.oversized[0].name == "tool result: run_command"
     assert "tool result: run_command" in verdict.reason
     assert "not compressible" in verdict.reason
-    # The reason states the arithmetic; the fix states an action.
     assert "Over by" in verdict.reason
     assert verdict.fix and "tool result: run_command" in verdict.fix
-    # notice() carries both, so one broadcast is enough.
     assert verdict.reason in verdict.notice() and verdict.fix in verdict.notice()
 
 
@@ -389,9 +391,6 @@ def test_a_compressed_but_still_oversized_component_says_so():
     assert "already compressed" in verdict.oversized[0].note
 
 
-# ── 7. Pressure is observable BEFORE the failure ───────────────────────────────
-
-
 def test_pressure_warns_while_the_state_is_still_fits():
     """ "a headroom signal, not only a post-hoc error" — the warning has to arrive while
     there is still room to act on it, so it fires on a turn that FITS."""
@@ -399,10 +398,12 @@ def test_pressure_warns_while_the_state_is_still_fits():
     room = win.input_tokens
 
     def at(fraction: float) -> Headroom:
-        # `tok ` is one token per word for cl100k and 1 per 4 chars for the fallback, so
-        # the same source text lands on the same fraction under either counter.
         return check(
-            [Component(name="ctx", text="tok " * int(room * fraction), compressible=False)],
+            [
+                Component(
+                    name="ctx", text="tok " * int(room * fraction), compressible=False
+                )
+            ],
             window=win,
         )
 
@@ -421,14 +422,13 @@ def test_pressure_warns_while_the_state_is_still_fits():
         assert pressured.headroom_tokens is not None and pressured.headroom_tokens > 0
 
 
-# ── 8. The seam: named components, and they cover the whole prompt ─────────────
-
-
 @pytest.fixture
 def builder(tmp_path):
-    return ContextBuilder(
-        memory=MemoryStore(workspace=tmp_path / "ws"),
-        skills=SkillsLoader(skills_path=tmp_path / "skills", install_builtins=False),
+    return PromptAssembler(
+        memory=MemoryJournal(workspace=tmp_path / "ws"),
+        skills=ProcedureLibrary(
+            skills_path=tmp_path / "skills", install_builtins=False
+        ),
     )
 
 
@@ -449,9 +449,7 @@ def test_the_assembly_hands_back_named_components_covering_the_whole_prompt(buil
     assert "".join(c.text for c in assembled.components) == assembled.message
     names = [c.name for c in assembled.components]
     assert "the user's request" in names
-    # Every component is named — an empty label is a generic overflow waiting to happen.
     assert all(c.name.strip() for c in assembled.components)
-    # And the pieces that must never be trimmed declare it.
     by_name = {c.name: c for c in assembled.components}
     assert by_name["the user's request"].compressible is False
 
@@ -464,10 +462,12 @@ def test_unlabelled_components_degrade_to_one_named_whole_not_to_a_wrong_measure
         "assembled prompt (components unlabelled by this engine)"
     ]
 
-    lying = AssembledContext(message="abcdef", components=[Component(name="half", text="abc")])
+    lying = AssembledContext(
+        message="abcdef", components=[Component(name="half", text="abc")]
+    )
     fallback = headroom_components(lying)
     assert len(fallback) == 1
-    assert fallback[0].text == "abcdef"  # measured whole, not the labelled half
+    assert fallback[0].text == "abcdef"
 
 
 @pytest.mark.asyncio
@@ -486,7 +486,8 @@ async def test_a_driven_assembly_past_a_small_declared_window_refuses_legibly(
     """
     clean_registry.register_provider(
         _FakeLocalProvider(
-            "FakeLocal", [LocalModel(name="tiny-chat", context_tokens=6_000, output_tokens=2_000)]
+            "FakeLocal",
+            [LocalModel(name="tiny-chat", context_tokens=6_000, output_tokens=2_000)],
         ),
         capabilities=["chat"],
         name="FakeLocal",
@@ -503,13 +504,10 @@ async def test_a_driven_assembly_past_a_small_declared_window_refuses_legibly(
     verdict = await check_headroom(assembled, model_ref="FakeLocal:tiny-chat")
 
     assert verdict.state is HeadroomState.CANNOT_FIT
-    # Vacuity: the figure came from the registry, not from a default.
     assert verdict.window.source == "catalog"
     assert verdict.window.tokens == 6_000
     assert verdict.window.output_reserve_tokens == 2_000
     assert verdict.window.tokens != DEFAULT_CONTEXT_WINDOW
-    # Legible: the reason names a specific component and the arithmetic, the fix names an
-    # action, and nothing sendable comes back.
     assert verdict.oversized
     assert verdict.oversized[0].name == "action button context"
     assert verdict.oversized[0].name in verdict.reason
@@ -525,13 +523,12 @@ async def test_a_driven_assembly_compresses_and_says_so(builder, clean_registry)
     both sizes, so a shorter answer is attributable to a named compression."""
     clean_registry.register_provider(
         _FakeLocalProvider(
-            "FakeLocal", [LocalModel(name="tiny-chat", context_tokens=6_000, output_tokens=2_000)]
+            "FakeLocal",
+            [LocalModel(name="tiny-chat", context_tokens=6_000, output_tokens=2_000)],
         ),
         capabilities=["chat"],
         name="FakeLocal",
     )
-    # An oversized retrieved document arriving through the hook-context seam — the shape the
-    # clause names ("which retrieved document"), assembled for real.
     builder.hooks.on_message = lambda text: _InjectedContext("D" * 200_000)
 
     assembled = DefaultContextEngine().assemble(
@@ -544,11 +541,10 @@ async def test_a_driven_assembly_compresses_and_says_so(builder, clean_registry)
     verdict = await check_headroom(assembled, model_ref="FakeLocal:tiny-chat")
 
     assert verdict.state is HeadroomState.FITS_AFTER_COMPRESSION
-    assert verdict.window.source == "catalog"  # vacuity: registry, not a default
+    assert verdict.window.source == "catalog"
     assert "hook context" in [c.name for c in verdict.compressed]
     assert "hook context" in verdict.notice()
     assert verdict.assembled_tokens <= verdict.window.input_tokens
-    # The compressed prompt is what will be sent, and it is genuinely smaller.
     assert verdict.text and len(verdict.text) < len(assembled.message)
 
 
@@ -556,29 +552,26 @@ class _InjectedContext:
     """Minimal stand-in for a hook result that injects context."""
 
     def __init__(self, text: str) -> None:
-        from gideon.hooks import HOOK_INJECT_CONTEXT
+        from gideon.engine.hooks import HOOK_INJECT_CONTEXT
 
         self.action = HOOK_INJECT_CONTEXT
         self.text = text
-
-
-# ── 9. The seam ACTS on the verdict (not a declared-but-inert control) ─────────
 
 
 def test_the_chat_seam_branches_on_all_three_states():
     """A contract nothing consumes is an inert control. The runner must resolve the verdict
     BEFORE the provider call and handle each state: refuse, send the compressed text, or
     proceed — so this asserts the CALL SITE, not just the mechanism."""
-    from gideon.dashboard import chat_runner
+    from gideon.interfaces.dashboard import chat_runner
 
     src = inspect.getsource(chat_runner)
     assert "await check_headroom(" in src
     assert "HeadroomState.CANNOT_FIT" in src
     assert "HeadroomState.FITS_AFTER_COMPRESSION" in src
-    # The refusal reaches the user as an error card, and the notice as an activity line.
     assert '"kind": "headroom"' in src
-    # …and it is decided before the message is handed on.
-    assert src.index("await check_headroom(") < src.index("full_message = _apply_incognito_prefix")
+    assert src.index("await check_headroom(") < src.index(
+        "full_message = _apply_incognito_prefix"
+    )
 
 
 @pytest.mark.asyncio
@@ -586,7 +579,8 @@ async def test_check_for_model_resolves_the_bound_model(clean_registry):
     """``check_for_model`` is the seam's entry point: it resolves the window and decides."""
     clean_registry.register_provider(
         _FakeLocalProvider(
-            "FakeLocal", [LocalModel(name="tiny-chat", context_tokens=6_000, output_tokens=2_000)]
+            "FakeLocal",
+            [LocalModel(name="tiny-chat", context_tokens=6_000, output_tokens=2_000)],
         ),
         capabilities=["chat"],
         name="FakeLocal",
@@ -609,16 +603,16 @@ def test_auto_is_not_treated_as_a_model_id():
     assert bound_model_ref("") == bound_model_ref("auto")
 
 
-# ── 10. The assembly's own silent drop is now reported ────────────────────────
-
-
 def test_the_session_context_char_cap_reports_its_drop(builder, monkeypatch):
     """`build_session_context` used to cut oversized history and tell only a SERVER LOG.
-    The reply that followed was indistinguishable from one built on the whole history."""
-    import gideon.context as ctx
+    The reply that followed was indistinguishable from one built on the whole history.
+    """
+    import gideon.cognition.context as ctx
 
     monkeypatch.setattr(ctx, "_MAX_CONTEXT_CHARS", 200)
-    monkeypatch.setattr(ContextBuilder, "_slots_block", lambda self, vector_store: "x" * 5_000)
+    monkeypatch.setattr(
+        PromptAssembler, "_slots_block", lambda self, vector_store: "x" * 5_000
+    )
 
     notices: list[str] = []
     builder.build_message(

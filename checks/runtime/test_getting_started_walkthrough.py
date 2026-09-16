@@ -23,18 +23,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
-#: `cli.py` has no ``__main__`` guard (it is reached through the ``gideon`` console
-#: script), so call `main` directly to exercise the real parser.
-_RUN_CLI = "from gideon.cli import main; main()"
+_RUN_CLI = "from gideon.interfaces.cli.main import main; main()"
 
 
 def _run_cli(
     args: list[str], home: Path, stdin_devnull: bool = True
 ) -> subprocess.CompletedProcess:
     env = {**os.environ, "GIDEON_HOME": str(home)}
-    # A stray real-home token/browser-open would make these tests environment-dependent.
     env.pop("GIDEON_PROJECT_DIR", None)
     return subprocess.run(
         [sys.executable, "-c", _RUN_CLI, *args],
@@ -44,9 +41,6 @@ def _run_cli(
         stdin=subprocess.DEVNULL if stdin_devnull else None,
         timeout=180,
     )
-
-
-# ── Guide step 1: `gideon setup` ────────────────────────────────────────
 
 
 def test_setup_survives_a_non_interactive_stdin(tmp_path) -> None:
@@ -64,15 +58,13 @@ def test_setup_survives_a_non_interactive_stdin(tmp_path) -> None:
     assert "Traceback" not in proc.stderr, proc.stderr
     assert "EOFError" not in proc.stderr, proc.stderr
     assert proc.returncode == 0, f"rc={proc.returncode}\n{proc.stderr}"
-    # It reached the end of the wizard, not just the banner.
     assert "Agent installed" in proc.stdout, proc.stdout
-    # And it said out loud that it was defaulting rather than prompting.
     assert "non-interactive stdin" in proc.stdout, proc.stdout
 
 
 def test_ask_returns_the_typed_answer_on_a_terminal(monkeypatch, capsys) -> None:
     """The interactive path is unchanged — the guard must not swallow a real answer."""
-    from gideon import cli_setup
+    from gideon.interfaces.cli import setup as cli_setup
 
     class _Tty:
         def isatty(self) -> bool:
@@ -94,7 +86,7 @@ def test_ask_survives_eof_on_a_terminal_that_closes(monkeypatch, capsys) -> None
     door — a real terminal whose stdin closes mid-wizard (ssh drop, closed pty) —
     which is the only way that branch is entered.
     """
-    from gideon import cli_setup
+    from gideon.interfaces.cli import setup as cli_setup
 
     class _Tty:
         def isatty(self) -> bool:
@@ -107,12 +99,11 @@ def test_ask_survives_eof_on_a_terminal_that_closes(monkeypatch, capsys) -> None
     monkeypatch.setattr("builtins.input", _eof)
 
     assert cli_setup._ask("  Timezone: ") == ""
-    # It took the interactive door (no non-interactive notice), then absorbed the EOF.
     assert "non-interactive" not in capsys.readouterr().out
 
 
 def test_ask_defaults_and_says_so_without_a_terminal(monkeypatch, capsys) -> None:
-    from gideon import cli_setup
+    from gideon.interfaces.cli import setup as cli_setup
 
     class _NotATty:
         def isatty(self) -> bool:
@@ -134,13 +125,12 @@ def test_no_wizard_prompt_bypasses_the_guard() -> None:
 
     A new bare `input()` would reintroduce the EOFError crash at a new step.
     """
-    src = (REPO_ROOT / "src" / "gideon" / "cli_setup.py").read_text(encoding="utf-8")
+    src = (
+        REPO_ROOT / "runtime" / "gideon" / "interfaces" / "cli" / "setup.py"
+    ).read_text(encoding="utf-8")
     calls = re.findall(r"\binput\(", src)
     assert len(calls) == 1, f"expected only _ask's own input() call, found {len(calls)}"
     assert "return input(prompt).strip()" in src
-
-
-# ── Guide step 4: `gideon chat -m "hello"` ──────────────────────────────
 
 
 def test_chat_with_no_provider_prints_the_fix_not_a_traceback(tmp_path) -> None:
@@ -150,24 +140,14 @@ def test_chat_with_no_provider_prints_the_fix_not_a_traceback(tmp_path) -> None:
     assert proc.returncode == 1, f"rc={proc.returncode}\n{proc.stdout}\n{proc.stderr}"
     assert "Traceback" not in proc.stderr, proc.stderr
     assert "asyncio" not in proc.stderr, proc.stderr
-    # The resolver's composed guidance survives intact.
     assert "no model provider resolves for use case 'chat'" in proc.stderr, proc.stderr
     assert "FIX:" in proc.stderr, proc.stderr
 
 
-# ── Remote friction: GitHub owner casing ─────────────────────────────────────
-
-#: The canonical owner, measured: `https://github.com/Gideon/Gideon` answers 200
-#: with no redirect, and an anonymous `git clone` of it succeeds with no credentials.
 _CANONICAL_OWNER = "Gideon"
 
-#: Literal `github.com/<owner>/<repo>` URLs only. `api.github.com/repos/...` has `repos` in the
-#: owner slot and is deliberately out of scope, as are f-string URLs built from a constant.
 _GH_URL = re.compile(r"github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)")
 
-#: Shipped code and the docs a newcomer reads. Roadmap plans are excluded on purpose: they
-#: quote the *old* `keyurgolani/*` repos as historical record, and rewriting a record to
-#: satisfy a lint rule is a false positive.
 _SCAN_ROOTS = (
     "src",
     "deploy",
@@ -209,12 +189,15 @@ def test_project_github_urls_use_the_canonical_owner_casing() -> None:
     """
     hits = _scan_github_urls()
 
-    # Vacuity floor: a rail that matched nothing looks clean forever.
-    assert len(hits) >= 10, f"URL scan found only {len(hits)} github.com URLs — rail is inert"
+    assert (
+        len(hits) >= 10
+    ), f"URL scan found only {len(hits)} github.com URLs — rail is inert"
     assert len({p for p, _, _ in hits}) >= 5, "URL scan reached fewer than 5 files"
 
     ours = [(p, owner, repo) for p, owner, repo in hits if owner.lower() == "gideon"]
-    assert len(ours) >= 8, f"only {len(ours)} own-org URLs matched — the owner filter is inert"
+    assert (
+        len(ours) >= 8
+    ), f"only {len(ours)} own-org URLs matched — the owner filter is inert"
 
     wrong = [
         f"{p.relative_to(REPO_ROOT)}: github.com/{owner}/{repo}"
@@ -230,10 +213,13 @@ def test_the_guide_does_not_promise_setup_collects_a_provider_credential() -> No
     correctly explains. The walkthrough followed § 1, expected a configured provider, and
     had none — so the two sections contradicted each other at the newcomer's expense.
     """
-    guide = (REPO_ROOT / "docs" / "guides" / "getting-started.md").read_text(encoding="utf-8")
-    installer = (REPO_ROOT / "deploy" / "website" / "install.sh").read_text(encoding="utf-8")
+    guide = (REPO_ROOT / "docs" / "guides" / "getting-started.md").read_text(
+        encoding="utf-8"
+    )
+    installer = (REPO_ROOT / "infrastructure" / "website" / "install.sh").read_text(
+        encoding="utf-8"
+    )
 
     assert "name + first provider credential" not in guide
     assert "name + first model provider" not in installer
-    # And the correction is present, not merely the claim removed.
     assert "does **not** ask for a model provider credential" in guide

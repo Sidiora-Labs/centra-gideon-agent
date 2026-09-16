@@ -21,16 +21,17 @@ from pathlib import Path
 
 import pytest
 
-from gideon.workflows import store as st
-from gideon.workflows import supervisor_policy as sp
-from gideon.workflows.models import WorkflowRun
+from gideon.automation.workflows import store as st
+from gideon.automation.workflows import supervisor_policy as sp
+from gideon.automation.workflows.models import WorkflowRun
 
 
 @pytest.fixture(autouse=True)
 def isolated(tmp_path: Path, monkeypatch) -> Path:
     """Same double-binding patch as `test_workflows_store.py` — the store imported
-    `config_dir` by value, so patching only the config module leaves it on the real home."""
-    import gideon.config.loader as cfg
+    `config_dir` by value, so patching only the config module leaves it on the real home.
+    """
+    import gideon.core.config.loader as cfg
 
     monkeypatch.setattr(cfg, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(st, "config_dir", lambda: tmp_path)
@@ -59,7 +60,6 @@ def test_one_override_moves_one_knob_and_nothing_else() -> None:
     base = sp.policy_for_kind("sdlc")
     resolved = sp.policy_for_run("sdlc", overrides={"max_cycles": 7})
     assert resolved.budget_max_cycles == 7
-    # Everything else is untouched: putting the base's own value back must reproduce it.
     from dataclasses import replace
 
     assert replace(resolved, budget_max_cycles=base.budget_max_cycles) == base

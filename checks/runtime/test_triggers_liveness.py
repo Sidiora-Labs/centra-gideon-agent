@@ -16,7 +16,7 @@ import time
 
 import pytest
 
-from gideon.triggers.liveness import DEFAULT_RECENT_SECS, is_target_active
+from gideon.automation.triggers.liveness import DEFAULT_RECENT_SECS, is_target_active
 
 NOW = 1_800_000_000.0
 
@@ -29,10 +29,9 @@ def _git(repo, *args):
         "GIT_COMMITTER_NAME": "t",
         "GIT_COMMITTER_EMAIL": "t@t",
     }
-    return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, env=env)
-
-
-# ── the off/default baseline (non-breaking) ──
+    return subprocess.run(
+        ["git", *args], cwd=repo, check=True, capture_output=True, env=env
+    )
 
 
 @pytest.mark.parametrize("spec", [{}, None, "not-a-dict", 123, []])
@@ -43,14 +42,13 @@ def test_an_empty_or_absent_guard_is_never_active(spec) -> None:
     assert reason == ""
 
 
-# ── recent mtime ──
-
-
 def test_a_recently_modified_path_is_active(tmp_path) -> None:
     target = tmp_path / "notes.md"
     target.write_text("edit\n")
-    os.utime(target, (NOW - 10, NOW - 10))  # 10s old
-    active, reason = is_target_active({"paths": ["notes.md"]}, now=NOW, base_dir=tmp_path)
+    os.utime(target, (NOW - 10, NOW - 10))
+    active, reason = is_target_active(
+        {"paths": ["notes.md"]}, now=NOW, base_dir=tmp_path
+    )
     assert active is True
     assert "notes.md" in reason and "modified" in reason
 
@@ -58,7 +56,7 @@ def test_a_recently_modified_path_is_active(tmp_path) -> None:
 def test_an_OLD_path_is_not_active(tmp_path) -> None:
     target = tmp_path / "notes.md"
     target.write_text("old\n")
-    os.utime(target, (NOW - 10_000, NOW - 10_000))  # far outside the window
+    os.utime(target, (NOW - 10_000, NOW - 10_000))
     active, _ = is_target_active({"paths": ["notes.md"]}, now=NOW, base_dir=tmp_path)
     assert active is False
 
@@ -66,7 +64,7 @@ def test_an_OLD_path_is_not_active(tmp_path) -> None:
 def test_recent_secs_widens_the_window(tmp_path) -> None:
     target = tmp_path / "notes.md"
     target.write_text("edit\n")
-    os.utime(target, (NOW - 600, NOW - 600))  # older than the 300s default, inside 900s
+    os.utime(target, (NOW - 600, NOW - 600))
     off, _ = is_target_active({"paths": ["notes.md"]}, now=NOW, base_dir=tmp_path)
     on, _ = is_target_active(
         {"paths": ["notes.md"], "recent_secs": 900}, now=NOW, base_dir=tmp_path
@@ -86,7 +84,9 @@ def test_a_directory_glob_catches_a_fresh_child(tmp_path) -> None:
 
 def test_a_missing_path_is_not_active(tmp_path) -> None:
     """An absent target cannot be busy — a glob that matches nothing simply does not fire."""
-    active, _ = is_target_active({"paths": ["does-not-exist.md"]}, now=NOW, base_dir=tmp_path)
+    active, _ = is_target_active(
+        {"paths": ["does-not-exist.md"]}, now=NOW, base_dir=tmp_path
+    )
     assert active is False
 
 
@@ -94,22 +94,20 @@ def test_the_default_window_is_300s() -> None:
     assert DEFAULT_RECENT_SECS == 300.0
 
 
-# ── lockfiles ──
-
-
 def test_a_present_lockfile_is_active(tmp_path) -> None:
     (tmp_path / "run.lock").write_text("")
-    active, reason = is_target_active({"lockfiles": ["run.lock"]}, now=NOW, base_dir=tmp_path)
+    active, reason = is_target_active(
+        {"lockfiles": ["run.lock"]}, now=NOW, base_dir=tmp_path
+    )
     assert active is True
     assert "lock file" in reason
 
 
 def test_an_absent_lockfile_is_not_active(tmp_path) -> None:
-    active, _ = is_target_active({"lockfiles": ["run.lock"]}, now=NOW, base_dir=tmp_path)
+    active, _ = is_target_active(
+        {"lockfiles": ["run.lock"]}, now=NOW, base_dir=tmp_path
+    )
     assert active is False
-
-
-# ── dirty git worktree ──
 
 
 def test_a_dirty_worktree_is_active(tmp_path) -> None:
@@ -119,7 +117,7 @@ def test_a_dirty_worktree_is_active(tmp_path) -> None:
     (repo / "f.txt").write_text("v1\n")
     _git(repo, "add", "f.txt")
     _git(repo, "commit", "-qm", "init")
-    (repo / "f.txt").write_text("v2\n")  # uncommitted change
+    (repo / "f.txt").write_text("v2\n")
     active, reason = is_target_active({"dirty_git": str(repo)}, now=NOW)
     assert active is True
     assert "uncommitted changes" in reason
@@ -140,9 +138,6 @@ def test_a_non_repo_dir_is_not_active_FAILS_OPEN(tmp_path) -> None:
     """`git status` returns non-zero outside a repo; "cannot tell" is NOT "busy"."""
     active, _ = is_target_active({"dirty_git": str(tmp_path)}, now=NOW)
     assert active is False
-
-
-# ── fail-open: a broken probe never defers and never raises ──
 
 
 def test_a_missing_git_binary_FAILS_OPEN(tmp_path, monkeypatch) -> None:
@@ -167,13 +162,15 @@ def test_a_git_timeout_FAILS_OPEN(tmp_path, monkeypatch) -> None:
 
 def test_an_unreadable_path_never_raises(tmp_path, monkeypatch) -> None:
     """A `stat` that explodes reads as not-modified, and the call still returns cleanly."""
-    import gideon.triggers.liveness as L
+    import gideon.automation.triggers.liveness as L
 
     def boom(*a, **k):
         raise OSError("permission denied")
 
     monkeypatch.setattr(L.Path, "stat", boom, raising=False)
-    active, reason = is_target_active({"paths": [str(tmp_path / "x")]}, now=NOW, base_dir=tmp_path)
+    active, reason = is_target_active(
+        {"paths": [str(tmp_path / "x")]}, now=NOW, base_dir=tmp_path
+    )
     assert active is False and reason == ""
 
 
@@ -190,9 +187,6 @@ def test_the_probe_does_NOT_write_anything(tmp_path) -> None:
     assert before == after
 
 
-# ── first-signal-wins ordering ──
-
-
 def test_the_first_firing_signal_names_itself(tmp_path) -> None:
     """One actionable reason, not a stacked list — a fresh path is reported ahead of a lock file."""
     fresh = tmp_path / "notes.md"
@@ -205,15 +199,12 @@ def test_the_first_firing_signal_names_itself(tmp_path) -> None:
         base_dir=tmp_path,
     )
     assert active is True
-    assert "notes.md" in reason  # paths is checked first
-
-
-# ── end-to-end through the real service tick (the DEFERRED ledger row) ──
+    assert "notes.md" in reason
 
 
 def _add(store, tid, *, skip_if_active=None):
-    from gideon.triggers import service as svc
-    from gideon.triggers.models import Trigger
+    from gideon.automation.triggers import service as svc
+    from gideon.automation.triggers.models import Trigger
 
     store.upsert(
         Trigger(
@@ -235,15 +226,16 @@ def _add(store, tid, *, skip_if_active=None):
 def test_a_guarded_trigger_over_a_busy_target_DEFERS_via_the_tick(tmp_path) -> None:
     """The whole point, end to end: a `skip_if_active` guard whose target is busy produces a
     DEFERRED ledger row through `service.tick` and does NOT dispatch — no new recording code, the
-    existing outcome path writes the typed row because the gate returns `Outcome.DEFERRED`."""
+    existing outcome path writes the typed row because the gate returns `Outcome.DEFERRED`.
+    """
     import asyncio
 
-    from gideon.triggers import service as svc
-    from gideon.triggers.models import Outcome
-    from gideon.triggers.store import TriggerStore
+    from gideon.automation.triggers import service as svc
+    from gideon.automation.triggers.models import Outcome
+    from gideon.automation.triggers.store import TriggerStore
 
     store = TriggerStore(base_dir=tmp_path)
-    (tmp_path / "run.lock").write_text("")  # the busy signal
+    (tmp_path / "run.lock").write_text("")
     _add(store, "clock:mutate", skip_if_active={"lockfiles": ["run.lock"]})
 
     result = asyncio.run(svc.tick(store, now=NOW + 1, base_dir=tmp_path, persist=False))
@@ -258,8 +250,8 @@ def test_an_unguarded_trigger_fires_normally_via_the_tick(tmp_path) -> None:
     """The non-breaking baseline through the tick: a trigger that declares no guard dispatches."""
     import asyncio
 
-    from gideon.triggers import service as svc
-    from gideon.triggers.store import TriggerStore
+    from gideon.automation.triggers import service as svc
+    from gideon.automation.triggers.store import TriggerStore
 
     store = TriggerStore(base_dir=tmp_path)
     _add(store, "clock:free")
@@ -272,8 +264,8 @@ def test_a_guarded_trigger_over_a_QUIET_target_fires_via_the_tick(tmp_path) -> N
     the mere presence of a `skip_if_active` block."""
     import asyncio
 
-    from gideon.triggers import service as svc
-    from gideon.triggers.store import TriggerStore
+    from gideon.automation.triggers import service as svc
+    from gideon.automation.triggers.store import TriggerStore
 
     store = TriggerStore(base_dir=tmp_path)
     _add(store, "clock:mutate", skip_if_active={"lockfiles": ["absent.lock"]})

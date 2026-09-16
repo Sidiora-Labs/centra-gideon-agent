@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from gideon.eval.runner import (
+from gideon.assurance.eval.runner import (
     EvalRunner,
     ScenarioResult,
     SessionResult,
@@ -14,7 +14,7 @@ from gideon.eval.runner import (
     format_results,
     score_by_dimension,
 )
-from gideon.eval.scenario import (
+from gideon.assurance.eval.scenario import (
     Assertion,
     AssertionType,
     Scenario,
@@ -24,15 +24,13 @@ from gideon.eval.scenario import (
     load_scenario,
     load_scenarios,
 )
-from gideon.llm.base import (
+from gideon.integrations.llm.base import (
     EVENT_COMPLETE,
     EVENT_PERMISSION_REQUEST,
     EVENT_TEXT_CHUNK,
     EVENT_TOOL_CALL,
     LLMEvent,
 )
-
-# ── Mock Provider ──
 
 
 class MockProvider:
@@ -72,9 +70,6 @@ class MockProvider:
         return 0.0
 
 
-# ── Assertion Tests ──
-
-
 class TestAssertion:
     def test_contains(self):
         a = Assertion(type=AssertionType.CONTAINS, value="rust")
@@ -103,9 +98,6 @@ class TestAssertion:
         assert a.check("yes indeed") is False
 
 
-# ── Scenario Loading Tests ──
-
-
 class TestScenarioLoading:
     def test_load_json(self, tmp_path):
         data = {
@@ -114,7 +106,10 @@ class TestScenarioLoading:
                 {
                     "name": "s1",
                     "turns": [
-                        {"user": "hello", "assertions": [{"type": "contains", "value": "hi"}]}
+                        {
+                            "user": "hello",
+                            "assertions": [{"type": "contains", "value": "hi"}],
+                        }
                     ],
                 }
             ],
@@ -124,7 +119,9 @@ class TestScenarioLoading:
         scenario = load_scenario(f)
         assert scenario.name == "json_test"
         assert len(scenario.sessions) == 1
-        assert scenario.sessions[0].turns[0].assertions[0].type == AssertionType.CONTAINS
+        assert (
+            scenario.sessions[0].turns[0].assertions[0].type == AssertionType.CONTAINS
+        )
 
     def test_load_json_with_seed(self, tmp_path):
         data = {
@@ -174,10 +171,9 @@ class TestScenarioLoading:
         scenario = load_scenario(f)
         assert scenario.name == "yaml_test"
         assert len(scenario.sessions) == 1
-        assert scenario.sessions[0].turns[0].assertions[0].type == AssertionType.CONTAINS
-
-
-# ── Tool Safety Tests ──
+        assert (
+            scenario.sessions[0].turns[0].assertions[0].type == AssertionType.CONTAINS
+        )
 
 
 class TestToolSafety:
@@ -186,20 +182,16 @@ class TestToolSafety:
     @pytest.mark.parametrize(
         "tool_name,expected",
         [
-            # Filesystem read-only tools (path-checked).
             ("read_file", "prefix_fs"),
             ("list_dir", "prefix_fs"),
             ("glob", "prefix_fs"),
             ("grep", "prefix_fs"),
             ("repo_map", "prefix_fs"),
-            # Non-filesystem read-only tools (approved unconditionally).
             ("knowledge_search", "exact"),
             ("task_list", "exact"),
             ("project_run_status", "exact"),
-            # Ambiguous / unknown short names are unsafe.
             ("search", "unsafe"),
             ("read", "unsafe"),
-            # Write / destructive tools are unsafe.
             ("write_file", "unsafe"),
             ("edit_file", "unsafe"),
             ("bash", "unsafe"),
@@ -214,9 +206,6 @@ class TestToolSafety:
         assert EvalRunner._classify_safe_tool(FakeEvent()) == expected
 
 
-# ── Path Extraction Tests ──
-
-
 class TestExtractPathFromInput:
     @pytest.mark.parametrize(
         "tool_input,expected",
@@ -227,16 +216,13 @@ class TestExtractPathFromInput:
             ('{"target": "/tmp/out"}', "/tmp/out"),
             ('{"unrelated": "value"}', ""),
             ("cat /src/main.py", "/src/main.py"),
-            ("https://example.com/path", ""),  # HTTP URLs should not match
+            ("https://example.com/path", ""),
             ("no-slash-token", ""),
-            ("invalid json {{", ""),  # falls through to token heuristic
+            ("invalid json {{", ""),
         ],
     )
     def test_extract_path(self, tool_input, expected):
         assert EvalRunner._extract_path_from_input(tool_input) == expected
-
-
-# ── Profile Seeding Tests ──
 
 
 class TestSeedProfile:
@@ -253,12 +239,11 @@ class TestSeedProfile:
         assert "Starfish" in projects
 
     def test_seed_lessons(self, tmp_path):
-        # Lessons seed into memory.db lesson.* (the sole store), not a JSONL file.
-        from gideon.vector_memory import VectorMemoryStore
+        from gideon.cognition.vector_memory import SemanticArchive
 
         seed = SeedProfile(lessons=["use 2-space indent", "prefer pytest"])
         _seed_profile(tmp_path, seed)
-        vs = VectorMemoryStore(db_path=tmp_path / "vector_memory.db")
+        vs = SemanticArchive(db_path=tmp_path / "vector_memory.db")
         vs.init()
         try:
             rules = {json.loads(e["value_json"]) for e in vs.get_lessons()}
@@ -269,16 +254,10 @@ class TestSeedProfile:
     def test_seed_empty(self, tmp_path):
         seed = SeedProfile()
         _seed_profile(tmp_path, seed)
-        # Should still init memory dir without errors
         assert (tmp_path / "memory").is_dir()
 
 
-# ── Runner Tests ──
-# Note: These tests work because MockProvider is passed via provider_factory and
-# EvalRunner.run_scenario uses a temp workspace_dir, which triggers _run_scenario_in
-# with lazy imports of SessionManager/AppConfig. The tests exercise the full
-# memory loop (consolidation, vector store) but MockProvider short-circuits actual
-# LLM calls, so no real gideon-cli session is needed.
+# with lazy imports of ConversationDirectory/AppConfig. The tests exercise the full
 
 
 class TestEvalRunner:
@@ -318,7 +297,9 @@ class TestEvalRunner:
                         Turn(
                             user="hello",
                             assertions=[
-                                Assertion(type=AssertionType.CONTAINS, value="nonexistent"),
+                                Assertion(
+                                    type=AssertionType.CONTAINS, value="nonexistent"
+                                ),
                             ],
                         )
                     ],
@@ -343,7 +324,9 @@ class TestEvalRunner:
                     turns=[
                         Turn(
                             user="My favorite language is Rust",
-                            assertions=[Assertion(type=AssertionType.CONTAINS, value="rust")],
+                            assertions=[
+                                Assertion(type=AssertionType.CONTAINS, value="rust")
+                            ],
                         )
                     ],
                 ),
@@ -352,7 +335,9 @@ class TestEvalRunner:
                     turns=[
                         Turn(
                             user="What is my favorite language?",
-                            assertions=[Assertion(type=AssertionType.CONTAINS, value="rust")],
+                            assertions=[
+                                Assertion(type=AssertionType.CONTAINS, value="rust")
+                            ],
                         )
                     ],
                 ),
@@ -410,9 +395,6 @@ class TestEvalRunner:
         runner = EvalRunner(provider_factory=lambda key, **kw: ToolProvider())
         result = await runner.run_scenario(scenario)
         assert result.sessions[0].turns[0].tool_calls == ["read_file"]
-
-
-# ── Permission Flow Tests ──
 
 
 class TestPermissionFlow:
@@ -585,9 +567,6 @@ class TestPermissionFlow:
         assert rejected == ["r1"]
 
 
-# ── Dimension Scoring Tests ──
-
-
 class TestDimensionScoring:
     def test_score_by_dimension(self):
         results = [
@@ -602,8 +581,18 @@ class TestDimensionScoring:
                                 user_message="q",
                                 agent_response="r",
                                 assertion_results=[
-                                    (Assertion(type=AssertionType.CONTAINS, value="x"), True),
-                                    (Assertion(type=AssertionType.CONTAINS, value="y"), False),
+                                    (
+                                        Assertion(
+                                            type=AssertionType.CONTAINS, value="x"
+                                        ),
+                                        True,
+                                    ),
+                                    (
+                                        Assertion(
+                                            type=AssertionType.CONTAINS, value="y"
+                                        ),
+                                        False,
+                                    ),
                                 ],
                             ),
                         ],
@@ -621,7 +610,12 @@ class TestDimensionScoring:
                                 user_message="q",
                                 agent_response="r",
                                 assertion_results=[
-                                    (Assertion(type=AssertionType.CONTAINS, value="z"), True),
+                                    (
+                                        Assertion(
+                                            type=AssertionType.CONTAINS, value="z"
+                                        ),
+                                        True,
+                                    ),
                                 ],
                             ),
                         ],
@@ -630,7 +624,6 @@ class TestDimensionScoring:
             ),
         ]
         dims = score_by_dimension(results)
-        # Scenario-level scoring: "a" failed (1 assertion failed), "b" passed
         assert dims["memory_recall"]["total"] == 2
         assert dims["memory_recall"]["passed"] == 1
         assert dims["lesson_application"]["total"] == 1
@@ -640,9 +633,6 @@ class TestDimensionScoring:
     def test_score_empty(self):
         dims = score_by_dimension([])
         assert dims == {}
-
-
-# ── Reporting Tests ──
 
 
 class TestReporting:
@@ -664,7 +654,10 @@ class TestReporting:
                             user_message="q",
                             agent_response="r",
                             assertion_results=[
-                                (Assertion(type=AssertionType.CONTAINS, value="r"), True),
+                                (
+                                    Assertion(type=AssertionType.CONTAINS, value="r"),
+                                    True,
+                                ),
                             ],
                         ),
                     ],
@@ -688,15 +681,12 @@ class TestReporting:
         assert s["elapsed_secs"] == 1.5
 
 
-# ── Judge Tests ──
-
-
 class TestJudgeParsing:
     """Tests for LLMJudge JSON parsing."""
 
     @pytest.mark.asyncio
     async def test_judge_parses_valid_json(self):
-        from gideon.eval.judge import LLMJudge
+        from gideon.assurance.eval.judge import LLMJudge
 
         class JudgeProvider(MockProvider):
             async def stream(self, message):
@@ -709,14 +699,16 @@ class TestJudgeParsing:
 
         judge = LLMJudge(provider_factory=lambda key, **kw: JudgeProvider())
         await judge.start()
-        verdict = await judge.judge_turn("desc", "criteria", "user msg", "assistant msg")
+        verdict = await judge.judge_turn(
+            "desc", "criteria", "user msg", "assistant msg"
+        )
         await judge.shutdown()
         assert verdict.score == 4.0
         assert verdict.reason == "mostly correct"
 
     @pytest.mark.asyncio
     async def test_judge_handles_unparseable_response(self):
-        from gideon.eval.judge import LLMJudge
+        from gideon.assurance.eval.judge import LLMJudge
 
         class BadProvider(MockProvider):
             async def stream(self, message):
@@ -726,7 +718,9 @@ class TestJudgeParsing:
 
         judge = LLMJudge(provider_factory=lambda key, **kw: BadProvider())
         await judge.start()
-        verdict = await judge.judge_turn("desc", "criteria", "user msg", "assistant msg")
+        verdict = await judge.judge_turn(
+            "desc", "criteria", "user msg", "assistant msg"
+        )
         await judge.shutdown()
         assert verdict.score == 0
         assert "parse_error" in verdict.reason
@@ -737,9 +731,6 @@ class TestJudgeAssertionType:
         a = Assertion(type=AssertionType.JUDGE, value="some criteria")
         assert a.check("any response") is True
         assert a.check("") is True
-
-
-# ── Consolidation Failure Tests ──
 
 
 class TestConsolidationFailure:
@@ -768,19 +759,15 @@ class TestConsolidationFailure:
         runner = EvalRunner(provider_factory=lambda key, **kw: MockProvider())
 
         with patch(
-            "gideon.history.HistoryConsolidator._consolidate",
+            "gideon.cognition.history.HistoryConsolidator._consolidate",
             new_callable=AsyncMock,
             side_effect=RuntimeError("consolidation boom"),
         ):
             result = await runner.run_scenario(scenario)
 
         assert result.consolidation_failures > 0
-        # Session data should still be present despite consolidation failure
         assert len(result.sessions) == 1
         assert len(result.sessions[0].turns) == 1
-
-
-# ── JUDGE Filtering Tests ──
 
 
 class TestJudgeFiltering:
@@ -797,7 +784,9 @@ class TestJudgeFiltering:
                             user="hello",
                             assertions=[
                                 Assertion(type=AssertionType.CONTAINS, value="echo"),
-                                Assertion(type=AssertionType.JUDGE, value="quality check"),
+                                Assertion(
+                                    type=AssertionType.JUDGE, value="quality check"
+                                ),
                             ],
                         )
                     ],
@@ -805,9 +794,10 @@ class TestJudgeFiltering:
             ],
         )
 
-        runner = EvalRunner(provider_factory=lambda key, **kw: MockProvider(), judge_enabled=False)
+        runner = EvalRunner(
+            provider_factory=lambda key, **kw: MockProvider(), judge_enabled=False
+        )
         result = await runner.run_scenario(scenario)
-        # Only the CONTAINS assertion should be in results
         assert result.total_assertions == 1
         assert result.passed_assertions == 1
 
@@ -824,7 +814,9 @@ class TestJudgeFiltering:
                             user="hello",
                             assertions=[
                                 Assertion(type=AssertionType.CONTAINS, value="echo"),
-                                Assertion(type=AssertionType.JUDGE, value="quality check"),
+                                Assertion(
+                                    type=AssertionType.JUDGE, value="quality check"
+                                ),
                             ],
                         )
                     ],
@@ -832,7 +824,8 @@ class TestJudgeFiltering:
             ],
         )
 
-        runner = EvalRunner(provider_factory=lambda key, **kw: MockProvider(), judge_enabled=True)
+        runner = EvalRunner(
+            provider_factory=lambda key, **kw: MockProvider(), judge_enabled=True
+        )
         result = await runner.run_scenario(scenario)
-        # Both assertions should be in results
         assert result.total_assertions == 2

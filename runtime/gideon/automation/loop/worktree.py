@@ -1,0 +1,679 @@
+"""Git worktree management for parallel task execution (unified loop engine).
+
+When a loop's workspace is a git repo, the scheduler can run several READY tasks
+of a phase at once — each in its own worktree (a linked checkout sharing the
+repo's object store) on its own branch, so concurrent workers don't stomp each
+other's files. When a phase's tasks all finish, their worktrees are merged back
+to the base branch and removed. Vendor-neutral git infra shared by any kind that
+parallelizes (code today; design later).
+
+Capability detection decides parallel-vs-sequential: parallel needs a present
+``git`` binary AND a workspace that is (or was just) a git repo. A brownfield
+workspace with no git, or a missing git binary, falls back to sequential (one
+task at a time in the workspace directly) — handled by the caller.
+
+All git calls are best-effort and time-bounded; failures degrade to sequential
+rather than raising.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+import os
+import re
+import shutil
+import subprocess
+import time
+from typing import NamedTuple
+
+logger = logging.getLogger(__name__)
+
+_TIMEOUT = 30
+_BRANCH_PREFIX = "gideon/task-"
+
+
+def _worktrees_root(workspace: str, project_id: str = "") -> str:
+    """The Gideon-owned directory holding this work's task worktrees — under
+    ``config_dir()``, NOT under the workspace itself.
+
+    Prefers a per-PROJECT root (``projects/<project_id>/worktrees``) so projects on
+    one shared workspace stay isolated; falls back to a stable workspace-hash root
+    when no project is bound. Deterministic in its args so every caller agrees on
+    the location."""
+    from gideon.core.config.loader import config_dir
+
+    if project_id:
+        return str(config_dir() / "projects" / project_id / "worktrees")
+    key = hashlib.sha1(os.path.abspath(workspace).encode("utf-8")).hexdigest()[:12]
+    return str(config_dir() / "code" / "worktrees" / key)
+
+
+def git_available() -> bool:
+    """True iff a ``git`` binary is on PATH."""
+    return shutil.which("git") is not None
+
+
+def _git(workspace: str, *args: str, timeout: int = _TIMEOUT) -> tuple[int, str]:
+    """Run a git command in ``workspace``; return (returncode, combined output)."""
+    from gideon.security.sandbox import PROFILE_BUILD, spawn_shim_argv
+
+    try:
+        p = subprocess.run(
+            spawn_shim_argv(["git", *args], PROFILE_BUILD),
+            cwd=workspace,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+        out = (p.stdout or b"").decode("utf-8", "replace") + (p.stderr or b"").decode(
+            "utf-8", "replace"
+        )
+        return p.returncode, out
+    except (OSError, subprocess.SubprocessError) as e:
+        return 1, str(e)
+
+
+def is_git_repo(workspace: str) -> bool:
+    """True iff ``workspace`` is inside a git working tree."""
+    if not workspace or not os.path.isdir(workspace):
+        return False
+    rc, out = _git(workspace, "rev-parse", "--is-inside-work-tree")
+    return rc == 0 and out.strip() == "true"
+
+
+def can_parallelize(workspace: str) -> bool:
+    """Whether parallel worktree execution is possible for this workspace: git is
+    installed and the workspace is a git repo. The caller falls back to sequential
+    single-worker execution when this is False."""
+    return bool(workspace) and git_available() and is_git_repo(workspace)
+
+
+def base_branch(workspace: str) -> str:
+    """The repo's current branch (the merge target for task worktrees). Falls back
+    to 'main' if it can't be resolved (e.g. an unborn HEAD on a fresh init)."""
+    rc, out = _git(workspace, "symbolic-ref", "--short", "HEAD")
+    name = out.strip()
+    return name if (rc == 0 and name) else "main"
+
+
+_TASK_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _safe_task_id(task_id: str) -> bool:
+    return bool(_TASK_ID_RE.match(task_id or ""))
+
+
+def worktree_path(workspace: str, task_id: str, project_id: str = "") -> str:
+    """Absolute path of a task's worktree — under Gideon's working dir, not the
+    workspace (see :func:`_worktrees_root`). ``project_id`` roots it under the
+    containing project when set. Raises ``ValueError`` on a non-filename-safe
+    ``task_id`` (the public ops catch it + treat the op as a no-op/failure) so a
+    traversal id can never escape the worktrees root."""
+    if not _safe_task_id(task_id):
+        raise ValueError(f"unsafe task_id for worktree path: {task_id!r}")
+    return os.path.join(_worktrees_root(workspace, project_id), task_id)
+
+
+def branch_name(task_id: str) -> str:
+    return f"{_BRANCH_PREFIX}{task_id}"
+
+
+TIMING_LOG_PREFIX = "worktree add"
+
+OUTCOME_CREATED = "created"
+OUTCOME_REUSED = "reused"
+OUTCOME_FAILED = "failed"
+
+_SIZE_CLASSES: tuple[tuple[int, str], ...] = (
+    (100, "tiny"),
+    (1_000, "small"),
+    (10_000, "medium"),
+    (100_000, "large"),
+)
+SIZE_CLASS_HUGE = "huge"
+SIZE_CLASS_UNKNOWN = "unknown"
+
+FILE_COUNT_UNKNOWN = -1
+
+_FILE_COUNT_CACHE: dict[str, int] = {}
+
+
+def size_class(file_count: int) -> str:
+    """The size-class tag for a tracked-file count (``FILE_COUNT_UNKNOWN`` → unknown)."""
+    if file_count < 0:
+        return SIZE_CLASS_UNKNOWN
+    for ceiling, name in _SIZE_CLASSES:
+        if file_count < ceiling:
+            return name
+    return SIZE_CLASS_HUGE
+
+
+def repo_file_count(workspace: str) -> int:
+    """Tracked files in ``workspace`` (``git ls-files``), cached per workspace.
+
+    ``FILE_COUNT_UNKNOWN`` when git cannot answer. Counts non-empty lines of the
+    combined git output; ``_git`` merges stderr, so a git warning could inflate the
+    count by a line or two — which cannot move a decade bucket, and reusing ``_git``
+    keeps every git call in this module behind the one resource-ceilinged runner
+    instead of adding a second, unshimmed subprocess path just to count files.
+    """
+    key = os.path.abspath(workspace or "")
+    cached = _FILE_COUNT_CACHE.get(key)
+    if cached is not None:
+        return cached
+    rc, out = _git(workspace, "ls-files")
+    count = (
+        sum(1 for ln in out.splitlines() if ln.strip())
+        if rc == 0
+        else FILE_COUNT_UNKNOWN
+    )
+    _FILE_COUNT_CACHE[key] = count
+    return count
+
+
+def repo_size_class(workspace: str) -> str:
+    """The cached size class of ``workspace``."""
+    return size_class(repo_file_count(workspace))
+
+
+def _log_creation(workspace: str, task_id: str, elapsed: float, outcome: str) -> None:
+    """Emit the one timing line. Called AFTER the clock stops, always.
+
+    The size class is resolved here rather than up front precisely so a cache MISS
+    (one ``git ls-files``) lands outside the measured window. Instrumented the other
+    way round, the first worktree of every process would report its own probe as part
+    of the hydration cost — and the first is the one a fan-out benchmark reads.
+    """
+    count = repo_file_count(workspace)
+    logger.info(
+        "%s outcome=%s task=%s ms=%d files=%d size_class=%s",
+        TIMING_LOG_PREFIX,
+        outcome,
+        task_id,
+        round(elapsed * 1000),
+        count,
+        size_class(count),
+    )
+
+
+POOL_CEILING = 4
+
+_PATH_TOKEN_RE = re.compile(r"(?<![\w/.-])((?:[\w.-]+/)+[\w-][\w.-]*)")
+_MAX_SCOPE_CANDIDATES = 16
+_MAX_SCOPE_DIRS = 8
+
+_TRACKED_DIRS_CACHE: dict[str, frozenset[str]] = {}
+
+
+def _tracked_dirs(workspace: str) -> frozenset[str]:
+    """Every directory that contains a tracked file, repo-relative (cached).
+
+    Directories, not files, because cone-mode sparse-checkout entries are directories.
+    Empty frozenset when git cannot answer — which makes every candidate unresolvable
+    and so degrades to a full checkout, the documented fallback."""
+    key = os.path.abspath(workspace or "")
+    cached = _TRACKED_DIRS_CACHE.get(key)
+    if cached is not None:
+        return cached
+    rc, out = _git(workspace, "ls-files")
+    dirs: set[str] = set()
+    if rc == 0:
+        for line in out.splitlines():
+            rel = line.strip()
+            if not rel:
+                continue
+            parts = rel.split("/")[:-1]
+            for i in range(1, len(parts) + 1):
+                dirs.add("/".join(parts[:i]))
+    result = frozenset(dirs)
+    _TRACKED_DIRS_CACHE[key] = result
+    return result
+
+
+def scope_candidates(text: str) -> list[str]:
+    """Path-like tokens in task text, de-duplicated, order preserved.
+
+    Pure text extraction — no git, no filesystem. Whether a token is REAL is
+    :func:`resolve_scope`'s job; keeping the two apart is what lets a hallucinated
+    path be dropped instead of producing an empty working tree."""
+    seen: list[str] = []
+    for m in _PATH_TOKEN_RE.finditer(text or ""):
+        tok = m.group(1).strip("/").rstrip(".")
+        if tok and tok not in seen:
+            seen.append(tok)
+        if len(seen) >= _MAX_SCOPE_CANDIDATES:
+            break
+    return seen
+
+
+def resolve_scope(workspace: str, candidates: list[str]) -> list[str]:
+    """Turn candidate path tokens into cone-mode sparse-checkout directories.
+
+    A candidate resolves when it names a tracked directory, or a file inside one (its
+    parent becomes the cone entry). Anything else — a hallucinated path, a file at the
+    repo root, a path from another project — is dropped. Returns ``[]`` when nothing
+    resolves or the result is too wide to be a scope, and ``[]`` means FULL hydration:
+    the fallback §1.2 requires whenever scope is "absent/unreliable"."""
+    if not candidates:
+        return []
+    tracked = _tracked_dirs(workspace)
+    if not tracked:
+        return []
+    out: list[str] = []
+    for cand in candidates:
+        norm = cand.replace(os.sep, "/").strip("/")
+        if not norm or norm.startswith("../") or ".." in norm.split("/"):
+            continue
+        entry = (
+            norm if norm in tracked else norm.rsplit("/", 1)[0] if "/" in norm else ""
+        )
+        if entry and entry in tracked and entry not in out:
+            out.append(entry)
+    if not out or len(out) > _MAX_SCOPE_DIRS:
+        return []
+    return sorted(out)
+
+
+def sparse_enabled() -> bool:
+    """Whether ``loops.worktree_sparse`` permits sparse hydration (default true).
+
+    Fails OPEN to today's behaviour: any config problem returns False → full checkout,
+    which is the slower but never-wrong path. ``AppConfig.load()`` rather than a cached
+    accessor because that is how the sibling ``loops`` reader does it
+    (``sdlc._check_work_post_gate``), and there is no cached accessor in this repo."""
+    try:
+        from gideon.core.config.loader import AppConfig
+
+        return bool(AppConfig.load().loops.worktree_sparse)
+    except Exception:
+        return False
+
+
+def scope_for_task(workspace: str, *texts: str) -> list[str]:
+    """The cone directories for a task described by ``texts`` (title, description,
+    action-plan lines…), or ``[]`` for full hydration.
+
+    THE config chokepoint: ``loops.worktree_sparse=False`` returns ``[]`` here, so the
+    setting cannot be bypassed by a caller that forgets to check it."""
+    if not sparse_enabled():
+        return []
+    return resolve_scope(workspace, scope_candidates("\n".join(t for t in texts if t)))
+
+
+def set_sparse_scope(wt_path: str, paths: list[str]) -> bool:
+    """Restrict ``wt_path``'s working tree to ``paths`` (cone mode). False on any
+    failure — the caller keeps the fully-hydrated worktree it already has.
+
+    The first ``sparse-checkout set`` in a repo also writes
+    ``extensions.worktreeConfig`` into the SHARED ``.git/config``; when several
+    worktrees of one repo arm sparse concurrently (the :func:`add_worktrees`
+    pool) the losers hit ``could not lock config file … File exists`` and would
+    silently fall back to full hydration. Bounded retry on that one transient
+    error class; anything else fails immediately as before.
+    """
+    if not paths:
+        return False
+    for attempt in range(3):
+        rc, out = _git(wt_path, "sparse-checkout", "set", *paths)
+        if rc == 0:
+            return True
+        if "could not lock config file" not in out:
+            break
+        time.sleep(0.05 * (attempt + 1))
+    logger.debug("sparse-checkout set failed in %s: %s", wt_path, out.strip()[:200])
+    return False
+
+
+def sparse_scope(wt_path: str) -> list[str]:
+    """The worktree's current cone entries (``[]`` when not sparse). Lets a caller —
+    and a test — observe the cone WIDEN rather than trusting that a command ran."""
+    rc, out = _git(wt_path, "sparse-checkout", "list")
+    if rc != 0:
+        return []
+    return sorted(ln.strip() for ln in out.splitlines() if ln.strip())
+
+
+def widen_scope(wt_path: str, paths: list[str]) -> bool:
+    """Add ``paths`` to the cone (``git sparse-checkout add``). Never narrows."""
+    if not paths:
+        return False
+    rc, out = _git(wt_path, "sparse-checkout", "add", *paths)
+    if rc != 0:
+        logger.debug("sparse-checkout add failed in %s: %s", wt_path, out.strip()[:200])
+        return False
+    return True
+
+
+def widen_for_pending(wt_path: str) -> list[str]:
+    """Widen the cone to cover every out-of-cone change present in ``wt_path``;
+    return the directories added (``[]`` when nothing needed widening).
+
+    This is the auto-widen of §1.2: an out-of-scope write must SUCCEED, and in git's
+    sparse world "succeed" can only mean "reaches the commit" — an unstaged file is
+    dropped silently (see the block above). Called by :func:`merge_worktree` before it
+    stages, so the widening happens on the path where the loss would otherwise occur.
+    A no-op on a non-sparse worktree: with no cone, nothing is out of it."""
+    if not sparse_scope(wt_path):
+        return []
+    rc, out = _git(wt_path, "status", "--porcelain", "--untracked-files=all")
+    if rc != 0:
+        return []
+    wanted: list[str] = []
+    for line in out.splitlines():
+        rel = line[3:].strip().strip('"')
+        if not rel:
+            continue
+        rel = rel.split(" -> ")[-1]
+        entry = rel.rsplit("/", 1)[0] if "/" in rel else ""
+        if entry and entry not in wanted:
+            wanted.append(entry)
+    if not wanted:
+        return []
+    cone = set(sparse_scope(wt_path))
+    missing = [
+        d for d in wanted if not any(d == c or d.startswith(c + "/") for c in cone)
+    ]
+    if not missing or not widen_scope(wt_path, missing):
+        return []
+    logger.info("worktree scope widened in %s: %s", wt_path, ",".join(sorted(missing)))
+    return sorted(missing)
+
+
+def pool_size(n_items: int | None = None) -> int:
+    """Worker count for batched worktree creation: ``min(cpu_count, POOL_CEILING)``,
+    never below 1, and never more than there is work for.
+
+    Bounded on BOTH sides deliberately. The ceiling is §1.2's ("bounded by
+    os.cpu_count(), ceiling 4"): ``git worktree add`` is I/O-bound and each briefly
+    takes the repo lock, so more threads than 4 buys contention, not throughput. The
+    cpu_count leg keeps a 2-core box from being asked for 4."""
+    size = min(os.cpu_count() or 1, POOL_CEILING)
+    if n_items is not None:
+        size = min(size, n_items)
+    return max(1, size)
+
+
+def add_worktrees(
+    workspace: str,
+    specs: list[tuple[str, list[str]]],
+    project_id: str = "",
+) -> dict[str, str | None]:
+    """Create worktrees for many tasks at once through a bounded thread pool.
+
+    ``specs`` is ``[(task_id, scope_paths), …]``; returns ``{task_id: path|None}``.
+    Each entry is exactly :func:`add_worktree`, so the timing-log contract, the
+    reuse-reset and the sparse setup are identical to the one-at-a-time path — the pool
+    changes only how many run at once. A single spec skips the pool entirely (a
+    ThreadPoolExecutor for one item is pure overhead)."""
+    if not specs:
+        return {}
+    if len(specs) == 1:
+        tid, scope = specs[0]
+        return {tid: add_worktree(workspace, tid, project_id, scope=scope)}
+    if any(scope for _, scope in specs):
+        _git(workspace, "config", "extensions.worktreeConfig", "true")
+    from concurrent.futures import ThreadPoolExecutor
+
+    results: dict[str, str | None] = {}
+    with ThreadPoolExecutor(max_workers=pool_size(len(specs))) as pool:
+        futures = {
+            pool.submit(add_worktree, workspace, tid, project_id, scope): tid
+            for tid, scope in specs
+        }
+        for fut, tid in futures.items():
+            try:
+                results[tid] = fut.result()
+            except Exception as e:
+                logger.debug("worktree add raised for %s: %s", tid, e)
+                results[tid] = None
+    return results
+
+
+def reset_worktree(workspace: str, task_id: str, project_id: str = "") -> bool:
+    """Reset a SURVIVING worktree so the next run of this task starts clean, KEEPING its
+    hydration (and its sparse cone). True iff the tree is now genuinely clean.
+
+    §1.2's reuse pool: where hydration dominates, resetting an existing checkout beats
+    remove + re-add. False means the caller must tear down (remove + add fresh) — a
+    half-reset worktree is worse than none, because it silently hands the next run the
+    previous one's leftovers.
+
+    **The recipe is three commands, not the plan's two.** §1.2 specifies
+    ``checkout -B <branch> <base>`` + ``clean -fd``; measured, that pair leaves BOTH a
+    modified tracked file and a staged index in place — ``checkout -B`` carries local
+    modifications across on purpose, and ``clean`` only touches untracked files. So a
+    ``reset --hard`` sits between them, and ``clean`` takes ``-x`` as well: ignored files
+    are the previous run's build output, and leaving them is exactly the cross-run leak
+    this exists to prevent. Both gaps are covered by their own tests.
+    """
+    path = worktree_path(workspace, task_id, project_id)
+    if not os.path.isdir(path):
+        return False
+    rc, out = _git(workspace, "rev-parse", "HEAD")
+    base = out.strip().splitlines()[0] if rc == 0 and out.strip() else "HEAD"
+    rc, out = _git(path, "checkout", "-B", branch_name(task_id), base)
+    if rc != 0:
+        logger.debug(
+            "worktree reset checkout failed for %s: %s", task_id, out.strip()[:200]
+        )
+        return False
+    rc, out = _git(path, "reset", "--hard", base)
+    if rc != 0:
+        logger.debug(
+            "worktree reset --hard failed for %s: %s", task_id, out.strip()[:200]
+        )
+        return False
+    rc, out = _git(path, "clean", "-fdx")
+    if rc != 0:
+        logger.debug(
+            "worktree reset clean failed for %s: %s", task_id, out.strip()[:200]
+        )
+        return False
+    return True
+
+
+def add_worktree(
+    workspace: str,
+    task_id: str,
+    project_id: str = "",
+    scope: list[str] | None = None,
+) -> str | None:
+    """Create (idempotently) a worktree + branch for ``task_id``; return its path,
+    or None on failure (caller falls back). Requires at least one commit on HEAD;
+    on a fresh repo the caller makes an initial commit first (see ensure_base_commit).
+
+    ``scope`` (from :func:`scope_for_task`) hydrates only those directories; empty or
+    absent means a full checkout. A sparse-setup failure is NOT a creation failure —
+    the worktree is already usable, just fully hydrated.
+
+    An EXISTING worktree is handed back as-is. That is deliberately NOT the reuse-pool
+    reset: this path is also the RESUME path (a loop restarting mid-task finds its
+    worker's worktree), and resetting here would delete a live task's in-progress work.
+    The reuse reset belongs at the phase/redo boundary where the work is finished with —
+    see :func:`reset_worktree` and its caller in ``sdlc._reap_merge_done``.
+
+    Emits one ``TIMING_LOG_PREFIX`` line per call (see the block above): the duration
+    covers the work that call actually did, so ``reused`` reports the real cost of the
+    idempotent early return rather than a fabricated zero."""
+    if not _safe_task_id(task_id):
+        logger.warning("worktree add refused — unsafe task_id %r", task_id)
+        return None
+    started = time.perf_counter()
+    path = worktree_path(workspace, task_id, project_id)
+    if os.path.isdir(path):
+        _log_creation(workspace, task_id, time.perf_counter() - started, OUTCOME_REUSED)
+        return path
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    branch = branch_name(task_id)
+    args = ["worktree", "add", "-f", "-B", branch]
+    if scope:
+        args.append("--no-checkout")
+    rc, out = _git(workspace, *args, path, "HEAD")
+    if rc == 0 and scope:
+        set_sparse_scope(path, scope)
+        rc, out = _git(path, "checkout")
+    elapsed = time.perf_counter() - started
+    if rc != 0:
+        _log_creation(workspace, task_id, elapsed, OUTCOME_FAILED)
+        logger.debug("worktree add failed for %s: %s", task_id, out.strip()[:200])
+        return None
+    _log_creation(workspace, task_id, elapsed, OUTCOME_CREATED)
+    return path
+
+
+def ensure_base_commit(workspace: str) -> bool:
+    """Guarantee HEAD points at a commit so worktrees can branch from it. A freshly
+    ``git init``'d repo has an unborn HEAD; stage + commit whatever's there (or an
+    empty commit) so worktrees work. Returns True if HEAD has a commit afterward."""
+    rc, _ = _git(workspace, "rev-parse", "--verify", "HEAD")
+    if rc == 0:
+        return True
+    _git(workspace, "add", "-A")
+    rc, _ = _git(
+        workspace,
+        "-c",
+        "user.name=Gideon",
+        "-c",
+        "user.email=code@gideon.local",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "Initial commit (Gideon Code)",
+    )
+    rc2, _ = _git(workspace, "rev-parse", "--verify", "HEAD")
+    return rc2 == 0
+
+
+class MergeResult(NamedTuple):
+    """Outcome of merging a task worktree back. ``ok`` = clean merge. On failure,
+    ``conflicts`` lists the conflicted files (empty for a non-conflict git error) —
+    captured BEFORE the merge is aborted, since the abort clears the unmerged state
+    and a post-abort ``conflict_paths`` would always read empty (the bug this fixes:
+    the caller would misreport every real conflict as a 'git error')."""
+
+    ok: bool
+    conflicts: list[str] = []
+
+    def __bool__(
+        self,
+    ) -> bool:
+        return self.ok
+
+
+def merge_worktree(workspace: str, task_id: str, project_id: str = "") -> MergeResult:
+    """Merge a finished task's branch back into the base branch, then remove its
+    worktree. Returns ``MergeResult(ok=True)`` on a clean merge. A conflict/failure
+    leaves the worktree in place (so it's not lost) and returns ``ok=False`` with the
+    conflicted paths (if any) — the caller surfaces an accurate message."""
+    if not _safe_task_id(task_id):
+        logger.warning("worktree merge refused — unsafe task_id %r", task_id)
+        return MergeResult(ok=False, conflicts=[])
+    branch = branch_name(task_id)
+    wt = worktree_path(workspace, task_id, project_id)
+    if os.path.isdir(wt):
+        widen_for_pending(wt)
+        _git(wt, "add", "-A")
+        _git(
+            wt,
+            "-c",
+            "user.name=Gideon",
+            "-c",
+            "user.email=code@gideon.local",
+            "commit",
+            "-q",
+            "-m",
+            f"task {task_id}: work",
+        )
+    rc, out = _git(
+        workspace,
+        "-c",
+        "user.name=Gideon",
+        "-c",
+        "user.email=code@gideon.local",
+        "merge",
+        "--no-edit",
+        branch,
+    )
+    if rc != 0:
+        conflicts = conflict_paths(workspace)
+        logger.info(
+            "worktree merge %s for %s: %s",
+            "conflict" if conflicts else "failed",
+            task_id,
+            out.strip()[:200],
+        )
+        if conflicts:
+            _git(workspace, "merge", "--abort")
+        return MergeResult(ok=False, conflicts=conflicts)
+    remove_worktree(workspace, task_id, project_id)
+    return MergeResult(ok=True, conflicts=[])
+
+
+def conflict_paths(workspace: str) -> list[str]:
+    """Files with unmerged (conflict) entries in ``workspace``, or [] if none / not
+    mid-merge. Used to tell a genuine merge CONFLICT apart from a non-conflict merge
+    failure so the caller surfaces an accurate message + only aborts a real merge."""
+    rc, out = _git(workspace, "diff", "--name-only", "--diff-filter=U")
+    if rc != 0:
+        return []
+    return [ln.strip() for ln in out.splitlines() if ln.strip()]
+
+
+def branch_exists(workspace: str, task_id: str) -> bool:
+    """True iff this task's branch still exists in the repo. A done task whose
+    branch lingers (its merge previously conflicted/failed and was aborted) still
+    has unmerged work — the scheduler retries the merge on resume rather than
+    skipping it past forever once its worker session is gone."""
+    if not _safe_task_id(task_id):
+        return False
+    rc, _ = _git(
+        workspace,
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        f"refs/heads/{branch_name(task_id)}",
+    )
+    return rc == 0
+
+
+def remove_worktree(workspace: str, task_id: str, project_id: str = "") -> None:
+    """Remove a task's worktree + delete its branch (best-effort cleanup)."""
+    if not _safe_task_id(task_id):
+        return
+    path = worktree_path(workspace, task_id, project_id)
+    _git(workspace, "worktree", "remove", "--force", path)
+    _git(workspace, "branch", "-D", branch_name(task_id))
+    if os.path.isdir(path):
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def cleanup_all(workspace: str, project_id: str = "") -> None:
+    """Remove the whole worktrees dir + prune registrations (project teardown).
+
+    With ``project_id`` set, only THIS project's worktree root is swept — so tearing
+    down one project on a shared workspace can't wipe another's worktrees. The
+    trailing branch sweep is still global (gideon/task-* branches live in the one
+    shared repo) but only removes branches whose worktree we just dropped."""
+    if not workspace:
+        return
+    # Explicitly remove each registered worktree under our (Gideon-owned) dir first —
+    root = _worktrees_root(workspace, project_id)
+    if os.path.isdir(root):
+        for name in os.listdir(root):
+            _git(workspace, "worktree", "remove", "--force", os.path.join(root, name))
+            _git(workspace, "branch", "-D", branch_name(name))
+    _git(workspace, "worktree", "prune")
+    if not project_id:
+        rc, out = _git(
+            workspace,
+            "for-each-ref",
+            "--format=%(refname:short)",
+            f"refs/heads/{_BRANCH_PREFIX}*",
+        )
+        if rc == 0:
+            for ref in (ln.strip() for ln in out.splitlines() if ln.strip()):
+                _git(workspace, "branch", "-D", ref)
+    if os.path.isdir(root):
+        shutil.rmtree(root, ignore_errors=True)

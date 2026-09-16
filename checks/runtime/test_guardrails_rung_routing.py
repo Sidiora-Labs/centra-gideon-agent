@@ -28,10 +28,14 @@ from typing import Any
 
 import pytest
 
-from gideon.action_providers.base import ActionContext, ActionProvider, ActionResult
-from gideon.apps.manifest import AppManifest, AutonomyConfig, ProviderConfig
-from gideon.guardrails import autonomy as au
-from gideon.guardrails import rungs as rg
+from gideon.extensions.apps.manifest import AppManifest, AutonomyConfig, ProviderConfig
+from gideon.integrations.action_providers.base import (
+    ActionContext,
+    ActionProvider,
+    ActionResult,
+)
+from gideon.security.guardrails import autonomy as au
+from gideon.security.guardrails import rungs as rg
 
 
 @pytest.fixture(autouse=True)
@@ -45,11 +49,11 @@ def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: home)
     cfg = home / "config.json"
     cfg.write_text("{}", encoding="utf-8")
-    monkeypatch.setattr("gideon.config.loader.config_path", lambda: cfg)
-    from gideon import sel as sel_mod
+    monkeypatch.setattr("gideon.core.config.loader.config_path", lambda: cfg)
+    from gideon.security import sel as sel_mod
 
     sel_mod.SecurityEventLog._instance = None
     sel_mod.SecurityEventLog._initialized = False
@@ -61,15 +65,12 @@ def _isolated_home(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def _clean_provider_registry():
     """Restore the action-provider registry — these tests install fakes into it."""
-    from gideon.action_providers.registry import _providers
+    from gideon.integrations.action_providers.registry import _providers
 
     before = dict(_providers)
     yield
     _providers.clear()
     _providers.update(before)
-
-
-# ── a fake app-contributed action provider ────────────────────────────────────
 
 
 class _AppAction(ActionProvider):
@@ -92,7 +93,9 @@ class _AppAction(ActionProvider):
         self, action_config: dict[str, Any], ctx: ActionContext, timeout: int = 30
     ) -> ActionResult:
         self.calls.append(ctx)
-        return ActionResult(success=True, stdout="did the thing", reversal=self._reversal)
+        return ActionResult(
+            success=True, stdout="did the thing", reversal=self._reversal
+        )
 
 
 def _install_app_action(
@@ -109,16 +112,23 @@ def _install_app_action(
     the declaration this test relies on is produced by the same code an installed app goes
     through — manifest in, ``ActionTypeSpec`` out.
     """
-    from gideon.providers.registry import ActionTypeHandler, RegisteredProvider
+    from gideon.extensions.providers.registry import (
+        ActionTypeHandler,
+        RegisteredProvider,
+    )
 
-    manifest = AppManifest(name="acme", version="1.0.0", displayName="Acme", description="d")
+    manifest = AppManifest(
+        name="acme", version="1.0.0", displayName="Acme", description="d"
+    )
     manifest.permissions.network = network
     provider_config = ProviderConfig(
         type="action",
         implementation="acme.provider:create",
         autonomy=AutonomyConfig(floor=floor, ceiling=ceiling),
     )
-    ext = RegisteredProvider(name="acme", manifest=manifest, provider_config=provider_config)
+    ext = RegisteredProvider(
+        name="acme", manifest=manifest, provider_config=provider_config
+    )
     instance = _AppAction(provider_name, reversal=reversal)
     ActionTypeHandler().register(ext, instance)
     return instance
@@ -129,7 +139,7 @@ APP_KEY = "app:acme.acme-do-thing"
 
 def _fire_event_trigger(provider_name: str = "acme-do-thing") -> Any:
     """Drive the REAL data-event fire path for a trigger pointing at ``provider_name``."""
-    from gideon.event_triggers import (
+    from gideon.automation.event_triggers import (
         MEMORY_UPDATE,
         SOURCE_MEMORY,
         EventTrigger,
@@ -163,9 +173,6 @@ def _inbox_rows(home) -> list[dict]:
     return list(items.values()) if isinstance(items, dict) else list(items)
 
 
-# ── done_when 1: a declared floor governs a real dispatch ─────────────────────
-
-
 def test_an_app_declared_floor_HOLDS_a_real_event_trigger_fire(_isolated_home):
     """🔴 THE ATOM. An app declares ``floor: one_tap`` and its action stops executing.
 
@@ -180,7 +187,6 @@ def test_an_app_declared_floor_HOLDS_a_real_event_trigger_fire(_isolated_home):
     assert action.calls == [], "a held action must never reach the provider"
     assert outcome.ran is False
     assert "held for your approval" in outcome.reason
-    # And the hold is DURABLE, not just a refusal: the user gets a row to decide on.
     rows = _inbox_rows(_isolated_home)
     assert rows, "a held action must leave a standing attention item"
     held = rows[-1]
@@ -201,9 +207,9 @@ def test_the_SAME_fire_executes_once_the_rung_is_granted(_isolated_home):
     assert _fire_event_trigger().ran is False
     assert action.calls == []
 
-    assert au.grant_rung(APP_KEY, "auto_with_undo", evidence_window="owner decision") == (
-        "auto_with_undo"
-    )
+    assert au.grant_rung(
+        APP_KEY, "auto_with_undo", evidence_window="owner decision"
+    ) == ("auto_with_undo")
 
     outcome = _fire_event_trigger()
     assert outcome.ran is True
@@ -217,12 +223,20 @@ def test_the_seams_carry_no_per_action_branch(_isolated_home):
     behavioural tests above and fail the requirement. The name→type mapping lives on the
     declaration (`ActionTypeSpec.providers`), so no seam mentions an action type at all.
     """
-    from gideon import event_triggers, gateway, hooks
+    from gideon.automation import event_triggers
+    from gideon.engine import hooks, trigger_dispatch
 
-    for module in (hooks, event_triggers, gateway):
+    for module in (hooks, event_triggers, trigger_dispatch):
         src = inspect.getsource(module)
-        for key in (APP_KEY, "acme-do-thing", "inbox.reply_draft", "action.execute_code"):
-            assert key not in src, f"{module.__name__} names {key!r} — that is special-casing"
+        for key in (
+            APP_KEY,
+            "acme-do-thing",
+            "inbox.reply_draft",
+            "action.execute_code",
+        ):
+            assert (
+                key not in src
+            ), f"{module.__name__} names {key!r} — that is special-casing"
 
 
 def test_an_UNDECLARED_provider_keeps_its_pre_ladder_behaviour(_isolated_home):
@@ -231,7 +245,7 @@ def test_an_UNDECLARED_provider_keeps_its_pre_ladder_behaviour(_isolated_home):
     Measured deliberately: treating an undeclared provider as `draft_only` would withhold
     every hook and trigger in the tree — an outage wearing a safety control's clothes.
     """
-    action = _install_app_action()  # no floor, no ceiling → no declaration at all
+    action = _install_app_action()
 
     assert au.action_type_for_provider("acme-do-thing") is None
     route = rg.route_provider_action("acme-do-thing")
@@ -243,10 +257,9 @@ def test_an_UNDECLARED_provider_keeps_its_pre_ladder_behaviour(_isolated_home):
     assert _inbox_rows(_isolated_home) == []
 
 
-# ── done_when 2: a leaves_machine ceiling cannot be claimed by a manifest ──────
-
-
-def test_a_manifest_CANNOT_claim_autonomous_for_a_network_reaching_action(_isolated_home, caplog):
+def test_a_manifest_CANNOT_claim_autonomous_for_a_network_reaching_action(
+    _isolated_home, caplog
+):
     """🔴 THE SECURITY RAIL. An app asking for ``autonomous`` is CLAMPED, and loudly.
 
     ``leaves_machine`` is derived by CORE from the app's own ``permissions.network``
@@ -266,10 +279,12 @@ def test_a_manifest_CANNOT_claim_autonomous_for_a_network_reaching_action(_isola
     assert spec.ceiling == au.RUNG_AUTO_WITH_UNDO, "an app's ceiling claim was honoured"
     assert "clamped to auto_with_undo" in caplog.text
 
-    from gideon.sel import sel
+    from gideon.security.sel import sel
 
     clamps = [
-        e for e in sel().recent(200) if e.get("operation") == "guardrails.autonomy_ceiling_clamped"
+        e
+        for e in sel().recent(200)
+        if e.get("operation") == "guardrails.autonomy_ceiling_clamped"
     ]
     assert clamps, "the clamp left no audit trail"
     assert "declared=autonomous" in clamps[-1]["resources"]
@@ -299,13 +314,9 @@ def test_a_core_leaves_machine_type_may_raise_its_own_ceiling(_isolated_home):
     assert spec is not None and spec.leaves_machine is True
     assert spec.ceiling == au.RUNG_AUTONOMOUS
 
-    # The same claim, from a manifest, does not survive.
     _install_app_action(ceiling="autonomous", network=True)
     app_spec = au.action_type(APP_KEY)
     assert app_spec is not None and app_spec.ceiling == au.RUNG_AUTO_WITH_UNDO
-
-
-# ── fail-closed ───────────────────────────────────────────────────────────────
 
 
 def test_an_unregistered_type_key_routes_to_the_bottom_rung(_isolated_home):
@@ -318,12 +329,17 @@ def test_an_unregistered_type_key_routes_to_the_bottom_rung(_isolated_home):
 
 def test_disabling_an_app_drops_its_declaration(_isolated_home):
     """A declaration outliving its provider would let a LATER app inherit its earned rung."""
-    from gideon.providers.registry import ActionTypeHandler, RegisteredProvider
+    from gideon.extensions.providers.registry import (
+        ActionTypeHandler,
+        RegisteredProvider,
+    )
 
     instance = _install_app_action(floor="one_tap")
     assert au.action_type_for_provider("acme-do-thing") is not None
 
-    manifest = AppManifest(name="acme", version="1.0.0", displayName="Acme", description="d")
+    manifest = AppManifest(
+        name="acme", version="1.0.0", displayName="Acme", description="d"
+    )
     ext = RegisteredProvider(
         name="acme", manifest=manifest, provider_config=ProviderConfig(type="action")
     )
@@ -340,17 +356,16 @@ def test_every_builtin_action_provider_carries_a_declaration(_isolated_home):
     at a seam, from an ungoverned action — so registration and declaration have to move
     together.
     """
-    from gideon.action_providers.registry import (
+    from gideon.integrations.action_providers.registry import (
         _ensure_default_providers_registered,
         list_action_providers,
     )
 
     _ensure_default_providers_registered()
-    missing = [n for n in list_action_providers() if au.action_type_for_provider(n) is None]
+    missing = [
+        n for n in list_action_providers() if au.action_type_for_provider(n) is None
+    ]
     assert missing == [], f"built-in providers with no autonomy declaration: {missing}"
-
-
-# ── the profile layer: narrows, never widens ──────────────────────────────────
 
 
 def test_an_unattended_profile_NARROWS_autonomous_to_auto_with_undo(_isolated_home):
@@ -362,7 +377,9 @@ def test_an_unattended_profile_NARROWS_autonomous_to_auto_with_undo(_isolated_ho
     """
     rg.ensure_core_action_types()
     attended = rg.route_provider_action("create-task", session_key="")
-    unattended = rg.route_provider_action("create-task", session_key="subagent:worker-1")
+    unattended = rg.route_provider_action(
+        "create-task", session_key="subagent:worker-1"
+    )
 
     assert attended.rung == au.RUNG_AUTONOMOUS and attended.route == rg.ROUTE_EXECUTE
     assert unattended.rung == au.RUNG_AUTO_WITH_UNDO
@@ -381,7 +398,7 @@ def test_a_profile_can_never_WIDEN_a_declared_ceiling(_isolated_home):
 
 def test_an_incident_holds_an_otherwise_autonomous_action(_isolated_home):
     """The kill switch outranks both levels — the composition still honours it."""
-    from gideon.guardrails.incident import activate, resume
+    from gideon.security.guardrails.incident import activate, resume
 
     action = _install_app_action(floor="autonomous", ceiling="autonomous")
     assert _fire_event_trigger().ran is True
@@ -390,16 +407,11 @@ def test_an_incident_holds_an_otherwise_autonomous_action(_isolated_home):
     activate("drill")
     try:
         outcome = _fire_event_trigger()
-        # The rung layer holds it too, independently of the fire path's own incident gate.
         assert rg.route_provider_action("acme-do-thing").rung == au.RUNG_ONE_TAP
     finally:
         resume()
-    # The incident gate at the top of the fire path refuses first; either way nothing ran.
     assert outcome.ran is False
     assert len(action.calls) == 1
-
-
-# ── auto_with_undo: the reversal handle ───────────────────────────────────────
 
 
 def test_auto_with_undo_persists_the_providers_reversal_handle(_isolated_home):
@@ -415,9 +427,13 @@ def test_auto_with_undo_persists_the_providers_reversal_handle(_isolated_home):
     outcome = _fire_event_trigger()
 
     assert outcome.ran is True and len(action.calls) == 1
-    from gideon.sel import sel
+    from gideon.security.sel import sel
 
-    rows = [e for e in sel().recent(200) if e.get("operation") == "guardrails.autonomy_executed"]
+    rows = [
+        e
+        for e in sel().recent(200)
+        if e.get("operation") == "guardrails.autonomy_executed"
+    ]
     assert rows, "an auto_with_undo execution left no audit row"
     assert "reversal=task:native:t-42" in rows[-1]["resources"]
     assert "rung=auto_with_undo" in rows[-1]["resources"]
@@ -438,12 +454,14 @@ def test_no_handle_means_no_undo_PROMISE(_isolated_home):
     class _Services:
         state = _State()
 
-    import gideon.action_providers.services as svc
+    import gideon.integrations.action_providers.services as svc
 
     original = svc.get_action_services
     svc.get_action_services = lambda: _Services()  # type: ignore[assignment]
     try:
-        _install_app_action(floor="auto_with_undo", ceiling="auto_with_undo", reversal="")
+        _install_app_action(
+            floor="auto_with_undo", ceiling="auto_with_undo", reversal=""
+        )
         assert _fire_event_trigger().ran is True
         assert notified == [], "an action with nothing to undo must not offer an undo"
 
@@ -465,7 +483,9 @@ def test_create_task_supplies_a_real_reversal_handle():
     to act on. Empty when the task provider returned no id — the seam then records the run
     and offers nothing, rather than offering something with nothing behind it.
     """
-    from gideon.action_providers.create_task_provider import CreateTaskActionProvider
+    from gideon.integrations.action_providers.create_task_provider import (
+        CreateTaskActionProvider,
+    )
 
     class _Task:
         id = "task-77"
@@ -473,7 +493,7 @@ def test_create_task_supplies_a_real_reversal_handle():
     async def _create_task(provider_name, **fields):
         return _Task()
 
-    import gideon.tasks.registry as treg
+    import gideon.engine.tasks.registry as treg
 
     original = treg.create_task
     treg.create_task = _create_task  # type: ignore[assignment]
@@ -489,16 +509,13 @@ def test_create_task_supplies_a_real_reversal_handle():
     assert result.reversal == "task:native:task-77"
 
 
-# ── draft_only: the proposal row ──────────────────────────────────────────────
-
-
 def test_draft_only_files_a_PROPOSAL_row_through_a_real_hook_run(_isolated_home):
     """The bottom rung, driven through `hooks.run_script_hook`.
 
     A proposal rather than an agent request because the two ask different questions:
     `draft_only` reports what an action WOULD have done, `one_tap` asks for a decision.
     """
-    from gideon.hooks import ScriptHook, run_script_hook
+    from gideon.engine.hooks import ScriptHook, run_script_hook
 
     action = _install_app_action(floor="draft_only", ceiling="one_tap")
     hook = ScriptHook(
@@ -521,14 +538,11 @@ def test_draft_only_files_a_PROPOSAL_row_through_a_real_hook_run(_isolated_home)
 def test_the_held_hook_status_projects_as_a_skipped_gate():
     """An unmapped `last_status` falls to the `RAN if last_run` default and would report a
     held action as one that succeeded — the landmine the table's own comments record."""
-    from gideon.triggers.history import HOOK_STATUS_TO_OUTCOME
-    from gideon.triggers.models import INERT_OUTCOMES, Outcome
+    from gideon.automation.triggers.history import HOOK_STATUS_TO_OUTCOME
+    from gideon.automation.triggers.models import INERT_OUTCOMES, Outcome
 
     assert HOOK_STATUS_TO_OUTCOME["held_for_rung"] == Outcome.SKIPPED_GATE.value
     assert Outcome.SKIPPED_GATE.value in INERT_OUTCOMES
-
-
-# ── the manifest block: additive, validated, round-tripped ────────────────────
 
 
 def test_a_manifest_without_an_autonomy_block_round_trips_unchanged():
@@ -580,9 +594,6 @@ def test_an_unparseable_autonomy_value_does_not_break_the_manifest():
     assert pc.autonomy == AutonomyConfig()
 
 
-# ── the third seam: the store-trigger fire path ───────────────────────────────
-
-
 def _fire_store_trigger(action: _AppAction, kind: str = "clock") -> Any:
     """Drive the REAL clock/file/webhook dispatch on a bare orchestrator.
 
@@ -592,8 +603,8 @@ def _fire_store_trigger(action: _AppAction, kind: str = "clock") -> Any:
     """
     import types
 
-    import gideon.action_providers as ap
-    from gideon.gateway import GatewayOrchestrator
+    import gideon.integrations.action_providers as ap
+    from gideon.engine.gateway import RuntimeCoordinator
 
     trigger = types.SimpleNamespace(
         id=f"{kind}:acme",
@@ -604,7 +615,9 @@ def _fire_store_trigger(action: _AppAction, kind: str = "clock") -> Any:
     try:
         ap.get_action_provider = lambda name: action  # type: ignore[assignment]
         asyncio.run(
-            object.__new__(GatewayOrchestrator)._fire_store_trigger(trigger, {"kind": kind})
+            object.__new__(RuntimeCoordinator)._fire_store_trigger(
+                trigger, {"kind": kind}
+            )
         )
     finally:
         ap.get_action_provider = original  # type: ignore[assignment]
@@ -622,14 +635,18 @@ def test_the_store_trigger_seam_HOLDS_a_declared_floor(_isolated_home):
     to a rung refusal for the same reason it applies to a screened payload — the user sees an
     automation that stopped and needs somewhere to look.
     """
-    from gideon.schedule_history import ScheduleRunStore
-    from gideon.triggers.models import Outcome
+    from gideon.automation.schedule_history import ExecutionJournal
+    from gideon.automation.triggers.models import Outcome
 
     action = _install_app_action(floor="one_tap", ceiling="auto_with_undo")
     trigger = _fire_store_trigger(action)
 
-    assert action.calls == [], "a held store-trigger action must never reach the provider"
-    runs, total = asyncio.run(ScheduleRunStore(_isolated_home).list_for_job(trigger.id, 0, 20))
+    assert (
+        action.calls == []
+    ), "a held store-trigger action must never reach the provider"
+    runs, total = asyncio.run(
+        ExecutionJournal(_isolated_home).list_for_job(trigger.id, 0, 20)
+    )
     assert total == 1, "a held fire left no ledger row"
     assert runs[0]["status"] == Outcome.SKIPPED_GATE.value
     assert "held for your approval" in runs[0]["error"]
@@ -645,22 +662,23 @@ def test_the_store_trigger_seam_records_the_reversal_handle(_isolated_home):
     _fire_store_trigger(action)
 
     assert len(action.calls) == 1
-    from gideon.sel import sel
+    from gideon.security.sel import sel
 
-    rows = [e for e in sel().recent(200) if e.get("operation") == "guardrails.autonomy_executed"]
+    rows = [
+        e
+        for e in sel().recent(200)
+        if e.get("operation") == "guardrails.autonomy_executed"
+    ]
     assert rows and "reversal=task:native:t-5" in rows[-1]["resources"]
 
 
-# ── the structural rail: a FOURTH seam cannot appear unrouted ─────────────────
-
-#: Every module that resolves an action provider and RUNS it, mirroring
-#: `test_action_provider_chokepoints.EXECUTION_SITES`. The manual Run path
-#: (`dashboard/handlers/triggers`) is excluded: a user pressing Run IS the approval a rung
-#: withholds for, and routing it would refuse the click that authorised the action.
 ROUTED_SEAMS: tuple[tuple[str, str], ...] = (
-    ("gideon.hooks", "the lifecycle-hook fire path"),
-    ("gideon.event_triggers", "the data-event fire path"),
-    ("gideon.gateway", "the clock/file/webhook store-trigger fire path"),
+    ("gideon.engine.hooks", "the lifecycle-hook fire path"),
+    ("gideon.automation.event_triggers", "the data-event fire path"),
+    (
+        "gideon.engine.trigger_dispatch",
+        "the clock/file/webhook store-trigger fire path",
+    ),
 )
 
 
@@ -679,7 +697,8 @@ def test_every_unattended_dispatch_seam_ROUTES(module_name, label):
     local_names = {
         (alias.asname or alias.name)
         for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("guardrails.rungs")
+        if isinstance(node, ast.ImportFrom)
+        and (node.module or "").endswith("guardrails.rungs")
         for alias in node.names
         if alias.name == "route_provider_action"
     }

@@ -9,7 +9,7 @@ round-trip through a string column.
 
 from __future__ import annotations
 
-from gideon.knowledge.citations import (
+from gideon.cognition.knowledge.citations import (
     EXCERPT_MAX,
     MARKER_RE,
     Citation,
@@ -22,12 +22,11 @@ from gideon.knowledge.citations import (
     strip_markers,
 )
 
-# ── the marker NUMBER is the key ──────────────────────────────────────────────
-
 
 def test_markers_key_on_number_not_order_of_appearance():
     """The claim that would silently mis-attribute everything if we got it wrong: a model
-    citing [3] before [1] means sources 3 and 1, and must never be renumbered to 1 and 2."""
+    citing [3] before [1] means sources 3 and 1, and must never be renumbered to 1 and 2.
+    """
     assert parse_markers("Latency rose [3] while cost fell [1].") == (1, 3)
 
 
@@ -45,7 +44,10 @@ def test_resolve_keys_each_citation_to_the_source_the_prompt_numbered():
         ]
     )
     res = resolve("Third says so [3]; first agrees [1].", sources)
-    assert [(c.marker, c.item_id) for c in res.citations] == [(1, "alpha"), (3, "gamma")]
+    assert [(c.marker, c.item_id) for c in res.citations] == [
+        (1, "alpha"),
+        (3, "gamma"),
+    ]
     assert res.dropped == ()
     assert res.warnings == ()
 
@@ -56,9 +58,6 @@ def test_a_marker_out_of_range_does_not_shift_the_ones_below_it():
     sources = register_sources([{"item_id": "alpha"}, {"item_id": "beta"}])
     res = resolve("Claim [9]. Other claim [1].", sources)
     assert [(c.marker, c.item_id) for c in res.citations] == [(1, "alpha")]
-
-
-# ── a dangling marker never reaches the reader ────────────────────────────────
 
 
 def test_an_unregistered_marker_is_dropped_warned_and_removed_from_the_text():
@@ -86,9 +85,6 @@ def test_text_with_no_dropped_markers_is_returned_unchanged():
     sources = register_sources([{"item_id": "alpha"}])
     original = "Two  spaces here [1]  and there."
     assert resolve(original, sources).text == original
-
-
-# ── strip_markers must not eat ordinary bracketed text ────────────────────────
 
 
 def test_strip_markers_removes_every_citation():
@@ -122,9 +118,6 @@ def test_a_restripped_synthesis_cannot_collide_with_this_turns_numbering():
     assert parse_markers(sources[0].excerpt) == ()
 
 
-# ── register_sources matches the prompt's numbering exactly ───────────────────
-
-
 def test_numbering_starts_at_one_matching_pipe_fenced_sources():
     refs = register_sources([{"item_id": "a"}, {"item_id": "b"}, {"item_id": "c"}])
     assert [r.marker for r in refs] == [1, 2, 3]
@@ -144,7 +137,10 @@ def test_register_sources_accepts_either_item_id_or_id():
 
 def test_register_sources_falls_back_through_content_summary_excerpt():
     refs = register_sources(
-        [{"item_id": "a", "summary": "the summary"}, {"item_id": "b", "excerpt": "the excerpt"}]
+        [
+            {"item_id": "a", "summary": "the summary"},
+            {"item_id": "b", "excerpt": "the excerpt"},
+        ]
     )
     assert [r.excerpt for r in refs] == ["the summary", "the excerpt"]
 
@@ -164,17 +160,18 @@ def test_excerpt_is_whitespace_collapsed_and_capped():
 
 
 def test_resolve_carries_the_chunk_and_excerpt_through():
-    sources = register_sources([{"item_id": "a", "chunk_index": 4, "content": "  body  "}])
+    sources = register_sources(
+        [{"item_id": "a", "chunk_index": 4, "content": "  body  "}]
+    )
     (citation,) = resolve("Claim [1].", sources).citations
     assert (citation.chunk_index, citation.excerpt) == (4, "body")
 
 
-# ── the persisted string form ─────────────────────────────────────────────────
-
-
 def test_persist_form_round_trips_marker_item_id_and_chunk():
     citations = [
-        Citation(marker=1, item_id="alpha", chunk_index=-1, excerpt="dropped in string form"),
+        Citation(
+            marker=1, item_id="alpha", chunk_index=-1, excerpt="dropped in string form"
+        ),
         Citation(marker=12, item_id="beta", chunk_index=0),
     ]
     encoded = persist_form(citations)
@@ -188,7 +185,9 @@ def test_persist_form_round_trips_marker_item_id_and_chunk():
 
 def test_persist_form_survives_an_item_id_containing_a_colon():
     """The id is the unbounded tail, so a colon in it cannot shift the integer fields."""
-    (decoded,) = parse_persist_form(persist_form([Citation(marker=3, item_id="ns:sub:id")]))
+    (decoded,) = parse_persist_form(
+        persist_form([Citation(marker=3, item_id="ns:sub:id")])
+    )
     assert (decoded.marker, decoded.item_id) == (3, "ns:sub:id")
 
 
@@ -206,5 +205,7 @@ def test_parse_persist_form_skips_a_malformed_cite_value():
 def test_source_ref_and_citation_are_hashable_frozen_records():
     """Frozen so a resolution cannot be edited after the fact -- an attribution that can be
     mutated in place is not evidence."""
-    assert len({SourceRef(marker=1, item_id="a"), SourceRef(marker=1, item_id="a")}) == 1
+    assert (
+        len({SourceRef(marker=1, item_id="a"), SourceRef(marker=1, item_id="a")}) == 1
+    )
     assert len({Citation(marker=1, item_id="a"), Citation(marker=2, item_id="a")}) == 2

@@ -25,9 +25,9 @@ frontier decision to normalize, which is itself the property this module protect
 Regenerating these fixtures is a deliberate act, not a convenience: run this module as a script,
 with the tree under test pinned —
 
-    PYTHONPATH=$PWD/src python tests/test_workflows_frontier_golden.py
+    PYTHONPATH=$PWD/src python checks/runtime/test_workflows_frontier_golden.py
 
-The `PYTHONPATH` is not optional. A bare `python tests/…py` resolves `gideon` through the
+The `PYTHONPATH` is not optional. A bare `python checks/runtime/…py` resolves `gideon` through the
 venv's editable install, which points at the main checkout, so from a git worktree it would capture
 a DIFFERENT tree's decisions and commit them as this branch's proof. (`pytest` is immune —
 `pyproject.toml`'s `pythonpath = ["src", "."]` is resolved relative to rootdir.) There is no
@@ -43,19 +43,14 @@ import re
 from pathlib import Path
 from typing import Any
 
-from gideon.workflows.bundled_defs import read_template, template_names
-from gideon.workflows.models import InstanceState, Node, NodeKind, walk
-from gideon.workflows.tick import Frontier, Limits, frontier
+from gideon.automation.workflows.bundled_defs import read_template, template_names
+from gideon.automation.workflows.models import InstanceState, Node, NodeKind, walk
+from gideon.automation.workflows.tick import Frontier, Limits, frontier
 
 GOLDEN_DIR = Path(__file__).parent / "fixtures" / "frontier_golden"
 
-#: Bound on the trajectory. Every bundled template settles well inside this; the cap exists so a
-#: template that cannot progress produces a finite capture instead of hanging the suite.
 MAX_TICKS = 24
 
-#: Handed to every completed node as its output. Deliberately rich enough that downstream
-#: `branch` selectors route and downstream `foreach` bindings resolve to a real list — an
-#: `items` that resolved to nothing would make the fan-out policies unobservable.
 _NODE_OUTPUT: dict[str, Any] = {
     "ok": True,
     "case": "yes",
@@ -68,8 +63,6 @@ _NODE_OUTPUT: dict[str, Any] = {
     "decision": "proceed",
 }
 
-#: Run inputs. Templates declare inputs and bind them into items/selectors; an unresolvable input
-#: would silently shrink the captured decision set.
 _INPUTS: dict[str, Any] = {
     "topic": "golden",
     "goal": "golden",
@@ -80,8 +73,6 @@ _INPUTS: dict[str, Any] = {
     "count": 3,
 }
 
-#: The four admission scenarios. `busy` pre-saturates the lanes from `running_lanes`, which is the
-#: only way to observe `deferred` on a template whose ready set is smaller than a default cap.
 SCENARIOS: list[dict[str, Any]] = [
     {"name": "default", "limits": None, "running_lanes": None, "wip": False},
     {
@@ -104,7 +95,6 @@ def _limits_for(spec: dict[str, int] | None) -> Limits | None:
     return None if spec is None else Limits(lanes=dict(spec))
 
 
-#: `{{nodes.triage.output.tier}}` — the shape every bundled branch uses for its selector.
 _SELECTOR = re.compile(r"\{\{\s*nodes\.([A-Za-z0-9_.\-]+)\.output\.([A-Za-z0-9_\-]+)")
 
 
@@ -128,9 +118,6 @@ def _routing_seeds(root: Node) -> dict[str, dict[str, Any]]:
             continue
         seeds.setdefault(match.group(1), {})[match.group(2)] = next(iter(node.cases))
     return seeds
-
-
-# ── the synthetic policy matrix ───────────────────────────────────────────────
 
 
 def _fanout_spec(name: str, *, max_concurrency: int | None) -> dict[str, Any]:
@@ -157,8 +144,16 @@ def _fanout_spec(name: str, *, max_concurrency: int | None) -> dict[str, Any]:
                         "id": "body",
                         "kind": "sequence",
                         "children": [
-                            {"id": "stage-a", "kind": "transform", "config": {"expr": "1"}},
-                            {"id": "stage-b", "kind": "transform", "config": {"expr": "2"}},
+                            {
+                                "id": "stage-a",
+                                "kind": "transform",
+                                "config": {"expr": "1"},
+                            },
+                            {
+                                "id": "stage-b",
+                                "kind": "transform",
+                                "config": {"expr": "2"},
+                            },
                         ],
                     },
                 }
@@ -167,11 +162,6 @@ def _fanout_spec(name: str, *, max_concurrency: int | None) -> dict[str, Any]:
     }
 
 
-#: `(spec name, max_concurrency, wip)`. The last row is the tie: `max_concurrency: 1` with the
-#: run-level WIP=1 invariant also in force. Both container policies bind at 1, and today's code
-#: (`cap = 1 if wip else _max_concurrency(node)`) gives WIP the refusal's name — so the refusal
-#: lands in `wip_held`, not nowhere. That tie is the single most refactor-fragile decision in the
-#: whole admission step, which is why it is a golden row rather than a comment.
 POLICY_MATRIX: list[tuple[str, int | None, bool]] = [
     ("uncapped", None, False),
     ("uncapped-wip", None, True),
@@ -180,9 +170,6 @@ POLICY_MATRIX: list[tuple[str, int | None, bool]] = [
     ("cap1", 1, False),
     ("cap1-wip", 1, True),
 ]
-
-
-# ── the deterministic trajectory driver ──────────────────────────────────────
 
 
 def _snapshot(spec: str, scenario: str, tick: int, fr: Frontier) -> dict[str, Any]:
@@ -250,7 +237,9 @@ def _trajectory(spec_name: str, root: Node, scenario: dict[str, Any]) -> list[st
         )
         lines.append(
             json.dumps(
-                _snapshot(spec_name, scenario["name"], tick, fr), ensure_ascii=False, default=str
+                _snapshot(spec_name, scenario["name"], tick, fr),
+                ensure_ascii=False,
+                default=str,
             )
         )
         if fr.complete or fr.blocked:
@@ -262,7 +251,9 @@ def _trajectory(spec_name: str, root: Node, scenario: dict[str, Any]) -> list[st
                 progressed = True
         for item in fr.ready:
             states[item.path] = InstanceState.DONE
-            outputs.setdefault(item.node_id, {**_NODE_OUTPUT, **seeds.get(item.node_id, {})})
+            outputs.setdefault(
+                item.node_id, {**_NODE_OUTPUT, **seeds.get(item.node_id, {})}
+            )
             progressed = True
         if not progressed:
             for path in fr.waiting:
@@ -302,9 +293,6 @@ def _capture_policies() -> list[str]:
         starved = dict(roomy, name="starved", limits={"llm": 1, "io": 1, "compute": 1})
         lines.extend(_trajectory(label, root, starved))
     return lines
-
-
-# ── the comparison ───────────────────────────────────────────────────────────
 
 
 def _assert_golden(name: str, actual: list[str]) -> None:
@@ -354,10 +342,12 @@ def test_the_golden_captured_every_admission_outcome():
     assert any(f["complete"] for f in bundled), "no template ever ran to completion"
     assert any(f["blocked"] for f in bundled), "the deadlock branch was never captured"
 
-    assert any(f["wip_held"] for f in policies), "the WIP=1 invariant never held an item"
-    assert any(f["deferred"] for f in policies), "the starved-lane pass admitted everything"
-    # `max_concurrency` binding without WIP: capped rows must at some tick launch strictly fewer
-    # item bodies than the uncapped row does at the same tick.
+    assert any(
+        f["wip_held"] for f in policies
+    ), "the WIP=1 invariant never held an item"
+    assert any(
+        f["deferred"] for f in policies
+    ), "the starved-lane pass admitted everything"
     capped = {
         f["tick"]
         for f in policies
@@ -367,19 +357,18 @@ def test_the_golden_captured_every_admission_outcome():
     uncapped = {
         f["tick"]
         for f in policies
-        if f["spec"] == "uncapped" and f["scenario"] == "default" and len(f["ready"]) == 5
+        if f["spec"] == "uncapped"
+        and f["scenario"] == "default"
+        and len(f["ready"]) == 5
     }
     assert uncapped, "the uncapped fan-out never launched all five items at once"
 
-    # The tie: `max_concurrency: 1` + WIP=1. The refusal must carry WIP's name.
     tie = [f for f in policies if f["spec"] == "cap1-wip" and f["wip_held"]]
     assert tie, (
         "the cap tie was never captured: with max_concurrency=1 AND the run-level WIP=1 "
         "invariant, the refusal must still be named `wip_held` — a declared invariant being "
         "enforced, not anonymous container pressure"
     )
-    # And its non-WIP twin must refuse the same items ANONYMOUSLY — that asymmetry is the
-    # `wip_held` vs `deferred` distinction this atom is forbidden to collapse.
     twin = [f for f in policies if f["spec"] == "cap1" and f["scenario"] == "default"]
     assert twin, "the cap1 control row is missing"
     assert not any(f["wip_held"] or f["deferred"] for f in twin), (
@@ -402,8 +391,8 @@ def test_the_frontier_module_reads_no_clock_and_does_no_io():
     because the impurity that matters is the one on a rarely-taken branch, which no single call
     would execute.
     """
-    import gideon.workflows.admission as admission_mod
-    import gideon.workflows.tick as tick_mod
+    import gideon.automation.workflows.admission as admission_mod
+    import gideon.automation.workflows.tick as tick_mod
 
     banned_modules = {
         "time",
@@ -419,8 +408,8 @@ def test_the_frontier_module_reads_no_clock_and_does_no_io():
         "threading",
         "asyncio",
         "logging",
-        "gideon.workflows.store",
-        "gideon.workflows.journal",
+        "gideon.automation.workflows.store",
+        "gideon.automation.workflows.journal",
     }
     banned_calls = {"open", "input", "print", "id"}
 
@@ -435,7 +424,9 @@ def test_the_frontier_module_reads_no_clock_and_does_no_io():
                 names = [node.module or ""]
             elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
                 if node.func.id in banned_calls:
-                    offenders.append(f"{path.name}:{node.lineno} calls {node.func.id}()")
+                    offenders.append(
+                        f"{path.name}:{node.lineno} calls {node.func.id}()"
+                    )
                 continue
             else:
                 continue
@@ -466,13 +457,15 @@ def test_the_frontier_is_deterministic_across_repeated_calls():
     assert inputs == _INPUTS, "frontier() mutated the inputs it was handed"
 
 
-# ── deliberate regeneration ──────────────────────────────────────────────────
-
-
 def _regenerate() -> None:
     GOLDEN_DIR.mkdir(parents=True, exist_ok=True)
-    for name, lines in (("bundled", _capture_bundled()), ("policies", _capture_policies())):
-        (GOLDEN_DIR / f"{name}.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    for name, lines in (
+        ("bundled", _capture_bundled()),
+        ("policies", _capture_policies()),
+    ):
+        (GOLDEN_DIR / f"{name}.jsonl").write_text(
+            "\n".join(lines) + "\n", encoding="utf-8"
+        )
         print(f"wrote {name}.jsonl ({len(lines)} decisions)")
     print(f"goldens in {GOLDEN_DIR}")
 

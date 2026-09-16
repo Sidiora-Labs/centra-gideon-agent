@@ -27,11 +27,9 @@ from importlib.metadata import version as _dist_version
 
 import pytest
 
-from gideon.apps import app_manager
-from gideon.apps.manifest import AppManifest
+from gideon.extensions.apps import app_manager
+from gideon.extensions.apps.manifest import AppManifest
 
-# A core-declared dependency, measured from the installed distribution's metadata
-# (not pyproject.toml, which a wheel does not ship). numpy is core: `numpy>=1.21,<3`.
 _CORE_NAME = "numpy"
 
 
@@ -56,10 +54,9 @@ def no_pip(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(app_manager.subprocess, "run", unreachable)
 
 
-# ── The refusals ──────────────────────────────────────────────────────────────
-
-
-def test_a_conflicting_core_pin_is_refused_and_leaves_the_gateway_untouched(no_pip) -> None:
+def test_a_conflicting_core_pin_is_refused_and_leaves_the_gateway_untouched(
+    no_pip,
+) -> None:
     """The atom's clause, with a real conflicting pin: core runs numpy>=1.21, the app
     demands <1.21, so pip could only satisfy it by downgrading the gateway's numpy."""
     before = _dist_version(_CORE_NAME)
@@ -69,7 +66,6 @@ def test_a_conflicting_core_pin_is_refused_and_leaves_the_gateway_untouched(no_p
 
     msg = str(ei.value)
     assert _CORE_NAME in msg and "refused" in msg, msg
-    # The gateway's own dependency is byte-for-byte the version it was running.
     assert _dist_version(_CORE_NAME) == before
 
 
@@ -111,10 +107,9 @@ def _installed(name: str) -> str | None:
         return None
 
 
-# ── What must stay installable (the guard's blast radius) ─────────────────────
-
-
-def test_the_real_compatible_core_pin_is_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_real_compatible_core_pin_is_allowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The vacuity floor: this is `diarization-onnx`'s ACTUAL pin (`numpy>=1.24`), the
     one real first-party collision with a core name. The guard evaluates a core-owned
     name here and ALLOWS it — so the rail is matching real input, not nothing.
@@ -124,11 +119,12 @@ def test_the_real_compatible_core_pin_is_allowed(monkeypatch: pytest.MonkeyPatch
         "numpy is no longer core-declared — this test's premise, and the guard's only "
         "real first-party collision, is gone"
     )
-    # No pip spawn expected either: the pin is already satisfied, so it is a no-op.
     monkeypatch.setattr(
         app_manager.subprocess,
         "run",
-        lambda cmd, **kw: (_ for _ in ()).throw(AssertionError(f"unexpected pip: {cmd}")),
+        lambda cmd, **kw: (_ for _ in ()).throw(
+            AssertionError(f"unexpected pip: {cmd}")
+        ),
     )
     assert app_manager._install_python_deps(_manifest([f"{_CORE_NAME}>=1.24"])) is False
     assert _dist_version(_CORE_NAME) == installed
@@ -146,20 +142,24 @@ def test_extras_are_not_core_so_provider_apps_stay_installable() -> None:
     """
     core = app_manager._core_requirement_pins()
     for name in (
-        "openai",  # 12 provider apps
-        "anthropic",  # anthropic-models, anthropic-compatible
-        "boto3",  # bedrock-models
-        "slack-sdk",  # slack-channel
+        "openai",
+        "anthropic",
+        "boto3",
+        "slack-sdk",
         "faster-whisper",
         "sentence-transformers",
         "piper-tts",
         "huggingface-hub",
         "faiss-cpu",
     ):
-        assert name not in core, f"{name} became a CORE dep — dep-declaring apps now refuse"
+        assert (
+            name not in core
+        ), f"{name} became a CORE dep — dep-declaring apps now refuse"
 
 
-def test_a_non_core_pin_is_untouched_by_the_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_non_core_pin_is_untouched_by_the_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A library core does not own passes straight through to pip, unchanged."""
     calls: list[list[str]] = []
 
@@ -172,7 +172,10 @@ def test_a_non_core_pin_is_untouched_by_the_guard(monkeypatch: pytest.MonkeyPatc
         app_manager.subprocess, "run", lambda cmd, **kw: (calls.append(cmd), _OK())[1]
     )
     assert (
-        app_manager._install_python_deps(_manifest(["totally-not-a-real-pkg-xyz==9.9.9"])) is True
+        app_manager._install_python_deps(
+            _manifest(["totally-not-a-real-pkg-xyz==9.9.9"])
+        )
+        is True
     )
     assert calls, "the guard swallowed a perfectly legal non-core requirement"
 
@@ -210,10 +213,8 @@ def test_every_real_first_party_dep_declaration_passes_the_guard(no_pip) -> None
         "together-models": ["openai>=1.0"],
         "vllm-models": ["openai>=1.0"],
     }
-    assert len(real_declarations) == 20  # the measured population
+    assert len(real_declarations) == 20
     for app, deps in real_declarations.items():
-        # The guard alone — not the installer — so an absent heavy wheel cannot
-        # masquerade as a refusal.
         app_manager._reject_core_dependency_conflicts(_manifest(deps, name=app), deps)
 
 
@@ -235,6 +236,5 @@ def test_core_pins_exclude_extras_by_marker_not_by_name_list() -> None:
     would rot the moment core gained an extra."""
     core = app_manager._core_requirement_pins()
     assert "numpy" in core and "httpx" in core, sorted(core)
-    # `gideon` self-references appear only under extras (dev/all bundles).
     assert "gideon" not in core
-    assert json.dumps(sorted(core))  # names are plain strings, safely serializable
+    assert json.dumps(sorted(core))

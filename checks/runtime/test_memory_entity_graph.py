@@ -13,20 +13,20 @@ from pathlib import Path
 
 import pytest
 
-from gideon.memory_graph import ENTITY_TYPES, LINK_TYPES, AliasIndex, Entity
-from gideon.memory_linker import (
+from gideon.cognition.memory_graph import ENTITY_TYPES, LINK_TYPES, AliasIndex, Entity
+from gideon.cognition.memory_linker import (
     backfill,
     classify_link,
     link_record,
     seed_from_knowledge,
     seed_from_memory_facts,
 )
-from gideon.vector_memory import VectorMemoryStore
+from gideon.cognition.vector_memory import SemanticArchive
 
 
 @pytest.fixture
 def store():
-    s = VectorMemoryStore(db_path=Path(tempfile.mkdtemp()) / "m.db", embedding_dim=3)
+    s = SemanticArchive(db_path=Path(tempfile.mkdtemp()) / "m.db", embedding_dim=3)
     s.init()
     return s
 
@@ -44,19 +44,26 @@ def _seeded(store, graph):
     return project, person
 
 
-# ── Migration ──
-
-
 class TestMigrationV7:
     def test_v7_is_applied(self, store):
-        versions = {r[0] for r in store.db.execute("SELECT version FROM schema_version")}
+        versions = {
+            r[0] for r in store.db.execute("SELECT version FROM schema_version")
+        }
         assert 7 in versions
 
     def test_graph_tables_exist(self, store):
         names = {
-            r[0] for r in store.db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            r[0]
+            for r in store.db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
         }
-        assert {"mem_entities", "mem_links", "mem_link_stats", "mem_entity_proposals"} <= names
+        assert {
+            "mem_entities",
+            "mem_links",
+            "mem_link_stats",
+            "mem_entity_proposals",
+        } <= names
 
     def test_migration_is_idempotent(self, store):
         """Re-running init must not duplicate or fail (ADD COLUMN has no IF NOT EXISTS)."""
@@ -69,7 +76,7 @@ class TestMigrationV7:
         store.db.execute("CREATE TABLE knowledge_facts (id TEXT)")
         store.db.execute("INSERT INTO knowledge_facts VALUES ('keep-me')")
         store.db.commit()
-        from gideon.vector_memory import _migrate_v7
+        from gideon.cognition.vector_memory import _migrate_v7
 
         with caplog.at_level("WARNING"):
             _migrate_v7(store.db)
@@ -78,13 +85,12 @@ class TestMigrationV7:
         assert [r[0] for r in rows] == ["keep-me"]
 
 
-# ── The alias matcher ──
-
-
 class TestAliasIndex:
     def test_matches_name_and_aliases(self):
         index = AliasIndex()
-        index.add_entity(Entity("e1", "Gideon", "project", aliases=("gideon", "p-gideon")))
+        index.add_entity(
+            Entity("e1", "Gideon", "project", aliases=("gideon", "p-gideon"))
+        )
         for text in ("I use Gideon daily", "gideon is fast", "the p-gideon repo"):
             assert [m.entity_id for m in index.find(text)] == ["e1"], text
 
@@ -114,7 +120,6 @@ class TestAliasIndex:
         assert index.add("e1", "AI") is False
         assert index.add("e1", "ML") is False
         assert index.add("e1", "Gideon") is True
-        # Multi-token phrases are specific enough to bypass the floor.
         assert index.add("e2", "AI Safety") is True
 
     def test_empty_and_unmatched_text(self):
@@ -144,7 +149,6 @@ class TestAliasIndex:
         index.add_entity(Entity("e1", "Gideon", "project"))
         found = index.unknown_capitalized("Dana Whitfield reviewed Gideon on Tuesday")
         assert "Dana Whitfield" in found
-        # A known entity is not "unknown", and lone capitalized words are noise.
         assert not any("Gideon" in f for f in found)
         assert "Tuesday" not in found
 
@@ -157,9 +161,6 @@ class TestAliasIndex:
         first = [(m.entity_id, m.start, m.end) for m in index.find(text)]
         for _ in range(5):
             assert [(m.entity_id, m.start, m.end) for m in index.find(text)] == first
-
-
-# ── Entities ──
 
 
 class TestEntities:
@@ -194,7 +195,10 @@ class TestEntities:
     def test_delete_removes_links_and_stats(self, graph):
         eid = graph.upsert_entity("Gideon", "project")
         graph.add_link(
-            from_kind="semantic", from_ref="project.a.note", to_entity=eid, link_type="mentions"
+            from_kind="semantic",
+            from_ref="project.a.note",
+            to_entity=eid,
+            link_type="mentions",
         )
         assert graph.delete_entity(eid) is True
         assert graph.backlinks(eid) == []
@@ -211,14 +215,14 @@ class TestEntities:
             assert graph.upsert_entity(f"thing-{i}", etype)
 
 
-# ── Links ──
-
-
 class TestLinks:
     def test_add_and_read(self, graph):
         eid = graph.upsert_entity("Gideon", "project")
         assert graph.add_link(
-            from_kind="semantic", from_ref="project.a", to_entity=eid, link_type="mentions"
+            from_kind="semantic",
+            from_ref="project.a",
+            to_entity=eid,
+            link_type="mentions",
         )
         links = graph.links_from("semantic", "project.a")
         assert len(links) == 1
@@ -229,10 +233,16 @@ class TestLinks:
         """A record rewritten ten times must not look ten times as connected."""
         eid = graph.upsert_entity("Gideon", "project")
         first = graph.add_link(
-            from_kind="semantic", from_ref="project.a", to_entity=eid, link_type="mentions"
+            from_kind="semantic",
+            from_ref="project.a",
+            to_entity=eid,
+            link_type="mentions",
         )
         again = graph.add_link(
-            from_kind="semantic", from_ref="project.a", to_entity=eid, link_type="mentions"
+            from_kind="semantic",
+            from_ref="project.a",
+            to_entity=eid,
+            link_type="mentions",
         )
         assert first is True and again is False
         assert len(graph.backlinks(eid)) == 1
@@ -242,7 +252,10 @@ class TestLinks:
         eid = graph.upsert_entity("Gideon", "project")
         with pytest.raises(ValueError):
             graph.add_link(
-                from_kind="semantic", from_ref="a", to_entity=eid, link_type="vibes_with"
+                from_kind="semantic",
+                from_ref="a",
+                to_entity=eid,
+                link_type="vibes_with",
             )
 
     def test_exactly_one_target_is_required(self, graph):
@@ -266,7 +279,9 @@ class TestLinks:
 
     def test_remove_link_decrements_stats(self, graph):
         eid = graph.upsert_entity("Gideon", "project")
-        graph.add_link(from_kind="semantic", from_ref="a", to_entity=eid, link_type="mentions")
+        graph.add_link(
+            from_kind="semantic", from_ref="a", to_entity=eid, link_type="mentions"
+        )
         link_id = graph.backlinks(eid)[0]["id"]
         assert graph.remove_link(link_id) is True
         assert graph.stats(eid)["inbound_count"] == 0
@@ -274,44 +289,57 @@ class TestLinks:
 
     def test_drop_links_for_a_record(self, graph):
         eid = graph.upsert_entity("Gideon", "project")
-        graph.add_link(from_kind="semantic", from_ref="a", to_entity=eid, link_type="mentions")
-        graph.add_link(from_kind="semantic", from_ref="a", to_ref="b", link_type="references")
+        graph.add_link(
+            from_kind="semantic", from_ref="a", to_entity=eid, link_type="mentions"
+        )
+        graph.add_link(
+            from_kind="semantic", from_ref="a", to_ref="b", link_type="references"
+        )
         assert graph.drop_links_for("semantic", "a") == 2
         assert graph.links_from("semantic", "a") == []
         assert graph.stats(eid)["inbound_count"] == 0
 
     def test_stats_never_go_negative(self, graph):
         eid = graph.upsert_entity("Gideon", "project")
-        graph.add_link(from_kind="semantic", from_ref="a", to_entity=eid, link_type="mentions")
+        graph.add_link(
+            from_kind="semantic", from_ref="a", to_entity=eid, link_type="mentions"
+        )
         graph.drop_links_for("semantic", "a")
         graph.drop_links_for("semantic", "a")
         assert graph.stats(eid)["inbound_count"] == 0
 
 
-# ── The typed-edge cascade ──
-
-
 class TestCascade:
     def _mention(self, entity_id="e1"):
-        from gideon.memory_graph import Mention
+        from gideon.cognition.memory_graph import Mention
 
         return Mention(entity_id, "Gideon", 0, 12)
 
     def test_persona_key_yields_about(self):
-        assert classify_link("user.persona.abc123", "Gideon", self._mention(), {}) == "about"
+        assert (
+            classify_link("user.persona.abc123", "Gideon", self._mention(), {})
+            == "about"
+        )
 
     def test_identity_facet_key_yields_about(self):
-        assert classify_link("pref.facet.identity.deadbeef", "x", self._mention(), {}) == "about"
+        assert (
+            classify_link("pref.facet.identity.deadbeef", "x", self._mention(), {})
+            == "about"
+        )
 
     def test_project_key_plus_project_entity_yields_same_project(self):
         assert (
-            classify_link("project.gideon.note", "Gideon", self._mention(), {"e1": "project"})
+            classify_link(
+                "project.gideon.note", "Gideon", self._mention(), {"e1": "project"}
+            )
             == "same_project"
         )
 
     def test_project_key_with_a_person_does_not_claim_affiliation(self):
         assert (
-            classify_link("project.gideon.note", "Keyur", self._mention(), {"e1": "person"})
+            classify_link(
+                "project.gideon.note", "Keyur", self._mention(), {"e1": "person"}
+            )
             != "same_project"
         )
 
@@ -322,7 +350,10 @@ class TestCascade:
         )
 
     def test_plain_text_falls_back_to_mentions(self):
-        assert classify_link("user.note.a", "just a note", self._mention(), {}) == "mentions"
+        assert (
+            classify_link("user.note.a", "just a note", self._mention(), {})
+            == "mentions"
+        )
 
     def test_cascade_only_emits_known_types(self):
         for key, text in (
@@ -331,10 +362,10 @@ class TestCascade:
             ("user.note.c", "https://x.dev"),
             ("user.note.d", "plain"),
         ):
-            assert classify_link(key, text, self._mention(), {"e1": "project"}) in LINK_TYPES
-
-
-# ── Write-time linking ──
+            assert (
+                classify_link(key, text, self._mention(), {"e1": "project"})
+                in LINK_TYPES
+            )
 
 
 class TestWriteTimeLinking:
@@ -342,7 +373,10 @@ class TestWriteTimeLinking:
         project, person = _seeded(store, graph)
         assert (
             store.set_semantic(
-                "project.gideon.note", "Keyur Golani refactored gideon", 0.9, "user_explicit"
+                "project.gideon.note",
+                "Keyur Golani refactored gideon",
+                0.9,
+                "user_explicit",
             )
             is None
         )
@@ -356,7 +390,9 @@ class TestWriteTimeLinking:
 
     def test_links_carry_a_context_snippet(self, store, graph):
         _seeded(store, graph)
-        store.set_semantic("user.note.a", "met Keyur Golani at the office", 0.9, "user_explicit")
+        store.set_semantic(
+            "user.note.a", "met Keyur Golani at the office", 0.9, "user_explicit"
+        )
         link = graph.links_from("semantic", "user.note.a")[0]
         assert "Keyur Golani" in (link["context"] or "")
 
@@ -364,7 +400,10 @@ class TestWriteTimeLinking:
         _seeded(store, graph)
         for i in range(5):
             store.set_semantic(
-                "project.gideon.note", f"gideon rev {i} by Keyur Golani", 0.9, "user_explicit"
+                "project.gideon.note",
+                f"gideon rev {i} by Keyur Golani",
+                0.9,
+                "user_explicit",
             )
         assert graph.summary()["links"] == 2
 
@@ -372,7 +411,9 @@ class TestWriteTimeLinking:
         _seeded(store, graph)
         store.set_semantic("user.note.a", "about Keyur Golani", 0.9, "user_explicit")
         assert len(graph.links_from("semantic", "user.note.a")) == 1
-        store.set_semantic("user.note.a", "about nobody in particular", 1.0, "user_explicit")
+        store.set_semantic(
+            "user.note.a", "about nobody in particular", 1.0, "user_explicit"
+        )
         assert graph.links_from("semantic", "user.note.a") == []
 
     def test_episodic_write_links_and_groups_by_conversation(self, store, graph):
@@ -400,8 +441,10 @@ class TestWriteTimeLinking:
 
     def test_rejected_write_creates_no_links(self, store, graph):
         _seeded(store, graph)
-        # A non-allowlisted key is rejected, so nothing should be linked.
-        assert store.set_semantic("bogus.key", "Keyur Golani", 0.9, "user_explicit") is not None
+        assert (
+            store.set_semantic("bogus.key", "Keyur Golani", 0.9, "user_explicit")
+            is not None
+        )
         assert graph.summary()["links"] == 0
 
     def test_disabling_the_graph_stops_linking(self, store, graph):
@@ -413,13 +456,16 @@ class TestWriteTimeLinking:
     def test_linker_failure_never_fails_the_write(self, store, graph, monkeypatch):
         """A linking bug must degrade to 'no links', never reject the user's data."""
         _seeded(store, graph)
-        import gideon.memory_linker as linker_mod
+        import gideon.cognition.memory_linker as linker_mod
 
         def _boom(*a, **k):
             raise RuntimeError("linker exploded")
 
         monkeypatch.setattr(linker_mod, "link_record", _boom)
-        assert store.set_semantic("user.note.a", "Keyur Golani", 0.9, "user_explicit") is None
+        assert (
+            store.set_semantic("user.note.a", "Keyur Golani", 0.9, "user_explicit")
+            is None
+        )
         assert store.get_semantic("user.note.a") is not None
 
     def test_link_record_reports_what_it_did(self, store, graph):
@@ -435,7 +481,7 @@ class TestWriteTimeLinking:
         )
         assert report["links"] == 2
         assert report["mentions"] == 2
-        assert report["proposals"] == 1  # Dana Whitfield is proposed, not created
+        assert report["proposals"] == 1
         assert len(report["entities"]) == 2
 
     def test_write_makes_no_llm_calls(self, store, graph):
@@ -445,25 +491,29 @@ class TestWriteTimeLinking:
         store.embed_fn = lambda t: (calls.append(t), [1.0, 0.0, 0.0])[1]
         before = len(calls)
         store.link_written_record(
-            from_kind="semantic", from_ref="user.note.a", key="user.note.a", text="gideon"
+            from_kind="semantic",
+            from_ref="user.note.a",
+            key="user.note.a",
+            text="gideon",
         )
         assert len(calls) == before
-
-
-# ── The notability gate ──
 
 
 class TestProposals:
     def test_unknown_name_does_not_become_an_entity(self, store, graph):
         _seeded(store, graph)
         before = len(graph.entities())
-        store.set_semantic("user.note.a", "met Dana Whitfield today", 0.9, "user_explicit")
+        store.set_semantic(
+            "user.note.a", "met Dana Whitfield today", 0.9, "user_explicit"
+        )
         assert len(graph.entities()) == before
 
     def test_promotion_needs_distinct_records(self, store, graph):
         _seeded(store, graph)
         for i in range(3):
-            store.set_semantic(f"user.note.{i}", "Dana Whitfield again", 0.9, "user_explicit")
+            store.set_semantic(
+                f"user.note.{i}", "Dana Whitfield again", 0.9, "user_explicit"
+            )
         proposals = {p["name"]: p["mention_count"] for p in graph.proposals()}
         assert proposals.get("Dana Whitfield") == 3
 
@@ -496,14 +546,13 @@ class TestProposals:
     def test_accepting_links_records_that_already_mentioned_it(self, store, graph):
         """Adding an entity should connect the past, not only the future."""
         _seeded(store, graph)
-        store.set_semantic("user.note.a", "Dana Whitfield reviewed it", 0.9, "user_explicit")
+        store.set_semantic(
+            "user.note.a", "Dana Whitfield reviewed it", 0.9, "user_explicit"
+        )
         eid = graph.accept_proposal("Dana Whitfield", "person")
         store.invalidate_alias_index()
         backfill(graph)
         assert len(graph.backlinks(eid)) == 1
-
-
-# ── Reversibility ──
 
 
 class TestReversibility:
@@ -541,7 +590,10 @@ class TestReversibility:
     def test_undo_link_remove_restores_the_edge(self, store, graph):
         eid = graph.upsert_entity("Gideon", "project")
         graph.add_link(
-            from_kind="semantic", from_ref="user.note.a", to_entity=eid, link_type="mentions"
+            from_kind="semantic",
+            from_ref="user.note.a",
+            to_entity=eid,
+            link_type="mentions",
         )
         link_id = graph.backlinks(eid)[0]["id"]
         graph.remove_link(link_id)
@@ -564,9 +616,6 @@ class TestReversibility:
         assert "unreadable" in msg
 
 
-# ── Seeding ──
-
-
 class TestSeeding:
     def test_seeds_projects_from_project_keys(self, store, graph):
         store.set_semantic("project.gideon.tool", "uses pytest", 0.9, "user_explicit")
@@ -581,7 +630,9 @@ class TestSeeding:
             "facet",
         )
         seed_from_memory_facts(graph)
-        assert [e.name for e in graph.entities() if e.entity_type == "person"] == ["Dana Whitfield"]
+        assert [e.name for e in graph.entities() if e.entity_type == "person"] == [
+            "Dana Whitfield"
+        ]
 
     def test_a_non_name_identity_facet_mints_nobody(self, store, graph):
         """ "prefers terse replies" is an identity facet with no person in it."""
@@ -607,9 +658,11 @@ class TestSeeding:
             "updated_at, is_deleted) VALUES ('project.x.a', '{bad', 0.9, 's', 'n', 'n', 0)"
         )
         store.db.commit()
-        seed_from_memory_facts(graph)  # must not raise
+        seed_from_memory_facts(graph)
 
-    def test_knowledge_seed_is_read_only_and_survives_a_missing_store(self, graph, tmp_path):
+    def test_knowledge_seed_is_read_only_and_survives_a_missing_store(
+        self, graph, tmp_path
+    ):
         assert seed_from_knowledge(graph, tmp_path / "nope.db") == 0
 
     def test_knowledge_entities_are_adopted_with_aliases(self, graph, tmp_path):
@@ -631,7 +684,6 @@ class TestSeeding:
         entity = graph.entities()[0]
         assert entity.name == "Acme Corp"
         assert "Acme" in entity.aliases
-        # The knowledge id is kept as a hint, never as a foreign key.
         assert entity.source == "knowledge:k1"
 
     def test_unknown_knowledge_type_is_normalized_not_dropped(self, graph, tmp_path):
@@ -652,14 +704,10 @@ class TestSeeding:
         assert graph.entities()[0].entity_type == "topic"
 
 
-# ── Backfill ──
-
-
 class TestBackfill:
     def test_links_existing_records(self, store, graph):
         store.set_semantic("project.gideon.a", "gideon notes", 0.9, "user_explicit")
         store.write_episodic("worked on gideon", conversation_id="c1")
-        # Entity added AFTER the records exist — nothing is linked yet.
         graph.upsert_entity("Gideon", "project", aliases=["gideon"])
         store.invalidate_alias_index()
         result = backfill(graph)
@@ -689,9 +737,6 @@ class TestBackfill:
         assert backfill(graph, limit=2)["records_processed"] <= 4
 
 
-# ── Lint + summary ──
-
-
 class TestLintAndSummary:
     def test_orphan_counts(self, store, graph):
         store.set_semantic("user.note.a", "nothing known here", 0.9, "user_explicit")
@@ -704,7 +749,7 @@ class TestLintAndSummary:
         assert graph.orphan_counts()["phantom_entities"] == 1
 
     def test_lint_reports_graph_flags(self, store, graph):
-        from gideon.memory_lint import lint_memory
+        from gideon.cognition.memory_lint import lint_memory
 
         store.set_semantic("user.note.a", "unlinked note", 0.9, "user_explicit")
         graph.upsert_entity("Unused Thing", "topic")
@@ -718,7 +763,7 @@ class TestLintAndSummary:
     def test_no_entities_means_no_orphan_noise(self, store, graph):
         """Before any entity exists every record is trivially unlinked; saying so
         for each one would bury the health tab in unactionable noise."""
-        from gideon.memory_lint import lint_memory
+        from gideon.cognition.memory_lint import lint_memory
 
         for i in range(3):
             store.set_semantic(f"user.note.{i}", "some note", 0.9, "user_explicit")
@@ -726,7 +771,7 @@ class TestLintAndSummary:
         assert "graph_orphans" not in {f["check"] for f in lint_memory(store).flags}
 
     def test_orphans_are_reported_once_entities_exist(self, store, graph):
-        from gideon.memory_lint import lint_memory
+        from gideon.cognition.memory_lint import lint_memory
 
         graph.upsert_entity("Gideon", "project")
         store.invalidate_alias_index()
@@ -734,7 +779,7 @@ class TestLintAndSummary:
         assert "graph_orphans" in {f["check"] for f in lint_memory(store).flags}
 
     def test_lint_skips_graph_checks_when_disabled(self, store):
-        from gideon.memory_lint import lint_memory
+        from gideon.cognition.memory_lint import lint_memory
 
         store.set_semantic("user.note.a", "unlinked", 0.9, "user_explicit")
         store.graph_enabled = False
@@ -755,12 +800,9 @@ class TestLintAndSummary:
             assert key in summary
 
 
-# ── Service + capability degradation ──
-
-
 class TestServiceSurface:
     def _service(self, store):
-        from gideon.memory_service import MemoryService
+        from gideon.cognition.memory_service import MemoryService
 
         return MemoryService.over_vector_store(store)
 
@@ -805,17 +847,14 @@ class TestServiceSurface:
         assert refs == {"project.gideon.a", "user.note.b"}
 
 
-# ── Config wiring ──
-
-
 class TestConfigWiring:
     def test_default_is_on(self):
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         assert AppConfig().memory.graph_enabled is True
 
     def test_round_trips_through_to_dict(self):
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         cfg = AppConfig()
         cfg.memory.graph_enabled = False
@@ -831,28 +870,29 @@ class TestConfigWiring:
         does arrive. Both must land on "still enabled".
         """
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        from gideon.config.coercion import _guard_flag
-        from gideon.config.loader import AppConfig, config_path
+        from gideon.core.config.coercion import _guard_flag
+        from gideon.core.config.loader import AppConfig, config_path
 
-        for raw, expected in ((True, True), (False, False), ("garbage", True), (None, True)):
+        for raw, expected in (
+            (True, True),
+            (False, False),
+            ("garbage", True),
+            (None, True),
+        ):
             config_path().write_text(
                 json.dumps({"memory": {"graph_enabled": raw}}), encoding="utf-8"
             )
             assert AppConfig.load().memory.graph_enabled is expected, raw
 
-        # The polarity itself: only an explicit false-spelling turns a guard off.
         assert _guard_flag("false") is False
         assert _guard_flag("off") is False
         assert _guard_flag("nonsense") is True
         assert _guard_flag(None) is True
 
     def test_patch_allowlist_includes_the_toggle(self):
-        from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+        from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
         assert "memory.graph_enabled" in _EDITABLE_CONFIG
-
-
-# ── Regressions found by driving the real API ────────────────────────────────
 
 
 class TestValidationRegressions:
@@ -875,7 +915,9 @@ class TestValidationRegressions:
             graph.tally_proposal("Dana Whitfield", ref)
         graph.upsert_entity("Dana Whitfield", "person")
         graph.proposals()
-        remaining = graph.db.execute("SELECT COUNT(*) FROM mem_entity_proposals").fetchone()[0]
+        remaining = graph.db.execute(
+            "SELECT COUNT(*) FROM mem_entity_proposals"
+        ).fetchone()[0]
         assert remaining == 0
 
     def test_project_seed_recovers_the_authors_capitalization(self, store, graph):
@@ -887,13 +929,17 @@ class TestValidationRegressions:
             "user_explicit",
         )
         seed_from_memory_facts(graph)
-        assert [e.name for e in graph.entities() if e.entity_type == "project"] == ["Gideon"]
+        assert [e.name for e in graph.entities() if e.entity_type == "project"] == [
+            "Gideon"
+        ]
 
     def test_project_seed_falls_back_to_the_slug(self, store, graph):
         """No casing evidence in the text → the slug is still better than nothing."""
         store.set_semantic("project.apollo.note", "uses pytest", 0.9, "user_explicit")
         seed_from_memory_facts(graph)
-        assert [e.name for e in graph.entities() if e.entity_type == "project"] == ["apollo"]
+        assert [e.name for e in graph.entities() if e.entity_type == "project"] == [
+            "apollo"
+        ]
 
 
 class TestKillSwitchIsLive:
@@ -905,31 +951,34 @@ class TestKillSwitchIsLive:
 
     def test_config_change_takes_effect_without_a_restart(self, tmp_path, monkeypatch):
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        from gideon.config.loader import config_path
+        from gideon.core.config.loader import config_path
 
-        store = VectorMemoryStore(db_path=tmp_path / "m.db", embedding_dim=3)
+        store = SemanticArchive(db_path=tmp_path / "m.db", embedding_dim=3)
         store.init()
         store.graph.upsert_entity("Gideon", "project")
         store.invalidate_alias_index()
         assert store.graph_enabled is True
 
-        config_path().write_text(json.dumps({"memory": {"graph_enabled": False}}), encoding="utf-8")
+        config_path().write_text(
+            json.dumps({"memory": {"graph_enabled": False}}), encoding="utf-8"
+        )
         assert store.graph_enabled is False
         store.set_semantic("user.note.a", "Gideon again", 0.9, "user_explicit")
         assert store.graph.links_from("semantic", "user.note.a") == []
 
-        config_path().write_text(json.dumps({"memory": {"graph_enabled": True}}), encoding="utf-8")
+        config_path().write_text(
+            json.dumps({"memory": {"graph_enabled": True}}), encoding="utf-8"
+        )
         assert store.graph_enabled is True
         store.set_semantic("user.note.b", "Gideon once more", 0.9, "user_explicit")
         assert store.graph.links_from("semantic", "user.note.b")
 
     def test_an_explicit_pin_overrides_config(self, tmp_path, monkeypatch):
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        store = VectorMemoryStore(db_path=tmp_path / "m.db", embedding_dim=3)
+        store = SemanticArchive(db_path=tmp_path / "m.db", embedding_dim=3)
         store.init()
         store.graph_enabled = False
         assert store.graph_enabled is False
-        # Setting it back to None resumes following config.
         store.graph_enabled = None
         assert store.graph_enabled is True
 
@@ -937,12 +986,14 @@ class TestKillSwitchIsLive:
         """Fail-safe direction: losing free, deterministic linking is the worse
         surprise, so ambiguity keeps it running."""
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        store = VectorMemoryStore(db_path=tmp_path / "m.db", embedding_dim=3)
+        store = SemanticArchive(db_path=tmp_path / "m.db", embedding_dim=3)
         store.init()
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         monkeypatch.setattr(
-            AppConfig, "load", staticmethod(lambda *a, **k: (_ for _ in ()).throw(ValueError("x")))
+            AppConfig,
+            "load",
+            staticmethod(lambda *a, **k: (_ for _ in ()).throw(ValueError("x"))),
         )
         assert store.graph_enabled is True
 
@@ -958,8 +1009,8 @@ class TestSqliteDriverParity:
     """
 
     def test_graph_and_store_share_one_sqlite_module(self):
-        import gideon.memory_graph as graph_mod
-        import gideon.vector_memory as store_mod
+        import gideon.cognition.memory_graph as graph_mod
+        import gideon.cognition.vector_memory as store_mod
 
         assert graph_mod.sqlite3 is store_mod.sqlite3, (
             "memory_graph must import sqlite3 the same way vector_memory does, or its "
@@ -971,26 +1022,27 @@ class TestSqliteDriverParity:
         not propagate an IntegrityError from the driver."""
         eid = graph.upsert_entity("Gideon", "project")
         assert (
-            graph.add_link(from_kind="semantic", from_ref="k", to_entity=eid, link_type="mentions")
+            graph.add_link(
+                from_kind="semantic", from_ref="k", to_entity=eid, link_type="mentions"
+            )
             is True
         )
         assert (
-            graph.add_link(from_kind="semantic", from_ref="k", to_entity=eid, link_type="mentions")
+            graph.add_link(
+                from_kind="semantic", from_ref="k", to_entity=eid, link_type="mentions"
+            )
             is False
         )
         assert len(graph.backlinks(eid)) == 1
 
     def test_the_integrity_error_class_is_the_connections_own(self, store):
         """Whatever driver is in play, the class we catch must be the one it raises."""
-        import gideon.memory_graph as graph_mod
+        import gideon.cognition.memory_graph as graph_mod
 
         with pytest.raises(graph_mod.sqlite3.IntegrityError):
             store.db.execute("CREATE TABLE uniq_probe (x TEXT PRIMARY KEY)")
             store.db.execute("INSERT INTO uniq_probe VALUES ('a')")
             store.db.execute("INSERT INTO uniq_probe VALUES ('a')")
-
-
-# ── The graph recall arm (Session 2, §2.1–2.2) ───────────────────────────────
 
 
 class TestGraphRecallArm:
@@ -1003,11 +1055,16 @@ class TestGraphRecallArm:
 
     def test_unresolvable_query_yields_no_boosts(self, store, graph):
         _seeded(store, graph)
-        assert graph.recall_refs("nothing recognizable here", index=store.alias_index) == {}
+        assert (
+            graph.recall_refs("nothing recognizable here", index=store.alias_index)
+            == {}
+        )
 
     def test_boost_reaches_the_linked_record(self, store, graph):
         _seeded(store, graph)
-        store.set_semantic("user.note.a", "Keyur Golani likes terse replies", 0.9, "user_explicit")
+        store.set_semantic(
+            "user.note.a", "Keyur Golani likes terse replies", 0.9, "user_explicit"
+        )
         boosts = graph.recall_refs("@keyur", index=store.alias_index)
         assert "user.note.a" in boosts
         assert boosts["user.note.a"] > 0
@@ -1015,7 +1072,9 @@ class TestGraphRecallArm:
     def test_boost_accumulates_across_named_entities(self, store, graph):
         """A record linked to two entities the query names beats one linked to one."""
         _seeded(store, graph)
-        store.set_semantic("project.gideon.both", "Keyur Golani works on gideon", 0.9, "user_explicit")
+        store.set_semantic(
+            "project.gideon.both", "Keyur Golani works on gideon", 0.9, "user_explicit"
+        )
         store.set_semantic("user.note.one", "Keyur Golani alone", 0.9, "user_explicit")
         boosts = graph.recall_refs("gideon and @keyur", index=store.alias_index)
         assert boosts["project.gideon.both"] > boosts["user.note.one"]
@@ -1036,7 +1095,9 @@ class TestGraphRecallArm:
         store.set_semantic(
             "user.note.a", "Ana Ortiz owns the billing rewrite", 0.9, "user_explicit"
         )
-        store.set_semantic("user.note.b", "quarterly budget review", 0.9, "user_explicit")
+        store.set_semantic(
+            "user.note.b", "quarterly budget review", 0.9, "user_explicit"
+        )
 
         query = "what is Sparrow working on"
         store.graph_enabled = False
@@ -1064,7 +1125,9 @@ class TestGraphRecallArm:
         store.graph_enabled = False
         assert store._graph_boosts("@keyur") == {}
 
-    def test_a_broken_graph_degrades_instead_of_failing_recall(self, store, graph, monkeypatch):
+    def test_a_broken_graph_degrades_instead_of_failing_recall(
+        self, store, graph, monkeypatch
+    ):
         """Recall must never fail because the graph is unhappy."""
         _seeded(store, graph)
         store.set_semantic("user.note.a", "Keyur Golani", 0.9, "user_explicit")
@@ -1074,7 +1137,6 @@ class TestGraphRecallArm:
 
         monkeypatch.setattr(type(graph), "recall_refs", _boom)
         assert store._graph_boosts("@keyur") == {}
-        # And the surrounding retrieval still works.
         assert store.get_semantic_context(query_text="Keyur", cap=800)
 
     def test_empty_query_costs_nothing(self, store, graph):
@@ -1083,7 +1145,9 @@ class TestGraphRecallArm:
 
     def test_evidence_names_the_connecting_entity(self, store, graph):
         _seeded(store, graph)
-        store.set_semantic("user.note.a", "Keyur Golani prefers terse", 0.9, "user_explicit")
+        store.set_semantic(
+            "user.note.a", "Keyur Golani prefers terse", 0.9, "user_explicit"
+        )
         evidence = graph.recall_evidence("@keyur", index=store.alias_index)
         assert evidence["user.note.a"] == ["Keyur Golani"]
 
@@ -1092,7 +1156,7 @@ class TestGraphRecallArm:
         assert graph.recall_evidence("unrelated words", index=store.alias_index) == {}
 
     def test_service_exposes_evidence_and_degrades(self, store, graph):
-        from gideon.memory_service import MemoryService
+        from gideon.cognition.memory_service import MemoryService
 
         _seeded(store, graph)
         store.set_semantic("user.note.a", "Keyur Golani", 0.9, "user_explicit")
@@ -1121,18 +1185,28 @@ class TestGraphRecallArm:
         store.set_semantic(
             "user.note.a", "Ana Ortiz owns the billing rewrite", 0.9, "user_explicit"
         )
-        store.set_semantic("user.note.z", "coffee machine is on floor three", 0.9, "user_explicit")
+        store.set_semantic(
+            "user.note.z", "coffee machine is on floor three", 0.9, "user_explicit"
+        )
 
-        block = store.get_semantic_context(query_text="what is Sparrow working on", cap=900)
+        block = store.get_semantic_context(
+            query_text="what is Sparrow working on", cap=900
+        )
         lines = [ln for ln in block.splitlines() if ln.startswith("user.note")]
-        assert lines and "billing" in lines[0], f"expected the linked record first, got {lines}"
+        assert (
+            lines and "billing" in lines[0]
+        ), f"expected the linked record first, got {lines}"
 
     def test_a_real_keyword_match_still_beats_the_graph(self, store, graph):
         """The floor must not invert the priority: typed words win."""
         graph.upsert_entity("Ana Ortiz", "person", aliases=["Sparrow"])
         store.invalidate_alias_index()
-        store.set_semantic("user.note.a", "Ana Ortiz owns billing", 0.9, "user_explicit")
-        store.set_semantic("user.note.z", "coffee machine on floor three", 0.9, "user_explicit")
+        store.set_semantic(
+            "user.note.a", "Ana Ortiz owns billing", 0.9, "user_explicit"
+        )
+        store.set_semantic(
+            "user.note.z", "coffee machine on floor three", 0.9, "user_explicit"
+        )
 
         block = store.get_semantic_context(query_text="coffee machine floor", cap=900)
         lines = [ln for ln in block.splitlines() if ln.startswith("user.note")]

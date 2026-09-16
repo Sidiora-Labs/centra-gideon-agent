@@ -37,12 +37,11 @@ from pathlib import Path
 
 import pytest
 
-from gideon.durability import state_history as sh
+from gideon.operations.durability import state_history as sh
 
-pytestmark = pytest.mark.skipif(not sh.git_available(), reason="git is required for time-travel")
-
-
-# ── fixtures ───────────────────────────────────────────────────────────────
+pytestmark = pytest.mark.skipif(
+    not sh.git_available(), reason="git is required for time-travel"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -68,7 +67,7 @@ def ws(tmp_path) -> Path:
 def _app(*, app_token: str = ""):
     from aiohttp import web
 
-    from gideon.dashboard.handlers import durability as mod
+    from gideon.interfaces.dashboard.handlers import durability as mod
 
     @web.middleware
     async def identity(request, handler):
@@ -77,7 +76,9 @@ def _app(*, app_token: str = ""):
         return await handler(request)
 
     app = web.Application(middlewares=[identity])
-    app.router.add_post("/api/durability/history/{root}/{op}", mod.api_durability_history_operate)
+    app.router.add_post(
+        "/api/durability/history/{root}/{op}", mod.api_durability_history_operate
+    )
     return app
 
 
@@ -111,7 +112,7 @@ def seeded(home, ws, monkeypatch):
     restoring the subset and restoring the whole root would do the same thing and
     a handler that dropped ``paths`` on the floor would pass every assertion.
     """
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: home)
     root = next(r for r in sh.roots(home=home, workspace=ws) if r.id == "config")
     sh.ensure_repo(root, home=home)
     (home / "entity_settings").mkdir(parents=True, exist_ok=True)
@@ -122,8 +123,6 @@ def seeded(home, ws, monkeypatch):
     (home / ENT).write_text("ent-v2\n")
     second = sh.commit(root, home=home)
     assert sh.commit_count(root, home=home) == 2
-    # Vacuity floor for every subset rail below: the WHOLE-root operation really
-    # does span both files, so naming one of them is a genuine narrowing.
     whole = sh.preview(root, first, operation="rollback", home=home)
     assert {f["path"] for f in whole["files"]} == {CFG, ENT}
     return root, first, second
@@ -142,18 +141,19 @@ async def _preview(client, op: str, sha: str, paths: object = "omit") -> dict:
     return await resp.json()
 
 
-# ── phase one: a preview that names a subset ───────────────────────────────
-
-
 class TestPerFilePreview:
     @pytest.mark.asyncio
-    async def test_a_preview_with_paths_echoes_them_and_changes_nothing(self, seeded, home):
+    async def test_a_preview_with_paths_echoes_them_and_changes_nothing(
+        self, seeded, home
+    ):
         _root, first, _second = seeded
         before = _on_disk(home)
         async with _client() as client:
             body = await _preview(client, "rollback", first, [CFG])
         assert body["confirmed"] is False
-        assert body["expected_paths"] == [CFG], "phase one must hand back the path-set token"
+        assert body["expected_paths"] == [
+            CFG
+        ], "phase one must hand back the path-set token"
         assert body["preview"]["paths"] == [CFG]
         assert [f["path"] for f in body["preview"]["files"]] == [
             CFG
@@ -168,9 +168,6 @@ class TestPerFilePreview:
             body = await _preview(client, "rollback", first, paths)
         assert body["expected_paths"] == [], "the whole root is the empty subset, once"
         assert {f["path"] for f in body["preview"]["files"]} == {CFG, ENT}
-
-
-# ── phase two: the confirm must match the preview it cites ─────────────────
 
 
 class TestPerFileConfirm:
@@ -218,7 +215,9 @@ class TestPerFileConfirm:
         assert _on_disk(home) == ("cfg-v1\n", "ent-v1\n")
 
     @pytest.mark.asyncio
-    async def test_a_confirm_that_widens_the_previewed_set_is_refused(self, seeded, home):
+    async def test_a_confirm_that_widens_the_previewed_set_is_refused(
+        self, seeded, home
+    ):
         """The load-bearing clause: previewed one file, confirmed the whole root."""
         root, first, _second = seeded
         head_before = _git_out(root, home, "rev-parse", "HEAD")
@@ -230,7 +229,6 @@ class TestPerFileConfirm:
                 json={
                     "sha": first,
                     "confirm": True,
-                    # No paths at all — i.e. the whole root — behind a one-file preview.
                     "expected_head": prev["expected_head"],
                     "expected_paths": prev["expected_paths"],
                 },
@@ -242,7 +240,9 @@ class TestPerFileConfirm:
         assert _git_out(root, home, "rev-parse", "HEAD") == head_before
 
     @pytest.mark.asyncio
-    async def test_a_confirm_that_narrows_a_whole_root_preview_is_refused(self, seeded, home):
+    async def test_a_confirm_that_narrows_a_whole_root_preview_is_refused(
+        self, seeded, home
+    ):
         root, first, _second = seeded
         head_before = _git_out(root, home, "rev-parse", "HEAD")
         before = _on_disk(home)
@@ -285,7 +285,9 @@ class TestPerFileConfirm:
         assert _git_out(root, home, "rev-parse", "HEAD") == head_before
 
     @pytest.mark.asyncio
-    async def test_a_subset_confirm_without_the_path_token_is_refused(self, seeded, home):
+    async def test_a_subset_confirm_without_the_path_token_is_refused(
+        self, seeded, home
+    ):
         """A subset confirm has to carry the token, exactly like ``expected_head``."""
         _root, first, _second = seeded
         async with _client() as client:
@@ -304,8 +306,12 @@ class TestPerFileConfirm:
         assert _on_disk(home) == ("cfg-v2\n", "ent-v2\n")
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize(("sent", "token"), [("omit", "omit"), (None, []), ([], None)])
-    async def test_null_and_empty_never_spuriously_mismatch(self, seeded, home, sent, token):
+    @pytest.mark.parametrize(
+        ("sent", "token"), [("omit", "omit"), (None, []), ([], None)]
+    )
+    async def test_null_and_empty_never_spuriously_mismatch(
+        self, seeded, home, sent, token
+    ):
         """Whole root spelled four ways across the two phases still applies."""
         _root, first, _second = seeded
         async with _client() as client:
@@ -319,7 +325,9 @@ class TestPerFileConfirm:
                 payload["paths"] = sent
             if token != "omit":
                 payload["expected_paths"] = token
-            resp = await client.post("/api/durability/history/config/rollback", json=payload)
+            resp = await client.post(
+                "/api/durability/history/config/rollback", json=payload
+            )
             assert resp.status == 200, await resp.text()
         assert _on_disk(home) == ("cfg-v1\n", "ent-v1\n")
 
@@ -344,14 +352,18 @@ class TestPerFileConfirm:
         assert _on_disk(home) == ("cfg-v1\n", "ent-v2\n")
 
 
-# ── path validation: a typed 400 that names the path ───────────────────────
-
-
 class TestPathValidation:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "bad",
-        ["../etc/passwd", "/etc/passwd", "entity_settings/../../escape", "~/secrets", ".", ""],
+        [
+            "../etc/passwd",
+            "/etc/passwd",
+            "entity_settings/../../escape",
+            "~/secrets",
+            ".",
+            "",
+        ],
     )
     async def test_an_escaping_path_is_a_400_naming_it(self, seeded, home, bad):
         before = _on_disk(home)
@@ -394,8 +406,12 @@ class TestPathValidation:
             assert (await resp.json())["error"]["code"] == "unknown_commit"
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("bad", ["config.json", 7, {"path": "config.json"}, [1], [None]])
-    async def test_a_non_list_or_non_string_paths_is_a_400_not_a_coercion(self, seeded, bad):
+    @pytest.mark.parametrize(
+        "bad", ["config.json", 7, {"path": "config.json"}, [1], [None]]
+    )
+    async def test_a_non_list_or_non_string_paths_is_a_400_not_a_coercion(
+        self, seeded, bad
+    ):
         async with _client() as client:
             resp = await client.post(
                 "/api/durability/history/config/rollback",
@@ -409,25 +425,32 @@ class TestPathValidation:
         async with _client() as client:
             resp = await client.post(
                 "/api/durability/history/config/rollback",
-                json={"sha": seeded[1], "confirm": True, "expected_paths": "config.json"},
+                json={
+                    "sha": seeded[1],
+                    "confirm": True,
+                    "expected_paths": "config.json",
+                },
             )
             assert resp.status == 400
             assert (await resp.json())["error"]["code"] == "bad_paths"
 
 
-# ── the shipped whole-root surface must be untouched ───────────────────────
-
-
 class TestWholeRootRegression:
     @pytest.mark.asyncio
-    async def test_preview_then_confirm_still_works_with_no_paths_field(self, seeded, home):
+    async def test_preview_then_confirm_still_works_with_no_paths_field(
+        self, seeded, home
+    ):
         _root, first, second = seeded
         async with _client() as client:
             prev = await _preview(client, "rollback", first)
             assert prev["confirmed"] is False and prev["expected_head"]
             resp = await client.post(
                 "/api/durability/history/config/rollback",
-                json={"sha": first, "confirm": True, "expected_head": prev["expected_head"]},
+                json={
+                    "sha": first,
+                    "confirm": True,
+                    "expected_head": prev["expected_head"],
+                },
             )
             assert resp.status == 200, await resp.text()
             body = await resp.json()
@@ -485,21 +508,20 @@ class TestWholeRootRegression:
             assert (await resp.json())["error"]["code"] == "owner_only"
 
 
-# ── the audit line ─────────────────────────────────────────────────────────
-
-
 class TestAudit:
     @pytest.mark.asyncio
     async def test_the_audit_line_carries_the_count_not_the_file_names(
         self, seeded, home, monkeypatch
     ):
-        from gideon.dashboard.handlers import durability as mod
+        from gideon.interfaces.dashboard.handlers import durability as mod
 
         seen: list[tuple[str, str, str]] = []
         monkeypatch.setattr(
             mod,
             "_audit_api",
-            lambda request, op, outcome, resources: seen.append((op, outcome, resources)),
+            lambda request, op, outcome, resources: seen.append(
+                (op, outcome, resources)
+            ),
         )
         _root, first, _second = seeded
         async with _client() as client:
@@ -522,8 +544,10 @@ class TestAudit:
         assert CFG not in resources, "an audit line is not a place for user file names"
 
     @pytest.mark.asyncio
-    async def test_a_whole_root_operation_audits_as_zero_paths(self, seeded, monkeypatch):
-        from gideon.dashboard.handlers import durability as mod
+    async def test_a_whole_root_operation_audits_as_zero_paths(
+        self, seeded, monkeypatch
+    ):
+        from gideon.interfaces.dashboard.handlers import durability as mod
 
         seen: list[str] = []
         monkeypatch.setattr(
@@ -536,7 +560,11 @@ class TestAudit:
             prev = await _preview(client, "rollback", first)
             resp = await client.post(
                 "/api/durability/history/config/rollback",
-                json={"sha": first, "confirm": True, "expected_head": prev["expected_head"]},
+                json={
+                    "sha": first,
+                    "confirm": True,
+                    "expected_head": prev["expected_head"],
+                },
             )
             assert resp.status == 200, await resp.text()
         assert "paths=0" in seen[-1], "zero is how a reader spots the whole-root case"

@@ -13,9 +13,9 @@ import logging
 
 import pytest
 
-from gideon.config import AppConfig
-from gideon.providers.provider_bridge import ProviderResolutionError
-from gideon.session import BACKGROUND_KEY, SessionManager
+from gideon.core.config import AppConfig
+from gideon.engine.session import BACKGROUND_KEY, ConversationDirectory
+from gideon.extensions.providers.provider_bridge import ProviderResolutionError
 
 
 def _cfg() -> AppConfig:
@@ -30,20 +30,16 @@ async def test_defers_quietly_when_no_model_resolves(caplog):
     def factory(*_a, **_k):
         raise ProviderResolutionError("No provider configured for use case 'chat'.")
 
-    mgr = SessionManager(_cfg(), provider_factory=factory)
-    # Target the EMITTING logger explicitly (not root): under xdist/worksteal, a bare
-    # caplog.at_level(INFO) attaches at root and can miss records when concurrent tests
-    # disrupt propagation → an empty caplog.records flake. Pinning the logger captures
-    # deterministically regardless of worker.
-    with caplog.at_level(logging.INFO, logger="gideon.session"):
+    mgr = ConversationDirectory(_cfg(), provider_factory=factory)
+    with caplog.at_level(logging.INFO, logger="gideon.engine.session"):
         await mgr._ensure_background()
 
-    assert BACKGROUND_KEY not in mgr._sessions  # spawn skipped
+    assert BACKGROUND_KEY not in mgr._sessions
     msgs = [r.getMessage() for r in caplog.records]
     assert any("deferred" in m.lower() for m in msgs), msgs
-    # Must NOT have logged a WARNING-level "Failed to create" traceback.
     assert not any(
-        r.levelno >= logging.WARNING and "Failed to create background session" in r.getMessage()
+        r.levelno >= logging.WARNING
+        and "Failed to create background session" in r.getMessage()
         for r in caplog.records
     )
 
@@ -63,13 +59,14 @@ async def test_genuine_error_still_warns(caplog):
     def factory(*_a, **_k):
         return _BoomProvider()
 
-    mgr = SessionManager(_cfg(), provider_factory=factory)
-    with caplog.at_level(logging.INFO, logger="gideon.session"):
+    mgr = ConversationDirectory(_cfg(), provider_factory=factory)
+    with caplog.at_level(logging.INFO, logger="gideon.engine.session"):
         await mgr._ensure_background()
 
     assert BACKGROUND_KEY not in mgr._sessions
     assert any(
-        r.levelno >= logging.WARNING and "Failed to create background session" in r.getMessage()
+        r.levelno >= logging.WARNING
+        and "Failed to create background session" in r.getMessage()
         for r in caplog.records
     )
 
@@ -85,6 +82,8 @@ async def test_creates_session_when_factory_succeeds(caplog):
         async def shutdown(self):
             return None
 
-    mgr = SessionManager(_cfg(), provider_factory=lambda *_a, **_k: _OkProvider())
+    mgr = ConversationDirectory(
+        _cfg(), provider_factory=lambda *_a, **_k: _OkProvider()
+    )
     await mgr._ensure_background()
     assert BACKGROUND_KEY in mgr._sessions

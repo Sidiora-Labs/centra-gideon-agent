@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.dashboard import origin
-from gideon.dashboard.origin import auth_is_off, tailnet_ip, tailscale_cli_present
-from gideon.resilience import doctor
-from gideon.resilience.doctor import DoctorContext
-
-# ── helper: tailnet CGNAT membership (100.64.0.0/10) ─────────────────────────
+from gideon.interfaces.dashboard import origin
+from gideon.interfaces.dashboard.origin import (
+    auth_is_off,
+    tailnet_ip,
+    tailscale_cli_present,
+)
+from gideon.operations.resilience import doctor
+from gideon.operations.resilience.doctor import DoctorContext
 
 
 def test_tailnet_ip_detects_injected_tailnet_address():
@@ -39,10 +41,10 @@ def test_tailnet_ip_picks_the_tailnet_addr_from_a_mixed_list():
 @pytest.mark.parametrize(
     "addr,expected",
     [
-        ("100.64.0.0", True),  # first address in the /10
-        ("100.63.255.255", False),  # one below the range
-        ("100.127.255.255", True),  # last address in the /10
-        ("100.128.0.0", False),  # one above the range
+        ("100.64.0.0", True),
+        ("100.63.255.255", False),
+        ("100.127.255.255", True),
+        ("100.128.0.0", False),
     ],
 )
 def test_tailnet_cgnat_boundaries(addr: str, expected: bool):
@@ -62,9 +64,6 @@ def test_tailscale_cli_present_is_patchable(monkeypatch):
     assert tailscale_cli_present() is True
 
 
-# ── helper: auth-off detection ───────────────────────────────────────────────
-
-
 def test_auth_is_off_true_for_none_mode(monkeypatch):
     monkeypatch.delenv("GIDEON_DEV_NO_AUTH", raising=False)
     monkeypatch.setenv("GIDEON_AUTH_MODE", "none")
@@ -81,9 +80,6 @@ def test_auth_is_off_true_for_dev_no_auth_flag(monkeypatch):
     monkeypatch.setenv("GIDEON_DEV_NO_AUTH", "1")
     monkeypatch.delenv("GIDEON_AUTH_MODE", raising=False)
     assert auth_is_off() is True
-
-
-# ── the doctor probe: three outcomes ─────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -119,7 +115,6 @@ async def test_probe_does_NOT_mint_or_print_a_live_token(monkeypatch):
     assert "?token=" not in res.detail
     assert "token=" not in res.evidence.get("phone_url", "")
     assert res.evidence.get("token_hint") == "gideon token"
-    # No evidence value looks like a minted token URL.
     for value in res.evidence.values():
         assert "token=" not in str(value)
 

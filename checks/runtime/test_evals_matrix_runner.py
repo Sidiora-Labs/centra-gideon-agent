@@ -17,24 +17,24 @@ import types
 
 import pytest
 
-from gideon.evals import runner as runner_mod
-from gideon.evals import scenarios as scenario_lib
-from gideon.evals import store
-from gideon.evals.child import (
+from gideon.assurance.evals import runner as runner_mod
+from gideon.assurance.evals import scenarios as scenario_lib
+from gideon.assurance.evals import store
+from gideon.assurance.evals.child import (
     error_result,
     parse_descriptor,
     render_result_line,
     result_from_scenario,
     wrap_factory_for_model,
 )
-from gideon.evals.matrix import (
+from gideon.assurance.evals.matrix import (
     FAILED,
     PASSED,
     VERIFIER_ABSENT,
     MatrixSpec,
     aggregate,
 )
-from gideon.evals.runner import run_matrix
+from gideon.assurance.evals.runner import run_matrix
 
 
 def write_pinnable_home(home, *, subjects=("s", "wf-x"), model="Acme:m1"):
@@ -48,7 +48,9 @@ def write_pinnable_home(home, *, subjects=("s", "wf-x"), model="Acme:m1"):
     (home / "config.json").write_text(
         json.dumps({"providers": [{"name": "Acme"}]}), encoding="utf-8"
     )
-    (home / "active_models.json").write_text(json.dumps({"chat": [model]}), encoding="utf-8")
+    (home / "active_models.json").write_text(
+        json.dumps({"chat": [model]}), encoding="utf-8"
+    )
     scenarios_dir = home / "evals" / "scenarios"
     scenarios_dir.mkdir(parents=True, exist_ok=True)
     for name in subjects:
@@ -81,7 +83,7 @@ class _FakeRun:
 
     def __init__(self, *, behavior):
         self.calls: list[dict] = []
-        self._behavior = behavior  # callable(index) -> ("ok"|"fail"|"garbage"|"timeout", payload)
+        self._behavior = behavior
 
     def __call__(self, args, *, env, timeout, capture_output, text):
         idx = len(self.calls)
@@ -90,11 +92,14 @@ class _FakeRun:
         if kind == "timeout":
             raise subprocess.TimeoutExpired(cmd=args, timeout=timeout)
         if kind == "garbage":
-            return types.SimpleNamespace(returncode=0, stdout="no sentinel here\n", stderr="")
+            return types.SimpleNamespace(
+                returncode=0, stdout="no sentinel here\n", stderr=""
+            )
         if kind == "fail":
             return types.SimpleNamespace(returncode=1, stdout="", stderr="boom")
-        # ok
-        return types.SimpleNamespace(returncode=0, stdout=render_result_line(payload), stderr="")
+        return types.SimpleNamespace(
+            returncode=0, stdout=render_result_line(payload), stderr=""
+        )
 
 
 def _patch_spawn(monkeypatch, behavior):
@@ -103,41 +108,44 @@ def _patch_spawn(monkeypatch, behavior):
     return fake
 
 
-# ── §1.3 — the parent env is never mutated ────────────────────────────────────
-
-
 def test_parent_env_never_mutated_child_env_carries_workspace(eval_home, monkeypatch):
     monkeypatch.delenv("GIDEON_WORKSPACE", raising=False)
     before = dict(os.environ)
-    fake = _patch_spawn(monkeypatch, lambda i: ("ok", {"ok": True, "passed": True, "score": 1.0}))
+    fake = _patch_spawn(
+        monkeypatch, lambda i: ("ok", {"ok": True, "passed": True, "score": 1.0})
+    )
 
-    run_matrix(MatrixSpec(subject="smoke_test", axes={}, trial_count=1), matrix_id="m-env")
+    run_matrix(
+        MatrixSpec(subject="smoke_test", axes={}, trial_count=1), matrix_id="m-env"
+    )
 
-    # The parent env is byte-identical — no GIDEON_WORKSPACE added or changed.
     assert dict(os.environ) == before
     assert "GIDEON_WORKSPACE" not in os.environ
-    # The CHILD env (the copy handed to subprocess.run) DID carry the workspace.
     assert len(fake.calls) == 1
     child_env = fake.calls[0]["env"]
     assert "GIDEON_WORKSPACE" in child_env
-    assert child_env["GIDEON_WORKSPACE"]  # a real temp path
-    # And it is NOT the parent's value (parent had none).
+    assert child_env["GIDEON_WORKSPACE"]
     assert "GIDEON_WORKSPACE" not in before
 
 
-# ── three-state outcome mapping ────────────────────────────────────────────────
-
-
 def test_passing_child_maps_to_passed(eval_home, monkeypatch):
-    _patch_spawn(monkeypatch, lambda i: ("ok", {"ok": True, "passed": True, "score": 0.9}))
-    result = run_matrix(MatrixSpec(subject="s", axes={}, trial_count=1), matrix_id="m-pass")
+    _patch_spawn(
+        monkeypatch, lambda i: ("ok", {"ok": True, "passed": True, "score": 0.9})
+    )
+    result = run_matrix(
+        MatrixSpec(subject="s", axes={}, trial_count=1), matrix_id="m-pass"
+    )
     assert [c.outcome for c in result.cells] == [PASSED]
     assert result.cells[0].score == pytest.approx(0.9)
 
 
 def test_failing_child_maps_to_failed(eval_home, monkeypatch):
-    _patch_spawn(monkeypatch, lambda i: ("ok", {"ok": True, "passed": False, "score": 0.1}))
-    result = run_matrix(MatrixSpec(subject="s", axes={}, trial_count=1), matrix_id="m-fail")
+    _patch_spawn(
+        monkeypatch, lambda i: ("ok", {"ok": True, "passed": False, "score": 0.1})
+    )
+    result = run_matrix(
+        MatrixSpec(subject="s", axes={}, trial_count=1), matrix_id="m-fail"
+    )
     assert [c.outcome for c in result.cells] == [FAILED]
     assert result.cells[0].score == pytest.approx(0.1)
 
@@ -145,7 +153,9 @@ def test_failing_child_maps_to_failed(eval_home, monkeypatch):
 def test_timeout_maps_to_verifier_absent(eval_home, monkeypatch):
     _patch_spawn(monkeypatch, lambda i: ("timeout", None))
     result = run_matrix(
-        MatrixSpec(subject="s", axes={}, trial_count=1), matrix_id="m-timeout", timeout_secs=5.0
+        MatrixSpec(subject="s", axes={}, trial_count=1),
+        matrix_id="m-timeout",
+        timeout_secs=5.0,
     )
     assert [c.outcome for c in result.cells] == [VERIFIER_ABSENT]
     assert result.cells[0].score is None
@@ -153,13 +163,17 @@ def test_timeout_maps_to_verifier_absent(eval_home, monkeypatch):
 
 def test_nonzero_exit_maps_to_verifier_absent(eval_home, monkeypatch):
     _patch_spawn(monkeypatch, lambda i: ("fail", None))
-    result = run_matrix(MatrixSpec(subject="s", axes={}, trial_count=1), matrix_id="m-nz")
+    result = run_matrix(
+        MatrixSpec(subject="s", axes={}, trial_count=1), matrix_id="m-nz"
+    )
     assert [c.outcome for c in result.cells] == [VERIFIER_ABSENT]
 
 
 def test_garbage_stdout_maps_to_verifier_absent(eval_home, monkeypatch):
     _patch_spawn(monkeypatch, lambda i: ("garbage", None))
-    result = run_matrix(MatrixSpec(subject="s", axes={}, trial_count=1), matrix_id="m-garbage")
+    result = run_matrix(
+        MatrixSpec(subject="s", axes={}, trial_count=1), matrix_id="m-garbage"
+    )
     assert [c.outcome for c in result.cells] == [VERIFIER_ABSENT]
 
 
@@ -185,65 +199,72 @@ def test_verifier_absent_is_never_averaged_as_zero(eval_home, monkeypatch):
     assert agg["counts"][VERIFIER_ABSENT] == 1
 
 
-# ── budget preflight — EXCEEDED skips the spawn ────────────────────────────────
-
-
 def test_budget_exceeded_makes_cell_absent_without_spawn(eval_home, monkeypatch):
-    from gideon.guardrails.budgets import BudgetVerdict
+    from gideon.security.guardrails.budgets import BudgetVerdict
 
     class _FakeMeter:
         def check_day(self, budget):
             return BudgetVerdict.EXCEEDED, "over the cap"
 
-    monkeypatch.setattr("gideon.guardrails.budgets.get_meter", lambda: _FakeMeter())
-    fake = _patch_spawn(monkeypatch, lambda i: ("ok", {"ok": True, "passed": True, "score": 1.0}))
+    monkeypatch.setattr(
+        "gideon.security.guardrails.budgets.get_meter", lambda: _FakeMeter()
+    )
+    fake = _patch_spawn(
+        monkeypatch, lambda i: ("ok", {"ok": True, "passed": True, "score": 1.0})
+    )
 
     result = run_matrix(
-        MatrixSpec(subject="s", axes={}, trial_count=1, budget_usd=1.0), matrix_id="m-budget"
+        MatrixSpec(subject="s", axes={}, trial_count=1, budget_usd=1.0),
+        matrix_id="m-budget",
     )
     assert [c.outcome for c in result.cells] == [VERIFIER_ABSENT]
-    # No child was spawned for the budget-blocked cell.
     assert fake.calls == []
 
 
 def test_no_budget_proceeds_and_spawns(eval_home, monkeypatch):
     """budget_usd=0.0 (unlimited) never consults the meter and always spawns."""
-    fake = _patch_spawn(monkeypatch, lambda i: ("ok", {"ok": True, "passed": True, "score": 1.0}))
+    fake = _patch_spawn(
+        monkeypatch, lambda i: ("ok", {"ok": True, "passed": True, "score": 1.0})
+    )
     result = run_matrix(
-        MatrixSpec(subject="s", axes={}, trial_count=1, budget_usd=0.0), matrix_id="m-nobudget"
+        MatrixSpec(subject="s", axes={}, trial_count=1, budget_usd=0.0),
+        matrix_id="m-nobudget",
     )
     assert [c.outcome for c in result.cells] == [PASSED]
     assert len(fake.calls) == 1
 
 
-# ── sequential + cartesian expansion ───────────────────────────────────────────
-
-
 def test_cartesian_product_times_trials_spawns_every_cell(eval_home, monkeypatch):
     """A 2×2 axes spec with trial_count=1 spawns exactly 4 cells."""
-    fake = _patch_spawn(monkeypatch, lambda i: ("ok", {"ok": True, "passed": True, "score": 1.0}))
-    spec = MatrixSpec(subject="s", axes={"model": ["A:x", "B:y"], "k": [1, 3]}, trial_count=1)
+    fake = _patch_spawn(
+        monkeypatch, lambda i: ("ok", {"ok": True, "passed": True, "score": 1.0})
+    )
+    spec = MatrixSpec(
+        subject="s", axes={"model": ["A:x", "B:y"], "k": [1, 3]}, trial_count=1
+    )
     result = run_matrix(spec, matrix_id="m-grid")
     assert len(fake.calls) == 4
     assert len(result.cells) == 4
-    # Each of the 4 coordinate combinations appears once.
     coord_pairs = {(c.coords["model"], c.coords["k"]) for c in result.cells}
     assert coord_pairs == {("A:x", 1), ("A:x", 3), ("B:y", 1), ("B:y", 3)}
 
 
 def test_trial_count_multiplies_cells(eval_home, monkeypatch):
-    fake = _patch_spawn(monkeypatch, lambda i: ("ok", {"ok": True, "passed": True, "score": 1.0}))
+    fake = _patch_spawn(
+        monkeypatch, lambda i: ("ok", {"ok": True, "passed": True, "score": 1.0})
+    )
     spec = MatrixSpec(subject="s", axes={"arm": ["a", "b"]}, trial_count=3)
     run_matrix(spec, matrix_id="m-trials")
-    assert len(fake.calls) == 6  # 2 arms × 3 trials
-
-
-# ── artifact retention ─────────────────────────────────────────────────────────
+    assert len(fake.calls) == 6
 
 
 def test_artifacts_are_retained_and_roundtrip(eval_home, monkeypatch):
-    _patch_spawn(monkeypatch, lambda i: ("ok", {"ok": True, "passed": True, "score": 0.7}))
-    spec = MatrixSpec(subject="wf-x", axes={"model": ["A:x"]}, scorer="assertion", trial_count=1)
+    _patch_spawn(
+        monkeypatch, lambda i: ("ok", {"ok": True, "passed": True, "score": 0.7})
+    )
+    spec = MatrixSpec(
+        subject="wf-x", axes={"model": ["A:x"]}, scorer="assertion", trial_count=1
+    )
     run_matrix(spec, matrix_id="m-artifacts")
 
     mdir = store.matrix_dir("m-artifacts")
@@ -251,17 +272,13 @@ def test_artifacts_are_retained_and_roundtrip(eval_home, monkeypatch):
     assert (mdir / "aggregates.json").exists()
     assert (mdir / "trials.json").exists()
 
-    # experiment.json round-trips back to the spec.
     assert MatrixSpec.from_dict(store.read_matrix_experiment("m-artifacts")) == spec
-    # aggregates round-trip.
     agg = store.read_matrix_aggregates("m-artifacts")
     assert agg["scored_count"] == 1 and agg["counts"][PASSED] == 1
-    # trials.json carries one per-cell row with its artifact ref.
     trials = store.read_matrix_trials("m-artifacts")
     assert len(trials) == 1
     assert trials[0]["outcome"] == PASSED
     assert trials[0]["artifact_ref"]
-    # a results.tsv row was appended.
     rows = store.read_results()
     assert len(rows) == 1
     assert rows[0]["study_id"] == "m-artifacts"
@@ -270,14 +287,13 @@ def test_artifacts_are_retained_and_roundtrip(eval_home, monkeypatch):
 
 
 def test_per_cell_descriptor_and_result_written(eval_home, monkeypatch):
-    _patch_spawn(monkeypatch, lambda i: ("ok", {"ok": True, "passed": True, "score": 1.0}))
+    _patch_spawn(
+        monkeypatch, lambda i: ("ok", {"ok": True, "passed": True, "score": 1.0})
+    )
     run_matrix(MatrixSpec(subject="s", axes={}, trial_count=1), matrix_id="m-celldir")
     cell_dir = store.matrix_dir("m-celldir") / "cell-0000"
     assert (cell_dir / "descriptor.json").exists()
     assert (cell_dir / "result.json").exists()
-
-
-# ── runner never raises out on an infra failure ────────────────────────────────
 
 
 def test_matrix_never_raises_on_cell_spawn_error(eval_home, monkeypatch):
@@ -288,11 +304,10 @@ def test_matrix_never_raises_on_cell_spawn_error(eval_home, monkeypatch):
         raise OSError("cannot spawn")
 
     monkeypatch.setattr(runner_mod.subprocess, "run", boom)
-    result = run_matrix(MatrixSpec(subject="s", axes={}, trial_count=1), matrix_id="m-oserr")
+    result = run_matrix(
+        MatrixSpec(subject="s", axes={}, trial_count=1), matrix_id="m-oserr"
+    )
     assert [c.outcome for c in result.cells] == [VERIFIER_ABSENT]
-
-
-# ── child pure helpers (no process/LLM) ────────────────────────────────────────
 
 
 def test_parse_descriptor_rejects_non_object():
@@ -303,7 +318,11 @@ def test_parse_descriptor_rejects_non_object():
 
 def test_result_from_scenario_scores_by_assertion_rate():
     scenario_result = types.SimpleNamespace(
-        total_assertions=4, passed_assertions=3, passed=False, name="s", elapsed_secs=1.2
+        total_assertions=4,
+        passed_assertions=3,
+        passed=False,
+        name="s",
+        elapsed_secs=1.2,
     )
     out = result_from_scenario(scenario_result)
     assert out["ok"] is True
@@ -312,9 +331,13 @@ def test_result_from_scenario_scores_by_assertion_rate():
 
 
 def test_result_from_scenario_no_assertions_uses_passed_flag():
-    passing = types.SimpleNamespace(total_assertions=0, passed_assertions=0, passed=True, name="s")
+    passing = types.SimpleNamespace(
+        total_assertions=0, passed_assertions=0, passed=True, name="s"
+    )
     assert result_from_scenario(passing)["score"] == 1.0
-    failing = types.SimpleNamespace(total_assertions=0, passed_assertions=0, passed=False, name="s")
+    failing = types.SimpleNamespace(
+        total_assertions=0, passed_assertions=0, passed=False, name="s"
+    )
     assert result_from_scenario(failing)["score"] == 0.0
 
 
@@ -326,7 +349,6 @@ def test_error_result_is_not_ok():
 def test_render_result_line_is_sentinel_prefixed():
     line = render_result_line({"ok": True, "score": 1.0})
     assert line.startswith(runner_mod.CELL_RESULT_SENTINEL)
-    # and the runner parses its own render back out.
     assert runner_mod._parse_child_stdout("noise\n" + line + "\nmore")["ok"] is True
 
 
@@ -340,14 +362,16 @@ def test_wrap_factory_binds_model_override():
     wrapped = wrap_factory_for_model(base, "Prov:model-x")
     assert wrapped("k") == "provider"
     assert seen["model_override"] == "Prov:model-x"
-    # No model → base factory returned unwrapped.
     assert wrap_factory_for_model(base, None) is base
 
 
 def test_aggregate_matches_runner_result(eval_home, monkeypatch):
     """Sanity: the aggregates the runner persists equal aggregate() over its cells."""
-    _patch_spawn(monkeypatch, lambda i: ("ok", {"ok": True, "passed": bool(i % 2), "score": 0.5}))
+    _patch_spawn(
+        monkeypatch, lambda i: ("ok", {"ok": True, "passed": bool(i % 2), "score": 0.5})
+    )
     result = run_matrix(
-        MatrixSpec(subject="s", axes={"arm": ["a", "b"]}, trial_count=1), matrix_id="m-agg"
+        MatrixSpec(subject="s", axes={"arm": ["a", "b"]}, trial_count=1),
+        matrix_id="m-agg",
     )
     assert result.aggregates == aggregate(result.cells)

@@ -1,65 +1,65 @@
 #!/bin/sh
-# Pre-push gate — Python lint + the frontend render-smoke rail (invoked by
-# .githooks/pre-push).
+                                                                          
+                      
 #
-# The render-smoke half was born from the v0.1.0 blank-dashboard release:
-# typecheck + vitest + vite build all passed while the built bundle crashed at
-# first render in a real browser (dual-React dependency skew). That gate re-runs
-# the whole frontend chain from a CLEAN, locked install — `npm ci` is the step
-# that catches declared-vs-resolved tree skew — then mounts the built SPA in
-# headless Chromium (scripts/render_smoke.mjs) before the push leaves the machine.
+                                                                         
+                                                                              
+                                                                                
+                                                                              
+                                                                            
+                                                                                          
 #
-# The Python lint half exists because pre-commit only formats the files a commit
-# STAGES: commits made before `hooks:install`, or with `--no-verify`, sail past it
-# and CI's `lint` job is the first thing that notices. This re-checks the whole
-# tree under the same tools CI uses, so a lint break is caught before the push.
+                                                                                
+                                                                                  
+                                                                               
+                                                                               
 #
-# Scope: each half runs ONLY when the outgoing commits touch paths it owns, so a
-# backend-only push skips the frontend chain and vice versa. Ref ranges arrive on
-# stdin per githooks(5).
+                                                                                
+                                                                                 
+                        
 #
-# The tree/ref guard exists because those two facts do not agree by themselves.
-# Scope is decided from the outgoing REFS, but both halves then check the WORKING
-# TREE (`git rev-parse --show-toplevel`) — and those are the same thing only when
-# the ref being pushed is what this worktree has checked out. With many
-# `git worktree`s in play they routinely are not: `git push origin some-branch`
-# from a checkout sitting on `main` scopes the gate by some-branch's diff and then
-# validates main's tree. It goes green and proves nothing about what shipped.
-# Batching pushes (`git push origin br1 br2 br3`) to pay the ~20-minute `npm ci` +
-# render-smoke cost once instead of three times is exactly how that happens. So
-# every outgoing ref must resolve to this worktree's HEAD commit or the push is
-# refused — one push per worktree, from the worktree that owns the branch. Refs are
-# peeled to a commit first (`^{commit}`): an annotated tag's own object SHA is never
-# a commit, and tagging the merge commit on `main` from a `main` checkout is the
-# documented release step (docs/maintainers/release-runbook.md).
+                                                                               
+                                                                                 
+                                                                                 
+                                                                       
+                                                                               
+                                                                                  
+                                                                             
+                                                                                  
+                                                                               
+                                                                               
+                                                                                   
+                                                                                    
+                                                                                
+                                                                
 #
-# Bypass: none built in. `git push --no-verify` exists for owner-declared
-# emergencies only (AGENTS.md) — a red gate means the push ships something broken.
+                                                                         
+                                                                                  
 set -eu
 
 repository_root=$(git rev-parse --show-toplevel)
 cd "$repository_root"
 
-FRONTEND_PATHS="web package.json package-lock.json scripts/render_smoke.mjs scripts/run_prepush.sh"
-PYTHON_PATHS="src/gideon tests harness pyproject.toml"
+FRONTEND_PATHS="apps/console package.json package-lock.json tooling/scripts/render_smoke.mjs tooling/scripts/run_prepush.sh"
+PYTHON_PATHS="runtime/gideon checks/runtime checks/harness pyproject.toml"
 ZERO=0000000000000000000000000000000000000000
 
 needs_gate=0
 needs_lint=0
 if [ -t 0 ]; then
-  # Manual invocation from a terminal (no ref ranges on stdin) — run the full
-  # gate unconditionally rather than blocking on read. Nothing named a ref here,
-  # so the tree/ref guard below has nothing to compare and correctly never runs:
-  # a manual run is a check of this tree, which is exactly what it claims to be.
+                                                                             
+                                                                                
+                                                                                
+                                                                                
   needs_gate=1
   needs_lint=1
 fi
 head_commit=$(git rev-parse --verify HEAD 2>/dev/null || echo unknown)
 while [ ! -t 0 ] && read -r local_ref local_sha _remote_ref remote_sha; do
-  [ "$local_sha" = "$ZERO" ] && continue  # branch deletion — nothing outgoing
-  # Refuse to gate a tree that is not the thing being pushed. Peel to a commit so
-  # an annotated tag compares as the commit it points at, and fall back to the raw
-  # SHA (which cannot equal HEAD) so an unpeelable ref is refused, not crashed on.
+  [ "$local_sha" = "$ZERO" ] && continue                                      
+                                                                                 
+                                                                                  
+                                                                                  
   pushed_commit=$(git rev-parse --verify --quiet "$local_sha^{commit}" || echo "$local_sha")
   if [ "$pushed_commit" != "$head_commit" ]; then
     echo "" >&2
@@ -73,29 +73,29 @@ while [ ! -t 0 ] && read -r local_ref local_sha _remote_ref remote_sha; do
     echo "          batching several refs into one push." >&2
     exit 1
   fi
-  # Scope by what this BRANCH adds on top of `main`, never by `remote_sha..local_sha`.
-  # The two are the same question only while the branch is a fast-forward of its remote.
-  # After a rebase (or any force-push) the old remote tip is no longer an ancestor, and
-  # `remote_sha..local_sha` diffs the two trees — dragging in every `main` commit that
-  # landed in between, including other people's frontend work. Measured on a three-file
-  # backend-only branch: 94 frontend files in that range versus 0 the branch touches, so
-  # the expensive half ran for ten minutes and then failed on web tests the diff could
-  # not have affected (issue 2269). Rebasing before a push is routine, so this was the
-  # common case rather than an edge one.
+                                                                                      
+                                                                                        
+                                                                                       
+                                                                                      
+                                                                                       
+                                                                                        
+                                                                                      
+                                                                                      
+                                        
   #
-  # A stale local `origin/main` makes the merge-base too OLD, which widens the range and
-  # gates more. That is the safe direction; the reverse would skip a real change. Below is
-  # the preference order — best available answer first, each falling back only when the one
-  # above it cannot be computed at all.
+                                                                                        
+                                                                                          
+                                                                                           
+                                       
   if base=$(git merge-base "$local_sha" origin/main 2>/dev/null); then
     range="$base..$local_sha"
   elif [ "$remote_sha" != "$ZERO" ]; then
-    # No origin/main to measure against (a fork that tracks `upstream`, say). The old
-    # range is the best answer left: exact while the branch is a fast-forward of its
-    # remote, and too WIDE after a rewrite — which over-gates, never under-gates.
+                                                                                     
+                                                                                    
+                                                                                 
     range="$remote_sha..$local_sha"
   else
-    # A new branch AND no shared history: nothing to compare. Gate rather than skip blind.
+                                                                                          
     needs_gate=1
     needs_lint=1
     continue
@@ -110,10 +110,10 @@ while [ ! -t 0 ] && read -r local_ref local_sha _remote_ref remote_sha; do
   fi
 done
 
-# Python lint, same tools and scope as CI's `lint` job. Resolve from the in-repo
-# venv (what the Makefile uses) and fall back to PATH; if neither has the dev
-# tools, say so and let the push through rather than blocking on a missing venv —
-# CI still enforces it.
+                                                                                
+                                                                             
+                                                                                 
+                       
 if [ "$needs_lint" -eq 1 ]; then
   if [ -x .venv/bin/black ]; then
     PY_BIN=".venv/bin/"
@@ -129,9 +129,9 @@ if [ "$needs_lint" -eq 1 ]; then
     echo "          Install them with: pip install -e '.[dev]'   (CI still checks.)"
   else
     echo "pre-push: python changes outgoing — checking lint (black, isort, flake8)."
-    if ! "${PY_BIN}black" --check --quiet src/gideon tests harness \
-      || ! "${PY_BIN}isort" --check-only --quiet src/gideon tests harness \
-      || ! "${PY_BIN}flake8" src/gideon tests harness; then
+    if ! "${PY_BIN}black" --check --quiet runtime/gideon checks/runtime checks/harness \
+      || ! "${PY_BIN}isort" --check-only --quiet runtime/gideon checks/runtime checks/harness \
+      || ! "${PY_BIN}flake8" runtime/gideon checks/runtime checks/harness; then
       echo "" >&2
       echo "pre-push: lint is red — run 'make format' then 'make lint', and commit the" >&2
       echo "          result before pushing. (CI's lint job checks the same thing.)" >&2

@@ -6,7 +6,7 @@ statement: >
   isolate itself with a `tmp_path`/`monkeypatch` fixture that redirects `config_dir()` —
   never touching the developer's real `~/.gideon` home.
 appliesTo:
-  - tests/**/*.py
+  - checks/runtime/**/*.py
 scanner: destructive-test-isolation
 source: >
   A destructive test once deleted the developer's real bound L6 model because it ran

@@ -1,11 +1,12 @@
 """Tests for voice_reply — provider-agnostic TTS orchestration (strip/split/
-synthesize-speech/upload/stream). Piper-specific synthesis moved to the piper-tts app."""
+synthesize-speech/upload/stream). Piper-specific synthesis moved to the piper-tts app.
+"""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from gideon.voice_reply import (
+from gideon.integrations.voice_reply import (
     DEFAULT_RATE,
     _validate_rate,
     split_sentences,
@@ -80,9 +81,6 @@ class TestSplitSentences:
         ]
 
 
-# ── synthesize_speech() ──────────────────────────────────────────────────
-
-
 class TestSynthesizeSpeech:
     @pytest.mark.asyncio
     async def test_piper_synthesis(self) -> None:
@@ -103,7 +101,6 @@ class TestSynthesizeSpeech:
     @pytest.mark.asyncio
     async def test_redacts_credentials_before_synthesis(self) -> None:
         """LLM output must be redacted for credentials before crossing into audio."""
-        # AKIA... is a typical AWS key shape caught by redact_credentials.
         raw = "secret AKIAIOSFODNN7EXAMPLE here"
         captured_text: list[str] = []
 
@@ -117,9 +114,6 @@ class TestSynthesizeSpeech:
 
         assert captured_text, "provider should have been called"
         assert "AKIAIOSFODNN7EXAMPLE" not in captured_text[0]
-
-
-# ── upload_voice_to_channel() ──────────────────────────────────────────────
 
 
 class TestUploadVoiceToChannel:
@@ -152,15 +146,12 @@ class TestUploadVoiceToChannel:
         assert await upload_voice_to_channel(client, "C1", "t1", str(audio)) is False
 
 
-# ── voice_reply() end-to-end ────────────────────────────────────────────
-
-
 class TestVoiceReplyEndToEnd:
     @pytest.mark.asyncio
     async def test_synthesis_fails_returns_false(self) -> None:
         client = MagicMock()
         with patch(
-            "gideon.voice_reply.synthesize_speech",
+            "gideon.integrations.voice_reply.synthesize_speech",
             new=AsyncMock(return_value=None),
         ):
             assert (
@@ -181,7 +172,7 @@ class TestVoiceReplyEndToEnd:
         client = MagicMock()
         client.upload_file = AsyncMock(return_value=None)
         with patch(
-            "gideon.voice_reply.synthesize_speech",
+            "gideon.integrations.voice_reply.synthesize_speech",
             new=AsyncMock(return_value=str(audio)),
         ):
             ok = await voice_reply(
@@ -201,7 +192,7 @@ class TestVoiceReplyEndToEnd:
         client = MagicMock()
         client.upload_file = AsyncMock(side_effect=RuntimeError("boom"))
         with patch(
-            "gideon.voice_reply.synthesize_speech",
+            "gideon.integrations.voice_reply.synthesize_speech",
             new=AsyncMock(return_value=str(audio)),
         ):
             ok = await voice_reply(
@@ -215,13 +206,10 @@ class TestVoiceReplyEndToEnd:
         assert not audio.exists(), "temp audio must be cleaned up on upload failure"
 
 
-# ── streaming_voice_reply() redaction ───────────────────────────────────
-
-
 class TestStreamingVoiceReply:
     @pytest.mark.asyncio
     async def test_redacts_credentials_before_synthesis(self, tmp_path) -> None:
-        from gideon.voice_reply import streaming_voice_reply
+        from gideon.integrations.voice_reply import streaming_voice_reply
 
         sentences_seen: list[str] = []
 
@@ -243,7 +231,7 @@ class TestStreamingVoiceReply:
 
     @pytest.mark.asyncio
     async def test_skips_sentences_with_failed_synth(self, tmp_path) -> None:
-        from gideon.voice_reply import streaming_voice_reply
+        from gideon.integrations.voice_reply import streaming_voice_reply
 
         calls = {"n": 0}
 
@@ -264,5 +252,4 @@ class TestStreamingVoiceReply:
         ):
             collected.append(idx)
 
-        # Only the odd-numbered calls succeed (1, 3).
         assert collected == [0, 2]

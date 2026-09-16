@@ -1,10 +1,10 @@
-"""Tests for gideon.agent_metadata CRUD operations."""
+"""Tests for gideon.engine.agent_metadata CRUD operations."""
 
 from unittest.mock import patch
 
 import pytest
 
-from gideon import agent_metadata
+from gideon.engine import agent_metadata
 
 
 @pytest.fixture(autouse=True)

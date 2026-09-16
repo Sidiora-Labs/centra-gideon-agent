@@ -9,18 +9,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from gideon.transcribe import is_available, transcribe_audio
-
-# ---------------------------------------------------------------------------
-# is_available
-# ---------------------------------------------------------------------------
+from gideon.integrations.transcribe import is_available, transcribe_audio
 
 
 class TestIsAvailable:
     @pytest.mark.asyncio
     async def test_disabled(self):
         with patch(
-            "gideon.providers.use_cases.load_use_case_settings",
+            "gideon.extensions.providers.use_cases.load_use_case_settings",
             return_value={"enabled": False},
         ):
             assert await is_available() is False
@@ -29,10 +25,10 @@ class TestIsAvailable:
     async def test_enabled_no_active_model(self):
         with (
             patch(
-                "gideon.providers.use_cases.load_use_case_settings",
+                "gideon.extensions.providers.use_cases.load_use_case_settings",
                 return_value={"enabled": True},
             ),
-            patch("gideon.stt.registry.active_stt", return_value=None),
+            patch("gideon.integrations.stt.registry.active_stt", return_value=None),
         ):
             assert await is_available() is False
 
@@ -42,10 +38,13 @@ class TestIsAvailable:
         prov.is_available = AsyncMock(return_value=False)
         with (
             patch(
-                "gideon.providers.use_cases.load_use_case_settings",
+                "gideon.extensions.providers.use_cases.load_use_case_settings",
                 return_value={"enabled": True},
             ),
-            patch("gideon.stt.registry.active_stt", return_value=(prov, "turbo")),
+            patch(
+                "gideon.integrations.stt.registry.active_stt",
+                return_value=(prov, "turbo"),
+            ),
         ):
             assert await is_available() is False
 
@@ -55,26 +54,23 @@ class TestIsAvailable:
         prov.is_available = AsyncMock(return_value=True)
         with (
             patch(
-                "gideon.providers.use_cases.load_use_case_settings",
+                "gideon.extensions.providers.use_cases.load_use_case_settings",
                 return_value={"enabled": True},
             ),
-            patch("gideon.stt.registry.active_stt", return_value=(prov, "turbo")),
-            patch("gideon.transcribe._ffmpeg_present", return_value=True),
+            patch(
+                "gideon.integrations.stt.registry.active_stt",
+                return_value=(prov, "turbo"),
+            ),
+            patch("gideon.integrations.transcribe._ffmpeg_present", return_value=True),
         ):
-            # readiness now delegates to the active provider — local or remote.
             assert await is_available() is True
-
-
-# ---------------------------------------------------------------------------
-# transcribe_audio
-# ---------------------------------------------------------------------------
 
 
 class TestTranscribeAudio:
     @pytest.mark.asyncio
     async def test_disabled_returns_none(self):
         with patch(
-            "gideon.providers.use_cases.load_use_case_settings",
+            "gideon.extensions.providers.use_cases.load_use_case_settings",
             return_value={"enabled": False},
         ):
             assert await transcribe_audio("/tmp/test.webm") is None
@@ -83,11 +79,11 @@ class TestTranscribeAudio:
     async def test_no_active_model_returns_none(self):
         with (
             patch(
-                "gideon.providers.use_cases.load_use_case_settings",
+                "gideon.extensions.providers.use_cases.load_use_case_settings",
                 return_value={"enabled": True},
             ),
-            patch("gideon.security.is_sensitive_path", return_value=False),
-            patch("gideon.stt.registry.active_stt", return_value=None),
+            patch("gideon.security.security.is_sensitive_path", return_value=False),
+            patch("gideon.integrations.stt.registry.active_stt", return_value=None),
         ):
             assert await transcribe_audio("/tmp/test.webm") is None
 
@@ -97,15 +93,20 @@ class TestTranscribeAudio:
         prov.transcribe = AsyncMock(return_value="Hello world")
         with (
             patch(
-                "gideon.providers.use_cases.load_use_case_settings",
+                "gideon.extensions.providers.use_cases.load_use_case_settings",
                 return_value={"enabled": True, "language_code": "en-US"},
             ),
-            patch("gideon.security.is_sensitive_path", return_value=False),
-            patch("gideon.stt.registry.active_stt", return_value=(prov, "turbo")),
+            patch("gideon.security.security.is_sensitive_path", return_value=False),
+            patch(
+                "gideon.integrations.stt.registry.active_stt",
+                return_value=(prov, "turbo"),
+            ),
         ):
             result = await transcribe_audio("/tmp/test.webm")
         assert result == "Hello world"
-        prov.transcribe.assert_awaited_once_with("/tmp/test.webm", model="turbo", language="en-US")
+        prov.transcribe.assert_awaited_once_with(
+            "/tmp/test.webm", model="turbo", language="en-US"
+        )
 
     @pytest.mark.asyncio
     async def test_provider_returns_none(self):
@@ -113,11 +114,14 @@ class TestTranscribeAudio:
         prov.transcribe = AsyncMock(return_value=None)
         with (
             patch(
-                "gideon.providers.use_cases.load_use_case_settings",
+                "gideon.extensions.providers.use_cases.load_use_case_settings",
                 return_value={"enabled": True},
             ),
-            patch("gideon.security.is_sensitive_path", return_value=False),
-            patch("gideon.stt.registry.active_stt", return_value=(prov, "turbo")),
+            patch("gideon.security.security.is_sensitive_path", return_value=False),
+            patch(
+                "gideon.integrations.stt.registry.active_stt",
+                return_value=(prov, "turbo"),
+            ),
         ):
             assert await transcribe_audio("/tmp/test.webm") is None
 
@@ -125,61 +129,61 @@ class TestTranscribeAudio:
     async def test_sensitive_path_blocked(self):
         with (
             patch(
-                "gideon.providers.use_cases.load_use_case_settings",
+                "gideon.extensions.providers.use_cases.load_use_case_settings",
                 return_value={"enabled": True},
             ),
-            patch("gideon.security.is_sensitive_path", return_value=True),
+            patch("gideon.security.security.is_sensitive_path", return_value=True),
         ):
             assert await transcribe_audio("/etc/shadow") is None
 
     @pytest.mark.asyncio
     async def test_small_file_uses_single_call(self, tmp_path):
-        # A small audio file transcribes in one provider call (no segmentation),
-        # even when ffmpeg is present.
         f = tmp_path / "small.wav"
         f.write_bytes(b"\x00" * 1024)
         prov = MagicMock()
         prov.transcribe = AsyncMock(return_value="hi")
         with (
             patch(
-                "gideon.providers.use_cases.load_use_case_settings",
+                "gideon.extensions.providers.use_cases.load_use_case_settings",
                 return_value={"enabled": True},
             ),
-            patch("gideon.security.is_sensitive_path", return_value=False),
-            patch("gideon.stt.registry.active_stt", return_value=(prov, "turbo")),
-            patch("gideon.transcribe._ffmpeg_present", return_value=True),
+            patch("gideon.security.security.is_sensitive_path", return_value=False),
+            patch(
+                "gideon.integrations.stt.registry.active_stt",
+                return_value=(prov, "turbo"),
+            ),
+            patch("gideon.integrations.transcribe._ffmpeg_present", return_value=True),
         ):
             result = await transcribe_audio(str(f))
         assert result == "hi"
-        prov.transcribe.assert_awaited_once()  # single call, not segmented
+        prov.transcribe.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_large_file_segments_and_stitches(self, tmp_path, monkeypatch):
-        # A file over the segment threshold is split (ffmpeg) into chunks that are
-        # transcribed sequentially and stitched.
-        monkeypatch.setenv("GIDEON_STT_SEGMENT_THRESHOLD", "10")  # 10 bytes
+        monkeypatch.setenv("GIDEON_STT_SEGMENT_THRESHOLD", "10")
         f = tmp_path / "big.wav"
         f.write_bytes(b"\x00" * 4096)
         prov = MagicMock()
         prov.transcribe = AsyncMock(side_effect=["part one", "part two"])
 
-        # Fake the ffmpeg segmenter: create two segment files in the work dir.
         async def _fake_transcribe_segmented(provider, model_id, language, audio_path):
-            # Exercise the real stitching contract without invoking ffmpeg.
             a = await provider.transcribe("seg0", model=model_id, language=language)
             b = await provider.transcribe("seg1", model=model_id, language=language)
             return " ".join(x for x in (a, b) if x)
 
         with (
             patch(
-                "gideon.providers.use_cases.load_use_case_settings",
+                "gideon.extensions.providers.use_cases.load_use_case_settings",
                 return_value={"enabled": True},
             ),
-            patch("gideon.security.is_sensitive_path", return_value=False),
-            patch("gideon.stt.registry.active_stt", return_value=(prov, "turbo")),
-            patch("gideon.transcribe._ffmpeg_present", return_value=True),
+            patch("gideon.security.security.is_sensitive_path", return_value=False),
             patch(
-                "gideon.transcribe._transcribe_segmented",
+                "gideon.integrations.stt.registry.active_stt",
+                return_value=(prov, "turbo"),
+            ),
+            patch("gideon.integrations.transcribe._ffmpeg_present", return_value=True),
+            patch(
+                "gideon.integrations.transcribe._transcribe_segmented",
                 side_effect=_fake_transcribe_segmented,
             ),
         ):
@@ -188,7 +192,6 @@ class TestTranscribeAudio:
 
     @pytest.mark.asyncio
     async def test_large_file_no_ffmpeg_falls_back_single(self, tmp_path, monkeypatch):
-        # Over threshold but ffmpeg absent → single provider call (no segmentation).
         monkeypatch.setenv("GIDEON_STT_SEGMENT_THRESHOLD", "10")
         f = tmp_path / "big.wav"
         f.write_bytes(b"\x00" * 4096)
@@ -196,26 +199,28 @@ class TestTranscribeAudio:
         prov.transcribe = AsyncMock(return_value="whole thing")
         with (
             patch(
-                "gideon.providers.use_cases.load_use_case_settings",
+                "gideon.extensions.providers.use_cases.load_use_case_settings",
                 return_value={"enabled": True},
             ),
-            patch("gideon.security.is_sensitive_path", return_value=False),
-            patch("gideon.stt.registry.active_stt", return_value=(prov, "turbo")),
-            patch("gideon.transcribe._ffmpeg_present", return_value=False),
+            patch("gideon.security.security.is_sensitive_path", return_value=False),
+            patch(
+                "gideon.integrations.stt.registry.active_stt",
+                return_value=(prov, "turbo"),
+            ),
+            patch("gideon.integrations.transcribe._ffmpeg_present", return_value=False),
         ):
             result = await transcribe_audio(str(f))
         assert result == "whole thing"
         prov.transcribe.assert_awaited_once_with(str(f), model="turbo", language="")
 
 
-# ---------------------------------------------------------------------------
-# L0 — rich transcript contract (segments + word timestamps + detailed path)
-# ---------------------------------------------------------------------------
-
-
 class TestTranscriptContract:
     def test_to_dict_nested_shape(self):
-        from gideon.stt.provider import TranscriptResult, TranscriptSegment, TranscriptWord
+        from gideon.integrations.stt.provider import (
+            TranscriptResult,
+            TranscriptSegment,
+            TranscriptWord,
+        )
 
         r = TranscriptResult(
             text="hello world",
@@ -223,21 +228,21 @@ class TestTranscriptContract:
             duration=1.5,
             segments=[
                 TranscriptSegment(
-                    0.0, 1.5, "hello world", words=[TranscriptWord(0.0, 0.5, "hello", 0.9)]
+                    0.0,
+                    1.5,
+                    "hello world",
+                    words=[TranscriptWord(0.0, 0.5, "hello", 0.9)],
                 )
             ],
         )
         d = r.to_dict()
         assert d["text"] == "hello world" and d["language"] == "en"
         assert d["segments"][0]["words"][0]["word"] == "hello"
-        assert d["segments"][0]["speaker"] is None  # filled later by fusion (L1)
+        assert d["segments"][0]["speaker"] is None
 
     @pytest.mark.asyncio
     async def test_default_detailed_wraps_flat_text(self):
-        # A provider that only implements transcribe() inherits the default
-        # transcribe_detailed, which wraps the flat text (no segments) — no provider
-        # is forced to fabricate structure it doesn't have.
-        from gideon.stt.provider import SttProvider
+        from gideon.integrations.stt.provider import SttProvider
 
         class _Flat(SttProvider):
             name = "flat"
@@ -265,7 +270,7 @@ class TestTranscriptContract:
 
     @pytest.mark.asyncio
     async def test_detailed_none_when_flat_none(self):
-        from gideon.stt.provider import SttProvider
+        from gideon.integrations.stt.provider import SttProvider
 
         class _Empty(SttProvider):
             name = "e"
@@ -290,8 +295,8 @@ class TestTranscriptContract:
 
     @pytest.mark.asyncio
     async def test_transcribe_audio_detailed_returns_result(self, tmp_path):
-        from gideon.stt.provider import TranscriptResult, TranscriptSegment
-        from gideon.transcribe import transcribe_audio_detailed
+        from gideon.integrations.stt.provider import TranscriptResult, TranscriptSegment
+        from gideon.integrations.transcribe import transcribe_audio_detailed
 
         f = tmp_path / "a.wav"
         f.write_bytes(b"\x00" * 32)
@@ -303,33 +308,39 @@ class TestTranscriptContract:
         )
         with (
             patch(
-                "gideon.providers.use_cases.load_use_case_settings",
+                "gideon.extensions.providers.use_cases.load_use_case_settings",
                 return_value={"enabled": True},
             ),
-            patch("gideon.security.is_sensitive_path", return_value=False),
-            patch("gideon.stt.registry.active_stt", return_value=(prov, "turbo")),
+            patch("gideon.security.security.is_sensitive_path", return_value=False),
+            patch(
+                "gideon.integrations.stt.registry.active_stt",
+                return_value=(prov, "turbo"),
+            ),
         ):
             r = await transcribe_audio_detailed(str(f))
         assert r is not None and r.text == "hi there" and len(r.segments) == 1
 
     @pytest.mark.asyncio
     async def test_segmented_detailed_offsets_timestamps(self, tmp_path, monkeypatch):
-        # The segmented detailed path must OFFSET each chunk's segment/word times by the
-        # chunk's start (chunk 1 at _STT_SEGMENT_SECONDS) so the merged timeline is
-        # continuous. We drive the merge helper directly with a fake per-chunk provider.
-        from gideon import transcribe as T
-        from gideon.stt.provider import TranscriptResult, TranscriptSegment, TranscriptWord
+        from gideon.integrations import transcribe as T
+        from gideon.integrations.stt.provider import (
+            TranscriptResult,
+            TranscriptSegment,
+            TranscriptWord,
+        )
 
         monkeypatch.setattr(T, "_STT_SEGMENT_SECONDS", 600)
 
-        # Each chunk reports LOCAL times [0..5]; two chunks → second offset by 600.
         def _chunk_result(_i):
             return TranscriptResult(
                 text="chunk",
                 duration=5.0,
                 segments=[
                     TranscriptSegment(
-                        0.0, 5.0, "chunk", words=[TranscriptWord(0.0, 5.0, "chunk", 1.0)]
+                        0.0,
+                        5.0,
+                        "chunk",
+                        words=[TranscriptWord(0.0, 5.0, "chunk", 1.0)],
                     )
                 ],
             )
@@ -344,7 +355,6 @@ class TestTranscriptContract:
         prov = MagicMock()
         prov.transcribe_detailed = _detailed
 
-        # Fake ffmpeg segmentation: create two segment files so the helper iterates twice.
         def _fake_listdir(p):
             return ["seg_00000.wav", "seg_00001.wav"]
 
@@ -364,7 +374,6 @@ class TestTranscriptContract:
 
         assert r is not None
         assert len(r.segments) == 2
-        # First chunk stays at 0..5; second chunk offset to 600..605.
         assert r.segments[0].start == 0.0 and r.segments[0].end == 5.0
         assert r.segments[1].start == 600.0 and r.segments[1].end == 605.0
-        assert r.segments[1].words[0].start == 600.0  # word times offset too
+        assert r.segments[1].words[0].start == 600.0

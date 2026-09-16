@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from gideon.triggers.file_watch import (
+from gideon.automation.triggers.file_watch import (
     HASH_BYTES,
     MAX_WATCHED_FILES,
     VCS_GLOBS,
@@ -56,11 +56,12 @@ def _names(paths: list[str]) -> list[str]:
     return sorted(Path(p).name for p in paths)
 
 
-# ── glob expansion ──
-
-
 def test_a_recursive_glob_finds_nested_files(notes):
-    assert _names([str(p) for p in expand_globs(_pat(notes))]) == ["a.md", "b.md", "c.md"]
+    assert _names([str(p) for p in expand_globs(_pat(notes))]) == [
+        "a.md",
+        "b.md",
+        "c.md",
+    ]
 
 
 def test_a_bare_trailing_double_star_matches_files_on_every_python(notes):
@@ -69,7 +70,8 @@ def test_a_bare_trailing_double_star_matches_files_on_every_python(notes):
     and the whole file-watch runtime silently saw nothing; 3.13 changed `**` to also match files.
     Measured 0-vs-2 files for `{dir}/**` on 3.12. `expand_globs` normalizes a trailing `/**` to
     `/**/*` so a directory watch finds its files identically on both — this is the shape the poll
-    loop actually receives, and this test is why it can no longer silently watch nothing on 3.12."""
+    loop actually receives, and this test is why it can no longer silently watch nothing on 3.12.
+    """
     found = expand_globs([str(notes / "**")])
     assert _names([str(p) for p in found]) == ["a.md", "b.md", "c.md"]
 
@@ -86,10 +88,7 @@ def test_a_tilde_is_expanded():
     meant, and silently watching nothing is the worst outcome."""
     home = Path.home()
     expanded = expand_globs(["~"])
-    # `~` itself is a directory so it is filtered out; what matters is that no path named "~"
-    # appears.
     assert not any(p.name == "~" for p in expanded)
-    # And a real pattern under home resolves to absolute paths under it.
     for p in expand_globs(["~/*"]):
         assert str(p).startswith(str(home))
 
@@ -99,7 +98,10 @@ def test_an_absolute_pattern_works(notes):
 
 
 def test_a_relative_pattern_resolves_against_base(notes):
-    assert _names([str(p) for p in expand_globs(["*.md"], base=notes)]) == ["a.md", "b.md"]
+    assert _names([str(p) for p in expand_globs(["*.md"], base=notes)]) == [
+        "a.md",
+        "b.md",
+    ]
 
 
 def test_a_malformed_glob_watches_nothing_rather_than_raising():
@@ -115,9 +117,6 @@ def test_expansion_is_sorted_and_deduped(notes):
     both = expand_globs([str(notes / "*.md"), str(notes / "a.md")])
     assert len(both) == 2
     assert both == sorted(both)
-
-
-# ── the content hash ──
 
 
 def test_the_hash_changes_with_content(notes):
@@ -147,9 +146,6 @@ def test_an_unreadable_path_hashes_to_empty(tmp_path):
     assert content_hash(tmp_path / "missing.md") == ""
 
 
-# ── the seeding pass ──
-
-
 def test_the_first_pass_seeds_and_never_fires(notes):
     """The bug `ConfigFsWatcher` documents, and worse for a trigger: an automation firing over a
     whole directory the first time it is enabled."""
@@ -167,9 +163,6 @@ def test_a_quiet_directory_never_fires(notes):
     for _ in range(3):
         delta, state = changed_files(_pat(notes), state)
         assert should_fire(delta) is False
-
-
-# ── the change classes ──
 
 
 def test_a_real_edit_is_modified_and_fires(notes):
@@ -223,7 +216,7 @@ def test_the_three_classes_stay_separate(notes):
     assert _names(delta.modified) == ["a.md"]
     assert _names(delta.added) == ["n.md"]
     assert _names(delta.removed) == ["b.md"]
-    assert _names(delta.changed) == ["a.md", "n.md"]  # NOT the removal
+    assert _names(delta.changed) == ["a.md", "n.md"]
 
 
 def test_a_change_is_reported_once_not_every_poll(notes):
@@ -236,9 +229,6 @@ def test_a_change_is_reported_once_not_every_poll(notes):
     assert should_fire(second) is False
 
 
-# ── state handling ──
-
-
 def test_state_is_returned_not_mutated(notes):
     """A caller that fails to persist must not half-advance the watch: either the new state is
     stored and the delta consumed, or neither happened."""
@@ -246,7 +236,7 @@ def test_state_is_returned_not_mutated(notes):
     snapshot = dict(state.hashes)
     (notes / "a.md").write_text("edited")
     _delta, new_state = changed_files(_pat(notes), state)
-    assert state.hashes == snapshot  # the old state is untouched
+    assert state.hashes == snapshot
     assert new_state.hashes != snapshot
 
 
@@ -256,7 +246,6 @@ def test_state_round_trips_through_a_dict(notes):
     revived = WatchState.from_dict(state.to_dict())
     assert revived.seeded is True
     assert revived.hashes == state.hashes
-    # And a revived state does not re-report everything.
     delta, _s = changed_files(_pat(notes), revived)
     assert should_fire(delta) is False
 
@@ -268,18 +257,15 @@ def test_a_missing_or_malformed_state_is_treated_as_unseeded():
     assert WatchState.from_dict({"hashes": "not-a-dict"}).hashes == {}
 
 
-# ── the cap ──
-
-
 def test_the_cap_truncates_deterministically_and_reports_it(tmp_path):
     """A `~/**` glob is hundreds of thousands of paths — hashing them每 poll makes the gateway
-    unusable, which is the `broad_watch_glob` finding `automation doctor` already flags."""
+    unusable, which is the `broad_watch_glob` finding `automation doctor` already flags.
+    """
     for i in range(12):
         (tmp_path / f"f{i:02d}.md").write_text(str(i))
     delta, state = changed_files([str(tmp_path / "*.md")], WatchState(), cap=5)
     assert delta.truncated is True
     assert len(state.hashes) == 5
-    # Deterministic: the same subset every poll, so files do not appear and vanish from the watch.
     _d2, state2 = changed_files([str(tmp_path / "*.md")], WatchState(), cap=5)
     assert sorted(state.hashes) == sorted(state2.hashes)
 
@@ -291,9 +277,6 @@ def test_an_uncapped_watch_reports_no_truncation(notes):
 
 def test_the_cap_default_is_bounded():
     assert 0 < MAX_WATCHED_FILES <= 100_000
-
-
-# ── the fire payload ──
 
 
 def test_the_payload_carries_paths_not_contents(notes):
@@ -322,9 +305,6 @@ def test_the_payload_reports_truncation(tmp_path):
         (tmp_path / f"f{i}.md").write_text(str(i))
     delta, _s = changed_files([str(tmp_path / "*.md")], WatchState(seeded=True), cap=2)
     assert fire_payload(delta)["truncated"] is True
-
-
-# ── the vcs preset ──
 
 
 def test_the_vcs_preset_watches_refs_and_HEAD(tmp_path):
@@ -371,13 +351,10 @@ def test_a_real_commit_moves_the_watched_ref(tmp_path):
     assert should_fire(delta) is True
 
 
-# ── the declared contract this satisfies ──
-
-
 def test_the_spec_keys_this_module_serves_are_the_declared_ones():
     """`models.SPEC_KEYS['file']` is `{paths, dedup}` — the contract this runtime implements. Drift
     here means a trigger can be authored with a key nothing reads."""
-    from gideon.triggers.models import SPEC_KEYS
+    from gideon.automation.triggers.models import SPEC_KEYS
 
     assert SPEC_KEYS["file"] == frozenset({"paths", "dedup"})
 
@@ -385,7 +362,7 @@ def test_the_spec_keys_this_module_serves_are_the_declared_ones():
 def test_a_file_trigger_parses_and_stays_enabled():
     """Measured before this module existed: it already did — which is exactly why the absent
     runtime was invisible."""
-    from gideon.triggers.models import parse_trigger
+    from gideon.automation.triggers.models import parse_trigger
 
     trigger, issues = parse_trigger(
         {

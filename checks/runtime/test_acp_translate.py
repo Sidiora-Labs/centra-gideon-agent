@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import json
 
-from gideon.acp import translate
-from gideon.acp.types import (
+from gideon.integrations.acp import translate
+from gideon.integrations.acp.types import (
     EVENT_PERMISSION_REQUEST,
     EVENT_TOOL_CALL,
     EVENT_TOOL_RESULT,
@@ -23,11 +23,13 @@ def _update(update: dict) -> JsonRpcMessage:
     return JsonRpcMessage(method="session/update", params={"update": update})
 
 
-# ── extract_text_chunk ─────────────────────────────────────────────────────────
 class TestExtractTextChunk:
     def test_plain_text(self):
         msg = _update(
-            {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "hi"}}
+            {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": "hi"},
+            }
         )
         text, is_thinking = translate.extract_text_chunk(msg)
         assert text == "hi" and is_thinking is False
@@ -48,7 +50,6 @@ class TestExtractTextChunk:
         assert text is None
 
 
-# ── extract_tool_event ─────────────────────────────────────────────────────────
 class TestExtractToolEvent:
     def test_tool_call_event(self):
         msg = _update(
@@ -66,12 +67,14 @@ class TestExtractToolEvent:
 
     def test_non_tool_returns_none(self):
         msg = _update(
-            {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "hi"}}
+            {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": "hi"},
+            }
         )
         assert translate.extract_tool_event(msg, {}, {}, []) is None
 
 
-# ── extract_tool_update_events (completed + failed both surface results) ─────────
 class TestExtractToolUpdateEvents:
     def test_completed_yields_result(self):
         msg = _update(
@@ -79,7 +82,9 @@ class TestExtractToolUpdateEvents:
                 "sessionUpdate": "tool_call_update",
                 "toolCallId": "t1",
                 "status": "completed",
-                "content": [{"type": "content", "content": {"type": "text", "text": "done"}}],
+                "content": [
+                    {"type": "content", "content": {"type": "text", "text": "done"}}
+                ],
             }
         )
         events = translate.extract_tool_update_events(msg, {}, {})
@@ -105,10 +110,9 @@ class TestExtractToolUpdateEvents:
         assert len(results) == 1 and "No such file" in results[0].tool_output
 
 
-# ── build_permission_event ──────────────────────────────────────────────────────
 class TestBuildPermissionEvent:
     def test_permission_event_fields(self):
-        from gideon.acp.dialect import DefaultDialect
+        from gideon.integrations.acp.dialect import DefaultDialect
 
         msg = JsonRpcMessage(
             id=55,
@@ -120,13 +124,9 @@ class TestBuildPermissionEvent:
         assert ev.kind == EVENT_PERMISSION_REQUEST
         assert ev.title == "Write" and ev.request_id == 55
 
-    # ── G18: the card must NAME the tool it is gating ───────────────────────────
-    #
-    # codex's `session/request_permission` payload is `{toolCallId, kind, status}` — the
-    # human title lives on the PRECEDING `tool_call` frame. Every assertion below drives
-    # the real two-frame sequence rather than hand-building the correlation cache: a test
-    # that seeds `tool_call_seen` itself cannot catch a producer that stops filling it.
-    def _seen_from_tool_call(self, *, title="Read file 'notes.md'", kind="read", call_id="c1"):
+    def _seen_from_tool_call(
+        self, *, title="Read file 'notes.md'", kind="read", call_id="c1"
+    ):
         seen: dict = {}
         inputs: dict = {}
         translate.extract_tool_event(
@@ -146,7 +146,7 @@ class TestBuildPermissionEvent:
         return inputs, seen
 
     def _permission(self, tool_call: dict, inputs: dict, seen: dict, req="r1"):
-        from gideon.acp.dialect import DefaultDialect
+        from gideon.integrations.acp.dialect import DefaultDialect
 
         msg = JsonRpcMessage(
             id=req,
@@ -161,19 +161,25 @@ class TestBuildPermissionEvent:
         ev = self._permission(
             {"toolCallId": "c1", "kind": "read", "status": "pending"}, inputs, seen
         )
-        assert ev.title == "Read file 'notes.md'", "the card cannot name the tool it gates"
+        assert (
+            ev.title == "Read file 'notes.md'"
+        ), "the card cannot name the tool it gates"
 
     def test_an_empty_title_is_an_absence_not_a_name(self):
         """`.get("title", "unknown")` only saw a MISSING key, so `title: ""` shipped a
         nameless card even when the correlation had the real name."""
         inputs, seen = self._seen_from_tool_call()
-        ev = self._permission({"toolCallId": "c1", "title": "", "status": "pending"}, inputs, seen)
+        ev = self._permission(
+            {"toolCallId": "c1", "title": "", "status": "pending"}, inputs, seen
+        )
         assert ev.title == "Read file 'notes.md'"
 
     def test_the_frames_own_title_wins_over_the_correlated_one(self):
         inputs, seen = self._seen_from_tool_call()
         ev = self._permission(
-            {"toolCallId": "c1", "title": "Frame's own", "status": "pending"}, inputs, seen
+            {"toolCallId": "c1", "title": "Frame's own", "status": "pending"},
+            inputs,
+            seen,
         )
         assert ev.title == "Frame's own"
 
@@ -181,7 +187,9 @@ class TestBuildPermissionEvent:
         """The vacuity floor for the fill: an uncorrelated id must stay `unknown` rather
         than borrow some other call's name."""
         inputs, seen = self._seen_from_tool_call()
-        ev = self._permission({"toolCallId": "no-such-call", "status": "pending"}, inputs, seen)
+        ev = self._permission(
+            {"toolCallId": "no-such-call", "status": "pending"}, inputs, seen
+        )
         assert ev.title == "unknown"
 
     def test_an_update_refines_one_field_without_erasing_the_other(self):
@@ -205,26 +213,30 @@ class TestBuildPermissionEvent:
         assert ev.title == "Read file 'renamed.md'" and ev.tool_kind == "read"
 
 
-# ── format_command_result ────────────────────────────────────────────────────────
 class TestFormatCommandResult:
     def test_message_and_data(self):
-        out = translate.format_command_result({"message": "usage report", "data": {"tokens": 42}})
+        out = translate.format_command_result(
+            {"message": "usage report", "data": {"tokens": 42}}
+        )
         assert "usage report" in out and '"tokens": 42' in out
 
 
-# ── is_tool_interrupted_marker ────────────────────────────────────────────────────
 class TestInterruptedMarker:
     def test_exact_marker_matches(self):
-        assert translate.is_tool_interrupted_marker(translate.TOOL_INTERRUPTED_MARKER) is True
+        assert (
+            translate.is_tool_interrupted_marker(translate.TOOL_INTERRUPTED_MARKER)
+            is True
+        )
 
     def test_prose_quoting_marker_does_not_match(self):
         assert (
-            translate.is_tool_interrupted_marker("I saw: " + translate.TOOL_INTERRUPTED_MARKER)
+            translate.is_tool_interrupted_marker(
+                "I saw: " + translate.TOOL_INTERRUPTED_MARKER
+            )
             is False
         )
 
 
-# ── read_new_tool_results (per-session JSONL tail) ───────────────────────────────
 class TestReadNewToolResults:
     def test_reads_tool_results_and_advances_pos(self, tmp_path):
         jsonl = tmp_path / "sess.jsonl"
@@ -238,7 +250,9 @@ class TestReadNewToolResults:
                                 "kind": "toolResult",
                                 "data": {
                                     "toolUseId": "j1",
-                                    "content": [{"kind": "text", "data": "jsonl output"}],
+                                    "content": [
+                                        {"kind": "text", "data": "jsonl output"}
+                                    ],
                                 },
                             }
                         ]
@@ -251,7 +265,6 @@ class TestReadNewToolResults:
         assert len(events) == 1 and events[0].tool_call_id == "j1"
         assert "jsonl output" in events[0].tool_output
         assert pos > 0
-        # A second read from the advanced position yields nothing new.
         events2, pos2 = translate.read_new_tool_results(jsonl, pos)
         assert events2 == [] and pos2 == pos
 
@@ -260,7 +273,6 @@ class TestReadNewToolResults:
         assert events == [] and pos == 0
 
 
-# ── coerce_tool_content ───────────────────────────────────────────────────────────
 class TestCoerceToolContent:
     def test_flattens_text_blocks(self):
         out = translate.coerce_tool_content(
@@ -272,10 +284,120 @@ class TestCoerceToolContent:
         assert translate.coerce_tool_content("plain") == "plain"
 
 
-# ── encode_prompt_content ─────────────────────────────────────────────────────────
 class TestEncodePromptContent:
     def test_wraps_message_as_content_blocks(self):
         blocks = translate.encode_prompt_content("hello")
         assert isinstance(blocks, list) and blocks
-        # Each block is a content dict with a text field somewhere.
         assert any("hello" in json.dumps(b) for b in blocks)
+
+
+def test_failure_decoder_uses_declared_keys_with_a_bounded_walk():
+    assert translate.terminal_result_failed(
+        {
+            "status": "completed",
+            "rawOutput": {"items": [{"Json": {"exit_status": "exit status: 3"}}]},
+        }
+    )
+    assert translate.terminal_result_failed({"content": [{"isError": True}]})
+    assert not translate.terminal_result_failed(
+        {
+            "rawOutput": {"exit_code": True, "text": "1 failed; exit 9"},
+            "rawInput": {"exit_code": 3},
+        }
+    )
+    cycle = {}
+    cycle["self"] = cycle
+    assert not translate._declares_failure(cycle)
+    payload = {"exit_code": 1}
+    for _ in range(translate._FAILURE_SCAN_MAX_DEPTH):
+        payload = {"nested": payload}
+    assert translate._declares_failure(payload)
+    assert not translate._declares_failure({"nested": payload})
+
+
+def test_tool_opening_and_refinement_preserve_declared_whole_file_changes():
+    before, after = "old line\n", "new line\n"
+    block = {"type": "diff", "path": "note.txt", "oldText": before, "newText": after}
+    inputs, seen = {}, {}
+    event = translate.extract_tool_event(
+        _update(
+            {"sessionUpdate": "tool_call", "toolCallId": "edit-1", "content": [block]}
+        ),
+        inputs,
+        seen,
+        [],
+    )
+    assert event.file_change == {"path": "note.txt", "before": before, "after": after}
+    assert "-old line" in event.tool_input and "+new line" in event.tool_input
+    update = translate.extract_tool_update_events(
+        _update(
+            {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "edit-1",
+                "content": [block],
+            }
+        ),
+        inputs,
+        seen,
+    )
+    assert len(update) == 1 and update[0].file_change == event.file_change
+    fragment = translate.extract_tool_event(
+        _update(
+            {
+                "sessionUpdate": "tool_call",
+                "toolCallId": "edit-2",
+                "rawInput": {
+                    "command": "strReplace",
+                    "path": "note.txt",
+                    "oldStr": "old",
+                    "newStr": "new",
+                },
+            }
+        ),
+        inputs,
+        seen,
+        [],
+    )
+    assert fragment.file_change is None and "-old" in fragment.tool_input
+
+
+def test_journal_retains_partial_record_position_and_unicode(tmp_path):
+    path = tmp_path / "events.jsonl"
+    record = {
+        "kind": "ToolResults",
+        "data": {
+            "content": [
+                {
+                    "kind": "toolResult",
+                    "data": {
+                        "toolUseId": "t",
+                        "content": [{"kind": "text", "data": "café"}],
+                    },
+                }
+            ]
+        },
+    }
+    wire = json.dumps(record, ensure_ascii=False).encode()
+    path.write_bytes(b"not json\n" + wire)
+    events, position = translate.read_new_tool_results(path, 0)
+    assert events == [] and position == len(b"not json\n")
+    with path.open("ab") as stream:
+        stream.write(b"\n")
+    events, final = translate.read_new_tool_results(path, position)
+    assert [event.tool_output for event in events] == ["café"]
+    assert final == path.stat().st_size
+    assert translate.read_new_tool_results(path, final) == ([], final)
+
+
+def test_real_file_prompt_attachment_preserves_text_and_bytes(tmp_path):
+    import base64
+
+    path = tmp_path / "image.png"
+    binary = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    )
+    path.write_bytes(binary)
+    encoded = translate.encode_prompt_content("inspect " + str(path))
+    assert encoded[0] == {"type": "text", "text": "inspect [image: image.png]"}
+    assert encoded[1]["mimeType"] == "image/png"
+    assert base64.b64decode(encoded[1]["data"]) == binary

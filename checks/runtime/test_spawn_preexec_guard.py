@@ -9,7 +9,7 @@ un-awaitable ``os.read(errpipe)``. The corrected mechanism delivers ceilings AFT
 the shim, so NO async spawn should pass ``preexec_fn`` at all.
 
 This static AST guard asserts exactly that: no ``asyncio.create_subprocess_exec`` /
-``asyncio.create_subprocess_shell`` call anywhere in ``src/gideon`` passes a
+``asyncio.create_subprocess_shell`` call anywhere in ``runtime/gideon`` passes a
 ``preexec_fn=`` keyword. A newly-introduced async ``preexec_fn`` reds CI naming its
 file:line. (There are currently zero on the tree — this guard keeps it that way; the
 allowlist of documented exceptions is deliberately empty.)
@@ -20,16 +20,13 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-# Documented, deliberate exceptions (``file::qualname`` keys). Empty by design: the shim
-# mechanism means an async spawn never needs preexec_fn. An entry here must carry a written
-# reason in this dict AND survive review — it is a hole in the safety property.
 _DOCUMENTED_EXCEPTIONS: dict[str, str] = {}
 
 _ASYNC_SPAWN = {"create_subprocess_exec", "create_subprocess_shell"}
 
 
 def _src_root() -> Path:
-    return Path(__file__).resolve().parents[1] / "src" / "gideon"
+    return Path(__file__).resolve().parents[2] / "runtime" / "gideon"
 
 
 def _async_callee(node: ast.Call) -> str | None:
@@ -70,7 +67,9 @@ def _offending_sites() -> list[str]:
                 self.q.pop()
 
             def visit_Call(self, n: ast.Call) -> None:
-                if _async_callee(n) and any(kw.arg == "preexec_fn" for kw in n.keywords):
+                if _async_callee(n) and any(
+                    kw.arg == "preexec_fn" for kw in n.keywords
+                ):
                     qual = ".".join(self.q) or "<module>"
                     key = f"{rel}::{qual}"
                     if key not in _DOCUMENTED_EXCEPTIONS:

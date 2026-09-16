@@ -28,32 +28,37 @@ import asyncio
 
 import pytest
 
-from gideon.triggers import loop as tl
-from gideon.triggers import wakeup as W
-from gideon.triggers.models import Outcome, parse_trigger
-from gideon.workflows import store as wstore
-from gideon.workflows.controller import EngineServices
-from gideon.workflows.models import RunStatus, WorkflowRun
-from gideon.workflows.native_defs import register_native_provider
-from gideon.workflows.watchdog import WorkflowWatchdog
+from gideon.automation.triggers import loop as tl
+from gideon.automation.triggers import wakeup as W
+from gideon.automation.triggers.models import Outcome, parse_trigger
+from gideon.automation.workflows import store as wstore
+from gideon.automation.workflows.controller import EngineServices
+from gideon.automation.workflows.models import RunStatus, WorkflowRun
+from gideon.automation.workflows.native_defs import register_native_provider
+from gideon.automation.workflows.watchdog import WorkflowWatchdog
 
 NOW = 1_700_000_000.0
 
-#: A run that PARKS on an approval gate and has an un-run node behind it. The node behind the gate
-#: is the whole proof: its output cannot exist unless the resume actually moved the run forward.
 GATED_SPEC = {
     "name": "gated",
     "root": {
         "kind": "sequence",
         "id": "s",
         "children": [
-            {"kind": "gate", "id": "approve", "config": {"kind": "approval", "prompt": "ok?"}},
-            {"kind": "transform", "id": "after", "config": {"expr": "the run carried on"}},
+            {
+                "kind": "gate",
+                "id": "approve",
+                "config": {"kind": "approval", "prompt": "ok?"},
+            },
+            {
+                "kind": "transform",
+                "id": "after",
+                "config": {"expr": "the run carried on"},
+            },
         ],
     },
 }
 
-#: Where `store.read_output` finds that node's value.
 AFTER_PATH = "root.children[1]"
 
 
@@ -80,17 +85,14 @@ def _resume_trigger(run_id: str, **extra) -> _Trigger:
     return _Trigger({"resume": {"run_id": run_id, **extra}})
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# the pure half: what a trigger declares, and what the dispatcher makes of it
-# ══════════════════════════════════════════════════════════════════════════════
-
-
 def test_a_trigger_with_NO_resume_target_still_builds_a_droppable_wake():
     """🟢 **THE VACUITY PARTNER for every mutation in this file.** Every trigger authored before a
     resume target existed must behave exactly as before — a `wake`, droppable, so `overlap: skip`
     keeps working. A mutation that breaks the resume path must leave this green, or the red it
     produced proves nothing about the resume path specifically."""
-    wakeup = W.wakeup_for(_Fire(_Trigger({"inline": {"provider": "notify"}})), seq=1, now=NOW)
+    wakeup = W.wakeup_for(
+        _Fire(_Trigger({"inline": {"provider": "notify"}})), seq=1, now=NOW
+    )
     assert wakeup.kind == W.WakeKind.WAKE.value
     assert wakeup.droppable is True
     assert wakeup.payload["trigger_id"] == "schedule:j1"
@@ -110,7 +112,9 @@ def test_the_resume_names_NO_session_because_it_targets_a_RUN():
     run-targeted resume that is the run's own session, which the dispatcher cannot derive — and does
     not need, because this wakeup never enters an inbox. Empty is the honest value; deriving the
     TRIGGER's key would name a session that provably did not park this run."""
-    assert W.wakeup_for(_Fire(_resume_trigger("run-7")), seq=1, now=NOW).session_key == ""
+    assert (
+        W.wakeup_for(_Fire(_resume_trigger("run-7")), seq=1, now=NOW).session_key == ""
+    )
 
 
 def test_a_resume_target_NEVER_reaches_the_session_inbox():
@@ -126,7 +130,9 @@ def test_a_resume_target_NEVER_reaches_the_session_inbox():
             enqueued.append((a, kw))
             return True
 
-    deliveries = W.dispatch_fires(_Manager(), [_Fire(_resume_trigger("run-7"))], now=NOW)
+    deliveries = W.dispatch_fires(
+        _Manager(), [_Fire(_resume_trigger("run-7"))], now=NOW
+    )
     assert [d.disposition for d in deliveries] == [W.Disposition.RESUME_TARGET.value]
     assert enqueued == [], "a resume target must never be queued onto a session inbox"
     assert deliveries[0].delivered is False
@@ -162,9 +168,6 @@ def test_the_new_disposition_is_counted_by_the_SHIPPED_summary():
     assert counts["retry"] == 0
 
 
-# ── `resume_target_of`: the normalized shape every consumer reads ──
-
-
 @pytest.mark.parametrize(
     "workflow",
     [
@@ -185,7 +188,9 @@ def test_a_target_that_names_no_run_is_NO_target(workflow):
     normally — and `models._resume_target_issues` tells the author at save time, where the mistake
     was made."""
     assert W.resume_target_of(_Trigger(workflow)) == {}
-    assert W.wakeup_for(_Fire(_Trigger(workflow)), now=NOW).kind == W.WakeKind.WAKE.value
+    assert (
+        W.wakeup_for(_Fire(_Trigger(workflow)), now=NOW).kind == W.WakeKind.WAKE.value
+    )
 
 
 def test_a_missing_answer_key_means_CLEAR_THE_PAUSE_not_answer_a_gate():
@@ -208,13 +213,12 @@ def test_answer_PRESENCE_is_what_counts_never_its_truthiness(answer):
 
 
 def test_the_target_carries_its_scope_and_token_through():
-    target = W.resume_target_of(_resume_trigger("run-7", project_id="p1", resume_token="tok"))
+    target = W.resume_target_of(
+        _resume_trigger("run-7", project_id="p1", resume_token="tok")
+    )
     assert target["run_id"] == "run-7"
     assert target["project_id"] == "p1"
     assert target["resume_token"] == "tok"
-
-
-# ── validation: the author is told at SAVE time ──
 
 
 def _issues(workflow: dict) -> list:
@@ -232,9 +236,12 @@ def _issues(workflow: dict) -> list:
 
 def test_a_resume_block_with_no_run_id_is_an_ERROR_at_save_time():
     """The runtime is fail-open on this by design, so validation is the ONLY thing that can tell the
-    author. Without it a mistyped target is a trigger that quietly does the wrong thing forever."""
+    author. Without it a mistyped target is a trigger that quietly does the wrong thing forever.
+    """
     issues = _issues({"resume": {}})
-    assert any(i.path == "workflow.resume.run_id" and i.severity == "error" for i in issues)
+    assert any(
+        i.path == "workflow.resume.run_id" and i.severity == "error" for i in issues
+    )
 
 
 def test_a_non_object_resume_target_is_an_ERROR():
@@ -268,10 +275,6 @@ def test_a_WELL_FORMED_resume_target_raises_no_issues():
     assert [i.to_dict() for i in issues] == []
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# the end-to-end half: the run ACTUALLY resumes
-# ══════════════════════════════════════════════════════════════════════════════
-
 pytestmark_asyncio = pytest.mark.anyio
 
 
@@ -291,9 +294,9 @@ def isolated(tmp_path, monkeypatch):
     """
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: home)
-    from gideon.workflows import defs as defs_mod
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: home)
+    from gideon.automation.workflows import defs as defs_mod
 
     saved = dict(defs_mod._providers)
     defs_mod._providers.clear()
@@ -329,11 +332,13 @@ def _attach(monkeypatch, watchdog) -> None:
     through `ActionServices.workflows` proves the accessor the gateway actually populates
     (`gateway.py`: `svc.workflows = self.workflow_watchdog`) is the one the loop reads.
     """
-    from gideon.action_providers import services as svc_mod
+    from gideon.integrations.action_providers import services as svc_mod
 
     services = svc_mod.get_action_services()
     if services is None:
-        services = svc_mod.ActionServices(state=None, spawn_background=lambda _coro: None)
+        services = svc_mod.ActionServices(
+            state=None, spawn_background=lambda _coro: None
+        )
         monkeypatch.setattr(svc_mod, "get_action_services", lambda: services)
     monkeypatch.setattr(services, "workflows", watchdog, raising=False)
 
@@ -359,7 +364,9 @@ async def _never_runs(_payload):
     where it lands, and `run_one` would swallow the raise into a `failed` outcome — so the assertion
     lives in the outcome, and this makes that outcome unmistakable.
     """
-    raise AssertionError("a resume target must never execute the trigger's ordinary action")
+    raise AssertionError(
+        "a resume target must never execute the trigger's ordinary action"
+    )
 
 
 @pytest.mark.anyio
@@ -375,7 +382,7 @@ async def test_THE_RUN_ACTUALLY_RESUMES(isolated, monkeypatch):
     run, watchdog = await _parked_run()
     _attach(monkeypatch, watchdog)
 
-    from gideon.workflows.human_input import list_continuations
+    from gideon.automation.workflows.human_input import list_continuations
 
     assert list_continuations(run.id), "the gate did not mint a continuation to resume"
     assert wstore.get(run.id).status == RunStatus.NEEDS_INPUT
@@ -386,7 +393,6 @@ async def test_THE_RUN_ACTUALLY_RESUMES(isolated, monkeypatch):
 
     controller = watchdog.controller(run.id)
     assert await controller.wait_for_terminal(timeout=20) == RunStatus.COMPLETE
-    # The proof: a value that only exists if the run carried on past the gate.
     assert wstore.read_output(run.id, AFTER_PATH) == "the run carried on"
     assert wstore.get(run.id).status == RunStatus.COMPLETE
 
@@ -404,15 +410,23 @@ async def test_a_resume_CONSUMES_the_gate_token(isolated, monkeypatch):
     run, watchdog = await _parked_run()
     _attach(monkeypatch, watchdog)
 
-    from gideon.workflows.human_input import _claimed_dir, _dir, list_continuations
+    from gideon.automation.workflows.human_input import (
+        _claimed_dir,
+        _dir,
+        list_continuations,
+    )
 
     token = list_continuations(run.id)[0].token
     assert (_dir(run.id) / f"{token}.json").is_file()
 
     assert (await _fire(run.id, answer=True)).outcome == Outcome.RAN.value
 
-    assert not (_dir(run.id) / f"{token}.json").exists(), "the gate answer was not claimed"
-    assert (_claimed_dir(run.id) / f"{token}.json").is_file(), "the claim left no audit trail"
+    assert not (
+        _dir(run.id) / f"{token}.json"
+    ).exists(), "the gate answer was not claimed"
+    assert (
+        _claimed_dir(run.id) / f"{token}.json"
+    ).is_file(), "the claim left no audit trail"
 
 
 @pytest.mark.anyio
@@ -434,7 +448,7 @@ async def test_list_continuations_EXCLUDES_a_claimed_gate(isolated, monkeypatch)
     """
     run, watchdog = await _parked_run()
     _attach(monkeypatch, watchdog)
-    from gideon.workflows.human_input import list_continuations
+    from gideon.automation.workflows.human_input import list_continuations
 
     assert (await _fire(run.id, answer=True)).outcome == Outcome.RAN.value
     assert list_continuations(run.id) == [], (
@@ -484,17 +498,18 @@ async def test_two_CONCURRENT_fires_resume_the_run_once(isolated, monkeypatch):
     run, watchdog = await _parked_run()
     _attach(monkeypatch, watchdog)
 
-    outcomes = await asyncio.gather(_fire(run.id, answer=True), _fire(run.id, answer=True))
+    outcomes = await asyncio.gather(
+        _fire(run.id, answer=True), _fire(run.id, answer=True)
+    )
     ran = [o for o in outcomes if o.outcome == Outcome.RAN.value]
     assert len(ran) == 1, [o.outcome for o in outcomes]
     assert all(o.reason for o in outcomes if o.outcome != Outcome.RAN.value)
 
 
-# ── the missing-target dispositions: fail-CLOSED, and LEGIBLE ──
-
-
 @pytest.mark.anyio
-async def test_a_GONE_target_is_REFUSED_with_a_reason_that_names_the_run(isolated, monkeypatch):
+async def test_a_GONE_target_is_REFUSED_with_a_reason_that_names_the_run(
+    isolated, monkeypatch
+):
     """🔴 **FAIL-CLOSED, and the direction is not symmetric.** This fires unattended. Fail-open
     would mean "the target is gone, so start a new run instead" — running work the author never
     asked for, on a schedule, with nobody watching, potentially mutating. Refusing costs one
@@ -525,14 +540,15 @@ async def test_a_FINISHED_target_is_REFUSED_not_restarted(isolated, monkeypatch)
     outcome = await _fire(run.id, answer=True)
     assert outcome.outcome == Outcome.REFUSED.value
     assert "has finished" in outcome.reason
-    # And it did NOT reach the gate machinery: the continuation is untouched.
-    from gideon.workflows.human_input import list_continuations
+    from gideon.automation.workflows.human_input import list_continuations
 
     assert len(list_continuations(run.id)) == 1
 
 
 @pytest.mark.anyio
-async def test_a_FOREIGN_target_is_REFUSED_when_the_project_disagrees(isolated, monkeypatch):
+async def test_a_FOREIGN_target_is_REFUSED_when_the_project_disagrees(
+    isolated, monkeypatch
+):
     """A run id is not unique to a project's intent — ids are reused across a restore and a fork —
     and resuming a stranger's run unattended is the one outcome worth refusing on a merely
     SUSPICIOUS signal."""
@@ -572,19 +588,17 @@ async def test_NO_declared_project_does_not_check_the_project(isolated, monkeypa
 
 
 @pytest.mark.anyio
-async def test_a_run_with_NO_PENDING_GATE_is_DEFERRED_not_refused(isolated, monkeypatch):
+async def test_a_run_with_NO_PENDING_GATE_is_DEFERRED_not_refused(
+    isolated, monkeypatch
+):
     """A state a parked run LEAVES on its own, so it is postponed rather than refused — and
     re-evaluated on the trigger's next scheduled fire. No retry queue: a scheduled trigger's own
     cadence IS the retry, and `pending_resumes` feeds `deliver_all`, which would put the resume back
     onto the inbox this path exists to avoid."""
     run, watchdog = await _parked_run()
     _attach(monkeypatch, watchdog)
-    from gideon.workflows.human_input import _dir
+    from gideon.automation.workflows.human_input import _dir
 
-    # Cleared by unlinking the files directly. `consume_continuation` now reaches this state on
-    # its own (a claimed record moves under `claimed/` and stops being listed — see
-    # `test_list_continuations_EXCLUDES_a_claimed_gate`), but constructing it by hand keeps this
-    # test about the DEFERRED branch alone, independent of the claim mechanics.
     for path in _dir(run.id).glob("*.json"):
         path.unlink()
 
@@ -619,23 +633,21 @@ async def test_a_pause_is_CLEARED_when_no_answer_is_declared(isolated, monkeypat
     fresh.extra["pause_requested"] = True
     wstore.save(fresh)
 
-    outcome = await _fire(run.id)  # no `answer` key at all
+    outcome = await _fire(run.id)
     assert outcome.outcome == Outcome.RAN.value, outcome.reason
     assert "pause_requested" not in wstore.get(run.id).extra
-    # The gate is UNTOUCHED — clearing a pause is not answering a question.
-    from gideon.workflows.human_input import list_continuations
+    from gideon.automation.workflows.human_input import list_continuations
 
     assert len(list_continuations(run.id)) == 1
-
-
-# ── survivability: this runs inside the one clock loop for the whole machine ──
 
 
 @pytest.mark.anyio
 async def test_an_UNREADABLE_store_is_a_FAILURE_not_a_refusal(isolated, monkeypatch):
     """A refusal says "your target is wrong"; a raise says "we could not tell". Reporting the second
     as the first would tell a user to fix an automation that was fine."""
-    monkeypatch.setattr(wstore, "get", lambda _rid: (_ for _ in ()).throw(OSError("disk")))
+    monkeypatch.setattr(
+        wstore, "get", lambda _rid: (_ for _ in ()).throw(OSError("disk"))
+    )
     _attach(monkeypatch, WorkflowWatchdog(None, EngineServices()))
     outcome = await _fire("run-7")
     assert outcome.outcome == Outcome.FAILED.value
@@ -645,7 +657,7 @@ async def test_an_UNREADABLE_store_is_a_FAILURE_not_a_refusal(isolated, monkeypa
 @pytest.mark.anyio
 async def test_a_RAISING_resume_never_propagates_into_the_tick(isolated, monkeypatch):
     """One trigger's resume must not take the clock loop for every automation on the machine."""
-    from gideon.workflows import service as wfs
+    from gideon.automation.workflows import service as wfs
 
     _attach(monkeypatch, WorkflowWatchdog(None, EngineServices()))
     run, _ = await _parked_run()
@@ -664,15 +676,17 @@ async def test_every_resume_path_RELEASES_the_trigger_claim(isolated, monkeypatc
     release a resume-target trigger reports `is_running` for the claim's full 3600s after its first
     fire, records `skipped_overlap` on every later tick, and answers `409 already running` to a
     manual Run for an hour."""
-    from gideon.triggers import executor as ex
+    from gideon.automation.triggers import executor as ex
 
     released: list[str] = []
-    monkeypatch.setattr(ex, "release_claim_for", lambda tid, **kw: released.append(tid) or True)
+    monkeypatch.setattr(
+        ex, "release_claim_for", lambda tid, **kw: released.append(tid) or True
+    )
     _attach(monkeypatch, WorkflowWatchdog(None, EngineServices()))
 
-    await _fire("gone")  # the refusal path
+    await _fire("gone")
     run, watchdog = await _parked_run()
     _attach(monkeypatch, watchdog)
-    await _fire(run.id, answer=True)  # the success path
+    await _fire(run.id, answer=True)
 
     assert released == ["schedule:j1", "schedule:j1"], released

@@ -12,11 +12,14 @@ import json
 
 import pytest
 
-from gideon.pricing import _PRICING_FILE, cache_savings_usd, estimate_cost, has_pricing
+from gideon.operations.pricing import (
+    _PRICING_FILE,
+    cache_savings_usd,
+    estimate_cost,
+    has_pricing,
+)
 
-# A real row (all 26 rows in the table carry both `cache_read` and `cache_write`).
 PRICED_MODEL = "claude-sonnet-4.6"
-# Deliberately not a prefix of any table key, so `_rates`' longest-prefix match misses too.
 UNPRICED_MODEL = "zzz-not-a-real-model-9000"
 
 _PER = 1_000_000.0
@@ -51,7 +54,9 @@ def test_priced_model_with_cache_reads_saves_the_hand_computed_delta() -> None:
     row = _row(PRICED_MODEL)
     in_tok, out_tok, read = 10_000, 2_000, 100_000
 
-    actual = _hand_cost(row, input_tokens=in_tok, output_tokens=out_tok, cache_read_tokens=read)
+    actual = _hand_cost(
+        row, input_tokens=in_tok, output_tokens=out_tok, cache_read_tokens=read
+    )
     counterfactual = _hand_cost(row, input_tokens=in_tok + read, output_tokens=out_tok)
     expected = round(counterfactual - actual, 6)
 
@@ -61,7 +66,6 @@ def test_priced_model_with_cache_reads_saves_the_hand_computed_delta() -> None:
         input_tokens=in_tok,
         output_tokens=out_tok,
     )
-    # For the current sonnet row (in 3.0 / cache_read 0.3 per 1M): 0.36 - 0.09 = 0.27.
     assert saved == expected
     assert saved is not None and saved > 0
 
@@ -85,7 +89,9 @@ def test_first_turn_that_only_writes_the_cache_is_negative() -> None:
     assert saved < 0
 
     row = _row(PRICED_MODEL)
-    assert row["cache_write"] > row["in"], "premise: a cache write costs more than plain input"
+    assert (
+        row["cache_write"] > row["in"]
+    ), "premise: a cache write costs more than plain input"
 
 
 def test_unpriced_model_is_none_and_not_a_zero() -> None:
@@ -100,7 +106,6 @@ def test_unpriced_model_is_none_and_not_a_zero() -> None:
         output_tokens=2_000,
     )
     assert saved is None
-    # i.e. `saved is not 0.0` — spelled without an `is` float comparison (flake8 F632).
     assert not isinstance(saved, float)
 
 

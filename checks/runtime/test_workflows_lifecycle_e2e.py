@@ -24,12 +24,12 @@ from collections import Counter
 
 import pytest
 
-from gideon.workflows import service, store
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.journal import ledger
-from gideon.workflows.models import RunStatus, WorkflowRun
-from gideon.workflows.native_defs import register_native_provider
-from gideon.workflows.watchdog import WorkflowWatchdog
+from gideon.automation.workflows import service, store
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.journal import ledger
+from gideon.automation.workflows.models import RunStatus, WorkflowRun
+from gideon.automation.workflows.native_defs import register_native_provider
+from gideon.automation.workflows.watchdog import WorkflowWatchdog
 
 pytestmark = pytest.mark.anyio
 
@@ -43,8 +43,8 @@ def anyio_backend() -> str:
 def _isolated(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
-    from gideon.workflows import defs as defs_mod
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
+    from gideon.automation.workflows import defs as defs_mod
 
     saved = dict(defs_mod._providers)
     defs_mod._providers.clear()
@@ -56,22 +56,22 @@ def _isolated(tmp_path, monkeypatch):
         defs_mod._providers.update(saved)
 
 
-#: A run PARKED ON A GATE — live, driven, with un-run downstream nodes. That is the state a user
-#: actually edits in, and the only one where mid-flight mutation is meaningful: a completed run's
-#: nodes are frozen (their outputs are already downstream) and a finished run is not live.
 EDITABLE_SPEC = {
     "name": "editable",
     "root": {
         "kind": "sequence",
         "id": "main",
         "children": [
-            {"kind": "gate", "id": "hold", "config": {"kind": "approval", "prompt": "hold here"}},
+            {
+                "kind": "gate",
+                "id": "hold",
+                "config": {"kind": "approval", "prompt": "hold here"},
+            },
             {"kind": "transform", "id": "produce", "config": {"expr": "original"}},
         ],
     },
 }
 
-#: A three-stage shape with a real binding chain, so a rewind has something to cascade through.
 LIFECYCLE_SPEC = {
     "name": "lifecycle",
     "root": {
@@ -98,7 +98,9 @@ def _controller(run: WorkflowRun, spec: dict, **kw) -> RunController:
     return RunController(run, spec, services=EngineServices(**kw))
 
 
-async def _launched(spec: dict, **kw) -> tuple[WorkflowRun, WorkflowWatchdog, RunController]:
+async def _launched(
+    spec: dict, **kw
+) -> tuple[WorkflowRun, WorkflowWatchdog, RunController]:
     """Create a run and launch it through the REAL supervisor.
 
     The real `WorkflowWatchdog` rather than a stand-in: `edit_run` and `resume_run` require a LIVE
@@ -125,7 +127,9 @@ async def _applied(run_id: str, from_version: int, *, timeout: float = 5.0) -> N
         if store.get(run_id).spec_version > from_version:
             return
         await asyncio.sleep(0.05)
-    raise AssertionError(f"the queued batch never applied (version stuck at {from_version})")
+    raise AssertionError(
+        f"the queued batch never applied (version stuck at {from_version})"
+    )
 
 
 async def _drain(controller: RunController, run_id: str) -> None:
@@ -164,49 +168,41 @@ class TestFullLifecycle:
         """
         run, sup, controller = await _launched(LIFECYCLE_SPEC)
         assert await controller.run_to_completion(timeout=30) == RunStatus.COMPLETE
-        assert store.read_output(run.id, "root.children[2]") == "reporting produced from gathered"
+        assert (
+            store.read_output(run.id, "root.children[2]")
+            == "reporting produced from gathered"
+        )
 
-        # ── rewind: the PREVIEW is the contract. It names what will re-run before anything does,
-        # which is what makes the operation safe to offer at all.
         preview = service.rewind_run(run.id, "produce", supervisor=sup, force=True)
         assert preview.get("ok"), preview
         rerun = set(preview["preview"]["rerun"]) | set(preview["preview"]["stale"])
         assert "produce" in rerun
-        # `gather` is upstream: a cascade that reached it would throw away work the rewind did not
-        # invalidate.
         assert "gather" not in rerun, f"the cascade reached upstream: {rerun}"
 
-        # ── drain and re-run: the rewound node executes AGAIN, the untouched one does not.
-        # Measured by execution COUNT per node, not by `step_cached`: a rewind bumps the node's
-        # epoch, and the epoch is part of the cache key — so the rewound region correctly MISSES
-        # the cache rather than hitting it. (An earlier version of this test asserted a
-        # `step_cached` event and was wrong about which mechanism it was observing: the cache
-        # serves a RESUME, and invalidation is what serves a rewind.)
         await _drain(controller, run.id)
         assert store.get(run.id).status == RunStatus.COMPLETE
         completions = Counter(
-            e["instance_path"] for e in ledger(run.id) if e.get("kind") == "step_completed"
+            e["instance_path"]
+            for e in ledger(run.id)
+            if e.get("kind") == "step_completed"
         )
         assert completions["root.children[1]"] == 2, "the rewound node did not re-run"
-        assert completions["root.children[0]"] == 1, "an untouched upstream node was re-executed"
-        # The epoch bump is what made that invalidation happen, and it is what a later resume keys
-        # off — so it has to be observable.
+        assert (
+            completions["root.children[0]"] == 1
+        ), "an untouched upstream node was re-executed"
         assert store.read_state(run.id)["root.children[1]"].epoch > 0
 
-        # ── fork AFTER a rewind: the case a unit test cannot construct, because it needs a run with
-        # real rewind history behind it.
         forked = service.fork_run(run.id, note="lifecycle test", supervisor=sup)
         assert forked.get("ok"), forked
         child = store.get(forked["child_run_id"])
         assert child is not None and child.parent_run_id == run.id
-        # The child inherits the completed prefix rather than re-running it.
         assert store.read_output(child.id, "root.children[0]") == "gathered"
-        # And the parent is untouched by any of it.
         assert store.get(run.id).status == RunStatus.COMPLETE
 
     async def test_a_rewound_run_reaches_the_SAME_terminal_state(self) -> None:
         """Rewind idempotence: rewinding and re-running a deterministic spec must land in the same
-        place. If it does not, the cache keys are wrong and a resume cannot be trusted."""
+        place. If it does not, the cache keys are wrong and a resume cannot be trusted.
+        """
         run, sup, first = await _launched(LIFECYCLE_SPEC)
         assert await first.run_to_completion(timeout=30) == RunStatus.COMPLETE
         original = store.read_output(run.id, "root.children[2]")
@@ -226,7 +222,9 @@ class TestConcurrentMutations:
     and "the controller applied it", which every unit test stubs.
     """
 
-    async def test_a_queued_batch_is_APPLIED_by_the_controllers_drain_point(self) -> None:
+    async def test_a_queued_batch_is_APPLIED_by_the_controllers_drain_point(
+        self,
+    ) -> None:
         """`edit_run` returns `queued: True` and nothing has changed yet. The version advancing is
         the only observable proof the drain point ran — and a batch that is accepted and never
         applied is indistinguishable, from the caller's side, from one that worked."""
@@ -236,15 +234,26 @@ class TestConcurrentMutations:
 
         result = service.edit_run(
             run.id,
-            [{"op": "update_node", "node_id": "produce", "fields": {"expr": "revised"}}],
+            [
+                {
+                    "op": "update_node",
+                    "node_id": "produce",
+                    "fields": {"expr": "revised"},
+                }
+            ],
             supervisor=sup,
         )
         assert result.get("ok") and result.get("queued") is True
-        # The spec on disk is UNCHANGED at this point: queuing is not applying.
-        assert store.read_spec(run.id)["root"]["children"][1]["config"]["expr"] == "original"
+        assert (
+            store.read_spec(run.id)["root"]["children"][1]["config"]["expr"]
+            == "original"
+        )
 
         await _applied(run.id, before)
-        assert store.read_spec(run.id)["root"]["children"][1]["config"]["expr"] == "revised"
+        assert (
+            store.read_spec(run.id)["root"]["children"][1]["config"]["expr"]
+            == "revised"
+        )
 
     async def test_editing_a_run_NOBODY_DRIVES_is_refused(self) -> None:
         """A mutation is only safe at a controller's drain point. Writing to a run with no
@@ -268,7 +277,13 @@ class TestConcurrentMutations:
         assert await controller.run_to_completion(timeout=30) == RunStatus.COMPLETE
         result = service.edit_run(
             run.id,
-            [{"op": "update_node", "node_id": "produce", "fields": {"expr": "too late"}}],
+            [
+                {
+                    "op": "update_node",
+                    "node_id": "produce",
+                    "fields": {"expr": "too late"},
+                }
+            ],
             supervisor=sup,
         )
         assert result.get("ok") is False
@@ -326,39 +341,34 @@ class TestCrashRecovery:
         run = await _fresh_run(spec)
         first = _controller(run, spec, get_provider=provider)
         task = asyncio.create_task(first.run_to_completion(timeout=30))
-        # Let the first node finish and the second start.
         for _ in range(100):
             if "slow" in started:
                 break
             await asyncio.sleep(0.02)
         assert "fast" in started and "slow" in started
 
-        # The "crash": stop the controller with the slow node still in flight.
         await first.stop()
         task.cancel()
-        # `stop()` may have let the task settle first, so cancelling an already-finished task is not
-        # an error — the assertion that matters is what the RESUME does, below.
         with contextlib.suppress(BaseException):
             await task
 
-        # Rebuild from disk, exactly as the watchdog does on boot.
         started.clear()
         release.set()
-        revived = _controller(store.get(run.id), store.read_spec(run.id), get_provider=provider)
+        revived = _controller(
+            store.get(run.id), store.read_spec(run.id), get_provider=provider
+        )
         status = await revived.run_to_completion(timeout=30)
-        # The claim under test is the CACHE, not the final status: `fast` was already done and its
-        # cache key still matches, so a resume must not re-execute it. (The status can legitimately
-        # be RUNNING if the interrupted node needs another tick — that is resume working, not
-        # failing.)
         assert "fast" not in started, "a completed node was re-executed on resume"
         assert status in (RunStatus.COMPLETE, RunStatus.RUNNING), status
 
-    async def test_a_run_cancelled_mid_flight_stays_cancelled_across_a_restart(self) -> None:
+    async def test_a_run_cancelled_mid_flight_stays_cancelled_across_a_restart(
+        self,
+    ) -> None:
         """The sticky-cancel invariant (WF2-R10): a cancel issued while the gateway was going down
-        must still be honoured when it comes back, or a user's stop silently un-happens."""
+        must still be honoured when it comes back, or a user's stop silently un-happens.
+        """
         run = await _fresh_run()
         store.request_cancel(run.id)
-        # A fresh controller — the cancel intent is on DISK, not in the object that received it.
         controller = _controller(store.get(run.id), LIFECYCLE_SPEC)
         status = await controller.run_to_completion(timeout=30)
         assert status == RunStatus.CANCELLED
@@ -392,7 +402,11 @@ class TestDoubleResume:
                         "id": "approve",
                         "config": {"kind": "approval", "prompt": "ok?"},
                     },
-                    {"kind": "transform", "id": "after", "config": {"expr": "went ahead"}},
+                    {
+                        "kind": "transform",
+                        "id": "after",
+                        "config": {"expr": "went ahead"},
+                    },
                 ],
             },
         }
@@ -402,7 +416,7 @@ class TestDoubleResume:
         status = await controller.wait_for_terminal(timeout=15)
         assert status == RunStatus.NEEDS_INPUT
 
-        from gideon.workflows.human_input import list_continuations
+        from gideon.automation.workflows.human_input import list_continuations
 
         pending = list_continuations(run.id)
         assert pending, "the gate did not mint a continuation"
@@ -412,9 +426,10 @@ class TestDoubleResume:
         assert first.get("ok"), first
         second = controller.resume(token, False)
         assert second.get("ok") is False
-        # A consumed token is UNKNOWN, not merely "already used": the record is deleted on claim, so
-        # a replayed link cannot even be identified — which is the stronger guarantee.
-        assert second.get("code") in ("WF_RESUME_ALREADY_USED", "WF_RESUME_UNKNOWN_TOKEN")
+        assert second.get("code") in (
+            "WF_RESUME_ALREADY_USED",
+            "WF_RESUME_UNKNOWN_TOKEN",
+        )
 
     async def test_the_run_proceeds_on_the_FIRST_answer(self) -> None:
         """The complement: refusing the second answer must not break the first."""
@@ -429,7 +444,11 @@ class TestDoubleResume:
                         "id": "approve",
                         "config": {"kind": "approval", "prompt": "ok?"},
                     },
-                    {"kind": "transform", "id": "after", "config": {"expr": "went ahead"}},
+                    {
+                        "kind": "transform",
+                        "id": "after",
+                        "config": {"expr": "went ahead"},
+                    },
                 ],
             },
         }
@@ -438,11 +457,11 @@ class TestDoubleResume:
         controller = await wd.launch(run, spec)
         await controller.wait_for_terminal(timeout=15)
 
-        from gideon.workflows.human_input import list_continuations
+        from gideon.automation.workflows.human_input import list_continuations
 
         token = list_continuations(run.id)[0].token
         controller.resume(token, True)
-        controller.resume(token, False)  # the replay
+        controller.resume(token, False)
         assert await controller.wait_for_terminal(timeout=20) == RunStatus.COMPLETE
         assert store.read_output(run.id, "root.children[1]") == "went ahead"
 
@@ -515,7 +534,9 @@ class TestDeepNesting:
         wd = WorkflowWatchdog(None, EngineServices())
         await (await wd.launch(run, spec)).run_to_completion(timeout=45)
         _rows, total = store.list_runs()
-        assert total <= 6, f"{total} runs created — the depth cap did not bound the recursion"
+        assert (
+            total <= 6
+        ), f"{total} runs created — the depth cap did not bound the recursion"
 
 
 class TestForkIsolation:
@@ -542,14 +563,16 @@ class TestForkIsolation:
 class TestPerformance:
     def test_a_50_node_spec_schedules_under_100ms(self) -> None:
         """The plan's acceptance criterion. The frontier is re-derived on EVERY tick, so its cost is
-        paid once per node completion — a slow frontier makes a large spec quadratically slow."""
+        paid once per node completion — a slow frontier makes a large spec quadratically slow.
+        """
         import time
 
-        from gideon.workflows.models import Node
-        from gideon.workflows.tick import frontier
+        from gideon.automation.workflows.models import Node
+        from gideon.automation.workflows.tick import frontier
 
         children = [
-            {"kind": "transform", "id": f"n{i}", "config": {"expr": f"{i}"}} for i in range(60)
+            {"kind": "transform", "id": f"n{i}", "config": {"expr": f"{i}"}}
+            for i in range(60)
         ]
         root = Node.from_dict({"kind": "parallel", "id": "wide", "children": children})
         start = time.perf_counter()
@@ -561,8 +584,8 @@ class TestPerformance:
         """Depth stresses the recursion where width stresses the loop; a spec is usually both."""
         import time
 
-        from gideon.workflows.models import Node
-        from gideon.workflows.tick import frontier
+        from gideon.automation.workflows.models import Node
+        from gideon.automation.workflows.tick import frontier
 
         node: dict = {"kind": "transform", "id": "leaf", "config": {"expr": "x"}}
         for i in range(40):
@@ -581,12 +604,9 @@ class TestSecurityBoundaries:
         absence of a feature is invisible to a behavioural test."""
         import inspect
 
-        from gideon.workflows import bindings
+        from gideon.automation.workflows import bindings
 
         source = inspect.getsource(bindings)
-        # `re.compile` is fine and ubiquitous; the builtin `compile(` is not. Checked as a
-        # word-boundary match so the module's own regex literals do not read as a code-exec
-        # surface — a test that cried wolf here would be turned off, which is worse than no test.
         import re as _re
 
         for forbidden in ("eval(", "exec(", "__import__"):
@@ -598,24 +618,32 @@ class TestSecurityBoundaries:
     def test_a_binding_cannot_reach_the_filesystem(self) -> None:
         import inspect
 
-        from gideon.workflows import bindings
+        from gideon.automation.workflows import bindings
 
         source = inspect.getsource(bindings)
         for forbidden in ("open(", "Path(", "subprocess"):
-            assert forbidden not in source, f"the binding language can reach {forbidden}"
+            assert (
+                forbidden not in source
+            ), f"the binding language can reach {forbidden}"
 
     def test_an_unknown_pipe_is_REFUSED_not_ignored(self) -> None:
         """A silently-dropped sanitization pipe is worse than a hard error: the spec looks
         sanitized and is not."""
-        from gideon.workflows.bindings import BindingContext, BindingError, resolve_expr
+        from gideon.automation.workflows.bindings import (
+            BindingContext,
+            BindingError,
+            resolve_expr,
+        )
 
         with pytest.raises(BindingError):
-            resolve_expr("inputs.x | not_a_real_pipe", BindingContext(inputs={"x": "v"}))
+            resolve_expr(
+                "inputs.x | not_a_real_pipe", BindingContext(inputs={"x": "v"})
+            )
 
     def test_a_credential_never_reaches_the_JOURNAL(self) -> None:
         """The journal is read by the flywheel, shipped in bug reports and rendered in a UI — a
         credential that reaches it is leaked to all three."""
-        from gideon.workflows.journal import redact
+        from gideon.automation.workflows.journal import redact
 
         secret = "sk-" + "a" * 40
         assert secret not in str(redact({"note": f"key is {secret}"}))
@@ -624,7 +652,7 @@ class TestSecurityBoundaries:
         """Not just journal lines: a node output is stored, bound into a later prompt and rendered
         in the widget."""
         run = store.create(WorkflowRun(id="", workflow_name="w"))
-        from gideon.workflows.journal import Journal
+        from gideon.automation.workflows.journal import Journal
 
         journal = Journal(run.id)
         secret = "ghp_" + "b" * 36

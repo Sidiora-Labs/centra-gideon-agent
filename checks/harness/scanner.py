@@ -26,8 +26,6 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-# ── Finding model ─────────────────────────────────────────────────────────────
-
 ERROR = "error"
 WARNING = "warning"
 
@@ -61,10 +59,7 @@ class Finding:
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parent.parent
-
-
-# ── Helpers ─────────────────────────────────────────────────────────────────
+    return Path(__file__).resolve().parent.parent.parent
 
 
 def _read(path: Path) -> str:
@@ -83,12 +78,11 @@ def _is_under(path: Path, root: Path, *parts: str) -> bool:
     return rel_parts[: len(parts)] == parts
 
 
-# ── Check: hook-provider-parity (ERROR) ─────────────────────────────────────────
-
-
 def _string_literals_in(node: ast.AST) -> list[str]:
     return [
-        n.value for n in ast.walk(node) if isinstance(n, ast.Constant) and isinstance(n.value, str)
+        n.value
+        for n in ast.walk(node)
+        if isinstance(n, ast.Constant) and isinstance(n.value, str)
     ]
 
 
@@ -100,8 +94,8 @@ def check_hook_provider_parity(files: list[Path], root: Path) -> list[Finding]:
     provider files) so a change to either end is caught; only reports when a
     provider file is in the changed set (or the allowlist itself changed).
     """
-    ap_root = root / "src" / "gideon" / "action_providers"
-    validation_py = root / "src" / "gideon" / "validation.py"
+    ap_root = root / "runtime" / "gideon" / "integrations" / "action_providers"
+    validation_py = root / "runtime" / "gideon" / "assurance" / "validation.py"
     changed = set(files)
     touches_providers = any(
         _is_under(f, root, "src", "gideon", "action_providers") for f in changed
@@ -110,9 +104,11 @@ def check_hook_provider_parity(files: list[Path], root: Path) -> list[Finding]:
     if not (touches_providers or touches_allowlist):
         return []
 
-    allowlist = _extract_frozenset_members(_read(validation_py), "ALLOWED_HOOK_PROVIDERS")
+    allowlist = _extract_frozenset_members(
+        _read(validation_py), "ALLOWED_HOOK_PROVIDERS"
+    )
     if allowlist is None:
-        return []  # can't parse the allowlist; don't guess
+        return []
 
     findings: list[Finding] = []
     for f in sorted(ap_root.glob("*_provider.py")) if ap_root.is_dir() else []:
@@ -165,16 +161,6 @@ def _provider_name_of(source: str) -> tuple[str, int]:
     return "", 0
 
 
-# ── Check: sse-event-registered (ERROR, scoped to the loop registry) ────────────
-
-# The loop/run SSE registry is the one with a FE lifecycle union (RUN_LIFECYCLE). Only
-# publishes on THAT registry are checked — other registries (model downloads, embedding
-# reindex, knowledge ingest) have their own vocabularies and no RUN_LIFECYCLE union, so
-# checking them would be a false positive. We identify loop-registry publishes by the
-# receiver/context idiom: `loop_sse().publish(...)` or `ctx.publish(...)` in loop kinds
-# (see _receiver_is_loop_registry).
-
-
 def check_sse_event_registered(files: list[Path], root: Path) -> list[Finding]:
     """Every literal loop-registry ``publish(..., "event", ...)`` event string must appear
     in the FE ``RUN_LIFECYCLE`` union. Exact set membership → ERROR.
@@ -186,7 +172,9 @@ def check_sse_event_registered(files: list[Path], root: Path) -> list[Finding]:
     py_changed = [
         f for f in changed if f.suffix == ".py" and _is_under(f, root, "src", "gideon")
     ]
-    lifecycle = _read(root / "web" / "src" / "pages" / "loops" / "useRunStream.ts")
+    lifecycle = _read(
+        root / "apps/console" / "src" / "pages" / "loops" / "useRunStream.ts"
+    )
     union = _extract_ts_run_lifecycle(lifecycle)
     if union is None:
         return []
@@ -205,7 +193,7 @@ def check_sse_event_registered(files: list[Path], root: Path) -> list[Finding]:
                         why="EventSource registers one listener per event name; an event not "
                         "in the FE union is silently dropped — no error, no UI update",
                         fix=f"add {event!r} to RUN_LIFECYCLE in "
-                        "web/src/pages/loops/useRunStream.ts (and handle it)",
+                        "apps/console/src/pages/loops/useRunStream.ts (and handle it)",
                     )
                 )
     return findings
@@ -234,7 +222,6 @@ def _loop_publish_events(source: str) -> list[tuple[str, int]]:
             continue
         if not _receiver_is_loop_registry(node.func.value):
             continue
-        # ctx.publish(cid, "event", data) → event is arg[1]; loop_sse().publish same shape.
         if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant):
             val = node.args[1].value
             if isinstance(val, str):
@@ -252,9 +239,6 @@ def _receiver_is_loop_registry(recv: ast.AST) -> bool:
     if isinstance(recv, ast.Name):
         return recv.id == "ctx"
     return False
-
-
-# ── Check: config-four-points (ERROR) ───────────────────────────────────────────
 
 
 def check_config_four_points(files: list[Path], root: Path) -> list[Finding]:
@@ -275,7 +259,7 @@ def check_config_four_points(files: list[Path], root: Path) -> list[Finding]:
     kept passing while silently checking 280 of 367 fields — a gate that narrows without
     redding is worse than one that is absent, because the green is read as coverage.
     """
-    config_dir_path = root / "src" / "gideon" / "config"
+    config_dir_path = root / "runtime" / "gideon" / "core" / "config"
     changed = set(files)
     if not any(f.parent == config_dir_path and f.suffix == ".py" for f in changed):
         return []
@@ -284,7 +268,9 @@ def check_config_four_points(files: list[Path], root: Path) -> list[Finding]:
     loader_tree = _parse_or_none(loader)
     if loader_tree is None:
         return []
-    load_kwargs = _load_body_kwarg_names(loader_tree)
+    load_kwargs = _load_body_kwarg_names(
+        loader_tree, _parse_or_none(config_dir_path / "decoding.py")
+    )
     if load_kwargs is None:
         return []
 
@@ -351,14 +337,12 @@ def _calls_field_with_meta(value: ast.AST | None) -> bool:
     return False
 
 
-#: The ``AppConfig`` methods that may hold the load mapping. ``load()`` is a one-line
-#: delegate; the mapping lives in ``load_with_migration_state()`` (PHF-15 split them so
-#: ``load()`` could stop writing the config it reads). Mirrored in
-#: ``scripts/generate_inert_surface_baseline.py``.
 _LOAD_MAPPING_METHODS = frozenset({"load", "load_with_migration_state"})
 
 
-def _load_body_kwarg_names(tree: ast.Module) -> set[str] | None:
+def _load_body_kwarg_names(
+    tree: ast.Module, policies: ast.Module | None = None
+) -> set[str] | None:
     """All keyword-argument names used anywhere in ``AppConfig``'s load mapping.
 
     Covers the nested-constructor idiom ``legibility=LegibilityConfig(discover_tips=...)``
@@ -378,13 +362,18 @@ def _load_body_kwarg_names(tree: ast.Module) -> set[str] | None:
                     found = True
                     for call in ast.walk(item):
                         if isinstance(call, ast.Call):
+                            if (
+                                policies is not None
+                                and isinstance(call.func, ast.Name)
+                                and call.func.id == "decode_configuration"
+                            ):
+                                from gideon.core.config.codec import mapped_fields
+
+                                names.update(mapped_fields(policies))
                             for kw in call.keywords:
                                 if kw.arg:
                                     names.add(kw.arg)
     return names if found else None
-
-
-# ── Check: app-sdk-boundary (ERROR) ─────────────────────────────────────────────
 
 
 def check_app_sdk_boundary(files: list[Path], root: Path) -> list[Finding]:
@@ -396,7 +385,7 @@ def check_app_sdk_boundary(files: list[Path], root: Path) -> list[Finding]:
         if f.suffix != ".py" or not _is_under(f, root, "apps"):
             continue
         if f.name.startswith("test_"):
-            continue  # test files may import core helpers (matches the boundary test)
+            continue
         for mod, lineno in _core_imports(_read(f)):
             parts = mod.split(".")
             if not (len(parts) >= 2 and parts[1] == "sdk"):
@@ -434,11 +423,6 @@ def _core_imports(source: str) -> list[tuple[str, int]]:
     return out
 
 
-# ── Check: destructive-test-isolation (WARNING, heuristic) ──────────────────────
-
-# Require CALL shape (`config_dir(`, `save_credential(`) not keyword/param shape
-# (`save_credential=lambda …`) so a test that passes a mock stub as a kwarg — already
-# isolated by construction — isn't flagged. `\b(?<!=)` avoids `save_credential=`.
 _HOME_TOUCH_RE = re.compile(
     r"(config_dir\(\)|local_models_dir\(|(?<![=\w])save_credential\(|credential_store\()"
 )
@@ -471,12 +455,6 @@ def check_destructive_test_isolation(files: list[Path], root: Path) -> list[Find
     return findings
 
 
-# ── Check: fence-at-ingestion (WARNING, heuristic — diff-scoped) ─────────────────
-
-# Requires an ADDED line (not a docstring) that appends external text to a prompt/context
-# accumulator: a `+=`/`.append(`/`.format(`/f-string on a `prompt`/`context`/`system`
-# accumulator whose value mentions an external source. Deliberately narrow: this heuristic
-# only fires on changed lines (diff-scoped) so it advises on your diff, not the whole tree.
 _PROMPT_ACCUM_RE = re.compile(
     r"\b(prompt|context|system_?prompt|messages)\b.{0,30}"
     r"(\+=|\.append\(|\.extend\(|\.format\(|f['\"])",
@@ -498,7 +476,8 @@ def check_fence_at_ingestion(
 
     Diff-scoped: only considers lines in ``changed_lines`` when provided (the ``run --diff``
     path); with no diff it scans all lines of the given files. Narrow by construction to
-    keep the signal high — a broad "mentions channel near message" match is pure noise."""
+    keep the signal high — a broad "mentions channel near message" match is pure noise.
+    """
     findings: list[Finding] = []
     for f in files:
         if f.suffix != ".py" or not _is_under(f, root, "src", "gideon"):
@@ -507,7 +486,7 @@ def check_fence_at_ingestion(
             continue
         src = _read(f)
         if _FENCE_RE.search(src):
-            continue  # file fences somewhere; assume it's handled
+            continue
         lines = src.splitlines()
         consider = changed_lines.get(f) if changed_lines is not None else None
         for i, line in enumerate(lines, start=1):
@@ -530,8 +509,6 @@ def check_fence_at_ingestion(
                 )
     return findings
 
-
-# ── Check: no-naive-transcript-cut (WARNING, heuristic) ─────────────────────────
 
 _TRUNCATE_RE = re.compile(r"(messages|transcript|journal|history)\s*\[\s*-?\d")
 _WALKBACK_RE = re.compile(r"_drop_orphan_tool_results|orphan_tool|walk.?back")
@@ -564,8 +541,6 @@ def check_no_naive_transcript_cut(files: list[Path], root: Path) -> list[Finding
             )
     return findings
 
-
-# ── Registry + entry point ──────────────────────────────────────────────────────
 
 _CHECKS = {
     "hook-provider-parity": check_hook_provider_parity,
@@ -602,5 +577,7 @@ def scan(
             findings.extend(check(files, r, changed_lines=changed_lines))  # type: ignore[call-arg]
         else:
             findings.extend(check(files, r))
-    findings.sort(key=lambda f: (0 if f.level == ERROR else 1, f.check, str(f.file), f.line))
+    findings.sort(
+        key=lambda f: (0 if f.level == ERROR else 1, f.check, str(f.file), f.line)
+    )
     return findings

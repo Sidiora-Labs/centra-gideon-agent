@@ -182,14 +182,14 @@ backend has no access to the gateway's SecurityEventLog).
 
 ## The App SDK
 
-- **Python**: `sdk/` (33 modules) is THE stable app-facing import surface —
+- **Python**: `packages/python-client/` (33 modules) is THE stable app-facing import surface —
   apps import core **only** via `gideon.sdk.*`
-  (boundary-lint-enforced by `tests/test_apps_import_boundary.py`). Modules
+  (boundary-lint-enforced by `checks/runtime/test_apps_import_boundary.py`). Modules
   cover models, channels, tools, search, memory, knowledge, STT/TTS,
   credentials, settings (`ProviderSettings` — each app's persisted store),
   security helpers, and `provider_helpers.register_branded_app` for
   protocol-thin branded model apps.
-- **Frontend**: `web/src/app/appSdk.tsx` — a contributed UI gets
+- **Frontend**: `apps/console/src/app/appSdk.tsx` — a contributed UI gets
   `createAppApi` / `createAppEvents` and mounts via `mount(el, ctx)`; the host
   resolves bare `react` / `@gideon/app-sdk` imports so app UIs don't
   bundle their own React.
@@ -203,13 +203,13 @@ the two together):
 
 | Import | Declaration | Exports |
 |---|---|---|
-| `@gideon/app-sdk/ui` | `shell-primitives` | `Button`, `Surface`, `useTheme`, `readAppTheme` |
-| `@gideon/app-sdk/genui` | `generative-widget` | `GenerativeWidget` |
-| `@gideon/app-sdk/genui` | `generative-component` | `registerComponent`, `unregisterComponents` |
+| `@gideon/app-packages/python-client/ui` | `shell-primitives` | `Button`, `Surface`, `useTheme`, `readAppTheme` |
+| `@gideon/app-packages/python-client/genui` | `generative-widget` | `GenerativeWidget` |
+| `@gideon/app-packages/python-client/genui` | `generative-component` | `registerComponent`, `unregisterComponents` |
 
 `Button`/`Surface` are the host's OWN components by identity, not copies, so a page built
 from them renders markup identical to a native page's — which is what
-`web/src/app/appSdkUi.test.tsx` asserts, by loading a fixture bundle through
+`apps/console/src/app/appSdkUi.test.tsx` asserts, by loading a fixture bundle through
 `ContributedPage` and diffing its output against the same page written natively. `useTheme`
 /`readAppTheme` return the resolved token contract (`colors` + spreadable `cssVars`), so an
 app never names a host CSS variable directly.
@@ -266,7 +266,7 @@ core — the one thing this platform exists to avoid.
 rule installed apps live under, not a second, narrower "native SDK" allowlist: a bundled
 app is loaded by the same `providers/loader.py` seam, registered through the same typed
 handler, and shipped by the same release, so a separate list would be a second boundary to
-keep in step for no gain. Every `sdk/` submodule is therefore available. What is
+keep in step for no gain. Every `packages/python-client/` submodule is therefore available. What is
 native-specific is a set of caveats, not import bans:
 
 | Caveat | Why |
@@ -287,11 +287,11 @@ factory never re-execute app code (a re-exec would mint a second class for one p
 breaking `isinstance` across two reads). A changed module needs a gateway restart.
 
 **Enforcement.** `native_contract.contract_violations` is the lint;
-`tests/test_native_capability_contract.py` runs it over every bundled module and carries
+`checks/runtime/test_native_capability_contract.py` runs it over every bundled module and carries
 the vacuity floor (at least one bundled app must actually ship a module) plus the
 "no core implementation" property: no core module may reference a bundle-owned module.
 That rail never skips, unlike its installed-app twin
-(`tests/test_apps_import_boundary.py`), which skips whenever the workspace `apps/` dir is
+(`checks/runtime/test_apps_import_boundary.py`), which skips whenever the workspace `apps/` dir is
 absent.
 
 **Reference implementation:** `apps/native/gideon-ui-docs/` — the design-system docs
@@ -300,7 +300,7 @@ entirely (no factory remains in `tool_providers/registry.py`), and `ui_list` was
 inside the bundle with no edit to any core module that implements, resolves or dispatches
 it. One residual core touch remains for a bundled app that adds an agent **tool**: a new
 tool name needs a `manifest_meta.TOOL_META` entry, because that map is the hand-maintained
-input to the agent manifest and `tests/test_api_manifest_drift.py` fails on a tool without
+input to the agent manifest and `checks/runtime/test_api_manifest_drift.py` fails on a tool without
 one. That is catalogue data about the shipped distribution's agent surface, not provider
 implementation — but it does mean "no core edits" is exact for provider behaviour and not
 yet exact for tool *metadata*.
@@ -327,7 +327,7 @@ removes exactly this app's servers. App-shipped stdio servers run with
 ## Declared quality bar (`apps/quality.py`)
 
 An app may declare `quality` — `{tested, designSystem, a11y}` — which the Store
-renders as the card's badge row (`web/src/pages/apps/qualityBadges.tsx`). Each
+renders as the card's badge row (`apps/console/src/pages/apps/qualityBadges.tsx`). Each
 axis is **tri-state, and that is the contract**:
 
 | value | meaning | rendering | verified? |
@@ -345,12 +345,12 @@ For a **first-party** app the block is not just decoration — the apps-repo CI 
 `python -m gideon.apps.quality .` and exits non-zero when a claim outruns the
 evidence in the bundle:
 
-- **`tested: true`** — the bundle ships `test_*.py` (root or `tests/`) *and* they
-  pass. Presence alone is not evidence, or an empty `tests/` would buy the badge.
+- **`tested: true`** — the bundle ships `test_*.py` (root or `checks/runtime/`) *and* they
+  pass. Presence alone is not evidence, or an empty `checks/runtime/` would buy the badge.
 - **`designSystem: "v2"`** — every `*.ts`/`*.tsx` in the bundle passes token-lint,
   by the SAME rule the host frontend is held to. The patterns are shared data
   (`apps/token_lint_rules.json`), read by both `apps/quality.py` and
-  `web/src/design/tokenLintRule.ts`; `tokenLintRuleParity.test.ts` fails if the two
+  `apps/console/src/design/tokenLintRule.ts`; `tokenLintRuleParity.test.ts` fails if the two
   drift. A second implementation of the rule would be the same declared-vs-actual
   drift one layer down.
 - **`a11y: true`** — the bundle ships `a11y/axe-report.json`

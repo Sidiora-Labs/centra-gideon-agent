@@ -23,15 +23,20 @@ import json
 
 import pytest
 
-from gideon.triggers import boot_migrate as BM
-from gideon.triggers import schedule_view as SV
-from gideon.triggers.store import TriggerStore
+from gideon.automation.triggers import boot_migrate as BM
+from gideon.automation.triggers import schedule_view as SV
+from gideon.automation.triggers.store import TriggerStore
 
-NOW = 1_800_000_000.0  # 2027-01-15T08:00:00Z
+NOW = 1_800_000_000.0
 
 _ACTION = {
     "provider": "invoke-agent",
-    "config": {"task_template": "go", "agent": "coder", "model": "m", "approval_mode": "auto"},
+    "config": {
+        "task_template": "go",
+        "agent": "coder",
+        "model": "m",
+        "approval_mode": "auto",
+    },
 }
 
 
@@ -45,12 +50,15 @@ def _job(jid="j", kind="cron", **over):
         "every": {"kind": "every", "every_secs": 300},
         "at": {"kind": "at", "at_ts": NOW + 3600},
     }[kind]
-    job = {"id": jid, "name": f"J-{jid}", "enabled": True, "schedule": schedule, "action": _ACTION}
+    job = {
+        "id": jid,
+        "name": f"J-{jid}",
+        "enabled": True,
+        "schedule": schedule,
+        "action": _ACTION,
+    }
     job.update(over)
     return job
-
-
-# ── 🔴 the migration now runs, and arms ──
 
 
 def test_boot_imports_crons_into_the_store(tmp_path):
@@ -69,12 +77,12 @@ def test_an_imported_cron_is_ARMED_not_left_inert(tmp_path):
     report = BM.migrate_and_arm(tmp_path, now=NOW)
     assert report["armed"] == ["j-cron"]
     armed = TriggerStore(base_dir=tmp_path).get("j-cron").trigger.next_fire_at
-    assert armed  # a real timestamp, not ""
+    assert armed
 
 
 def test_an_armed_import_becomes_due(tmp_path):
     """The property that matters: after boot, the tick can actually see it."""
-    from gideon.triggers import service as SVC
+    from gideon.automation.triggers import service as SVC
 
     _crons(tmp_path, _job("j-cron"))
     BM.migrate_and_arm(tmp_path, now=NOW)
@@ -99,9 +107,6 @@ def test_a_disabled_row_is_not_armed(tmp_path):
     assert BM.migrate_and_arm(tmp_path, now=NOW)["armed"] == []
 
 
-# ── 🔴 the idempotency defect ──
-
-
 def test_a_second_boot_arms_nothing(tmp_path):
     """🔴 THE defect. The second boot's migration blanked the arm, so every boot re-armed — which
     re-phases a schedule (a 9am job armed at 03:00 becomes "next 9am from now")."""
@@ -115,7 +120,8 @@ def test_a_second_boot_arms_nothing(tmp_path):
 
 def test_a_re_migration_preserves_run_history(tmp_path):
     """🔴 The same defect's other half: `run_count`/`last_run_id`/health are what has HAPPENED to the
-    trigger. `crons.json` is the source of truth for what the job IS, not for its history."""
+    trigger. `crons.json` is the source of truth for what the job IS, not for its history.
+    """
     _crons(tmp_path, _job("j-cron"))
     BM.migrate_and_arm(tmp_path, now=NOW)
     store = TriggerStore(base_dir=tmp_path)
@@ -148,7 +154,7 @@ def test_a_re_migration_still_picks_up_a_CONFIG_change(tmp_path):
 
 def test_a_trigger_authored_directly_in_the_store_survives_a_migration(tmp_path):
     """The store's own promise: an import upserts by id rather than replacing the store."""
-    from gideon.triggers.models import Trigger
+    from gideon.automation.triggers.models import Trigger
 
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(
@@ -164,9 +170,6 @@ def test_a_trigger_authored_directly_in_the_store_survives_a_migration(tmp_path)
     _crons(tmp_path, _job("j-cron"))
     BM.migrate_and_arm(tmp_path, now=NOW)
     assert TriggerStore(base_dir=tmp_path).get("file:mine") is not None
-
-
-# ── boot safety ──
 
 
 def test_a_missing_crons_file_is_not_an_error(tmp_path):
@@ -200,9 +203,6 @@ def test_verify_runs_at_boot_and_reports_paused_rows(tmp_path):
     report = BM.verify_report(tmp_path)
     assert report.get("paused") == ["j-every"]
     assert report.get("ok") is False
-
-
-# ── the schedule projection (§6's re-point precondition) ──
 
 
 def test_the_projection_covers_every_field_the_api_publishes(tmp_path):
@@ -249,13 +249,14 @@ def test_the_cadence_string_matches_the_shipped_formatter(tmp_path):
     """🔴 Delegates to `schedule.format_schedule`. Measured: a hand-rolled version produced
     `0 9 * * * (America/New_York)` where the live API produces `At 9:00 AM EDT` — worse prose AND a
     second formatter that would drift from the one the rest of the UI reads."""
-    from gideon.schedule import ScheduleDefinition, format_schedule
+    from gideon.automation.schedule import ScheduleDefinition, format_schedule
 
     _crons(tmp_path, _job("j-cron", timezone="America/New_York"))
     BM.migrate_and_arm(tmp_path, now=NOW)
     trigger = TriggerStore(base_dir=tmp_path).get("j-cron").trigger
     expected = format_schedule(
-        ScheduleDefinition(kind="cron", cron_expr="0 9 * * *"), tz_name="America/New_York"
+        ScheduleDefinition(kind="cron", cron_expr="0 9 * * *"),
+        tz_name="America/New_York",
     )
     assert SV.describe_cadence(trigger) == expected
 
@@ -263,12 +264,16 @@ def test_the_cadence_string_matches_the_shipped_formatter(tmp_path):
 def test_delivery_and_session_are_read_from_their_new_addresses(tmp_path):
     """`LEGACY_FIELD_MAP` moved `channel`→`delivery` and `session_key`→`session`. Reading the action
     config for them (where they used to be) would render empty."""
-    _crons(tmp_path, _job("j", channel="C9", persistent_session=True, session_key="cron:j"))
+    _crons(
+        tmp_path, _job("j", channel="C9", persistent_session=True, session_key="cron:j")
+    )
     BM.migrate_and_arm(tmp_path, now=NOW)
     trigger = TriggerStore(base_dir=tmp_path).get("j").trigger
     assert SV.channel_of(trigger) == "C9"
     assert SV.session_key_of(trigger) == "cron:j"
-    assert SV.to_schedule_row(trigger, now=NOW, base_dir=tmp_path)["has_session"] is True
+    assert (
+        SV.to_schedule_row(trigger, now=NOW, base_dir=tmp_path)["has_session"] is True
+    )
 
 
 def test_a_silent_job_projects_silent(tmp_path):
@@ -296,14 +301,18 @@ def test_the_deliberate_drops_are_None_not_fabricated(tmp_path):
 def test_running_state_comes_from_the_claim_store(tmp_path):
     """S97's whole point: `is_running` is answerable from an API process that does not own the
     scheduler loop, because a claim is a file rather than a process-local dict."""
-    from gideon.triggers import claims
-    from gideon.triggers.scheduling import Claim
+    from gideon.automation.triggers import claims
+    from gideon.automation.triggers.scheduling import Claim
 
     _crons(tmp_path, _job("j"))
     BM.migrate_and_arm(tmp_path, now=NOW)
     trigger = TriggerStore(base_dir=tmp_path).get("j").trigger
-    assert SV.to_schedule_row(trigger, now=NOW, base_dir=tmp_path)["is_running"] is False
-    claims.write_claim(Claim(trigger_id="j", holder="tick", claimed_at=NOW), base_dir=tmp_path)
+    assert (
+        SV.to_schedule_row(trigger, now=NOW, base_dir=tmp_path)["is_running"] is False
+    )
+    claims.write_claim(
+        Claim(trigger_id="j", holder="tick", claimed_at=NOW), base_dir=tmp_path
+    )
     row = SV.to_schedule_row(trigger, now=NOW, base_dir=tmp_path)
     assert row["is_running"] is True
     assert row["running_since"] == NOW
@@ -315,7 +324,7 @@ def test_every_legacy_clock_kind_projects(kind, tmp_path):
     _crons(tmp_path, _job("j", kind))
     BM.migrate_and_arm(tmp_path, now=NOW)
     row = SV.to_schedule_row(TriggerStore(base_dir=tmp_path).get("j").trigger, now=NOW)
-    assert row["schedule"]  # a non-empty cadence string
+    assert row["schedule"]
     assert row["id"] == "schedule:j"
 
 
@@ -323,7 +332,7 @@ def test_the_chat_created_flat_workflow_shape_also_projects(tmp_path):
     """🔴 Two action shapes exist in a real store: a migrated cron nests under `workflow.inline`,
     while S92's chat tools write a FLAT `{provider, config}`. Reading only one would render an empty
     action for half the rows."""
-    from gideon.triggers.models import Trigger
+    from gideon.automation.triggers.models import Trigger
 
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(
@@ -336,7 +345,9 @@ def test_the_chat_created_flat_workflow_shape_also_projects(tmp_path):
             workflow={"provider": "run-prompt", "config": {"message": "go"}},
         )
     )
-    row = SV.to_schedule_row(store.get("clock:mine").trigger, now=NOW, base_dir=tmp_path)
+    row = SV.to_schedule_row(
+        store.get("clock:mine").trigger, now=NOW, base_dir=tmp_path
+    )
     assert row["action"]["provider"] == "run-prompt"
     assert row["message"] == "go"
 
@@ -346,33 +357,26 @@ def test_the_gateway_boots_the_migration(tmp_path):
     calls it — the source, since the alternative is a function nobody invokes."""
     import inspect
 
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.automation_boot import AutomationBoot
+    from gideon.engine.gateway import RuntimeCoordinator
 
-    src = inspect.getsource(GatewayOrchestrator._init_cron)
-    assert "migrate_and_arm" in src
-
-
-# ── 🔴 #461: the idempotency defect's THIRD half — the off switch ─────────────
-#
-# `test_a_re_migration_preserves_run_history` above closed `run_count`/`last_run_id`/health.
-# `enabled` was left out of `RUNTIME_FIELDS`, so it kept the original defect's shape: a user
-# disabled a trigger, the next boot re-migrated, and `crons.json`'s stale `enabled: true` came
-# back — re-enabled AND re-armed, because `needs_arming` then selected it.
-#
-# Whether an automation is switched on is a fact about what has HAPPENED to a trigger (a person
-# turned it off), not about what it IS. That is the same line the rest of this section draws.
+    assert "AutomationBoot" in inspect.getsource(RuntimeCoordinator._init_cron)
+    assert "self.migrate()" in inspect.getsource(AutomationBoot.start)
+    assert "migrate_and_arm()" in inspect.getsource(AutomationBoot.migrate)
 
 
 def test_a_re_migration_PRESERVES_a_user_disable(tmp_path):
     """🔴 THE defect. Turning an automation off and restarting turned it back on."""
-    _crons(tmp_path, _job("j-cron"))  # legacy row says enabled: true
+    _crons(tmp_path, _job("j-cron"))
     BM.migrate_and_arm(tmp_path, now=NOW)
     store = TriggerStore(base_dir=tmp_path)
     assert store.set_enabled("j-cron", False) is not None
 
     BM.migrate_and_arm(tmp_path, now=NOW + 200)
     after = TriggerStore(base_dir=tmp_path).get("j-cron").trigger
-    assert after.enabled is False, "the boot migration re-asserted the legacy enabled value"
+    assert (
+        after.enabled is False
+    ), "the boot migration re-asserted the legacy enabled value"
 
 
 def test_a_re_enabled_trigger_is_ALSO_preserved(tmp_path):
@@ -391,7 +395,7 @@ def test_a_preserved_disable_is_not_re_armed(tmp_path):
     """The user-visible consequence, stated as a behaviour. A trigger that came back enabled also
     came back ARMED, so it advertised a countdown and then fired — which is the harm, not the flag.
     """
-    from gideon.triggers import service as SVC
+    from gideon.automation.triggers import service as SVC
 
     _crons(tmp_path, _job("j-cron"))
     BM.migrate_and_arm(tmp_path, now=NOW)
@@ -399,7 +403,9 @@ def test_a_preserved_disable_is_not_re_armed(tmp_path):
 
     BM.migrate_and_arm(tmp_path, now=NOW + 200)
     triggers = [r.trigger for r in TriggerStore(base_dir=tmp_path).load()]
-    assert SVC.due_ids(triggers, now=NOW + 86_400) == [], "a disabled trigger became due again"
+    assert (
+        SVC.due_ids(triggers, now=NOW + 86_400) == []
+    ), "a disabled trigger became due again"
 
 
 def test_False_is_carried_because_a_bool_is_never_ABSENT(tmp_path):
@@ -413,8 +419,8 @@ def test_False_is_carried_because_a_bool_is_never_ABSENT(tmp_path):
     Asserted at the unit rather than only through a migration, because the migration reads
     `crons.json` and a future change to that reader could hide this again.
     """
-    from gideon.triggers.models import Trigger
-    from gideon.triggers.store import RUNTIME_FIELDS, _carry_runtime_state
+    from gideon.automation.triggers.models import Trigger
+    from gideon.automation.triggers.store import RUNTIME_FIELDS, _carry_runtime_state
 
     assert "enabled" in RUNTIME_FIELDS
     assert False in (None, "", 0), "the premise: Python treats False as equal to 0"
@@ -435,8 +441,6 @@ def test_False_is_carried_because_a_bool_is_never_ABSENT(tmp_path):
     _carry_runtime_state(_t(enabled=False), incoming)
     assert incoming.enabled is False
 
-    # And the falsy-means-absent rule still holds for the counters, which is why the fix is
-    # `isinstance(value, bool) or …` and not "carry every falsy value".
     incoming = _t(run_count=5)
     _carry_runtime_state(_t(run_count=0), incoming)
     assert incoming.run_count == 5, "a zero count must not overwrite a derived one"

@@ -16,11 +16,9 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 from chat_test_helpers import _make_app, _make_state
 
-from gideon import natural_voice as nv
-from gideon.agents.marketplace import AgentDefinition
-from gideon.config.loader import AppConfig, config_path
-
-# ── the resolution order ──
+from gideon.core.config.loader import AppConfig, config_path
+from gideon.engine.agents.marketplace import AgentDefinition
+from gideon.integrations import natural_voice as nv
 
 
 class TestResolutionOrder:
@@ -36,7 +34,7 @@ class TestResolutionOrder:
                 states = {
                     "conversation": conversation in ("on", "off"),
                     "agent": agent,
-                    "platform": True,  # the floor always states — that is its job
+                    "platform": True,
                 }
                 expected = next(s for s in nv.NATURAL_VOICE_PRECEDENCE if states[s])
                 got = nv.resolve(conversation, agent)
@@ -50,9 +48,7 @@ class TestResolutionOrder:
         ``NATURAL_VOICE_PRECEDENCE`` is reordered — the sibling above cannot,
         because the floor states unconditionally and would simply win first.
         """
-        # off beats an agent that asks for it …
         assert nv.resolve("off", agent=True) == nv.NaturalVoice(False, "conversation")
-        # … and on beats an agent that does not.
         assert nv.resolve("on", agent=False) == nv.NaturalVoice(True, "conversation")
 
     def test_an_agent_preference_travels_when_the_conversation_is_silent(self):
@@ -68,12 +64,11 @@ class TestResolutionOrder:
         assert nv.normalize_conversation_choice(bad) == ""
         assert nv.resolve(bad, agent=False).source == "platform"
 
-    @pytest.mark.parametrize(("word", "expected"), [("on", True), ("OFF", False), (" On ", True)])
+    @pytest.mark.parametrize(
+        ("word", "expected"), [("on", True), ("OFF", False), (" On ", True)]
+    )
     def test_the_tri_state_is_case_and_space_insensitive(self, word, expected):
         assert nv.resolve(word, agent=not expected).enabled is expected
-
-
-# ── the instruction: present, concrete, and safety-preserving ──
 
 
 class TestInstruction:
@@ -104,13 +99,13 @@ class TestInstruction:
         text = nv.instruction()
         assert "sound natural" not in text.lower()
         for named in (
-            "Great question",  # filler opener
-            "In summary",  # the redundant summary close
-            "Let me know if you'd like me to",  # the unasked offer to continue
-            "leverage",  # the long word with a short synonym
+            "Great question",
+            "In summary",
+            "Let me know if you'd like me to",
+            "leverage",
             "delve",
-            "shortest accurate word",  # stated positively
-            "Answer in the first sentence",  # stated positively
+            "shortest accurate word",
+            "Answer in the first sentence",
         ):
             assert named in text, f"the instruction stopped naming {named!r}"
 
@@ -122,15 +117,13 @@ class TestInstruction:
         is allowed, and each half reddens independently.
         """
         text = nv.instruction()
-        # 1. The instruction itself forbids softening a refusal, in as many words.
         assert "WHAT DOES NOT CHANGE" in text
         assert "If you must refuse, refuse." in text
         assert "Plainer prose is not softer prose" in text
         assert "as fully and as directly" in text
-        # 2. A refusal already framed in the turn survives injection byte-for-byte —
-        #    the mechanism appends, it never rewrites (see the module's rejected
-        #    alternative: a post-hoc rewriting pass, which could do exactly this).
-        refusal = "I won't do that — it would delete data with no backup. Here is why: …"
+        refusal = (
+            "I won't do that — it would delete data with no backup. Here is why: …"
+        )
         out = nv.maybe_inject(refusal, "on", False)
         assert out.startswith(refusal)
         assert refusal in out
@@ -146,7 +139,9 @@ class TestInstruction:
         assert "change meaning" in doc
 
     def test_a_render_failure_never_blocks_the_turn(self):
-        with patch.object(nv, "instruction", side_effect=RuntimeError("prompt store down")):
+        with patch.object(
+            nv, "instruction", side_effect=RuntimeError("prompt store down")
+        ):
             assert nv.maybe_inject("hi", "on", False) == "hi"
 
 
@@ -166,7 +161,7 @@ class TestTheTurnActuallyCallsIt:
         import ast
         from pathlib import Path
 
-        import gideon.dashboard.chat_runner as runner
+        import gideon.interfaces.dashboard.chat_runner as runner
 
         src = Path(runner.__file__).read_text(encoding="utf-8")
         tree = ast.parse(src)
@@ -177,18 +172,18 @@ class TestTheTurnActuallyCallsIt:
             and isinstance(n.func, ast.Attribute)
             and n.func.attr == "maybe_inject"
         ]
-        assert len(calls) == 1, f"expected exactly one natural-voice injection, found {len(calls)}"
+        assert (
+            len(calls) == 1
+        ), f"expected exactly one natural-voice injection, found {len(calls)}"
         args = ast.unparse(calls[0])
         assert "natural_voice" in args, "the per-conversation tri-state is not passed"
         assert "agent_default" in args, "the agent scope is not consulted"
-        # And it rides the same `message` the persona seam builds, so the turn the
-        # model sees carries it (rather than a local nobody sends).
         assert calls[0].args and ast.unparse(calls[0].args[0]) == "message"
 
     def test_the_snippet_is_registered_and_editable(self):
         """PT-1's path: the instruction is a BUNDLED snippet, so it shows up in
         Settings → Prompts instead of being a string literal nobody can reach."""
-        from gideon.prompt_providers.catalog import BUNDLED_SNIPPETS
+        from gideon.integrations.prompt_providers.catalog import BUNDLED_SNIPPETS
 
         entry = next((s for s in BUNDLED_SNIPPETS if s.name == "natural-voice"), None)
         assert entry is not None, "the natural-voice snippet is not registered"
@@ -196,14 +191,13 @@ class TestTheTurnActuallyCallsIt:
         assert entry.description
 
 
-# ── the per-agent scope: the full config round trip ──
-
-
 class TestAgentScopeRoundTrip:
     def test_config_profile_round_trips_through_disk(self, tmp_path, monkeypatch):
         """dataclass → load() → to_dict(): the loader-allowlist gotcha, pinned."""
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        config_path().write_text(json.dumps({"agents": {"bot": {"natural_voice": True}}}))
+        config_path().write_text(
+            json.dumps({"agents": {"bot": {"natural_voice": True}}})
+        )
         cfg = AppConfig.load()
         assert cfg.agents["bot"].natural_voice is True
         assert cfg.to_dict()["agents"]["bot"]["natural_voice"] is True
@@ -211,7 +205,7 @@ class TestAgentScopeRoundTrip:
     def test_a_saved_profile_reloads_with_the_value(self, tmp_path, monkeypatch):
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
         cfg = AppConfig.load()
-        from gideon.config.loader import AgentProfile
+        from gideon.core.config.loader import AgentProfile
 
         cfg.agents["plainly"] = AgentProfile(natural_voice=True)
         cfg.save()
@@ -221,7 +215,7 @@ class TestAgentScopeRoundTrip:
         """A config field without ``_meta`` is invisible to the settings surfaces."""
         from dataclasses import fields
 
-        from gideon.config.loader import AgentProfile
+        from gideon.core.config.loader import AgentProfile
 
         meta = {f.name: f.metadata for f in fields(AgentProfile)}["natural_voice"]
         assert meta.get("label") == "Natural Voice"
@@ -230,10 +224,10 @@ class TestAgentScopeRoundTrip:
     def test_the_name_does_not_collide_with_the_two_shipped_voice_surfaces(self):
         """``AgentProfile.voice`` is the PERSONA and ``voice_profiles`` is SPEECH.
         Natural voice is a third thing and must stay a third name."""
-        from gideon.config.loader import AgentProfile
+        from gideon.core.config.loader import AgentProfile
 
         p = AgentProfile(voice="blunt and witty", natural_voice=True)
-        assert p.voice == "blunt and witty"  # persona, untouched
+        assert p.voice == "blunt and witty"
         assert p.natural_voice is True
         assert "natural_voice" != "voice"
 
@@ -249,7 +243,7 @@ class TestAgentScopeRoundTrip:
         truthy string ``"False"``, so without its own branch the update path would
         wedge the toggle permanently on."""
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        from gideon.agents.marketplace import LocalAgentMarketplace
+        from gideon.engine.agents.marketplace import LocalAgentMarketplace
 
         mp = LocalAgentMarketplace(base_dir=tmp_path / "agents")
         mp.create(AgentDefinition(name="bot", natural_voice=True))
@@ -258,12 +252,11 @@ class TestAgentScopeRoundTrip:
         assert mp.update("bot", {"natural_voice": True}).natural_voice is True
 
 
-# ── the per-conversation scope: write path, persistence, and the resolved payload ──
-
-
 @pytest.fixture()
 def chat_app(tmp_path, monkeypatch):
-    monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+    )
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     return _make_state(tmp_path)
 
@@ -274,7 +267,8 @@ class TestConversationScope:
         chat_app.get_or_create_session("nv-session")
         async with TestClient(TestServer(_make_app(chat_app))) as client:
             resp = await client.patch(
-                "/api/chat/sessions/nv-session/natural-voice", json={"natural_voice": "on"}
+                "/api/chat/sessions/nv-session/natural-voice",
+                json={"natural_voice": "on"},
             )
             assert resp.status == 200
             body = await resp.json()
@@ -289,10 +283,10 @@ class TestConversationScope:
         session.natural_voice = "on"
         async with TestClient(TestServer(_make_app(chat_app))) as client:
             resp = await client.patch(
-                "/api/chat/sessions/nv-session/natural-voice", json={"natural_voice": "yes"}
+                "/api/chat/sessions/nv-session/natural-voice",
+                json={"natural_voice": "yes"},
             )
             assert resp.status == 400
-        # and it did NOT clear the override the user already set
         assert session.natural_voice == "on"
 
     @pytest.mark.asyncio
@@ -301,7 +295,8 @@ class TestConversationScope:
         session.natural_voice = "off"
         async with TestClient(TestServer(_make_app(chat_app))) as client:
             resp = await client.patch(
-                "/api/chat/sessions/nv-session/natural-voice", json={"natural_voice": ""}
+                "/api/chat/sessions/nv-session/natural-voice",
+                json={"natural_voice": ""},
             )
             assert resp.status == 200
         assert session.natural_voice == ""
@@ -311,7 +306,7 @@ class TestConversationScope:
         """ "for that conversation only" — the per-conversation write must not reach
         the agent definition, or one chat would silently re-voice every other one."""
         cfg = AppConfig.load()
-        from gideon.config.loader import AgentProfile
+        from gideon.core.config.loader import AgentProfile
 
         cfg.agents["plainly"] = AgentProfile(natural_voice=True)
         cfg.save()
@@ -319,13 +314,14 @@ class TestConversationScope:
         session.agent = "plainly"
         async with TestClient(TestServer(_make_app(chat_app))) as client:
             resp = await client.patch(
-                "/api/chat/sessions/nv-session/natural-voice", json={"natural_voice": "off"}
+                "/api/chat/sessions/nv-session/natural-voice",
+                json={"natural_voice": "off"},
             )
             body = await resp.json()
         assert body["natural_voice_effective"] is False
         assert body["natural_voice_source"] == "conversation"
-        assert body["natural_voice_agent_default"] is True  # honestly reported
-        assert AppConfig.load().agents["plainly"].natural_voice is True  # untouched on disk
+        assert body["natural_voice_agent_default"] is True
+        assert AppConfig.load().agents["plainly"].natural_voice is True
 
     @pytest.mark.asyncio
     async def test_the_send_body_accepts_it_for_a_brand_new_chat(self, chat_app):
@@ -337,11 +333,13 @@ class TestConversationScope:
         dashboard's ``ensureSession`` creates the session (``POST /api/chat/sessions``)
         and only then sends, so the create below is what the real flow does. A send
         naming a key that exists nowhere is now refused ``session_not_found`` (see
-        tests/test_chat_session_resurrection_audit.py), and the sibling test right
+        checks/runtime/test_chat_session_resurrection_audit.py), and the sibling test right
         below already uses this same setup.
         """
         chat_app.get_or_create_session("fresh")
-        with patch("gideon.dashboard.chat_handlers.run_chat", new=AsyncMock()):
+        with patch(
+            "gideon.interfaces.dashboard.chat_handlers.run_chat", new=AsyncMock()
+        ):
             async with TestClient(TestServer(_make_app(chat_app))) as client:
                 resp = await client.post(
                     "/api/chat?ws=1",
@@ -354,7 +352,9 @@ class TestConversationScope:
     async def test_an_absent_body_key_does_not_clear_it(self, chat_app):
         session = chat_app.get_or_create_session("keep")
         session.natural_voice = "on"
-        with patch("gideon.dashboard.chat_handlers.run_chat", new=AsyncMock()):
+        with patch(
+            "gideon.interfaces.dashboard.chat_handlers.run_chat", new=AsyncMock()
+        ):
             async with TestClient(TestServer(_make_app(chat_app))) as client:
                 resp = await client.post(
                     "/api/chat?ws=1", json={"message": "hi", "session": "keep"}
@@ -364,7 +364,7 @@ class TestConversationScope:
 
     @pytest.mark.asyncio
     async def test_session_detail_carries_the_resolved_pair(self, chat_app):
-        from gideon.config.loader import AgentProfile
+        from gideon.core.config.loader import AgentProfile
 
         cfg = AppConfig.load()
         cfg.agents["plainly"] = AgentProfile(natural_voice=True)
@@ -385,7 +385,7 @@ class TestConversationScope:
 
     def test_it_survives_a_session_meta_round_trip(self, chat_app, tmp_path):
         """Both restore paths read the meta line; this pins the write + one read."""
-        from gideon.dashboard.chat_persistence import save_session_to_history
+        from gideon.interfaces.dashboard.chat_persistence import save_session_to_history
 
         session = chat_app.get_or_create_session("nv-session")
         session.natural_voice = "on"
@@ -395,7 +395,7 @@ class TestConversationScope:
         assert meta.get("natural_voice") == "on"
 
     def test_an_inheriting_session_writes_no_meta_key(self, chat_app):
-        from gideon.dashboard.chat_persistence import save_session_to_history
+        from gideon.interfaces.dashboard.chat_persistence import save_session_to_history
 
         session = chat_app.get_or_create_session("nv-session")
         session.messages.append({"role": "user", "content": "hi"})
@@ -406,7 +406,7 @@ class TestConversationScope:
     def test_the_startup_restore_reads_it_back(self, chat_app):
         """The other half of the round trip: a gateway restart must not silently
         drop the conversation's override back to "inherit"."""
-        from gideon.dashboard.chat_persistence import (
+        from gideon.interfaces.dashboard.chat_persistence import (
             restore_recent_sessions,
             save_session_to_history,
         )

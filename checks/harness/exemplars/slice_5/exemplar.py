@@ -9,7 +9,7 @@ drives the two ends of a gate's life against the real controller:
    NOT a pass. A timed-out gate reading as approval is how an unattended run would "approve"
    something no human ever saw (WF2-R7).
 
-Runnable standalone: `python -m harness.exemplars.slice_5.exemplar` (or `smoke.sh`). The
+Runnable standalone: `python -m checks.harness.exemplars.slice_5.exemplar` (or `smoke.sh`). The
 timeout leg uses a 1s `timeout_secs`, so the whole exemplar stays well under 30s.
 """
 
@@ -18,28 +18,30 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from gideon.workflows import store
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.models import RunStatus, WorkflowRun
+from gideon.automation.workflows import store
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.models import RunStatus, WorkflowRun
 
-#: An approval gate with no timeout: an unanswered run parks at needs_input.
 WAITS_SPEC: dict[str, Any] = {
     "name": "slice5-gate-waits",
-    "root": {"kind": "gate", "id": "g", "config": {"kind": "approval", "prompt": "ship it?"}},
+    "root": {
+        "kind": "gate",
+        "id": "g",
+        "config": {"kind": "approval", "prompt": "ship it?"},
+    },
 }
 
-#: An approval gate with a short timeout: unanswered, it FAILS (never a silent approval).
 TIMES_OUT_SPEC: dict[str, Any] = {
     "name": "slice5-gate-times-out",
-    "root": {"kind": "gate", "id": "g", "config": {"kind": "approval", "timeout_secs": 1}},
+    "root": {
+        "kind": "gate",
+        "id": "g",
+        "config": {"kind": "approval", "timeout_secs": 1},
+    },
 }
 
 
 async def _drive() -> str | None:
-    # 1. Unanswered, no timeout → needs_input with a typed ask payload. `needs_input` is a
-    #    STOPPING point, not a terminal state, so `wait_for_terminal` (which returns there)
-    #    is the right waiter — `run_to_completion` would block until its own timeout. `stop()`
-    #    then tears down the background tick loop without marking the run failed.
     waits = store.create(WorkflowRun(id="", workflow_name=WAITS_SPEC["name"]))
     store.write_spec(waits.id, WAITS_SPEC)
     c_waits = RunController(waits, WAITS_SPEC, services=EngineServices())
@@ -52,7 +54,6 @@ async def _drive() -> str | None:
     if not c_waits.run.attention or c_waits.run.attention.get("kind") != "approval":
         return f"expected a typed 'approval' ask payload, got {c_waits.run.attention}"
 
-    # 2. Unanswered, with a timeout → FAILED (a real terminal state), never a silent pass.
     timed = store.create(WorkflowRun(id="", workflow_name=TIMES_OUT_SPEC["name"]))
     store.write_spec(timed.id, TIMES_OUT_SPEC)
     c_timed = RunController(timed, TIMES_OUT_SPEC, services=EngineServices())

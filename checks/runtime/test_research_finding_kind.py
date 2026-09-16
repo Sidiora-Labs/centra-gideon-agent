@@ -29,10 +29,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gideon import notification_kinds as nk
-from gideon.inbox import InboxStore, emit_attention_item
-from gideon.knowledge import semantics as sem
-from gideon.knowledge.semantics import (
+from gideon.cognition.knowledge import semantics as sem
+from gideon.cognition.knowledge.semantics import (
     DEFAULT_LIST_EXCLUDED_KINDS,
     KIND_BUDGETS,
     KINDS,
@@ -40,7 +38,9 @@ from gideon.knowledge.semantics import (
     SYNTHESIZED_KINDS,
     check_persist,
 )
-from gideon.knowledge.store import KnowledgeStore
+from gideon.cognition.knowledge.store import KnowledgeStore
+from gideon.integrations.inbox import InboxStore, emit_attention_item
+from gideon.workspace import notification_kinds as nk
 
 
 @pytest.fixture(autouse=True)
@@ -65,7 +65,7 @@ class _NoEmbedder:
 
 async def _list(store, query: dict) -> dict:
     """Drive the real list handler with a minimal fake request (no aiohttp app needed)."""
-    from gideon.dashboard.handlers.knowledge import list_items
+    from gideon.interfaces.dashboard.handlers.knowledge import list_items
 
     class _State:
         knowledge_store = store
@@ -79,7 +79,9 @@ async def _list(store, query: dict) -> dict:
     return json.loads(resp.body.decode())
 
 
-def _write_finding(store, *, title: str = "Vector DBs converged on HNSW", body: str = "") -> str:
+def _write_finding(
+    store, *, title: str = "Vector DBs converged on HNSW", body: str = ""
+) -> str:
     """One finding written through the REAL persist path — ``check_persist`` then the
     provider's ``_upsert_item``, the only writer of the ``kind`` column.
 
@@ -88,7 +90,9 @@ def _write_finding(store, *, title: str = "Vector DBs converged on HNSW", body: 
     and stores nothing (the shape already documented at ``knowledge/updates.py``). A fixture
     built on it would leave every exclusion assertion below passing for the wrong reason.
     """
-    from gideon.action_providers.knowledge_persist_provider import _upsert_item
+    from gideon.integrations.action_providers.knowledge_persist_provider import (
+        _upsert_item,
+    )
 
     content = body or "the quoll benchmark shows recall parity at half the memory"
     check = check_persist(
@@ -111,21 +115,21 @@ def _write_finding(store, *, title: str = "Vector DBs converged on HNSW", body: 
         creating=True,
     )
     row = store.db.execute("SELECT kind FROM items WHERE id = ?", (item_id,)).fetchone()
-    assert row and row["kind"] == RESEARCH_FINDING_KIND, "the fixture must really carry the kind"
+    assert (
+        row and row["kind"] == RESEARCH_FINDING_KIND
+    ), "the fixture must really carry the kind"
     return item_id
-
-
-# ── the kind is registered in the taxonomy ──────────────────────────────────────
 
 
 def test_the_kind_is_in_the_vocabulary_and_carries_its_own_budget():
     """A kind with no budget silently inherits DEFAULT_BUDGET, which may be wildly wrong."""
     assert RESEARCH_FINDING_KIND in KINDS
     assert KIND_BUDGETS[RESEARCH_FINDING_KIND] == 16_000
-    # Sized between the two neighbours it sits between on purpose: bigger than a bare
-    # `insight` (it carries evidence prose and citations), smaller than the whole `report`
-    # (one scheduled pass emits several findings).
-    assert KIND_BUDGETS["insight"] < KIND_BUDGETS[RESEARCH_FINDING_KIND] < KIND_BUDGETS["report"]
+    assert (
+        KIND_BUDGETS["insight"]
+        < KIND_BUDGETS[RESEARCH_FINDING_KIND]
+        < KIND_BUDGETS["report"]
+    )
 
 
 def test_a_finding_needs_citations_because_it_is_synthesized():
@@ -138,7 +142,6 @@ def test_a_finding_needs_citations_because_it_is_synthesized():
     assert check_persist(
         kind=RESEARCH_FINDING_KIND, title="Finding", content="c", citations=["t-1"]
     ).ok
-    # The opt-out stays explicit: a pass that genuinely cannot source a finding says so.
     assert check_persist(
         kind=RESEARCH_FINDING_KIND, title="Finding", content="c", unsourced=True
     ).ok
@@ -158,9 +161,6 @@ def test_an_oversize_finding_is_told_to_condense_and_retry():
     assert over.logical_key == "research-finding:finding"
 
 
-# ── indexed, not listed ─────────────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_a_finding_is_absent_from_the_default_items_list(store):
     """The plain library list is what the owner scrolls; a weekly report must not fill it."""
@@ -170,7 +170,9 @@ async def test_a_finding_is_absent_from_the_default_items_list(store):
     listed = await _list(store, {})
     titles = [i["title"] for i in listed["items"]]
     assert titles == ["A real note"]
-    assert listed["total"] == 1, "the count must agree with the rows, not with the store"
+    assert (
+        listed["total"] == 1
+    ), "the count must agree with the rows, not with the store"
 
 
 @pytest.mark.asyncio
@@ -183,7 +185,6 @@ async def test_an_explicit_kind_filter_re_admits_it(store):
     explicit = await _list(store, {"kind": RESEARCH_FINDING_KIND})
     assert [i["title"] for i in explicit["items"]] == ["Vector DBs converged on HNSW"]
     assert explicit["total"] == 1
-    # And the filter is a filter, not just an un-exclusion: the ordinary note is now out.
     assert "A real note" not in [i["title"] for i in explicit["items"]]
 
 
@@ -197,7 +198,8 @@ async def test_the_exclusion_is_declared_once_in_semantics(store, monkeypatch):
     """
     _write_finding(store)
     monkeypatch.setattr(
-        "gideon.dashboard.handlers.knowledge.DEFAULT_LIST_EXCLUDED_KINDS", frozenset()
+        "gideon.interfaces.dashboard.handlers.knowledge.DEFAULT_LIST_EXCLUDED_KINDS",
+        frozenset(),
     )
     listed = await _list(store, {})
     assert [i["title"] for i in listed["items"]] == ["Vector DBs converged on HNSW"]
@@ -207,15 +209,11 @@ async def test_the_exclusion_is_declared_once_in_semantics(store, monkeypatch):
 async def test_a_finding_is_still_findable_by_search(store):
     """Indexed, not listed — the asymmetry IS the feature, so search must not filter it."""
     _write_finding(store)
-    # The library's own FTS, which is what the list endpoint's hybrid retriever reads.
     assert [r["title"] for r in store.search_items_fts("quoll", limit=50)] == [
         "Vector DBs converged on HNSW"
     ]
     found = await _list(store, {"q": "quoll"})
     assert "Vector DBs converged on HNSW" in [i["title"] for i in found["items"]]
-
-
-# ── delivery rides the existing attention + digest path ─────────────────────────
 
 
 def test_the_notification_pair_is_registered_and_not_the_generic_fallback():
@@ -224,8 +222,12 @@ def test_the_notification_pair_is_registered_and_not_the_generic_fallback():
     uncategorized. That silent downgrade is what the registration prevents."""
     resolved = nk.resolve_kind("knowledge", "research_finding")
     assert (resolved.source, resolved.kind) == ("knowledge", "research_finding")
-    assert resolved.attention is True, "a report nobody is watching cannot be a toast only"
-    assert nk.kind_for_legacy_pair("knowledge", "research_finding") == nk.RESEARCH_FINDING
+    assert (
+        resolved.attention is True
+    ), "a report nobody is watching cannot be a toast only"
+    assert (
+        nk.kind_for_legacy_pair("knowledge", "research_finding") == nk.RESEARCH_FINDING
+    )
 
 
 def test_a_written_finding_is_delivered_through_the_existing_attention_path(tmp_path):
@@ -250,21 +252,17 @@ def test_a_written_finding_is_delivered_through_the_existing_attention_path(tmp_
         dedup_key="report-42:finding-1",
     )
 
-    # The durable half: a row the owner finds later, even if the toast was missed.
     assert item_id
     row = inbox.items[item_id]
     assert row.item_kind == "research_finding"
     assert "Vector DBs converged on HNSW" in row.message
 
-    # The delivered half: ONE notification, carrying the kind's own wire string so a rule and
-    # the digest can both find it, and the knowledge item it points at.
     assert state.notify.call_count == 1
     args, kwargs = state.notify.call_args
     assert args[0] == nk.RESEARCH_FINDING
     assert kwargs["meta"]["inbox_item"] == item_id
     assert kwargs["meta"]["knowledge_item_id"] == "k-1"
 
-    # Re-emission is idempotent: a report re-run must not stack rows or interrupt twice.
     again = emit_attention_item(
         state,
         source="knowledge",
@@ -281,12 +279,15 @@ def test_a_written_finding_is_delivered_through_the_existing_attention_path(tmp_
 def test_a_finding_gets_its_OWN_digest_heading():
     """Registration alone would not have been enough: without a distinct wire string the
     digest would group findings under whichever kind their bare string collided with."""
-    from gideon.notification_rules import build_digest_body
+    from gideon.workspace.notification_rules import build_digest_body
 
     body = build_digest_body(
         [
             {"kind": nk.RESEARCH_FINDING, "title": "Vector DBs converged on HNSW"},
-            {"kind": nk.kind_for_legacy_pair("cron", "result"), "title": "Nightly sync ran"},
+            {
+                "kind": nk.kind_for_legacy_pair("cron", "result"),
+                "title": "Nightly sync ran",
+            },
         ]
     )
     assert "**Research report finding** — 1" in body, body
@@ -298,19 +299,13 @@ def test_the_kind_keeps_the_immediate_default_the_registry_ships():
     no setting the user knowingly changed. ``digest`` is one click in the rules matrix — the
     registry row is what makes that click possible."""
     assert nk.resolve_kind("knowledge", "research_finding").default_mode == "immediate"
-    # The population's CANONICAL home is
-    # `test_notification_kinds::test_the_kinds_defaulting_to_something_other_than_immediate_are_EXACTLY_these`,
-    # which carries the per-kind justification. This copy is the local vacuity floor: it keeps
-    # the assertion above from being the only thing standing between a future kind and a quiet
-    # default. Widened for `user/note` (INU-9) — a note the USER wrote defaults to `badge`,
-    # because a toast tells you something you did not know and you cannot be informed of your
-    # own keystrokes.
     quiet = sorted(k.key for k in nk.all_kinds() if k.default_mode != "immediate")
     assert quiet == ["system/usage_recap", "user/note"]
 
 
 def test_the_semantics_module_is_the_canonical_home_of_the_string():
     """The sibling ``knowledge/research_reports.py`` aliases this rather than re-spelling it:
-    a producer naming its own vocabulary is how a second, disagreeing spelling gets minted."""
+    a producer naming its own vocabulary is how a second, disagreeing spelling gets minted.
+    """
     assert sem.RESEARCH_FINDING_KIND == "research-finding"
     assert DEFAULT_LIST_EXCLUDED_KINDS == frozenset({sem.RESEARCH_FINDING_KIND})

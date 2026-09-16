@@ -21,8 +21,9 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Inches, Mm, Pt
 
-from gideon.documents.from_markup import document_from_markdown
-from gideon.documents.model import (
+from gideon.cognition.knowledge.readers import FileReader
+from gideon.workspace.documents.from_markup import document_from_markdown
+from gideon.workspace.documents.model import (
     BLOCK_KINDS,
     Block,
     Cell,
@@ -31,15 +32,12 @@ from gideon.documents.model import (
     ParagraphStyle,
     Run,
 )
-from gideon.documents.writers import docx_writer
-from gideon.documents.writers.docx_writer import render_docx
-from gideon.knowledge.readers import FileReader
+from gideon.workspace.documents.writers import docx_writer
+from gideon.workspace.documents.writers.docx_writer import render_docx
 
 _MONOSPACE = "Courier New"
 _URL = "https://example.invalid/docs"
 
-#: One twentieth of a point, in EMU. `w:pgSz` stores twips, so a named page size cannot
-#: read back at exact EMU however precisely the writer computes it.
 _ONE_TWIP_EMU = 635
 
 
@@ -124,9 +122,6 @@ def _part_names(data: bytes) -> list[str]:
         return sorted(archive.namelist())
 
 
-# --------------------------------------------------------------------------- the clause
-
-
 def test_a_bold_run_reads_back_bold_via_python_docx():
     """DFE-2's clause, round-tripped through the file rather than the model."""
     data = render_docx(
@@ -136,7 +131,9 @@ def test_a_bold_run_reads_back_bold_via_python_docx():
     para = _reopen(data).paragraphs[0]
     assert [run.text for run in para.runs] == ["plain ", "strong"]
     assert para.runs[1].bold is True, "a bold run must read back bold from the document"
-    assert para.runs[0].bold is None, "a plain run inherits; it must not declare bold OFF"
+    assert (
+        para.runs[0].bold is None
+    ), "a plain run inherits; it must not declare bold OFF"
 
 
 def test_an_italic_run_reads_back_italic_via_python_docx():
@@ -150,7 +147,9 @@ def test_an_italic_run_reads_back_italic_via_python_docx():
 
 
 def test_a_bold_run_in_a_heading_reads_back_bold():
-    data = render_docx(_model(_block("heading", level=2, runs=[_Run("Big", bold=True)])))
+    data = render_docx(
+        _model(_block("heading", level=2, runs=[_Run("Big", bold=True)]))
+    )
 
     para = _reopen(data).paragraphs[0]
     assert para.style.name == "Heading 2"
@@ -173,8 +172,6 @@ def test_a_link_run_keeps_its_display_text_and_its_url():
     data = render_docx(_model(_block("paragraph", runs=runs)))
 
     para = _reopen(data).paragraphs[0]
-    # A hyperlink's run is a child of w:hyperlink, not of w:p, so it is deliberately
-    # absent from para.runs — the visible text arrives through para.text.
     assert para.text == "see the docs"
     assert [link.address for link in para.hyperlinks] == [_URL]
     assert [run.text for run in para.hyperlinks[0].runs] == ["the docs"]
@@ -200,7 +197,9 @@ def test_the_hyperlink_relationship_is_external_and_points_at_the_url():
 def test_the_hyperlink_run_properties_are_in_ooxml_schema_order():
     """`CT_RPr` is a sequence, not a choice — out-of-order children read as corrupt."""
     runs = [_Run("hot", bold=True, italic=True, code=True, link=_URL)]
-    xml = _document_xml(render_docx(_model(_block("paragraph", runs=runs)))).decode("utf-8")
+    xml = _document_xml(render_docx(_model(_block("paragraph", runs=runs)))).decode(
+        "utf-8"
+    )
 
     props = xml.split("<w:rPr>")[1].split("</w:rPr>")[0]
     order = [chunk.split(" ")[0].split("/")[0] for chunk in props.split("<w:")[1:]]
@@ -208,13 +207,12 @@ def test_the_hyperlink_run_properties_are_in_ooxml_schema_order():
 
 
 def test_a_bold_link_run_reads_back_bold():
-    data = render_docx(_model(_block("paragraph", runs=[_Run("hot", bold=True, link=_URL)])))
+    data = render_docx(
+        _model(_block("paragraph", runs=[_Run("hot", bold=True, link=_URL)]))
+    )
 
     para = _reopen(data).paragraphs[0]
     assert para.hyperlinks[0].runs[0].bold is True
-
-
-# ------------------------------------------------------------------- backwards fidelity
 
 
 def _legacy_docx(model: DocumentModel) -> bytes:
@@ -285,26 +283,33 @@ def test_a_runs_less_model_renders_exactly_as_it_did_before():
 
 def test_a_runs_less_paragraph_carries_no_run_properties():
     """The narrow version of the claim above: nothing is added, not even an empty rPr."""
-    para = _reopen(render_docx(_model(_block("paragraph", text="Prose.")))).paragraphs[0]
+    para = _reopen(render_docx(_model(_block("paragraph", text="Prose.")))).paragraphs[
+        0
+    ]
 
     assert para.runs[0].bold is None
     assert para.runs[0].italic is None
     assert para.runs[0].font.name is None
-    assert b"w:rPr" not in _document_xml(render_docx(_model(_block("paragraph", text="Prose."))))
-
-
-# ----------------------------------------------------------- 0.0 means "writer default"
+    assert b"w:rPr" not in _document_xml(
+        render_docx(_model(_block("paragraph", text="Prose.")))
+    )
 
 
 def _paragraph_with_style(style) -> object:
-    return _reopen(render_docx(_model(_block("paragraph", text="a", style=style)))).paragraphs[0]
+    return _reopen(
+        render_docx(_model(_block("paragraph", text="a", style=style)))
+    ).paragraphs[0]
 
 
 def test_zero_spacing_means_writer_default_and_never_an_explicit_zero():
     unset = _paragraph_with_style(_Style())
-    tight = _paragraph_with_style(_Style(space_before_pt=2, space_after_pt=3, line_spacing=0.9))
+    tight = _paragraph_with_style(
+        _Style(space_before_pt=2, space_after_pt=3, line_spacing=0.9)
+    )
 
-    assert unset.paragraph_format.space_before is None, "0.0 must leave the template alone"
+    assert (
+        unset.paragraph_format.space_before is None
+    ), "0.0 must leave the template alone"
     assert unset.paragraph_format.space_after is None
     assert unset.paragraph_format.line_spacing is None
     assert unset.alignment is None
@@ -312,24 +317,33 @@ def test_zero_spacing_means_writer_default_and_never_an_explicit_zero():
     assert tight.paragraph_format.space_before == Pt(2)
     assert tight.paragraph_format.space_after == Pt(3)
     assert tight.paragraph_format.line_spacing == 0.9
-    # "unset" and "tight" must be distinguishable in the OUTPUT, not just in the model.
     assert tight.paragraph_format.space_before != unset.paragraph_format.space_before
     assert tight.paragraph_format.line_spacing != unset.paragraph_format.line_spacing
 
 
 def test_a_declared_alignment_reads_back_and_an_unknown_one_does_not_guess():
-    assert _paragraph_with_style(_Style(align="center")).alignment == WD_ALIGN_PARAGRAPH.CENTER
-    assert _paragraph_with_style(_Style(align="right")).alignment == WD_ALIGN_PARAGRAPH.RIGHT
+    assert (
+        _paragraph_with_style(_Style(align="center")).alignment
+        == WD_ALIGN_PARAGRAPH.CENTER
+    )
+    assert (
+        _paragraph_with_style(_Style(align="right")).alignment
+        == WD_ALIGN_PARAGRAPH.RIGHT
+    )
     assert _paragraph_with_style(_Style(align="sideways")).alignment is None
 
 
 def test_a_style_of_none_touches_nothing():
     assert _paragraph_with_style(None).paragraph_format.space_before is None
-    assert b"w:pPr" not in _document_xml(render_docx(_model(_block("paragraph", text="a"))))
+    assert b"w:pPr" not in _document_xml(
+        render_docx(_model(_block("paragraph", text="a")))
+    )
 
 
 def _section(page) -> object:
-    return _reopen(render_docx(_model(_block("paragraph", text="a"), page=page))).sections[0]
+    return _reopen(
+        render_docx(_model(_block("paragraph", text="a"), page=page))
+    ).sections[0]
 
 
 def test_zero_margin_means_writer_default_and_never_a_zero_margin():
@@ -340,8 +354,6 @@ def test_zero_margin_means_writer_default_and_never_a_zero_margin():
     assert declared.left_margin == Inches(0.75)
     assert declared.top_margin == Inches(0.75)
     assert declared.left_margin != default.left_margin
-    # The edges nobody set keep the template's own values — per-edge means per edge, not
-    # "one number spread over four".
     assert declared.right_margin == default.right_margin
 
 
@@ -356,17 +368,13 @@ def test_landscape_swaps_the_page_and_portrait_is_a_no_op_on_a_portrait_template
 
 def test_a_named_size_decides_the_page_rather_than_swapping_the_templates():
     """The bug per-edge margins alone would not have caught: swapping the template's own
-    width/height can only ever yield landscape LETTER, whatever size the model asked for."""
+    width/height can only ever yield landscape LETTER, whatever size the model asked for.
+    """
     a4 = _section(_Page(size="a4", orientation="landscape"))
 
-    # Within one twip: `w:pgSz` is stored in twentieths of a point, so the exact EMU width
-    # cannot survive the file. 130 EMU is a five-thousandth of a millimetre.
     assert abs(a4.page_width - Mm(297)) <= _ONE_TWIP_EMU
     assert abs(a4.page_height - Mm(210)) <= _ONE_TWIP_EMU
     assert a4.page_width != _section(_Page(orientation="landscape")).page_width
-
-
-# ----------------------------------------------------------------------- richer  tables
 
 
 def test_a_cells_table_keeps_the_row_zero_header_bold_and_honours_per_cell_bold():
@@ -377,7 +385,9 @@ def test_a_cells_table_keeps_the_row_zero_header_bold_and_honours_per_cell_bold(
     table = _reopen(render_docx(_model(_block("table", cells=cells)))).tables[0]
 
     assert [c.text for c in table.rows[0].cells] == ["h1", "h2"]
-    assert all(run.bold for run in table.cell(0, 0).paragraphs[0].runs), "row 0 is the header"
+    assert all(
+        run.bold for run in table.cell(0, 0).paragraphs[0].runs
+    ), "row 0 is the header"
     assert all(run.bold for run in table.cell(0, 1).paragraphs[0].runs)
     assert table.cell(1, 0).paragraphs[0].runs[0].bold is None
     assert table.cell(1, 1).paragraphs[0].runs[0].bold is True
@@ -408,9 +418,6 @@ def test_rows_still_render_when_cells_is_empty():
     assert [table.cell(0, 0).text, table.cell(1, 0).text] == ["h", "v"]
 
 
-# ---------------------------------------------------------------- the model's own sweep
-
-
 def _sample(kind: str) -> tuple[Block, str]:
     """One block per kind plus the marker that proves it reached the document."""
     samples = {
@@ -428,7 +435,9 @@ def _sample(kind: str) -> tuple[Block, str]:
 
 def _visible_text(doc) -> str:
     parts = [para.text for para in doc.paragraphs]
-    parts += [cell.text for table in doc.tables for row in table.rows for cell in row.cells]
+    parts += [
+        cell.text for table in doc.tables for row in table.rows for cell in row.cells
+    ]
     return "\n".join(parts)
 
 
@@ -449,33 +458,29 @@ def test_a_run_carrying_block_still_renders_something_for_every_kind_that_has_ru
         assert "marker" in _visible_text(_reopen(render_docx(_model(block)))), kind
 
 
-# ------------------------------------------------------------ through the REAL  reader
-
-
 def test_a_run_carrying_document_re_reads_through_the_real_reader(tmp_path):
     """The repo's in-process validity proof: the same reader that ingests uploads.
 
     A `w:hyperlink` keeps its visible text out of `w:p`'s own `w:r` children, so a reader
     that walked only those runs would silently drop the link's words.
     """
-    runs = [_Run("plain "), _Run("strong", bold=True), _Run(", see "), _Run("the docs", link=_URL)]
+    runs = [
+        _Run("plain "),
+        _Run("strong", bold=True),
+        _Run(", see "),
+        _Run("the docs", link=_URL),
+    ]
     path = tmp_path / "out.docx"
     path.write_bytes(render_docx(_model(_block("paragraph", runs=runs), title="Doc")))
 
     text, meta = FileReader().read(str(path))
 
     assert meta["format"] == "docx"
-    assert "plain strong, see the docs" in text, "the link's words must survive the reader"
+    assert (
+        "plain strong, see the docs" in text
+    ), "the link's words must survive the reader"
 
 
-# ----------------------------------------- the SHIPPED dataclasses, not just the doubles
-
-#: Each double declared at the top of this file, beside the dataclass it stands in for.
-#: The doubles pin the writer's contract in isolation, which is worth having — but on their
-#: own they pin it to a shape `model.py` is free to walk away from: rename `Run.bold` and the
-#: writer stops emitting bold in production while every test above stays green, because the
-#: doubles keep the old name. No other test feeds the writer a real `Run`, so this is the
-#: link that makes those assertions statements about what we actually ship.
 _DOUBLES = ((_Run, Run), (_Style, ParagraphStyle), (_Cell, Cell), (_Page, PageSetup))
 
 
@@ -483,7 +488,11 @@ def _field_spec(cls) -> dict:
     """Field names mapped to their default VALUES — a rename, a drop and a changed default
     are the three ways a double goes stale, and names alone would only catch two."""
     return {
-        spec.name: (spec.default_factory() if spec.default_factory is not MISSING else spec.default)
+        spec.name: (
+            spec.default_factory()
+            if spec.default_factory is not MISSING
+            else spec.default
+        )
         for spec in fields(cls)
     }
 
@@ -491,7 +500,9 @@ def _field_spec(cls) -> dict:
 @pytest.mark.parametrize(
     "double,real", _DOUBLES, ids=["Run", "ParagraphStyle", "Cell", "PageSetup"]
 )
-def test_each_double_matches_its_shipped_dataclass_field_for_field(double, real) -> None:
+def test_each_double_matches_its_shipped_dataclass_field_for_field(
+    double, real
+) -> None:
     assert _field_spec(double) == _field_spec(real), (
         f"{double.__name__} has drifted from the shipped {real.__name__}; every assertion "
         "made through it is now about a shape this repo does not ship"
@@ -502,7 +513,7 @@ def test_the_parity_check_notices_a_drifted_double() -> None:
     """Vacuity floor: parity that cannot fail is not parity."""
 
     @dataclass
-    class _Renamed:  # `bold` under a new name
+    class _Renamed:
         text: str = ""
         strong: bool = False
         italic: bool = False
@@ -510,14 +521,14 @@ def test_the_parity_check_notices_a_drifted_double() -> None:
         link: str = ""
 
     @dataclass
-    class _Dropped:  # `link` gone
+    class _Dropped:
         text: str = ""
         bold: bool = False
         italic: bool = False
         code: bool = False
 
     @dataclass
-    class _Redefaulted:  # a formatting flag that arrives ENABLED
+    class _Redefaulted:
         text: str = ""
         bold: bool = True
         italic: bool = False
@@ -525,12 +536,10 @@ def test_the_parity_check_notices_a_drifted_double() -> None:
         link: str = ""
 
     for stale in (_Renamed, _Dropped, _Redefaulted):
-        assert _field_spec(stale) != _field_spec(Run), f"{stale.__name__} read as up to date"
-    # ...and the same check calls the real double current, or it would condemn everything.
+        assert _field_spec(stale) != _field_spec(
+            Run
+        ), f"{stale.__name__} read as up to date"
     assert _field_spec(_Run) == _field_spec(Run)
-
-
-# ------------------------------- the whole chain: markup → model → bytes → python-docx
 
 
 def test_markdown_bold_survives_markup_model_bytes_and_read_back() -> None:
@@ -548,16 +557,10 @@ def test_markdown_bold_survives_markup_model_bytes_and_read_back() -> None:
 
     assert ("strong", True) in reread, f"bold did not survive the chain: {reread}"
     assert ("Some ", None) in reread, "a plain run must inherit, not declare bold OFF"
-    # The link's words live in `w:hyperlink`, NOT among `w:p`'s own runs — so `para.runs`
-    # cannot see them and `para.text` is the surface that proves nothing was dropped. That
-    # `.text` includes them at all is precisely what the python-docx >=1.1 floor buys.
     assert "link" not in dict(reread)
     assert para.text == "Some strong words and a link."
 
 
-# ------------------------------------------------------ soul guardrail 5: writers  pure
-
-#: A writer takes a model and returns bytes. Anything below would make it reach outward.
 _IMPURE = (
     "open(",
     "requests",

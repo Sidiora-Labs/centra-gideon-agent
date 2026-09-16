@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.knowledge import maintenance as m
+from gideon.cognition.knowledge import maintenance as m
 
 
 @pytest.fixture
@@ -41,9 +41,6 @@ def _counting_pass(counter: list, *, returns: int = 0):
         return returns
 
     return _run
-
-
-# ── The due rule ──────────────────────────────────────────────────────────
 
 
 def test_a_clean_index_is_not_due(home):
@@ -79,17 +76,14 @@ def test_staleness_is_measured_from_the_FIRST_write_not_the_latest(home):
     off that stamp would defer forever — precisely when the backlog is largest. So the age
     comes from `dirty_since`.
     """
-    m.mark_dirty(now=1000.0)  # the first write: the age anchor
+    m.mark_dirty(now=1000.0)
     for t in range(1, 20):
-        m.mark_dirty(now=1000.0 + t * 50.0)  # a steady stream, latest is always fresh
+        m.mark_dirty(now=1000.0 + t * 50.0)
     state = m.load_state()
     assert state["dirty_since"] == 1000.0, "the anchor moved with the stream"
     assert state["dirty_ts"] > 1900.0, "the snapshot boundary did not advance"
     due, why = m.is_due(now=1000.0 + 901.0, in_flight=5, staleness=900.0)
     assert due is True, f"a continuously-busy pipeline starved maintenance: {why}"
-
-
-# ── The snapshot ──────────────────────────────────────────────────────────
 
 
 def test_a_write_landing_MID_RUN_is_not_swallowed(home):
@@ -102,14 +96,16 @@ def test_a_write_landing_MID_RUN_is_not_swallowed(home):
     m.mark_dirty(now=1000.0)
 
     def _writes_while_running(*, batch_size: int = 0) -> int:
-        m.mark_dirty(now=2000.0)  # a write arrives mid-pass
+        m.mark_dirty(now=2000.0)
         return 0
 
     m.register_pass("writer", _writes_while_running)
     result = m.execute(now=1500.0)
 
     assert result.ran is True
-    assert result.snapshot == 1000.0, f"the snapshot was not the pre-run watermark: {result}"
+    assert (
+        result.snapshot == 1000.0
+    ), f"the snapshot was not the pre-run watermark: {result}"
     assert m.is_dirty() is True, "the mid-run write was swallowed by the clear"
 
 
@@ -130,9 +126,6 @@ def test_the_clean_stamp_never_moves_backwards(home):
     assert m.is_dirty() is False
 
 
-# ── Bounded batches ───────────────────────────────────────────────────────
-
-
 def test_a_batched_pass_is_reinvoked_until_it_reports_nothing_left(home):
     calls: list = []
     seq = [3, 2, 0]
@@ -144,7 +137,11 @@ def test_a_batched_pass_is_reinvoked_until_it_reports_nothing_left(home):
     m.mark_dirty(now=1000.0)
     m.register_pass("drain", _run)
     result = m.execute(batch_size=25)
-    assert calls == [25, 25, 25], f"sub-batches were not bounded/looped as declared: {calls}"
+    assert calls == [
+        25,
+        25,
+        25,
+    ], f"sub-batches were not bounded/looped as declared: {calls}"
     assert result.per_pass["drain"] == 5
 
 
@@ -195,9 +192,6 @@ def test_registering_the_same_name_twice_does_not_double_the_pass(home):
     assert len(calls) == 1, f"a re-registered pass ran {len(calls)} times"
 
 
-# ── The in-flight probe ───────────────────────────────────────────────────
-
-
 def test_an_absent_probe_is_LOUD_rather_than_silently_permissive(home, caplog):
     """The first version of this read a `knowledge.get_ingest_queue` that does not exist, so
     every lookup fell into an except and returned 0 — the coalescing clause would have been
@@ -206,7 +200,9 @@ def test_an_absent_probe_is_LOUD_rather_than_silently_permissive(home, caplog):
     import logging
 
     m.set_in_flight_probe(None)
-    with caplog.at_level(logging.WARNING, logger="gideon.knowledge.maintenance"):
+    with caplog.at_level(
+        logging.WARNING, logger="gideon.cognition.knowledge.maintenance"
+    ):
         assert m._in_flight_depth() == 0
     assert any(
         "no in-flight probe" in r.message for r in caplog.records
@@ -225,9 +221,9 @@ def test_the_gateway_installs_the_probe(home):
     Driven on a bare orchestrator instance: the installer must not need a running gateway,
     because it is called during startup before much else exists.
     """
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.gateway import RuntimeCoordinator
 
-    gw = GatewayOrchestrator.__new__(GatewayOrchestrator)
+    gw = RuntimeCoordinator.__new__(RuntimeCoordinator)
     gw.dashboard_state = None
     assert m.has_in_flight_probe() is False
     gw._install_graph_maintenance_probe()
@@ -236,9 +232,10 @@ def test_the_gateway_installs_the_probe(home):
 
 
 def test_the_probe_does_not_START_a_queue_to_measure_it(home):
-    """`DashboardState.knowledge_ingest_queue()` CONSTRUCTS and starts a worker. Probing must
-    read the private attribute instead — asking how busy the queue is must not create one."""
-    from gideon.gateway import GatewayOrchestrator
+    """`ConsoleState.knowledge_ingest_queue()` CONSTRUCTS and starts a worker. Probing must
+    read the private attribute instead — asking how busy the queue is must not create one.
+    """
+    from gideon.engine.gateway import RuntimeCoordinator
 
     class _State:
         _knowledge_ingest_queue = None
@@ -246,13 +243,10 @@ def test_the_probe_does_not_START_a_queue_to_measure_it(home):
         def knowledge_ingest_queue(self):  # pragma: no cover - must never be called
             raise AssertionError("the probe started a queue just to measure it")
 
-    gw = GatewayOrchestrator.__new__(GatewayOrchestrator)
+    gw = RuntimeCoordinator.__new__(RuntimeCoordinator)
     gw.dashboard_state = _State()
     gw._install_graph_maintenance_probe()
     assert m._in_flight_depth() == 0
-
-
-# ── The tick ──────────────────────────────────────────────────────────────
 
 
 def test_maintenance_runs_with_auto_backup_off(home, monkeypatch):
@@ -263,7 +257,7 @@ def test_maintenance_runs_with_auto_backup_off(home, monkeypatch):
     silently lose knowledge-graph maintenance — they mitigate unrelated failures. So the tick
     calls maintenance OUTSIDE that gate, and this is the proof.
     """
-    import gideon.durability.service as ds
+    import gideon.operations.durability.service as ds
 
     monkeypatch.setattr(ds, "enabled", lambda: False)
     ran: list = []
@@ -278,7 +272,7 @@ def test_maintenance_runs_with_auto_backup_off(home, monkeypatch):
 
 def test_the_tick_does_not_run_a_clean_index(home):
     """Vacuity for the tick: it consults due-ness rather than running unconditionally."""
-    import gideon.durability.service as ds
+    import gideon.operations.durability.service as ds
 
     ran: list = []
     m.set_in_flight_probe(lambda: 0)
@@ -289,24 +283,23 @@ def test_the_tick_does_not_run_a_clean_index(home):
 
 def test_the_tick_never_raises(home, monkeypatch):
     """A maintenance failure must not break the backup loop it rides."""
-    import gideon.durability.service as ds
+    import gideon.operations.durability.service as ds
 
-    monkeypatch.setattr(m, "run_maintenance", lambda **kw: (_ for _ in ()).throw(RuntimeError("x")))
-    ds._tick_graph_maintenance()  # must not raise
-
-
-# ── Config round-trip ─────────────────────────────────────────────────────
+    monkeypatch.setattr(
+        m, "run_maintenance", lambda **kw: (_ for _ in ()).throw(RuntimeError("x"))
+    )
+    ds._tick_graph_maintenance()
 
 
 def test_max_staleness_round_trips_through_config(home, monkeypatch):
     """The clause says it round-trips; this asserts all the way to the reader."""
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     cfg = AppConfig.load()
     assert cfg.knowledge.maintenance_max_staleness_secs == 900
     assert "maintenance_max_staleness_secs" in cfg.to_dict()["knowledge"]
 
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
     spec = _EDITABLE_CONFIG.get("knowledge.maintenance_max_staleness_secs")
     assert spec and spec["type"] == "int", "the field is not PATCH-writable"
@@ -318,13 +311,15 @@ def test_max_staleness_round_trips_through_config(home, monkeypatch):
         knowledge = _K()
 
     monkeypatch.setattr(AppConfig, "load", staticmethod(lambda: _C()))
-    assert m.max_staleness_secs() == 120.0, "the host does not read the configured value"
+    assert (
+        m.max_staleness_secs() == 120.0
+    ), "the host does not read the configured value"
 
 
 def test_a_zero_staleness_cannot_disable_coalescing(home, monkeypatch):
     """The file is hand-editable, so the floor is enforced in the reader too — a 0 would make
     every tick "stale" and defeat the coalescing the watermark exists for."""
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     class _K:
         maintenance_max_staleness_secs = 0
@@ -336,11 +331,8 @@ def test_a_zero_staleness_cannot_disable_coalescing(home, monkeypatch):
     assert m.max_staleness_secs() == m.DEFAULT_MAX_STALENESS_SECS
 
 
-# ── Registration ──────────────────────────────────────────────────────────
-
-
 def test_the_standing_passes_register(home):
-    from gideon.knowledge import maintenance_passes
+    from gideon.cognition.knowledge import maintenance_passes
 
     names = maintenance_passes.register_all()
     assert maintenance_passes.PASS_MEMORY_LINT in names
@@ -351,11 +343,16 @@ def test_the_standing_passes_register(home):
 
 def test_the_standing_passes_are_single_sweep_not_batched(home):
     """A lint returning "3 findings" must not be read as "3 units of remaining work"."""
-    from gideon.knowledge import maintenance_passes
+    from gideon.cognition.knowledge import maintenance_passes
 
     maintenance_passes.register_all()
-    for name in (maintenance_passes.PASS_MEMORY_LINT, maintenance_passes.PASS_CONSOLIDATION):
-        assert m._PASSES[name].batched is False, f"{name} would busy-loop on its own report"
+    for name in (
+        maintenance_passes.PASS_MEMORY_LINT,
+        maintenance_passes.PASS_CONSOLIDATION,
+    ):
+        assert (
+            m._PASSES[name].batched is False
+        ), f"{name} would busy-loop on its own report"
 
 
 def test_the_linker_backfill_is_registered_as_RESUMABLE_not_a_sweep(home):
@@ -366,7 +363,7 @@ def test_the_linker_backfill_is_registered_as_RESUMABLE_not_a_sweep(home):
     still look wired while only ever draining ONE batch per tick — a library larger than a batch
     would never finish, and nothing in the result would say so.
     """
-    from gideon.knowledge import maintenance_passes
+    from gideon.cognition.knowledge import maintenance_passes
 
     maintenance_passes.register_all()
     assert maintenance_passes.PASS_LINK_BACKFILL in m.registered_passes()
@@ -380,7 +377,7 @@ def test_the_registered_linker_pass_CALLS_the_real_backfill(home, monkeypatch):
     that does the work. This drives `execute` and asserts `link_backfill.link_backfill_pass`
     was the thing invoked, with the host's batch size passed through.
     """
-    from gideon.knowledge import link_backfill, maintenance_passes
+    from gideon.cognition.knowledge import link_backfill, maintenance_passes
 
     seen: list[int] = []
     monkeypatch.setattr(
@@ -400,7 +397,7 @@ def test_the_linker_pass_DRAINS_across_sub_batches(home, monkeypatch):
     Three sub-batches then empty — the drain loop must keep claiming while the pass reports
     work, and stop when it reports none.
     """
-    from gideon.knowledge import link_backfill, maintenance_passes
+    from gideon.cognition.knowledge import link_backfill, maintenance_passes
 
     returns = [5, 5, 2, 0]
     calls: list[int] = []

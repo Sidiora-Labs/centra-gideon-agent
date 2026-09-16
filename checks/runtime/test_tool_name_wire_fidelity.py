@@ -14,13 +14,11 @@ import asyncio
 
 import pytest
 
-from gideon.agents.native.runtime import (
+from gideon.engine.agents.native.runtime import (
     NativeAgentRuntime,
     _sanitized_tool_key,
     build_sanitized_index,
 )
-
-# ── the pure function's contract ──────────────────────────────────────────────
 
 
 class TestBuildSanitizedIndex:
@@ -35,16 +33,12 @@ class TestBuildSanitizedIndex:
         assert collisions == {"mcp_a_b": ["mcp/a/b", "mcp/a_b", "mcp_a/b"]}
 
     def test_never_shadows_a_real_exact_name(self) -> None:
-        # "mcp/x" sanitizes to "mcp_x", which IS a real tool — no remap.
         healing, _ = build_sanitized_index(["mcp/x", "mcp_x"])
         assert "mcp_x" not in healing
 
     def test_legal_names_need_no_entry(self) -> None:
         healing, collisions = build_sanitized_index(["alpha", "beta_2", "g-tool"])
         assert healing == {} and collisions == {}
-
-
-# ── the census rail: the FULL shipped tool surface round-trips ────────────────
 
 
 def _offline_census() -> list[str]:
@@ -55,11 +49,11 @@ def _offline_census() -> list[str]:
     trusts — plus the platform builtin provider, so the census matches what a
     real session's runtime indexes.
     """
-    from gideon.agents.native.builtin_tools import NativeBuiltinToolProvider
-    from gideon.apps.manifest import AppManifest
-    from gideon.providers import registry as prov_reg
-    from gideon.providers.loader import BUNDLED_DIR
-    from gideon.tool_providers import registry as tool_reg
+    from gideon.engine.agents.native.builtin_tools import NativeBuiltinToolProvider
+    from gideon.extensions.apps.manifest import AppManifest
+    from gideon.extensions.providers import registry as prov_reg
+    from gideon.extensions.providers.loader import BUNDLED_DIR
+    from gideon.integrations.tool_providers import registry as tool_reg
 
     tool_reg._providers.clear()
     prov_reg._registry = None
@@ -87,7 +81,9 @@ class TestTheCensusRail:
         """The rail: a new tool whose name collides under the model-safe form
         would ship an unhealable rewrite — fail here instead."""
         names = _offline_census()
-        assert len(names) >= 40, f"census suspiciously small ({len(names)}) — bootstrap broke?"
+        assert (
+            len(names) >= 40
+        ), f"census suspiciously small ({len(names)}) — bootstrap broke?"
         _, collisions = build_sanitized_index(names)
         assert not collisions, (
             "tool names collide under the model-safe form — rename one of each "
@@ -109,9 +105,6 @@ class TestTheCensusRail:
         assert not unhealable, f"names that do not round-trip the wire: {unhealable}"
 
 
-# ── the draft's failing turn shape, green ─────────────────────────────────────
-
-
 class TestTurnBoundary:
     @pytest.mark.asyncio
     async def test_later_turn_calling_the_rewritten_form_dispatches_real_tool(self):
@@ -120,7 +113,11 @@ class TestTurnBoundary:
         dispatch to the real tool — the T00 failing shape."""
         from test_native_runtime import _defn, _drain, _McpTool, _ScriptedModel
 
-        from gideon.llm.events import EVENT_COMPLETE, EVENT_TOOL_CALL, AgentEvent
+        from gideon.integrations.llm.events import (
+            EVENT_COMPLETE,
+            EVENT_TOOL_CALL,
+            AgentEvent,
+        )
 
         real = "mcp/everything/echo"
         rewritten = _sanitized_tool_key(real)
@@ -150,7 +147,9 @@ class TestTurnBoundary:
             ]
         )
         mcp = _McpTool([real])
-        rt = NativeAgentRuntime(definition=_defn(), model_provider=model, tool_providers=[mcp])
+        rt = NativeAgentRuntime(
+            definition=_defn(), model_provider=model, tool_providers=[mcp]
+        )
         await rt.start()
         await _drain(rt, "turn one")
         await _drain(rt, "turn two")

@@ -32,9 +32,8 @@ import importlib
 
 import pytest
 
-from gideon.workflows.batch_compile import MUTATING_TOOLS, is_write_tool
+from gideon.automation.workflows.batch_compile import MUTATING_TOOLS, is_write_tool
 
-#: The in-process MCP registries whose tools a leaf/subagent can reach.
 _REGISTRIES = (
     "mcp_core",
     "mcp_workflows",
@@ -45,22 +44,8 @@ _REGISTRIES = (
     "mcp_automation",
 )
 
-#: Every shipped tool that is genuinely READ-ONLY, so a research leaf keeps it.
-#:
-#: 🔴 This is the ratchet. A new tool must be added here or to `MUTATING_TOOLS`, and choosing
-#: is the point — the old mechanism let a writer land with no decision made about it.
-#:
-#: The five PROPOSE tools are here deliberately, and #1775 asks for three of them the other
-#: way. A proposal is a row the owner accepts or dismisses, not an unconsented change, and
-#: propose-only is an established posture rather than an oversight: the shipped
-#: `refine-template` workflow's stage is a RESEARCH leaf whose agent holds
-#: `propose_template_diff`, and `leaf_tool_posture` is called there with no `declared` list —
-#: so classifying a proposal as a write takes the refiner's only writing tool away and breaks a
-#: shipped workflow. What remains is that a research run can fill a triage queue, which the
-#: owner sees and dismisses.
 _EXPECTED_READ_ONLY: frozenset[str] = frozenset(
     {
-        # Reads
         "artifact_get",
         "artifact_list",
         "artifact_versions",
@@ -71,7 +56,7 @@ _EXPECTED_READ_ONLY: frozenset[str] = frozenset(
         "memory_list",
         "memory_recall",
         "prompt_render",
-        "refiner_evidence",  # "Read-only: this is the ONLY evidence…"
+        "refiner_evidence",
         "skill_invoke",
         "skill_resource",
         "skill_search",
@@ -82,18 +67,16 @@ _EXPECTED_READ_ONLY: frozenset[str] = frozenset(
         "workflow_get_def",
         "workflow_list_defs",
         "workflow_manifest",
-        "workflow_observe",  # "Read-only."
+        "workflow_observe",
         "workflow_output",
         "workflow_status",
-        # Renders inline, persists nothing ("the agency-free two-step")
         "visualize",
-        # Proposals the owner triages — see the note above
         "dashboard_tile_propose",
         "project_context_review",
         "propose_template_diff",
         "skill_promote",
-        "suggest_template",  # "it never saves anything"
-        "template_save_from_session",  # "never writes a definition"
+        "suggest_template",
+        "template_save_from_session",
     }
 )
 
@@ -113,7 +96,9 @@ def _shipped_tools() -> dict[str, str]:
 def test_the_census_is_not_vacuous():
     """The floor. An empty registry walk would make every assertion below pass on nothing."""
     tools = _shipped_tools()
-    assert len(tools) >= 60, f"only {len(tools)} tools found — the registry walk is broken"
+    assert (
+        len(tools) >= 60
+    ), f"only {len(tools)} tools found — the registry walk is broken"
     assert len(_REGISTRIES) == len({*_REGISTRIES})
 
 
@@ -122,7 +107,9 @@ def test_every_shipped_tool_is_classified():
     nobody decided about, which is exactly how 59 writers ended up allowed."""
     tools = _shipped_tools()
     unclassified = sorted(
-        name for name in tools if name not in _EXPECTED_READ_ONLY and not is_write_tool(name)
+        name
+        for name in tools
+        if name not in _EXPECTED_READ_ONLY and not is_write_tool(name)
     )
     assert not unclassified, (
         "these shipped tools are classified as neither a write nor a known read — add each to "
@@ -133,9 +120,12 @@ def test_every_shipped_tool_is_classified():
 
 def test_no_expected_read_is_actually_classified_as_a_write():
     """The other side of the ratchet: the read list must not silently disagree with the
-    classifier, or a rename would leave a stale entry claiming coverage it no longer has."""
+    classifier, or a rename would leave a stale entry claiming coverage it no longer has.
+    """
     contradictions = sorted(n for n in _EXPECTED_READ_ONLY if is_write_tool(n))
-    assert not contradictions, f"listed as read-only but classified as writes: {contradictions}"
+    assert (
+        not contradictions
+    ), f"listed as read-only but classified as writes: {contradictions}"
 
 
 def test_the_read_only_list_has_no_stale_entries():
@@ -145,14 +135,11 @@ def test_the_read_only_list_has_no_stale_entries():
     assert not stale, f"no registry exposes these any more — drop them: {stale}"
 
 
-# ── the CALL SITE, not the set (#1775's explicit ask) ─────────────────────────
-
-
 @pytest.fixture
 def read_only_leaf(monkeypatch):
     """A read-only leaf at depth 1 — the posture an unattended research spawn resolves to."""
-    from gideon import mcp_shared
-    from gideon.workflows.engine import WF_DEPTH_KEY
+    from gideon.automation.workflows.engine import WF_DEPTH_KEY
+    from gideon.integrations import mcp_shared
 
     monkeypatch.setenv(WF_DEPTH_KEY, "1")
     monkeypatch.setenv(mcp_shared.LEAF_READ_ONLY_KEY, "1")
@@ -165,7 +152,8 @@ def read_only_leaf(monkeypatch):
 )
 def test_the_seam_denies_a_learning_write_to_a_read_only_leaf(tool, read_only_leaf):
     """#1775's headline, asserted at the enforcement seam rather than on the set. Every one of
-    these was allowed: none contains a CRUD verb fragment, so the marker list never fired."""
+    these was allowed: none contains a CRUD verb fragment, so the marker list never fired.
+    """
     assert read_only_leaf.leaf_tool_denial(tool), f"{tool} reached a read-only leaf"
 
 
@@ -209,7 +197,7 @@ def test_the_refiner_keeps_the_only_tool_it_writes_with(read_only_leaf):
     """The shipped `refine-template` stage is a research leaf and `leaf_tool_posture` is called
     there with no `declared` list, so this is what stands between the classification and a
     broken workflow."""
-    from gideon.learning import refiner_tools
+    from gideon.cognition.learning import refiner_tools
 
     for tool in refiner_tools.REFINER_TOOL_NAMES:
         assert read_only_leaf.leaf_tool_denial(tool) == "", f"the refiner lost {tool}"

@@ -1,4 +1,4 @@
-"""Tests for ``gideon.seed`` — fixture seeding of ``$GIDEON_HOME``.
+"""Tests for ``gideon.operations.seed`` — fixture seeding of ``$GIDEON_HOME``.
 
 Covers fixture resolution and name guards, the safety rails (home unset,
 main-home protection, non-empty target, symlinked target), ``--seed-replace``,
@@ -12,12 +12,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from gideon import seed as seed_mod
+from gideon.operations import seed as seed_mod
 
 
 def test_seed_empty_happy_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``gideon seed --fixture empty`` writes fixture.yaml into $GIDEON_HOME."""
-    # copytree refuses an existing dst, so don't pre-create it.
     target = tmp_path / "home"
     monkeypatch.setenv("GIDEON_HOME", str(target))
 
@@ -25,7 +24,6 @@ def test_seed_empty_happy_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
 
     out_file = target / "fixture.yaml"
     assert out_file.is_file(), f"expected {out_file} to exist after seed"
-    # Exact match guards against accidental fixture tampering.
     assert out_file.read_text(encoding="utf-8").strip() == "schema-version: 2026-04-28"
 
 
@@ -40,7 +38,9 @@ def test_seed_unset_home_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "GIDEON_HOME" in str(excinfo.value)
 
 
-def test_seed_unknown_fixture_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_seed_unknown_fixture_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Unknown fixture name raises SeedError with exit code 2.
 
     Regression guard for ``_resolve_fixture`` — if fixture dir lookup ever
@@ -56,11 +56,8 @@ def test_seed_unknown_fixture_raises(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert excinfo.value.code == seed_mod.EXIT_RAIL
     msg = str(excinfo.value)
     assert "unknown fixture" in msg
-    # Discoverability: the error must list the shipped fixtures so the user
-    # doesn't have to read the ``tests_fixtures/`` tree.
     assert "Available fixtures:" in msg
     assert "empty" in msg
-    # Target must not be written when fixture lookup fails.
     assert not target.exists()
 
 
@@ -76,10 +73,6 @@ def test_seed_unknown_fixture_raises(tmp_path: Path, monkeypatch: pytest.MonkeyP
         ".",
         "",
         "./",
-        # SEC-1: NUL byte + control chars must be caught at the empty-or-root
-        # gate before ``(root / name).resolve()`` raises ``ValueError`` and
-        # escapes ``seed_cmd``'s ``except SeedError`` (bypassing both the
-        # ``seed: error:`` ASCII prefix AND the SEL audit emit).
         "foo\x00bar",
         "\x00",
         "foo\nbar",
@@ -109,15 +102,8 @@ def test_seed_path_traversal_rejected(
         seed_mod.seed(name)
 
     assert excinfo.value.code == seed_mod.EXIT_RAIL
-    # Target must not be written.
     assert not target.exists()
 
-    # Pin which gate rejected each name. New "empty-or-root" cases must
-    # hit the first gate; the old path-separator/``..`` cases must hit
-    # the second. ``"./empty"`` is interesting: it has ``/`` so it hits
-    # the separator gate, not the empty-or-root gate. NUL-byte / control-
-    # char names (``"foo\x00bar"``, ``"foo\nbar"``) also hit gate 1 via
-    # the ``ord(c) < 0x20`` check (SEC-1 regression guard).
     if name in ("", ".", "./") or any(ord(c) < 0x20 for c in name):
         assert "empty or refers to the root" in str(
             excinfo.value
@@ -128,9 +114,11 @@ def test_seed_path_traversal_rejected(
         ), f"expected path-separator gate to reject {name!r}, got: {excinfo.value}"
 
 
-@patch("gideon.seed.sel")
+@patch("gideon.operations.seed.sel")
 def test_seed_cmd_exit_code_on_unset(
-    mock_sel: MagicMock, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    mock_sel: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """seed_cmd returns 2 and prints to stderr when $GIDEON_HOME is unset.
 
@@ -147,7 +135,6 @@ def test_seed_cmd_exit_code_on_unset(
     assert rc == seed_mod.EXIT_RAIL
     err = capsys.readouterr().err
     assert "GIDEON_HOME" in err
-    # Plain ASCII prefix so non-UTF-8 terminals don't swallow the message.
     assert err.startswith("seed: error:")
 
 
@@ -162,12 +149,10 @@ def test_seed_cli_flag_registered(tmp_path: Path) -> None:
     server. ``--help`` exits 0 after printing usage, which is enough to
     verify the flag is registered and the seed_cmd wiring imports clean.
     """
-    repo_root = Path(__file__).resolve().parent.parent
+    repo_root = Path(__file__).resolve().parent.parent.parent
     import os as _os
 
     env = {**_os.environ, "HOME": str(tmp_path)}
-    # Preserve user site-packages: overriding HOME loses ~/.local/lib/pythonX.Y
-    # where deps like croniter/cron_descriptor live when not system-installed.
     real_home = _os.environ.get("HOME", "")
     if real_home:
         import site
@@ -179,11 +164,8 @@ def test_seed_cli_flag_registered(tmp_path: Path) -> None:
                 env["PYTHONPATH"] = user_site + _os.pathsep + existing_pp
             else:
                 env["PYTHONPATH"] = user_site
-    # Guard against trailing separator when PYTHONPATH is unset — a trailing
-    # ":" on POSIX adds CWD to sys.path, which would import unexpected
-    # modules depending on where pytest runs.
     existing_pypath = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = str(repo_root / "src") + (
+    env["PYTHONPATH"] = str(repo_root / "runtime") + (
         _os.pathsep + existing_pypath if existing_pypath else ""
     )
     env["GIDEON_PROJECT_DIR"] = str(repo_root)
@@ -199,21 +181,11 @@ def test_seed_cli_flag_registered(tmp_path: Path) -> None:
         f"expected exit 0 from --help, got {result.returncode}\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
-    # The flag must be registered and documented.
     assert "--seed" in result.stdout
     assert "FIXTURE" in result.stdout
 
 
-# ------------------------------------------------------------------
-# SEL audit regression tests — pin the emission contract so a future
-# refactor can't silently remove the ``sel().log_api_access(...)``
-# call or swap the ``outcome`` enum values. Pattern matches
-# ``test/test_enterprise.py::test_allowlist_add_emits_audit`` and
-# ``test/test_token_auth.py::test_refresh_emits_denied_audit``.
-# ------------------------------------------------------------------
-
-
-@patch("gideon.seed.sel")
+@patch("gideon.operations.seed.sel")
 def test_seed_cmd_emits_sel_audit_on_success(
     mock_sel: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -230,16 +202,11 @@ def test_seed_cmd_emits_sel_audit_on_success(
     assert kw["outcome"] == "allowed"
     assert kw["source"] == "cli"
     assert "fixture='empty'" in kw["resources"]
-    # ``target_set=True`` proves we log the presence-flag, not the raw
-    # ``$GIDEON_HOME`` value, to avoid leaking it into the audit stream.
     assert "target_set=True" in kw["resources"]
-    # Regression guard: the raw target path must NEVER appear in the
-    # audit resources string. A future refactor adding
-    # ``f"... target={target!r}"`` would silently leak the path.
     assert str(target) not in kw["resources"]
 
 
-@patch("gideon.seed.sel")
+@patch("gideon.operations.seed.sel")
 def test_seed_cmd_emits_sel_audit_on_rail_denied(
     mock_sel: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -252,13 +219,10 @@ def test_seed_cmd_emits_sel_audit_on_rail_denied(
     kw = mock_sel().log_api_access.call_args.kwargs
     assert kw["outcome"] == "denied"
     assert "fixture='empty'" in kw["resources"]
-    # Rail-tag discipline: audit stream uses short code-controlled
-    # identifiers, not the exception message (which embeds user-influenced
-    # paths). ``rail=unset_home`` is the constant for this denial.
     assert f"rail={seed_mod.SeedError.RAIL_UNSET_HOME}" in kw["resources"]
 
 
-@patch("gideon.seed.sel")
+@patch("gideon.operations.seed.sel")
 def test_seed_cmd_emits_sel_audit_on_path_traversal_denied(
     mock_sel: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -270,14 +234,11 @@ def test_seed_cmd_emits_sel_audit_on_path_traversal_denied(
 
     kw = mock_sel().log_api_access.call_args.kwargs
     assert kw["outcome"] == "denied"
-    # The full adversarial input must appear verbatim in the audit log so
-    # an SOC reviewing SEL events can reconstruct the attack attempt.
     assert "fixture='../../.ssh'" in kw["resources"]
-    # Path-traversal hits the bad-name rail.
     assert f"rail={seed_mod.SeedError.RAIL_BAD_NAME}" in kw["resources"]
 
 
-@patch("gideon.seed.sel", side_effect=OSError("read-only HOME"))
+@patch("gideon.operations.seed.sel", side_effect=OSError("read-only HOME"))
 def test_seed_cmd_safe_audit_swallows_sel_init_failure(
     mock_sel: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -289,14 +250,12 @@ def test_seed_cmd_safe_audit_swallows_sel_init_failure(
     monkeypatch.setenv("GIDEON_HOME", str(target))
 
     args = type("Args", (), {"seed": "empty"})()
-    # Must NOT raise — the audit failure is swallowed by ``_safe_audit``.
     rc = seed_mod.seed_cmd(args)
     assert rc == seed_mod.EXIT_OK
-    # And the actual seed still ran: target was populated.
     assert (target / "fixture.yaml").is_file()
 
 
-@patch("gideon.seed.sel")
+@patch("gideon.operations.seed.sel")
 def test_seed_cmd_emits_sel_audit_on_copytree_oserror(
     mock_sel: MagicMock,
     tmp_path: Path,
@@ -331,19 +290,15 @@ def test_seed_cmd_emits_sel_audit_on_copytree_oserror(
     rc = seed_mod.seed_cmd(args)
 
     assert rc == seed_mod.EXIT_IO_ERROR
-    # ``seed: error:`` prefix contract: plain-ASCII, never a traceback.
     err = capsys.readouterr().err
     assert err.startswith("seed: error:"), f"expected ASCII error prefix, got: {err!r}"
-    # SEL audit event fires with outcome="error".
     kw = mock_sel().log_api_access.call_args.kwargs
     assert kw["outcome"] == "error"
     assert "fixture='empty'" in kw["resources"]
-    # Error type is named in the audit so operators can triage without
-    # re-running the failure (OSError vs PermissionError vs FileExistsError etc.).
     assert "OSError" in kw["resources"]
 
 
-@patch("gideon.seed.sel", side_effect=OSError("read-only HOME"))
+@patch("gideon.operations.seed.sel", side_effect=OSError("read-only HOME"))
 def test_seed_cmd_safe_audit_logs_warning_on_swallowed_failure(
     mock_sel: MagicMock,
     tmp_path: Path,
@@ -357,7 +312,7 @@ def test_seed_cmd_safe_audit_logs_warning_on_swallowed_failure(
     Python's last-resort handler (WARNING+ only); ``.warning`` survives it and
     reaches stderr, keeping audit failures observable. This asserts a
     WARNING-level record (with ``exc_info=True``) is emitted from
-    ``gideon.seed`` whenever ``sel()`` raises.
+    ``gideon.operations.seed`` whenever ``sel()`` raises.
     """
     import logging
 
@@ -365,13 +320,14 @@ def test_seed_cmd_safe_audit_logs_warning_on_swallowed_failure(
     monkeypatch.setenv("GIDEON_HOME", str(target))
 
     args = type("Args", (), {"seed": "empty"})()
-    with caplog.at_level(logging.WARNING, logger="gideon.seed"):
+    with caplog.at_level(logging.WARNING, logger="gideon.operations.seed"):
         rc = seed_mod.seed_cmd(args)
 
     assert rc == seed_mod.EXIT_OK
-    # Exactly one WARNING record from our audit handler.
     audit_records = [
-        r for r in caplog.records if r.name == "gideon.seed" and r.levelno == logging.WARNING
+        r
+        for r in caplog.records
+        if r.name == "gideon.operations.seed" and r.levelno == logging.WARNING
     ]
     assert len(audit_records) == 1, (
         f"expected exactly one WARNING log from _safe_audit on sel() failure; "
@@ -379,17 +335,13 @@ def test_seed_cmd_safe_audit_logs_warning_on_swallowed_failure(
     )
     rec = audit_records[0]
     assert "SEL audit emit failed" in rec.message
-    # ``exc_info=True`` preserves the traceback so callers see the OSError.
     assert rec.exc_info is not None
     assert rec.exc_info[0] is OSError
 
 
-# ------------------------------------------------------------------
-# Safety rails + --seed-replace.
-# ------------------------------------------------------------------
-
-
-def test_seed_main_home_rail_refuses(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_seed_main_home_rail_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """``$GIDEON_HOME=~/.gideon`` exits 2 with 'refusing to seed main
     gateway home' message, even when the path doesn't exist yet.
 
@@ -409,7 +361,6 @@ def test_seed_main_home_rail_refuses(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
     assert excinfo.value.code == seed_mod.EXIT_RAIL
     assert "refusing to seed main gateway home" in str(excinfo.value)
-    # Target dir must not be created as a side-effect.
     assert not target.exists()
 
 
@@ -434,7 +385,6 @@ def test_seed_main_home_rail_refuses_even_with_replace(
 
     assert excinfo.value.code == seed_mod.EXIT_RAIL
     assert "refusing to seed main gateway home" in str(excinfo.value)
-    # The main-home rail MUST fire before rmtree runs.
     assert (
         target / "real_user_data.txt"
     ).exists(), "CRITICAL: --seed-replace wiped main gateway home despite rail"
@@ -489,7 +439,6 @@ def test_seed_non_empty_rail_refuses_without_replace(
     msg = str(excinfo.value)
     assert "not empty" in msg
     assert "--seed-replace" in msg
-    # Pre-existing content must be untouched on the refusal path.
     assert (target / "stale.txt").read_text() == "old content"
 
 
@@ -509,12 +458,12 @@ def test_seed_non_empty_rail_succeeds_with_replace(
 
     seed_mod.seed("empty", replace=True)
 
-    # Pre-existing content gone.
     assert not (target / "stale.txt").exists()
     assert not (target / "subdir").exists()
-    # Fixture content present.
     assert (target / "fixture.yaml").is_file()
-    assert (target / "fixture.yaml").read_text().strip() == ("schema-version: 2026-04-28")
+    assert (target / "fixture.yaml").read_text().strip() == (
+        "schema-version: 2026-04-28"
+    )
 
 
 def test_seed_replace_refuses_symlinked_target(
@@ -538,7 +487,6 @@ def test_seed_replace_refuses_symlinked_target(
 
     assert excinfo.value.code == seed_mod.EXIT_RAIL
     assert "symlinked" in str(excinfo.value)
-    # Link target must be untouched.
     assert (real_dir / "precious.txt").read_text() == "must survive"
 
 
@@ -552,7 +500,7 @@ def test_seed_empty_existing_dir_succeeds_without_replace(
     back to "must not exist".
     """
     target = tmp_path / "empty_preexisting"
-    target.mkdir()  # exists, but empty
+    target.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(target))
 
     seed_mod.seed("empty")
@@ -560,7 +508,7 @@ def test_seed_empty_existing_dir_succeeds_without_replace(
     assert (target / "fixture.yaml").is_file()
 
 
-@patch("gideon.seed.sel")
+@patch("gideon.operations.seed.sel")
 def test_seed_cmd_replace_flag_threaded(
     mock_sel: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -576,17 +524,14 @@ def test_seed_cmd_replace_flag_threaded(
     args = type("Args", (), {"seed": "empty", "seed_replace": True})()
     assert seed_mod.seed_cmd(args) == seed_mod.EXIT_OK
 
-    # Audit event records replace=True so an SOC reviewing SEL events can
-    # see whether a dev tool invocation wiped data.
     kw = mock_sel().log_api_access.call_args.kwargs
     assert kw["outcome"] == "allowed"
     assert "replace=True" in kw["resources"]
-    # Actual seed happened.
     assert (target / "fixture.yaml").is_file()
     assert not (target / "junk").exists()
 
 
-@patch("gideon.seed.sel")
+@patch("gideon.operations.seed.sel")
 def test_seed_cmd_missing_seed_replace_attr_defaults_false(
     mock_sel: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -599,7 +544,6 @@ def test_seed_cmd_missing_seed_replace_attr_defaults_false(
     target = tmp_path / "home"
     monkeypatch.setenv("GIDEON_HOME", str(target))
 
-    # Intentionally omit ``seed_replace`` from the namespace.
     args = type("Args", (), {"seed": "empty"})()
     assert seed_mod.seed_cmd(args) == seed_mod.EXIT_OK
     assert (target / "fixture.yaml").is_file()
@@ -607,11 +551,9 @@ def test_seed_cmd_missing_seed_replace_attr_defaults_false(
     assert "replace=False" in kw["resources"]
 
 
-# ------------------------------------------------------------------
-# ------------------------------------------------------------------
-
-
-def test_seed_resolve_failure_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_seed_resolve_failure_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """``resolve()`` raising ``OSError`` in the main-home check denies, not allows.
 
     A failed resolve must not fall back to the unresolved path (which would
@@ -626,9 +568,6 @@ def test_seed_resolve_failure_fails_closed(tmp_path: Path, monkeypatch: pytest.M
     original_resolve = Path.resolve
 
     def _selective_raise(self, *args, **kwargs):
-        # Only fail on the for_main_home_check resolve — leave other
-        # resolves alone (fixtures-root resolution, etc.) so the test
-        # isolates the exact branch under regression.
         if str(self) == str(target):
             raise OSError("[Errno 40] Too many levels of symbolic links")
         return original_resolve(self, *args, **kwargs)
@@ -641,7 +580,6 @@ def test_seed_resolve_failure_fails_closed(tmp_path: Path, monkeypatch: pytest.M
     assert excinfo.value.code == seed_mod.EXIT_RAIL
     assert excinfo.value.rail == seed_mod.SeedError.RAIL_RESOLVE_FAILED
     assert "cannot resolve $GIDEON_HOME" in str(excinfo.value)
-    # Critical: target must NOT have been wiped or created by the bypass.
     assert not target.exists()
 
 
@@ -665,7 +603,7 @@ def test_seed_empty_string_fixture_rejected(
     assert excinfo.value.rail == seed_mod.SeedError.RAIL_BAD_NAME
 
 
-@patch("gideon.seed.sel")
+@patch("gideon.operations.seed.sel")
 def test_seed_cmd_empty_seed_routes_to_seed_cmd(
     mock_sel: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -682,7 +620,6 @@ def test_seed_cmd_empty_seed_routes_to_seed_cmd(
     rc = seed_mod.seed_cmd(args)
 
     assert rc == seed_mod.EXIT_RAIL
-    # Audit stream records the bad-name rail, not a swallowed no-op.
     kw = mock_sel().log_api_access.call_args.kwargs
     assert kw["outcome"] == "denied"
     assert f"rail={seed_mod.SeedError.RAIL_BAD_NAME}" in kw["resources"]
@@ -691,7 +628,6 @@ def test_seed_cmd_empty_seed_routes_to_seed_cmd(
 @pytest.mark.parametrize(
     "setup,expected_rail,replace",
     [
-        # (setup_fn, expected rail, replace flag)
         ("main_home", "main_home", False),
         ("non_empty", "non_empty", False),
         ("symlinked_target", "symlink_replace", True),
@@ -712,9 +648,7 @@ def test_seed_audit_uses_rail_tag_not_raw_path(
     success/error paths. Asserts BOTH: (a) ``rail=<short-constant>`` is present,
     (b) the resolved target path is NOT present in the audit resources string.
     """
-    # Patch ``sel`` LOCALLY per test so parametrize doesn't collide with
-    # the @patch decorator's call-count tracking.
-    with patch("gideon.seed.sel") as mock_sel:
+    with patch("gideon.operations.seed.sel") as mock_sel:
         if setup == "main_home":
             fake_home = tmp_path / "fake_home"
             fake_home.mkdir()
@@ -727,7 +661,7 @@ def test_seed_audit_uses_rail_tag_not_raw_path(
             target.mkdir()
             (target / "stale.txt").write_text("old")
             monkeypatch.setenv("GIDEON_HOME", str(target))
-        else:  # symlinked_target
+        else:
             real = tmp_path / "real"
             real.mkdir()
             (real / "precious.txt").write_text("keep")
@@ -743,14 +677,13 @@ def test_seed_audit_uses_rail_tag_not_raw_path(
         assert seed_mod.seed_cmd(args) == seed_mod.EXIT_RAIL
 
         kw = mock_sel().log_api_access.call_args.kwargs
-        # Rail constant present.
         assert (
             f"rail={expected_rail}" in kw["resources"]
         ), f"expected rail={expected_rail} in audit, got: {kw['resources']!r}"
-        # Resolved target path must NOT leak into the audit stream —
-        # that's the point of the rail-tag refactor.
         resolved = (
-            target.resolve(strict=False) if target.exists() or target.is_symlink() else target
+            target.resolve(strict=False)
+            if target.exists() or target.is_symlink()
+            else target
         )
         assert (
             str(resolved) not in kw["resources"]

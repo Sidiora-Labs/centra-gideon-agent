@@ -42,30 +42,25 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.dashboard.handlers.files import (
+from gideon.interfaces.dashboard.handlers.files import (
     _validate_dashboard_path,
     api_file_read,
     api_reveal_path,
 )
-from gideon.security import (
+from gideon.security.security import (
     HOME_SECRET_DIRS,
     HOME_SECRET_FILE_BASENAMES,
     OWN_SECRET_BASENAMES,
     is_sensitive_path,
 )
 
-#: Modules that own Gideon's authentication state. Each exports zero-arg ``*_path()``
-#: helpers naming the files it writes; the rail reads those rather than a copied list, so a new
-#: auth file is covered on the day its path helper appears.
 _AUTH_LAYER_MODULES = (
-    "gideon.dashboard.session_store",
-    "gideon.auth.credentials",
-    "gideon.auth.enrollment",
-    "gideon.auth.pairing",
+    "gideon.interfaces.dashboard.session_store",
+    "gideon.security.auth.credentials",
+    "gideon.security.auth.enrollment",
+    "gideon.security.auth.pairing",
 )
 
-#: Written into every seeded secret so a refusal body can be checked for LEAKAGE, not just for
-#: a status code. A 400 that quotes the bytes it refused is not a refusal.
 _MARKER = "ZZ-SECRET-MARKER-DO-NOT-DISCLOSE"
 
 
@@ -117,7 +112,7 @@ def secret_home(tmp_path, monkeypatch):
     """
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     monkeypatch.setattr(
-        "gideon.dashboard.handlers.files._dashboard_roots",
+        "gideon.interfaces.dashboard.handlers.files._dashboard_roots",
         lambda: [("Home", str(tmp_path))],
     )
     return tmp_path
@@ -138,7 +133,7 @@ def seeded_home(secret_home):
 
 @pytest.fixture
 def mock_sel():
-    with patch("gideon.sel.sel") as m:
+    with patch("gideon.security.sel.sel") as m:
         m.return_value = MagicMock()
         yield m.return_value
 
@@ -148,9 +143,6 @@ def _app() -> web.Application:
     app.router.add_get("/api/file-read", api_file_read)
     app.router.add_post("/api/reveal", api_reveal_path)
     return app
-
-
-# ── 1. the rail: ask the auth layer, do not copy its names ────────────────────
 
 
 class TestAuthLayerFilesAreProtected:
@@ -169,12 +161,16 @@ class TestAuthLayerFilesAreProtected:
         here — it fails in the coverage test below if it is unprotected, which is the point.
         """
         found = _auth_layer_paths()
-        assert len(found) >= 5, f"auth-layer path discovery returned too little: {found}"
+        assert (
+            len(found) >= 5
+        ), f"auth-layer path discovery returned too little: {found}"
         names = {p.name for p in found.values()}
-        # The signing key is the subject of #354; the password hash and both code stores are
-        # what the rail found next. Named here as a floor on the DISCOVERY, not as the guard's
-        # source of truth.
-        assert {"session_key", "credentials.json", "enroll_codes.json", "pair_codes.json"} <= names
+        assert {
+            "session_key",
+            "credentials.json",
+            "enroll_codes.json",
+            "pair_codes.json",
+        } <= names
 
     def test_every_auth_layer_file_is_refused_by_the_dashboard_guard(self, secret_home):
         """``_validate_dashboard_path`` — the one function all 16 path-taking routes call.
@@ -192,7 +188,9 @@ class TestAuthLayerFilesAreProtected:
             not leaked
         ), f"auth-layer files readable through the dashboard files surface: {leaked}"
 
-    def test_every_auth_layer_file_is_refused_by_the_shared_path_guard(self, secret_home):
+    def test_every_auth_layer_file_is_refused_by_the_shared_path_guard(
+        self, secret_home
+    ):
         """``is_sensitive_path`` — the guard the bash hooks, the terminal cwd check and the
         action denylist all consult.
 
@@ -205,9 +203,6 @@ class TestAuthLayerFilesAreProtected:
             if not is_sensitive_path(str(target))
         ]
         assert not leaked, f"auth-layer files unknown to is_sensitive_path: {leaked}"
-
-
-# ── 2. derived, not re-listed ─────────────────────────────────────────────────
 
 
 class TestDeclarationIsTheOnlySource:
@@ -223,15 +218,19 @@ class TestDeclarationIsTheOnlySource:
         """Add a synthetic secret to ``HOME_SECRET_FILE_BASENAMES``; the dashboard must refuse
         it immediately. Under the old hand-copied list this could only pass if someone also
         edited ``handlers/files.py`` — i.e. it could not pass at all."""
-        import gideon.security as sec
+        import gideon.security.security as sec
 
         synthetic = "zz_future_signing_key"
         target = secret_home / synthetic
         target.write_text(f"{_MARKER}\n")
-        assert _validate_dashboard_path(str(target)) is not None, "control: not blocked yet"
+        assert (
+            _validate_dashboard_path(str(target)) is not None
+        ), "control: not blocked yet"
 
         monkeypatch.setattr(
-            sec, "HOME_SECRET_FILE_BASENAMES", sec.HOME_SECRET_FILE_BASENAMES | {synthetic}
+            sec,
+            "HOME_SECRET_FILE_BASENAMES",
+            sec.HOME_SECRET_FILE_BASENAMES | {synthetic},
         )
         assert (
             _validate_dashboard_path(str(target)) is None
@@ -241,15 +240,20 @@ class TestDeclarationIsTheOnlySource:
         self, secret_home, monkeypatch
     ):
         """The subtree half. A directory entry must refuse files BENEATH it, including one
-        nobody has written yet — that is why ``auth/`` is a dir entry and not three names."""
-        import gideon.security as sec
+        nobody has written yet — that is why ``auth/`` is a dir entry and not three names.
+        """
+        import gideon.security.security as sec
 
         target = secret_home / "zz_future_auth" / "not_yet_invented.json"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(f"{_MARKER}\n")
-        assert _validate_dashboard_path(str(target)) is not None, "control: not blocked yet"
+        assert (
+            _validate_dashboard_path(str(target)) is not None
+        ), "control: not blocked yet"
 
-        monkeypatch.setattr(sec, "HOME_SECRET_DIRS", sec.HOME_SECRET_DIRS | {"zz_future_auth"})
+        monkeypatch.setattr(
+            sec, "HOME_SECRET_DIRS", sec.HOME_SECRET_DIRS | {"zz_future_auth"}
+        )
         monkeypatch.setattr(
             sec,
             "_SENSITIVE_GIDEON_HOME_ENTRIES",
@@ -265,19 +269,17 @@ class TestDeclarationIsTheOnlySource:
         It is the tuple ~70 call sites consume. If it were maintained beside them, the two
         halves could disagree, which is #354's shape a third time.
         """
-        import gideon.security as sec
+        import gideon.security.security as sec
 
         assert set(sec._SENSITIVE_GIDEON_HOME_ENTRIES) == set(
             sec.HOME_SECRET_FILE_BASENAMES | sec.HOME_SECRET_DIRS
         )
 
 
-# ── 3. both routes, fail closed, no leakage ──────────────────────────────────
-
-
 class TestRefusalsAreFailClosedAndQuiet:
     """Every declared secret is refused at the wire by both path-taking routes under test,
-    with a 4xx that discloses neither the resolved absolute path nor any file content."""
+    with a 4xx that discloses neither the resolved absolute path nor any file content.
+    """
 
     @pytest.mark.asyncio
     async def test_file_read_refuses_every_declared_secret(self, seeded_home, mock_sel):
@@ -310,10 +312,13 @@ class TestRefusalsAreFailClosedAndQuiet:
             popen.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_reveal_refuses_a_path_outside_every_root(self, secret_home, mock_sel):
+    async def test_reveal_refuses_a_path_outside_every_root(
+        self, secret_home, mock_sel
+    ):
         """Fail closed on the unknowable case: a perfectly ordinary file that simply is not in
         any root the dashboard surfaces. It carries no ``..`` and is not sensitive, which is
-        precisely why the two checks that predate the allowlist did not catch it (#655)."""
+        precisely why the two checks that predate the allowlist did not catch it (#655).
+        """
         outside = Path(os.path.realpath(str(secret_home.parent))) / "zz-outside.txt"
         outside.write_text("ordinary\n")
         with patch("subprocess.Popen") as popen:
@@ -344,18 +349,16 @@ class TestRefusalsAreFailClosedAndQuiet:
             assert _MARKER not in body, f"{label} echoed file contents"
             assert str(target) not in body, f"{label} echoed the resolved path"
             assert str(seeded_home) not in body, f"{label} echoed the resolved home"
-            # A stack trace or module name would tell the caller how the refusal was reached.
             assert "Traceback" not in body and "gideon" not in body
-
-
-# ── 4. vacuity floor ─────────────────────────────────────────────────────────
 
 
 class TestVacuityFloor:
     """Without these, a guard that refuses EVERYTHING would satisfy every test above."""
 
     @pytest.mark.asyncio
-    async def test_an_ordinary_file_in_root_is_still_served(self, seeded_home, mock_sel):
+    async def test_an_ordinary_file_in_root_is_still_served(
+        self, seeded_home, mock_sel
+    ):
         """``crons.json`` is real Gideon home state the explorer legitimately shows —
         an ordinary file sitting in the same directory as the refused secrets, so it isolates
         the secret guards from the root allowlist."""
@@ -367,7 +370,9 @@ class TestVacuityFloor:
             assert '{"jobs": []}' in await resp.text()
 
     @pytest.mark.asyncio
-    async def test_an_ordinary_file_in_root_is_still_revealable(self, seeded_home, mock_sel):
+    async def test_an_ordinary_file_in_root_is_still_revealable(
+        self, seeded_home, mock_sel
+    ):
         """The reveal counterpart: the explorer's "Reveal in Finder" button must still work.
         ``Popen`` is patched, so this asserts the decision to spawn without spawning."""
         ordinary = seeded_home / "notes.md"
@@ -384,11 +389,15 @@ class TestVacuityFloor:
                 assert json.loads(await resp.text()) == {"ok": True}
             popen.assert_called_once()
 
-    def test_an_ordinary_name_that_merely_resembles_a_secret_is_allowed(self, secret_home):
+    def test_an_ordinary_name_that_merely_resembles_a_secret_is_allowed(
+        self, secret_home
+    ):
         """The name tier must not over-block. A user's own ``my_session_key.md`` or a
         ``credentials`` folder inside a WORKSPACE is not Gideon's auth material — which
         is why the directory entries are location-scoped rather than basename rules."""
         for ok_name in ("my_session_key.md", "sessions.json.bak", "authors.md"):
             target = secret_home / ok_name
             target.write_text("ok\n")
-            assert _validate_dashboard_path(str(target)) is not None, f"{ok_name} over-blocked"
+            assert (
+                _validate_dashboard_path(str(target)) is not None
+            ), f"{ok_name} over-blocked"

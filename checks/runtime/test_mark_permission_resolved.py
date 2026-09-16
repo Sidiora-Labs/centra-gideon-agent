@@ -2,7 +2,7 @@
 
 import json
 
-from gideon.dashboard.state import _mark_permission_resolved
+from gideon.interfaces.dashboard.state import _mark_permission_resolved
 
 
 class TestMarkPermissionResolved:
@@ -81,7 +81,12 @@ class TestMarkPermissionResolved:
     def test_preserves_existing_cls_fields(self) -> None:
         original = {"request_id": "abc", "tool_input": "ls -la", "is_read_only": "1"}
         msgs = [
-            {"role": "permission", "content": "shell", "cls": json.dumps(original), "ts": "1"},
+            {
+                "role": "permission",
+                "content": "shell",
+                "cls": json.dumps(original),
+                "ts": "1",
+            },
         ]
         _mark_permission_resolved(msgs, "abc", "approved")
         cls = json.loads(msgs[0]["cls"])

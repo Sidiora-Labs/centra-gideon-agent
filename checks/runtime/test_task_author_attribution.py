@@ -33,8 +33,8 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.tasks import registry
-from gideon.tasks.handlers import register_task_routes
+from gideon.engine.tasks import registry
+from gideon.engine.tasks.handlers import register_task_routes
 
 OWNER = "keyur-golani"
 FORGED = "root@evil"
@@ -51,10 +51,10 @@ async def _client(tmp_path):
     """
     registry._providers.clear()
     with (
-        patch("gideon.tasks.native.config_dir", return_value=tmp_path),
-        patch("gideon.tasks.hierarchy.config_dir", return_value=tmp_path),
-        patch("gideon.tasks.native._current_username", return_value=OWNER),
-        patch("gideon.tasks.handlers._owner_username", return_value=OWNER),
+        patch("gideon.engine.tasks.native.config_dir", return_value=tmp_path),
+        patch("gideon.engine.tasks.hierarchy.config_dir", return_value=tmp_path),
+        patch("gideon.engine.tasks.native._current_username", return_value=OWNER),
+        patch("gideon.engine.tasks.handlers._owner_username", return_value=OWNER),
     ):
         app = web.Application()
         register_task_routes(app)
@@ -69,10 +69,9 @@ def _task_files(tmp_path):
 
 
 def _stored(tmp_path, task_id):
-    return json.loads((tmp_path / "tasks" / f"{task_id}.json").read_text(encoding="utf-8"))
-
-
-# ── POST /api/tasks ──────────────────────────────────────────────────────────
+    return json.loads(
+        (tmp_path / "tasks" / f"{task_id}.json").read_text(encoding="utf-8")
+    )
 
 
 @pytest.mark.asyncio
@@ -81,7 +80,6 @@ async def test_create_refuses_a_supplied_author_and_writes_nothing(tmp_path):
         r = await client.post("/api/tasks", json={"title": "forged", "author": FORGED})
         assert r.status == 400
         assert (await r.json())["error"] == REFUSAL
-        # Refused means nothing landed — not a task quietly re-signed as the owner.
         assert _task_files(tmp_path) == []
 
 
@@ -120,9 +118,6 @@ async def test_create_refuses_an_empty_author(tmp_path):
         assert _task_files(tmp_path) == []
 
 
-# ── PUT /api/tasks/{id} ──────────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_update_refuses_a_supplied_author_and_leaves_provenance_intact(tmp_path):
     """The worse half of the bug: this rewrote the author of a row that was already
@@ -142,7 +137,9 @@ async def test_update_refuses_the_whole_edit_rather_than_applying_the_rest(tmp_p
     only partly honored."""
     async with _client(tmp_path) as client:
         t = await (await client.post("/api/tasks", json={"title": "before"})).json()
-        r = await client.put(f"/api/tasks/{t['id']}", json={"title": "after", "author": FORGED})
+        r = await client.put(
+            f"/api/tasks/{t['id']}", json={"title": "after", "author": FORGED}
+        )
         assert r.status == 400
         stored = _stored(tmp_path, t["id"])
         assert stored["title"] == "before"
@@ -155,15 +152,14 @@ async def test_update_still_edits_every_other_field(tmp_path):
     still applies, so the refusal above is about attribution and nothing else."""
     async with _client(tmp_path) as client:
         t = await (await client.post("/api/tasks", json={"title": "before"})).json()
-        r = await client.put(f"/api/tasks/{t['id']}", json={"title": "after", "priority": "high"})
+        r = await client.put(
+            f"/api/tasks/{t['id']}", json={"title": "after", "priority": "high"}
+        )
         assert r.status == 200
         stored = _stored(tmp_path, t["id"])
         assert stored["title"] == "after"
         assert stored["priority"] == "high"
         assert stored["author"] == OWNER
-
-
-# ── POST /api/tasks/bulk ─────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -175,13 +171,15 @@ async def test_bulk_create_refuses_a_supplied_author_and_aborts_the_batch(tmp_pa
     async with _client(tmp_path) as client:
         r = await client.post(
             "/api/tasks/bulk",
-            json={"op": "create", "items": [{"title": "ok"}, {"title": "bad", "author": FORGED}]},
+            json={
+                "op": "create",
+                "items": [{"title": "ok"}, {"title": "bad", "author": FORGED}],
+            },
         )
         assert r.status == 400
         payload = await r.json()
         assert {"index": 1, "error": REFUSAL} in payload["errors"]
         assert payload["succeeded"] == 0
-        # Validate-all-then-apply: the honest sibling item is not created either.
         assert _task_files(tmp_path) == []
 
 
@@ -203,7 +201,8 @@ async def test_bulk_still_creates_and_updates_without_an_author(tmp_path):
     """VACUITY FLOOR for bulk, both ops."""
     async with _client(tmp_path) as client:
         r = await client.post(
-            "/api/tasks/bulk", json={"op": "create", "items": [{"title": "a"}, {"title": "b"}]}
+            "/api/tasks/bulk",
+            json={"op": "create", "items": [{"title": "a"}, {"title": "b"}]},
         )
         assert r.status == 200
         created = await r.json()
@@ -212,7 +211,8 @@ async def test_bulk_still_creates_and_updates_without_an_author(tmp_path):
         assert [_stored(tmp_path, i)["author"] for i in ids] == [OWNER, OWNER]
 
         r = await client.post(
-            "/api/tasks/bulk", json={"op": "update", "items": [{"id": ids[0], "title": "a2"}]}
+            "/api/tasks/bulk",
+            json={"op": "update", "items": [{"id": ids[0], "title": "a2"}]},
         )
         assert r.status == 200
         assert _stored(tmp_path, ids[0])["title"] == "a2"
@@ -231,9 +231,6 @@ async def test_bulk_delete_is_unaffected(tmp_path):
         )
         assert r.status == 200
         assert _task_files(tmp_path) == []
-
-
-# ── The consequence: attribution steers the owner's own views ────────────────
 
 
 @pytest.mark.asyncio
@@ -256,9 +253,6 @@ async def test_a_caller_cannot_hide_a_task_from_the_owners_mine_view(tmp_path):
         assert [t["title"] for t in ready["tasks"]] == ["visible"]
 
 
-# ── The store says the same thing as the HTTP layer ──────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_the_store_will_not_rewrite_an_author_on_update(tmp_path):
     """Defense in depth at the layer that owns the record. The HTTP refusal closes
@@ -268,9 +262,10 @@ async def test_the_store_will_not_rewrite_an_author_on_update(tmp_path):
     async with _client(tmp_path):
         created = await registry.create_task(title="honest")
         assert created.author == OWNER
-        updated = await registry.update_task(created.id, author="in-process-forge", title="edited")
+        updated = await registry.update_task(
+            created.id, author="in-process-forge", title="edited"
+        )
         assert updated is not None
-        # The edit applied — so this is provenance immutability, not a dead update path.
         assert updated.title == "edited"
         assert updated.author == OWNER
         assert _stored(tmp_path, created.id)["author"] == OWNER
@@ -286,9 +281,6 @@ async def test_the_store_still_lets_a_trusted_caller_sign_its_own_creation(tmp_p
         task = await registry.create_task(title="finding", author="self-qa")
         assert task.author == "self-qa"
         assert _stored(tmp_path, task.id)["author"] == "self-qa"
-
-
-# ── The sibling provenance fields, and one voice across routes ───────────────
 
 
 @pytest.mark.asyncio
@@ -313,7 +305,11 @@ async def test_ids_and_timestamps_stay_server_owned_on_both_write_paths(tmp_path
 
         r = await client.put(
             f"/api/tasks/{created['id']}",
-            json={"id": "t-forged", "created_at": "1999-01-01T00:00:00Z", "provider": "evil"},
+            json={
+                "id": "t-forged",
+                "created_at": "1999-01-01T00:00:00Z",
+                "provider": "evil",
+            },
         )
         assert r.status == 200
         stored = _stored(tmp_path, created["id"])
@@ -335,9 +331,10 @@ async def test_the_comment_route_refuses_with_the_same_message(tmp_path):
         assert r.status == 400
         assert (await r.json())["error"] == REFUSAL
 
-        # VACUITY FLOOR: a legitimate comment still records, under the acting identity.
         r = await client.post(f"/api/tasks/{t['id']}/comments", json={"body": "honest"})
         assert r.status == 201
         assert (await r.json())["author"] == OWNER
         sidecar = tmp_path / "tasks" / f"_comments_{t['id']}.json"
-        assert [c["author"] for c in json.loads(sidecar.read_text(encoding="utf-8"))] == [OWNER]
+        assert [
+            c["author"] for c in json.loads(sidecar.read_text(encoding="utf-8"))
+        ] == [OWNER]

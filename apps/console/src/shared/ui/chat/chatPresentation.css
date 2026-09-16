@@ -1,0 +1,68 @@
+.gideon-composer-panel {
+  border-radius: var(--radius-lg);
+  border-color: color-mix(in srgb, var(--color-outline-variant) 75%, transparent);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--color-on-surface) 3%, transparent),
+    0 12px 32px color-mix(in srgb, var(--color-on-surface) 3%, transparent);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.gideon-composer-panel[data-active],
+.gideon-composer-panel:focus-within {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 12%, transparent),
+    0 10px 28px color-mix(in srgb, var(--color-on-surface) 4%, transparent);
+}
+
+.gideon-composer-toolbar {
+  border-color: color-mix(in srgb, var(--color-outline-variant) 45%, transparent);
+}
+
+.gideon-composer-options {
+  padding-block: 2px;
+}
+
+.gideon-composer-actions > button {
+  border-radius: var(--radius-md);
+}
+
+.gideon-composer-actions > .gideon-composer-primary {
+  margin-inline-start: 4px;
+}
+
+.gideon-chat-user {
+  min-width: 0;
+  max-width: 80%;
+  padding: 12px 18px;
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 40%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--color-surface-container) 80%, var(--color-surface-high));
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.gideon-chat-prose {
+  min-width: 0;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+
+.gideon-chat-prose :where(p, li) {
+  line-height: 1.75;
+}
+
+.gideon-chat-prose :where(pre, table) {
+  overflow-wrap: normal;
+}
+
+@media (max-width: 640px) {
+  .gideon-chat-user {
+    max-width: 92%;
+    padding: 11px 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gideon-composer-panel {
+    transition: none;
+  }
+}

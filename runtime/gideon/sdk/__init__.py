@@ -2,7 +2,7 @@
 
 This is the published core/app boundary (workspace-core-app-split, §3). A separated
 app imports ONLY from ``gideon.sdk.*`` — never deep core internals like
-``gideon.dashboard`` or ``gideon.agents.native`` — so the core can evolve
+``gideon.interfaces.dashboard`` or ``gideon.engine.agents.native`` — so the core can evolve
 its internals without breaking apps, and an import-lint can enforce the boundary.
 
 Each submodule re-exports one provider-type's ABC + its data types from the live core
@@ -21,8 +21,6 @@ need a ``gideon.sdk.runtime`` (stable spawn/run/create calls) before they can
 leave core; that submodule is intentionally not published yet.
 """
 
-# The SDK's own version — bump on a breaking change to any re-exported surface.
-# Apps gate compatibility via app.json ``minGideonVersion``.
 SDK_VERSION = "1.0"
 
 __all__ = ["SDK_VERSION"]

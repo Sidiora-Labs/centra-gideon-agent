@@ -1,8 +1,8 @@
 """Drift guard for the generated self-description manifest (PLATFORM-LEGIBILITY §1.2).
 
-The manifest (:mod:`gideon.manifest`) is generated from the live registries,
+The manifest (:mod:`gideon.extensions.manifest`) is generated from the live registries,
 but the two facts they can't carry — a response-type discriminator and worked
-examples — live in the hand-maintained :mod:`gideon.manifest_meta`. This
+examples — live in the hand-maintained :mod:`gideon.extensions.manifest_meta`. This
 suite is what keeps that map honest, so a tool or route can't ship as a silent,
 undocumented surface an agent has to reverse-engineer:
 
@@ -31,13 +31,11 @@ from pathlib import Path
 
 import pytest
 
-import gideon.dashboard.server as server_mod
-from gideon.apps.manifest import AppManifest
-from gideon.manifest_meta import MANIFEST_EXCLUDE, TOOL_META, canonical_route
-from gideon.providers.loader import BUNDLED_DIR
+import gideon.interfaces.dashboard.server as server_mod
+from gideon.extensions.apps.manifest import AppManifest
+from gideon.extensions.manifest_meta import MANIFEST_EXCLUDE, TOOL_META, canonical_route
+from gideon.extensions.providers.loader import BUNDLED_DIR
 
-# aiohttp route-registration verbs whose FIRST string literal arg is the path
-# (``add_route`` is the exception: it's ``add_route(method, path, handler)``).
 _ADD_VERBS = {
     "add_get",
     "add_post",
@@ -60,8 +58,8 @@ def registered_tools():
     the same seam the S3 build-time reference uses. Both process-global registries
     are reset around the test so it can't leak into (or inherit from) siblings.
     """
-    from gideon.providers import registry as prov_reg
-    from gideon.tool_providers import registry as tool_reg
+    from gideon.extensions.providers import registry as prov_reg
+    from gideon.integrations.tool_providers import registry as tool_reg
 
     tool_reg._providers.clear()
     prov_reg._registry = None
@@ -75,15 +73,14 @@ def registered_tools():
             if manifest.provider:
                 reg.register(manifest, enabled=True)
 
-        from gideon import mcp_core
-        from gideon.tool_providers.registry import list_all_tools
+        from gideon.integrations import mcp_core
+        from gideon.integrations.tool_providers.registry import list_all_tools
 
         live = asyncio.run(list_all_tools())
         by_name = {t.name: t for t in live if t.provider != "mcp"}
-        # mcp_core IS the gideon-core provider (same 8 names), so the union is
-        # already covered by by_name; assert that invariant rather than assume it.
         core_names = {
-            (t["name"] if isinstance(t, dict) else t.name) for t in mcp_core._list_tools()
+            (t["name"] if isinstance(t, dict) else t.name)
+            for t in mcp_core._list_tools()
         }
         assert core_names <= set(by_name), core_names - set(by_name)
         yield by_name
@@ -104,7 +101,9 @@ def test_every_tool_has_a_faithful_meta_entry(registered_tools):
     problems: list[str] = []
     for name, tool in sorted(registered_tools.items()):
         if name not in TOOL_META:
-            problems.append(f"{name}: no TOOL_META entry (add one with a response_type + example)")
+            problems.append(
+                f"{name}: no TOOL_META entry (add one with a response_type + example)"
+            )
             continue
         if not (tool.description or "").strip():
             problems.append(f"{name}: empty description on the registered tool")
@@ -129,7 +128,8 @@ def test_no_stale_tool_meta_entries(registered_tools):
     """Every TOOL_META key maps to a live tool — a removed tool must lose its entry."""
     stale = sorted(set(TOOL_META) - set(registered_tools))
     assert not stale, (
-        "TOOL_META has entries for tools that no longer exist " f"(remove them): {stale}"
+        "TOOL_META has entries for tools that no longer exist "
+        f"(remove them): {stale}"
     )
 
 
@@ -190,7 +190,8 @@ def test_no_stale_exclusions():
     exclusion allowlist can't rot into a fiction."""
     stale = sorted(set(MANIFEST_EXCLUDE) - _non_api(_literal_route_paths()))
     assert not stale, (
-        "MANIFEST_EXCLUDE lists paths that no longer register " f"(remove them): {stale}"
+        "MANIFEST_EXCLUDE lists paths that no longer register "
+        f"(remove them): {stale}"
     )
 
 
@@ -206,7 +207,7 @@ def test_excluded_routes_dont_leak_into_the_live_walk():
     """
     from aiohttp import web
 
-    from gideon.manifest import _routes_section
+    from gideon.extensions.manifest import _routes_section
 
     app = web.Application()
 
@@ -238,9 +239,9 @@ def test_declared_error_codes_exist():
     this guard immediately starts enforcing them.
     """
     try:
-        from gideon.errors import ERROR_CODES  # type: ignore
+        from gideon.core.errors import ERROR_CODES  # type: ignore
     except Exception:
-        ERROR_CODES = None  # §2 not landed yet
+        ERROR_CODES = None
     for name, meta in TOOL_META.items():
         for code in meta.get("error_codes", []):
             if ERROR_CODES is not None:

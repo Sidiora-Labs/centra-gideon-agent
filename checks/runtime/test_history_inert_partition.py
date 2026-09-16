@@ -22,8 +22,13 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.triggers.history import feed_response, is_inert, outcome_counts, partition_inert
-from gideon.triggers.models import INERT_OUTCOMES, FireRecord, Outcome
+from gideon.automation.triggers.history import (
+    feed_response,
+    is_inert,
+    outcome_counts,
+    partition_inert,
+)
+from gideon.automation.triggers.models import INERT_OUTCOMES, FireRecord, Outcome
 
 
 def _rec(rid: str, outcome: str) -> FireRecord:
@@ -39,13 +44,11 @@ MIXED = [
 ]
 
 
-# ── the classification ──
-
-
 @pytest.mark.parametrize("outcome", sorted(INERT_OUTCOMES))
 def test_EVERY_declared_inert_outcome_is_classified(outcome):
     """🔴 The completeness half. A declared table is not a control until something reads it, so every
-    entry is asserted rather than trusted — this is the check whose absence let the table drift."""
+    entry is asserted rather than trusted — this is the check whose absence let the table drift.
+    """
     assert is_inert(_rec("x", outcome)) is True
 
 
@@ -76,9 +79,6 @@ def test_BLOCKED_INJECTION_is_not_inert():
 def test_DEFERRED_is_not_inert():
     """A deferred fire is work that WILL happen — parked, not skipped."""
     assert is_inert(_rec("x", Outcome.DEFERRED.value)) is False
-
-
-# ── the partition ──
 
 
 def test_the_partition_splits_work_from_suppression():
@@ -113,9 +113,6 @@ def test_an_ALL_SUPPRESSED_feed_reports_zero_work():
     did, suppressed = partition_inert(rows)
     assert did == []
     assert len(suppressed) == 20
-
-
-# ── the wire shape ──
 
 
 def test_the_response_carries_BOTH_id_lists():

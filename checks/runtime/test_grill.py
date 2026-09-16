@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from gideon import grill
+from gideon.cognition import grill
 
 
 def _run(coro):
@@ -21,9 +21,6 @@ def _ask_returning(*responses):
     return _ask
 
 
-# ── assess_goal ──
-
-
 def test_assess_clear_goal_not_ambiguous():
     ask = _ask_returning('{"ambiguous": false, "questions": []}')
     amb, qs = _run(grill.assess_goal("ship the thing", ask))
@@ -31,13 +28,14 @@ def test_assess_clear_goal_not_ambiguous():
 
 
 def test_assess_ambiguous_with_questions():
-    ask = _ask_returning('{"ambiguous": true, "questions": ["Which platform?", "By when?"]}')
+    ask = _ask_returning(
+        '{"ambiguous": true, "questions": ["Which platform?", "By when?"]}'
+    )
     amb, qs = _run(grill.assess_goal("make it good", ask))
     assert amb is True and qs == ["Which platform?", "By when?"]
 
 
 def test_assess_ambiguous_but_no_questions_is_not_ambiguous():
-    # ambiguous=true but no questions → can't act on it → treated as not-ambiguous
     ask = _ask_returning('{"ambiguous": true, "questions": []}')
     amb, _ = _run(grill.assess_goal("x", ask))
     assert amb is False
@@ -46,9 +44,6 @@ def test_assess_ambiguous_but_no_questions_is_not_ambiguous():
 def test_assess_handles_garbage():
     amb, qs = _run(grill.assess_goal("x", _ask_returning("not json")))
     assert amb is False and qs == []
-
-
-# ── check_memory ──
 
 
 def test_check_memory_none_recall():
@@ -69,13 +64,10 @@ def test_check_memory_swallows_errors():
     assert _run(grill.check_memory("x", _recall)) == ""
 
 
-# ── grill: flat shape (campaigns) ──
-
-
 def test_grill_flat_decomposes():
     ask = _ask_returning(
-        '{"ambiguous": false, "questions": []}',  # assess
-        '["feasibility", "risks", "alternatives"]',  # decompose
+        '{"ambiguous": false, "questions": []}',
+        '["feasibility", "risks", "alternatives"]',
     )
     r = _run(grill.grill("a real goal here", shape="flat", ask=ask, assess=True))
     assert r.shape == "flat"
@@ -96,9 +88,6 @@ def test_grill_flat_caps_at_20():
     assert len(r.sub_goals) == 20
 
 
-# ── grill: tree shape (projects) ──
-
-
 def test_grill_tree_builds_phases():
     tree = '{"phases": [{"title": "Scope", "description": "d", "steps": [{"title": "platform", "prompt": "Which platform?"}]}]}'  # noqa: E501
     r = _run(grill.grill("goal", shape="tree", ask=_ask_returning(tree), assess=False))
@@ -109,15 +98,9 @@ def test_grill_tree_builds_phases():
 
 
 def test_grill_tree_drops_stepless_and_promptless():
-    tree = (
-        '{"phases": [{"title": "P", "steps": [{"title": "x"}, {"title": "y", "prompt": "real?"}]}]}'
-    )
+    tree = '{"phases": [{"title": "P", "steps": [{"title": "x"}, {"title": "y", "prompt": "real?"}]}]}'
     r = _run(grill.grill("goal", shape="tree", ask=_ask_returning(tree), assess=False))
-    # only the step with a prompt survives
     assert [s["prompt"] for s in r.phases[0]["steps"]] == ["real?"]
-
-
-# ── memory-checked + save_decisions ──
 
 
 def test_grill_records_memory_hit():
@@ -142,4 +125,4 @@ def test_grill_save_failure_does_not_break():
 
     ask = _ask_returning('["x"]')
     r = _run(grill.grill("goal", shape="flat", ask=ask, save=_boom, assess=False))
-    assert r.sub_goals == ["x"]  # decomposition still returned
+    assert r.sub_goals == ["x"]

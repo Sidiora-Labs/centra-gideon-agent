@@ -17,10 +17,8 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.dashboard import model_downloads as M
-from gideon.dashboard.handlers import model_downloads as H
-
-# ── catalog/provider stubs (no network) ──
+from gideon.interfaces.dashboard import model_downloads as M
+from gideon.interfaces.dashboard.handlers import model_downloads as H
 
 
 @pytest.fixture(autouse=True)
@@ -35,15 +33,18 @@ def _stub_providers(monkeypatch):
     monkeypatch.setattr(
         M,
         "_model_exists",
-        lambda provider, model: model in {"good", "slow", "boom", "already", "truncated"},
+        lambda provider, model: model
+        in {"good", "slow", "boom", "already", "truncated"},
     )
-    monkeypatch.setattr(M, "_expected_size_bytes", lambda provider, model: 4 * 1024 * 1024)
+    monkeypatch.setattr(
+        M, "_expected_size_bytes", lambda provider, model: 4 * 1024 * 1024
+    )
     monkeypatch.setattr(
         M, "_is_downloaded", lambda provider, model: model in {"already", "truncated"}
     )
-    # `truncated` is on disk AND incomplete — the Repair case. Stubbed explicitly so the
-    # short-circuit's two inputs read side by side.
-    monkeypatch.setattr(M, "_is_truncated", lambda provider, model: model == "truncated")
+    monkeypatch.setattr(
+        M, "_is_truncated", lambda provider, model: model == "truncated"
+    )
     monkeypatch.setattr(M, "_dir_size", lambda path: 0)
 
     async def _fetch(provider, model):
@@ -59,9 +60,6 @@ async def _settle():
     """Yield control so scheduled job tasks can run to completion."""
     for _ in range(20):
         await asyncio.sleep(0.02)
-
-
-# ── registry ──
 
 
 @pytest.mark.asyncio
@@ -89,8 +87,9 @@ async def test_start_records_error():
 @pytest.mark.asyncio
 async def test_unknown_provider_and_unknown_model(monkeypatch):
     reg = M.ModelDownloadRegistry()
-    # Unknown provider → _provider() returns None for this name.
-    monkeypatch.setattr(M, "_provider", lambda name: None if name == "bogus" else object())
+    monkeypatch.setattr(
+        M, "_provider", lambda name: None if name == "bogus" else object()
+    )
     job, err = reg.start("bogus", "good")
     assert job is None and "Unknown provider" in err
     job, err = reg.start("sentence-transformers", "nonesuch")
@@ -104,7 +103,7 @@ async def test_dedupe_in_flight_returns_same_job():
     reg = M.ModelDownloadRegistry()
     j1, _ = reg.start("piper-tts", "slow")
     j2, _ = reg.start("piper-tts", "slow")
-    assert j1.id == j2.id  # same (provider, model) while running → one job
+    assert j1.id == j2.id
     await _settle()
 
 
@@ -114,7 +113,7 @@ async def test_already_downloaded_short_circuits():
     job, err = reg.start("sentence-transformers", "already")
     assert err is None
     assert job.state == "done"
-    assert job.downloaded_bytes == job.total_bytes  # reported complete immediately
+    assert job.downloaded_bytes == job.total_bytes
 
 
 @pytest.mark.asyncio
@@ -132,7 +131,9 @@ async def test_a_truncated_model_is_refetched_not_short_circuited():
     job, err = reg.start("voice-clone-tts", "truncated")
     assert err is None and job is not None
     assert job.state in ("queued", "running"), "a truncated model must be RE-fetched"
-    assert job.downloaded_bytes == 0, "claiming the full byte count is the dead click's tell"
+    assert (
+        job.downloaded_bytes == 0
+    ), "claiming the full byte count is the dead click's tell"
     await _settle()
     assert reg.get(job.id).state == "done"
 
@@ -142,8 +143,8 @@ async def test_cancel_detaches_job():
     reg = M.ModelDownloadRegistry()
     job, _ = reg.start("piper-tts", "slow")
     assert reg.cancel(job.id) is True
-    assert reg.get(job.id) is None  # dropped from registry
-    assert reg.cancel(job.id) is False  # unknown now
+    assert reg.get(job.id) is None
+    assert reg.cancel(job.id) is False
     await _settle()
 
 
@@ -157,10 +158,7 @@ async def test_progress_frames_reach_subscriber():
     seen = []
     while not q.empty():
         seen.append(q.get_nowait().name)
-    assert "done" in seen  # terminal frame published to the live hub
-
-
-# ── HTTP handlers ──
+    assert "done" in seen
 
 
 def _req(method, path, reg, *, body=None, match_info=None):
@@ -232,6 +230,8 @@ async def test_handler_cancel_unknown_404():
 async def test_handler_stream_missing_job_404():
     reg = M.ModelDownloadRegistry()
     resp = await H.api_model_download_stream(
-        _req("GET", "/api/models/downloads/dl-99/stream", reg, match_info={"id": "dl-99"})
+        _req(
+            "GET", "/api/models/downloads/dl-99/stream", reg, match_info={"id": "dl-99"}
+        )
     )
     assert resp.status == 404

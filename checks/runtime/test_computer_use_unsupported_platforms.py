@@ -47,32 +47,36 @@ import sys
 
 import pytest
 
-from gideon.computer_use import driver_host, enable_state, linux_driver, macos_driver, service
-from gideon.computer_use import tools as ct
-from gideon.computer_use import unsupported_platform, windows_driver
-from gideon.errors import ERROR_CODES
-from gideon.manifest_meta import TOOL_META
+from gideon.core.errors import ERROR_CODES
+from gideon.extensions.manifest_meta import TOOL_META
+from gideon.integrations.computer_use import (
+    driver_host,
+    enable_state,
+    linux_driver,
+    macos_driver,
+    service,
+)
+from gideon.integrations.computer_use import tools as ct
+from gideon.integrations.computer_use import (
+    unsupported_platform,
+    windows_driver,
+)
 
 ARMED_APP = "TextEdit"
 CODE = unsupported_platform.ERR_PLATFORM_UNSUPPORTED
 
-#: The repository's ``src``, seeded into the spawned child so it runs this tree.
-SRC = str(pathlib.Path(__file__).resolve().parents[1] / "src")
+SRC = str(pathlib.Path(__file__).resolve().parents[2] / "src")
 
-#: ``(module, platform.system() value, the API its refusal must name)``.
 PENDING = (
     (windows_driver, "Windows", "UI Automation"),
     (linux_driver, "Linux", "AT-SPI"),
 )
 
-#: The seven driver operations, derived from the tool surface rather than tabulated — a second
-#: list is a second place to forget one, and a forgotten op would read here as "covered".
 OPS = tuple(service._driver_op(spec) for spec in ct.TOOL_SURFACE)
 
-#: For the one assertion that cannot be simulated: what a *real* macOS ``run_op`` answers. Every
-#: other Darwin twin in this file fakes ``platform.system()`` and therefore runs everywhere.
 _NEEDS_DARWIN = pytest.mark.skipif(
-    platform.system() != "Darwin", reason="an unsimulated macOS answer needs a macOS host"
+    platform.system() != "Darwin",
+    reason="an unsimulated macOS answer needs a macOS host",
 )
 
 
@@ -95,7 +99,8 @@ def _arm(tmp_path, *apps: str) -> None:
     """Write a real enable document and force a re-read — the real parser, not a patched
     accessor, so the chain is proven to read the operator's actual document."""
     (tmp_path / "enable.json").write_text(
-        json.dumps({"version": 1, "enabled": True, "apps": list(apps)}), encoding="utf-8"
+        json.dumps({"version": 1, "enabled": True, "apps": list(apps)}),
+        encoding="utf-8",
     )
     enable_state.reset_enable_state()
 
@@ -108,7 +113,7 @@ def _child_argv(system: str) -> list[str]:
         "-c",
         f"import sys; sys.path.insert(0, {SRC!r});"
         f"import platform; platform.system = lambda: {system!r};"
-        "from gideon.computer_use.driver_host import main;"
+        "from gideon.integrations.computer_use.driver_host import main;"
         "raise SystemExit(main())",
     ]
 
@@ -150,9 +155,6 @@ def _args_for(spec, snapshot_id: str) -> dict:
     return {"snapshot_id": snapshot_id, "element_index": 0, **extra.get(spec.name, {})}
 
 
-# ── 1. resolution: the mapping is now a fact (REAL — no simulation) ───────────
-
-
 @pytest.mark.parametrize(("module", "system", "_api"), PENDING)
 def test_the_platform_driver_now_resolves(module, system, _api):
     """The gap this atom closes, stated as the assertion that would have failed before it.
@@ -178,9 +180,6 @@ def test_an_unmapped_platform_still_answers_none():
     is not written yet" — which is exactly why the two carry different codes."""
     assert driver_host.resolve_driver("Plan9") is None
     assert "Plan9" not in driver_host.DRIVER_MODULES
-
-
-# ── 2. import safety: a driver may never break the gateway (REAL) ─────────────
 
 
 _ALLOWED_IMPORT_ROOTS = frozenset({"__future__", "typing", "gideon"})
@@ -243,11 +242,10 @@ def test_a_pending_driver_re_derives_no_wording(module, _system, _api):
     ]
 
 
-# ── 3. the child's answer for every operation (platform SIMULATED in-process) ─
-
-
 @pytest.mark.parametrize(("module", "system", "api"), PENDING)
-def test_every_operation_refuses_with_the_platform_code(module, system, api, monkeypatch):
+def test_every_operation_refuses_with_the_platform_code(
+    module, system, api, monkeypatch
+):
     """The atom's clause at the driver boundary: all seven operations, the real
     ``driver_host.run_op``, one typed refusal each.
 
@@ -307,7 +305,9 @@ def test_no_operation_refuses_this_way_on_an_unsimulated_macos_host():
 
 
 @pytest.mark.parametrize(("module", "system", "api"), PENDING)
-def test_the_fix_is_actionable_rather_than_a_restatement(module, system, api, monkeypatch):
+def test_the_fix_is_actionable_rather_than_a_restatement(
+    module, system, api, monkeypatch
+):
     """A FIX that repeats the error is the defect this atom exists to remove. The *old* answer
     on Windows was "Nothing to configure — the capability is armed but has no driver to run",
     which tells an operator neither what works nor what not to try. This one must name macOS,
@@ -322,7 +322,8 @@ def test_the_fix_is_actionable_rather_than_a_restatement(module, system, api, mo
 
 def test_the_two_platforms_do_not_share_one_hardcoded_sentence(monkeypatch):
     """Parameterised, not copied: Windows must not report AT-SPI and Linux must not report UIA.
-    A single hardcoded string would satisfy every per-platform assertion above individually."""
+    A single hardcoded string would satisfy every per-platform assertion above individually.
+    """
     answers = {}
     for module, system, _api in PENDING:
         monkeypatch.setattr(platform, "system", lambda system=system: system)
@@ -332,11 +333,10 @@ def test_the_two_platforms_do_not_share_one_hardcoded_sentence(monkeypatch):
     assert "UI Automation" not in json.dumps(answers["Linux"])
 
 
-# ── 4. THE CALL SITE: computer_dispatch, end to end, real ceilinged spawn ─────
-
-
 @pytest.mark.parametrize("spec", ct.TOOL_SURFACE, ids=lambda s: s.name)
-def test_every_tool_refuses_through_the_real_dispatch_on_windows(spec, tmp_path, monkeypatch):
+def test_every_tool_refuses_through_the_real_dispatch_on_windows(
+    spec, tmp_path, monkeypatch
+):
     """**The clause, at the call site a user reaches.** Not "a function exists that would return
     this code" — the real ``computer_dispatch``, the real keystone, the real screens, the real
     SEL row, the real ``create_subprocess_limited`` spawn, a real child process, and the real
@@ -353,9 +353,14 @@ def test_every_tool_refuses_through_the_real_dispatch_on_windows(spec, tmp_path,
     driver at all, which is the honest place for the refusal to arrive.
     """
     monkeypatch.setattr(service, "_driver_argv", lambda: _child_argv("Windows"))
-    snapshot = service._remember(ARMED_APP, "fp-1", [{"role": "AXTextField", "label": "Subject"}])
+    snapshot = service._remember(
+        ARMED_APP, "fp-1", [{"role": "AXTextField", "label": "Subject"}]
+    )
     error = _dispatch_error(
-        spec.name, _args_for(spec, snapshot.snapshot_id), system="Windows", tmp_path=tmp_path
+        spec.name,
+        _args_for(spec, snapshot.snapshot_id),
+        system="Windows",
+        tmp_path=tmp_path,
     )
     assert error is not None, f"{spec.name} did not refuse on Windows"
     assert error.code == CODE, (spec.name, error.code, error.what)
@@ -364,9 +369,12 @@ def test_every_tool_refuses_through_the_real_dispatch_on_windows(spec, tmp_path,
     assert "macOS" in error.fix
 
 
-def test_the_dispatch_refusal_is_not_flattened_to_a_generic_driver_failure(tmp_path, monkeypatch):
+def test_the_dispatch_refusal_is_not_flattened_to_a_generic_driver_failure(
+    tmp_path, monkeypatch
+):
     """Stated as its own row so the reason the code is in ``_CHILD_CODES`` cannot be lost: drop
-    it from that allowlist and the message an operator reads becomes "the driver failed"."""
+    it from that allowlist and the message an operator reads becomes "the driver failed".
+    """
     monkeypatch.setattr(service, "_driver_argv", lambda: _child_argv("Linux"))
     error = _dispatch_error(
         "computer_snapshot", {"app": ARMED_APP}, system="Linux", tmp_path=tmp_path
@@ -377,7 +385,9 @@ def test_the_dispatch_refusal_is_not_flattened_to_a_generic_driver_failure(tmp_p
     assert CODE in service._CHILD_CODES
 
 
-def test_the_same_spawn_on_darwin_does_not_produce_the_platform_refusal(tmp_path, monkeypatch):
+def test_the_same_spawn_on_darwin_does_not_produce_the_platform_refusal(
+    tmp_path, monkeypatch
+):
     """**The end-to-end leg's vacuity assertion.** Identical machinery, identical argv shape,
     only the simulated platform changed — and the platform code must NOT appear. Without this,
     the test above would pass just as happily against a driver that refused everything
@@ -386,8 +396,6 @@ def test_the_same_spawn_on_darwin_does_not_produce_the_platform_refusal(tmp_path
     error = _dispatch_error(
         "computer_snapshot", {"app": ARMED_APP}, system="Darwin", tmp_path=tmp_path
     )
-    # macOS either succeeds or refuses for a macOS reason (an ungranted accessibility
-    # permission, on a machine where TCC has not been ticked) — never for this one.
     assert error is None or error.code != CODE, error and (error.code, error.what)
 
 
@@ -399,9 +407,6 @@ def test_an_unarmed_machine_still_refuses_at_the_keystone_first(tmp_path, monkey
     with pytest.raises(enable_state.ComputerUseDisabled) as caught:
         _run(service.computer_dispatch("computer_list_apps", {}))
     assert caught.value.error.code == enable_state.ERR_DISABLED
-
-
-# ── 5. the code is a registered, declared, distinct surface ───────────────────
 
 
 def test_the_code_is_registered_and_distinct():

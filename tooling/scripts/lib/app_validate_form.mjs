@@ -1,10 +1,10 @@
 // How the app-bundle UI validation harness enters a tool's arguments into the Tools
-// inspector's "Try it" form — leg 5 (`tool-invoke`) of scripts/app_ui_validate.mjs.
+// inspector's "Try it" form — leg 5 (`tool-invoke`) of tooling/scripts/app_ui_validate.mjs.
 //
 // This is its own module, split out of the browser driver, because it is the ONE step
 // that could silently decide whether the tool-invoke leg means anything, and a browser
 // driver cannot be unit-tested. It is now pinned against the REAL rendered form by
-// web/src/pages/tools/harnessFillsToolArgs.test.tsx, which renders `SchemaField` into a
+// apps/console/src/pages/tools/harnessFillsToolArgs.test.tsx, which renders `SchemaField` into a
 // DOM and drives these functions through a locator shim.
 //
 // ── THE DEFECT THIS REPLACES ──────────────────────────────────────────────────
@@ -12,7 +12,7 @@
 //
 //     page.locator(`input[name="${key}"], textarea[name="${key}"], select[name="${key}"]`)
 //
-// `SchemaField` (web/src/pages/tools/schema.tsx) renders NO `name` attribute. It binds the
+// `SchemaField` (apps/console/src/pages/tools/schema.tsx) renders NO `name` attribute. It binds the
 // visible `<label htmlFor>` to a React `useId()`, and gives the boolean Toggle / custom
 // widgets an accessible name instead. So that selector matched NOTHING, every `.fill()`
 // was skipped by the `if (await field.count())` guard that wrapped it, and the tool was
@@ -36,26 +36,17 @@
 //     silently no-ops, is exactly how this hid for as long as it did. Every argument the
 //     harness claims to have entered is confirmed against the control, and anything it
 //     could not enter is returned in `unfilled` so the driver can report a BLOCKED leg
-//     naming the harness/inspector — never a FAIL blamed on the bundle.
+//     naming the checks/harness/inspector — never a FAIL blamed on the bundle.
 
-/** The accessible name the inspector renders for a schema property.
- *
- *  `SchemaField` shows `x-meta.label ?? name`, so a provider that labels
- *  `require_approval` as "Require Approval" is findable only under that text. */
 export function argLabel(key, schema) {
   const label = schema?.['x-meta']?.label
   return typeof label === 'string' && label.trim() ? label : key
 }
 
-/** The locator for argument `key`'s control in the "Try it" form.
- *
- *  `getByLabel` — NOT `[name=…]`. See the module header: the component renders no `name`,
- *  and matching on one is indistinguishable from matching a field the user left blank. */
 export function argFieldLocator(page, key, schema) {
   return page.getByLabel(argLabel(key, schema), { exact: true }).first()
 }
 
-/** A self-describing placeholder value for a required argument, by schema type. */
 export function placeholderFor(schema) {
   if (Array.isArray(schema?.enum) && schema.enum.length) return String(schema.enum[0])
   switch (schema?.type) {
@@ -67,12 +58,6 @@ export function placeholderFor(schema) {
 
 const schemaType = (schema) => (Array.isArray(schema?.type) ? schema.type[0] : schema?.type)
 
-/** Fill every required argument of `tool` in the open "Try it" form.
- *
- *  Returns `{ args, unfilled }` where `args` is what the form DEMONSTRABLY holds (read
- *  back from each control), and `unfilled` names every required argument the harness
- *  could not enter, with the reason. A non-empty `unfilled` must block the leg: running
- *  anyway produces the tool's own "needs an X" error and misattributes it to the bundle. */
 export async function fillRequiredArgs(page, tool) {
   const args = {}
   const unfilled = []
@@ -86,9 +71,6 @@ export async function fillRequiredArgs(page, tool) {
       continue
     }
     if (schemaType(schema) === 'boolean') {
-      // A boolean renders as a Toggle, not a fillable control. `seedArgs` starts it OFF,
-      // which already IS the placeholder — so there is nothing to type and nothing to
-      // read back, and the form genuinely holds `false`.
       args[key] = false
       continue
     }

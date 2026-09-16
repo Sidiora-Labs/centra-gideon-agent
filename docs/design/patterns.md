@@ -1,6 +1,6 @@
 # Design-System Pattern Gallery
 
-**Plan:** DESIGN-SYSTEM-CONSISTENCY · **Contract:** C2 · **Authority:** `web/DESIGN.md` + `web/PRODUCT.md`
+**Plan:** DESIGN-SYSTEM-CONSISTENCY · **Contract:** C2 · **Authority:** `apps/console/DESIGN.md` + `apps/console/PRODUCT.md`
 
 The canonical usage of each shared primitive + each interaction pattern. Every page-touching plan cites this to "stay consistent." A new shared primitive lands here the moment it's added (that's how it stops being a one-off). This is a static doc (zero new dep) — the plan's default over a live Storybook route.
 
@@ -10,7 +10,7 @@ The canonical usage of each shared primitive + each interaction pattern. Every p
 
 ## Form fields
 
-### `TextField` / `TextArea` — `web/src/ui/TextField.tsx`
+### `TextField` / `TextArea` — `apps/console/src/ui/TextField.tsx`
 
 The one shared single-line input (`TextField`) and multi-line input (`TextArea`). The S1 audit found **no** shared field primitive, so ~200 raw `<input>`s across the app re-rolled the same shape by hand — `TextField` is the canonical extraction of that exact shape (not a redesign).
 
@@ -47,17 +47,17 @@ import { Search } from 'lucide-react'
 <TextArea mono value={body} onChange={(e) => setBody(e.target.value)} placeholder="Notes…" />
 ```
 
-**Migrate to it when** you see a raw `<input>`/`<textarea>` whose className contains the canonical shape above. The class contract is pinned by `web/src/ui/TextField.test.ts…x` (`textFieldClass`/`textAreaClass`) so a migration is a provable drop-in — but any migration that changes rendered pixels must still be verified by the visual harness (`web/e2e/`).
+**Migrate to it when** you see a raw `<input>`/`<textarea>` whose className contains the canonical shape above. The class contract is pinned by `apps/console/src/ui/TextField.test.ts…x` (`textFieldClass`/`textAreaClass`) so a migration is a provable drop-in — but any migration that changes rendered pixels must still be verified by the visual harness (`apps/console/e2e/`).
 
 > **NOTE:** `<select>` is not yet wrapped — a `Select` primitive is a follow-up (its native chevron + `[color-scheme]` handling differ enough to warrant its own entry). Until then, style `<select>` to match the `TextField` shape.
 
 ---
 
-## Buttons (existing — `web/src/ui/Button.tsx`, `IconButton.tsx`)
+## Buttons (existing — `apps/console/src/ui/Button.tsx`, `IconButton.tsx`)
 
 `Button` (variant `primary|secondary|ghost|danger`, size `sm|md|lg`, `shape`, `loading`) and `IconButton` are the canonical clickable chrome. The S1 audit found **420 raw `<button>`** outside `ui/` — migrating those to `Button`/`IconButton` is the largest S2 primitive-adoption task (harness-gated, worst-first: CodeCockpit → ChatPage). Documented here as the target; full variant gallery to be expanded as that migration proceeds.
 
-### `SquareIconButton` — `web/src/ui/SquareIconButton.tsx`
+### `SquareIconButton` — `apps/console/src/ui/SquareIconButton.tsx`
 
 The **dense square** sibling of the round `IconButton`: a 28px (`size-7`) `rounded-md`
 hit area with a small glyph, for tight action clusters in list rows, card headers,
@@ -126,7 +126,7 @@ itself — `whileTap` composes its own `transform` and would clobber the centeri
 icon `<button>`. The round pill (`IconButton`) and this square dense form are the
 two canonical icon-action shapes — pick by density, don't hand-roll a third.
 
-## Dialogs (existing — `web/src/ui/Modal.tsx`)
+## Dialogs (existing — `apps/console/src/ui/Modal.tsx`)
 
 `Modal` is already the sole canonical dialog (the audit found **0** bespoke `<dialog>`/`role="dialog"` outside `ui/`). Keep it that way — the primitive-adoption ratchet (C1/T3.4) guards against regression.
 
@@ -134,7 +134,7 @@ two canonical icon-action shapes — pick by density, don't hand-roll a third.
 
 ## Typography weight
 
-### `fvs(weight)` / `.fw-<n>` — `web/src/design/fontWeight.ts` + `tokens.css`
+### `fvs(weight)` / `.fw-<n>` — `apps/console/src/design/fontWeight.ts` + `tokens.css`
 
 The app's variable font is driven by `font-variation-settings: "wght" <n>`. The audit found this set **inline ~180 times** across pages (75× `500`, 48× `600`, 42× `550`, 11× `470`, …) with no shared home. Two canonical ways to apply a weight (both emit the identical `font-variation-settings`):
 
@@ -157,8 +157,8 @@ The S1 audit found the name `EmptyState` was used for two genuinely different th
 
 | Pattern | Component | Shape | Use when |
 |---|---|---|---|
-| **Page-empty** | `EmptyState` — `web/src/ui/ListScaffold.tsx` | Full-height **centered** column: tinted icon chip, headline, hint, optional `Button` action | A whole page/list/panel is empty (Tasks page with no tasks, empty Knowledge, etc.) — the empty state IS the content |
-| **Slot-empty** | `SlotEmptyState` — `web/src/pages/dashboard/widgets/kit.tsx` | Compact **top-aligned strip**: small icon + one line + optional inline action, dashed hairline | A dashboard widget/slot sits next to full siblings in a grid — a stretched centered empty would read as a conspicuous void |
+| **Page-empty** | `EmptyState` — `apps/console/src/ui/ListScaffold.tsx` | Full-height **centered** column: tinted icon chip, headline, hint, optional `Button` action | A whole page/list/panel is empty (Tasks page with no tasks, empty Knowledge, etc.) — the empty state IS the content |
+| **Slot-empty** | `SlotEmptyState` — `apps/console/src/pages/dashboard/widgets/kit.tsx` | Compact **top-aligned strip**: small icon + one line + optional inline action, dashed hairline | A dashboard widget/slot sits next to full siblings in a grid — a stretched centered empty would read as a conspicuous void |
 
 > **Cycle 6→7 note:** `kit.tsx`'s slot variant was renamed `EmptyState` → **`SlotEmptyState`** so the name no longer collides with the canonical page-empty primitive (the collision made two intentional patterns look like an accidental duplicate). Pure rename — zero visual change.
 >
@@ -183,7 +183,7 @@ Still to standardize + document:
 - [x] **Selection** — see below
 - [ ] **Error state** — inline (`alertDialog({ tone: 'danger' })` for imperative failures; a shared inline error banner primitive is a follow-up if the audit finds enough ad-hoc ones)
 
-### Confirm / prompt / alert — `web/src/ui/dialog/`
+### Confirm / prompt / alert — `apps/console/src/ui/dialog/`
 
 The app-wide replacement for `window.confirm/prompt/alert` — imperative, styled, callable from anywhere (event handlers, catch blocks, plain modules). A single `<DialogHost>` in the shell renders them; all use the canonical `Modal`.
 
@@ -203,7 +203,7 @@ await alertDialog({ title: 'Could not save', body: err.message, tone: 'danger' }
 
 **Migrate to it when** you see raw `window.confirm`/`window.prompt` or an ad-hoc confirm modal.
 
-### Loading / skeleton — `web/src/ui/ListScaffold.tsx`
+### Loading / skeleton — `apps/console/src/ui/ListScaffold.tsx`
 
 One skeleton family, shaped like the real chrome so the first paint doesn't jump:
 
@@ -215,6 +215,6 @@ One skeleton family, shaped like the real chrome so the first paint doesn't jump
 
 All carry `aria-busy`/`aria-label`. **Migrate to it when** you see a bespoke `animate-pulse` block or an ad-hoc spinner as a page's first-load state.
 
-### Selection / list rows — `ListRow` (`web/src/ui/ListScaffold.tsx`)
+### Selection / list rows — `ListRow` (`apps/console/src/ui/ListScaffold.tsx`)
 
 `ListRow({ index, onClick, children, accent })` — the canonical list row: staggered rise+fade in, physical hover-lift/press when clickable, optional left `accent` rail. Consistent across every list page; use it rather than hand-rolling a `<div className="rounded-lg bg-surface-container …">` row.

@@ -7,10 +7,10 @@ import json as _json
 import pytest
 from aiohttp.test_utils import make_mocked_request
 
-import gideon.config.loader as _loader
-import gideon.dashboard.handlers as _handlers
-import gideon.dashboard.handlers.agents as _agents_h
-from gideon.agents.defaults import (
+import gideon.core.config.loader as _loader
+import gideon.interfaces.dashboard.handlers as _handlers
+import gideon.interfaces.dashboard.handlers.agents as _agents_h
+from gideon.engine.agents.defaults import (
     DEFAULT_NATIVE_AGENT_NAME,
     default_agent_name,
     make_default_native_profile,
@@ -19,26 +19,25 @@ from gideon.agents.defaults import (
 
 
 def test_default_native_profile_is_native():
-    from gideon.config.loader import AgentProfile
+    from gideon.core.config.loader import AgentProfile
 
     prof = make_default_native_profile(AgentProfile)
     assert prof.provider == "native"
     assert prof.source == "builtin"
-    assert prof.system_prompt  # has a persona
-    assert prof.model == ""  # inherits the chat use-case binding
+    assert prof.system_prompt
+    assert prof.model == ""
 
 
 def test_global_agent_provider_defaults_native():
-    from gideon.config.loader import AgentConfig
+    from gideon.core.config.loader import AgentConfig
 
     assert AgentConfig().provider == "native"
 
 
 def test_agent_profile_has_provider_field():
-    from gideon.config.loader import AgentProfile
+    from gideon.core.config.loader import AgentProfile
 
-    # Per-agent provider override (P5 field, brought forward in P4.5).
-    assert AgentProfile().provider == ""  # empty inherits the global default
+    assert AgentProfile().provider == ""
     assert AgentProfile(provider="acp:claude").provider == "acp:claude"
 
 
@@ -48,36 +47,25 @@ class _Cfg:
 
 
 def test_default_agent_name_falls_back_to_native():
-    # default_agent is a single top-level field (the nested agent.default_agent
-    # was removed); empty → the native default, set → that name.
     assert default_agent_name(_Cfg()) == DEFAULT_NATIVE_AGENT_NAME
     assert default_agent_name(_Cfg(default_agent="MyAgent")) == "MyAgent"
 
 
 def test_normalize_agent_name_canonicalizes_default():
-    # All the spellings of "the default agent" collapse to one scope key, so
-    # agent-scoped memory (persona, commitments) writes + reads agree (M5e).
     assert normalize_agent_name(None) == DEFAULT_NATIVE_AGENT_NAME
     assert normalize_agent_name("") == DEFAULT_NATIVE_AGENT_NAME
     assert normalize_agent_name("gideon") == DEFAULT_NATIVE_AGENT_NAME
     assert normalize_agent_name("Gideon") == DEFAULT_NATIVE_AGENT_NAME
     assert normalize_agent_name("  gideon  ") == DEFAULT_NATIVE_AGENT_NAME
-    # a real custom agent passes through unchanged
     assert normalize_agent_name("MyCustomAgent") == "MyCustomAgent"
-
-
-# ── PUT /api/config/default-agent — set-time agent-name validation ──
-# Regression: the setter wrote ANY name to config.json → the write "succeeded"
-# (ok:true) but the next AppConfig.load() re-migration reconciled the dangling name
-# back to the real default, so the change silently didn't stick. It now rejects an
-# unknown agent up-front (same set-time-validation principle as models #16 / search
-# #17). Empty string is allowed (reset to system default).
 
 
 def _acfg(monkeypatch, tmp_path, agents: dict):
     """A config.json with the given agents dict; point both config_path seams at it."""
     cfg = tmp_path / "config.json"
-    cfg.write_text(_json.dumps({"agents": {k: {} for k in agents}, "default_agent": "default"}))
+    cfg.write_text(
+        _json.dumps({"agents": {k: {} for k in agents}, "default_agent": "default"})
+    )
     monkeypatch.setattr(_loader, "config_path", lambda: cfg)
     monkeypatch.setattr(_loader, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(_handlers, "config_path", lambda: cfg, raising=False)
@@ -100,7 +88,6 @@ async def test_default_agent_rejects_unknown(monkeypatch, tmp_path):
     resp = await _agents_h.api_default_agent(_put({"agent": "no-such-agent-xyz"}))
     assert resp.status == 400
     assert "Unknown agent" in _json.loads(resp.body.decode())["error"]
-    # config.json's default_agent must be UNCHANGED (write rejected before disk).
     assert _json.loads(cfg.read_text())["default_agent"] == "default"
 
 
@@ -117,7 +104,7 @@ async def test_default_agent_accepts_known(monkeypatch, tmp_path):
 async def test_default_agent_empty_allowed(monkeypatch, tmp_path):
     _acfg(monkeypatch, tmp_path, {"default": {}})
     resp = await _agents_h.api_default_agent(_put({"agent": ""}))
-    assert resp.status == 200  # empty = reset to system default, never rejected
+    assert resp.status == 200
 
 
 @pytest.mark.asyncio
@@ -129,12 +116,11 @@ async def test_default_agent_missing_key_is_400_not_silent_clear(monkeypatch, tm
     cfg = _acfg(monkeypatch, tmp_path, {"default": {}, "my-writer": {}})
     resp = await _agents_h.api_default_agent(_put({"name": "my-writer"}))
     assert resp.status == 400
-    # default_agent untouched on disk
     assert _json.loads(cfg.read_text())["default_agent"] == "default"
 
 
 def test_is_reserved_agent_case_insensitive():
-    from gideon.agents.defaults import LOOP_WORKER_AGENT_NAME, is_reserved_agent
+    from gideon.engine.agents.defaults import LOOP_WORKER_AGENT_NAME, is_reserved_agent
 
     reserved = LOOP_WORKER_AGENT_NAME
     assert is_reserved_agent(reserved)
@@ -159,7 +145,7 @@ async def test_api_agents_create_rejects_non_alphanumeric(monkeypatch, tmp_path)
 
 @pytest.mark.asyncio
 async def test_api_agents_create_case_insensitive_conflict(monkeypatch, tmp_path):
-    from gideon.agents.defaults import LOOP_WORKER_AGENT_NAME
+    from gideon.engine.agents.defaults import LOOP_WORKER_AGENT_NAME
 
     _acfg(monkeypatch, tmp_path, {LOOP_WORKER_AGENT_NAME: {}})
     req = make_mocked_request("POST", "/api/agents")
@@ -184,5 +170,4 @@ async def test_api_agents_create_lowercases_name(monkeypatch, tmp_path):
     req.json = _j
     resp = await _agents_h.api_gideon_agents_create(req)
     assert resp.status == 200
-    # ensure it landed lowercase in config
     assert "mynewagent" in _json.loads(cfg.read_text())["agents"]

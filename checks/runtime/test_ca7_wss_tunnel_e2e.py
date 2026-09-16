@@ -2,7 +2,7 @@
 
 `CA-7`'s build half (commit `57102588`) is merged: `ws.py:_check_ws_origin` admits an
 `Origin`-less upgrade when the authorizing session carries a paired `device` row, and
-`tests/test_ca7_remote_wss_auth.py` pins that admission and its fail-closed edges. What that
+`checks/runtime/test_ca7_remote_wss_auth.py` pins that admission and its fail-closed edges. What that
 suite does NOT do is *transport*: it drives `aiohttp`'s in-process test client straight at the
 app, so no socket ever carried TLS, nothing sat between client and gateway, and no connection
 was ever killed mid-session. The atom's `done_when` is written as an **observation** over a
@@ -29,9 +29,9 @@ closable on one machine.
 * The tunnel is **loopback**. There is no public DNS name, no publicly-trusted CA, and no
   internet path. The topology (client → owner's tunnel → gateway, TLS terminated at the tunnel)
   is real; the *remoteness* is not. A clause needing a genuinely remote peer is still unobserved.
-* The client is a native `aiohttp` client, not a shipped desktop/mobile shell. It is native in
+* The client is a native `aiohttp` client, not a shipped apps/desktop/mobile shell. It is native in
   the sense the admission cares about: it has no document, so it sends no `Origin`.
-  (Corrected by `CA-8`: this used to add "the repo still has none (`desktop/main.js` holds one
+  (Corrected by `CA-8`: this used to add "the repo still has none (`apps/desktop/main.js` holds one
   `backendUrl`)". The shell now holds two urls — `localGatewayUrl` for the gateway it spawned and
   `activeUrl` for a paired one — and connects to gateways it did not spawn. It is still not the
   client under test here, and deliberately never will be for THIS admission path: the desktop shell
@@ -65,18 +65,15 @@ import pytest
 from aiohttp import ClientConnectionError, ClientSession, WSServerHandshakeError, web
 from aiohttp.test_utils import TestServer
 
-from gideon.dashboard import exposure
-from gideon.dashboard import origin as origin_mod
-from gideon.dashboard import session_store as ss
-from gideon.dashboard import token_auth
-from gideon.dashboard import ws as ws_mod
-from gideon.dashboard.origin import build_allowed_origins
+from gideon.interfaces.dashboard import exposure
+from gideon.interfaces.dashboard import origin as origin_mod
+from gideon.interfaces.dashboard import session_store as ss
+from gideon.interfaces.dashboard import token_auth
+from gideon.interfaces.dashboard import ws as ws_mod
+from gideon.interfaces.dashboard.origin import build_allowed_origins
 
 PORT = 10000
-COOKIE = f"pc_token_{PORT}"
-
-
-# ── isolation ────────────────────────────────────────────────────────────────────────────────
+COOKIE = f"gideon_token_{PORT}"
 
 
 @pytest.fixture(autouse=True)
@@ -85,23 +82,22 @@ def _isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
 
     `GIDEON_HOME` is the safe lever (read per call, cached nowhere) and is what
     `exposure`/`AppConfig.load` follow. Both `config_dir` bindings are patched too because
-    `session_store` does `from gideon.config.loader import config_dir` at import time, so
+    `session_store` does `from gideon.core.config.loader import config_dir` at import time, so
     patching only the loader would leave the store writing to the REAL home. The assertion is
     the point of the fixture: a silent miss looks exactly like a passing test.
     """
-    import gideon.config.loader as loader
+    import gideon.core.config.loader as loader
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(ss, "config_dir", lambda: tmp_path, raising=False)
     token_auth.use_persistent_secret()
     token_auth.revoke_all_sessions()
-    assert ss.sessions_path().parent == tmp_path, "session store still points at the real home"
+    assert (
+        ss.sessions_path().parent == tmp_path
+    ), "session store still points at the real home"
     yield tmp_path
     token_auth.revoke_all_sessions()
-
-
-# ── a real certificate, and a real TLS-terminating tunnel ────────────────────────────────────
 
 
 def _self_signed(tmp_path: Path) -> tuple[ssl.SSLContext, ssl.SSLContext]:
@@ -123,7 +119,9 @@ def _self_signed(tmp_path: Path) -> tuple[ssl.SSLContext, ssl.SSLContext]:
         .not_valid_before(now - datetime.timedelta(minutes=5))
         .not_valid_after(now + datetime.timedelta(hours=1))
         .add_extension(
-            x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]),
+            x509.SubjectAlternativeName(
+                [x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]
+            ),
             critical=False,
         )
         .sign(key, hashes.SHA256())
@@ -168,10 +166,14 @@ class _TlsTunnel:
         self._writers: list[asyncio.StreamWriter] = []
 
     async def start(self) -> None:
-        self._server = await asyncio.start_server(self._handle, "127.0.0.1", 0, ssl=self._ssl)
+        self._server = await asyncio.start_server(
+            self._handle, "127.0.0.1", 0, ssl=self._ssl
+        )
         self.port = int(self._server.sockets[0].getsockname()[1])
 
-    async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    async def _handle(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
         try:
             up_r, up_w = await asyncio.open_connection(*self._up)
         except OSError:
@@ -180,12 +182,13 @@ class _TlsTunnel:
         self._writers += [writer, up_w]
         try:
             head = await reader.readuntil(b"\r\n\r\n")
-        except Exception:  # noqa: BLE001 — a client that vanished mid-head needs no ceremony
+        except (
+            Exception
+        ):  # noqa: BLE001 — a client that vanished mid-head needs no ceremony
             writer.close()
             up_w.close()
             return
         if self.real_ip:
-            # Insert before the blank line that ends the head, exactly as a proxy would.
             head = head[:-2] + f"X-Real-IP: {self.real_ip}\r\n".encode() + b"\r\n"
         up_w.write(head)
         await up_w.drain()
@@ -202,7 +205,9 @@ class _TlsTunnel:
                     break
                 w.write(data)
                 await w.drain()
-        except Exception:  # noqa: BLE001 — either side dying ends the relay, which is the point
+        except (
+            Exception
+        ):  # noqa: BLE001 — either side dying ends the relay, which is the point
             pass
         finally:
             try:
@@ -232,9 +237,6 @@ class _TlsTunnel:
         await asyncio.sleep(0.05)
 
 
-# ── the gateway: the real route, the real middleware, plus a peer recorder ────────────────────
-
-
 def _app() -> tuple[web.Application, list[dict[str, str]]]:
     """The shipped `/api/ws` behind the shipped token middleware, and every peer it saw."""
     seen: list[dict[str, str]] = []
@@ -252,7 +254,10 @@ def _app() -> tuple[web.Application, list[dict[str, str]]]:
         return await handler(request)
 
     app = web.Application(
-        middlewares=[_record, token_auth.token_auth_middleware(port=PORT, local_only=False)]
+        middlewares=[
+            _record,
+            token_auth.token_auth_middleware(port=PORT, local_only=False),
+        ]
     )
     app["allowed_origins"] = build_allowed_origins(PORT, False)
     state = mock.MagicMock()
@@ -268,8 +273,12 @@ def _paired_token(*, device: bool = True) -> str:
     token = token_auth.generate_token("owner")
     if device:
         nonce = token_auth.token_nonce(token)
-        assert nonce, "the minted token must carry a nonce for the test to mean anything"
-        assert ss.attach_device(nonce, ss.DeviceInfo(id="dev-1", name="Phone", kind="mobile"))
+        assert (
+            nonce
+        ), "the minted token must carry a nonce for the test to mean anything"
+        assert ss.attach_device(
+            nonce, ss.DeviceInfo(id="dev-1", name="Phone", kind="mobile")
+        )
     return token
 
 
@@ -287,7 +296,9 @@ class _Rig:
         self.tunnel = tunnel
         self.client_ctx = client_ctx
         self.seen = seen
-        self._server_ctx: ssl.SSLContext = client_ctx  # replaced by `rig` with the server's
+        self._server_ctx: ssl.SSLContext = (
+            client_ctx  # replaced by `rig` with the server's
+        )
 
     @property
     def wss_url(self) -> str:
@@ -298,7 +309,10 @@ class _Rig:
         """Kill the tunnel and bring a new one up on a fresh port, as a tunnel restart does."""
         await self.tunnel.stop()
         self.tunnel = _TlsTunnel(
-            self.server.host or "127.0.0.1", int(self.server.port or 0), self._server_ctx, real_ip
+            self.server.host or "127.0.0.1",
+            int(self.server.port or 0),
+            self._server_ctx,
+            real_ip,
         )
         await self.tunnel.start()
 
@@ -323,10 +337,6 @@ async def rig(tmp_path: Path) -> AsyncIterator[_Rig]:
         yield r
     finally:
         await r.tunnel.stop()
-        # BOUNDED on purpose. `TestServer.close()` waits on live handlers, and an `/api/ws`
-        # handler whose transport was aborted under it can still be parked in `receive()`. That
-        # is teardown, reached only after every assertion has already run, so a stuck handler
-        # must not be allowed to hang the suite — and cannot hide a finding either.
         try:
             await asyncio.wait_for(server.close(), timeout=10)
         except asyncio.TimeoutError:  # pragma: no cover — belt and braces
@@ -346,7 +356,9 @@ async def _open(rig: _Rig, token: str, *, origin: str | None = None) -> Any:
     sess = ClientSession()
     with mock.patch.object(origin_mod, "is_loopback", return_value=False):
         try:
-            sock = await sess.ws_connect(rig.wss_url, headers=headers, ssl=rig.client_ctx)
+            sock = await sess.ws_connect(
+                rig.wss_url, headers=headers, ssl=rig.client_ctx
+            )
         except BaseException:
             await sess.close()
             raise
@@ -364,8 +376,6 @@ async def _close(sock: Any) -> None:
     session is closed either way.
     """
     try:
-        # Bounded: a courteous close waits for the peer's close frame, which never comes from a
-        # tunnel that has been killed, and aiohttp's own default wait is 10s per socket.
         await asyncio.wait_for(sock.close(), timeout=3)
     except (ClientConnectionError, ConnectionResetError, asyncio.TimeoutError):
         pass
@@ -383,11 +393,10 @@ async def _status(rig: _Rig, token: str, *, origin: str | None = None) -> int:
     return 101
 
 
-# ── the done_when, clause by clause ──────────────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
-async def test_a_native_client_reaches_the_gateway_over_a_real_tls_tunnel(tmp_path: Path) -> None:
+async def test_a_native_client_reaches_the_gateway_over_a_real_tls_tunnel(
+    tmp_path: Path,
+) -> None:
     """Clause 1: a native client reaches the gateway over a tunnel using its device session.
 
     Every leg is asserted rather than assumed: the URL really is `wss://`, the socket really
@@ -399,20 +408,30 @@ async def test_a_native_client_reaches_the_gateway_over_a_real_tls_tunnel(tmp_pa
         token = _paired_token()
         assert r.wss_url.startswith("wss://"), "the client must dial TLS, not plaintext"
         assert str(r.tunnel.port) in r.wss_url
-        assert str(r.server.port) not in r.wss_url, "the client must not hold the gateway's port"
+        assert (
+            str(r.server.port) not in r.wss_url
+        ), "the client must not hold the gateway's port"
 
         sock = await _open(r, token)
         try:
-            # A real TLS transport, not merely a `wss://` string.
-            assert sock._response.connection.transport.get_extra_info("ssl_object") is not None
+            assert (
+                sock._response.connection.transport.get_extra_info("ssl_object")
+                is not None
+            )
             first = await asyncio.wait_for(sock.receive_json(), timeout=5)
-            assert first["type"] == "sessions", "the live socket must carry real gateway traffic"
+            assert (
+                first["type"] == "sessions"
+            ), "the live socket must carry real gateway traffic"
         finally:
             await _close(sock)
 
         upgrade = r.seen[-1]
-        assert upgrade["origin"] == "", "a native client has no document and must send no Origin"
-        assert upgrade["host"] == f"127.0.0.1:{r.tunnel.port}", "the client addressed the tunnel"
+        assert (
+            upgrade["origin"] == ""
+        ), "a native client has no document and must send no Origin"
+        assert (
+            upgrade["host"] == f"127.0.0.1:{r.tunnel.port}"
+        ), "the client addressed the tunnel"
 
 
 @pytest.mark.asyncio
@@ -456,24 +475,33 @@ async def test_no_new_origin_exemption_was_needed_to_reach_it_over_the_tunnel(
     """
     async with rig(tmp_path) as r:
         probes = [
-            f"https://127.0.0.1:{r.tunnel.port}",  # the tunnel, standing in for a remote peer
-            "https://pc.example.com",  # refused by the shipped rule, patch or no patch
+            f"https://127.0.0.1:{r.tunnel.port}",
+            "https://pc.example.com",
             "http://evil.example",
-            f"http://localhost:{PORT}",  # in the set unconditionally — must stay admitted
+            f"http://localhost:{PORT}",
         ]
-        paired = {p: await _status(r, _paired_token(device=True), origin=p) for p in probes}
-        plain = {p: await _status(r, _paired_token(device=False), origin=p) for p in probes}
-        assert paired == plain, f"a device session changed which origins are admitted: {paired}"
-        assert paired[f"http://localhost:{PORT}"] == 101, "the probe set must not be all-refusals"
+        paired = {
+            p: await _status(r, _paired_token(device=True), origin=p) for p in probes
+        }
+        plain = {
+            p: await _status(r, _paired_token(device=False), origin=p) for p in probes
+        }
+        assert (
+            paired == plain
+        ), f"a device session changed which origins are admitted: {paired}"
+        assert (
+            paired[f"http://localhost:{PORT}"] == 101
+        ), "the probe set must not be all-refusals"
         assert paired["https://pc.example.com"] == 403
 
-        # The one admitted difference, which is the whole of CA-7's seam.
         assert await _status(r, _paired_token(device=True), origin=None) == 101
         assert await _status(r, _paired_token(device=False), origin=None) == 403
 
 
 @pytest.mark.asyncio
-async def test_killing_the_tunnel_mid_session_drops_the_socket_promptly(tmp_path: Path) -> None:
+async def test_killing_the_tunnel_mid_session_drops_the_socket_promptly(
+    tmp_path: Path,
+) -> None:
     """Clause 2, first half: the drop is observed, and it is prompt rather than a hang.
 
     A client left hanging on a dead tunnel is the ungraceful failure this clause exists to rule
@@ -490,12 +518,14 @@ async def test_killing_the_tunnel_mid_session_drops_the_socket_promptly(tmp_path
     async with rig(tmp_path) as r:
         sock = await _open(r, _paired_token())
         try:
-            assert (await asyncio.wait_for(sock.receive_json(), timeout=5))["type"] == "sessions"
-            await r.tunnel.stop()  # the tunnel dies under the live session
+            assert (await asyncio.wait_for(sock.receive_json(), timeout=5))[
+                "type"
+            ] == "sessions"
+            await r.tunnel.stop()
             try:
                 await asyncio.wait_for(sock.receive(), timeout=5)
             except (ClientConnectionError, ConnectionResetError):
-                pass  # the raise shape — still a prompt notification, not a hang
+                pass
             assert (
                 sock.closed or sock._writer.transport.is_closing()
             ), "the client still believes the dead socket is usable"
@@ -504,7 +534,9 @@ async def test_killing_the_tunnel_mid_session_drops_the_socket_promptly(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_the_same_device_session_reconnects_once_the_tunnel_returns(tmp_path: Path) -> None:
+async def test_the_same_device_session_reconnects_once_the_tunnel_returns(
+    tmp_path: Path,
+) -> None:
     """Clause 2, second half: the session survives the transport's death.
 
     This is the property that makes "reconnects gracefully" true, and it is not free: a session
@@ -515,16 +547,22 @@ async def test_the_same_device_session_reconnects_once_the_tunnel_returns(tmp_pa
     async with rig(tmp_path) as r:
         token = _paired_token()
         sock = await _open(r, token)
-        assert (await asyncio.wait_for(sock.receive_json(), timeout=5))["type"] == "sessions"
+        assert (await asyncio.wait_for(sock.receive_json(), timeout=5))[
+            "type"
+        ] == "sessions"
         dead_port = r.tunnel.port
         await _close(sock)
 
         await r.restart_tunnel()
-        assert r.tunnel.port != dead_port, "the reconnect must cross a genuinely new listener"
+        assert (
+            r.tunnel.port != dead_port
+        ), "the reconnect must cross a genuinely new listener"
 
         again = await _open(r, token)
         try:
-            assert (await asyncio.wait_for(again.receive_json(), timeout=5))["type"] == "sessions"
+            assert (await asyncio.wait_for(again.receive_json(), timeout=5))[
+                "type"
+            ] == "sessions"
         finally:
             await _close(again)
 
@@ -546,21 +584,25 @@ async def test_the_reconnect_survives_the_changed_client_ip_a_real_tunnel_produc
         await r.restart_tunnel(real_ip="203.0.113.7")
         sock = await _open(r, token)
         try:
-            assert (await asyncio.wait_for(sock.receive_json(), timeout=5))["type"] == "sessions"
+            assert (await asyncio.wait_for(sock.receive_json(), timeout=5))[
+                "type"
+            ] == "sessions"
         finally:
             await _close(sock)
-        assert r.seen[-1]["x_real_ip"] == "203.0.113.7", "the tunnel must have moved the address"
+        assert (
+            r.seen[-1]["x_real_ip"] == "203.0.113.7"
+        ), "the tunnel must have moved the address"
 
-        # And from a different address again, on the same session — the phone-changes-network case.
         await r.restart_tunnel(real_ip="198.51.100.22")
         sock = await _open(r, token)
         try:
-            assert (await asyncio.wait_for(sock.receive_json(), timeout=5))["type"] == "sessions"
+            assert (await asyncio.wait_for(sock.receive_json(), timeout=5))[
+                "type"
+            ] == "sessions"
         finally:
             await _close(sock)
         assert r.seen[-1]["x_real_ip"] == "198.51.100.22"
 
-        # The binding that the cookie path skips is real, and would have refused both reconnects.
         token_auth.bind_token_ip(token, "203.0.113.7")
         assert token_auth.check_token_ip(token, "203.0.113.7")
         assert not token_auth.check_token_ip(
@@ -568,11 +610,10 @@ async def test_the_reconnect_survives_the_changed_client_ip_a_real_tunnel_produc
         ), "if the cookie path consulted this, the second reconnect could not have succeeded"
 
 
-# ── no cloud middle tier: a path property, asserted ──────────────────────────────────────────
-
-
 @pytest.mark.asyncio
-async def test_no_cloud_middle_tier_the_only_hop_is_the_owners_own_tunnel(tmp_path: Path) -> None:
+async def test_no_cloud_middle_tier_the_only_hop_is_the_owners_own_tunnel(
+    tmp_path: Path,
+) -> None:
     """Success Criterion 3 as a rail: client → owner's tunnel → gateway, and nothing else.
 
     Asserted as a closed accounting of the path rather than a comment: across the whole session
@@ -583,20 +624,27 @@ async def test_no_cloud_middle_tier_the_only_hop_is_the_owners_own_tunnel(tmp_pa
     async with rig(tmp_path) as r:
         sock = await _open(r, _paired_token())
         try:
-            assert (await asyncio.wait_for(sock.receive_json(), timeout=5))["type"] == "sessions"
-            # The client's only peer: the tunnel it dialed.
+            assert (await asyncio.wait_for(sock.receive_json(), timeout=5))[
+                "type"
+            ] == "sessions"
             peer = sock._response.connection.transport.get_extra_info("peername")
             assert peer[0] == "127.0.0.1" and peer[1] == r.tunnel.port
         finally:
             await _close(sock)
 
         peers = {s["remote"] for s in r.seen}
-        assert peers == {"127.0.0.1"}, f"the gateway saw something other than the tunnel: {peers}"
+        assert peers == {
+            "127.0.0.1"
+        }, f"the gateway saw something other than the tunnel: {peers}"
         hosts = {s["host"] for s in r.seen}
-        assert hosts == {f"127.0.0.1:{r.tunnel.port}"}, f"a third host appears in the path: {hosts}"
+        assert hosts == {
+            f"127.0.0.1:{r.tunnel.port}"
+        }, f"a third host appears in the path: {hosts}"
 
 
-def test_no_cloud_middle_tier_the_gateway_advertises_no_host_the_owner_did_not_configure() -> None:
+def test_no_cloud_middle_tier_the_gateway_advertises_no_host_the_owner_did_not_configure() -> (
+    None
+):
     """The static half: nothing in the product supplies a public host on the owner's behalf.
 
     A cloud tier would have to enter as a default — a fallback broker hostname the code reaches
@@ -604,7 +652,9 @@ def test_no_cloud_middle_tier_the_gateway_advertises_no_host_the_owner_did_not_c
     the owner does declare a URL it is returned verbatim rather than rewritten through anything.
     Add a vendor default to `public_url`'s fallback chain and this reds.
     """
-    assert exposure.public_url() == "", "an unconfigured instance must advertise no host at all"
+    assert (
+        exposure.public_url() == ""
+    ), "an unconfigured instance must advertise no host at all"
     assert exposure.public_host() == ""
     assert exposure.is_exposed() is False
 
@@ -613,5 +663,7 @@ def test_no_cloud_middle_tier_the_gateway_advertises_no_host_the_owner_did_not_c
         external_access=SimpleNamespace(public_url=""),
     )
     assert exposure.public_url(owner) == "https://pc.example.com"
-    assert exposure.public_host(owner) == "pc.example.com", "the owner's host, not a rewrite"
+    assert (
+        exposure.public_host(owner) == "gideon.example.com"
+    ), "the owner's host, not a rewrite"
     assert exposure.is_https(owner) is True

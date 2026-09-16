@@ -1,4 +1,4 @@
-"""Unit tests for the self-development harness spec layer (harness/specs.py, profiles.py).
+"""Unit tests for the self-development harness spec layer (checks/harness/specs.py, profiles.py).
 
 These lock the spec-schema contract and the profile resolution the CLI relies on. They are
 pure/in-memory (no pytest subprocess) — the live reference-resolution round-trip
@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from harness import profiles
-from harness.specs import (
+from checks.harness import profiles
+from checks.harness.specs import (
     KIND_RULE,
     KIND_TASK,
     Spec,
@@ -31,9 +31,6 @@ def _write(tmp_path: Path, subdir: str, name: str, text: str) -> Path:
     p = d / name
     p.write_text(textwrap.dedent(text), encoding="utf-8")
     return p
-
-
-# ── parse_spec ────────────────────────────────────────────────────────────────
 
 
 def test_parse_spec_reads_frontmatter_and_body(tmp_path: Path) -> None:
@@ -101,11 +98,7 @@ def test_get_list_tolerates_scalar(tmp_path: Path) -> None:
         """,
     )
     spec = parse_spec(p)
-    # A scalar where a list is expected is coerced to a one-item list.
     assert spec.get_list("appliesTo") == ["src/single.py"]
-
-
-# ── validate_spec ─────────────────────────────────────────────────────────────
 
 
 def _rule(**meta: object) -> Spec:
@@ -117,7 +110,12 @@ def _rule(**meta: object) -> Spec:
         "source": "src",
     }
     base.update(meta)
-    return Spec(path=Path("harness/specs/rules/r.md"), kind=KIND_RULE, meta=base, body="why")
+    return Spec(
+        path=Path("checks/harness/specs/rules/r.md"),
+        kind=KIND_RULE,
+        meta=base,
+        body="why",
+    )
 
 
 def test_valid_rule_has_no_issues() -> None:
@@ -145,9 +143,8 @@ def test_malformed_id_flagged() -> None:
 
 
 def test_type_directory_mismatch_flagged() -> None:
-    # A task-typed spec physically filed under rules/ is a filing mistake.
     spec = Spec(
-        path=Path("harness/specs/rules/mis.md"),
+        path=Path("checks/harness/specs/rules/mis.md"),
         kind=KIND_TASK,
         meta={
             "id": "t",
@@ -165,7 +162,7 @@ def test_type_directory_mismatch_flagged() -> None:
 
 def test_task_requires_negative_acceptance() -> None:
     spec = Spec(
-        path=Path("harness/specs/tasks/t.md"),
+        path=Path("checks/harness/specs/tasks/t.md"),
         kind=KIND_TASK,
         meta={
             "id": "T9.1",
@@ -173,7 +170,7 @@ def test_task_requires_negative_acceptance() -> None:
             "title": "t",
             "intent": "i",
             "touchedAreas": ["src/x.py"],
-            "acceptance": {"positive": ["did the thing"]},  # no negative clause
+            "acceptance": {"positive": ["did the thing"]},
         },
         body="",
     )
@@ -187,18 +184,12 @@ def test_unknown_requiredrules_reference_flagged() -> None:
     assert any("unknown spec id" in i.message for i in issues)
 
 
-# ── validate_all ──────────────────────────────────────────────────────────────
-
-
 def test_duplicate_ids_flagged() -> None:
     a = _rule(id="dup")
     b = _rule(id="dup")
-    b.path = Path("harness/specs/rules/b.md")
+    b.path = Path("checks/harness/specs/rules/b.md")
     issues = validate_all([a, b])
     assert any("duplicate id" in i.message for i in issues)
-
-
-# ── profiles ──────────────────────────────────────────────────────────────────
 
 
 def test_profile_registry_has_core_profiles() -> None:
@@ -207,19 +198,17 @@ def test_profile_registry_has_core_profiles() -> None:
 
 
 def test_resolve_commands_substitutes_tests() -> None:
-    cmds = profiles.resolve_commands(["fast"], tests=["tests/test_a.py::t1"])
+    cmds = profiles.resolve_commands(["fast"], tests=["checks/runtime/test_a.py::t1"])
     assert len(cmds) == 1
-    assert cmds[0].command.endswith("tests/test_a.py::t1")
+    assert cmds[0].command.endswith("checks/runtime/test_a.py::t1")
     assert cmds[0].profile == "fast"
 
 
 def test_resolve_commands_skips_needs_tests_when_none() -> None:
-    # `fast` needs node-ids; with none, it contributes no command (caller decides error).
     assert profiles.resolve_commands(["fast"], tests=[]) == []
 
 
 def test_resolve_commands_dedups_and_ignores_unknown() -> None:
     cmds = profiles.resolve_commands(["web", "web", "does-not-exist"])
     commands = [c.command for c in cmds]
-    # web contributes 2 commands, requested twice → still 2 (deduped); unknown ignored.
     assert commands == ["npm run typecheck:web", "npm run test:web"]

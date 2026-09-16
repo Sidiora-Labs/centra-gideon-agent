@@ -20,9 +20,13 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.workflows import service, store
-from gideon.workflows.controller import EngineServices, RunController, _item_label
-from gideon.workflows.models import NodeInstance, RunStatus, WorkflowRun
+from gideon.automation.workflows import service, store
+from gideon.automation.workflows.controller import (
+    EngineServices,
+    RunController,
+    _item_label,
+)
+from gideon.automation.workflows.models import NodeInstance, RunStatus, WorkflowRun
 
 pytestmark = pytest.mark.anyio
 
@@ -36,8 +40,10 @@ def anyio_backend() -> str:
 def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
-    monkeypatch.setattr("gideon.inbox.config_dir", lambda: home, raising=False)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr(
+        "gideon.integrations.inbox.config_dir", lambda: home, raising=False
+    )
     return home
 
 
@@ -54,7 +60,9 @@ SPEC = {
 def _terminal_run(status: RunStatus = RunStatus.COMPLETE) -> WorkflowRun:
     run = store.create(WorkflowRun(id="", workflow_name="del"))
     store.write_spec(run.id, SPEC)
-    store.write_state(run.id, {"root.children[0]": NodeInstance(path="root.children[0]")})
+    store.write_state(
+        run.id, {"root.children[0]": NodeInstance(path="root.children[0]")}
+    )
     run.status = status
     store.save(run)
     return run
@@ -86,7 +94,12 @@ class TestDeleteRefusals:
 
     @pytest.mark.parametrize(
         "status",
-        [RunStatus.COMPLETE, RunStatus.FAILED, RunStatus.CANCELLED, RunStatus.ESCALATED],
+        [
+            RunStatus.COMPLETE,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+            RunStatus.ESCALATED,
+        ],
     )
     async def test_every_terminal_status_is_deletable(self, status: RunStatus) -> None:
         run = _terminal_run(status)
@@ -108,7 +121,7 @@ class TestDeleteEffects:
     async def test_it_closes_the_runs_open_inbox_rows(self) -> None:
         """A gate open when the run was cancelled would otherwise outlive the run entirely and
         be unanswerable forever."""
-        from gideon.inbox import InboxItem, InboxStore, ItemKind
+        from gideon.integrations.inbox import InboxItem, InboxStore, ItemKind
 
         run = _terminal_run(RunStatus.CANCELLED)
         inbox = InboxStore()
@@ -162,7 +175,9 @@ class TestDeleteEffects:
         assert (await service.delete_run(run.id, supervisor=sup))["ok"] is True
         assert sup.forgotten == [run.id]
 
-    async def test_a_supervisor_that_cannot_forget_does_not_block_the_delete(self) -> None:
+    async def test_a_supervisor_that_cannot_forget_does_not_block_the_delete(
+        self,
+    ) -> None:
         """A registry failure must not strand a run the user asked to remove."""
 
         class _Broken:
@@ -224,7 +239,11 @@ class TestForeachProjection:
             "kind": "foreach",
             "id": "loop",
             "config": {"items": [{"path": "a.py"}, {"path": "b.py"}, {"path": "c.py"}]},
-            "body": {"kind": "transform", "id": "item", "config": {"expr": "{{item.path}}"}},
+            "body": {
+                "kind": "transform",
+                "id": "item",
+                "config": {"expr": "{{item.path}}"},
+            },
         },
     }
 
@@ -254,13 +273,13 @@ class TestForeachProjection:
     async def test_the_label_SURVIVES_a_reload(self) -> None:
         """It is persisted on the instance because the items list is re-resolved from a binding:
         after an upstream output changes, the label would otherwise be unrecoverable — and a
-        retry must show the item it originally got, not whatever now sits at that index."""
+        retry must show the item it originally got, not whatever now sits at that index.
+        """
         run = store.create(WorkflowRun(id="", workflow_name="fan"))
         store.write_spec(run.id, self.FAN)
         c = RunController(run, self.FAN, services=EngineServices())
         await c.run_to_completion(timeout=20)
 
-        # Re-read from DISK, with no controller in memory.
         reloaded = store.read_state(run.id)
         labels = {i.item_label for p, i in reloaded.items() if "#" in p}
         assert labels == {"a.py", "b.py", "c.py"}
@@ -268,7 +287,7 @@ class TestForeachProjection:
     async def test_the_projection_still_validates(self) -> None:
         """The new fields are in the projection's field table, so a fan-out snapshot is not
         suddenly "invalid" for carrying them."""
-        from gideon.workflows.projection import project
+        from gideon.automation.workflows.projection import project
 
         run = store.create(WorkflowRun(id="", workflow_name="fan"))
         store.write_spec(run.id, self.FAN)

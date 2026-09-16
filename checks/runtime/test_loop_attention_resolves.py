@@ -38,11 +38,21 @@ from typing import Any
 
 import pytest
 
-from gideon import inbox as inbox_mod
-from gideon.inbox import InboxStore, ItemKind, ItemStatus, emit_attention_item
-from gideon.loop import store as loop_store
-from gideon.loop.loop import ATTENTION_STATUSES, LOOP_PHASES, Loop, LoopStatus
-from gideon.workflows import attention
+from gideon.automation.loop import store as loop_store
+from gideon.automation.loop.loop import (
+    ATTENTION_STATUSES,
+    LOOP_PHASES,
+    Loop,
+    LoopStatus,
+)
+from gideon.automation.workflows import attention
+from gideon.integrations import inbox as inbox_mod
+from gideon.integrations.inbox import (
+    InboxStore,
+    ItemKind,
+    ItemStatus,
+    emit_attention_item,
+)
 
 
 class _Svc:
@@ -68,7 +78,9 @@ class _State:
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path, raising=False)
+    monkeypatch.setattr(
+        "gideon.core.config.loader.config_dir", lambda: tmp_path, raising=False
+    )
     return tmp_path
 
 
@@ -83,20 +95,24 @@ def live(home: Path, monkeypatch: pytest.MonkeyPatch) -> _State:
     store = InboxStore()
     store.load()
     state = _State(store)
-    from gideon.inbox_providers import native_source
+    from gideon.integrations.inbox_providers import native_source
 
     monkeypatch.setattr(native_source, "_dashboard_state", state, raising=False)
     return state
 
 
 def _loop(status: LoopStatus = LoopStatus.RUNNING) -> Loop:
-    loop = loop_store.create(Loop(id="", kind="code", name="bell_times tier gap", task="t"))
+    loop = loop_store.create(
+        Loop(id="", kind="code", name="bell_times tier gap", task="t")
+    )
     if status is not LoopStatus.READY:
         loop_store.update_status(loop.id, status)
     return loop
 
 
-def _raise_row(state: _State, loop_id: str, *, event: str = "blocked", cycles: int = 0) -> str:
+def _raise_row(
+    state: _State, loop_id: str, *, event: str = "blocked", cycles: int = 0
+) -> str:
     """The watchdog's real emit, with its real arguments."""
     return emit_attention_item(
         state,
@@ -108,9 +124,6 @@ def _raise_row(state: _State, loop_id: str, *, event: str = "blocked", cycles: i
         refs={"loop": loop_id, "loop_kind": "code"},
         dedup_key=f"loop:{loop_id}:{event}:{cycles}",
     )
-
-
-# ── the defect ───────────────────────────────────────────────────────────────────────────
 
 
 class TestResume:
@@ -158,8 +171,12 @@ class TestResume:
         loop_store.update_status(loop.id, LoopStatus.PAUSED)
         assert live._inbox_svc.inbox.items[item].status == ItemStatus.PENDING.value
 
-    @pytest.mark.parametrize("ending", [LoopStatus.COMPLETE, LoopStatus.FAILED, LoopStatus.STOPPED])
-    def test_an_ended_loop_closes_its_row(self, live: _State, ending: LoopStatus) -> None:
+    @pytest.mark.parametrize(
+        "ending", [LoopStatus.COMPLETE, LoopStatus.FAILED, LoopStatus.STOPPED]
+    )
+    def test_an_ended_loop_closes_its_row(
+        self, live: _State, ending: LoopStatus
+    ) -> None:
         """A finished loop answers its own question by ending — nothing about it is actionable.
         Same reasoning as `resolve_run_items` for a cancelled workflow run."""
         loop = _loop(LoopStatus.BLOCKED)
@@ -186,7 +203,8 @@ class TestTheRailIsDerived:
         self, live: _State, source: LoopStatus, target: LoopStatus
     ) -> None:
         """Enumerated from the phase map, so a NEW attention status (or a new non-attention one)
-        is covered the day it is added rather than the day someone remembers to add a case."""
+        is covered the day it is added rather than the day someone remembers to add a case.
+        """
         loop = _loop(source)
         item = _raise_row(live, loop.id)
         loop_store.update_status(loop.id, target)
@@ -198,7 +216,9 @@ class TestTheRailIsDerived:
         "source,target",
         [
             (s, t)
-            for s, t in itertools.permutations(sorted(ATTENTION_STATUSES, key=lambda x: x.value), 2)
+            for s, t in itertools.permutations(
+                sorted(ATTENTION_STATUSES, key=lambda x: x.value), 2
+            )
         ],
     )
     def test_an_attention_to_attention_move_keeps_the_row(
@@ -215,7 +235,7 @@ class TestTheRailIsDerived:
     def test_the_attention_set_is_derived_and_non_empty(self) -> None:
         """Vacuity floor for both rails above: an empty set would make every parametrisation
         collapse to nothing and both tests would "pass" with zero cases."""
-        from gideon.loop.loop import LifecyclePhase
+        from gideon.automation.loop.loop import LifecyclePhase
 
         assert ATTENTION_STATUSES == frozenset(
             s for s, phase in LOOP_PHASES.items() if phase is LifecyclePhase.ATTENTION
@@ -224,13 +244,17 @@ class TestTheRailIsDerived:
         assert LoopStatus.BLOCKED in ATTENTION_STATUSES
         assert LoopStatus.RUNNING not in ATTENTION_STATUSES
 
-    def test_the_resolve_is_reached_from_update_status(self, live: _State, monkeypatch) -> None:
+    def test_the_resolve_is_reached_from_update_status(
+        self, live: _State, monkeypatch
+    ) -> None:
         """🪤 Every new guard needs a non-test caller. Observed through the RESULT rather than a
         source grep, which would pass on an import that is never invoked."""
         loop = _loop(LoopStatus.BLOCKED)
         seen: list[dict] = []
         monkeypatch.setattr(
-            inbox_mod, "resolve_attention_items", lambda _state, refs, **_kw: seen.append(refs) or 0
+            inbox_mod,
+            "resolve_attention_items",
+            lambda _state, refs, **_kw: seen.append(refs) or 0,
         )
         loop_store.update_status(loop.id, LoopStatus.RUNNING)
         assert seen == [{"loop": loop.id}]
@@ -251,9 +275,6 @@ class TestTheRailIsDerived:
         assert calls == []
 
 
-# ── the generic resolver ─────────────────────────────────────────────────────────────────
-
-
 class TestResolveAttentionItems:
     def test_matching_is_a_ref_SUBSET_so_one_implementation_serves_every_emitter(
         self, live: _State
@@ -271,7 +292,9 @@ class TestResolveAttentionItems:
         )
         assert inbox_mod.resolve_attention_items(live, {"loop": "L1"}) == 1
         assert store.items[loop_row].status == ItemStatus.HANDLED.value
-        assert store.items[gate].status == ItemStatus.PENDING.value, "a loop resolve hit a gate row"
+        assert (
+            store.items[gate].status == ItemStatus.PENDING.value
+        ), "a loop resolve hit a gate row"
 
     def test_every_pair_must_match_so_a_scoped_resolve_cannot_close_a_sibling(
         self, live: _State
@@ -296,7 +319,10 @@ class TestResolveAttentionItems:
             dedup_key="k2",
         )
         assert (
-            inbox_mod.resolve_attention_items(live, {"workflow": "r1", "workflow_node": "n1"}) == 1
+            inbox_mod.resolve_attention_items(
+                live, {"workflow": "r1", "workflow_node": "n1"}
+            )
+            == 1
         )
         assert store.items[n1].status == ItemStatus.HANDLED.value
         assert store.items[n2].status == ItemStatus.PENDING.value
@@ -329,23 +355,31 @@ class TestResolveAttentionItems:
             refs={"loop": "L1", "loop_kind": ""},
             dedup_key="k-blankkind",
         )
-        assert inbox_mod.resolve_attention_items(live, {"loop": "L1", "loop_kind": ""}) == 0
-        assert live._inbox_svc.inbox.items[blank_kind].status == ItemStatus.PENDING.value
-        # …and the row is still resolvable the correct way, by the ref that identifies it.
+        assert (
+            inbox_mod.resolve_attention_items(live, {"loop": "L1", "loop_kind": ""})
+            == 0
+        )
+        assert (
+            live._inbox_svc.inbox.items[blank_kind].status == ItemStatus.PENDING.value
+        )
         assert inbox_mod.resolve_attention_items(live, {"loop": "L1"}) == 1
 
     @pytest.mark.parametrize(
-        "settled", [ItemStatus.DISMISSED.value, ItemStatus.HANDLED.value, ItemStatus.SENT.value]
+        "settled",
+        [ItemStatus.DISMISSED.value, ItemStatus.HANDLED.value, ItemStatus.SENT.value],
     )
     def test_a_settled_row_is_not_rewritten(self, live: _State, settled: str) -> None:
         """The user's own action wins. Rewriting a row they dismissed would resurrect a decision
-        they already made — and `SENT` belongs to the reply machinery, not to attention."""
+        they already made — and `SENT` belongs to the reply machinery, not to attention.
+        """
         row = _raise_row(live, "L1")
         live._inbox_svc.inbox.items[row].status = settled
         assert inbox_mod.resolve_attention_items(live, {"loop": "L1"}) == 0
         assert live._inbox_svc.inbox.items[row].status == settled
 
-    def test_it_is_best_effort_and_never_raises(self, live: _State, monkeypatch) -> None:
+    def test_it_is_best_effort_and_never_raises(
+        self, live: _State, monkeypatch
+    ) -> None:
         """A loop transition must not fail because the inbox could not be written."""
         _raise_row(live, "L1")
 
@@ -385,11 +419,16 @@ class TestOneOpenStatusVocabulary:
             row = _raise_row(live, "L1")
             store.items[row].status = status
             suppresses = (
-                inbox_mod._find_open_by_dedup(store, store.items[row].refs["dedup_key"]) is not None
+                inbox_mod._find_open_by_dedup(store, store.items[row].refs["dedup_key"])
+                is not None
             )
-            store.items[row].status = status  # _find_open_by_dedup does not mutate; be explicit
+            store.items[row].status = (
+                status  # _find_open_by_dedup does not mutate; be explicit
+            )
             closes = inbox_mod.resolve_attention_items(live, {"loop": "L1"}) == 1
-            assert suppresses == closes, f"{status}: suppression and resolution disagree"
+            assert (
+                suppresses == closes
+            ), f"{status}: suppression and resolution disagree"
 
     def test_the_workflow_module_no_longer_keeps_its_own_copy(self) -> None:
         """The clean break. A second definition is how the two would drift; the workflow module
@@ -429,7 +468,9 @@ class TestTheWorkflowPathStillWorks:
         assert attention.resolve_run_items(live, "r1") == 1
         assert store.items[n2].status == ItemStatus.HANDLED.value
 
-    def test_a_gate_resolve_cannot_be_unscoped_by_an_empty_run_id(self, live: _State) -> None:
+    def test_a_gate_resolve_cannot_be_unscoped_by_an_empty_run_id(
+        self, live: _State
+    ) -> None:
         """A small hardening inherited from the generic guard, stated at its measured size.
 
         Executed against `origin/main`: `resolve_run_items(state, "")` closed exactly ONE row —
@@ -454,25 +495,24 @@ class TestTheWorkflowPathStillWorks:
         assert live._inbox_svc.inbox.items[blank].status == ItemStatus.PENDING.value
 
 
-# ── the dedup key ────────────────────────────────────────────────────────────────────────
-
-
 class TestDedupKey:
     def test_two_polls_of_one_wait_share_a_key(self, home: Path, monkeypatch) -> None:
         """The property that must survive: the watchdog re-observes a blocked loop every tick,
         and each tick must not stack a row. A loop completes no cycles while it waits, so the
         cycle count is what makes "the same wait" and "a later wait" distinguishable."""
-        from gideon.loop import files as loop_files
-        from gideon.loop.watchdog import LoopWatchdog
+        from gideon.automation.loop import files as loop_files
+        from gideon.automation.loop.watchdog import LoopWatchdog
 
         monkeypatch.setattr(loop_files, "cycles_completed", lambda _id: 8)
         wd = LoopWatchdog.__new__(LoopWatchdog)
-        assert wd._attention_dedup_key("L1", "blocked") == wd._attention_dedup_key("L1", "blocked")
+        assert wd._attention_dedup_key("L1", "blocked") == wd._attention_dedup_key(
+            "L1", "blocked"
+        )
         assert wd._attention_dedup_key("L1", "blocked") == "loop:L1:blocked:8"
 
     def test_a_later_wait_gets_a_different_key(self, home: Path, monkeypatch) -> None:
-        from gideon.loop import files as loop_files
-        from gideon.loop.watchdog import LoopWatchdog
+        from gideon.automation.loop import files as loop_files
+        from gideon.automation.loop.watchdog import LoopWatchdog
 
         wd = LoopWatchdog.__new__(LoopWatchdog)
         monkeypatch.setattr(loop_files, "cycles_completed", lambda _id: 8)
@@ -483,12 +523,15 @@ class TestDedupKey:
     def test_each_event_keeps_its_own_key(self, home: Path, monkeypatch) -> None:
         """`blocked` and `stagnant` are different requests; they were separately keyed before and
         must stay so, or a stalled loop would be silenced by an earlier block."""
-        from gideon.loop import files as loop_files
-        from gideon.loop.watchdog import LoopWatchdog
+        from gideon.automation.loop import files as loop_files
+        from gideon.automation.loop.watchdog import LoopWatchdog
 
         monkeypatch.setattr(loop_files, "cycles_completed", lambda _id: 3)
         wd = LoopWatchdog.__new__(LoopWatchdog)
-        keys = {wd._attention_dedup_key("L1", e) for e in ("blocked", "stagnant", "needs_input")}
+        keys = {
+            wd._attention_dedup_key("L1", e)
+            for e in ("blocked", "stagnant", "needs_input")
+        }
         assert len(keys) == 3
 
     def test_an_unreadable_cycle_count_degrades_to_the_old_key(
@@ -497,8 +540,8 @@ class TestDedupKey:
         """🪤 Fail-soft in the safe direction. Raising inside a publish path would cost the
         notification entirely; the un-suffixed key is the OLD behaviour — still deduped per
         (loop, event), just not self-re-arming — and it cannot double-notify."""
-        from gideon.loop import files as loop_files
-        from gideon.loop.watchdog import LoopWatchdog
+        from gideon.automation.loop import files as loop_files
+        from gideon.automation.loop.watchdog import LoopWatchdog
 
         def _boom(_id):
             raise OSError("ledger unreadable")
@@ -511,7 +554,7 @@ class TestDedupKey:
         """The assumption the key rests on, asserted against the real projection rather than
         trusted: if a waiting loop could complete cycles, the key would change under a re-poll
         and the watchdog would stack a row per tick."""
-        from gideon.loop import files as loop_files
+        from gideon.automation.loop import files as loop_files
 
         loop = _loop(LoopStatus.BLOCKED)
         before = loop_files.cycles_completed(loop.id)

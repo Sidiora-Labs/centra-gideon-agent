@@ -16,7 +16,7 @@ import inspect
 
 import pytest
 
-from gideon.learning.inbox import (
+from gideon.cognition.learning.inbox import (
     ACCEPT_ACTORS,
     BULK_ACCEPTABLE_TIERS,
     FILE_ACTORS,
@@ -57,9 +57,6 @@ def _prop(pid="p1", **kw):
     )
     base.update(kw)
     return _Prop(**base)
-
-
-# ── §7 criterion 1: the accept gate ──
 
 
 def test_an_agent_can_never_accept():
@@ -113,7 +110,9 @@ def test_the_gate_takes_no_trust_parameter():
     """
     params = set(inspect.signature(require_human).parameters)
     assert params == {"action", "actor", "status"}
-    assert not any(p in params for p in ("trust", "trust_mode", "yolo", "force", "override"))
+    assert not any(
+        p in params for p in ("trust", "trust_mode", "yolo", "force", "override")
+    )
 
 
 def test_an_already_resolved_proposal_cannot_be_re_decided():
@@ -132,11 +131,13 @@ def test_the_actor_vocabulary_is_reused_not_redefined():
     """S56's matrix already carries the doctrine — the AGENT is a worker whose self-report is
     what needs checking". Two actor enums would eventually disagree about who an `agent` is.
     """
-    from gideon.workflows.verified_done import Actor
+    from gideon.automation.workflows.verified_done import Actor
 
     for actor in (a.value for a in Actor):
         gate = require_human(action="accept", actor=actor)
-        assert gate.denial != Denial.UNKNOWN_ACTOR.value, f"{actor} should be a known actor"
+        assert (
+            gate.denial != Denial.UNKNOWN_ACTOR.value
+        ), f"{actor} should be a known actor"
 
 
 def test_only_the_user_may_decide():
@@ -163,9 +164,6 @@ def test_a_refused_action_produces_an_audit_row():
     assert row["reason"]
 
 
-# ── §6.1: every kind, one queue ──
-
-
 def test_the_inbox_covers_every_proposal_kind():
     """One surface for every kind. A second kind list is how a surface silently stops showing one.
 
@@ -173,7 +171,7 @@ def test_the_inbox_covers_every_proposal_kind():
     original six, and a surface that enumerated a stale number would drop the newest kind — the
     exact failure this test exists to catch.
     """
-    from gideon.learning.proposals import Kind
+    from gideon.cognition.learning.proposals import Kind
 
     kinds = [k.value for k in Kind]
     view = build_view([_prop(f"p{i}", kind=k) for i, k in enumerate(kinds)])
@@ -217,9 +215,11 @@ def test_the_projection_survives_an_older_record():
     """`Proposal` gains fields as the flywheel grows; a projection raising on an older record would
     empty the inbox exactly when someone needs to review a backlog."""
     row = row_from_proposal(_Prop(id="old", kind="skill", title="t", provenance="p"))
-    assert row.reinforcements == 0 and row.evidence_refs == [] and row.manifest_valid is True
-    # UNGRADED, not "correlated": defaulting to a tier would upgrade a record from before the
-    # tier existed into a claim nobody made.
+    assert (
+        row.reinforcements == 0
+        and row.evidence_refs == []
+        and row.manifest_valid is True
+    )
     assert row.evidence_strength == ""
 
 
@@ -232,17 +232,17 @@ def test_a_row_carries_the_evidence_TIER_not_only_the_count():
     one and nothing anywhere read it — so the reviewer deciding a retirement saw `2 evidence
     ref(s)` whether the claim was measured or merely correlated.
     """
-    measured = row_from_proposal(_prop("a", kind="retirement", evidence_strength="ablation"))
+    measured = row_from_proposal(
+        _prop("a", kind="retirement", evidence_strength="ablation")
+    )
     correlated = row_from_proposal(_prop("b", evidence_strength="correlated"))
 
     assert measured.to_dict()["evidence_strength"] == "ablation"
-    # VACUITY FLOOR: a hardcoded constant would satisfy the line above. These two rows carry the
-    # same evidence COUNT, so only the tier can tell them apart.
     assert measured.evidence_refs == correlated.evidence_refs
-    assert measured.to_dict()["evidence_strength"] != correlated.to_dict()["evidence_strength"]
-
-
-# ── risk tiers are metadata, never a lane ──
+    assert (
+        measured.to_dict()["evidence_strength"]
+        != correlated.to_dict()["evidence_strength"]
+    )
 
 
 def test_a_manual_only_row_is_never_bulk_acceptable():
@@ -286,12 +286,9 @@ def test_bulk_eligibility_is_a_ui_bound_not_the_gate():
 
 def test_there_is_no_auto_tier_in_the_refiners_vocabulary():
     """§3.1: any "auto" tier is guardrail-violating."""
-    from gideon.learning.refiner import RiskTier
+    from gideon.cognition.learning.refiner import RiskTier
 
     assert "auto" not in {t.value for t in RiskTier}
-
-
-# ── ordering and filtering ──
 
 
 def test_manual_only_sorts_FIRST():
@@ -344,7 +341,9 @@ def test_flagged_only_surfaces_the_broken_manifests():
     flag nobody sees."""
     rows = [
         row_from_proposal(_prop("ok")),
-        row_from_proposal(_prop("broken", manifest_valid=False, manifest_issues=["no root_cause"])),
+        row_from_proposal(
+            _prop("broken", manifest_valid=False, manifest_issues=["no root_cause"])
+        ),
     ]
     assert [r.id for r in filter_rows(rows, flagged_only=True)] == ["broken"]
 
@@ -357,19 +356,22 @@ def test_an_invalid_manifest_still_appears_in_the_queue():
 
 def test_filters_compose():
     rows = [
-        row_from_proposal(_prop("a", kind="skill", manifest_valid=False), risk_tier="low"),
+        row_from_proposal(
+            _prop("a", kind="skill", manifest_valid=False), risk_tier="low"
+        ),
         row_from_proposal(_prop("b", kind="skill"), risk_tier="low"),
     ]
     assert [r.id for r in filter_rows(rows, kind="skill", flagged_only=True)] == ["a"]
 
 
-# ── the assembled view ──
-
-
 def test_counts_exist_for_every_filter_chip():
     """A filter chip with no count is a chip a user has to click to discover is empty."""
     view = build_view(
-        [_prop("a", kind="skill"), _prop("b", kind="skill"), _prop("c", kind="retirement")],
+        [
+            _prop("a", kind="skill"),
+            _prop("b", kind="skill"),
+            _prop("c", kind="retirement"),
+        ],
         tiers={"c": "manual_only"},
     )
     assert view.by_kind == {"retirement": 1, "skill": 2}
@@ -403,14 +405,11 @@ def test_a_missing_tier_defaults_to_review_not_low():
 
 def test_the_view_is_a_projection_and_writes_nothing():
     """Asserted against the source: the store stays in `learning.proposals`."""
-    from gideon.learning import inbox
+    from gideon.cognition.learning import inbox
 
     src = inspect.getsource(inbox)
     for forbidden in ("atomic_write", "_save(", "sqlite3", ".unlink(", "open("):
         assert forbidden not in src, f"the inbox writes via {forbidden}"
-
-
-# ── the gate wired into the REAL accept/reject path ──
 
 
 @pytest.fixture
@@ -421,7 +420,7 @@ def store(tmp_path, monkeypatch):
     resolves them per call, so patching the accessor is what actually redirects it — and nothing can
     reach the real home.
     """
-    from gideon.learning import proposals as P
+    from gideon.cognition.learning import proposals as P
 
     monkeypatch.setattr(P, "_dir", lambda: tmp_path)
     monkeypatch.setattr(P, "_decisions_path", lambda: tmp_path / "decisions.json")
@@ -430,7 +429,12 @@ def store(tmp_path, monkeypatch):
 
 def _filed(store, pid="p1", **kw):
     base = dict(
-        id=pid, kind="lesson_batch", title="t", body="b", provenance="refiner", status="pending"
+        id=pid,
+        kind="lesson_batch",
+        title="t",
+        body="b",
+        provenance="refiner",
+        status="pending",
     )
     base.update(kw)
     prop = store.Proposal(**base)
@@ -508,7 +512,7 @@ def test_a_missing_proposal_still_raises_rather_than_being_gated(store):
 
 def test_accept_and_reject_both_take_an_actor():
     """Asserted on the signatures, so a future refactor that drops the parameter fails here."""
-    from gideon.learning import proposals as P
+    from gideon.cognition.learning import proposals as P
 
     assert "actor" in inspect.signature(P.accept).parameters
     assert "actor" in inspect.signature(P.reject).parameters

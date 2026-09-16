@@ -59,7 +59,7 @@ import urllib.request
 import browse_chrome
 import pytest
 
-from gideon.browse.safety_script import (
+from gideon.integrations.browse.safety_script import (
     GUARD_STEPS,
     GUARDED_NAVIGATOR_KEYS,
     SAFETY_MARKER,
@@ -67,11 +67,6 @@ from gideon.browse.safety_script import (
     safety_script,
 )
 
-# --------------------------------------------------------------------------------------------
-# Layer 1: content / structure. No browser.
-# --------------------------------------------------------------------------------------------
-
-#: A host built to break out of every embedding we might ever put the script in.
 HOSTILE_HOST = "ev\"il'\\x.test</script><script>alert(1)</script>"
 
 
@@ -108,7 +103,9 @@ def test_script_names_every_api_it_claims_to_guard() -> None:
     ):
         assert api in SAFETY_SCRIPT, f"guard for {api} is missing from the script"
     for key in GUARDED_NAVIGATOR_KEYS:
-        assert f'"{key}"' in SAFETY_SCRIPT, f"navigator.{key} is not in the hardened key list"
+        assert (
+            f'"{key}"' in SAFETY_SCRIPT
+        ), f"navigator.{key} is not in the hardened key list"
     assert "bluetooth" in GUARDED_NAVIGATOR_KEYS
 
 
@@ -116,7 +113,9 @@ def test_guards_are_non_writable_and_non_configurable() -> None:
     """The re-assignment defence is a property descriptor, so assert the descriptor is asked for."""
     assert "writable: false" in SAFETY_SCRIPT
     assert "configurable: false" in SAFETY_SCRIPT
-    assert "Object.defineProperty" in SAFETY_SCRIPT or "_defineProperty" in SAFETY_SCRIPT
+    assert (
+        "Object.defineProperty" in SAFETY_SCRIPT or "_defineProperty" in SAFETY_SCRIPT
+    )
 
 
 def test_script_is_wrapped_so_injection_cannot_throw() -> None:
@@ -141,21 +140,24 @@ def test_script_is_wrapped_so_injection_cannot_throw() -> None:
             continue
         first_statement = stripped
         break
-    assert first_statement == "try {", f"the script's first statement is {first_statement!r}"
+    assert (
+        first_statement == "try {"
+    ), f"the script's first statement is {first_statement!r}"
     assert "} catch (err) {" in SAFETY_SCRIPT, "the outer swallow is gone"
     assert SAFETY_SCRIPT.rstrip().endswith("}")
     assert SAFETY_MARKER in SAFETY_SCRIPT
 
 
 def test_allow_hosts_are_baked_in_normalised() -> None:
-    script = safety_script(allow_hosts=("Example.COM", "  cdn.example.com  ", "example.com", ""))
+    script = safety_script(
+        allow_hosts=("Example.COM", "  cdn.example.com  ", "example.com", "")
+    )
     assert '["example.com", "cdn.example.com"]' in script
     assert "Example.COM" not in script
 
 
 def test_empty_allow_list_denies_everything() -> None:
     assert "var ALLOW_HOSTS = [];" in SAFETY_SCRIPT
-    # The deny-by-default branch: an empty list short-circuits before any URL parsing.
     assert "if (!ALLOW_HOSTS.length) {" in SAFETY_SCRIPT
 
 
@@ -163,21 +165,16 @@ def test_hostile_allow_host_is_escaped_and_cannot_break_out() -> None:
     """An unescaped allow-list value would be a script-injection bug in our own tooling."""
     script = safety_script(allow_hosts=(HOSTILE_HOST,))
 
-    # The dangerous SYNTAX must not survive anywhere in the emitted source. Note the
-    # assertion is deliberately about syntax, not about the payload text: `alert(1)` is
-    # inert *inside* a quoted JS string literal, so demanding its absence would be demanding
-    # the wrong property — the bug being tested for is breaking OUT of the literal.
     assert "</script>" not in script
     assert "<script>" not in script
     assert '"ev"' not in script, "the value's own quote escaped the literal"
 
-    # Scoped to what is actually measured: the baked literal carries no character that could
-    # terminate a string, a statement or an enclosing HTML element.
     literal = _baked_allow_literal(script)
     for dangerous in ("<", ">", "&", "\n", "\r"):
-        assert dangerous not in literal, f"{dangerous!r} survived into the baked allow-list"
+        assert (
+            dangerous not in literal
+        ), f"{dangerous!r} survived into the baked allow-list"
 
-    # And the value must still round-trip, so the escaping is not just deletion.
     assert json.loads(literal) == [HOSTILE_HOST.lower()]
 
 
@@ -206,10 +203,10 @@ def test_module_import_pulls_in_no_http_client() -> None:
     """The browse package invariant: this module is pure, with no network dependency at all.
 
     Measured by loading the file *in isolation* (``spec_from_file_location``), not via
-    ``import gideon.browse.safety_script``. That is not a dodge, it is the only way to
+    ``import gideon.integrations.browse.safety_script``. That is not a dodge, it is the only way to
     measure THIS module: importing it through the package first runs
     ``gideon/browse/__init__.py``, whose BA-1 chain reaches
-    ``extraction.py`` -> ``gideon.knowledge.connectors.base``, and *that* closure
+    ``extraction.py`` -> ``gideon.cognition.knowledge.connectors.base``, and *that* closure
     contains ``httpx``/``urllib3``/``http.client``. So the package-level import is already not
     HTTP-client-free on ``main``; asserting on it here would measure BA-1's dependency, not
     this atom's. What is in scope, and what this asserts, is that safety_script.py adds
@@ -225,7 +222,9 @@ def test_module_import_pulls_in_no_http_client() -> None:
         "browse",
         "safety_script.py",
     )
-    spec = importlib.util.spec_from_file_location("_ba2_isolated_safety_script", module_path)
+    spec = importlib.util.spec_from_file_location(
+        "_ba2_isolated_safety_script", module_path
+    )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
 
@@ -236,26 +235,27 @@ def test_module_import_pulls_in_no_http_client() -> None:
     finally:
         sys.modules.pop("_ba2_isolated_safety_script", None)
 
-    network = {"aiohttp", "httpx", "requests", "urllib3", "websockets", "http.client", "ssl"}
-    assert not (added & network), f"safety_script's own import closure reaches {added & network}"
+    network = {
+        "aiohttp",
+        "httpx",
+        "requests",
+        "urllib3",
+        "websockets",
+        "http.client",
+        "ssl",
+    }
+    assert not (
+        added & network
+    ), f"safety_script's own import closure reaches {added & network}"
     assert not {name for name in added if name.startswith("gideon")}, (
         "safety_script imported a gideon module, so it can inherit a network dependency: "
         f"{sorted(name for name in added if name.startswith('gideon'))}"
     )
-    # Loading it with no package context still produces a usable script — proof the isolation
-    # above is real and not an artifact of a partially-initialised module.
     assert module.SAFETY_SCRIPT == SAFETY_SCRIPT
 
 
-# --------------------------------------------------------------------------------------------
-# Layer 2: real execution. A live browser, over raw CDP.
-# --------------------------------------------------------------------------------------------
-
-#: Names our guard uses for its rejections/throws. Asserting on this — not merely on "it
-#: threw" — is what separates our guard from the browser refusing on its own.
 BLOCKED_ERROR = "GideonBlockedError"
 
-#: Named once so the skip/fail message says which proof stopped running.
 PROOF = "BEHAVIOURAL PROOF"
 
 
@@ -282,8 +282,6 @@ _PAGE_HTML = (
     "<body><h1>probe</h1></body></html>"
 ).encode("ascii")
 
-#: Runs in a Worker realm — a realm addScriptToEvaluateOnNewDocument never reaches. If the
-#: Worker constructor guard fails, THIS is what silently reaches the network.
 _WORKER_JS = b"self.fetch('/beacon?via=worker').catch(function () {});"
 
 
@@ -301,11 +299,12 @@ class _LocalSite:
             def log_message(self, *args: object) -> None:  # noqa: A003 - stdlib hook
                 pass
 
-            def _respond(self, status: int, body: bytes = b"", ctype: str = "text/plain") -> None:
+            def _respond(
+                self, status: int, body: bytes = b"", ctype: str = "text/plain"
+            ) -> None:
                 self.send_response(status)
                 self.send_header("Content-Type", ctype)
                 self.send_header("Content-Length", str(len(body)))
-                # So CORS can never mask a hit we are trying to observe.
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
                 if body:
@@ -340,9 +339,9 @@ class _LocalSite:
             daemon_threads = True
 
             def handle_error(self, request: object, client_address: object) -> None:
-                # Chrome tears sockets down abruptly on shutdown. A reset is not a failure,
-                # but the stdlib's default traceback on stderr reads exactly like one.
-                if isinstance(sys.exc_info()[1], (ConnectionResetError, BrokenPipeError)):
+                if isinstance(
+                    sys.exc_info()[1], (ConnectionResetError, BrokenPipeError)
+                ):
                     return
                 super().handle_error(request, client_address)  # type: ignore[arg-type]
 
@@ -382,7 +381,9 @@ class _Cdp:
         self._ws = ws
         self._next_id = 0
 
-    async def send(self, method: str, params: dict | None = None, session: str | None = None):
+    async def send(
+        self, method: str, params: dict | None = None, session: str | None = None
+    ):
         self._next_id += 1
         message: dict = {"id": self._next_id, "method": method, "params": params or {}}
         if session:
@@ -396,8 +397,6 @@ class _Cdp:
                 return raw.get("result", {})
 
 
-#: Runs INSIDE the page. Exercises every guarded surface and reports what happened, so the
-#: Python side can compare it against the server's own hit ledger.
 _PROBE_JS = """
 (async () => {
   const out = {marker: null, errors: {}};
@@ -519,9 +518,6 @@ async def _run_probe(chrome: str, site: _LocalSite, script: str | None) -> dict:
 
     port = _free_port()
     profile = tempfile.mkdtemp(prefix="ba2-safety-profile-")
-    # Chrome's own stderr, kept so a launch that never reaches CDP reports its real cause
-    # rather than only the generic poll timeout. On GitHub's ubuntu-latest a headless launch
-    # without --no-sandbox aborts at startup, and DEVNULL used to swallow that fatal line.
     stderr_log = tempfile.NamedTemporaryFile(prefix="ba2-safety-stderr-", suffix=".log")
     proc = subprocess.Popen(
         [
@@ -529,25 +525,13 @@ async def _run_probe(chrome: str, site: _LocalSite, script: str | None) -> dict:
             f"--remote-debugging-port={port}",
             f"--user-data-dir={profile}",
             "--headless",
-            # Required on GitHub Actions Linux runners: the sandbox cannot initialise there and
-            # /dev/shm is too small for Chrome's default; without these the process aborts before
-            # opening the CDP port. Harmless on macOS, where the suite also runs locally.
             "--no-sandbox",
             "--disable-dev-shm-usage",
             "--no-first-run",
             "--no-default-browser-check",
             "--disable-gpu",
             "--autoplay-policy=no-user-gesture-required",
-            # Web Bluetooth's base::Feature is default-DISABLED on desktop Linux (enabled on
-            # macOS/Windows), so on ubuntu-latest `navigator.bluetooth` is natively absent and
-            # the baseline vacuity guard in test_navigator_device_apis_are_unreachable_and_
-            # hard_defined fails: the guarded `undefined` would prove nothing. Forcing the
-            # feature on makes the baseline origin behave like the macOS runs the suite was
-            # measured on — the attribute natively exists, so guarded-undefined is a real
-            # measurement of OUR descriptor, not of a browser build gap. No-op on macOS.
             "--enable-features=WebBluetooth",
-            # A guard regression must not be able to reach any REAL site from this suite.
-            # The local server is deliberately the only reachable origin.
             "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
         ],
         stdout=subprocess.DEVNULL,
@@ -577,7 +561,8 @@ async def _run_probe(chrome: str, site: _LocalSite, script: str | None) -> dict:
             cdp = _Cdp(ws)
             target = await cdp.send("Target.createTarget", {"url": "about:blank"})
             attached = await cdp.send(
-                "Target.attachToTarget", {"targetId": target["targetId"], "flatten": True}
+                "Target.attachToTarget",
+                {"targetId": target["targetId"], "flatten": True},
             )
             session = attached["sessionId"]
             await cdp.send("Page.enable", session=session)
@@ -591,7 +576,9 @@ async def _run_probe(chrome: str, site: _LocalSite, script: str | None) -> dict:
                 )
                 assert added.get("identifier"), "CDP refused the safety script"
 
-            await cdp.send("Page.navigate", {"url": f"{site.origin}/page"}, session=session)
+            await cdp.send(
+                "Page.navigate", {"url": f"{site.origin}/page"}, session=session
+            )
             await asyncio.sleep(0.6)
 
             probe = _PROBE_JS % {
@@ -609,8 +596,9 @@ async def _run_probe(chrome: str, site: _LocalSite, script: str | None) -> dict:
                 session=session,
             )
             if "exceptionDetails" in result:
-                raise AssertionError(f"probe threw in-page: {result['exceptionDetails']}")
-            # Let the async paths (WebSocket/EventSource/Worker/beacon) reach the server.
+                raise AssertionError(
+                    f"probe threw in-page: {result['exceptionDetails']}"
+                )
             await asyncio.sleep(1.5)
             return json.loads(result["result"]["value"])
     finally:
@@ -619,8 +607,6 @@ async def _run_probe(chrome: str, site: _LocalSite, script: str | None) -> dict:
             proc.wait(timeout=5)
         except Exception:
             proc.kill()
-        # Closing the NamedTemporaryFile unlinks it (POSIX); Chrome's inherited fd keeps the
-        # inode alive until it exits, which the terminate/wait above has already ensured.
         stderr_log.close()
         shutil.rmtree(profile, ignore_errors=True)
 
@@ -662,10 +648,16 @@ def test_harness_can_observe_a_network_reach(browser_runs: dict) -> None:
     the assertion that makes "zero hits" evidence rather than an artifact.
     """
     hits = browser_runs["baseline_hits"]
-    assert browser_runs["baseline"]["marker"] is None, "baseline run was accidentally injected"
-    assert hits.get("fetch", 0) >= 1, f"harness never saw a fetch reach the server: {hits}"
+    assert (
+        browser_runs["baseline"]["marker"] is None
+    ), "baseline run was accidentally injected"
+    assert (
+        hits.get("fetch", 0) >= 1
+    ), f"harness never saw a fetch reach the server: {hits}"
     assert hits.get("xhr", 0) >= 1, f"harness never saw an XHR reach the server: {hits}"
-    assert sum(hits.values()) >= 3, f"baseline reached the server too rarely to trust: {hits}"
+    assert (
+        sum(hits.values()) >= 3
+    ), f"baseline reached the server too rarely to trust: {hits}"
 
 
 def test_injection_leaves_the_page_guarded(browser_runs: dict) -> None:
@@ -677,8 +669,9 @@ def test_injection_leaves_the_page_guarded(browser_runs: dict) -> None:
     )
     assert marker["failed"] == [], f"guards failed to install: {marker['failed']}"
     installed = set(marker["applied"]) | set(marker["skipped"])
-    assert installed == set(GUARD_STEPS), f"guard steps drifted: {installed ^ set(GUARD_STEPS)}"
-    # Everything except the APIs this engine genuinely does not expose must be APPLIED.
+    assert installed == set(
+        GUARD_STEPS
+    ), f"guard steps drifted: {installed ^ set(GUARD_STEPS)}"
     assert set(marker["applied"]) >= {
         "fetch",
         "XMLHttpRequest",
@@ -724,11 +717,15 @@ def test_every_other_network_path_is_blocked(browser_runs: dict) -> None:
     assert guarded["ws"]["ok"] is False and guarded["ws"]["name"] == BLOCKED_ERROR
     assert guarded["es"]["ok"] is False and guarded["es"]["name"] == BLOCKED_ERROR
     assert guarded["beacon"]["ok"] is False, "sendBeacon reported success"
-    assert guarded["worker"]["ok"] is False and guarded["worker"]["name"] == BLOCKED_ERROR
+    assert (
+        guarded["worker"]["ok"] is False and guarded["worker"]["name"] == BLOCKED_ERROR
+    )
     assert guarded["rtc"]["ok"] is False and guarded["rtc"]["name"] == BLOCKED_ERROR
 
     for via in ("fetch", "xhr", "ws", "es", "beacon", "worker"):
-        assert hits.get(via, 0) == 0, f"{via} reached the server despite the guard: {hits}"
+        assert (
+            hits.get(via, 0) == 0
+        ), f"{via} reached the server despite the guard: {hits}"
 
 
 def test_worker_realm_cannot_reach_the_network(browser_runs: dict) -> None:
@@ -756,7 +753,9 @@ def test_media_play_rejects(browser_runs: dict) -> None:
     )
 
 
-def test_navigator_device_apis_are_unreachable_and_hard_defined(browser_runs: dict) -> None:
+def test_navigator_device_apis_are_unreachable_and_hard_defined(
+    browser_runs: dict,
+) -> None:
     """The clause's navigator.bluetooth leg.
 
     Whether ``navigator.bluetooth === undefined`` is a vacuous assertion depends on the page's
@@ -775,7 +774,7 @@ def test_navigator_device_apis_are_unreachable_and_hard_defined(browser_runs: di
     baseline = browser_runs["baseline"]
     for key, descriptor in baseline["navigator"].items():
         if descriptor is None:
-            continue  # natively absent (insecure-context origins) — nothing to distinguish
+            continue
         assert descriptor["isData"] is False or descriptor["configurable"] is True, (
             f"navigator.{key} natively looks EXACTLY like our guard's descriptor, so the "
             "guarded assertion below would be vacuous"
@@ -791,12 +790,13 @@ def test_navigator_device_apis_are_unreachable_and_hard_defined(browser_runs: di
         descriptor = guarded["navigator"][key]
         assert descriptor is not None, f"navigator.{key} has no guard descriptor"
         assert descriptor["isData"] is True, f"navigator.{key} is still an accessor"
-        assert descriptor["valueIsUndefined"] is True, f"navigator.{key} is not undefined"
+        assert (
+            descriptor["valueIsUndefined"] is True
+        ), f"navigator.{key} is not undefined"
         assert descriptor["writable"] is False, f"navigator.{key} is re-assignable"
         assert descriptor["configurable"] is False, f"navigator.{key} is re-definable"
 
     assert guarded["bluetoothReachable"] is False
-    # The receiver trick that an instance-level shadow would have left open.
     assert guarded["bluetoothViaReflect"] == "undefined", guarded["bluetoothViaReflect"]
 
 

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import gideon.providers.provider_bridge as pb
+import gideon.extensions.providers.provider_bridge as pb
 
 
 def test_acp_agent_entry_builds_via_registry():
@@ -26,21 +26,21 @@ def test_acp_agent_entry_builds_via_registry():
     candidate.options = {"command": ["claude-code-acp"], "dialect": "claude-code"}
     candidate.declared_capabilities = frozenset()
 
-    from gideon.llm.capabilities import Capability
+    from gideon.integrations.llm.capabilities import Capability
 
     registry = MagicMock()
     registry.list_entries.return_value = [candidate]
-    # Entry has no declared caps → resolution falls back to capability_of(type);
-    # make CHAT present so the candidate matches.
-    registry.capability_of.return_value = MagicMock(capabilities=frozenset({Capability.CHAT}))
+    registry.capability_of.return_value = MagicMock(
+        capabilities=frozenset({Capability.CHAT})
+    )
     built = MagicMock(name="AcpAgentProvider")
     registry.build.return_value = built
 
-    # _resolve_from_config_registry imports get_default_registry locally from
-    # gideon.llm.registry — patch that path only.
-    with patch("gideon.llm.registry.get_default_registry", return_value=registry):
+    with patch(
+        "gideon.integrations.llm.registry.get_default_registry", return_value=registry
+    ):
         result = pb._resolve_from_config_registry("chat", session_key="s", agent="A")
 
-    assert result is built  # built via the registry path
-    registry.build.assert_called_once()  # registry factory used
+    assert result is built
+    registry.build.assert_called_once()
     assert registry.build.call_args.args[0] == "acp:claude-code"

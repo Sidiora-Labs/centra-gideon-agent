@@ -30,21 +30,18 @@ from pathlib import Path
 
 import pytest
 
-from gideon.triggers import chain
-from gideon.triggers import ownership as OWN
-from gideon.triggers import provider
-from gideon.triggers import registry as TREG
-from gideon.triggers import routing as ROUTE
-from gideon.triggers import service as SVC
-from gideon.triggers.models import Trigger, parse_trigger
-from gideon.triggers.store import LoadedTrigger, TriggerStore
+from gideon.automation.triggers import chain
+from gideon.automation.triggers import ownership as OWN
+from gideon.automation.triggers import provider
+from gideon.automation.triggers import registry as TREG
+from gideon.automation.triggers import routing as ROUTE
+from gideon.automation.triggers import service as SVC
+from gideon.automation.triggers.models import Trigger, parse_trigger
+from gideon.automation.triggers.store import LoadedTrigger, TriggerStore
 
 NOW = 1_800_000_000.0
 OWNER = "keyur"
 
-#: The four things a shared automation fires, mapped onto the action providers that ship. Kept as
-#: data so the parametrized fire test and the "these names are real" test cannot disagree about
-#: which four are being claimed.
 FOUR_TARGETS = {
     "workflow": ("run-workflow", {"workflow": "morning-brief"}),
     "automation": ("invoke-agent", {"prompt": "triage the shared inbox"}),
@@ -64,14 +61,13 @@ class FileProviderStore:
     def __init__(self, path: Path, *, name: str = "team") -> None:
         self.name = name
         self._path = Path(path)
-        # Fault switches, each one a real shape a backend can have.
-        self.noop_upsert = False  # accepts the write, persists nothing (the storm shape)
-        self.raise_on_upsert = False  # a backend outage mid-write
-        self.noop_delete = False  # says it deleted, left the row
-        self.blind_get = False  # cannot read a row back (so a write is unverifiable)
-        self.upserts: list[str] = []  # ids written here, for "the write went where it should"
-
-    # ── the contract ──
+        self.noop_upsert = (
+            False  # accepts the write, persists nothing (the storm shape)
+        )
+        self.raise_on_upsert = False
+        self.noop_delete = False
+        self.blind_get = False
+        self.upserts: list[str] = []
 
     @property
     def base_dir(self) -> Path:
@@ -94,7 +90,9 @@ class FileProviderStore:
             out.append(LoadedTrigger(trigger=trigger, issues=list(issues)))
         return out
 
-    def list_triggers(self, *, kind: str = "", include_broken: bool = True) -> list[Trigger]:
+    def list_triggers(
+        self, *, kind: str = "", include_broken: bool = True
+    ) -> list[Trigger]:
         return [
             row.trigger
             for row in self.load()
@@ -130,17 +128,12 @@ class FileProviderStore:
     def changed_on_disk(self) -> bool:
         return False
 
-    # ── test helpers ──
-
     def seed(self, *triggers: Trigger) -> None:
         self._write([t.to_dict() for t in triggers])
 
     def next_fire_of(self, trigger_id: str) -> str:
         row = next((r for r in self.load() if r.trigger.id == trigger_id), None)
         return row.trigger.next_fire_at if row else ""
-
-
-# ── fixtures ──────────────────────────────────────────────────────────────────────────────
 
 
 @pytest.fixture
@@ -178,7 +171,14 @@ def _clean_process_globals():
 
 
 def _trigger(
-    tid="t1", *, next_at=0.0, kind="clock", author="", action="run-prompt", config=None, **over
+    tid="t1",
+    *,
+    next_at=0.0,
+    kind="clock",
+    author="",
+    action="run-prompt",
+    config=None,
+    **over,
 ):
     base = dict(
         id=tid,
@@ -200,9 +200,6 @@ def _local_ids(native: TriggerStore) -> list[str]:
     return [row.trigger.id for row in native.load()]
 
 
-# ── the wrapper ───────────────────────────────────────────────────────────────────────────
-
-
 def test_with_no_provider_installed_the_store_is_not_wrapped_at_all(native):
     """Every single-user install. The seam must cost nothing when nothing is registered."""
     assert ROUTE.routed(native) is native
@@ -218,14 +215,17 @@ def test_a_registered_provider_wraps_the_store_once(native, team):
 def test_the_arm_read_sees_both_stores_rows(native, team):
     native.upsert(_trigger("local", author=OWNER))
     team.seed(_trigger("remote", author=OWNER))
-    assert sorted(t.id for t in provider.armable(ROUTE.routed(native))) == ["local", "remote"]
-    # And the bare native store is untouched by all of this.
+    assert sorted(t.id for t in provider.armable(ROUTE.routed(native))) == [
+        "local",
+        "remote",
+    ]
     assert [t.id for t in provider.armable(native)] == ["local"]
 
 
 def test_the_claim_root_stays_local(native, team):
     """A claim describes a LOCAL run. Collecting every machine's claims in a shared folder would
-    make `overlap` refuse one member's fire because another member happened to hold the trigger."""
+    make `overlap` refuse one member's fire because another member happened to hold the trigger.
+    """
     assert ROUTE.routed(native).base_dir == native.base_dir
 
 
@@ -246,9 +246,6 @@ def test_an_id_in_both_stores_arms_only_once_and_locally(native, team):
     assert [r.trigger.id for r in provider.all_rows(native)] == ["clash", "clash"]
 
 
-# ── the write routes to the SERVING store ─────────────────────────────────────────────────
-
-
 def test_a_providers_row_is_written_back_to_the_provider(native, team):
     """THE atom's precondition. `triggers.json` must never gain the id."""
     team.seed(_trigger("remote", author=OWNER, next_at=NOW))
@@ -257,7 +254,9 @@ def test_a_providers_row_is_written_back_to_the_provider(native, team):
     native.upsert(row)
 
     assert team.next_fire_of("remote") == SVC.to_iso(NOW + 3600)
-    assert _local_ids(native) == [], "the provider's row must not appear in triggers.json"
+    assert (
+        _local_ids(native) == []
+    ), "the provider's row must not appear in triggers.json"
     assert team.upserts == ["remote"]
 
 
@@ -277,7 +276,9 @@ def test_a_brand_new_row_is_local(native, team):
     assert "fresh" not in team.upserts
 
 
-def test_a_colliding_id_writes_locally_because_the_local_row_is_the_armed_one(native, team):
+def test_a_colliding_id_writes_locally_because_the_local_row_is_the_armed_one(
+    native, team
+):
     """Read and write must agree about who owns a clashing id, or the arm path reschedules a row
     nobody reads."""
     native.upsert(_trigger("clash", author=OWNER))
@@ -296,9 +297,6 @@ def test_a_delete_routes_to_the_provider_too(native, team):
     assert _local_ids(native) == ["local"]
 
 
-# ── the four fires ────────────────────────────────────────────────────────────────────────
-
-
 @pytest.mark.parametrize("label", sorted(FOUR_TARGETS))
 def test_an_app_served_owner_row_autonomously_fires_each_target(native, team, label):
     """Criterion 5, measured per target: a real `tick` over a real gate walk produces a real fire.
@@ -310,7 +308,9 @@ def test_an_app_served_owner_row_autonomously_fires_each_target(native, team, la
       4. a SECOND tick at the same clock fires nothing (not a storm).
     """
     action, config = FOUR_TARGETS[label]
-    team.seed(_trigger(label, author=OWNER, next_at=NOW - 60, action=action, config=config))
+    team.seed(
+        _trigger(label, author=OWNER, next_at=NOW - 60, action=action, config=config)
+    )
     before = team.next_fire_of(label)
 
     result = asyncio.run(SVC.tick(native, now=NOW, persist=True))
@@ -321,7 +321,9 @@ def test_an_app_served_owner_row_autonomously_fires_each_target(native, team, la
     assert result.rescheduled == [label]
 
     after = team.next_fire_of(label)
-    assert after and after != before, "the schedule did not advance — this is the fire storm"
+    assert (
+        after and after != before
+    ), "the schedule did not advance — this is the fire storm"
     assert SVC.to_epoch(after) > NOW
     assert _local_ids(native) == [], "the fired row leaked into triggers.json"
 
@@ -331,15 +333,18 @@ def test_an_app_served_owner_row_autonomously_fires_each_target(native, team, la
 
 def test_the_four_action_providers_the_fires_name_are_real(native):
     """A fire that named a provider nothing implements would satisfy every assertion above and still
-    be a dead automation. So the names are checked against the real registry, not a list."""
-    from gideon.action_providers.registry import (
+    be a dead automation. So the names are checked against the real registry, not a list.
+    """
+    from gideon.integrations.action_providers.registry import (
         _ensure_default_providers_registered,
         get_action_provider,
     )
 
     _ensure_default_providers_registered()
     for label, (action, _config) in sorted(FOUR_TARGETS.items()):
-        assert get_action_provider(action) is not None, f"{label} → {action} is not registered"
+        assert (
+            get_action_provider(action) is not None
+        ), f"{label} → {action} is not registered"
 
 
 def test_the_run_count_and_last_fired_meters_land_in_the_serving_store(native, team):
@@ -366,7 +371,8 @@ def test_the_owners_app_served_row_fires_beside_a_local_one(native, team):
 
 def test_boot_arms_an_app_served_row_into_the_providers_store(native, team):
     """Boot WRITES `next_fire_at`. Without this a shared automation would come up unarmed and only
-    start firing after its first clock tick — a first fire that silently depends on uptime."""
+    start firing after its first clock tick — a first fire that silently depends on uptime.
+    """
     team.seed(_trigger("remote", author=OWNER, next_at=NOW - 3600))
     report = SVC.boot(native, now=NOW, persist=True)
     assert [r["id"] for r in report["rearmed"]] == ["remote"]
@@ -376,7 +382,8 @@ def test_boot_arms_an_app_served_row_into_the_providers_store(native, team):
 
 def test_a_retiring_one_shot_is_deleted_from_the_providers_store(native, team):
     """`delete_after_run` retirement must remove the row where it lives. Deleting a local row that
-    never existed would leave the provider's copy live on an elapsed slot — the storm again."""
+    never existed would leave the provider's copy live on an elapsed slot — the storm again.
+    """
     team.seed(
         _trigger(
             "one-shot",
@@ -393,9 +400,12 @@ def test_a_retiring_one_shot_is_deleted_from_the_providers_store(native, team):
 
 def test_an_app_served_automation_can_be_chained_off_another(native, team):
     """An automation fired BY an automation — "when the team brief finishes, notify me", served by
-    the app. Safe to route because a `run_completed` row holds no schedule to advance."""
+    the app. Safe to route because a `run_completed` row holds no schedule to advance.
+    """
     team.seed(
-        _trigger("brief", author=OWNER, action="run-workflow", config={"workflow": "brief"}),
+        _trigger(
+            "brief", author=OWNER, action="run-workflow", config={"workflow": "brief"}
+        ),
         _trigger(
             "followup",
             author=OWNER,
@@ -418,10 +428,9 @@ def test_an_app_served_automation_can_be_chained_off_another(native, team):
     assert refused == []
 
 
-# ── the storm guards ─────────────────────────────────────────────────────────────────────
-
-
-def test_a_provider_that_silently_does_not_persist_fires_once_and_is_quarantined(native, team):
+def test_a_provider_that_silently_does_not_persist_fires_once_and_is_quarantined(
+    native, team
+):
     """The named failure mode, as a runtime invariant rather than only a test assertion.
 
     A store that accepts the write and keeps the old `next_fire_at` is due again every tick forever.
@@ -440,10 +449,14 @@ def test_a_provider_that_silently_does_not_persist_fires_once_and_is_quarantined
     assert second.fires == [], "a frozen schedule fired twice — the storm is open"
     third = asyncio.run(SVC.tick(native, now=NOW + 7200, persist=True))
     assert third.fires == []
-    assert _local_ids(native) == [], "the frozen row must not be rescued into triggers.json"
+    assert (
+        _local_ids(native) == []
+    ), "the frozen row must not be rescued into triggers.json"
 
 
-def test_a_provider_whose_write_raises_is_quarantined_and_does_not_break_the_tick(native, team):
+def test_a_provider_whose_write_raises_is_quarantined_and_does_not_break_the_tick(
+    native, team
+):
     """A team backend's outage must not abort a tick that is also rescheduling local automations."""
     native.upsert(_trigger("local", author=OWNER, next_at=NOW - 60))
     team.seed(_trigger("remote", author=OWNER, next_at=NOW - 60))
@@ -460,7 +473,8 @@ def test_a_provider_whose_write_raises_is_quarantined_and_does_not_break_the_tic
 
 def test_a_provider_whose_write_cannot_be_read_back_is_quarantined(native, team):
     """Unverifiable is treated as unpersisted. A store core cannot re-read is a store core cannot
-    promise anything about, and the safe reading of "I don't know" is "do not arm it again"."""
+    promise anything about, and the safe reading of "I don't know" is "do not arm it again".
+    """
     team.seed(_trigger("blind", author=OWNER, next_at=NOW - 60))
     team.blind_get = True
     asyncio.run(SVC.tick(native, now=NOW, persist=True))
@@ -494,9 +508,6 @@ def test_a_quarantined_providers_rows_still_render(native, team):
     assert [r.trigger.id for r in provider.all_rows(native)] == ["frozen"]
 
 
-# ── "alice": the two separate properties ─────────────────────────────────────────────────
-
-
 def test_an_app_served_alice_row_renders_visible_and_read_only(native, team):
     """PROPERTY ONE — visible-but-inert RENDERING. The row is listed, and the read-only fact the UI
     renders is computed from the same predicate the arm path uses, never re-derived from `author`.
@@ -506,9 +517,11 @@ def test_an_app_served_alice_row_renders_visible_and_read_only(native, team):
     assert sorted(listed) == ["alice-nightly", "mine"]
     assert OWN.is_owner_authored(listed["alice-nightly"]) is False
     assert OWN.is_owner_authored(listed["mine"]) is True
-    # Enabled, so it is inert by OWNERSHIP and not by a toggle somebody could flip back on.
     assert listed["alice-nightly"].enabled is True
-    assert [t.id for t in ROUTE.routed(native).list_triggers()] == ["alice-nightly", "mine"]
+    assert [t.id for t in ROUTE.routed(native).list_triggers()] == [
+        "alice-nightly",
+        "mine",
+    ]
 
 
 def test_an_app_served_alice_row_is_never_handed_to_the_arm_path(native, team):
@@ -520,12 +533,14 @@ def test_an_app_served_alice_row_is_never_handed_to_the_arm_path(native, team):
     """
     team.seed(_trigger("alice-nightly", author="alice", next_at=NOW - 60))
     wrapped = ROUTE.routed(native)
-    assert [r.trigger.id for r in wrapped.load()] == ["alice-nightly"]  # the read sees it
-    assert provider.armable(wrapped) == []  # the arm path never does
+    assert [r.trigger.id for r in wrapped.load()] == ["alice-nightly"]
+    assert provider.armable(wrapped) == []
     assert SVC.due_ids(provider.armable(wrapped), now=NOW) == []
 
 
-def test_a_tick_over_an_app_served_alice_row_fires_nothing_and_writes_nothing(native, team):
+def test_a_tick_over_an_app_served_alice_row_fires_nothing_and_writes_nothing(
+    native, team
+):
     """The end-to-end form. The last assertion is the sharp one: her `next_fire_at` is UNCHANGED, so
     the arm path did not merely decline to fire it — it never touched it."""
     team.seed(_trigger("alice-nightly", author="alice", next_at=NOW - 60))

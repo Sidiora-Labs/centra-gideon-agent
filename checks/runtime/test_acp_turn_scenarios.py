@@ -18,8 +18,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from gideon.acp.client import AcpClient
-from gideon.acp.types import (
+from gideon.integrations.acp.client import AcpClient
+from gideon.integrations.acp.types import (
     CAP_COMMANDS,
     EVENT_AGENT_SWITCHED,
     EVENT_COMPLETE,
@@ -48,13 +48,8 @@ class _ScriptedStdout:
 
     async def readline(self) -> bytes:
         if self._i >= len(self._lines):
-            # Stream stays open briefly after the scripted frames (a real pipe doesn't EOF
-            # the instant a turn's frames are written), THEN closes. The short idle lets a
-            # turn complete on its terminal `result` frame before the close, while the
-            # eventual EOF still drives the no-terminal scenarios (stale/interrupted) and
-            # never hangs the suite.
             await asyncio.sleep(0.3)
-            return b""  # EOF
+            return b""
         line = self._lines[self._i]
         self._i += 1
         return line
@@ -71,9 +66,10 @@ def _client_with_frames(
     transport, plus one bound :class:`AcpSession` on the well-known ``req_id``. Because
     the turn's request id is deterministic (the fake connection's id counter starts at
     the scripted *req_id* minus one), the terminal frame's ``id`` matches. The scenario
-    assertions below are unchanged — only this harness plumbing adapts to the wrapper."""
-    from gideon.acp.reader import FrameRouter
-    from gideon.acp.session import AcpConnection
+    assertions below are unchanged — only this harness plumbing adapts to the wrapper.
+    """
+    from gideon.integrations.acp.reader import FrameRouter
+    from gideon.integrations.acp.session import AcpConnection
 
     client = AcpClient(session_key=session_key)
 
@@ -97,26 +93,16 @@ def _client_with_frames(
     transport = _FakeTransport()
     router = FrameRouter(transport.readline)
     conn = AcpConnection(None, router, dialect=client._dialect, transport=transport)
-    # The turn's request id must equal the scripted terminal frame's id. The session
-    # allocates its prompt id via conn.send_request → conn._req_id() (pre-increment),
-    # so seed the counter so the FIRST allocated id is *req_id*.
     conn._next_id = req_id - 1
 
-    # Bind the session (registers its router queue) BEFORE starting the reader, so no
-    # scripted notification is read + routed before the queue exists (else it would be
-    # dropped to the broadcast sink). Real spawns register per session/new too.
     session = conn._bind_session("sess-abc", session_files_dir=None)
     router.start()
-    # These scenarios model an agent that speaks the vendor extensions, so declare the
-    # command capability the real `initialize` would have captured — `stream_command` is
-    # gated on it (`G4`), and a harness that skipped the handshake would otherwise be
-    # exercising the refusal path instead of the command turn.
     conn._agent_capabilities = {CAP_COMMANDS: True}
     client._can_execute_commands = conn.supports_native_commands
     client._connection = conn
     client._session = session
     client._session_id = "sess-abc"
-    client.ensure_ready = AsyncMock()  # connection + session already wired above
+    client.ensure_ready = AsyncMock()
     return client
 
 
@@ -124,9 +110,6 @@ async def _collect(client: AcpClient, message: str = "go") -> list:
     return [ev async for ev in client.stream_events(message)]
 
 
-# ── frame builders ───────────────────────────────────────────────────────────
-# Every session-scoped notification carries ``sessionId`` (as real backends do) so the
-# FrameRouter demuxes it to the session's queue. The bound session id is "sess-abc".
 _SID = "sess-abc"
 
 
@@ -143,7 +126,9 @@ def _text(t: str, kind: str = "text") -> dict:
     }
 
 
-def _tool_call(tid: str, title: str, kind: str = "read", raw: dict | None = None) -> dict:
+def _tool_call(
+    tid: str, title: str, kind: str = "read", raw: dict | None = None
+) -> dict:
     return {
         "method": "session/update",
         "params": {
@@ -168,7 +153,9 @@ def _tool_update(tid: str, *, status: str = "completed", output: str = "done") -
                 "sessionUpdate": "tool_call_update",
                 "toolCallId": tid,
                 "status": status,
-                "content": [{"type": "content", "content": {"type": "text", "text": output}}],
+                "content": [
+                    {"type": "content", "content": {"type": "text", "text": output}}
+                ],
             },
         },
     }
@@ -178,7 +165,6 @@ def _complete(req_id: int = 1, reason: str = "end_turn") -> dict:
     return {"id": req_id, "result": {"stopReason": reason}}
 
 
-# ── scenarios ─────────────────────────────────────────────────────────────────
 @pytest.mark.asyncio
 async def test_scenario_plain_text_then_complete():
     c = _client_with_frames([_text("hello world"), _complete()])
@@ -190,11 +176,12 @@ async def test_scenario_plain_text_then_complete():
 
 @pytest.mark.asyncio
 async def test_scenario_thinking_then_text():
-    c = _client_with_frames([_text("pondering", "thinking"), _text("answer"), _complete()])
+    c = _client_with_frames(
+        [_text("pondering", "thinking"), _text("answer"), _complete()]
+    )
     events = await _collect(c)
     kinds = [e.kind for e in events]
     assert kinds == [EVENT_THINKING_CHUNK, EVENT_TEXT_CHUNK, EVENT_COMPLETE]
-    # only the non-thinking chunk counts toward text_chunks telemetry
     assert c.last_prompt_stats.text_chunks == 1
 
 
@@ -210,7 +197,6 @@ async def test_scenario_tool_call_then_update_result():
     events = await _collect(c)
     kinds = [e.kind for e in events]
     assert EVENT_TOOL_CALL in kinds
-    # a tool_call_update carrying terminal content yields a tool_result on the same card
     assert EVENT_TOOL_RESULT in kinds
     assert kinds[-1] == EVENT_COMPLETE
     tc = next(e for e in events if e.kind == EVENT_TOOL_CALL)
@@ -260,11 +246,12 @@ async def test_scenario_agent_switch():
 
 @pytest.mark.asyncio
 async def test_scenario_tool_interrupted_marker_synthesizes_complete():
-    # The security-filter marker → synthetic complete (no terminal frame scripted).
-    c = _client_with_frames([_text("Tool uses were interrupted, waiting for the next user prompt")])
-    c._emit_tool_interrupted_sel = MagicMock()  # skip SEL wiring, focus on the event contract
+    c = _client_with_frames(
+        [_text("Tool uses were interrupted, waiting for the next user prompt")]
+    )
+    c._emit_tool_interrupted_sel = MagicMock()
     events = await _collect(c)
-    assert events[-1].kind == EVENT_COMPLETE  # synthesized despite no `result` frame
+    assert events[-1].kind == EVENT_COMPLETE
     assert any(e.kind == EVENT_TEXT_CHUNK for e in events)
 
 
@@ -279,8 +266,7 @@ async def test_scenario_multi_text_chunks_stream_in_order():
 
 @pytest.mark.asyncio
 async def test_scenario_error_terminal_raises():
-    # A terminal frame carrying `error` (not `result`) → the turn raises AcpError.
-    from gideon.acp.errors import AcpError
+    from gideon.integrations.acp.errors import AcpError
 
     c = _client_with_frames(
         [_text("partial"), {"id": 1, "error": {"code": -32000, "message": "boom"}}]
@@ -291,8 +277,6 @@ async def test_scenario_error_terminal_raises():
 
 @pytest.mark.asyncio
 async def test_scenario_command_result_formatted_as_text():
-    # stream_command uses commands/execute → the terminal result's message+data is
-    # formatted into a text chunk (extract_agent_from_result path).
     c = _client_with_frames(
         [{"id": 1, "result": {"message": "usage report", "data": {"tokens": 42}}}]
     )
@@ -304,12 +288,7 @@ async def test_scenario_command_result_formatted_as_text():
 
 @pytest.mark.asyncio
 async def test_scenario_jsonl_tool_results_surface(tmp_path):
-    # Backends that persist tool results to a per-session JSONL file (opt-in via
-    # session_files_dir) must surface them as EVENT_TOOL_RESULT — the client-unique
-    # path the session replicates; guard it here too.
     c = _client_with_frames([_text("running tool"), _complete()])
-    # The per-session JSONL tail is owned by the AcpSession now (opt-in via its
-    # session_files_dir); point it at the tmp file so the real reader surfaces results.
     c._session._session_files_dir = tmp_path
     (tmp_path / "sess-abc.jsonl").write_text(
         json.dumps(
@@ -336,33 +315,28 @@ async def test_scenario_jsonl_tool_results_surface(tmp_path):
     assert "jsonl output" in results[0].tool_output
 
 
-# ── send_message (the →str public API) ─────────────────────────────────────────
-# stream_events is only one of the two turn surfaces. `send_message` returns the
-# whole turn as a STRING (a preserved public method the cutover reimplements by
-# draining the same frame stream — task #7 step 3, retiring `_read_prompt_response`).
-# The oracle must pin its contract at the stdout boundary too, or the cutover has no
-# net under the string API.
 @pytest.mark.asyncio
 async def test_scenario_send_message_concatenates_text():
     c = _client_with_frames([_text("Hello, "), _text("world!"), _complete()])
     result = await c.send_message("hi")
-    assert result == "Hello, world!"  # non-thinking chunks joined in order
+    assert result == "Hello, world!"
     assert c.last_prompt_stats.text_chunks == 2
-    assert c._last_stop_reason == "end_turn"  # terminal stopReason recorded for wait_turn_done
+    assert c._last_stop_reason == "end_turn"
 
 
 @pytest.mark.asyncio
 async def test_scenario_send_message_excludes_thinking():
-    # Thinking chunks stream to the UI but must NOT leak into the returned answer string.
-    c = _client_with_frames([_text("deliberating", "thinking"), _text("final answer"), _complete()])
+    c = _client_with_frames(
+        [_text("deliberating", "thinking"), _text("final answer"), _complete()]
+    )
     result = await c.send_message("hi")
-    assert result == "final answer"  # thinking excluded from the concatenation
+    assert result == "final answer"
     assert c.last_prompt_stats.text_chunks == 1
 
 
 @pytest.mark.asyncio
 async def test_scenario_send_message_error_frame_raises():
-    from gideon.acp.errors import AcpError
+    from gideon.integrations.acp.errors import AcpError
 
     c = _client_with_frames(
         [_text("partial"), {"id": 1, "error": {"code": -32000, "message": "kaboom"}}]
@@ -371,36 +345,27 @@ async def test_scenario_send_message_error_frame_raises():
         await c.send_message("hi")
 
 
-# ── failed-tool result (V6 live facet, now pinned black-box) ───────────────────
 @pytest.mark.asyncio
 async def test_scenario_failed_tool_surfaces_result():
-    # A tool_call_update with status="failed" carries the error text in the SAME
-    # content shape as "completed" and MUST surface as EVENT_TOOL_RESULT (the user
-    # needs to see the failure) — translate.extract_tool_update_events, the failed branch.
     c = _client_with_frames(
         [
             _tool_call("t1", "Run ls"),
-            _tool_update("t1", status="failed", output="ls: /nope: No such file or directory"),
+            _tool_update(
+                "t1", status="failed", output="ls: /nope: No such file or directory"
+            ),
             _complete(),
         ]
     )
     events = await _collect(c)
     tr = [e for e in events if e.kind == EVENT_TOOL_RESULT]
     assert len(tr) == 1 and tr[0].tool_call_id == "t1"
-    assert "No such file or directory" in tr[0].tool_output  # failure text surfaced, not dropped
-    assert events[-1].kind == EVENT_COMPLETE  # turn still completes normally
+    assert "No such file or directory" in tr[0].tool_output
+    assert events[-1].kind == EVENT_COMPLETE
 
 
-# ── stale-synthetic complete (agent streamed text but never sent `result`) ─────
 @pytest.mark.asyncio
 async def test_scenario_stale_text_without_terminal_synthesizes_complete(monkeypatch):
-    # The stdout closes (EOF) after text but with NO terminal `result` frame. Because
-    # text was streamed (_stale_eligible), the turn is finalized with a synthetic
-    # EVENT_COMPLETE(end_turn) rather than surfacing a timeout — distinct from the
-    # security-marker synthesize (that path keys off the interrupted marker text).
-    # Shrink the stale-silence window (real value 90s) so the oracle stays fast — the
-    # CONTRACT under test is "synthesize on stale EOF", not the wall-clock duration.
-    monkeypatch.setattr("gideon.acp.client._STALE_TURN_TIMEOUT", 0.1)
+    monkeypatch.setattr("gideon.integrations.acp.client._STALE_TURN_TIMEOUT", 0.1)
     c = _client_with_frames([_text("here is a partial reply")])
     events = await _collect(c)
     assert any(e.kind == EVENT_TEXT_CHUNK for e in events)
@@ -408,11 +373,8 @@ async def test_scenario_stale_text_without_terminal_synthesizes_complete(monkeyp
     assert events[-1].stop_reason == "end_turn"
 
 
-# ── stop_reason passthrough (not hardcoded to end_turn) ────────────────────────
 @pytest.mark.asyncio
 async def test_scenario_stop_reason_passthrough_non_default():
-    # The terminal frame's stopReason is surfaced VERBATIM on EVENT_COMPLETE — guards
-    # against a cutover that hardcodes end_turn instead of reading the frame.
     c = _client_with_frames([_text("cut short"), _complete(reason="max_tokens")])
     events = await _collect(c)
     assert events[-1].kind == EVENT_COMPLETE

@@ -29,11 +29,11 @@ import json
 
 import pytest
 
-from gideon.loop import files as loop_files
-from gideon.loop import manager, store, supervisor
-from gideon.loop import watchdog as W
-from gideon.loop.loop import KINDS, Loop, LoopStatus
-from gideon.workflows.supervisor_policy import (
+from gideon.automation.loop import files as loop_files
+from gideon.automation.loop import manager, store, supervisor
+from gideon.automation.loop import watchdog as W
+from gideon.automation.loop.loop import KINDS, Loop, LoopStatus
+from gideon.automation.workflows.supervisor_policy import (
     DONE_JUDGE_ASSESSMENT,
     DONE_NEVER,
     DONE_ORCHESTRATED,
@@ -54,11 +54,13 @@ def _tmp_config(monkeypatch, tmp_path):
     BOTH bindings a caller can reach: `loop.files.config_dir` is the name the file store (and,
     through it, the row store's db path) resolved at import, and `config.loader.config_dir` is the
     origin. Patching only one leaves an import-bound reader pointed at the real home."""
-    monkeypatch.setattr("gideon.loop.files.config_dir", lambda: tmp_path)
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
-    from gideon.loop import files as _loop_files
+    monkeypatch.setattr("gideon.automation.loop.files.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
+    from gideon.automation.loop import files as _loop_files
 
-    assert _loop_files.config_dir() == tmp_path, "the store redirect did not take — refusing to run"
+    assert (
+        _loop_files.config_dir() == tmp_path
+    ), "the store redirect did not take — refusing to run"
     return tmp_path
 
 
@@ -79,7 +81,7 @@ class _FakeState:
         self._sessions = {}
         self.notes = []
         self.refreshed = []
-        from gideon.dashboard.sse import SseRegistry
+        from gideon.interfaces.dashboard.sse import SseRegistry
 
         self._sse = SseRegistry()
 
@@ -95,7 +97,12 @@ class _FakeState:
 
 class _FakeNudge:
     def __init__(self, lid, session_name):
-        self.id, self.session_name, self.active, self.cycle_count = lid, session_name, True, 0
+        self.id, self.session_name, self.active, self.cycle_count = (
+            lid,
+            session_name,
+            True,
+            0,
+        )
 
 
 class _FakeSvc:
@@ -104,7 +111,14 @@ class _FakeSvc:
         self._n = 0
 
     async def add(
-        self, *, session_name, message, idle_secs, max_cycles, stop_sentinel_path, first_idle_secs=0
+        self,
+        *,
+        session_name,
+        message,
+        idle_secs,
+        max_cycles,
+        stop_sentinel_path,
+        first_idle_secs=0,
     ):
         self._n += 1
         lp = _FakeNudge(f"N{self._n}", session_name)
@@ -112,7 +126,9 @@ class _FakeSvc:
         return lp
 
     def get_by_session(self, session_name):
-        return next((lp for lp in self._loops.values() if lp.session_name == session_name), None)
+        return next(
+            (lp for lp in self._loops.values() if lp.session_name == session_name), None
+        )
 
     async def update(self, loop_id, **kw):
         lp = self._loops.get(loop_id)
@@ -148,21 +164,23 @@ def _running(**over):
 
 def _write_finding(cid, cycle):
     (loop_files.loop_dir(cid) / "findings" / f"cycle_{cycle:03d}.json").write_text(
-        json.dumps({"cycle": cycle, "new_findings_count": 1, "summary": f"cycle {cycle} work"})
+        json.dumps(
+            {"cycle": cycle, "new_findings_count": 1, "summary": f"cycle {cycle} work"}
+        )
     )
 
 
 def _drive_one_cycle(wd, loop):
     """Seed liveness, land ONE new finding, then poll again — the shipped path that reaches the
     convergence decision. Returns nothing; the caller reads its spies."""
-    wd._state._sessions[manager.session_key(loop.id)] = _FakeSession(manager.session_key(loop.id))
-    _run(wd._poll_once())  # first observation seeds liveness and returns early
+    wd._state._sessions[manager.session_key(loop.id)] = _FakeSession(
+        manager.session_key(loop.id)
+    )
+    _run(wd._poll_once())
     _write_finding(loop.id, 1)
-    _run(wd._poll_once())  # a new finding → the convergence decision
+    _run(wd._poll_once())
 
 
-#: The five kinds and the `kind_config` that selects each one's declared variant. `goal` is driven
-#: in all three of its variants because the variant IS the axis the deleted Python branched on.
 _KIND_CASES: tuple[tuple[str, dict], ...] = (
     ("general", {"verify_command": "true"}),
     ("goal", {"goal_type": "verifiable", "verify_command": "true"}),
@@ -192,10 +210,12 @@ def test_the_watchdog_resolves_the_declared_policy_for_every_kind(monkeypatch, c
         return real(k, kc)
 
     monkeypatch.setattr(W, "policy_for_kind", _spy)
-    # Neither real mechanism may run here: this test is about RESOLUTION, and a live judge or a
-    # spawned subprocess would make it slow and non-hermetic.
-    monkeypatch.setattr("gideon.loop.gates.run_verify_command", lambda *a, **k: _coro(None))
-    monkeypatch.setattr("gideon.loop.judge.assess_cycle", lambda *a, **k: _coro(None))
+    monkeypatch.setattr(
+        "gideon.automation.loop.gates.run_verify_command", lambda *a, **k: _coro(None)
+    )
+    monkeypatch.setattr(
+        "gideon.automation.loop.judge.assess_cycle", lambda *a, **k: _coro(None)
+    )
 
     loop = _running(kind=kind, kind_config=dict(cfg))
     _drive_one_cycle(_wd(), loop)
@@ -211,8 +231,6 @@ def test_the_watchdog_resolves_the_declared_policy_for_every_kind(monkeypatch, c
     ), "the watchdog resolved a policy that is not the declared row — a second declaration exists"
 
 
-#: Which mechanism each declared signal is allowed to reach. The matrix is asserted in BOTH
-#: directions, so a run that reaches the wrong one fails as loudly as one that reaches none.
 _MECHANISM_BY_SIGNAL = {
     DONE_VERIFY_COMMAND: ("command",),
     DONE_JUDGE_ASSESSMENT: ("judge",),
@@ -220,23 +238,14 @@ _MECHANISM_BY_SIGNAL = {
     DONE_ORCHESTRATED: (),
 }
 
-#: The mechanism each CONVERGENCE KEY must reach, pinned INDEPENDENTLY of the declaration.
-#:
-#: Deriving this from `policy_for_kind(...).convergence.signal` was the first shape of this test and
-#: it was measurably too weak: flipping `general`'s row from `verify_command` to `orchestrated`
-#: (a real falsification run) left the derived expectation agreeing with the mutated row, so the
-#: general leg still PASSED. A matrix that reads its own answer off the thing under test can only
-#: catch a declaration/evaluator disagreement, never a WRONG declaration — which is the failure
-#: that would actually ship (a kind that silently stops self-completing). These values are the
-#: behaviour of the DELETED plugin, restated here as the independent expectation.
 _EXPECTED_MECHANISM: dict[str, tuple[str, ...]] = {
-    "general": ("command",),  # GeneralKind.is_done_signal ran verify_command
-    "goal:verifiable": ("command",),  # GoalKind: goal_type == "verifiable" ran verify_command
-    "goal:open_ended": ("judge",),  # GoalKind._assess_open_ended commissioned the judge
-    "goal:monitor": (),  # GoalKind: goal_type == "monitor" returned False outright
-    "research:open_ended": ("judge",),  # ResearchKind inherited GoalKind's open-ended branch
-    "code": (),  # CodeKind.is_done_signal was `return None`; its hook owns done-ness
-    "design": (),  # DesignKind.is_done_signal was `return None`; its hook owns done-ness
+    "general": ("command",),
+    "goal:verifiable": ("command",),
+    "goal:open_ended": ("judge",),
+    "goal:monitor": (),
+    "research:open_ended": ("judge",),
+    "code": (),
+    "design": (),
 }
 
 
@@ -250,17 +259,17 @@ def test_the_declared_mechanism_is_the_one_that_runs(monkeypatch, case):
 
     def _command(*_a, **_k):
         reached.append("command")
-        return _coro(None)  # can't-tell → the loop neither completes nor stalls
+        return _coro(None)
 
     def _judge(*_a, **_k):
         reached.append("judge")
         return _coro(None)
 
-    monkeypatch.setattr("gideon.loop.gates.run_verify_command", _command)
-    monkeypatch.setattr("gideon.loop.judge.assess_cycle", _judge)
-    # The calibration canary would otherwise run its own probe before the judge; short-circuit it
-    # to "trustworthy" so this test observes the assessment call, not the probe.
-    monkeypatch.setattr("gideon.loop.instrument.probe_judge", lambda *_a, **_k: _coro(True))
+    monkeypatch.setattr("gideon.automation.loop.gates.run_verify_command", _command)
+    monkeypatch.setattr("gideon.automation.loop.judge.assess_cycle", _judge)
+    monkeypatch.setattr(
+        "gideon.automation.loop.instrument.probe_judge", lambda *_a, **_k: _coro(True)
+    )
 
     loop = _running(kind=kind, kind_config=dict(cfg))
     _drive_one_cycle(_wd(), loop)
@@ -273,8 +282,6 @@ def test_the_declared_mechanism_is_the_one_that_runs(monkeypatch, case):
         f"used — but the poll reached {sorted(set(reached))}. Either the declared row is wrong "
         f"(it currently says {signal!r}) or a kind is still deciding in Python."
     )
-    # And the declaration agrees with the independent expectation, so the row cannot drift away
-    # from the behaviour above while the run still happens to reach the right mechanism.
     assert set(_MECHANISM_BY_SIGNAL[signal]) == expected, (
         f"{key} declares signal {signal!r} (→ {sorted(_MECHANISM_BY_SIGNAL[signal])}) but must use "
         f"{sorted(expected)}. The declaration is the shipped rule; fix the row, not this test."
@@ -293,13 +300,15 @@ def test_an_orchestrated_kind_does_not_reach_the_point_in_time_evaluator(monkeyp
         return await real_signal(loop, findings, policy)
 
     monkeypatch.setattr(supervisor, "done_signal", _spy)
-    monkeypatch.setattr("gideon.loop.gates.run_verify_command", lambda *a, **k: _coro(None))
+    monkeypatch.setattr(
+        "gideon.automation.loop.gates.run_verify_command", lambda *a, **k: _coro(None)
+    )
 
-    # Positive control FIRST: a non-orchestrated kind must reach the evaluator, else "not reached"
-    # below would be indistinguishable from a spy that never fires.
     general = _running(kind="general", kind_config={"verify_command": "true"})
     _drive_one_cycle(_wd(), general)
-    assert calls == [DONE_VERIFY_COMMAND], f"positive control failed — evaluator calls: {calls}"
+    assert calls == [
+        DONE_VERIFY_COMMAND
+    ], f"positive control failed — evaluator calls: {calls}"
 
     calls.clear()
     code = _running(kind="code", kind_config={})
@@ -312,21 +321,24 @@ def test_an_orchestrated_kind_does_not_reach_the_point_in_time_evaluator(monkeyp
 
 def test_a_monitor_goals_two_satellite_decisions_come_from_the_policy(monkeypatch):
     """`budget_stop_is_genuine` and the stall signal were the two `getattr`-shaped hooks beside
-    `is_done_signal`. Both are now policy reads, asserted at the watchdog's own call sites."""
-    monkeypatch.setattr("gideon.loop.gates.run_verify_command", lambda *a, **k: _coro(None))
+    `is_done_signal`. Both are now policy reads, asserted at the watchdog's own call sites.
+    """
+    monkeypatch.setattr(
+        "gideon.automation.loop.gates.run_verify_command", lambda *a, **k: _coro(None)
+    )
     monitor = _running(kind="goal", kind_config={"goal_type": "monitor"}, max_cycles=1)
     wd = _wd()
     _drive_one_cycle(wd, monitor)
-    # max_cycles=1 with one finding → the budget path ran, and for a monitor the policy declares
-    # that stop GENUINE, so the loop completes cleanly rather than error-flavoured.
     row = store.get(monitor.id)
     assert row.status == LoopStatus.COMPLETE.value, row.status
-    assert supervisor.budget_stop_is_genuine(policy_for_kind("goal", {"goal_type": "monitor"}))
-    # The stall signal is off for a monitor and on for everything else — read through the
-    # watchdog's own predicate, so a rewiring that bypassed the policy would red here.
+    assert supervisor.budget_stop_is_genuine(
+        policy_for_kind("goal", {"goal_type": "monitor"})
+    )
     assert wd._stagnation_disabled(row) is True
     assert (
-        wd._stagnation_disabled(_running(kind="goal", kind_config={"goal_type": "open_ended"}))
+        wd._stagnation_disabled(
+            _running(kind="goal", kind_config={"goal_type": "open_ended"})
+        )
         is False
     )
 
@@ -335,7 +347,7 @@ def test_every_declared_signal_has_a_mechanism_row():
     """Vacuity floor for the matrix: a signal added to the closed vocabulary without a row here
     would make `_MECHANISM_BY_SIGNAL[...]` raise rather than silently pass, but only if some test
     drives that signal. This asserts the coverage directly."""
-    from gideon.workflows.supervisor_policy import DONE_SIGNALS
+    from gideon.automation.workflows.supervisor_policy import DONE_SIGNALS
 
     assert set(_MECHANISM_BY_SIGNAL) == set(
         DONE_SIGNALS
@@ -345,10 +357,9 @@ def test_every_declared_signal_has_a_mechanism_row():
         f"the driven cases cover {sorted(driven)} but the vocabulary is {sorted(DONE_SIGNALS)} — "
         f"an undriven signal is an unmeasured mechanism."
     )
-    # And every KIND is driven, not just every signal: five kinds, all present.
-    assert {k for k, _ in _KIND_CASES} == set(KINDS), set(KINDS) - {k for k, _ in _KIND_CASES}
-    # The independent expectation covers exactly the driven cases — a case with no pinned mechanism
-    # would raise a KeyError above rather than pass, but an ORPHAN row would rot unnoticed.
+    assert {k for k, _ in _KIND_CASES} == set(KINDS), set(KINDS) - {
+        k for k, _ in _KIND_CASES
+    }
     assert set(_EXPECTED_MECHANISM) == {_case_id(c) for c in _KIND_CASES}
 
 

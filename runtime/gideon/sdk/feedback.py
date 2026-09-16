@@ -1,7 +1,7 @@
 """SDK: feedback capture — the one write API for AI-judgment verdicts (Tier-S).
 
-Stable re-export of :func:`gideon.feedback.record_feedback` and
-:class:`~gideon.feedback.FeedbackRecord` so an app records feedback on its
+Stable re-export of :func:`gideon.cognition.feedback.record_feedback` and
+:class:`~gideon.cognition.feedback.FeedbackRecord` so an app records feedback on its
 own judgments identically to core surfaces. App bundles calling through the
 ``/api/feedback`` route get ``source_app`` stamped server-side and their producer
 namespaced to ``app:<name>:<producer>``; in-process SDK callers SHOULD pass their
@@ -12,7 +12,7 @@ an optional short reason ever feeds learning. Deterministic, local-only — reco
 never leave the instance.
 """
 
-from gideon.feedback import (  # noqa: F401
+from gideon.cognition.feedback import (
     PRODUCER_KINDS,
     TARGET_KINDS,
     FeedbackRecord,

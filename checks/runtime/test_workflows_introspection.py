@@ -25,7 +25,7 @@ import tempfile
 
 import pytest
 
-from gideon.workflows.introspection import (
+from gideon.automation.workflows.introspection import (
     CHECKLIST,
     EDGE_STATS_MIN_RUNS,
     FAKE_CHECK_MIN_RUNS,
@@ -60,7 +60,7 @@ def write_run(run_id: str, events: list[tuple]) -> list[dict]:
     actually writes — a hand-built fixture would let this module drift from the stream it
     projects.
     """
-    from gideon.workflows import journal as J
+    from gideon.automation.workflows import journal as J
 
     j = J.Journal(run_id)
     for kind, kwargs in events:
@@ -68,13 +68,11 @@ def write_run(run_id: str, events: list[tuple]) -> list[dict]:
     return J.ledger(run_id)
 
 
-# ── the projection agrees with the engine's own aggregate ──
-
-
 def test_run_stats_matches_the_engines_OWN_run_totals(journal_home):
     """Two aggregates over one stream that disagreed would make the cockpit and the run row show
-    different numbers for the same run, and there would be no way to tell which was right."""
-    from gideon.workflows import journal as J
+    different numbers for the same run, and there would be no way to tell which was right.
+    """
+    from gideon.automation.workflows import journal as J
 
     events = write_run(
         "r-agree",
@@ -98,21 +96,28 @@ def test_run_stats_matches_the_engines_OWN_run_totals(journal_home):
     assert stats.steps_completed == official["steps_completed"]
     assert stats.steps_failed == official["steps_failed"]
     assert stats.steps_cached == official["steps_cached"]
-    # …including the money DISCLOSURE, not just the money (#2566). Two aggregates that agreed on the
-    # dollar and disagreed on whether it was measured would be the same defect one level up.
     assert stats.priced is official["priced"] is True
 
 
 def test_the_models_a_run_used_are_collected(journal_home):
     """ "What is costing money" is unanswerable without knowing which model spent it."""
-    from gideon.workflows import journal as J
+    from gideon.automation.workflows import journal as J
 
     events = write_run(
         "r-models",
         [
-            (J.STEP_COMPLETED, {"instance_path": "a", "node_id": "a", "model": "claude-sonnet-5"}),
-            (J.STEP_COMPLETED, {"instance_path": "b", "node_id": "b", "model": "claude-opus-5"}),
-            (J.STEP_COMPLETED, {"instance_path": "c", "node_id": "c", "model": "claude-sonnet-5"}),
+            (
+                J.STEP_COMPLETED,
+                {"instance_path": "a", "node_id": "a", "model": "claude-sonnet-5"},
+            ),
+            (
+                J.STEP_COMPLETED,
+                {"instance_path": "b", "node_id": "b", "model": "claude-opus-5"},
+            ),
+            (
+                J.STEP_COMPLETED,
+                {"instance_path": "c", "node_id": "c", "model": "claude-sonnet-5"},
+            ),
         ],
     )
     assert run_stats("r-models", events).models == ["claude-sonnet-5", "claude-opus-5"]
@@ -126,12 +131,11 @@ def test_an_empty_ledger_projects_to_zeros_rather_than_raising():
 
 
 def test_a_malformed_event_is_skipped(journal_home):
-    stats = run_stats("r-junk", [None, "not a dict", {"kind": "step_completed", "tokens": 5}])
+    stats = run_stats(
+        "r-junk", [None, "not a dict", {"kind": "step_completed", "tokens": 5}]
+    )
     assert stats.steps_completed == 1
     assert stats.tokens == 5
-
-
-# ── verification debt ──
 
 
 def test_a_step_a_GATE_verified_is_not_debt(journal_home):
@@ -139,7 +143,7 @@ def test_a_step_a_GATE_verified_is_not_debt(journal_home):
     with three nodes between them. Counting "the next node is a gate" would report a
     correctly-verified reviewer as debt, and a debt number that flags correct structure gets
     ignored."""
-    from gideon.workflows import journal as J
+    from gideon.automation.workflows import journal as J
 
     events = write_run(
         "r-verified",
@@ -147,7 +151,12 @@ def test_a_step_a_GATE_verified_is_not_debt(journal_home):
             (J.STEP_COMPLETED, {"instance_path": "a", "node_id": "write"}),
             (
                 J.GATE_RESOLVED,
-                {"instance_path": "g", "node_id": "check", "approved": True, "verifies": ["write"]},
+                {
+                    "instance_path": "g",
+                    "node_id": "check",
+                    "approved": True,
+                    "verifies": ["write"],
+                },
             ),
         ],
     )
@@ -157,7 +166,7 @@ def test_a_step_a_GATE_verified_is_not_debt(journal_home):
 
 
 def test_an_UNVERIFIED_step_is_debt(journal_home):
-    from gideon.workflows import journal as J
+    from gideon.automation.workflows import journal as J
 
     events = write_run(
         "r-debt",
@@ -184,20 +193,27 @@ def test_the_debt_threshold_is_not_ZERO():
     assert VERIFICATION_DEBT_WARN > 0.0
 
 
-# ── said-no metrics, from the field the engine actually writes ──
-
-
 def test_gate_stats_read_the_APPROVED_field(journal_home):
     """NOT `GATE_REJECTED`: that kind is declared in `journal.py` and emitted nowhere, so a metric
-    reading it would report zero rejections for every gate and flag the whole library as fake."""
-    from gideon.workflows import journal as J
+    reading it would report zero rejections for every gate and flag the whole library as fake.
+    """
+    from gideon.automation.workflows import journal as J
 
     events = write_run(
         "r-gates",
         [
-            (J.GATE_RESOLVED, {"instance_path": "g", "node_id": "check", "approved": True}),
-            (J.GATE_RESOLVED, {"instance_path": "g", "node_id": "check", "approved": False}),
-            (J.GATE_RESOLVED, {"instance_path": "g", "node_id": "check", "approved": True}),
+            (
+                J.GATE_RESOLVED,
+                {"instance_path": "g", "node_id": "check", "approved": True},
+            ),
+            (
+                J.GATE_RESOLVED,
+                {"instance_path": "g", "node_id": "check", "approved": False},
+            ),
+            (
+                J.GATE_RESOLVED,
+                {"instance_path": "g", "node_id": "check", "approved": True},
+            ),
         ],
     )
     stats = gate_stats(events)["check"]
@@ -214,15 +230,14 @@ def test_GATE_REJECTED_is_still_emitted_NOWHERE():
     import pathlib as _p
     import re as _re
 
-    src = _p.Path("src/gideon")
-    # A WRITE, not a mention: `journal.py` declares the constant and `introspection.py`
-    # documents why
-    # it is unused, and matching either would make this test fail on its own explanation.
-    # The pattern
-    # is the shape a real emitter has — the constant passed to a journal write.
+    src = _p.Path("runtime/gideon")
     emit = _re.compile(r"write\s*\(\s*[\w_.]*GATE_REJECTED")
-    emitters = [str(f) for f in src.rglob("*.py") if emit.search(f.read_text(encoding="utf-8"))]
-    assert emitters == [], f"GATE_REJECTED is now emitted by {emitters} — revisit gate_stats"
+    emitters = [
+        str(f) for f in src.rglob("*.py") if emit.search(f.read_text(encoding="utf-8"))
+    ]
+    assert (
+        emitters == []
+    ), f"GATE_REJECTED is now emitted by {emitters} — revisit gate_stats"
 
 
 def test_a_NON_GATE_retry_does_not_create_a_gate_row(journal_home):
@@ -231,13 +246,19 @@ def test_a_NON_GATE_retry_does_not_create_a_gate_row(journal_home):
     with `total: 0` and a 0.0 pass rate — a row that reads as a gate which has never
     passed anything,
     in a table whose credibility is the only reason anyone reads it."""
-    from gideon.workflows import journal as J
+    from gideon.automation.workflows import journal as J
 
     events = write_run(
         "r-nongate",
         [
-            (J.GATE_RESOLVED, {"instance_path": "g", "node_id": "check", "approved": True}),
-            (J.STEP_ATTEMPT, {"instance_path": "p", "node_id": "publish", "attempt": 2}),
+            (
+                J.GATE_RESOLVED,
+                {"instance_path": "g", "node_id": "check", "approved": True},
+            ),
+            (
+                J.STEP_ATTEMPT,
+                {"instance_path": "p", "node_id": "publish", "attempt": 2},
+            ),
         ],
     )
     stats = gate_stats(events)
@@ -246,12 +267,15 @@ def test_a_NON_GATE_retry_does_not_create_a_gate_row(journal_home):
 
 
 def test_a_GATE_retry_is_counted(journal_home):
-    from gideon.workflows import journal as J
+    from gideon.automation.workflows import journal as J
 
     events = write_run(
         "r-gateretry",
         [
-            (J.GATE_RESOLVED, {"instance_path": "g", "node_id": "check", "approved": True}),
+            (
+                J.GATE_RESOLVED,
+                {"instance_path": "g", "node_id": "check", "approved": True},
+            ),
             (J.STEP_ATTEMPT, {"instance_path": "g", "node_id": "check", "attempt": 3}),
         ],
     )
@@ -261,12 +285,15 @@ def test_a_GATE_retry_is_counted(journal_home):
 def test_ATTEMPT_ONE_is_not_a_retry(journal_home):
     """Counting it would report a retry on every node that ever ran, which makes the retry column
     meaningless."""
-    from gideon.workflows import journal as J
+    from gideon.automation.workflows import journal as J
 
     events = write_run(
         "r-firsttry",
         [
-            (J.GATE_RESOLVED, {"instance_path": "g", "node_id": "check", "approved": True}),
+            (
+                J.GATE_RESOLVED,
+                {"instance_path": "g", "node_id": "check", "approved": True},
+            ),
             (J.STEP_ATTEMPT, {"instance_path": "g", "node_id": "check", "attempt": 1}),
         ],
     )
@@ -277,14 +304,13 @@ def test_an_event_with_no_node_id_is_skipped():
     assert gate_stats([{"kind": "gate_resolved", "approved": True}]) == {}
 
 
-# ── the fake-check badge needs a SAMPLE ──
-
-
 @pytest.mark.parametrize("passes", [1, 5, FAKE_CHECK_MIN_RUNS - 1])
 def test_a_small_sample_does_NOT_earn_the_badge(passes):
     """ "0 rejections in 3 runs" is a sample-size artifact. A badge that fired there would teach the
     user to ignore badges before the metric had ever been right."""
-    assert GateStats(node_id="check", passes=passes, rejects=0).fake_check_warning() == ""
+    assert (
+        GateStats(node_id="check", passes=passes, rejects=0).fake_check_warning() == ""
+    )
 
 
 @pytest.mark.parametrize("passes", [FAKE_CHECK_MIN_RUNS, 40])
@@ -315,9 +341,6 @@ def test_a_gate_that_never_ran_has_no_pass_rate():
     assert GateStats(node_id="check").total == 0
 
 
-# ── percentiles ──
-
-
 def test_percentiles_are_REAL_observed_values():
     """Nearest-rank rather than interpolated: with the handful of runs a personal instance
     accumulates, an interpolated p95 invents a value between two real runs, and "the bad case cost
@@ -340,14 +363,14 @@ def test_p95_is_at_least_p50():
     assert percentile(values, 95) >= percentile(values, 50)
 
 
-# ── template cards ──
-
-
 def test_a_card_reports_BOTH_percentiles():
     """A mean would hide both the typical case and the bad one — one runaway run moves it,
     and nothing
     tells you whether the usual run is cheap."""
-    runs = [RunStats(run_id=f"r{i}", cost_usd=c) for i, c in enumerate([0.01, 0.02, 0.03, 0.90])]
+    runs = [
+        RunStats(run_id=f"r{i}", cost_usd=c)
+        for i, c in enumerate([0.01, 0.02, 0.03, 0.90])
+    ]
     card = template_card("deep-research", runs)
     assert card.cost_p50 < card.cost_p95
     assert card.runs == 4
@@ -382,11 +405,10 @@ def test_the_failure_rate_counts_RUNS_not_steps():
 
 
 def test_warnings_ride_on_the_card():
-    card = template_card("t", [RunStats(run_id="r1")], warnings=["`check` has never rejected"])
+    card = template_card(
+        "t", [RunStats(run_id="r1")], warnings=["`check` has never rejected"]
+    )
     assert card.to_dict()["warnings"] == ["`check` has never rejected"]
-
-
-# ── the nine-question checklist ──
 
 
 def test_the_checklist_has_all_NINE_questions():
@@ -394,7 +416,16 @@ def test_the_checklist_has_all_NINE_questions():
     "glanceable" from a taste claim into a contract."""
     assert len(CHECKLIST) == 9
     keys = {key for key, _ in CHECKLIST}
-    assert {"running", "blocked", "approval", "failed", "cost", "risky", "next", "proof"} <= keys
+    assert {
+        "running",
+        "blocked",
+        "approval",
+        "failed",
+        "cost",
+        "risky",
+        "next",
+        "proof",
+    } <= keys
 
 
 def test_a_MISSING_answer_is_reported_as_a_gap():
@@ -416,9 +447,6 @@ def test_no_answers_reports_every_question():
     assert len(checklist_gaps({})) == 9
 
 
-# ── the Proof section ──
-
-
 def test_a_proof_section_with_no_evidence_SAYS_SO():
     """A Proof section with no evidence and no warning is the worst possible surface: it looks like
     proof."""
@@ -429,7 +457,8 @@ def test_a_proof_section_with_no_evidence_SAYS_SO():
 
 def test_a_section_with_evidence_needs_no_caveat():
     section = proof_section(
-        RunStats(run_id="r", steps_completed=3), evidence_files=["before.png", "after.png"]
+        RunStats(run_id="r", steps_completed=3),
+        evidence_files=["before.png", "after.png"],
     )
     assert section.evidence_files == ["before.png", "after.png"]
     assert section.honest is True
@@ -437,23 +466,27 @@ def test_a_section_with_evidence_needs_no_caveat():
 
 def test_HIGH_verification_debt_earns_a_warning():
     """A run with high debt and a confident summary is exactly the shape that makes unattended work
-    untrustworthy — the output looks finished, and nothing says how much of it was checked."""
+    untrustworthy — the output looks finished, and nothing says how much of it was checked.
+    """
     section = proof_section(
-        RunStats(run_id="r", steps_completed=4, unverified_steps=4), evidence_files=["x.png"]
+        RunStats(run_id="r", steps_completed=4, unverified_steps=4),
+        evidence_files=["x.png"],
     )
     assert any("nothing verifying them" in w for w in section.warnings)
 
 
 def test_LOW_debt_earns_no_debt_warning():
     section = proof_section(
-        RunStats(run_id="r", steps_completed=4, unverified_steps=0), evidence_files=["x.png"]
+        RunStats(run_id="r", steps_completed=4, unverified_steps=0),
+        evidence_files=["x.png"],
     )
     assert not any("nothing verifying" in w for w in section.warnings)
 
 
 def test_a_FAILED_step_is_called_out():
     section = proof_section(
-        RunStats(run_id="r", steps_completed=2, steps_failed=1), evidence_files=["x.png"]
+        RunStats(run_id="r", steps_completed=2, steps_failed=1),
+        evidence_files=["x.png"],
     )
     assert any("failed" in w for w in section.warnings)
 
@@ -471,7 +504,9 @@ def test_a_section_over_a_run_that_did_nothing_reports_zero_coverage_not_an_erro
 def test_the_summary_states_the_counts_rather_than_a_verdict():
     """A summary that said "succeeded" would be the run grading itself; the counts let the reader
     grade it."""
-    summary = proof_section(RunStats(run_id="r", steps_completed=3, steps_failed=1)).summary
+    summary = proof_section(
+        RunStats(run_id="r", steps_completed=3, steps_failed=1)
+    ).summary
     assert "3 steps completed" in summary
     assert "1 failed" in summary
 
@@ -485,17 +520,26 @@ def test_the_summary_and_the_failed_warning_each_agree_with_their_OWN_count():
     asserted too — "check what the run did with their outputs" is as wrong at n === 1 as "step(s)"
     was.
     """
-    one_completed = proof_section(RunStats(run_id="r", steps_completed=1, steps_failed=4))
+    one_completed = proof_section(
+        RunStats(run_id="r", steps_completed=1, steps_failed=4)
+    )
     assert "1 step completed" in one_completed.summary
     assert "1 steps" not in one_completed.summary
-    assert "4 steps failed — check what the run did with their outputs" in one_completed.warnings
+    assert (
+        "4 steps failed — check what the run did with their outputs"
+        in one_completed.warnings
+    )
 
-    many_completed = proof_section(RunStats(run_id="r", steps_completed=4, steps_failed=1))
+    many_completed = proof_section(
+        RunStats(run_id="r", steps_completed=4, steps_failed=1)
+    )
     assert "4 steps completed" in many_completed.summary
-    assert "1 step failed — check what the run did with its output" in many_completed.warnings
+    assert (
+        "1 step failed — check what the run did with its output"
+        in many_completed.warnings
+    )
     assert not any("their outputs" in w for w in many_completed.warnings)
 
-    # And no sentence anywhere in the section may reintroduce the hedge.
     for stats in (one_completed, many_completed):
         assert "(s)" not in stats.summary
         assert not any("(s)" in w for w in stats.warnings)
@@ -514,26 +558,24 @@ def test_a_two_case_branch_says_one_other_case_not_1_case_s():
     assert "case(s)" not in two.degenerate_warning()
     assert " 1 case" not in two.degenerate_warning()
 
-    four = BranchStats(path="router", cases={"bug": runs, "a": 0, "b": 0, "c": 0}, routed_runs=runs)
-    assert "its other 3 cases are declared but never chosen" in four.degenerate_warning()
-
-    # The guard itself is unchanged: one declared case is a spec shape, not a do-nothing selector.
+    four = BranchStats(
+        path="router", cases={"bug": runs, "a": 0, "b": 0, "c": 0}, routed_runs=runs
+    )
     assert (
-        BranchStats(path="router", cases={"bug": runs}, routed_runs=runs).degenerate_warning() == ""
+        "its other 3 cases are declared but never chosen" in four.degenerate_warning()
+    )
+
+    assert (
+        BranchStats(
+            path="router", cases={"bug": runs}, routed_runs=runs
+        ).degenerate_warning()
+        == ""
     )
 
 
-# ── PP-8: edge-decision statistics (per-`branch` case + per-judge verdict distribution) ──
-#
-# The selected case survives in the EVENT STREAM only as the instance PATH of the case subtree:
-# the branch's `{"case": label}` output is offloaded behind an `output_ref` and its declined edges
-# are never journaled. So the projection reads `<branch>.cases[<label>]` paths — the taken case
-# runs, every untaken case's subtree is `step_skipped` (asserted against the engine's real writers
-# in `test_workflows_controller`: `root.cases[b]` and its children are skipped). These tests build
-# that exact shape.
-
-
-def _branch_run(taken: str | None, skipped: list[str], *, branch: str = "router") -> list[dict]:
+def _branch_run(
+    taken: str | None, skipped: list[str], *, branch: str = "router"
+) -> list[dict]:
     """One run's events for a `branch` that took `taken` (or routed nowhere), skipping the rest."""
     events: list[dict] = []
     if taken is not None:
@@ -546,7 +588,11 @@ def _branch_run(taken: str | None, skipped: list[str], *, branch: str = "router"
         )
     for label in skipped:
         events.append(
-            {"kind": "step_skipped", "instance_path": f"{branch}.cases[{label}]", "node_id": label}
+            {
+                "kind": "step_skipped",
+                "instance_path": f"{branch}.cases[{label}]",
+                "node_id": label,
+            }
         )
     return events
 
@@ -562,7 +608,8 @@ def test_edge_stats_counts_each_branch_case():
 
 def test_the_edge_sample_bar_IS_the_said_no_bar():
     """One rule for the whole surface: a branch and a gate on the same template must not disagree
-    about what "enough runs" means, so the dead-case flag reuses the fake-check threshold."""
+    about what "enough runs" means, so the dead-case flag reuses the fake-check threshold.
+    """
     assert EDGE_STATS_MIN_RUNS == FAKE_CHECK_MIN_RUNS
 
 
@@ -577,7 +624,8 @@ def test_a_case_NEVER_taken_is_flagged_over_a_real_sample():
 
 def test_a_never_taken_case_is_NOT_flagged_on_a_YOUNG_template():
     """The load-bearing sample gate. `feat` unseen over three routings is UNSAMPLED, not dead — a
-    flag here is the noise that teaches a reader to ignore the surface before it is ever right."""
+    flag here is the noise that teaches a reader to ignore the surface before it is ever right.
+    """
     runs = [_branch_run("bug", ["feat"]) for _ in range(3)]
     stats = edge_stats(runs).branches["router"]
     assert stats.routed_runs == 3
@@ -613,7 +661,8 @@ def test_a_single_case_branch_is_not_called_degenerate():
 
 def test_a_branch_that_did_not_ROUTE_is_not_counted():
     """An outer branch can skip this one entirely; a run where every case is skipped is not a
-    routing, so it must not inflate `routed_runs` — else a skipped branch reads as a dead-case."""
+    routing, so it must not inflate `routed_runs` — else a skipped branch reads as a dead-case.
+    """
     routed = [_branch_run("bug", ["feat"]) for _ in range(12)]
     unrouted = [_branch_run(None, ["bug", "feat"]) for _ in range(5)]
     stats = edge_stats(routed + unrouted).branches["router"]
@@ -623,7 +672,8 @@ def test_a_branch_that_did_not_ROUTE_is_not_counted():
 
 def test_nested_branches_attribute_to_their_OWN_prefix():
     """`outer` takes `a`; inside `a`, `inner` takes `b` and skips `c`. Each `.cases[...]` segment is
-    attributed to its immediate prefix, so the two branches are counted independently."""
+    attributed to its immediate prefix, so the two branches are counted independently.
+    """
     run = [
         {"kind": "step_completed", "instance_path": "outer.cases[a]", "node_id": "a"},
         {"kind": "step_skipped", "instance_path": "outer.cases[z]", "node_id": "z"},
@@ -632,7 +682,11 @@ def test_nested_branches_attribute_to_their_OWN_prefix():
             "instance_path": "outer.cases[a].inner.cases[b]",
             "node_id": "b",
         },
-        {"kind": "step_skipped", "instance_path": "outer.cases[a].inner.cases[c]", "node_id": "c"},
+        {
+            "kind": "step_skipped",
+            "instance_path": "outer.cases[a].inner.cases[c]",
+            "node_id": "c",
+        },
     ]
     branches = edge_stats([run]).branches
     assert branches["outer"].cases == {"a": 1, "z": 0}
@@ -641,10 +695,19 @@ def test_nested_branches_attribute_to_their_OWN_prefix():
 
 def test_a_container_case_is_taken_via_its_CHILDREN():
     """A structural container case root emits no step of its own; its children do. "Taken" reads a
-    non-skip event ANYWHERE in the subtree, so a container leg is not mistaken for never-taken."""
+    non-skip event ANYWHERE in the subtree, so a container leg is not mistaken for never-taken.
+    """
     run = [
-        {"kind": "step_completed", "instance_path": "router.cases[big].child", "node_id": "child"},
-        {"kind": "step_skipped", "instance_path": "router.cases[small]", "node_id": "small"},
+        {
+            "kind": "step_completed",
+            "instance_path": "router.cases[big].child",
+            "node_id": "child",
+        },
+        {
+            "kind": "step_skipped",
+            "instance_path": "router.cases[small]",
+            "node_id": "small",
+        },
     ]
     stats = edge_stats([run]).branches["router"]
     assert stats.cases == {"big": 1, "small": 0}
@@ -661,21 +724,24 @@ def test_edge_stats_reads_the_REAL_journal_path_shape(journal_home):
     """Through the engine's own `Journal`, not hand-built dicts: the field names, redaction and the
     `.cases[...]` path are whatever the engine writes, so this catches the projection drifting from
     the stream it reads (the ethos this module was built on)."""
-    from gideon.workflows import journal as J
+    from gideon.automation.workflows import journal as J
 
     events = write_run(
         "r-branch",
         [
-            (J.STEP_COMPLETED, {"instance_path": "router.cases[bug]", "node_id": "bug"}),
-            (J.STEP_SKIPPED, {"instance_path": "router.cases[feat]", "node_id": "feat"}),
+            (
+                J.STEP_COMPLETED,
+                {"instance_path": "router.cases[bug]", "node_id": "bug"},
+            ),
+            (
+                J.STEP_SKIPPED,
+                {"instance_path": "router.cases[feat]", "node_id": "feat"},
+            ),
         ],
     )
     stats = edge_stats([events]).branches["router"]
     assert stats.cases == {"bug": 1, "feat": 0}
     assert stats.routed_runs == 1
-
-
-# ── the judge half: per-gate verdict distribution ──
 
 
 def _judge_run(node_id: str, verdict: str) -> list[dict]:
@@ -693,14 +759,17 @@ def test_judge_verdict_distribution_is_counted():
 
 def test_a_DEGENERATE_judge_is_flagged():
     """A judge that returns one verdict over a real sample is not discriminating — the same shape
-    as an always-one-way branch, complementary to `gate_stats`'s approve/reject said-no badge."""
+    as an always-one-way branch, complementary to `gate_stats`'s approve/reject said-no badge.
+    """
     runs = [_judge_run("grader", "pass") for _ in range(12)]
     warning = edge_stats(runs).judges["grader"].degenerate_warning()
     assert "grader" in warning and "pass" in warning
 
 
 def test_a_judge_with_MIXED_verdicts_is_not_degenerate():
-    runs = [_judge_run("grader", "pass") for _ in range(11)] + [_judge_run("grader", "revise")]
+    runs = [_judge_run("grader", "pass") for _ in range(11)] + [
+        _judge_run("grader", "revise")
+    ]
     assert edge_stats(runs).judges["grader"].degenerate_warning() == ""
 
 

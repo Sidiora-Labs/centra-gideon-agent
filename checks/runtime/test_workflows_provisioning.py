@@ -33,9 +33,9 @@ import subprocess
 
 import pytest
 
-from gideon.workflows import provisioning, store
-from gideon.workflows.models import RunStatus, WorkflowRun
-from gideon.workflows.workspace import Mode, WorkspaceSpec, parse_workspace
+from gideon.automation.workflows import provisioning, store
+from gideon.automation.workflows.models import RunStatus, WorkflowRun
+from gideon.automation.workflows.workspace import Mode, WorkspaceSpec, parse_workspace
 
 pytestmark = pytest.mark.anyio
 
@@ -59,7 +59,7 @@ def home(tmp_path, monkeypatch):
     h = tmp_path / "home"
     h.mkdir(exist_ok=True)
     monkeypatch.setenv("GIDEON_HOME", str(h))
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: h)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: h)
     return h
 
 
@@ -92,20 +92,17 @@ async def _ok_runner(recorded: list[tuple[str, str]]):
     return runner
 
 
-# ── the spec seam: a declaration, not a default ──
-
-
 class TestSpecResolution:
     def test_a_spec_with_NO_workspace_block_declares_nothing(self) -> None:
         """The property a measurement forced. Provisioning every run into a scratch dir made every
         stale RUNNING run look like an isolated substrate to the boot sweep, so a crash-survivor
         with journal-backed resumable work would be SUSPENDED awaiting a manual Resume instead of
-        adopted (`test_an_adopted_run_resumes_without_re_running_finished_work` caught it)."""
+        adopted (`test_an_adopted_run_resumes_without_re_running_finished_work` caught it).
+        """
         assert provisioning.declares_workspace({"name": "x", "root": {}}) is False
-        assert provisioning.declares_workspace({"workspace": {"mode": "scratch"}}) is True
-        # A non-dict block is not a declaration either — `parse_workspace` would call it fatal, and
-        # refusing a run over `workspace: "yes"` when the author declared nothing coherent would be
-        # worse than ignoring it.
+        assert (
+            provisioning.declares_workspace({"workspace": {"mode": "scratch"}}) is True
+        )
         assert provisioning.declares_workspace({"workspace": "yes"}) is False
 
     def test_the_config_default_fills_an_UNDECLARED_mode_only(self) -> None:
@@ -120,16 +117,19 @@ class TestSpecResolution:
         )
         assert spec.mode is Mode.IN_PLACE
 
-    def test_an_unparseable_default_mode_falls_back_to_scratch_NOT_in_place(self) -> None:
+    def test_an_unparseable_default_mode_falls_back_to_scratch_NOT_in_place(
+        self,
+    ) -> None:
         """S49's ruling: `in_place` is never a default. A config typo must not be the thing that
         puts a destructive step against the user's real tree."""
-        spec, issues = provisioning.resolve_spec({"workspace": {"setup": "x"}}, default_mode="wat")
+        spec, issues = provisioning.resolve_spec(
+            {"workspace": {"setup": "x"}}, default_mode="wat"
+        )
         assert spec.mode is Mode.SCRATCH
         assert any(i.code == "unknown_default_mode" for i in issues)
-        assert not any(i.fatal for i in issues), "a bad config value degrades, it does not refuse"
-
-
-# ── the PID lock, outside the workspace ──
+        assert not any(
+            i.fatal for i in issues
+        ), "a bad config value degrades, it does not refuse"
 
 
 class TestWorkspaceLock:
@@ -144,10 +144,15 @@ class TestWorkspaceLock:
         finally:
             lock.release()
 
-    def test_a_named_workspace_keys_on_the_NAME_and_an_unnamed_one_on_the_RUN(self) -> None:
+    def test_a_named_workspace_keys_on_the_NAME_and_an_unnamed_one_on_the_RUN(
+        self,
+    ) -> None:
         """Two runs sharing one named workspace are the contention case; two per-run workspaces
-        cannot collide. Keying both on the run id would make the shared case lockless."""
-        assert provisioning.lock_key("r-1", "shared") == provisioning.lock_key("r-2", "shared")
+        cannot collide. Keying both on the run id would make the shared case lockless.
+        """
+        assert provisioning.lock_key("r-1", "shared") == provisioning.lock_key(
+            "r-2", "shared"
+        )
         assert provisioning.lock_key("r-1") != provisioning.lock_key("r-2")
 
     def test_it_FAILS_FAST_on_live_contention_and_names_the_holder(self, home) -> None:
@@ -168,11 +173,11 @@ class TestWorkspaceLock:
         """flock is released by the OS on death, so the file survives with a dead pid in it. The
         next acquirer takes the lock and overwrites the record — a crashed run must not wedge its
         workspace forever."""
-        from gideon.concurrency import lock_path
+        from gideon.core.concurrency import lock_path
 
         path = lock_path(provisioning.lock_key("r-9"))
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("999999999\n")  # a pid no live process can have
+        path.write_text("999999999\n")
 
         lock = provisioning.acquire_workspace_lock("r-9")
         try:
@@ -181,13 +186,12 @@ class TestWorkspaceLock:
         finally:
             lock.release()
 
-    def test_the_pid_probe_reads_a_missing_process_as_dead_and_ours_as_alive(self) -> None:
+    def test_the_pid_probe_reads_a_missing_process_as_dead_and_ours_as_alive(
+        self,
+    ) -> None:
         assert provisioning.pid_alive(os.getpid()) is True
         assert provisioning.pid_alive(999_999_999) is False
         assert provisioning.pid_alive(0) is False
-
-
-# ── provisioning: create → preserve → setup, in that order ──
 
 
 class TestProvisionOrder:
@@ -199,12 +203,21 @@ class TestProvisionOrder:
         seen: list[bool] = []
 
         async def runner(command: str, cwd: str) -> tuple[bool, str]:
-            seen.append((os.path.join(cwd, ".env")) and os.path.exists(os.path.join(cwd, ".env")))
+            seen.append(
+                (os.path.join(cwd, ".env"))
+                and os.path.exists(os.path.join(cwd, ".env"))
+            )
             return True, "ok"
 
-        spec = WorkspaceSpec(mode=Mode.WORKTREE, preserve_patterns=[".env"], setup="echo build")
+        spec = WorkspaceSpec(
+            mode=Mode.WORKTREE, preserve_patterns=[".env"], setup="echo build"
+        )
         result = await provisioning.provision(
-            spec, run_id=run.id, project_id="p-1", workspace_dir=str(repo), runner=runner
+            spec,
+            run_id=run.id,
+            project_id="p-1",
+            workspace_dir=str(repo),
+            runner=runner,
         )
         assert result.ok and result.isolated
         assert ".env" in result.preserved
@@ -216,7 +229,9 @@ class TestProvisionOrder:
         preserve pattern fatal because `**` copies the whole tree into the workspace it is being
         isolated FROM."""
         run = _run()
-        spec, issues = parse_workspace({"mode": "worktree", "preserve_patterns": ["**"]})
+        spec, issues = parse_workspace(
+            {"mode": "worktree", "preserve_patterns": ["**"]}
+        )
         assert any(i.fatal for i in issues)
         result = await provisioning.provision(
             spec, run_id=run.id, workspace_dir=str(repo), issues=issues
@@ -246,7 +261,8 @@ class TestProvisionOrder:
         self, home, repo
     ) -> None:
         """Marking a failure done would make it permanent across every subsequent resume — and the
-        conditions setup fails on (an offline registry, a missing binary) are usually transient."""
+        conditions setup fails on (an offline registry, a missing binary) are usually transient.
+        """
         run = _run()
         spec = WorkspaceSpec(mode=Mode.SCRATCH, setup="npm ci")
 
@@ -268,7 +284,9 @@ class TestProvisionOrder:
 
 
 class TestResumeIdempotency:
-    async def test_the_same_worktree_is_reused_and_setup_is_SKIPPED(self, home, repo) -> None:
+    async def test_the_same_worktree_is_reused_and_setup_is_SKIPPED(
+        self, home, repo
+    ) -> None:
         """`add_worktree` is idempotent (measured) and markers are content-addressed, so a resume
         costs nothing rather than needing detection code."""
         run = _run(project_id="p-1")
@@ -277,10 +295,18 @@ class TestResumeIdempotency:
         runner = await _ok_runner(calls)
 
         first = await provisioning.provision(
-            spec, run_id=run.id, project_id="p-1", workspace_dir=str(repo), runner=runner
+            spec,
+            run_id=run.id,
+            project_id="p-1",
+            workspace_dir=str(repo),
+            runner=runner,
         )
         second = await provisioning.provision(
-            spec, run_id=run.id, project_id="p-1", workspace_dir=str(repo), runner=runner
+            spec,
+            run_id=run.id,
+            project_id="p-1",
+            workspace_dir=str(repo),
+            runner=runner,
         )
         assert first.path == second.path, "the SAME worktree, not a second one"
         assert first.setup_ran == ["echo one"]
@@ -326,9 +352,13 @@ class TestDegradation:
         )
         assert result.ok is True
         assert result.path and "not a git repo" in result.degraded_reason
-        assert result.isolated is False, "an isolated mode that could not isolate reports honestly"
+        assert (
+            result.isolated is False
+        ), "an isolated mode that could not isolate reports honestly"
 
-    async def test_container_mode_degrades_rather_than_refusing(self, home, repo) -> None:
+    async def test_container_mode_degrades_rather_than_refusing(
+        self, home, repo
+    ) -> None:
         """WF2WOR-12 shipped container mode with the no-environment posture unchanged: a bare
         `container` declaration (no manifest) still RUNS — isolated scratch, reason recorded,
         no container id claimed."""
@@ -340,7 +370,9 @@ class TestDegradation:
         assert "no environment manifest" in result.degraded_reason
         assert result.container_id == "" and result.container_backend == ""
 
-    async def test_in_place_reports_the_REAL_tree_and_is_not_isolated(self, home, repo) -> None:
+    async def test_in_place_reports_the_REAL_tree_and_is_not_isolated(
+        self, home, repo
+    ) -> None:
         """Inventing a path would hide from every surface that the run worked in the user's tree —
         which is exactly the fact `in_place` needs to make visible."""
         run = _run()
@@ -350,18 +382,19 @@ class TestDegradation:
         assert result.path == str(repo) and result.isolated is False
 
 
-# ── the run record ──
-
-
 class TestRunRecord:
-    async def test_worktree_path_IS_WRITTEN_for_every_isolated_mode(self, home, repo) -> None:
+    async def test_worktree_path_IS_WRITTEN_for_every_isolated_mode(
+        self, home, repo
+    ) -> None:
         """`watchdog._substrate_for` reads exactly this key and had ZERO writers before this atom —
         a live reader of a key nothing writes. Written for SCRATCH too: a scratch workspace that
         survived a restart is just as recoverable as a git one, so keying the sweep's decision on
         the mode name would abort recoverable work for the commoner mode."""
         run = _run()
         spec = WorkspaceSpec(mode=Mode.SCRATCH)
-        result = await provisioning.provision(spec, run_id=run.id, workspace_dir=str(repo))
+        result = await provisioning.provision(
+            spec, run_id=run.id, workspace_dir=str(repo)
+        )
         provisioning.stamp_run(run, result, spec)
         store.save(run)
 
@@ -374,8 +407,12 @@ class TestRunRecord:
         """A run record is read by the cockpit, the export archive and a bug report. It must not be
         the thing that leaks a token."""
         run = _run()
-        spec = WorkspaceSpec(mode=Mode.SCRATCH, env={"API_KEY": "{{secret:OPENAI}}", "MODE": None})
-        result = await provisioning.provision(spec, run_id=run.id, workspace_dir=str(repo))
+        spec = WorkspaceSpec(
+            mode=Mode.SCRATCH, env={"API_KEY": "{{secret:OPENAI}}", "MODE": None}
+        )
+        result = await provisioning.provision(
+            spec, run_id=run.id, workspace_dir=str(repo)
+        )
         provisioning.stamp_run(run, result, spec)
         assert run.extra["workspace"]["env"] == {"API_KEY": True, "MODE": False}
         assert "OPENAI" not in str(run.extra)
@@ -390,7 +427,9 @@ class TestRunRecord:
         run = _run()
         run.extra["worktree_path"] = "/gone/from/a/previous/pass"
         spec = WorkspaceSpec(mode=Mode.IN_PLACE)
-        result = await provisioning.provision(spec, run_id=run.id, workspace_dir=str(plain))
+        result = await provisioning.provision(
+            spec, run_id=run.id, workspace_dir=str(plain)
+        )
         provisioning.stamp_run(run, result, spec)
         assert "worktree_path" not in run.extra
 
@@ -408,7 +447,9 @@ class TestRunRecord:
 
         clean = provisioning.inspect_run(run)
         provisioning.stamp_preserved_path(run, clean)
-        assert "preserved_workspace_path" not in run.extra, "a clean worktree yields no path"
+        assert (
+            "preserved_workspace_path" not in run.extra
+        ), "a clean worktree yields no path"
 
         (os.path.join(result.path, "new.txt"))
         with open(os.path.join(result.path, "new.txt"), "w", encoding="utf-8") as fh:
@@ -419,11 +460,10 @@ class TestRunRecord:
         assert run.extra["preserved_workspace_path"] == result.path
 
 
-# ── teardown before deletion ──
-
-
 class TestTeardown:
-    async def test_teardown_runs_while_the_directory_STILL_EXISTS(self, home, repo) -> None:
+    async def test_teardown_runs_while_the_directory_STILL_EXISTS(
+        self, home, repo
+    ) -> None:
         """The order IS the contract. Teardown's job is to stop services and sync work out, and
         both need the directory to still be there — a plan that deleted first would run its own
         teardown against nothing and report success."""
@@ -453,7 +493,9 @@ class TestTeardown:
         both verbs would offer to apply them. The exclusion runs at the ADD, because a review
         filter cannot un-commit a secret."""
         run = _run(project_id="p-1")
-        spec = WorkspaceSpec(mode=Mode.WORKTREE, preserve_patterns=[".env"], setup="echo hi")
+        spec = WorkspaceSpec(
+            mode=Mode.WORKTREE, preserve_patterns=[".env"], setup="echo hi"
+        )
         calls: list[tuple[str, str]] = []
         result = await provisioning.provision(
             spec,
@@ -464,21 +506,25 @@ class TestTeardown:
         )
         provisioning.stamp_run(run, result, spec)
         assert ".env" in result.preserved
-        with open(os.path.join(result.path, "real-work.txt"), "w", encoding="utf-8") as fh:
+        with open(
+            os.path.join(result.path, "real-work.txt"), "w", encoding="utf-8"
+        ) as fh:
             fh.write("the thing the run produced\n")
 
         torn = await provisioning.teardown(run, workspace_dir=str(repo))
         assert torn.committed is True
         branch = torn.branch
-        # The branch survives the removal — that is what makes the record reference git rather than
-        # a deleted directory.
         listed = git(repo, "ls-tree", "-r", "--name-only", branch)
         names = set(listed.split())
         assert "real-work.txt" in names
         assert ".env" not in names, "the preserved secret never reached git history"
-        assert not any(n.startswith(".gideon-setup") for n in names), "no engine machinery committed"
+        assert not any(
+            n.startswith(".gideon-setup") for n in names
+        ), "no engine machinery committed"
 
-    async def test_keep_open_still_runs_teardown_but_keeps_the_directory(self, home, repo) -> None:
+    async def test_keep_open_still_runs_teardown_but_keeps_the_directory(
+        self, home, repo
+    ) -> None:
         """Keeping the directory is not keeping the processes. A `docker compose` left up because
         the user wanted to inspect the files is a leak the override never asked for."""
         run = _run(project_id="p-1")
@@ -499,7 +545,9 @@ class TestTeardown:
         exactly."""
         run = _run()
         spec = WorkspaceSpec(mode=Mode.IN_PLACE, teardown="echo bye")
-        result = await provisioning.provision(spec, run_id=run.id, workspace_dir=str(repo))
+        result = await provisioning.provision(
+            spec, run_id=run.id, workspace_dir=str(repo)
+        )
         provisioning.stamp_run(run, result, spec)
         torn = await provisioning.teardown(
             run, workspace_dir=str(repo), runner=await _ok_runner([])
@@ -507,7 +555,9 @@ class TestTeardown:
         assert torn.removed is False
         assert (repo / "a.txt").is_file(), "the real tree is untouched"
 
-    async def test_a_teardown_FAILURE_does_not_block_the_removal(self, home, repo) -> None:
+    async def test_a_teardown_FAILURE_does_not_block_the_removal(
+        self, home, repo
+    ) -> None:
         """Both call sites are deletion paths. A run that cannot be deleted because its teardown
         threw would be a row visible forever with no way to remove it."""
         run = _run(project_id="p-1")
@@ -520,12 +570,11 @@ class TestTeardown:
         async def exploding(command: str, cwd: str) -> tuple[bool, str]:
             raise RuntimeError("the teardown script is broken")
 
-        torn = await provisioning.teardown(run, workspace_dir=str(repo), runner=exploding)
+        torn = await provisioning.teardown(
+            run, workspace_dir=str(repo), runner=exploding
+        )
         assert torn.failed and torn.removed is True
         assert not os.path.isdir(result.path)
-
-
-# ── the review + the two verbs ──
 
 
 class TestReintegration:
@@ -534,7 +583,9 @@ class TestReintegration:
         engine's own `.gideon-setup/` markers as user changes. A review panel full of machinery is
         one the user skims, with the file that mattered in the same list."""
         run = _run(project_id="p-1")
-        spec = WorkspaceSpec(mode=Mode.WORKTREE, preserve_patterns=[".env"], setup="echo x")
+        spec = WorkspaceSpec(
+            mode=Mode.WORKTREE, preserve_patterns=[".env"], setup="echo x"
+        )
         result = await provisioning.provision(
             spec,
             run_id=run.id,
@@ -550,7 +601,9 @@ class TestReintegration:
         paths = {c["path"] for c in body["workspace"]["changed"]}
         assert paths == {"mine.txt"}, f"machinery leaked into the review: {paths}"
 
-    async def test_both_verbs_are_OFFERED_with_the_branch_named(self, home, repo) -> None:
+    async def test_both_verbs_are_OFFERED_with_the_branch_named(
+        self, home, repo
+    ) -> None:
         """Reintegration is offered, never performed — a run that auto-merged would decide for the
         user, and the decision is the whole reason the work was isolated."""
         run = _run(project_id="p-1")
@@ -567,14 +620,14 @@ class TestReintegration:
     async def test_a_real_CONFLICT_is_named_on_the_offer(self, home, repo) -> None:
         """ "Apply this" that then fails with a conflict is a worse experience than "apply this (1
         file conflicts)". The probe uses `merge-tree --write-tree`, which reports without touching
-        either tree — a real merge-and-abort would leave the user's index dirty for a READ."""
+        either tree — a real merge-and-abort would leave the user's index dirty for a READ.
+        """
         run = _run(project_id="p-1")
         spec = WorkspaceSpec(mode=Mode.WORKTREE)
         result = await provisioning.provision(
             spec, run_id=run.id, project_id="p-1", workspace_dir=str(repo)
         )
         provisioning.stamp_run(run, result, spec)
-        # Divergent edits to the SAME file, each committed on its own side.
         with open(os.path.join(result.path, "a.txt"), "w", encoding="utf-8") as fh:
             fh.write("from the run\n")
         await provisioning.teardown(run, workspace_dir=str(repo), keep_open=True)
@@ -585,19 +638,15 @@ class TestReintegration:
         assert body["reintegration"]["conflicts"] == ["a.txt"]
         offered = {v["verb"]: v["safe"] for v in body["reintegration"]["verbs"]}
         assert offered["apply_locally"] is False
-        # Checkout stays safe WITH conflicts: nothing merges, so there is nothing to conflict with
-        # until the user decides to merge.
         assert offered["checkout_branch"] is True
-        # And the user's tree is untouched by the READ.
         assert (repo / "a.txt").read_text() == "from the user\n"
 
-    def test_a_run_with_no_workspace_reviews_as_empty_rather_than_raising(self, home) -> None:
+    def test_a_run_with_no_workspace_reviews_as_empty_rather_than_raising(
+        self, home
+    ) -> None:
         run = _run()
         body = provisioning.reintegration(run, workspace_dir="")
         assert body["workspace"]["path"] == "" and body["workspace"]["changed"] == []
-
-
-# ── the two deletion paths ──
 
 
 class TestDeletionPaths:
@@ -607,11 +656,13 @@ class TestDeletionPaths:
         """A scratch workspace lives UNDER the run dir, so the `rmtree` would take it out. Running
         teardown afterwards would execute `docker compose down` against a path that no longer holds
         the compose file."""
-        from gideon.workflows import service
+        from gideon.automation.workflows import service
 
         run = _run(status=RunStatus.COMPLETE)
         spec = WorkspaceSpec(mode=Mode.SCRATCH, teardown="compose-down")
-        result = await provisioning.provision(spec, run_id=run.id, workspace_dir=str(repo))
+        result = await provisioning.provision(
+            spec, run_id=run.id, workspace_dir=str(repo)
+        )
         provisioning.stamp_run(run, result, spec)
         run.status = RunStatus.COMPLETE
         store.save(run)
@@ -631,11 +682,13 @@ class TestDeletionPaths:
         assert store.get(run.id) is None
         assert not os.path.isdir(result.path)
 
-    async def test_retention_expiry_tears_down_TOO(self, home, repo, monkeypatch) -> None:
+    async def test_retention_expiry_tears_down_TOO(
+        self, home, repo, monkeypatch
+    ) -> None:
         """Retention is the path that fires with nobody watching, so it is the one where a leak
         accumulates silently. Wiring only the explicit delete would leave every expired run's
         services running."""
-        from gideon.workflows.watchdog import prune_runs
+        from gideon.automation.workflows.watchdog import prune_runs
 
         made = []
         for i in range(3):
@@ -648,7 +701,9 @@ class TestDeletionPaths:
                 )
             )
             spec = WorkspaceSpec(mode=Mode.SCRATCH, teardown=f"stop-{i}")
-            result = await provisioning.provision(spec, run_id=run.id, workspace_dir=str(repo))
+            result = await provisioning.provision(
+                spec, run_id=run.id, workspace_dir=str(repo)
+            )
             provisioning.stamp_run(run, result, spec)
             store.save(run)
             made.append(run)
@@ -662,7 +717,6 @@ class TestDeletionPaths:
         monkeypatch.setattr(provisioning, "run_step", spy)
         removed = await prune_runs("ret", keep=1)
         assert removed == 2
-        # The two OLDEST were pruned, and each ran its own teardown command.
         assert sorted(commands) == ["stop-0", "stop-1"]
 
     async def test_the_config_switch_SKIPS_the_command_but_still_removes(
@@ -670,12 +724,14 @@ class TestDeletionPaths:
     ) -> None:
         """The knob's real reader. Off is the escape hatch for a teardown command that is itself
         the problem; removal still happens, or the directory would be orphaned."""
-        from gideon.config.loader import AppConfig
-        from gideon.workflows import service
+        from gideon.automation.workflows import service
+        from gideon.core.config.loader import AppConfig
 
         run = _run()
         spec = WorkspaceSpec(mode=Mode.SCRATCH, teardown="never-runs")
-        result = await provisioning.provision(spec, run_id=run.id, workspace_dir=str(repo))
+        result = await provisioning.provision(
+            spec, run_id=run.id, workspace_dir=str(repo)
+        )
         provisioning.stamp_run(run, result, spec)
 
         cfg = AppConfig.load()
@@ -694,16 +750,14 @@ class TestDeletionPaths:
         assert torn.removed is True and not os.path.isdir(result.path)
 
 
-# ── the watchdog's substrate check ──
-
-
 class TestSubstrateCheck:
     async def test_the_sweep_reads_the_REAL_worktree_state(self, home, repo) -> None:
         """S52 built `substrate_for` so "S46's boot sweep has one source of truth". Before this
         atom the sweep did its own `Path(wt).is_dir()`, so two places computed the same decision —
-        and the disagreement shows up as a run aborted despite having recoverable work."""
-        from gideon.workflows.controller import EngineServices
-        from gideon.workflows.watchdog import WorkflowWatchdog
+        and the disagreement shows up as a run aborted despite having recoverable work.
+        """
+        from gideon.automation.workflows.controller import EngineServices
+        from gideon.automation.workflows.watchdog import WorkflowWatchdog
 
         run = _run(project_id="p-1", status=RunStatus.RUNNING)
         spec = WorkspaceSpec(mode=Mode.WORKTREE)
@@ -720,14 +774,12 @@ class TestSubstrateCheck:
         substrate = wd._substrate_for(run)
         assert substrate.kind == "worktree" and substrate.alive is True
         assert substrate.isolated is True
-        # The dirty state is recorded on the way past — a Resume affordance with no path to the
-        # work is a button that tells the user nothing.
         assert store.get(run.id).extra["preserved_workspace_path"] == result.path
 
     async def test_a_GONE_workspace_reads_as_dead(self, home, repo) -> None:
         """A Resume that points at a gone worktree is worse than an honest abort."""
-        from gideon.workflows.controller import EngineServices
-        from gideon.workflows.watchdog import WorkflowWatchdog
+        from gideon.automation.workflows.controller import EngineServices
+        from gideon.automation.workflows.watchdog import WorkflowWatchdog
 
         run = _run(status=RunStatus.RUNNING)
         run.extra["worktree_path"] = str(repo / "never-existed")
@@ -740,22 +792,21 @@ class TestSubstrateCheck:
     def test_an_inline_run_is_reported_NOT_isolated(self, home) -> None:
         """So the sweep leaves it to adoption, which resumes it from the journal — the DEVIATION
         the sweep's own docstring records."""
-        from gideon.workflows.controller import EngineServices
-        from gideon.workflows.watchdog import WorkflowWatchdog
+        from gideon.automation.workflows.controller import EngineServices
+        from gideon.automation.workflows.watchdog import WorkflowWatchdog
 
         run = _run(status=RunStatus.RUNNING)
         wd = WorkflowWatchdog(None, EngineServices())
         assert wd._substrate_for(run).isolated is False
 
 
-# ── config: both keys have a real reader ──
-
-
 class TestConfigReaders:
     def test_workspace_default_mode_is_READ_by_resolve_spec(self) -> None:
         """A knob nothing reads is the inert-control class this program keeps finding."""
         for mode in ("scratch", "worktree", "in_place", "container"):
-            spec, _ = provisioning.resolve_spec({"workspace": {"setup": "x"}}, default_mode=mode)
+            spec, _ = provisioning.resolve_spec(
+                {"workspace": {"setup": "x"}}, default_mode=mode
+            )
             assert spec.mode.value == mode
 
     def test_workspace_teardown_on_expiry_is_READ_by_teardown_workspace(self) -> None:
@@ -763,7 +814,7 @@ class TestConfigReaders:
         lives in `service.teardown_workspace`, and both deletion paths go through it."""
         import inspect
 
-        from gideon.workflows import service
+        from gideon.automation.workflows import service
 
         src = inspect.getsource(service.teardown_workspace)
         assert "workspace_teardown_on_expiry" in src
@@ -772,7 +823,7 @@ class TestConfigReaders:
         """The four-point contract's load half, driven rather than asserted from the dataclass."""
         import json
 
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         home = tmp_path / "cfghome"
         home.mkdir()
@@ -792,12 +843,14 @@ class TestConfigReaders:
         assert cfg.workflows.workspace_default_mode == "worktree"
         assert cfg.workflows.workspace_teardown_on_expiry is False
 
-    def test_an_unknown_stored_mode_loads_as_scratch(self, tmp_path, monkeypatch) -> None:
+    def test_an_unknown_stored_mode_loads_as_scratch(
+        self, tmp_path, monkeypatch
+    ) -> None:
         """Not as the declared value and NOT as `in_place`: a config typo must not be what puts a
         destructive step against the user's real tree."""
         import json
 
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         home = tmp_path / "cfghome2"
         home.mkdir()

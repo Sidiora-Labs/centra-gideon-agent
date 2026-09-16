@@ -23,16 +23,16 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gideon.memory_graph_export import render_graph_html
-from gideon.memory_service import MemoryService
-from gideon.vector_memory import VectorMemoryStore
+from gideon.cognition.memory_graph_export import render_graph_html
+from gideon.cognition.memory_service import MemoryService
+from gideon.cognition.vector_memory import SemanticArchive
 
 
 @pytest.fixture()
 def store(tmp_path, monkeypatch):
     """A real vector store on a temp path — never the user's home."""
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
-    vs = VectorMemoryStore(db_path=tmp_path / "memory.db", embedding_dim=3)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
+    vs = SemanticArchive(db_path=tmp_path / "memory.db", embedding_dim=3)
     vs.init()
     return vs
 
@@ -40,9 +40,6 @@ def store(tmp_path, monkeypatch):
 @pytest.fixture()
 def svc(store):
     return MemoryService.over_vector_store(store)
-
-
-# ── the entity topology (§7.2) ───────────────────────────────────────────────
 
 
 def test_entity_graph_edges_carry_what_the_filters_need(svc, store):
@@ -54,7 +51,9 @@ def test_entity_graph_edges_carry_what_the_filters_need(svc, store):
     """
     svc.graph_add_entity("Ana", "person")
     svc.graph_add_entity("Atlas", "project")
-    store.set_semantic("project.note", "Ana leads Atlas this quarter", 0.9, "user_explicit")
+    store.set_semantic(
+        "project.note", "Ana leads Atlas this quarter", 0.9, "user_explicit"
+    )
 
     graph = svc.entity_graph()
     names = {n["name"] for n in graph["nodes"]}
@@ -62,7 +61,9 @@ def test_entity_graph_edges_carry_what_the_filters_need(svc, store):
     edge = next((e for e in graph["edges"] if e["records"] >= 1), None)
     assert edge is not None, "one record naming both entities must produce one edge"
     assert edge["link_types"], "an edge with no link type cannot be filtered by type"
-    assert edge["provenances"], "an edge with no provenance cannot be filtered by provenance"
+    assert edge[
+        "provenances"
+    ], "an edge with no provenance cannot be filtered by provenance"
     assert 0.0 < edge["confidence"] <= 1.0
 
 
@@ -83,9 +84,6 @@ def test_entity_graph_is_empty_not_broken_without_a_graph(store):
     assert svc.graph_record_links("sem:anything") == []
 
 
-# ── per-record links + evidence (§7.1) ──────────────────────────────────────
-
-
 def test_record_links_resolve_the_entity_name(svc, store):
     """A link row names the entity, not just its opaque id.
 
@@ -95,8 +93,6 @@ def test_record_links_resolve_the_entity_name(svc, store):
     svc.graph_add_entity("Ana", "person")
     store.set_semantic("user.ana", "Ana prefers async standups", 0.9, "user_explicit")
 
-    # `user.*` is an allowlisted semantic prefix — an unallowed key is a rejected no-op write,
-    # which would make this test pass vacuously against a store that holds nothing.
     links = svc.graph_record_links("sem:user.ana")
     assert links, "the record mentions a known entity, so it must have links"
     assert links[0]["entity_name"] == "Ana"
@@ -114,11 +110,8 @@ def test_only_the_two_real_kinds_resolve(svc, store):
     svc.graph_add_entity("Ana", "person")
     store.set_semantic("user.ana", "Ana prefers async standups", 0.9, "user_explicit")
     assert svc.graph_record_links("lesson:whatever") == []
-    assert svc.graph_record_links("user.ana") == []  # no prefix at all
+    assert svc.graph_record_links("user.ana") == []
     assert svc.graph_record_links("sem:") == []
-
-
-# ── the slots editor (§6/§7.1) ──────────────────────────────────────────────
 
 
 def test_slots_list_includes_unwritten_builtins(svc):
@@ -147,13 +140,15 @@ def test_append_then_retire_round_trips_through_the_service(svc):
     slots = {s["name"]: s for s in svc.slots()}
     line = slots["persona"]["lines"][0]
     assert line["tombstoned"] is True
-    assert line["tombstoned_by"] == "human", "a human tombstone is what makes the guard final"
+    assert (
+        line["tombstoned_by"] == "human"
+    ), "a human tombstone is what makes the guard final"
     assert slots["persona"]["live_count"] == 0
 
 
 def test_the_editor_writes_as_the_human_so_nothing_re_derives_a_deletion(svc):
     """A retired line cannot be re-added — the resurrection guard, driven from the editor."""
-    from gideon import memory_slots
+    from gideon.cognition import memory_slots
 
     svc.slot_append("self_notes", "user dislikes emoji")
     svc.slot_tombstone("self_notes", "user dislikes emoji")
@@ -175,7 +170,7 @@ async def test_an_over_cap_append_is_a_409_carrying_the_trim_proposal(svc, monke
     lose. That only holds if the handler forwards the proposal — a 400 with a message would
     make the editor's only honest move "give up".
     """
-    from gideon.dashboard.handlers import memory as handlers
+    from gideon.interfaces.dashboard.handlers import memory as handlers
 
     monkeypatch.setattr(handlers, "_get_service", lambda _state: svc)
     cap = next(s for s in svc.slots() if s["name"] == "persona")["cap_chars"]
@@ -196,13 +191,29 @@ async def test_an_over_cap_append_is_a_409_carrying_the_trim_proposal(svc, monke
     assert "Nothing was written" in body["proposal"]["message"]
 
 
-# ── the self-contained export (§7.2) ────────────────────────────────────────
-
 _GRAPH = {
     "nodes": [
-        {"id": "e1", "name": "Ana", "entity_type": "person", "community": 0, "inbound_count": 3},
-        {"id": "e2", "name": "Atlas", "entity_type": "project", "community": 0, "inbound_count": 2},
-        {"id": "e3", "name": "Solo", "entity_type": "tool", "community": None, "inbound_count": 0},
+        {
+            "id": "e1",
+            "name": "Ana",
+            "entity_type": "person",
+            "community": 0,
+            "inbound_count": 3,
+        },
+        {
+            "id": "e2",
+            "name": "Atlas",
+            "entity_type": "project",
+            "community": 0,
+            "inbound_count": 2,
+        },
+        {
+            "id": "e3",
+            "name": "Solo",
+            "entity_type": "tool",
+            "community": None,
+            "inbound_count": 0,
+        },
     ],
     "edges": [
         {
@@ -226,7 +237,9 @@ def test_the_export_carries_no_script_and_no_remote_reference():
     """
     doc = render_graph_html(_GRAPH, generated_at="2026-08-16 12:00 UTC")
     assert "<script" not in doc.lower()
-    assert not re.search(r"\son[a-z]+\s*=", doc, re.IGNORECASE), "no inline event handlers"
+    assert not re.search(
+        r"\son[a-z]+\s*=", doc, re.IGNORECASE
+    ), "no inline event handlers"
     assert "http://" not in doc.replace("http://www.w3.org/2000/svg", "")
     assert "https://" not in doc
 
@@ -303,4 +316,6 @@ def test_communities_get_distinct_colours_and_unclustered_reads_neutral():
     )
     fills = set(re.findall(r'fill="(hsl\([^"]+\))"', doc))
     assert len(fills) >= 3, f"two communities + unclustered must differ, got {fills}"
-    assert "hsl(0 0% 62%)" in fills, "an unclustered node reads neutral, not as a community"
+    assert (
+        "hsl(0 0% 62%)" in fills
+    ), "an unclustered node reads neutral, not as a community"

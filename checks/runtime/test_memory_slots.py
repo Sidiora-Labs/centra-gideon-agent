@@ -10,17 +10,19 @@ from __future__ import annotations
 
 import pytest
 
-from gideon import memory_slots
-from gideon.learning import self_model
-from gideon.memory_record import MemoryKind, _kind_from_key, decay_profile
-from gideon.vector_memory import SemanticRejectCode, VectorMemoryStore
+from gideon.cognition import memory_slots
+from gideon.cognition.learning import self_model
+from gideon.cognition.memory_record import MemoryKind, _kind_from_key, decay_profile
+from gideon.cognition.vector_memory import SemanticArchive, SemanticRejectCode
 
 
 @pytest.fixture()
 def store(tmp_path, monkeypatch):
-    """A real VectorMemoryStore on tmp_path — never the user's home."""
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path, raising=False)
-    vs = VectorMemoryStore(db_path=tmp_path / "memory.db")
+    """A real SemanticArchive on tmp_path — never the user's home."""
+    monkeypatch.setattr(
+        "gideon.core.config.loader.config_dir", lambda: tmp_path, raising=False
+    )
+    vs = SemanticArchive(db_path=tmp_path / "memory.db")
     vs.init()
     yield vs
 
@@ -34,12 +36,11 @@ def _slot_rows(store) -> list[str]:
     ]
 
 
-# ── Piece 1: prefix + per-slot cap, over-cap fails loudly as a trim proposal ──
-
-
 def test_slot_prefix_is_allowlisted(store):
     """`slot.*` rides `_BUILTIN_PREFIXES`, not user config."""
-    assert store.set_semantic("slot.persona", {"lines": []}, 1.0, "user_explicit") is None
+    assert (
+        store.set_semantic("slot.persona", {"lines": []}, 1.0, "user_explicit") is None
+    )
     assert "slot.persona" in _slot_rows(store)
 
 
@@ -67,9 +68,10 @@ def test_over_cap_append_refuses_and_proposes_a_trim(store):
     assert proposal.slot == "persona"
     assert proposal.cap_chars == cap
     assert proposal.over_by > 0
-    assert proposal.drop_candidates, "a trim proposal with nothing to drop is not actionable"
+    assert (
+        proposal.drop_candidates
+    ), "a trim proposal with nothing to drop is not actionable"
     assert "Nothing was written" in proposal.message
-    # Not truncated, not partially written: the slot is exactly as it was.
     assert [line.text for line in memory_slots.load(store, "persona")] == [
         line.text for line in before
     ]
@@ -80,7 +82,10 @@ def test_put_path_enforces_the_cap_even_bypassing_append(store):
     """A direct `set_semantic` cannot route around the ceiling (a route or tool could)."""
     cap = memory_slots.cap_for("preferences")
     result = store.set_semantic(
-        "slot.preferences", {"lines": [{"text": "x" * (cap + 50)}]}, 1.0, "user_explicit"
+        "slot.preferences",
+        {"lines": [{"text": "x" * (cap + 50)}]},
+        1.0,
+        "user_explicit",
     )
     assert result is not None, "an over-cap slot put must be refused, not written"
     code, message = result
@@ -91,13 +96,16 @@ def test_put_path_enforces_the_cap_even_bypassing_append(store):
 
 def test_slot_cap_reject_is_audited(store):
     """A refused memory the user tried to keep must be explainable afterwards."""
-    from gideon.vector_memory import _AUDITABLE_REJECT_CODES
+    from gideon.cognition.vector_memory import _AUDITABLE_REJECT_CODES
 
     assert SemanticRejectCode.SLOT_CAP in _AUDITABLE_REJECT_CODES
 
 
 def test_ad_hoc_slot_gets_the_default_cap(store):
-    assert memory_slots.cap_for("something_invented") == memory_slots.DEFAULT_SLOT_CAP_CHARS
+    assert (
+        memory_slots.cap_for("something_invented")
+        == memory_slots.DEFAULT_SLOT_CAP_CHARS
+    )
 
 
 def test_over_cap_detects_a_hand_edited_row(store):
@@ -113,9 +121,6 @@ def test_over_cap_detects_a_hand_edited_row(store):
     )
     store.db.commit()
     assert memory_slots.over_cap(store).get("self_notes", 0) > 0
-
-
-# ── Piece 2: lazy built-ins ──
 
 
 def test_builtin_slots_are_declared(store):
@@ -141,14 +146,13 @@ def test_builtins_are_lazy_nothing_written_until_used(store):
         assert memory_slots.load(store, name) == []
         assert memory_slots.is_materialized(store, name) is False
     assert memory_slots.render_slots_block(store) == ""
-    assert _slot_rows(store) == [], "a built-in slot was materialized without being written"
+    assert (
+        _slot_rows(store) == []
+    ), "a built-in slot was materialized without being written"
 
     memory_slots.append(store, "glossary", "MGAV = memory graph and vault.")
     assert _slot_rows(store) == ["slot.glossary"]
     assert memory_slots.is_materialized(store, "persona") is False
-
-
-# ── Piece 3: ONE bounded Slots block ──
 
 
 def test_slots_block_is_hard_bounded_with_oversized_input(store):
@@ -185,37 +189,37 @@ def test_block_omits_tombstoned_lines(store):
 
 def test_session_context_injects_one_bounded_slots_block(tmp_path, monkeypatch):
     """The block reaches `build_session_context` — exactly once, and bounded."""
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path, raising=False)
-    from gideon.context import ContextBuilder
+    monkeypatch.setattr(
+        "gideon.core.config.loader.config_dir", lambda: tmp_path, raising=False
+    )
+    from gideon.cognition.context import PromptAssembler
 
-    vs = VectorMemoryStore(db_path=tmp_path / "memory.db")
+    vs = SemanticArchive(db_path=tmp_path / "memory.db")
     vs.init()
     memory_slots.append(store=vs, name="persona", text="Answers like a staff engineer.")
 
-    builder = ContextBuilder.__new__(ContextBuilder)
+    builder = PromptAssembler.__new__(PromptAssembler)
     block = builder._slots_block(vs)
     assert "Answers like a staff engineer." in block
     assert block.count("[MEMORY SLOTS]") == 1
     assert len(block) <= memory_slots.SLOTS_BLOCK_MAX_CHARS + 2
 
 
-# ── Piece 4: append-only after_turn_review hook ──
-
-
 def test_hook_appends_and_never_rewrites(store):
-    from gideon.after_turn_review import capture_slot_lines
+    from gideon.cognition.after_turn_review import capture_slot_lines
 
     class _Svc:
         has_vector = True
         _vs = store
 
-    written = capture_slot_lines(_Svc(), "pending_items", ["Ship MGAV-8.", "Review the plan."])
+    written = capture_slot_lines(
+        _Svc(), "pending_items", ["Ship MGAV-8.", "Review the plan."]
+    )
     assert written == 2
     first = memory_slots.load(store, "pending_items")
 
     capture_slot_lines(_Svc(), "pending_items", ["One more thing."])
     after = memory_slots.load(store, "pending_items")
-    # Append-only: the original lines are still there, in order, unmodified.
     assert [line.text for line in after][: len(first)] == [line.text for line in first]
     assert after[-1].text == "One more thing."
 
@@ -225,7 +229,7 @@ def test_hook_never_resurrects_a_human_tombstone(store):
 
     Resurrecting deleted user content is a trust break, not a duplicate row.
     """
-    from gideon.after_turn_review import capture_slot_lines
+    from gideon.cognition.after_turn_review import capture_slot_lines
 
     class _Svc:
         has_vector = True
@@ -241,7 +245,6 @@ def test_hook_never_resurrects_a_human_tombstone(store):
     live = [line.text for line in memory_slots.live_lines(lines)]
     assert live == [], "a human-tombstoned line was resurrected"
     assert "User dislikes long preambles." not in memory_slots.render_slots_block(store)
-    # The tombstone itself survives — that retention is what makes the guard possible.
     assert lines[0].tombstoned and lines[0].tombstoned_by == "human"
 
 
@@ -250,12 +253,15 @@ def test_agent_tombstone_may_be_re_derived(store):
     memory_slots.append(store, "self_notes", "Prefers pytest -x.")
     memory_slots.tombstone(store, "self_notes", "Prefers pytest -x.", actor="agent")
     memory_slots.append(store, "self_notes", "Prefers pytest -x.")
-    assert [line.text for line in memory_slots.live_lines(memory_slots.load(store, "self_notes"))]
+    assert [
+        line.text
+        for line in memory_slots.live_lines(memory_slots.load(store, "self_notes"))
+    ]
 
 
 def test_hook_writes_are_undoable_through_the_event_log(store):
     """WAL + undo come from going through `set_semantic`, so assert they actually do."""
-    from gideon.after_turn_review import capture_slot_lines
+    from gideon.cognition.after_turn_review import capture_slot_lines
 
     class _Svc:
         has_vector = True
@@ -272,7 +278,7 @@ def test_hook_writes_are_undoable_through_the_event_log(store):
 
 def test_hook_surfaces_a_trim_proposal_instead_of_dropping(store):
     """An over-cap reflection append is reported, not swallowed."""
-    from gideon.after_turn_review import capture_slot_lines
+    from gideon.cognition.after_turn_review import capture_slot_lines
 
     class _Svc:
         has_vector = True
@@ -286,9 +292,6 @@ def test_hook_surfaces_a_trim_proposal_instead_of_dropping(store):
     )
     assert written == 0
     assert proposals and proposals[0].over_by > 0
-
-
-# ── Piece 5: ≥3 reinforcements before a behavioural principle ──
 
 
 def test_principle_needs_three_reinforcements_two_is_not_enough():
@@ -307,7 +310,9 @@ def test_principle_needs_three_reinforcements_two_is_not_enough():
         ],
     )
     assert two.promotable_for("principle") is False
-    plan_two = self_model.plan_promotion(facet="principle", reinforcement=two, current=[])
+    plan_two = self_model.plan_promotion(
+        facet="principle", reinforcement=two, current=[]
+    )
     assert plan_two.allowed is False
     assert "3" in plan_two.reason
 
@@ -317,7 +322,9 @@ def test_principle_needs_three_reinforcements_two_is_not_enough():
         observations=two.observations,
     )
     assert three.promotable_for("principle") is True
-    assert self_model.plan_promotion(facet="principle", reinforcement=three, current=[]).allowed
+    assert self_model.plan_promotion(
+        facet="principle", reinforcement=three, current=[]
+    ).allowed
 
 
 def test_non_principle_facets_keep_the_lower_bar():
@@ -335,25 +342,27 @@ def test_non_principle_facets_keep_the_lower_bar():
         ],
     )
     assert two.promotable_for("theory") is True
-    assert self_model.plan_promotion(facet="theory", reinforcement=two, current=[]).allowed
-
-
-# ── Closed-enum sweep: the new kind is handled explicitly everywhere ──
+    assert self_model.plan_promotion(
+        facet="theory", reinforcement=two, current=[]
+    ).allowed
 
 
 def test_slot_key_maps_to_its_own_kind_and_decay_profile():
     """`_DECAY_PROFILES` raises for an unmapped kind — this asserts the map was swept."""
     assert _kind_from_key("slot.persona") is MemoryKind.SLOT
     assert decay_profile(MemoryKind.SLOT) == "slot"
-    from gideon.learning.decay import KIND_MULTIPLIERS
+    from gideon.cognition.learning.decay import KIND_MULTIPLIERS
 
     assert "slot" in KIND_MULTIPLIERS
-    assert KIND_MULTIPLIERS["slot"] < KIND_MULTIPLIERS["semantic"], "a slot must age slower"
+    assert (
+        KIND_MULTIPLIERS["slot"] < KIND_MULTIPLIERS["semantic"]
+    ), "a slot must age slower"
 
 
 def test_slot_is_listed_as_a_record_and_excluded_from_the_fact_block(store):
     memory_slots.append(store, "persona", "Terse.")
     kinds = {r.kind for r in store.iter_records()}
-    assert MemoryKind.SLOT in kinds, "a slot must be enumerable by the inventory surfaces"
-    # …but never rendered as a fact about the user (it has its own block).
+    assert (
+        MemoryKind.SLOT in kinds
+    ), "a slot must be enumerable by the inventory surfaces"
     assert "Terse." not in store.get_semantic_context("persona terse", cap=2000)

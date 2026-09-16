@@ -8,7 +8,7 @@ nothing counts. None of those show up in a unit test — the code works. Only a 
 the shape of the tree* sees them.
 
 This generator IS that census. It measures three structural properties of production
-``src/gideon`` and commits them to ``structural-baseline.json`` as three INDEPENDENT
+``runtime/gideon`` and commits them to ``checks/catalogs/structure.json`` as three INDEPENDENT
 shrink-only ratchets:
 
   * ``structural-size`` — a per-file size ceiling no file may exceed, plus a shrink-only
@@ -19,7 +19,7 @@ shrink-only ratchets:
   * ``structural-duplication`` — a duplicate-implementation counter for the families this
     codebase has repeatedly re-derived (HTTP error envelope, verdict types, durable write).
 
-Each ratchet is its own gate in ``scripts/gate_report.py`` (PHF-11's aggregate), so three
+Each ratchet is its own gate in ``tooling/scripts/gate_report.py`` (PHF-11's aggregate), so three
 independent structural failures report as THREE failures in one run — one red never hides
 the other two.
 
@@ -49,22 +49,22 @@ the other two.
 
 ⚠️  EVERY THRESHOLD RECORDS ITS RATIONALE — the defect it exists to catch — in the
     ``rationale`` field beside the number, so a future session can tell a load-bearing limit
-    from an arbitrary one. ``tests/test_structural_baseline.py`` asserts every threshold has
+    from an arbitrary one. ``checks/runtime/test_structural_baseline.py`` asserts every threshold has
     one.
 
 # what this deliberately does NOT ratchet
     Stated as decisions, so the omissions read as choices rather than gaps:
 
-    * **``tests/`` file length.** A 3,000-line test module is not the comprehension hazard a
+    * **``checks/runtime/`` file length.** A 3,000-line test module is not the comprehension hazard a
       3,000-line production module is: tests are read one function at a time and grow by
       append, by design. Ratcheting them would tax the one activity we want cheapest.
     * **Function/class length and cyclomatic complexity.** flake8 already owns per-line and
       per-import style; a complexity ratchet needs a metric everyone agrees on, and picking
       one badly produces a gate people route around. Deferred, not rejected.
-    * **``web/`` (the SPA).** The design-system ratchets already own frontend structure and
-      run under vitest; a second, Python-side counter over ``web/src`` would be a duplicate
+    * **``apps/console/`` (the SPA).** The design-system ratchets already own frontend structure and
+      run under vitest; a second, Python-side counter over ``apps/console/src`` would be a duplicate
       gate — exactly the defect ``structural-duplication`` measures.
-    * **The apps → core import direction.** ``tests/test_apps_import_boundary.py`` already
+    * **The apps → core import direction.** ``checks/runtime/test_apps_import_boundary.py`` already
       owns it (apps may reach core only via ``gideon.sdk.*``). This atom deliberately
       picks directions that test does NOT cover: INSIDE core, and the reverse direction
       (core importing its own published facade).
@@ -79,7 +79,7 @@ the other two.
     Regenerate ONLY when a counter LEGITIMATELY SHRANK (a file was split, an upward import
     was inverted, a re-derivation was deleted), and do it in that SAME commit::
 
-        python scripts/generate_structural_baseline.py
+        python tooling/scripts/generate_structural_baseline.py
 
     Each such commit should be able to point at the split, the inversion, or the deletion.
 
@@ -113,30 +113,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-for _p in (_REPO_ROOT, _REPO_ROOT / "src"):
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+for _p in (_REPO_ROOT, _REPO_ROOT / "runtime"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
 
-# ── Census scope ─────────────────────────────────────────────────────────────
-#
-# The walk is rooted at ``src/gideon`` and NEVER at the repo root. That is deliberate
-# and load-bearing: this repo is routinely checked out as ~200 concurrent git worktrees, and
-# a walk that wandered into ``.worktrees/``, ``node_modules/``, ``.venv/`` or ``build/``
-# would census ANOTHER tree — a number that drifts on every run and measures nothing. None
-# of those directories can appear under ``src/gideon``; ``_EXCLUDED_DIR_NAMES`` is a
-# belt-and-suspenders floor asserted by the ratchet's own test.
+# The walk is rooted at ``runtime/gideon`` and NEVER at the repo root. That is deliberate
+# of those directories can appear under ``runtime/gideon``; ``_EXCLUDED_DIR_NAMES`` is a
 _EXCLUDED_DIR_NAMES = frozenset(
     {"__pycache__", ".venv", ".venv-client", "node_modules", "build", "dist", ".worktrees", ".git"}
 )
 
-# Vacuity floor for the census itself. MEASURED 2026-08-21: 921 production ``.py`` files
-# under ``src/gideon``. The floor is far below that and far above a broken walk (0, or
-# the handful a wrong root yields), so it catches "the rail inspected nothing" without
-# churning every time a module is added or deleted. A rail that matches nothing looks clean,
-# and that is the most common way a gate in this repo dies — so each ratchet ALSO asserts it
-# inspected exactly as many files as the census counted (``vacuity_failures``).
+# under ``runtime/gideon``. The floor is far below that and far above a broken walk (0, or
 MIN_CENSUS_PY_FILES = 800
 
 RATCHET_SIZE = "structural-size"
@@ -146,14 +135,11 @@ RATCHETS = (RATCHET_SIZE, RATCHET_IMPORT_DIRECTION, RATCHET_DUPLICATION)
 
 
 def _repo_root() -> Path:
-    # Returns the constant resolved at import, NOT a fresh ``Path(__file__).resolve()``. This
-    # is called once per file per scan (~2,700 times); re-resolving each time made the cold
-    # census three times slower for nothing.
     return _REPO_ROOT
 
 
 def _src_root() -> Path:
-    return _repo_root() / "src" / "gideon"
+    return _repo_root() / "runtime" / "gideon"
 
 
 def _is_excluded(path: Path) -> bool:
@@ -169,21 +155,19 @@ def _is_excluded(path: Path) -> bool:
 
     The exclusion's actual purpose is unchanged and is stated in
     ``test_the_walk_cannot_wander_into_a_worktree_or_a_vendor_directory``: don't count another
-    agent's tree. That guarantee comes from rooting the walk at ``src/gideon`` (asserted
+    agent's tree. That guarantee comes from rooting the walk at ``runtime/gideon`` (asserted
     there), not from matching ancestor names — and a name outside the root was never something
     this filter could meaningfully judge.
     """
     try:
         rel = path.relative_to(_src_root())
     except ValueError:
-        # Outside the census root entirely. The walk cannot produce this, and the rail asserts
-        # so; treat it as excluded rather than silently counting it.
         return True
     return bool(_EXCLUDED_DIR_NAMES & set(rel.parts))
 
 
 def _src_py_files() -> list[Path]:
-    """Every production ``.py`` file under ``src/gideon`` (sorted, vendor dirs excluded)."""
+    """Every production ``.py`` file under ``runtime/gideon`` (sorted, vendor dirs excluded)."""
     out: list[Path] = []
     for path in _src_root().rglob("*.py"):
         if _is_excluded(path):
@@ -208,7 +192,7 @@ def _rel(path: Path) -> str:
 
 
 def _in_src(path: Path) -> str:
-    """POSIX path relative to ``src/gideon`` (the layer key's namespace)."""
+    """POSIX path relative to ``runtime/gideon`` (the layer key's namespace)."""
     return path.resolve().relative_to(_src_root()).as_posix()
 
 
@@ -227,7 +211,7 @@ def census_py_files() -> int:
 
 
 def census_packages() -> set[str]:
-    """Every immediate sub-package of ``src/gideon`` that holds at least one ``.py``
+    """Every immediate sub-package of ``runtime/gideon`` that holds at least one ``.py``
     file, taken straight from disk. Compared against what the ratchets actually walked: a
     file COUNT alone cannot see a whole package dropping out of the walk (66 packages, so
     losing one still leaves the count above any plausible floor)."""
@@ -254,96 +238,14 @@ class Scan:
     rows: dict[str, Any]
 
 
-# ── Ratchet 1: per-file size ceiling ─────────────────────────────────────────
 
-# Files at or above this length are the WATCH BAND, and the ratchet counts HOW MANY there are
-# (shrink-only) rather than pinning each one's length. The boundary must sit at a real GAP in the
-# measured distribution, never at a round number, and this repo proved why within three days of
-# the band being authored: ``agents/native/builtin_tools.py`` grew ~233 lines (AG-14 alone added
-# 122) to 2467, which left the original 2500 band with **33** lines of headroom — the cliff rail
-# caught it, and the band had to move.
-#
-# MEASURED 2026-08-21 over 921 production files. Only two boundaries in the relevant window clear
-# the rail's own >= 100 requirement:
-#
-#     band   population   largest non-member          headroom
-#     2400        11       2294  subagent.py              106
-#     2500        10       2467  builtin_tools.py          33   <- the cliff that forced this move
-#     2600         9       2583  workflows/engine.py       17
-#     2800         9       2583  workflows/engine.py      217   <- CHOSEN
-#     2900         8       2808  chat_handlers.py          92
-#     3000         7       2992  handlers/files.py          8
-#
-# 2800 over 2400, and the usual reading of that trade is backwards. The apparent cost is that
-# ``engine.py`` (2583) and ``builtin_tools.py`` (2467) are not watched — but a band member's
-# growth is deliberately NOT a violation, so at 2400 those two would be GRANDFATHERED and free to
-# run to the ceiling unchallenged. At 2800 they are outside, and crossing 2800 REDS. The band at
-# 2800 therefore puts MORE pressure on the two fastest-growing large files in the repo, not less.
-# On top of that, 2400's 106 lines of headroom is well under one feature's growth for this
-# codebase (233 lines in three days, above), so it would be shipping a boundary already known to
-# be one merge from redding; 2800 gives 217, 2.17x the rail's floor.
-#
-# KNOWN COST, stated rather than discovered later: the band's smallest member is
-# ``chat_handlers.py`` at 2808, so it has only 8 lines of SHRINK margin — delete nine lines from
-# it and the stale-high check asks for a regeneration. That is deliberate. The 225-line gap
-# (2583 -> 2808) cannot give 200+ lines of margin in both directions, and the two remedies are not
-# equally priced: a stale-high red is one command (re-run this generator) in the same commit and is
-# the documented, sanctioned flow for a file leaving the giant population, whereas a cliff red asks
-# for the boundary itself to be re-authored. Optimise the
-# margin against GROWTH, which is the direction this ratchet exists to measure, and pay the cheap
-# remedy on the other side.
 SIZE_WATCH_BAND_LINES = 2800
 
-# The absolute per-file ceiling. FORBIDDEN TO RAISE.
-#
-# MEASURED 2026-08-21: the max over 921 production files is 5447 (``config/loader.py``). The
-# ceiling is set one 1000-line STEP above that max rather than AT it, and the reason is the
-# difference between a ratchet and an outage. ``config/loader.py`` is the ceiling holder AND the
-# file the config round-trip contract touches on every new field (dataclass + ``_meta`` +
-# ``load()`` — three of the contract's five points live there). A ceiling pinned at 5447 gives
-# that file ZERO headroom, so a one-line boolean toggle would red CI and demand a 5,447-line
-# split as its price. The rail's job is to stop a STEP CHANGE — a module arriving at 6,000 lines,
-# or the worst file gaining a thousand — and the watch-band population already catches every new
-# giant at the band. So: 553 lines of ordinary-maintenance headroom, and nothing in the repo may
-# reach 6,000.
-#
-# Deliberately a STEP multiple, not ``max + N``: a step keeps the rendered value STABLE while the
-# max drifts by a few lines, so the byte-compare test does not demand a regeneration on every
-# routine commit. Lower it one step when the max legitimately drops below the previous step —
-# ``stale_high()`` asks for exactly that via ``ceiling_slack_steps``.
-#
-# RE-MEASURED 2026-08-28 (PHF-14, the decomposition the paragraph above predicted): ``config/
-# loader.py`` was split into per-domain sibling modules and went 5652 -> 4285, so the ceiling
-# HOLDER is now ``workflows/controller.py`` at 5287 (headroom 713). The ceiling stays at 6000 and
-# needs no regeneration: 5287 is still inside the top step, so ``ceiling_slack_steps`` is still 0.
-# Note the holder is no longer the config round-trip's file, so the "boolean toggle costs a split"
-# argument above now describes a risk that has been paid down rather than one being carried.
 SIZE_CEILING_STEP_LINES = 1000
 SIZE_CEILING_LINES = 6000
 
 _SIZE_RATIONALE = (
-    "A module nobody can hold in their head is where every other kind of decay hides: dead "
-    "branches, a second implementation of something three functions above, a config field read "
-    "in one place and written in another. Growth is invisible per commit (+40 lines reviews "
-    "fine) and irreversible in aggregate. TWO rails, and the split between them is the whole "
-    "design. (1) The CEILING is absolute: no file may reach 6000 lines, so no module can arrive "
-    "or grow into a step change, and a new worst file reds. It sits one 1000-line step above the "
-    "measured max of 5447 on purpose — pinned AT the max it would give the repo's most-"
-    "maintained file zero headroom and turn a boolean config toggle into a mandatory 5,447-line "
-    "split, which is the gate people route around. (2) The WATCH-BAND POPULATION is the honest "
-    "decay signal: how MANY files are giant, shrink-only. A file ENTERING the 2800-line band "
-    "reds (9 -> 10); splitting one is how you go green (9 -> 8). Growth WITHIN the band, below "
-    "the ceiling, is ordinary maintenance of the files that by construction get maintained most, "
-    "and is deliberately NOT a violation. Everything below the band is unconstrained except by "
-    "the ceiling: routine work is untaxed, and the count is what has to come down. WHY 2800 AND "
-    "NOT A ROUND 2500: the boundary has to sit at a real gap, and this repo proved it within "
-    "three days — agents/native/builtin_tools.py grew ~233 lines (AG-14 added 122) to 2467, "
-    "leaving the original 2500 band 33 lines of headroom. 2800 sits in the 225-line gap between "
-    "engine.py (2583) and chat_handlers.py (2808): 217 lines of headroom, 2.17x the cliff rail's "
-    "floor. It also leaves engine.py and builtin_tools.py OUTSIDE the band, where crossing 2800 "
-    "reds them — at 2400 they would be grandfathered members, free to grow to the ceiling "
-    "unchallenged. The full measured distribution and the accepted 8-line shrink margin on "
-    "chat_handlers.py are recorded beside SIZE_WATCH_BAND_LINES."
+    "Keep individual modules at or below 6000 lines and prevent growth in the population at or above 2800 lines. Existing large modules may change within that range; new entrants remain regressions. The 1000-line step measures opportunities to lower the ceiling after code is split. These limits preserve maintenance room without allowing new oversized modules."
 )
 
 
@@ -388,13 +290,9 @@ def size_block_from(counts: dict[str, int]) -> dict[str, Any]:
     return {
         "ceiling_lines": SIZE_CEILING_LINES,
         "ceiling_step_lines": SIZE_CEILING_STEP_LINES,
-        # How many full steps the ceiling could come down. 0 while the max sits inside the
-        # current step; >0 means a split landed and the ceiling is now stale-high.
         "ceiling_slack_steps": max(0, (SIZE_CEILING_LINES - biggest) // SIZE_CEILING_STEP_LINES),
         "over_ceiling": over,
         "watch_band_lines": SIZE_WATCH_BAND_LINES,
-        # Identities kept for legibility — a reader can see WHICH files are giant. Their
-        # individual lengths are deliberately NOT asserted; only membership is.
         "watch_band_members": watched,
         "rationale": _SIZE_RATIONALE,
         "totals": {"watched_files": len(watched)},
@@ -444,7 +342,6 @@ def regressions_size(baseline: dict[str, Any], current: dict[str, Any]) -> list[
     return lines
 
 
-# ── Ratchet 2: module-boundary / import-direction ────────────────────────────
 
 
 @dataclass(frozen=True)
@@ -463,26 +360,17 @@ class DirectionRule:
     def applies_to(self, in_src: str) -> bool:
         top = in_src.split("/")[0] if "/" in in_src else ""
         if top in self.upper:
-            return False  # the upper layer may of course import itself
+            return False
         return self.lower == ("*",) or top in self.lower
 
 
-# The layer order, lowest first. Deliberately SMALL: three rules with measured, non-zero
-# populations plus one leaf-isolation rule, each naming the defect it catches. This is not a
-# full layering of 66 packages — a map that large would be a design document masquerading as
-# a lint, and its first false red would get the whole gate deleted.
 DIRECTION_RULES: tuple[DirectionRule, ...] = (
     DirectionRule(
         name="ledger-is-a-leaf",
         lower=("ledger",),
         upper=("dashboard", "sdk", "workflows", "loop", "agents", "knowledge", "learning"),
         rationale=(
-            "PP-4 extracted the run ledger OUT of workflows as a platform primitive; "
-            "workflows/journal.py is now a 685-line facade OVER it. An import back up into a "
-            "consumer would silently undo that extraction: the ledger would stop being usable "
-            "by loops, tasks or evals (PP-5/PP-9 are exactly those consumers) and the "
-            "extraction would have to be paid for twice. Measured at 0 edges — the extraction "
-            "is clean today, and this rule is what keeps it that way for the cost of one line."
+            "The run ledger supplies durable records to orchestration, learning, evaluation, and user interfaces. It must remain independent of those consumers so each can use it without loading an application layer. Imports in the reverse direction are counted as dependency regressions, with the recorded population serving as the upper bound."
         ),
     ),
     DirectionRule(
@@ -490,27 +378,14 @@ DIRECTION_RULES: tuple[DirectionRule, ...] = (
         lower=("*",),
         upper=("dashboard",),
         rationale=(
-            "``dashboard/`` is the aiohttp + SPA surface. Domain code that imports a handler "
-            "module inverts the dependency: the domain can no longer be exercised without "
-            "standing up the web app, which is how a feature ends up reachable ONLY through "
-            "one route and invisible to the CLI, the MCP surface and the harness. Measured 56 "
-            "edges across 26 files, most of them entry-point composition (gateway, cli_*) "
-            "that is legitimately downward-facing. Shrink-only GRANDFATHERS those instead of "
-            "an exemption list — an allowlist is a thing that rots, a measured floor is not."
-        ),
+            "Domain operations should be usable from the browser, command line, and automation interfaces. Importing HTTP handlers from domain modules ties those operations to the web application. Existing imports remain measured, including composition entry points; additional edges require moving shared behavior below the interface layer."       ),
     ),
     DirectionRule(
         name="core-must-not-import-its-own-published-facade",
         lower=("*",),
         upper=("sdk",),
         rationale=(
-            "``gideon.sdk`` is the OUTWARD facade that removable app bundles import; "
-            "tests/test_apps_import_boundary.py pins the other direction (apps may reach core "
-            "only through it) and that test SKIPS in a standalone clone, so this direction has "
-            "never been guarded at all. When core imports its own facade, the facade becomes "
-            "load-bearing INSIDE core and can no longer be reshaped for apps without breaking "
-            "core — the provider-boundary tenet inverted. Measured 10 edges across 7 files."
-        ),
+            "The published client facade is the supported entry point for extension bundles. Internal code should use its underlying implementation instead of depending on that external facade, so the public API can evolve without becoming an internal dependency cycle. The stored count limits further imports in this direction."       ),
     ),
 )
 
@@ -519,7 +394,7 @@ def _imported_gideon_modules(path: Path, tree: ast.Module) -> list[str]:
     """Absolute ``gideon.*`` module paths imported by ``path``, relative imports resolved.
 
     A relative import is the shape that hides a direction violation from grep (``from
-    ..dashboard import x`` never contains the string ``gideon.dashboard``), so it is
+    ..dashboard import x`` never contains the string ``gideon.interfaces.dashboard``), so it is
     resolved here rather than skipped.
     """
     parent = path.resolve().parent
@@ -612,7 +487,6 @@ def regressions_import_direction(baseline: dict[str, Any], current: dict[str, An
     return lines
 
 
-# ── Ratchet 3: duplicate-implementation counter ──────────────────────────────
 
 
 @dataclass(frozen=True)
@@ -630,48 +504,21 @@ DUPLICATE_FAMILIES: tuple[DuplicateFamily, ...] = (
         name="http-error-envelope-helper",
         canonical=None,
         rationale=(
-            "PL-8 deleted THIRTEEN module-local ``json_error`` clones, one of which had minted "
-            "a third ``WF_UPPER_SNAKE`` code vocabulary inside the HTTP envelope. Twelve "
-            "survive under other names (``_err``, ``_bad``, ``_bad_request``, ``_rpc_error``, "
-            '``_invalid_path``, …), each a one-statement re-derivation of the ``{"error": '
-            '{"code", "message"}}`` wire shape. Every clone is a place the envelope drifts '
-            "silently — a wrong status, an UPPER_SNAKE code where the wire wants "
-            "lowercase_snake, a missing field — and no round-trip test can see it, because "
-            "each handler's test asserts against that handler's own clone. There is "
-            "deliberately NO canonical HTTP helper yet: the two-error-envelope ruling keeps "
-            "``AgentError`` and the wire shape apart, and this counter measures the population "
-            "rather than mandating a merge. The fix for a thirteenth is to PROMOTE one shared "
-            "helper, never to add another."
+            "Small handler helpers that independently construct the HTTP error envelope can disagree on status, code naming, or required fields. This census counts those implementations without selecting a shared helper or combining the HTTP envelope with domain exceptions. Reduce the count by establishing and using a common HTTP helper when appropriate."
         ),
     ),
     DuplicateFamily(
         name="verdict-type",
-        canonical="src/gideon/workflows/judge_contract.py",
+        canonical="runtime/gideon/automation/workflows/judge_contract.py",
         rationale=(
-            "PP-14's thesis: the engine implements verdict semantics several times over "
-            "because the primitive was never named. WF2LOO-16 deleted ``CycleVerdict`` into "
-            "``judge_contract.JudgeVerdict`` and measured that 0 of 4 loop-verdict shapes "
-            "satisfied ``validate_verdict`` — four dialects, none interoperable. 23 "
-            "verdict-shaped types still live outside the canonical module, each with its own "
-            "pass/fail tokens and its own reason field, so no supervisor, ledger or evaluator "
-            "can read a verdict without knowing which dialect produced it. This is a COUNTER, "
-            "not a ban: a decision in a genuinely different domain (an IP allow/deny result) "
-            "is not destined to merge — but then it should not be NAMED a verdict, and that "
-            "rename shrinks this number too."
+            "Verdict-shaped classes outside the shared workflow contract introduce additional decision formats for supervisors and evaluators to interpret. This count tracks those definitions while allowing genuinely different domain decisions to retain their own types. A definition leaves the population when it uses the shared contract or receives a more specific domain name."
         ),
     ),
     DuplicateFamily(
         name="durable-write",
-        canonical="src/gideon/atomic_write.py",
+        canonical="runtime/gideon/core/atomic_write.py",
         rationale=(
-            "DAS-9: a handler rolled its own ``mkstemp`` + ``rename`` and so vanished from the "
-            "history seam — the write landed on disk and no post-write hook ever fired, which "
-            "is the swallowed-write defect with a green test on both sides. ``atomic_write.py`` "
-            "is the ONE implementation that keeps that seam (and fsync durability) intact. "
-            "Five functions across four files still pair a temp-file creation with a rename "
-            "themselves. Thin wrappers that DELEGATE to ``atomic_write`` are deliberately not "
-            "counted — three exist and they are the shape we want, not a re-derivation."
-        ),
+            "Functions that create a temporary file and then rename it can bypass the shared persistence hooks and durability guarantees. Count these local implementations while excluding wrappers that delegate to the canonical atomic-write function. New persistence paths must use that function so writes retain their established history and synchronization behavior."       ),
     ),
 )
 
@@ -783,7 +630,7 @@ def scan_duplicates() -> Scan:
             ("durable-write", _durable_write_sites),
         ):
             if canonical.get(family) == rel:
-                continue  # the canonical implementation is not a duplicate of itself
+                continue
             sites.extend(f"{family}:{symbol}" for symbol in finder(tree))
         if sites:
             per_file[rel] = {"count": len(sites), "sites": sorted(sites)}
@@ -831,7 +678,6 @@ def regressions_duplication(baseline: dict[str, Any], current: dict[str, Any]) -
     return lines
 
 
-# ── Inventory, vacuity, ratchet dispatch ─────────────────────────────────────
 
 
 def build_inventory() -> dict[str, Any]:
@@ -844,7 +690,7 @@ def build_inventory() -> dict[str, Any]:
     ``MIN_CENSUS_PY_FILES`` and against the census the run itself performed.
     """
     return {
-        "generated_from": "scripts/generate_structural_baseline.py",
+        "generated_from": "tooling/scripts/generate_structural_baseline.py",
         "ratchets": list(RATCHETS),
         RATCHET_SIZE: _size_block(),
         RATCHET_IMPORT_DIRECTION: _import_direction_block(),
@@ -852,9 +698,119 @@ def build_inventory() -> dict[str, Any]:
     }
 
 
+def encode_catalog(inventory: dict[str, Any]) -> dict[str, Any]:
+    size = inventory[RATCHET_SIZE]
+    imports = inventory[RATCHET_IMPORT_DIRECTION]
+    duplication = inventory[RATCHET_DUPLICATION]
+    return {
+        "version": 1,
+        "kind": "gideon.structure",
+        "data": {
+            "generator": inventory["generated_from"],
+            "order": inventory["ratchets"],
+            "checks": {
+                "size": {
+                    "limits": {
+                        "file_lines": size["ceiling_lines"],
+                        "step_lines": size["ceiling_step_lines"],
+                        "watch_lines": size["watch_band_lines"],
+                    },
+                    "observed": {
+                        "slack_steps": size["ceiling_slack_steps"],
+                        "over_limit": [{"path": path, "lines": count} for path, count in sorted(size["over_ceiling"].items())],
+                        "watch_members": size["watch_band_members"],
+                        "watched_files": size["totals"]["watched_files"],
+                    },
+                    "purpose": size["rationale"],
+                },
+                "imports": {
+                    "rules": [
+                        {"id": rule["name"], "from": rule["lower"], "to": rule["upper"], "purpose": rule["rationale"]}
+                        for rule in imports["rules"]
+                    ],
+                    "sources": [
+                        {"path": path, "count": entry["edges"], "violations": entry["violations"]}
+                        for path, entry in sorted(imports["per_file"].items())
+                    ],
+                    "summary": imports["totals"],
+                },
+                "duplication": {
+                    "families": [
+                        {"id": family["name"], "canonical": family["canonical"], "purpose": family["rationale"]}
+                        for family in duplication["families"]
+                    ],
+                    "sources": [
+                        {
+                            "path": path,
+                            "count": entry["count"],
+                            "sites": [
+                                {"family": family, "symbol": symbol}
+                                for family, symbol in (site.split(":", 1) for site in entry["sites"])
+                            ],
+                        }
+                        for path, entry in sorted(duplication["per_file"].items())
+                    ],
+                    "summary": duplication["totals"],
+                },
+            },
+        },
+    }
+
+
+def decode_catalog(document: dict[str, Any]) -> dict[str, Any]:
+    if document.get("version") != 1 or document.get("kind") != "gideon.structure":
+        raise ValueError("unsupported Gideon structure catalog")
+    data = document["data"]
+    size = data["checks"]["size"]
+    imports = data["checks"]["imports"]
+    duplication = data["checks"]["duplication"]
+    for entries in (size["observed"]["over_limit"], imports["sources"], duplication["sources"]):
+        paths = [entry["path"] for entry in entries]
+        if len(paths) != len(set(paths)):
+            raise ValueError("duplicate source in structure catalog")
+    return {
+        "generated_from": data["generator"],
+        "ratchets": data["order"],
+        RATCHET_SIZE: {
+            "ceiling_lines": size["limits"]["file_lines"],
+            "ceiling_step_lines": size["limits"]["step_lines"],
+            "watch_band_lines": size["limits"]["watch_lines"],
+            "ceiling_slack_steps": size["observed"]["slack_steps"],
+            "over_ceiling": {entry["path"]: entry["lines"] for entry in size["observed"]["over_limit"]},
+            "watch_band_members": size["observed"]["watch_members"],
+            "totals": {"watched_files": size["observed"]["watched_files"]},
+            "rationale": size["purpose"],
+        },
+        RATCHET_IMPORT_DIRECTION: {
+            "rules": [
+                {"name": rule["id"], "lower": rule["from"], "upper": rule["to"], "rationale": rule["purpose"]}
+                for rule in imports["rules"]
+            ],
+            "per_file": {
+                entry["path"]: {"edges": entry["count"], "violations": entry["violations"]}
+                for entry in imports["sources"]
+            },
+            "totals": imports["summary"],
+        },
+        RATCHET_DUPLICATION: {
+            "families": [
+                {"name": family["id"], "canonical": family["canonical"], "rationale": family["purpose"]}
+                for family in duplication["families"]
+            ],
+            "per_file": {
+                entry["path"]: {
+                    "count": entry["count"],
+                    "sites": [f"{site['family']}:{site['symbol']}" for site in entry["sites"]],
+                }
+                for entry in duplication["sources"]
+            },
+            "totals": duplication["summary"],
+        },
+    }
+
+
 def build_baseline() -> str:
-    """Render the inventory as a deterministic JSON string (sorted, trailing newline)."""
-    return json.dumps(build_inventory(), indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    return json.dumps(encode_catalog(build_inventory()), indent=2, sort_keys=True, ensure_ascii=False) + "\n"
 
 
 _SCAN_CACHE: dict[str, tuple[tuple[object, object], Scan]] = {}
@@ -925,7 +881,7 @@ def vacuity_failures(ratchet: str | None = None) -> list[str]:
                 "looks clean."
             )
             continue
-        # ``src/gideon/<pkg>/...`` → ``<pkg>``; ``src/gideon/mod.py`` → ``""``.
+        # ``runtime/gideon/<pkg>/...`` → ``<pkg>``; ``runtime/gideon/mod.py`` → ``""``.
         seen_packages = {
             (parts[2] if len(parts) > 3 else "") for parts in (rel.split("/") for rel in inspected)
         }
@@ -941,7 +897,7 @@ def vacuity_failures(ratchet: str | None = None) -> list[str]:
 def ratchet_failures(ratchet: str, baseline: dict[str, Any], current: dict[str, Any]) -> list[str]:
     """Every failure line for ONE ratchet: its vacuity failures first, then its backslides.
 
-    Scoped to a single ratchet on purpose — that is what lets ``scripts/gate_report.py``
+    Scoped to a single ratchet on purpose — that is what lets ``tooling/scripts/gate_report.py``
     register the three as three INDEPENDENT gates, so three simultaneous structural failures
     report as three rather than the first one hiding the rest.
     """
@@ -987,12 +943,13 @@ def stale_high(ratchet: str, baseline: dict[str, Any], current: dict[str, Any]) 
 
 
 def baseline_path() -> Path:
-    """Repo-root location of the committed ``structural-baseline.json``."""
-    return _repo_root() / "structural-baseline.json"
+    """Repo-root location of the committed ``checks/catalogs/structure.json``."""
+    return _repo_root() / "checks/catalogs/structure.json"
 
 
 def main() -> None:
     path = baseline_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(build_baseline(), encoding="utf-8")
     inventory = build_inventory()
     print(f"wrote {path}")

@@ -7,7 +7,7 @@ app lives under. See ``gideon/apps/native_contract.py`` and
 ``docs/architecture/app-platform.md``.
 
 This file is the enforcement half, and it is deliberately built to be non-vacuous.
-``tests/test_apps_import_boundary.py`` (the installed-app twin) resolves the workspace
+``checks/runtime/test_apps_import_boundary.py`` (the installed-app twin) resolves the workspace
 ``apps/`` dir and ``pytest.skip``s the whole module when it is absent — which is the case
 in a standalone core clone AND in this project's own workspace, whose apps checkout is
 named ``GideonApps``. A skipped rail reads exactly like a passing one. The bundled
@@ -26,8 +26,8 @@ from pathlib import Path
 
 import pytest
 
-from gideon.apps.manifest import AppManifest
-from gideon.apps.native_contract import (
+from gideon.extensions.apps.manifest import AppManifest
+from gideon.extensions.apps.native_contract import (
     NATIVE_DIR,
     all_contract_violations,
     bundle_module_file,
@@ -38,7 +38,7 @@ from gideon.apps.native_contract import (
     native_bundle_dirs,
 )
 
-_SRC_DIR = Path(__file__).resolve().parents[1] / "src"
+_SRC_DIR = Path(__file__).resolve().parents[2] / "src"
 
 
 @functools.lru_cache(maxsize=1)
@@ -73,9 +73,6 @@ def _bundle_owned() -> list[tuple[str, AppManifest]]:
                 out.append((bundle.name, manifest))
                 break
     return out
-
-
-# ── the import boundary, over the tree the installed-app rail never sees ──────
 
 
 def test_bundled_modules_import_only_the_sdk():
@@ -119,9 +116,6 @@ def test_every_bundled_app_declares_a_resolvable_implementation():
     assert not problems, problems
 
 
-# ── "without core edits" — the property, not the promise ──────────────────────
-
-
 @pytest.mark.parametrize("bundle_name", [n for n, _ in _bundle_owned()])
 def test_bundle_owned_capability_has_no_core_implementation(bundle_name):
     """No core module implements, imports or resolves a bundle-owned provider.
@@ -138,11 +132,10 @@ def test_bundle_owned_capability_has_no_core_implementation(bundle_name):
     for rel, text in _core_sources().items():
         hits = []
         for stem in module_stems:
-            # A bundle's module is not on an importable package path, so a core
-            # dependency on it can only be spelled as a path or a dotted pseudo-path.
-            # Comments are stripped first: a core module is allowed to EXPLAIN that a
-            # capability moved into a bundle — it just may not reach for it.
-            if f"apps.native.{bundle_name}" in text or f"apps/native/{bundle_name}/{stem}" in text:
+            if (
+                f"apps.native.{bundle_name}" in text
+                or f"apps/native/{bundle_name}/{stem}" in text
+            ):
                 hits.append(f"references {bundle_name}/{stem}")
         if hits:
             offenders[rel] = sorted(set(hits))
@@ -166,15 +159,14 @@ def test_ui_docs_capability_left_core_entirely():
     )
 
 
-# ── the loader: bundle-local, namespaced, cached ──────────────────────────────
-
-
 def _fake_ext(name: str, ext_dir: Path, implementation: str):
     """A RegisteredProvider whose dir resolution points at ``ext_dir``."""
-    from gideon.apps.manifest import ProviderConfig
-    from gideon.providers.registry import RegisteredProvider
+    from gideon.extensions.apps.manifest import ProviderConfig
+    from gideon.extensions.providers.registry import RegisteredProvider
 
-    manifest = AppManifest(name=name, version="1.0.0", displayName=name, description="x")
+    manifest = AppManifest(
+        name=name, version="1.0.0", displayName=name, description="x"
+    )
     cfg = ProviderConfig(type="tool", implementation=implementation)
     return RegisteredProvider(name=name, manifest=manifest, provider_config=cfg)
 
@@ -187,7 +179,7 @@ def test_two_bundles_shipping_provider_py_do_not_collide(tmp_path, monkeypatch):
     sys.path — so the first bundle to load would win ``sys.modules["provider"]`` and the
     second would silently receive the first one's factory.
     """
-    from gideon.providers import loader
+    from gideon.extensions.providers import loader
 
     for name, marker in (("alpha-bundle", "ALPHA"), ("beta-bundle", "BETA")):
         d = tmp_path / name
@@ -204,7 +196,9 @@ def test_two_bundles_shipping_provider_py_do_not_collide(tmp_path, monkeypatch):
     assert got == {"alpha-bundle": "ALPHA", "beta-bundle": "BETA"}
     assert namespaced_module_name("alpha-bundle", "provider") in sys.modules
     assert namespaced_module_name("beta-bundle", "provider") in sys.modules
-    assert "provider" not in sys.modules, "a bare 'provider' module leaked into sys.modules"
+    assert (
+        "provider" not in sys.modules
+    ), "a bare 'provider' module leaked into sys.modules"
 
 
 def test_bundle_module_is_loaded_once(tmp_path):
@@ -239,21 +233,20 @@ def test_a_failing_bundle_module_is_not_left_cached(tmp_path):
     assert namespaced_module_name("broken-bundle", "provider") not in sys.modules
 
 
-# ── the exemplar, through the real dispatch path ──────────────────────────────
-
-
 @pytest.fixture()
 def ui_docs_provider():
     """The ui-docs provider as the gateway builds it: manifest → ProviderRegistry →
     typed tool handler → the live tool registry. No shortcut construction."""
-    from gideon.providers import registry as prov_reg
-    from gideon.tool_providers import registry as tool_reg
+    from gideon.extensions.providers import registry as prov_reg
+    from gideon.integrations.tool_providers import registry as tool_reg
 
     tool_reg._providers.clear()
     prov_reg._registry = None
     try:
         reg = prov_reg.get_provider_registry()
-        manifest = AppManifest.from_json_file(NATIVE_DIR / "gideon-ui-docs" / "app.json")
+        manifest = AppManifest.from_json_file(
+            NATIVE_DIR / "gideon-ui-docs" / "app.json"
+        )
         reg.register(manifest, enabled=True)
         provider = tool_reg.get_provider("gideon-ui-docs")
         assert provider is not None, "the bundle did not reach the live tool registry"
@@ -273,7 +266,9 @@ def test_the_registered_provider_is_the_bundles_own_code(ui_docs_provider):
     )
 
 
-def test_the_gained_method_is_dispatched_not_merely_declared(ui_docs_provider, tmp_path):
+def test_the_gained_method_is_dispatched_not_merely_declared(
+    ui_docs_provider, tmp_path
+):
     """``ui_list`` is reachable through the ordinary tool path AND returns real output.
 
     Declaring a tool is free; this drives it. The artifact is faked in tmp so the test
@@ -285,10 +280,22 @@ def test_the_gained_method_is_dispatched_not_merely_declared(ui_docs_provider, t
 
     docs = {
         "components": [
-            {"name": "Zed", "source": "Zed.tsx", "description": "the last one", "props": []},
-            {"name": "Abacus", "source": "Abacus.tsx", "description": "counts", "props": []},
+            {
+                "name": "Zed",
+                "source": "Zed.tsx",
+                "description": "the last one",
+                "props": [],
+            },
+            {
+                "name": "Abacus",
+                "source": "Abacus.tsx",
+                "description": "counts",
+                "props": [],
+            },
         ],
-        "tokens": [{"varName": "--color-primary", "label": "Primary", "group": "color"}],
+        "tokens": [
+            {"varName": "--color-primary", "label": "Primary", "group": "color"}
+        ],
     }
     artifact = tmp_path / "ui-docs.json"
     artifact.write_text(json.dumps(docs), encoding="utf-8")
@@ -298,11 +305,9 @@ def test_the_gained_method_is_dispatched_not_merely_declared(ui_docs_provider, t
     try:
         res = asyncio.run(ui_docs_provider.invoke("ui_list", {}))
         assert res.success, res.error
-        # Enumerated, alphabetical, with its description — the discovery ui_search can't do.
         assert "Abacus" in res.output and "Zed" in res.output
         assert res.output.index("Abacus") < res.output.index("Zed")
         assert "counts" in res.output
-        # kind='tokens' switches the catalog; a bad kind is refused, not silently defaulted.
         tokens = asyncio.run(ui_docs_provider.invoke("ui_list", {"kind": "tokens"}))
         assert tokens.success and "--color-primary" in tokens.output
         assert "Abacus" not in tokens.output
@@ -316,7 +321,7 @@ def test_the_bundle_reads_the_dist_dir_the_dashboard_serves():
     """The bundle resolves packaged host assets by path (it ships in the same
     distribution). Pin it against the dir the dashboard actually serves, so moving
     ``static/dist`` reds here instead of making the tools report 'not built'."""
-    from gideon.dashboard.server import _DIST_DIR
+    from gideon.interfaces.dashboard.server import _DIST_DIR
 
     module = load_bundle_module(
         NATIVE_DIR / "gideon-ui-docs", "gideon-ui-docs", "provider"

@@ -36,16 +36,13 @@ import pathlib
 
 import pytest
 
-from gideon.loop import store as loop_store
-from gideon.workflows import deliverable as D
-from gideon.workflows import loop_aliases
+from gideon.automation.loop import store as loop_store
+from gideon.automation.workflows import deliverable as D
+from gideon.automation.workflows import loop_aliases
 
-#: The three documents PP-16's unit-1 clause names, quoted above. Pinned here rather than read out
-#: of the derived table so the atom's list and the code's answer are two independent statements — a
-#: kind that stopped declaring its document would otherwise shrink both at once and stay green.
 ATOM_NAMED_DOCUMENTS = ("REPORT.md", "MONITOR_LOG.md", "DESIGN.md")
 
-_SRC = pathlib.Path(__file__).resolve().parent.parent / "src" / "gideon"
+_SRC = pathlib.Path(__file__).resolve().parent.parent.parent / "runtime" / "gideon"
 
 
 @pytest.fixture()
@@ -57,20 +54,17 @@ def run_home(monkeypatch, tmp_path):
 
 def _run(workflow: str, *, spec: dict | None = None, workspace: str = "") -> str:
     """Persist a run of ``workflow`` and return its id. Real store, real spec file."""
-    from gideon.workflows import store
-    from gideon.workflows.models import RunStatus, WorkflowRun
+    from gideon.automation.workflows import store
+    from gideon.automation.workflows.models import RunStatus, WorkflowRun
 
-    run = WorkflowRun(id=store.new_run_id(), workflow_name=workflow, status=RunStatus.RUNNING)
+    run = WorkflowRun(
+        id=store.new_run_id(), workflow_name=workflow, status=RunStatus.RUNNING
+    )
     if workspace:
-        # The same key `provisioning.stamp_workspace` writes, so the roots resolver is exercised
-        # through the record shape the engine really persists rather than a shape invented here.
         run.extra["workspace"] = {"path": workspace, "isolated": True}
     store.save(run)
     store.write_spec(run.id, spec if spec is not None else {"root": {"kind": "action"}})
     return run.id
-
-
-# ── the mapping is DRIVEN, and it agrees with the kinds in both directions ──
 
 
 def test_the_derived_table_names_the_three_documents_the_atom_names():
@@ -80,7 +74,9 @@ def test_the_derived_table_names_the_three_documents_the_atom_names():
     derived = {source.name for source in table.values() if source.name}
     assert derived, "vacuity floor: every template resolved to an empty document name"
     missing = [name for name in ATOM_NAMED_DOCUMENTS if name not in derived]
-    assert not missing, f"unit 1's own clause names documents no template produces: {missing}"
+    assert (
+        not missing
+    ), f"unit 1's own clause names documents no template produces: {missing}"
 
 
 def test_each_named_document_belongs_to_the_template_its_kind_resolves_to():
@@ -119,8 +115,8 @@ def test_the_name_is_asked_of_the_kind_rather_than_read_from_a_constant_here():
     directly. A constant table in `deliverable.py` would pass every test above and fail this one the
     moment a kind renamed its document.
     """
-    from gideon.loop import kinds as kinds_mod
-    from gideon.loop.loop import Loop
+    from gideon.automation.loop import kinds as kinds_mod
+    from gideon.automation.loop.loop import Loop
 
     kinds_mod.ensure_loaded()
     table = D.template_deliverables()
@@ -133,7 +129,11 @@ def test_the_name_is_asked_of_the_kind_rather_than_read_from_a_constant_here():
             name="",
             kind=source.kind,
             task="",
-            kind_config={"goal_type": source.variant.replace("-", "_")} if source.variant else {},
+            kind_config=(
+                {"goal_type": source.variant.replace("-", "_")}
+                if source.variant
+                else {}
+            ),
         )
         assert source.name == (
             strategy.deliverable_name(loop) or ""
@@ -152,9 +152,6 @@ def test_the_source_file_hard_codes_none_of_the_document_names():
 
     source = (_SRC / "workflows" / "deliverable.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
-    # Docstrings are string constants too, so exclude them BY NODE IDENTITY — `ast.get_docstring`
-    # returns a cleaned (dedented) string that never equals the raw literal, so comparing text
-    # excludes nothing and the test would fire on its own explanatory prose.
     doc_nodes: set[int] = set()
     for holder in ast.walk(tree):
         if not isinstance(
@@ -192,7 +189,7 @@ def test_the_loop_side_still_reads_the_log_by_that_name(run_home, monkeypatch):
     Without this, `LOG_NAME` could drift from what `read_log` opens and only the run side would
     notice — which is the two-spellings bug in a new costume.
     """
-    from gideon.loop import files as loop_files
+    from gideon.automation.loop import files as loop_files
 
     loop_id = "aa11bb22"
     directory = loop_files.loop_dir(loop_id)
@@ -201,35 +198,36 @@ def test_the_loop_side_still_reads_the_log_by_that_name(run_home, monkeypatch):
     assert "looked around" in loop_store.read_log(loop_id)
 
 
-# ── absent is NAMED, five ways ──
-
-
 def test_a_run_with_no_document_reports_not_written_and_no_content(run_home):
     """The common case, and the one clause 4 of this unit is about.
 
     `content is None`, not `""`: an empty string is a document someone wrote nothing into, and the
     panel would render an empty page for it rather than saying why there is none.
     """
-    from gideon.workflows import service
+    from gideon.automation.workflows import service
 
     payload = service.run_deliverable(_run("goal-pursuit-open-ended"))
     assert payload["ok"] is True
     report = payload["report"]
-    assert report["name"] == "REPORT.md", "the name is known even when the file is not there"
+    assert (
+        report["name"] == "REPORT.md"
+    ), "the name is known even when the file is not there"
     assert report["present"] is False
     assert report["content"] is None
     assert report["absent_reason"] == D.NOT_WRITTEN
     assert report["absent_reason"] in D.ABSENT_REASONS
 
 
-def test_a_kind_that_produces_no_document_says_so_rather_than_reporting_not_written(run_home):
+def test_a_kind_that_produces_no_document_says_so_rather_than_reporting_not_written(
+    run_home,
+):
     """A verifiable goal is FINISHED with no document; a young open-ended goal is WAITING for one.
 
     Both render as "no content", and collapsing them is the absent-vs-declared-zero mistake in text
     form: one tells the user to check back, the other tells them nothing is coming and that is
     correct.
     """
-    from gideon.workflows import service
+    from gideon.automation.workflows import service
 
     for template in (
         loop_aliases.resolve_kind("goal", variant="verifiable"),
@@ -247,24 +245,28 @@ def test_a_template_no_kind_resolves_to_is_unknown_rather_than_documentless(run_
     Reporting `kind_has_no_document` for them would be a claim about a template nothing here has
     read — and it is exactly the claim that would make a bespoke template's real document invisible.
     """
-    from gideon.workflows import service
+    from gideon.automation.workflows import service
 
     payload = service.run_deliverable(_run("morning-triage"))
     assert payload["report"]["absent_reason"] == D.TEMPLATE_UNKNOWN
-    assert payload["derivation"]["declared_by"] is None, "nothing declared it, so nothing is named"
+    assert (
+        payload["derivation"]["declared_by"] is None
+    ), "nothing declared it, so nothing is named"
 
 
 def test_a_run_with_no_directory_at_all_reports_no_root(run_home):
     """A run whose dir was swept reads as `no_root`, not as a worker that has not written."""
     import shutil
 
-    from gideon.workflows import service, store
+    from gideon.automation.workflows import service, store
 
     run_id = _run("goal-pursuit-open-ended")
     shutil.rmtree(store.run_dir(run_id))
     payload = service.run_deliverable(run_id)
     assert payload["report"]["absent_reason"] == D.NO_ROOT
-    assert all(root["exists"] is False for root in payload["roots"]), "the roots say so too"
+    assert all(
+        root["exists"] is False for root in payload["roots"]
+    ), "the roots say so too"
 
 
 def test_an_unreadable_document_is_reported_rather_than_blanked(run_home):
@@ -278,7 +280,9 @@ def test_an_unreadable_document_is_reported_rather_than_blanked(run_home):
     finally:
         target.chmod(0o600)
     if document.present:
-        pytest.skip("this filesystem ignores mode 000 for the owner — nothing to assert")
+        pytest.skip(
+            "this filesystem ignores mode 000 for the owner — nothing to assert"
+        )
     assert document.absent_reason == D.UNREADABLE
     assert document.found_in == D.ROOT_RUN_DIR, "we know WHERE the unreadable file is"
 
@@ -296,12 +300,9 @@ def test_every_absent_reason_the_module_can_report_is_in_the_declared_vocabulary
     assert len(named) == 5, "five distinct facts, not four spellings of one"
 
 
-# ── present, and honestly present ──
-
-
 def test_a_written_document_is_served_with_its_size_and_where_it_was_found(run_home):
     """The happy path, end to end through the service."""
-    from gideon.workflows import service, store
+    from gideon.automation.workflows import service, store
 
     run_id = _run("design-project")
     body = "# Design\n\nTokens settled.\n"
@@ -312,7 +313,9 @@ def test_a_written_document_is_served_with_its_size_and_where_it_was_found(run_h
     assert report["content"] == body
     assert report["bytes"] == len(body.encode())
     assert report["found_in"] == D.ROOT_RUN_DIR
-    assert report["absent_reason"] is None, "present and absent_reason are mutually exclusive"
+    assert (
+        report["absent_reason"] is None
+    ), "present and absent_reason are mutually exclusive"
 
 
 def test_a_document_someone_wrote_nothing_into_is_present_with_an_empty_body(run_home):
@@ -322,7 +325,7 @@ def test_a_document_someone_wrote_nothing_into_is_present_with_an_empty_body(run
     reports `present: True` and `content: ""`. A read path that folded this into the absent branch
     would pass every absence test above and quietly lose the distinction.
     """
-    from gideon.workflows import service, store
+    from gideon.automation.workflows import service, store
 
     run_id = _run("goal-pursuit-open-ended")
     (store.run_dir(run_id) / "REPORT.md").write_text("")
@@ -334,7 +337,7 @@ def test_a_document_someone_wrote_nothing_into_is_present_with_an_empty_body(run
 
 def test_the_log_slot_is_served_beside_the_deliverable(run_home):
     """`report` + `log`, the same two slots `GET /api/loops/{id}/report` returns."""
-    from gideon.workflows import service, store
+    from gideon.automation.workflows import service, store
 
     run_id = _run("goal-pursuit-open-ended")
     (store.run_dir(run_id) / loop_store.LOG_NAME).write_text("cycle 1: started\n")
@@ -351,7 +354,7 @@ def test_the_workspace_wins_over_the_run_dir(run_home):
     one, and only an unbound loop writes into its own dir. A run-dir-first resolver would serve a
     stale copy for every isolated run — which on a reading surface is worse than serving nothing.
     """
-    from gideon.workflows import service, store
+    from gideon.automation.workflows import service, store
 
     workspace = run_home / "ws"
     workspace.mkdir()
@@ -369,14 +372,18 @@ def test_a_credential_in_a_worker_authored_document_is_redacted(run_home):
     The loop side redacts its copy (`loop/files._redact_str`); the run side must too, or PP-16's
     retirement would move the same document onto a surface that leaks it.
     """
-    from gideon.workflows import service, store
+    from gideon.automation.workflows import service, store
 
     run_id = _run("goal-pursuit-open-ended")
     secret = "sk-ant-api03-AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHH"
-    (store.run_dir(run_id) / "REPORT.md").write_text(f"the key is {secret} and it works\n")
+    (store.run_dir(run_id) / "REPORT.md").write_text(
+        f"the key is {secret} and it works\n"
+    )
     content = service.run_deliverable(run_id)["report"]["content"]
     assert secret not in content, "a credential reached the payload"
-    assert "it works" in content, "vacuity floor: the whole document was dropped, not redacted"
+    assert (
+        "it works" in content
+    ), "vacuity floor: the whole document was dropped, not redacted"
 
 
 def test_a_traversing_name_cannot_escape_the_root(run_home):
@@ -405,16 +412,15 @@ def test_an_oversized_document_is_truncated_and_says_so(run_home):
     """
     docs = D.Roots([D.Root(D.ROOT_RUN_DIR, str(run_home), True)])
     body = ("the worker kept writing and writing and writing. " * 20 + "\n") * 600
-    assert len(body) > D.MAX_DOC_BYTES, "vacuity floor: the fixture is under the ceiling"
+    assert (
+        len(body) > D.MAX_DOC_BYTES
+    ), "vacuity floor: the fixture is under the ceiling"
     (run_home / "REPORT.md").write_text(body)
     document = D.read_document(docs, "REPORT.md")
     assert document.truncated is True
     assert document.bytes == len(body), "the REAL size, not the served slice"
     assert len(document.content or "") == D.MAX_DOC_BYTES
     assert document.clipped_blobs == 0, "prose carries no blob-shaped run"
-
-
-# ── the cost of reading a document, which a byte ceiling alone does not bound ──
 
 
 def test_a_blob_is_clipped_before_redaction_ever_sees_it(run_home):
@@ -437,10 +443,13 @@ def test_a_blob_is_clipped_before_redaction_ever_sees_it(run_home):
     assert document.clipped_blobs == 1
     content = document.content or ""
     assert blob not in content
-    # Replaced WHOLE, not truncated: half of a credential is still half of a credential.
     assert "A" * (D.MAX_TOKEN_CHARS + 1) not in content
-    assert f"{len(blob)}-character run with no whitespace" in content, "the clip names itself"
-    assert "before" in content and "after" in content, "vacuity floor: the prose survived"
+    assert (
+        f"{len(blob)}-character run with no whitespace" in content
+    ), "the clip names itself"
+    assert (
+        "before" in content and "after" in content
+    ), "vacuity floor: the prose survived"
 
 
 def test_prose_is_never_clipped(run_home):
@@ -451,8 +460,13 @@ def test_prose_is_never_clipped(run_home):
     served intact.
     """
     docs = D.Roots([D.Root(D.ROOT_RUN_DIR, str(run_home), True)])
-    paragraph = "the finding is that latency comes from weight load rather than inference. " * 40
-    assert len(paragraph) > D.MAX_TOKEN_CHARS * 4, "vacuity floor: the fixture is too short"
+    paragraph = (
+        "the finding is that latency comes from weight load rather than inference. "
+        * 40
+    )
+    assert (
+        len(paragraph) > D.MAX_TOKEN_CHARS * 4
+    ), "vacuity floor: the fixture is too short"
     (run_home / "REPORT.md").write_text(paragraph)
     document = D.read_document(docs, "REPORT.md")
     assert document.clipped_blobs == 0
@@ -480,16 +494,13 @@ def test_the_worst_case_document_is_served_in_bounded_time(run_home):
     assert elapsed < 30.0, f"reading a worst-case document took {elapsed:.1f}s"
 
 
-# ── the template gap this surface must not misreport as a slow worker ──
-
-
 def test_instructed_is_false_when_the_runs_own_spec_never_names_the_document(run_home):
     """The measured finding: no bundled template names its kind's document.
 
     So "not written yet" is usually the wrong sentence — nothing ever asked. The panel reads this
     field to say so, and a payload that omitted it would leave the FE guessing.
     """
-    from gideon.workflows import service
+    from gideon.automation.workflows import service
 
     payload = service.run_deliverable(_run("goal-pursuit-open-ended"))
     assert payload["instructed"] is False
@@ -497,7 +508,7 @@ def test_instructed_is_false_when_the_runs_own_spec_never_names_the_document(run
 
 def test_instructed_is_true_when_the_spec_does_name_it(run_home):
     """Both directions — a field that is always False proves nothing about the template."""
-    from gideon.workflows import service
+    from gideon.automation.workflows import service
 
     spec = {"root": {"kind": "action", "prompt": "Maintain REPORT.md as you go."}}
     payload = service.run_deliverable(_run("goal-pursuit-open-ended", spec=spec))
@@ -506,7 +517,7 @@ def test_instructed_is_true_when_the_spec_does_name_it(run_home):
 
 def test_instructed_is_null_when_there_is_no_name_to_look_for(run_home):
     """ "We did not check" and "we checked and it is not there" are different facts."""
-    from gideon.workflows import service
+    from gideon.automation.workflows import service
 
     payload = service.run_deliverable(_run(loop_aliases.resolve_kind("code")))
     assert payload["instructed"] is None
@@ -532,10 +543,9 @@ def test_no_bundled_template_the_five_kinds_resolve_to_names_its_own_document():
         if source.name in path.read_text(encoding="utf-8"):
             naming.append(template)
     assert checked >= 3, f"vacuity floor: only {checked} bundled templates were read"
-    assert not naming, f"these templates now name their document — re-do the claim: {naming}"
-
-
-# ── the route, resolved rather than grepped ──
+    assert (
+        not naming
+    ), f"these templates now name their document — re-do the claim: {naming}"
 
 
 @pytest.mark.asyncio
@@ -551,12 +561,17 @@ async def test_the_route_resolves_at_runtime_to_this_handler():
     from aiohttp import web
     from aiohttp.test_utils import make_mocked_request
 
-    from gideon.workflows.handlers import api_run_deliverable, register_workflow_routes
+    from gideon.automation.workflows.handlers import (
+        api_run_deliverable,
+        register_workflow_routes,
+    )
 
     app = web.Application()
     register_workflow_routes(app)
     canonical = {
-        getattr(r.resource, "canonical", "") for r in app.router.routes() if r.method == "GET"
+        getattr(r.resource, "canonical", "")
+        for r in app.router.routes()
+        if r.method == "GET"
     }
     assert "/api/workflows/runs/{run_id}/deliverable" in canonical
 
@@ -573,8 +588,8 @@ async def test_the_route_answers_a_real_read_and_404s_an_unknown_run(run_home):
     from aiohttp import web
     from aiohttp.test_utils import TestClient, TestServer
 
-    from gideon.workflows import store
-    from gideon.workflows.handlers import register_workflow_routes
+    from gideon.automation.workflows import store
+    from gideon.automation.workflows.handlers import register_workflow_routes
 
     run_id = _run("goal-pursuit-open-ended")
     (store.run_dir(run_id) / "REPORT.md").write_text("# It worked\n")
@@ -587,20 +602,19 @@ async def test_the_route_answers_a_real_read_and_404s_an_unknown_run(run_home):
         assert body["report"]["content"] == "# It worked\n"
 
         missing = await client.get("/api/workflows/runs/deadbeef/deliverable")
-        assert missing.status == 404, "a deleted run must be distinguishable from a young one"
+        assert (
+            missing.status == 404
+        ), "a deleted run must be distinguishable from a young one"
 
 
 def test_the_route_is_documented_in_the_offline_reference():
     """An agent reads `reference/routes.md`; an undocumented route is unreachable to it."""
     import gideon
 
-    routes_md = (pathlib.Path(gideon.__file__).parent / "reference" / "routes.md").read_text(
-        encoding="utf-8"
-    )
+    routes_md = (
+        pathlib.Path(gideon.__file__).parent / "reference" / "routes.md"
+    ).read_text(encoding="utf-8")
     assert "/api/workflows/runs/{run_id}/deliverable" in routes_md
-
-
-# ── what this payload deliberately does NOT carry ──
 
 
 def test_the_payload_carries_no_money_field(run_home):
@@ -614,7 +628,7 @@ def test_the_payload_carries_no_money_field(run_home):
     loop-backed run's document. Absent, not zero: the field is not here, and this test is what keeps
     a later session from adding one without meeting the finding.
     """
-    from gideon.workflows import service
+    from gideon.automation.workflows import service
 
     payload = service.run_deliverable(_run("goal-pursuit-open-ended"))
     flat = json.dumps(payload)
@@ -633,7 +647,7 @@ def test_the_payload_carries_no_roi_axis_either(run_home):
     which is the correct scope. This surface's correct scope is to carry neither: a document read is
     not where an unreachable score should first appear as a blank.
     """
-    from gideon.workflows import service
+    from gideon.automation.workflows import service
 
     flat = json.dumps(service.run_deliverable(_run("design-project")))
     for banned in ("marginal_value", "quality_score"):

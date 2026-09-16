@@ -25,8 +25,8 @@ from pathlib import Path
 import pytest
 
 import gideon
-from gideon.apps import app_manager, catalog, manager
-from gideon.apps.manifest import (
+from gideon.extensions.apps import app_manager, catalog, manager
+from gideon.extensions.apps.manifest import (
     CORE_COMPAT_INCOMPATIBLE,
     CORE_COMPAT_INVALID,
     CORE_COMPAT_OK,
@@ -37,19 +37,17 @@ from gideon.apps.manifest import (
     strict_version_tuple,
 )
 
-HOST = "1.4.2"  # the pretend running core for every path test below
+HOST = "1.4.2"
 
 
 @pytest.fixture(autouse=True)
 def _isolate_apps(tmp_path, monkeypatch):
     """Isolated config dir + a pinned host core version, so no test depends on the
     version of the core it happens to be running against."""
-    import gideon.config.loader as loader
+    import gideon.core.config.loader as loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(manager, "config_dir", lambda: tmp_path)
-    # Patched on the ROOT package, not on `host_core_version`, so the real lazy
-    # `from gideon import __version__` read is exercised.
     monkeypatch.setattr(gideon, "__version__", HOST)
     return tmp_path
 
@@ -78,11 +76,6 @@ def _make_app_source(
     return src
 
 
-# ---------------------------------------------------------------------------
-# The verdict itself — one owner, four states
-# ---------------------------------------------------------------------------
-
-
 class TestFourStateVerdict:
     def test_absent_floor_is_ok_and_admits(self):
         v = check_core_version("", host=HOST)
@@ -104,7 +97,16 @@ class TestFourStateVerdict:
 
     @pytest.mark.parametrize(
         "floor",
-        ["latest", "1", "1.2", "1.2.3.4", "one.two.three", "~1.2.0", ">=1.2.0", "1.2.x"],
+        [
+            "latest",
+            "1",
+            "1.2",
+            "1.2.3.4",
+            "one.two.three",
+            "~1.2.0",
+            ">=1.2.0",
+            "1.2.x",
+        ],
     )
     def test_malformed_floor_is_invalid_but_admits(self, floor):
         """Fails OPEN: a typo in one advisory field must not brick an app whose code is
@@ -127,8 +129,12 @@ class TestFourStateVerdict:
     def test_versions_compare_numerically_not_lexically(self):
         """The classic trap: ``"10.0.0" < "9.0.0"`` as strings."""
         assert check_core_version("9.0.0", host="10.0.0").state == CORE_COMPAT_OK
-        assert check_core_version("0.10.0", host="0.9.0").state == CORE_COMPAT_INCOMPATIBLE
-        assert check_core_version("1.0.10", host="1.0.9").state == CORE_COMPAT_INCOMPATIBLE
+        assert (
+            check_core_version("0.10.0", host="0.9.0").state == CORE_COMPAT_INCOMPATIBLE
+        )
+        assert (
+            check_core_version("1.0.10", host="1.0.9").state == CORE_COMPAT_INCOMPATIBLE
+        )
 
     def test_prerelease_and_build_suffixes_are_dropped(self):
         """Same semantics as the module's existing ``version_tuple``: pre-release
@@ -160,18 +166,13 @@ class TestFourStateVerdict:
         assert "99.0.0" in d["reason"]
 
 
-# ---------------------------------------------------------------------------
-# Entry path: install
-# ---------------------------------------------------------------------------
-
-
 class TestInstallPath:
     def test_newer_floor_refused_naming_both_versions(self, tmp_path):
         src = _make_app_source(tmp_path, name="needs-future", floor="99.0.0")
         res = app_manager.install(src, confirm=True)
         assert res.ok is False
         assert "99.0.0" in res.error and HOST in res.error
-        assert "gideon update" in res.error  # states what to do next
+        assert "gideon update" in res.error
         assert manager._read_installed("needs-future") is None
         assert not app_manager.app_dir("needs-future").exists()
 
@@ -189,15 +190,21 @@ class TestInstallPath:
 
     def test_malformed_declaration_installs_with_a_warning(self, tmp_path, caplog):
         src = _make_app_source(tmp_path, name="floor-typo", floor="latest")
-        with caplog.at_level(logging.WARNING, logger="gideon.apps.app_manager"):
+        with caplog.at_level(
+            logging.WARNING, logger="gideon.extensions.apps.app_manager"
+        ):
             res = app_manager.install(src, confirm=True)
         assert res.ok is True, res.error
         assert any("latest" in r.getMessage() for r in caplog.records)
 
-    def test_unmeasurable_host_installs_with_a_warning(self, tmp_path, caplog, monkeypatch):
+    def test_unmeasurable_host_installs_with_a_warning(
+        self, tmp_path, caplog, monkeypatch
+    ):
         monkeypatch.setattr(gideon, "__version__", "0.2.0.dev3+g9a1c")
         src = _make_app_source(tmp_path, name="dev-tree-ok", floor="99.0.0")
-        with caplog.at_level(logging.WARNING, logger="gideon.apps.app_manager"):
+        with caplog.at_level(
+            logging.WARNING, logger="gideon.extensions.apps.app_manager"
+        ):
             res = app_manager.install(src, confirm=True)
         assert res.ok is True, res.error
         assert any("99.0.0" in r.getMessage() for r in caplog.records)
@@ -207,16 +214,13 @@ class TestInstallPath:
         monkeypatch.setattr(
             app_manager,
             "_audit",
-            lambda op, outcome, name, **kw: seen.append((op, outcome, kw.get("error", ""))),
+            lambda op, outcome, name, **kw: seen.append(
+                (op, outcome, kw.get("error", ""))
+            ),
         )
         src = _make_app_source(tmp_path, name="needs-future", floor="99.0.0")
         app_manager.install(src, confirm=True)
         assert any(op == "install" and "99.0.0" in err for op, _o, err in seen)
-
-
-# ---------------------------------------------------------------------------
-# Entry path: update
-# ---------------------------------------------------------------------------
 
 
 class TestUpdatePath:
@@ -238,7 +242,6 @@ class TestUpdatePath:
         assert res.ok is False
         assert "99.0.0" in res.error and HOST in res.error
         assert "gideon update" in res.error
-        # The old app is untouched — a refused update never swaps.
         meta = manager._read_installed(name)
         assert meta is not None and meta.version == "1.0.0"
 
@@ -257,18 +260,13 @@ class TestUpdatePath:
         assert meta is not None and meta.version == "2.0.0"
 
 
-# ---------------------------------------------------------------------------
-# Entry path: enable (the core-DOWNGRADE case — the app is already on disk)
-# ---------------------------------------------------------------------------
-
-
 class TestEnablePath:
     def test_enable_refused_after_a_core_downgrade(self, tmp_path, monkeypatch):
         src = _make_app_source(tmp_path, name="was-fine", floor="1.0.0")
         assert app_manager.install(src, confirm=True).ok is True
         assert app_manager.disable("was-fine") is True
 
-        monkeypatch.setattr(gideon, "__version__", "0.9.0")  # core downgraded
+        monkeypatch.setattr(gideon, "__version__", "0.9.0")
         assert app_manager.enable("was-fine") is False
         meta = manager._read_installed("was-fine")
         assert meta is not None and meta.enabled is False
@@ -299,11 +297,6 @@ class TestEnablePath:
         assert app_manager.enable("still-fine") is True
         meta = manager._read_installed("still-fine")
         assert meta is not None and meta.enabled is True
-
-
-# ---------------------------------------------------------------------------
-# Entry path: gateway boot-load of an already-installed, already-enabled app
-# ---------------------------------------------------------------------------
 
 
 class _FakeSupervisor:
@@ -338,23 +331,30 @@ def _install_with_backend(tmp_path, name, floor):
         encoding="utf-8",
     )
     manager._write_installed(
-        name, manager.InstalledApp(name=name, version="1.0.0", displayName=name, enabled=True)
+        name,
+        manager.InstalledApp(
+            name=name, version="1.0.0", displayName=name, enabled=True
+        ),
     )
 
 
 class TestBootLoadPath:
     @pytest.fixture(autouse=True)
     def _fake_supervisor(self, monkeypatch):
-        import gideon.apps.backend_runtime as backend_runtime
+        import gideon.extensions.apps.backend_runtime as backend_runtime
 
         sup = _FakeSupervisor()
         monkeypatch.setattr(backend_runtime, "get_backend_supervisor", lambda: sup)
         monkeypatch.delenv("GIDEON_SKIP_APP_BACKENDS", raising=False)
         return sup
 
-    def test_incompatible_app_backend_is_not_started(self, tmp_path, _fake_supervisor, caplog):
+    def test_incompatible_app_backend_is_not_started(
+        self, tmp_path, _fake_supervisor, caplog
+    ):
         _install_with_backend(tmp_path, "stale-app", "99.0.0")
-        with caplog.at_level(logging.WARNING, logger="gideon.apps.app_manager"):
+        with caplog.at_level(
+            logging.WARNING, logger="gideon.extensions.apps.app_manager"
+        ):
             started = app_manager.start_enabled_app_backends()
         assert started == []
         assert _fake_supervisor.started == []
@@ -364,11 +364,6 @@ class TestBootLoadPath:
         _install_with_backend(tmp_path, "fresh-app", "1.0.0")
         assert app_manager.start_enabled_app_backends() == ["fresh-app"]
         assert _fake_supervisor.started == ["fresh-app"]
-
-
-# ---------------------------------------------------------------------------
-# Read surface: the Store install-consent card
-# ---------------------------------------------------------------------------
 
 
 class TestStoreConsentSurface:
@@ -385,7 +380,10 @@ class TestStoreConsentSurface:
             tmp_path,
             [("card-future", "99.0.0"), ("card-ok", "1.0.0"), ("card-typo", "latest")],
         )
-        assert by_name["card-future"].coreCompatibility["state"] == CORE_COMPAT_INCOMPATIBLE
+        assert (
+            by_name["card-future"].coreCompatibility["state"]
+            == CORE_COMPAT_INCOMPATIBLE
+        )
         assert by_name["card-future"].coreCompatibility["required"] == "99.0.0"
         assert by_name["card-future"].coreCompatibility["host"] == HOST
         assert "99.0.0" in by_name["card-future"].coreCompatibility["reason"]
@@ -399,25 +397,21 @@ class TestStoreConsentSurface:
         assert all("coreCompatibility" in d for d in local_apps)
 
 
-# ---------------------------------------------------------------------------
-# Vacuity floor — a gate that refused everything would fail HERE
-# ---------------------------------------------------------------------------
-
-
 class TestVacuityFloor:
     """The gate has to let the overwhelmingly common cases through. If any of these
-    start refusing, the gate has become a wall and the file is no longer vacuous-safe."""
+    start refusing, the gate has become a wall and the file is no longer vacuous-safe.
+    """
 
     @pytest.mark.parametrize(
         "floor",
         [
-            None,  # declared nothing at all
-            "0.0.1",  # far below the host
-            "1.0.0",  # below the host
-            HOST,  # exactly the host
-            "latest",  # malformed → invalid, fails open
-            "1.2",  # malformed → invalid, fails open
-            "",  # explicitly empty
+            None,
+            "0.0.1",
+            "1.0.0",
+            HOST,
+            "latest",
+            "1.2",
+            "",
         ],
     )
     def test_these_all_install_and_enable(self, tmp_path, floor):

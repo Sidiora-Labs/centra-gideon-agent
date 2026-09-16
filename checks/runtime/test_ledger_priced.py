@@ -36,7 +36,7 @@ import pathlib
 
 import pytest
 
-_SRC = pathlib.Path(__file__).resolve().parent.parent / "src" / "gideon"
+_SRC = pathlib.Path(__file__).resolve().parent.parent.parent / "runtime" / "gideon"
 
 
 @pytest.fixture()
@@ -46,29 +46,32 @@ def ledger_home(monkeypatch, tmp_path):
     return tmp_path
 
 
-# ── the two producers, each writing through its own real emitter ──
-
-
 def _loop_ledger(loop_id: str = "abc12345", cycles: int = 2) -> str:
     """Write a real LOOP ledger with `LoopJournal.cycle` — the producer that books no cost."""
-    from gideon.loop.journal import LoopJournal
+    from gideon.automation.loop.journal import LoopJournal
 
     journal = LoopJournal.open(loop_id)
     for cycle in range(1, cycles + 1):
         journal.cycle(
             cycle,
-            {"summary": f"cycle {cycle}", "stage": "implement", "_source_file": f"f{cycle}.json"},
+            {
+                "summary": f"cycle {cycle}",
+                "stage": "implement",
+                "_source_file": f"f{cycle}.json",
+            },
         )
     return loop_id
 
 
 def _run_ledger(run_id: str, steps: list[dict]) -> str:
     """Write a real RUN ledger with `Journal.step_completed` — the producer that books a cost."""
-    from gideon.workflows import journal as J
-    from gideon.workflows import store as run_store
-    from gideon.workflows.models import InstanceState, RunStatus, WorkflowRun
+    from gideon.automation.workflows import journal as J
+    from gideon.automation.workflows import store as run_store
+    from gideon.automation.workflows.models import InstanceState, RunStatus, WorkflowRun
 
-    run_store.save(WorkflowRun(id=run_id, workflow_name="priced-tmpl", status=RunStatus.RUNNING))
+    run_store.save(
+        WorkflowRun(id=run_id, workflow_name="priced-tmpl", status=RunStatus.RUNNING)
+    )
     journal = J.Journal(run_id)
     for i, step in enumerate(steps):
         journal.step_completed(
@@ -83,13 +86,10 @@ def _run_ledger(run_id: str, steps: list[dict]) -> str:
 
 
 def _loop_totals(loop_id: str) -> dict:
-    from gideon.ledger.reader import run_totals
-    from gideon.loop import files as loop_files
+    from gideon.assurance.ledger.reader import run_totals
+    from gideon.automation.loop import files as loop_files
 
     return run_totals(loop_files, loop_id)
-
-
-# ── the primitive: absent is not zero, in both directions ──
 
 
 def test_a_loop_shaped_ledger_reports_its_cost_as_UNPRICED(ledger_home):
@@ -99,14 +99,12 @@ def test_a_loop_shaped_ledger_reports_its_cost_as_UNPRICED(ledger_home):
     surface trusting `run_totals["cost_usd"]` would report a paid loop as free.
     """
     totals = _loop_totals(_loop_ledger())
-    assert totals["steps_completed"] == 2, "vacuity floor: the loop producer wrote nothing"
+    assert (
+        totals["steps_completed"] == 2
+    ), "vacuity floor: the loop producer wrote nothing"
     assert totals["priced"] is False
-    # The float is still a float — every caller's arithmetic keeps working. It is just a FLOOR now,
-    # and `priced` is what says so.
     assert totals["cost_usd"] == 0.0
-    # And the count is untouched: a step DID complete, which needs no cost key. `cycles_completed`
-    # reads exactly this and was honest for both producers all along.
-    from gideon.loop.journal import cycles_completed
+    from gideon.automation.loop.journal import cycles_completed
 
     assert cycles_completed("abc12345") == 2
 
@@ -117,11 +115,13 @@ def test_a_genuinely_free_run_reports_its_zero_as_PRICED(ledger_home):
     A run on a free local model books ``cost_usd: 0.0`` — a measurement. Reporting it as unpriced
     would mirror the same defect: the user told "unknown" about a cost that is known to be nothing.
     """
-    from gideon.workflows import journal as J
+    from gideon.automation.workflows import journal as J
 
     _run_ledger("run-free", [{"tokens": 0, "cost_usd": 0.0, "model": "local/qwen"}] * 2)
     totals = J.run_totals("run-free")
-    assert totals["steps_completed"] == 2, "vacuity floor: the run producer wrote nothing"
+    assert (
+        totals["steps_completed"] == 2
+    ), "vacuity floor: the run producer wrote nothing"
     assert totals["priced"] is True, "a measured zero must not be reported as unpriced"
     assert totals["cost_usd"] == 0.0
 
@@ -133,7 +133,7 @@ def test_the_two_zeros_are_now_DISTINGUISHABLE(ledger_home):
     SET of differing keys rather than just `priced` is deliberate — it pins that nothing else about
     the aggregate drifted while the disclosure was added.
     """
-    from gideon.workflows import journal as J
+    from gideon.automation.workflows import journal as J
 
     loop = _loop_totals(_loop_ledger())
     _run_ledger("run-free2", [{"tokens": 0, "cost_usd": 0.0}] * 2)
@@ -150,19 +150,24 @@ def test_one_unpriced_step_taints_a_mixed_run(ledger_home):
     A partially-costed run reports the dollars it DID see, marked as a floor. Dropping the figure
     would throw away a real measurement; presenting it as complete is the defect.
     """
-    from gideon.ledger.writer import EVENTS_FILE
-    from gideon.workflows import journal as J
-    from gideon.workflows import store as run_store
+    from gideon.assurance.ledger.writer import EVENTS_FILE
+    from gideon.automation.workflows import journal as J
+    from gideon.automation.workflows import store as run_store
 
     _run_ledger("run-mixed", [{"tokens": 100, "cost_usd": 0.25}])
-    # A second `step_completed` with NO cost key — what a loop-shaped row looks like on a run store.
     run_store.append_jsonl(
-        "run-mixed", EVENTS_FILE, {"kind": J.STEP_COMPLETED, "node_id": "loopish", "cycle": 1}
+        "run-mixed",
+        EVENTS_FILE,
+        {"kind": J.STEP_COMPLETED, "node_id": "loopish", "cycle": 1},
     )
     totals = J.run_totals("run-mixed")
-    assert totals["steps_completed"] == 2, "vacuity floor: the second row was not appended"
+    assert (
+        totals["steps_completed"] == 2
+    ), "vacuity floor: the second row was not appended"
     assert totals["priced"] is False
-    assert totals["cost_usd"] == pytest.approx(0.25), "the dollars actually seen are still reported"
+    assert totals["cost_usd"] == pytest.approx(
+        0.25
+    ), "the dollars actually seen are still reported"
 
 
 def test_an_explicit_null_cost_reads_unpriced_like_an_absent_one(ledger_home):
@@ -172,14 +177,18 @@ def test_an_explicit_null_cost_reads_unpriced_like_an_absent_one(ledger_home):
     no key, and a total that called the first priced would be honest about the schema and wrong
     about the money.
     """
-    from gideon.ledger.writer import EVENTS_FILE
-    from gideon.workflows import journal as J
-    from gideon.workflows import store as run_store
-    from gideon.workflows.models import RunStatus, WorkflowRun
+    from gideon.assurance.ledger.writer import EVENTS_FILE
+    from gideon.automation.workflows import journal as J
+    from gideon.automation.workflows import store as run_store
+    from gideon.automation.workflows.models import RunStatus, WorkflowRun
 
-    run_store.save(WorkflowRun(id="run-null", workflow_name="t", status=RunStatus.RUNNING))
+    run_store.save(
+        WorkflowRun(id="run-null", workflow_name="t", status=RunStatus.RUNNING)
+    )
     run_store.append_jsonl(
-        "run-null", EVENTS_FILE, {"kind": J.STEP_COMPLETED, "node_id": "n", "cost_usd": None}
+        "run-null",
+        EVENTS_FILE,
+        {"kind": J.STEP_COMPLETED, "node_id": "n", "cost_usd": None},
     )
     totals = J.run_totals("run-null")
     assert totals["steps_completed"] == 1, "vacuity floor"
@@ -193,18 +202,17 @@ def test_an_empty_ledger_reports_priced_exactly_as_usage_ledger_does(ledger_home
     matching the sibling surface's blank aggregate is what keeps ONE word meaning one thing. Read
     out of `_blank_agg` rather than written as ``True`` here, so the two cannot drift apart.
     """
-    from gideon import usage_ledger
-    from gideon.workflows import journal as J
-    from gideon.workflows import store as run_store
-    from gideon.workflows.models import RunStatus, WorkflowRun
+    from gideon.automation.workflows import journal as J
+    from gideon.automation.workflows import store as run_store
+    from gideon.automation.workflows.models import RunStatus, WorkflowRun
+    from gideon.operations import usage_ledger
 
-    run_store.save(WorkflowRun(id="run-empty", workflow_name="t", status=RunStatus.RUNNING))
+    run_store.save(
+        WorkflowRun(id="run-empty", workflow_name="t", status=RunStatus.RUNNING)
+    )
     totals = J.run_totals("run-empty")
     assert totals["steps_completed"] == 0
     assert totals["priced"] is usage_ledger._blank_agg()["priced"]
-
-
-# ── one word for one fact: the same key, the same polarity, on both money surfaces ──
 
 
 def test_the_word_priced_means_the_same_thing_on_both_money_surfaces(ledger_home):
@@ -215,11 +223,10 @@ def test_the_word_priced_means_the_same_thing_on_both_money_surfaces(ledger_home
     loop money. Both are exercised HERE, in one test, so a future divergence in polarity or spelling
     reds rather than being discovered by a user comparing two panels.
     """
-    from gideon import usage_ledger
-    from gideon.loop.manager import loop_spend, session_key
+    from gideon.automation.loop.manager import loop_spend, session_key
+    from gideon.operations import usage_ledger
 
     loop_id = "abc12345"
-    # An unpriced turn on the loop's own worker session — what `loop_spend` reads.
     usage_ledger.record_turn(
         usage_ledger.TurnUsage(
             ts="2026-09-07T00:00:00+00:00",
@@ -238,12 +245,10 @@ def test_the_word_priced_means_the_same_thing_on_both_money_surfaces(ledger_home
     assert spend["turns"] == 1, "vacuity floor: the turn ledger recorded nothing"
     assert spend["priced"] is False, "loop_spend's own vocabulary"
 
-    # The same loop's LEDGER totals, from the same fact, using the same key with the same polarity.
     ledger_totals = _loop_totals(_loop_ledger(loop_id))
     assert ledger_totals["priced"] is False
     assert "priced" in spend and "priced" in ledger_totals, "one spelling, not two"
 
-    # …and a fully-priced turn flips it on both, so the agreement is not a shared constant.
     usage_ledger.record_turn(
         usage_ledger.TurnUsage(
             ts="2026-09-07T00:00:01+00:00",
@@ -261,9 +266,6 @@ def test_the_word_priced_means_the_same_thing_on_both_money_surfaces(ledger_home
     assert loop_spend("bcd23456")["priced"] is True
 
 
-# ── the introspection projection carries the same fact ──
-
-
 def test_run_stats_carries_priced_and_agrees_with_the_primitive(ledger_home):
     """`RunStats.cost_usd` stays an accumulating float — the decided trade (#2566 ruling 4).
 
@@ -271,9 +273,9 @@ def test_run_stats_carries_priced_and_agrees_with_the_primitive(ledger_home):
     being silent. It must agree with the primitive's answer for the same ledger, or the cockpit and
     the run row would disagree about whether the same dollar was measured.
     """
-    from gideon.loop.journal import ledger as loop_ledger_read
-    from gideon.workflows import journal as J
-    from gideon.workflows.introspection import run_stats
+    from gideon.automation.loop.journal import ledger as loop_ledger_read
+    from gideon.automation.workflows import journal as J
+    from gideon.automation.workflows.introspection import run_stats
 
     loop_id = _loop_ledger()
     loop_stats = run_stats(loop_id, loop_ledger_read(loop_id))
@@ -295,58 +297,36 @@ def test_a_template_card_is_tainted_by_one_unpriced_run(ledger_home):
     Both directions, because a card that reported `priced: False` unconditionally would put a "≥" on
     every template in the product and teach the user to ignore it.
     """
-    from gideon.workflows.introspection import RunStats, template_card
+    from gideon.automation.workflows.introspection import RunStats, template_card
 
-    priced_runs = [RunStats(run_id="a", cost_usd=0.02), RunStats(run_id="b", cost_usd=0.06)]
+    priced_runs = [
+        RunStats(run_id="a", cost_usd=0.02),
+        RunStats(run_id="b", cost_usd=0.06),
+    ]
     clean = template_card("t", priced_runs).to_dict()
     assert clean["runs"] == 2, "vacuity floor"
     assert clean["priced"] is True
     assert clean["cost_p95"] == pytest.approx(0.06)
 
-    tainted = template_card("t", [*priced_runs, RunStats(run_id="c", priced=False)]).to_dict()
+    tainted = template_card(
+        "t", [*priced_runs, RunStats(run_id="c", priced=False)]
+    ).to_dict()
     assert tainted["priced"] is False
-    # The percentiles are still computed — a floor, not a blank.
     assert tainted["cost_p50"] > 0
 
-    # An empty sample is priced, for the same reason an empty ledger is: there is no unpriced
-    # constituent, and `runs: 0` already says the card has no sample.
     assert template_card("t", []).to_dict()["priced"] is True
 
 
-# ── the rail: a new consumer cannot read `cost_usd` without consulting `priced` ──
-
-#: The ledger money PRODUCERS — the functions whose result pairs a dollar figure with its
-#: `priced` disclosure. `guardrails.budgets.SpendMeter.run_totals` is deliberately NOT here: it is a
-#: different symbol returning a `_ScopeTotal`, and folding it in would make this rail police an
-#: unrelated meter. Resolved by receiver below so the two never get confused.
 MONEY_PRODUCERS = frozenset({"run_totals", "run_stats", "template_card"})
 
-#: Receivers that mean the SpendMeter method rather than the ledger function. A call whose receiver
-#: is one of these is skipped.
 _METER_RECEIVERS = frozenset({"self", "meter", "m", "self._meter", "_meter"})
 
-#: The money-carrying dataclasses. Their own methods are consumers of their own float.
 MONEY_CLASSES = frozenset({"RunStats", "TemplateCard"})
 
-#: Every key/attribute that IS a dollar figure from one of those producers. `cost_p50`/`cost_p95`
-#: ride here too: a percentile over an unpriced sample is exactly as much a floor as the sum is.
 MONEY_KEYS = frozenset({"cost_usd", "cost_p50", "cost_p95"})
 
-#: The disclosure that must accompany any of them.
 DISCLOSURE = "priced"
 
-#: Absolute lower bounds, independent of the parse that derives the expected set. A rail that found
-#: zero sites would pass every assertion below while measuring nothing, so the census must clear a
-#: floor it cannot compute for itself. Set BELOW the true counts on purpose — this is a floor, not a
-#: pin, so ordinary growth of the tree never reds it.
-#:
-#: KNOWN LIMITATION: these two integers are the one thing the rail cannot defend. A contributor who
-#: lowers them can make the census vacuous. What the pairing DOES defend is the accident: the byte
-#: census below re-counts the same producers with `str.count` and no AST at all, so a broken or
-#: over-narrowed parse is caught by an instrument that does not share the parser.
-#:
-#: Measured at the time of writing: 15 consumers, 5 of which read a dollar, 25 producer-call
-#: occurrences by byte count. The floors sit below those so ordinary refactoring never reds them.
 MIN_MONEY_CONSUMERS = 10
 MIN_MONEY_READ_SITES = 4
 
@@ -378,7 +358,9 @@ def _money_consumers() -> tuple[list[tuple[str, int, str]], list[tuple[str, int,
             consumers.append((rel, fn.lineno, f"{cls + '.' if cls else ''}{fn.name}"))
             body = ast.unparse(fn)
             if _reads_money(fn) and DISCLOSURE not in body:
-                violations.append((rel, fn.lineno, f"{cls + '.' if cls else ''}{fn.name}"))
+                violations.append(
+                    (rel, fn.lineno, f"{cls + '.' if cls else ''}{fn.name}")
+                )
     return consumers, violations
 
 
@@ -398,10 +380,6 @@ def _functions(tree: ast.AST):
 def _consumer_reason(fn: ast.AST, cls: str) -> str | None:
     if cls in MONEY_CLASSES:
         return "method of a money dataclass"
-    # A MODULE-LEVEL function with a producer's name IS that producer. A METHOD with the same name
-    # is not: `SpendMeter.run_totals` returns a `_ScopeTotal` from an in-memory meter and answers to
-    # a different contract, so policing it here would be this rail reaching into a subsystem it does
-    # not own — the exact over-reach that makes a structural rail get deleted.
     if not cls and getattr(fn, "name", "") in MONEY_PRODUCERS:
         return "is a money producer"
     for node in ast.walk(fn):
@@ -412,7 +390,7 @@ def _consumer_reason(fn: ast.AST, cls: str) -> str | None:
             return "calls a money producer"
         if isinstance(func, ast.Attribute) and func.attr in MONEY_PRODUCERS:
             if ast.unparse(func.value) in _METER_RECEIVERS:
-                continue  # the SpendMeter method — a different symbol entirely
+                continue
             return "calls a money producer"
     return None
 
@@ -466,8 +444,12 @@ def test_the_rail_reds_on_a_planted_violation_and_passes_its_fix():
     good = ast.parse(_COMPLIANT_SNIPPET).body[0]
     assert _consumer_reason(bad, "") == "calls a money producer"
     assert _consumer_reason(good, "") == "calls a money producer"
-    assert _reads_money(bad) and _reads_money(good), "the detector must see the dollar read"
-    assert DISCLOSURE not in ast.unparse(bad), "the planted violation must be a violation"
+    assert _reads_money(bad) and _reads_money(
+        good
+    ), "the detector must see the dollar read"
+    assert DISCLOSURE not in ast.unparse(
+        bad
+    ), "the planted violation must be a violation"
     assert DISCLOSURE in ast.unparse(good), "…and its fix must not be"
 
 
@@ -477,10 +459,11 @@ def test_no_consumer_reads_a_ledger_dollar_without_consulting_priced():
     Reported with file:line so a red names the consumer rather than the count.
     """
     consumers, violations = _money_consumers()
-    assert not violations, "these read a ledger dollar without consulting `priced`: " + ", ".join(
+    assert (
+        not violations
+    ), "these read a ledger dollar without consulting `priced`: " + ", ".join(
         f"{path}:{line} {name}" for path, line, name in violations
     )
-    # Vacuity floor, direction one: the census must actually have found consumers to check.
     assert len(consumers) >= MIN_MONEY_CONSUMERS, (
         f"the census found only {len(consumers)} money consumers "
         f"(floor {MIN_MONEY_CONSUMERS}) — the parse is broken or over-narrowed, so a green "
@@ -495,12 +478,16 @@ def test_no_consumer_reads_a_ledger_dollar_without_consulting_priced():
 
 def _reads_money_at(consumer: tuple[str, int, str]) -> bool:
     """Whether the consumer at ``(path, lineno, name)`` reads a money key. Re-parsed by LINE, so
-    this second pass cannot silently agree with the first by sharing its node objects."""
+    this second pass cannot silently agree with the first by sharing its node objects.
+    """
     path, lineno, _name = consumer
     root = _SRC.parent.parent / path
     tree = ast.parse(root.read_text(encoding="utf-8"), filename=str(root))
     for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.lineno == lineno:
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.lineno == lineno
+        ):
             return _reads_money(node)
     return False
 
@@ -524,7 +511,7 @@ def test_the_census_floor_holds_under_a_byte_count_that_shares_no_parser():
         f"a byte census of {sorted(MONEY_PRODUCERS)} call syntax found {calls} occurrences, "
         f"below the floor {MIN_MONEY_CONSUMERS} — either the tree shrank or the floors are wrong"
     )
-    # And the disclosure really is in the primitive's own source, so `DISCLOSURE` is not a typo that
-    # would make every `DISCLOSURE not in body` check above pass vacuously.
     reader = (_SRC / "ledger" / "reader.py").read_text(encoding="utf-8")
-    assert f'"{DISCLOSURE}"' in reader, "the primitive does not emit the key this rail polices"
+    assert (
+        f'"{DISCLOSURE}"' in reader
+    ), "the primitive does not emit the key this rail polices"

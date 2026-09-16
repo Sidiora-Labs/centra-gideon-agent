@@ -22,12 +22,12 @@ import json
 
 import pytest
 
-from gideon import after_turn_review as atr
-from gideon.loop import files as loop_files
-from gideon.loop import store
-from gideon.loop import watchdog as W
-from gideon.loop.loop import Loop, LoopStatus
-from gideon.skills import proposals
+from gideon.automation.loop import files as loop_files
+from gideon.automation.loop import store
+from gideon.automation.loop import watchdog as W
+from gideon.automation.loop.loop import Loop, LoopStatus
+from gideon.cognition import after_turn_review as atr
+from gideon.extensions.skills import proposals
 
 
 def _run(coro):
@@ -38,10 +38,12 @@ def _run(coro):
 def home(monkeypatch, tmp_path):
     """One isolated home for the three stores this seam touches: the loop store, the skill
     proposals queue, and the config the gate reads. Nothing may reach the real home."""
-    monkeypatch.setattr("gideon.loop.files.config_dir", lambda: tmp_path)
-    monkeypatch.setattr("gideon.skills.loader.config_dir", lambda: tmp_path)
-    monkeypatch.setattr("gideon.config.loader.config_path", lambda: tmp_path / "config.json")
-    import gideon.skills.marketplace as mp
+    monkeypatch.setattr("gideon.automation.loop.files.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.extensions.skills.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gideon.core.config.loader.config_path", lambda: tmp_path / "config.json"
+    )
+    import gideon.extensions.skills.marketplace as mp
 
     monkeypatch.setattr(mp, "SKILL_DISCOVERY_PATHS", [])
     return tmp_path
@@ -49,9 +51,6 @@ def home(monkeypatch, tmp_path):
 
 def _write_config(home, **learning):
     (home / "config.json").write_text(json.dumps({"learning": learning}))
-
-
-# ── fakes (the watchdog's two collaborators) ─────────────────────────────────
 
 
 class _FakeSse:
@@ -81,7 +80,12 @@ class _FakeState:
 
 class _FakeNudge:
     def __init__(self, lid, session_name):
-        self.id, self.session_name, self.active, self.cycle_count = lid, session_name, True, 0
+        self.id, self.session_name, self.active, self.cycle_count = (
+            lid,
+            session_name,
+            True,
+            0,
+        )
 
 
 class _FakeSvc:
@@ -90,7 +94,14 @@ class _FakeSvc:
         self._n = 0
 
     async def add(
-        self, *, session_name, message, idle_secs, max_cycles, stop_sentinel_path, first_idle_secs=0
+        self,
+        *,
+        session_name,
+        message,
+        idle_secs,
+        max_cycles,
+        stop_sentinel_path,
+        first_idle_secs=0,
     ):
         self._n += 1
         lp = _FakeNudge(f"N{self._n}", session_name)
@@ -98,7 +109,9 @@ class _FakeSvc:
         return lp
 
     def get_by_session(self, session_name):
-        return next((lp for lp in self._loops.values() if lp.session_name == session_name), None)
+        return next(
+            (lp for lp in self._loops.values() if lp.session_name == session_name), None
+        )
 
     async def update(self, loop_id, **kw):
         lp = self._loops.get(loop_id)
@@ -146,7 +159,9 @@ def _counting_review(monkeypatch, summary="Proposed skill: staging-gate"):
     watchdog resolves at call time, so the whole chain up to the review is exercised."""
     calls = []
 
-    async def _fake(*, session_key, user_message, assistant_text, loaded_skills, completion=None):
+    async def _fake(
+        *, session_key, user_message, assistant_text, loaded_skills, completion=None
+    ):
         calls.append(
             {
                 "session_key": session_key,
@@ -180,9 +195,6 @@ def _create_completion(slug="staging-gate"):
     return _c
 
 
-# ── property 1: one synthesis call per RUN ───────────────────────────────────
-
-
 class TestOncePerRun:
     def test_a_multi_cycle_run_reviews_once_at_the_end(self, monkeypatch):
         """The seam is END-of-run, not per-cycle. Four supervisor polls drive four cycles;
@@ -197,7 +209,13 @@ class TestOncePerRun:
             _run(wd._poll_once())
             d = loop_files.loop_dir(c.id)
             (d / "findings" / f"cycle_{cycle:03d}.json").write_text(
-                json.dumps({"cycle": cycle, "new_findings_count": 1, "sources_checked": [cycle]})
+                json.dumps(
+                    {
+                        "cycle": cycle,
+                        "new_findings_count": 1,
+                        "sources_checked": [cycle],
+                    }
+                )
             )
         _drain(wd._state)
         assert store.get(c.id).status == LoopStatus.COMPLETE.value
@@ -220,7 +238,7 @@ class TestOncePerRun:
         the guard would be dead code."""
         c = _running()
         store.update_status(c.id, LoopStatus.COMPLETE)
-        store.update_status(c.id, LoopStatus.COMPLETE)  # must not raise
+        store.update_status(c.id, LoopStatus.COMPLETE)
         assert store.get(c.id).status == LoopStatus.COMPLETE.value
 
     def test_at_most_one_proposal_reaches_the_queue(self):
@@ -230,7 +248,9 @@ class TestOncePerRun:
         (loop_files.loop_dir(c.id) / "REPORT.md").write_text(
             "# Outcome\nStaged the migration, verified in staging, then promoted to prod."
         )
-        summary = _run(_wd()._run_loop_end_ladder(c.id, [], completion=_create_completion()))
+        summary = _run(
+            _wd()._run_loop_end_ladder(c.id, [], completion=_create_completion())
+        )
         assert summary
         assert len(proposals.list_pending()) == 1
 
@@ -241,9 +261,6 @@ class TestOncePerRun:
         _run(wd._complete(c.id, reason="", genuine=False))
         assert len(wd._state._background_tasks) == 1
         _drain(wd._state)
-
-
-# ── property 2: an environment-failure run enqueues NOTHING ──────────────────
 
 
 class TestEnvironmentFailureHygiene:
@@ -263,7 +280,9 @@ class TestEnvironmentFailureHygiene:
 
     def test_env_failure_in_the_goal_enqueues_nothing(self):
         c = _running(task="figure out why the deploy command failed with exit code 137")
-        (loop_files.loop_dir(c.id) / "REPORT.md").write_text("# Outcome\nRoot-caused and fixed.")
+        (loop_files.loop_dir(c.id) / "REPORT.md").write_text(
+            "# Outcome\nRoot-caused and fixed."
+        )
         _run(_wd()._run_loop_end_ladder(c.id, [], completion=_create_completion()))
         assert proposals.list_pending() == []
 
@@ -278,11 +297,10 @@ class TestEnvironmentFailureHygiene:
         assert len(proposals.list_pending()) == 1
 
 
-# ── property 3: completion never waits on the model ──────────────────────────
-
-
 class TestCompletionNeverWaitsOnTheModel:
-    def test_a_hanging_review_does_not_delay_the_status_or_the_publish(self, monkeypatch):
+    def test_a_hanging_review_does_not_delay_the_status_or_the_publish(
+        self, monkeypatch
+    ):
         """The review blocks on an Event nothing sets. `_complete` must still return with
         the terminal status written and `complete` published — i.e. it is SCHEDULED, not
         awaited. If the call were awaited this test would hang, not fail."""
@@ -300,11 +318,12 @@ class TestCompletionNeverWaitsOnTheModel:
         _run(wd._complete(c.id, reason="", genuine=False))
         assert store.get(c.id).status == LoopStatus.COMPLETE.value
         assert any(e[1] == "complete" for e in wd._state._sse.events)
-        # let the scheduled task actually reach the hang, then release it
         _run(asyncio.sleep(0))
         gate.set()
         _drain(wd._state)
-        assert started.is_set(), "the review must really have been scheduled, not skipped"
+        assert (
+            started.is_set()
+        ), "the review must really have been scheduled, not skipped"
 
     def test_the_publish_follows_the_status_write(self, monkeypatch):
         _counting_review(monkeypatch)
@@ -314,9 +333,6 @@ class TestCompletionNeverWaitsOnTheModel:
         events = [e[1] for e in wd._state._sse.events]
         assert events[-1] == "complete"
         _drain(wd._state)
-
-
-# ── property 4: nothing here wedges completion ───────────────────────────────
 
 
 class TestNeverWedgesCompletion:
@@ -357,9 +373,6 @@ class TestNeverWedgesCompletion:
         assert calls == []
 
 
-# ── the gate: same hygiene as the chat path, answered before the texts ───────
-
-
 class TestGate:
     def test_skill_ladder_flag_off_fires_nothing(self, home, monkeypatch):
         _write_config(home, skill_ladder=False)
@@ -396,7 +409,9 @@ class TestGate:
         _write_config(home, enabled=False)
         read = []
         monkeypatch.setattr(
-            W.LoopWatchdog, "_loop_outcome_text", lambda self, loop: read.append(loop.id) or ""
+            W.LoopWatchdog,
+            "_loop_outcome_text",
+            lambda self, loop: read.append(loop.id) or "",
         )
         c = _running()
         wd = _wd()
@@ -415,14 +430,15 @@ class TestGate:
         assert len(calls) == 1
 
 
-# ── the run's own texts (one deliverable resolution, shared) ─────────────────
-
-
 class TestRunTexts:
-    def test_the_goal_is_the_user_side_and_the_deliverable_is_the_outcome(self, monkeypatch):
+    def test_the_goal_is_the_user_side_and_the_deliverable_is_the_outcome(
+        self, monkeypatch
+    ):
         calls = _counting_review(monkeypatch)
         c = _running()
-        (loop_files.loop_dir(c.id) / "REPORT.md").write_text("# Outcome\nThe report body.")
+        (loop_files.loop_dir(c.id) / "REPORT.md").write_text(
+            "# Outcome\nThe report body."
+        )
         _run(_wd()._run_loop_end_ladder(c.id, ["deploy-flow"]))
         assert len(calls) == 1
         assert calls[0]["user_message"] == c.task
@@ -430,7 +446,9 @@ class TestRunTexts:
         assert calls[0]["session_key"] == c.session_key
         assert calls[0]["loaded_skills"] == ["deploy-flow"]
 
-    def test_the_deliverable_is_resolved_in_the_bound_workspace(self, monkeypatch, tmp_path):
+    def test_the_deliverable_is_resolved_in_the_bound_workspace(
+        self, monkeypatch, tmp_path
+    ):
         """Same workspace-first resolution the artifact graduation uses — shared, not a
         second copy that can drift."""
         ws = tmp_path / "ws"

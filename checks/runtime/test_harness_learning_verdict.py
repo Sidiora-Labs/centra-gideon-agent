@@ -1,6 +1,6 @@
 """LV-7 — the skills-on/off verdict sibling reuses `fanout_measure`, it does not re-derive it.
 
-The protocol's §5 names `harness/fanout_measure.py`'s three constants as THE thresholds and rules
+The protocol's §5 names `checks/harness/fanout_measure.py`'s three constants as THE thresholds and rules
 out relabelling `skills_on` as `fanout` to get a green run. These tests pin both halves: that the
 constants and the comparison logic are the SAME objects (not copies that can drift), and that the
 only thing the sibling adds is a directional relabel.
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from harness import fanout_measure, learning_verdict
+from checks.harness import fanout_measure, learning_verdict
 
 MODULE = Path(learning_verdict.__file__)
 
@@ -22,15 +22,18 @@ def _trials(*scores, tokens=1000):
     return [learning_verdict.Trial(score=float(s), tokens=tokens) for s in scores]
 
 
-# ── reuse, proved by identity rather than by equal numbers ───────────────────
-
-
 def test_the_three_thresholds_are_the_SAME_objects_not_equal_copies():
     """Equal numbers would drift silently; the same binding cannot.
 
-    A copied `5.0` passes an equality test forever after `fanout_measure` changes its band."""
-    assert learning_verdict.INCONCLUSIVE_BAND_POINTS is fanout_measure.INCONCLUSIVE_BAND_POINTS
-    assert learning_verdict.TOKEN_MATCH_TOLERANCE is fanout_measure.TOKEN_MATCH_TOLERANCE
+    A copied `5.0` passes an equality test forever after `fanout_measure` changes its band.
+    """
+    assert (
+        learning_verdict.INCONCLUSIVE_BAND_POINTS
+        is fanout_measure.INCONCLUSIVE_BAND_POINTS
+    )
+    assert (
+        learning_verdict.TOKEN_MATCH_TOLERANCE is fanout_measure.TOKEN_MATCH_TOLERANCE
+    )
     assert learning_verdict.MIN_TRIALS_PER_ARM is fanout_measure.MIN_TRIALS_PER_ARM
     assert learning_verdict.Arm is fanout_measure.Arm
     assert learning_verdict.Trial is fanout_measure.Trial
@@ -46,7 +49,8 @@ def test_the_sibling_defines_no_threshold_of_its_own():
         if isinstance(node, ast.Assign)
         for target in node.targets
         if isinstance(target, ast.Name)
-        if isinstance(node.value, ast.Constant) and isinstance(node.value.value, (int, float))
+        if isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, (int, float))
         if not isinstance(node.value.value, bool)
     }
     assert (
@@ -54,7 +58,9 @@ def test_the_sibling_defines_no_threshold_of_its_own():
     ), f"the sibling minted its own numeric threshold(s): {numeric_consts}"
 
 
-def test_the_sibling_calls_compare_rather_than_reimplementing_the_check_order(monkeypatch):
+def test_the_sibling_calls_compare_rather_than_reimplementing_the_check_order(
+    monkeypatch,
+):
     """§5's check order (trials → tokens → band → spread) has exactly one implementation.
 
     Proved by observing the call, not by matching outputs: two implementations can agree on the
@@ -79,13 +85,8 @@ def test_the_sibling_calls_compare_rather_than_reimplementing_the_check_order(mo
         "work": "sk_grill",
         "fanout": learning_verdict.ARM_SKILLS_ON,
         "single": learning_verdict.ARM_SKILLS_OFF,
-        # The one thing this module declares rather than inherits, asserted at the call and not
-        # only in the answer: a keyword that stopped being passed would default to TOTALS.
         "spend_basis": fanout_measure.SPEND_PER_TRIAL,
     }
-
-
-# ── the relabel is a relabel: the five map in, plus one declared member ──────
 
 
 def test_the_verdict_vocabulary_is_the_relabel_plus_exactly_one_declared_member():
@@ -104,10 +105,7 @@ def test_the_verdict_vocabulary_is_the_relabel_plus_exactly_one_declared_member(
     assert learning_verdict.VERDICT_TOKENS_UNRECORDED not in fanout_measure.VERDICTS
     assert "fanout_wins" not in learning_verdict.VERDICTS
     assert "single_wins" not in learning_verdict.VERDICTS
-    # Spelled with the ONE word, not a synonym of it.
     assert learning_verdict.UNRECORDED in learning_verdict.VERDICT_TOKENS_UNRECORDED
-    # And every member is still its own reproduction class, so nothing compares EQUAL by falling
-    # through `VERDICT_CLASS`'s default.
     for verdict in learning_verdict.VERDICTS:
         assert learning_verdict.verdict_class(verdict) == verdict
 
@@ -149,9 +147,6 @@ def test_a_negative_delta_favours_the_skills_off_arm_and_is_published_the_same_w
     assert tv.delta_points == -20.0
 
 
-# ── the refusals ─────────────────────────────────────────────────────────────
-
-
 def test_an_empty_arm_yields_NO_VERDICT_not_insufficient_trials():
     """ "We measured nothing" and "we measured too little" are different claims. `compare` would
     return `insufficient_trials` for an empty arm, which reads as the latter."""
@@ -162,11 +157,6 @@ def test_an_empty_arm_yields_NO_VERDICT_not_insufficient_trials():
     assert tv.delta_points is None
     assert "skills_off" in tv.reason
     assert "not a tie and not a zero delta" in tv.reason
-    # 🔑 ONE arm is the ORDINARY case here, not an edge: a paired run where a single arm produced
-    # nothing. This sentence is not a log line — the runner writes it into the persisted report,
-    # `GET /api/evals/learning-benchmark` serves it as `BenchmarkTaskRow.reason`, and
-    # `learning/BenchmarkPanel.tsx` renders it VERBATIM. It read `arm(s) skills_off …` until
-    # 2026-09-02, i.e. it was wrong on its commonest input.
     assert tv.reason.startswith("arm skills_off produced no scored cell"), tv.reason
     assert "(s)" not in tv.reason, tv.reason
 
@@ -181,7 +171,9 @@ def test_both_arms_empty_names_them_BOTH_and_pluralises():
     tv = learning_verdict.verdict_task(
         task_id="sk_grill", skill="grill", on_trials=[], off_trials=[]
     )
-    assert tv.reason.startswith("arms skills_on, skills_off produced no scored cell"), tv.reason
+    assert tv.reason.startswith(
+        "arms skills_on, skills_off produced no scored cell"
+    ), tv.reason
     assert "(s)" not in tv.reason, tv.reason
 
 
@@ -199,7 +191,10 @@ def test_to_dict_never_substitutes_a_number_for_an_absent_verdict():
 
 def test_two_trials_per_arm_is_refused_at_the_stated_floor():
     tv = learning_verdict.verdict_task(
-        task_id="sk_grill", skill="grill", on_trials=_trials(80, 80), off_trials=_trials(60, 60)
+        task_id="sk_grill",
+        skill="grill",
+        on_trials=_trials(80, 80),
+        off_trials=_trials(60, 60),
     )
     assert tv.verdict == learning_verdict.VERDICT_INSUFFICIENT_TRIALS
 
@@ -259,26 +254,17 @@ def test_verdict_class_maps_an_unknown_string_to_itself():
     assert learning_verdict.verdict_class("inconclusive") == "inconclusive"
 
 
-# ── the relabel reaches the NOTES, not just the verdict strings ───────────────
-#
-# §8 publishes the verdict WITH its notes, so a note is part of the published result. `compare()`
-# writes its notes in fan-out vocabulary, and until this landed they were forwarded verbatim: a
-# MEASURED skills report (`learnbench-20260907T003211Z`, k=5 against a local Ollama) published
-#
-#     "token spend differs by 13.7% (fanout 42517 vs single 37409) … give the cheaper arm more
-#      budget (more single-agent samples, or a wider fan-out) … the largest published fan-out win
-#      was ~3.75x tokens"
-#
-# about a suppressed SKILL. The module's own docstring already promised "an output file about
-# skills does not say `fanout_wins`"; the notes broke that promise in the same file.
-
-
 def _spend(on_scores, off_scores, *, on_tokens, off_tokens):
     return learning_verdict.verdict_task(
         task_id="sk_grill",
         skill="grill",
-        on_trials=[learning_verdict.Trial(score=float(s), tokens=on_tokens) for s in on_scores],
-        off_trials=[learning_verdict.Trial(score=float(s), tokens=off_tokens) for s in off_scores],
+        on_trials=[
+            learning_verdict.Trial(score=float(s), tokens=on_tokens) for s in on_scores
+        ],
+        off_trials=[
+            learning_verdict.Trial(score=float(s), tokens=off_tokens)
+            for s in off_scores
+        ],
         spend_observed=True,
     )
 
@@ -289,13 +275,19 @@ def test_no_published_note_speaks_the_fanout_vocabulary(word):
     carries a note, not as the presence of one good sentence. A single spot-check would pass on a
     module that fixed one note and forwarded the other two."""
     cases = [
-        # not_token_matched (the 13.7% case, real numbers off the measured run)
-        _spend((50, 100, 100, 100, 100), (100, 50, 100, 100, 100), on_tokens=8503, off_tokens=7482),
-        # not_token_matched via a zero-spend arm
+        _spend(
+            (50, 100, 100, 100, 100),
+            (100, 50, 100, 100, 100),
+            on_tokens=8503,
+            off_tokens=7482,
+        ),
         _spend((80, 80, 80), (60, 60, 60), on_tokens=1000, off_tokens=0),
-        # inconclusive by within-arm spread (delta clears the band, spread swamps it)
-        _spend((100, 50, 100, 100, 100), (40, 40, 40, 40, 40), on_tokens=1000, off_tokens=1000),
-        # inconclusive by the band
+        _spend(
+            (100, 50, 100, 100, 100),
+            (40, 40, 40, 40, 40),
+            on_tokens=1000,
+            off_tokens=1000,
+        ),
         _spend((80, 80, 80), (79, 79, 79), on_tokens=1000, off_tokens=1000),
     ]
     for tv in cases:
@@ -320,8 +312,6 @@ def test_the_replacement_note_keeps_compares_OWN_numbers():
     )
     assert tv.verdict == learning_verdict.VERDICT_NOT_TOKEN_MATCHED
     note = next(n for n in tv.notes if "token spend differs" in n)
-    # PER TRIAL — the quantity the gate divided. The arm totals are `k` times these and are in the
-    # published `arms` payload; a note that printed totals would name a number the gate did not use.
     assert f"{learning_verdict.ARM_SKILLS_ON} {on_tokens} over {k} trial(s)" in note
     assert f"{learning_verdict.ARM_SKILLS_OFF} {off_tokens} over {k}" in note
 
@@ -340,9 +330,9 @@ def test_the_replacement_note_keeps_compares_OWN_numbers():
     printed = next(n for n in upstream.notes if "token spend differs by " in n)
     percentage = printed.split("token spend differs by ", 1)[1].split(" ", 1)[0]
     assert percentage.endswith("%")
-    assert percentage in note, f"compare() printed {percentage!r}; the relabel printed {note!r}"
-    # …and it must not read as a finding about the skill, which is the misreading §5's tolerance
-    # exists to prevent.
+    assert (
+        percentage in note
+    ), f"compare() printed {percentage!r}; the relabel printed {note!r}"
     assert "declining a question it did not ask" in note
 
 
@@ -352,7 +342,9 @@ def test_the_literature_citation_that_justifies_the_band_is_NOT_reworded():
     through as written even though it says "architecture"."""
     tv = _spend((80, 80, 80), (79, 79, 79), on_tokens=1000, off_tokens=1000)
     assert tv.verdict == learning_verdict.VERDICT_INCONCLUSIVE
-    assert any("scorer swaps move scores further than architecture does" in n for n in tv.notes)
+    assert any(
+        "scorer swaps move scores further than architecture does" in n for n in tv.notes
+    )
 
 
 def test_a_balanced_pair_carries_no_imbalance_note():
@@ -360,21 +352,6 @@ def test_a_balanced_pair_carries_no_imbalance_note():
     equal, or it is decoration that fires on every task and tells a reader nothing."""
     tv = _spend((80, 80, 80), (60, 60, 60), on_tokens=1000, off_tokens=1000)
     assert not any("UNEQUAL" in n for n in tv.notes)
-
-
-# ── the token gate divides PER TRIAL, because this is a paired design (#2587) ──
-#
-# Protocol §3 runs `k` trials per arm over IDENTICAL work, so per-trial and total spend are the same
-# comparison whenever a run is whole. They diverge in exactly one case and it is §6's: an arm that
-# lost cells to `VERIFIER_ABSENT`. `compare()`'s default basis is TOTALS and is right for the
-# experiment it belongs to — amendment (e) matches budget by giving the cheaper arm more samples, so
-# ITS arms are unequal on purpose. Reusing that denominator here published, about a real run:
-#
-#     token_ratio 0.5139 — "token spend differs by 48.6%"
-#
-# for `sk_task_project` in `learnbench-20260907T003211Z`, which ran 3 `skills_on` trials against 5
-# and whose per-trial spends are 8,099 and 9,456 — a 14.3% difference. Two thirds of that "48.6%"
-# was the two missing attempts.
 
 
 def test_the_ratio_of_UNEQUAL_arms_is_PER_TRIAL_not_over_totals():
@@ -391,8 +368,6 @@ def test_the_ratio_of_UNEQUAL_arms_is_PER_TRIAL_not_over_totals():
     )
     assert tv.token_ratio == round(8099 / 9456, 4) == 0.8565
     assert tv.token_ratio != round((8099 * 3) / (9456 * 5), 4)
-    # …and correcting the arithmetic does NOT move the verdict class, which is what makes this a
-    # miscomputation fix rather than a protocol edit: 14.3% is over the 5% tolerance too.
     assert tv.verdict == learning_verdict.VERDICT_NOT_TOKEN_MATCHED
 
 
@@ -415,8 +390,6 @@ def test_equal_TOTALS_over_unequal_trial_counts_is_NOT_a_token_match():
     )
     assert tv.verdict == learning_verdict.VERDICT_NOT_TOKEN_MATCHED
     assert tv.token_ratio == round(10_000 / 6_000, 4)
-    # The shape the totals gate would have produced, spelled out so this test states what it
-    # prevents rather than only what it wants.
     on = fanout_measure.Arm(
         name="skills_on", trials=[fanout_measure.Trial(score=90.0, tokens=10_000)] * 3
     )
@@ -428,17 +401,24 @@ def test_equal_TOTALS_over_unequal_trial_counts_is_NOT_a_token_match():
     assert on_totals.verdict == fanout_measure.VERDICT_FANOUT_WINS
 
 
-def test_the_basis_is_verified_off_the_ANSWER_not_only_passed_into_the_call(monkeypatch):
+def test_the_basis_is_verified_off_the_ANSWER_not_only_passed_into_the_call(
+    monkeypatch,
+):
     """The rail proper. `compare()`'s default is TOTALS, so an edit that drops the keyword — or
     that flips `SPEND_BASIS` — would silently restore the incommensurable comparison. It raises
-    instead, and the raise names both trial counts so the report of it is diagnosable."""
+    instead, and the raise names both trial counts so the report of it is diagnosable.
+    """
     monkeypatch.setattr(learning_verdict, "SPEND_BASIS", fanout_measure.SPEND_TOTAL)
     with pytest.raises(learning_verdict.IncommensurableSpendError) as exc:
         learning_verdict.verdict_task(
             task_id="sk_task_project",
             skill="task-and-project",
-            on_trials=[learning_verdict.Trial(score=100.0, tokens=8099) for _ in range(3)],
-            off_trials=[learning_verdict.Trial(score=100.0, tokens=9456) for _ in range(5)],
+            on_trials=[
+                learning_verdict.Trial(score=100.0, tokens=8099) for _ in range(3)
+            ],
+            off_trials=[
+                learning_verdict.Trial(score=100.0, tokens=9456) for _ in range(5)
+            ],
             spend_observed=True,
         )
     assert "3 skills_on trial(s) against 5 skills_off" in str(exc.value)
@@ -460,9 +440,6 @@ def test_the_unequal_arm_note_says_the_ratio_is_per_trial_and_the_delta_is_not_p
     assert "skills_on 3 trial(s) against skills_off 5" in note
     assert "PER-TRIAL comparison" in note
     assert "NOT a paired result" in note
-
-
-# ══ #2540 — the run-level token ratio REFUSES rather than averaging ═══════════
 
 
 def _paired(tokens_on: int, tokens_off: int, n: int = 5):
@@ -493,11 +470,9 @@ def test_an_unrecorded_token_count_refuses_the_ratio_rather_than_dividing_a_plac
     assert tv.token_ratio is None
     assert tv.tokens_recorded is False
     assert tv.unrecorded_spend_cells == 3
-    # The SCORES were measured, so they are published — that is why this is not a `None` verdict.
     assert tv.delta_points == 20.0
     assert tv.arms["skills_on"]["mean_score"] == 80.0
     assert tv.arms["skills_off"]["trials"] == 5
-    # And the arm token figures are `None`, not the placeholder zeros the trials carry.
     assert tv.arms["skills_on"]["tokens"] is None
     assert tv.arms["skills_off"]["tokens"] is None
     assert tv.arms["skills_on"]["tokens_per_point"] is None
@@ -512,7 +487,9 @@ def test_the_refusal_is_not_the_same_claim_as_not_measured_or_not_token_matched(
     * `not_token_matched` — the arms WERE compared and their spend differed. A measurement.
     * `tokens_unrecorded` — the arms were scored and their spend was never reported.
     """
-    unrecorded = learning_verdict.verdict_task(task_id="t", skill="s", **_kw(tokens_recorded=False))
+    unrecorded = learning_verdict.verdict_task(
+        task_id="t", skill="s", **_kw(tokens_recorded=False)
+    )
     unmeasured = learning_verdict.verdict_task(
         task_id="t", skill="s", on_trials=[], off_trials=[], spend_observed=True
     )
@@ -522,12 +499,12 @@ def test_the_refusal_is_not_the_same_claim_as_not_measured_or_not_token_matched(
     assert unrecorded.verdict == learning_verdict.VERDICT_TOKENS_UNRECORDED
     assert unmeasured.verdict is None
     assert mismatched.verdict == learning_verdict.VERDICT_NOT_TOKEN_MATCHED
-    assert len({str(unrecorded.verdict), str(unmeasured.verdict), str(mismatched.verdict)}) == 3
-    # The mismatched one is a MEASUREMENT: its ratio is a number, not a refusal.
+    assert (
+        len({str(unrecorded.verdict), str(unmeasured.verdict), str(mismatched.verdict)})
+        == 3
+    )
     assert mismatched.token_ratio == 10.0
     assert mismatched.tokens_recorded is True
-    # `verdict_class` keeps them apart for §8 reproduction too, so a re-run cannot cross states and
-    # still "reproduce".
     classes = {
         learning_verdict.verdict_class(str(unrecorded.verdict)),
         learning_verdict.verdict_class(str(mismatched.verdict)),
@@ -535,7 +512,9 @@ def test_the_refusal_is_not_the_same_claim_as_not_measured_or_not_token_matched(
     assert len(classes) == 2
 
 
-def _kw(*, tokens_on: int = 0, tokens_off: int = 0, tokens_recorded: bool = True) -> dict:
+def _kw(
+    *, tokens_on: int = 0, tokens_off: int = 0, tokens_recorded: bool = True
+) -> dict:
     on, off = _paired(tokens_on, tokens_off)
     return {
         "on_trials": on,
@@ -557,12 +536,14 @@ def test_the_token_gate_is_UNREACHABLE_with_an_unrecorded_count(monkeypatch):
         raise AssertionError("compare() was reached with an unrecorded token count")
 
     monkeypatch.setattr(learning_verdict, "compare", _bomb)
-    tv = learning_verdict.verdict_task(task_id="t", skill="s", **_kw(tokens_recorded=False))
+    tv = learning_verdict.verdict_task(
+        task_id="t", skill="s", **_kw(tokens_recorded=False)
+    )
     assert tv.verdict == learning_verdict.VERDICT_TOKENS_UNRECORDED
-    # VACUITY FLOOR: the same bomb with a RECORDED count does go off, so the test above proves the
-    # refusal short-circuits rather than that `compare` is never called at all.
     with pytest.raises(AssertionError, match="compare\\(\\) was reached"):
-        learning_verdict.verdict_task(task_id="t", skill="s", **_kw(tokens_on=100, tokens_off=100))
+        learning_verdict.verdict_task(
+            task_id="t", skill="s", **_kw(tokens_on=100, tokens_off=100)
+        )
 
 
 def test_the_second_rail_exists_and_is_deliberately_unreachable_in_normal_operation():
@@ -585,11 +566,11 @@ def test_the_second_rail_exists_and_is_deliberately_unreachable_in_normal_operat
         and isinstance(node.exc.func, ast.Name)
         and node.exc.func.id == "IncommensurableSpendError"
     ]
-    # One for the spend BASIS, one for the unrecorded COUNT. Both bases the gate cannot use.
     assert len(raises) == 2, "both IncommensurableSpendError rails must stand"
     assert "the token-match gate was reached" in src
-    # And the raise sits BEFORE the `compare` call, not after it — after would be a post-mortem.
-    assert src.index("the token-match gate was reached") < src.index("comparison = compare(task_id")
+    assert src.index("the token-match gate was reached") < src.index(
+        "comparison = compare(task_id"
+    )
 
 
 def test_a_recorded_zero_token_arm_is_still_a_measurement_not_a_refusal():
@@ -600,7 +581,9 @@ def test_a_recorded_zero_token_arm_is_still_a_measurement_not_a_refusal():
     `tokens_unrecorded` would hide a real, disqualifying observation behind an absence.
     """
     tv = learning_verdict.verdict_task(
-        task_id="t", skill="s", **_kw(tokens_on=1000, tokens_off=0, tokens_recorded=True)
+        task_id="t",
+        skill="s",
+        **_kw(tokens_on=1000, tokens_off=0, tokens_recorded=True),
     )
     assert tv.verdict == learning_verdict.VERDICT_NOT_TOKEN_MATCHED
     assert tv.tokens_recorded is True

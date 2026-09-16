@@ -18,12 +18,12 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.dashboard.chat import (
+from gideon.interfaces.dashboard.chat import (
     api_chat_session_acp_agent,
     api_chat_session_reasoning_effort,
 )
-from gideon.dashboard.handlers import providers as providers_mod
-from gideon.dashboard.state import DashboardState, _ChatSession
+from gideon.interfaces.dashboard.handlers import providers as providers_mod
+from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
 
 RUNTIME = "acp:codex"
 
@@ -52,23 +52,26 @@ def _seed(runtime: str, efforts: list[dict] | None, *, agents: bool = True) -> N
     providers_mod._discovery_cache[runtime] = (_time.monotonic(), [payload])
 
 
-def _app(state: DashboardState) -> web.Application:
+def _app(state: ConsoleState) -> web.Application:
     app = web.Application()
     app["state"] = state
     app.router.add_post(
-        "/api/chat/sessions/{session}/reasoning-effort", api_chat_session_reasoning_effort
+        "/api/chat/sessions/{session}/reasoning-effort",
+        api_chat_session_reasoning_effort,
     )
-    app.router.add_post("/api/chat/sessions/{session}/acp-agent", api_chat_session_acp_agent)
+    app.router.add_post(
+        "/api/chat/sessions/{session}/acp-agent", api_chat_session_acp_agent
+    )
     return app
 
 
-def _state(session: _ChatSession) -> DashboardState:
-    state = MagicMock(spec=DashboardState)
+def _state(session: _ChatSession) -> ConsoleState:
+    state = MagicMock(spec=ConsoleState)
     state._sessions = {session.key: session}
     state.push_sessions_update = MagicMock()
     state.sessions = MagicMock()
     state.sessions.reset = AsyncMock()
-    state.conversation_log = None  # persistence is exercised elsewhere
+    state.conversation_log = None
     return state
 
 
@@ -78,24 +81,28 @@ def _bound_session(runtime: str = RUNTIME) -> _ChatSession:
     return s
 
 
-# ── the accessor: [] and None are different facts ─────────────────────────────────
-
-
 class TestDeclaredEfforts:
     def test_a_declaration_of_none_is_not_the_same_as_unknown(self):
         """The whole fix rests on this distinction: `[]` is a backend that was ASKED and
         reported no effort axis (refusable); `None` is discovery that never ran (must fail
         open). Collapsing them either blocks every bind on a cold cache or silently accepts
         an effort codex said it cannot honor."""
-        assert providers_mod.declared_efforts(RUNTIME) is None, "cold cache must read unknown"
+        assert (
+            providers_mod.declared_efforts(RUNTIME) is None
+        ), "cold cache must read unknown"
         _seed(RUNTIME, [])
-        assert providers_mod.declared_efforts(RUNTIME) == [], "declared none must read as []"
+        assert (
+            providers_mod.declared_efforts(RUNTIME) == []
+        ), "declared none must read as []"
 
     def test_the_rows_are_the_backends_verbatim_option_dicts(self):
         """`supported_efforts` rows are `{"value", "label", …}` — the shape the composer
         renders. Stringifying a row instead of reading `value` would compare an effort
         against "{'value': 'low', …}" and refuse every legitimate bind."""
-        _seed(RUNTIME, [{"value": "low", "label": "Low"}, {"value": "xhigh", "label": "X"}])
+        _seed(
+            RUNTIME,
+            [{"value": "low", "label": "Low"}, {"value": "xhigh", "label": "X"}],
+        )
         assert providers_mod.declared_efforts(RUNTIME) == ["low", "xhigh"]
 
     def test_a_cached_but_failed_discovery_reads_unknown_not_empty(self):
@@ -107,9 +114,6 @@ class TestDeclaredEfforts:
         assert providers_mod.declared_efforts(RUNTIME) is None
 
 
-# ── POST /reasoning-effort ─────────────────────────────────────────────────────────
-
-
 class TestPerTurnEndpointHonorsTheDeclaration:
     @pytest.mark.asyncio
     async def test_a_runtime_declaring_none_refuses_an_effort(self):
@@ -117,7 +121,8 @@ class TestPerTurnEndpointHonorsTheDeclaration:
         session = _bound_session()
         async with TestClient(TestServer(_app(_state(session)))) as client:
             resp = await client.post(
-                "/api/chat/sessions/test/reasoning-effort", json={"reasoning_effort": "low"}
+                "/api/chat/sessions/test/reasoning-effort",
+                json={"reasoning_effort": "low"},
             )
             assert resp.status == 400
             body = await resp.json()
@@ -126,12 +131,15 @@ class TestPerTurnEndpointHonorsTheDeclaration:
         assert session.reasoning_effort == "", "the refused effort was persisted anyway"
 
     @pytest.mark.asyncio
-    async def test_an_effort_outside_a_declared_set_is_refused_and_the_set_is_named(self):
+    async def test_an_effort_outside_a_declared_set_is_refused_and_the_set_is_named(
+        self,
+    ):
         _seed(RUNTIME, [{"value": "low"}, {"value": "high"}])
         session = _bound_session()
         async with TestClient(TestServer(_app(_state(session)))) as client:
             resp = await client.post(
-                "/api/chat/sessions/test/reasoning-effort", json={"reasoning_effort": "medium"}
+                "/api/chat/sessions/test/reasoning-effort",
+                json={"reasoning_effort": "medium"},
             )
             assert resp.status == 400
             msg = (await resp.json())["error"]["message"]
@@ -144,7 +152,8 @@ class TestPerTurnEndpointHonorsTheDeclaration:
         session = _bound_session()
         async with TestClient(TestServer(_app(_state(session)))) as client:
             resp = await client.post(
-                "/api/chat/sessions/test/reasoning-effort", json={"reasoning_effort": "high"}
+                "/api/chat/sessions/test/reasoning-effort",
+                json={"reasoning_effort": "high"},
             )
             assert resp.status == 200
         assert session.reasoning_effort == "high"
@@ -152,11 +161,13 @@ class TestPerTurnEndpointHonorsTheDeclaration:
     @pytest.mark.asyncio
     async def test_an_unknown_declaration_fails_OPEN(self):
         """Cold discovery must not make the control unusable — the format check is still the
-        bar, and refusing here would break the picker whenever discovery has not warmed."""
+        bar, and refusing here would break the picker whenever discovery has not warmed.
+        """
         session = _bound_session()
         async with TestClient(TestServer(_app(_state(session)))) as client:
             resp = await client.post(
-                "/api/chat/sessions/test/reasoning-effort", json={"reasoning_effort": "low"}
+                "/api/chat/sessions/test/reasoning-effort",
+                json={"reasoning_effort": "low"},
             )
             assert resp.status == 200
         assert session.reasoning_effort == "low"
@@ -165,16 +176,14 @@ class TestPerTurnEndpointHonorsTheDeclaration:
     async def test_clearing_is_always_allowed_even_when_the_runtime_declares_none(self):
         _seed(RUNTIME, [])
         session = _bound_session()
-        session.reasoning_effort = "low"  # e.g. persisted before this rail existed
+        session.reasoning_effort = "low"
         async with TestClient(TestServer(_app(_state(session)))) as client:
             resp = await client.post(
-                "/api/chat/sessions/test/reasoning-effort", json={"reasoning_effort": ""}
+                "/api/chat/sessions/test/reasoning-effort",
+                json={"reasoning_effort": ""},
             )
             assert resp.status == 200, "a user must always be able to UNPIN"
         assert session.reasoning_effort == ""
-
-
-# ── POST /acp-agent (the bind path) ───────────────────────────────────────────────
 
 
 class TestBindPathHonorsTheDeclaration:
@@ -188,12 +197,16 @@ class TestBindPathHonorsTheDeclaration:
                 json={"provider": RUNTIME, "reasoning_effort": "low"},
             )
             assert resp.status == 400
-            assert "no reasoning-effort options" in (await resp.json())["error"]["message"]
+            assert (
+                "no reasoning-effort options" in (await resp.json())["error"]["message"]
+            )
         assert session.reasoning_effort == ""
         assert session.acp_provider == "", "a refused bind must not half-apply"
 
     @pytest.mark.asyncio
-    async def test_a_backend_declared_value_outside_the_old_ladder_is_now_accepted(self):
+    async def test_a_backend_declared_value_outside_the_old_ladder_is_now_accepted(
+        self,
+    ):
         """The bind path used to enforce a hardcoded ``low/medium/high/max``, so a backend
         offering ``xhigh`` had its own value refused — and the per-turn endpoint, which has
         no fixed scale, accepted it. The two paths now apply the same bar."""

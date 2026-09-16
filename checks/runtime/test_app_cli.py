@@ -1,6 +1,6 @@
 """Tests for the app-contributed CLI seams (plan 32: PROVIDER-BOUNDARY-COMPLETION).
 
-Covers ``gideon.app_cli``:
+Covers ``gideon.extensions.app_cli``:
 - ``run_app_setup_steps`` — imports + runs each installed+enabled app's ``cli.setup``
   with a ``SetupContext``; a raising step warns and continues; ``--app`` filters.
 - ``run_app_doctor_probes`` — imports + runs each ``cli.doctor`` under a timeout,
@@ -14,17 +14,15 @@ import json
 
 import pytest
 
-from gideon import app_cli
-from gideon.apps import manager
+from gideon.extensions import app_cli
+from gideon.extensions.apps import manager
 
 
 @pytest.fixture(autouse=True)
 def _isolate(tmp_path, monkeypatch):
     """Point the apps dir at tmp_path so list_apps()/app_dir() read our fixtures."""
     monkeypatch.setattr(manager, "config_dir", lambda: tmp_path)
-    # app_cli imports save_credential from config.loader at call time; point the
-    # credential store at tmp_path too so a setup step's write is isolated.
-    from gideon.config import loader as cfg_loader
+    from gideon.core.config import loader as cfg_loader
 
     monkeypatch.setattr(cfg_loader, "config_dir", lambda: tmp_path)
     return tmp_path
@@ -38,7 +36,12 @@ def _install_app(root, name, *, module_file="", module_body="", cli=None, enable
         json.dumps({"name": name, "version": "1.0.0", "enabled": enabled}),
         encoding="utf-8",
     )
-    manifest = {"name": name, "version": "1.0.0", "displayName": name, "description": name}
+    manifest = {
+        "name": name,
+        "version": "1.0.0",
+        "displayName": name,
+        "description": name,
+    }
     if cli is not None:
         manifest["cli"] = cli
     (d / "app.json").write_text(json.dumps(manifest), encoding="utf-8")
@@ -47,11 +50,7 @@ def _install_app(root, name, *, module_file="", module_body="", cli=None, enable
     return d
 
 
-# ── run_app_setup_steps ───────────────────────────────────────────────────────
-
-
 def test_setup_step_runs_and_receives_context(_isolate):
-    # P5: an app with cli.setup runs; its run(ctx) can save a credential + read it back.
     _install_app(
         _isolate,
         "cfg-app",
@@ -65,13 +64,11 @@ def test_setup_step_runs_and_receives_context(_isolate):
         cli={"setup": "cli_setup:run"},
     )
     app_cli.run_app_setup_steps()
-    # the credential landed in the isolated .env
     env = (_isolate / ".env").read_text(encoding="utf-8")
     assert "CFG_APP_TOKEN=xyz" in env
 
 
 def test_setup_step_that_raises_does_not_abort(_isolate, capsys):
-    # P6: a raising step prints a warning and setup continues to the next app.
     _install_app(
         _isolate,
         "a-bad",
@@ -86,14 +83,13 @@ def test_setup_step_that_raises_does_not_abort(_isolate, capsys):
         module_body="def run(ctx):\n    ctx.print('z-good ran')\n",
         cli={"setup": "cli_setup:run"},
     )
-    app_cli.run_app_setup_steps()  # must not raise
+    app_cli.run_app_setup_steps()
     out = capsys.readouterr().out
-    assert "a-bad" in out and "boom" in out  # warning shown
-    assert "z-good ran" in out  # later app still ran (alphabetical order)
+    assert "a-bad" in out and "boom" in out
+    assert "z-good ran" in out
 
 
 def test_setup_only_app_filter(_isolate, capsys):
-    # P7: --app <name> runs only that app's step.
     _install_app(
         _isolate,
         "one",
@@ -115,7 +111,6 @@ def test_setup_only_app_filter(_isolate, capsys):
 
 
 def test_setup_disabled_app_skipped(_isolate, capsys):
-    # A disabled app's setup step never runs.
     _install_app(
         _isolate,
         "off",
@@ -128,11 +123,7 @@ def test_setup_disabled_app_skipped(_isolate, capsys):
     assert "OFF ran" not in capsys.readouterr().out
 
 
-# ── run_app_doctor_probes ──────────────────────────────────────────────────────
-
-
 def test_doctor_probe_renders_lines(_isolate, capsys):
-    # P8: a probe returning DoctorLines renders a per-app section; a fail line is an issue.
     _install_app(
         _isolate,
         "probe-app",
@@ -148,15 +139,14 @@ def test_doctor_probe_renders_lines(_isolate, capsys):
     issues = app_cli.run_app_doctor_probes()
     out = capsys.readouterr().out
     assert "probe-app" in out and "token" in out and "workspace" in out
-    assert any("workspace" in i for i in issues)  # the fail line became an issue
+    assert any("workspace" in i for i in issues)
 
 
 def test_doctor_probe_timeout_does_not_hang(_isolate, capsys):
-    # P9: a hung probe becomes a single fail line within the timeout — never hangs.
     monkey_timeout = 0.3
-    import gideon.app_cli as ac
+    import gideon.extensions.app_cli as ac
 
-    ac._DOCTOR_TIMEOUT_SECS = monkey_timeout  # shrink for a fast test
+    ac._DOCTOR_TIMEOUT_SECS = monkey_timeout
     _install_app(
         _isolate,
         "hang-app",
@@ -184,7 +174,6 @@ def test_doctor_probe_exception_becomes_fail(_isolate, capsys):
 
 
 def test_malformed_cli_ref_is_a_warning_not_a_crash(_isolate, capsys):
-    # A cli.setup ref that isn't "module:function" warns and continues.
     _install_app(
         _isolate,
         "bad-ref",
@@ -192,5 +181,5 @@ def test_malformed_cli_ref_is_a_warning_not_a_crash(_isolate, capsys):
         module_body="def run(ctx):\n    ctx.print('never')\n",
         cli={"setup": "not_a_valid_ref"},
     )
-    app_cli.run_app_setup_steps()  # must not raise
+    app_cli.run_app_setup_steps()
     assert "bad-ref" in capsys.readouterr().out

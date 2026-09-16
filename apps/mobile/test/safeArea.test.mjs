@@ -6,9 +6,8 @@ import {
   readSafeAreaInsets,
   SAFE_AREA_VARS,
   watchSafeAreaInsets,
-} from '../www/shell/safeArea.mjs'
+} from '../www/platform/safe-area.mjs'
 
-/** A document whose root element resolves the four custom properties to `values`. */
 function fakeEnvironment(values = {}) {
   const doc = { documentElement: { tagName: 'HTML' } }
   const listeners = []
@@ -24,7 +23,6 @@ function fakeEnvironment(values = {}) {
   return { doc, view, listeners, target: { style: {} } }
 }
 
-/** A notched phone in portrait. */
 const NOTCHED = {
   [SAFE_AREA_VARS.top]: '47px',
   [SAFE_AREA_VARS.right]: '0px',
@@ -44,8 +42,6 @@ test('the insets are read out of the custom properties shell.css resolves env() 
 
 test('applied, not merely declared — the target element carries the padding afterwards', () => {
   const { doc, view, target } = fakeEnvironment(NOTCHED)
-  // Before: nothing. This is the half that makes the assertion below non-vacuous — a CSS-only
-  // shell would leave the element exactly like this and still "declare" safe areas.
   assert.deepEqual(target.style, {})
 
   const applied = applySafeAreaInsets(doc, view, target)
@@ -58,8 +54,6 @@ test('applied, not merely declared — the target element carries the padding af
 })
 
 test('each inset lands on its OWN edge', () => {
-  // A transposed mapping (top->bottom, left->right) is the defect a symmetric fixture cannot
-  // see, so every value here is distinct.
   const { doc, view, target } = fakeEnvironment({
     [SAFE_AREA_VARS.top]: '1px',
     [SAFE_AREA_VARS.right]: '2px',
@@ -76,8 +70,6 @@ test('each inset lands on its OWN edge', () => {
 })
 
 test('a platform without insets reports 0px rather than an empty string', () => {
-  // An empty `padding-top: ` is invalid CSS and would be dropped, so the fallback has to be a
-  // real length. A browser preview with no `viewport-fit=cover` lands here.
   const { doc, view, target } = fakeEnvironment({})
   applySafeAreaInsets(doc, view, target)
   assert.deepEqual(target.style, {
@@ -97,7 +89,6 @@ test('rotation reapplies — insets read once are correct in one orientation onl
     ['orientationchange', 'resize'],
   )
 
-  // Landscape on the same device: the notch moves to the left edge.
   Object.assign(NOTCHED, {
     [SAFE_AREA_VARS.top]: '0px',
     [SAFE_AREA_VARS.left]: '47px',

@@ -6,10 +6,10 @@ statement: >
   the dataclass field (with `_meta`), `AppConfig.load()`'s explicit mapping, `to_dict()`,
   and — if runtime-editable — the `_EDITABLE_CONFIG` PATCH allowlist.
 appliesTo:
-  - src/gideon/config/loader.py
-  - src/gideon/dashboard/handlers/core.py
+  - runtime/gideon/config/loader.py
+  - runtime/gideon/dashboard/handlers/core.py
 requiredTests:
-  - tests/test_config_roundtrip.py
+  - checks/runtime/test_config_roundtrip.py
 scanner: config-four-points
 source: >
   The silent-drop gotcha: a field present in a dataclass but omitted from `to_dict()` is
@@ -45,6 +45,6 @@ For a new field `foo` on `LegibilityConfig` (the worked example the codebase alr
    PATCH:** add the dotted path with its validation spec —
    `"legibility.foo": {"type": "bool"}` — plus a frontend control if user-facing.
 
-`tests/test_config_roundtrip.py` mutates every leaf field and asserts save→load preserves
+`checks/runtime/test_config_roundtrip.py` mutates every leaf field and asserts save→load preserves
 it, so it catches points 1–3. Point 4 (editability) is a deliberate choice per field —
 the scanner check flags a field that looks editable but is missing from the allowlist.

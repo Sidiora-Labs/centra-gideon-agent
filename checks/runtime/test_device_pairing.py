@@ -26,11 +26,11 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.auth import pairing
-from gideon.dashboard import session_store as ss
-from gideon.dashboard import token_auth
-from gideon.dashboard.handlers import auth as auth_h
-from gideon.dashboard.handlers import devices as devices_h
+from gideon.interfaces.dashboard import session_store as ss
+from gideon.interfaces.dashboard import token_auth
+from gideon.interfaces.dashboard.handlers import auth as auth_h
+from gideon.interfaces.dashboard.handlers import devices as devices_h
+from gideon.security.auth import pairing
 
 PORT = 10000
 
@@ -38,7 +38,7 @@ PORT = 10000
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
     """Every store this surface touches points at *tmp_path*, never the real home."""
-    import gideon.config.loader as loader
+    import gideon.core.config.loader as loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(pairing, "config_dir", lambda: tmp_path)
@@ -55,7 +55,7 @@ def _isolated(tmp_path, monkeypatch):
 @pytest.fixture()
 def sel_events(monkeypatch) -> list[dict[str, Any]]:
     """Capture SEL calls through the REAL ``_sel()`` indirection the routes use."""
-    import gideon.sel as sel_mod
+    import gideon.security.sel as sel_mod
 
     events: list[dict[str, Any]] = []
     recorder = MagicMock()
@@ -81,13 +81,12 @@ def _expire_stored_codes(home) -> None:
     path.write_text(json.dumps(codes), encoding="utf-8")
 
 
-# ── The pairing code ────────────────────────────────────────────────────
-
-
 def test_a_pairing_code_round_trips_exactly_once(_isolated) -> None:
     code, _exp = pairing.issue_code()
     assert pairing.redeem_code(code).result == pairing.RESULT_OK
-    assert pairing.redeem_code(code).result == pairing.RESULT_INVALID, "must be single-use"
+    assert (
+        pairing.redeem_code(code).result == pairing.RESULT_INVALID
+    ), "must be single-use"
 
 
 def test_the_pairing_ttl_is_five_minutes_and_the_deadline_honours_it(_isolated) -> None:
@@ -102,7 +101,9 @@ def test_the_pairing_ttl_is_five_minutes_and_the_deadline_honours_it(_isolated) 
     assert pairing.PAIR_CODE_TTL_SECS == 300, "five minutes, the contract's number"
     before = time.time()
     _code, expires_at = pairing.issue_code()
-    assert 300 <= expires_at - before <= 305, f"deadline {expires_at - before:.1f}s from issue"
+    assert (
+        300 <= expires_at - before <= 305
+    ), f"deadline {expires_at - before:.1f}s from issue"
 
 
 def test_an_expired_code_is_told_apart_from_an_unknown_one(_isolated) -> None:
@@ -148,7 +149,6 @@ def test_outstanding_codes_are_capped(_isolated) -> None:
     """Scarcity is a rate limit: nobody can ask for thousands and widen the guess space."""
     for _ in range(pairing._MAX_ACTIVE + 4):
         pairing.issue_code()
-    # Read the store, not a convenience counter — the file is what bounds the guess space.
     assert len(pairing._prune(pairing._load())) == pairing._MAX_ACTIVE
 
 
@@ -174,12 +174,9 @@ def test_the_label_survives_to_the_redemption(_isolated) -> None:
 
 def test_pairing_codes_live_apart_from_enrollment_codes(_isolated) -> None:
     """Two surfaces, two stores: an enrollment code must not open the pairing door."""
-    from gideon.auth import enrollment
+    from gideon.security.auth import enrollment
 
     assert pairing.codes_path() != enrollment.codes_path()
-
-
-# ── The widened session row ─────────────────────────────────────────────
 
 
 def _device(**kw) -> ss.DeviceInfo:
@@ -189,7 +186,9 @@ def _device(**kw) -> ss.DeviceInfo:
 
 
 def test_a_device_row_round_trips(_isolated) -> None:
-    ss.remember_session("n1", time.time() + 3600, issuer=ss.ISSUER_PAIR, device=_device())
+    ss.remember_session(
+        "n1", time.time() + 3600, issuer=ss.ISSUER_PAIR, device=_device()
+    )
     record = ss.load_session_records()["n1"]
     assert record.issuer == ss.ISSUER_PAIR
     assert record.device is not None
@@ -201,7 +200,9 @@ def test_the_expiry_projection_matches_the_records(_isolated) -> None:
     exp = time.time() + 3600
     ss.remember_session("n1", exp, issuer=ss.ISSUER_PAIR, device=_device())
     ss.remember_session("n2", exp)
-    assert ss.load_sessions() == {n: r.expiry for n, r in ss.load_session_records().items()}
+    assert ss.load_sessions() == {
+        n: r.expiry for n, r in ss.load_session_records().items()
+    }
 
 
 def test_an_old_shape_row_is_discarded(_isolated) -> None:
@@ -228,8 +229,12 @@ def test_attach_preserves_the_original_expiry(_isolated) -> None:
 
 def test_nonces_for_device_finds_every_session(_isolated) -> None:
     """Re-pairing before the old session expires is legitimate; a partial revoke is not."""
-    ss.remember_session("n1", time.time() + 3600, issuer=ss.ISSUER_PAIR, device=_device())
-    ss.remember_session("n2", time.time() + 3600, issuer=ss.ISSUER_PAIR, device=_device())
+    ss.remember_session(
+        "n1", time.time() + 3600, issuer=ss.ISSUER_PAIR, device=_device()
+    )
+    ss.remember_session(
+        "n2", time.time() + 3600, issuer=ss.ISSUER_PAIR, device=_device()
+    )
     ss.remember_session("n3", time.time() + 3600)
     assert sorted(ss.nonces_for_device("dev-1")) == ["n1", "n2"]
     assert ss.nonces_for_device("nope") == []
@@ -248,29 +253,27 @@ def test_a_device_name_is_bounded_and_single_line(_isolated) -> None:
 
 
 def test_the_store_stays_owner_only_with_a_device_row(_isolated) -> None:
-    ss.remember_session("n1", time.time() + 3600, issuer=ss.ISSUER_PAIR, device=_device())
+    ss.remember_session(
+        "n1", time.time() + 3600, issuer=ss.ISSUER_PAIR, device=_device()
+    )
     assert oct(ss.sessions_path().stat().st_mode)[-3:] == "600"
 
 
 def test_only_device_rows_are_in_the_registry(_isolated) -> None:
     ss.remember_session("owner", time.time() + 3600)
-    ss.remember_session("phone", time.time() + 3600, issuer=ss.ISSUER_PAIR, device=_device())
+    ss.remember_session(
+        "phone", time.time() + 3600, issuer=ss.ISSUER_PAIR, device=_device()
+    )
     assert set(ss.device_sessions()) == {"phone"}
 
 
 def test_stats_count_devices_without_naming_them(_isolated) -> None:
-    ss.remember_session("secret-nonce", time.time() + 3600, issuer=ss.ISSUER_PAIR, device=_device())
+    ss.remember_session(
+        "secret-nonce", time.time() + 3600, issuer=ss.ISSUER_PAIR, device=_device()
+    )
     stats = ss.session_stats()
     assert stats["devices"] == 1
     assert "secret-nonce" not in json.dumps(stats)
-
-
-# ── The last-seen writer (CA-2) ─────────────────────────────────────────
-#
-# C1 deliberately shipped `DeviceInfo` WITHOUT `last_seen`, on the grounds that its only honest
-# writer is the authorize path and that a throttled write there is a cost decision, not a field
-# declaration. These assert the three properties that made it payable: it is throttled, it never
-# gates the verdict, and an unstamped device reads as "never" rather than as freshly paired.
 
 
 def _stored_device(nonce: str) -> ss.DeviceInfo:
@@ -299,9 +302,9 @@ def test_last_seen_round_trips_through_the_store(_isolated) -> None:
         "n1", time.time() + 3600, issuer=ss.ISSUER_PAIR, device=_device(last_seen=seen)
     )
     assert _stored_device("n1").last_seen == pytest.approx(seen)
-    assert json.loads(ss.sessions_path().read_text())["sessions"]["n1"]["device"]["last_seen"] == (
-        pytest.approx(seen)
-    ), "the field must be on disk, not only on the dataclass"
+    assert json.loads(ss.sessions_path().read_text())["sessions"]["n1"]["device"][
+        "last_seen"
+    ] == (pytest.approx(seen)), "the field must be on disk, not only on the dataclass"
 
 
 def test_a_row_with_no_last_seen_reads_as_never_not_as_paired_at(_isolated) -> None:
@@ -329,21 +332,29 @@ def test_a_row_with_no_last_seen_reads_as_never_not_as_paired_at(_isolated) -> N
     device = ss.load_session_records()["n1"].device
     assert device is not None
     assert device.minted_at == pytest.approx(minted)
-    assert device.last_seen == 0.0, "an absent stamp is 'never', never a backfill of minted_at"
+    assert (
+        device.last_seen == 0.0
+    ), "an absent stamp is 'never', never a backfill of minted_at"
 
 
-def test_a_stale_device_is_stamped_once_and_then_throttled(_isolated, monkeypatch) -> None:
+def test_a_stale_device_is_stamped_once_and_then_throttled(
+    _isolated, monkeypatch
+) -> None:
     ss.remember_session(
         "n1", time.time() + 3600, issuer=ss.ISSUER_PAIR, device=_device(last_seen=0.0)
     )
     calls = _count_saves(monkeypatch)
     assert ss.touch_device_last_seen("n1") is True
     assert calls[0] == 1
-    assert ss.touch_device_last_seen("n1") is False, "still fresh: inside the throttle window"
+    assert (
+        ss.touch_device_last_seen("n1") is False
+    ), "still fresh: inside the throttle window"
     assert calls[0] == 1, "the second touch must not rewrite the store"
 
 
-def test_a_stamp_older_than_the_threshold_is_written_again(_isolated, monkeypatch) -> None:
+def test_a_stamp_older_than_the_threshold_is_written_again(
+    _isolated, monkeypatch
+) -> None:
     """The throttle must not be a one-shot: an idle device still updates a minute later."""
     ss.remember_session(
         "n1", time.time() + 3600, issuer=ss.ISSUER_PAIR, device=_device(last_seen=0.0)
@@ -375,11 +386,15 @@ def test_two_rapid_authorizations_write_the_store_once(_isolated, monkeypatch) -
     assert token_auth.validate_token(token, use_session_exp=True)[0] is True
     assert token_auth.validate_token(token, use_session_exp=True)[0] is True
 
-    assert calls[0] == 1, "two authorizations inside the window must cost ONE store write"
+    assert (
+        calls[0] == 1
+    ), "two authorizations inside the window must cost ONE store write"
     assert _stored_device(nonce).last_seen > 0.0
 
 
-def test_an_authorization_still_succeeds_when_the_stamp_raises(_isolated, monkeypatch) -> None:
+def test_an_authorization_still_succeeds_when_the_stamp_raises(
+    _isolated, monkeypatch
+) -> None:
     """Best-effort by contract: a store that cannot be stamped must not deny a valid session."""
     token = token_auth.generate_token("owner", ttl_seconds=3600)
     nonce = next(iter(ss.load_session_records()))
@@ -392,7 +407,7 @@ def test_an_authorization_still_succeeds_when_the_stamp_raises(_isolated, monkey
     valid, _user, reason = token_auth.validate_token(token, use_session_exp=True)
     assert valid is True, reason
 
-    token_auth._state.clear_all()  # force the adopt-from-store path too
+    token_auth._state.clear_all()
     assert token_auth.validate_token(token, use_session_exp=True)[0] is True
 
 
@@ -403,7 +418,9 @@ def _age_stored_last_seen(nonce: str, age_secs: float) -> None:
     ss.sessions_path().write_text(json.dumps(raw), encoding="utf-8")
 
 
-def test_the_in_memory_throttle_suppresses_even_the_read(_isolated, monkeypatch) -> None:
+def test_the_in_memory_throttle_suppresses_even_the_read(
+    _isolated, monkeypatch
+) -> None:
     """The two layers are separable: the map suppresses a write the store WOULD have allowed."""
     token = token_auth.generate_token("owner", ttl_seconds=3600)
     nonce = next(iter(ss.load_session_records()))
@@ -413,7 +430,9 @@ def test_the_in_memory_throttle_suppresses_even_the_read(_isolated, monkeypatch)
 
     calls = _count_saves(monkeypatch)
     assert token_auth.validate_token(token, use_session_exp=True)[0] is True
-    assert calls[0] == 0, "the in-memory attempt map must short-circuit before the file read"
+    assert (
+        calls[0] == 0
+    ), "the in-memory attempt map must short-circuit before the file read"
 
 
 def test_a_restart_forgets_the_throttle(_isolated, monkeypatch) -> None:
@@ -428,13 +447,10 @@ def test_a_restart_forgets_the_throttle(_isolated, monkeypatch) -> None:
     assert token_auth.validate_token(token, use_session_exp=True)[0] is True
     _age_stored_last_seen(nonce, ss.LAST_SEEN_THROTTLE_SECS + 10)
 
-    token_auth._state.clear_all()  # the in-memory half of a restart
+    token_auth._state.clear_all()
     calls = _count_saves(monkeypatch)
     assert token_auth.validate_token(token, use_session_exp=True)[0] is True
     assert calls[0] == 1, "a restart must not inherit the previous process's throttle"
-
-
-# ── The routes ──────────────────────────────────────────────────────────
 
 
 async def _start(client) -> dict[str, Any]:
@@ -452,7 +468,9 @@ async def test_pair_start_returns_a_code_and_a_qr_url(_isolated) -> None:
     async with TestClient(TestServer(_app())) as client:
         data = await _start(client)
     assert len(data["code"]) == pairing._CODE_LEN + 1, "grouped XXXX-XXXX for reading"
-    assert data["code"] in data["pairing_url"], "the QR payload must be actionable on its own"
+    assert (
+        data["code"] in data["pairing_url"]
+    ), "the QR payload must be actionable on its own"
     assert data["expires_in"] == pairing.PAIR_CODE_TTL_SECS
     assert data["expires_at"] > time.time()
 
@@ -462,11 +480,15 @@ async def test_clause_1_complete_writes_a_durable_device_row(_isolated) -> None:
     """CLAUSE 1: a sessions.json row with device+issuer, and no new token type."""
     async with TestClient(TestServer(_app())) as client:
         data = await _start(client)
-        resp = await _complete(client, data["code"], device_name="Pixel 9", kind="mobile")
+        resp = await _complete(
+            client, data["code"], device_name="Pixel 9", kind="mobile"
+        )
         assert resp.status == 200
         body = await resp.json()
-        assert resp.cookies[f"pc_token_{PORT}"], "the device gets the ORDINARY session cookie"
-        token = resp.cookies[f"pc_token_{PORT}"].value
+        assert resp.cookies[
+            f"gideon_token_{PORT}"
+        ], "the device gets the ORDINARY session cookie"
+        token = resp.cookies[f"gideon_token_{PORT}"].value
 
     records = ss.load_session_records()
     assert len(records) == 1
@@ -486,9 +508,9 @@ async def test_clause_2_the_device_session_survives_a_restart(_isolated) -> None
     async with TestClient(TestServer(_app())) as client:
         data = await _start(client)
         resp = await _complete(client, data["code"], device_name="Pixel", kind="mobile")
-        token = resp.cookies[f"pc_token_{PORT}"].value
+        token = resp.cookies[f"gideon_token_{PORT}"].value
 
-    token_auth._state.clear_all()  # the in-memory half of a restart
+    token_auth._state.clear_all()
     token_auth.reset_secret_cache()
     valid, user, reason = token_auth.validate_token(token, use_session_exp=True)
     assert valid is True, reason
@@ -525,7 +547,7 @@ async def test_clause_4_revoke_locks_the_device_out_across_a_restart(_isolated) 
     async with TestClient(TestServer(_app())) as client:
         data = await _start(client)
         resp = await _complete(client, data["code"], device_name="Pixel", kind="mobile")
-        token = resp.cookies[f"pc_token_{PORT}"].value
+        token = resp.cookies[f"gideon_token_{PORT}"].value
         device_id = (await resp.json())["device_id"]
         assert token_auth.validate_token(token, use_session_exp=True)[0] is True
 
@@ -533,9 +555,7 @@ async def test_clause_4_revoke_locks_the_device_out_across_a_restart(_isolated) 
         assert revoked.status == 200
         assert (await revoked.json())["revoked"] == 1
 
-    # Live: the in-memory half bit, with no restart involved.
     assert token_auth.validate_token(token, use_session_exp=True)[0] is False
-    # Across a restart: the durable half bit too, so it cannot come back to life.
     token_auth._state.clear_all()
     token_auth.reset_secret_cache()
     valid, _user, reason = token_auth.validate_token(token, use_session_exp=True)
@@ -557,9 +577,19 @@ async def test_the_registry_lists_the_device_and_never_a_nonce(_isolated) -> Non
 
     assert len(payload["devices"]) == 1
     row = payload["devices"][0]
-    assert {"id", "name", "kind", "minted_at", "last_seen", "issuer", "expires_at"} <= set(row)
+    assert {
+        "id",
+        "name",
+        "kind",
+        "minted_at",
+        "last_seen",
+        "issuer",
+        "expires_at",
+    } <= set(row)
     assert row["issuer"] == ss.ISSUER_PAIR
-    assert nonce not in json.dumps(payload), "the registry is read aloud; the nonce is a credential"
+    assert nonce not in json.dumps(
+        payload
+    ), "the registry is read aloud; the nonce is a credential"
 
 
 @pytest.mark.asyncio
@@ -607,14 +637,19 @@ async def test_revoking_an_unknown_device_is_a_404(_isolated) -> None:
 async def test_revoke_drops_every_session_of_that_device(_isolated) -> None:
     """A revoke that only dropped the newest would leave the device logged in."""
     async with TestClient(TestServer(_app())) as client:
-        first = await _complete(client, (await _start(client))["code"], device_name="Phone")
+        first = await _complete(
+            client, (await _start(client))["code"], device_name="Phone"
+        )
         device_id = (await first.json())["device_id"]
-        # A second session for the SAME device id, as a re-pair before expiry produces.
         token_auth.generate_token(devices_h.PAIRED_DEVICE_USER, ttl_seconds=3600)
         extra = next(
-            n for n in ss.load_session_records() if not ss.load_session_records()[n].device
+            n
+            for n in ss.load_session_records()
+            if not ss.load_session_records()[n].device
         )
-        ss.attach_device(extra, ss.DeviceInfo(id=device_id, name="Phone", kind="mobile"))
+        ss.attach_device(
+            extra, ss.DeviceInfo(id=device_id, name="Phone", kind="mobile")
+        )
 
         resp = await client.post(f"/api/devices/{device_id}/revoke", json={})
         assert (await resp.json())["revoked"] == 2
@@ -657,7 +692,9 @@ async def test_an_undeclared_kind_is_derived_from_the_user_agent(_isolated) -> N
         resp = await client.post(
             "/api/devices/pair/complete",
             json={"code": data["code"]},
-            headers={"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)"},
+            headers={
+                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)"
+            },
         )
         assert resp.status == 200
     device = next(iter(ss.device_sessions().values())).device
@@ -668,7 +705,9 @@ async def test_an_undeclared_kind_is_derived_from_the_user_agent(_isolated) -> N
 @pytest.mark.asyncio
 async def test_the_owners_label_beats_a_derived_name(_isolated) -> None:
     async with TestClient(TestServer(_app())) as client:
-        resp = await client.post("/api/devices/pair/start", json={"label": "Kitchen tablet"})
+        resp = await client.post(
+            "/api/devices/pair/start", json={"label": "Kitchen tablet"}
+        )
         await _complete(client, (await resp.json())["code"])
     device = next(iter(ss.device_sessions().values())).device
     assert device is not None and device.name == "Kitchen tablet"
@@ -688,9 +727,6 @@ async def test_pair_complete_is_rate_limited(_isolated) -> None:
         assert resp.headers["Retry-After"]
 
 
-# ── The audit floor ─────────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_every_route_emits_a_sel_event(_isolated, sel_events) -> None:
     async with TestClient(TestServer(_app())) as client:
@@ -701,7 +737,12 @@ async def test_every_route_emits_a_sel_event(_isolated, sel_events) -> None:
         await client.post(f"/api/devices/{device_id}/revoke", json={})
 
     ops = [e["operation"] for e in sel_events]
-    for expected in ("device_pair_started", "device_paired", "devices_listed", "device_revoked"):
+    for expected in (
+        "device_pair_started",
+        "device_paired",
+        "devices_listed",
+        "device_revoked",
+    ):
         assert expected in ops, f"{expected} was not audited"
     assert all(e["source"] == "devices" for e in sel_events)
 
@@ -713,44 +754,48 @@ async def test_the_denials_are_audited_too(_isolated, sel_events) -> None:
         await _complete(client, "ABCDEFGH")
         await client.post("/api/devices/nope/revoke", json={})
 
-    denied = [(e["operation"], e["outcome"]) for e in sel_events if e["outcome"] == "denied"]
+    denied = [
+        (e["operation"], e["outcome"]) for e in sel_events if e["outcome"] == "denied"
+    ]
     assert ("device_paired", "denied") in denied
     assert ("device_revoked", "denied") in denied
 
 
 @pytest.mark.asyncio
-async def test_the_audit_never_carries_the_code_or_the_nonce(_isolated, sel_events) -> None:
+async def test_the_audit_never_carries_the_code_or_the_nonce(
+    _isolated, sel_events
+) -> None:
     async with TestClient(TestServer(_app())) as client:
         data = await _start(client)
         await _complete(client, data["code"], device_name="Pixel", kind="mobile")
     nonce = next(iter(ss.load_session_records()))
     dumped = json.dumps(sel_events)
-    assert data["code"] not in dumped, "a code in the security log is a code in every log shipper"
+    assert (
+        data["code"] not in dumped
+    ), "a code in the security log is a code in every log shipper"
     assert nonce not in dumped
 
 
 @pytest.mark.asyncio
 async def test_a_broken_sel_does_not_break_the_route(_isolated, monkeypatch) -> None:
     """An audit failure must not eat the reply the user is waiting for."""
-    import gideon.sel as sel_mod
+    import gideon.security.sel as sel_mod
 
-    monkeypatch.setattr(sel_mod, "sel", lambda: (_ for _ in ()).throw(RuntimeError("no sel")))
+    monkeypatch.setattr(
+        sel_mod, "sel", lambda: (_ for _ in ()).throw(RuntimeError("no sel"))
+    )
     async with TestClient(TestServer(_app())) as client:
         assert (await client.post("/api/devices/pair/start", json={})).status == 200
-
-
-# ── The auth exemption ──────────────────────────────────────────────────
 
 
 def test_only_the_redeem_path_and_its_page_are_bypass_exempt() -> None:
     """Redeeming has no session yet; minting a code requires already being the owner."""
     assert "/api/devices/pair/complete" in token_auth._BYPASS_EXACT
-    assert "/pair" in token_auth._BYPASS_EXACT, "the page must be reachable without a session"
+    assert (
+        "/pair" in token_auth._BYPASS_EXACT
+    ), "the page must be reachable without a session"
     assert "/api/devices/pair/start" not in token_auth._BYPASS_EXACT
     assert "/api/devices" not in token_auth._BYPASS_EXACT
-
-
-# ── /pair — the joining device's redeem screen ──────────────────────────
 
 
 @pytest.mark.asyncio
@@ -797,7 +842,6 @@ async def test_a_browser_that_already_has_a_session_is_sent_home(_isolated) -> N
         resp = await client.get(f"/pair?token={token}", allow_redirects=False)
         assert resp.status == 302
         assert resp.headers["Location"] == "/"
-        # A browser with no session still gets the form, so the redirect is not unconditional.
         assert (await client.get("/pair")).status == 200
 
 
@@ -813,7 +857,9 @@ def test_every_refusal_the_redeem_path_can_return_has_copy_on_the_page() -> None
         devices_h.ERR_LOCKED_OUT,
         devices_h.ERR_ORIGIN,
     ):
-        assert f"{code}:" in devices_h._PAIR_SCRIPT, f"{code} has no copy on the redeem page"
+        assert (
+            f"{code}:" in devices_h._PAIR_SCRIPT
+        ), f"{code} has no copy on the redeem page"
 
 
 def test_the_page_reads_the_error_envelope_the_route_actually_emits() -> None:
@@ -831,20 +877,24 @@ def test_the_page_reads_the_error_envelope_the_route_actually_emits() -> None:
 
 
 def test_the_two_standalone_pages_share_one_token_block() -> None:
-    """`/login` and `/pair` are the only surfaces that cannot inherit `web/`'s design system.
+    """`/login` and `/pair` are the only surfaces that cannot inherit `apps/console/`'s design system.
 
     A second hand-written copy of the tokens drifts silently — neither page has a
     visual-regression test that would notice.
     """
-    from gideon.dashboard.handlers.page_shell import PAGE_STYLE
+    from gideon.interfaces.dashboard.handlers.page_shell import PAGE_STYLE
 
     assert PAGE_STYLE in devices_h._PAIR_HTML
     assert PAGE_STYLE in auth_h._LOGIN_HTML
-    assert "--primary" in PAGE_STYLE, "vacuity floor: the shared block carries real tokens"
+    assert (
+        "--primary" in PAGE_STYLE
+    ), "vacuity floor: the shared block carries real tokens"
 
 
 @pytest.mark.asyncio
-async def test_a_wrong_origin_is_refused_on_both_pair_routes(_isolated, monkeypatch) -> None:
+async def test_a_wrong_origin_is_refused_on_both_pair_routes(
+    _isolated, monkeypatch
+) -> None:
     monkeypatch.setattr(devices_h, "check_origin", lambda _r: False)
     async with TestClient(TestServer(_app())) as client:
         for path in ("/api/devices/pair/start", "/api/devices/pair/complete"):
@@ -854,7 +904,9 @@ async def test_a_wrong_origin_is_refused_on_both_pair_routes(_isolated, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_a_session_that_cannot_be_attributed_is_retracted(_isolated, monkeypatch) -> None:
+async def test_a_session_that_cannot_be_attributed_is_retracted(
+    _isolated, monkeypatch
+) -> None:
     """An un-listed device session is the exact failure the registry exists to prevent."""
     monkeypatch.setattr(devices_h, "attach_device", lambda *a, **k: False)
     async with TestClient(TestServer(_app())) as client:

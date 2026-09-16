@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.providers import instances as inst_mod
-from gideon.providers.registry import ToolTypeHandler
+from gideon.extensions.providers import instances as inst_mod
+from gideon.extensions.providers.registry import ToolTypeHandler
 
 
 class _FakeToolProvider:
@@ -21,7 +21,6 @@ class _FakeToolProvider:
 
     def __init__(self, config: dict):
         self.endpoint = config.get("endpoint", "")
-        # unique name per endpoint (mirrors OpenAIToolProvider's slug name)
         self.name = f"openai-{self.endpoint.rsplit('/', 1)[-1] or 'x'}"
 
 
@@ -41,14 +40,13 @@ class _Ext:
 
 @pytest.fixture
 def _cfg_home(tmp_path, monkeypatch):
-    # Redirect the instance store under tmp_path.
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     return tmp_path
 
 
 def _stub_factory(monkeypatch):
     monkeypatch.setattr(
-        "gideon.providers.loader.load_factory",
+        "gideon.extensions.providers.loader.load_factory",
         lambda ext: (lambda config=None: _FakeToolProvider(config or {})),
     )
 
@@ -61,7 +59,6 @@ def test_create_iterates_enabled_instances(_cfg_home, monkeypatch):
     inst_mod.create_instance(
         "openai-tools", display_name="b", config={"endpoint": "https://b.example/2"}
     )
-    # disable the "b" instance (match by endpoint, not creation order).
     b = next(
         i
         for i in inst_mod.list_instances("openai-tools")
@@ -72,15 +69,13 @@ def test_create_iterates_enabled_instances(_cfg_home, monkeypatch):
     handler = ToolTypeHandler()
     result = handler.create(_Ext("openai-tools", multi=True))
     assert isinstance(result, list)
-    # Only the ENABLED instance yields a provider.
     assert len(result) == 1
     assert result[0].endpoint == "https://a.example/1"
-    assert getattr(result[0], "instance_id", None)  # tagged with its instance id
+    assert getattr(result[0], "instance_id", None)
 
 
 def test_create_returns_none_when_no_enabled_instances(_cfg_home, monkeypatch):
     _stub_factory(monkeypatch)
-    # no instances at all
     handler = ToolTypeHandler()
     assert handler.create(_Ext("openai-tools", multi=True)) is None
 
@@ -89,12 +84,12 @@ def test_register_and_deregister_normalize_a_list(_cfg_home, monkeypatch):
     _stub_factory(monkeypatch)
     registered: list[str] = []
     monkeypatch.setattr(
-        "gideon.tool_providers.registry.register_provider",
+        "gideon.integrations.tool_providers.registry.register_provider",
         lambda p: registered.append(p.name),
     )
     unregistered: list[str] = []
     monkeypatch.setattr(
-        "gideon.tool_providers.registry.unregister_provider",
+        "gideon.integrations.tool_providers.registry.unregister_provider",
         lambda n: unregistered.append(n),
     )
     handler = ToolTypeHandler()
@@ -108,10 +103,9 @@ def test_register_and_deregister_normalize_a_list(_cfg_home, monkeypatch):
 
 
 def test_single_instance_tool_path_unchanged(_cfg_home, monkeypatch):
-    # A NON-multiInstance tool app still uses the singleton-config path (one provider).
     _stub_factory(monkeypatch)
     monkeypatch.setattr(
-        "gideon.providers.settings.ProviderSettings.load",
+        "gideon.extensions.providers.settings.ProviderSettings.load",
         staticmethod(lambda name: {"endpoint": "https://single/x"}),
     )
     handler = ToolTypeHandler()

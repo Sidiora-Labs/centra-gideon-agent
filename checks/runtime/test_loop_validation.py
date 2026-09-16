@@ -1,7 +1,7 @@
 """Unit tests for the unified loop pre-flight validation, exercised through the
 ``code`` kind — task length, entry-stage / project-kind checks, verify/test command
 screening, cycle budget, and workspace path-safety (absolute, non-sensitive, not a
-system root). The shared spine lives in :mod:`gideon.loop.validation`; the
+system root). The shared spine lives in :mod:`gideon.automation.loop.validation`; the
 code-specific checks come from the code kind's ``validate_config``.
 
 Unified semantics that differ from the legacy code validator:
@@ -9,14 +9,14 @@ Unified semantics that differ from the legacy code validator:
     later); the launch_blocker enforces it at start. So it no longer blocks here.
   • ``workspace_dir_errors`` is the shared path-safety helper (keyword-only
     ``require_exists``); the system-root + sensitive-dir guards live in
-    :func:`gideon.security.is_sensitive_path`.
+    :func:`gideon.security.security.is_sensitive_path`.
 """
 
 from __future__ import annotations
 
 import os
 
-from gideon.loop import validation as V
+from gideon.automation.loop import validation as V
 
 
 def _ok(**over) -> dict:
@@ -50,15 +50,10 @@ class TestValidation:
         assert r.can_start is False
 
     def test_capitalized_kind_and_stage_accepted(self):
-        # A caller (notably the chat code_project_create tool, where the LLM may
-        # capitalize) shouldn't fail validation over casing — the membership check
-        # lowercases first. "Greenfield"/"Design" are valid.
         r = V.validate(_ok(project_kind="Greenfield", entry_stage="Design"))
         assert r.can_start is True, r.errors
 
     def test_brownfield_without_dir_warns_not_blocks(self):
-        # Unified: a brownfield draft can be created without a dir (picked later);
-        # the launch_blocker enforces it at start. So this is a warning, not a block.
         r = V.validate(_ok(project_kind="brownfield", workspace_dir=""))
         assert r.can_start is True
         assert any("workspace" in w.lower() for w in r.warnings)
@@ -68,9 +63,9 @@ class TestValidation:
         assert r.can_start is True
 
     def test_brownfield_missing_dir_warns_not_blocks(self):
-        # A not-yet-existing dir is a warning at create (the launch action re-validates
-        # existence). Path-safety is what blocks, not existence.
-        r = V.validate(_ok(project_kind="brownfield", workspace_dir="/no/such/dir/xyz123"))
+        r = V.validate(
+            _ok(project_kind="brownfield", workspace_dir="/no/such/dir/xyz123")
+        )
         assert r.can_start is True
         assert any("does not exist" in w.lower() for w in r.warnings)
 
@@ -84,15 +79,13 @@ class TestValidation:
         assert r.can_start is False
 
     def test_relative_workspace_blocks(self):
-        # A relative path is rejected outright as non-absolute (it must name an exact
-        # location, not one resolved against the gateway's cwd).
-        r = V.validate(_ok(project_kind="brownfield", workspace_dir="relative/path/xyz123"))
+        r = V.validate(
+            _ok(project_kind="brownfield", workspace_dir="relative/path/xyz123")
+        )
         assert r.can_start is False
         assert any("absolute" in e.lower() for e in r.errors)
 
     def test_tilde_absolute_workspace_accepted(self, tmp_path, monkeypatch):
-        # A ~-prefixed path expands to an absolute home path → accepted (not flagged
-        # as relative).
         monkeypatch.setenv("HOME", str(tmp_path))
         (tmp_path / "repo").mkdir()
         r = V.validate(_ok(project_kind="brownfield", workspace_dir="~/repo"))
@@ -107,8 +100,6 @@ class TestValidation:
         assert r.can_start is False
 
     def test_workspace_pointing_at_file_blocks(self, tmp_path):
-        # A path that is an existing FILE would crash launch-time os.makedirs — reject
-        # it pre-flight (path-safety is checked regardless of existence semantics).
         f = tmp_path / "notes.txt"
         f.write_text("x")
         r = V.validate(_ok(project_kind="brownfield", workspace_dir=str(f)))
@@ -120,9 +111,6 @@ class TestValidation:
         assert r.can_start is False
 
     def test_estimate_is_self_consistent(self):
-        # estimated_duration_min must derive from the SAME effective cycle count as
-        # estimated_cycles — a capped project AND an uncapped one (which falls back to
-        # the hard cap for cycles) must never report N cycles but 0 minutes.
         capped = V.validate(_ok(max_cycles=30))
         assert capped.estimated_cycles == 30 and capped.estimated_duration_min == 60
         uncapped = V.validate(_ok(max_cycles=0))
@@ -134,7 +122,8 @@ class TestSensitiveWorkspace:
     """The workspace becomes the cwd for an UNSANDBOXED worker + its verify/test
     shells, so a path resolving into a credential dir (~/.aws, ~/.ssh, …) must be
     rejected. validate() realpaths BEFORE is_sensitive_path, so a symlink that
-    *resolves* into a sensitive dir is caught even though its own name looks innocent."""
+    *resolves* into a sensitive dir is caught even though its own name looks innocent.
+    """
 
     def test_direct_sensitive_dir_blocks(self, tmp_path, monkeypatch):
         monkeypatch.setenv("HOME", str(tmp_path))
@@ -156,7 +145,7 @@ class TestSensitiveWorkspace:
         monkeypatch.setenv("HOME", str(tmp_path))
         aws = tmp_path / ".aws"
         aws.mkdir()
-        link = tmp_path / "my-project"  # looks harmless
+        link = tmp_path / "my-project"
         os.symlink(aws, link)
         r = V.validate(_ok(project_kind="brownfield", workspace_dir=str(link)))
         assert r.can_start is False
@@ -177,12 +166,14 @@ class TestSystemPathWorkspace:
 
     def test_filesystem_root_blocks(self):
         assert any(
-            "sensitive location" in e for e in V.workspace_dir_errors("/", require_exists=False)
+            "sensitive location" in e
+            for e in V.workspace_dir_errors("/", require_exists=False)
         )
 
     def test_etc_blocks(self):
         assert any(
-            "sensitive location" in e for e in V.workspace_dir_errors("/etc", require_exists=False)
+            "sensitive location" in e
+            for e in V.workspace_dir_errors("/etc", require_exists=False)
         )
 
     def test_usr_subdir_blocks(self):
@@ -193,15 +184,16 @@ class TestSystemPathWorkspace:
 
     def test_var_blocks(self):
         assert any(
-            "sensitive location" in e for e in V.workspace_dir_errors("/var", require_exists=False)
+            "sensitive location" in e
+            for e in V.workspace_dir_errors("/var", require_exists=False)
         )
 
     def test_macos_temp_child_allowed(self):
-        # pytest tmp dirs realpath under /private/var/folders/... — those MUST pass.
-        errs = V.workspace_dir_errors("/private/var/folders/ab/T/tmpXYZ/proj", require_exists=False)
+        errs = V.workspace_dir_errors(
+            "/private/var/folders/ab/T/tmpXYZ/proj", require_exists=False
+        )
         assert not any("sensitive location" in e for e in errs)
 
     def test_volumes_child_allowed(self):
-        # A child of /Volumes (an external/mounted disk) is a legitimate workspace.
         errs = V.workspace_dir_errors("/Users/dev/repos/my-repo", require_exists=False)
         assert not any("sensitive location" in e for e in errs)

@@ -25,11 +25,11 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.workflows import defs as defs_mod
-from gideon.workflows import handlers as H
-from gideon.workflows import store
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.models import RunStatus, WorkflowRun
+from gideon.automation.workflows import defs as defs_mod
+from gideon.automation.workflows import handlers as H
+from gideon.automation.workflows import store
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.models import RunStatus, WorkflowRun
 
 pytestmark = pytest.mark.anyio
 
@@ -43,7 +43,7 @@ def anyio_backend() -> str:
 def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
 
 
@@ -52,7 +52,11 @@ SPEC_ROOT = {
     "id": "main",
     "children": [
         {"kind": "transform", "id": "seed", "config": {"expr": {"n": 1}}},
-        {"kind": "transform", "id": "tail", "config": {"expr": "got {{nodes.seed.output.n}}"}},
+        {
+            "kind": "transform",
+            "id": "tail",
+            "config": {"expr": "got {{nodes.seed.output.n}}"},
+        },
     ],
 }
 
@@ -116,7 +120,7 @@ class _State:
     def __init__(self, supervisor=None, restricted: bool = False) -> None:
         self.workflows = supervisor
         self._restricted = restricted
-        from gideon.dashboard.sse import SseRegistry
+        from gideon.interfaces.dashboard.sse import SseRegistry
 
         self._sse = SseRegistry()
 
@@ -153,9 +157,6 @@ def _body(resp) -> dict:
     return json.loads(resp.body.decode())
 
 
-# ── the shared-service claim ─────────────────────────────────────────────────
-
-
 class TestOneEngineTwoSurfaces:
     def test_the_handlers_delegate_to_the_service_module(self) -> None:
         """The whole design: two implementations kept in sync by hand is the bug class
@@ -163,8 +164,13 @@ class TestOneEngineTwoSurfaces:
         import inspect
 
         source = inspect.getsource(H)
-        assert "from gideon.workflows import service" in source
-        for call in ("service.list_defs", "service.start_run", "service.status", "service.audit"):
+        assert "from gideon.automation.workflows import service" in source
+        for call in (
+            "service.list_defs",
+            "service.start_run",
+            "service.status",
+            "service.audit",
+        ):
             assert call in source, call
 
     def test_routes_register_and_order_runs_before_the_def_wildcard(self) -> None:
@@ -179,7 +185,7 @@ class TestOneEngineTwoSurfaces:
     def test_the_server_mounts_them(self) -> None:
         import inspect
 
-        from gideon.dashboard import server
+        from gideon.interfaces.dashboard import server
 
         assert "register_workflow_routes" in inspect.getsource(server)
 
@@ -188,14 +194,14 @@ class TestOneEngineTwoSurfaces:
         reports no supervisor — both tolerate None, both are inert."""
         import inspect
 
-        from gideon import gateway
+        from gideon.engine import gateway, nudge_dispatch
 
-        source = inspect.getsource(gateway)
-        assert "dashboard_state.workflows = self.workflow_watchdog" in source
-        assert "svc.workflows = self.workflow_watchdog" in source
-
-
-# ── the error envelope ───────────────────────────────────────────────────────
+        assert "SupervisorAssembly(self, logger).start()" in inspect.getsource(
+            gateway.RuntimeCoordinator._init_autonudge
+        )
+        source = inspect.getsource(nudge_dispatch.SupervisorAssembly)
+        assert "runtime.dashboard_state.workflows = runtime.workflow_watchdog" in source
+        assert "service.workflows = runtime.workflow_watchdog" in source
 
 
 class TestErrorEnvelope:
@@ -219,7 +225,9 @@ class TestErrorEnvelope:
 
     def test_the_actionable_payload_survives_into_detail(self) -> None:
         """Dropping the issue list leaves a client with a status and nothing to show."""
-        resp = H._fail({"code": "WF_DEF_INVALID", "message": "bad", "issues": [{"code": "X"}]})
+        resp = H._fail(
+            {"code": "WF_DEF_INVALID", "message": "bad", "issues": [{"code": "X"}]}
+        )
         assert _body(resp)["error"]["detail"]["issues"] == [{"code": "X"}]
 
     def test_the_service_code_is_preserved_for_finer_branching(self) -> None:
@@ -231,9 +239,6 @@ class TestErrorEnvelope:
         """`ok` is the service's internal discriminator; HTTP already carries status."""
         resp = H._ok({"ok": True, "run_id": "abc"})
         assert _body(resp) == {"run_id": "abc"}
-
-
-# ── definitions ──────────────────────────────────────────────────────────────
 
 
 class TestDefRoutes:
@@ -260,7 +265,9 @@ class TestDefRoutes:
         got = _body(await H.api_def_detail(req))
         assert got["definition"]["name"] == "api-wf"
 
-    async def test_a_dry_run_save_writes_nothing_and_returns_200(self, provider) -> None:
+    async def test_a_dry_run_save_writes_nothing_and_returns_200(
+        self, provider
+    ) -> None:
         resp = await H.api_def_save(
             _req(
                 "POST",
@@ -274,15 +281,29 @@ class TestDefRoutes:
 
     async def test_an_invalid_root_is_a_400(self, provider) -> None:
         resp = await H.api_def_save(
-            _req("POST", "/api/workflows", state=_State(), body={"name": "x", "root": "nope"})
+            _req(
+                "POST",
+                "/api/workflows",
+                state=_State(),
+                body={"name": "x", "root": "nope"},
+            )
         )
         assert resp.status == 400
         assert _body(resp)["error"]["code"] == "invalid_request"
 
     async def test_an_invalid_spec_is_a_422_with_its_issues(self, provider) -> None:
-        bad = {"kind": "sequence", "id": "s", "children": [{"kind": "infer", "id": "x"}]}
+        bad = {
+            "kind": "sequence",
+            "id": "s",
+            "children": [{"kind": "infer", "id": "x"}],
+        }
         resp = await H.api_def_save(
-            _req("POST", "/api/workflows", state=_State(), body={"name": "bad-wf", "root": bad})
+            _req(
+                "POST",
+                "/api/workflows",
+                state=_State(),
+                body={"name": "bad-wf", "root": bad},
+            )
         )
         assert resp.status == 422
         assert _body(resp)["error"]["detail"]["issues"]
@@ -295,12 +316,20 @@ class TestDefRoutes:
                 {
                     "kind": "action",
                     "id": "a",
-                    "config": {"provider": "bash", "token": "ghp_abcdefghijklmnopqrstuv"},
+                    "config": {
+                        "provider": "bash",
+                        "token": "ghp_abcdefghijklmnopqrstuv",
+                    },
                 }
             ],
         }
         resp = await H.api_def_save(
-            _req("POST", "/api/workflows", state=_State(), body={"name": "leak", "root": root})
+            _req(
+                "POST",
+                "/api/workflows",
+                state=_State(),
+                body={"name": "leak", "root": root},
+            )
         )
         assert resp.status == 422
         assert _body(resp)["error"]["code"] == "inline_secret"
@@ -326,9 +355,6 @@ class TestDefRoutes:
         assert 'provenance="user"' in inspect.getsource(H.api_def_save)
 
 
-# ── runs ─────────────────────────────────────────────────────────────────────
-
-
 class TestRunRoutes:
     async def test_starting_a_run_returns_202_and_launches(self, provider) -> None:
         await provider.save_def(name="run-wf", root=SPEC_ROOT)
@@ -345,7 +371,9 @@ class TestRunRoutes:
         body = _body(resp)
         assert body["run_id"] and sup.launched == [body["run_id"]]
 
-    async def test_a_blocking_run_returns_200_with_the_final_state(self, provider) -> None:
+    async def test_a_blocking_run_returns_200_with_the_final_state(
+        self, provider
+    ) -> None:
         await provider.save_def(name="block-wf", root=SPEC_ROOT)
         resp = await H.api_run_start(
             _req(
@@ -497,7 +525,9 @@ class TestRunRoutes:
             "/api/workflows/runs/x/edit",
             state=_State(None),
             body={
-                "ops": [{"op": "update_node", "node_id": "tail", "fields": {"expr": "z"}}],
+                "ops": [
+                    {"op": "update_node", "node_id": "tail", "fields": {"expr": "z"}}
+                ],
                 "preview_only": True,
             },
         )
@@ -506,7 +536,9 @@ class TestRunRoutes:
         assert resp.status == 200 and _body(resp)["queued"] is False
 
     async def test_empty_ops_are_a_400(self) -> None:
-        req = _req("POST", "/api/workflows/runs/x/edit", state=_State(None), body={"ops": []})
+        req = _req(
+            "POST", "/api/workflows/runs/x/edit", state=_State(None), body={"ops": []}
+        )
         req.match_info["run_id"] = "abc"
         assert (await H.api_run_edit(req)).status == 400
 
@@ -533,7 +565,9 @@ class TestRunRoutes:
                 )
             )
         )
-        req = _req("POST", "/api/workflows/runs/x/fork", state=_State(), body={"note": "alt"})
+        req = _req(
+            "POST", "/api/workflows/runs/x/fork", state=_State(), body={"note": "alt"}
+        )
         req.match_info["run_id"] = started["run_id"]
         resp = await H.api_run_fork(req)
         assert resp.status == 201
@@ -568,9 +602,6 @@ class TestRunRoutes:
         assert (await H.api_run_continuations(req)).status == 404
 
 
-# ── audit + manifest ─────────────────────────────────────────────────────────
-
-
 class TestAuditAndManifest:
     async def test_audit_defaults_to_dry_run(self) -> None:
         """A repair that ran by default on a GET-shaped call would be a foot-gun."""
@@ -578,8 +609,9 @@ class TestAuditAndManifest:
         assert resp.status == 200 and _body(resp)["dry_run"] is True
 
     async def test_heal_requires_a_non_restricted_session(self) -> None:
-        req = _req("GET", "/api/workflows/audit?dry_run=false", state=_State(restricted=True))
-        # A non-restricted state still heals; the guard reads the state's own check.
+        req = _req(
+            "GET", "/api/workflows/audit?dry_run=false", state=_State(restricted=True)
+        )
         resp = await H.api_audit(req)
         assert resp.status == 200 and _body(resp)["dry_run"] is False
 
@@ -588,17 +620,17 @@ class TestAuditAndManifest:
         assert body["node_kinds"] and body["mutation_ops"]
 
 
-# ── restricted sessions ──────────────────────────────────────────────────────
-
-
 class TestRestrictedSessions:
     async def test_a_restricted_session_cannot_start_a_run(self, monkeypatch) -> None:
         """A workflow run spends money and touches the world."""
         monkeypatch.setattr(
-            "gideon.workflows.handlers._is_restricted_session", lambda s, r: True
+            "gideon.automation.workflows.handlers._is_restricted_session",
+            lambda s, r: True,
         )
         resp = await H.api_run_start(
-            _req("POST", "/api/workflows/runs", state=_State(_Sup()), body={"name": "x"})
+            _req(
+                "POST", "/api/workflows/runs", state=_State(_Sup()), body={"name": "x"}
+            )
         )
         assert resp.status == 403
         assert _body(resp)["error"]["code"] == "restricted_session"
@@ -606,7 +638,8 @@ class TestRestrictedSessions:
     async def test_reads_are_not_gated(self, monkeypatch) -> None:
         """A read has no side effect; gating it would make an incognito session useless."""
         monkeypatch.setattr(
-            "gideon.workflows.handlers._is_restricted_session", lambda s, r: True
+            "gideon.automation.workflows.handlers._is_restricted_session",
+            lambda s, r: True,
         )
         assert (await H.api_defs_list(_req("GET", "/api/workflows"))).status == 200
 
@@ -626,9 +659,6 @@ class TestRestrictedSessions:
             H.api_run_fork,
         ):
             assert "_guard(" in inspect.getsource(fn), fn.__name__
-
-
-# ── SSE ──────────────────────────────────────────────────────────────────────
 
 
 class TestRunEvents:
@@ -661,14 +691,16 @@ class TestRunEvents:
         it — and the symptom would surface in a browser console instead of here."""
         import inspect
 
-        from gideon.workflows.projection import validate_snapshot
+        from gideon.automation.workflows.projection import validate_snapshot
 
         source = inspect.getsource(H.api_run_events)
-        assert "from gideon.workflows.projection import project" in source
+        assert "from gideon.automation.workflows.projection import project" in source
 
         run = store.create(WorkflowRun(id="", workflow_name="w"))
-        store.write_spec(run.id, {"name": "w", "root": {"kind": "transform", "id": "a"}})
-        from gideon.workflows.projection import project
+        store.write_spec(
+            run.id, {"name": "w", "root": {"kind": "transform", "id": "a"}}
+        )
+        from gideon.automation.workflows.projection import project
 
         snap, issues = project(run.id)
         assert issues == []
@@ -682,9 +714,6 @@ class TestRunEvents:
         assert "TERMINAL_RUN_STATUSES" in inspect.getsource(H.api_run_events)
 
 
-# ── the offline reference ────────────────────────────────────────────────────
-
-
 class TestReferenceCoverage:
     def test_the_workflow_routes_are_in_the_offline_reference(self) -> None:
         """The reference walked only `dashboard/`, so entity families registered from their
@@ -694,7 +723,9 @@ class TestReferenceCoverage:
 
         import gideon
 
-        routes_md = (Path(gideon.__file__).parent / "reference" / "routes.md").read_text()
+        routes_md = (
+            Path(gideon.__file__).parent / "reference" / "routes.md"
+        ).read_text()
         assert "/api/workflows/runs" in routes_md
         assert "/api/workflows/manifest" in routes_md
 
@@ -705,12 +736,14 @@ class TestReferenceCoverage:
 
         import gideon
 
-        routes_md = (Path(gideon.__file__).parent / "reference" / "routes.md").read_text()
+        routes_md = (
+            Path(gideon.__file__).parent / "reference" / "routes.md"
+        ).read_text()
         assert "/api/artifacts" in routes_md
         assert "/api/tasks" in routes_md
 
     def test_the_walker_scans_the_whole_package(self) -> None:
-        from gideon.manifest_reference import _route_source_files
+        from gideon.extensions.manifest_reference import _route_source_files
 
         names = {p.name for p in _route_source_files()}
         assert "handlers.py" in names
@@ -747,19 +780,25 @@ class TestWorkspaceRoute:
             f"{r.method} {r.resource.canonical}"
             for r in app.router.routes()
             if r.method != "GET"
-            and any(w in r.resource.canonical for w in ("apply", "checkout", "reintegrat"))
+            and any(
+                w in r.resource.canonical for w in ("apply", "checkout", "reintegrat")
+            )
         ]
         assert offending == [], offending
 
     async def test_an_unknown_run_is_a_404(self) -> None:
-        resp = await H.api_run_workspace(_req("GET", "/api/workflows/runs/nope/workspace"))
+        resp = await H.api_run_workspace(
+            _req("GET", "/api/workflows/runs/nope/workspace")
+        )
         assert resp.status == 404
         assert _body(resp)["error"]["code"] == "not_found"
 
     async def test_a_run_with_no_workspace_answers_with_an_empty_review(self) -> None:
         """The COMMON case — a workspace is a declaration, not a default — so it answers 200 with
         an empty diff rather than an error the FE would render as a failure."""
-        run = store.create(WorkflowRun(id="", workflow_name="wf", status=RunStatus.COMPLETE))
+        run = store.create(
+            WorkflowRun(id="", workflow_name="wf", status=RunStatus.COMPLETE)
+        )
         req = _req("GET", f"/api/workflows/runs/{run.id}/workspace")
         req.match_info["run_id"] = run.id  # type: ignore[index]
         resp = await H.api_run_workspace(req)
@@ -767,10 +806,6 @@ class TestWorkspaceRoute:
         body = _body(resp)
         assert body["workspace"]["path"] == ""
         assert body["workspace"]["changed"] == []
-        # EI-8 §6.2: the localhost web preview travels on THIS payload. Pinned at the route,
-        # not only in the service, because the cockpit's type declares the field — a frontend
-        # reader of a key the route never sends is the defect this asserts away. An inline run
-        # has nothing to preview and says so rather than triggering a host-wide port scan.
         assert body["preview"]["ports"] == []
         assert "no isolated workspace" in body["preview"]["reason"]
 
@@ -782,9 +817,6 @@ class TestWorkspaceRoute:
         source = inspect.getsource(H.api_run_delete)
         assert 'request.query.get("keep_open"' in source
         assert "keep_open=keep_open" in source
-
-
-# ── introspection: the nine questions (WORK-CONTAINERS §6.4, R6 — WF2WOR-7) ──
 
 
 class TestIntrospectRoute:
@@ -836,14 +868,14 @@ class TestIntrospectRoute:
         run_id = await self._started(provider, "intro-real")
         body = await self._introspect(run_id)
         assert body["run_id"] == run_id
-        # The run really ran, so the projection must SEE that. Zeros here mean the route read a
-        # different run's journal, or none.
         assert body["stats"]["steps_completed"] >= 2, body["stats"]
         assert body["timeline"], "the journal timeline is empty for a run that executed"
         kinds = {row["kind"] for row in body["timeline"]}
         assert "step_completed" in kinds, kinds
 
-    async def test_the_edge_distribution_rides_the_real_response(self, provider) -> None:
+    async def test_the_edge_distribution_rides_the_real_response(
+        self, provider
+    ) -> None:
         """PP-8 wired-vs-inert: the edge-decision projection must be CALLED by the route, not
         merely exist. A run with no branch has an empty distribution — but the key, and its shape,
         prove the route reads it. `risky.edges` carries the same object so the "what is risky"
@@ -853,10 +885,12 @@ class TestIntrospectRoute:
         assert body["edges"] == {"branches": {}, "judges": {}}, body["edges"]
         assert body["answers"]["risky"]["edges"] == {"branches": {}, "judges": {}}
 
-    async def test_the_projection_agrees_with_the_engines_own_totals(self, provider) -> None:
+    async def test_the_projection_agrees_with_the_engines_own_totals(
+        self, provider
+    ) -> None:
         """Two aggregates over one journal that disagreed would put different numbers for the same
         run on the cockpit strip and the run row, with no way to tell which lied."""
-        from gideon.workflows import journal as J
+        from gideon.automation.workflows import journal as J
 
         run_id = await self._started(provider, "intro-agree")
         body = await self._introspect(run_id)
@@ -867,8 +901,9 @@ class TestIntrospectRoute:
 
     async def test_all_nine_checklist_questions_are_answered(self, provider) -> None:
         """The atom's actual criterion. `checklist_gaps` is the contract: a non-empty list names a
-        question this payload cannot answer, and an evaluator would hit that hole in the UI."""
-        from gideon.workflows.introspection import CHECKLIST
+        question this payload cannot answer, and an evaluator would hit that hole in the UI.
+        """
+        from gideon.automation.workflows.introspection import CHECKLIST
 
         run_id = await self._started(provider, "intro-nine")
         body = await self._introspect(run_id)
@@ -878,13 +913,16 @@ class TestIntrospectRoute:
 
     async def test_an_empty_answer_is_still_an_answer(self, provider) -> None:
         """ "Nothing is blocked" is an answer. A surface treating empty as a gap would make an
-        idle instance look broken — the module's own documented rule, asserted at the route."""
+        idle instance look broken — the module's own documented rule, asserted at the route.
+        """
         run_id = await self._started(provider, "intro-empty")
         body = await self._introspect(run_id)
         assert body["answers"]["blocked"] == []
         assert body["checklist_gaps"] == []
 
-    async def test_the_next_if_silent_answer_distinguishes_its_three_cases(self, provider) -> None:
+    async def test_the_next_if_silent_answer_distinguishes_its_three_cases(
+        self, provider
+    ) -> None:
         """The one question no other surface answers, and the one that decides whether a user can
         walk away. A completed run must say it has stopped, not that it 'proceeds'."""
         run_id = await self._started(provider, "intro-next")
@@ -893,7 +931,9 @@ class TestIntrospectRoute:
         run = store.get(run_id)
         assert run is not None
         if run.status in (RunStatus.COMPLETE, RunStatus.FAILED, RunStatus.CANCELLED):
-            assert body["answers"]["next"]["action"] == "nothing", body["answers"]["next"]
+            assert body["answers"]["next"]["action"] == "nothing", body["answers"][
+                "next"
+            ]
 
     async def test_the_proof_section_states_its_own_caveat(self, provider) -> None:
         """A Proof section with no evidence and no warning is the worst possible surface: it looks
@@ -913,15 +953,19 @@ class TestIntrospectRoute:
         assert one["template_card"]["runs"] >= 1
         second = await self._started(provider, "intro-card")
         two = await self._introspect(second)
-        assert two["template_card"]["runs"] > one["template_card"]["runs"], two["template_card"]
+        assert two["template_card"]["runs"] > one["template_card"]["runs"], two[
+            "template_card"
+        ]
 
-    async def test_the_timeline_is_redacted_through_the_journals_own_redactor(self) -> None:
+    async def test_the_timeline_is_redacted_through_the_journals_own_redactor(
+        self,
+    ) -> None:
         """The ledger records failure detail and model verbatim, and a failure message is exactly
         where a credential surfaces in a screenshot. Reusing `journal.redact` rather than a local
         scrubber is what keeps the two from drifting."""
         import inspect
 
-        from gideon.workflows import service as S
+        from gideon.automation.workflows import service as S
 
         source = inspect.getsource(S.introspection_timeline)
         assert "journal_mod.redact" in source
@@ -936,12 +980,9 @@ class TestIntrospectRoute:
             if "introspect" in (r.resource.canonical if r.resource else "")
         ]
         assert matched, "the introspect route is not registered"
-        # HEAD rides along with `add_get` and is equally a read. What must not appear is a
-        # mutating verb: a POST here would invite a surface to "refresh" stats by writing.
-        assert all(r.method in ("GET", "HEAD") for r in matched), [r.method for r in matched]
-
-
-# ── PP-16 seam 4f: the per-run policy-overrides write surface ────────────────
+        assert all(r.method in ("GET", "HEAD") for r in matched), [
+            r.method for r in matched
+        ]
 
 
 class TestPolicyOverridesRoute:
@@ -990,19 +1031,20 @@ class TestPolicyOverridesRoute:
         run row, so a live overlay edit would be silently reverted by the next engine
         save — and the loop side froze these knobs at launch, so a run must not silently
         gain a capability loops never had."""
-        run = store.create(WorkflowRun(id="", workflow_name="w", status=RunStatus.RUNNING))
+        run = store.create(
+            WorkflowRun(id="", workflow_name="w", status=RunStatus.RUNNING)
+        )
         resp = await self._put(run.id, {"max_cycles": 2})
         assert resp.status == 409
         body = _body(resp)
         assert body["error"]["code"] == "run_not_prelaunch"
         assert body["error"]["service_code"] == "WF_RUN_NOT_PRELAUNCH"
-        # Nothing was written through the refusal.
         assert store.get(run.id).policy_overrides == {}
 
     async def test_the_gate_reads_the_phase_not_the_draft_literal(self) -> None:
         """Every non-prelaunch phase refuses — asserted across the whole status vocabulary
         so a future status added to models.py inherits the gate by construction."""
-        from gideon.workflows.models import RUN_PHASES, LifecyclePhase
+        from gideon.automation.workflows.models import RUN_PHASES, LifecyclePhase
 
         for status, phase in RUN_PHASES.items():
             run = store.create(WorkflowRun(id="", workflow_name="w", status=status))
@@ -1013,10 +1055,14 @@ class TestPolicyOverridesRoute:
                 assert resp.status == 409, status
                 assert _body(resp)["error"]["code"] == "run_not_prelaunch"
 
-    async def test_an_unknown_key_is_a_400_naming_keys_and_the_overridable_set(self) -> None:
+    async def test_an_unknown_key_is_a_400_naming_keys_and_the_overridable_set(
+        self,
+    ) -> None:
         """The seam-4d strict write side, surfaced: the response must carry WHAT was wrong
         (`unknown_keys`) and what would have been right (`overridable`)."""
-        from gideon.workflows.supervisor_policy import OVERRIDABLE_POLICY_KEYS
+        from gideon.automation.workflows.supervisor_policy import (
+            OVERRIDABLE_POLICY_KEYS,
+        )
 
         run = store.create(WorkflowRun(id="", workflow_name="w"))
         resp = await self._put(run.id, {"max_cyclez": 9, "attended": True})
@@ -1025,7 +1071,6 @@ class TestPolicyOverridesRoute:
         assert body["error"]["code"] == "unknown_policy_key"
         assert body["error"]["detail"]["unknown_keys"] == ["max_cyclez"]
         assert body["error"]["detail"]["overridable"] == sorted(OVERRIDABLE_POLICY_KEYS)
-        # Refused BEFORE writing: the stored overlay is untouched.
         assert store.get(run.id).policy_overrides == {}
 
     async def test_a_missing_run_is_a_404(self) -> None:

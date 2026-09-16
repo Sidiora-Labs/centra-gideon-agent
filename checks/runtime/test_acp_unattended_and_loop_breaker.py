@@ -21,31 +21,29 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from gideon.acp.adapter import acp_event_to_agent_event
-from gideon.acp.client import AcpClient
-from gideon.acp.permission_authority import HOST_AUTHORITY_MODE
-from gideon.acp.translate import extract_tool_update_events
-from gideon.acp.types import JsonRpcMessage
-from gideon.dashboard.chat_runner import run_chat
-from gideon.dashboard.state import DashboardState, _ChatSession
-from gideon.guardrails.loop_breaker import (
-    BLOCK_THRESHOLD,
-    CIRCUIT_THRESHOLD,
-    WARN_THRESHOLD,
-    params_key,
-)
-from gideon.history import ConversationLog
-from gideon.hooks import ToolHookResult
-from gideon.llm.acp_session_provider import AcpSessionProvider
-from gideon.llm.base import (
+from gideon.cognition.history import ConversationLog
+from gideon.engine.hooks import ToolHookResult
+from gideon.integrations.acp.adapter import acp_event_to_agent_event
+from gideon.integrations.acp.client import AcpClient
+from gideon.integrations.acp.permission_authority import HOST_AUTHORITY_MODE
+from gideon.integrations.acp.translate import extract_tool_update_events
+from gideon.integrations.acp.types import JsonRpcMessage
+from gideon.integrations.llm.acp_session_provider import AcpSessionProvider
+from gideon.integrations.llm.base import (
     EVENT_COMPLETE,
     EVENT_PERMISSION_REQUEST,
     EVENT_TOOL_CALL,
     EVENT_TOOL_RESULT,
     LLMEvent,
 )
-
-# ── door 1: AcpClient — the chokepoint every mode path crosses ────────────────
+from gideon.interfaces.dashboard.chat_runner import run_chat
+from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
+from gideon.security.guardrails.loop_breaker import (
+    BLOCK_THRESHOLD,
+    CIRCUIT_THRESHOLD,
+    WARN_THRESHOLD,
+    params_key,
+)
 
 
 class TestAcpClientModeDoor:
@@ -64,8 +62,16 @@ class TestAcpClientModeDoor:
         assert c._unattended is False
 
     def test_interactive_clamps_every_auto_approve_spelling(self):
-        for spelling in ("acceptEdits", "accept-edits", "dontAsk", "yolo", "bypassPermissions"):
-            assert AcpClient(mode=spelling, command=["true"])._mode == HOST_AUTHORITY_MODE
+        for spelling in (
+            "acceptEdits",
+            "accept-edits",
+            "dontAsk",
+            "yolo",
+            "bypassPermissions",
+        ):
+            assert (
+                AcpClient(mode=spelling, command=["true"])._mode == HOST_AUTHORITY_MODE
+            )
 
     def test_unattended_session_keeps_bypass(self):
         """§2.3's explicit path — and the reason gap 3 was a gap."""
@@ -86,9 +92,6 @@ class TestAcpClientModeDoor:
     def test_plan_mode_unaffected_either_way(self):
         assert AcpClient(mode="plan", command=["true"])._mode == "plan"
         assert AcpClient(mode="plan", command=["true"], unattended=True)._mode == "plan"
-
-
-# ── door 2: the POOLED path (a warmed connection, specialized on claim) ──────
 
 
 class _FakeConn:
@@ -121,15 +124,21 @@ class TestPooledModeDoor:
     @pytest.mark.asyncio
     async def test_pooled_interactive_still_clamps(self):
         p, conn = self._mk(unattended=False)
-        with patch("gideon.sel.sel", MagicMock()):
+        with patch("gideon.security.sel.sel", MagicMock()):
             await p.set_mode("bypassPermissions")
-        assert conn._dialect.set_mode_request.call_args.kwargs["mode"] == HOST_AUTHORITY_MODE
+        assert (
+            conn._dialect.set_mode_request.call_args.kwargs["mode"]
+            == HOST_AUTHORITY_MODE
+        )
 
     @pytest.mark.asyncio
     async def test_pooled_unattended_forwards_bypass(self):
         p, conn = self._mk(unattended=True)
         await p.set_mode("bypassPermissions")
-        assert conn._dialect.set_mode_request.call_args.kwargs["mode"] == "bypassPermissions"
+        assert (
+            conn._dialect.set_mode_request.call_args.kwargs["mode"]
+            == "bypassPermissions"
+        )
 
     @pytest.mark.asyncio
     async def test_set_unattended_before_set_mode_is_what_lets_it_through(self):
@@ -138,10 +147,10 @@ class TestPooledModeDoor:
         p, conn = self._mk(unattended=False)
         p.set_unattended(True)
         await p.set_mode("bypassPermissions")
-        assert conn._dialect.set_mode_request.call_args.kwargs["mode"] == "bypassPermissions"
-
-
-# ── the bridge kwarg: unattended must STOP being popped for ACP ──────────────
+        assert (
+            conn._dialect.set_mode_request.call_args.kwargs["mode"]
+            == "bypassPermissions"
+        )
 
 
 class TestBridgeThreadsUnattendedToAcp:
@@ -150,7 +159,7 @@ class TestBridgeThreadsUnattendedToAcp:
     a pop would show up as a missing kwarg."""
 
     def _entry(self):
-        from gideon.llm.registry import ProviderEntry
+        from gideon.integrations.llm.registry import ProviderEntry
 
         return ProviderEntry(
             name="acp:demo-cli",
@@ -160,7 +169,7 @@ class TestBridgeThreadsUnattendedToAcp:
         )
 
     def test_factory_honours_unattended_true(self):
-        from gideon.llm.acp_agent import _factory
+        from gideon.integrations.llm.acp_agent import _factory
 
         p = _factory(entry=self._entry(), acp_mode="bypassPermissions", unattended=True)
         assert p._unattended is True
@@ -168,7 +177,7 @@ class TestBridgeThreadsUnattendedToAcp:
 
     def test_factory_without_the_kwarg_stays_clamped(self):
         """The pre-AAP-6 behaviour, kept as the floor: no flag → AAP-5's clamp."""
-        from gideon.llm.acp_agent import _factory
+        from gideon.integrations.llm.acp_agent import _factory
 
         p = _factory(entry=self._entry(), acp_mode="bypassPermissions")
         assert p._unattended is False
@@ -184,7 +193,7 @@ class TestBridgeThreadsUnattendedToAcp:
         ``_resolve_from_config_registry`` — which was only reachable because an
         ``acp:<cli>`` kind used to resolve a MODEL (`G158`).
         """
-        import gideon.providers.provider_bridge as pb
+        import gideon.extensions.providers.provider_bridge as pb
 
         seen: dict = {}
         model_axis_called: list[str] = []
@@ -216,7 +225,9 @@ class TestBridgeThreadsUnattendedToAcp:
         seen.clear()
         model_axis_called.clear()
         with patch.object(pb, "_resolve_from_config_registry", _fake_registry_resolve):
-            with patch.object(pb, "_build_native_runtime", lambda **kw: seen.update(kw)):
+            with patch.object(
+                pb, "_build_native_runtime", lambda **kw: seen.update(kw)
+            ):
                 pb.resolve_provider_for_use_case(
                     "chat",
                     session_key="chat-1",
@@ -224,12 +235,7 @@ class TestBridgeThreadsUnattendedToAcp:
                     provider_kind="native",
                     unattended=True,
                 )
-        # The native branch takes it as an EXPLICIT argument, never via **kwargs — so
-        # it is present as a real parameter and absent from the forwarded kwargs.
         assert seen.get("unattended") is True
-
-
-# ── translate: the failure bit the breaker needs (was dropped entirely) ──────
 
 
 class TestAcpFailureSignalReachesTheHost:
@@ -244,7 +250,9 @@ class TestAcpFailureSignalReachesTheHost:
                     "sessionUpdate": "tool_call_update",
                     "toolCallId": "t1",
                     "status": status,
-                    "content": [{"type": "content", "content": {"type": "text", "text": "boom"}}],
+                    "content": [
+                        {"type": "content", "content": {"type": "text", "text": "boom"}}
+                    ],
                 }
             },
         )
@@ -262,13 +270,16 @@ class TestAcpFailureSignalReachesTheHost:
         assert results and "ok" not in results[0].tool_meta
 
 
-# ── the same bit, DERIVED so it does not depend on the runtime's word (`G151`) ──
-
-
 def _terminal_frame(update: dict) -> JsonRpcMessage:
     return JsonRpcMessage(
         method="session/update",
-        params={"update": {"sessionUpdate": "tool_call_update", "toolCallId": "t1", **update}},
+        params={
+            "update": {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "t1",
+                **update,
+            }
+        },
     )
 
 
@@ -281,9 +292,6 @@ def _ok_bit(update: dict):
     return results[0].tool_meta.get("ok", "ABSENT")
 
 
-# Byte-copies of the frames the two CLIs actually sent for the SAME command,
-# `bash -c 'echo boom >&2; exit 3'`, captured live on 2026-08-23. The whole point of
-# the atom is that these two disagree, so paraphrasing them would test the paraphrase.
 KIRO_FAILED_FRAME = {
     "kind": "execute",
     "status": "completed",
@@ -293,7 +301,15 @@ KIRO_FAILED_FRAME = {
         "command": "bash -c 'echo boom >&2; exit 3'",
     },
     "rawOutput": {
-        "items": [{"Json": {"exit_status": "exit status: 3", "stdout": "", "stderr": "boom\n"}}]
+        "items": [
+            {
+                "Json": {
+                    "exit_status": "exit status: 3",
+                    "stdout": "",
+                    "stderr": "boom\n",
+                }
+            }
+        ]
     },
 }
 KIRO_PASSED_FRAME = {
@@ -302,7 +318,15 @@ KIRO_PASSED_FRAME = {
     "title": "Running: bash -c 'echo hello; exit 0'",
     "rawInput": {"command": "bash -c 'echo hello; exit 0'"},
     "rawOutput": {
-        "items": [{"Json": {"exit_status": "exit status: 0", "stdout": "hello\n", "stderr": ""}}]
+        "items": [
+            {
+                "Json": {
+                    "exit_status": "exit status: 0",
+                    "stdout": "hello\n",
+                    "stderr": "",
+                }
+            }
+        ]
     },
 }
 CODEX_FAILED_FRAME = {
@@ -345,7 +369,9 @@ class TestFailureBitIsRuntimeAgnostic:
         frame = {
             "status": "completed",
             "rawInput": {"command": "bash -c 'echo boom >&2; exit 3'"},
-            "rawOutput": {"items": [{"Json": {"exit_status": "exit status: 0", "stdout": ""}}]},
+            "rawOutput": {
+                "items": [{"Json": {"exit_status": "exit status: 0", "stdout": ""}}]
+            },
         }
         assert _ok_bit(frame) == "ABSENT"
 
@@ -355,7 +381,10 @@ class TestFailureBitIsRuntimeAgnostic:
         frame = {
             "status": "completed",
             "content": [
-                {"type": "content", "content": {"type": "text", "text": "3 failed, exit 1, ERROR"}}
+                {
+                    "type": "content",
+                    "content": {"type": "text", "text": "3 failed, exit 1, ERROR"},
+                }
             ],
         }
         assert _ok_bit(frame) == "ABSENT"
@@ -366,7 +395,11 @@ class TestFailureBitIsRuntimeAgnostic:
         frame = {
             "status": "completed",
             "content": [
-                {"type": "content", "isError": True, "content": {"type": "text", "text": "no"}}
+                {
+                    "type": "content",
+                    "isError": True,
+                    "content": {"type": "text", "text": "no"},
+                }
             ],
         }
         assert _ok_bit(frame) is False
@@ -374,12 +407,18 @@ class TestFailureBitIsRuntimeAgnostic:
     def test_a_frame_declaring_nothing_stays_a_success(self):
         """Vacuity floor 4: no exit status anywhere → absent, not failed. Most tool
         results (a file read, a search) carry no exit status at all."""
-        assert _ok_bit({"status": "completed", "rawOutput": {"content": "hello"}}) == "ABSENT"
+        assert (
+            _ok_bit({"status": "completed", "rawOutput": {"content": "hello"}})
+            == "ABSENT"
+        )
 
     def test_a_true_flag_is_not_read_as_exit_one(self):
         """``True == 1`` in Python, so a boolean under an exit-status key would read as
         "exited 1" if the type were not checked first."""
-        assert _ok_bit({"status": "completed", "rawOutput": {"exit_code": True}}) == "ABSENT"
+        assert (
+            _ok_bit({"status": "completed", "rawOutput": {"exit_code": True}})
+            == "ABSENT"
+        )
 
     def test_deeply_buried_status_is_bounded_not_infinite(self):
         """kiro buries the status two levels down, so the walk must descend — but it is
@@ -390,9 +429,6 @@ class TestFailureBitIsRuntimeAgnostic:
         assert _ok_bit({"status": "completed", "rawOutput": deep}) == "ABSENT"
         shallow: dict = {"a": {"b": {"exit_code": 3}}}
         assert _ok_bit({"status": "completed", "rawOutput": shallow}) is False
-
-
-# ── the run_chat harness (same shape as AAP-5's) ────────────────────────────
 
 
 async def _async_iter(items):
@@ -408,7 +444,7 @@ def _make_state(tmp_path):
     sessions.get_or_create = AsyncMock(return_value=(client, True, False))
     sessions.record_failure = AsyncMock()
     sessions.check_context_usage = MagicMock()
-    state = DashboardState(
+    state = ConsoleState(
         sessions=sessions,
         start_time=0.0,
         conversation_log=ConversationLog(base_dir=tmp_path),
@@ -441,7 +477,7 @@ def _texts(session):
 
 
 async def _drive(state, session):
-    with patch("gideon.dashboard.chat_runner.sel", MagicMock()):
+    with patch("gideon.interfaces.dashboard.chat_runner.sel", MagicMock()):
         await run_chat(state, session, "hello")
 
 
@@ -456,9 +492,19 @@ def _decoded_result(frame: dict, call_id: str) -> LLMEvent:
     """
     msg = JsonRpcMessage(
         method="session/update",
-        params={"update": {"sessionUpdate": "tool_call_update", "toolCallId": call_id, **frame}},
+        params={
+            "update": {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": call_id,
+                **frame,
+            }
+        },
     )
-    results = [e for e in extract_tool_update_events(msg, {}, {}) if e.kind == EVENT_TOOL_RESULT]
+    results = [
+        e
+        for e in extract_tool_update_events(msg, {}, {})
+        if e.kind == EVENT_TOOL_RESULT
+    ]
     assert results, f"the decoder produced no tool result for {frame!r}"
     return acp_event_to_agent_event(results[0])
 
@@ -502,9 +548,6 @@ def _fail_cycle(n):
         )
     out.append(LLMEvent(kind=EVENT_COMPLETE, stop_reason="end_turn"))
     return out
-
-
-# ── gap 3: which sessions count as unattended, and what that changes ─────────
 
 
 class TestUnattendedClassification:
@@ -585,7 +628,9 @@ class TestUnattendedFailFast:
         assert any("auto-denied" in t for t in _texts(session))
 
     @pytest.mark.asyncio
-    async def test_interactive_permission_request_still_parks_for_a_human(self, tmp_path):
+    async def test_interactive_permission_request_still_parks_for_a_human(
+        self, tmp_path
+    ):
         """The floor for the fail-fast: it must NOT leak into an attended session.
         Here the card is rendered and the turn waits until answered."""
         state, client = _make_state(tmp_path)
@@ -619,9 +664,6 @@ class TestUnattendedFailFast:
         assert not any("auto-denied" in t for t in _texts(session))
 
 
-# ── gap 5: the breaker, driven over a real failing-tool ACP stream ───────────
-
-
 class TestAcpLoopBreaker:
     """`G6` measured that six consecutive failures produced nothing. Each rung is
     driven through run_chat, and the vacuity floor (a passing stream produces no
@@ -634,10 +676,6 @@ class TestAcpLoopBreaker:
         _set_stream(client, _fail_cycle(WARN_THRESHOLD))
         session = _session()
         await _drive(state, session)
-        # Assert the FAILURE path's own wording, not the shared "change approach"
-        # tail: the structural (no-progress) note ends the same way, so matching on
-        # that alone would also pass if the failure signal never arrived and three
-        # identical SUCCESSES tripped the structural detector instead.
         assert any("this is failure #" in t for t in _texts(session))
 
     @pytest.mark.asyncio
@@ -658,8 +696,6 @@ class TestAcpLoopBreaker:
         await _drive(state, session)
         texts = _texts(session)
         assert any("Run aborted by the loop breaker" in t for t in texts), texts[-3:]
-        # The turn is aborted by cancelling the CLI's turn, not by abandoning the
-        # stream — so every post-loop finalizer still runs.
         client.cancel_session.assert_awaited()
 
     @pytest.mark.asyncio
@@ -687,7 +723,9 @@ class TestAcpLoopBreaker:
                 )
             )
             events.append(
-                LLMEvent(kind=EVENT_TOOL_RESULT, tool_call_id=f"t{i}", tool_output=f"out-{i}")
+                LLMEvent(
+                    kind=EVENT_TOOL_RESULT, tool_call_id=f"t{i}", tool_output=f"out-{i}"
+                )
             )
         events.append(LLMEvent(kind=EVENT_COMPLETE, stop_reason="end_turn"))
         _set_stream(client, events)
@@ -741,7 +779,7 @@ class TestAcpLoopBreaker:
                     tool_input='{"command": "flip"}',
                 )
             )
-            _ok = (i % 2) == 1  # every other call succeeds → streak never reaches 5
+            _ok = (i % 2) == 1
             events.append(
                 LLMEvent(
                     kind=EVENT_TOOL_RESULT,
@@ -755,9 +793,6 @@ class TestAcpLoopBreaker:
         session = _session()
         await _drive(state, session)
         assert not any("was blocked" in t for t in _texts(session))
-
-
-# ── the CALL SITE: a real CLI's frames, through the real decoder, into the breaker ──
 
 
 class TestBreakerFiresOnRealRuntimeFrames:
@@ -823,11 +858,6 @@ class TestBreakerFiresOnRealRuntimeFrames:
         assert not any("Run aborted by the loop breaker" in t for t in texts), texts
 
 
-# ── the breaker's IDENTITY: a per-call narration must not mint a new bucket ──
-
-
-#: kiro's real ``rawInput`` for the four byte-identical failing calls it ran live on
-#: 2026-08-23 — same command, a different narration every time.
 KIRO_PER_CALL_INPUTS = [
     json.dumps(
         {
@@ -878,8 +908,12 @@ class TestBreakerIdentityIgnoresAdapterNarration:
     def test_native_dict_args_are_untouched(self):
         """The native runtime passes a dict of real arguments and shares this function,
         so the ACP fix must be a no-op there."""
-        assert params_key("write", {"path": "a.txt"}) != params_key("write", {"path": "b.txt"})
-        assert params_key("write", {"path": "a.txt"}) == params_key("write", {"path": "a.txt"})
+        assert params_key("write", {"path": "a.txt"}) != params_key(
+            "write", {"path": "b.txt"}
+        )
+        assert params_key("write", {"path": "a.txt"}) == params_key(
+            "write", {"path": "a.txt"}
+        )
 
     def test_an_all_metadata_input_keeps_its_original_identity(self):
         """Stripping everything would collapse unrelated calls into one bucket, so an
@@ -889,7 +923,9 @@ class TestBreakerIdentityIgnoresAdapterNarration:
         assert params_key("bash", a) != params_key("bash", b)
 
     def test_a_non_json_input_string_is_left_alone(self):
-        assert params_key("bash", "not json at all") == params_key("bash", "not json at all")
+        assert params_key("bash", "not json at all") == params_key(
+            "bash", "not json at all"
+        )
         assert params_key("bash", "a") != params_key("bash", "b")
 
     @pytest.mark.asyncio
@@ -911,16 +947,13 @@ class TestBreakerIdentityIgnoresAdapterNarration:
         assert any("was blocked" in t for t in _texts(session)), _texts(session)
 
 
-# ── AAP-7 / `G158`: an ``acp:<cli>`` binding resolves THAT CLI, never a model ──
-
-
 class TestAnAcpBindingResolvesTheNamedRuntime:
     """The defect that made protocol resume unreachable, measured end to end.
 
     ``provider_kind`` was only ever read to SKIP the native builder; an ACP kind then
     fell into the MODEL-axis resolution, which deliberately excludes ``acp_agent``
     entries — so a session bound to ``acp:<cli>`` silently ran the pinned chat model.
-    It hid because ``SessionManager``'s ACP connection-pool claim normally answers
+    It hid because ``ConversationDirectory``'s ACP connection-pool claim normally answers
     first using ``provider_kind`` directly, and that claim is skipped exactly when a
     resume id exists. Result: the one path that needed a resumable ACP client was the
     one path that never got one — a live gateway restart mid-conversation continued on
@@ -929,8 +962,8 @@ class TestAnAcpBindingResolvesTheNamedRuntime:
 
     @staticmethod
     def _register(monkeypatch, tmp_path, name="acp:demo-cli"):
-        from gideon.llm.acp_agent import ACP_AGENT_CAPABILITY
-        from gideon.llm.registry import ProviderEntry, get_default_registry
+        from gideon.integrations.llm.acp_agent import ACP_AGENT_CAPABILITY
+        from gideon.integrations.llm.registry import ProviderEntry, get_default_registry
 
         entry = ProviderEntry(
             name=name,
@@ -944,12 +977,14 @@ class TestAnAcpBindingResolvesTheNamedRuntime:
         monkeypatch.setattr(registry, "unregister_entry", lambda n: None, raising=False)
         return entry
 
-    def test_it_builds_a_resumable_agent_provider_not_a_model(self, monkeypatch, tmp_path):
+    def test_it_builds_a_resumable_agent_provider_not_a_model(
+        self, monkeypatch, tmp_path
+    ):
         """THE CALL SITE. The built provider must be an ``AgentProvider`` — that is the
-        isinstance ``SessionManager`` gates ``set_resume`` on, so anything else means
+        isinstance ``ConversationDirectory`` gates ``set_resume`` on, so anything else means
         the resume id is dropped on the floor and ``session/load`` is never sent."""
-        import gideon.providers.provider_bridge as pb
-        from gideon.agents.provider import AgentProvider
+        import gideon.extensions.providers.provider_bridge as pb
+        from gideon.engine.agents.provider import AgentProvider
 
         self._register(monkeypatch, tmp_path)
         model_axis_called: list[str] = []
@@ -973,9 +1008,9 @@ class TestAnAcpBindingResolvesTheNamedRuntime:
 
     def test_the_per_session_cwd_reaches_the_built_runtime(self, monkeypatch, tmp_path):
         """cwd is a SESSION axis — a CLI spawned in the wrong directory cannot find the
-        conversation the resume id names (``SessionManager`` restores the stored cwd for
+        conversation the resume id names (``ConversationDirectory`` restores the stored cwd for
         exactly this reason)."""
-        import gideon.providers.provider_bridge as pb
+        import gideon.extensions.providers.provider_bridge as pb
 
         self._register(monkeypatch, tmp_path)
         ws = tmp_path / "ws"
@@ -996,24 +1031,30 @@ class TestAnAcpBindingResolvesTheNamedRuntime:
         """VACUITY FLOOR, and the honesty requirement: silently serving a different
         runtime is the failure mode. An absent entry must be a refusal the user can
         read, not a fallback."""
-        import gideon.providers.provider_bridge as pb
+        import gideon.extensions.providers.provider_bridge as pb
 
-        monkeypatch.setattr(pb, "_resolve_from_config_registry", lambda use_case, **kw: MagicMock())
+        monkeypatch.setattr(
+            pb, "_resolve_from_config_registry", lambda use_case, **kw: MagicMock()
+        )
         with pytest.raises(pb.ProviderResolutionError) as exc:
             pb.resolve_provider_for_use_case(
-                "chat", session_key="dashboard:chat-1", provider_kind="acp:not-installed"
+                "chat",
+                session_key="dashboard:chat-1",
+                provider_kind="acp:not-installed",
             )
         assert "acp:not-installed" in str(exc.value)
 
     def test_a_native_kind_is_untouched(self, monkeypatch, tmp_path):
         """VACUITY FLOOR the other way: the branch is scoped to ``acp:`` and must not
         capture the native path."""
-        import gideon.providers.provider_bridge as pb
+        import gideon.extensions.providers.provider_bridge as pb
 
         built: dict = {}
         monkeypatch.setattr(pb, "_build_native_runtime", lambda **kw: built.update(kw))
         monkeypatch.setattr(
-            pb, "_build_acp_runtime", lambda *a, **kw: pytest.fail("acp branch took a native turn")
+            pb,
+            "_build_acp_runtime",
+            lambda *a, **kw: pytest.fail("acp branch took a native turn"),
         )
         pb.resolve_provider_for_use_case(
             "chat", session_key="dashboard:chat-1", agent="a", provider_kind="native"

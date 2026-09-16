@@ -23,8 +23,10 @@ from pathlib import Path
 
 import pytest
 
-from gideon import after_turn_review as atr
-from gideon.guardrails.audit import (
+from checks.runtime.test_guardrails_model_call import FakeProvider as _BaseFake
+from gideon.cognition import after_turn_review as atr
+from gideon.integrations.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK, LLMEvent
+from gideon.security.guardrails.audit import (
     CALLERS,
     UNATTRIBUTED,
     AttemptRecord,
@@ -34,19 +36,19 @@ from gideon.guardrails.audit import (
     record_attempt,
     set_current_caller,
 )
-from gideon.guardrails.health import provider_health
-from gideon.guardrails.model_call import ModelCallGuard
-from gideon.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK, LLMEvent
-from tests.test_guardrails_model_call import FakeProvider as _BaseFake
+from gideon.security.guardrails.health import provider_health
+from gideon.security.guardrails.model_call import ModelCallGuard
 
-_SRC = Path(__file__).resolve().parents[1] / "src" / "gideon"
+_SRC = Path(__file__).resolve().parents[2] / "runtime" / "gideon"
 
 
 class FakeProvider(_BaseFake):
     async def complete(self, messages, *, tools=None, model=None, reasoning_effort=""):
         yield LLMEvent(kind=EVENT_TEXT_CHUNK, text=self._text)
         yield LLMEvent(
-            kind=EVENT_COMPLETE, input_tokens=self._tokens[0], output_tokens=self._tokens[1]
+            kind=EVENT_COMPLETE,
+            input_tokens=self._tokens[0],
+            output_tokens=self._tokens[1],
         )
 
 
@@ -79,7 +81,7 @@ async def _one_call(caller: str, *, provider=None) -> None:
         try:
             await _drain(guard.stream("summarize this"))
         except Exception:
-            pass  # a failed attempt is still an audited attempt — that is the point
+            pass
 
 
 def _callers_by_name(payload: dict) -> dict[str, dict]:
@@ -91,20 +93,19 @@ class TestCallersAreToldApart:
 
     @pytest.mark.asyncio
     async def test_two_background_callers_are_separable(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
         await _one_call("skill_ladder")
         await _one_call("inbox_triage")
         await _one_call("inbox_triage")
 
         rows = read_recent()
         assert len(rows) == 3
-        # Same use_case on every row — which is exactly why the axis could not answer this.
         assert {r["use_case"] for r in rows} == {"background"}
 
         by_caller = _callers_by_name(provider_health())
         assert by_caller["inbox_triage"]["calls"] == 2
         assert by_caller["skill_ladder"]["calls"] == 1
-        assert "conflict_merge" not in by_caller  # a caller that made no call invents no row
+        assert "conflict_merge" not in by_caller
 
     @pytest.mark.asyncio
     async def test_a_dead_caller_is_visible_where_the_provider_aggregate_hides_it(
@@ -116,25 +117,29 @@ class TestCallersAreToldApart:
         provider it uses is fine — and it is the case the per-provider rollup structurally
         cannot report, because it averages the two callers together.
         """
-        monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
         await _one_call("inbox_triage")
         await _one_call("skill_ladder", provider=BrokenProvider())
 
         payload = provider_health()
         provider_row = next(p for p in payload["providers"] if p["name"] == "P")
-        assert provider_row["pass_rate"] == 0.5, "the provider view averages the two callers"
+        assert (
+            provider_row["pass_rate"] == 0.5
+        ), "the provider view averages the two callers"
 
         by_caller = _callers_by_name(payload)
         assert by_caller["inbox_triage"]["pass_rate"] == 1.0
         assert by_caller["skill_ladder"]["pass_rate"] == 0.0
         assert by_caller["skill_ladder"]["failed"] == 1
-        assert by_caller["skill_ladder"]["failure_modes"], "a dead caller names WHY it is dead"
+        assert by_caller["skill_ladder"][
+            "failure_modes"
+        ], "a dead caller names WHY it is dead"
 
     @pytest.mark.asyncio
     async def test_an_unbound_call_reads_as_unattributed_not_as_someone_else(
         self, tmp_path, monkeypatch
     ):
-        monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
         await _one_call("")
         by_caller = _callers_by_name(provider_health())
         assert list(by_caller) == [UNATTRIBUTED]
@@ -144,9 +149,9 @@ class TestCallersAreToldApart:
 class TestTheVocabularyIsClosed:
     def test_an_unknown_caller_is_refused_at_the_binding_seam(self):
         with pytest.raises(ValueError, match="unknown model-call caller"):
-            set_current_caller("skill-ladder")  # the hyphenated near-miss spelling
+            set_current_caller("skill-ladder")
         with pytest.raises(ValueError):
-            with caller_scope("learning"):  # plausible, and not in the vocabulary
+            with caller_scope("learning"):
                 pass
         assert current_caller() == "", "a refused bind must not leave a caller bound"
 
@@ -154,12 +159,18 @@ class TestTheVocabularyIsClosed:
         with caller_scope("skill_ladder"):
             with caller_scope(""):
                 assert current_caller() == ""
-            assert current_caller() == "skill_ladder", "a nested scope restores its parent"
+            assert (
+                current_caller() == "skill_ladder"
+            ), "a nested scope restores its parent"
 
-    def test_an_unknown_caller_is_never_written_to_the_ledger(self, tmp_path, monkeypatch, caplog):
+    def test_an_unknown_caller_is_never_written_to_the_ledger(
+        self, tmp_path, monkeypatch, caplog
+    ):
         """A record built by hand cannot smuggle a fifth spelling into the file either."""
-        monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
-        with caplog.at_level(logging.WARNING, logger="gideon.guardrails.audit"):
+        monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
+        with caplog.at_level(
+            logging.WARNING, logger="gideon.security.guardrails.audit"
+        ):
             record_attempt(
                 AttemptRecord(
                     audit_id="a1",
@@ -171,13 +182,15 @@ class TestTheVocabularyIsClosed:
                     caller="skillLadder",
                 )
             )
-        assert read_recent()[0]["caller"] == "", "an unknown caller is dropped, not stored"
+        assert (
+            read_recent()[0]["caller"] == ""
+        ), "an unknown caller is dropped, not stored"
         assert any("unknown caller" in r.message for r in caplog.records)
 
     def test_every_member_of_the_vocabulary_has_a_production_binder(self):
         """No declared-but-unbound member. A vocabulary entry nothing binds is an inert
         surface, and this repo's whole inert-surface census exists because that keeps
-        happening. Readers in ``tests/`` deliberately do not count."""
+        happening. Readers in ``checks/runtime/`` deliberately do not count."""
         found: set[str] = set()
         for path in _SRC.rglob("*.py"):
             text = path.read_text(encoding="utf-8")
@@ -185,7 +198,9 @@ class TestTheVocabularyIsClosed:
                 if f'caller_scope("{name}")' in text:
                     found.add(name)
         assert found, "vacuity guard: the scan matched nothing at all"
-        assert found == set(CALLERS), f"unbound caller(s): {sorted(set(CALLERS) - found)}"
+        assert found == set(
+            CALLERS
+        ), f"unbound caller(s): {sorted(set(CALLERS) - found)}"
 
 
 def _shipped_default_level() -> int:
@@ -196,16 +211,18 @@ def _shipped_default_level() -> int:
     default ever changes — and so it reds today for an INFO-only line, which is what `G47`
     literally asked for and would have been inert.
     """
-    from gideon.config.loader import AgentConfig
+    from gideon.core.config.loader import AgentConfig
 
     return getattr(logging, str(AgentConfig.__dataclass_fields__["log_level"].default))
 
 
 class TestADeadLadderPassIsLegible:
-    LOGGER = "gideon.after_turn_review"
+    LOGGER = "gideon.cognition.after_turn_review"
 
     @pytest.mark.asyncio
-    async def test_a_pass_that_died_is_visible_at_the_shipped_default_level(self, caplog):
+    async def test_a_pass_that_died_is_visible_at_the_shipped_default_level(
+        self, caplog
+    ):
         async def boom(_prompt: str) -> str:
             raise TimeoutError("provider timeout after 60010 ms")
 
@@ -219,7 +236,9 @@ class TestADeadLadderPassIsLegible:
             )
         assert out is None
         records = [r for r in caplog.records if r.name == self.LOGGER]
-        assert len(records) == 1, f"exactly one line per pass, got {[r.message for r in records]}"
+        assert (
+            len(records) == 1
+        ), f"exactly one line per pass, got {[r.message for r in records]}"
         assert records[0].levelno >= _shipped_default_level()
         text = records[0].getMessage()
         assert "provider_error" in text and "TimeoutError" in text
@@ -244,11 +263,12 @@ class TestADeadLadderPassIsLegible:
         records = [r for r in caplog.records if r.name == self.LOGGER]
         assert len(records) == 1
         assert "no_action" in records[0].getMessage()
-        # …and a healthy pass stays quiet on a default install: this is the spam bound.
         assert records[0].levelno < _shipped_default_level()
 
     @pytest.mark.asyncio
-    async def test_garbage_from_the_model_is_a_failed_pass_not_a_silent_one(self, caplog):
+    async def test_garbage_from_the_model_is_a_failed_pass_not_a_silent_one(
+        self, caplog
+    ):
         async def garbage(_prompt: str) -> str:
             return "I would love to help with that!"
 
@@ -298,7 +318,8 @@ class TestEveryLadderExitNamesAMappedVerdict:
         fn = next(
             n
             for n in ast.walk(ast.parse(source))
-            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "_ladder_pass"
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and n.name == "_ladder_pass"
         )
         returned: set[str] = set()
         for node in ast.walk(fn):
@@ -307,7 +328,7 @@ class TestEveryLadderExitNamesAMappedVerdict:
             first = node.value.elts[0] if node.value.elts else None
             if isinstance(first, ast.Constant):
                 returned.add(str(first.value))
-            elif isinstance(first, ast.IfExp):  # the template branch picks between two
+            elif isinstance(first, ast.IfExp):
                 for branch in (first.body, first.orelse):
                     if isinstance(branch, ast.Constant):
                         returned.add(str(branch.value))
@@ -315,6 +336,4 @@ class TestEveryLadderExitNamesAMappedVerdict:
         assert not returned - set(
             atr._LADDER_VERDICT_LEVEL
         ), f"unmapped verdict(s): {sorted(returned - set(atr._LADDER_VERDICT_LEVEL))}"
-        # The one key the pass never returns: the wrapper's initial value, used when the pass
-        # raises before naming anything. Pinned so it is not "cleaned up" as dead.
         assert set(atr._LADDER_VERDICT_LEVEL) - returned == {"internal_error"}

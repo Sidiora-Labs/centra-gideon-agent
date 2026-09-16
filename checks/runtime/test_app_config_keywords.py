@@ -14,9 +14,8 @@ shared-authority half (the provider path, which is the reachable one) is in
 
 from __future__ import annotations
 
-from gideon.apps.app_config import validate_config
+from gideon.extensions.apps.app_config import validate_config
 
-# The issue's measured schema, verbatim.
 SCHEMA = {
     "type": "object",
     "properties": {
@@ -41,7 +40,11 @@ class TestNumericBounds:
     def test_exclusive_bounds(self):
         schema = {
             "properties": {
-                "ratio": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1}
+                "ratio": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "exclusiveMaximum": 1,
+                }
             }
         }
         assert any("greater than 0" in e for e in validate_config({"ratio": 0}, schema))
@@ -49,15 +52,11 @@ class TestNumericBounds:
         assert validate_config({"ratio": 0.5}, schema) == []
 
     def test_wrong_typed_value_gets_type_error_not_a_crash(self):
-        # The bound must not be compared against a string — the type error is the only
-        # complaint, and nothing raises.
         errs = validate_config({"timeout_secs": "soon"}, SCHEMA)
         assert any("must be an integer" in e for e in errs)
         assert not any("at least" in e for e in errs)
 
     def test_bool_is_not_a_number_for_bounds(self):
-        # bool subclasses int; it already fails the type check and must not be range-checked
-        # as 0/1.
         errs = validate_config({"timeout_secs": True}, SCHEMA)
         assert any("not a boolean" in e for e in errs)
         assert not any("at least" in e for e in errs)
@@ -77,14 +76,17 @@ class TestStringConstraints:
 
     def test_min_length(self):
         schema = {"properties": {"name": {"type": "string", "minLength": 3}}}
-        assert any("at least 3 characters" in e for e in validate_config({"name": "ab"}, schema))
+        assert any(
+            "at least 3 characters" in e
+            for e in validate_config({"name": "ab"}, schema)
+        )
         assert validate_config({"name": "abc"}, schema) == []
 
     def test_broken_manifest_pattern_skips_never_blocks(self):
-        # A regex only the APP AUTHOR can fix must not wall off the user's write: the check is
-        # skipped with a warning; siblings still apply.
         schema = {
-            "properties": {"lang": {"type": "string", "pattern": "[unclosed", "maxLength": 2}}
+            "properties": {
+                "lang": {"type": "string", "pattern": "[unclosed", "maxLength": 2}
+            }
         }
         assert validate_config({"lang": "en"}, schema) == []
         errs = validate_config({"lang": "eng"}, schema)
@@ -97,9 +99,12 @@ class TestExistingContractUntouched:
             "properties": {"mode": {"type": "string", "enum": ["a", "b"]}},
             "required": ["mode"],
         }
-        assert any("must be one of" in e for e in validate_config({"mode": "c"}, schema))
+        assert any(
+            "must be one of" in e for e in validate_config({"mode": "c"}, schema)
+        )
         assert any("Missing required field" in e for e in validate_config({}, schema))
         assert any(
-            "unknown config key" in e for e in validate_config({"mode": "a", "x": 1}, schema)
+            "unknown config key" in e
+            for e in validate_config({"mode": "a", "x": 1}, schema)
         )
         assert validate_config({"mode": "a"}, schema) == []

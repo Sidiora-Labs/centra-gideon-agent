@@ -29,25 +29,26 @@ from pathlib import Path
 
 import pytest
 
-import gideon.schedule_script as ss
-from gideon import gateway_base
-from gideon.action_providers.base import ActionContext
-from gideon.action_providers.bash_provider import BashActionProvider
-from gideon.hooks import HOOK_EVENT_USER_PROMPT_SUBMIT, ScriptHook, run_script_hook
-from gideon.sandbox import CHILD_ENV_BASE_NAMES, build_child_env, env_name_is_sensitive
+import gideon.automation.schedule_script as ss
+from gideon.engine import gateway_base
+from gideon.engine.hooks import (
+    HOOK_EVENT_USER_PROMPT_SUBMIT,
+    ScriptHook,
+    run_script_hook,
+)
+from gideon.integrations.action_providers.base import ActionContext
+from gideon.integrations.action_providers.bash_provider import BashActionProvider
+from gideon.security.sandbox import (
+    CHILD_ENV_BASE_NAMES,
+    build_child_env,
+    env_name_is_sensitive,
+)
 
-#: Two shapes of planted secret, both of which the OLD bash-provider pattern would have
-#: caught, and neither of which the OLD cron-script one-prefix denylist would.
 _PLANTED = "ACME_CLOUD_API_KEY"
-#: A shape NO name-pattern denylist in the tree would have recognised — the false-negative
-#: class the allowlist exists to close.
 _PLANTED_UNGUESSABLE = "ACME_DEPLOY_PAT"
 
 _SECRET_VALUE = "planted-secret-value-9f3a"
 
-# Each run spawns a fresh interpreter through the sandbox wrapper; under full-suite xdist
-# load a spawn that takes 0.3s alone can take tens of seconds of wall time from CPU
-# contention. Same headroom the sibling schedule-script suite uses.
 _TIMEOUT = 90
 
 
@@ -71,9 +72,6 @@ def _plant_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(_PLANTED_UNGUESSABLE, _SECRET_VALUE)
 
 
-# ── site 1: a hook child (hooks.run_script_hook → the bash provider) ──
-
-
 def test_a_hook_child_cannot_read_a_planted_gateway_secret() -> None:
     """Driven through the real hook dispatcher, not the provider alone."""
     hook = ScriptHook(
@@ -88,15 +86,13 @@ def test_a_hook_child_cannot_read_a_planted_gateway_secret() -> None:
     result = asyncio.run(run_script_hook(hook, "phf4"))
 
     assert result.exit_code == 0, result.error or result.stderr
-    assert "PATH=" in result.stdout, "the child got no PATH — the spawn, not the filter, is broken"
+    assert (
+        "PATH=" in result.stdout
+    ), "the child got no PATH — the spawn, not the filter, is broken"
     assert _SECRET_VALUE not in result.stdout
     assert _PLANTED not in result.stdout
     assert _PLANTED_UNGUESSABLE not in result.stdout
-    # The hook contract's own variables still arrive.
     assert "GIDEON_HOOK_EVENT=" in result.stdout
-
-
-# ── site 2: a cron-script child (schedule_script.run_script_sandboxed) ──
 
 
 def _fake_crons(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
@@ -124,11 +120,15 @@ def test_a_cron_script_child_cannot_read_a_planted_gateway_secret(
                     ]
                 )
             """))
-    r = ss.run_script_sandboxed(f"{crons / 'probe.py'}:run", "phf4-job", "msg", timeout=_TIMEOUT)
+    r = ss.run_script_sandboxed(
+        f"{crons / 'probe.py'}:run", "phf4-job", "msg", timeout=_TIMEOUT
+    )
 
     assert r["status"] == "ok", r
     kept, planted, unguessable = r["message"].split("|")
-    assert kept == "PATH", "the child got no PATH — the spawn, not the filter, is broken"
+    assert (
+        kept == "PATH"
+    ), "the child got no PATH — the spawn, not the filter, is broken"
     assert planted == "-"
     assert unguessable == "-"
 
@@ -147,11 +147,10 @@ def test_the_cron_secret_channel_still_works(
             def run(ctx):
                 return ctx.message
             """))
-    r = ss.run_script_sandboxed(f"{crons / 'chan.py'}:run", "phf4-job", "carried", timeout=_TIMEOUT)
+    r = ss.run_script_sandboxed(
+        f"{crons / 'chan.py'}:run", "phf4-job", "carried", timeout=_TIMEOUT
+    )
     assert r == {"status": "ok", "message": "carried"}
-
-
-# ── site 3: a bash-action child (BashActionProvider.execute) ──
 
 
 def test_a_bash_action_child_cannot_read_a_planted_gateway_secret() -> None:
@@ -163,15 +162,13 @@ def test_a_bash_action_child_cannot_read_a_planted_gateway_secret() -> None:
         )
     )
     assert result.success, result.error or result.stderr
-    assert "PATH=" in result.stdout, "the child got no PATH — the spawn, not the filter, is broken"
+    assert (
+        "PATH=" in result.stdout
+    ), "the child got no PATH — the spawn, not the filter, is broken"
     assert _SECRET_VALUE not in result.stdout
     assert _PLANTED not in result.stdout
     assert _PLANTED_UNGUESSABLE not in result.stdout
-    # A trigger `$variable` still reaches the command.
     assert "item=x" in result.stdout
-
-
-# ── the builder itself ──
 
 
 def test_the_base_is_an_allowlist_not_a_copy() -> None:
@@ -187,13 +184,9 @@ def test_the_base_covers_what_a_child_needs_to_run() -> None:
         "TMPDIR",
         "LANG",
         "TZ",
-        # The ceiling shim runs `python -m gideon._spawn_exec_shim`; without
-        # PYTHONPATH that import can fail and take every spawn with it.
         "PYTHONPATH",
-        # A corporate install reaches the network only through these.
         "HTTPS_PROXY",
         "REQUESTS_CA_BUNDLE",
-        # Which install a child addresses.
         "GIDEON_HOME",
         "GIDEON_WORKSPACE",
         "GIDEON_PORT",
@@ -205,22 +198,30 @@ def test_the_base_carries_no_credential_holder() -> None:
     """Nothing in the base may be a credential, by the floor's own test or by name."""
     for name in CHILD_ENV_BASE_NAMES:
         assert not env_name_is_sensitive(name), name
-    for name in ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "GIDEON_OWNER_ID", "SSH_AUTH_SOCK"):
+    for name in (
+        "SLACK_BOT_TOKEN",
+        "SLACK_APP_TOKEN",
+        "GIDEON_OWNER_ID",
+        "SSH_AUTH_SOCK",
+    ):
         assert name not in CHILD_ENV_BASE_NAMES, name
 
 
 def test_a_declared_name_is_passed_through(monkeypatch: pytest.MonkeyPatch) -> None:
     """The escape hatch a script with a legitimate extra need uses."""
     monkeypatch.setattr(
-        "gideon.sandbox._declared_env_passthrough", lambda site: {"ACME_REGION"}
+        "gideon.security.sandbox._declared_env_passthrough",
+        lambda site: {"ACME_REGION"},
     )
-    env = build_child_env(site="t", source={"PATH": "/bin", "ACME_REGION": "eu", "OTHER": "no"})
+    env = build_child_env(
+        site="t", source={"PATH": "/bin", "ACME_REGION": "eu", "OTHER": "no"}
+    )
     assert env == {"ACME_REGION": "eu", "PATH": "/bin"}
 
 
 def test_a_declared_name_is_read_from_config(monkeypatch: pytest.MonkeyPatch) -> None:
     """The declaration is OPERATOR config — wired to `sandbox.env_passthrough`, not a stub."""
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     cfg = AppConfig()
     cfg.sandbox.env_passthrough = ["ACME_REGION", "AWS_SECRET_ACCESS_KEY", "not a name"]
@@ -230,11 +231,12 @@ def test_a_declared_name_is_read_from_config(monkeypatch: pytest.MonkeyPatch) ->
         site="t",
         source={"PATH": "/bin", "ACME_REGION": "eu", "AWS_SECRET_ACCESS_KEY": "s"},
     )
-    # Declared and allowed; declared but refused by the floor; unparseable and ignored.
     assert env == {"ACME_REGION": "eu", "PATH": "/bin"}
 
 
-def test_the_floor_cannot_be_lowered_by_a_declaration(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_floor_cannot_be_lowered_by_a_declaration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Enforced at the BUILD site, so it holds even past the declaration parser.
 
     The parser already refuses a sensitive declaration with a warning. This patches the
@@ -242,18 +244,21 @@ def test_the_floor_cannot_be_lowered_by_a_declaration(monkeypatch: pytest.Monkey
     assembled names another way still cannot lower it.
     """
     monkeypatch.setattr(
-        "gideon.sandbox._declared_env_passthrough",
+        "gideon.security.sandbox._declared_env_passthrough",
         lambda site: {"AWS_SECRET_ACCESS_KEY", "GNUPGHOME"},
     )
     env = build_child_env(
-        site="t", source={"AWS_SECRET_ACCESS_KEY": "s", "GNUPGHOME": "/g", "PATH": "/bin"}
+        site="t",
+        source={"AWS_SECRET_ACCESS_KEY": "s", "GNUPGHOME": "/g", "PATH": "/bin"},
     )
     assert env == {"PATH": "/bin"}
 
 
-def test_an_unreadable_config_yields_the_narrower_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_unreadable_config_yields_the_narrower_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Fail-open on config, which here means fail-CLOSED on the environment."""
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     def _boom(*a: object, **k: object) -> None:
         raise RuntimeError("config.json is corrupt")
@@ -282,8 +287,10 @@ def test_withheld_names_are_logged_so_a_missing_variable_is_diagnosable(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """A dropped variable a script needed must be findable, never a silent mystery."""
-    with caplog.at_level("DEBUG", logger="gideon.sandbox"):
-        build_child_env(site="cron-script", source={"PATH": "/bin", "ACME_REGION": "eu"})
+    with caplog.at_level("DEBUG", logger="gideon.security.sandbox"):
+        build_child_env(
+            site="cron-script", source={"PATH": "/bin", "ACME_REGION": "eu"}
+        )
     assert any(
         "ACME_REGION" in r.getMessage() and "env_passthrough" in r.getMessage()
         for r in caplog.records

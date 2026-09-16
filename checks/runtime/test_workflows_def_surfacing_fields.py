@@ -17,18 +17,15 @@ drift shows as a def that surfaces through one path and not the other for identi
 
 import pytest
 
-from gideon.workflows import surfacing_channels as sc
-from gideon.workflows.models import DefMetadata, Node, NodeKind
-from gideon.workflows.pool import SurfaceRoute
-from gideon.workflows.surfacing import SurfaceMode
-from gideon.workflows.surfacing_channels import Escalation
+from gideon.automation.workflows import surfacing_channels as sc
+from gideon.automation.workflows.models import DefMetadata, Node, NodeKind
+from gideon.automation.workflows.pool import SurfaceRoute
+from gideon.automation.workflows.surfacing import SurfaceMode
+from gideon.automation.workflows.surfacing_channels import Escalation
 
 
 def _meta(**kw) -> DefMetadata:
     return DefMetadata.from_dict(kw)
-
-
-# ── the fields exist and are TYPED ──
 
 
 def test_the_surfacing_fields_are_TYPED_not_stashed_in_extra():
@@ -87,10 +84,9 @@ def test_every_new_field_appears_in_to_dict():
         "hands_off_to",
         "guided",
     ):
-        assert key in payload, f"{key} serializes to nothing, so it cannot survive a save"
-
-
-# ── tolerant coercion, in the SAFE direction ──
+        assert (
+            key in payload
+        ), f"{key} serializes to nothing, so it cannot survive a save"
 
 
 def test_an_UNKNOWN_surface_mode_reads_as_OFF():
@@ -135,13 +131,12 @@ def test_a_NON_DICT_handoff_entry_is_dropped():
     ]
 
 
-# ── the adapter: ONE conversion point per record ──
-
-
 def test_the_def_drives_S58s_surfacing_record():
     """Two readers of the same fields drift, and the drift shows as a def that surfaces through one
     path and not the other for identical metadata."""
-    meta = sc.meta_from_def(_meta(surface_mode="passive", match_text="back up", agent_digest="d"))
+    meta = sc.meta_from_def(
+        _meta(surface_mode="passive", match_text="back up", agent_digest="d")
+    )
     assert meta.surface_mode is SurfaceMode.PASSIVE
     assert meta.match_text == "back up"
     assert meta.agent_digest == "d"
@@ -150,7 +145,9 @@ def test_the_def_drives_S58s_surfacing_record():
 def test_the_adapter_does_NOT_re_implement_tolerance():
     """`from_dict` already coerced an unknown mode to `off`, so by the time the adapter runs
     there is one tolerance rule, not two that could disagree."""
-    assert sc.meta_from_def(_meta(surface_mode="nonsense")).surface_mode is SurfaceMode.OFF
+    assert (
+        sc.meta_from_def(_meta(surface_mode="nonsense")).surface_mode is SurfaceMode.OFF
+    )
 
 
 def _carried_kwargs(source: str, function: str, cls: str) -> set[str]:
@@ -189,13 +186,14 @@ def test_the_ONE_conversion_point_carries_every_field_a_def_can_SUPPLY():
     import inspect
     from pathlib import Path
 
-    from gideon.workflows.surfacing import SurfacingMeta
+    from gideon.automation.workflows.surfacing import SurfacingMeta
 
-    shared = {f.name for f in dc.fields(SurfacingMeta)} & {f.name for f in dc.fields(DefMetadata)}
-    # Vacuity guard: a rail over an empty intersection passes forever and measures nothing. Seven is
-    # the population measured at WF2TAS-12 (match_text, summary, when_to_use, agent_digest,
-    # surface_mode, requirements, cadence_days) — a DROP below it means fields left the seam.
-    assert len(shared) >= 7, f"the seam shrank to {sorted(shared)} — is the rail still measuring?"
+    shared = {f.name for f in dc.fields(SurfacingMeta)} & {
+        f.name for f in dc.fields(DefMetadata)
+    }
+    assert (
+        len(shared) >= 7
+    ), f"the seam shrank to {sorted(shared)} — is the rail still measuring?"
 
     source = Path(inspect.getsourcefile(sc) or "").read_text(encoding="utf-8")
     carried = _carried_kwargs(source, "meta_from_def", "SurfacingMeta")
@@ -236,7 +234,11 @@ def test_the_def_drives_the_HANDOFF_edges():
     edges = sc.handoffs_from_def(
         _meta(
             hands_off_to=[
-                {"target_def": "bug-fix", "context_fields": ["id"], "requires_user_request": True}
+                {
+                    "target_def": "bug-fix",
+                    "context_fields": ["id"],
+                    "requires_user_request": True,
+                }
             ]
         )
     )
@@ -254,7 +256,9 @@ def test_an_edge_pointing_NOWHERE_is_dropped():
 def test_the_doctor_entry_includes_PACKS():
     """Assembled here rather than per call site: a surface building this dict itself would forget
     `packs` and report every pack-gated def as unreachable."""
-    entry = sc.doctor_entry("d", _meta(surface_mode="passive", packs=["python-project"]))
+    entry = sc.doctor_entry(
+        "d", _meta(surface_mode="passive", packs=["python-project"])
+    )
     assert entry["packs"] == ["python-project"]
     assert sc.doctor([entry]) == []
 
@@ -267,9 +271,6 @@ def test_a_def_reachable_only_by_CADENCE_passes_the_doctor():
 def test_a_def_with_NO_channel_is_reported():
     entry = sc.doctor_entry("ghost", _meta(surface_mode="passive"))
     assert sc.doctor([entry])
-
-
-# ── routing reads the REAL node tree ──
 
 
 def _gate_in_branch() -> Node:
@@ -291,9 +292,9 @@ def test_a_gate_buried_in_BRANCH_CASES_still_routes_to_a_RUN():
     """S45 measured a hand-rolled walk finding 4 of 13 nodes because branch children live under
     `cases`/`default_case`. Missing a gate here would route a gated def to a blueprint, which has no
     engine to pause."""
-    assert sc.route_from_def(_meta(surface_mode="passive", guided=True), _gate_in_branch()) is (
-        SurfaceRoute.RUN
-    )
+    assert sc.route_from_def(
+        _meta(surface_mode="passive", guided=True), _gate_in_branch()
+    ) is (SurfaceRoute.RUN)
 
 
 def test_a_lightweight_GUIDED_def_is_a_blueprint():
@@ -309,7 +310,9 @@ def test_a_lightweight_GUIDED_def_is_a_blueprint():
 
 def test_a_lightweight_def_that_is_not_guided_stays_PASSIVE():
     root = Node(kind=NodeKind.SEQUENCE, id="s", children=[])
-    assert sc.route_from_def(_meta(surface_mode="passive"), root) is SurfaceRoute.PASSIVE
+    assert (
+        sc.route_from_def(_meta(surface_mode="passive"), root) is SurfaceRoute.PASSIVE
+    )
 
 
 def test_a_MULTI_TURN_stage_forces_a_run_even_when_guided():
@@ -318,16 +321,24 @@ def test_a_MULTI_TURN_stage_forces_a_run_even_when_guided():
         id="s",
         children=[Node(kind=NodeKind.STAGE, id="st", config={"max_turns": 5})],
     )
-    assert sc.route_from_def(_meta(surface_mode="passive", guided=True), root) is SurfaceRoute.RUN
+    assert (
+        sc.route_from_def(_meta(surface_mode="passive", guided=True), root)
+        is SurfaceRoute.RUN
+    )
 
 
 def test_a_SCHEMA_bearing_stage_forces_a_run():
     root = Node(
         kind=NodeKind.SEQUENCE,
         id="s",
-        children=[Node(kind=NodeKind.STAGE, id="st", config={"schema": {"type": "object"}})],
+        children=[
+            Node(kind=NodeKind.STAGE, id="st", config={"schema": {"type": "object"}})
+        ],
     )
-    assert sc.route_from_def(_meta(surface_mode="passive", guided=True), root) is SurfaceRoute.RUN
+    assert (
+        sc.route_from_def(_meta(surface_mode="passive", guided=True), root)
+        is SurfaceRoute.RUN
+    )
 
 
 def test_an_UNWALKABLE_spec_routes_to_a_RUN_not_a_blueprint():
@@ -342,28 +353,35 @@ def test_an_OFF_def_never_routes_to_a_blueprint():
     """`off` means the def does not surface itself, so a guided `off` def must not become a
     blueprint — that would materialize a conversation the user switched off."""
     root = Node(kind=NodeKind.SEQUENCE, id="s", children=[])
-    assert sc.route_from_def(_meta(surface_mode="off", guided=True), root) is SurfaceRoute.PASSIVE
+    assert (
+        sc.route_from_def(_meta(surface_mode="off", guided=True), root)
+        is SurfaceRoute.PASSIVE
+    )
 
 
 def test_an_OFF_def_that_NEEDS_the_engine_still_reports_RUN():
     """Measured: the structural facts win over the mode here. A gated def IS a run — reporting it as
     passive would tell a caller it could be injected as text, which would silently drop its gate.
-    `off` governs whether it SURFACES (S58's veto owns that), not what it structurally is."""
-    assert sc.route_from_def(_meta(surface_mode="off"), _gate_in_branch()) is SurfaceRoute.RUN
-
-
-# ── the def still round-trips as a whole ──
+    `off` governs whether it SURFACES (S58's veto owns that), not what it structurally is.
+    """
+    assert (
+        sc.route_from_def(_meta(surface_mode="off"), _gate_in_branch())
+        is SurfaceRoute.RUN
+    )
 
 
 def test_a_WHOLE_def_round_trips_with_the_new_fields():
     """The fields live on `DefMetadata`, which `WorkflowDef.to_dict` nests — so a def-level round
-    trip is what proves an authored template keeps its surfacing configuration across a save."""
-    from gideon.workflows.models import WorkflowDef
+    trip is what proves an authored template keeps its surfacing configuration across a save.
+    """
+    from gideon.automation.workflows.models import WorkflowDef
 
     original = WorkflowDef(
         name="backup",
         root=Node(kind=NodeKind.SEQUENCE, id="s", children=[]),
-        metadata=_meta(surface_mode="suggest", cadence_days=30, packs=["ci"], guided=True),
+        metadata=_meta(
+            surface_mode="suggest", cadence_days=30, packs=["ci"], guided=True
+        ),
     )
     restored = WorkflowDef.from_dict(original.to_dict())
     assert restored.metadata.surface_mode == "suggest"
@@ -374,7 +392,7 @@ def test_a_WHOLE_def_round_trips_with_the_new_fields():
 
 @pytest.mark.parametrize("mode", ["off", "passive", "suggest"])
 def test_each_declared_mode_survives_a_def_round_trip(mode):
-    from gideon.workflows.models import WorkflowDef
+    from gideon.automation.workflows.models import WorkflowDef
 
     original = WorkflowDef(
         name="d",

@@ -23,13 +23,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from gideon.triggers import claims, reaper
-from gideon.triggers.models import Trigger, TriggerHealth
-from gideon.triggers.scheduling import Claim
-from gideon.triggers.store import TriggerStore
+from gideon.automation.triggers import claims, reaper
+from gideon.automation.triggers.models import Trigger, TriggerHealth
+from gideon.automation.triggers.scheduling import Claim
+from gideon.automation.triggers.store import TriggerStore
 
 NOW = 1_700_000_000.0
-OVER = reaper.RUN_DEADLINE_SECS + 120  # comfortably past the deadline
+OVER = reaper.RUN_DEADLINE_SECS + 120
 
 
 @pytest.fixture
@@ -52,11 +52,9 @@ def _trigger(store, trigger_id="clock:nightly", name="Nightly"):
 def _claim(home, trigger_id="clock:nightly", *, age: float):
     """Write the claim a granted fire leaves behind, `age` seconds ago."""
     claims.write_claim(
-        Claim(trigger_id=trigger_id, holder="tick:1", claimed_at=NOW - age), base_dir=home
+        Claim(trigger_id=trigger_id, holder="tick:1", claimed_at=NOW - age),
+        base_dir=home,
     )
-
-
-# ── overdue(): the pure read ──
 
 
 def test_a_run_past_the_deadline_is_overdue(home):
@@ -86,7 +84,7 @@ def test_an_idle_trigger_is_never_overdue(home, store):
 def test_a_self_expired_claim_is_not_reaped_again(home):
     """S97's claims expire at read time after 1h. That outer backstop already freed the trigger, so
     reaping it again would log a kill for a run nothing is holding."""
-    _claim(home, age=7200.0)  # past CLAIM_MAX_DURATION_SECS
+    _claim(home, age=7200.0)
     assert reaper.overdue(now=NOW, base_dir=home) == []
 
 
@@ -105,18 +103,18 @@ def test_a_missing_claims_dir_is_not_an_error(tmp_path):
     assert reaper.overdue(now=NOW, base_dir=tmp_path / "never-used") == []
 
 
-# ── reap_one(): the effect ──
-
-
 def test_reaping_releases_the_claim(home, store):
     """🔴 THE POINT. A stuck claim wedges `overlap: skip` until the 1h expiry, so the trigger would
-    silently skip every fire for an hour. Releasing it is what makes the next fire possible."""
+    silently skip every fire for an hour. Releasing it is what makes the next fire possible.
+    """
     _trigger(store)
     _claim(home, age=OVER)
     assert claims.is_running("clock:nightly", now=NOW, base_dir=home) is True
 
-    with patch("gideon.sel.sel"):
-        record = reaper.reap_one("clock:nightly", OVER, store=store, now=NOW, base_dir=home)
+    with patch("gideon.security.sel.sel"):
+        record = reaper.reap_one(
+            "clock:nightly", OVER, store=store, now=NOW, base_dir=home
+        )
 
     assert claims.is_running("clock:nightly", now=NOW, base_dir=home) is False
     assert record["released"] is True
@@ -134,8 +132,10 @@ def test_reaping_records_degraded_health_and_the_reason(home, store):
     _trigger(store)
     _claim(home, age=OVER)
 
-    with patch("gideon.sel.sel"):
-        record = reaper.reap_one("clock:nightly", OVER, store=store, now=NOW, base_dir=home)
+    with patch("gideon.security.sel.sel"):
+        record = reaper.reap_one(
+            "clock:nightly", OVER, store=store, now=NOW, base_dir=home
+        )
 
     row = store.get("clock:nightly")
     assert row is not None
@@ -151,7 +151,7 @@ def test_reaping_emits_the_sel_audit_the_cron_reaper_emitted(home, store):
     _trigger(store)
     _claim(home, age=OVER)
 
-    with patch("gideon.sel.sel") as mock_sel:
+    with patch("gideon.security.sel.sel") as mock_sel:
         reaper.reap_one("clock:nightly", OVER, store=store, now=NOW, base_dir=home)
 
     mock_sel().log_tool_invocation.assert_called_once_with(
@@ -168,8 +168,10 @@ def test_reaping_a_trigger_with_no_store_row_still_frees_it(home, store):
     trigger whose row was deleted mid-run must still get its claim back."""
     _claim(home, "clock:ghost", age=OVER)
 
-    with patch("gideon.sel.sel"):
-        record = reaper.reap_one("clock:ghost", OVER, store=store, now=NOW, base_dir=home)
+    with patch("gideon.security.sel.sel"):
+        record = reaper.reap_one(
+            "clock:ghost", OVER, store=store, now=NOW, base_dir=home
+        )
 
     assert record["released"] is True
     assert record["recorded"] is False
@@ -180,8 +182,10 @@ def test_reaping_with_no_store_at_all_still_frees_the_claim(home):
     """`store=None` is the API-only case. The claim is on disk either way."""
     _claim(home, age=OVER)
 
-    with patch("gideon.sel.sel"):
-        record = reaper.reap_one("clock:nightly", OVER, store=None, now=NOW, base_dir=home)
+    with patch("gideon.security.sel.sel"):
+        record = reaper.reap_one(
+            "clock:nightly", OVER, store=None, now=NOW, base_dir=home
+        )
 
     assert record["released"] is True
     assert claims.is_running("clock:nightly", now=NOW, base_dir=home) is False
@@ -193,8 +197,10 @@ def test_a_raising_store_does_not_stop_the_release(home):
     broken = MagicMock()
     broken.get.side_effect = OSError("disk gone")
 
-    with patch("gideon.sel.sel"):
-        record = reaper.reap_one("clock:nightly", OVER, store=broken, now=NOW, base_dir=home)
+    with patch("gideon.security.sel.sel"):
+        record = reaper.reap_one(
+            "clock:nightly", OVER, store=broken, now=NOW, base_dir=home
+        )
 
     assert record["released"] is True
     assert record["recorded"] is False
@@ -205,14 +211,13 @@ def test_a_failing_sel_audit_does_not_mask_the_reap(home, store):
     _trigger(store)
     _claim(home, age=OVER)
 
-    with patch("gideon.sel.sel", side_effect=RuntimeError("no sel")):
-        record = reaper.reap_one("clock:nightly", OVER, store=store, now=NOW, base_dir=home)
+    with patch("gideon.security.sel.sel", side_effect=RuntimeError("no sel")):
+        record = reaper.reap_one(
+            "clock:nightly", OVER, store=store, now=NOW, base_dir=home
+        )
 
     assert record["released"] is True
     assert claims.is_running("clock:nightly", now=NOW, base_dir=home) is False
-
-
-# ── sweep_once(): the whole pass ──
 
 
 def test_a_sweep_reaps_every_overdue_run_and_spares_the_rest(home, store):
@@ -223,7 +228,7 @@ def test_a_sweep_reaps_every_overdue_run_and_spares_the_rest(home, store):
     _claim(home, "clock:hung-b", age=OVER)
     _claim(home, "clock:fine", age=30.0)
 
-    with patch("gideon.sel.sel"):
+    with patch("gideon.security.sel.sel"):
         records = reaper.sweep_once(store=store, now=NOW, base_dir=home)
 
     assert [r["trigger_id"] for r in records] == ["clock:hung-a", "clock:hung-b"]
@@ -243,8 +248,10 @@ def test_a_shorter_deadline_reaps_a_younger_run(home, store):
     _trigger(store)
     _claim(home, age=100.0)
 
-    with patch("gideon.sel.sel"):
-        records = reaper.sweep_once(store=store, now=NOW, deadline_secs=50.0, base_dir=home)
+    with patch("gideon.security.sel.sel"):
+        records = reaper.sweep_once(
+            store=store, now=NOW, deadline_secs=50.0, base_dir=home
+        )
 
     assert [r["trigger_id"] for r in records] == ["clock:nightly"]
 
@@ -256,7 +263,7 @@ def test_sweeping_twice_is_idempotent(home, store):
     _trigger(store)
     _claim(home, age=OVER)
 
-    with patch("gideon.sel.sel"):
+    with patch("gideon.security.sel.sel"):
         first = reaper.sweep_once(store=store, now=NOW, base_dir=home)
         second = reaper.sweep_once(store=store, now=NOW, base_dir=home)
 
@@ -264,22 +271,20 @@ def test_sweeping_twice_is_idempotent(home, store):
     assert second == []
 
 
-# ── run_forever(): the loop ──
-
-
 @pytest.mark.asyncio
 async def test_the_loop_sweeps_on_its_interval(home, store):
     """Ported from `test_start_reaper_creates_task` + `test_reaper_loop_invokes_force_reap...`,
     which asserted a task object existed and that a hand-built dict got swept. This drives the real
-    loop against a real claim and asserts the CLAIM IS GONE — the outcome, not the plumbing."""
+    loop against a real claim and asserts the CLAIM IS GONE — the outcome, not the plumbing.
+    """
     _trigger(store)
     _claim(home, age=OVER)
 
-    with patch("gideon.sel.sel"):
+    with patch("gideon.security.sel.sel"):
         task = asyncio.create_task(
             reaper.run_forever(store=store, base_dir=home, interval_secs=0.01)
         )
-        for _ in range(200):  # up to ~2s, but returns as soon as the sweep lands
+        for _ in range(200):
             await asyncio.sleep(0.01)
             if not claims.is_running("clock:nightly", base_dir=home):
                 break
@@ -293,7 +298,9 @@ async def test_the_loop_sweeps_on_its_interval(home, store):
 @pytest.mark.asyncio
 async def test_the_loop_propagates_cancellation(home, store):
     """Ported from `test_stop_cancels_reaper`. Shutdown has to be able to stop it."""
-    task = asyncio.create_task(reaper.run_forever(store=store, base_dir=home, interval_secs=0.01))
+    task = asyncio.create_task(
+        reaper.run_forever(store=store, base_dir=home, interval_secs=0.01)
+    )
     await asyncio.sleep(0.02)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -304,7 +311,8 @@ async def test_the_loop_propagates_cancellation(home, store):
 @pytest.mark.asyncio
 async def test_the_loop_outlives_a_failing_sweep(home, store):
     """A reaper that died on one bad sweep would silently stop bounding every run on the machine —
-    and it would look exactly like a healthy one, which is how the loop it replaces stayed inert."""
+    and it would look exactly like a healthy one, which is how the loop it replaces stayed inert.
+    """
     calls: list[int] = []
     real = reaper.sweep_once
 
@@ -316,7 +324,7 @@ async def test_the_loop_outlives_a_failing_sweep(home, store):
 
     _trigger(store)
     _claim(home, age=OVER)
-    with patch.object(reaper, "sweep_once", flaky), patch("gideon.sel.sel"):
+    with patch.object(reaper, "sweep_once", flaky), patch("gideon.security.sel.sel"):
         task = asyncio.create_task(
             reaper.run_forever(store=store, base_dir=home, interval_secs=0.01)
         )
@@ -328,18 +336,16 @@ async def test_the_loop_outlives_a_failing_sweep(home, store):
         with pytest.raises(asyncio.CancelledError):
             await task
 
-    assert len(calls) >= 2  # it kept sweeping after the failure
-
-
-# ── the deadline agrees with the reapers it sits beside ──
+    assert len(calls) >= 2
 
 
 def test_the_deadline_matches_the_cron_and_subagent_reapers():
     """The plan keeps the reaper "as defense-in-depth over ALL trigger-fired runs", so the number a
     user already reasons about for a cron has to be the number a store-backed trigger gets. Three
-    deadlines that drifted apart would make "why did my run stop at 30 minutes" unanswerable."""
-    from gideon import subagent
-    from gideon.schedule import _JOB_TIMEOUT_SECS
+    deadlines that drifted apart would make "why did my run stop at 30 minutes" unanswerable.
+    """
+    from gideon.automation.schedule import _JOB_TIMEOUT_SECS
+    from gideon.engine import subagent
 
     assert reaper.RUN_DEADLINE_SECS == float(_JOB_TIMEOUT_SECS)
     assert reaper.RUN_DEADLINE_SECS == float(subagent._TIMEOUT_SECS)
@@ -351,16 +357,19 @@ def test_the_legacy_reaper_is_gone(home):
     nothing and said so nowhere); S112 deleted the class that carried it, which is a stronger
     statement than any per-method check could make."""
     with pytest.raises(ImportError):
-        from gideon.schedule import ScheduleService  # noqa: F401
+        from gideon.automation.schedule import ScheduleService  # noqa: F401
 
 
 def test_boot_starts_the_new_reaper_and_not_the_old_one():
     """Source-level, like S100's `test_triggers_loop.py` check: the wiring is the whole point of the
-    session, and a boot test that mocks `ScheduleService` cannot see which loop was armed."""
+    session, and a boot test that mocks `ScheduleService` cannot see which loop was armed.
+    """
     import pathlib
 
-    import gideon.gateway as G
+    import gideon.engine.gateway as G
+    from gideon.engine import automation_boot
 
-    src = pathlib.Path(G.__file__).read_text()
-    assert "self._trigger_reaper_loop()" in src
+    assert "AutomationBoot" in pathlib.Path(G.__file__).read_text()
+    src = pathlib.Path(automation_boot.__file__).read_text()
+    assert "self.runtime._trigger_reaper_loop()" in src
     assert "cron_svc.start_reaper" not in src

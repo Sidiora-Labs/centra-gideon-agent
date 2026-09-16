@@ -21,14 +21,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gideon.learning_summary import (
+from gideon.cognition.learning_summary import (
     _MAX_NAMES,
     LearningSummary,
     compose_learning_summary,
 )
-from gideon.skills import loader as loader_mod
-from gideon.skills import overlays, proposals
-from gideon.skills.loader import AutoSkillProvenance, SkillsLoader
+from gideon.extensions.skills import loader as loader_mod
+from gideon.extensions.skills import overlays, proposals
+from gideon.extensions.skills.loader import AutoSkillProvenance, ProcedureLibrary
 
 NOW = datetime(2026, 8, 20, 12, 0, tzinfo=timezone.utc)
 
@@ -45,7 +45,9 @@ def _iso_real(days_ago: float) -> str:
     as the calendar advances, which is a test that passes today and fails silently in a
     week. Measured: it already did, five days after `NOW`.
     """
-    return (datetime.now(tz=timezone.utc) - timedelta(days=days_ago)).isoformat(timespec="seconds")
+    return (datetime.now(tz=timezone.utc) - timedelta(days=days_ago)).isoformat(
+        timespec="seconds"
+    )
 
 
 @pytest.fixture
@@ -58,7 +60,7 @@ def home(tmp_path, monkeypatch):
     make every test below write to the real home and still pass.
     """
     monkeypatch.setattr(loader_mod, "config_dir", lambda: tmp_path)
-    import gideon.skills.marketplace as mp
+    import gideon.extensions.skills.marketplace as mp
 
     monkeypatch.setattr(mp, "SKILL_DISCOVERY_PATHS", [])
     assert loader_mod.skills_dir() == tmp_path / "skills"
@@ -66,8 +68,8 @@ def home(tmp_path, monkeypatch):
     return tmp_path
 
 
-def _loader() -> SkillsLoader:
-    return SkillsLoader(install_builtins=False)
+def _loader() -> ProcedureLibrary:
+    return ProcedureLibrary(install_builtins=False)
 
 
 def _create(slug: str, *, created_at: str) -> str:
@@ -114,15 +116,12 @@ def _enqueue(slug: str, *, kind: str = "new", refine_target: str = "") -> None:
 
 def _memory(tmp_path):
     """A real vector store — the backing for both facets and lessons."""
-    from gideon.vector_memory import VectorMemoryStore
+    from gideon.cognition.vector_memory import SemanticArchive
 
-    vs = VectorMemoryStore(db_path=tmp_path / "memory.db", embedding_dim=3)
+    vs = SemanticArchive(db_path=tmp_path / "memory.db", embedding_dim=3)
     vs.init()
     vs.embed_fn = lambda t: [1.0, 0.0, 0.0]
     return vs
-
-
-# ── counts + names: the two must not be derived from each other ────────────────────
 
 
 def test_counts_are_exact_while_names_are_a_bounded_sample(home):
@@ -167,9 +166,6 @@ def test_pending_is_unwindowed_and_a_refine_names_its_target(home):
 
     assert summary.pending_proposals.count == 1
     assert summary.pending_proposals.names == ["auto/existing-flow (refine)"]
-
-
-# ── new vs refined: distinguished by provenance, never double-counted ──────────────
 
 
 def test_new_and_refined_are_split_by_provenance(home):
@@ -218,11 +214,7 @@ def test_an_overlay_refinement_is_seen_though_skill_md_is_untouched(home):
     summary = compose_learning_summary(now=NOW)
 
     assert summary.refined_skills.names == [name]
-    # The base bytes are the falsification target of the overlay design itself.
     assert (home / "skills" / name / "SKILL.md").read_bytes() == before
-
-
-# ── facts: facets + lessons, each through its live writer ──────────────────────────
 
 
 def test_facts_read_facets_and_lessons_from_their_live_writers(home, tmp_path):
@@ -232,13 +224,21 @@ def test_facts_read_facets_and_lessons_from_their_live_writers(home, tmp_path):
     `/api/lessons` + the same review call the second. The facet carries its live state
     from the SAME derivation the ambient PROFILE block uses.
     """
-    from gideon.memory_service import MemoryService
-    from gideon.preference_facets import upsert_facet
+    from gideon.cognition.memory_service import MemoryService
+    from gideon.cognition.preference_facets import upsert_facet
 
     vs = _memory(tmp_path)
-    upsert_facet(vs, "style", "prefers terse replies", cue="explicit", now=NOW - timedelta(days=1))
+    upsert_facet(
+        vs,
+        "style",
+        "prefers terse replies",
+        cue="explicit",
+        now=NOW - timedelta(days=1),
+    )
     assert (
-        MemoryService.over_vector_store(vs).write_lesson("always run make lint", category="process")
+        MemoryService.over_vector_store(vs).write_lesson(
+            "always run make lint", category="process"
+        )
         is True
     )
 
@@ -264,9 +264,6 @@ def test_no_vector_store_yields_no_facts_and_still_reports_skills(home):
     assert summary.new_skills.count == 1
 
 
-# ── the window is a real filter (the vacuity half) ─────────────────────────────────
-
-
 def test_everything_outside_the_window_is_excluded(home, tmp_path):
     """The same seed, read from a `now` a year later, reports only the unwindowed group.
 
@@ -274,22 +271,38 @@ def test_everything_outside_the_window_is_excluded(home, tmp_path):
     ignored, the counts here would match the in-window test's. `pending` stays at 1
     because it is deliberately unwindowed.
     """
-    from gideon.memory_service import MemoryService
-    from gideon.preference_facets import upsert_facet
+    from gideon.cognition.memory_service import MemoryService
+    from gideon.cognition.preference_facets import upsert_facet
 
     vs = _memory(tmp_path)
     _create("fresh-thing", created_at=_iso(2))
     _create("old-thing", created_at=_iso(120))
     _refine("auto/old-thing", refined_at=_iso(3))
     _enqueue("still-pending")
-    upsert_facet(vs, "style", "prefers terse replies", cue="explicit", now=NOW - timedelta(days=1))
-    MemoryService.over_vector_store(vs).write_lesson("always run make lint", category="process")
+    upsert_facet(
+        vs,
+        "style",
+        "prefers terse replies",
+        cue="explicit",
+        now=NOW - timedelta(days=1),
+    )
+    MemoryService.over_vector_store(vs).write_lesson(
+        "always run make lint", category="process"
+    )
 
     inside = compose_learning_summary(now=NOW, vs=vs)
-    assert (inside.new_skills.count, inside.refined_skills.count, inside.facts.count) == (1, 1, 2)
+    assert (
+        inside.new_skills.count,
+        inside.refined_skills.count,
+        inside.facts.count,
+    ) == (1, 1, 2)
 
     outside = compose_learning_summary(now=NOW + timedelta(days=365), vs=vs)
-    assert (outside.new_skills.count, outside.refined_skills.count, outside.facts.count) == (
+    assert (
+        outside.new_skills.count,
+        outside.refined_skills.count,
+        outside.facts.count,
+    ) == (
         0,
         0,
         0,
@@ -304,12 +317,11 @@ def test_the_window_is_clamped_to_the_declared_bounds(home):
     assert compose_learning_summary(window_days=9999, now=NOW).window_days == 90
 
 
-# ── propose-don't-write ────────────────────────────────────────────────────────────
-
-
 def _snapshot(root) -> dict[str, bytes]:
     return {
-        str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()
+        str(p.relative_to(root)): p.read_bytes()
+        for p in sorted(root.rglob("*"))
+        if p.is_file()
     }
 
 
@@ -319,14 +331,22 @@ def test_composing_the_block_writes_nothing(home, tmp_path):
     Byte-for-byte over every file in the home, not just the ones the composer names — a
     per-store check would miss a store that grew a cache file on read.
     """
-    from gideon.memory_service import MemoryService
-    from gideon.preference_facets import upsert_facet
+    from gideon.cognition.memory_service import MemoryService
+    from gideon.cognition.preference_facets import upsert_facet
 
     vs = _memory(tmp_path)
     _create("fresh-thing", created_at=_iso(2))
     _enqueue("still-pending")
-    upsert_facet(vs, "style", "prefers terse replies", cue="explicit", now=NOW - timedelta(days=1))
-    MemoryService.over_vector_store(vs).write_lesson("always run make lint", category="process")
+    upsert_facet(
+        vs,
+        "style",
+        "prefers terse replies",
+        cue="explicit",
+        now=NOW - timedelta(days=1),
+    )
+    MemoryService.over_vector_store(vs).write_lesson(
+        "always run make lint", category="process"
+    )
 
     before = _snapshot(home / "skills")
     assert before, "the snapshot must see files or this proves nothing"
@@ -337,21 +357,20 @@ def test_composing_the_block_writes_nothing(home, tmp_path):
     assert _snapshot(home / "skills") == before
 
 
-# ── the HTTP surface the block actually reads ──────────────────────────────────────
-
-
 def _state(tmp_path):
-    from gideon.dashboard.state import DashboardState
-    from gideon.memory import MemoryStore
+    from gideon.cognition.memory import MemoryJournal
+    from gideon.interfaces.dashboard.state import ConsoleState
 
     ws = tmp_path / "ws"
     ws.mkdir(exist_ok=True)
-    mem = MemoryStore(workspace=ws)
+    mem = MemoryJournal(workspace=ws)
     mem.init()
     mem.vector_store = _memory(tmp_path)
     cb = MagicMock()
     cb.memory = mem
-    state = DashboardState(sessions=MagicMock(count=0), start_time=0.0, context_builder=cb)
+    state = ConsoleState(
+        sessions=MagicMock(count=0), start_time=0.0, context_builder=cb
+    )
     return state, mem.vector_store
 
 
@@ -372,8 +391,8 @@ async def test_endpoint_serves_the_block_with_real_counts(home, tmp_path):
     internal dataclass: the block's contract is the JSON, and a rename inside
     `LearningSummary` that left the payload alone must not red here.
     """
-    from gideon.dashboard.handlers.learning import api_learning_summary
-    from gideon.preference_facets import upsert_facet
+    from gideon.cognition.preference_facets import upsert_facet
+    from gideon.interfaces.dashboard.handlers.learning import api_learning_summary
 
     state, vs = _state(tmp_path)
     _create("fresh-thing", created_at=_iso_real(2))
@@ -397,7 +416,7 @@ async def test_endpoint_404s_when_learning_is_disabled(home, tmp_path, monkeypat
 
     Zeros there would assert "nothing was learned"; the truth is "nothing is tracked".
     """
-    import gideon.dashboard.handlers.learning as mod
+    import gideon.interfaces.dashboard.handlers.learning as mod
 
     state, _vs = _state(tmp_path)
     _create("fresh-thing", created_at=_iso_real(2))
@@ -408,22 +427,22 @@ async def test_endpoint_404s_when_learning_is_disabled(home, tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
-async def test_a_temporary_session_gets_the_block_without_the_facts(home, tmp_path, monkeypatch):
+async def test_a_temporary_session_gets_the_block_without_the_facts(
+    home, tmp_path, monkeypatch
+):
     """A `blocks_reads` session sees skills/proposals but no memory content.
 
     Matches `/api/lessons`, which returns an empty list for the same caller. The skill and
     proposal groups are not memory, so hiding them too would be a different lie.
     """
-    import gideon.dashboard.handlers._shared as shared
-    from gideon.dashboard.handlers.learning import api_learning_summary
-    from gideon.preference_facets import upsert_facet
+    import gideon.interfaces.dashboard.handlers._shared as shared
+    from gideon.cognition.preference_facets import upsert_facet
+    from gideon.interfaces.dashboard.handlers.learning import api_learning_summary
 
     state, vs = _state(tmp_path)
     _create("fresh-thing", created_at=_iso_real(2))
     upsert_facet(vs, "style", "prefers terse replies", cue="explicit")
 
-    # Control: the same request WITH reads allowed sees the facet — so the assertion
-    # below measures the block, not an empty store.
     allowed = json.loads((await api_learning_summary(_req(state))).body)
     assert allowed["facts"]["count"] == 1
 
@@ -454,7 +473,7 @@ def test_the_summary_route_is_actually_registered_not_merely_defined():
     """
     from aiohttp import web as _web
 
-    from gideon.dashboard.handlers import learning as _learning
+    from gideon.interfaces.dashboard.handlers import learning as _learning
 
     app = _web.Application()
     _learning.register_learning_routes(app)

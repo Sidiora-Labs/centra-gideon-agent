@@ -11,9 +11,9 @@ because the spec still looks like a spec with criteria.
 
 import pytest
 
-from gideon.workflows.intent import Intent, Rigor
-from gideon.workflows.models import Node
-from gideon.workflows.rigor import (
+from gideon.automation.workflows.intent import Intent, Rigor
+from gideon.automation.workflows.models import Node
+from gideon.automation.workflows.rigor import (
     CRITERIA_KEY,
     REFINE_GATE_ID,
     ArtifactRevision,
@@ -26,7 +26,7 @@ from gideon.workflows.rigor import (
     specify_prompt,
     specify_spec,
 )
-from gideon.workflows.validator import validate_node_tree
+from gideon.automation.workflows.validator import validate_node_tree
 
 
 def seq(*children) -> dict:
@@ -41,12 +41,10 @@ def ids(spec: dict) -> list[str]:
     return [c["id"] for c in spec["root"]["children"]]
 
 
-# ── entering the fast path ──
-
-
 def test_an_explicit_request_wins_over_the_classifier():
     """`rigor: fast` is the user saying "I know this is a worse spec and I want to start anyway".
-    A classifier that overrode it would argue with a decision about the user's own time."""
+    A classifier that overrode it would argue with a decision about the user's own time.
+    """
     assert is_fast(Intent(rigor=Rigor.DEEP), requested="fast") is True
 
 
@@ -61,9 +59,6 @@ def test_a_standard_intent_is_not_fast():
 def test_is_fast_survives_no_intent_at_all():
     assert is_fast(None, requested="fast") is True
     assert is_fast(None) is False
-
-
-# ── the refinement gate ──
 
 
 def test_the_gate_lands_after_the_first_WORK_node():
@@ -92,7 +87,9 @@ def test_scheduling_is_idempotent():
 def test_the_gate_does_not_follow_another_GATE():
     """A gate produces a decision, not an artifact. Refining after one would refine against
     nothing new."""
-    spec = seq({"kind": "gate", "id": "ask", "config": {"kind": "approval"}}, stage("work"))
+    spec = seq(
+        {"kind": "gate", "id": "ask", "config": {"kind": "approval"}}, stage("work")
+    )
     assert ids(schedule_refinement(spec)) == ["ask", "work", REFINE_GATE_ID]
 
 
@@ -104,16 +101,15 @@ def test_the_spec_records_that_it_took_the_fast_path():
 def test_a_scheduled_plan_still_validates():
     out = schedule_refinement(seq(stage("a")))
     errors = [
-        i for i in validate_node_tree(Node.from_dict(out["root"])).issues if i.severity == "error"
+        i
+        for i in validate_node_tree(Node.from_dict(out["root"])).issues
+        if i.severity == "error"
     ]
     assert errors == []
 
 
 def test_a_malformed_spec_is_returned_untouched():
     assert schedule_refinement({"root": "junk"}) == {"root": "junk"}
-
-
-# ── Specify ──
 
 
 def test_the_specify_prompt_demands_exactly_one_stage():
@@ -129,7 +125,9 @@ def test_the_specify_prompt_forbids_broadening_the_task():
 
 
 def test_a_specify_result_is_one_runnable_stage():
-    spec = specify_spec("Summarize the retry behaviour in the ingest path as a short note.")
+    spec = specify_spec(
+        "Summarize the retry behaviour in the ingest path as a short note."
+    )
     assert spec["root"]["kind"] == "stage"
     assert spec["rigor"] == Rigor.FAST.value
 
@@ -146,17 +144,18 @@ def test_an_empty_instruction_produces_no_spec():
 def test_a_specified_spec_validates():
     spec = specify_spec("Write a short note about cold starts.")
     errors = [
-        i for i in validate_node_tree(Node.from_dict(spec["root"])).issues if i.severity == "error"
+        i
+        for i in validate_node_tree(Node.from_dict(spec["root"])).issues
+        if i.severity == "error"
     ]
     assert errors == []
 
 
-# ── the append-only ratchet ──
-
-
 def test_a_defects_fix_becomes_the_criterion():
     """Phrased as a requirement a judge can check, not as a bug report about one past run."""
-    out = ratchet_criteria({}, [Defect(observed="no sources", fix="every claim cites a source")])
+    out = ratchet_criteria(
+        {}, [Defect(observed="no sources", fix="every claim cites a source")]
+    )
     assert out[CRITERIA_KEY] == ["every claim cites a source"]
 
 
@@ -203,12 +202,12 @@ def test_the_original_spec_is_not_mutated():
     assert spec == {}
 
 
-# ── revise-spec-from-artifact ──
-
-
 def test_a_revision_ratchets_and_records_its_provenance():
     out = revise_from_artifact(
-        {}, ArtifactRevision(from_run="run-1", defects=[Defect(fix="check a", observed="")])
+        {},
+        ArtifactRevision(
+            from_run="run-1", defects=[Defect(fix="check a", observed="")]
+        ),
     )
     assert out[CRITERIA_KEY] == ["check a"]
     assert out["extra"]["revised_from_runs"] == ["run-1"]
@@ -227,7 +226,9 @@ def test_revision_from_an_artifact_does_NOT_edit_nodes():
     spec = seq(stage("a"), stage("b"))
     out = revise_from_artifact(
         spec,
-        ArtifactRevision(from_run="r", defects=[Defect(fix="check", observed="", node_id="a")]),
+        ArtifactRevision(
+            from_run="r", defects=[Defect(fix="check", observed="", node_id="a")]
+        ),
     )
     assert out["root"] == spec["root"]
 
@@ -237,14 +238,13 @@ def test_the_revision_payload_separates_facts_from_judgements():
     durable residue. Merged, a defect the user reported would be indistinguishable from one the
     system inferred."""
     payload = ArtifactRevision(
-        from_run="r", reaction="too shallow", defects=[Defect(observed="thin", fix="go deeper")]
+        from_run="r",
+        reaction="too shallow",
+        defects=[Defect(observed="thin", fix="go deeper")],
     ).to_dict()
     assert payload["reaction"] == "too shallow"
     assert payload["criteria"] == ["go deeper"]
     assert payload["defects"][0]["observed"] == "thin"
-
-
-# ── the rigor note ──
 
 
 @pytest.mark.parametrize(
@@ -259,7 +259,8 @@ def test_the_revision_payload_separates_facts_from_judgements():
 )
 def test_the_note_says_which_path_ran_and_why(intent, requested, expected):
     """A user who got a thin plan needs to know it was the fast path; one who got interrogated
-    needs to know what earned it. Unexplained rigor is the same legibility failure either way."""
+    needs to know what earned it. Unexplained rigor is the same legibility failure either way.
+    """
     assert expected in rigor_note(intent, requested=requested)
 
 
@@ -268,9 +269,6 @@ def test_the_fast_note_explains_where_refinement_HAPPENS():
     replaces them."""
     note = rigor_note(Intent(rigor=Rigor.FAST, reason="deadline"))
     assert "refinement gate after the first output" in note
-
-
-# ── the tool's own vocabulary ──
 
 
 @pytest.mark.parametrize("word", ["fast", "minimal", "FAST", " Minimal "])
@@ -283,13 +281,17 @@ def test_the_tools_published_rigor_WORD_enters_the_fast_path(word):
 
 def test_an_explicit_request_does_not_quote_the_CLASSIFIERS_contradicting_reason():
     """Measured: an explicit `minimal` printed "Fast path (rigor=standard …)", so the note
-    contradicted its own headline and read as a router bug rather than as an honored request."""
-    note = rigor_note(Intent(rigor=Rigor.STANDARD, reason="rigor=standard"), requested="minimal")
+    contradicted its own headline and read as a router bug rather than as an honored request.
+    """
+    note = rigor_note(
+        Intent(rigor=Rigor.STANDARD, reason="rigor=standard"), requested="minimal"
+    )
     assert "you asked for it" in note
     assert "rigor=standard" not in note
 
 
 def test_an_unrecognized_rigor_word_does_not_enter_the_fast_path():
     """Substituting the fast path for an invalid value would give a caller something they did not
-    ask for with no indication — the same silent-substitution failure the plan tool rejects."""
+    ask for with no indication — the same silent-substitution failure the plan tool rejects.
+    """
     assert is_fast(Intent(rigor=Rigor.STANDARD), requested="thorough") is False

@@ -20,14 +20,14 @@ from typing import Any
 
 import pytest
 
-from gideon.llm.events import (
+from gideon.integrations.llm.events import (
     EVENT_COMPLETE,
     EVENT_PERMISSION_REQUEST,
     EVENT_TEXT_CHUNK,
     EVENT_THINKING_CHUNK,
     EVENT_TOOL_CALL,
 )
-from gideon.llm.scripted import (
+from gideon.integrations.llm.scripted import (
     HOME_ENV_VAR,
     SCRIPT_ENV_VAR,
     ScriptedProvider,
@@ -37,12 +37,8 @@ from gideon.llm.scripted import (
     resolve_script_path,
 )
 
-SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
+SRC_ROOT = Path(__file__).resolve().parents[2] / "runtime"
 
-# Networking + vendor-SDK modules that must never appear in this provider's import
-# graph. ``socket``/``ssl``/``urllib``/``http`` are in the list on purpose: the delta
-# assertion below isolates this module from the package ``__init__``s, which already
-# load those, so including them makes the assertion strictly stronger.
 FORBIDDEN_IMPORTS = frozenset(
     {
         "aiohttp",
@@ -65,10 +61,9 @@ FORBIDDEN_IMPORTS = frozenset(
 )
 
 
-# ── Script builders ───────────────────────────────────────────────────
-
-
-def _write_script(tmp_path: Path, script: dict[str, Any], name: str = "script.json") -> Path:
+def _write_script(
+    tmp_path: Path, script: dict[str, Any], name: str = "script.json"
+) -> Path:
     path = tmp_path / name
     path.write_text(json.dumps(script), encoding="utf-8")
     return path
@@ -153,9 +148,6 @@ def _as_tuples(events: list[Any]) -> list[tuple]:
     return [tuple(sorted(dataclasses.asdict(e).items(), key=str)) for e in events]
 
 
-# ── The safety gate ───────────────────────────────────────────────────
-
-
 def test_refuses_to_construct_without_the_optin_env_var(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -181,7 +173,9 @@ def test_refusal_is_not_a_silent_no_op_provider(
     assert provider is None
 
 
-def test_refuses_when_home_is_unset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_refuses_when_home_is_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """An opted-in script with the DEFAULT home would answer in the user's real home."""
     monkeypatch.setenv(SCRIPT_ENV_VAR, str(_write_script(tmp_path, _text_script())))
     monkeypatch.delenv(HOME_ENV_VAR, raising=False)
@@ -193,7 +187,7 @@ def test_refuses_when_home_is_explicitly_the_real_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Pointing the home AT the real home is refused too, and without mkdir'ing it."""
-    import gideon.config.loader as loader
+    import gideon.core.config.loader as loader
 
     def _poisoned() -> Path:  # pragma: no cover - must never be called
         raise AssertionError("the gate must not call config_dir(): it mkdir's the home")
@@ -207,7 +201,7 @@ def test_refuses_when_home_is_explicitly_the_real_home(
 
 def test_gate_never_creates_the_real_home(monkeypatch: pytest.MonkeyPatch) -> None:
     """The no-opt-in path must not touch the filesystem at all."""
-    import gideon.config.loader as loader
+    import gideon.core.config.loader as loader
 
     def _poisoned() -> Path:  # pragma: no cover - must never be called
         raise AssertionError("the gate must not call config_dir(): it mkdir's the home")
@@ -236,17 +230,16 @@ def test_no_constructor_argument_can_bypass_the_gate() -> None:
 
 
 @pytest.mark.asyncio
-async def test_start_re_asserts_the_gate(enabled, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_start_re_asserts_the_gate(
+    enabled, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """GIDEON_HOME is read live everywhere; a home that moves must still refuse."""
     enabled(_text_script())
     provider = ScriptedProvider()
-    await provider.start()  # passes while the isolated home is bound
+    await provider.start()
     monkeypatch.delenv(HOME_ENV_VAR, raising=False)
     with pytest.raises(ScriptedProviderRefused):
         await provider.start()
-
-
-# ── A bound instance is usable ────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -258,7 +251,11 @@ async def test_bound_instance_completes_a_scripted_text_turn(enabled) -> None:
 
     events = await _collect(provider.stream("hello"))
 
-    assert [e.kind for e in events] == [EVENT_TEXT_CHUNK, EVENT_TEXT_CHUNK, EVENT_COMPLETE]
+    assert [e.kind for e in events] == [
+        EVENT_TEXT_CHUNK,
+        EVENT_TEXT_CHUNK,
+        EVENT_COMPLETE,
+    ]
     assert "".join(e.text for e in events[:2]) == "Hello from the scripted provider."
     done = events[-1]
     assert (done.input_tokens, done.output_tokens) == (42, 7)
@@ -293,7 +290,11 @@ async def test_tool_call_turn_emits_permission_then_call(enabled) -> None:
     assert request.request_id == "call-1"
     assert request.options == ["allow", "deny"]
     call = events[3]
-    assert (call.tool_call_id, call.title, call.risk_level) == ("call-1", "read_file", "safe")
+    assert (call.tool_call_id, call.title, call.risk_level) == (
+        "call-1",
+        "read_file",
+        "safe",
+    )
     assert call.tool_input == {"path": "README.md"}
     assert provider.pending_tool_calls == {"call-1": "read_file"}
 
@@ -422,7 +423,7 @@ async def test_complete_walks_the_same_script(enabled) -> None:
 
 @pytest.mark.asyncio
 async def test_complete_records_its_kwargs_without_reacting_to_them(enabled) -> None:
-    """Reacting to tools/model/effort would break the byte-identical guarantee."""
+    """Reacting to tooling/model/effort would break the byte-identical guarantee."""
     enabled({"version": 1, "turns": [{"text": "same"}]})
     a = ScriptedProvider()
     b = ScriptedProvider()
@@ -444,9 +445,6 @@ async def test_complete_records_its_kwargs_without_reacting_to_them(enabled) -> 
         "model": "gpt-nonexistent",
         "reasoning_effort": "max",
     }
-
-
-# ── Determinism ───────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -472,10 +470,9 @@ async def test_same_script_and_prompts_produce_byte_identical_events(
     run_two = [ev for p in prompts for ev in await _collect(second.stream(p))]
 
     assert _as_tuples(run_one) == _as_tuples(run_two)
-    # Belt and braces: the serialized stream is literally byte-identical.
-    assert json.dumps([dataclasses.asdict(e) for e in run_one], sort_keys=True) == json.dumps(
-        [dataclasses.asdict(e) for e in run_two], sort_keys=True
-    )
+    assert json.dumps(
+        [dataclasses.asdict(e) for e in run_one], sort_keys=True
+    ) == json.dumps([dataclasses.asdict(e) for e in run_two], sort_keys=True)
 
 
 @pytest.mark.asyncio
@@ -490,9 +487,6 @@ async def test_token_counts_come_from_the_script(enabled) -> None:
         outputs.append(events[-1].output_tokens)
 
     assert outputs == [1, 2, 3]
-
-
-# ── Zero network, proven ──────────────────────────────────────────────
 
 
 def _module_file(module: str) -> Path | None:
@@ -541,13 +535,15 @@ def test_module_scope_import_closure_declares_no_http_client() -> None:
     First-party modules it pulls are scanned at module scope, which is what actually
     executes on import.
     """
-    root = "gideon.llm.scripted"
+    root = "gideon.integrations.llm.scripted"
     root_file = _module_file(root)
-    assert root_file is not None, "scripted.py not found under src/"
+    assert root_file is not None, "scripted.py not found under runtime/"
 
     root_tree = ast.parse(root_file.read_text(encoding="utf-8"))
     root_statements = [
-        node for node in ast.walk(root_tree) if isinstance(node, (ast.Import, ast.ImportFrom))
+        node
+        for node in ast.walk(root_tree)
+        if isinstance(node, (ast.Import, ast.ImportFrom))
     ]
 
     closure: set[str] = set()
@@ -568,9 +564,10 @@ def test_module_scope_import_closure_declares_no_http_client() -> None:
             elif top in FORBIDDEN_IMPORTS:
                 offenders.setdefault(module, []).append(name)
 
-    assert offenders == {}, f"network-capable imports declared in the closure: {offenders}"
-    # Vacuity guard: an empty closure or a walk that found nothing would also pass.
-    assert root in closure and "gideon.llm.base" in closure
+    assert (
+        offenders == {}
+    ), f"network-capable imports declared in the closure: {offenders}"
+    assert root in closure and "gideon.integrations.llm.base" in closure
     assert len(root_statements) >= 5
 
 
@@ -584,9 +581,9 @@ def test_importing_the_module_loads_no_networking_module() -> None:
     """
     probe = """
 import json, sys
-import gideon.llm            # package __init__ baseline
+import gideon.integrations.llm            # package __init__ baseline
 before = set(sys.modules)
-import gideon.llm.scripted   # noqa: F401
+import gideon.integrations.llm.scripted   # noqa: F401
 delta = sorted(set(sys.modules) - before)
 print(json.dumps(delta))
 """
@@ -598,13 +595,11 @@ print(json.dumps(delta))
         check=True,
     )
     delta = json.loads(result.stdout.strip().splitlines()[-1])
-    # Vacuity guard: the probe must actually have imported something new.
-    assert "gideon.llm.scripted" in delta, f"probe imported nothing new: {delta}"
+    assert (
+        "gideon.integrations.llm.scripted" in delta
+    ), f"probe imported nothing new: {delta}"
     leaked = sorted({name.split(".")[0] for name in delta} & FORBIDDEN_IMPORTS)
     assert leaked == [], f"importing scripted.py pulled networking modules: {leaked}"
-
-
-# ── Strict script validation (a typo in a fixture must be loud) ────────
 
 
 @pytest.mark.parametrize(
@@ -614,31 +609,48 @@ print(json.dumps(delta))
         pytest.param({"version": 2, "turns": [{"text": "x"}]}, id="wrong-version"),
         pytest.param({"version": 1, "turns": []}, id="empty-turns"),
         pytest.param({"version": 1}, id="no-turns"),
-        pytest.param({"version": 1, "turns": [{"text": "x"}], "extra": 1}, id="unknown-top-key"),
-        pytest.param({"version": 1, "turns": [{"chunk": ["x"]}]}, id="unknown-turn-key"),
         pytest.param(
-            {"version": 1, "turns": [{"text": "a", "chunks": ["b"]}]}, id="text-and-chunks"
-        ),
-        pytest.param({"version": 1, "turns": [{"chunks": "not-a-list"}]}, id="chunks-not-a-list"),
-        pytest.param({"version": 1, "turns": [{"usage": {"nope": 1}}]}, id="unknown-usage-key"),
-        pytest.param(
-            {"version": 1, "turns": [{"usage": {"input_tokens": "x"}}]}, id="usage-not-int"
+            {"version": 1, "turns": [{"text": "x"}], "extra": 1}, id="unknown-top-key"
         ),
         pytest.param(
-            {"version": 1, "turns": [{"tool_calls": [{"name": "t"}]}]}, id="tool-call-no-id"
+            {"version": 1, "turns": [{"chunk": ["x"]}]}, id="unknown-turn-key"
         ),
         pytest.param(
-            {"version": 1, "turns": [{"tool_calls": [{"id": "a"}]}]}, id="tool-call-no-name"
+            {"version": 1, "turns": [{"text": "a", "chunks": ["b"]}]},
+            id="text-and-chunks",
         ),
         pytest.param(
-            {"version": 1, "turns": [{"tool_calls": [{"id": "a", "name": "t", "options": ["x"]}]}]},
+            {"version": 1, "turns": [{"chunks": "not-a-list"}]}, id="chunks-not-a-list"
+        ),
+        pytest.param(
+            {"version": 1, "turns": [{"usage": {"nope": 1}}]}, id="unknown-usage-key"
+        ),
+        pytest.param(
+            {"version": 1, "turns": [{"usage": {"input_tokens": "x"}}]},
+            id="usage-not-int",
+        ),
+        pytest.param(
+            {"version": 1, "turns": [{"tool_calls": [{"name": "t"}]}]},
+            id="tool-call-no-id",
+        ),
+        pytest.param(
+            {"version": 1, "turns": [{"tool_calls": [{"id": "a"}]}]},
+            id="tool-call-no-name",
+        ),
+        pytest.param(
+            {
+                "version": 1,
+                "turns": [{"tool_calls": [{"id": "a", "name": "t", "options": ["x"]}]}],
+            },
             id="options-without-approval",
         ),
         pytest.param(
-            {"version": 1, "on_exhausted": "explode", "turns": [{}]}, id="bad-on-exhausted"
+            {"version": 1, "on_exhausted": "explode", "turns": [{}]},
+            id="bad-on-exhausted",
         ),
         pytest.param(
-            {"version": 1, "context_usage_pct": "high", "turns": [{}]}, id="pct-not-a-number"
+            {"version": 1, "context_usage_pct": "high", "turns": [{}]},
+            id="pct-not-a-number",
         ),
         pytest.param({"version": 1, "turns": "nope"}, id="turns-not-a-list"),
     ],
@@ -651,10 +663,94 @@ def test_malformed_script_raises_loudly(
         ScriptedProvider()
 
 
-def test_non_json_script_raises_loudly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_non_json_script_raises_loudly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     path = tmp_path / "broken.json"
     path.write_text("{not json", encoding="utf-8")
     monkeypatch.setenv(SCRIPT_ENV_VAR, str(path))
     monkeypatch.setenv(HOME_ENV_VAR, str(tmp_path / "home"))
+    with pytest.raises(ScriptedScriptError):
+        ScriptedProvider()
+
+
+@pytest.mark.asyncio
+async def test_failed_prompt_does_not_consume_turn_and_base_fallback_uses_last_user(
+    enabled,
+):
+    from gideon.integrations.llm.base import ModelProvider
+
+    enabled(
+        {
+            "version": 1,
+            "on_exhausted": "error",
+            "turns": [
+                {"expect_prompt": "selected", "text": "first"},
+                {"expect_prompt": "/status", "text": "second"},
+            ],
+        }
+    )
+    provider = ScriptedProvider()
+    with pytest.raises(ScriptedScriptError):
+        await _collect(provider.stream("wrong"))
+    assert provider.turn_index == 0
+    events = await _collect(
+        ModelProvider.complete(
+            provider,
+            [
+                {"role": "user", "content": "ignored"},
+                {"role": "user", "content": "selected"},
+                {"role": "assistant", "content": "later"},
+            ],
+        )
+    )
+    assert [event.text for event in events if event.kind == EVENT_TEXT_CHUNK] == [
+        "first"
+    ]
+    assert provider.turn_index == 1
+    command = await _collect(provider.stream_command("/status"))
+    assert [event.text for event in command if event.kind == EVENT_TEXT_CHUNK] == [
+        "second"
+    ]
+    assert provider.turn_index == 2
+
+
+@pytest.mark.asyncio
+async def test_interrupted_permission_turn_advances_once_and_retains_pending_state(
+    enabled,
+):
+    enabled(_tool_script())
+    provider = ScriptedProvider()
+    events = provider.stream("read")
+    async for event in events:
+        if event.kind == EVENT_PERMISSION_REQUEST:
+            break
+    assert provider.pending_tool_calls == {"call-1": "read_file"}
+    assert provider.context_usage_pct() is None
+    await events.aclose()
+    await provider.reject_tool("call-1")
+    assert provider.turn_index == 1
+    assert provider.pending_tool_calls == {}
+    assert provider.decisions == [("call-1", "rejected")]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"version": 1, "on_exhausted": [], "turns": [{}]},
+        {"version": 1, "turns": [{"duration_ms": True}]},
+        {"version": 1, "turns": [{"usage": {"input_tokens": True}}]},
+        {"version": 1, "turns": [{"context_usage_pct": False}]},
+        {"version": 1, "turns": [{"thinking": [1]}]},
+        {
+            "version": 1,
+            "turns": [
+                {"tool_calls": [{"id": "a", "name": "t", "requires_approval": 1}]}
+            ],
+        },
+    ],
+)
+def test_script_schema_rejects_invalid_scalar_types(payload, enabled):
+    enabled(payload)
     with pytest.raises(ScriptedScriptError):
         ScriptedProvider()

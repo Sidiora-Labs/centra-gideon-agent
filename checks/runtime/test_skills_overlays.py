@@ -15,16 +15,16 @@ import time
 
 import pytest
 
-from gideon.skills import loader as loader_mod
-from gideon.skills import overlays, proposals
-from gideon.skills.loader import SkillsLoader
-from gideon.skills.marketplace import verify_skill_integrity
+from gideon.extensions.skills import loader as loader_mod
+from gideon.extensions.skills import overlays, proposals
+from gideon.extensions.skills.loader import ProcedureLibrary
+from gideon.extensions.skills.marketplace import verify_skill_integrity
 
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     monkeypatch.setattr(loader_mod, "config_dir", lambda: tmp_path)
-    import gideon.skills.marketplace as mp
+    import gideon.extensions.skills.marketplace as mp
 
     monkeypatch.setattr(mp, "SKILL_DISCOVERY_PATHS", [])
     return tmp_path
@@ -58,18 +58,25 @@ def _overlay_files(home):
 
 
 def test_apply_writes_one_file_and_load_merges_it(home):
-    _install_locked_skill(home, "release-flow", "---\nname: release-flow\n---\n\nBase steps.\n")
+    _install_locked_skill(
+        home, "release-flow", "---\nname: release-flow\n---\n\nBase steps.\n"
+    )
     overlays.apply_overlay(
-        "release-flow", description="Prefer uv", procedure_md="Use uv, never pip.", created_at=""
+        "release-flow",
+        description="Prefer uv",
+        procedure_md="Use uv, never pip.",
+        created_at="",
     )
     assert len(_overlay_files(home)) == 1
-    loaded = SkillsLoader(install_builtins=False).load_skill("release-flow")
+    loaded = ProcedureLibrary(install_builtins=False).load_skill("release-flow")
     assert "Base steps." in loaded and "Use uv, never pip." in loaded
 
 
 def test_no_overlay_leaves_the_body_untouched(home):
-    _install_locked_skill(home, "release-flow", "---\nname: release-flow\n---\n\nBase steps.\n")
-    loaded = SkillsLoader(install_builtins=False).load_skill("release-flow")
+    _install_locked_skill(
+        home, "release-flow", "---\nname: release-flow\n---\n\nBase steps.\n"
+    )
+    loaded = ProcedureLibrary(install_builtins=False).load_skill("release-flow")
     assert loaded == "---\nname: release-flow\n---\n\nBase steps.\n"
 
 
@@ -81,11 +88,10 @@ def test_revert_removes_exactly_one_file_and_keeps_the_lock_intact(home):
     )
     lock_before = lock_path.read_bytes()
     md_before = (skill_dir / "SKILL.md").read_bytes()
-    assert verify_skill_integrity(skill_dir).ok  # precondition: intact
+    assert verify_skill_integrity(skill_dir).ok
 
     overlays.apply_overlay("release-flow", procedure_md="Use uv, never pip.")
     assert len(_overlay_files(home)) == 1
-    # Apply touched neither the base file nor the lock — still verifiable.
     assert verify_skill_integrity(skill_dir).ok
     assert lock_path.read_bytes() == lock_before
     assert (skill_dir / "SKILL.md").read_bytes() == md_before
@@ -95,16 +101,17 @@ def test_revert_removes_exactly_one_file_and_keeps_the_lock_intact(home):
     after = len(_overlay_files(home))
 
     assert removed == 1
-    assert before - after == 1  # exactly one file gone
+    assert before - after == 1
     assert after == 0
-    # Revert touched neither the base file nor the lock.
     assert verify_skill_integrity(skill_dir).ok
     assert lock_path.read_bytes() == lock_before
     assert (skill_dir / "SKILL.md").read_bytes() == md_before
 
 
 def test_revert_of_a_skill_with_no_overlay_is_a_noop(home):
-    _install_locked_skill(home, "release-flow", "---\nname: release-flow\n---\n\nBase steps.\n")
+    _install_locked_skill(
+        home, "release-flow", "---\nname: release-flow\n---\n\nBase steps.\n"
+    )
     assert overlays.revert_overlay("release-flow") == 0
 
 
@@ -129,7 +136,7 @@ def test_accept_of_a_refine_proposal_applies_the_overlay(home):
     assert len(_overlay_files(home)) == 1
     assert verify_skill_integrity(skill_dir).ok
     assert lock_path.read_bytes() == lock_before
-    loaded = SkillsLoader(install_builtins=False).load_skill("task-and-project")
+    loaded = ProcedureLibrary(install_builtins=False).load_skill("task-and-project")
     assert "Attach the design doc link." in loaded
 
 

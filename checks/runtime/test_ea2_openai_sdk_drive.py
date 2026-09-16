@@ -25,11 +25,12 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 
-from gideon.inbound import auth
-from gideon.inbound import openai_dialect as dialect
+from gideon.integrations.inbound import auth
+from gideon.integrations.inbound import openai_dialect as dialect
 
 openai_sdk = pytest.importorskip(
-    "openai", reason="the `openai` extra is not installed — Success Criteria 2 UNVERIFIED here"
+    "openai",
+    reason="the `openai` extra is not installed — Success Criteria 2 UNVERIFIED here",
 )
 
 _SURFACES = ("OPENAI", "MCP", "A2A", "CAPTURE", "BRIDGE")
@@ -55,7 +56,9 @@ class _Session:
         self.task = None
         self.event = asyncio.Event()
 
-    def append(self, role: str, content: str, cls: str = "", ts: str = "", **kw) -> None:
+    def append(
+        self, role: str, content: str, cls: str = "", ts: str = "", **kw
+    ) -> None:
         msg = {"role": role, "content": content, "cls": cls, "ts": ts}
         self.messages.append(msg)
         self._pending.append(msg)
@@ -79,13 +82,19 @@ class _State:
 
 
 def _configure(monkeypatch, *, persistent: bool):
-    from gideon.config.external_access import ExternalAccessConfig
-    from gideon.config.external_access import ExternalAccessSurfaceConfig as Surface
-    from gideon.config.loader import AgentConfig, AppConfig
-    from gideon.inbound.clients import InboundClient
+    from gideon.core.config.external_access import (
+        ExternalAccessConfig,
+    )
+    from gideon.core.config.external_access import (
+        ExternalAccessSurfaceConfig as Surface,
+    )
+    from gideon.core.config.loader import AgentConfig, AppConfig
+    from gideon.integrations.inbound.clients import InboundClient
 
     cfg = AppConfig()
-    cfg.external_access = ExternalAccessConfig(enabled=True, openai=Surface(enabled=True))
+    cfg.external_access = ExternalAccessConfig(
+        enabled=True, openai=Surface(enabled=True)
+    )
     cfg.agents = {"researcher": AgentConfig()}
     cfg.default_agent = "researcher"
     monkeypatch.setattr(AppConfig, "load", staticmethod(lambda *a, **k: cfg))
@@ -149,7 +158,7 @@ async def test_sdk_holds_a_multi_turn_conversation(monkeypatch):
                 user="alice",
             )
             second = client.chat.completions.create(
-                model="researcher",  # the bare form, from a dropdown-only client
+                model="researcher",
                 messages=[{"role": "user", "content": "and what did I just ask?"}],
                 user="alice",
             )
@@ -159,14 +168,14 @@ async def test_sdk_holds_a_multi_turn_conversation(monkeypatch):
     finally:
         await server.close()
 
-    # The SDK parsed both, which is the claim: these are typed objects, not dicts.
     assert first.choices[0].message.content == "first reply"
     assert second.choices[0].message.content == "second reply"
     assert first.object == "chat.completion"
     assert first.usage is not None
     assert prompts == ["who are you?", "and what did I just ask?"]
-    # Continuity: both turns on one session, and it is the contract's key shape.
-    assert len(state._sessions) == 1, f"expected one session, got {list(state._sessions)}"
+    assert (
+        len(state._sessions) == 1
+    ), f"expected one session, got {list(state._sessions)}"
     key = next(iter(state._sessions))
     assert key == dialect.session_key_for("sdk-client", "alice")
 
@@ -202,7 +211,6 @@ async def test_sdk_streams_and_sees_the_usage_block(monkeypatch):
     assert text.strip() == "alpha beta gamma"
     assert chunks[-1].usage is not None, "the SDK must surface the final frame's usage"
     assert chunks[-1].usage.total_tokens >= 0
-    # And no chunk claimed a tool call — §2.3, checked through the SDK's own model.
     assert all(not (c.choices and c.choices[0].delta.tool_calls) for c in chunks)
 
 
@@ -258,8 +266,6 @@ async def test_sdk_raises_authentication_error_on_a_bad_key(monkeypatch):
     finally:
         await server.close()
     assert error.status_code == 401
-    # Generic admission code (see the dialect test's note); the SDK still classifies it
-    # as AuthenticationError, which is the half a real client acts on.
     assert error.code == "unauthorized"
 
 
@@ -288,7 +294,9 @@ async def test_curl_audio_speech_returns_bound_tts_audio(monkeypatch):
     ``resolve_voice``.
     """
     if shutil.which("curl") is None:  # pragma: no cover — curl is present on macOS/CI
-        pytest.skip("curl is not installed — the Success Criteria 2 audio leg is UNVERIFIED")
+        pytest.skip(
+            "curl is not installed — the Success Criteria 2 audio leg is UNVERIFIED"
+        )
 
     handed: dict = {}
 
@@ -306,11 +314,15 @@ async def test_curl_audio_speech_returns_bound_tts_audio(monkeypatch):
             "speech_voice": "",
         },
     )
-    monkeypatch.setattr("gideon.voice_reply.streaming_voice_reply", _fake_stream)
+    monkeypatch.setattr(
+        "gideon.integrations.voice_reply.streaming_voice_reply", _fake_stream
+    )
     server, _, _ = await _serve(monkeypatch)
     token = auth.create_surface_token(dialect.OPENAI_SURFACE)
     url = f"http://127.0.0.1:{server.port}{dialect.ROUTE_SPEECH}"
-    payload = json.dumps({"model": "tts-1", "input": "hello from curl", "voice": "whatever"})
+    payload = json.dumps(
+        {"model": "tts-1", "input": "hello from curl", "voice": "whatever"}
+    )
     try:
         proc = await asyncio.to_thread(
             subprocess.run,
@@ -340,7 +352,6 @@ async def test_curl_audio_speech_returns_bound_tts_audio(monkeypatch):
     assert status == b"200"
     assert content_type.startswith(b"audio/wav")
     assert body == b"RIFF____WAVEfake-bound-audio"
-    # The cosmetic alias never reached provider selection.
     assert handed["provider"] == "THE-BOUND-PROVIDER"
     assert handed["voice"] == "the-bound-voice"
     assert handed["text"] == "hello from curl"

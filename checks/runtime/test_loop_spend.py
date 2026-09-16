@@ -20,16 +20,11 @@ from __future__ import annotations
 
 import pytest
 
-from gideon import usage_ledger as ul
-from gideon.loop.manager import loop_spend, session_key, task_session_key
-from gideon.loop.plan_walkthrough import planner_session_key
-from gideon.usage_ledger import TurnUsage
+from gideon.automation.loop.manager import loop_spend, session_key, task_session_key
+from gideon.automation.loop.plan_walkthrough import planner_session_key
+from gideon.operations import usage_ledger as ul
+from gideon.operations.usage_ledger import TurnUsage
 
-#: Two loop ids where one is a strict prefix of the other, as a STRING. `store._LOOP_ID_RE` mints
-#: 8 hex chars, so two real ids cannot collide today — but the ledger accepts whatever
-#: `session_key` a writer hands it, and the selection must be unambiguous on its own terms rather
-#: than borrow safety from a regex in another module. If the id shape ever widens, this is the test
-#: that already covers it.
 LOOP = "abc123"
 LOOP_LONGER = "abc1234"
 
@@ -37,7 +32,7 @@ LOOP_LONGER = "abc1234"
 @pytest.fixture(autouse=True)
 def _home(tmp_path, monkeypatch):
     """Isolated config_dir — the ledger writes under tmp, never the real home."""
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     return tmp_path
 
 
@@ -58,15 +53,11 @@ def _turn(skey: str, cost: float, *, priced: bool = True, tokens: int = 100) -> 
     )
 
 
-# ── 1. both worker key shapes ───────────────────────────────────────────────────────────
-
-
 def test_the_key_shapes_this_reads_are_the_ones_the_manager_mints() -> None:
     """The floor: if these spellings drift, every sum below is measuring the wrong keys."""
     assert session_key(LOOP) == f"loop-{LOOP}"
     assert task_session_key(LOOP, "t1") == f"loop-{LOOP}-t1"
     assert task_session_key(LOOP, "t1").startswith(session_key(LOOP) + "-")
-    # The planner is NOT under the worker prefix — the whole reason it is reported separately.
     assert not planner_session_key(LOOP).startswith(session_key(LOOP) + "-")
 
 
@@ -84,8 +75,6 @@ def test_a_fan_out_loop_sums_the_main_worker_AND_every_task_worker() -> None:
     spend = loop_spend(LOOP)
     assert spend["dollars_est"] == pytest.approx(1.25)
     assert spend["turns"] == 3
-    # Vacuity floor: the main worker's own turn is really in there, so this is not three task
-    # workers passing for a fan-out sum.
     assert (
         loop_spend(LOOP)["dollars_est"]
         > ul.totals(session_key=task_session_key(LOOP, "t1"))["cost_usd"]
@@ -96,11 +85,7 @@ def test_a_fan_out_loop_sums_the_main_worker_AND_every_task_worker() -> None:
 def test_tokens_sum_across_the_fan_out_too() -> None:
     _turn(session_key(LOOP), 0.1, tokens=100)
     _turn(task_session_key(LOOP, "t1"), 0.1, tokens=200)
-    # 100+10 + 200+20
     assert loop_spend(LOOP)["tokens"] == 330
-
-
-# ── 2. the prefix must not be ambiguous ─────────────────────────────────────────────────
 
 
 def test_a_loop_whose_id_EXTENDS_another_is_not_swallowed_by_it() -> None:
@@ -132,9 +117,11 @@ def test_the_extending_loops_own_task_workers_stay_with_it() -> None:
 def test_the_prefix_match_is_separator_aware_at_the_seam_itself() -> None:
     """Unit-level, so a red points at the predicate rather than at a fixture."""
     prefix = session_key(LOOP)
-    assert ul._session_matches(prefix, "", prefix) is True  # the key itself
-    assert ul._session_matches(prefix + "-t1", "", prefix) is True  # a child at the separator
-    assert ul._session_matches(prefix + "4", "", prefix) is False  # a longer id, NOT a child
+    assert ul._session_matches(prefix, "", prefix) is True
+    assert (
+        ul._session_matches(prefix + "-t1", "", prefix) is True
+    )  # a child at the separator
+    assert ul._session_matches(prefix + "4", "", prefix) is False
     assert ul._session_matches(prefix + "4-t1", "", prefix) is False
     assert ul._session_matches("loop-plan-" + LOOP, "", prefix) is False
 
@@ -151,7 +138,9 @@ def test_the_exact_session_filter_still_works_alongside_the_prefix_one() -> None
     _turn(session_key(LOOP), 1.00)
     _turn(task_session_key(LOOP, "t1"), 2.00)
     assert ul.totals(session_key=session_key(LOOP))["cost_usd"] == pytest.approx(1.00)
-    assert ul.totals(session_prefix=session_key(LOOP))["cost_usd"] == pytest.approx(3.00)
+    assert ul.totals(session_prefix=session_key(LOOP))["cost_usd"] == pytest.approx(
+        3.00
+    )
 
 
 def test_rollup_takes_the_prefix_too_and_groups_within_it() -> None:
@@ -163,9 +152,6 @@ def test_rollup_takes_the_prefix_too_and_groups_within_it() -> None:
     assert rows[0]["cost_usd"] == pytest.approx(3.00)
 
 
-# ── 3. the planning bucket is reported, not folded and not dropped ──────────────────────
-
-
 def test_planning_spend_is_reported_beside_the_worker_figure_not_inside_it() -> None:
     """`plan_walkthrough` names the planner session `app="loops"` and keys it `loop-plan-<id>`,
     so it is neither under the worker prefix nor in the same purpose bucket. Reporting it
@@ -174,7 +160,9 @@ def test_planning_spend_is_reported_beside_the_worker_figure_not_inside_it() -> 
     _turn(planner_session_key(LOOP), 0.40)
 
     spend = loop_spend(LOOP)
-    assert spend["dollars_est"] == pytest.approx(1.00), "planning must not inflate the run figure"
+    assert spend["dollars_est"] == pytest.approx(
+        1.00
+    ), "planning must not inflate the run figure"
     assert spend["planning"]["dollars_est"] == pytest.approx(0.40)
     assert spend["planning"]["turns"] == 1
 
@@ -193,9 +181,6 @@ def test_planning_spend_alone_still_reports_the_worker_figure_as_zero() -> None:
     assert spend["dollars_est"] == 0.0
     assert spend["turns"] == 0
     assert spend["planning"]["dollars_est"] == pytest.approx(0.40)
-
-
-# ── 4. honesty of the figure itself ─────────────────────────────────────────────────────
 
 
 def test_an_unpriced_turn_taints_priced_so_the_caller_can_say_FLOOR() -> None:

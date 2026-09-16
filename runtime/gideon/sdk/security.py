@@ -37,7 +37,7 @@ from collections.abc import Awaitable, Callable, Iterable
 
 from aiohttp import web
 
-from gideon.security import fence_untrusted  # noqa: F401
+from gideon.security.security import fence_untrusted  # noqa: F401
 
 __all__ = [
     "fence_untrusted",
@@ -49,16 +49,9 @@ __all__ = [
     "APP_SECRET_ENV",
 ]
 
-# The header the gateway proxy attaches and the backend verifies. Value is
-# ``<ts>:<hmac_hex>``.
 PROXY_SIGNATURE_HEADER = "X-Gideon-Proxy"
-# Acceptance window in seconds either side of ``now`` — a captured signature replayed
-# after this many seconds is refused.
 PROXY_SIGNATURE_WINDOW_SECS = 60
-# Environment variable the supervisor injects the per-app secret into.
 APP_SECRET_ENV = "GIDEON_APP_SECRET"
-# Path(s) exempt from signature: the gateway watchdog probes the backend's health
-# endpoint directly (not through the signing proxy), so it must not require a signature.
 _DEFAULT_EXEMPT: frozenset[str] = frozenset({"/health"})
 
 
@@ -73,7 +66,9 @@ def build_signing_string(ts: int, method: str, path_qs: str, body: bytes) -> str
 
 
 def _hmac_hex(secret: str, message: str) -> str:
-    return hmac.new(secret.encode("utf-8"), message.encode("utf-8"), hashlib.sha256).hexdigest()
+    return hmac.new(
+        secret.encode("utf-8"), message.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
 
 
 def sign_proxy_request(
@@ -150,7 +145,9 @@ def require_proxy_signature(
       mismatched signature returns ``401`` and the route body never runs. The compare is
       constant-time (:func:`hmac.compare_digest`).
     """
-    resolved_secret = secret if secret is not None else os.environ.get(APP_SECRET_ENV, "")
+    resolved_secret = (
+        secret if secret is not None else os.environ.get(APP_SECRET_ENV, "")
+    )
     exempt = frozenset(exempt_paths)
 
     @web.middleware
@@ -158,8 +155,6 @@ def require_proxy_signature(
         request: web.Request,
         handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
     ) -> web.StreamResponse:
-        # Read the body exactly once and stash it — the single body-read mechanism the
-        # backend's own body parsing reuses (so the stream is never consumed twice).
         body = await request.read()
         request["body_bytes"] = body
 
@@ -172,7 +167,12 @@ def require_proxy_signature(
 
         provided = request.headers.get(PROXY_SIGNATURE_HEADER, "")
         ok, reason = _verify(
-            resolved_secret, request.method, request.raw_path, body, provided, window_secs
+            resolved_secret,
+            request.method,
+            request.raw_path,
+            body,
+            provided,
+            window_secs,
         )
         if not ok:
             _deny(request, reason)

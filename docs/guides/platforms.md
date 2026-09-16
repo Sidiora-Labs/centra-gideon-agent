@@ -1,45 +1,30 @@
 # Platforms
 
-Where Gideon runs and what to know per platform. The recommended install
-paths (`uv tool`, the bootstrap one-liner, Docker Compose) are the same
-everywhere — see [Getting started](getting-started.md). This page covers only
-the platform-specific gotchas.
+The runtime includes Linux and macOS service paths, with Linux-container and WSL2
+options for Windows hosts. Use the [checkout setup](../../README.md#run-from-a-checkout)
+or an operator-supplied package or image. No public package index, image registry,
+installer endpoint, or release repository is assumed.
 
-## Support matrix
+## Qualification scope
 
-Every row names the mechanism that **proves** it. No row claims "supported" without
-one, and the token points at something you can go read or re-run:
+Platform support must be established for the revision and deployment being used.
+Focused local checks in this rewrite do not certify the full platform matrix.
 
-- `CI:<job>` — a job in `.github/workflows/` that runs the suite (or a release
-  smoke) on that platform. Green on `main`/nightly is the evidence.
-- `checklist:<section>` — a documented manual walkthrough; evidence is a recorded
-  run, not a CI job.
-- `community` — reported working by users; **not** verified by us.
+| Environment | Source path | Qualification boundary |
+| --- | --- | --- |
+| Linux | Python gateway; systemd integration; Linux container images | Verify architecture, dependencies, isolation, and the intended user flows |
+| macOS | Python gateway; launchd integration; desktop packaging target | Verify local behavior and any distribution signing requirements |
+| Windows with WSL2 | Linux runtime inside a WSL2 distribution | Verify filesystem, networking, and service behavior on that host |
+| Windows with Docker Desktop | Linux images using the WSL2 backend | Build locally or select operator-published image references |
+| Native Windows | No desktop packaging command in the current workspace | Not a qualified native release |
 
-| Platform | Support | Proof |
-|---|---|---|
-| Linux x86-64 | first-class | `CI:full/matrix (ubuntu-latest)` + `CI:release/images smoke (linux/amd64)` |
-| Linux arm64 | first-class | `CI:full/matrix (ubuntu-24.04-arm)` + `CI:release/images smoke (linux/arm64)` |
-| macOS Apple silicon | first-class | `CI:full/matrix (macos-14, macos-latest)` |
-| macOS Intel | best-effort | `community` — no Intel runner in CI; the x86-64 Python/wheel path is the same as Linux x86-64 |
-| Windows via WSL2 | supported | `checklist:Windows via WSL2` (this page) |
-| Windows via Docker Desktop | supported | `checklist:Windows via Docker Desktop` (this page) — written, **not yet executed verbatim**; the release runbook's Windows checklist records the first run |
-| Windows native | not supported | — see [windows-native-audit](../research/windows-native-audit.md) |
-
-The arm64 rows became CI-backed in PLATFORM-REACH A1.3 (arm jobs in `full.yml`) and
-A2.1 (per-arch release smoke); before that they were aspirational.
-
-The matrix above is the **backend**. The desktop *shell* is narrower: unsigned Linux
-x86-64 AppImage/deb on every release (`CI:release/desktop-linux smoke`), macOS from a
-checkout only until signing credentials exist, and no Windows build — see
-[the desktop guide](desktop.md#platforms) for the per-OS signing story and the dated
-Windows deferral.
-
----
+The [desktop guide](desktop.md#platforms) distinguishes runtime deployment from native
+application packaging. The guidance below describes environment setup rather than
+recording a completed release validation.
 
 ## The `[models]` extra, per architecture
 
-`pip install 'gideon[models]'` pulls the local-embedding stack. Wheel
+`python -m pip install -e '.[models]'` from the checkout pulls the local-embedding stack. Wheel
 availability — not Gideon — is what varies by arch. Read from the committed
 `uv.lock` (the resolver's own record, so it stays honest as versions move):
 
@@ -66,7 +51,7 @@ PY
 The embedding stack, not the gateway, is what strains small boards. The gateway
 itself is light; `torch` + a loaded embedding model is the heavy part.
 
-- **< 2 GB RAM** — skip the extra. Install plain `gideon` and use a remote
+- **< 2 GB RAM** — skip the extra. Install the checkout without the `models` extra and use a remote
   provider for embeddings. Everything except local embedding works unchanged.
 - **2–4 GB (Pi 4/5 class)** — `[models]` can work, but add swap before first use;
   the model load is the spike, not steady state:
@@ -168,17 +153,15 @@ it, or start it on Windows login via **Task Scheduler** with a
 
 ## Windows via Docker Desktop
 
-The no-Linux-shell path: Docker Desktop runs the published multi-arch images, so
-you never install Python or open a WSL prompt. You do need Docker Desktop with
+Docker Desktop runs the configured Linux images or builds them from this checkout,
+so the Windows host does not need a Python installation. You do need Docker Desktop with
 its **WSL2 backend** (its default; the legacy Hyper-V backend is not tested).
 
 ### 1. Get the compose file and a `.env`
 
-From a checkout, or by downloading just these two files:
+Obtain the checkout from the operator-configured repository, then run from its root:
 
 ```powershell
-git clone https://github.com/Gideon/Gideon.git
-cd Gideon
 copy .env.example .env
 ```
 
@@ -188,18 +171,19 @@ container paths, not Windows paths** — the gateway runs inside Linux, so
 already sets it to `/data`, backed by a named volume.
 
 > **Why the `.env` must sit at the repo root:** `compose.yaml` declares
-> `env_file: ../../.env`, i.e. two levels up from `deploy/compose/`. If you copy
+> `env_file: ../../.env`, i.e. two levels up from `infrastructure/compose/`. If you copy
 > the compose file somewhere else on its own, that relative path breaks and your
 > keys silently do not load.
 
 ### 2. Start it
 
 ```powershell
-docker compose -f deploy/compose/compose.yaml up -d
+docker compose -f infrastructure/compose/compose.yaml -f infrastructure/compose/compose.build.yaml up -d --build
 ```
 
-First run pulls both images (`gideon-gateway`, `gideon-web`). Pin a
-release instead of `latest` by setting `GIDEON_IMAGE_TAG` in `.env`.
+This builds the local gateway and web images. To use published images instead, set
+`GIDEON_GATEWAY_IMAGE` and `GIDEON_WEB_IMAGE` to complete references supplied by the
+operator, then omit the build overlay. No registry is selected by default.
 
 ### 3. Open the dashboard
 
@@ -232,23 +216,28 @@ Useful volume operations:
 
 ```powershell
 docker volume inspect compose_gideon_home     # where it lives
-docker compose -f deploy/compose/compose.yaml down  # stop, KEEP the volume
-docker compose -f deploy/compose/compose.yaml down -v  # stop and DELETE state
+docker compose -f infrastructure/compose/compose.yaml down  # stop, KEEP the volume
+docker compose -f infrastructure/compose/compose.yaml down -v  # stop and DELETE state
 ```
 
 Prefer `gideon snapshot` (run inside the gateway container) over copying
 the volume by hand:
 
 ```powershell
-docker compose -f deploy/compose/compose.yaml exec gideon-gateway gideon snapshot
+docker compose -f infrastructure/compose/compose.yaml exec gideon-gateway gideon snapshot
 ```
 
 ### 5. Updating
 
+For a local build, obtain the intended repository revision and rebuild:
+
 ```powershell
-docker compose -f deploy/compose/compose.yaml pull
-docker compose -f deploy/compose/compose.yaml up -d
+docker compose -f infrastructure/compose/compose.yaml -f infrastructure/compose/compose.build.yaml up -d --build
 ```
+
+For operator-published images, update the configured image references, then run
+`docker compose -f infrastructure/compose/compose.yaml pull` followed by
+`docker compose -f infrastructure/compose/compose.yaml up -d`.
 
 The named volume survives, so your state carries across the upgrade.
 

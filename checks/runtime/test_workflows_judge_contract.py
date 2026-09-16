@@ -9,7 +9,7 @@ import inspect
 
 import pytest
 
-from gideon.workflows.judge_contract import (
+from gideon.automation.workflows.judge_contract import (
     DEFAULT_FORBIDDEN_MODES,
     GRANULARITY_PRESETS,
     SCORE_MAX,
@@ -53,9 +53,6 @@ def passing(**extra) -> dict:
     return base
 
 
-# ── the proof precondition ──
-
-
 def test_a_pass_without_proof_is_invalid():
     """Not "discouraged" — rejected. A completion record without proof is a claim,
     and the point of a checker is to stop accepting claims."""
@@ -67,7 +64,12 @@ def test_a_pass_without_proof_is_invalid():
 def test_evidence_refs_satisfy_the_proof_precondition():
     """A citation chain is proof; it need not be a command's stdout."""
     verdict = validate_verdict(
-        {"verdict": "PASS", "scores": dict(FULL), "evidence_refs": ["node.audit.output"]}, hints()
+        {
+            "verdict": "PASS",
+            "scores": dict(FULL),
+            "evidence_refs": ["node.audit.output"],
+        },
+        hints(),
     )
     assert verdict.passed
 
@@ -79,11 +81,10 @@ def test_a_pass_with_proof_and_full_scores_passes():
 def test_a_reject_needs_no_proof():
     """Only approval carries the burden — demanding proof to reject would make the
     judge's easiest move be approval."""
-    verdict = validate_verdict({"verdict": "REJECT", "reasoning": "tests fail"}, hints())
+    verdict = validate_verdict(
+        {"verdict": "REJECT", "reasoning": "tests fail"}, hints()
+    )
     assert verdict.valid and not verdict.passed
-
-
-# ── the ratchet ──
 
 
 def test_a_single_shortfall_fails_under_strict():
@@ -105,9 +106,10 @@ def test_an_unscored_criterion_is_a_shortfall():
 def test_relaxed_reports_shortfalls_even_when_it_passes():
     """A relaxed pass is never silent about what it let through."""
     ok, shortfalls = meets_ratchet(
-        {**FULL, "documented": 0}, hints(ratchet=Ratchet.RELAXED, marginal_threshold=1.0)
+        {**FULL, "documented": 0},
+        hints(ratchet=Ratchet.RELAXED, marginal_threshold=1.0),
     )
-    assert shortfalls  # recorded regardless of the verdict
+    assert shortfalls
     assert isinstance(ok, bool)
 
 
@@ -121,29 +123,28 @@ def test_target_scores_are_clamped():
     assert RubricCriterion("x", target_score=-5).clamp_target() == 0
 
 
-# ── engine-computed derivable fields ──
-
-
 def test_the_overall_is_computed_not_taken_from_the_model():
     """If the engine trusted a self-reported aggregate, a judge could score every
     dimension 0 and still report 5, and nothing downstream would notice."""
     verdict = validate_verdict(passing(overall=5.0), hints())
     assert verdict.overall == pytest.approx(compute_overall(FULL, RUBRIC))
-    assert verdict.model_overall == 5.0  # kept as metadata so drift is visible
+    assert verdict.model_overall == 5.0
     assert verdict.overall != verdict.model_overall
 
 
 def test_weights_shift_the_computed_overall():
-    weighted = [RubricCriterion("a", 2, weight=3.0), RubricCriterion("b", 2, weight=1.0)]
-    assert compute_overall({"a": 2, "b": 0}, weighted) > compute_overall({"a": 0, "b": 2}, weighted)
+    weighted = [
+        RubricCriterion("a", 2, weight=3.0),
+        RubricCriterion("b", 2, weight=1.0),
+    ]
+    assert compute_overall({"a": 2, "b": 0}, weighted) > compute_overall(
+        {"a": 0, "b": 2}, weighted
+    )
 
 
 def test_an_empty_rubric_falls_back_to_a_plain_mean():
     assert compute_overall({"a": 2, "b": 0}, []) == pytest.approx(1.0)
     assert compute_overall({}, []) == 0.0
-
-
-# ── the deterministic cross-check ──
 
 
 def test_a_pass_contradicting_the_deterministic_check_escalates():
@@ -163,12 +164,10 @@ def test_an_unavailable_check_does_not_block_a_pass():
     assert validate_verdict(passing(), hints(), fallback_result=None).passed
 
 
-# ── forbidden success modes ──
-
-
 def test_an_admitted_forbidden_mode_invalidates_a_pass():
     verdict = validate_verdict(
-        passing(reasoning="The test was deleted but the implementation looks correct."), hints()
+        passing(reasoning="The test was deleted but the implementation looks correct."),
+        hints(),
     )
     assert not verdict.passed
     assert "forbidden success mode" in verdict.invalid_reason
@@ -213,17 +212,18 @@ def test_the_default_modes_each_carry_two_signal_words():
         assert len(words) >= 2, mode
 
 
-# ── the typed escape hatch ──
-
-
 def test_cannot_judge_becomes_an_escalation_not_a_crash():
     """A parseable refusal. It is not a pass, and it is not an error either."""
-    verdict = validate_verdict({"verdict": "PASS", "cannot_judge": "no test output"}, hints())
+    verdict = validate_verdict(
+        {"verdict": "PASS", "cannot_judge": "no test output"}, hints()
+    )
     assert verdict.verdict is Verdict.ESCALATE
     assert verdict.escalated and not verdict.passed
 
 
-@pytest.mark.parametrize("garbage", [None, "not a dict", 42, [], {}, {"verdict": "MAYBE"}])
+@pytest.mark.parametrize(
+    "garbage", [None, "not a dict", 42, [], {}, {"verdict": "MAYBE"}]
+)
 def test_garbage_becomes_a_reject_never_an_exception(garbage):
     """A judge returning malformed JSON has not approved anything, and crashing the
     run turns a judge outage into a lost iteration."""
@@ -235,9 +235,6 @@ def test_garbage_becomes_a_reject_never_an_exception(garbage):
 def test_the_verdict_enum_is_closed():
     with pytest.raises(ValueError):
         Verdict("APPROVED")
-
-
-# ── sample aggregation ──
 
 
 def test_a_majority_pass_carries_a_terminal_gate():
@@ -295,9 +292,6 @@ def test_the_sample_count_is_forced_odd():
     assert JudgeHints(judge_samples=4).sample_count() == 5
     assert JudgeHints(judge_samples=3).sample_count() == 3
     assert JudgeHints(judge_samples=0).sample_count() == 1
-
-
-# ── hint parsing ──
 
 
 def test_hints_parse_leniently_and_default_strict():
@@ -373,9 +367,6 @@ def test_the_granularity_presets_match_the_real_dial():
     assert GRANULARITY_PRESETS["exhaustive"]["consecutive_clean"] == 3
 
 
-# ── the record ──
-
-
 def test_a_verdict_reports_validity_and_passing_separately():
     """ "Well-formed" and "approved" are different questions."""
     rejected = JudgeVerdict(verdict=Verdict.REJECT)
@@ -386,7 +377,7 @@ def test_a_verdict_reports_validity_and_passing_separately():
 
 def test_runtime_hints_reach_the_workflow_def():
     """The hints have to survive the def round-trip or none of this is reachable."""
-    from gideon.workflows.models import WorkflowDef
+    from gideon.automation.workflows.models import WorkflowDef
 
     spec = {
         "name": "t",
@@ -400,7 +391,7 @@ def test_runtime_hints_reach_the_workflow_def():
 
 
 def test_malformed_runtime_hints_do_not_break_a_def():
-    from gideon.workflows.models import WorkflowDef
+    from gideon.automation.workflows.models import WorkflowDef
 
     wf = WorkflowDef.from_dict(
         {
@@ -412,11 +403,6 @@ def test_malformed_runtime_hints_do_not_break_a_def():
     assert wf.runtime_hints == {}
 
 
-# ── the enforcement rail (WF2LOO-12 measured it unwired; WF2LOO-13 wired it) ──
-
-#: The ENFORCEMENT entry points production must reach DIRECTLY. The TYPES are deliberately
-#: absent: `judge_actors` imports `Isolation` and `judge_pretier` imports `FallbackCheck`, and
-#: importing a type enforces nothing.
 _ENFORCEMENT_ENTRY_POINTS = (
     "validate_verdict",
     "hints_from_dict",
@@ -425,16 +411,12 @@ _ENFORCEMENT_ENTRY_POINTS = (
     "parse_judge_json",
 )
 
-#: Reached THROUGH `validate_verdict` rather than called from outside — so "no production caller"
-#: is the wrong question for them and the right one is "is the chain from the entry point still
-#: intact". Asserted by AST below rather than by grep: a rule that stops being reachable from the
-#: one function production calls is exactly as inert as one with no caller at all, and it looks
-#: fine from every other angle.
-_REACHED_THROUGH_VALIDATION = ("meets_ratchet", "compute_overall", "detect_forbidden_modes")
+_REACHED_THROUGH_VALIDATION = (
+    "meets_ratchet",
+    "compute_overall",
+    "detect_forbidden_modes",
+)
 
-#: The claim the docstring carried while the list had NO caller. WF2LOO-13 gave every entry point
-#: one, so this phrase reappearing means someone re-stranded the contract — or copied the old
-#: notice back in. Either way the docstring and the call graph have parted company again.
 _UNWIRED_MARKER = "enforcement is not wired"
 
 _OWNER = "workflows/judge_contract.py"
@@ -443,7 +425,7 @@ _OWNER = "workflows/judge_contract.py"
 def _repo_src():
     from pathlib import Path
 
-    return Path(__file__).resolve().parents[1] / "src"
+    return Path(__file__).resolve().parents[2] / "src"
 
 
 def _production_callers() -> dict[str, list[str]]:
@@ -475,10 +457,12 @@ def test_every_enforcement_entry_point_has_a_production_caller():
     inverted rather than deleted, because "the contract is authored but nothing runs it" is a state
     this module has already been in once, and it is invisible from inside the module.
     """
-    source = (_repo_src() / "gideon/workflows/judge_contract.py").read_text(encoding="utf-8")
-    # Vacuity floor: a rail scanning for names that no longer exist passes forever on an
-    # empty match set. Every entry point must still be a function in the owning module.
-    missing = [name for name in _ENFORCEMENT_ENTRY_POINTS if f"def {name}(" not in source]
+    source = (_repo_src() / "gideon/workflows/judge_contract.py").read_text(
+        encoding="utf-8"
+    )
+    missing = [
+        name for name in _ENFORCEMENT_ENTRY_POINTS if f"def {name}(" not in source
+    ]
     assert not missing, (
         f"this rail scans for enforcement functions judge_contract no longer defines: {missing}"
         " — retarget the list, do not let it match nothing"
@@ -530,7 +514,7 @@ def test_the_docstring_describes_the_live_path_rather_than_disclaiming_it():
     docstring must NAME the seams that enforce — a reader who is told enforcement is live and not
     told where goes looking for a caller they cannot find.
     """
-    from gideon.workflows import engine, judge_contract
+    from gideon.automation.workflows import engine, judge_contract
 
     doc = (judge_contract.__doc__ or "").lower()
     assert _UNWIRED_MARKER not in doc, (
@@ -545,8 +529,6 @@ def test_the_docstring_describes_the_live_path_rather_than_disclaiming_it():
         )
 
     gate = inspect.getsource(engine.dispatch_gate)
-    # Vacuity floor #2: confirm we are reading the function that owns the judge branch before
-    # drawing a conclusion from what its text does contain.
     assert "GateKind.JUDGE" in gate, (
         "dispatch_gate no longer contains the judge branch — this rail is reading the wrong "
         "function and the assertions below prove nothing"
@@ -567,14 +549,11 @@ def test_the_posture_measurement_stays_with_the_code():
     numbers are the argument, so they live in the module that enforces — not only in a plan log
     nobody reads from a traceback.
     """
-    from gideon.workflows import judge_contract
+    from gideon.automation.workflows import judge_contract
 
     doc = judge_contract.__doc__ or ""
     for marker in ("7 judge GATES", "13 rubric criteria", "not an outage"):
         assert marker in doc, f"the WF2LOO-13 posture measurement lost {marker!r}"
-
-
-# ── the wire shape and the anti-outage rules (WF2LOO-13) ──
 
 
 class TestParseJudgeJson:
@@ -582,7 +561,9 @@ class TestParseJudgeJson:
         assert parse_judge_json('{"verdict": "PASS"}') == {"verdict": "PASS"}
 
     def test_a_fenced_block(self):
-        assert parse_judge_json('```json\n{"verdict": "REJECT"}\n```') == {"verdict": "REJECT"}
+        assert parse_judge_json('```json\n{"verdict": "REJECT"}\n```') == {
+            "verdict": "REJECT"
+        }
 
     def test_prose_either_side(self):
         raw = 'Here is my assessment:\n{"verdict": "PASS", "proof": "ok"}\nHope that helps.'
@@ -590,7 +571,8 @@ class TestParseJudgeJson:
 
     def test_braces_inside_the_reasoning_do_not_truncate_it(self):
         """Brace-counted rather than regex-matched: `reasoning` routinely contains braces, and a
-        greedy or lazy regex either swallows the rest of the answer or stops at the first `}`."""
+        greedy or lazy regex either swallows the rest of the answer or stops at the first `}`.
+        """
         raw = '{"reasoning": "the dict {a: 1} was empty", "verdict": "REJECT"}'
         assert parse_judge_json(raw)["verdict"] == "REJECT"
 
@@ -646,11 +628,14 @@ class TestTheRatchetIsScopedToDeclaredRubrics:
     def test_a_declared_rubric_scored_below_target_refuses_the_PASS(self):
         hints = JudgeHints(rubric=[RubricCriterion("the tests pass", target_score=2)])
         v = validate_verdict(
-            {"verdict": "PASS", "proof": "exit 1", "scores": {"the tests pass": 1}}, hints
+            {"verdict": "PASS", "proof": "exit 1", "scores": {"the tests pass": 1}},
+            hints,
         )
         assert v.passed is False
         assert "below rubric targets" in v.invalid_reason
-        assert v.protocol_error is False, "a shortfall is about the WORK, not the answer's shape"
+        assert (
+            v.protocol_error is False
+        ), "a shortfall is about the WORK, not the answer's shape"
         assert v.shortfalls == ["the tests pass: 1 < 2"]
 
     def test_a_PASS_that_scored_NOTHING_is_a_protocol_error(self):
@@ -667,7 +652,9 @@ class TestTheInstructionStatesWhatIsEnforced:
     """A contract enforced against a prompt that never mentioned it is a trap, not a gate."""
 
     def test_the_exact_rubric_keys_are_named(self):
-        hints = JudgeHints(rubric=[RubricCriterion("the layer is identified", target_score=1)])
+        hints = JudgeHints(
+            rubric=[RubricCriterion("the layer is identified", target_score=1)]
+        )
         text = judge_instruction("judge it", hints)
         assert '"the layer is identified" (target 1)' in text
         assert "unscored criterion counts as a shortfall" in text
@@ -684,13 +671,11 @@ class TestTheInstructionStatesWhatIsEnforced:
     def test_the_forbidden_modes_and_hidden_checks_are_rendered(self):
         hints = JudgeHints(
             forbidden_success_modes=["test deleted or skipped"],
-            hidden_validation_commands=["pytest -q tests/test_secret.py"],
+            hidden_validation_commands=["pytest -q checks/runtime/test_secret.py"],
         )
         text = judge_instruction("judge it", hints)
         assert "test deleted or skipped" in text
-        # Rendered ONLY into judge prompts: a worker that can read the hidden checks satisfies
-        # them specifically, which is the same as not having them.
-        assert "pytest -q tests/test_secret.py" in text
+        assert "pytest -q checks/runtime/test_secret.py" in text
 
 
 class TestAggregationAbsorbedTheGateRules:
@@ -698,7 +683,9 @@ class TestAggregationAbsorbedTheGateRules:
     so the rules have to live in the one aggregator — or they are silently gone."""
 
     def _v(self, verdict: str, **kw) -> JudgeVerdict:
-        return validate_verdict({"verdict": verdict, "proof": "cited", **kw}, JudgeHints())
+        return validate_verdict(
+            {"verdict": verdict, "proof": "cited", **kw}, JudgeHints()
+        )
 
     def test_a_bare_ESCALATE_verdict_outweighs_a_pass_majority(self):
         samples = [self._v("PASS"), self._v("PASS"), self._v("ESCALATE")]
@@ -724,16 +711,17 @@ class TestThirdVocabularyAbsorbed:
         """No compat shim, no re-export, no alias. A surviving `CycleVerdict` symbol anywhere in
         `loop.judge` would mean the third vocabulary is still constructible, which is the whole
         thing this atom removed."""
-        from gideon.loop import judge as loop_judge
+        from gideon.automation.loop import judge as loop_judge
 
         assert not hasattr(loop_judge, "CycleVerdict")
-        assert not hasattr(loop_judge, "adjudicate")  # the rule moved WITH its fields
-        assert not hasattr(loop_judge, "_clamp")  # the contract owns the 0-5 clamp now
+        assert not hasattr(loop_judge, "adjudicate")
+        assert not hasattr(loop_judge, "_clamp")
 
     def test_verdict_for_cycle_maps_every_corner(self):
         """All four corners, including the overlap. `done` DOMINATES a regression because that is
         what the supervisor does (`loop/supervisor._judge_assessment_signal` completes on `done`
-        without reading `regressed`); a projection stricter than the routing it labels is a lie."""
+        without reading `regressed`); a projection stricter than the routing it labels is a lie.
+        """
         assert verdict_for_cycle(True, False) is Verdict.PASS
         assert verdict_for_cycle(True, True) is Verdict.PASS
         assert verdict_for_cycle(False, True) is Verdict.REJECT
@@ -748,13 +736,22 @@ class TestThirdVocabularyAbsorbed:
 
     def test_done_and_passed_are_not_the_same_claim(self):
         """`done` is "the judge said complete"; `passed` adds "and it survived validation". The
-        loop routes on the first because its prompt was never given the preconditions."""
-        invalid = validate_verdict({"verdict": "PASS"}, JudgeHints())  # no proof cited
+        loop routes on the first because its prompt was never given the preconditions.
+        """
+        invalid = validate_verdict({"verdict": "PASS"}, JudgeHints())
         assert invalid.done is True and invalid.passed is False
 
     @pytest.mark.parametrize(
         "raw,expected",
-        [(99, 5.0), (-4, 0.0), (2.5, 2.5), (5, 5.0), (0, 0.0), ("high", 0.0), (None, 0.0)],
+        [
+            (99, 5.0),
+            (-4, 0.0),
+            (2.5, 2.5),
+            (5, 5.0),
+            (0, 0.0),
+            ("high", 0.0),
+            (None, 0.0),
+        ],
     )
     def test_the_0_5_clamp_is_structural(self, raw, expected):
         """Clamped in `__post_init__`, so EVERY producer clamps — the loop parser, `adjudicate`
@@ -766,7 +763,8 @@ class TestThirdVocabularyAbsorbed:
 
     def test_clamp_holds_on_the_contract_parse_path_too(self):
         v = validate_verdict(
-            {"verdict": "RETRY", "marginal_value": 42, "quality_score": -1}, JudgeHints()
+            {"verdict": "RETRY", "marginal_value": 42, "quality_score": -1},
+            JudgeHints(),
         )
         assert v.marginal_value == 5.0 and v.quality_score == 0.0
 
@@ -788,9 +786,13 @@ class TestThirdVocabularyAbsorbed:
 
     def test_to_dict_carries_every_key_the_cockpit_reads(self):
         """The cockpit's ROI rail and verdict chips read these off the PERSISTED shape. Dropping
-        one is a silent blank in the UI, not a test failure, so the wire contract is asserted."""
+        one is a silent blank in the UI, not a test failure, so the wire contract is asserted.
+        """
         d = JudgeVerdict(
-            verdict=Verdict.PASS, done_reason="met", marginal_value=3.0, quality_score=4.0
+            verdict=Verdict.PASS,
+            done_reason="met",
+            marginal_value=3.0,
+            quality_score=4.0,
         ).to_dict()
         for key in (
             "done",
@@ -813,12 +815,14 @@ class TestAsymmetricAdjudication:
     """
 
     def _v(self, done=False, regressed=False, **kw) -> JudgeVerdict:
-        return JudgeVerdict(verdict=verdict_for_cycle(done, regressed), regressed=regressed, **kw)
+        return JudgeVerdict(
+            verdict=verdict_for_cycle(done, regressed), regressed=regressed, **kw
+        )
 
     def test_a_done_does_NOT_survive_a_disagreeing_skeptic(self):
         merged = adjudicate(self._v(done=True, done_reason="met"), self._v(done=False))
         assert merged.done is False, "a claimed completion survived on ONE yes"
-        assert merged.verdict is Verdict.RETRY  # re-projected, not left saying PASS
+        assert merged.verdict is Verdict.RETRY
         assert "overturned" in merged.done_reason
 
     def test_a_done_survives_only_when_the_skeptic_agrees(self):
@@ -839,7 +843,9 @@ class TestAsymmetricAdjudication:
         assert result.done is True and result.adversarial is False
 
     def test_the_merge_carries_the_primarys_scores_and_band(self):
-        primary = self._v(done=True, marginal_value=3.5, quality_score=4.2, band_used=1.7)
+        primary = self._v(
+            done=True, marginal_value=3.5, quality_score=4.2, band_used=1.7
+        )
         merged = adjudicate(primary, self._v(done=True))
         assert merged.marginal_value == 3.5
         assert merged.quality_score == 4.2

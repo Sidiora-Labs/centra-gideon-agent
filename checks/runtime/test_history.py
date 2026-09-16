@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from gideon.history import (
+from gideon.cognition.history import (
     _CONSOLIDATION_THRESHOLD,
     _SESSION_KEEP_LINES,
     ConversationLog,
@@ -21,7 +21,7 @@ class TestConversationLog:
         path = tmp_path / "thread1.jsonl"
         assert path.exists()
         lines = path.read_text().splitlines()
-        assert len(lines) == 2  # metadata + message
+        assert len(lines) == 2
         meta = json.loads(lines[0])
         assert meta["_type"] == "metadata"
         msg = json.loads(lines[1])
@@ -60,7 +60,7 @@ class TestConversationLog:
 
     def test_provenance_empty(self, tmp_path):
         log = ConversationLog(base_dir=tmp_path)
-        log.append("t1", "user", "hello")  # no provenance
+        log.append("t1", "user", "hello")
         assert log.recent_with_provenance("t1") == []
 
     def test_unconsolidated_count(self, tmp_path):
@@ -81,7 +81,7 @@ class TestConversationLog:
 
     def test_mark_consolidated_nonexistent(self, tmp_path):
         log = ConversationLog(base_dir=tmp_path)
-        log.mark_consolidated("nonexistent", 5)  # should not raise
+        log.mark_consolidated("nonexistent", 5)
 
     def test_load_transcript(self, tmp_path):
         log = ConversationLog(base_dir=tmp_path)
@@ -98,7 +98,6 @@ class TestConversationLog:
     def test_safe_key_sanitizes(self, tmp_path):
         log = ConversationLog(base_dir=tmp_path)
         log.append("thread:with/special chars!", "user", "hi")
-        # Should create a file with sanitized name
         files = list(tmp_path.glob("*.jsonl"))
         assert len(files) == 1
         assert "/" not in files[0].name
@@ -112,49 +111,44 @@ class TestConversationLog:
 
     def test_rotation(self, tmp_path):
         log = ConversationLog(base_dir=tmp_path)
-        # Need > 200 lines AND > 2MB to trigger rotation
         content = "x" * 10000
         for i in range(300):
             log.append("t1", "user", f"{content} msg {i}")
         path = tmp_path / "t1.jsonl"
         lines = path.read_text().splitlines()
-        # Should have metadata + kept lines (+ a few from post-rotation appends)
         assert len(lines) <= _SESSION_KEEP_LINES + 5
 
     def test_rotation_resets_consolidated(self, tmp_path):
         log = ConversationLog(base_dir=tmp_path)
-        # Need > 200 lines AND > 2MB to trigger rotation
         content = "x" * 10000
         for i in range(250):
             log.append("t1", "user", f"{content} msg {i}")
         log.mark_consolidated("t1", 200)
-        # Add more to trigger rotation again
         for i in range(100):
             log.append("t1", "user", f"{content} more {i}")
-        # After rotation, last_consolidated should be reset to 0
         meta = log._read_metadata("t1")
         assert meta.get("last_consolidated") == 0
 
     def test_corrupted_json_lines_skipped(self, tmp_path):
         log = ConversationLog(base_dir=tmp_path)
         log.append("t1", "user", "good message")
-        # Inject corrupted line
         path = tmp_path / "t1.jsonl"
         with open(path, "a") as f:
             f.write("this is not json\n")
         log.append("t1", "user", "another good message")
         messages = log._read_messages("t1")
-        assert len(messages) == 2  # corrupted line skipped
+        assert len(messages) == 2
 
     def test_metadata_missing(self, tmp_path):
         """Session file without metadata line should still work."""
         log = ConversationLog(base_dir=tmp_path)
         path = tmp_path / "t1.jsonl"
-        # Write messages without metadata
-        path.write_text(json.dumps({"role": "user", "content": "hi", "ts": "2026-01-01"}) + "\n")
+        path.write_text(
+            json.dumps({"role": "user", "content": "hi", "ts": "2026-01-01"}) + "\n"
+        )
         messages = log._read_messages("t1")
         assert len(messages) == 1
-        assert log.unconsolidated_count("t1") == 1  # offset defaults to 0
+        assert log.unconsolidated_count("t1") == 1
 
     def test_init_creates_dir(self, tmp_path):
         sessions_dir = tmp_path / "sessions"
@@ -236,7 +230,6 @@ class TestRewriteSession:
         log.rewrite_session("t1", [])
         messages = log._read_messages("t1")
         assert messages == []
-        # Metadata should still exist
         meta = log._read_metadata("t1")
         assert meta["_type"] == "metadata"
 
@@ -244,7 +237,6 @@ class TestRewriteSession:
         """Rewrite uses tmp file — original should not be corrupted on crash."""
         log = ConversationLog(base_dir=tmp_path)
         log.append("t1", "user", "original")
-        # Verify no .tmp file left behind after successful rewrite
         log.rewrite_session("t1", [{"role": "user", "content": "new", "ts": "now"}])
         tmp_files = list(tmp_path.glob("*.tmp"))
         assert tmp_files == []
@@ -267,7 +259,9 @@ class TestRecentFromSource:
         log = ConversationLog(base_dir=tmp_path)
         log.append("dashboard:chat-1-100", "user", "hello 1")
         log.append("dashboard:chat-2-200", "user", "hello 2")
-        result = log.recent_from_source("dashboard:", exclude_key="dashboard:chat-1-100")
+        result = log.recent_from_source(
+            "dashboard:", exclude_key="dashboard:chat-1-100"
+        )
         assert len(result) == 1
         assert result[0]["content"] == "hello 2"
 
@@ -292,7 +286,6 @@ class TestRecentFromSource:
 
     def test_recent_from_source_sorted_by_ts(self, tmp_path):
         log = ConversationLog(base_dir=tmp_path)
-        # Append in different sessions — timestamps will be ordered
         log.append("dashboard:chat-1-100", "user", "first")
         log.append("dashboard:chat-2-200", "user", "second")
         log.append("dashboard:chat-1-100", "user", "third")
@@ -303,23 +296,21 @@ class TestRecentFromSource:
 
 class TestSessionManagerCompaction:
     def test_sliding_window_splits_messages(self, tmp_path):
-        from gideon.history import ConversationLog
+        from gideon.cognition.history import ConversationLog
 
         log = ConversationLog(base_dir=tmp_path)
         log.init()
-        # 10 messages = 5 pairs
         for i in range(10):
             role = "user" if i % 2 == 0 else "assistant"
             log.append("t1", role, f"msg-{i}")
 
         older, recent = log.sliding_window("t1", keep_recent=2)
-        # keep 2 pairs = 4 messages recent, 6 older
         assert len(older) == 6
         assert len(recent) == 4
         assert recent[0]["content"] == "msg-6"
 
     def test_sliding_window_all_recent_when_few(self, tmp_path):
-        from gideon.history import ConversationLog
+        from gideon.cognition.history import ConversationLog
 
         log = ConversationLog(base_dir=tmp_path)
         log.init()
@@ -338,7 +329,10 @@ class TestCanonicalKey:
         assert ConversationLog._canonical_key("slack-thread-123") == "slack-thread-123"
 
     def test_single_prefix_unchanged(self):
-        assert ConversationLog._canonical_key("dashboard_chat-1-100") == "dashboard_chat-1-100"
+        assert (
+            ConversationLog._canonical_key("dashboard_chat-1-100")
+            == "dashboard_chat-1-100"
+        )
 
     def test_double_prefix_collapsed(self):
         assert (
@@ -347,13 +341,15 @@ class TestCanonicalKey:
         )
 
     def test_triple_prefix_collapsed(self):
-        assert ConversationLog._canonical_key("dashboard_dashboard_dashboard_x") == "dashboard_x"
+        assert (
+            ConversationLog._canonical_key("dashboard_dashboard_dashboard_x")
+            == "dashboard_x"
+        )
 
     def test_empty_string(self):
         assert ConversationLog._canonical_key("") == ""
 
     def test_dashboard_only_returns_self(self):
-        # "dashboard_" with nothing after stripping → returns original
         assert ConversationLog._canonical_key("dashboard_") == "dashboard_"
 
 
@@ -374,7 +370,6 @@ class TestListSessionsDedup:
     def test_skips_symlinks(self, tmp_path):
         log = ConversationLog(base_dir=tmp_path)
         log.append("original-session", "user", "hello")
-        # Create a symlink alias
         src = tmp_path / "original-session.jsonl"
         dst = tmp_path / "alias-session.jsonl"
         dst.symlink_to(src.name)
@@ -385,11 +380,9 @@ class TestListSessionsDedup:
 
     def test_deduplicates_stacked_prefixes(self, tmp_path):
         log = ConversationLog(base_dir=tmp_path)
-        # Create two files that are canonical duplicates
         log.append("dashboard_chat-1-100", "user", "original")
         log.append("dashboard_dashboard_chat-1-100", "user", "duplicate")
         sessions = log.list_sessions()
-        # Should only have one entry for this canonical key
         canon_keys = [ConversationLog._canonical_key(s["key"]) for s in sessions]
         assert canon_keys.count("dashboard_chat-1-100") == 1
 
@@ -399,7 +392,6 @@ class TestListSessionsDedup:
         log = ConversationLog(base_dir=tmp_path)
         log.append("dashboard_chat-1-100", "user", "older")
         log.append("dashboard_dashboard_chat-1-100", "user", "newer")
-        # Make the double-prefix file newer
         older = tmp_path / "dashboard_chat-1-100.jsonl"
         os.utime(older, (1000, 1000))
         sessions = log.list_sessions()
@@ -422,7 +414,6 @@ class TestListSessionsDedup:
         log.append("session-a", "user", "old session")
         log.append("session-b", "user", "new session")
 
-        # Force deterministic mtimes: B older, A newer
         os.utime(tmp_path / "session-b.jsonl", (1000, 1000))
         os.utime(tmp_path / "session-a.jsonl", (2000, 2000))
 
@@ -477,11 +468,8 @@ class TestSearchSessions:
         """
         log = ConversationLog(base_dir=tmp_path)
         log.append("alpha", "user", "hello there")
-        # "role" appears in every JSONL line as a structural key — must not match
         assert log.search_sessions("role") == []
-        # "user" appears as the role value — must not match on that alone
         assert log.search_sessions("user") == []
-        # But a real content substring does match
         assert [s["key"] for s in log.search_sessions("hello")] == ["alpha"]
 
     def test_matches_query_with_json_escaped_chars(self, tmp_path):
@@ -533,13 +521,11 @@ class TestSearchSessions:
 
     def test_title_match_ranks_above_content_only(self, tmp_path):
         """Title match gets field boost, outranking a content-only match."""
-        # content-only match, newer (would win on recency alone)
         (tmp_path / "content-only.jsonl").write_text(
             '{"_type": "metadata", "title": "unrelated topic"}\n'
             '{"role": "user", "content": "we discussed webhook deploy"}\n',
             encoding="utf-8",
         )
-        # title match, older
         (tmp_path / "title-match.jsonl").write_text(
             '{"_type": "metadata", "title": "webhook troubleshooting"}\n'
             '{"role": "user", "content": "help with the pipeline"}\n',
@@ -591,7 +577,9 @@ class TestSearchSessions:
         )
         (tmp_path / "long.jsonl").write_text(
             '{"_type": "metadata", "title": "t"}\n'
-            '{"role": "user", "content": "webhook webhook webhook ' + "x " * 2000 + '"}\n',
+            '{"role": "user", "content": "webhook webhook webhook '
+            + "x " * 2000
+            + '"}\n',
             encoding="utf-8",
         )
         import os
@@ -618,15 +606,18 @@ class TestSearchSessions:
         newest-first-on-tie invariant isn't satisfied trivially.
         """
         (tmp_path / "older.jsonl").write_text(
-            '{"_type": "metadata", "title": "t"}\n' '{"role": "user", "content": "webhook"}\n',
+            '{"_type": "metadata", "title": "t"}\n'
+            '{"role": "user", "content": "webhook"}\n',
             encoding="utf-8",
         )
         (tmp_path / "middle-title.jsonl").write_text(
-            '{"_type": "metadata", "title": "webhook"}\n' '{"role": "user", "content": "x"}\n',
+            '{"_type": "metadata", "title": "webhook"}\n'
+            '{"role": "user", "content": "x"}\n',
             encoding="utf-8",
         )
         (tmp_path / "newer.jsonl").write_text(
-            '{"_type": "metadata", "title": "t"}\n' '{"role": "user", "content": "webhook"}\n',
+            '{"_type": "metadata", "title": "t"}\n'
+            '{"role": "user", "content": "webhook"}\n',
             encoding="utf-8",
         )
         import os
@@ -671,15 +662,11 @@ class TestSearchSessions:
         hits would outrank a single title match and this test would
         fail.  Guards the "title is strong evidence" invariant.
         """
-        # Short session with 5 content hits, no title match.  Written
-        # directly so the title doesn't auto-extract from content.
         (tmp_path / "heavy-content.jsonl").write_text(
             '{"_type": "metadata", "title": "chat about deployments"}\n'
             '{"role": "user", "content": "webhook webhook webhook webhook webhook"}\n',
             encoding="utf-8",
         )
-        # Title-only match, no content hits.  Written *older* so recency
-        # alone would place it second - only the title boost can flip it.
         (tmp_path / "title-only.jsonl").write_text(
             '{"_type": "metadata", "title": "webhook deploy"}\n'
             '{"role": "user", "content": "unrelated text"}\n',
@@ -703,16 +690,11 @@ class TestSearchSessions:
         Files outside the window must not appear in results even if they
         would score higher, bounding per-search I/O.
         """
-        monkeypatch.setattr("gideon.history._SEARCH_SCAN_WINDOW", 2)
+        monkeypatch.setattr("gideon.cognition.history._SEARCH_SCAN_WINDOW", 2)
         log = ConversationLog(base_dir=tmp_path)
-        # Oldest: strong match (would win on score if scanned)
         log.append("old-strong", "user", "webhook webhook webhook webhook webhook")
-        # Two newer weak matches fill the scan window
         log.append("new-weak-1", "user", "webhook x")
         log.append("new-weak-2", "user", "webhook y")
-        # Explicit mtimes: filesystems with 1-second granularity (macOS
-        # HFS+) can give all three files the same mtime, making the
-        # list_sessions() order non-deterministic without this.
         import os
 
         os.utime(tmp_path / "old-strong.jsonl", (1000, 1000))
@@ -726,11 +708,13 @@ class TestSearchSessions:
 
 class TestArchive:
     def test_rotate_archives_dropped_lines(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.history._SESSION_MAX_BYTES", 100)
-        monkeypatch.setattr("gideon.history._SESSION_KEEP_LINES", 3)
+        monkeypatch.setattr("gideon.cognition.history._SESSION_MAX_BYTES", 100)
+        monkeypatch.setattr("gideon.cognition.history._SESSION_KEEP_LINES", 3)
         log = ConversationLog(base_dir=tmp_path)
         for i in range(20):
-            log.append("t1", "user", f"message number {i} with enough text to exceed limits")
+            log.append(
+                "t1", "user", f"message number {i} with enough text to exceed limits"
+            )
         archives = list((tmp_path / "archive").glob("t1__*.jsonl"))
         assert len(archives) >= 1
         content = archives[0].read_text()
@@ -756,17 +740,16 @@ class TestArchive:
         import os
         import time
 
-        import gideon.history as history_mod
-        from gideon.history import _cleanup_old_archives
+        import gideon.cognition.history as history_mod
+        from gideon.cognition.history import _cleanup_old_archives
 
-        history_mod._last_cleanup = 0.0  # reset rate-limit so cleanup actually runs
+        history_mod._last_cleanup = 0.0
         adir = tmp_path / "archive"
         adir.mkdir()
         old = adir / "old__20200101-000000.jsonl"
         old.write_text("{}\n")
         new = adir / "new__20990101-000000.jsonl"
         new.write_text("{}\n")
-        # Backdate old file by 10 days
         ten_days_ago = time.time() - 10 * 86400
         os.utime(old, (ten_days_ago, ten_days_ago))
         removed = _cleanup_old_archives(retention_days=7, base=tmp_path)
@@ -775,7 +758,7 @@ class TestArchive:
         assert new.exists()
 
     def test_archive_empty_lines_noop(self, tmp_path):
-        from gideon.history import _archive_lines
+        from gideon.cognition.history import _archive_lines
 
         result = _archive_lines("k", [], reason="rotate", base=tmp_path)
         assert result is None
@@ -783,7 +766,7 @@ class TestArchive:
 
     def test_same_second_conflict_suffixes_filename(self, tmp_path):
         """Multiple archives for same key in same second must not clobber each other."""
-        from gideon.history import _archive_lines
+        from gideon.cognition.history import _archive_lines
 
         p1 = _archive_lines("k", ["line1\n"], reason="rotate", base=tmp_path)
         p2 = _archive_lines("k", ["line2\n"], reason="rotate", base=tmp_path)
@@ -795,8 +778,8 @@ class TestArchive:
         assert "line3" in p3.read_text()
 
     def test_cleanup_old_archives_noop_when_dir_missing(self, tmp_path):
-        import gideon.history as history_mod
-        from gideon.history import _cleanup_old_archives
+        import gideon.cognition.history as history_mod
+        from gideon.cognition.history import _cleanup_old_archives
 
         history_mod._last_cleanup = 0.0
         removed = _cleanup_old_archives(retention_days=7, base=tmp_path)
@@ -804,7 +787,7 @@ class TestArchive:
 
     def test_safe_key_sanitizes_unsafe_chars(self, tmp_path):
         """Keys with slashes/colons must be sanitized into safe filenames."""
-        from gideon.history import _archive_lines, _safe_key
+        from gideon.cognition.history import _archive_lines, _safe_key
 
         assert _safe_key("slack:C123/456") == "slack_C123_456"
         p = _archive_lines("slack:C123/456", ["x\n"], reason="rotate", base=tmp_path)
@@ -814,11 +797,10 @@ class TestArchive:
 
     def test_multiple_rotations_produce_multiple_archives(self, tmp_path, monkeypatch):
         """A session that keeps growing across multiple rotate cycles produces multiple archive files."""  # noqa: E501
-        monkeypatch.setattr("gideon.history._SESSION_MAX_BYTES", 200)
-        monkeypatch.setattr("gideon.history._SESSION_KEEP_LINES", 2)
+        monkeypatch.setattr("gideon.cognition.history._SESSION_MAX_BYTES", 200)
+        monkeypatch.setattr("gideon.cognition.history._SESSION_KEEP_LINES", 2)
         log = ConversationLog(base_dir=tmp_path)
         for _ in range(3):
-            # Each round writes enough to trigger a rotate
             for i in range(20):
                 log.append("loop", "user", f"msg {i} " + "x" * 50)
         archives = list((tmp_path / "archive").glob("loop__*.jsonl"))
@@ -826,7 +808,7 @@ class TestArchive:
 
     def test_archive_header_is_valid_json_metadata_line(self, tmp_path):
         """First line of archive is a JSON metadata row; remaining lines are original message jsonl."""  # noqa: E501
-        from gideon.history import _archive_lines
+        from gideon.cognition.history import _archive_lines
 
         p = _archive_lines(
             "k",
@@ -856,7 +838,7 @@ class TestArchiveDashboardAPI:
         pytest.importorskip("aiohttp")
         from aiohttp import web
 
-        from gideon.dashboard.handlers import (
+        from gideon.interfaces.dashboard.handlers import (
             api_session_archive_list,
             api_session_archive_read,
         )
@@ -864,7 +846,6 @@ class TestArchiveDashboardAPI:
         app = web.Application()
         app.router.add_get("/api/session/archive", api_session_archive_list)
         app.router.add_get("/api/session/archive/{name}", api_session_archive_read)
-        # Handler resolves archive dir via _sessions_dir(); tests monkeypatch that.
         return app
 
     @pytest.fixture
@@ -873,23 +854,20 @@ class TestArchiveDashboardAPI:
         import os
         import time
 
-        import gideon.history as history_mod
+        import gideon.cognition.history as history_mod
 
         sessions = tmp_path / "sessions"
         archive = sessions / "archive"
         archive.mkdir(parents=True)
         now = time.time()
-        # Oldest mtime
         (archive / "a__20260101-000000.jsonl").write_text(
             '{"_type":"archive","reason":"rotate","count":1}\n{"role":"user","content":"x"}\n'
         )
         os.utime(archive / "a__20260101-000000.jsonl", (now - 300, now - 300))
-        # Newest mtime (should sort first)
         (archive / "b__20260102-000000.jsonl").write_text(
             '{"_type":"archive","reason":"compact","count":1}\n{"role":"user","content":"y"}\n'
         )
         os.utime(archive / "b__20260102-000000.jsonl", (now, now))
-        # Middle mtime
         (archive / "a__20260103-000000.jsonl").write_text(
             '{"_type":"archive","reason":"rotate","count":1}\n{"role":"user","content":"z"}\n'
         )
@@ -907,7 +885,6 @@ class TestArchiveDashboardAPI:
             assert resp.status == 200
             data = await resp.json()
             assert len(data["archives"]) == 3
-            # Sorted newest first by mtime (not filename)
             assert data["archives"][0]["name"] == "b__20260102-000000.jsonl"
             assert data["archives"][1]["name"] == "a__20260103-000000.jsonl"
             assert data["archives"][2]["name"] == "a__20260101-000000.jsonl"
@@ -928,7 +905,7 @@ class TestArchiveDashboardAPI:
     async def test_list_empty_when_no_archive_dir(self, tmp_path, monkeypatch):
         from aiohttp.test_utils import TestClient, TestServer
 
-        import gideon.history as history_mod
+        import gideon.cognition.history as history_mod
 
         sessions = tmp_path / "sessions"
         sessions.mkdir()
@@ -957,13 +934,12 @@ class TestArchiveDashboardAPI:
 
         app = self._make_app()
         async with TestClient(TestServer(app)) as client:
-            # Names with '..' must be rejected by the handler's canonical path check.
-            # '..' alone (no slash) reaches the handler; canonical-resolve check catches it.
-            # URL-encoded slashes ('..%2Fetc.jsonl') may be rejected by the router (404)
-            # or by the handler (400) depending on aiohttp version — both are acceptable.
             for bad, expected in [
-                ("..", (400, 404)),  # missing .jsonl → 400, or no match → 404
-                ("...jsonl", (400, 404)),  # may resolve inside dir → 404, or caught → 400
+                ("..", (400, 404)),
+                (
+                    "...jsonl",
+                    (400, 404),
+                ),
                 ("..%2Fetc.jsonl", (400, 403, 404)),
                 ("..%2F..%2Fetc.jsonl", (400, 403, 404)),
             ]:
@@ -974,7 +950,6 @@ class TestArchiveDashboardAPI:
     async def test_read_rejects_non_jsonl_extension(self, archive_dir):
         from aiohttp.test_utils import TestClient, TestServer
 
-        # Put a forbidden file alongside archives
         (archive_dir / "secret.txt").write_text("SHOULD NOT BE READABLE")
         app = self._make_app()
         async with TestClient(TestServer(app)) as client:
@@ -987,7 +962,9 @@ class TestArchiveDashboardAPI:
 
         app = self._make_app()
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/session/archive/nonexistent.20260101-000000.jsonl")
+            resp = await client.get(
+                "/api/session/archive/nonexistent.20260101-000000.jsonl"
+            )
             assert resp.status == 404
 
     @pytest.mark.asyncio
@@ -995,7 +972,6 @@ class TestArchiveDashboardAPI:
         """Archived content is redacted (credentials + exfiltration URLs) before being served."""
         from aiohttp.test_utils import TestClient, TestServer
 
-        # Write an archive containing a fake AWS access key
         leaky = archive_dir / "leak__20260104-000000.jsonl"
         leaky.write_text(
             '{"_type":"archive","reason":"rotate","count":1}\n'
@@ -1006,7 +982,6 @@ class TestArchiveDashboardAPI:
             resp = await client.get("/api/session/archive/leak__20260104-000000.jsonl")
             assert resp.status == 200
             body = await resp.text()
-            # Raw credential must not appear in the response
             assert "AKIAIOSFODNN7EXAMPLE" not in body
 
 
@@ -1018,28 +993,23 @@ class TestArchiveOnlyDropped:
         log.append("t1", "user", "A")
         log.append("t1", "assistant", "B")
         log.append("t1", "user", "C")
-        # Read back the three message lines so we can feed them exactly to rewrite_session
-        from gideon.history import _safe_key
+        from gideon.cognition.history import _safe_key
 
         path = tmp_path / f"{_safe_key('t1')}.jsonl"
-        lines = [ln for ln in path.read_text().splitlines() if ln and '"_type"' not in ln]
+        lines = [
+            ln for ln in path.read_text().splitlines() if ln and '"_type"' not in ln
+        ]
         assert len(lines) == 3
-        kept = [json.loads(lines[1]), json.loads(lines[2])]  # B, C
+        kept = [json.loads(lines[1]), json.loads(lines[2])]
         log.rewrite_session("t1", kept)
         archives = list((tmp_path / "archive").glob("t1__*.jsonl"))
         assert len(archives) == 1
         archived = archives[0].read_text()
-        # Only the dropped message A should be in the archive (not B or C).
         assert '"content": "A"' in archived
         assert '"content": "B"' not in archived
         assert '"content": "C"' not in archived
         header = json.loads(archived.splitlines()[0])
         assert header["count"] == 1
-
-
-# ---------------------------------------------------------------------------
-# Tests for consolidation offset only advances on success
-# ---------------------------------------------------------------------------
 
 
 class TestConsolidationOffset:
@@ -1122,7 +1092,9 @@ class TestExplicitConsolidationTriggers:
 
         async def run():
             with (
-                patch.object(c, "consolidate_now", new_callable=AsyncMock, return_value=True) as cn,
+                patch.object(
+                    c, "consolidate_now", new_callable=AsyncMock, return_value=True
+                ) as cn,
                 patch.object(type(c), "_svc", create=True) as svc_prop,
             ):
                 seal = MagicMock(return_value=0)
@@ -1158,7 +1130,7 @@ class TestExplicitConsolidationTriggers:
 
             async def fake_consolidate(key, include_history=True):
                 calls.append(key)
-                c._running.discard(key)  # mirrors _consolidate's finally
+                c._running.discard(key)
 
             with patch.object(c, "_consolidate", side_effect=fake_consolidate):
                 await c.consolidate_now("k")
@@ -1176,12 +1148,11 @@ class TestStopEventContextInjection:
         """context.py emits the system note for resolved stop events."""
         import json
 
-        from gideon.context import _build_stop_event_notes
+        from gideon.cognition.context import _build_stop_event_notes
 
         log = ConversationLog(base_dir=tmp_path)
         log.append("sess1", "user", "hello")
         log.append("sess1", "assistant", "hi")
-        # Append a resolved stop_event as a system message
         stop_data = json.dumps(
             {
                 "kind": "stop_event",
@@ -1199,7 +1170,7 @@ class TestStopEventContextInjection:
         """At most 3 stop event notes are injected."""
         import json
 
-        from gideon.context import _build_stop_event_notes
+        from gideon.cognition.context import _build_stop_event_notes
 
         log = ConversationLog(base_dir=tmp_path)
         for i in range(5):
@@ -1221,7 +1192,7 @@ class TestStopEventContextInjection:
         """Unresolved stop_events (state=stopping) are not injected."""
         import json
 
-        from gideon.context import _build_stop_event_notes
+        from gideon.cognition.context import _build_stop_event_notes
 
         log = ConversationLog(base_dir=tmp_path)
         stop_data = json.dumps(
@@ -1242,20 +1213,28 @@ class TestAutoSkillHelpers:
     """Module-level helpers for auto-skill eligibility."""
 
     def test_count_tool_call_messages(self):
-        from gideon.history import _count_tool_call_messages
+        from gideon.cognition.history import _count_tool_call_messages
 
         messages = [
             {"role": "user", "content": "hi"},
             {"role": "assistant", "content": "hello", "tools": ["fs_read"]},
             {"role": "user", "content": "do X"},
-            {"role": "assistant", "content": "ok", "tools": ["fs_read", "execute_bash"]},
-            {"role": "assistant", "content": "done", "tools": []},  # empty list counts as zero
+            {
+                "role": "assistant",
+                "content": "ok",
+                "tools": ["fs_read", "execute_bash"],
+            },
+            {
+                "role": "assistant",
+                "content": "done",
+                "tools": [],
+            },
             {"role": "assistant", "content": "another", "tools": ["fs_read"]},
         ]
         assert _count_tool_call_messages(messages) == 3
 
     def test_count_handles_malformed_tools(self):
-        from gideon.history import _count_tool_call_messages
+        from gideon.cognition.history import _count_tool_call_messages
 
         messages = [
             {"role": "assistant", "content": "x", "tools": "not-a-list"},
@@ -1265,26 +1244,38 @@ class TestAutoSkillHelpers:
         assert _count_tool_call_messages(messages) == 0
 
     def test_session_touched_sensitive_true_for_aws(self):
-        from gideon.history import _session_touched_sensitive
+        from gideon.cognition.history import _session_touched_sensitive
 
         messages = [
-            {"role": "assistant", "content": "", "tools": ["Reading ~/.aws/credentials"]},
+            {
+                "role": "assistant",
+                "content": "",
+                "tools": ["Reading ~/.aws/credentials"],
+            },
         ]
         assert _session_touched_sensitive(messages) is True
 
     def test_session_touched_sensitive_true_for_imds(self):
-        from gideon.history import _session_touched_sensitive
+        from gideon.cognition.history import _session_touched_sensitive
 
         messages = [
-            {"role": "assistant", "content": "", "tools": ["curl 169.254.169.254/latest/..."]},
+            {
+                "role": "assistant",
+                "content": "",
+                "tools": ["curl 169.254.169.254/latest/..."],
+            },
         ]
         assert _session_touched_sensitive(messages) is True
 
     def test_session_touched_sensitive_false_for_normal_tools(self):
-        from gideon.history import _session_touched_sensitive
+        from gideon.cognition.history import _session_touched_sensitive
 
         messages = [
-            {"role": "assistant", "content": "", "tools": ["Running: ls /tmp", "fs_read"]},
+            {
+                "role": "assistant",
+                "content": "",
+                "tools": ["Running: ls /tmp", "fs_read"],
+            },
             {"role": "assistant", "content": "", "tools": ["grep foo bar.txt"]},
         ]
         assert _session_touched_sensitive(messages) is False
@@ -1295,7 +1286,7 @@ class TestDashboardSchemaToolCallCounting:
 
     def test_count_dashboard_role_tool_messages(self):
         """Dashboard pipeline records tool calls as role='tool' messages."""
-        from gideon.history import _count_tool_call_messages
+        from gideon.cognition.history import _count_tool_call_messages
 
         messages = [
             {"role": "user", "content": "find info on grading"},
@@ -1310,7 +1301,7 @@ class TestDashboardSchemaToolCallCounting:
 
     def test_sensitive_detection_dashboard_schema(self):
         """Sensitive paths in dashboard tool content are detected."""
-        from gideon.history import _session_touched_sensitive
+        from gideon.cognition.history import _session_touched_sensitive
 
         messages = [
             {"role": "assistant", "content": "Reading credentials."},
@@ -1321,7 +1312,7 @@ class TestDashboardSchemaToolCallCounting:
 
     def test_sensitive_false_for_normal_dashboard_tools(self):
         """Normal dashboard tool messages don't trigger sensitive detection."""
-        from gideon.history import _session_touched_sensitive
+        from gideon.cognition.history import _session_touched_sensitive
 
         messages = [
             {"role": "tool", "content": "🔧 Running: @my-mcp-server/ReadFile"},
@@ -1331,17 +1322,15 @@ class TestDashboardSchemaToolCallCounting:
 
     def test_mixed_schema_no_double_count(self):
         """Sessions mixing legacy tools field and dashboard role='tool' count correctly."""
-        from gideon.history import _count_tool_call_messages
+        from gideon.cognition.history import _count_tool_call_messages
 
         messages = [
             {"role": "assistant", "content": "step 1", "tools": ["fs_read"]},
             {"role": "tool", "content": "🔧 Running: @my-mcp-server/ReadFile"},
             {"role": "tool", "content": "✅ Running: @my-mcp-server/ReadFile"},
             {"role": "assistant", "content": "step 2", "tools": ["grep"]},
-            # Edge case: a message with BOTH signals (shouldn't happen but test no double-count)
             {"role": "tool", "content": "tool msg", "tools": ["fs_read"]},
         ]
-        # 2 legacy + 2 dashboard-only + 1 that has both (counted once via legacy branch) = 5
         assert _count_tool_call_messages(messages) == 5
 
 
@@ -1351,14 +1340,16 @@ class TestProcessAutoSkillsIntegration:
     @pytest.mark.asyncio
     async def test_consolidator_default_off_never_writes(self, tmp_path):
         """With auto_skills_enabled=False (default), no skill writes happen."""
-        from gideon.memory import MemoryStore
-        from gideon.skills import SkillsLoader
+        from gideon.cognition.memory import MemoryJournal
+        from gideon.extensions.skills import ProcedureLibrary
 
         conv_log = ConversationLog(base_dir=tmp_path / "sessions")
         conv_log.init()
-        mem = MemoryStore(workspace=tmp_path / "memory")
+        mem = MemoryJournal(workspace=tmp_path / "memory")
         mem.init()
-        skills = SkillsLoader(skills_path=tmp_path / "skills", install_builtins=False)
+        skills = ProcedureLibrary(
+            skills_path=tmp_path / "skills", install_builtins=False
+        )
 
         consolidator = HistoryConsolidator(
             log=conv_log,
@@ -1367,9 +1358,10 @@ class TestProcessAutoSkillsIntegration:
             auto_skills_enabled=False,
         )
 
-        # Seed a session with 10 tool calls — would be eligible if flag were on
         for i in range(10):
-            conv_log.append("dashboard:chat-1", "assistant", f"step {i}", tools=["fs_read"])
+            conv_log.append(
+                "dashboard:chat-1", "assistant", f"step {i}", tools=["fs_read"]
+            )
 
         async def fake_llm(_prompt):
             return {
@@ -1385,19 +1377,20 @@ class TestProcessAutoSkillsIntegration:
         with patch.object(consolidator, "_call_llm", side_effect=fake_llm):
             await consolidator._consolidate("dashboard:chat-1", include_history=True)
 
-        # Flag off → no auto skill written
         assert skills.list_auto_skills() == []
 
     @pytest.mark.asyncio
     async def test_consolidator_on_creates_auto_skill(self, tmp_path, monkeypatch):
-        from gideon.memory import MemoryStore
-        from gideon.skills import SkillsLoader
+        from gideon.cognition.memory import MemoryJournal
+        from gideon.extensions.skills import ProcedureLibrary
 
         conv_log = ConversationLog(base_dir=tmp_path / "sessions")
         conv_log.init()
-        mem = MemoryStore(workspace=tmp_path / "memory")
+        mem = MemoryJournal(workspace=tmp_path / "memory")
         mem.init()
-        skills = SkillsLoader(skills_path=tmp_path / "skills", install_builtins=False)
+        skills = ProcedureLibrary(
+            skills_path=tmp_path / "skills", install_builtins=False
+        )
 
         consolidator = HistoryConsolidator(
             log=conv_log,
@@ -1407,10 +1400,12 @@ class TestProcessAutoSkillsIntegration:
             auto_min_tool_calls=5,
         )
 
-        # 6 tool-call messages — above threshold, no sensitive paths
         for i in range(6):
             conv_log.append(
-                "dashboard:chat-2", "assistant", f"step {i}", tools=["Running: grep foo bar.txt"]
+                "dashboard:chat-2",
+                "assistant",
+                f"step {i}",
+                tools=["Running: grep foo bar.txt"],
             )
 
         async def fake_llm(_prompt):
@@ -1424,22 +1419,15 @@ class TestProcessAutoSkillsIntegration:
                 },
             }
 
-        # Propose-only (Phase F: skill-evolution-proposal-only): autonomous synthesis
-        # NEVER writes a live skill — it enqueues a human-reviewable proposal. So the
-        # eligible session produces a PROPOSAL (not an auto/ SKILL.md), and no auto
-        # skill exists until a person accepts it. Isolate the proposals dir (it lives
-        # under config_dir()) into tmp so the test never touches the real home.
-        import gideon.skills.loader as _skloader
-        from gideon.skills import proposals as _proposals
+        import gideon.extensions.skills.loader as _skloader
+        from gideon.extensions.skills import proposals as _proposals
 
         monkeypatch.setattr(_skloader, "config_dir", lambda: tmp_path)
 
         with patch.object(consolidator, "_call_llm", side_effect=fake_llm):
             await consolidator._consolidate("dashboard:chat-2", include_history=True)
 
-        # No live auto skill was written…
         assert skills.list_auto_skills() == []
-        # …but a proposal was queued carrying the synthesized skill.
         pending = _proposals.list_pending()
         assert len(pending) == 1
         assert pending[0].slug == "grep-with-context"
@@ -1447,21 +1435,23 @@ class TestProcessAutoSkillsIntegration:
 
     @pytest.mark.asyncio
     async def test_sensitive_session_skipped_even_when_enabled(self, tmp_path):
-        from gideon.memory import MemoryStore
-        from gideon.skills import SkillsLoader
+        from gideon.cognition.memory import MemoryJournal
+        from gideon.extensions.skills import ProcedureLibrary
 
         conv_log = ConversationLog(base_dir=tmp_path / "sessions")
         conv_log.init()
-        mem = MemoryStore(workspace=tmp_path / "memory")
+        mem = MemoryJournal(workspace=tmp_path / "memory")
         mem.init()
-        skills = SkillsLoader(skills_path=tmp_path / "skills", install_builtins=False)
+        skills = ProcedureLibrary(
+            skills_path=tmp_path / "skills", install_builtins=False
+        )
 
         consolidator = HistoryConsolidator(
             log=conv_log,
             memory=mem,
             skills_loader=skills,
             auto_skills_enabled=True,
-            auto_min_tool_calls=2,  # low threshold to force eligibility otherwise
+            auto_min_tool_calls=2,
         )
 
         for i in range(5):
@@ -1477,15 +1467,12 @@ class TestProcessAutoSkillsIntegration:
         async def fake_llm(_prompt):
             nonlocal llm_called
             llm_called = True
-            # The prompt built for this session should NOT include new_skill
-            # because eligibility check failed.  Return basic keys only.
             return {"history_entry": "sensitive session"}
 
         with patch.object(consolidator, "_call_llm", side_effect=fake_llm):
             await consolidator._consolidate("dashboard:chat-3", include_history=True)
 
-        assert llm_called  # consolidation still happened for memory
-        # But no auto skill written
+        assert llm_called
         assert skills.list_auto_skills() == []
 
     @pytest.mark.asyncio
@@ -1495,14 +1482,16 @@ class TestProcessAutoSkillsIntegration:
         """If the LLM returns a procedure with an AWS key, it's redacted BEFORE the
         proposal is queued (Phase F: synthesis proposes, never auto-writes). The AKIA
         key must not survive into the enqueued proposal's procedure_md."""
-        from gideon.memory import MemoryStore
-        from gideon.skills import SkillsLoader
+        from gideon.cognition.memory import MemoryJournal
+        from gideon.extensions.skills import ProcedureLibrary
 
         conv_log = ConversationLog(base_dir=tmp_path / "sessions")
         conv_log.init()
-        mem = MemoryStore(workspace=tmp_path / "memory")
+        mem = MemoryJournal(workspace=tmp_path / "memory")
         mem.init()
-        skills = SkillsLoader(skills_path=tmp_path / "skills", install_builtins=False)
+        skills = ProcedureLibrary(
+            skills_path=tmp_path / "skills", install_builtins=False
+        )
 
         consolidator = HistoryConsolidator(
             log=conv_log,
@@ -1513,7 +1502,9 @@ class TestProcessAutoSkillsIntegration:
         )
 
         for i in range(5):
-            conv_log.append("dashboard:chat-4", "assistant", f"step {i}", tools=["fs_read"])
+            conv_log.append(
+                "dashboard:chat-4", "assistant", f"step {i}", tools=["fs_read"]
+            )
 
         async def fake_llm(_prompt):
             return {
@@ -1530,8 +1521,8 @@ class TestProcessAutoSkillsIntegration:
                 },
             }
 
-        import gideon.skills.loader as _skloader
-        from gideon.skills import proposals as _proposals
+        import gideon.extensions.skills.loader as _skloader
+        from gideon.extensions.skills import proposals as _proposals
 
         monkeypatch.setattr(_skloader, "config_dir", lambda: tmp_path)
 
@@ -1540,27 +1531,24 @@ class TestProcessAutoSkillsIntegration:
 
         pending = _proposals.list_pending()
         assert len(pending) == 1
-        # AKIA prefix must NOT survive into the queued proposal.
         assert "AKIAIOSFODNN7EXAMPLE" not in pending[0].procedure_md
-        # And nothing was auto-written live.
         assert skills.list_auto_skills() == []
 
     @pytest.mark.asyncio
     async def test_similarity_dedup_skips_near_duplicate(self, tmp_path):
-        from gideon.memory import MemoryStore
-        from gideon.skills import SkillsLoader
+        from gideon.cognition.memory import MemoryJournal
+        from gideon.extensions.skills import ProcedureLibrary
 
         conv_log = ConversationLog(base_dir=tmp_path / "sessions")
         conv_log.init()
-        mem = MemoryStore(workspace=tmp_path / "memory")
+        mem = MemoryJournal(workspace=tmp_path / "memory")
         mem.init()
         skills_dir = tmp_path / "skills"
-        # Pre-existing skill we'd duplicate
         (skills_dir / "existing").mkdir(parents=True)
         (skills_dir / "existing" / "SKILL.md").write_text(
             "---\nname: existing\ndescription: Search timber logs via ssh chained patterns\n---\n"
         )
-        skills = SkillsLoader(skills_path=skills_dir, install_builtins=False)
+        skills = ProcedureLibrary(skills_path=skills_dir, install_builtins=False)
 
         consolidator = HistoryConsolidator(
             log=conv_log,
@@ -1572,14 +1560,15 @@ class TestProcessAutoSkillsIntegration:
         )
 
         for i in range(5):
-            conv_log.append("dashboard:chat-5", "assistant", f"step {i}", tools=["fs_read"])
+            conv_log.append(
+                "dashboard:chat-5", "assistant", f"step {i}", tools=["fs_read"]
+            )
 
         async def fake_llm(_prompt):
             return {
                 "history_entry": "x",
                 "new_skill": {
                     "slug": "similar-timber-search",
-                    # Near-duplicate description → should be deduped
                     "description": "Search timber logs via ssh chained patterns",
                     "triggers": "timber, log",
                     "procedure_md": "body",
@@ -1590,23 +1579,27 @@ class TestProcessAutoSkillsIntegration:
             await consolidator._consolidate("dashboard:chat-5", include_history=True)
 
         auto = skills.list_auto_skills()
-        assert auto == []  # dedup prevented creation
+        assert auto == []
 
     @pytest.mark.asyncio
-    async def test_dashboard_schema_messages_trigger_auto_skill(self, tmp_path, monkeypatch):
+    async def test_dashboard_schema_messages_trigger_auto_skill(
+        self, tmp_path, monkeypatch
+    ):
         """Dashboard-format role='tool' messages pass eligibility and produce a skill
         PROPOSAL (Phase F: propose-only, never auto-write).
 
         This is the regression test that would have caught the schema mismatch bug.
         """
-        from gideon.memory import MemoryStore
-        from gideon.skills import SkillsLoader
+        from gideon.cognition.memory import MemoryJournal
+        from gideon.extensions.skills import ProcedureLibrary
 
         conv_log = ConversationLog(base_dir=tmp_path / "sessions")
         conv_log.init()
-        mem = MemoryStore(workspace=tmp_path / "memory")
+        mem = MemoryJournal(workspace=tmp_path / "memory")
         mem.init()
-        skills = SkillsLoader(skills_path=tmp_path / "skills", install_builtins=False)
+        skills = ProcedureLibrary(
+            skills_path=tmp_path / "skills", install_builtins=False
+        )
 
         consolidator = HistoryConsolidator(
             log=conv_log,
@@ -1616,16 +1609,29 @@ class TestProcessAutoSkillsIntegration:
             auto_min_tool_calls=5,
         )
 
-        # Seed with REAL dashboard-format messages (no "tools" field anywhere)
-        conv_log.append("dashboard:chat-schema", "user", "find info on grading services")
+        conv_log.append(
+            "dashboard:chat-schema", "user", "find info on grading services"
+        )
         conv_log.append("dashboard:chat-schema", "assistant", "Let me look that up.")
-        conv_log.append("dashboard:chat-schema", "tool", "🔧 Running: @my-mcp-server/ReadFile")
-        conv_log.append("dashboard:chat-schema", "tool", "✅ Running: @my-mcp-server/ReadFile")
+        conv_log.append(
+            "dashboard:chat-schema", "tool", "🔧 Running: @my-mcp-server/ReadFile"
+        )
+        conv_log.append(
+            "dashboard:chat-schema", "tool", "✅ Running: @my-mcp-server/ReadFile"
+        )
         conv_log.append("dashboard:chat-schema", "assistant", "Now checking sub-pages.")
-        conv_log.append("dashboard:chat-schema", "tool", "🔧 Running: @my-mcp-server/ReadFile")
-        conv_log.append("dashboard:chat-schema", "tool", "✅ Running: @my-mcp-server/ReadFile")
-        conv_log.append("dashboard:chat-schema", "tool", "🔧 Running: @my-mcp-server/SearchCode")
-        conv_log.append("dashboard:chat-schema", "tool", "✅ Running: @my-mcp-server/SearchCode")
+        conv_log.append(
+            "dashboard:chat-schema", "tool", "🔧 Running: @my-mcp-server/ReadFile"
+        )
+        conv_log.append(
+            "dashboard:chat-schema", "tool", "✅ Running: @my-mcp-server/ReadFile"
+        )
+        conv_log.append(
+            "dashboard:chat-schema", "tool", "🔧 Running: @my-mcp-server/SearchCode"
+        )
+        conv_log.append(
+            "dashboard:chat-schema", "tool", "✅ Running: @my-mcp-server/SearchCode"
+        )
         conv_log.append("dashboard:chat-schema", "assistant", "Here's the full list.")
 
         async def fake_llm(_prompt):
@@ -1639,20 +1645,20 @@ class TestProcessAutoSkillsIntegration:
                 },
             }
 
-        import gideon.skills.loader as _skloader
-        from gideon.skills import proposals as _proposals
+        import gideon.extensions.skills.loader as _skloader
+        from gideon.extensions.skills import proposals as _proposals
 
         monkeypatch.setattr(_skloader, "config_dir", lambda: tmp_path)
 
         with patch.object(consolidator, "_call_llm", side_effect=fake_llm):
-            await consolidator._consolidate("dashboard:chat-schema", include_history=True)
+            await consolidator._consolidate(
+                "dashboard:chat-schema", include_history=True
+            )
 
-        # Eligibility passed (the schema-mismatch bug would drop these tool msgs
-        # below threshold) → a proposal was queued for the dashboard-format session.
         pending = _proposals.list_pending()
         assert len(pending) == 1
         assert pending[0].slug == "dashboard-wiki-explorer"
-        assert skills.list_auto_skills() == []  # propose-only: nothing live
+        assert skills.list_auto_skills() == []
 
 
 class TestAutoSkillSELAudit:
@@ -1661,20 +1667,19 @@ class TestAutoSkillSELAudit:
     @pytest.mark.asyncio
     async def test_refine_namespace_lock_rejection_emits_sel(self, tmp_path):
         """When LLM tries to refine a hand-authored skill, SEL must log rejection."""
-        from gideon.memory import MemoryStore
-        from gideon.skills import SkillsLoader
+        from gideon.cognition.memory import MemoryJournal
+        from gideon.extensions.skills import ProcedureLibrary
 
         conv_log = ConversationLog(base_dir=tmp_path / "sessions")
         conv_log.init()
-        mem = MemoryStore(workspace=tmp_path / "memory")
+        mem = MemoryJournal(workspace=tmp_path / "memory")
         mem.init()
         skills_dir = tmp_path / "skills"
-        # Plant a hand-authored skill (not under auto/)
         (skills_dir / "manual-skill").mkdir(parents=True)
         (skills_dir / "manual-skill" / "SKILL.md").write_text(
             "---\nname: manual-skill\ndescription: hand-crafted\n---\n"
         )
-        skills = SkillsLoader(skills_path=skills_dir, install_builtins=False)
+        skills = ProcedureLibrary(skills_path=skills_dir, install_builtins=False)
 
         consolidator = HistoryConsolidator(
             log=conv_log,
@@ -1686,14 +1691,15 @@ class TestAutoSkillSELAudit:
         )
 
         for i in range(5):
-            conv_log.append("dashboard:chat-refine", "assistant", f"s{i}", tools=["fs_read"])
+            conv_log.append(
+                "dashboard:chat-refine", "assistant", f"s{i}", tools=["fs_read"]
+            )
 
         async def fake_llm(_prompt):
             return {
                 "history_entry": "x",
-                # LLM tries to refine a NON-auto skill (attack surface)
                 "refined_skill": {
-                    "name": "manual-skill",  # NOT under auto/
+                    "name": "manual-skill",
                     "description": "hijacked",
                     "triggers": "",
                     "procedure_md": "attacker content",
@@ -1706,11 +1712,12 @@ class TestAutoSkillSELAudit:
             recorded.append(kwargs)
 
         with patch.object(consolidator, "_call_llm", side_effect=fake_llm):
-            with patch("gideon.history.sel") as mock_sel:
+            with patch("gideon.cognition.history.sel") as mock_sel:
                 mock_sel.return_value.log_tool_invocation = fake_log
-                await consolidator._consolidate("dashboard:chat-refine", include_history=True)
+                await consolidator._consolidate(
+                    "dashboard:chat-refine", include_history=True
+                )
 
-        # Expect at least one audit entry with outcome=rejected and reason=not_auto_namespace
         namespace_rejections = [
             r
             for r in recorded
@@ -1720,7 +1727,6 @@ class TestAutoSkillSELAudit:
         assert len(namespace_rejections) == 1
         assert namespace_rejections[0]["tool_name"] == "auto_skill_refine"
         assert namespace_rejections[0]["metadata"]["name"] == "manual-skill"
-        # Original hand-authored skill untouched
         content = (skills_dir / "manual-skill" / "SKILL.md").read_text()
         assert "hand-crafted" in content
         assert "attacker content" not in content
@@ -1731,14 +1737,16 @@ class TestAutoSkillSELAudit:
         a synthesized skill is rejected at synthesis time only when a required field
         (here procedure_md) is empty. That rejection must emit a SEL audit event
         (reason=empty_after_redaction) and queue no proposal."""
-        from gideon.memory import MemoryStore
-        from gideon.skills import SkillsLoader
+        from gideon.cognition.memory import MemoryJournal
+        from gideon.extensions.skills import ProcedureLibrary
 
         conv_log = ConversationLog(base_dir=tmp_path / "sessions")
         conv_log.init()
-        mem = MemoryStore(workspace=tmp_path / "memory")
+        mem = MemoryJournal(workspace=tmp_path / "memory")
         mem.init()
-        skills = SkillsLoader(skills_path=tmp_path / "skills", install_builtins=False)
+        skills = ProcedureLibrary(
+            skills_path=tmp_path / "skills", install_builtins=False
+        )
 
         consolidator = HistoryConsolidator(
             log=conv_log,
@@ -1749,7 +1757,9 @@ class TestAutoSkillSELAudit:
         )
 
         for i in range(5):
-            conv_log.append("dashboard:chat-empty", "assistant", f"s{i}", tools=["fs_read"])
+            conv_log.append(
+                "dashboard:chat-empty", "assistant", f"s{i}", tools=["fs_read"]
+            )
 
         async def fake_llm(_prompt):
             return {
@@ -1758,8 +1768,6 @@ class TestAutoSkillSELAudit:
                     "slug": "valid-slug",
                     "description": "some description",
                     "triggers": "",
-                    # Required procedure body is empty → after the required-field
-                    # check the synthesis is rejected (no proposal queued).
                     "procedure_md": "",
                 },
             }
@@ -1769,15 +1777,17 @@ class TestAutoSkillSELAudit:
         def fake_log(**kwargs):
             recorded.append(kwargs)
 
-        import gideon.skills.loader as _skloader
-        from gideon.skills import proposals as _proposals
+        import gideon.extensions.skills.loader as _skloader
+        from gideon.extensions.skills import proposals as _proposals
 
         monkeypatch.setattr(_skloader, "config_dir", lambda: tmp_path)
 
         with patch.object(consolidator, "_call_llm", side_effect=fake_llm):
-            with patch("gideon.history.sel") as mock_sel:
+            with patch("gideon.cognition.history.sel") as mock_sel:
                 mock_sel.return_value.log_tool_invocation = fake_log
-                await consolidator._consolidate("dashboard:chat-empty", include_history=True)
+                await consolidator._consolidate(
+                    "dashboard:chat-empty", include_history=True
+                )
 
         rejections = [
             r
@@ -1787,7 +1797,6 @@ class TestAutoSkillSELAudit:
             and r.get("metadata", {}).get("reason") == "empty_after_redaction"
         ]
         assert len(rejections) == 1
-        # No proposal queued, nothing live.
         assert _proposals.list_pending() == []
         assert skills.list_auto_skills() == []
 
@@ -1802,14 +1811,16 @@ class TestAutoSkillSELAuditCompleteness:
     @pytest.mark.asyncio
     async def test_create_empty_after_redaction_emits_sel(self, tmp_path):
         """If LLM returns new_skill but redaction strips everything, emit rejection audit."""
-        from gideon.memory import MemoryStore
-        from gideon.skills import SkillsLoader
+        from gideon.cognition.memory import MemoryJournal
+        from gideon.extensions.skills import ProcedureLibrary
 
         conv_log = ConversationLog(base_dir=tmp_path / "sessions")
         conv_log.init()
-        mem = MemoryStore(workspace=tmp_path / "memory")
+        mem = MemoryJournal(workspace=tmp_path / "memory")
         mem.init()
-        skills = SkillsLoader(skills_path=tmp_path / "skills", install_builtins=False)
+        skills = ProcedureLibrary(
+            skills_path=tmp_path / "skills", install_builtins=False
+        )
 
         consolidator = HistoryConsolidator(
             log=conv_log,
@@ -1820,13 +1831,15 @@ class TestAutoSkillSELAuditCompleteness:
         )
 
         for i in range(5):
-            conv_log.append("dashboard:chat-empty", "assistant", f"s{i}", tools=["fs_read"])
+            conv_log.append(
+                "dashboard:chat-empty", "assistant", f"s{i}", tools=["fs_read"]
+            )
 
         async def fake_llm(_prompt):
             return {
                 "history_entry": "x",
                 "new_skill": {
-                    "slug": "",  # empty slug — rejection before similarity check
+                    "slug": "",
                     "description": "",
                     "triggers": "",
                     "procedure_md": "",
@@ -1839,9 +1852,11 @@ class TestAutoSkillSELAuditCompleteness:
             recorded.append(kwargs)
 
         with patch.object(consolidator, "_call_llm", side_effect=fake_llm):
-            with patch("gideon.history.sel") as mock_sel:
+            with patch("gideon.cognition.history.sel") as mock_sel:
                 mock_sel.return_value.log_tool_invocation = fake_log
-                await consolidator._consolidate("dashboard:chat-empty", include_history=True)
+                await consolidator._consolidate(
+                    "dashboard:chat-empty", include_history=True
+                )
 
         empty_rejections = [
             r
@@ -1856,15 +1871,16 @@ class TestAutoSkillSELAuditCompleteness:
     @pytest.mark.asyncio
     async def test_refine_empty_after_redaction_emits_sel(self, tmp_path):
         """Same gap on refine path: empty fields after redaction must audit."""
-        from gideon.memory import MemoryStore
-        from gideon.skills import AutoSkillProvenance, SkillsLoader
+        from gideon.cognition.memory import MemoryJournal
+        from gideon.extensions.skills import AutoSkillProvenance, ProcedureLibrary
 
         conv_log = ConversationLog(base_dir=tmp_path / "sessions")
         conv_log.init()
-        mem = MemoryStore(workspace=tmp_path / "memory")
+        mem = MemoryJournal(workspace=tmp_path / "memory")
         mem.init()
-        skills = SkillsLoader(skills_path=tmp_path / "skills", install_builtins=False)
-        # Plant a valid auto/ skill to refine
+        skills = ProcedureLibrary(
+            skills_path=tmp_path / "skills", install_builtins=False
+        )
         skills.create_auto_skill(
             "existing-auto",
             description="existing desc",
@@ -1885,14 +1901,16 @@ class TestAutoSkillSELAuditCompleteness:
         )
 
         for i in range(5):
-            conv_log.append("dashboard:chat-refine-empty", "assistant", f"s{i}", tools=["fs_read"])
+            conv_log.append(
+                "dashboard:chat-refine-empty", "assistant", f"s{i}", tools=["fs_read"]
+            )
 
         async def fake_llm(_prompt):
             return {
                 "history_entry": "x",
                 "refined_skill": {
                     "name": "auto/existing-auto",
-                    "description": "",  # empty — should trigger rejection audit
+                    "description": "",
                     "triggers": "",
                     "procedure_md": "",
                 },
@@ -1904,9 +1922,11 @@ class TestAutoSkillSELAuditCompleteness:
             recorded.append(kwargs)
 
         with patch.object(consolidator, "_call_llm", side_effect=fake_llm):
-            with patch("gideon.history.sel") as mock_sel:
+            with patch("gideon.cognition.history.sel") as mock_sel:
                 mock_sel.return_value.log_tool_invocation = fake_log
-                await consolidator._consolidate("dashboard:chat-refine-empty", include_history=True)
+                await consolidator._consolidate(
+                    "dashboard:chat-refine-empty", include_history=True
+                )
 
         empty_rejections = [
             r
@@ -1920,18 +1940,20 @@ class TestAutoSkillSELAuditCompleteness:
     @pytest.mark.asyncio
     async def test_refine_update_failed_emits_sel(self, tmp_path):
         """When update_auto_skill returns False (oversized / missing), audit the rejection."""
-        from gideon.memory import MemoryStore
-        from gideon.skills import (
+        from gideon.cognition.memory import MemoryJournal
+        from gideon.extensions.skills import (
             AUTO_SKILL_MAX_PROCEDURE_CHARS,
             AutoSkillProvenance,
-            SkillsLoader,
+            ProcedureLibrary,
         )
 
         conv_log = ConversationLog(base_dir=tmp_path / "sessions")
         conv_log.init()
-        mem = MemoryStore(workspace=tmp_path / "memory")
+        mem = MemoryJournal(workspace=tmp_path / "memory")
         mem.init()
-        skills = SkillsLoader(skills_path=tmp_path / "skills", install_builtins=False)
+        skills = ProcedureLibrary(
+            skills_path=tmp_path / "skills", install_builtins=False
+        )
         skills.create_auto_skill(
             "too-big-refine",
             description="original",
@@ -1952,7 +1974,9 @@ class TestAutoSkillSELAuditCompleteness:
         )
 
         for i in range(5):
-            conv_log.append("dashboard:chat-oversize", "assistant", f"s{i}", tools=["fs_read"])
+            conv_log.append(
+                "dashboard:chat-oversize", "assistant", f"s{i}", tools=["fs_read"]
+            )
 
         huge = "x" * (AUTO_SKILL_MAX_PROCEDURE_CHARS + 1)
 
@@ -1973,9 +1997,11 @@ class TestAutoSkillSELAuditCompleteness:
             recorded.append(kwargs)
 
         with patch.object(consolidator, "_call_llm", side_effect=fake_llm):
-            with patch("gideon.history.sel") as mock_sel:
+            with patch("gideon.cognition.history.sel") as mock_sel:
                 mock_sel.return_value.log_tool_invocation = fake_log
-                await consolidator._consolidate("dashboard:chat-oversize", include_history=True)
+                await consolidator._consolidate(
+                    "dashboard:chat-oversize", include_history=True
+                )
 
         update_rejections = [
             r
@@ -1999,14 +2025,13 @@ class TestConsolidationPromptJsonShape:
     def test_new_skill_prompt_shape_quotes_balanced(self):
         """The new_skill key prose lives in the bundled ``consolidation-key-new-skill``
         snippet now; render it and verify the JSON shape example stays well-formed."""
-        from gideon.prompt_providers.runtime import render_snippet_block
+        from gideon.integrations.prompt_providers.runtime import render_snippet_block
 
         rendered = render_snippet_block("consolidation-key-new-skill")
         assert '"description": "<=150 chars, starts with verb>",' in rendered, (
             "The description value in the new_skill prompt must end with "
             "a closing quote before the comma so the JSON shape stays valid."
         )
-        # Same sanity check for procedure_md
         assert '"procedure_md": "<concise markdown body with' in rendered, (
             "procedure_md value must be a well-formed JSON string "
             "opener — don't split the value inside a quoted string."
@@ -2019,14 +2044,14 @@ class TestPersonaCommitmentCapture:
     unit-tested before; this proves they're actually CALLED by the runtime."""
 
     def _consolidator(self, tmp_path):
-        from gideon.memory import MemoryStore
-        from gideon.vector_memory import VectorMemoryStore
+        from gideon.cognition.memory import MemoryJournal
+        from gideon.cognition.vector_memory import SemanticArchive
 
         conv_log = ConversationLog(base_dir=tmp_path / "sessions")
         conv_log.init()
-        mem = MemoryStore(workspace=tmp_path / "memory")
+        mem = MemoryJournal(workspace=tmp_path / "memory")
         mem.init()
-        vs = VectorMemoryStore(db_path=tmp_path / "m.db", embedding_dim=3)
+        vs = SemanticArchive(db_path=tmp_path / "m.db", embedding_dim=3)
         vs.init()
         vs.embed_fn = lambda t: [1.0, 0.0, 0.0]
         consolidator = HistoryConsolidator(log=conv_log, memory=mem, vector_store=vs)
@@ -2034,7 +2059,7 @@ class TestPersonaCommitmentCapture:
 
     def _patch_flag(self, value: bool, max_per_day: int = 3):
         """Patch AppConfig.load so the live-read proactive flag is controllable."""
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         real = AppConfig.load()
         real.memory.proactive_commitments = value
@@ -2043,14 +2068,15 @@ class TestPersonaCommitmentCapture:
 
     @pytest.mark.asyncio
     async def test_self_persona_captured_from_consolidation(self, tmp_path):
-        from gideon.memory_record import MemoryKind
-        from gideon.memory_service import MemoryService
+        from gideon.cognition.memory_record import MemoryKind
+        from gideon.cognition.memory_service import MemoryService
 
         consolidator, conv_log, vs = self._consolidator(tmp_path)
-        # Session must carry an agent — persona is agent-scoped.
         conv_log.append("dashboard:chat-p", "user", "review my code", agent="Gideon")
         for i in range(3):
-            conv_log.append("dashboard:chat-p", "assistant", f"step {i}", tools=["fs_read"])
+            conv_log.append(
+                "dashboard:chat-p", "assistant", f"step {i}", tools=["fs_read"]
+            )
 
         async def fake_llm(_prompt):
             return {
@@ -2068,22 +2094,24 @@ class TestPersonaCommitmentCapture:
         block = svc.persona_block(agent="Gideon")
         assert "clean-break refactors" in block
         assert "thorough, direct review" in block
-        # the read path (context injection) now has something to inject
         recs = svc.get_records(kinds={MemoryKind.SELF_PERSONA.value})
         assert len(recs) == 2
 
     @pytest.mark.asyncio
     async def test_commitments_not_captured_when_flag_off(self, tmp_path):
-        from gideon.memory_record import MemoryKind
-        from gideon.memory_service import MemoryService
+        from gideon.cognition.memory_record import MemoryKind
+        from gideon.cognition.memory_service import MemoryService
 
         consolidator, conv_log, vs = self._consolidator(tmp_path)
-        conv_log.append("dashboard:chat-c", "user", "migration ships Friday", agent="Gideon")
+        conv_log.append(
+            "dashboard:chat-c", "user", "migration ships Friday", agent="Gideon"
+        )
         for i in range(3):
-            conv_log.append("dashboard:chat-c", "assistant", f"step {i}", tools=["fs_read"])
+            conv_log.append(
+                "dashboard:chat-c", "assistant", f"step {i}", tools=["fs_read"]
+            )
 
         async def fake_llm(_prompt):
-            # Even if the LLM returns commitments, the flag-off path must not write
             return {
                 "history_entry": "discussed the migration",
                 "commitments": [
@@ -2097,20 +2125,26 @@ class TestPersonaCommitmentCapture:
 
         with self._patch_flag(False):
             with patch.object(consolidator, "_call_llm", side_effect=fake_llm):
-                await consolidator._consolidate("dashboard:chat-c", include_history=True)
+                await consolidator._consolidate(
+                    "dashboard:chat-c", include_history=True
+                )
 
         svc = MemoryService.over_vector_store(vs)
         assert svc.get_records(kinds={MemoryKind.COMMITMENT.value}) == []
 
     @pytest.mark.asyncio
     async def test_commitments_captured_when_flag_on(self, tmp_path):
-        from gideon.memory_record import MemoryKind
-        from gideon.memory_service import MemoryService
+        from gideon.cognition.memory_record import MemoryKind
+        from gideon.cognition.memory_service import MemoryService
 
         consolidator, conv_log, vs = self._consolidator(tmp_path)
-        conv_log.append("dashboard:chat-d", "user", "migration ships Friday", agent="Gideon")
+        conv_log.append(
+            "dashboard:chat-d", "user", "migration ships Friday", agent="Gideon"
+        )
         for i in range(3):
-            conv_log.append("dashboard:chat-d", "assistant", f"step {i}", tools=["fs_read"])
+            conv_log.append(
+                "dashboard:chat-d", "assistant", f"step {i}", tools=["fs_read"]
+            )
 
         async def fake_llm(_prompt):
             return {
@@ -2121,7 +2155,6 @@ class TestPersonaCommitmentCapture:
                         "due_window": "2026-07-06T09:00:00+00:00",
                         "confidence": 0.9,
                     },
-                    # low-confidence one must be refused by the service guardrail
                     {
                         "text": "maybe ping about something",
                         "due_window": "2026-07-06T09:00:00+00:00",
@@ -2132,17 +2165,15 @@ class TestPersonaCommitmentCapture:
 
         with self._patch_flag(True):
             with patch.object(consolidator, "_call_llm", side_effect=fake_llm):
-                await consolidator._consolidate("dashboard:chat-d", include_history=True)
+                await consolidator._consolidate(
+                    "dashboard:chat-d", include_history=True
+                )
 
         svc = MemoryService.over_vector_store(vs)
         recs = svc.get_records(kinds={MemoryKind.COMMITMENT.value})
-        # only the high-confidence one survives
         assert len(recs) == 1
         env = recs[0].value
         assert env["text"] == "How did the Friday migration go?"
-        # channel is the heartbeat deliver-target (dashboard:<bare-session-name>);
-        # the consolidation key's 'dashboard:' prefix is stripped before re-
-        # prefixing so the target never doubles (was a real delivery bug).
         assert env["channel"] == "dashboard:chat-d"
 
     @pytest.mark.asyncio
@@ -2150,38 +2181,45 @@ class TestPersonaCommitmentCapture:
         """No explicit agent on the session → capture keys on the canonical
         default agent (the common dashboard case), so write/read agree. The read
         path normalizes the same way, so a default-agent chat still gets persona."""
-        from gideon.agents.defaults import DEFAULT_NATIVE_AGENT_NAME
-        from gideon.memory_record import MemoryKind
-        from gideon.memory_service import MemoryService
+        from gideon.cognition.memory_record import MemoryKind
+        from gideon.cognition.memory_service import MemoryService
+        from gideon.engine.agents.defaults import DEFAULT_NATIVE_AGENT_NAME
 
         consolidator, conv_log, vs = self._consolidator(tmp_path)
-        # no agent= on append → session metadata carries no agent
         for i in range(3):
-            conv_log.append("dashboard:chat-na", "assistant", f"step {i}", tools=["fs_read"])
+            conv_log.append(
+                "dashboard:chat-na", "assistant", f"step {i}", tools=["fs_read"]
+            )
 
         async def fake_llm(_prompt):
-            return {"history_entry": "did things", "self_persona": ["a default-agent growth note"]}
+            return {
+                "history_entry": "did things",
+                "self_persona": ["a default-agent growth note"],
+            }
 
         with self._patch_flag(True):
             with patch.object(consolidator, "_call_llm", side_effect=fake_llm):
-                await consolidator._consolidate("dashboard:chat-na", include_history=True)
+                await consolidator._consolidate(
+                    "dashboard:chat-na", include_history=True
+                )
 
         svc = MemoryService.over_vector_store(vs)
         recs = svc.get_records(kinds={MemoryKind.SELF_PERSONA.value})
         assert len(recs) == 1
         assert recs[0].scope_ref == DEFAULT_NATIVE_AGENT_NAME
-        # and the read path (which normalizes None → default) finds it
-        assert "default-agent growth note" in svc.persona_block(agent=DEFAULT_NATIVE_AGENT_NAME)
+        assert "default-agent growth note" in svc.persona_block(
+            agent=DEFAULT_NATIVE_AGENT_NAME
+        )
 
 
 class TestCommitmentDeliveryScan:
     """M5e delivery wiring: due_commitments_all powers the heartbeat's scan."""
 
     def _svc(self, tmp_path):
-        from gideon.memory_service import MemoryService
-        from gideon.vector_memory import VectorMemoryStore
+        from gideon.cognition.memory_service import MemoryService
+        from gideon.cognition.vector_memory import SemanticArchive
 
-        vs = VectorMemoryStore(db_path=tmp_path / "m.db", embedding_dim=3)
+        vs = SemanticArchive(db_path=tmp_path / "m.db", embedding_dim=3)
         vs.init()
         vs.embed_fn = lambda t: [1.0, 0.0, 0.0]
         return MemoryService.over_vector_store(vs)
@@ -2204,7 +2242,6 @@ class TestCommitmentDeliveryScan:
             confidence=0.95,
             enabled=True,
         )
-        # a future one must NOT be due
         svc.record_commitment(
             agent="AgentA",
             channel="dashboard:s1",
@@ -2216,7 +2253,6 @@ class TestCommitmentDeliveryScan:
         due = svc.due_commitments_all(now_iso="2026-01-01T00:00:00+00:00")
         texts = {d["text"] for d in due}
         assert texts == {"ping A", "ping B"}
-        # each carries its owning agent + channel for scoped delivery
         by_text = {d["text"]: d for d in due}
         assert by_text["ping A"]["agent"] == "AgentA"
         assert by_text["ping A"]["channel"] == "dashboard:s1"

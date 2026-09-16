@@ -29,7 +29,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 
 def _make_app() -> web.Application:
-    from gideon.dashboard.handlers import api_gideon_config_patch
+    from gideon.interfaces.dashboard.handlers import api_gideon_config_patch
 
     app = web.Application()
     app.router.add_patch("/api/config/gideon", api_gideon_config_patch)
@@ -50,7 +50,7 @@ def _seed_config() -> dict:
 def tmp_config(tmp_path: Path):
     cfg_path = tmp_path / "config.json"
     cfg_path.write_text(json.dumps(_seed_config()), encoding="utf-8")
-    with patch("gideon.config.loader.config_path", return_value=cfg_path):
+    with patch("gideon.core.config.loader.config_path", return_value=cfg_path):
         yield cfg_path
 
 
@@ -61,7 +61,10 @@ def seen_writes():
     Uses the public register/unregister pair rather than reaching into the module global, so
     the test breaks if the seam's own contract changes rather than silently drifting.
     """
-    from gideon.atomic_write import register_post_write_hook, unregister_post_write_hook
+    from gideon.core.atomic_write import (
+        register_post_write_hook,
+        unregister_post_write_hook,
+    )
 
     paths: list[Path] = []
 
@@ -77,7 +80,9 @@ def seen_writes():
 
 
 @pytest.mark.asyncio
-async def test_a_config_patch_lands_a_commit_in_the_config_history_root(tmp_path) -> None:
+async def test_a_config_patch_lands_a_commit_in_the_config_history_root(
+    tmp_path,
+) -> None:
     """The load-bearing assertion: a settings change becomes a history commit.
 
     🪤 READ THIS BEFORE TRUSTING IT AS THE REGRESSION PIN — IT IS NOT ONE. Two successive
@@ -96,7 +101,7 @@ async def test_a_config_patch_lands_a_commit_in_the_config_history_root(tmp_path
     What this test IS worth keeping for: it pins that a config PATCH ends in a history commit at
     all, so a future change that stops config writes reaching the debouncer entirely goes red.
     """
-    from gideon.durability import history_debounce, state_history
+    from gideon.operations.durability import history_debounce, state_history
 
     home = tmp_path / "home"
     home.mkdir()
@@ -107,9 +112,11 @@ async def test_a_config_patch_lands_a_commit_in_the_config_history_root(tmp_path
         pytest.skip("git is unavailable, so time-travel records nothing by design")
 
     debouncer = history_debounce.install(home=home)
-    assert debouncer is not None, "the debouncer must install for this test to mean anything"
+    assert (
+        debouncer is not None
+    ), "the debouncer must install for this test to mean anything"
     try:
-        with patch("gideon.config.loader.config_path", return_value=cfg_path):
+        with patch("gideon.core.config.loader.config_path", return_value=cfg_path):
             async with TestClient(TestServer(_make_app())) as c:
                 resp = await c.patch(
                     "/api/config/gideon",
@@ -117,7 +124,6 @@ async def test_a_config_patch_lands_a_commit_in_the_config_history_root(tmp_path
                 )
                 assert resp.status == 200, await resp.text()
 
-        # Flush rather than sleep: a fixed sleep measures the skeleton, not the behaviour.
         debouncer.flush()
         root = {r.id: r for r in state_history.roots(home)}["config"]
         assert state_history.repo_exists(root, home=home), (
@@ -143,15 +149,6 @@ async def test_the_patch_still_persists_the_value(tmp_config, seen_writes) -> No
     data = json.loads(tmp_config.read_text(encoding="utf-8"))
     assert data["local_models"]["pressure_warn_pct"] == 70
     assert data["default_agent"] == "gideon"
-    # The handler writes a NARROW patch: it read-modify-writes the raw JSON document, so the
-    # file keeps exactly the top-level keys it had — no defaulted sections added, and no keys
-    # the dataclasses do not model silently dropped.
-    #
-    # This assertion used to read `len(data) > 20`, i.e. "the PATCH writes the full normalized
-    # config". That was never the PATCH path's doing: `AppConfig.load()` further down the
-    # handler used to rewrite the whole file as a migration write-back side effect, and the
-    # normalization was ITS footprint. PHF-15 made `load()` a pure read, so what lands on disk
-    # is now only what this handler actually wrote.
     assert sorted(data) == sorted(_seed_config()), (
         "the PATCH added or dropped a top-level key. It read-modify-writes the raw document "
         "precisely so a config key the dataclasses do not model survives an edit."
@@ -183,13 +180,17 @@ def test_the_handler_does_not_use_a_seam_bypassing_writer() -> None:
     time-travel is supposed to cover. Named rather than pattern-matched, because the failure
     mode is this exact substitution.
     """
-    src = Path(__file__).resolve().parents[1] / "src" / "gideon" / "dashboard"
+    src = (
+        Path(__file__).resolve().parents[2]
+        / "runtime"
+        / "gideon"
+        / "interfaces"
+        / "dashboard"
+    )
     text = (src / "handlers" / "core.py").read_text(encoding="utf-8")
-    # Strip comments so the explanatory note naming the bypass does not read as a use of it.
     code = "\n".join(ln.split("#", 1)[0] for ln in text.splitlines())
     assert "_atomic_json_write" not in code, (
         "handlers/core.py calls the seam-bypassing writer again; config writes must go through "
         "atomic_write or time-travel silently stops recording settings changes"
     )
-    # Vacuity floor: the file really does write config through the seam.
     assert "atomic_write(" in code

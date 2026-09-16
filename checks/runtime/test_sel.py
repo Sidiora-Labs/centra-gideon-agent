@@ -1,4 +1,4 @@
-"""Tests for gideon.sel — Security Event Log."""
+"""Tests for gideon.security.sel — Security Event Log."""
 
 import json
 import threading
@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from gideon.sel import SecurityEvent, SecurityEventLog, _infer_source, sel
+from gideon.security.sel import SecurityEvent, SecurityEventLog, _infer_source, sel
 
 
 @pytest.fixture(autouse=True)
@@ -208,7 +208,6 @@ class TestVerifyIntegrity:
                 operation="op1",
             )
         )
-        # Tamper with first entry
         sel_file = sel_dir / "security_events.jsonl"
         lines = sel_file.read_text().strip().splitlines()
         entry = json.loads(lines[0])
@@ -218,7 +217,6 @@ class TestVerifyIntegrity:
 
         total, valid = log.verify_integrity()
         assert total == 2
-        # Entry 0's self-hash is still valid; entry 1's chain breaks because prev_hash mismatches
         assert valid < 2
 
 
@@ -247,7 +245,6 @@ class TestRecent:
 
 class TestPrune:
     def test_removes_old_entries(self, log, sel_dir):
-        # Write an entry with an old timestamp
         log.log(
             SecurityEvent(
                 event_id="old",
@@ -281,7 +278,6 @@ class TestPrune:
         assert log.prune() == 0
 
     def test_size_cap_keeps_newest(self, log, sel_dir):
-        # All recent (never age-pruned), but more than the size cap → keep newest N.
         for i in range(10):
             log.log(
                 SecurityEvent(
@@ -298,7 +294,6 @@ class TestPrune:
         assert removed == 6
         remaining = (sel_dir / "security_events.jsonl").read_text().strip().splitlines()
         assert len(remaining) == 4
-        # The four kept are the newest (op6..op9), oldest dropped first.
         assert "op6" in remaining[0]
         assert "op9" in remaining[-1]
 
@@ -316,7 +311,10 @@ class TestPrune:
                 )
             )
         assert log.prune(keep_days=365, max_entries=0) == 0
-        assert len((sel_dir / "security_events.jsonl").read_text().strip().splitlines()) == 5
+        assert (
+            len((sel_dir / "security_events.jsonl").read_text().strip().splitlines())
+            == 5
+        )
 
 
 class TestForwardCallback:
@@ -353,7 +351,6 @@ class TestForwardCallback:
                 operation="test_op",
             )
         )
-        # Event should still be written despite callback failure
         sel_file = sel_dir / "security_events.jsonl"
         assert sel_file.exists()
         assert "cb2" in sel_file.read_text()
@@ -377,7 +374,9 @@ class TestThreadSafety:
                     )
                 )
 
-        threads = [threading.Thread(target=write_events, args=(t, 10)) for t in range(4)]
+        threads = [
+            threading.Thread(target=write_events, args=(t, 10)) for t in range(4)
+        ]
         for t in threads:
             t.start()
         for t in threads:
@@ -386,7 +385,6 @@ class TestThreadSafety:
         sel_file = sel_dir / "security_events.jsonl"
         lines = sel_file.read_text().strip().splitlines()
         assert len(lines) == 40
-        # All lines should be valid JSON
         for line in lines:
             json.loads(line)
 
@@ -417,7 +415,7 @@ class TestSingleton:
 
     def test_sel_accessor(self, sel_dir):
         """The module-level sel() function returns the singleton."""
-        with patch("gideon.sel._default_dir", return_value=sel_dir):
+        with patch("gideon.security.sel._default_dir", return_value=sel_dir):
             instance = sel()
             assert isinstance(instance, SecurityEventLog)
 
@@ -436,18 +434,9 @@ class TestReadLastHash:
             )
         )
         expected_hash = log._last_hash
-        # Reset and re-read
         SecurityEventLog._instance = None
         log2 = SecurityEventLog(base_dir=sel_dir)
         assert log2._last_hash == expected_hash
-
-
-# ─────────────────────────────────────────────────────────────────────────
-# Edge-case tests — paths the baseline coverage push doesn't exercise:
-# HMAC-tamper vs chain-break detection, the 4 KB-boundary backward scan
-# in ``_read_last_hash``, redaction of forwarded callback payloads, and
-# robustness paths around malformed/blank lines in the on-disk JSONL.
-# ─────────────────────────────────────────────────────────────────────────
 
 
 class TestSecurityEventDataclass:
@@ -462,11 +451,9 @@ class TestSecurityEventDataclass:
         assert evt.prev_hash == ""
         assert evt.entry_hash == ""
         assert evt.metadata == {}
-        assert evt.caller_scope == ""  # G47: unset until a caller_scope is bound
+        assert evt.caller_scope == ""
 
     def test_metadata_default_factory_is_per_instance(self) -> None:
-        # Catch the classic mutable-default-arg bug if someone "fixes" the
-        # dataclass to use a literal {} default.
         a = _make_event()
         b = _make_event()
         a.metadata["x"] = 1
@@ -477,18 +464,16 @@ class TestHmacKeyManagementExtras:
     def test_chmod_failure_is_swallowed(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # Read-only filesystems raise OSError on chmod — must not crash init.
         def _boom(*a, **kw):
             raise OSError("chmod denied")
 
-        monkeypatch.setattr("gideon.sel.os.chmod", _boom)
+        monkeypatch.setattr("gideon.security.sel.os.chmod", _boom)
         log = SecurityEventLog(base_dir=tmp_path)
         assert (tmp_path / "sel_hmac.key").exists()
         assert log._hmac_key
 
     def test_singleton_init_is_idempotent(self, tmp_path: Path) -> None:
         a = SecurityEventLog(base_dir=tmp_path)
-        # Second call must reuse the original instance and ignore base_dir.
         other = tmp_path / "other"
         b = SecurityEventLog(base_dir=other)
         assert a is b
@@ -503,22 +488,21 @@ class TestLogHashAndCallbackExtras:
         h1 = log._compute_hash(evt)
         h2 = log._compute_hash(evt)
         assert h1 == h2
-        assert len(h1) == 64  # sha256 hex
+        assert len(h1) == 64
 
     def test_compute_hash_excludes_entry_hash_field(self, tmp_path: Path) -> None:
         log = SecurityEventLog(base_dir=tmp_path)
         evt = _make_event()
         h_before = log._compute_hash(evt)
         evt.entry_hash = "anything"
-        # Hash MUST be stable when only the (excluded) entry_hash field changes.
         assert log._compute_hash(evt) == h_before
 
-    def test_log_invokes_forward_callback_with_redacted_payload(self, tmp_path: Path) -> None:
+    def test_log_invokes_forward_callback_with_redacted_payload(
+        self, tmp_path: Path
+    ) -> None:
         log = SecurityEventLog(base_dir=tmp_path)
         captured: list[dict] = []
         log.set_forward_callback(captured.append)
-        # Embed an AWS access key in resources — must be redacted before
-        # forwarding to avoid credential exfiltration via the audit pipeline.
         log.log(_make_event(resources="key=AKIAIOSFODNN7EXAMPLE"))
         assert len(captured) == 1
         forwarded = captured[0]
@@ -538,8 +522,6 @@ class TestLogHashAndCallbackExtras:
 
 class TestVerifyIntegrityExtras:
     def test_detects_chain_break(self, tmp_path: Path) -> None:
-        # Distinct from a tampered HMAC: here the prev_hash linkage is
-        # broken but the entry's own HMAC may still verify in isolation.
         log = SecurityEventLog(base_dir=tmp_path)
         log.log(_make_event(event_id="e0"))
         log.log(_make_event(event_id="e1"))
@@ -551,7 +533,7 @@ class TestVerifyIntegrityExtras:
         path.write_text("\n".join(lines) + "\n")
         total, valid = log.verify_integrity()
         assert total == 2
-        assert valid == 1  # entry 1 fails the chain check
+        assert valid == 1
 
     def test_skips_blank_lines(self, tmp_path: Path) -> None:
         log = SecurityEventLog(base_dir=tmp_path)
@@ -567,7 +549,6 @@ class TestVerifyIntegrityExtras:
         path = tmp_path / "security_events.jsonl"
         path.write_text(path.read_text() + "not-json-at-all\n")
         total, valid = log.verify_integrity()
-        # Malformed line counts toward total, doesn't count as valid.
         assert total == 2
         assert valid == 1
 
@@ -576,8 +557,8 @@ class TestLogToolInvocationExtras:
     def test_explicit_source_overrides_inferred(self, tmp_path: Path) -> None:
         log = SecurityEventLog(base_dir=tmp_path)
         log.log_tool_invocation(
-            session_key="dashboard:abc",  # would infer "dashboard"
-            source="cli",  # explicit override
+            session_key="dashboard:abc",
+            source="cli",
             tool_name="t",
             outcome="approved",
         )
@@ -589,7 +570,7 @@ class TestLogToolInvocationExtras:
             session_key="cli_chat",
             tool_name="t",
             outcome="approved",
-            request_id=42,  # int — must be coerced
+            request_id=42,
         )
         assert log.recent()[0]["request_id"] == "42"
 
@@ -615,7 +596,7 @@ class TestLogApiAccessExtras:
             error="e" * 800,
         )
         e = log.recent()[0]
-        assert len(e["resources"]) == 500  # _MAX_ARG_LEN
+        assert len(e["resources"]) == 500
         assert len(e["error"]) == 500
 
 
@@ -647,8 +628,6 @@ class TestRecentExtras:
 
 class TestPruneExtras:
     def test_recomputes_last_hash_after_prune(self, tmp_path: Path) -> None:
-        # When prune removes the chain tail, _last_hash must move back so
-        # subsequent log() calls link to the surviving tail, not a phantom.
         log = SecurityEventLog(base_dir=tmp_path)
         log.log(_make_event(event_id="old", timestamp="2020-01-01T00:00:00+00:00"))
         from datetime import datetime, timezone
@@ -669,7 +648,6 @@ class TestPruneExtras:
         log.log(_make_event(timestamp=now))
         path = tmp_path / "security_events.jsonl"
         path.write_text(path.read_text() + "not-json\n")
-        # Malformed line is removable (not a structured retainable entry).
         assert log.prune() == 1
 
     def test_prune_keeps_when_nothing_old(self, tmp_path: Path) -> None:
@@ -684,11 +662,9 @@ class TestPruneExtras:
 
 class TestReadLastHashExtras:
     def test_scans_back_across_4kb_boundary(self, tmp_path: Path) -> None:
-        # Force the backward-scan loop to iterate past one 4 KB chunk so the
-        # buf-prepend path is exercised.
         log = SecurityEventLog(base_dir=tmp_path)
-        big_resources = "x" * 200  # ~250 B per JSONL line
-        for i in range(60):  # ~15 KB total — well past 4 KB chunk
+        big_resources = "x" * 200
+        for i in range(60):
             log.log(_make_event(event_id=f"e{i:02d}", resources=big_resources))
         expected_tail = log._last_hash
 
@@ -701,8 +677,6 @@ class TestReadLastHashExtras:
         SecurityEventLog._instance = None
         SecurityEventLog._initialized = False
         tmp_path.mkdir(parents=True, exist_ok=True)
-        # Single un-parseable line — _read_last_hash must swallow the
-        # JSONDecodeError and return "" so init can succeed.
         (tmp_path / "security_events.jsonl").write_text("not json\n")
         log = SecurityEventLog(base_dir=tmp_path)
         assert log._last_hash == ""
@@ -718,9 +692,6 @@ class TestCallerScopeAttribution:
     field, because the only such field was the session-key ``caller_identity``.
     """
 
-    #: Fields that are always unique/volatile per write, so they can never be the thing
-    #: that tells two rows apart. What REMAINS after removing them is the row's real
-    #: caller-attribution surface — identical for the two paths on origin/main.
     _VOLATILE = {"event_id", "timestamp", "prev_hash", "entry_hash"}
 
     def _attribution(self, row: dict) -> dict:
@@ -731,10 +702,8 @@ class TestCallerScopeAttribution:
         whether a ladder subsystem scope was active (``ladder_ran``) or not."""
         import contextlib
 
-        from gideon.guardrails.audit import caller_scope
+        from gideon.security.guardrails.audit import caller_scope
 
-        # "skill_ladder" is a real member of the closed CALLERS vocabulary, so this drives
-        # the true seam (set_current_caller would reject a made-up value).
         ctx = caller_scope("skill_ladder") if ladder_ran else contextlib.nullcontext()
         with ctx:
             log.log_tool_invocation(
@@ -746,16 +715,12 @@ class TestCallerScopeAttribution:
 
     def test_ran_and_declined_is_distinguishable_from_never_fired(self, tmp_path):
         log = SecurityEventLog(base_dir=tmp_path)
-        self._log_identical_call(log, ladder_ran=True)  # a ladder step RAN (then declined)
-        self._log_identical_call(log, ladder_ran=False)  # a ladder step NEVER FIRED
+        self._log_identical_call(log, ladder_ran=True)
+        self._log_identical_call(log, ladder_ran=False)
         rows = log.recent(limit=2)
         assert len(rows) == 2
         a, b = rows
 
-        # Vacuity floor: the two rows ARE the same call in every field the pre-AAPX-1 schema
-        # captured — same session (⇒ caller_identity + inferred source), same op/kind/outcome.
-        # Any distinguishability must therefore come from the new per-call caller surface,
-        # not an incidentally different input.
         for shared in (
             "caller_identity",
             "source",
@@ -767,19 +732,15 @@ class TestCallerScopeAttribution:
             assert a[shared] == b[shared], shared
         assert a["caller_identity"] == "_bg"
 
-        # THE CLAIM. With everything else equal, the two rows are still distinguishable.
-        # On origin/main the two projections are identical (==) and this FAILS; after
-        # AAPX-1 the surfaced caller differs and it PASSES.
         assert self._attribution(a) != self._attribution(b)
 
-        # Concretely, the discriminator is the bound subsystem: exactly one row carries it.
-        # ``.get`` (not ``[]``) so this line gives a clean AssertionError on origin/main
-        # rather than a KeyError — the failure above is the one that matters.
-        assert sorted(r.get("caller_scope", "\x00missing") for r in rows) == ["", "skill_ladder"]
+        assert sorted(r.get("caller_scope", "\x00missing") for r in rows) == [
+            "",
+            "skill_ladder",
+        ]
 
     def test_explicit_caller_scope_on_event_is_not_overwritten(self, tmp_path):
-        # An explicit value wins over the ambient scope: only an UNSET field is filled.
-        from gideon.guardrails.audit import caller_scope
+        from gideon.security.guardrails.audit import caller_scope
 
         log = SecurityEventLog(base_dir=tmp_path)
         with caller_scope("skill_ladder"):
@@ -787,9 +748,7 @@ class TestCallerScopeAttribution:
         assert log.recent()[0]["caller_scope"] == "inbox_triage"
 
     def test_caller_scope_is_covered_by_the_hmac(self, tmp_path):
-        # The stamped attribution is tamper-evident: it is hashed like any other field, so a
-        # forged caller_scope on disk fails verification.
-        from gideon.guardrails.audit import caller_scope
+        from gideon.security.guardrails.audit import caller_scope
 
         log = SecurityEventLog(base_dir=tmp_path)
         with caller_scope("skill_ladder"):
@@ -798,7 +757,7 @@ class TestCallerScopeAttribution:
         path = tmp_path / "security_events.jsonl"
         row = json.loads(path.read_text().strip())
         assert row["caller_scope"] == "skill_ladder"
-        row["caller_scope"] = "inbox_triage"  # forge the attribution
+        row["caller_scope"] = "inbox_triage"
         path.write_text(json.dumps(row) + "\n")
         total, valid = log.verify_integrity()
         assert (total, valid) == (1, 0)
@@ -813,7 +772,6 @@ class TestRotate:
     """
 
     def test_archive_preserves_key_and_starts_clean_chain(self, log, sel_dir):
-        # Seed a real chain before rotating.
         for i in range(3):
             log.log(_make_event(event_id=f"pre{i}"))
         key_path = sel_dir / "sel_hmac.key"
@@ -821,10 +779,8 @@ class TestRotate:
 
         result = log.rotate(archive=True)
 
-        # The HMAC signing key is create-only — rotate() MUST NOT rewrite it.
         assert key_path.read_bytes() == key_before
 
-        # The old chain is archived beside the live log as a timestamped .bak.jsonl, not destroyed.
         assert result["rotated"] is True
         assert result["entries_before"] == 3
         assert result["entries_after"] == 0
@@ -834,7 +790,6 @@ class TestRotate:
         assert archive.name.endswith(".bak.jsonl")
         assert len([ln for ln in archive.read_text().splitlines() if ln.strip()]) == 3
 
-        # The live log restarts empty and verifies clean; a new event chains from a fresh root.
         assert not (sel_dir / "security_events.jsonl").exists()
         assert log.verify_integrity() == (0, 0)
         log.log(_make_event(event_id="post"))
@@ -851,6 +806,5 @@ class TestRotate:
         assert result["rotated"] is True
         assert result["archive_path"] == ""
         assert not (sel_dir / "security_events.jsonl").exists()
-        # Even a non-archiving reset leaves the signing key byte-for-byte unchanged.
         assert (sel_dir / "sel_hmac.key").read_bytes() == key_before
         assert log.verify_integrity() == (0, 0)

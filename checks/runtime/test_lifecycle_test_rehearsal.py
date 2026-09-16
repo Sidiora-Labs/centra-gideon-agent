@@ -19,11 +19,16 @@ import platform
 
 import pytest
 
-from gideon.hooks import HOOK_EVENT_USER_PROMPT_SUBMIT, ScriptHook, run_script_hook
+from gideon.engine.hooks import (
+    HOOK_EVENT_USER_PROMPT_SUBMIT,
+    ScriptHook,
+    run_script_hook,
+)
 
 _IS_MACOS = platform.system() == "Darwin"
 pytestmark = pytest.mark.skipif(
-    not _IS_MACOS and platform.system() != "Linux", reason="bash provider tests need a POSIX shell"
+    not _IS_MACOS and platform.system() != "Linux",
+    reason="bash provider tests need a POSIX shell",
 )
 
 
@@ -46,10 +51,7 @@ class TestLifecycleTestIsARehearsal:
     async def test_a_rehearsal_never_writes_fire_history(self):
         hook = _hook(run_count=1, last_status="ok", last_run=1000.0)
         result = await run_script_hook(hook, "ctx", test=True)
-        # The action genuinely ran (that is what Test verifies)…
         assert "fired" in (result.stdout or "")
-        # …but the REAL history is untouched: run_count/last_run/last_status are
-        # the trigger's only fire record, and a rehearsal is not a fire.
         assert hook.run_count == 1
         assert hook.last_status == "ok"
         assert hook.last_run == 1000.0
@@ -64,8 +66,6 @@ class TestLifecycleTestIsARehearsal:
 
     @pytest.mark.asyncio
     async def test_a_failing_rehearsal_also_stays_off_the_record(self):
-        # The rule must hold on EVERY terminal branch, not just success — a test
-        # of a broken trigger must not stamp `error` into the real history either.
         hook = _hook(provider="no-such-provider", run_count=3, last_status="ok")
         result = await run_script_hook(hook, "ctx", test=True)
         assert result.error
@@ -78,21 +78,19 @@ class TestLifecycleTestIsARehearsal:
 
         class _Spy:
             async def execute(self, action_config, ctx, timeout=30):
-                from gideon.action_providers.base import ActionResult
+                from gideon.integrations.action_providers.base import ActionResult
 
                 seen.update(ctx.payload or {})
                 return ActionResult(success=True, exit_code=0, stdout="ok")
 
-        from gideon.action_providers import registry
+        from gideon.integrations.action_providers import registry
 
         registry._providers["spy-609"] = _Spy()  # type: ignore[assignment]
         try:
             hook = _hook(provider="spy-609")
             caller_event = {"hook_event_name": hook.event, "cwd": "/tmp"}
             await run_script_hook(hook, "ctx", hook_event=caller_event, test=True)
-            # The event-path contract verbatim: the tag rides the payload.
             assert seen.get("test") is True
-            # The caller's dict was copied, not mutated.
             assert "test" not in caller_event
         finally:
             registry._providers.pop("spy-609", None)
@@ -100,13 +98,13 @@ class TestLifecycleTestIsARehearsal:
 
 class TestNotifyMarksRehearsals:
     def _ctx(self, payload):
-        from gideon.action_providers.base import ActionContext
+        from gideon.integrations.action_providers.base import ActionContext
 
         return ActionContext(event="Error", context="c", payload=payload)
 
     @pytest.mark.asyncio
     async def test_tagged_payload_prefixes_the_title(self, monkeypatch):
-        from gideon.action_providers import notify_provider as np
+        from gideon.integrations.action_providers import notify_provider as np
 
         sent: list[tuple] = []
 
@@ -123,7 +121,5 @@ class TestNotifyMarksRehearsals:
         r1 = await prov.execute(cfg, self._ctx({"test": True}))
         r2 = await prov.execute(cfg, self._ctx({}))
         assert r1.success and r2.success
-        # The rehearsal is marked; the real one is untouched — an unmarked test
-        # notification is indistinguishable from a live alert in the inbox.
         assert sent[0][1] == "[test] Inventory agent hit an error"
         assert sent[1][1] == "Inventory agent hit an error"

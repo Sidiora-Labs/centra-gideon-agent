@@ -6,8 +6,8 @@ statement: >
   walk back over any dangling tool-call/tool-result pair so a tool call is never separated
   from its result (which corrupts the next model turn).
 appliesTo:
-  - src/gideon/context_compaction.py
-  - src/gideon/context_management.py
+  - runtime/gideon/context_compaction.py
+  - runtime/gideon/context_management.py
 scanner: no-naive-transcript-cut
 source: >
   A tool_use message whose matching tool_result is truncated away (or vice versa) makes

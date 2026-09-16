@@ -6,8 +6,8 @@ from unittest.mock import patch
 
 import pytest
 
-from gideon.history import ConversationLog
-from gideon.sync_bridge import (
+from gideon.cognition.history import ConversationLog
+from gideon.integrations.sync_bridge import (
     _PENDING_RESUME_TTL,
     _pending_resume_msg_ts,
     _pending_resumes,
@@ -57,20 +57,35 @@ class TestFormatSessionList:
     def test_formats_numbered_list(self):
         now = time.time()
         sessions = [
-            {"key": "k1", "title": "Chat about code", "source": "dashboard", "modified": now - 120},
-            {"key": "k2", "title": "Channel thread", "source": "channel", "modified": now - 7200},
+            {
+                "key": "k1",
+                "title": "Chat about code",
+                "source": "dashboard",
+                "modified": now - 120,
+            },
+            {
+                "key": "k2",
+                "title": "Channel thread",
+                "source": "channel",
+                "modified": now - 7200,
+            },
         ]
         result = format_session_list(sessions)
         assert "`1`" in result
         assert "`2`" in result
-        assert "🖥️" in result  # dashboard icon
-        assert "💬" in result  # channel icon
+        assert "🖥️" in result
+        assert "💬" in result
         assert "2m ago" in result
         assert "2h ago" in result
 
     def test_age_days(self):
         sessions = [
-            {"key": "k1", "title": "Old", "source": "channel", "modified": time.time() - 86400 * 3},
+            {
+                "key": "k1",
+                "title": "Old",
+                "source": "channel",
+                "modified": time.time() - 86400 * 3,
+            },
         ]
         result = format_session_list(sessions)
         assert "3d ago" in result
@@ -108,16 +123,17 @@ class TestPendingResumeStateMachine:
 
     def test_ttl_expiry(self):
         set_pending_resume("thread-1", [{"key": "k1"}])
-        # Simulate time passing beyond TTL
-        with patch("gideon.sync_bridge.time") as mock_time:
-            # set_pending_resume used real time.monotonic(); now peek uses mock
-            mock_time.monotonic.return_value = time.monotonic() + _PENDING_RESUME_TTL + 1
+        with patch("gideon.integrations.sync_bridge.time") as mock_time:
+            mock_time.monotonic.return_value = (
+                time.monotonic() + _PENDING_RESUME_TTL + 1
+            )
             assert peek_pending_resume("thread-1") is None
 
     def test_msg_ts_stored_and_popped(self):
-        set_pending_resume("thread-1", [{"key": "k1"}], bot_list_ts="B1", user_cmd_ts="U1")
+        set_pending_resume(
+            "thread-1", [{"key": "k1"}], bot_list_ts="B1", user_cmd_ts="U1"
+        )
         assert pop_pending_resume_ts("thread-1") == ("B1", "U1")
-        # Second pop returns empty
         assert pop_pending_resume_ts("thread-1") == ("", "")
 
     def test_msg_ts_not_stored_when_empty(self):
@@ -155,7 +171,6 @@ class TestHandoffToChannel:
             delivery, "U123", log, "dashboard:chat-1", title="Test Chat"
         )
         assert result is not None
-        # open_dm targeted the owner; the handoff header was delivered there.
         assert len(delivery.delivered) >= 1
         channel, text = delivery.delivered[0]
         assert channel == "D-U123"
@@ -194,14 +209,12 @@ class TestHandoffToChannel:
         )
         assert result is not None
         assert "dashboard:chat-1" in sessions.linked
-        # explicit channel wins over open_dm
         assert delivery.delivered[0][0] == "C456"
 
     @pytest.mark.asyncio
     async def test_title_from_metadata_when_not_provided(self, tmp_path):
         log = ConversationLog(base_dir=tmp_path)
         log.append("dashboard:chat-1", "user", "hello")
-        # Set title in metadata
         path = tmp_path / "dashboard_chat-1.jsonl"
         lines = path.read_text().splitlines(keepends=True)
         meta = json.loads(lines[0])

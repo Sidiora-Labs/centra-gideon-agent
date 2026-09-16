@@ -12,25 +12,25 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from gideon.action_providers.base import ActionContext
-from gideon.action_providers.create_task_provider import CreateTaskActionProvider
-from gideon.action_providers.notify_provider import NotifyActionProvider
-from gideon.action_providers.send_message_provider import SendMessageActionProvider
-from gideon.action_providers.template import render_template
+from gideon.integrations.action_providers.base import ActionContext
+from gideon.integrations.action_providers.create_task_provider import (
+    CreateTaskActionProvider,
+)
+from gideon.integrations.action_providers.notify_provider import NotifyActionProvider
+from gideon.integrations.action_providers.send_message_provider import (
+    SendMessageActionProvider,
+)
+from gideon.integrations.action_providers.template import render_template
 
 
 def _ctx() -> ActionContext:
-    return ActionContext(event="Stop", context="all done", payload={"tool_name": "bash"})
-
-
-# ── bash: $variables resolve as env vars ────────────────────────────────────
+    return ActionContext(
+        event="Stop", context="all done", payload={"tool_name": "bash"}
+    )
 
 
 def test_bash_payload_vars_resolve_via_env():
-    # The advertised schedule $variables ($job_id, $now, $EVENT…) must resolve
-    # inside the shell command — exported as env vars (not string-templated,
-    # which would be an injection vector via e.g. $last_result content).
-    from gideon.action_providers.bash_provider import BashActionProvider
+    from gideon.integrations.action_providers.bash_provider import BashActionProvider
 
     ctx = ActionContext(
         event="schedule:j1",
@@ -43,7 +43,9 @@ def test_bash_payload_vars_resolve_via_env():
         },
     )
     res = asyncio.run(
-        BashActionProvider().execute({"command": 'echo "e=$EVENT id=$job_id at=$now"'}, ctx)
+        BashActionProvider().execute(
+            {"command": 'echo "e=$EVENT id=$job_id at=$now"'}, ctx
+        )
     )
     assert res.success
     assert res.stdout == "e=schedule:j1 id=j1 at=2026-07-11T00:00:00"
@@ -56,9 +58,11 @@ def test_bash_honours_the_timeout_in_its_own_action_config():
     the `timeout=` parameter. That mattered the moment the fire path stopped passing one: driven
     before the fix, `{"command": "sleep 3", "timeout": 1}` ran the full 3 seconds.
     """
-    from gideon.action_providers.bash_provider import BashActionProvider
+    from gideon.integrations.action_providers.bash_provider import BashActionProvider
 
-    res = asyncio.run(BashActionProvider().execute({"command": "sleep 3", "timeout": 1}, _ctx()))
+    res = asyncio.run(
+        BashActionProvider().execute({"command": "sleep 3", "timeout": 1}, _ctx())
+    )
     assert not res.success
     assert "Timed out after 1s" == res.error
 
@@ -67,28 +71,34 @@ def test_bash_config_timeout_wins_over_the_callers_default():
     """The caller's value is a FLOOR for actions that declare nothing; an action that declares its
     own bound is the more specific instruction. Same precedence as `run-script`'s
     `zt_timeout or timeout`."""
-    from gideon.action_providers.bash_provider import BashActionProvider
+    from gideon.integrations.action_providers.bash_provider import BashActionProvider
 
     res = asyncio.run(
-        BashActionProvider().execute({"command": "sleep 3", "timeout": 1}, _ctx(), timeout=600)
+        BashActionProvider().execute(
+            {"command": "sleep 3", "timeout": 1}, _ctx(), timeout=600
+        )
     )
     assert "Timed out after 1s" == res.error
 
 
 def test_bash_falls_back_to_the_callers_timeout_when_the_action_declares_none():
-    from gideon.action_providers.bash_provider import BashActionProvider
+    from gideon.integrations.action_providers.bash_provider import BashActionProvider
 
-    res = asyncio.run(BashActionProvider().execute({"command": "sleep 3"}, _ctx(), timeout=1))
+    res = asyncio.run(
+        BashActionProvider().execute({"command": "sleep 3"}, _ctx(), timeout=1)
+    )
     assert "Timed out after 1s" == res.error
 
 
 def test_bash_ignores_a_junk_config_timeout_rather_than_raising():
     """The Triggers UI persists empty optional fields as "", so a non-numeric value is a normal
     input, not a misconfiguration to crash on."""
-    from gideon.action_providers.bash_provider import BashActionProvider
+    from gideon.integrations.action_providers.bash_provider import BashActionProvider
 
     res = asyncio.run(
-        BashActionProvider().execute({"command": "echo hi", "timeout": "nope"}, _ctx(), timeout=30)
+        BashActionProvider().execute(
+            {"command": "echo hi", "timeout": "nope"}, _ctx(), timeout=30
+        )
     )
     assert res.success
     assert res.stdout == "hi"
@@ -102,17 +112,15 @@ def test_the_store_fire_path_gives_a_command_the_legacy_mode_default():
     Source-level because the alternative is booting a gateway to time a subprocess; the value is the
     contract, and the two providers' own precedence is asserted directly above.
     """
-    import pathlib
+    import inspect
 
-    import gideon.gateway as G
+    from gideon.engine.trigger_dispatch import TriggerAction, TriggerDispatch
 
-    src = pathlib.Path(G.__file__).read_text()
-    assert 'timeout = 300 if provider_name == "bash" else 30' in src
-    assert "await provider.execute(config, ctx, timeout=timeout)" in src
-    assert "await provider.execute(config, ctx)\n" not in src
-
-
-# ── renderer ──────────────────────────────────────────────────────────────
+    assert TriggerAction("bash", {}, None).timeout == 300
+    assert TriggerAction("notify", {}, None).timeout == 30
+    src = inspect.getsource(TriggerDispatch.execute)
+    assert "await action.provider.execute(" in src
+    assert "timeout=action.timeout" in src
 
 
 def test_render_substitutes_event_context_payload():
@@ -128,9 +136,6 @@ def test_render_empty_is_empty():
     assert render_template("", _ctx()) == ""
 
 
-# ── notify ──────────────────────────────────────────────────────────────────
-
-
 def test_notify_missing_title_is_error_result():
     res = asyncio.run(NotifyActionProvider().execute({}, _ctx()))
     assert res.success is False and "title_template" in res.error
@@ -138,10 +143,14 @@ def test_notify_missing_title_is_error_result():
 
 def test_notify_success_calls_state_notify(monkeypatch):
     calls = []
-    fake_state = SimpleNamespace(notify=lambda kind, title, body: calls.append((kind, title, body)))
-    import gideon.action_providers.notify_provider as mod
+    fake_state = SimpleNamespace(
+        notify=lambda kind, title, body: calls.append((kind, title, body))
+    )
+    import gideon.integrations.action_providers.notify_provider as mod
 
-    monkeypatch.setattr(mod, "get_action_services", lambda: SimpleNamespace(state=fake_state))
+    monkeypatch.setattr(
+        mod, "get_action_services", lambda: SimpleNamespace(state=fake_state)
+    )
     res = asyncio.run(
         NotifyActionProvider().execute(
             {"title_template": "Done: $CONTEXT", "kind": "success"}, _ctx()
@@ -152,14 +161,11 @@ def test_notify_success_calls_state_notify(monkeypatch):
 
 
 def test_notify_services_unavailable_is_error(monkeypatch):
-    import gideon.action_providers.notify_provider as mod
+    import gideon.integrations.action_providers.notify_provider as mod
 
     monkeypatch.setattr(mod, "get_action_services", lambda: None)
     res = asyncio.run(NotifyActionProvider().execute({"title_template": "x"}, _ctx()))
     assert res.success is False and "services unavailable" in res.error
-
-
-# ── create-task ───────────────────────────────────────────────────────────
 
 
 def test_create_task_missing_title_is_error():
@@ -175,7 +181,7 @@ def test_create_task_success_calls_registry(monkeypatch):
         captured["fields"] = fields
         return SimpleNamespace(id="t-abc")
 
-    import gideon.tasks.registry as reg
+    import gideon.engine.tasks.registry as reg
 
     monkeypatch.setattr(reg, "create_task", fake_create)
     res = asyncio.run(
@@ -198,7 +204,7 @@ def test_create_task_honors_assignee_due_labels(monkeypatch):
         captured.update(fields)
         return SimpleNamespace(id="t-xyz")
 
-    import gideon.tasks.registry as reg
+    import gideon.engine.tasks.registry as reg
 
     monkeypatch.setattr(reg, "create_task", fake_create)
     res = asyncio.run(
@@ -234,6 +240,7 @@ def test_create_task_manifest_schema_exposes_every_honored_field():
 
     src_manifest = (
         Path(gideon.__file__).resolve().parent
+        / "extensions"
         / "apps"
         / "native"
         / "create-task-action"
@@ -241,7 +248,6 @@ def test_create_task_manifest_schema_exposes_every_honored_field():
     )
     schema = json.loads(src_manifest.read_text())["provider"]["settingsSchema"]
     schema_fields = set(schema.get("properties", {}))
-    # The full set the executor reads from action_config (title/body are templated).
     honored = {
         "title_template",
         "body_template",
@@ -253,10 +259,9 @@ def test_create_task_manifest_schema_exposes_every_honored_field():
         "labels",
     }
     missing = honored - schema_fields
-    assert not missing, f"executor honors {sorted(missing)} but the schema doesn't expose them"
-
-
-# ── send-message ──────────────────────────────────────────────────────────
+    assert (
+        not missing
+    ), f"executor honors {sorted(missing)} but the schema doesn't expose them"
 
 
 def test_send_message_missing_text_is_error():
@@ -270,17 +275,16 @@ def test_send_message_no_channel_falls_back_to_notify(monkeypatch):
         channel_delivery=None,
         notify=lambda kind, title, body: notified.append((kind, title, body)),
     )
-    import gideon.action_providers.send_message_provider as mod
+    import gideon.integrations.action_providers.send_message_provider as mod
 
-    monkeypatch.setattr(mod, "get_action_services", lambda: SimpleNamespace(state=fake_state))
+    monkeypatch.setattr(
+        mod, "get_action_services", lambda: SimpleNamespace(state=fake_state)
+    )
     res = asyncio.run(
         SendMessageActionProvider().execute({"text_template": "ping $CONTEXT"}, _ctx())
     )
     assert res.success is True
     assert notified and notified[0][2] == "ping all done"
-
-
-# ── lifecycle-trigger provider allowlist (validation) ──
 
 
 def test_hook_provider_allowlist_includes_all_action_providers():
@@ -293,18 +297,20 @@ def test_hook_provider_allowlist_includes_all_action_providers():
     the provider; Slice 3 re-adds provider + allowlist entry together). The
     registered-minus-allowed check below is what actually holds the invariant — it
     catches a provider in one set and not the other, which is the real bug."""
-    from gideon.action_providers.registry import (
+    from gideon.assurance.validation import ALLOWED_HOOK_PROVIDERS
+    from gideon.integrations.action_providers.registry import (
         _ensure_default_providers_registered,
         list_action_providers,
     )
-    from gideon.validation import ALLOWED_HOOK_PROVIDERS
 
     _ensure_default_providers_registered()
     registered = set(list_action_providers())
     missing = registered - set(ALLOWED_HOOK_PROVIDERS)
-    assert not missing, f"action providers not accepted by lifecycle triggers: {missing}"
-    # Explicitly pin the T1 provider (T2's run-workflow returns with Slice 3).
+    assert (
+        not missing
+    ), f"action providers not accepted by lifecycle triggers: {missing}"
     assert {"run-prompt"} <= set(ALLOWED_HOOK_PROVIDERS)
-    # And the converse: nothing may sit in the allowlist without being registered,
-    # or a trigger validates, saves, and then fails at dispatch time.
-    assert "run-workflow" not in set(ALLOWED_HOOK_PROVIDERS) or "run-workflow" in registered
+    assert (
+        "run-workflow" not in set(ALLOWED_HOOK_PROVIDERS)
+        or "run-workflow" in registered
+    )

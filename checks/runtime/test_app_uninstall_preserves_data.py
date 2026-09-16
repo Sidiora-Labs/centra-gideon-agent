@@ -32,12 +32,8 @@ from pathlib import Path
 
 import pytest
 
-from gideon.apps import app_manager, manager
+from gideon.extensions.apps import app_manager, manager
 
-# The app's own tool. A real script, run as a real subprocess, doing real `git` work in
-# `data/` — the same shape as the `notes` bundle whose measured cycle opened #2541. If
-# this were a `Path.write_text` in the test body it would prove the test can write files,
-# not that an app's data survives the lifecycle.
 NOTE_TOOL = """\
 import subprocess, sys
 from pathlib import Path
@@ -60,14 +56,16 @@ print("wrote", title)
 @pytest.fixture(autouse=True)
 def _isolate_apps(tmp_path, monkeypatch):
     """Point config_dir at a tmp dir so the whole cycle runs in a throwaway home."""
-    import gideon.config.loader as loader
+    import gideon.core.config.loader as loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(manager, "config_dir", lambda: tmp_path)
     return tmp_path
 
 
-def _bundle(tmp_path: Path, *, name: str = "notes-fixture", ships_data: bool = False) -> Path:
+def _bundle(
+    tmp_path: Path, *, name: str = "notes-fixture", ships_data: bool = False
+) -> Path:
     """A minimal, real app bundle carrying the note tool."""
     src = tmp_path / "src" / name
     src.mkdir(parents=True, exist_ok=True)
@@ -84,9 +82,10 @@ def _bundle(tmp_path: Path, *, name: str = "notes-fixture", ships_data: bool = F
     )
     (src / "note.py").write_text(NOTE_TOOL, encoding="utf-8")
     if ships_data:
-        # Seed content the BUNDLE ships. The user's parked data must win over it.
         (src / "data").mkdir(exist_ok=True)
-        (src / "data" / "welcome.md").write_text("shipped by the bundle\n", encoding="utf-8")
+        (src / "data" / "welcome.md").write_text(
+            "shipped by the bundle\n", encoding="utf-8"
+        )
     return src
 
 
@@ -100,7 +99,9 @@ def _write_note(name: str, title: str, body: str) -> None:
         text=True,
         timeout=60,
     )
-    assert proc.returncode == 0, f"the app's note tool failed: {proc.stderr or proc.stdout}"
+    assert (
+        proc.returncode == 0
+    ), f"the app's note tool failed: {proc.stderr or proc.stdout}"
 
 
 def _notebook(name: str) -> Path:
@@ -131,16 +132,17 @@ def _git_log_at(book: Path) -> list[str]:
     if not (book / ".git").is_dir():
         return []
     proc = subprocess.run(
-        ["git", "log", "--format=%s"], cwd=str(book), capture_output=True, text=True, timeout=60
+        ["git", "log", "--format=%s"],
+        cwd=str(book),
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     return [ln for ln in proc.stdout.splitlines() if ln.strip()]
 
 
 def _git_log(name: str) -> list[str]:
     return _git_log_at(_notebook(name))
-
-
-# ── the real cycle ────────────────────────────────────────────────────────────
 
 
 def test_real_cycle_notes_and_git_history_survive_uninstall_and_reinstall(tmp_path):
@@ -153,19 +155,18 @@ def test_real_cycle_notes_and_git_history_survive_uninstall_and_reinstall(tmp_pa
     src = _bundle(tmp_path)
     assert app_manager.install(src, confirm=True).ok
 
-    # 1. Real data, written through the app's own tool: two notes, two git commits.
     _write_note(name, "alpha", "the first note")
     _write_note(name, "beta", "the second note")
     before_notes = _notes(name)
     before_log = _git_log(name)
     assert set(before_notes) == {"alpha", "beta"}, before_notes
     assert before_log == ["note: beta", "note: alpha"], before_log
-    assert (_notebook(name) / ".git").is_dir(), "the fixture must be writing REAL git history"
+    assert (
+        _notebook(name) / ".git"
+    ).is_dir(), "the fixture must be writing REAL git history"
 
-    # 2. The new middle rung.
     assert app_manager.uninstall_keep_data(name) is True
 
-    # 3. The app is GONE — not merely deactivated. Every surface agrees.
     assert not manager.app_dir(name).exists(), "the app's tree survived a removal"
     assert manager._read_installed(name) is None
     assert name not in {a["name"] for a in manager.list_apps()}, (
@@ -173,25 +174,24 @@ def test_real_cycle_notes_and_git_history_survive_uninstall_and_reinstall(tmp_pa
         "from discovery, not lingering as a ghost"
     )
 
-    # ...and the data is not. It is parked where the panel says it is.
     parked = app_manager._preserved_data_dir(name)
     assert parked.is_dir(), "uninstall did not keep the app's data/"
     assert (parked / "notebook" / "alpha.md").is_file()
     assert (parked / "notebook" / ".git").is_dir(), "the git history was not preserved"
 
-    # There is exactly ONE copy: the successful ``shutil.move`` consumed the quarantine
-    # stage, so the success path leaves no orphan behind it. A second copy of the user's
-    # data nobody asked for is a disk leak, and it goes stale the moment they reinstall.
-    assert not _staged(name).exists(), "the keep-data uninstall left its staging copy behind"
+    assert not _staged(
+        name
+    ).exists(), "the keep-data uninstall left its staging copy behind"
 
-    # 4. Reinstall — and read the notes back through the same paths as before.
     assert app_manager.install(src, confirm=True).ok
     assert _notes(name) == before_notes, "notes did not survive uninstall → reinstall"
-    assert _git_log(name) == before_log, "git history did not survive uninstall → reinstall"
+    assert (
+        _git_log(name) == before_log
+    ), "git history did not survive uninstall → reinstall"
 
-    # 5. The parked copy is consumed by the successful reinstall, so a LATER
-    #    force-uninstall cannot leave a resurrectable copy behind.
-    assert not parked.exists(), "the parked copy outlived the reinstall that consumed it"
+    assert (
+        not parked.exists()
+    ), "the parked copy outlived the reinstall that consumed it"
 
 
 def test_parked_user_data_wins_over_data_the_bundle_ships(tmp_path):
@@ -207,7 +207,7 @@ def test_parked_user_data_wins_over_data_the_bundle_ships(tmp_path):
     assert app_manager.install(src, confirm=True).ok
     shipped = manager.app_dir(name) / "data" / "welcome.md"
     assert shipped.read_text(encoding="utf-8") == "shipped by the bundle\n"
-    shipped.write_text("edited by the user\n", encoding="utf-8")  # the user's own version
+    shipped.write_text("edited by the user\n", encoding="utf-8")
     _write_note(name, "mine", "my own note")
 
     assert app_manager.uninstall_keep_data(name) is True
@@ -218,9 +218,6 @@ def test_parked_user_data_wins_over_data_the_bundle_ships(tmp_path):
         "the bundle's shipped data/ overwrote the user's restored copy — a reinstall "
         "just reset their edits to the defaults"
     )
-
-
-# ── the wiping rung still wipes ───────────────────────────────────────────────
 
 
 def test_force_uninstall_still_takes_the_data_with_it(tmp_path):
@@ -241,7 +238,6 @@ def test_force_uninstall_still_takes_the_data_with_it(tmp_path):
     assert not app_manager._preserved_data_dir(
         name
     ).exists(), "force_uninstall parked a copy of the data it was asked to destroy"
-    # And a reinstall comes back EMPTY — the observable difference from the rung above.
     assert app_manager.install(src, confirm=True).ok
     assert _notes(name) == {}, "force_uninstall's data came back on reinstall"
 
@@ -262,15 +258,19 @@ def test_a_successful_reinstall_consumes_the_park_so_none_can_go_stale(tmp_path)
     assert app_manager._preserved_data_dir(name).is_dir()
 
     assert app_manager.install(src, confirm=True).ok
-    assert "first" in _notes(name)  # the park did its job
-    assert not app_manager._preserved_data_dir(name).exists(), "the park outlived its use"
+    assert "first" in _notes(name)
+    assert not app_manager._preserved_data_dir(
+        name
+    ).exists(), "the park outlived its use"
 
     assert app_manager.force_uninstall(name) is True
     assert app_manager.install(src, confirm=True).ok
     assert _notes(name) == {}, "data came back after a force uninstall"
 
 
-def test_force_uninstall_drops_a_park_a_failed_restore_left_behind(tmp_path, monkeypatch):
+def test_force_uninstall_drops_a_park_a_failed_restore_left_behind(
+    tmp_path, monkeypatch
+):
     """ "Removes everything" has to include a park the install could not consume.
 
     A park is normally consumed by the install that restores it. The one way it can
@@ -291,14 +291,6 @@ def test_force_uninstall_drops_a_park_a_failed_restore_left_behind(tmp_path, mon
     parked = app_manager._preserved_data_dir(name)
     assert parked.is_dir()
 
-    # Fail ONLY the restore copy (parked → the new tree's data/); staging still works,
-    # so the install itself succeeds and lands an app next to an unconsumed park.
-    #
-    # A `monkeypatch.context()`, NOT `monkeypatch.undo()`: undo() drops every patch on
-    # the shared function-scoped monkeypatch — INCLUDING the autouse fixture's
-    # `config_dir` isolation — so the rest of the test would run against the real
-    # ~/.gideon. On a test whose next call is a force uninstall, that is not a
-    # style point.
     real_copytree = app_manager.shutil.copytree
 
     def _fail_restore(srcp, dstp, *a, **k):
@@ -316,7 +308,6 @@ def test_force_uninstall_drops_a_park_a_failed_restore_left_behind(tmp_path, mon
         "is recoverable"
     )
 
-    # Now the destructive rung has to take it.
     assert app_manager.force_uninstall(name) is True
     assert (
         not parked.exists()
@@ -345,7 +336,9 @@ def test_a_failed_restore_is_recorded_not_silent(tmp_path, monkeypatch):
     monkeypatch.setattr(
         app_manager,
         "_audit",
-        lambda op, outcome, nm, **kw: records.append((op, outcome, kw.get("detail", ""))),
+        lambda op, outcome, nm, **kw: records.append(
+            (op, outcome, kw.get("detail", ""))
+        ),
     )
     real_copytree = app_manager.shutil.copytree
     monkeypatch.setattr(
@@ -359,11 +352,10 @@ def test_a_failed_restore_is_recorded_not_silent(tmp_path, monkeypatch):
     )
     assert app_manager.install(src, confirm=True).ok
 
-    detail = [d for op, outcome, d in records if op == "install" and outcome == "ok"][-1]
+    detail = [d for op, outcome, d in records if op == "install" and outcome == "ok"][
+        -1
+    ]
     assert "preserved_data=restore_failed" in detail, detail
-
-
-# ── absent vs empty: two different facts, two different code paths ────────────
 
 
 def test_an_empty_data_dir_is_preserved_as_an_empty_data_dir(tmp_path):
@@ -378,7 +370,9 @@ def test_an_empty_data_dir_is_preserved_as_an_empty_data_dir(tmp_path):
     src = _bundle(tmp_path)
     assert app_manager.install(src, confirm=True).ok
     data = manager.app_dir(name) / "data"
-    assert data.is_dir() and not any(data.iterdir()), "install should mint an empty data/"
+    assert data.is_dir() and not any(
+        data.iterdir()
+    ), "install should mint an empty data/"
 
     facts = app_manager.describe_app_data(name)
     assert facts["present"] is True and facts["entries"] == 0, facts
@@ -386,9 +380,13 @@ def test_an_empty_data_dir_is_preserved_as_an_empty_data_dir(tmp_path):
 
     assert app_manager.uninstall_keep_data(name) is True
     parked = app_manager._preserved_data_dir(name)
-    assert parked.is_dir(), "an empty data/ was treated as 'no data/' and was not parked"
+    assert (
+        parked.is_dir()
+    ), "an empty data/ was treated as 'no data/' and was not parked"
     assert not any(parked.iterdir())
-    assert not _staged(name).exists(), "the empty-data/ park left its staging copy behind"
+    assert not _staged(
+        name
+    ).exists(), "the empty-data/ park left its staging copy behind"
 
 
 def test_an_absent_data_dir_parks_nothing_and_reports_absent(tmp_path):
@@ -401,7 +399,6 @@ def test_an_absent_data_dir_parks_nothing_and_reports_absent(tmp_path):
     name = "notes-fixture"
     src = _bundle(tmp_path)
     assert app_manager.install(src, confirm=True).ok
-    # Remove the data/ install minted, so the app genuinely has none.
     import shutil
 
     shutil.rmtree(manager.app_dir(name) / "data")
@@ -410,12 +407,16 @@ def test_an_absent_data_dir_parks_nothing_and_reports_absent(tmp_path):
     facts = app_manager.describe_app_data(name)
     assert facts["present"] is False and facts["entries"] == 0, facts
     assert app_manager._data_fact("data", None) == "data=absent"
-    assert app_manager._data_fact("data", manager.app_dir(name) / "data") == "data=absent"
+    assert (
+        app_manager._data_fact("data", manager.app_dir(name) / "data") == "data=absent"
+    )
 
     assert app_manager.uninstall_keep_data(name) is True
     assert not app_manager._preserved_data_dir(
         name
-    ).exists(), "an app with NO data/ grew a parked dir; absent and empty have collapsed"
+    ).exists(), (
+        "an app with NO data/ grew a parked dir; absent and empty have collapsed"
+    )
 
 
 def test_describe_app_data_separates_present_from_entries(tmp_path):
@@ -429,24 +430,16 @@ def test_describe_app_data_separates_present_from_entries(tmp_path):
     _write_note(name, "one", "content")
     facts = app_manager.describe_app_data(name)
     assert facts["present"] is True
-    assert facts["entries"] == 1, facts  # notebook/
+    assert facts["entries"] == 1, facts
     assert facts["path"].endswith(f".{name}.data"), facts["path"]
-    # An app that is not installed has no data and nothing counted. `path` is still the
-    # slot its data WOULD occupy — it is a computed location, never a claim that
-    # anything is there, and `present` is the field that carries that claim.
     ghost = app_manager.describe_app_data("ghost")
     assert ghost["present"] is False and ghost["entries"] == 0, ghost
-    # A name that could never be minted as a directory has no slot at all — and so cannot
-    # hold an unconsumed copy under one either (#2585).
     assert app_manager.describe_app_data("Not A Kebab Name") == {
         "present": False,
         "entries": 0,
         "path": "",
         "unconsumed": [],
     }
-
-
-# ── gates, refusals, and the audit channel ────────────────────────────────────
 
 
 def test_unknown_app_is_false_and_parks_nothing(tmp_path):
@@ -467,7 +460,8 @@ def test_a_name_that_cannot_hold_a_parked_copy_is_refused_not_guessed(tmp_path):
     d = manager.apps_dir() / weird
     d.mkdir(parents=True)
     (d / "installed.json").write_text(
-        json.dumps({"name": weird, "version": "1.0.0", "enabled": True}), encoding="utf-8"
+        json.dumps({"name": weird, "version": "1.0.0", "enabled": True}),
+        encoding="utf-8",
     )
     (d / "data").mkdir()
     (d / "data" / "note.md").write_text("still here\n", encoding="utf-8")
@@ -490,7 +484,9 @@ def test_native_app_refuses_the_middle_rung_too(tmp_path):
     assert app_manager.install(src, confirm=True).ok
 
     assert app_manager.uninstall_keep_data("native-fixture") is False
-    assert (manager.app_dir("native-fixture") / "app.json").is_file(), "files were removed"
+    assert (
+        manager.app_dir("native-fixture") / "app.json"
+    ).is_file(), "files were removed"
     assert manager._read_installed("native-fixture") is not None
 
 
@@ -512,7 +508,9 @@ def test_preservation_failure_removes_nothing(tmp_path, monkeypatch):
     monkeypatch.setattr(_shutil, "copytree", _boom)
 
     assert app_manager.uninstall_keep_data(name) is False
-    assert manager.app_dir(name).is_dir(), "the app was removed after preservation failed"
+    assert manager.app_dir(
+        name
+    ).is_dir(), "the app was removed after preservation failed"
     assert (_notebook(name) / "precious.md").is_file(), "the note was destroyed anyway"
     assert manager._read_installed(name) is not None, "the app was deregistered anyway"
 
@@ -569,16 +567,17 @@ def test_a_failed_park_keeps_the_last_copy_and_says_where_it_is(tmp_path, monkey
     monkeypatch.setattr(os, "rename", _fail_park)
 
     assert app_manager.uninstall_keep_data(name) is False
-    assert fired == ["rename"], "the injected park failure never fired; the test is vacuous"
+    assert fired == [
+        "rename"
+    ], "the injected park failure never fired; the test is vacuous"
 
-    # The removal has already happened. That is what makes this the dangerous branch, and
-    # asserting it keeps the test honest: if the fixture ever stops reaching the park, the
-    # survival assertion below would pass on a machine where nothing was ever at risk.
-    assert not manager.app_dir(name).exists(), "the fixture no longer drives the park branch"
-    assert not app_manager._preserved_data_dir(name).exists(), "the park was meant to fail"
+    assert not manager.app_dir(
+        name
+    ).exists(), "the fixture no longer drives the park branch"
+    assert not app_manager._preserved_data_dir(
+        name
+    ).exists(), "the park was meant to fail"
 
-    # So the stage is the last copy — and the user's notes and git history have to read
-    # back OUT of it. A dir that merely exists is not evidence their work is in it.
     assert staged.is_dir(), (
         "the failed park deleted the only remaining copy of the user's data: the app tree "
         "is gone and the stage was GC'd behind it (#2574)"
@@ -590,7 +589,6 @@ def test_a_failed_park_keeps_the_last_copy_and_says_where_it_is(tmp_path, monkey
         _git_log_at(staged / "notebook") == before_log
     ), "the surviving copy lost the git history the app wrote"
 
-    # And the record says WHERE it survived, so the fact is recovery information.
     detail, error = next(
         (d, e)
         for op, outcome, d, e in records
@@ -612,7 +610,9 @@ def test_every_outcome_reaches_the_audit_channel(tmp_path, monkeypatch):
     monkeypatch.setattr(
         app_manager,
         "_audit",
-        lambda op, outcome, name, **kw: records.append((op, outcome, kw.get("detail", ""))),
+        lambda op, outcome, name, **kw: records.append(
+            (op, outcome, kw.get("detail", ""))
+        ),
     )
 
     name = "notes-fixture"
@@ -624,17 +624,18 @@ def test_every_outcome_reaches_the_audit_channel(tmp_path, monkeypatch):
 
     ops = [(op, outcome) for op, outcome, _ in records]
     assert ("uninstall_keep_data", "ok") in ops, ops
-    # The removal it delegates to is audited on its own terms too, so the log shows the
-    # files being removed AND the data being kept rather than only the friendlier half.
     assert ("force_uninstall", "ok") in ops, ops
 
     keep = next(d for op, _, d in records if op == "uninstall_keep_data")
     assert keep == "data=1", f"the record must say what happened to data/, saw {keep!r}"
 
-    # The reinstall's record says the data went back, and how much of it.
-    reinstall = [d for op, outcome, d in records if op == "install" and outcome == "ok"][-1]
+    reinstall = [
+        d for op, outcome, d in records if op == "install" and outcome == "ok"
+    ][-1]
     assert "preserved_data=1" in reinstall, reinstall
-    first_install = [d for op, outcome, d in records if op == "install" and outcome == "ok"][0]
+    first_install = [
+        d for op, outcome, d in records if op == "install" and outcome == "ok"
+    ][0]
     assert "preserved_data=absent" in first_install, (
         "a first install must record that nothing was parked, distinctly from an empty "
         f"park; saw {first_install!r}"
@@ -659,10 +660,9 @@ def test_deactivate_rung_is_unchanged_and_still_keeps_the_files(tmp_path):
     assert meta is not None and meta.enabled is False
     assert not app_manager._preserved_data_dir(
         name
-    ).exists(), "deactivate parked a copy; nothing left disk, so there is nothing to park"
-
-
-# ── #2585: two unlabelled copies, and the four ways a site guessed which was which ──
+    ).exists(), (
+        "deactivate parked a copy; nothing left disk, so there is nothing to park"
+    )
 
 
 def _files_at(root: Path) -> int:
@@ -671,7 +671,11 @@ def _files_at(root: Path) -> int:
 
 
 def _bytes_at(root: Path) -> int:
-    return sum(p.stat().st_size for p in root.rglob("*") if p.is_file()) if root.is_dir() else 0
+    return (
+        sum(p.stat().st_size for p in root.rglob("*") if p.is_file())
+        if root.is_dir()
+        else 0
+    )
 
 
 def _shape(root: Path) -> tuple[int, int, dict[str, str], list[str]]:
@@ -744,8 +748,6 @@ def test_a_failed_park_leaves_no_partial_copy_at_the_parked_path(tmp_path, monke
     real_rename, real_copytree = os.rename, app_manager.shutil.copytree
 
     def _cross_device(srcp, dstp, *a, **k):
-        # EXDEV is what USED to route the park through copytree + rmtree(src). Any
-        # os.rename failure did; this is simply the one the issue names.
         if Path(srcp) == staged:
             fired.append("rename")
             raise OSError(errno.EXDEV, "injected: cross-device link")
@@ -759,24 +761,21 @@ def test_a_failed_park_leaves_no_partial_copy_at_the_parked_path(tmp_path, monke
     with monkeypatch.context() as m:
         m.setattr(os, "rename", _cross_device)
         m.setattr(app_manager.shutil, "copytree", _watch_copytree)
-        # Captured, not asserted yet, deliberately: the DISK claims are checked first, so a
-        # regression that brings the fallback back reds on the copy it left behind rather
-        # than on a return code, which says nothing about where the user's data went.
         outcome = app_manager.uninstall_keep_data(name)
 
     assert fired == ["rename"], "the injection never ran, so this test proved nothing"
-    assert not manager.app_dir(name).exists(), "the fixture no longer drives the park branch"
+    assert not manager.app_dir(
+        name
+    ).exists(), "the fixture no longer drives the park branch"
     assert not copytree_of_stage, (
         "the park fell back to copying the stage — the very path that leaves a partial "
         f"copy behind: {copytree_of_stage}"
     )
 
-    # The claim: nothing at all at the parked path. Not a partial copy, not an empty dir.
     assert not parked.exists(), (
         f"a failed park left {_files_at(parked)} files / {_bytes_at(parked)} bytes at the "
         "parked path; a later install would restore that as if it were the whole thing"
     )
-    # And the stage is still the complete last copy, byte for byte.
     assert (
         _shape(staged) == before
     ), f"the surviving copy is not what went in: {_shape(staged)} vs {before}"
@@ -818,10 +817,11 @@ def test_a_second_keep_data_uninstall_refuses_instead_of_deleting_the_survivor(
         m.setattr(os, "rename", _fail_park)
         assert app_manager.uninstall_keep_data(name) is False
     survivor = _shape(staged)
-    assert survivor[2] == {"alpha": "the first note\n", "beta": "the second note\n"}, survivor
+    assert survivor[2] == {
+        "alpha": "the first note\n",
+        "beta": "the second note\n",
+    }, survivor
 
-    # The user reinstalls (the app is gone, so the rung is unreachable until they do) and
-    # writes more. Their earlier copy is still sitting in quarantine, unread.
     assert app_manager.install(src, confirm=True).ok
     assert _shape(staged) == survivor, "the reinstall touched the quarantined survivor"
     _write_note(name, "gamma", "written after the reinstall")
@@ -837,14 +837,18 @@ def test_a_second_keep_data_uninstall_refuses_instead_of_deleting_the_survivor(
         f"the survivor was destroyed: {_shape(staged)} vs {survivor} — this is the "
         "return-True data loss #2585 reports"
     )
-    # FAIL-CLOSED, so the refusal came before anything was removed.
     assert manager._read_installed(name) is not None, "the app was removed by a refusal"
-    assert _shape(manager.app_dir(name) / "data") == live_before, "live data/ was touched"
+    assert (
+        _shape(manager.app_dir(name) / "data") == live_before
+    ), "live data/ was touched"
     detail, error = _keep_data_failure(records)
-    assert "data=unconsumed_copy" in detail, f"the new fact token is missing: {detail!r}"
-    assert str(staged) in detail, f"the refusal does not name the copy it protected: {detail!r}"
+    assert (
+        "data=unconsumed_copy" in detail
+    ), f"the new fact token is missing: {detail!r}"
+    assert (
+        str(staged) in detail
+    ), f"the refusal does not name the copy it protected: {detail!r}"
     assert "Nothing was removed" in error, error
-    # Second endpoint — the one the removal-confirm dialog reads.
     assert app_manager.describe_app_data(name)["unconsumed"] == [str(staged)]
 
 
@@ -872,7 +876,6 @@ def test_a_keep_data_uninstall_refuses_while_an_unconsumed_park_is_still_on_disk
     assert app_manager.uninstall_keep_data(name) is True
     parked = app_manager._preserved_data_dir(name)
 
-    # A real failed restore — the only route to "live app beside an unconsumed park".
     real_copytree = app_manager.shutil.copytree
 
     def _fail_restore(srcp, dstp, *a, **k):
@@ -900,9 +903,13 @@ def test_a_keep_data_uninstall_refuses_while_an_unconsumed_park_is_still_on_disk
         "the stage was moved INSIDE the older park — shutil.move's "
         "destination-is-a-directory case"
     )
-    assert not _staged(name).exists(), "the refusal came after staging; it must come first"
+    assert not _staged(
+        name
+    ).exists(), "the refusal came after staging; it must come first"
     assert manager._read_installed(name) is not None, "the app was removed by a refusal"
-    assert _shape(manager.app_dir(name) / "data") == live_before, "live data/ was touched"
+    assert (
+        _shape(manager.app_dir(name) / "data") == live_before
+    ), "live data/ was touched"
     detail, _error = _keep_data_failure(records)
     assert "data=unconsumed_copy" in detail and str(parked) in detail, detail
     assert app_manager.describe_app_data(name)["unconsumed"] == [str(parked)]
@@ -941,19 +948,18 @@ def test_the_refusal_clears_by_the_route_it_names_rather_than_wedging_the_app(
     with monkeypatch.context() as m:
         m.setattr(app_manager.shutil, "copytree", _fail_restore)
         assert app_manager.install(src, confirm=True).ok
-    assert app_manager.uninstall_keep_data(name) is False  # refused; park unconsumed
+    assert app_manager.uninstall_keep_data(name) is False
     _write_note(name, "current", "the live copy")
 
-    # Route 1: the unconsumed PARK moved aside by hand. Both copies then survive, and the
-    # rung proceeds — the park it writes is the live data, not the resurrected old one.
     kept_by_hand = parked.parent / "kept-by-hand"
     parked.rename(kept_by_hand)
     assert app_manager.describe_app_data(name)["unconsumed"] == []
     assert app_manager.uninstall_keep_data(name) is True, "the rung stayed wedged"
     assert _notes_at(parked / "notebook") == {"current": "the live copy\n"}
-    assert _notes_at(kept_by_hand / "notebook") == {"old": "round one\n"}, "route 1 lost it"
+    assert _notes_at(kept_by_hand / "notebook") == {
+        "old": "round one\n"
+    }, "route 1 lost it"
 
-    # Route 2: a survivor STAGE moved aside by hand — same predicate, other path.
     assert app_manager.install(src, confirm=True).ok
     assert _notes(name) == {"current": "the live copy\n"}, "the park did not come back"
     _write_note(name, "later", "round two")
@@ -993,10 +999,8 @@ def test_describe_app_data_reports_no_unconsumed_copies_on_the_ordinary_path(tmp
     _write_note(name, "one", "body")
     assert app_manager.describe_app_data(name)["unconsumed"] == []
     assert app_manager.uninstall_keep_data(name) is True
-    # The app is gone, so the park is now the only copy — and it IS reported, because the
-    # next keep-data uninstall would be refused on account of it.
     assert app_manager.describe_app_data(name)["unconsumed"] == [
         str(app_manager._preserved_data_dir(name))
     ]
-    assert app_manager.install(src, confirm=True).ok  # consumes it
+    assert app_manager.install(src, confirm=True).ok
     assert app_manager.describe_app_data(name)["unconsumed"] == []

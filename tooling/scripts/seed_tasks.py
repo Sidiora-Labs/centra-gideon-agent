@@ -17,7 +17,7 @@ detail panel, filters, sort, search, reset) can be evaluated against real data:
 - A Repeatable-project list whose tasks are all done (so reset is exercisable)
 
 Run against the live gateway (default http://127.0.0.1:10000, no-auth dev mode):
-    .venv/bin/python scripts/seed_tasks.py [BASE_URL]
+    .venv/bin/python tooling/scripts/seed_tasks.py [BASE_URL]
 """
 
 from __future__ import annotations
@@ -102,7 +102,6 @@ def main() -> None:
     print(f"Seeding rich task dataset against {BASE}")
     wipe()
 
-    # ── Project: Beacon Launch — a feature build with a full dependency DAG ──
     beacon = project(
         "Beacon Launch",
         "Ship the Beacon feature. Prefer small, reviewable changes; keep the API contract stable.",
@@ -110,7 +109,6 @@ def main() -> None:
     build = task_list("Build", project_id=beacon)
     qa = task_list("QA & Release", project_id=beacon)
 
-    # Root design tasks (done) → a bottleneck (backend) several tasks depend on.
     spec = task(
         title="Write the feature spec", task_list_id=build, status="done", priority="high",
         labels=["planning"], assignee="ravi", due=_iso_days(-14),
@@ -124,7 +122,7 @@ def main() -> None:
         exit_criteria=[{"description": "endpoints documented", "met": True}],
         action_plan=[{"content": "draft OpenAPI", "completed": True}, {"content": "review with frontend", "completed": True}],
     )
-    backend = task(  # the BOTTLENECK — many tasks depend on this
+    backend = task(
         title="Build backend endpoints", task_list_id=build, status="in_progress", priority="critical",
         labels=["backend", "api"], assignee="mei", depends_on=[contract, spec], due=_iso_days(-2),
         agent_instructions_template="Implement each endpoint behind the documented contract; add unit tests per handler.",
@@ -164,7 +162,7 @@ def main() -> None:
         title="Write API docs", task_list_id=qa, status="open", priority="low",
         labels=["docs"], depends_on=[backend], due=_iso_days(8),
     )
-    ship = task(  # critical-path tail
+    ship = task(
         title="Ship the release", task_list_id=qa, status="open", priority="critical",
         labels=["release"], assignee="ravi", depends_on=[e2e, docs], due=_iso_days(10),
         agent_instructions_template="Cut the release only when all blockers are done and the changelog is updated.",
@@ -173,14 +171,13 @@ def main() -> None:
     comment(backend, "Sounds good, I'll have the token format ready.", "ravi")
     comment(ship, "Holding the release train for the e2e suite.")
 
-    # ── Project: Security — a mix incl. a MANUAL block + a cancelled task ──
     sec = project("Security")
     sec_list = task_list("Hardening", project_id=sec)
     task(
         title="Rotate API keys", task_list_id=sec_list, status="blocked", priority="critical",
         labels=["security"], assignee="mei", due=_iso_days(-1),
         notes=[{"content": "Blocked on the vendor — waiting for their new key-issuance window (external, no prerequisite)."}],
-    )  # manual block (no unfinished prereq) — exercises manual-vs-auto block
+    )
     task(
         title="Pen-test the login flow", task_list_id=sec_list, status="open", priority="high",
         labels=["security", "auth"], due=_iso_days(14),
@@ -191,27 +188,25 @@ def main() -> None:
         labels=["cleanup"], notes=[{"content": "Cancelled — the webhook has external consumers we can't migrate yet."}],
     )
 
-    # ── Repeatable project list — all tasks done, so the UI reset is exercisable ──
     weekly = task_list("Weekly ops", repeatable=True)
     for t in ("Review on-call alerts", "Triage the bug backlog", "Update the status dashboard"):
         task(title=t, task_list_id=weekly, status="done", priority="low", labels=["ops"],
              exit_criteria=[{"description": "completed this week", "met": True}])
 
-    # ── Chore (default) — loose ad-hoc tasks, varied due dates for the sort view ──
     chore = get("/api/projects")["projects"]
     chore_id = next(p["id"] for p in chore if p["name"] == "Chore")
     chore_list = task_list("Inbox", project_id=chore_id)
     task(title="Reply to the design review thread", task_list_id=chore_list, status="open",
-         priority="medium", due=_iso_days(-3), labels=["admin"])           # overdue
+         priority="medium", due=_iso_days(-3), labels=["admin"])
     task(title="Book the team offsite", task_list_id=chore_list, status="open",
-         priority="low", due=_iso_days(1), labels=["admin"])               # due tomorrow
+         priority="low", due=_iso_days(1), labels=["admin"])
     task(title="Renew the TLS certificate", task_list_id=chore_list, status="open",
-         priority="high", due=_iso_days(2), labels=["infra"])              # due soon
+         priority="high", due=_iso_days(2), labels=["infra"])
     task(title="Draft the Q4 roadmap", task_list_id=chore_list, status="in_progress",
          priority="medium", due=_iso_days(30), labels=["planning"],
          action_plan=[{"content": "gather input", "completed": True}, {"content": "draft themes", "completed": False}])
     task(title="Archive last quarter's projects", task_list_id=chore_list, status="done",
-         priority="trivial", labels=["cleanup"])                           # trivial priority rung
+         priority="trivial", labels=["cleanup"])
     task(title="Tidy the shared drive", task_list_id=chore_list, status="open", priority="trivial")
 
     tasks = get("/api/tasks?limit=10000")

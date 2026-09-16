@@ -20,10 +20,10 @@ import json
 
 import pytest
 
-from gideon import mcp_workflows as T
-from gideon.workflows import defs as defs_mod
-from gideon.workflows import service, store
-from gideon.workflows.models import RunStatus, WorkflowRun
+from gideon.automation.workflows import defs as defs_mod
+from gideon.automation.workflows import service, store
+from gideon.automation.workflows.models import RunStatus, WorkflowRun
+from gideon.integrations import mcp_workflows as T
 
 pytestmark = pytest.mark.anyio
 
@@ -37,7 +37,7 @@ def anyio_backend() -> str:
 def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
 
 
@@ -46,7 +46,11 @@ SPEC_ROOT = {
     "id": "main",
     "children": [
         {"kind": "transform", "id": "seed", "config": {"expr": {"n": 1}}},
-        {"kind": "infer", "id": "think", "config": {"prompt": "on {{nodes.seed.output.n}}"}},
+        {
+            "kind": "infer",
+            "id": "think",
+            "config": {"prompt": "on {{nodes.seed.output.n}}"},
+        },
     ],
 }
 
@@ -129,7 +133,9 @@ class _ReadOnlyProvider(_MemProvider):
     def readonly(self) -> bool:
         return True
 
-    async def save_def(self, **fields):  # pragma: no cover - a read-only provider is never written
+    async def save_def(
+        self, **fields
+    ):  # pragma: no cover - a read-only provider is never written
         raise AssertionError("a read-only provider must never be written through")
 
     def seed(self, name: str) -> None:
@@ -156,7 +162,7 @@ class _FakeSupervisor:
         return self.controllers.get(run_id)
 
     async def launch(self, run, spec, *, depth: int = 0):
-        from gideon.workflows.controller import EngineServices, RunController
+        from gideon.automation.workflows.controller import EngineServices, RunController
 
         async def fake(prompt, *, use_case="background", output_type=None):
             return "ok"
@@ -166,9 +172,6 @@ class _FakeSupervisor:
         self.launched.append(run.id)
         await c.start()
         return c
-
-
-# ── the tool surface ─────────────────────────────────────────────────────────
 
 
 class TestToolSurface:
@@ -206,14 +209,14 @@ class TestToolSurface:
         assert "workflow_start" not in T.READ_ONLY_TOOLS
 
     def test_every_tool_has_a_validation_schema(self) -> None:
-        from gideon.validation import MCP_WORKFLOW_SCHEMAS
+        from gideon.assurance.validation import MCP_WORKFLOW_SCHEMAS
 
         for tool in T._list_tools():
             assert tool["name"] in MCP_WORKFLOW_SCHEMAS, tool["name"]
 
     def test_schema_keys_match_their_own_tool_name(self) -> None:
         """The lookup is by dict key; a mismatch means validation silently never runs."""
-        from gideon.validation import MCP_WORKFLOW_SCHEMAS
+        from gideon.assurance.validation import MCP_WORKFLOW_SCHEMAS
 
         for key, schema in MCP_WORKFLOW_SCHEMAS.items():
             assert schema.tool_name == key
@@ -231,7 +234,7 @@ class TestToolSurface:
         The other direction is deliberately NOT asserted: a validated-but-unadvertised field
         is an internal argument a handler accepts without inviting a model to send it.
         """
-        from gideon.validation import MCP_WORKFLOW_SCHEMAS
+        from gideon.assurance.validation import MCP_WORKFLOW_SCHEMAS
 
         for tool in T._list_tools():
             advertised = set((tool.get("inputSchema") or {}).get("properties") or {})
@@ -246,12 +249,14 @@ class TestToolSurface:
 class TestRegistration:
     def test_the_module_is_in_the_aggregator(self) -> None:
         """An unlisted module is invisible to every ACP agent."""
-        from gideon.mcp_core import _AGGREGATED_CATEGORY_MODULES
+        from gideon.integrations.mcp_core import _AGGREGATED_CATEGORY_MODULES
 
-        assert "gideon.mcp_workflows" in _AGGREGATED_CATEGORY_MODULES
+        assert "gideon.integrations.mcp_workflows" in _AGGREGATED_CATEGORY_MODULES
 
     def test_the_provider_factory_resolves(self) -> None:
-        from gideon.tool_providers.registry import create_workflows_provider
+        from gideon.integrations.tool_providers.registry import (
+            create_workflows_provider,
+        )
 
         provider = create_workflows_provider()
         assert provider is not None
@@ -274,21 +279,18 @@ class TestRegistration:
         assert data["native"] is True
 
     def test_every_tool_has_manifest_meta(self) -> None:
-        from gideon.manifest_meta import TOOL_META
+        from gideon.extensions.manifest_meta import TOOL_META
 
         for tool in T._list_tools():
             assert tool["name"] in TOOL_META, tool["name"]
             assert TOOL_META[tool["name"]]["response_type"], tool["name"]
 
 
-# ── the manifest tool ────────────────────────────────────────────────────────
-
-
 class TestManifest:
     def test_it_is_generated_from_the_engines_own_enums(self) -> None:
         """Generated, never hand-written: a hand-kept catalog drifts the moment either side
         changes, and an author following a stale one writes specs the engine rejects."""
-        from gideon.workflows.models import NodeKind
+        from gideon.automation.workflows.models import NodeKind
 
         body = service.manifest()
         kinds = {k["kind"] for k in body["node_kinds"]}
@@ -313,9 +315,6 @@ class TestManifest:
         assert "node_kinds" in out and "mutation_ops" in out
 
 
-# ── definitions ──────────────────────────────────────────────────────────────
-
-
 class TestDefs:
     async def test_authoring_saves_a_valid_spec(self, provider) -> None:
         body = await service.author_def(name="wf-one", root=SPEC_ROOT, description="d")
@@ -328,8 +327,14 @@ class TestDefs:
         assert body["ok"] and body["dry_run"] and not body["saved"]
         assert await provider.get_def("wf-dry") is None
 
-    async def test_an_invalid_spec_comes_back_repromptable_with_issues(self, provider) -> None:
-        bad = {"kind": "sequence", "id": "s", "children": [{"kind": "infer", "id": "x"}]}
+    async def test_an_invalid_spec_comes_back_repromptable_with_issues(
+        self, provider
+    ) -> None:
+        bad = {
+            "kind": "sequence",
+            "id": "s",
+            "children": [{"kind": "infer", "id": "x"}],
+        }
         body = await service.author_def(name="wf-bad", root=bad)
         assert not body["ok"] and body["code"] == "WF_DEF_INVALID"
         assert body["repromptable"] and body["issues"]
@@ -349,12 +354,11 @@ class TestDefs:
         success, and the run used the bundled spec. The UI reported the half that was not used.
         """
         readonly_provider.seed("audit-sweep")
-        body = await service.author_def(name="audit-sweep", root=SPEC_ROOT, description="mine")
+        body = await service.author_def(
+            name="audit-sweep", root=SPEC_ROOT, description="mine"
+        )
         assert not body["ok"] and body["code"] == "WF_DEF_NAME_RESERVED"
-        # Nothing written — the whole defect was that the write happened.
         assert await provider.get_def("audit-sweep") is None
-        # The refusal names the provider AND what to do instead. A 409 that says only "conflict"
-        # leaves the user re-clicking Save.
         assert body["provider"] == "test-pack"
         assert "different name" in body["message"]
 
@@ -362,7 +366,8 @@ class TestDefs:
         self, provider, readonly_provider
     ) -> None:
         """`save=False` exists to learn what is wrong before committing, and the name is the
-        cheapest thing to fix. Discovering it only on the real save wastes the dry run."""
+        cheapest thing to fix. Discovering it only on the real save wastes the dry run.
+        """
         readonly_provider.seed("audit-sweep")
         body = await service.author_def(name="audit-sweep", root=SPEC_ROOT, save=False)
         assert not body["ok"] and body["code"] == "WF_DEF_NAME_RESERVED"
@@ -371,9 +376,13 @@ class TestDefs:
         """🪤 The vacuity floor. "Refuse a name another provider has" one step too far refuses
         every UPDATE, since a user re-saving their own def collides with themselves. Only a
         READ-ONLY provider reserves a name."""
-        first = await service.author_def(name="wf-mine", root=SPEC_ROOT, description="v1")
+        first = await service.author_def(
+            name="wf-mine", root=SPEC_ROOT, description="v1"
+        )
         assert first["ok"] and first["saved"]
-        again = await service.author_def(name="wf-mine", root=SPEC_ROOT, description="v2")
+        again = await service.author_def(
+            name="wf-mine", root=SPEC_ROOT, description="v2"
+        )
         assert again["ok"] and again["saved"], "re-saving one's own def must still work"
         assert (await provider.get_def("wf-mine"))["description"] == "v2"
 
@@ -405,7 +414,10 @@ class TestDefs:
                 {
                     "kind": "action",
                     "id": "a",
-                    "config": {"provider": "bash", "api_key": "sk-ant-abcdefghijklmnopqrst"},
+                    "config": {
+                        "provider": "bash",
+                        "api_key": "sk-ant-abcdefghijklmnopqrst",
+                    },
                 }
             ],
         }
@@ -414,7 +426,9 @@ class TestDefs:
         assert body["findings"]
         assert await provider.get_def("wf-leak") is None
 
-    async def test_reading_a_def_strips_credentials_to_presence_flags(self, provider) -> None:
+    async def test_reading_a_def_strips_credentials_to_presence_flags(
+        self, provider
+    ) -> None:
         """A def read is rendered in a UI and echoed into a chat turn; a credential that
         reaches either has leaked to both."""
         await provider.save_def(
@@ -423,7 +437,11 @@ class TestDefs:
                 "kind": "sequence",
                 "id": "s",
                 "children": [
-                    {"kind": "action", "id": "a", "config": {"provider": "x", "token": "t-real"}}
+                    {
+                        "kind": "action",
+                        "id": "a",
+                        "config": {"provider": "x", "token": "t-real"},
+                    }
                 ],
             },
         )
@@ -456,16 +474,17 @@ class TestDefs:
         assert not body["ok"] and body["code"] == "WF_DEF_NO_WRITABLE_PROVIDER"
 
 
-# ── runs ─────────────────────────────────────────────────────────────────────
-
-
 class TestRuns:
-    async def test_starting_a_run_launches_it_through_the_supervisor(self, provider) -> None:
+    async def test_starting_a_run_launches_it_through_the_supervisor(
+        self, provider
+    ) -> None:
         """Through the SUPERVISOR, so the controller is the one the watchdog knows about —
         otherwise a restart adopts the run a second time and two writers race."""
         await service.author_def(name="wf-run", root=SPEC_ROOT)
         sup = _FakeSupervisor()
-        body = await service.start_run(name="wf-run", supervisor=sup, skip_preflight=True)
+        body = await service.start_run(
+            name="wf-run", supervisor=sup, skip_preflight=True
+        )
         assert body["ok"] and body["run_id"]
         assert sup.launched == [body["run_id"]]
 
@@ -510,12 +529,14 @@ class TestRuns:
 
     async def test_no_supervisor_is_honest_about_not_starting(self, provider) -> None:
         await service.author_def(name="wf-nosup", root=SPEC_ROOT)
-        body = await service.start_run(name="wf-nosup", supervisor=None, skip_preflight=True)
+        body = await service.start_run(
+            name="wf-nosup", supervisor=None, skip_preflight=True
+        )
         assert not body["ok"] and body["code"] == "WF_NO_SUPERVISOR"
-        assert body["run_id"]  # created, and the response says so
+        assert body["run_id"]
 
     async def test_an_idempotency_key_returns_the_existing_run(self, provider) -> None:
-        from gideon.workflows.effects import START_DEDUPE
+        from gideon.automation.workflows.effects import START_DEDUPE
 
         START_DEDUPE._entries.clear()
         await service.author_def(name="wf-idem", root=SPEC_ROOT)
@@ -544,8 +565,6 @@ class TestRuns:
         )
         body = service.status(started["run_id"])
         assert body["ok"]
-        # Instances exist for the executed LEAVES; a container's state is derived, never
-        # stored, so it is legitimately absent from the state map.
         assert {n["node_id"] for n in body["nodes"]} == {"seed", "think"}
         assert all(n["state"] == "done" for n in body["nodes"])
 
@@ -582,7 +601,9 @@ class TestObserve:
         assert body["window_ms"] == service.MAX_OBSERVE_MS and body["clamped"]
 
     async def test_it_returns_early_on_a_terminal_run(self) -> None:
-        run = store.create(WorkflowRun(id="", workflow_name="w", status=RunStatus.COMPLETE))
+        run = store.create(
+            WorkflowRun(id="", workflow_name="w", status=RunStatus.COMPLETE)
+        )
         import time as _t
 
         began = _t.monotonic()
@@ -598,7 +619,9 @@ class TestControl:
         """Persisted, so a cancel issued while the gateway is down is still honoured."""
         await service.author_def(name="wf-can", root=SPEC_ROOT)
         sup = _FakeSupervisor()
-        started = await service.start_run(name="wf-can", supervisor=sup, skip_preflight=True)
+        started = await service.start_run(
+            name="wf-can", supervisor=sup, skip_preflight=True
+        )
         body = service.cancel_run(started["run_id"], supervisor=sup)
         assert body["ok"] and store.cancel_requested(started["run_id"])
 
@@ -606,7 +629,9 @@ class TestControl:
         assert service.cancel_run("deadbeef")["code"] == "WF_RUN_NOT_FOUND"
 
     async def test_cancelling_a_finished_run_is_refused(self) -> None:
-        run = store.create(WorkflowRun(id="", workflow_name="w", status=RunStatus.COMPLETE))
+        run = store.create(
+            WorkflowRun(id="", workflow_name="w", status=RunStatus.COMPLETE)
+        )
         assert service.cancel_run(run.id)["code"] == "WF_RUN_ALREADY_TERMINAL"
 
     async def test_editing_a_run_with_no_live_controller_is_refused(self) -> None:
@@ -614,7 +639,9 @@ class TestControl:
         would write state with no one to apply it."""
         run = store.create(WorkflowRun(id="", workflow_name="w"))
         store.write_spec(run.id, {"name": "w", "root": SPEC_ROOT})
-        body = service.edit_run(run.id, [{"op": "skip", "node_id": "think"}], supervisor=None)
+        body = service.edit_run(
+            run.id, [{"op": "skip", "node_id": "think"}], supervisor=None
+        )
         assert not body["ok"] and body["code"] == "WF_RUN_NOT_LIVE"
 
     async def test_preview_works_without_a_live_controller(self) -> None:
@@ -622,12 +649,10 @@ class TestControl:
         run = store.create(WorkflowRun(id="", workflow_name="w"))
         store.write_spec(run.id, {"name": "w", "root": SPEC_ROOT})
         body = service.preview_edit(
-            run.id, [{"op": "update_node", "node_id": "think", "fields": {"prompt": "x"}}]
+            run.id,
+            [{"op": "update_node", "node_id": "think", "fields": {"prompt": "x"}}],
         )
         assert body["ok"] and body["queued"] is False
-        # Nothing has executed, so the cascade is empty and needs no confirmation — the
-        # preview is honest about there being nothing to re-run rather than listing the
-        # node just because it was named.
         assert body["preview"]["rerun"] == []
         assert body["preview"]["needs_confirmation"] is False
 
@@ -643,12 +668,14 @@ class TestControl:
         )
         body = service.fork_run(started["run_id"], note="try again")
         assert body["ok"] and body["child_run_id"] != started["run_id"]
-        assert body["shared_axes"]  # what a fork does NOT isolate is surfaced
+        assert body["shared_axes"]
 
     async def test_resume_with_no_pending_gate_is_coded(self, provider) -> None:
         await service.author_def(name="wf-res", root=SPEC_ROOT)
         sup = _FakeSupervisor()
-        started = await service.start_run(name="wf-res", supervisor=sup, skip_preflight=True)
+        started = await service.start_run(
+            name="wf-res", supervisor=sup, skip_preflight=True
+        )
         body = service.resume_run(started["run_id"], supervisor=sup, answer=True)
         assert not body["ok"] and body["code"] in (
             "WF_NO_PENDING_GATE",
@@ -658,9 +685,6 @@ class TestControl:
     def test_audit_defaults_to_dry_run(self) -> None:
         body = service.audit()
         assert body["ok"] and body["dry_run"] is True
-
-
-# ── the plan scaffold ────────────────────────────────────────────────────────
 
 
 class TestPlan:
@@ -705,9 +729,6 @@ class TestPlan:
         assert '"rigor": "standard"' in out
 
 
-# ── the error contract ───────────────────────────────────────────────────────
-
-
 class TestErrorContract:
     def test_a_failure_leads_with_its_code(self) -> None:
         """So the model can branch on it instead of parsing prose."""
@@ -734,10 +755,14 @@ class TestErrorContract:
     def test_no_tool_raises_on_garbage_input(self) -> None:
         """Every tool, called with nonsense: the contract is a readable string, always."""
         for tool in T._list_tools():
-            out = T._call_tool(tool["name"], {"run_id": "zzz", "name": "!!", "node_id": ""})
+            out = T._call_tool(
+                tool["name"], {"run_id": "zzz", "name": "!!", "node_id": ""}
+            )
             assert isinstance(out, str) and out, tool["name"]
 
-    async def test_a_tool_called_from_async_code_does_not_explode(self, provider) -> None:
+    async def test_a_tool_called_from_async_code_does_not_explode(
+        self, provider
+    ) -> None:
         """Found live, not by a unit test: the sync tool boundary wraps async service calls,
         and `asyncio.run` raises "cannot be called from a running event loop" when the
         caller is already async. Production is safe (the runtime uses a thread executor),
@@ -752,10 +777,9 @@ class TestErrorContract:
             ("workflow_start", {"name": "absent"}),
         ):
             out = T._call_tool(name, args)
-            assert isinstance(out, str) and "cannot be called from a running" not in out, name
-
-
-# ── memory-mode inheritance, wired end to end (WORK-CONTAINERS §5.1) ───────────
+            assert (
+                isinstance(out, str) and "cannot be called from a running" not in out
+            ), name
 
 
 class TestMemoryModeInheritance:
@@ -771,14 +795,14 @@ class TestMemoryModeInheritance:
         resolves through `config.loader.config_dir` — a DIFFERENT symbol than the store's own
         `config_dir` the module autouse fixture patches. Set `GIDEON_HOME` so an origin
         metadata read cannot touch the real home."""
-        monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "pc-home"))
+        monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "gideon-home"))
 
     async def test_an_incognito_origin_stamps_the_run_record(self, provider) -> None:
         """The durable spine: the inherited mode lands in `run.extra` so a restart replays it.
         Driven through the registry path (no durable JSONL line needed) to prove `start_run`
         consults the live registry for the launching key."""
-        from gideon import session_restrictions
-        from gideon.workflows.ownership import MemoryMode, run_mode
+        from gideon.automation.workflows.ownership import MemoryMode, run_mode
+        from gideon.engine import session_restrictions
 
         session_restrictions.clear("dashboard:inc-origin")
         session_restrictions.mark_incognito("dashboard:inc-origin")
@@ -793,17 +817,19 @@ class TestMemoryModeInheritance:
             assert body["ok"]
             run = store.get(body["run_id"])
             assert run_mode(run) is MemoryMode.INCOGNITO
-            # And it survives the record's own serialization round trip — what a restart replays.
-            from gideon.workflows.models import WorkflowRun
+            from gideon.automation.workflows.models import WorkflowRun
 
-            assert run_mode(WorkflowRun.from_dict(run.to_dict())) is MemoryMode.INCOGNITO
+            assert (
+                run_mode(WorkflowRun.from_dict(run.to_dict())) is MemoryMode.INCOGNITO
+            )
         finally:
             session_restrictions.clear("dashboard:inc-origin")
 
     async def test_a_normal_origin_leaves_the_record_unstamped(self, provider) -> None:
         """NORMAL is left unstamped — `run_mode` reads an absent key as normal, so stamping it
-        would add a redundant string to every unrestricted run for no behavioural gain."""
-        from gideon.workflows.ownership import RUN_MODE_KEY
+        would add a redundant string to every unrestricted run for no behavioural gain.
+        """
+        from gideon.automation.workflows.ownership import RUN_MODE_KEY
 
         await service.author_def(name="wf-norm-origin", root=SPEC_ROOT)
         body = await service.start_run(
@@ -815,13 +841,16 @@ class TestMemoryModeInheritance:
         assert body["ok"]
         assert RUN_MODE_KEY not in store.get(body["run_id"]).extra
 
-    async def test_the_controller_ENFORCES_the_mode_in_the_registry(self, provider) -> None:
+    async def test_the_controller_ENFORCES_the_mode_in_the_registry(
+        self, provider
+    ) -> None:
         """The registry is the fast path the knowledge/learning writers consult during the run,
         and the chat layer never marks it for a background run (it enforces off the live session
         object, which the run no longer holds). So the controller's run-start mark is the
-        registry's first writer for these keys — for BOTH the origin key and the run-owned key."""
-        from gideon import session_restrictions
-        from gideon.workflows.ownership import owned_key
+        registry's first writer for these keys — for BOTH the origin key and the run-owned key.
+        """
+        from gideon.automation.workflows.ownership import owned_key
+        from gideon.engine import session_restrictions
 
         session_restrictions.clear("dashboard:enf-origin")
         session_restrictions.mark_incognito("dashboard:enf-origin")
@@ -836,8 +865,6 @@ class TestMemoryModeInheritance:
                 skip_preflight=True,
             )
             assert body["status"] == RunStatus.COMPLETE.value
-            # The controller marked the run-owned key too, off its own record — proving the mark
-            # is re-derived from `extra` at `_prepare`, not carried only from the launching session.
             assert session_restrictions.is_restricted(owned_key(body["run_id"], "run"))
         finally:
             session_restrictions.clear("dashboard:enf-origin")
@@ -860,14 +887,17 @@ class TestMemoryModeInheritance:
         note = body["announcement"]
         assert note["origin_key"] == "dashboard:mir-norm"
         assert note["indexable"] is True
-        assert "wf-mir-norm" in note["text"] and RunStatus.COMPLETE.value in note["text"]
+        assert (
+            "wf-mir-norm" in note["text"] and RunStatus.COMPLETE.value in note["text"]
+        )
 
     async def test_a_blocking_run_mirrors_the_summary_WITHOUT_indexing_for_incognito(
         self, provider
     ) -> None:
         """The run's outcome is still useful to the person who asked for it; what they asked to
-        avoid is the record. The indexability decision travels WITH the text, decided once."""
-        from gideon import session_restrictions
+        avoid is the record. The indexability decision travels WITH the text, decided once.
+        """
+        from gideon.engine import session_restrictions
 
         session_restrictions.clear("dashboard:mir-inc")
         session_restrictions.mark_incognito("dashboard:mir-inc")
@@ -884,7 +914,6 @@ class TestMemoryModeInheritance:
             note = body["announcement"]
             assert note["indexable"] is False
             assert "incognito" in note["reason"]
-            # The summary text is still delivered — suppressed from the index, not withheld.
             assert note["text"]
         finally:
             session_restrictions.clear("dashboard:mir-inc")
@@ -897,7 +926,11 @@ class TestMemoryModeInheritance:
             "kind": "sequence",
             "id": "main",
             "children": [
-                {"kind": "gate", "id": "ask", "config": {"kind": "approval", "prompt": "proceed?"}},
+                {
+                    "kind": "gate",
+                    "id": "ask",
+                    "config": {"kind": "approval", "prompt": "proceed?"},
+                },
             ],
         }
         await service.author_def(name="wf-ask", root=root)

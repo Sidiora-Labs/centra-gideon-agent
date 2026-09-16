@@ -17,8 +17,7 @@ import asyncio
 
 import pytest
 
-from gideon.tasks.models import Task, TaskStatus, WorkflowTaskBinding
-from gideon.workflows.materialize import (
+from gideon.automation.workflows.materialize import (
     ENGINE_OWNED_FIELDS,
     FANOUT_TASK_CAP,
     NON_MATERIALIZING_KINDS,
@@ -36,18 +35,16 @@ from gideon.workflows.materialize import (
     reject_write,
     should_materialize,
 )
-from gideon.workflows.models import (
+from gideon.automation.workflows.models import (
     SUCCESS_STATES,
     TERMINAL_STATES,
     InstanceState,
 )
+from gideon.engine.tasks.models import Task, TaskStatus, WorkflowTaskBinding
 
 
 def node(node_id: str = "review", kind: str = "stage", **cfg) -> dict:
     return {"kind": kind, "id": node_id, "config": cfg}
-
-
-# ── the projection table is exhaustive ──
 
 
 def test_EVERY_engine_state_is_in_the_table():
@@ -112,9 +109,6 @@ def test_a_stopped_node_is_BLOCKED(state):
     assert project_status(state) is TaskStatus.BLOCKED
 
 
-# ── blocked_kind is a field, not a status explosion ──
-
-
 def test_TaskStatus_gained_exactly_ONE_member():
     """A status per block reason is a state fork every surface then re-implements, and the
     surface that forgets shows a stale column. The WHY lives in `blocked_kind`.
@@ -152,7 +146,10 @@ def test_a_dependency_wait_is_NOT_needs_input():
     ],
 )
 def test_a_failure_class_maps_to_a_blocked_kind(failure_class, expected):
-    assert project_blocked_kind(InstanceState.FAILED, failure_class=failure_class) == expected
+    assert (
+        project_blocked_kind(InstanceState.FAILED, failure_class=failure_class)
+        == expected
+    )
 
 
 def test_an_UNKNOWN_failure_class_degrades_to_a_plain_block():
@@ -178,9 +175,6 @@ def test_an_unblocked_state_has_no_blocked_kind():
         assert project_blocked_kind(state, failure_class="permission") == ""
 
 
-# ── the fingerprint ──
-
-
 def test_the_same_work_fingerprints_the_SAME():
     assert fingerprint(title="Review", body="check it") == fingerprint(
         title="Review", body="check it"
@@ -188,7 +182,9 @@ def test_the_same_work_fingerprints_the_SAME():
 
 
 def test_different_work_fingerprints_differently():
-    assert fingerprint(title="Review", body="a") != fingerprint(title="Review", body="b")
+    assert fingerprint(title="Review", body="a") != fingerprint(
+        title="Review", body="b"
+    )
 
 
 def test_a_SOURCE_REF_wins_over_the_title():
@@ -202,9 +198,6 @@ def test_a_SOURCE_REF_wins_over_the_title():
 
 def test_the_fingerprint_is_short_enough_to_eyeball():
     assert len(fingerprint(title="x")) == 16
-
-
-# ── which nodes earn a task ──
 
 
 @pytest.mark.parametrize("kind", sorted(NON_MATERIALIZING_KINDS))
@@ -233,11 +226,10 @@ def test_a_node_with_no_id_earns_no_task():
     assert should_materialize({"kind": "stage", "id": "", "config": {}})[0] is False
 
 
-# ── the materialization plan ──
-
-
 def test_a_plan_creates_one_task_per_work_node():
-    plan = plan_materialization("r-1", [node("a"), node("b"), node("root", kind="sequence")])
+    plan = plan_materialization(
+        "r-1", [node("a"), node("b"), node("root", kind="sequence")]
+    )
     assert [s.binding.node_id for s in plan.create] == ["a", "b"]
     assert any("root" in s for s in plan.skipped)
 
@@ -247,7 +239,11 @@ def test_an_ALREADY_MATERIALIZED_node_is_not_duplicated():
     own earlier work — dedup by lookup, not by transaction.
     """
     existing = [
-        Task(id="t1", title="a", workflow_binding=WorkflowTaskBinding(run_id="r-1", node_id="a"))
+        Task(
+            id="t1",
+            title="a",
+            workflow_binding=WorkflowTaskBinding(run_id="r-1", node_id="a"),
+        )
     ]
     plan = plan_materialization("r-1", [node("a"), node("b")], existing_tasks=existing)
     assert [s.binding.node_id for s in plan.create] == ["b"]
@@ -280,7 +276,11 @@ def test_a_DIFFERENT_run_materializes_its_own_task():
     second run look already-done.
     """
     existing = [
-        Task(id="t1", title="a", workflow_binding=WorkflowTaskBinding(run_id="r-1", node_id="a"))
+        Task(
+            id="t1",
+            title="a",
+            workflow_binding=WorkflowTaskBinding(run_id="r-1", node_id="a"),
+        )
     ]
     plan = plan_materialization("r-2", [node("a")], existing_tasks=existing)
     assert len(plan.create) == 1
@@ -288,7 +288,9 @@ def test_a_DIFFERENT_run_materializes_its_own_task():
 
 def test_a_task_with_NO_binding_does_not_block_materialization():
     """A standalone task the user happens to have named similarly is not the run's work."""
-    plan = plan_materialization("r-1", [node("a")], existing_tasks=[Task(id="t1", title="a")])
+    plan = plan_materialization(
+        "r-1", [node("a")], existing_tasks=[Task(id="t1", title="a")]
+    )
     assert len(plan.create) == 1
 
 
@@ -297,13 +299,14 @@ def test_existing_matches_are_REPORTED_not_silently_skipped():
     failed to materialize anything.
     """
     existing = [
-        Task(id="t1", title="a", workflow_binding=WorkflowTaskBinding(run_id="r-1", node_id="a"))
+        Task(
+            id="t1",
+            title="a",
+            workflow_binding=WorkflowTaskBinding(run_id="r-1", node_id="a"),
+        )
     ]
     plan = plan_materialization("r-1", [node("a")], existing_tasks=existing)
     assert plan.existing
-
-
-# ── the fan-out cap ──
 
 
 def test_a_big_fanout_is_CAPPED():
@@ -351,11 +354,10 @@ def test_an_empty_fanout_has_no_progress_line():
     assert progress_line(0, 0) == ""
 
 
-# ── managed vs produced vs standalone ──
-
-
 def test_a_managed_task_is_engine_owned():
-    task = Task(id="t", title="x", workflow_binding=WorkflowTaskBinding(run_id="r", node_id="n"))
+    task = Task(
+        id="t", title="x", workflow_binding=WorkflowTaskBinding(run_id="r", node_id="n")
+    )
     assert managed(task) is True
 
 
@@ -388,14 +390,15 @@ def test_a_produced_task_KEEPS_its_provenance():
     assert task.workflow_binding.run_id == "r-9"
 
 
-# ── the write façade rejects, it does not merge ──
-
-
 def test_a_user_STATUS_write_on_a_managed_task_is_refused():
     """Two writers on one status field produce a board that disagrees with the run it is showing,
     and the user believes the board.
     """
-    task = Task(id="t", title="x", workflow_binding=WorkflowTaskBinding(run_id="r-7", node_id="n"))
+    task = Task(
+        id="t",
+        title="x",
+        workflow_binding=WorkflowTaskBinding(run_id="r-7", node_id="n"),
+    )
     why = reject_write(task, {"status": "done"})
     assert why
     assert "r-7" in why
@@ -403,7 +406,9 @@ def test_a_user_STATUS_write_on_a_managed_task_is_refused():
 
 def test_the_refusal_names_the_ALTERNATIVE():
     """A refusal that does not say what to do instead reads as the feature being broken."""
-    task = Task(id="t", title="x", workflow_binding=WorkflowTaskBinding(run_id="r", node_id="n"))
+    task = Task(
+        id="t", title="x", workflow_binding=WorkflowTaskBinding(run_id="r", node_id="n")
+    )
     why = reject_write(task, {"status": "done"})
     assert "workflow_skip" in why or "workflow_rewind" in why
 
@@ -412,7 +417,9 @@ def test_the_refusal_names_the_ALTERNATIVE():
 def test_every_engine_owned_field_is_protected(field_name):
     """Not just status: a user edit to `evidence` would be a human asserting the machine's
     finding."""
-    task = Task(id="t", title="x", workflow_binding=WorkflowTaskBinding(run_id="r", node_id="n"))
+    task = Task(
+        id="t", title="x", workflow_binding=WorkflowTaskBinding(run_id="r", node_id="n")
+    )
     assert reject_write(task, {field_name: "anything"})
 
 
@@ -420,7 +427,9 @@ def test_a_USER_owned_field_is_still_writable_on_a_managed_task():
     """The engine owns the projection, not the whole task. A user must still be able to add a
     note or change the assignee on work the run is driving.
     """
-    task = Task(id="t", title="x", workflow_binding=WorkflowTaskBinding(run_id="r", node_id="n"))
+    task = Task(
+        id="t", title="x", workflow_binding=WorkflowTaskBinding(run_id="r", node_id="n")
+    )
     assert reject_write(task, {"assignee": "me", "labels": ["urgent"]}) == ""
 
 
@@ -438,14 +447,13 @@ def test_a_PRODUCED_task_accepts_a_status_write():
     assert reject_write(task, {"status": "done"}) == ""
 
 
-# ── the body contract ──
-
-
 def test_a_body_leads_with_BEHAVIOR():
     """Someone picking up the task needs to know what it IS before what proves it. A body that
     opened with acceptance criteria reads as a checklist for work nobody described.
     """
-    body = build_body("Add retry to the ingest path", ["retries are bounded", "a test covers it"])
+    body = build_body(
+        "Add retry to the ingest path", ["retries are bounded", "a test covers it"]
+    )
     assert body.index("What to build") < body.index("Acceptance")
 
 
@@ -473,7 +481,9 @@ def test_a_CODE_SNIPPET_in_a_body_is_flagged():
     """File paths and code snippets go stale the moment the tree moves, and a body that
     confidently names a moved file sends the reader to the wrong place.
     """
-    issues = body_issues("Do the thing\n```python\nprint(1)\n```\n\nAcceptance: it works")
+    issues = body_issues(
+        "Do the thing\n```python\nprint(1)\n```\n\nAcceptance: it works"
+    )
     assert any("stale" in i for i in issues)
 
 
@@ -496,13 +506,12 @@ def test_the_lint_is_ADVISORY():
     the work. The finding is reported so the author can fix the staleness.
     """
     spec = TaskSpec(
-        title="x", binding=WorkflowTaskBinding(run_id="r", node_id="n"), body="```code```"
+        title="x",
+        binding=WorkflowTaskBinding(run_id="r", node_id="n"),
+        body="```code```",
     )
     assert body_issues(spec.body)
     assert spec.to_fields()["description"] == "```code```"
-
-
-# ── the round trip through the REAL task store ──
 
 
 @pytest.fixture()
@@ -516,14 +525,19 @@ def test_a_binding_SURVIVES_create_and_reload(task_home):
     round-tripped through `to_dict`/`from_dict` and still arrived EMPTY from `create_task`
     until the provider named it too.
     """
-    from gideon.tasks import registry
+    from gideon.engine.tasks import registry
 
     async def run():
         binding = WorkflowTaskBinding(
-            run_id="r-55", node_id="review", node_path="root.children[0]", fingerprint="abc123"
+            run_id="r-55",
+            node_id="review",
+            node_path="root.children[0]",
+            fingerprint="abc123",
         )
         created = await registry.create_task(
-            title="Review the draft", workflow_binding=binding, done_criterion="a judge passes"
+            title="Review the draft",
+            workflow_binding=binding,
+            done_criterion="a judge passes",
         )
         assert created.workflow_binding == binding
         assert created.done_criterion == "a judge passes"
@@ -540,11 +554,12 @@ def test_a_DICT_form_binding_is_accepted(task_home):
     passes JSON. Refusing either would push the coercion to every call site, and the site that
     forgot would create a task the engine does not own while the board shows it as managed.
     """
-    from gideon.tasks import registry
+    from gideon.engine.tasks import registry
 
     async def run():
         return await registry.create_task(
-            title="From JSON", workflow_binding={"run_id": "r", "node_id": "n", "managed": False}
+            title="From JSON",
+            workflow_binding={"run_id": "r", "node_id": "n", "managed": False},
         )
 
     created = asyncio.run(run())
@@ -553,7 +568,7 @@ def test_a_DICT_form_binding_is_accepted(task_home):
 
 
 def test_the_ENGINE_completion_path_persists_evidence(task_home):
-    from gideon.tasks import registry
+    from gideon.engine.tasks import registry
 
     async def run():
         created = await registry.create_task(
@@ -570,15 +585,13 @@ def test_the_ENGINE_completion_path_persists_evidence(task_home):
     assert reloaded.workflow_binding is not None
 
 
-# ── the status coercion that used to be silent ──
-
-
 def test_a_SKIPPED_status_no_longer_degrades_to_open():
     """Measured before adding the member: `from_dict` coerced an unknown status to OPEN, so a
     skipped task read back as work still to do — silently, on the board the user plans from.
     """
     assert (
-        Task.from_dict({"id": "t", "title": "x", "status": "skipped"}).status is TaskStatus.SKIPPED
+        Task.from_dict({"id": "t", "title": "x", "status": "skipped"}).status
+        is TaskStatus.SKIPPED
     )
 
 
@@ -586,7 +599,10 @@ def test_a_GENUINELY_unknown_status_still_degrades_safely():
     """Tolerance is still right for a value this build does not know — OPEN keeps the work
     visible, which is the recoverable direction.
     """
-    assert Task.from_dict({"id": "t", "title": "x", "status": "quantum"}).status is TaskStatus.OPEN
+    assert (
+        Task.from_dict({"id": "t", "title": "x", "status": "quantum"}).status
+        is TaskStatus.OPEN
+    )
 
 
 def test_every_projection_field_round_trips():

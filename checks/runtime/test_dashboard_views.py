@@ -17,7 +17,7 @@ from dataclasses import fields
 
 import pytest
 
-from gideon.dashboard import views_store as store
+from gideon.interfaces.dashboard import views_store as store
 
 
 @pytest.fixture(autouse=True)
@@ -25,11 +25,10 @@ def _isolate_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    monkeypatch.setattr("gideon.dashboard.views_store.config_dir", lambda: home)
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.views_store.config_dir", lambda: home
+    )
     return home
-
-
-# ── The Overview preset ───────────────────────────────────────────────────────
 
 
 def test_overview_preset_exists_and_is_locked():
@@ -46,9 +45,7 @@ def test_empty_registry_renders_todays_core_layout_byte_identical():
     overview = store.get_view(store.PRESET_OVERVIEW_ID)
     core_refs = [t.ref for t in overview.tiles]
     assert core_refs == list(store._OVERVIEW_CORE_REFS)
-    # No artifact tiles on a fresh install — nothing overlaid.
     assert all(r.startswith("core:") for r in core_refs)
-    # And these are exactly the eight hard-imported widgets in DashboardPage order.
     assert core_refs == [
         "core:hero-pulse",
         "core:action-center",
@@ -71,9 +68,6 @@ def test_preset_refuses_delete():
         store.delete_view(store.PRESET_OVERVIEW_ID)
 
 
-# ── The tile schema — refs + size + order, NEVER coordinates ────────────────────
-
-
 def test_tile_has_no_coordinate_fields():
     """A tile is a ref + size + order + added_by + its refresh binding (AS-2) — the coordinate
     grid stays retired. `refresh` is a DATA seam, not a spatial one: it says where a tile's
@@ -94,7 +88,6 @@ def test_pin_posts_an_artifact_tile_to_a_view():
     assert len(tiles) == 1
     assert tiles[0].size == "l"
     assert tiles[0].added_by == "user"
-    # Persisted as overlay on disk — not folded into the locked core refs.
     disk = json.loads(store.views_path().read_text())
     assert disk["overlay"][store.PRESET_OVERVIEW_ID][0]["ref"] == "artifact:sales-board"
     assert "x" not in disk["overlay"][store.PRESET_OVERVIEW_ID][0]
@@ -121,9 +114,6 @@ def test_tile_cap_enforced(monkeypatch):
         store.add_tile(store.PRESET_OVERVIEW_ID, "artifact:c")
 
 
-# ── User views ──────────────────────────────────────────────────────────────
-
-
 def test_create_update_delete_user_view():
     view = store.create_view("My Board", icon="LayoutGrid")
     assert not view.preset
@@ -131,9 +121,6 @@ def test_create_update_delete_user_view():
     assert updated.name == "Renamed" and updated.nav_pinned is True
     store.delete_view(view.id)
     assert store.get_view(view.id) is None
-
-
-# ── Agent proposals: accept / dismiss ───────────────────────────────────────
 
 
 def test_proposed_tile_carries_added_by_agent():
@@ -158,13 +145,12 @@ def test_dismiss_removes_the_tile():
     assert not any(t.ref == "artifact:p" for t in overview.tiles)
 
 
-# ── The dashboard_tile_propose tool ─────────────────────────────────────────
-
-
 def test_tile_propose_tool_writes_agent_row():
-    from gideon import mcp_core
+    from gideon.integrations import mcp_core
 
-    out = mcp_core._call_tool("dashboard_tile_propose", {"slug": "live-board", "size": "full"})
+    out = mcp_core._call_tool(
+        "dashboard_tile_propose", {"slug": "live-board", "size": "full"}
+    )
     assert "accept/dismiss chip" in out
     overview = store.get_view(store.PRESET_OVERVIEW_ID)
     tile = next(t for t in overview.tiles if t.ref == "artifact:live-board")
@@ -173,12 +159,9 @@ def test_tile_propose_tool_writes_agent_row():
 
 
 def test_tile_propose_tool_is_registered():
-    from gideon import mcp_core
+    from gideon.integrations import mcp_core
 
     assert "dashboard_tile_propose" in [t["name"] for t in mcp_core._list_tools()]
-
-
-# ── HTTP boundary: /api/dashboard/views CRUD (presets read-only) ────────────
 
 
 def _run(coro):
@@ -191,10 +174,10 @@ def _req(method, path, *, match=None, body=None):
     from aiohttp import web
     from aiohttp.test_utils import make_mocked_request
 
-    request = make_mocked_request(method, path, match_info=match or {}, app=web.Application())
+    request = make_mocked_request(
+        method, path, match_info=match or {}, app=web.Application()
+    )
 
-    # The handlers read the body via ``await request.json()``; inject it directly
-    # rather than plumbing a payload stream (which needs a live protocol).
     async def _json():
         return body or {}
 
@@ -209,7 +192,7 @@ def _body(resp):
 
 
 def test_route_lists_views_with_overview_preset():
-    from gideon.dashboard.handlers import views as H
+    from gideon.interfaces.dashboard.handlers import views as H
 
     resp = _run(H.api_dashboard_views(_req("GET", "/api/dashboard/views")))
     assert resp.status == 200
@@ -218,7 +201,7 @@ def test_route_lists_views_with_overview_preset():
 
 
 def test_route_refuses_preset_edit_with_403():
-    from gideon.dashboard.handlers import views as H
+    from gideon.interfaces.dashboard.handlers import views as H
 
     resp = _run(
         H.api_dashboard_view_detail(
@@ -234,18 +217,20 @@ def test_route_refuses_preset_edit_with_403():
 
 
 def test_route_refuses_preset_delete_with_403():
-    from gideon.dashboard.handlers import views as H
+    from gideon.interfaces.dashboard.handlers import views as H
 
     resp = _run(
         H.api_dashboard_view_detail(
-            _req("DELETE", "/api/dashboard/views/overview", match={"view_id": "overview"})
+            _req(
+                "DELETE", "/api/dashboard/views/overview", match={"view_id": "overview"}
+            )
         )
     )
     assert resp.status == 403
 
 
 def test_route_pins_a_tile():
-    from gideon.dashboard.handlers import views as H
+    from gideon.interfaces.dashboard.handlers import views as H
 
     resp = _run(
         H.api_dashboard_view_tiles(

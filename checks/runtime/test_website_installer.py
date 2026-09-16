@@ -1,10 +1,10 @@
 """The install one-liner — the front door — gets a rail, and its header stops lying.
 
-``deploy/website/install.sh`` is what ``curl -fsSL https://gideon.dev/install | sh``
+``infrastructure/website/install.sh`` is what ``curl -fsSL https://gideon.dev/install | sh``
 executes on a stranger's machine. Until now **nothing in CI ran it, linted it, or compared
 it to what we serve**, while its own header claimed all three:
 
-    # ... it is staged here under deploy/website/ so it is version-controlled,
+    # ... it is staged here under infrastructure/website/ so it is version-controlled,
     # shellcheck-clean, and CI-smoke-tested (plan 33 full.yml runs it in a bare ubuntu
     # container weekly).
 
@@ -17,7 +17,7 @@ artifact, and a comment nobody can execute cannot go red.
 
 The claim also hid a real regression. Three digests, measured the same day:
 
-    staged  deploy/website/install.sh   d7a852c1…  "workspace directory + timezone"
+    staged  infrastructure/website/install.sh   d7a852c1…  "workspace directory + timezone"
     site    public/install (mirror)     8e06a1fd…  "your name + first model provider"
     served  https://gideon.dev/install  8e06a1fd…  (identical to the site mirror)
 
@@ -32,8 +32,8 @@ moved to the dashboard (``_print_dashboard_pointer``: "the dashboard owns it"). 
 three weeks gideon.dev told every new user to run a command that would do neither of
 the two things it advertised.
 
-The sync path is a HUMAN COPY (``deploy/website/README.md`` §1: "**To apply:** copy
-``deploy/website/install.sh`` into the website repo"). It is not broken code — there is no
+The sync path is a HUMAN COPY (``infrastructure/website/README.md`` §1: "**To apply:** copy
+``infrastructure/website/install.sh`` into the website repo"). It is not broken code — there is no
 code. An unenforced instruction drifted the moment someone edited one side, which is why
 the fix here is a rail and not a re-copy.
 
@@ -82,92 +82,43 @@ import tomllib
 
 import pytest
 
-_ROOT = pathlib.Path(__file__).resolve().parents[1]
-_INSTALLER = _ROOT / "deploy" / "website" / "install.sh"
-_PIN = _ROOT / "deploy" / "website" / "install.sh.sha256"
+_ROOT = pathlib.Path(__file__).resolve().parents[2]
+_INSTALLER = _ROOT / "infrastructure" / "website" / "install.sh"
+_PIN = _ROOT / "infrastructure" / "website" / "install.sh.sha256"
 _CI = _ROOT / ".github" / "workflows" / "ci.yml"
 _FULL = _ROOT / ".github" / "workflows" / "full.yml"
 _PYPROJECT = _ROOT / "pyproject.toml"
 _CHANGELOG = _ROOT / "CHANGELOG.md"
-#: The user-facing install guide — where the verify recipe is documented, because a verify path
-#: only maintainers can find is not a user-facing option.
 _GUIDE = _ROOT / "docs" / "guides" / "getting-started.md"
-_DEPLOY_README = _ROOT / "deploy" / "website" / "README.md"
+_DEPLOY_README = _ROOT / "infrastructure" / "website" / "README.md"
 _REPO_README = _ROOT / "README.md"
 
-#: The URL the one-liner is served from. The live legs in ``full.yml`` must name it.
 SERVED_URL = "https://gideon.dev/install"
 
-#: The host that serves the script. A digest fetched from HERE would be worthless against a
-#: compromise of this host: it would serve the script and the matching digest. The documented
-#: verify recipe must therefore source its digest from some other origin — asserted, not hoped.
 SERVED_HOST = "gideon.dev"
 
-#: The installer's downgrade floor, as a shell constant. Its VALUE is not pinned here — it is
-#: derived from ``CHANGELOG.md`` (see :class:`TestInstallFloorTracksTheReleaseHistory`), because
-#: a hand-typed version in a shell script that nothing checks is the defect in #2554.
-FLOOR_CONST = "PC_MIN_VERSION"
+FLOOR_CONST = "GIDEON_MIN_VERSION"
 
-#: A line that pipes Astral's installer into ``sh`` — there are two, the curl and the wget
-#: branch, and neither verifies anything.
 UV_FETCH = r'UV_INSTALLER_URL"?\s*\|\s*sh\b'
 
-#: The line that OPENS that fetch. The comment #2582 found lying sits above the guard rather
-#: than above either branch, because it covers both, so this is where attachment is asserted —
-#: and ``test_the_block_is_attached_to_the_fetch`` checks that the guard really still performs
-#: the fetch, so the anchor cannot quietly drift off the thing it is documenting.
 UV_FETCH_GUARD = r"^\s*if have curl; then\s*$"
 
-#: The guide heading that owns the verify recipe. ``install.sh``, ``README.md`` and
-#: ``deploy/website/README.md`` all point at it; the slug is the anchor those links use.
 VERIFY_HEADING = "Verify the one-liner"
 
-#: Releases this project has already published to PyPI (measured 2026-09-07 against
-#: ``pypi.org/pypi/gideon/json``: exactly 0.1.0, 0.1.1, 0.1.2, 0.1.3). History cannot be
-#: rewritten, so these are permanent — the vacuity floor for :func:`released_versions`, in the
-#: spirit of :data:`LONG_STANDING_CI_JOBS`.
 LONG_STANDING_RELEASES = frozenset({"0.1.0", "0.1.1", "0.1.2", "0.1.3"})
 
-#: Turns "the tool this case needs is absent" from a skip into a failure. Set by the
-#: ``lint`` job, which installs shellcheck and dash first. NOT set on a contributor's
-#: laptop, where reding the suite over a missing linter would be hostile.
 REQUIRE_ENV = "GIDEON_REQUIRE_INSTALL_PROOF"
 
-#: The installer's single dispatching statement. Load-bearing for `curl | sh` safety: see
-#: :class:`TestTruncatedDownloadFailsClosed`.
 DISPATCH = 'main "$@"'
 
-#: ``/bin/sh`` by absolute path, because the offline cases hand the child a PATH that holds only
-#: :data:`SANDBOX_TOOLS` — which does not include a shell. Resolving the interpreter through that
-#: PATH raised ``FileNotFoundError: 'sh'``, so the cases errored on the interpreter and their real
-#: assertions never ran. Naming it absolutely keeps the restricted PATH a statement about what the
-#: SCRIPT can reach rather than an accident that skips the measurement.
 SH = "/bin/sh"
 
-#: External commands the installer legitimately uses on its no-network paths. A sandbox PATH is
-#: built from exactly these (:func:`sandbox_env`), which is what makes "no download was
-#: attempted" a measurement rather than an assumption: ``curl``, ``wget`` and ``uv`` are absent
-#: BY CONSTRUCTION, so any leg that tried to fetch dies visibly instead of quietly succeeding
-#: because the runner happened to have a downloader.
-#:
-#: An empty PATH was the first attempt and was wrong twice over: ``subprocess`` could not find
-#: the interpreter, and once that was fixed ``--container`` failed on ``cat`` — an honest but
-#: uninteresting red about coreutils rather than about the installer. Allow the harmless
-#: externals, deny only the downloaders, and the red means what it says.
 SANDBOX_TOOLS = ("cat", "uname", "printf")
 
-#: Commands that must NOT be reachable in the sandbox. Asserted, not merely omitted — a future
-#: edit to :data:`SANDBOX_TOOLS` that let a downloader back in would make every "no network"
-#: claim below vacuous, and nothing else would say so.
 FORBIDDEN_TOOLS = ("curl", "wget", "uv")
 
-#: Job ids long enough in these workflows that their absence means the parser broke rather
-#: than that CI changed. The vacuity floor for :func:`jobs`.
 LONG_STANDING_CI_JOBS = frozenset({"lint", "test", "web", "rails", "harness", "client"})
 LONG_STANDING_FULL_JOBS = frozenset({"matrix", "audit", "security-corpus", "coverage"})
-
-
-# ── parsers (text in, answer out — so the vacuity tests can drive them) ───────────────
 
 
 def jobs(text: str) -> dict[str, str]:
@@ -187,7 +138,7 @@ def jobs(text: str) -> dict[str, str]:
         if not in_jobs:
             continue
         if line.strip() and not line.startswith(" ") and not line.startswith("#"):
-            break  # back to a top-level key: the jobs mapping ended
+            break
         header = re.match(r"^ {2}([A-Za-z][\w-]*):\s*(#.*)?$", line)
         if header:
             current = header.group(1)
@@ -333,12 +284,14 @@ def fenced_blocks(text: str) -> list[str]:
 
     Leading whitespace on the fence is allowed, and that is not cosmetic: MEASURED while
     mutation-testing this module, an anchored ``^```` missed every block nested inside a
-    numbered list — which is how ``deploy/website/README.md`` writes its commands. A planted
+    numbered list — which is how ``infrastructure/website/README.md`` writes its commands. A planted
     duplicate recipe there survived
     :meth:`TestDocumentedVerifyPathIsReal.test_the_recipe_is_not_duplicated_across_docs`
     entirely, because the parser could not see the file's most likely place to grow one.
     """
-    return re.findall(r"^[ \t]*```[^\n]*\n(.*?)^[ \t]*```", text, flags=re.MULTILINE | re.DOTALL)
+    return re.findall(
+        r"^[ \t]*```[^\n]*\n(.*?)^[ \t]*```", text, flags=re.MULTILINE | re.DOTALL
+    )
 
 
 def verify_recipes(text: str) -> list[str]:
@@ -346,7 +299,7 @@ def verify_recipes(text: str) -> list[str]:
 
     Both halves are required. A block that only fetches is the plain one-liner every doc
     already shows, and a block that only hashes is the maintainer's pin-regeneration command in
-    ``deploy/website/README.md`` — counting either as a user verify path would make
+    ``infrastructure/website/README.md`` — counting either as a user verify path would make
     :meth:`TestDocumentedVerifyPathIsReal.test_the_recipe_is_not_duplicated_across_docs`
     report duplication that does not exist, and the origin assertion vacuous.
     """
@@ -431,22 +384,20 @@ def test_sandbox_really_has_no_downloader(sandbox_env: dict[str, str]) -> None:
             f"{tool} is reachable inside the sandbox PATH, so the offline cases below prove "
             "nothing about staying offline."
         )
-    assert shutil.which("cat", path=sandbox_env["PATH"]), "sandbox lost cat — --container needs it"
-
-
-# ── the file exists at all ───────────────────────────────────────────────────────────
+    assert shutil.which(
+        "cat", path=sandbox_env["PATH"]
+    ), "sandbox lost cat — --container needs it"
 
 
 def test_installer_and_pin_are_present() -> None:
     """The whole module is vacuous if these two paths move without it noticing."""
-    assert _INSTALLER.is_file(), f"{_INSTALLER} is missing — the served one-liner is unstaged"
-    assert _PIN.is_file(), f"{_PIN} is missing — nothing pins the bytes the site must serve"
-    # If /bin/sh ever moves, the offline cases would raise FileNotFoundError on the interpreter
-    # and their real assertions would never be reached. Fail on the cause, not the symptom.
+    assert (
+        _INSTALLER.is_file()
+    ), f"{_INSTALLER} is missing — the served one-liner is unstaged"
+    assert (
+        _PIN.is_file()
+    ), f"{_PIN} is missing — nothing pins the bytes the site must serve"
     assert pathlib.Path(SH).exists(), f"{SH} is missing — the offline cases cannot run"
-
-
-# ── POSIX + linter contract (the header's "shellcheck-clean") ────────────────────────
 
 
 class TestPosixShellContract:
@@ -471,12 +422,14 @@ class TestPosixShellContract:
         """The header has claimed "shellcheck-clean" since the file landed. Now it is checked."""
         shellcheck = _tool_or_skip("shellcheck")
         proc = subprocess.run(
-            [shellcheck, "-s", "sh", str(_INSTALLER)], capture_output=True, text=True, timeout=120
+            [shellcheck, "-s", "sh", str(_INSTALLER)],
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
-        assert proc.returncode == 0, f"shellcheck -s sh findings:\n{proc.stdout}{proc.stderr}"
-
-
-# ── the argument paths that need no network ──────────────────────────────────────────
+        assert (
+            proc.returncode == 0
+        ), f"shellcheck -s sh findings:\n{proc.stdout}{proc.stderr}"
 
 
 class TestOfflineArgumentPaths:
@@ -497,12 +450,16 @@ class TestOfflineArgumentPaths:
             env=dict(env),
         )
 
-    def test_help_exits_zero_and_documents_container(self, sandbox_env: dict[str, str]) -> None:
+    def test_help_exits_zero_and_documents_container(
+        self, sandbox_env: dict[str, str]
+    ) -> None:
         proc = self._run(sandbox_env, "--help")
         assert proc.returncode == 0, proc.stderr
         assert "--container" in proc.stdout
 
-    def test_container_prints_the_compose_snippet(self, sandbox_env: dict[str, str]) -> None:
+    def test_container_prints_the_compose_snippet(
+        self, sandbox_env: dict[str, str]
+    ) -> None:
         proc = self._run(sandbox_env, "--container")
         assert proc.returncode == 0, proc.stderr
         assert "docker compose" in proc.stdout
@@ -510,7 +467,9 @@ class TestOfflineArgumentPaths:
     def test_unknown_argument_fails_closed(self, sandbox_env: dict[str, str]) -> None:
         """An unrecognised flag must not fall through into an install."""
         proc = self._run(sandbox_env, "--bogus")
-        assert proc.returncode == 1, f"expected exit 1, got {proc.returncode}: {proc.stdout}"
+        assert (
+            proc.returncode == 1
+        ), f"expected exit 1, got {proc.returncode}: {proc.stdout}"
         assert "unknown argument" in proc.stderr
 
     def test_no_downloader_available_refuses_rather_than_half_installing(
@@ -530,11 +489,9 @@ class TestOfflineArgumentPaths:
             f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
         )
         assert "curl or wget" in proc.stderr, (
-            "it failed, but without naming the missing prerequisite: " f"{proc.stderr!r}"
+            "it failed, but without naming the missing prerequisite: "
+            f"{proc.stderr!r}"
         )
-
-
-# ── curl | sh truncation safety ──────────────────────────────────────────────────────
 
 
 class TestTruncatedDownloadFailsClosed:
@@ -556,11 +513,15 @@ class TestTruncatedDownloadFailsClosed:
             "the dispatch runs from a truncated download, so `curl | sh` stops failing closed."
         )
 
-    def test_nothing_the_script_defines_runs_before_the_dispatch(self, installer_text: str) -> None:
+    def test_nothing_the_script_defines_runs_before_the_dispatch(
+        self, installer_text: str
+    ) -> None:
         funcs = defined_funcs(installer_text)
         assert "main" in funcs, "no main() — the parser or the script shape changed"
         calls = top_level_calls(installer_text, funcs)
-        assert calls, "found no top-level call at all, not even the dispatch — parser broke"
+        assert (
+            calls
+        ), "found no top-level call at all, not even the dispatch — parser broke"
         assert len(calls) == 1, (
             "more than one of the script's own functions runs at load time: "
             f"{calls!r}. Only the final dispatch may."
@@ -599,7 +560,9 @@ class TestTruncatedDownloadFailsClosed:
             f"{started!r}. `curl | sh` no longer fails closed on a partial transfer."
         )
 
-    def test_the_complete_file_does_reach_a_step(self, sandbox_env: dict[str, str]) -> None:
+    def test_the_complete_file_does_reach_a_step(
+        self, sandbox_env: dict[str, str]
+    ) -> None:
         """Vacuity floor for the sweep above: the WHOLE file must trip the ``==>`` tell.
 
         Without this, a rename of ``step()`` or a change to its marker would make the
@@ -620,9 +583,6 @@ class TestTruncatedDownloadFailsClosed:
         )
 
 
-# ── the digest pin: the offline half of the drift rail ───────────────────────────────
-
-
 class TestServedDigestPin:
     """``install.sh.sha256`` is the contract between this repo and gideon.dev.
 
@@ -640,7 +600,7 @@ class TestServedDigestPin:
             f"install.sh has changed but install.sh.sha256 was not updated "
             f"(file {actual}, pin {recorded}).\n"
             "Update the pin AND re-apply the file to the website repo's public/install in "
-            "the same change — see deploy/website/README.md §1. The pin is deliberately in "
+            "the same change — see infrastructure/website/README.md §1. The pin is deliberately in "
             "your way: it is the only moment anyone is reminded the mirror exists."
         )
 
@@ -651,10 +611,9 @@ class TestServedDigestPin:
         assert len(lines) == 1, f"expected exactly one digest line, got {lines!r}"
         digest, _, name = lines[0].partition(" ")
         assert re.fullmatch(r"[0-9a-f]{64}", digest), f"not a sha256 digest: {digest!r}"
-        assert name.strip() == "install.sh", f"the pin must name install.sh, not {name.strip()!r}"
-
-
-# ── the PyPI install: a downgrade floor, and a rail that keeps it from rotting ───────
+        assert (
+            name.strip() == "install.sh"
+        ), f"the pin must name install.sh, not {name.strip()!r}"
 
 
 class TestInstallFloorTracksTheReleaseHistory:
@@ -713,7 +672,9 @@ class TestInstallFloorTracksTheReleaseHistory:
                 f"index installs old code silently:\n    {line}"
             )
 
-    def test_the_floor_did_not_cost_the_idempotent_upgrade(self, installer_text: str) -> None:
+    def test_the_floor_did_not_cost_the_idempotent_upgrade(
+        self, installer_text: str
+    ) -> None:
         """``--upgrade`` is the documented upgrade path and the reason #2582 was not just fixed.
 
         The issue's own objection to pinning is that it would trade away re-runnability. It does
@@ -739,10 +700,12 @@ class TestInstallFloorTracksTheReleaseHistory:
         assert floor == history[1], (
             f"{FLOOR_CONST}={floor!r} is not the previous release ({history[1]!r}; newest is "
             f"{history[0]!r}). Bump it in the same change as the version, and regenerate "
-            "install.sh.sha256 — see PC_MIN_VERSION in the installer for why it lags by one."
+            "install.sh.sha256 — see GIDEON_MIN_VERSION in the installer for why it lags by one."
         )
 
-    def test_the_floor_is_never_the_version_this_tree_builds(self, installer_text: str) -> None:
+    def test_the_floor_is_never_the_version_this_tree_builds(
+        self, installer_text: str
+    ) -> None:
         """Stated separately from the case above because it names a DIFFERENT failure.
 
         The equality above keeps the floor from rotting. This one keeps it from being too
@@ -801,7 +764,9 @@ class TestUvBootstrapCommentIsHonestAboutWhatIsVerified:
         to still contain the pipe into ``sh``.
         """
         lines = installer_text.splitlines()
-        guard = next((n for n, line in enumerate(lines) if re.search(UV_FETCH_GUARD, line)), None)
+        guard = next(
+            (n for n, line in enumerate(lines) if re.search(UV_FETCH_GUARD, line)), None
+        )
         assert guard is not None, (
             "the installer no longer opens the uv bootstrap with `if have curl; then`, so the "
             "comment this class checks has nothing to be attached to."
@@ -815,7 +780,9 @@ class TestUvBootstrapCommentIsHonestAboutWhatIsVerified:
             "are measuring an empty string. The unverified fetch must be documented AT the fetch."
         )
 
-    def test_it_does_not_claim_the_piped_script_verifies_itself(self, installer_text: str) -> None:
+    def test_it_does_not_claim_the_piped_script_verifies_itself(
+        self, installer_text: str
+    ) -> None:
         """The literal claim #2582 found, so a straight revert of that line reds."""
         block = comment_block_above(installer_text, UV_FETCH_GUARD)
         assert not re.search(r"(?i)verifies its own downloads", block), (
@@ -824,7 +791,9 @@ class TestUvBootstrapCommentIsHonestAboutWhatIsVerified:
             "pipe into sh unverified — the exact wording #2582 was filed about."
         )
 
-    def test_it_discloses_that_the_piped_bytes_are_unverified(self, installer_text: str) -> None:
+    def test_it_discloses_that_the_piped_bytes_are_unverified(
+        self, installer_text: str
+    ) -> None:
         """Absence of a lie is not the same as presence of the truth.
 
         Deleting the false sentence would satisfy the case above and leave a reader with no
@@ -860,7 +829,7 @@ class TestDocumentedVerifyPathIsReal:
     """``install.sh.sha256`` becomes a user-facing integrity check — with its limits stated.
 
     The pin already existed, documented purely as a maintainer drift-detection artifact
-    (``deploy/website/README.md`` §1). Documenting it as a user verification path costs nothing
+    (``infrastructure/website/README.md`` §1). Documenting it as a user verification path costs nothing
     and is the one option in #2582 that hands a cautious user a real choice today — but ONLY
     because the digest is fetched from a different origin than the script. A digest served by
     the host that serves the script proves almost nothing against that host: it hands you both,
@@ -888,7 +857,9 @@ class TestDocumentedVerifyPathIsReal:
             f"{len(recipes)}. Two recipes in one section is two things to keep in step."
         )
 
-    def test_the_digest_comes_from_a_different_origin_than_the_script(self, section: str) -> None:
+    def test_the_digest_comes_from_a_different_origin_than_the_script(
+        self, section: str
+    ) -> None:
         """THE security property. Everything else in this class is hygiene around it.
 
         A same-origin digest is defeated by the same compromise it is supposed to detect, so a
@@ -909,7 +880,9 @@ class TestDocumentedVerifyPathIsReal:
                 "check would prove nothing against exactly the attacker it appears to stop."
             )
 
-    def test_the_recipe_checks_the_digest_instead_of_printing_it(self, section: str) -> None:
+    def test_the_recipe_checks_the_digest_instead_of_printing_it(
+        self, section: str
+    ) -> None:
         """``shasum -a 256 install.sh`` prints a hash a user must eyeball. ``-c`` decides."""
         (recipe,) = verify_recipes(section)
         assert re.search(r"\bsha(?:sum -a 256|256sum)\s+-c\b", recipe), (
@@ -921,13 +894,17 @@ class TestDocumentedVerifyPathIsReal:
         """``shasum -c`` resolves the name INSIDE the digest file, so the two must agree.
 
         This is not style: the pin reads ``<digest>  install.sh``, so a recipe that saved the
-        download as ``pc-install.sh`` would fail for every user with "No such file or
+        download as ``gideon-install.sh`` would fail for every user with "No such file or
         directory" while looking perfectly reasonable in review.
         """
         (recipe,) = verify_recipes(section)
         pinned_name = _PIN.read_text(encoding="utf-8").split()[1]
-        match = re.search(rf"-o\s+(\S+)\s+\S*{re.escape(SERVED_HOST)}/install\b", recipe)
-        assert match, f"the recipe does not save the served script to a named file:\n{recipe}"
+        match = re.search(
+            rf"-o\s+(\S+)\s+\S*{re.escape(SERVED_HOST)}/install\b", recipe
+        )
+        assert (
+            match
+        ), f"the recipe does not save the served script to a named file:\n{recipe}"
         assert match.group(1) == pinned_name, (
             f"the recipe saves the script as {match.group(1)!r} but the pin names "
             f"{pinned_name!r}, so `shasum -c` cannot find the file it is asked to check."
@@ -945,7 +922,9 @@ class TestDocumentedVerifyPathIsReal:
             "the section never explains that a same-origin digest would prove almost nothing, "
             "so the one property the recipe depends on reads as an arbitrary detail."
         )
-        assert re.search(r"(?i)(does not defeat|does not prove|not by itself proof)", section), (
+        assert re.search(
+            r"(?i)(does not defeat|does not prove|not by itself proof)", section
+        ), (
             "the section never states a limit of the check. A digest that is not described "
             "precisely gets read as end-to-end integrity, which it is not."
         )
@@ -953,7 +932,7 @@ class TestDocumentedVerifyPathIsReal:
     def test_the_recipe_is_not_duplicated_across_docs(self) -> None:
         """#2554's lesson, applied to the thing that would repeat it.
 
-        Three files now point at this recipe (``README.md``, ``deploy/website/README.md``, and
+        Three files now point at this recipe (``README.md``, ``infrastructure/website/README.md``, and
         the installer's own comment). If any of them grows its own copy of the commands, the
         copies drift and the wrong one is the one someone runs.
         """
@@ -984,9 +963,6 @@ class TestDocumentedVerifyPathIsReal:
         )
 
 
-# ── header truth: the rail over the defect this file was written for ─────────────────
-
-
 class TestHeaderClaimsAreTrue:
     """Every workflow and job the installer's header advertises must actually exist.
 
@@ -995,7 +971,9 @@ class TestHeaderClaimsAreTrue:
     a reader would otherwise go and check. These cases make the claim executable.
     """
 
-    def test_header_makes_at_least_one_checkable_claim(self, installer_text: str) -> None:
+    def test_header_makes_at_least_one_checkable_claim(
+        self, installer_text: str
+    ) -> None:
         claims = header_claims(installer_text)
         assert claims, (
             "the header names no workflow/job pair, so nothing about its CI claims is "
@@ -1017,9 +995,6 @@ class TestHeaderClaimsAreTrue:
                 f"no such job (it has: {sorted(present)}). This is exactly the defect the "
                 "file was carrying: an advertised job that was never written."
             )
-
-
-# ── rail wiring: the live leg must exist, and must not be able to pass vacuously ─────
 
 
 def code_only(body: str) -> str:
@@ -1061,7 +1036,7 @@ def fetch_guards(body: str) -> list[str]:
         if line.strip() == "fi" and (len(line) - len(line.lstrip())) == indent:
             guards.append(current)
             current = None
-    if current is not None:  # unterminated — hand it back so the caller can fail on it
+    if current is not None:
         guards.append(current)
     return ["\n".join(g) for g in guards]
 
@@ -1077,7 +1052,9 @@ def _live_leg(full_text: str) -> tuple[str, str]:
         f"no job in full.yml mentions {SERVED_URL}. The installer's live rail is gone, "
         "and the header's smoke claim is false again."
     )
-    assert len(matches) == 1, f"expected one live installer leg, found {sorted(matches)}"
+    assert (
+        len(matches) == 1
+    ), f"expected one live installer leg, found {sorted(matches)}"
     return next(iter(matches.items()))
 
 
@@ -1100,17 +1077,17 @@ class TestLiveInstallerLegIsWired:
         or PyPI regressed" (served red) — two different pages for two different people.
 
         Asserted as EXECUTION, not as a mention. The drift leg legitimately names the staged
-        path twice — ``sha256sum deploy/website/install.sh`` and a ``diff`` against it — so a
+        path twice — ``sha256sum infrastructure/website/install.sh`` and a ``diff`` against it — so a
         substring check passed with the staged smoke leg deleted outright: measured, the leg
         was reduced to served-only and the case stayed green. Hashing a file is not running
         it.
         """
         _jid, body = leg
         assert re.search(
-            r"(?:^|\s)(?:/bin/)?(?:sh|dash|bash)\s+\S*deploy/website/install\.sh",
+            r"(?:^|\s)(?:/bin/)?(?:sh|dash|bash)\s+\S*infrastructure/website/install\.sh",
             code_only(body),
         ), (
-            "nothing in the live leg EXECUTES deploy/website/install.sh (hashing or diffing "
+            "nothing in the live leg EXECUTES infrastructure/website/install.sh (hashing or diffing "
             "it does not count). A staged edit that breaks the installer would go green "
             "until someone copied it to the website repo."
         )
@@ -1192,7 +1169,9 @@ class TestLiveInstallerLegIsWired:
             "runner's real tool directories."
         )
 
-    def test_both_smoke_legs_assert_the_installed_binary_runs(self, leg: tuple[str, str]) -> None:
+    def test_both_smoke_legs_assert_the_installed_binary_runs(
+        self, leg: tuple[str, str]
+    ) -> None:
         """Installing without running proves the wheel downloaded, not that it works.
 
         Counted, not merely found: with one occurrence the assertion is satisfied by whichever
@@ -1227,10 +1206,10 @@ class TestLintJobChecksTheInstaller:
         the apt loop still named the tool. Naming a linter is not running it.
         """
         assert re.search(
-            r"shellcheck\s+(?:-\S+\s+)*-s\s+sh\s+\S*deploy/website/install\.sh",
+            r"shellcheck\s+(?:-\S+\s+)*-s\s+sh\s+\S*infrastructure/website/install\.sh",
             code_only(lint_body),
         ), (
-            "ci.yml's lint job never invokes `shellcheck -s sh deploy/website/install.sh`, "
+            "ci.yml's lint job never invokes `shellcheck -s sh infrastructure/website/install.sh`, "
             "so the header's shellcheck-clean claim rests on nothing again."
         )
 
@@ -1246,7 +1225,7 @@ class TestLintJobChecksTheInstaller:
         code = code_only(lint_body)
         for tool in ("sh -n", "dash -n"):
             assert re.search(
-                rf"{re.escape(tool)}\s+\S*deploy/website/install\.sh", code
+                rf"{re.escape(tool)}\s+\S*infrastructure/website/install\.sh", code
             ), f"ci.yml's lint job does not run `{tool}` on the installer"
 
     def test_lint_sets_the_require_proof_lever(self, lint_body: str) -> None:
@@ -1257,22 +1236,23 @@ class TestLintJobChecksTheInstaller:
         )
 
 
-# ── vacuity: the parsers must be able to say NO ──────────────────────────────────────
-
-
 class TestParsersAreNotVacuous:
     """Every assertion above is only worth its ability to fail. Drive it and watch."""
 
     def test_jobs_finds_the_real_workflows(self) -> None:
         ci = set(jobs(_CI.read_text(encoding="utf-8")))
         full = set(jobs(_FULL.read_text(encoding="utf-8")))
-        assert LONG_STANDING_CI_JOBS <= ci, f"parser lost ci.yml jobs: {LONG_STANDING_CI_JOBS - ci}"
+        assert (
+            LONG_STANDING_CI_JOBS <= ci
+        ), f"parser lost ci.yml jobs: {LONG_STANDING_CI_JOBS - ci}"
         assert (
             LONG_STANDING_FULL_JOBS <= full
         ), f"parser lost full.yml jobs: {LONG_STANDING_FULL_JOBS - full}"
 
     def test_jobs_ignores_step_level_keys(self) -> None:
-        parsed = jobs("jobs:\n  only:\n    runs-on: x\n    steps:\n      - name: not-a-job\n")
+        parsed = jobs(
+            "jobs:\n  only:\n    runs-on: x\n    steps:\n      - name: not-a-job\n"
+        )
         assert set(parsed) == {"only"}
 
     def test_jobs_stops_at_the_end_of_the_mapping(self) -> None:
@@ -1285,7 +1265,6 @@ class TestParsersAreNotVacuous:
 
     def test_header_claims_pairs_only_within_a_line(self) -> None:
         assert header_claims("# ci.yml `lint` does it\n") == {("ci.yml", "lint")}
-        # A workflow on one line and a job id on another is not a claim about that pair.
         assert header_claims("# ci.yml runs\n# `lint` separately\n") == set()
 
     def test_header_claims_finds_nothing_in_an_unclaiming_header(self) -> None:
@@ -1293,7 +1272,9 @@ class TestParsersAreNotVacuous:
 
     def test_missing_job_is_detected(self) -> None:
         """The exact defect: a header naming a job the workflow does not have."""
-        claimed = header_claims("#!/bin/sh\n# full.yml `install-smoke` runs it weekly\n")
+        claimed = header_claims(
+            "#!/bin/sh\n# full.yml `install-smoke` runs it weekly\n"
+        )
         assert claimed == {("full.yml", "install-smoke")}
         present = jobs("jobs:\n  matrix:\n    runs-on: x\n  audit:\n    runs-on: x\n")
         assert not {job for _wf, job in claimed} <= set(present)
@@ -1310,13 +1291,17 @@ class TestParsersAreNotVacuous:
             "      - run: export UV_TOOL_DIR=/tmp/x\n"
         )
         code = code_only(body)
-        assert "continue-on-error" not in code, "a comment still satisfies the negative check"
+        assert (
+            "continue-on-error" not in code
+        ), "a comment still satisfies the negative check"
         assert "UV_TOOL_DIR" in code, "stripped too much — the real assignment is gone"
 
     def test_code_only_leaves_a_comment_only_body_empty_of_claims(self) -> None:
         """A leg that only TALKS about the rail must not satisfy the rail."""
         assert (
-            code_only("      # runs gideon --version and pins install.sh.sha256\n").strip()
+            code_only(
+                "      # runs gideon --version and pins install.sh.sha256\n"
+            ).strip()
             == ""
         )
 
@@ -1324,7 +1309,9 @@ class TestParsersAreNotVacuous:
         """The live leg must really contain the guards the assertions iterate over."""
         _jid, body = _live_leg(_FULL.read_text(encoding="utf-8"))
         guards = fetch_guards(body)
-        assert len(guards) >= 2, f"parser found {len(guards)} fetch guards in the live leg"
+        assert (
+            len(guards) >= 2
+        ), f"parser found {len(guards)} fetch guards in the live leg"
         assert all("curl" in g for g in guards)
 
     def test_fetch_guards_isolates_each_block(self) -> None:
@@ -1358,7 +1345,9 @@ class TestParsersAreNotVacuous:
 
     def test_live_leg_found_by_url_not_by_name(self) -> None:
         jid, body = _live_leg(
-            "jobs:\n  renamed-anything:\n    steps:\n      - run: curl " + SERVED_URL + "\n"
+            "jobs:\n  renamed-anything:\n    steps:\n      - run: curl "
+            + SERVED_URL
+            + "\n"
         )
         assert jid == "renamed-anything" and SERVED_URL in body
 
@@ -1393,10 +1382,12 @@ class TestParsersAreNotVacuous:
         assert released_versions(text) == ["9.9.9"]
 
     def test_installer_constant_reads_a_value_and_admits_absence(self) -> None:
-        assert installer_constant('X="1"\nPC_MIN_VERSION="0.9.9"\n', FLOOR_CONST) == "0.9.9"
-        assert installer_constant('PC_PACKAGE="gideon"\n', FLOOR_CONST) is None
-        # An assignment the shell would not see at load time is not the constant.
-        assert installer_constant('  PC_MIN_VERSION="0.9.9"\n', FLOOR_CONST) is None
+        assert (
+            installer_constant('X="1"\nPC_MIN_VERSION="0.9.9"\n', FLOOR_CONST)
+            == "0.9.9"
+        )
+        assert installer_constant('GIDEON_PACKAGE="gideon"\n', FLOOR_CONST) is None
+        assert installer_constant('  GIDEON_MIN_VERSION="0.9.9"\n', FLOOR_CONST) is None
 
     def test_uv_tool_install_lines_ignores_a_commented_invocation(self) -> None:
         """The measured hole this parser exists to close.
@@ -1406,8 +1397,8 @@ class TestParsersAreNotVacuous:
         the :func:`code_only` finding.
         """
         script = (
-            "#   3. `uv tool install --upgrade gideon>=$PC_MIN_VERSION` (header prose)\n"
-            '    uv tool install --upgrade "$PC_PACKAGE>=$PC_MIN_VERSION"\n'
+            "#   3. `uv tool install --upgrade gideon>=$GIDEON_MIN_VERSION` (header prose)\n"
+            '    uv tool install --upgrade "$GIDEON_PACKAGE>=$GIDEON_MIN_VERSION"\n'
         )
         found = uv_tool_install_lines(script)
         assert len(found) == 1 and found[0].startswith("uv tool install"), found
@@ -1415,7 +1406,9 @@ class TestParsersAreNotVacuous:
 
     def test_uv_tool_install_lines_reports_an_unfloored_invocation(self) -> None:
         """The mutant that matters: the pre-#2582 command, which the rail must not accept."""
-        (line,) = uv_tool_install_lines('    uv tool install --upgrade "$PC_PACKAGE"\n')
+        (line,) = uv_tool_install_lines(
+            '    uv tool install --upgrade "$GIDEON_PACKAGE"\n'
+        )
         assert f">=${FLOOR_CONST}" not in line
 
     def test_version_key_orders_releases_and_refuses_junk(self) -> None:
@@ -1426,30 +1419,37 @@ class TestParsersAreNotVacuous:
                 version_key(junk)
 
     def test_pyproject_version_reads_the_project_table(self) -> None:
-        assert pyproject_version('[project]\nname = "x"\nversion = "1.2.3"\n') == "1.2.3"
-        # Not fooled by a version key in some other table — the reason this uses tomllib.
-        assert pyproject_version('[project]\nversion = "1.2.3"\n[tool.x]\nversion = "9.9.9"\n') == (
-            "1.2.3"
+        assert (
+            pyproject_version('[project]\nname = "x"\nversion = "1.2.3"\n') == "1.2.3"
         )
+        assert pyproject_version(
+            '[project]\nversion = "1.2.3"\n[tool.x]\nversion = "9.9.9"\n'
+        ) == ("1.2.3")
 
     def test_comment_block_above_takes_only_the_attached_block(self) -> None:
         text = "# far above\n\ncode_between\n# attached one\n# attached two\nif have curl; then\n"
         block = comment_block_above(text, UV_FETCH_GUARD)
         assert "attached one" in block and "attached two" in block
-        assert "far above" not in block, "the walk did not stop at the first non-comment line"
+        assert (
+            "far above" not in block
+        ), "the walk did not stop at the first non-comment line"
 
     def test_comment_block_above_is_empty_when_the_line_is_absent(self) -> None:
         """So the attachment case is a real floor rather than a formality."""
-        assert comment_block_above("# a comment\nsomething_else\n", UV_FETCH_GUARD) == ""
+        assert (
+            comment_block_above("# a comment\nsomething_else\n", UV_FETCH_GUARD) == ""
+        )
 
     def test_fenced_blocks_returns_bodies_not_fences(self) -> None:
-        blocks = fenced_blocks("intro\n```bash\nfirst\n```\nmid\n```\nsecond\n```\nend\n")
+        blocks = fenced_blocks(
+            "intro\n```bash\nfirst\n```\nmid\n```\nsecond\n```\nend\n"
+        )
         assert blocks == ["first\n", "second\n"]
 
     def test_fenced_blocks_sees_a_block_nested_in_a_list(self) -> None:
         """The measured hole: a duplicate recipe indented inside a numbered list was invisible.
 
-        ``deploy/website/README.md`` writes its commands that way, so this is not a hypothetical
+        ``infrastructure/website/README.md`` writes its commands that way, so this is not a hypothetical
         indentation — it is the shape a second copy would actually take, and it survived the
         duplication rail until this case existed.
         """
@@ -1464,9 +1464,7 @@ class TestParsersAreNotVacuous:
             "the maintainer's pin-regeneration command counts as a user verify recipe, which "
             "would make the duplication count wrong and the origin assertion vacuous."
         )
-        both = (
-            f"```bash\ncurl -o install.sh {SERVED_URL}\nshasum -a 256 -c install.sh.sha256\n```\n"
-        )
+        both = f"```bash\ncurl -o install.sh {SERVED_URL}\nshasum -a 256 -c install.sh.sha256\n```\n"
         assert len(verify_recipes(both)) == 1
 
     def test_markdown_section_stops_at_the_next_heading(self) -> None:
@@ -1481,9 +1479,14 @@ class TestParsersAreNotVacuous:
         assert "run me" in markdown_section(doc, "Target")
 
     def test_host_of_isolates_the_host(self) -> None:
-        assert host_of("https://raw.githubusercontent.com/o/r/main/x.sha256") != SERVED_HOST
+        assert (
+            host_of("https://raw.githubusercontent.com/o/r/main/x.sha256")
+            != SERVED_HOST
+        )
         assert host_of(f"https://{SERVED_HOST}/install.sh.sha256") == SERVED_HOST
         assert host_of("not a url") == ""
 
     def test_urls_strips_trailing_markdown_punctuation(self) -> None:
-        assert urls("see (https://example.com/a.sha256), then") == ["https://example.com/a.sha256"]
+        assert urls("see (https://example.com/a.sha256), then") == [
+            "https://example.com/a.sha256"
+        ]

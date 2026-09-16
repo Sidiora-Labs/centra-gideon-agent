@@ -31,9 +31,7 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.action_providers.base import ActionContext
-from gideon.action_providers.template import render_template
-from gideon.event_triggers import (
+from gideon.automation.event_triggers import (
     CONTENT_MATCH,
     CONTENT_MATCH_SCAN_LIMIT,
     MEMORY_KEY_PATTERN,
@@ -41,27 +39,28 @@ from gideon.event_triggers import (
     EventTrigger,
     catastrophic_regex_hint,
 )
-from gideon.event_triggers import matches as _matches
+from gideon.automation.event_triggers import matches as _matches
+from gideon.integrations.action_providers.base import ActionContext
+from gideon.integrations.action_providers.template import render_template
 
 
 def matches(t, **kw):
     """This file exercises the payload-is-data rule for MEMORY triggers; source scoping is
-    covered in ``test_event_triggers.py``, so default the source here to keep the calls focused."""
+    covered in ``test_event_triggers.py``, so default the source here to keep the calls focused.
+    """
     return _matches(t, source=kw.pop("source", SOURCE_MEMORY), **kw)
 
 
 def _trigger(**kw) -> EventTrigger:
-    return EventTrigger(id=kw.pop("id", "e:t"), pattern=kw.pop("pattern", CONTENT_MATCH), **kw)
-
-
-# ── rule (d): the payload never supplies a pattern ──
+    return EventTrigger(
+        id=kw.pop("id", "e:t"), pattern=kw.pop("pattern", CONTENT_MATCH), **kw
+    )
 
 
 def test_the_PATTERN_comes_from_the_TRIGGER_not_the_value():
     """The rule's core. A value that looks like a regex is matched as literal data."""
     t = _trigger(content_re="deploy")
     assert matches(t, event_type="set", key="k", value="deploy finished") is True
-    # The value's own regex-ish text is not compiled — it is the haystack, never the needle.
     assert matches(t, event_type="set", key="k", value=".*") is False
 
 
@@ -77,7 +76,6 @@ def test_the_KEY_GLOB_comes_from_the_trigger_too():
     t = _trigger(pattern=MEMORY_KEY_PATTERN, key_glob="project.acme.*")
     assert matches(t, event_type="set", key="project.acme.x", value="v") is True
     assert matches(t, event_type="set", key="project.other.x", value="v") is False
-    # A value shaped like a glob changes nothing.
     assert matches(t, event_type="set", key="other", value="project.acme.*") is False
 
 
@@ -91,15 +89,16 @@ def test_a_payload_value_is_NOT_re_expanded_as_a_template():
     )
     out = render_template("$new_items", ctx)
     assert "s3cr3t" not in out
-    assert "$SECRET_KEY" in out, "the placeholder stays literal — one substitution pass only"
+    assert (
+        "$SECRET_KEY" in out
+    ), "the placeholder stays literal — one substitution pass only"
 
 
 def test_a_payload_value_cannot_inject_CONTEXT():
-    ctx = ActionContext(event="e", context="the-real-context", payload={"x": "see $CONTEXT"})
+    ctx = ActionContext(
+        event="e", context="the-real-context", payload={"x": "see $CONTEXT"}
+    )
     assert "the-real-context" not in render_template("$x", ctx)
-
-
-# ── the scan cap ──
 
 
 def test_the_scan_is_LENGTH_CAPPED():
@@ -115,19 +114,27 @@ def test_a_match_INSIDE_the_cap_still_fires():
     assert matches(t, event_type="set", key="k", value="NEEDLE at the front") is True
 
 
-def test_the_cap_does_not_truncate_what_is_STORED_or_FIRED():
-    """The cap applies to the SCAN only. Truncating the value itself would silently change what the
-    automation sees — asserted on the source, because the property is that `matches` is pure and
-    never writes."""
-    import inspect
+def test_the_cap_does_not_truncate_what_is_STORED_or_FIRED(tmp_path, monkeypatch):
+    from gideon.automation.event_triggers import EventTriggerEngine, EventTriggerStore
+    from gideon.automation.triggers.dispatch import drain_spool
 
-    # Inspect the real matcher, not this file's source-defaulting wrapper.
-    src = inspect.getsource(_matches)
-    assert "scanned" in src, "the cap applies to a local scan copy"
-    assert "value =" not in src, "matches must never rebind the caller's value"
-
-
-# ── the catastrophic-regex hint ──
+    monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
+    trigger = _trigger(content_re="NEEDLE")
+    value = "NEEDLE" + "x" * CONTENT_MATCH_SCAN_LIMIT + "TAIL"
+    store = EventTriggerStore(tmp_path / "event_triggers.json")
+    store.upsert(trigger)
+    EventTriggerEngine(store).on_event(
+        source="memory",
+        event_type="set",
+        key="k",
+        value=value,
+        now=100,
+    )
+    pending, invalid = drain_spool()
+    assert invalid == 0 and len(pending) == 1
+    assert pending[0].payload["value"] == value
+    assert pending[0].payload["value"].endswith("TAIL")
+    assert trigger.content_re == store.load()[0].content_re == "NEEDLE"
 
 
 @pytest.mark.parametrize(
@@ -170,14 +177,11 @@ def test_the_hint_says_HOW_TO_FIX_IT():
     assert "Simplify" in hint
 
 
-# ── the hint is WIRED, not inert ──
-
-
 def test_the_CREATE_handler_surfaces_the_hint():
     """🔴 A hint nothing returns is the inert-control defect this program keeps finding."""
     import inspect
 
-    from gideon.dashboard.handlers import triggers as T
+    from gideon.interfaces.dashboard.handlers import triggers as T
 
     src = inspect.getsource(T._create_event)
     assert "_regex_hint" in src and "warning" in src
@@ -188,7 +192,7 @@ def test_the_UPDATE_handler_surfaces_the_hint_too():
     their memory writes get slow."""
     import inspect
 
-    from gideon.dashboard.handlers import triggers as T
+    from gideon.interfaces.dashboard.handlers import triggers as T
 
     src = inspect.getsource(T._update_event)
     assert "_regex_hint" in src and "warning" in src
@@ -198,5 +202,5 @@ def test_a_catastrophic_pattern_is_WARNED_not_REFUSED():
     """Refusing would break triggers people already have — the same warn-and-keep-working reasoning
     S119 recorded for a verbatim webhook token. The trigger still matches."""
     t = _trigger(content_re=r"(a+)+$")
-    assert matches(t, event_type="set", key="k", value="aaa!") is False  # ran, did not raise
+    assert matches(t, event_type="set", key="k", value="aaa!") is False
     assert catastrophic_regex_hint(t.content_re), "and the author was warned"

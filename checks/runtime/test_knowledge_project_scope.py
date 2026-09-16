@@ -28,26 +28,27 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.action_providers.base import ActionContext
-from gideon.action_providers.knowledge_persist_provider import (
+from gideon.cognition.knowledge import project_scope
+from gideon.cognition.knowledge.session_brief import build as build_brief
+from gideon.cognition.knowledge.session_brief import project_tag
+from gideon.cognition.knowledge.store import KnowledgeStore, knowledge_db_path
+from gideon.engine.tasks import registry
+from gideon.engine.tasks.handlers import register_task_routes
+from gideon.integrations.action_providers.base import ActionContext
+from gideon.integrations.action_providers.knowledge_persist_provider import (
     KnowledgePersistActionProvider,
 )
-from gideon.knowledge import project_scope
-from gideon.knowledge.session_brief import build as build_brief
-from gideon.knowledge.session_brief import project_tag
-from gideon.knowledge.store import KnowledgeStore, knowledge_db_path
-from gideon.tasks import registry
-from gideon.tasks.handlers import register_task_routes
 
 
 @pytest.fixture(autouse=True)
 def _isolated_home(tmp_path, monkeypatch):
     """`GIDEON_HOME` so `knowledge_db_path()` — and every other import-bound store —
-    resolves inside tmp. Patching `config_dir` alone would miss the modules that bound it."""
+    resolves inside tmp. Patching `config_dir` alone would miss the modules that bound it.
+    """
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    monkeypatch.setattr("gideon.tasks.hierarchy.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.engine.tasks.hierarchy.config_dir", lambda: home)
     return home
 
 
@@ -77,7 +78,9 @@ async def _persist(
 
 
 def _metadata(item_id: str) -> dict:
-    rows = list(_store().db.execute("SELECT file_metadata FROM items WHERE id = ?", (item_id,)))
+    rows = list(
+        _store().db.execute("SELECT file_metadata FROM items WHERE id = ?", (item_id,))
+    )
     assert rows, f"item {item_id} not found"
     return json.loads(rows[0]["file_metadata"] or "{}")
 
@@ -90,27 +93,30 @@ def _tags(item_id: str) -> set[str]:
     return {r["name"] for r in rows}
 
 
-# ── the closed enum ─────────────────────────────────────────────────────────
-
-
 class TestSharingPolicy:
     def test_the_enum_is_exactly_private_and_shared(self):
         assert {p.value for p in project_scope.SharingPolicy} == {"private", "shared"}
 
     def test_an_undeclared_or_unknown_policy_fails_closed_to_private(self):
-        assert project_scope.normalize_policy(None) is project_scope.SharingPolicy.PRIVATE
+        assert (
+            project_scope.normalize_policy(None) is project_scope.SharingPolicy.PRIVATE
+        )
         assert project_scope.normalize_policy("") is project_scope.SharingPolicy.PRIVATE
         assert project_scope.normalize_policy("world-readable") is (
             project_scope.SharingPolicy.PRIVATE
         )
-        assert project_scope.DEFAULT_SHARING_POLICY is project_scope.SharingPolicy.PRIVATE
+        assert (
+            project_scope.DEFAULT_SHARING_POLICY is project_scope.SharingPolicy.PRIVATE
+        )
 
     def test_every_member_is_handled_by_the_cross_container_filter(self):
         """Enumerated, not spot-checked: each member must produce a decided answer for a
-        FOREIGN project, so a future third member trips this instead of falling through."""
+        FOREIGN project, so a future third member trips this instead of falling through.
+        """
         decided = {
             policy: project_scope.visible_in_project(
-                {"project_id": "p-owner", "sharing_policy": policy.value}, project_id="p-other"
+                {"project_id": "p-owner", "sharing_policy": policy.value},
+                project_id="p-other",
             )
             for policy in project_scope.SharingPolicy
         }
@@ -121,10 +127,9 @@ class TestSharingPolicy:
 
     def test_an_unscoped_item_is_not_claimed_by_any_project(self):
         assert not project_scope.visible_in_project({}, project_id="p-a")
-        assert not project_scope.visible_in_project({"sharing_policy": "shared"}, project_id="p-a")
-
-
-# ── the writer ──────────────────────────────────────────────────────────────
+        assert not project_scope.visible_in_project(
+            {"sharing_policy": "shared"}, project_id="p-a"
+        )
 
 
 class TestRunWrittenItemsCarryScope:
@@ -168,17 +173,18 @@ class TestRunWrittenItemsCarryScope:
         """First writer owns the container: a second project re-persisting identical content
         records corroboration without moving the item — otherwise "private to its project"
         would end wherever the last run happened to be."""
-        first = await _persist(title="Shared truth", project_id="p-alpha", content="same body")
-        second = await _persist(title="Shared truth", project_id="p-beta", content="same body")
+        first = await _persist(
+            title="Shared truth", project_id="p-alpha", content="same body"
+        )
+        second = await _persist(
+            title="Shared truth", project_id="p-beta", content="same body"
+        )
 
-        assert second["item_id"] == first["item_id"]  # reinforced, not duplicated
+        assert second["item_id"] == first["item_id"]
         meta = _metadata(first["item_id"])
         assert meta["project_id"] == "p-alpha"
         assert project_tag("p-alpha") in _tags(first["item_id"])
         assert project_tag("p-beta") not in _tags(first["item_id"])
-
-
-# ── the readers ─────────────────────────────────────────────────────────────
 
 
 class TestProjectReaders:
@@ -196,8 +202,12 @@ class TestProjectReaders:
 
     @pytest.mark.asyncio
     async def test_the_project_view_shows_own_items_and_only_shared_foreign_ones(self):
-        own_private = await _persist(title="Own private", project_id="p-alpha", content="a")
-        foreign_private = await _persist(title="Foreign private", project_id="p-beta", content="b")
+        own_private = await _persist(
+            title="Own private", project_id="p-alpha", content="a"
+        )
+        foreign_private = await _persist(
+            title="Foreign private", project_id="p-beta", content="b"
+        )
         foreign_shared = await _persist(
             title="Foreign shared", project_id="p-beta", policy="shared", content="c"
         )
@@ -209,8 +219,6 @@ class TestProjectReaders:
         assert foreign_shared["item_id"] in by_id
         assert foreign_private["item_id"] not in by_id
         assert by_id[own_private["item_id"]]["source_project"] == ""
-        # A foreign row is labeled with its OWNING project, never presented as this
-        # project's own output. The name is "" only when that project no longer exists.
         assert by_id[foreign_shared["item_id"]]["project_id"] == "p-beta"
         assert by_id[foreign_shared["item_id"]]["sharing_policy"] == "shared"
 
@@ -221,15 +229,12 @@ class TestProjectReaders:
         assert project_scope.project_items(_store(), project_id="") == []
 
 
-# ── the HTTP surface the FE reads ───────────────────────────────────────────
-
-
 @asynccontextmanager
 async def _client(home):
     registry._providers.clear()
     with (
-        patch("gideon.tasks.native.config_dir", return_value=home),
-        patch("gideon.tasks.hierarchy.config_dir", return_value=home),
+        patch("gideon.engine.tasks.native.config_dir", return_value=home),
+        patch("gideon.engine.tasks.hierarchy.config_dir", return_value=home),
     ):
         app = web.Application()
         register_task_routes(app)
@@ -244,9 +249,13 @@ async def test_linked_endpoint_serves_the_project_knowledge_section(_isolated_ho
     on THAT payload — a filter only the Python API can see is a filter no user benefits from.
     """
     async with _client(_isolated_home) as client:
-        pid = (await (await client.post("/api/projects", json={"name": "Alpha"})).json())["id"]
+        pid = (
+            await (await client.post("/api/projects", json={"name": "Alpha"})).json()
+        )["id"]
         await _persist(title="Persisted by a run", project_id=pid)
-        await _persist(title="Someone else's secret", project_id="p-other", content="zz")
+        await _persist(
+            title="Someone else's secret", project_id="p-other", content="zz"
+        )
 
         body = await (await client.get(f"/api/projects/{pid}/linked")).json()
 

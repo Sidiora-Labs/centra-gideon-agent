@@ -5,7 +5,7 @@ accept a valid layout, coerce/clamp numeric fields to the 12-col grid, drop
 unknown/duplicate widget ids, treat empty as reset, and reject malformed shapes
 (→ 400 at the handler)."""
 
-from gideon.dashboard.handlers.files import _sanitize_dashboard_layout
+from gideon.interfaces.dashboard.handlers.files import _sanitize_dashboard_layout
 
 
 class TestSanitizeDashboardLayout:
@@ -18,13 +18,19 @@ class TestSanitizeDashboardLayout:
             {"widgets": [{"id": "hero", "x": 0, "y": 0, "w": 12, "h": 1}], "v": 1}
         )
         assert out == {
-            "widgets": [{"id": "hero", "x": 0, "y": 0, "w": 12, "h": 1, "hidden": False}],
+            "widgets": [
+                {"id": "hero", "x": 0, "y": 0, "w": 12, "h": 1, "hidden": False}
+            ],
             "v": 1,
         }
 
     def test_hidden_flag_preserved(self) -> None:
         out = _sanitize_dashboard_layout(
-            {"widgets": [{"id": "memory", "x": 9, "y": 6, "w": 3, "h": 2, "hidden": True}]}
+            {
+                "widgets": [
+                    {"id": "memory", "x": 9, "y": 6, "w": 3, "h": 2, "hidden": True}
+                ]
+            }
         )
         assert out["widgets"][0]["hidden"] is True
 
@@ -61,7 +67,6 @@ class TestSanitizeDashboardLayout:
         assert len(out["widgets"]) == 1
 
     def test_all_unknown_collapses_to_reset(self) -> None:
-        # A layout whose every id is unknown yields no widgets → treated as reset.
         assert (
             _sanitize_dashboard_layout(
                 {"widgets": [{"id": "nope", "x": 0, "y": 0, "w": 4, "h": 2}]}

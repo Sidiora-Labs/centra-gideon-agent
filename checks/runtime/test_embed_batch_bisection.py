@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.knowledge import embed_batch as eb
+from gideon.cognition.knowledge import embed_batch as eb
 
 
 class CeilingProvider:
@@ -40,7 +40,9 @@ class CeilingProvider:
         self.calls += 1
         self.sizes.append(len(texts))
         if len(texts) > self.ceiling:
-            raise RuntimeError(f"batch size {len(texts)} exceeds maximum of {self.ceiling}")
+            raise RuntimeError(
+                f"batch size {len(texts)} exceeds maximum of {self.ceiling}"
+            )
         for t in texts:
             if t in self.fail_texts:
                 raise RuntimeError("this specific input is not embeddable")
@@ -48,7 +50,6 @@ class CeilingProvider:
 
 
 def _texts(n: int) -> list[str]:
-    # Distinct lengths, so a mis-aligned result is detectable by VALUE rather than only by count.
     return ["x" * (i + 1) for i in range(n)]
 
 
@@ -58,15 +59,14 @@ def _no_sleeping(monkeypatch):
     monkeypatch.setattr(eb.time, "sleep", lambda _s: None)
 
 
-# ── The bisection ─────────────────────────────────────────────────────────
-
-
 def test_bisection_converges_on_a_provider_that_rejects_large_batches():
     """The atom's named proof. K=4, batch of 16 → split until every text is embedded."""
     p = CeilingProvider(ceiling=4)
     texts = _texts(16)
     out = eb.embed_texts(texts, embed_many=p.embed_many, batch_size=16, retry_budget=1)
-    assert len(out) == len(texts), "the result changed length — a chunk was dropped or invented"
+    assert len(out) == len(
+        texts
+    ), "the result changed length — a chunk was dropped or invented"
     assert all(v is not None for v in out), f"some texts never embedded: {out}"
     assert max(p.sizes) == 16 and min(p.sizes) <= 4, f"no discovery happened: {p.sizes}"
 
@@ -76,15 +76,21 @@ def test_every_vector_lands_on_its_OWN_text_after_a_split():
     p = CeilingProvider(ceiling=3)
     texts = _texts(11)
     out = eb.embed_texts(texts, embed_many=p.embed_many, batch_size=11, retry_budget=1)
-    assert out == [[float(len(t))] for t in texts], "vectors were mis-attributed across the split"
+    assert out == [
+        [float(len(t))] for t in texts
+    ], "vectors were mis-attributed across the split"
 
 
 def test_bisection_is_logarithmic_not_one_call_per_text():
     """The cost of discovery. 32 texts with a ceiling of 8 must not degrade to 32 calls."""
     p = CeilingProvider(ceiling=8)
-    out = eb.embed_texts(_texts(32), embed_many=p.embed_many, batch_size=32, retry_budget=1)
+    out = eb.embed_texts(
+        _texts(32), embed_many=p.embed_many, batch_size=32, retry_budget=1
+    )
     assert all(v is not None for v in out)
-    assert p.calls < 32, f"bisection degenerated to per-text calls: {p.calls} calls, {p.sizes}"
+    assert (
+        p.calls < 32
+    ), f"bisection degenerated to per-text calls: {p.calls} calls, {p.sizes}"
 
 
 def test_a_single_unembeddable_text_does_not_cost_the_others_their_vectors():
@@ -96,10 +102,14 @@ def test_a_single_unembeddable_text_does_not_cost_the_others_their_vectors():
     """
     bad = _texts(8)[3]
     p = CeilingProvider(ceiling=8, fail_texts={bad})
-    out = eb.embed_texts(_texts(8), embed_many=p.embed_many, batch_size=8, retry_budget=1)
+    out = eb.embed_texts(
+        _texts(8), embed_many=p.embed_many, batch_size=8, retry_budget=1
+    )
     assert len(out) == 8
     assert out[3] is None, "the poison text was reported as embedded"
-    assert all(v is not None for i, v in enumerate(out) if i != 3), f"collateral damage: {out}"
+    assert all(
+        v is not None for i, v in enumerate(out) if i != 3
+    ), f"collateral damage: {out}"
 
 
 def test_nothing_is_dropped_when_EVERY_text_fails():
@@ -108,9 +118,6 @@ def test_nothing_is_dropped_when_EVERY_text_fails():
     p = CeilingProvider(ceiling=8, fail_texts=set(texts))
     out = eb.embed_texts(texts, embed_many=p.embed_many, batch_size=5, retry_budget=1)
     assert out == [None] * 5
-
-
-# ── Retry and backoff ─────────────────────────────────────────────────────
 
 
 def test_a_transient_failure_is_retried_within_the_budget():
@@ -151,7 +158,9 @@ def test_a_TERMINAL_error_is_not_retried_at_all():
         calls.append(len(texts))
         raise RuntimeError("401 Unauthorized: invalid api key")
 
-    out = eb.embed_texts(_texts(4), embed_many=unauthorized, batch_size=4, retry_budget=3)
+    out = eb.embed_texts(
+        _texts(4), embed_many=unauthorized, batch_size=4, retry_budget=3
+    )
     assert out == [None] * 4
     assert calls == [4], f"a terminal error was retried or bisected: {calls}"
 
@@ -173,11 +182,10 @@ def test_an_UNRECOGNISED_error_still_bisects(monkeypatch):
             else [[1.0] for _ in texts]
         ),
     )
-    out = eb.embed_texts(_texts(4), embed_many=p.embed_many, batch_size=4, retry_budget=1)
+    out = eb.embed_texts(
+        _texts(4), embed_many=p.embed_many, batch_size=4, retry_budget=1
+    )
     assert all(v is not None for v in out), "an unrecognised error was not bisected"
-
-
-# ── Shape errors ──────────────────────────────────────────────────────────
 
 
 def test_a_provider_returning_the_WRONG_COUNT_is_a_failure_not_a_zip():
@@ -192,12 +200,9 @@ def test_a_provider_returning_the_WRONG_COUNT_is_a_failure_not_a_zip():
 
     out = eb.embed_texts(_texts(4), embed_many=short, batch_size=4, retry_budget=1)
     assert len(out) == 4
-    # It bisects on the shape error and each size-1 call still returns a 0-length list, so every
-    # slot ends None — the important part is that NO slot got another text's vector.
-    assert out == [None] * 4, f"a wrong-count response was zipped into the results: {out}"
-
-
-# ── The per-text fallback ─────────────────────────────────────────────────
+    assert (
+        out == [None] * 4
+    ), f"a wrong-count response was zipped into the results: {out}"
 
 
 def test_a_provider_with_no_batch_path_still_embeds_everything():
@@ -224,13 +229,10 @@ def test_an_empty_input_is_an_empty_result():
     assert eb.embed_texts([]) == []
 
 
-# ── Config round-trip ─────────────────────────────────────────────────────
-
-
 def test_batch_size_and_retry_budget_round_trip_through_config(tmp_path, monkeypatch):
     """The clause says both round-trip; this asserts all the way to the reader."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     cfg = AppConfig.load()
     assert cfg.knowledge.embed_batch_size == 32
@@ -238,10 +240,12 @@ def test_batch_size_and_retry_budget_round_trip_through_config(tmp_path, monkeyp
     d = cfg.to_dict()["knowledge"]
     assert "embed_batch_size" in d and "embed_retry_budget" in d
 
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
     for key in ("knowledge.embed_batch_size", "knowledge.embed_retry_budget"):
-        assert _EDITABLE_CONFIG.get(key, {}).get("type") == "int", f"{key} is not PATCH-writable"
+        assert (
+            _EDITABLE_CONFIG.get(key, {}).get("type") == "int"
+        ), f"{key} is not PATCH-writable"
 
     class _K:
         embed_batch_size = 8
@@ -256,7 +260,7 @@ def test_batch_size_and_retry_budget_round_trip_through_config(tmp_path, monkeyp
 
 
 def _patch_knowledge_cfg(monkeypatch, *, batch: int, budget: int) -> None:
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     class _K:
         embed_batch_size = batch
@@ -291,18 +295,22 @@ def test_a_NEGATIVE_batch_size_cannot_hang_the_import(tmp_path, monkeypatch):
     """
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     _patch_knowledge_cfg(monkeypatch, batch=-5, budget=-2)
-    assert eb.batch_size_from_config() == 1, "a negative batch size reached the grouping loop"
+    assert (
+        eb.batch_size_from_config() == 1
+    ), "a negative batch size reached the grouping loop"
     assert eb.retry_budget_from_config() == 1
     # End to end: every text still embeds rather than the loop yielding nothing.
     p = CeilingProvider(ceiling=99)
     out = eb.embed_texts(_texts(3), embed_many=p.embed_many)
-    assert all(v is not None for v in out), f"a negative config emptied the import: {out}"
+    assert all(
+        v is not None for v in out
+    ), f"a negative config emptied the import: {out}"
 
 
 def test_the_configured_batch_size_is_actually_used(tmp_path, monkeypatch):
     """A knob nothing reads is the defect class this repo keeps finding — assert the group size."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     class _K:
         embed_batch_size = 3

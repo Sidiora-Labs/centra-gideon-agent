@@ -15,40 +15,36 @@ from pathlib import Path
 
 import pytest
 
-from gideon.apps import app_manager, catalog, manager
-from gideon.apps import source as app_source
-from gideon.providers import loader
+from gideon.extensions.apps import app_manager, catalog, manager
+from gideon.extensions.apps import source as app_source
+from gideon.extensions.providers import loader
 
 
 @pytest.fixture(autouse=True)
 def _isolate(tmp_path, monkeypatch):
-    import gideon.config.loader as cfg
+    import gideon.core.config.loader as cfg
+
+    monkeypatch.delenv("GIDEON_APP_CATALOG_URLS", raising=False)
+    monkeypatch.delenv("GIDEON_APP_REGISTRY_URL", raising=False)
 
     monkeypatch.setattr(cfg, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(manager, "config_dir", lambda: tmp_path)
-    # catalog binds config_dir into its OWN namespace at import (from ... import
-    # config_dir), so patch it there too — otherwise catalog._sources_path() escapes
-    # the sandbox and reads/writes the real ~/.gideon/apps/app-sources.json.
     monkeypatch.setattr(catalog, "config_dir", lambda: tmp_path)
-    # The APE-7 update-surfacing path persists its notified high-water mark via
-    # entity_routes (entity_settings/app_updates.json) and falls back to an InboxStore
-    # under inbox.config_dir — both bind config_dir at import into their own namespace,
-    # so patch those too or the "no re-nag" state would touch the real ~/.gideon.
-    from gideon import inbox as _inbox
-    from gideon.providers import entity_routes as _er
+    from gideon.extensions.providers import entity_routes as _er
+    from gideon.integrations import inbox as _inbox
 
     monkeypatch.setattr(_er, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(_inbox, "config_dir", lambda: tmp_path)
     native = tmp_path / "native"
     native.mkdir()
     monkeypatch.setattr(loader, "BUNDLED_DIR", native)
-    # Neutralize the always-present first-party default source so these tests see a
-    # clean local-source baseline (env set to a nonexistent path disables it).
     monkeypatch.setenv("GIDEON_FIRST_PARTY_APPS_DIR", str(tmp_path / "no-first-party"))
     return tmp_path
 
 
-def _native(root: Path, name: str, *, native: bool, provider_type: str = "search") -> None:
+def _native(
+    root: Path, name: str, *, native: bool, provider_type: str = "search"
+) -> None:
     d = root / "native" / name
     d.mkdir(parents=True)
     mani: dict = {
@@ -59,7 +55,7 @@ def _native(root: Path, name: str, *, native: bool, provider_type: str = "search
         "icon": "Plug",
         "provider": {
             "type": provider_type,
-            "implementation": "gideon.search_providers.duckduckgo_provider:create_provider",
+            "implementation": "gideon.integrations.search_providers.duckduckgo_provider:create_provider",
         },
     }
     if native:
@@ -76,7 +72,9 @@ def _store_available() -> set[str]:
     these tests would reach github.com. ``available_bundled`` is a pure enumerator now
     (issue 2528): the install-state filter lives in ``resolve_catalog_entries`` with every
     other source's, so this is the composition the wire payload actually performs."""
-    return {e.name for e in catalog.resolve_catalog_entries(catalog.available_bundled())}
+    return {
+        e.name for e in catalog.resolve_catalog_entries(catalog.available_bundled())
+    }
 
 
 def test_native_app_seeded_then_absent_from_available(tmp_path):
@@ -84,7 +82,7 @@ def test_native_app_seeded_then_absent_from_available(tmp_path):
     (The Store surfaces only a native app MISSING from the Library — the defensive
     self-heal case — which doesn't happen in normal operation.)"""
     _native(tmp_path, "brave-search", native=True)
-    app_manager.seed_builtin_apps()  # → now in the Library
+    app_manager.seed_builtin_apps()
     assert "brave-search" not in _store_available()
 
 
@@ -93,51 +91,48 @@ def test_native_app_cannot_be_force_uninstalled(tmp_path):
     Library and never reappears as 'available'."""
     _native(tmp_path, "brave-search", native=True)
     app_manager.seed_builtin_apps()
-    assert app_manager.force_uninstall("brave-search") is False  # locked
-    assert manager._read_installed("brave-search") is not None  # still installed
+    assert app_manager.force_uninstall("brave-search") is False
+    assert manager._read_installed("brave-search") is not None
     assert "brave-search" not in _store_available()
 
 
 def test_missing_native_app_resurfaces_as_available(tmp_path):
     """Defensive self-heal: if a native app's installed record is somehow gone, it
-    resurfaces in available_bundled so it can be restored (native apps are mandatory)."""
+    resurfaces in available_bundled so it can be restored (native apps are mandatory).
+    """
     _native(tmp_path, "brave-search", native=True)
-    # NOT seeded → not in the Library → shows as available (native, provider search)
-    entry = next((e for e in catalog.available_bundled() if e.name == "brave-search"), None)
+    entry = next(
+        (e for e in catalog.available_bundled() if e.name == "brave-search"), None
+    )
     assert entry is not None
     assert entry.isProvider is True and entry.providerType == "search"
     assert entry.sourceKind == "native" and entry.icon == "Plug"
     assert "brave-search" in _store_available()
 
 
-def test_default_first_party_git_source_present():
-    """The published first-party apps repo ships as a Store default (so a plain
-    pip install surfaces first-party apps, uninstalled). It is not user-removable."""
-    defaults = catalog.list_git_sources()
-    assert "https://github.com/Gideon/GideonApps.git" in defaults
-    # A bundled default can't be removed via remove_git_source (it's not a user src).
-    catalog.remove_git_source("https://github.com/Gideon/GideonApps.git")
-    assert "https://github.com/Gideon/GideonApps.git" in catalog.list_git_sources()
+def test_fresh_catalog_has_no_external_defaults(tmp_path):
+    assert catalog.list_git_sources() == []
+    assert catalog.seed_default_git_sources() == []
+    assert catalog.network_source_hosts() == []
+    assert not (tmp_path / "apps" / "app-sources.json").exists()
+
+
+def test_configured_first_party_git_source_present(monkeypatch):
+    source = "https://catalog.example.test/apps.git"
+    monkeypatch.setenv("GIDEON_APP_CATALOG_URLS", source)
+    assert catalog.list_git_sources() == [source]
+    catalog.remove_git_source(source)
+    assert catalog.list_git_sources() == [source]
 
 
 def test_git_sources_add_remove(tmp_path):
-    # Defaults are always present; user sources accumulate alongside them.
     assert "https://github.com/acme/cool-app.git" not in catalog.list_git_sources()
     catalog.add_git_source("https://github.com/acme/cool-app.git")
     assert "https://github.com/acme/cool-app.git" in catalog.list_git_sources()
-    # idempotent
     catalog.add_git_source("https://github.com/acme/cool-app.git")
     assert catalog.list_git_sources().count("https://github.com/acme/cool-app.git") == 1
     catalog.remove_git_source("https://github.com/acme/cool-app.git")
     assert "https://github.com/acme/cool-app.git" not in catalog.list_git_sources()
-
-
-# ── git-source install from a multi-app repo (PUBL-9) ──
-#
-# The published apps repo (GideonApps) publishes NO app-registry.json, so the
-# Store reaches it through the clone-then-subdir-scan fallback and installs one app at
-# a time via a ``url#app`` pointer. These tests build a real bare git repo of the same
-# shape and drive it over ``file://`` — the identical git code path, no network.
 
 
 def _git(*args: str, cwd: Path) -> None:
@@ -212,7 +207,7 @@ def offline_git_sources(monkeypatch):
     ``available_catalog()`` shallow-clones every configured git source and the shipped
     default is the real published repo, so without this a test reaches github.com; the
     caches are process-global, so without the clear they leak between tests."""
-    monkeypatch.setattr(catalog, "_DEFAULT_GIT_SOURCES", ())
+    monkeypatch.delenv("GIDEON_APP_CATALOG_URLS", raising=False)
     catalog._git_scan_cache.clear()
     catalog._registry_cache.clear()
     yield
@@ -227,15 +222,12 @@ def test_git_source_subdir_apps_surface_as_install_cards(tmp_path, offline_git_s
 
     cat = catalog.available_catalog()
     git_apps = cat["gitApps"]
-    # Vacuity floor: a scan that discovers nothing must FAIL here, not pass forever on
-    # an empty list (a broken clone degrades to [] by design).
     assert len(git_apps) == 2, git_apps
     by_name = {e["name"]: e for e in git_apps}
     assert set(by_name) == {"alpha-app", "beta-app"}
     for name, entry in by_name.items():
         assert entry["sourceKind"] == "git"
         assert entry["source"] == url
-        # The install pointer install() has to accept for this card.
         assert entry["pointer"] == f"{url}#{name}"
     assert url in cat["gitSources"]
 
@@ -245,15 +237,15 @@ def test_catalog_git_pointer_resolves_to_the_named_app(tmp_path, offline_git_sou
     app's directory, not the repo root. This is the end of the Store install path."""
     url = _bare_repo_with_apps(tmp_path / "repo", ["alpha-app", "beta-app"])
     catalog.add_git_source(url)
-    cards = [e for e in catalog.available_catalog()["gitApps"] if e["name"] == "beta-app"]
+    cards = [
+        e for e in catalog.available_catalog()["gitApps"] if e["name"] == "beta-app"
+    ]
     assert cards, "fixture produced no beta-app card"
 
     resolved = app_source.resolve(cards[0]["pointer"])
     try:
         manifest = json.loads((resolved.path / "app.json").read_text(encoding="utf-8"))
         assert manifest["name"] == "beta-app"
-        # A remote clone is untrusted → the scanner's external tier, and the caller
-        # cleans up the whole clone, not just the app subdir.
         assert resolved.origin == "external"
         assert resolved.cleanup is True
         assert resolved.cleanup_path != resolved.path
@@ -272,9 +264,9 @@ def test_multi_app_git_url_without_a_suffix_names_the_apps(tmp_path):
         app_source.resolve(url)
     msg = str(excinfo.value)
     assert "2 apps" in msg
-    assert f"{url}#alpha-app" in msg  # the exact string the user should type
+    assert f"{url}#alpha-app" in msg
     assert "beta-app" in msg
-    assert "app.json" not in msg  # not the old root-manifest message
+    assert "app.json" not in msg
 
 
 def test_single_app_git_repo_still_resolves_at_its_root(tmp_path):
@@ -290,7 +282,9 @@ def test_single_app_git_repo_still_resolves_at_its_root(tmp_path):
             app_source._rmtree(resolved.cleanup_path)
 
 
-def test_git_repo_with_no_apps_resolves_and_leaves_the_manifest_error_to_install(tmp_path):
+def test_git_repo_with_no_apps_resolves_and_leaves_the_manifest_error_to_install(
+    tmp_path,
+):
     """A repo holding no apps at all keeps the plain "no app.json" failure — the
     multi-app hint must not swallow the genuinely-appless case."""
     url = _bare_repo_with_apps(tmp_path / "repo", [])
@@ -316,7 +310,9 @@ def test_git_scan_is_cached_within_its_ttl(tmp_path, offline_git_sources):
 
     _publish_app(repo, "beta-app")
     cached = catalog._scan_git_source(url, now=1000.0 + catalog._GIT_SCAN_TTL_SECS - 1)
-    assert {e.name for e in cached} == {"alpha-app"}, "second scan inside the TTL re-cloned"
+    assert {e.name for e in cached} == {
+        "alpha-app"
+    }, "second scan inside the TTL re-cloned"
 
     fresh = catalog._scan_git_source(url, now=1000.0 + catalog._GIT_SCAN_TTL_SECS + 1)
     assert {e.name for e in fresh} == {"alpha-app", "beta-app"}
@@ -331,26 +327,15 @@ def test_same_repo_with_and_without_dot_git_is_one_source(tmp_path):
     assert [s for s in catalog.list_git_sources() if "cool-app" in s] == [
         "https://github.com/acme/cool-app.git"
     ]
-    # Either spelling removes it.
     catalog.remove_git_source("https://github.com/acme/cool-app")
     assert not [s for s in catalog.list_git_sources() if "cool-app" in s]
 
 
-def test_published_default_source_is_not_duplicated_by_a_user_add():
-    """Measured against the real gateway: POST /api/apps/sources with the published repo
-    URL typed WITHOUT '.git' appended a SECOND source for the same repo — a full extra
-    shallow clone per catalog refresh (3.4s measured) that surfaced zero extra apps."""
-    user_sources = catalog.add_git_source("https://github.com/Gideon/GideonApps")
-
-    assert [s for s in catalog.list_git_sources() if "GideonApps" in s] == [
-        "https://github.com/Gideon/GideonApps.git"
-    ]
-    # Nor persisted as a user source: the stored list must not shadow a default, or
-    # retiring that default would silently hand the user a duplicate source.
-    assert user_sources == []
-
-
-# ── local-directory app sources (workspace-core-app-split §4) ──
+def test_configured_default_source_is_not_duplicated_by_a_user_add(monkeypatch):
+    source = "https://catalog.example.test/apps.git"
+    monkeypatch.setenv("GIDEON_APP_CATALOG_URLS", source)
+    assert catalog.add_git_source(source.removesuffix(".git")) == []
+    assert catalog.list_git_sources() == [source]
 
 
 def _local_app(root: Path, name: str) -> None:
@@ -363,7 +348,10 @@ def _local_app(root: Path, name: str) -> None:
                 "version": "1.0",
                 "displayName": name.title(),
                 "description": f"{name} local",
-                "provider": {"type": "search", "implementation": "provider:create_provider"},
+                "provider": {
+                    "type": "search",
+                    "implementation": "provider:create_provider",
+                },
             }
         ),
         encoding="utf-8",
@@ -393,7 +381,6 @@ def test_local_source_apps_surface_in_catalog(tmp_path):
     cat = catalog.available_catalog()
     assert str(src) in cat["localSources"]
     assert "tavily-search" in {a["name"] for a in cat["localApps"]}
-    # sourceKind flags it as local for the Store UI
     entry = next(a for a in cat["localApps"] if a["name"] == "tavily-search")
     assert entry["sourceKind"] == "local"
 
@@ -405,7 +392,10 @@ def test_catalog_carries_the_declared_quality_block(tmp_path):
     renders no badges rather than a row of misses it never signed up for."""
     src = tmp_path / "myapps"
     src.mkdir()
-    for name, quality in (("badged-app", {"tested": True, "a11y": False}), ("quiet-app", None)):
+    for name, quality in (
+        ("badged-app", {"tested": True, "a11y": False}),
+        ("quiet-app", None),
+    ):
         d = src / name
         d.mkdir(parents=True)
         mani = {
@@ -433,7 +423,12 @@ def _consent_fixture_source(tmp_path) -> Path:
         (
             "declines-net",
             {"cron": True, "network": False},
-            {"name": "nightly", "cron_expr": "23 * * * *", "agent": "researcher", "message": "go"},
+            {
+                "name": "nightly",
+                "cron_expr": "23 * * * *",
+                "agent": "researcher",
+                "message": "go",
+            },
         ),
         ("silent-net", {"cron": True}, {"name": "poller", "every": 3600, "agent": "a"}),
     ):
@@ -455,7 +450,9 @@ def _consent_fixture_source(tmp_path) -> Path:
     return src
 
 
-def test_catalog_consent_payload_distinguishes_a_network_denial_from_a_silence(tmp_path):
+def test_catalog_consent_payload_distinguishes_a_network_denial_from_a_silence(
+    tmp_path,
+):
     """The pre-install consent card reads THIS payload, and it used to collapse an
     explicit ``"network": false`` into the same shape as a manifest that never mentions
     the key — so an app that had stated it does not go out to the internet was disclosed
@@ -465,7 +462,6 @@ def test_catalog_consent_payload_distinguishes_a_network_denial_from_a_silence(t
     by_name = {a["name"]: a for a in catalog.available_catalog()["localApps"]}
     assert by_name["declines-net"]["permissions"]["network"] is False
     assert "network" not in by_name["silent-net"]["permissions"]
-    # The declaration is still not a grant — the enforced flag is untouched.
     assert by_name["declines-net"]["permissions"]["cron"] is True
 
 
@@ -480,8 +476,6 @@ def test_catalog_consent_payload_words_the_cron_cadence(tmp_path):
     assert cron["cron_expr"] == "23 * * * *", "the exact expression is not discarded"
     assert cron["cadence"] and cron["cadence"] != cron["cron_expr"]
     assert "23" in cron["cadence"] and "*" not in cron["cadence"]
-    # The interval form is the surface's own to word; a server cadence there would be a
-    # second spelling of the same fact.
     assert by_name["silent-net"]["crons"][0]["cadence"] == ""
 
 
@@ -492,14 +486,12 @@ def test_first_party_source_is_present_and_not_removable(tmp_path, monkeypatch):
     fp.mkdir()
     _local_app(fp, "brave-search")
     monkeypatch.setenv("GIDEON_FIRST_PARTY_APPS_DIR", str(fp))
-    # present in the list + its apps badged first-party
     assert str(fp) in catalog.list_local_sources()
     assert str(fp) in catalog.first_party_sources()
     cat = catalog.available_catalog()
     assert str(fp) in cat["firstPartySources"]
     entry = next(a for a in cat["localApps"] if a["name"] == "brave-search")
     assert entry["sourceKind"] == "first-party"
-    # not removable
     with pytest.raises(ValueError):
         catalog.remove_local_source(str(fp))
     assert str(fp) in catalog.list_local_sources()
@@ -512,7 +504,6 @@ def test_git_and_local_sources_independent(tmp_path):
     catalog.add_local_source(str(src))
     assert "https://github.com/x/gideon-app-y" in catalog.list_git_sources()
     assert str(src) in catalog.list_local_sources()
-    # removing one doesn't touch the other
     catalog.remove_git_source("https://github.com/x/gideon-app-y")
     assert str(src) in catalog.list_local_sources()
 
@@ -521,17 +512,15 @@ def test_legacy_flat_sources_file_upgrades(tmp_path):
     """A pre-existing flat {"sources":[urls]} file reads as git sources (back-compat)."""
     p = tmp_path / "apps" / "app-sources.json"
     p.parent.mkdir(parents=True)
-    p.write_text(json.dumps({"sources": ["https://github.com/x/legacy"]}), encoding="utf-8")
+    p.write_text(
+        json.dumps({"sources": ["https://github.com/x/legacy"]}), encoding="utf-8"
+    )
     assert "https://github.com/x/legacy" in catalog.list_git_sources()
-    # adding a local source rewrites in the typed shape without losing the git one
     src = tmp_path / "myapps"
     src.mkdir()
     catalog.add_local_source(str(src))
     assert "https://github.com/x/legacy" in catalog.list_git_sources()
     assert str(src) in catalog.list_local_sources()
-
-
-# ── update surfacing (APE-7) ──
 
 
 def _installed_app(root: Path, name: str, version: str) -> None:
@@ -540,7 +529,9 @@ def _installed_app(root: Path, name: str, version: str) -> None:
     d = root / "apps" / name
     d.mkdir(parents=True)
     (d / "installed.json").write_text(
-        json.dumps({"name": name, "version": version, "enabled": True, "origin": "local"}),
+        json.dumps(
+            {"name": name, "version": version, "enabled": True, "origin": "local"}
+        ),
         encoding="utf-8",
     )
     (d / "app.json").write_text(
@@ -591,9 +582,9 @@ def test_updates_available_lists_only_newer(tmp_path):
     _installed_app(tmp_path, "wiki", "1.0.0")
     src = tmp_path / "myapps"
     src.mkdir()
-    _source_app(src, "notes", "1.2.0")  # newer → listed
-    _source_app(src, "todo", "1.9.0")  # older → not listed
-    _source_app(src, "wiki", "1.0.0")  # same → not listed
+    _source_app(src, "notes", "1.2.0")
+    _source_app(src, "todo", "1.9.0")
+    _source_app(src, "wiki", "1.0.0")
     catalog.add_local_source(str(src))
 
     updates = catalog.updates_available()
@@ -609,7 +600,7 @@ def test_updates_available_ignores_app_with_no_source(tmp_path):
     _installed_app(tmp_path, "notes", "1.0.0")
     src = tmp_path / "myapps"
     src.mkdir()
-    catalog.add_local_source(str(src))  # empty source
+    catalog.add_local_source(str(src))
     assert catalog.updates_available() == []
 
 
@@ -638,8 +629,7 @@ def test_surface_app_updates_emits_one_notification(tmp_path):
     assert {u["name"] for u in updates} == {"notes"}
     assert len(state.notifications) == 1
     kind, title, _ = state.notifications[0]
-    # the wire kind resolves back to the registered apps/update pair
-    from gideon import notification_kinds as nk
+    from gideon.workspace import notification_kinds as nk
 
     assert nk.kind_for_legacy(kind).key == "apps/update"
     assert "Notes" in title
@@ -656,7 +646,7 @@ def test_surface_app_updates_does_not_renag_on_review(tmp_path):
 
     state = _FakeState()
     catalog.surface_app_updates(state)
-    catalog.surface_app_updates(state)  # second view — must not re-nag
+    catalog.surface_app_updates(state)
     assert len(state.notifications) == 1
 
 
@@ -671,7 +661,6 @@ def test_surface_app_updates_refires_only_for_a_newer_version(tmp_path):
     state = _FakeState()
     catalog.surface_app_updates(state)
     assert len(state.notifications) == 1
-    # source bumps again → a new version the user hasn't been told about
     _source_app(src, "notes", "1.3.0")
     catalog.surface_app_updates(state)
     assert len(state.notifications) == 2
@@ -690,28 +679,24 @@ def test_surface_app_updates_no_state_is_noop_emit(tmp_path):
 
 
 def test_app_update_notification_kind_is_registered():
-    from gideon import notification_kinds as nk
+    from gideon.workspace import notification_kinds as nk
 
     k = nk.resolve_kind("apps", "update")
     assert k.key == "apps/update"
     assert k.attention is True
     assert k.default_mode == "immediate"
-    # the wire string round-trips (or a rule against it would be silently ignored)
     assert nk.kind_for_legacy_pair("apps", "update") == "app_update"
     assert nk.kind_for_legacy("app_update").key == "apps/update"
 
 
-# ── SDK boundary (workspace-core-app-split §3) ──
-
-
 def test_sdk_reexports_are_core_classes():
     """The SDK is a thin facade — its symbols ARE the core ABCs (one definition)."""
+    from gideon.integrations.search_providers.base import SearchProvider as CoreSP
     from gideon.sdk.search import SearchProvider
-    from gideon.search_providers.base import SearchProvider as CoreSP
 
     assert SearchProvider is CoreSP
+    from gideon.integrations.tool_providers.base import ToolProvider as CoreTP
     from gideon.sdk.tool import RiskLevel, ToolProvider
-    from gideon.tool_providers.base import ToolProvider as CoreTP
 
     assert ToolProvider is CoreTP and RiskLevel is not None
 
@@ -739,27 +724,25 @@ def test_sdk_all_submodules_import():
     assert isinstance(SDK_VERSION, str)
 
 
-# ── P20: registry-index (federated app sources) ──────────────────────────────
-
-
 def _write_registry(root: Path, apps: list[dict]) -> None:
-    (root / "app-registry.json").write_text(json.dumps({"apps": apps}), encoding="utf-8")
+    (root / "app-registry.json").write_text(
+        json.dumps({"apps": apps}), encoding="utf-8"
+    )
 
 
 def test_parse_registry_tolerant_of_shapes_and_garbage():
-    # bare array OR {"apps":[...]}; drops nameless/malformed; dedups by name.
-    bare = catalog._parse_registry(json.dumps([{"name": "a"}, {"name": "b", "repo": "u"}]))
+    bare = catalog._parse_registry(
+        json.dumps([{"name": "a"}, {"name": "b", "repo": "u"}])
+    )
     assert [p.name for p in bare] == ["a", "b"]
     obj = catalog._parse_registry(
         json.dumps({"apps": [{"name": "x"}, {"no": "name"}, "junk", {"name": "x"}]})
     )
-    assert [p.name for p in obj] == ["x"]  # nameless + non-dict + dup dropped
+    assert [p.name for p in obj] == ["x"]
     assert catalog._parse_registry("not json") == []
 
 
 def test_local_source_registry_surfaces_remote_apps_without_dirscan(tmp_path):
-    # A local source that publishes app-registry.json → its pointers become install
-    # cards under remoteApps, WITHOUT any app.json on disk (no clone/dir-scan needed).
     src = tmp_path / "reg-src"
     src.mkdir()
     _write_registry(
@@ -780,7 +763,6 @@ def test_local_source_registry_surfaces_remote_apps_without_dirscan(tmp_path):
     assert "cool-app" in remote
     e = remote["cool-app"]
     assert e["displayName"] == "Cool App" and e["sourceKind"] == "local"
-    # the install POINTER carries repo + #subdirectory (routes through the scanner at install)
     assert e["pointer"] == "https://github.com/acme/cool.git#apps/cool"
 
 
@@ -790,11 +772,9 @@ def test_registry_index_is_cached_by_ttl(tmp_path):
     _write_registry(src, [{"name": "app-one"}])
     p1 = catalog._fetch_registry_index(str(src), is_git=False, now=1000.0)
     assert [p.name for p in p1] == ["app-one"]
-    # rewrite the index, but within the TTL the cached result stands
     _write_registry(src, [{"name": "app-two"}])
     p2 = catalog._fetch_registry_index(str(src), is_git=False, now=1000.0 + 100)
-    assert [p.name for p in p2] == ["app-one"]  # cached
-    # past the TTL → refetched
+    assert [p.name for p in p2] == ["app-one"]
     p3 = catalog._fetch_registry_index(
         str(src), is_git=False, now=1000.0 + catalog._REGISTRY_TTL_SECS + 1
     )
@@ -803,29 +783,22 @@ def test_registry_index_is_cached_by_ttl(tmp_path):
 
 def test_source_without_registry_falls_back_to_none(tmp_path):
     src = tmp_path / "plain-src"
-    src.mkdir()  # no app-registry.json
+    src.mkdir()
     assert catalog._fetch_registry_index(str(src), is_git=False, now=5.0) is None
 
 
 def test_registry_skips_already_installed(tmp_path):
-    # A pointer whose app is already in the Library is not re-offered.
     src = tmp_path / "reg-src"
     src.mkdir()
     _write_registry(src, [{"name": "brave-search"}, {"name": "fresh-app"}])
     catalog.add_local_source(str(src))
-    # brave-search is installed (native seed path); fresh-app is not.
     _native(tmp_path, "brave-search", native=True)
     app_manager.seed_builtin_apps()
     names = {a["name"] for a in catalog.available_catalog()["remoteApps"]}
     assert "fresh-app" in names and "brave-search" not in names
 
 
-# ── P29: install-consent transparency (permissions + declared crons in the catalog) ──
-
-
 def test_catalog_surfaces_permissions_and_crons_for_review(tmp_path):
-    # An app that declares permissions + a cron surfaces them in its Store card so the
-    # user can review WHAT it will be granted + WHAT it will run BEFORE installing.
     src = tmp_path / "consent-src"
     src.mkdir()
     d = src / "reminder-app"
@@ -838,8 +811,6 @@ def test_catalog_surfaces_permissions_and_crons_for_review(tmp_path):
                 "displayName": "Reminder App",
                 "description": "posts a daily reminder",
                 "permissions": {"cron": True, "api": ["/api/inbox"]},
-                # a manifest cron runs an AGENT with a MESSAGE (that's how app_crons builds the
-                # scheduled job) — the review summary must surface those, not a phantom action.
                 "crons": [
                     {
                         "name": "daily-reminder",
@@ -853,37 +824,35 @@ def test_catalog_surfaces_permissions_and_crons_for_review(tmp_path):
         encoding="utf-8",
     )
     catalog.add_local_source(str(src))
-    entry = next(a for a in catalog.available_catalog()["localApps"] if a["name"] == "reminder-app")
-    # permissions surfaced for review
+    entry = next(
+        a
+        for a in catalog.available_catalog()["localApps"]
+        if a["name"] == "reminder-app"
+    )
     assert entry["permissions"].get("cron") is True
     assert "/api/inbox" in (entry["permissions"].get("api") or [])
-    # declared crons surfaced (name + cadence + WHAT it runs) so the user sees the recurring job
     assert len(entry["crons"]) == 1
     c = entry["crons"][0]
     assert c["name"] == "daily-reminder"
     assert c["cron_expr"] == "0 9 * * *"
-    # the truthful "what it runs" fields — agent + its prompt (not an action/command that
-    # a manifest cron never has); this is what would silently be empty before the fix.
     assert c["agent"] == "reminder-bot"
     assert c["message"] == "Post today's reminders to the inbox."
 
 
 def test_catalog_no_permissions_crons_is_empty_not_missing(tmp_path):
-    # An app with no permissions/crons → empty dict/list (stable shape for the FE), not absent.
     src = tmp_path / "plain-consent"
     src.mkdir()
     _local_app(src, "plain-app")
     catalog.add_local_source(str(src))
-    entry = next(a for a in catalog.available_catalog()["localApps"] if a["name"] == "plain-app")
+    entry = next(
+        a for a in catalog.available_catalog()["localApps"] if a["name"] == "plain-app"
+    )
     assert entry["permissions"] == {} and entry["crons"] == []
 
 
-# ── P13–P16: installed_logger_roots() — the runtime replacement for the removed
-#    constants.APP_LOGGER_ROOTS. Derives app log-namespace roots from ENABLED
-#    installed apps' manifests (JSON only), de-duped, () when no apps dir. ──
-
-
-def _install_app(root: Path, name: str, *, logger_roots: list[str], enabled: bool = True) -> None:
+def _install_app(
+    root: Path, name: str, *, logger_roots: list[str], enabled: bool = True
+) -> None:
     """Write an installed app under ``apps/<name>/`` — installed.json (enabled state) +
     app.json (manifest with loggerRoots) — mirroring what manager.list_apps() reads."""
     d = root / "apps" / name
@@ -917,30 +886,27 @@ def _install_app(root: Path, name: str, *, logger_roots: list[str], enabled: boo
 
 
 def test_installed_logger_roots_empty_when_no_apps_dir(tmp_path):
-    # P16: fresh install — no apps/ dir yet → () (callers degrade to just 'gideon').
     assert not (tmp_path / "apps").exists()
     assert catalog.installed_logger_roots() == ()
 
 
 def test_installed_logger_roots_collects_enabled_manifest_roots(tmp_path):
-    # P13: an ENABLED app that declares loggerRoots contributes them.
     _install_app(tmp_path, "slack-app", logger_roots=["slack_runtime"])
     assert catalog.installed_logger_roots() == ("slack_runtime",)
 
 
 def test_installed_logger_roots_skips_disabled_and_dedups(tmp_path):
-    # P14: disabled apps contribute nothing; roots are de-duped preserving first-seen order.
     _install_app(tmp_path, "alpha-app", logger_roots=["alpha_rt", "shared_rt"])
-    _install_app(tmp_path, "beta-app", logger_roots=["shared_rt", "beta_rt"])  # shared_rt dup
-    _install_app(tmp_path, "off-app", logger_roots=["ghost_rt"], enabled=False)  # skipped
+    _install_app(
+        tmp_path, "beta-app", logger_roots=["shared_rt", "beta_rt"]
+    )  # shared_rt dup
+    _install_app(tmp_path, "off-app", logger_roots=["ghost_rt"], enabled=False)
     roots = catalog.installed_logger_roots()
     assert roots == ("alpha_rt", "shared_rt", "beta_rt")
-    assert "ghost_rt" not in roots  # disabled app's root never plumbed
+    assert "ghost_rt" not in roots
 
 
 def test_installed_logger_roots_ignores_apps_without_roots(tmp_path):
-    # P15: an installed app with no loggerRoots (the common case) contributes nothing —
-    # the roots list only carries apps that actually declare a non-gideon namespace.
     _install_app(tmp_path, "plain-app", logger_roots=[])
     _install_app(tmp_path, "logging-app", logger_roots=["custom_rt"])
     assert catalog.installed_logger_roots() == ("custom_rt",)
@@ -985,8 +951,11 @@ def test_catalog_entry_carries_declared_provider_capabilities(tmp_path):
     catalog.add_local_source(str(src))
 
     by_name = {a["name"]: a for a in catalog.available_catalog()["localApps"]}
-    assert by_name["openai-models"]["providerCapabilities"] == ["chat", "streaming", "embedding"]
-    # The discriminator this field exists for: same providerType, different lane.
+    assert by_name["openai-models"]["providerCapabilities"] == [
+        "chat",
+        "streaming",
+        "embedding",
+    ]
     assert by_name["faster-whisper"]["providerType"] == "model"
     assert by_name["faster-whisper"]["providerCapabilities"] == ["stt"]
     assert "chat" not in by_name["faster-whisper"]["providerCapabilities"]
@@ -1002,29 +971,37 @@ def test_catalog_entry_capabilities_empty_for_a_non_provider_app(tmp_path):
     d.mkdir(parents=True)
     (d / "app.json").write_text(
         json.dumps(
-            {"name": "note-app", "version": "1.0", "displayName": "Notes", "description": "x"}
+            {
+                "name": "note-app",
+                "version": "1.0",
+                "displayName": "Notes",
+                "description": "x",
+            }
         ),
         encoding="utf-8",
     )
     catalog.add_local_source(str(src))
-    entry = next(a for a in catalog.available_catalog()["localApps"] if a["name"] == "note-app")
+    entry = next(
+        a for a in catalog.available_catalog()["localApps"] if a["name"] == "note-app"
+    )
     assert entry["isProvider"] is False
     assert entry["providerCapabilities"] == []
 
 
-# ── ET-4: the curated registry ships as a SEEDED, REMOVABLE default git source ──
-#
-# The mechanism under test and why it is not the bundled tuple: `_DEFAULT_GIT_SOURCES`
-# is folded into every read of `list_git_sources()`, so removing one of those cannot
-# persist. The registry is instead WRITTEN ONCE into app-sources.json plus a marker, so
-# the normal DELETE removes it and the marker keeps it removed on the next start.
+@pytest.fixture
+def registry_url(monkeypatch):
+    url = "https://registry.example.test/apps.git"
+    monkeypatch.setenv("GIDEON_APP_REGISTRY_URL", url)
+    return url
 
 
-def _registry_fixture_repo(root: Path, *, app_name: str = "fixture-registry-app") -> str:
+def _registry_fixture_repo(
+    root: Path, *, app_name: str = "fixture-registry-app"
+) -> str:
     """A real local git repo publishing an ``app-registry.json`` index — the POSITIVE
     CONTROL for "the seeded source is actually consulted".
 
-    The shipped registry (`scratch/registry/app-registry.json`) is EMPTY until ET-6, so a
+    The shipped registry (`examples/registry/app-registry.json`) is EMPTY until ET-6, so a
     test that asserted "zero listings from the registry" would pass with the source
     skipped entirely. This fixture publishes one listing, so the assertion below can
     only pass if the seeded source was fetched and parsed."""
@@ -1060,84 +1037,106 @@ def _registry_fixture_repo(root: Path, *, app_name: str = "fixture-registry-app"
     return str(repo)
 
 
-def test_registry_source_seeds_only_behind_the_config_flag(tmp_path, monkeypatch):
+def test_registry_source_seeds_only_behind_the_config_flag(
+    tmp_path, monkeypatch, registry_url
+):
     """The flag gates SEEDING: off ⇒ no source and NO marker (so a later on still seeds)."""
-    monkeypatch.setattr(catalog, "_DEFAULT_GIT_SOURCES", ())
-    url = catalog._REGISTRY_GIT_SOURCE
+    monkeypatch.delenv("GIDEON_APP_CATALOG_URLS", raising=False)
+    url = registry_url
     cfg_file = tmp_path / "config.json"
 
-    cfg_file.write_text(json.dumps({"apps": {"registry_source_enabled": False}}), encoding="utf-8")
+    cfg_file.write_text(
+        json.dumps({"apps": {"registry_source_enabled": False}}), encoding="utf-8"
+    )
     assert catalog.seed_default_git_sources() == []
     assert url not in catalog.list_git_sources()
-    # No marker either — the flag must be a real gate, not a one-shot that burns the seed.
     assert not (tmp_path / "apps" / "app-sources.json").is_file()
 
-    cfg_file.write_text(json.dumps({"apps": {"registry_source_enabled": True}}), encoding="utf-8")
+    cfg_file.write_text(
+        json.dumps({"apps": {"registry_source_enabled": True}}), encoding="utf-8"
+    )
     assert catalog.seed_default_git_sources() == [url]
     assert url in catalog.list_git_sources()
-    raw = json.loads((tmp_path / "apps" / "app-sources.json").read_text(encoding="utf-8"))
+    raw = json.loads(
+        (tmp_path / "apps" / "app-sources.json").read_text(encoding="utf-8")
+    )
     assert url in raw["git"], "the registry must be a REAL row, not a fold-in default"
     assert "registry" in raw["seeded"]
 
-    # A second start seeds nothing more and never duplicates the row.
     assert catalog.seed_default_git_sources() == []
     assert catalog.list_git_sources().count(url) == 1
 
 
-def test_registry_source_seeds_on_a_fresh_home_with_no_config_file(tmp_path, monkeypatch):
+def test_configured_registry_source_seeds_on_a_fresh_home_with_no_config_file(
+    tmp_path, monkeypatch, registry_url
+):
     """A fresh install has no `apps` key at all — absence must take the shipped default (on).
 
     The polarity matters: reading the flag with the fail-closed `_expose_flag` alone would
-    make a brand-new home seed NOTHING, which is the opposite of "ships as a default"."""
-    monkeypatch.setattr(catalog, "_DEFAULT_GIT_SOURCES", ())
+    make a brand-new home seed NOTHING, which is the opposite of "ships as a default".
+    """
+    monkeypatch.delenv("GIDEON_APP_CATALOG_URLS", raising=False)
     assert not (tmp_path / "config.json").is_file()
-    assert catalog.seed_default_git_sources() == [catalog._REGISTRY_GIT_SOURCE]
+    assert catalog.seed_default_git_sources() == [registry_url]
 
 
-def test_unreadable_flag_value_resolves_to_the_shipped_default(tmp_path, monkeypatch):
+def test_unreadable_flag_value_resolves_to_the_shipped_default(
+    tmp_path, monkeypatch, registry_url
+):
     """MEASURED platform behaviour, pinned so nobody re-derives it wrong.
 
     A non-bool at this path never reaches the field mapping: `load()`'s schema type-gate
     replaces it with the field's dataclass default first (`_apply_field_default`, logging
     "using default"). So a corrupted value resolves to the SHIPPED posture — registry ON —
     NOT to fail-closed-off. Worth a rail because the instinct on a flag that adds a network
-    source is to guard it with `_expose_flag`, and such a guard would be dead code here."""
-    monkeypatch.setattr(catalog, "_DEFAULT_GIT_SOURCES", ())
+    source is to guard it with `_expose_flag`, and such a guard would be dead code here.
+    """
+    monkeypatch.delenv("GIDEON_APP_CATALOG_URLS", raising=False)
     (tmp_path / "config.json").write_text(
         json.dumps({"apps": {"registry_source_enabled": "perhaps"}}), encoding="utf-8"
     )
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     assert AppConfig.load().apps.registry_source_enabled is True
-    assert catalog.seed_default_git_sources() == [catalog._REGISTRY_GIT_SOURCE]
+    assert catalog.seed_default_git_sources() == [registry_url]
 
 
-def test_removing_the_seeded_registry_source_survives_a_restart(tmp_path, monkeypatch):
+def test_removing_the_seeded_registry_source_survives_a_restart(
+    tmp_path, monkeypatch, registry_url
+):
     """Remove it, then RESTART: it must stay gone.
 
     "Restart" here is a genuinely fresh interpreter with fresh module state, reading the
     same home — the in-memory list can't lie to us, and neither can a monkeypatched
     module global. The subprocess sees the real `_REGISTRY_GIT_SOURCE`, so the URL it
     would re-seed is the same one this test removed."""
-    url = catalog._REGISTRY_GIT_SOURCE
+    url = registry_url
     assert catalog.seed_default_git_sources() == [url]
     assert url in catalog.list_git_sources()
 
     catalog.remove_git_source(url)
     assert url not in catalog.list_git_sources()
-    raw = json.loads((tmp_path / "apps" / "app-sources.json").read_text(encoding="utf-8"))
+    raw = json.loads(
+        (tmp_path / "apps" / "app-sources.json").read_text(encoding="utf-8")
+    )
     assert url not in raw["git"]
-    assert "registry" in raw["seeded"], "the marker must OUTLIVE the removal, or it comes back"
+    assert (
+        "registry" in raw["seeded"]
+    ), "the marker must OUTLIVE the removal, or it comes back"
 
     code = (
-        "import json;from gideon.apps import catalog;"
+        "import json;from gideon.extensions.apps import catalog;"
         "print(json.dumps({'seeded': catalog.seed_default_git_sources(),"
         "'listed': catalog.list_git_sources()}))"
     )
     env = {**os.environ, "GIDEON_HOME": str(tmp_path)}
     env.pop("GIDEON_FIRST_PARTY_APPS_DIR", None)
     proc = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, env=env, timeout=120
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
     )
     assert proc.returncode == 0, proc.stderr
     out = json.loads(proc.stdout.strip().splitlines()[-1])
@@ -1145,14 +1144,16 @@ def test_removing_the_seeded_registry_source_survives_a_restart(tmp_path, monkey
     assert url not in out["listed"]
 
 
-def test_seeded_registry_is_a_default_the_user_may_remove(tmp_path, monkeypatch):
+def test_seeded_registry_is_a_default_the_user_may_remove(
+    tmp_path, monkeypatch, registry_url
+):
     """The two labelling bits the Store renders: "Default" yes, "unremovable" no."""
-    url = catalog._REGISTRY_GIT_SOURCE
+    url = registry_url
     catalog.seed_default_git_sources()
     assert url in catalog.default_git_sources()
     assert url not in catalog.builtin_git_sources()
-    # The bundled apps repo is the other side of the contract: a default that CANNOT go.
-    bundled = catalog._DEFAULT_GIT_SOURCES[0]
+    bundled = "https://catalog.example.test/apps.git"
+    monkeypatch.setenv("GIDEON_APP_CATALOG_URLS", bundled)
     assert bundled in catalog.default_git_sources()
     assert bundled in catalog.builtin_git_sources()
 
@@ -1164,15 +1165,13 @@ def test_the_seeded_registry_source_is_actually_consulted(tmp_path, monkeypatch)
     the catalog skipped the source — i.e. it is the falsifiable form of "a fresh home lists
     registry apps in the Store", run against a fixture index because the real registry
     ships empty until ET-6."""
-    monkeypatch.setattr(catalog, "_DEFAULT_GIT_SOURCES", ())
-    # Neutralize the first-party local default (a set env var wins exclusively; a
-    # nonexistent path disables it) so only the seeded source can contribute listings.
+    monkeypatch.delenv("GIDEON_APP_CATALOG_URLS", raising=False)
     monkeypatch.setenv("GIDEON_FIRST_PARTY_APPS_DIR", str(tmp_path / "nope"))
     catalog._registry_cache.clear()
     catalog._git_scan_cache.clear()
 
-    repo = _registry_fixture_repo(tmp_path)
-    monkeypatch.setattr(catalog, "_REGISTRY_GIT_SOURCE", repo)
+    repo = Path(_registry_fixture_repo(tmp_path)).as_uri()
+    monkeypatch.setenv("GIDEON_APP_REGISTRY_URL", repo)
     assert catalog.seed_default_git_sources() == [repo]
 
     cat = catalog.available_catalog()
@@ -1182,15 +1181,20 @@ def test_the_seeded_registry_source_is_actually_consulted(tmp_path, monkeypatch)
     assert "fixture-registry-app" in [e["name"] for e in cat["remoteApps"]]
 
 
-def test_seed_marker_survives_unrelated_source_edits(tmp_path, monkeypatch):
+def test_seed_marker_survives_unrelated_source_edits(
+    tmp_path, monkeypatch, registry_url
+):
     """Every write path round-trips the marker. If `add_git_source` dropped it, the next
-    start would resurrect a removed default — the defect this whole marker exists to stop."""
-    monkeypatch.setattr(catalog, "_DEFAULT_GIT_SOURCES", ())
+    start would resurrect a removed default — the defect this whole marker exists to stop.
+    """
+    monkeypatch.delenv("GIDEON_APP_CATALOG_URLS", raising=False)
     catalog.seed_default_git_sources()
-    catalog.remove_git_source(catalog._REGISTRY_GIT_SOURCE)
+    catalog.remove_git_source(registry_url)
     catalog.add_git_source("https://github.com/acme/unrelated.git")
     catalog.add_local_source(str(tmp_path))
-    raw = json.loads((tmp_path / "apps" / "app-sources.json").read_text(encoding="utf-8"))
+    raw = json.loads(
+        (tmp_path / "apps" / "app-sources.json").read_text(encoding="utf-8")
+    )
     assert "registry" in raw["seeded"]
     assert catalog.seed_default_git_sources() == []
 
@@ -1202,14 +1206,13 @@ def test_a_registry_listed_app_still_hits_the_scanner_gate(tmp_path, monkeypatch
     Drives the whole route the user drives — seed the source, read the Store card, install
     by the exact `pointer` the card hands over. A bypass added for registry-sourced apps
     (an "official source, skip the scan" shortcut is the tempting one) reds this."""
-    from gideon.supply_chain import Verdict
+    from gideon.security.supply_chain import Verdict
 
-    monkeypatch.setattr(catalog, "_DEFAULT_GIT_SOURCES", ())
+    monkeypatch.delenv("GIDEON_APP_CATALOG_URLS", raising=False)
     monkeypatch.setenv("GIDEON_FIRST_PARTY_APPS_DIR", str(tmp_path / "nope"))
     catalog._registry_cache.clear()
     catalog._git_scan_cache.clear()
 
-    # An app with content the scanner calls dangerous, published as the registry's listing.
     app_src = tmp_path / "src" / "dangerous-app"
     app_src.mkdir(parents=True)
     (app_src / "app.json").write_text(
@@ -1223,29 +1226,34 @@ def test_a_registry_listed_app_still_hits_the_scanner_gate(tmp_path, monkeypatch
         ),
         encoding="utf-8",
     )
-    (app_src / "scripts").mkdir()
-    (app_src / "scripts" / "evil.sh").write_text("rm -rf / --no-preserve-root\n", encoding="utf-8")
+    (app_src / "tooling/scripts").mkdir(parents=True)
+    (app_src / "tooling/scripts" / "evil.sh").write_text(
+        "rm -rf / --no-preserve-root\n", encoding="utf-8"
+    )
 
     repo = tmp_path / "registry-fixture-repo"
     repo.mkdir()
     (repo / "app-registry.json").write_text(
-        json.dumps({"apps": [{"name": "dangerous-app", "repo": str(app_src)}]}), encoding="utf-8"
+        json.dumps({"apps": [{"name": "dangerous-app", "repo": str(app_src)}]}),
+        encoding="utf-8",
     )
     git = ["git", "-c", "user.email=t@example.invalid", "-c", "user.name=t"]
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
     subprocess.run([*git, "add", "app-registry.json"], cwd=repo, check=True)
     subprocess.run([*git, "commit", "-q", "-m", "index"], cwd=repo, check=True)
 
-    monkeypatch.setattr(catalog, "_REGISTRY_GIT_SOURCE", str(repo))
-    assert catalog.seed_default_git_sources() == [str(repo)]
+    monkeypatch.setenv("GIDEON_APP_REGISTRY_URL", repo.as_uri())
+    assert catalog.seed_default_git_sources() == [repo.as_uri()]
 
     card = next(
-        e for e in catalog.available_catalog()["remoteApps"] if e["name"] == "dangerous-app"
+        e
+        for e in catalog.available_catalog()["remoteApps"]
+        if e["name"] == "dangerous-app"
     )
     res = app_manager.install(card["pointer"], confirm=True)
     assert not res.ok
     assert res.scan.verdict is Verdict.DANGEROUS
-    assert not manager.app_dir("dangerous-app").exists()  # nothing landed live
+    assert not manager.app_dir("dangerous-app").exists()
 
 
 def test_seeding_never_reaches_for_the_installer(tmp_path, monkeypatch):
@@ -1256,15 +1264,6 @@ def test_seeding_never_reaches_for_the_installer(tmp_path, monkeypatch):
     body = seed_src.split('"""', 2)[-1]
     for forbidden in ("install", "resolve", "clone", "requests", "urlopen"):
         assert forbidden not in body, f"the seeder must not {forbidden} anything"
-
-
-# --- ET-4 negative clause, pinned structurally ------------------------------------
-# "the scanner gate at install is unchanged (no new install path)" is a claim about
-# what does NOT exist, and the behavioural rail above can only prove the ONE route it
-# drives. A second route that skipped the gate would leave it green. So the census
-# below pins the chokepoint itself: every app tree that lands on disk goes through
-# ``default_scanner.scan(<staged tree>)``, and that call exists in exactly two places
-# in the whole package. A third one is a new install path by definition.
 
 
 def _scanner_gate_call_sites(token: str) -> set[tuple[str, str]]:
@@ -1281,8 +1280,6 @@ def _scanner_gate_call_sites(token: str) -> set[tuple[str, str]]:
 
     pkg_root = Path(gideon.__file__).resolve().parent
     files = sorted(p for p in pkg_root.rglob("*.py"))
-    # Vacuity floor: a broken glob (wrong root, wrong suffix) reads as "no call sites"
-    # and would make every assertion below trivially true.
     assert len(files) > 100, f"census walked only {len(files)} files under {pkg_root}"
 
     sites: set[tuple[str, str]] = set()
@@ -1331,41 +1328,20 @@ def test_the_install_scanner_gate_has_exactly_three_call_sites():
     set. It is to justify the new install path, and then widen it deliberately.
     """
     expected = {
-        ("apps/app_manager.py", "install"),
-        ("apps/app_manager.py", "update"),
-        ("supply_chain.py", "scan_dir"),
+        ("extensions/apps/app_manager.py", "install"),
+        ("extensions/apps/app_manager.py", "update"),
+        ("security/supply_chain.py", "scan_dir"),
     }
     assert _scanner_gate_call_sites("default_scanner.scan(") == expected
 
-    # Vacuity control: the same census over a token that is not in the package must
-    # come back empty. Without this, a walker that silently reads nothing (or an
-    # `ast.parse` that raised into a swallowed except) would look like agreement.
     assert _scanner_gate_call_sites("default_scanner.scan_every_registry_app(") == set()
 
 
-# --- ET-4 listing clause: the seeded source's index has ONE accepted filename -------
-# "a fresh dev home lists registry apps in the Store" is the atom's one clause that
-# cannot be closed from inside core, and the reasons are outside it: the seeded URL
-# `https://github.com/Gideon/registry.git` does not exist yet (`git ls-remote` →
-# "Repository not found"), and ET-3's staged index is `{"apps": []}` until ET-6 lists
-# something.
-#
-# What IS reachable is the CONTRACT between the two halves, and it is one filename and
-# nothing else. Core enumerates a source's apps from an index named
-# `catalog._REGISTRY_FILENAME` at the source root — the same contract for every git and
-# local source. That filename USED to be the gap: ET-3 staged its index as
-# `registry.json` while core reads `app-registry.json`, and an ET-3 schema-valid row
-# measured one listing under core's name and none under ET-3's. `ET-4a` closed it by
-# renaming the staged file, so the two halves now agree by construction — no parser
-# change was needed, and ET-5 (which owns reading the richer `maintainer`/
-# `last_validated` fields) inherits an index core can already see.
-#
-# The rail below keeps them agreeing, in BOTH directions: the positive leg proves an
-# ET-3-shaped row lists with no core change, and the negative leg proves core still
-# accepts exactly one filename — so a parser that quietly widens the accepted name, or
-# stops reading an ET-3-shaped row, reds here instead of in a user's empty Store.
+# an operator must configure a reachable registry URL (`git ls-remote` →
 
-_STAGED_REGISTRY = Path(__file__).resolve().parent.parent / "scratch" / "registry"
+_STAGED_REGISTRY = (
+    Path(__file__).resolve().parent.parent.parent / "examples" / "registry"
+)
 
 
 def _et3_shaped_row(name: str) -> dict:
@@ -1374,7 +1350,9 @@ def _et3_shaped_row(name: str) -> dict:
     Built against the schema rather than copied from it, so a new required field in
     `app-registry.schema.json` reds this instead of drifting silently.
     """
-    schema = json.loads((_STAGED_REGISTRY / "app-registry.schema.json").read_text(encoding="utf-8"))
+    schema = json.loads(
+        (_STAGED_REGISTRY / "app-registry.schema.json").read_text(encoding="utf-8")
+    )
     required = schema["properties"]["apps"]["items"]["required"]
     assert required, "the row schema declares no required fields — fixture is vacuous"
     row = {
@@ -1387,14 +1365,16 @@ def _et3_shaped_row(name: str) -> dict:
         "added": "2026-08-25",
     }
     missing = set(required) - set(row)
-    assert not missing, f"ET-3's row schema now requires {sorted(missing)} — widen the fixture"
+    assert (
+        not missing
+    ), f"ET-3's row schema now requires {sorted(missing)} — widen the fixture"
     return row
 
 
 def _seed_registry_publishing(index_name: str, tmp_path, monkeypatch) -> list[str]:
     """Publish one ET-3-shaped row under ``index_name`` in a local git repo, seed it as
     the default registry source, and return the app names the Store lists."""
-    monkeypatch.setattr(catalog, "_DEFAULT_GIT_SOURCES", ())
+    monkeypatch.delenv("GIDEON_APP_CATALOG_URLS", raising=False)
     monkeypatch.setenv("GIDEON_FIRST_PARTY_APPS_DIR", str(tmp_path / "nope"))
     catalog._registry_cache.clear()
     catalog._git_scan_cache.clear()
@@ -1409,23 +1389,130 @@ def _seed_registry_publishing(index_name: str, tmp_path, monkeypatch) -> list[st
     subprocess.run([*git, "add", index_name], cwd=repo, check=True)
     subprocess.run([*git, "commit", "-q", "-m", "index"], cwd=repo, check=True)
 
-    monkeypatch.setattr(catalog, "_REGISTRY_GIT_SOURCE", str(repo))
+    monkeypatch.setenv("GIDEON_APP_REGISTRY_URL", repo.as_uri())
     sources = tmp_path / "apps" / "app-sources.json"
     if sources.exists():
         sources.unlink()
-    assert catalog.seed_default_git_sources() == [str(repo)]
+    assert catalog.seed_default_git_sources() == [repo.as_uri()]
     return [e["name"] for e in catalog.available_catalog().get("remoteApps", [])]
 
 
-def test_the_seeded_registry_lists_only_under_cores_index_filename(tmp_path, monkeypatch):
+def test_the_seeded_registry_lists_only_under_cores_index_filename(
+    tmp_path, monkeypatch
+):
     """The seeded default lists an ET-3-shaped row — and only when the index is named
     what core reads. The negative half is the measured gap; the positive half is what
     stops it being a rail that matches nothing.
     """
-    assert _seed_registry_publishing(catalog._REGISTRY_FILENAME, tmp_path, monkeypatch) == [
-        "probe-app"
-    ]
-    # Any OTHER name. Same bytes, same row, same seeded source — no listing. This is the
-    # name ET-3 published under before `ET-4a` renamed it, so the leg pins the rename
-    # too: re-publishing the index under the old name lists nothing.
+    assert _seed_registry_publishing(
+        catalog._REGISTRY_FILENAME, tmp_path, monkeypatch
+    ) == ["probe-app"]
     assert _seed_registry_publishing("registry.json", tmp_path, monkeypatch) == []
+
+
+@pytest.mark.parametrize(
+    "configured",
+    [
+        '[" https://catalog.example.test/one.git ", "https://catalog.example.test/one", "ssh://git@catalog.example.test/two.git"]',
+        " https://catalog.example.test/one.git , https://catalog.example.test/one ,ssh://git@catalog.example.test/two.git ",
+    ],
+)
+def test_operator_catalog_formats_keep_order_and_repository_identity(
+    configured, monkeypatch
+):
+    monkeypatch.setenv("GIDEON_APP_CATALOG_URLS", configured)
+    expected = [
+        "https://catalog.example.test/one.git",
+        "ssh://git@catalog.example.test/two.git",
+    ]
+    assert catalog.list_git_sources() == expected
+    assert catalog.builtin_git_sources() == expected
+    assert catalog.network_source_hosts() == ["catalog.example.test"]
+
+
+def test_catalog_configuration_is_resolved_per_read_and_user_rows_survive(monkeypatch):
+    persisted = "https://user.example.test/app.git"
+    catalog.add_git_source(persisted)
+    monkeypatch.setenv(
+        "GIDEON_APP_CATALOG_URLS", "https://catalog.example.test/one.git"
+    )
+    assert catalog.list_git_sources() == [
+        "https://catalog.example.test/one.git",
+        persisted,
+    ]
+    monkeypatch.setenv("GIDEON_APP_CATALOG_URLS", "[]")
+    assert catalog.list_git_sources() == [persisted]
+    monkeypatch.delenv("GIDEON_APP_CATALOG_URLS")
+    assert catalog.list_git_sources() == [persisted]
+
+
+@pytest.mark.parametrize(
+    "configured",
+    ["[", "{}", '"https://catalog.example.test/app.git"', "javascript:alert(1)"],
+)
+def test_malformed_catalog_configuration_adds_no_source(configured, monkeypatch):
+    monkeypatch.setenv("GIDEON_APP_CATALOG_URLS", configured)
+    assert catalog.list_git_sources() == []
+
+
+def test_invalid_registry_does_not_burn_the_seed_marker(tmp_path, monkeypatch, caplog):
+    monkeypatch.setenv(
+        "GIDEON_APP_REGISTRY_URL", "https://secret-token@registry.example.test/apps.git"
+    )
+    assert catalog.seed_default_git_sources() == []
+    assert not (tmp_path / "apps" / "app-sources.json").exists()
+    assert "secret-token" not in caplog.text
+    monkeypatch.setenv(
+        "GIDEON_APP_REGISTRY_URL", "https://registry.example.test/apps.git"
+    )
+    assert catalog.seed_default_git_sources() == [
+        "https://registry.example.test/apps.git"
+    ]
+
+
+def test_disabled_catalog_default_can_be_explicitly_saved_as_a_user_source(
+    tmp_path, monkeypatch
+):
+    source = "https://catalog.example.test/apps.git"
+    monkeypatch.setenv("GIDEON_APP_CATALOG_URLS", source)
+    (tmp_path / "config.json").write_text(
+        json.dumps({"apps": {"bundled_source_enabled": False}})
+    )
+    assert catalog.list_git_sources() == []
+    assert catalog.add_git_source(source) == [source]
+    assert catalog.list_git_sources() == [source]
+    assert catalog.builtin_git_sources() == []
+    assert catalog.remove_git_source(source) == []
+    assert catalog.list_git_sources() == []
+
+
+def test_existing_registry_row_gets_a_durable_marker_without_duplication(registry_url):
+    catalog.add_git_source(registry_url.removesuffix(".git"))
+    assert catalog.seed_default_git_sources() == []
+    assert catalog.list_git_sources() == [registry_url.removesuffix(".git")]
+    catalog.remove_git_source(registry_url)
+    assert catalog.seed_default_git_sources() == []
+    assert catalog.list_git_sources() == []
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [None, [], 4, {"git": "bad", "local": None, "seeded": {"registry": True}}],
+)
+def test_malformed_persisted_source_shapes_are_recoverable(tmp_path, payload):
+    path = tmp_path / "apps" / "app-sources.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps(payload))
+    assert catalog.list_git_sources() == []
+    assert catalog.list_local_sources() == []
+    source = "https://user.example.test/app.git"
+    assert catalog.add_git_source(source) == [source]
+    assert json.loads(path.read_text()) == {"git": [source], "local": [], "seeded": []}
+
+
+def test_bundled_app_remains_available_without_remote_configuration(tmp_path):
+    _native(tmp_path, "local-provider", native=True)
+    available = catalog.available_catalog()
+    assert [app["name"] for app in available["bundled"]] == ["local-provider"]
+    assert available["gitSources"] == []
+    assert available["networkSources"] == []

@@ -18,8 +18,8 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.tasks import registry
-from gideon.tasks.handlers import register_task_routes
+from gideon.engine.tasks import registry
+from gideon.engine.tasks.handlers import register_task_routes
 
 
 @asynccontextmanager
@@ -28,12 +28,12 @@ async def _client(tmp_path):
     (run store, leases, the flock, the loop store) points at one temp home."""
     registry._providers.clear()
     with (
-        patch("gideon.tasks.native.config_dir", return_value=tmp_path),
-        patch("gideon.tasks.hierarchy.config_dir", return_value=tmp_path),
-        patch("gideon.workflows.store.config_dir", return_value=tmp_path),
-        patch("gideon.workflows.leases.config_dir", return_value=tmp_path),
-        patch("gideon.concurrency.config_dir", return_value=tmp_path),
-        patch("gideon.loop.files.config_dir", return_value=tmp_path),
+        patch("gideon.engine.tasks.native.config_dir", return_value=tmp_path),
+        patch("gideon.engine.tasks.hierarchy.config_dir", return_value=tmp_path),
+        patch("gideon.automation.workflows.store.config_dir", return_value=tmp_path),
+        patch("gideon.automation.workflows.leases.config_dir", return_value=tmp_path),
+        patch("gideon.core.concurrency.config_dir", return_value=tmp_path),
+        patch("gideon.automation.loop.files.config_dir", return_value=tmp_path),
     ):
         app = web.Application()
         register_task_routes(app)
@@ -68,22 +68,24 @@ async def test_empty_project_returns_a_complete_empty_board(tmp_path):
 
 @pytest.mark.asyncio
 async def test_runs_loops_and_tasks_all_appear_on_one_board(tmp_path):
-    from gideon.loop import store as loop_store
-    from gideon.loop.loop import Loop
-    from gideon.workflows import store as run_store
-    from gideon.workflows.models import RunStatus, WorkflowRun
+    from gideon.automation.loop import store as loop_store
+    from gideon.automation.loop.loop import Loop
+    from gideon.automation.workflows import store as run_store
+    from gideon.automation.workflows.models import RunStatus, WorkflowRun
 
     async with _client(tmp_path) as client:
         pid = await _mk_project(client)
-        # a WF2 run bound to the project
         run_store.create(
-            WorkflowRun(id="", workflow_name="analyze", status=RunStatus.RUNNING, project_id=pid)
+            WorkflowRun(
+                id="", workflow_name="analyze", status=RunStatus.RUNNING, project_id=pid
+            )
         )
-        # a legacy loop under the project
-        loop_store.create(Loop(id="", kind="goal", name="Loopy", task="g" * 30, project_id=pid))
-        # a standalone task under the project (via project_id → its General list, so the
-        # native provider's derived project label matches the /work source's NAME lookup)
-        await client.post("/api/tasks", json={"title": "Do the thing", "project_id": pid})
+        loop_store.create(
+            Loop(id="", kind="goal", name="Loopy", task="g" * 30, project_id=pid)
+        )
+        await client.post(
+            "/api/tasks", json={"title": "Do the thing", "project_id": pid}
+        )
 
         r = await client.get(f"/api/projects/{pid}/work")
         body = await r.json()
@@ -94,14 +96,13 @@ async def test_runs_loops_and_tasks_all_appear_on_one_board(tmp_path):
 
 @pytest.mark.asyncio
 async def test_needs_input_group_is_pinned_first(tmp_path):
-    from gideon.loop import store as loop_store
-    from gideon.loop.loop import Loop, LoopStatus
-    from gideon.workflows import store as run_store
-    from gideon.workflows.models import RunStatus, WorkflowRun
+    from gideon.automation.loop import store as loop_store
+    from gideon.automation.loop.loop import Loop, LoopStatus
+    from gideon.automation.workflows import store as run_store
+    from gideon.automation.workflows.models import RunStatus, WorkflowRun
 
     async with _client(tmp_path) as client:
         pid = await _mk_project(client)
-        # a WORKING run + a NEEDS_INPUT-mapped loop (blocked)
         run_store.create(
             WorkflowRun(
                 id="",
@@ -114,11 +115,11 @@ async def test_needs_input_group_is_pinned_first(tmp_path):
         lp = loop_store.create(
             Loop(id="", kind="goal", name="Blocked", task="b" * 30, project_id=pid)
         )
-        loop_store.update_status(lp.id, LoopStatus.BLOCKED)  # DB row, not just status.json
+        loop_store.update_status(lp.id, LoopStatus.BLOCKED)
 
         body = await (await client.get(f"/api/projects/{pid}/work")).json()
         states = [g["state"] for g in body["board"]]
-        assert states[0] == "needs_input"  # pinned first, unconditionally
+        assert states[0] == "needs_input"
         assert body["attention"] >= 1
 
 
@@ -126,20 +127,21 @@ async def test_needs_input_group_is_pinned_first(tmp_path):
 async def test_a_failing_source_degrades_only_its_section(tmp_path):
     """Per-section isolation: break the tasks source; runs/loops stay ok, board renders,
     completeness is partial, and the tasks section carries status:error."""
-    from gideon.workflows import store as run_store
-    from gideon.workflows.models import RunStatus, WorkflowRun
+    from gideon.automation.workflows import store as run_store
+    from gideon.automation.workflows.models import RunStatus, WorkflowRun
 
     async with _client(tmp_path) as client:
         pid = await _mk_project(client)
         run_store.create(
-            WorkflowRun(id="", workflow_name="alive", status=RunStatus.RUNNING, project_id=pid)
+            WorkflowRun(
+                id="", workflow_name="alive", status=RunStatus.RUNNING, project_id=pid
+            )
         )
 
-        # Make the async task list blow up — the tasks section must absorb it alone.
         async def boom(*a, **k):
             raise RuntimeError("task provider down")
 
-        with patch("gideon.tasks.registry.list_all_tasks", boom):
+        with patch("gideon.engine.tasks.registry.list_all_tasks", boom):
             r = await client.get(f"/api/projects/{pid}/work")
         body = await r.json()
         assert body["completeness"] == "partial"
@@ -147,7 +149,6 @@ async def test_a_failing_source_degrades_only_its_section(tmp_path):
         assert by_name["tasks"]["status"] == "error"
         assert by_name["runs"]["status"] == "ok"
         assert by_name["loops"]["status"] == "ok"
-        # the board still rendered the runs section's row
         titles = {row["title"] for group in body["board"] for row in group["rows"]}
         assert "alive" in titles
 
@@ -156,27 +157,27 @@ async def test_a_failing_source_degrades_only_its_section(tmp_path):
 async def test_claim_and_release_round_trip_and_refusal(tmp_path):
     async with _client(tmp_path) as client:
         pid = await _mk_project(client)
-        # claim a target for worker-1
         r = await client.post(
-            f"/api/projects/{pid}/work/claim", json={"target_id": "run-1", "holder": "worker-1"}
+            f"/api/projects/{pid}/work/claim",
+            json={"target_id": "run-1", "holder": "worker-1"},
         )
         assert r.status == 200
         body = await r.json()
         assert body["granted"] is True and body["claim"]["holder"] == "worker-1"
-        # a second holder is refused while the first holds
         r2 = await client.post(
-            f"/api/projects/{pid}/work/claim", json={"target_id": "run-1", "holder": "worker-2"}
+            f"/api/projects/{pid}/work/claim",
+            json={"target_id": "run-1", "holder": "worker-2"},
         )
         b2 = await r2.json()
         assert b2["granted"] is False and "worker-1" in b2["reason"]
-        # the holder releases it
         r3 = await client.post(
-            f"/api/projects/{pid}/work/release", json={"target_id": "run-1", "holder": "worker-1"}
+            f"/api/projects/{pid}/work/release",
+            json={"target_id": "run-1", "holder": "worker-1"},
         )
         assert (await r3.json())["released"] is True
-        # now worker-2 can take it
         r4 = await client.post(
-            f"/api/projects/{pid}/work/claim", json={"target_id": "run-1", "holder": "worker-2"}
+            f"/api/projects/{pid}/work/claim",
+            json={"target_id": "run-1", "holder": "worker-2"},
         )
         assert (await r4.json())["granted"] is True
 
@@ -185,7 +186,9 @@ async def test_claim_and_release_round_trip_and_refusal(tmp_path):
 async def test_claim_requires_target_and_holder(tmp_path):
     async with _client(tmp_path) as client:
         pid = await _mk_project(client)
-        r = await client.post(f"/api/projects/{pid}/work/claim", json={"target_id": "x"})
+        r = await client.post(
+            f"/api/projects/{pid}/work/claim", json={"target_id": "x"}
+        )
         assert r.status == 400
 
 

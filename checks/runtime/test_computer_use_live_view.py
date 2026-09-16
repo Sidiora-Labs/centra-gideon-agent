@@ -40,16 +40,14 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.computer_use import enable_state, overlay, render, service
-from gideon.computer_use import tools as ct
+from gideon.integrations.computer_use import enable_state, overlay, render, service
+from gideon.integrations.computer_use import tools as ct
 
-SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "gideon"
+SRC = pathlib.Path(__file__).resolve().parents[2] / "runtime" / "gideon"
 
 ARMED_APP = "TextEdit"
 FINGERPRINT = "fp-live-view"
 
-#: A pressable element WITH geometry, because the overlay's whole claim is "where a click
-#: will land": frame (100, 200, 50, 20) → centre (125.0, 210.0).
 BUTTON = {
     "index": 0,
     "role": "AXButton",
@@ -78,14 +76,18 @@ def _isolated(tmp_path, monkeypatch):
 
 def _arm(tmp_path, *apps: str) -> None:
     (tmp_path / "enable.json").write_text(
-        json.dumps({"version": 1, "enabled": True, "apps": list(apps)}), encoding="utf-8"
+        json.dumps({"version": 1, "enabled": True, "apps": list(apps)}),
+        encoding="utf-8",
     )
     enable_state.reset_enable_state()
 
 
-def _fake_driver(monkeypatch, *, elements=None, fingerprint=FINGERPRINT, act_fails=False):
+def _fake_driver(
+    monkeypatch, *, elements=None, fingerprint=FINGERPRINT, act_fails=False
+):
     """Step 6 as an in-process double (the `test_computer_use_dispatch` idiom), optionally
-    failing every ACTING op while the read (snapshot) still answers — the wedged-driver case."""
+    failing every ACTING op while the read (snapshot) still answers — the wedged-driver case.
+    """
     calls: list[str] = []
 
     async def run(op, payload, *, tool):
@@ -95,8 +97,9 @@ def _fake_driver(monkeypatch, *, elements=None, fingerprint=FINGERPRINT, act_fai
         if op == "list_apps":
             return {"apps": [ARMED_APP]}
         if act_fails:
-            # What the real _run_driver does with a child's error envelope: a typed refusal.
-            service._refuse(service.ERR_DRIVER_FAILED, what="wedged", why="", fix="retry")
+            service._refuse(
+                service.ERR_DRIVER_FAILED, what="wedged", why="", fix="retry"
+            )
         return {"ok": True, "op": op}
 
     monkeypatch.setattr(service, "_run_driver", run)
@@ -115,11 +118,13 @@ def _click(snapshot_id: str):
 
 def _view_client(app_name: str = "") -> TestClient:
     """The live-view route mounted the way `test_security_audit_api` mounts its surface."""
-    from gideon.dashboard.handlers.computer_use import api_computer_use_live_view
+    from gideon.interfaces.dashboard.handlers.computer_use import (
+        api_computer_use_live_view,
+    )
 
     app = web.Application()
     if app_name:
-        # Mirrors what the auth middleware stamps for an app-scoped token.
+
         @web.middleware
         async def stamp_app(request, handler):
             request["app"] = app_name
@@ -128,9 +133,6 @@ def _view_client(app_name: str = "") -> TestClient:
         app.middlewares.append(stamp_app)
     app.router.add_get("/api/computer-use/live-view", api_computer_use_live_view)
     return TestClient(TestServer(app))
-
-
-# ── 1. the capability census: the tool surface is UNCHANGED with the views on ─
 
 
 def test_the_tool_surface_is_unchanged_with_the_views_on(tmp_path, monkeypatch):
@@ -152,17 +154,18 @@ def test_the_tool_surface_is_unchanged_with_the_views_on(tmp_path, monkeypatch):
         }
     ), "the seven-tool surface (§2) changed — DCU-7 must not touch it"
 
-    # Views ON: overlay observing a real approved dispatch…
     _arm(tmp_path, ARMED_APP)
     _fake_driver(monkeypatch)
     snap = service._remember(ARMED_APP, FINGERPRINT, [BUTTON])
     _run(_click(snap.snapshot_id))
-    assert overlay.motion_trail(), "the observed dispatch left no trail — 'views on' is vacuous"
-    # …the live view rendering…
+    assert (
+        overlay.motion_trail()
+    ), "the observed dispatch left no trail — 'views on' is vacuous"
     view = render.live_view()
-    assert view["snapshots"] and view["trail"], "the view rendered empty — 'views on' is vacuous"
+    assert (
+        view["snapshots"] and view["trail"]
+    ), "the view rendered empty — 'views on' is vacuous"
 
-    # …and the dashboard route serving it.
     async def served():
         client = _view_client()
         await client.start_server()
@@ -194,7 +197,9 @@ def _registered_computer_use_routes() -> set[tuple[str, str]]:
         if not verb.startswith("add_"):
             continue
         args = [a.value for a in node.args if isinstance(a, ast.Constant)]
-        paths = [a for a in args if isinstance(a, str) and a.startswith("/api/computer-use")]
+        paths = [
+            a for a in args if isinstance(a, str) and a.startswith("/api/computer-use")
+        ]
         for path in paths:
             found.add((verb.removeprefix("add_"), path))
     return found
@@ -202,7 +207,8 @@ def _registered_computer_use_routes() -> set[tuple[str, str]]:
 
 def test_the_computer_use_route_surface_is_pinned():
     """One POST that can act, one GET that can only look. Exact equality against a non-empty
-    expected set is its own vacuity floor: a scanner gone blind returns ``set()`` and reds."""
+    expected set is its own vacuity floor: a scanner gone blind returns ``set()`` and reds.
+    """
     assert _registered_computer_use_routes() == {
         ("post", "/api/computer-use/dispatch"),
         ("get", "/api/computer-use/live-view"),
@@ -212,8 +218,6 @@ def test_the_computer_use_route_surface_is_pinned():
     )
 
 
-#: Modules whose import inside a view would be desktop reach. `ctypes` is included for the
-#: same reason `test_the_macos_driver_holds_no_ctypes` pins it: the FFI lives in ONE file.
 _DRIVER_MODULES = (
     "macos_driver",
     "macos_ffi",
@@ -232,7 +236,9 @@ def _reach(source: str) -> list[str]:
     offences: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            offences += [a.name for a in node.names if any(m in a.name for m in _DRIVER_MODULES)]
+            offences += [
+                a.name for a in node.names if any(m in a.name for m in _DRIVER_MODULES)
+            ]
         elif isinstance(node, ast.ImportFrom):
             module = node.module or ""
             if any(m in module for m in _DRIVER_MODULES):
@@ -261,16 +267,17 @@ def test_the_view_modules_import_no_driver_and_reach_no_dispatch():
 
 def test_the_reach_scanner_detects_an_offender():
     """The scanner's own efficacy proof, so an empty offence list is a finding, not blindness."""
-    assert _reach("from gideon.computer_use import macos_ffi\n") != []
+    assert _reach("from gideon.integrations.computer_use import macos_ffi\n") != []
     assert _reach("import ctypes\n") != []
-    assert _reach("async def peek():\n    return await computer_dispatch('computer_click')\n")
+    assert _reach(
+        "async def peek():\n    return await computer_dispatch('computer_click')\n"
+    )
     assert _reach("x = 1\n") == []
 
 
-# ── 2. the overlay observes; it never gates and never leads ───────────────────
-
-
-def test_an_approved_click_lands_a_trail_point_at_the_element_centre(tmp_path, monkeypatch):
+def test_an_approved_click_lands_a_trail_point_at_the_element_centre(
+    tmp_path, monkeypatch
+):
     _arm(tmp_path, ARMED_APP)
     _fake_driver(monkeypatch)
     snap = service._remember(ARMED_APP, FINGERPRINT, [BUTTON])
@@ -289,8 +296,8 @@ def test_a_refused_attempt_paints_no_fake_cursor(tmp_path, monkeypatch):
     refusal (the SEL row exists); the trail stays empty."""
     _arm(tmp_path, ARMED_APP)
     _fake_driver(monkeypatch)
-    snap = service._remember("Terminal", FINGERPRINT, [BUTTON])  # NOT allowlisted
-    import gideon.computer_use.policy as policy
+    snap = service._remember("Terminal", FINGERPRINT, [BUTTON])
+    import gideon.integrations.computer_use.policy as policy
 
     with pytest.raises(policy.ComputerUsePolicyRefusal):
         _run(_click(snap.snapshot_id))
@@ -321,7 +328,9 @@ def test_reads_leave_no_trail(tmp_path, monkeypatch):
 
 def test_the_trail_is_bounded():
     for i in range(overlay.MAX_TRAIL + 25):
-        overlay.observe_action(tool="computer_click", app=ARMED_APP, element=BUTTON, params={})
+        overlay.observe_action(
+            tool="computer_click", app=ARMED_APP, element=BUTTON, params={}
+        )
     trail = overlay.motion_trail()
     assert len(trail) == overlay.MAX_TRAIL
     seqs = [p["seq"] for p in trail]
@@ -340,8 +349,6 @@ def test_observation_fails_open_on_any_input():
         element={"frame": {"x": "NaNsense", "width": []}},
         params={"click_method": 7},
     )
-    # Whatever was recorded, nothing raised — and the malformed frame produced no phantom
-    # (0, 0) landing in the display corner.
     assert all(p["x"] is None for p in overlay.motion_trail() if p["label"] == "")
 
 
@@ -362,9 +369,6 @@ def test_a_named_pointer_method_records_its_own_spelling(tmp_path, monkeypatch):
     assert (point["x"], point["y"]) == (10.0, 20.0)
 
 
-# ── 3. the live view renders, mirrors, and reaches nothing ───────────────────
-
-
 def test_the_view_renders_on_a_disarmed_machine():
     """The most useful sentence a view can say on a disarmed machine is that it is disarmed —
     so the keystone is displayed here, never consulted as a gate."""
@@ -376,7 +380,8 @@ def test_the_view_renders_on_a_disarmed_machine():
 
 def test_the_view_calls_no_driver(monkeypatch):
     """The mirror shows what the model already read. A live view that walked a window would
-    BE a read capability — so the driver seam explodes under it and the view must not care."""
+    BE a read capability — so the driver seam explodes under it and the view must not care.
+    """
 
     def boom(*a, **k):  # pragma: no cover - failing is the test
         raise AssertionError("the live view reached the driver")
@@ -395,7 +400,9 @@ def test_the_mirror_carries_geometry_and_identity_but_no_field_contents():
     (element,) = snap_row["elements"]
     assert element["frame"] == BUTTON["frame"]
     assert "value" not in element, "the wireframe must not mirror field contents at all"
-    assert secret not in json.dumps(element), "credential-shaped text must not reach a browser"
+    assert secret not in json.dumps(
+        element
+    ), "credential-shaped text must not reach a browser"
     assert element["role"] == "AXTextField"
 
 
@@ -417,7 +424,7 @@ def test_the_feed_shows_both_verdicts_from_the_real_sel(tmp_path, monkeypatch):
     snap = service._remember(ARMED_APP, FINGERPRINT, [BUTTON])
     _run(_click(snap.snapshot_id))
     denied_snap = service._remember("Terminal", FINGERPRINT, [BUTTON])
-    import gideon.computer_use.policy as policy
+    import gideon.integrations.computer_use.policy as policy
 
     with pytest.raises(policy.ComputerUsePolicyRefusal):
         _run(_click(denied_snap.snapshot_id))
@@ -432,19 +439,19 @@ def test_the_feed_shows_both_verdicts_from_the_real_sel(tmp_path, monkeypatch):
 
 
 def test_the_feed_carries_only_computer_use_rows(tmp_path, monkeypatch):
-    from gideon.sel import sel
+    from gideon.security.sel import sel
 
     sel().log_api_access(
-        caller="dashboard:abc", operation="GET /api/tools", outcome="completed", source="dashboard"
+        caller="dashboard:abc",
+        operation="GET /api/tools",
+        outcome="completed",
+        source="dashboard",
     )
-    import gideon.computer_use.gate as gate
+    import gideon.integrations.computer_use.gate as gate
 
     gate.require_computer_use(tool="computer_click", app=ARMED_APP, outcome="approved")
     feed = render.live_view()["feed"]
     assert [row["operation"] for row in feed] == ["computer_click"]
-
-
-# ── 4. the dashboard route ────────────────────────────────────────────────────
 
 
 def test_the_route_serves_the_view_model():
@@ -471,7 +478,8 @@ def test_the_route_serves_the_view_model():
 
 def test_an_app_scoped_token_is_refused_categorically():
     """Same shape and same reasoning as the audit surface: 403 with its own stable code,
-    never a 200 carrying an empty view (which would read as "the agent is doing nothing")."""
+    never a 200 carrying an empty view (which would read as "the agent is doing nothing").
+    """
 
     async def check():
         client = _view_client(app_name="some-installed-app")
@@ -485,9 +493,6 @@ def test_an_app_scoped_token_is_refused_categorically():
             await client.close()
 
     _run(check())
-
-
-# ── 5. the observation seam stays where the chain put it ─────────────────────
 
 
 def test_the_observation_runs_after_the_audit_and_before_the_driver():

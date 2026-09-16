@@ -14,7 +14,7 @@ from pathlib import Path
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
-from gideon.config.loader import (
+from gideon.core.config.loader import (
     AgentConfig,
     AgentProfile,
     AppConfig,
@@ -27,45 +27,22 @@ from gideon.config.loader import (
     resolve_agent_bindings,
     resolve_memory_store_config,
 )
-from gideon.config.schema import SCHEMA_REGISTRY as _SCHEMA_REGISTRY
+from gideon.core.config.schema import SCHEMA_REGISTRY as _SCHEMA_REGISTRY
 
-# Logger used by the loader module — needed for capturing warnings in tests
-logger = logging.getLogger("gideon.config.loader")
+logger = logging.getLogger("gideon.core.config.loader")
 
-# ---------------------------------------------------------------------------
-# Helpers / Strategies
-# ---------------------------------------------------------------------------
 
-# Fields with enum constraints and their allowed values
-# agent.provider is intentionally NOT here — it accepts an open ``acp:<cli>``
-# space (any connected ACP runtime), so it carries no closed enum constraint.
-#: (section, key, allowed, case_insensitive). The last flag matters: `load()` deliberately
-#: upper-cases `agent.log_level` BEFORE jsonschema validation ("Normalize case-insensitive enum
-#: fields before validation", loader.py), so `"iNFO"` is a VALID way to write `INFO` — not a
-#: violation. Hypothesis found that: with a plain `bad_value not in allowed` filter it eventually
-#: generated `"iNFO"`, the loader correctly resolved it to `INFO`, and the property test failed
-#: while asserting the loader was wrong. The flag lets the filter model the real contract instead.
 _ENUM_FIELDS: list[tuple[str, str, list[str], bool]] = [
     ("agent", "approval_mode", ["auto", "interactive", "trust_reads"], False),
     ("agent", "sandbox", ["auto", "off"], False),
     ("agent", "log_level", ["DEBUG", "INFO", "WARNING", "ERROR"], True),
 ]
 
-# Top-level keys the loader recognises. Derived from the SAME authoritative sources the
-# loader uses (`_detect_unrecognized_keys`): the SCHEMA_REGISTRY top-level paths (generated
-# from the AppConfig dataclass) plus the direct-read allowlist. A hand-maintained copy of
-# this set drifted — it omitted real sections like `learning`/`legibility`/`loops`, so the
-# unrecognized-keys property test spuriously expected an "unrecognized" warning for a key
-# the loader actually knows. Deriving it keeps the two in lockstep forever.
-_SCHEMA_TOP_KEYS = {e.path for e in _SCHEMA_REGISTRY if "." not in e.path and e.path != "*"}
-# Direct-read sections the loader allowlists (not AppConfig fields) — must match
-# loader._DIRECT_READ_TOP_KEYS. The unrecognized-keys property must NOT generate these.
+_SCHEMA_TOP_KEYS = {
+    e.path for e in _SCHEMA_REGISTRY if "." not in e.path and e.path != "*"
+}
 _DIRECT_READ_TOP_KEYS = {"providers", "meta", "slack"}
 _KNOWN_TOP_KEYS = _SCHEMA_TOP_KEYS | _DIRECT_READ_TOP_KEYS
-
-# No skip marker any more. `jsonschema` is a HARD dependency, and the marker was worse than
-# useless: it turned "validation is entirely absent on a normal install" into six skipped tests,
-# and a skip reads as a pass in every summary.
 
 
 def _load_from_dict(data: object) -> AppConfig:
@@ -83,7 +60,7 @@ def _load_from_dict(data: object) -> AppConfig:
 
     try:
         with unittest.mock.patch(
-            "gideon.config.loader.config_path",
+            "gideon.core.config.loader.config_path",
             return_value=tmp,
         ):
             return AppConfig.load()
@@ -105,7 +82,7 @@ def _load_from_raw_string(content: str) -> AppConfig:
 
     try:
         with unittest.mock.patch(
-            "gideon.config.loader.config_path",
+            "gideon.core.config.loader.config_path",
             return_value=tmp,
         ):
             return AppConfig.load()
@@ -114,16 +91,9 @@ def _load_from_raw_string(content: str) -> AppConfig:
         tmp.with_suffix(".json.bak").unlink(missing_ok=True)
 
 
-#: Every module `AppConfig.load()` can warn THROUGH. More than one because PHF-14 moved the
-#: JSON-Schema validation pass to `config/validation.py`, which owns its own `__name__` logger —
-#: so the enum/type/unknown-key warnings now come from `gideon.config.validation` while the
-#: credential and agent-resolution warnings still come from `gideon.config.loader`.
-#: Capturing only the loader made this helper return `[]` for warnings that WERE emitted, which
-#: reads as "the loader stopped warning" rather than "the test stopped listening". Add a name here
-#: when a config module starts warning; do not narrow it back to one.
 _WARNING_SOURCES = (
-    "gideon.config.loader",
-    "gideon.config.validation",
+    "gideon.core.config.loader",
+    "gideon.core.config.validation",
 )
 
 
@@ -142,7 +112,7 @@ def _load_from_dict_with_logs(data: object) -> tuple[AppConfig, list[str]]:
 
     try:
         with unittest.mock.patch(
-            "gideon.config.loader.config_path",
+            "gideon.core.config.loader.config_path",
             return_value=tmp,
         ):
             messages: list[str] = []
@@ -157,7 +127,9 @@ def _load_from_dict_with_logs(data: object) -> tuple[AppConfig, list[str]]:
                         messages.append(str(msg))
                     original_warning(msg, *args)
 
-                return unittest.mock.patch.object(logger_local, "warning", capture_warning)
+                return unittest.mock.patch.object(
+                    logger_local, "warning", capture_warning
+                )
 
             with contextlib.ExitStack() as stack:
                 for name in _WARNING_SOURCES:
@@ -174,14 +146,12 @@ def _default_config() -> AppConfig:
     return AppConfig()
 
 
-# Hypothesis strategy for safe identifier strings (no control chars, JSON-safe)
 _safe_name_st = st.text(
     alphabet=st.sampled_from("abcdefghijklmnopqrstuvwxyz0123456789_-"),
     min_size=1,
     max_size=15,
 )
 
-# Strategy for AgentProfile instances
 _agent_profile_st = st.builds(
     AgentProfile,
     provider_agent=st.text(min_size=0, max_size=20),
@@ -189,20 +159,14 @@ _agent_profile_st = st.builds(
     memory_store=_safe_name_st,
 )
 
-# Strategy for MemoryStoreConfig instances
 _memory_store_config_st = st.builds(
     MemoryStoreConfig,
     description=st.text(min_size=0, max_size=30),
 )
 
-# Hypothesis strategy for generating valid AgentConfig instances
 _agent_config_st = st.builds(
     AgentConfig,
     approval_mode=st.sampled_from(["auto", "interactive", "trust_reads"]),
-    # NOTE: bare "acp" is a LEGACY global default that load() migrates to
-    # "native" (clean break — native is the default runtime; ACP is opt-in per
-    # agent). Generate only non-migrated runtime values so the round-trip tests
-    # serialization, not the one-shot legacy migration (covered separately).
     provider=st.sampled_from(["native", "acp:claude-code", "acp:test-cli"]),
     sandbox=st.sampled_from(["auto", "off"]),
     soft_stop_budget_secs=st.floats(min_value=0.5, max_value=60.0),
@@ -265,15 +229,9 @@ _gideon_config_st = st.builds(
 )
 
 
-# ---------------------------------------------------------------------------
-# Property Tests: core config load/validation
-# ---------------------------------------------------------------------------
-
-
 class TestConfigLoaderProperties:
     """Property-based tests for the config loader validation logic."""
 
-    # Feature: config-schema, Property 6: AppConfig load/to_dict round-trip
     @given(config=_gideon_config_st)
     @settings(deadline=None)
     def test_load_to_dict_round_trip(
@@ -288,24 +246,19 @@ class TestConfigLoaderProperties:
         d = config.to_dict()
         loaded = _load_from_dict(d)
 
-        # Compare agent fields
         assert loaded.agent.approval_mode == config.agent.approval_mode
         assert loaded.agent.provider == config.agent.provider
         assert loaded.agent.sandbox == config.agent.sandbox
 
-        # Compare session
         assert loaded.session.timeout_secs == config.session.timeout_secs
 
-        # Compare memory fields
         assert loaded.memory.migrated == config.memory.migrated
         assert loaded.memory.episodic_max_results == config.memory.episodic_max_results
         assert loaded.memory.episodic_max_count == config.memory.episodic_max_count
         assert loaded.memory.history_max_days == config.memory.history_max_days
 
-        # Compare dashboard
         assert loaded.dashboard.url == config.dashboard.url
 
-        # Compare inbox
         assert loaded.inbox.enabled == config.inbox.enabled
         assert loaded.inbox.user_id == config.inbox.user_id
         assert loaded.inbox.watched_channels == config.inbox.watched_channels
@@ -313,11 +266,9 @@ class TestConfigLoaderProperties:
         assert loaded.inbox.style_rules == config.inbox.style_rules
         assert loaded.inbox.test_mode == config.inbox.test_mode
 
-        # Compare top-level fields
         assert loaded.hooks == config.hooks
         assert loaded.auto_update == config.auto_update
 
-    # Feature: config-schema, Property 9: Type mismatch falls back to default
     @given(
         field_idx=st.integers(min_value=0, max_value=2),
         wrong_idx=st.integers(min_value=0, max_value=3),
@@ -339,16 +290,15 @@ class TestConfigLoaderProperties:
             ("session", "timeout_secs", "integer"),
         ]
         wrong_values = [
-            42,  # wrong for string/boolean
-            "not_a_num",  # wrong for integer/boolean
-            True,  # wrong for string/integer
-            [1, 2, 3],  # wrong for all scalar types
+            42,
+            "not_a_num",
+            True,
+            [1, 2, 3],
         ]
 
         section, key, expected_type = fields[field_idx]
         wrong_value = wrong_values[wrong_idx]
 
-        # Skip cases where the wrong_value accidentally has the right type
         type_map = {"string": str, "boolean": bool, "integer": int}
         expected_py = type_map[expected_type]
         if expected_type == "integer":
@@ -368,7 +318,6 @@ class TestConfigLoaderProperties:
             default_section, key
         ), f"Expected default for {section}.{key} after type mismatch"
 
-    # Feature: config-schema, Property 10: Enum violation falls back to default
     @given(
         field_idx=st.integers(min_value=0, max_value=len(_ENUM_FIELDS) - 1),
         bad_value=st.text(min_size=1, max_size=20),
@@ -385,9 +334,6 @@ class TestConfigLoaderProperties:
         **Validates: Requirements 6.3**
         """
         section, key, allowed, case_insensitive = _ENUM_FIELDS[field_idx]
-        # A case-insensitive field normalizes before validation, so a case variant of an allowed
-        # value is NOT a violation — filtering only on exact membership makes the test assert that
-        # the loader's own documented normalization is a bug.
         if case_insensitive:
             assume(bad_value.upper() not in {a.upper() for a in allowed})
         else:
@@ -404,7 +350,6 @@ class TestConfigLoaderProperties:
             f"(value={bad_value!r}, allowed={allowed})"
         )
 
-    # Feature: config-schema, Property 11: Unrecognized keys are detected
     @given(
         extra_keys=st.lists(
             st.text(
@@ -431,23 +376,34 @@ class TestConfigLoaderProperties:
 
         unrecognized_msgs = [m for m in messages if "unrecognized top-level keys" in m]
         assert len(unrecognized_msgs) > 0, (
-            f"Expected warning about unrecognized keys {extra_keys}, " f"got messages: {messages}"
+            f"Expected warning about unrecognized keys {extra_keys}, "
+            f"got messages: {messages}"
         )
 
         warning_text = unrecognized_msgs[0]
         for k in extra_keys:
-            assert k in warning_text, f"Key '{k}' not mentioned in warning: {warning_text}"
+            assert (
+                k in warning_text
+            ), f"Key '{k}' not mentioned in warning: {warning_text}"
 
     def test_direct_read_sections_meta_providers_not_flagged(self) -> None:
         """`providers` (LLM-provider registry) and `meta` (FS-roundtrip provenance) are
         legitimate top-level sections read DIRECTLY off the raw config — not AppConfig
         fields, so absent from SCHEMA_REGISTRY. The loader must allowlist them or it
         spuriously warns on every load (the config is loaded very frequently → a log
-        flood). A genuinely bogus key must still be flagged (the diagnostic still works)."""
+        flood). A genuinely bogus key must still be flagged (the diagnostic still works).
+        """
         data = {
-            "meta": {"lastTouchedVersion": "0.1.0", "lastTouchedAt": "2026-06-25T00:00:00Z"},
+            "meta": {
+                "lastTouchedVersion": "0.1.0",
+                "lastTouchedAt": "2026-06-25T00:00:00Z",
+            },
             "providers": [
-                {"name": "Bedrock", "type": "bedrock", "options": {"region": "us-west-2"}}
+                {
+                    "name": "Bedrock",
+                    "type": "bedrock",
+                    "options": {"region": "us-west-2"},
+                }
             ],
             "definitely_bogus_key": 1,
         }
@@ -461,7 +417,6 @@ class TestConfigLoaderProperties:
             "definitely_bogus_key" in joined
         ), f"a genuinely unknown key must still be flagged: {messages}"
 
-    # Feature: config-schema, Property 12: load() always returns valid AppConfig
     @given(
         content=st.one_of(
             st.text(min_size=0, max_size=200),
@@ -493,7 +448,6 @@ class TestConfigLoaderProperties:
         assert isinstance(result.hooks, dict)
         assert isinstance(result.auto_update, bool)
 
-    # Feature: config-schema, Property 14: Deprecated fields are accepted during loading
     @given(
         command_val=st.text(min_size=1, max_size=20),
     )
@@ -511,9 +465,8 @@ class TestConfigLoaderProperties:
 
         **Validates: Requirements 8.2**
         """
-        from gideon.config import schema as schema_mod
+        from gideon.core.config import schema as schema_mod
 
-        # Find and temporarily mark dashboard.url as deprecated
         target_entry = None
         for entry in schema_mod.SCHEMA_REGISTRY:
             if entry.path == "dashboard.url":
@@ -522,7 +475,6 @@ class TestConfigLoaderProperties:
         assert target_entry is not None, "dashboard.url not in SCHEMA_REGISTRY"
 
         original_deprecated = target_entry.deprecated
-        # Also patch JSON Schema x-meta
         slack_props = (
             schema_mod.JSON_SCHEMA.get("properties", {})
             .get("dashboard", {})
@@ -549,15 +501,9 @@ class TestConfigLoaderProperties:
                 slack_props["x-meta"]["deprecated"] = original_xmeta_dep
 
 
-# ---------------------------------------------------------------------------
-# Agent bindings & resolver property tests
-# ---------------------------------------------------------------------------
-
-
 class TestAgentBindingsProperties:
     """Property-based tests for AgentProfile metadata and the resolver."""
 
-    # Property: New dataclass metadata completeness
     @given(
         cls_idx=st.integers(min_value=0, max_value=1),
     )
@@ -581,14 +527,23 @@ class TestAgentBindingsProperties:
 
         for f in fields:
             meta = dict(f.metadata) if f.metadata else {}
-            assert "label" in meta, f"{cls.__name__}.{f.name} missing 'label' in metadata"
-            assert isinstance(meta["label"], str), f"{cls.__name__}.{f.name} label must be str"
-            assert len(meta["label"]) > 0, f"{cls.__name__}.{f.name} label must not be empty"
+            assert (
+                "label" in meta
+            ), f"{cls.__name__}.{f.name} missing 'label' in metadata"
+            assert isinstance(
+                meta["label"], str
+            ), f"{cls.__name__}.{f.name} label must be str"
+            assert (
+                len(meta["label"]) > 0
+            ), f"{cls.__name__}.{f.name} label must not be empty"
             assert "help" in meta, f"{cls.__name__}.{f.name} missing 'help' in metadata"
-            assert isinstance(meta["help"], str), f"{cls.__name__}.{f.name} help must be str"
-            assert len(meta["help"]) > 0, f"{cls.__name__}.{f.name} help must not be empty"
+            assert isinstance(
+                meta["help"], str
+            ), f"{cls.__name__}.{f.name} help must be str"
+            assert (
+                len(meta["help"]) > 0
+            ), f"{cls.__name__}.{f.name} help must not be empty"
 
-    # Property: Config serialization round-trip for agents/memory_stores
     @given(config=_gideon_config_st)
     @settings(deadline=None)
     def test_config_serialization_round_trip(
@@ -603,38 +558,39 @@ class TestAgentBindingsProperties:
         d = config.to_dict()
         loaded = _load_from_dict(d)
 
-        # Compare agents — load() may add a default native agent if none exist
         if config.agents:
             for name in config.agents:
                 assert name in loaded.agents
-                assert loaded.agents[name].provider_agent == config.agents[name].provider_agent
-                assert loaded.agents[name].default_dir == config.agents[name].default_dir
-                assert loaded.agents[name].memory_store == config.agents[name].memory_store
+                assert (
+                    loaded.agents[name].provider_agent
+                    == config.agents[name].provider_agent
+                )
+                assert (
+                    loaded.agents[name].default_dir == config.agents[name].default_dir
+                )
+                assert (
+                    loaded.agents[name].memory_store == config.agents[name].memory_store
+                )
         else:
-            # Empty agents → load() seeds a default native agent
             assert len(loaded.agents) >= 1
 
-        # default_agent always names a real agent after load()
         assert loaded.default_agent in loaded.agents
 
-        # Compare memory_stores
         if config.memory_stores:
             assert set(loaded.memory_stores.keys()) == set(config.memory_stores.keys())
             for name in config.memory_stores:
                 assert (
-                    loaded.memory_stores[name].description == config.memory_stores[name].description
+                    loaded.memory_stores[name].description
+                    == config.memory_stores[name].description
                 )
         else:
-            # Empty memory_stores → default entry synthesized
             assert "default" in loaded.memory_stores
 
-        # Compare core fields still round-trip
         assert loaded.agent.approval_mode == config.agent.approval_mode
         assert loaded.agent.provider == config.agent.provider
         assert loaded.session.timeout_secs == config.session.timeout_secs
         assert loaded.auto_update == config.auto_update
 
-    # Property: Serialization format correctness
     @given(config=_gideon_config_st)
     @settings(deadline=None)
     def test_serialization_format_correctness(
@@ -648,7 +604,6 @@ class TestAgentBindingsProperties:
         """
         d = config.to_dict()
 
-        # agents is a dict of dicts with expected keys
         assert isinstance(d["agents"], dict)
         for name, agent_dict in d["agents"].items():
             assert isinstance(agent_dict, dict)
@@ -656,23 +611,22 @@ class TestAgentBindingsProperties:
             assert "default_dir" in agent_dict
             assert "memory_store" in agent_dict
 
-        # memory_stores is a dict of dicts with expected keys
         assert isinstance(d["memory_stores"], dict)
         for name, ms_dict in d["memory_stores"].items():
             assert isinstance(ms_dict, dict)
             assert "description" in ms_dict
 
-        # default_agent is present; retired default_memory_store stays gone
         assert "default_agent" in d
         assert isinstance(d["default_agent"], str)
         assert "default_memory_store" not in d
 
-    # Property: Memory store merge correctness
     @given(
         top_level=st.fixed_dictionaries(
             {},
             optional={
-                "semantic_confidence_threshold": st.floats(min_value=0.0, max_value=1.0),
+                "semantic_confidence_threshold": st.floats(
+                    min_value=0.0, max_value=1.0
+                ),
                 "episodic_dedup_threshold": st.floats(min_value=0.0, max_value=1.0),
                 "episodic_max_results": st.integers(min_value=1, max_value=50),
                 "history_max_days": st.integers(min_value=1, max_value=365),
@@ -707,7 +661,6 @@ class TestAgentBindingsProperties:
         """
         merged = resolve_memory_store_config(top_level, store_overrides)
 
-        # Unspecified fields inherit from top-level
         for key, value in top_level.items():
             if key not in store_overrides:
                 assert merged[key] == value, (
@@ -715,10 +668,8 @@ class TestAgentBindingsProperties:
                     f"(expected {value!r}, got {merged.get(key)!r})"
                 )
 
-        # Explicit non-empty, non-None store values override
         for key, value in store_overrides.items():
             if key == "description":
-                # description is store-only metadata, must not appear in merged
                 assert key not in merged or merged.get(key) == top_level.get(
                     key
                 ), "'description' should be skipped during merge"
@@ -729,7 +680,6 @@ class TestAgentBindingsProperties:
                     f"(expected {value!r}, got {merged.get(key)!r})"
                 )
 
-        # Empty string and None values do not override
         for key, value in store_overrides.items():
             if key == "description":
                 continue
@@ -740,10 +690,8 @@ class TestAgentBindingsProperties:
                         f"(expected {top_level[key]!r}, got {merged.get(key)!r})"
                     )
 
-        # Original top_level dict must not be mutated
         assert merged is not top_level
 
-    # Property: Resolver returns correct bindings for the named agent
     @given(
         agent_name=_safe_name_st,
         store_name=_safe_name_st,
@@ -781,20 +729,17 @@ class TestAgentBindingsProperties:
             },
         )
 
-        # Resolve via explicit agent_name
         result = resolve_agent_bindings(config, agent_name=agent_name)
         assert isinstance(result, ResolvedBindings)
         assert result.workspace_dir == Path(agent_dir)
         assert result.memory_store_name == store_name
         assert result.provider_agent == provider_agent_name
 
-        # Resolve via default_agent (no explicit agent_name)
         result2 = resolve_agent_bindings(config)
         assert result2.workspace_dir == Path(agent_dir)
         assert result2.memory_store_name == store_name
         assert result2.provider_agent == provider_agent_name
 
-    # Property: Resolver falls back on a missing memory store reference
     @given(
         agent_name=_safe_name_st,
         missing_store=_safe_name_st,
@@ -830,12 +775,9 @@ class TestAgentBindingsProperties:
 
         result = resolve_agent_bindings(config, agent_name=agent_name)
 
-        # Agent's own working dir is honoured
         assert result.workspace_dir == Path(agent_dir)
-        # Missing store falls back to filesystem (empty name)
         assert result.memory_store_name == ""
 
-    # Property: Agents parsing accepts duplicate provider_agent values
     @given(
         agents_data=st.dictionaries(
             keys=_safe_name_st,
@@ -865,18 +807,12 @@ class TestAgentBindingsProperties:
         raw_config: dict = {"agents": agents_data}
         cfg = _load_from_dict(raw_config)
 
-        # All agent entries must be parsed (load() may add a default too)
         for name, raw_entry in agents_data.items():
             parsed = cfg.agents[name]
             assert isinstance(parsed, AgentProfile)
             assert parsed.provider_agent == raw_entry["provider_agent"]
             assert parsed.default_dir == raw_entry["default_dir"]
             assert parsed.memory_store == raw_entry["memory_store"]
-
-
-# ---------------------------------------------------------------------------
-# Resolver / default-agent unit tests
-# ---------------------------------------------------------------------------
 
 
 class TestEdgeCases:
@@ -921,29 +857,26 @@ class TestEdgeCases:
                 {
                     "agents": {
                         "Gideon": {"provider": "native"},
-                        "my-helper": {"provider": "native"},  # user agent — keep
-                        "gideon-autonomous": {"provider": "native"},  # retired — prune
+                        "my-helper": {"provider": "native"},
+                        "gideon-autonomous": {"provider": "native"},
                     },
                     "default_agent": "Gideon",
                 }
             )
         )
-        from gideon.config.migrations import load_and_persist_migrations
+        from gideon.core.config.migrations import load_and_persist_migrations
 
         original = cfg_file.read_text()
-        with unittest.mock.patch("gideon.config.loader.config_dir", return_value=tmp_path):
+        with unittest.mock.patch(
+            "gideon.core.config.loader.config_dir", return_value=tmp_path
+        ):
             cfg = AppConfig.load()
 
-            # In-memory: retired gone, user + default kept, reserved seeded.
             assert "gideon-autonomous" not in cfg.agents
             assert "my-helper" in cfg.agents
             assert "Gideon" in cfg.agents
-            # …and reading it changed NOTHING on disk. load() is a pure read (PHF-15).
             assert cfg_file.read_text() == original
 
-            # Persisting is a separate, explicit act, and the gateway boot path is its only
-            # caller. Through it, the retired key really is gone from disk rather than
-            # filtered in memory — a reload must not resurrect it.
             load_and_persist_migrations()
 
         on_disk = json.loads(cfg_file.read_text())
@@ -992,7 +925,10 @@ class TestEdgeCases:
         assert result_unknown.workspace_dir == result_default.workspace_dir
         assert result_unknown.memory_store_name == result_default.memory_store_name
         assert result_unknown.provider_agent == result_default.provider_agent
-        assert result_unknown.effective_memory_config == result_default.effective_memory_config
+        assert (
+            result_unknown.effective_memory_config
+            == result_default.effective_memory_config
+        )
 
 
 class TestResourceIndependence:
@@ -1016,11 +952,6 @@ class TestResourceIndependence:
         }
         overlap = ms_fields & forbidden
         assert not overlap, f"MemoryStoreConfig has agent/workspace fields: {overlap}"
-
-
-# ---------------------------------------------------------------------------
-# Persistent log_level config field
-# ---------------------------------------------------------------------------
 
 
 class TestPersistentLogLevel:
@@ -1061,7 +992,6 @@ class TestMemoryConfigBehaviorFlags:
         assert _load_from_dict({}).memory.proactive_commitments is False
 
     def test_l1_manifest_can_be_disabled(self) -> None:
-        # l1_manifest defaults True; a saved False must actually load as False.
         cfg = _load_from_dict({"memory": {"l1_manifest": False}})
         assert cfg.memory.l1_manifest is False
 
@@ -1081,11 +1011,6 @@ class TestMemoryConfigBehaviorFlags:
         assert cfg.memory.auto_promote_every_n == 9
 
 
-# ---------------------------------------------------------------------------
-# Soft-stop config field
-# ---------------------------------------------------------------------------
-
-
 class TestSoftStopBudget:
     """Tests for agent.soft_stop_budget_secs config field."""
 
@@ -1101,26 +1026,28 @@ class TestSoftStopBudget:
 
     def test_soft_stop_budget_too_low(self, caplog) -> None:
         """AgentConfig clamps soft_stop_budget_secs below 0.5 to 0.5 with a warning."""
-        with caplog.at_level(logging.WARNING, logger="gideon.config.loader"):
+        with caplog.at_level(logging.WARNING, logger="gideon.core.config.loader"):
             cfg = AgentConfig(soft_stop_budget_secs=0.1)
         assert cfg.soft_stop_budget_secs == 0.5
         assert "out of range" in caplog.text
 
     def test_soft_stop_budget_too_high(self, caplog) -> None:
         """AgentConfig clamps soft_stop_budget_secs above 60.0 to 60.0 with a warning."""
-        with caplog.at_level(logging.WARNING, logger="gideon.config.loader"):
+        with caplog.at_level(logging.WARNING, logger="gideon.core.config.loader"):
             cfg = AgentConfig(soft_stop_budget_secs=120.0)
         assert cfg.soft_stop_budget_secs == 60.0
         assert "out of range" in caplog.text
 
     def test_soft_stop_budget_appears_in_schema(self) -> None:
         """Generated config baseline includes soft_stop_budget_secs."""
-        from gideon.config.schema import SCHEMA_REGISTRY
+        from gideon.core.config.schema import SCHEMA_REGISTRY
 
         paths = [e.path for e in SCHEMA_REGISTRY]
         assert "agent.soft_stop_budget_secs" in paths
 
-        entry = next(e for e in SCHEMA_REGISTRY if e.path == "agent.soft_stop_budget_secs")
+        entry = next(
+            e for e in SCHEMA_REGISTRY if e.path == "agent.soft_stop_budget_secs"
+        )
         assert entry.type == "number"
         assert entry.default_value == 10.0
 

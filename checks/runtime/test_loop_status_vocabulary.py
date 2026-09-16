@@ -3,10 +3,10 @@
 🔴 WHY THIS RAIL EXISTS. A loop's lifecycle status is one backend enum (``loop.loop:LoopStatus``)
 and the frontend narrated it from TWO tables that had drifted word-for-word and tone-for-tone:
 
-* ``web/src/lib/loopStatus.ts`` — read by the Code list, the in-chat SDLC progress card and the
+* ``apps/console/src/lib/loopStatus.ts`` — read by the Code list, the in-chat SDLC progress card and the
   Projects linked-work rows: ``stagnant`` → "Stalled", ``intake`` → "Analyzing",
   ``complete`` → "Complete", ``running`` → primary, ``complete`` → ok.
-* ``web/src/pages/loops/loopStatusMeta.ts`` — read by the Loops list and the dashboard Active Work
+* ``apps/console/src/pages/loops/loopStatusMeta.ts`` — read by the Loops list and the dashboard Active Work
   widget: ``stagnant`` → "Stagnant", ``intake`` → "Intake", ``complete`` → "Completed",
   ``running`` → ok, ``complete`` → primary, ``paused`` → warn.
 
@@ -36,36 +36,19 @@ from pathlib import Path
 
 import pytest
 
-from gideon.loop.loop import ACTIVE_STATUSES, LoopStatus
+from gideon.automation.loop.loop import ACTIVE_STATUSES, LoopStatus
 
-_REPO = Path(__file__).resolve().parent.parent
-_WEB = _REPO / "web" / "src"
+_REPO = Path(__file__).resolve().parent.parent.parent
+_WEB = _REPO / "apps/console" / "src"
 _REGISTRY = _WEB / "lib" / "loopStatus.ts"
 _API = _WEB / "lib" / "api.ts"
 
-# web is optional in some checkouts (backend-only installs); skip cleanly then.
 pytestmark = pytest.mark.skipif(not _WEB.exists(), reason="web sources not present")
 
-#: The one status the frontend renders that the backend never sends: a `complete` loop carrying an
-#: `error_message` finished non-genuinely (budget exhausted, DoD unmet), which `effectiveLoopStatus`
-#: maps to this synthetic key so it does not read as a genuine green completion.
 _SYNTHETIC = {"ended_early"}
 
-#: A loop-status registry declares a status key against a string or an object literal
-#: (``stagnant: { label: 'Stalled', … }``). Deliberately NOT matched: a status keyed to a number
-#: (``CodeSection``'s ``stagnant: 2`` attention-sort rank) — a rank order is not a vocabulary.
-#:
-#: Also deliberately NOT counted: a table that PROJECTS a loop status into a different closed
-#: vocabulary. `lib/useAgentActivity.ts`'s `LOOP_STATE` maps the 12 `UnifiedLoopStatus` members
-#: onto the 5 `AgentActivityState` members (`working`/`needs_input`/`waiting_approval`/`idle`/
-#: `error`) for the ambient worlds — it holds no label and no tone, so it cannot produce the
-#: "Stalled vs Stagnant" or two-meanings-of-green drift this census exists to prevent. Same
-#: reasoning as the rank-order exemption above: a projection is not a words-and-tones table.
-#: (AS-9 added it; PP-16's rail matched its `stagnant: 'needs_input'` row, which is a state
-#: name, not a display word.)
 _REGISTRY_ROW = re.compile(r"\bstagnant:\s*[{'\"]")
 
-#: The active-status set literal, in the order every hand-written copy used.
 _ACTIVE_LITERAL = re.compile(r"'running',\s*'paused',\s*'stagnant'")
 
 
@@ -94,11 +77,11 @@ def test_the_registry_covers_the_backend_enum_exactly():
     missing = backend - keys
     stale = keys - backend - _SYNTHETIC
     assert not missing, (
-        f"LoopStatus members with no word in web/src/lib/loopStatus.ts: {sorted(missing)}. "
+        f"LoopStatus members with no word in apps/console/src/lib/loopStatus.ts: {sorted(missing)}. "
         "A status the frontend cannot name renders as its raw snake_case wire value."
     )
     assert not stale, (
-        f"web/src/lib/loopStatus.ts names statuses the backend never sends: {sorted(stale)}. "
+        f"apps/console/src/lib/loopStatus.ts names statuses the backend never sends: {sorted(stale)}. "
         f"Remove them, or list them in _SYNTHETIC if derived like {sorted(_SYNTHETIC)}."
     )
 
@@ -106,7 +89,9 @@ def test_the_registry_covers_the_backend_enum_exactly():
 def test_the_frontend_active_set_mirrors_the_backend_one():
     text = _REGISTRY.read_text(encoding="utf-8")
     block = text.split("export const ACTIVE_LOOP_STATUSES", 1)
-    assert len(block) == 2, "ACTIVE_LOOP_STATUSES is gone from the registry — parser drift?"
+    assert (
+        len(block) == 2
+    ), "ACTIVE_LOOP_STATUSES is gone from the registry — parser drift?"
     fe = set(re.findall(r"'([a-z_]+)'", block[1].split("])", 1)[0]))
     assert fe, "parsed no members out of ACTIVE_LOOP_STATUSES — parser drift?"
     be = {s.value for s in ACTIVE_STATUSES}
@@ -119,8 +104,6 @@ def test_the_frontend_active_set_mirrors_the_backend_one():
 
 
 def test_there_is_exactly_one_loop_status_registry():
-    # Vacuity floor first: the positive control must still match, or "nothing else matches" is
-    # a statement about the regex rather than about the codebase.
     assert _REGISTRY_ROW.search(
         _REGISTRY.read_text(encoding="utf-8")
     ), f"the loop-status row pattern no longer matches {_REGISTRY} — this census is vacuous"
@@ -128,12 +111,12 @@ def test_there_is_exactly_one_loop_status_registry():
         p.relative_to(_REPO)
         for p in _web_sources()
         if p != _REGISTRY
-        and p.name != "useAgentActivity.ts"  # a projection, not a vocabulary — see above
+        and p.name != "useAgentActivity.ts"
         and _REGISTRY_ROW.search(p.read_text(encoding="utf-8"))
     ]
     assert not others, (
         f"a second loop-status registry reappeared: {[str(p) for p in others]}. The words and "
-        "tones live in web/src/lib/loopStatus.ts only — two tables is how 'Stalled' vs 'Stagnant' "
+        "tones live in apps/console/src/lib/loopStatus.ts only — two tables is how 'Stalled' vs 'Stagnant' "
         "and two meanings of green shipped at once."
     )
 
@@ -163,8 +146,12 @@ def _union_members(name: str) -> set[str]:
     text = _API.read_text(encoding="utf-8")
     text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
     text = re.sub(r"//[^\n]*", "", text)
-    m = re.search(rf"export type {name}\s*=\s*((?:[^\n]*\n)+?)\s*(?:export|/\*|\Z)", text)
-    assert m, f"could not find `export type {name}` in web/src/lib/api.ts — parser drift?"
+    m = re.search(
+        rf"export type {name}\s*=\s*((?:[^\n]*\n)+?)\s*(?:export|/\*|\Z)", text
+    )
+    assert (
+        m
+    ), f"could not find `export type {name}` in apps/console/src/lib/api.ts — parser drift?"
     return set(re.findall(r"'([a-z_]+)'", m.group(1)))
 
 
@@ -184,7 +171,7 @@ def test_the_wire_type_union_covers_the_backend_enum_exactly():
     backend = {s.value for s in LoopStatus}
     assert backend, "LoopStatus enum is empty — import drift?"
     assert union == backend, (
-        "web/src/lib/api.ts:UnifiedLoopStatus disagrees with loop.loop:LoopStatus "
+        "apps/console/src/lib/api.ts:UnifiedLoopStatus disagrees with loop.loop:LoopStatus "
         f"(union-only={sorted(union - backend)}, backend-only={sorted(backend - union)}). "
         "A member the union omits cannot be compared against without a type error, which is "
         "how a real state stops being reachable from any affordance."
@@ -193,14 +180,15 @@ def test_the_wire_type_union_covers_the_backend_enum_exactly():
 
 def test_there_is_exactly_one_wire_status_union():
     """The retired per-kind copies must not come back. `LoopStatus`/`CodeStatus` were
-    goal-shaped and code-shaped unions of the same enum; one of them omitted `blocked`."""
+    goal-shaped and code-shaped unions of the same enum; one of them omitted `blocked`.
+    """
     text = _API.read_text(encoding="utf-8")
     text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
     text = re.sub(r"//[^\n]*", "", text)
     found = set(re.findall(r"export type (\w*(?:Loop|Code)Status)\s*=", text))
     assert (
         "UnifiedLoopStatus" in found
-    ), "UnifiedLoopStatus is gone from web/src/lib/api.ts — this rail can prove nothing"
+    ), "UnifiedLoopStatus is gone from apps/console/src/lib/api.ts — this rail can prove nothing"
     assert found == {
         "UnifiedLoopStatus"
-    }, f"more than one loop-status union is exported from web/src/lib/api.ts: {sorted(found)}"
+    }, f"more than one loop-status union is exported from apps/console/src/lib/api.ts: {sorted(found)}"

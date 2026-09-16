@@ -17,12 +17,9 @@ def _write_config(tmp_path, providers):
     return cfg
 
 
-# ── openai_family_providers (shared config reader) ───────────────────────────
-
-
 class TestOpenAIFamilyProviders:
     def test_filters_to_openai_family(self, tmp_path, monkeypatch):
-        from gideon.providers import use_cases as uc
+        from gideon.extensions.providers import use_cases as uc
 
         _write_config(
             tmp_path,
@@ -31,7 +28,10 @@ class TestOpenAIFamilyProviders:
                     "name": "MyOpenAI",
                     "type": "openai",
                     "model": "gpt-4o",
-                    "options": {"api_key": "sk-x", "endpoint": "https://api.openai.com/v1"},
+                    "options": {
+                        "api_key": "sk-x",
+                        "endpoint": "https://api.openai.com/v1",
+                    },
                 },
                 {
                     "name": "LocalLlama",
@@ -48,32 +48,29 @@ class TestOpenAIFamilyProviders:
             ],
         )
         monkeypatch.setattr(
-            "gideon.config.loader.config_path", lambda: tmp_path / "config.json"
+            "gideon.core.config.loader.config_path", lambda: tmp_path / "config.json"
         )
 
         found = uc.openai_family_providers()
         names = {p["name"] for p in found}
-        assert names == {"MyOpenAI", "Groqq"}  # ollama excluded
+        assert names == {"MyOpenAI", "Groqq"}
         my = next(p for p in found if p["name"] == "MyOpenAI")
         assert my["api_key"] == "sk-x"
         assert my["endpoint"] == "https://api.openai.com/v1"
 
     def test_no_config_returns_empty(self, tmp_path, monkeypatch):
-        from gideon.providers import use_cases as uc
+        from gideon.extensions.providers import use_cases as uc
 
         monkeypatch.setattr(
-            "gideon.config.loader.config_path", lambda: tmp_path / "missing.json"
+            "gideon.core.config.loader.config_path", lambda: tmp_path / "missing.json"
         )
         assert uc.openai_family_providers() == []
 
 
-# ── STT registry resolves a remote selection ─────────────────────────────────
-
-
 class TestRemoteSttResolution:
     def test_active_stt_resolves_remote_provider(self, monkeypatch):
-        from gideon.providers import use_cases as uc
-        from gideon.stt import registry as sr
+        from gideon.extensions.providers import use_cases as uc
+        from gideon.integrations.stt import registry as sr
 
         monkeypatch.setattr(sr, "_providers", {}, raising=False)
         monkeypatch.setattr(
@@ -94,18 +91,16 @@ class TestRemoteSttResolution:
         assert model_id == "whisper-1"
 
     def test_local_provider_resolves_alongside_remote(self, monkeypatch):
-        # The local faster-whisper backend is an APP now: the loader registers its
-        # provider into the stt registry (name "faster_whisper"). Simulate that here
-        # (register a stand-in), then confirm active_stt() resolves the local binding
-        # alongside the remote OpenAI-family adapter.
-        from gideon.providers import use_cases as uc
-        from gideon.stt import registry as sr
+        from gideon.extensions.providers import use_cases as uc
+        from gideon.integrations.stt import registry as sr
 
         class _FakeWhisper:
             name = "faster_whisper"
             display_name = "Faster Whisper"
 
-        monkeypatch.setattr(sr, "_providers", {"faster_whisper": _FakeWhisper()}, raising=False)
+        monkeypatch.setattr(
+            sr, "_providers", {"faster_whisper": _FakeWhisper()}, raising=False
+        )
         monkeypatch.setattr(
             uc,
             "openai_family_providers",
@@ -128,28 +123,29 @@ class TestRemoteSttResolution:
         app-registered bundled backend (faster-whisper). Clearing everything was a
         regression — a provider-config edit silently unregistered local STT until the
         next gateway restart."""
-        from gideon.stt import registry as sr
+        from gideon.integrations.stt import registry as sr
 
-        bundled = object()  # stands in for the app-registered faster-whisper provider
+        bundled = object()
         remote = object()
         monkeypatch.setattr(
-            sr, "_providers", {"faster_whisper": bundled, "MyOpenAI": remote}, raising=False
+            sr,
+            "_providers",
+            {"faster_whisper": bundled, "MyOpenAI": remote},
+            raising=False,
         )
         monkeypatch.setattr(sr, "_remote_names", {"MyOpenAI"}, raising=False)
-        # No config providers → _ensure_registered re-adds nothing; refresh drops remote only.
-        monkeypatch.setattr("gideon.providers.use_cases.openai_family_providers", lambda: [])
+        monkeypatch.setattr(
+            "gideon.extensions.providers.use_cases.openai_family_providers", lambda: []
+        )
         sr.refresh_providers()
-        assert sr._providers == {"faster_whisper": bundled}  # bundled survived
+        assert sr._providers == {"faster_whisper": bundled}
         assert sr._remote_names == set()
-
-
-# ── TTS registry resolves a remote selection ─────────────────────────────────
 
 
 class TestRemoteTtsResolution:
     def test_active_tts_resolves_remote_provider(self, monkeypatch):
-        from gideon.providers import use_cases as uc
-        from gideon.tts import registry as tr
+        from gideon.extensions.providers import use_cases as uc
+        from gideon.integrations.tts import registry as tr
 
         monkeypatch.setattr(tr, "_providers", {}, raising=False)
         monkeypatch.setattr(
@@ -170,15 +166,20 @@ class TestRemoteTtsResolution:
         assert voice_id == "tts-1"
 
     def test_active_voice_params_provider_neutral(self, monkeypatch):
-        from gideon.providers import use_cases as uc
-        from gideon.tts import registry as tr
+        from gideon.extensions.providers import use_cases as uc
+        from gideon.integrations.tts import registry as tr
 
         prov = MagicMock()
         monkeypatch.setattr(tr, "active_tts", lambda: (prov, "tts-1"))
         monkeypatch.setattr(
             uc,
             "load_use_case_settings",
-            lambda u: {"enabled": True, "auto_speak": True, "speed": 1.2, "speech_voice": "nova"},
+            lambda u: {
+                "enabled": True,
+                "auto_speak": True,
+                "speed": 1.2,
+                "speech_voice": "nova",
+            },
         )
 
         params = tr.active_voice_params()
@@ -190,13 +191,10 @@ class TestRemoteTtsResolution:
         assert params["auto_speak"] is True
 
 
-# ── Adapter behavior ─────────────────────────────────────────────────────────
-
-
 class TestOpenAISttProvider:
     @pytest.mark.asyncio
     async def test_unavailable_without_key(self):
-        from gideon.stt.openai_provider import OpenAISttProvider
+        from gideon.integrations.stt.openai_provider import OpenAISttProvider
 
         prov = OpenAISttProvider(provider_name="X", endpoint="", api_key="")
         with patch.dict("os.environ", {}, clear=True):
@@ -204,7 +202,7 @@ class TestOpenAISttProvider:
 
     @pytest.mark.asyncio
     async def test_transcribe_returns_text(self, tmp_path):
-        from gideon.stt.openai_provider import OpenAISttProvider
+        from gideon.integrations.stt.openai_provider import OpenAISttProvider
 
         audio = tmp_path / "a.webm"
         audio.write_bytes(b"x")
@@ -230,21 +228,21 @@ class TestOpenAISttProvider:
         It must NOT carry local-model management methods — those are the separate
         LocalModelProvider axis that only local backends (faster-whisper) implement. Its
         hosted models surface for binding via the config-provider catalog, not here."""
-        from gideon.local_models.provider import LocalModelProvider
-        from gideon.stt.openai_provider import OpenAISttProvider
+        from gideon.integrations.local_models.provider import LocalModelProvider
+        from gideon.integrations.stt.openai_provider import OpenAISttProvider
 
         prov = OpenAISttProvider(provider_name="X", endpoint="", api_key="sk-x")
         assert not isinstance(prov, LocalModelProvider)
         assert not hasattr(prov, "list_models")
         assert not hasattr(prov, "download_model")
         assert not hasattr(prov, "delete_model")
-        assert callable(prov.transcribe)  # inference axis present
+        assert callable(prov.transcribe)
 
 
 class TestOpenAITtsProvider:
     @pytest.mark.asyncio
     async def test_synthesize_writes_audio(self, tmp_path):
-        from gideon.tts.openai_provider import OpenAITtsProvider
+        from gideon.integrations.tts.openai_provider import OpenAITtsProvider
 
         out = tmp_path / "out.mp3"
         fake_resp = MagicMock()
@@ -273,7 +271,7 @@ class TestOpenAITtsProvider:
 
     @pytest.mark.asyncio
     async def test_can_synthesize_requires_key(self):
-        from gideon.tts.openai_provider import OpenAITtsProvider
+        from gideon.integrations.tts.openai_provider import OpenAITtsProvider
 
         prov = OpenAITtsProvider(provider_name="X", endpoint="", api_key="")
         with patch.dict("os.environ", {}, clear=True):
@@ -289,11 +287,7 @@ class TestRemoteAudioEndpointGating:
 
     @pytest.mark.asyncio
     async def test_stt_non_openai_unpinned_transcribe_refuses(self, tmp_path):
-        # The #38 gating now lives on the INFERENCE axis (transcribe): a non-OpenAI
-        # endpoint has no known default transcriber, so an unpinned call refuses rather
-        # than sending whisper-1 to the wrong service. (Model DISCOVERY for binding is
-        # the config-provider catalog's job, not the adapter's — see the decoupling.)
-        from gideon.stt.openai_provider import OpenAISttProvider
+        from gideon.integrations.stt.openai_provider import OpenAISttProvider
 
         audio = tmp_path / "a.wav"
         audio.write_bytes(b"RIFFxxxx")
@@ -308,23 +302,24 @@ class TestRemoteAudioEndpointGating:
         """Decoupled axes: a REMOTE TTS provider implements ONLY inference (synthesize);
         no list_voices/download_voice/delete_voice — those are the LocalModelProvider
         axis for local backends (piper)."""
-        from gideon.local_models.provider import LocalModelProvider
-        from gideon.tts.openai_provider import OpenAITtsProvider
+        from gideon.integrations.local_models.provider import LocalModelProvider
+        from gideon.integrations.tts.openai_provider import OpenAITtsProvider
 
         prov = OpenAITtsProvider(provider_name="X", endpoint="", api_key="k")
         assert not isinstance(prov, LocalModelProvider)
         assert not hasattr(prov, "list_voices")
         assert not hasattr(prov, "download_voice")
-        assert callable(prov.synthesize)  # inference axis present
+        assert callable(prov.synthesize)
 
     @pytest.mark.asyncio
     async def test_tts_non_openai_unpinned_synthesize_refuses(self, tmp_path):
-        from gideon.tts.openai_provider import OpenAITtsProvider
+        from gideon.integrations.tts.openai_provider import OpenAITtsProvider
 
         prov = OpenAITtsProvider(
             provider_name="Alibaba",
             endpoint="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
             api_key="k",
         )
-        # No voice= (model) → must NOT default to tts-1 on a non-OpenAI endpoint.
-        assert await prov.synthesize("hello", output_path=str(tmp_path / "o.mp3")) is None
+        assert (
+            await prov.synthesize("hello", output_path=str(tmp_path / "o.mp3")) is None
+        )

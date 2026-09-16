@@ -10,10 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.agents.native.tools import InProcessMcpToolProvider
-from gideon.tool_providers.registry import (
-    create_native_provider,
-)
+from gideon.engine.agents.native.tools import InProcessMcpToolProvider
+from gideon.integrations.tool_providers.registry import create_native_provider
 
 
 @pytest.mark.asyncio
@@ -22,7 +20,6 @@ async def test_native_factory_yields_core_tools():
     tools = await prov.list_tools()
     assert prov.name == "gideon-core"
     assert len(tools) > 0, "core provider must expose tools"
-    # Every tool is tagged with the provider name.
     assert all(t.provider == "gideon-core" for t in tools)
 
 
@@ -40,10 +37,13 @@ def test_get_mcp_registry_has_no_importers():
     exist, so any importer silently degrades to zero tools)."""
     import pathlib
 
-    root = pathlib.Path(__file__).resolve().parent.parent / "src" / "gideon"
+    root = pathlib.Path(__file__).resolve().parent.parent.parent / "runtime" / "gideon"
     offenders = []
     for p in root.rglob("*.py"):
         text = p.read_text(encoding="utf-8", errors="replace")
-        if "import get_mcp_registry" in text or "mcp_discovery import get_mcp_registry" in text:
+        if (
+            "import get_mcp_registry" in text
+            or "mcp_discovery import get_mcp_registry" in text
+        ):
             offenders.append(str(p.relative_to(root)))
     assert offenders == [], f"dead get_mcp_registry import resurfaced in: {offenders}"

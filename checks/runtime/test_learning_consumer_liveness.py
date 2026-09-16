@@ -40,23 +40,20 @@ from typing import Any
 
 import pytest
 
-from gideon.artifacts import registry
-from gideon.artifacts.native import NativeArtifactProvider
-from gideon.learning import consumer_liveness, outcome_resolver
-from gideon.learning import proposals as P
-from gideon.ledger import outcomes
-from gideon.memory_service import MemoryService
-from gideon.workflows import engine as engine_mod
-from gideon.workflows import journal as journal_mod
-from gideon.workflows import pinned
-from gideon.workflows import store as store_mod
-from gideon.workflows.models import RunStatus, WorkflowRun
+from gideon.assurance.ledger import outcomes
+from gideon.automation.workflows import engine as engine_mod
+from gideon.automation.workflows import journal as journal_mod
+from gideon.automation.workflows import pinned
+from gideon.automation.workflows import store as store_mod
+from gideon.automation.workflows.models import RunStatus, WorkflowRun
+from gideon.cognition.learning import consumer_liveness, outcome_resolver
+from gideon.cognition.learning import proposals as P
+from gideon.cognition.memory_service import MemoryService
+from gideon.workspace.artifacts import registry
+from gideon.workspace.artifacts.native import NativeArtifactProvider
 
-#: A day in seconds, so the "matured" clock skips in units the horizon is expressed in.
 _DAY = 86400.0
 
-#: The publish horizon the engine declares (7 days). Read off the constant rather than retyped so a
-#: change to the engine's generosity does not quietly make these tests assert the old number.
 _HORIZON = engine_mod.PUBLISH_CONSUMPTION_HORIZON_SECS
 
 
@@ -71,15 +68,12 @@ def home(tmp_path, monkeypatch):
     test.
     """
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     monkeypatch.setattr(P, "_surface_in_inbox", lambda prop: None)
     monkeypatch.setattr(P, "_resolve_inbox_item", lambda pid, status: None)
     registry.register_provider(NativeArtifactProvider(tmp_path / "artifacts"))
     yield tmp_path
     registry.unregister_provider("native")
-
-
-# ── driving one publish cycle of a work unit ──
 
 
 def _provider():
@@ -98,7 +92,9 @@ def _cycle(unit: str, slug: str) -> WorkflowRun:
     run = store_mod.create(WorkflowRun(id="", workflow_name=unit))
     run.status = RunStatus.COMPLETE
     store_mod.save(run)
-    _provider().create(name=f"{slug} body", content="the deliverable", slug=slug, source="workflow")
+    _provider().create(
+        name=f"{slug} body", content="the deliverable", slug=slug, source="workflow"
+    )
     engine_mod._open_publish_outcome(run.id, "emit", {"slug": slug, "action": "create"})
     return run
 
@@ -113,7 +109,9 @@ def _grade(runs: list[WorkflowRun], *, after_days: float = 8.0) -> dict[str, int
     A DELIBERATELY vector-store-free service: a consumption-sourced question must grade on a box
     with no embedder, which is exactly what moving off the semantic-memory metric bought.
     """
-    opened = min(outcome_resolver._epoch(q["ts"]) or 0.0 for run in runs for q in _questions(run))
+    opened = min(
+        outcome_resolver._epoch(q["ts"]) or 0.0 for run in runs for q in _questions(run)
+    )
     return outcome_resolver.resolve(
         MemoryService.over_vector_store(None), now=opened + after_days * _DAY
     )
@@ -131,9 +129,6 @@ def _dormancy_proposals() -> list[Any]:
     ]
 
 
-# ══ THE SILENT HALF — the assertions that prove this is not a blanket nag ══
-
-
 def test_an_opened_artifact_keeps_the_sweep_silent(home):
     """THE load-bearing test. Three cycles, every artifact untouched EXCEPT the last, which the user
     opened in the dashboard (`POST /api/artifacts/{slug}/events` → `record_impression`). One reader
@@ -142,7 +137,6 @@ def test_an_opened_artifact_keeps_the_sweep_silent(home):
     Without this clause a sweep that fires on the never-opened case proves nothing — anything fires.
     """
     runs = [_cycle("weekly-digest", f"digest-{i}") for i in range(3)]
-    # The one touch: a consumer opened the newest artifact.
     _provider().record_impression("digest-2", by="user", session_id="reader-session")
 
     _grade(runs)
@@ -188,7 +182,9 @@ def test_a_versioned_user_edit_is_a_touch(home):
     semantics to widen the signal is a separate change with its own consumers.
     """
     runs = [_cycle("notes", f"notes-{i}") for i in range(3)]
-    _provider().update("notes-0", content="the user rewrote a line", snapshot=True, actor="user")
+    _provider().update(
+        "notes-0", content="the user rewrote a line", snapshot=True, actor="user"
+    )
 
     _grade(runs)
     assert consumer_liveness.sweep()["dormant"] == 0
@@ -202,16 +198,16 @@ def test_the_producers_own_writes_are_not_touches(home):
     runs = [_cycle("selfread", f"selfread-{i}") for i in range(3)]
     for index in range(3):
         _provider().update(
-            f"selfread-{index}", content=f"revision {index}", snapshot=True, actor="agent"
+            f"selfread-{index}",
+            content=f"revision {index}",
+            snapshot=True,
+            actor="agent",
         )
     events = {e.type for e in _provider().get("selfread-0").events}
     assert events == {"created", "iterated"}, events
 
     _grade(runs)
     assert consumer_liveness.sweep()["dormant"] == 1
-
-
-# ══ THE FIRING HALF ══
 
 
 def test_three_unread_cycles_are_reported_as_a_proposal(home):
@@ -221,25 +217,32 @@ def test_three_unread_cycles_are_reported_as_a_proposal(home):
 
     graded = _grade(runs)
     assert graded["resolved"] == 3 and graded["inconclusive"] == 0
-    assert all(r["measured"] == outcomes.UNCONSUMED for run in runs for r in _resolutions(run))
+    assert all(
+        r["measured"] == outcomes.UNCONSUMED for run in runs for r in _resolutions(run)
+    )
 
     report = consumer_liveness.sweep()
-    assert report == {"units": 1, "dormant": 1, "live": 0, "insufficient": 0, "proposed": 1}
+    assert report == {
+        "units": 1,
+        "dormant": 1,
+        "live": 0,
+        "insufficient": 0,
+        "proposed": 1,
+    }
 
     (proposal,) = _dormancy_proposals()
     assert proposal.kind == P.Kind.RETIREMENT.value
     assert proposal.target == "consumer_liveness.dead-monitor"
-    # Both options, explicitly, because only the user can tell the two facts apart.
     assert "PAUSE" in proposal.body and "RETIRE" in proposal.body
     assert "Nothing has been stopped" in proposal.body
-    # The volatile evidence rides in refs (outside the fingerprint) so the body stays stable.
     assert {f"artifact:dead-{i}" for i in range(3)} <= set(proposal.evidence_refs)
 
 
 def test_the_publish_question_grades_without_a_vector_store(home):
     """PP-9 opened the publish question against a semantic-memory metric nothing wrote, so it always
     closed `inconclusive`. PP-10's consumption source is read off the artifact, so the bet grades
-    for real on a box with no embedder — asserted here because `_grade` passes a null store."""
+    for real on a box with no embedder — asserted here because `_grade` passes a null store.
+    """
     run = _cycle("one-shot", "one-shot-a")
     (question,) = _questions(run)
     assert question["metric_source"] == outcomes.SOURCE_CONSUMPTION
@@ -261,21 +264,15 @@ def test_the_sweep_reads_pp9s_record_and_adds_no_counter(home):
     consumer_liveness.sweep()
 
     (proposal,) = _dormancy_proposals()
-    # The horizon in the body came off the `pending_outcome`, not from a number this module keeps.
     assert f"{_HORIZON / _DAY:.0f} days" in proposal.body
-    # The sweep persists NOTHING of its own: the home holds the stores that existed before it, and
-    # no state file, counter or catalog named after it. A second store is the duplication PP-9/PP-10
-    # exist to remove, so its absence is asserted rather than assumed.
     written = {entry.name for entry in home.iterdir()}
-    assert not {name for name in written if "liveness" in name or "dormanc" in name}, written
+    assert not {
+        name for name in written if "liveness" in name or "dormanc" in name
+    }, written
 
-    # Running it twice writes nothing new either — the verdict is re-derived from the ledger.
     before = sorted(str(path.relative_to(home)) for path in home.rglob("*"))
     consumer_liveness.sweep()
     assert sorted(str(path.relative_to(home)) for path in home.rglob("*")) == before
-
-
-# ══ THE HORIZON — a fresh work unit cannot fire ══
 
 
 def test_a_fresh_work_unit_does_not_fire(home):
@@ -284,12 +281,18 @@ def test_a_fresh_work_unit_does_not_fire(home):
     YET" case, and calling it dormant is the exact mistake the atom forbids."""
     runs = [_cycle("fresh", f"fresh-{i}") for i in range(3)]
 
-    graded = _grade(runs, after_days=1.0)  # inside the 7-day horizon
+    graded = _grade(runs, after_days=1.0)
     assert graded == {"resolved": 0, "inconclusive": 0, "pending": 3, "proposed": 0}
     assert all(_resolutions(run) == [] for run in runs)
 
     report = consumer_liveness.sweep()
-    assert report == {"units": 0, "dormant": 0, "live": 0, "insufficient": 0, "proposed": 0}
+    assert report == {
+        "units": 0,
+        "dormant": 0,
+        "live": 0,
+        "insufficient": 0,
+        "proposed": 0,
+    }
     assert _dormancy_proposals() == []
 
 
@@ -323,10 +326,6 @@ def test_an_unreadable_cycle_is_insufficient_not_dormant(home):
     assert _dormancy_proposals() == []
 
 
-# ══ IT NEVER ACTS ══
-
-#: Names that would mean the sweep decided on its own. The atom forbids every one of them: only the
-#: user knows whether "nobody looked yet" or "nobody will ever look".
 _FORBIDDEN_CALLS = frozenset(
     {
         "pause",
@@ -349,7 +348,8 @@ _FORBIDDEN_CALLS = frozenset(
 def test_the_sweep_module_cannot_call_anything_that_stops_a_work_unit():
     """A STRUCTURAL rail, not a reading of today's code: the sweep's whole licence is that it
     proposes. An edit that later reaches for a pause has to fail here rather than ship as a control
-    that quietly acts, so the check is over the module's call graph and needs no home fixture."""
+    that quietly acts, so the check is over the module's call graph and needs no home fixture.
+    """
     source = pathlib.Path(consumer_liveness.__file__).read_text(encoding="utf-8")
     called: set[str] = set()
     for node in ast.walk(ast.parse(source)):
@@ -366,7 +366,8 @@ def test_the_sweep_module_cannot_call_anything_that_stops_a_work_unit():
 
 def test_a_firing_sweep_leaves_the_work_unit_running(home):
     """The functional half of the same guarantee: the sweep fires, files its proposal, and every run
-    is byte-identical afterwards. Nothing was paused, nothing was retired, no status moved."""
+    is byte-identical afterwards. Nothing was paused, nothing was retired, no status moved.
+    """
     runs = [_cycle("still-running", f"sr-{i}") for i in range(3)]
     _grade(runs)
     before = {run.id: store_mod.get(run.id).to_dict() for run in runs}  # type: ignore[union-attr]
@@ -378,9 +379,6 @@ def test_a_firing_sweep_leaves_the_work_unit_running(home):
     assert all(store_mod.get(run.id).status == RunStatus.COMPLETE for run in runs)
 
 
-# ══ NOT NAGGING ══
-
-
 def test_a_second_sweep_reinforces_rather_than_stacking(home):
     """Idempotency without a state file: the body is stable per work unit, so the queue's own
     fingerprint cascade REINFORCES the pending row. A sweep that filed a fresh proposal every
@@ -389,7 +387,7 @@ def test_a_second_sweep_reinforces_rather_than_stacking(home):
     _grade(runs)
 
     assert consumer_liveness.sweep()["proposed"] == 1
-    assert consumer_liveness.sweep()["proposed"] == 1  # reinforced, not a second row
+    assert consumer_liveness.sweep()["proposed"] == 1
 
     (proposal,) = _dormancy_proposals()
     assert proposal.reinforcements >= 2
@@ -397,7 +395,8 @@ def test_a_second_sweep_reinforces_rather_than_stacking(home):
 
 def test_a_rejected_dormancy_finding_is_never_re_filed(home):
     """ "I know, leave it alone" has to stick. Rejecting the proposal records the decision against
-    its fingerprint, and the stable body means the next sweep hashes to the same one and skips."""
+    its fingerprint, and the stable body means the next sweep hashes to the same one and skips.
+    """
     runs = [_cycle("accepted-risk", f"ar-{i}") for i in range(3)]
     _grade(runs)
     consumer_liveness.sweep()
@@ -406,9 +405,6 @@ def test_a_rejected_dormancy_finding_is_never_re_filed(home):
 
     assert consumer_liveness.sweep()["proposed"] == 0
     assert _dormancy_proposals() == []
-
-
-# ══ THE PURE VERDICT ══
 
 
 def _res(resolution: str, measured: float | None) -> dict[str, Any]:
@@ -423,7 +419,6 @@ def _res(resolution: str, measured: float | None) -> dict[str, Any]:
         ([_res(outcomes.MEASURED, 0.0)] * 2, outcomes.INSUFFICIENT),
         ([_res(outcomes.MEASURED, 0.0)] * 3, outcomes.DORMANT),
         ([_res(outcomes.MEASURED, 0.0)] * 9, outcomes.DORMANT),
-        # One touch anywhere in the window wins: a fortnightly reader is a reader.
         (
             [
                 _res(outcomes.MEASURED, 0.0),
@@ -432,15 +427,15 @@ def _res(resolution: str, measured: float | None) -> dict[str, Any]:
             ],
             outcomes.LIVE,
         ),
-        # A single touch is enough on its own — no cycle floor applies to LIVE.
         ([_res(outcomes.MEASURED, 1.0)], outcomes.LIVE),
-        # An unreadable cycle is never evidence of dormancy.
         (
             [_res(outcomes.MEASURED, 0.0)] * 2 + [_res(outcomes.INCONCLUSIVE, None)],
             outcomes.INSUFFICIENT,
         ),
-        # A touch OUTSIDE the window does not rescue a dormant unit — only the last N count.
-        ([_res(outcomes.MEASURED, 1.0)] + [_res(outcomes.MEASURED, 0.0)] * 3, outcomes.DORMANT),
+        (
+            [_res(outcomes.MEASURED, 1.0)] + [_res(outcomes.MEASURED, 0.0)] * 3,
+            outcomes.DORMANT,
+        ),
     ],
 )
 def test_dormancy_verdict_is_three_states(resolutions, expected):
@@ -455,7 +450,8 @@ def test_the_consumption_metric_round_trips():
     from the metric name. Built and parsed in one place — two hand-written format strings would
     drift and the sweep would silently lose its evidence refs."""
     assert (
-        outcomes.slug_from_metric(outcomes.consumption_metric("weekly-digest")) == "weekly-digest"
+        outcomes.slug_from_metric(outcomes.consumption_metric("weekly-digest"))
+        == "weekly-digest"
     )
     assert outcomes.slug_from_metric("lesson.metric.plan_a_win") == ""
     assert outcomes.slug_from_metric("") == ""

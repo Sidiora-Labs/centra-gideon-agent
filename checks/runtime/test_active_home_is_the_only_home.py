@@ -45,40 +45,16 @@ import re
 
 import pytest
 
-SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "gideon"
+SRC = pathlib.Path(__file__).resolve().parents[2] / "runtime" / "gideon"
 
-#: A literal spelling of the real Gideon home. Deliberately matches only
-#: `.gideon`: `Path.home() / ".claude.json"` and `~/.claude/agents/…` are the
-#: claude-code CLI's OWN global config, which genuinely lives at the user's real home and
-#: must not follow `GIDEON_HOME`.
 _LITERAL_HOME = re.compile(
     r"""Path\.home\(\)\s*/\s*["']\.gideon|expanduser\(\s*["']~/\.gideon"""
 )
 
-#: Tokens that make a literal spelling legitimate: the enclosing function consults the env
-#: var or the canonical resolver, so the literal is the *documented fallback* rather than the
-#: answer. `config_dir()` is that resolver (env-first, with a system-directory guard).
 _RESOLVER_TOKENS = ("GIDEON_HOME", "config_dir", "workspace_root")
 
-#: How many GUARDED sites exist. A CEILING (may only shrink), and it is what makes this rail
-#: honest about its own blind spot.
-#:
-#: The classification above is a scope heuristic: it asks whether the enclosing function
-#: MENTIONS a resolver, not whether *this* expression is the fallback. Telling those apart
-#: needs real dataflow. So a second hardcode added inside a function that already resolves
-#: the home correctly elsewhere would read as "guarded" and pass — which is precisely the
-#: "fixed in one function and left in a sibling" shape this rail exists to stop, one level in.
-#:
-#: Measured by mutation: reverting `mcp_core._current_session_thread_ts` to the real home
-#: left the `config_dir` import in scope, so the heuristic alone stayed green. The count
-#: closes that hole — a NEW literal anywhere raises it, wherever it hides.
 _GUARDED_CEILING = 12
 
-#: The sites that legitimately mean the REAL home, with the reason each one does.
-#:
-#: A CEILING, not a floor: shrinking it is always allowed, and adding to it requires stating
-#: why the active home is the wrong answer for that site. Both entries below want the real
-#: home precisely BECAUSE it is the real one — they exist to protect it.
 _REAL_HOME_IS_CORRECT: dict[str, str] = {
     "seed.py": (
         "`real_home()` exists so `--seed` can REFUSE to seed the operator's real home. "
@@ -106,7 +82,6 @@ def _sites() -> list[tuple[str, int, str, bool]]:
             continue
         tree = ast.parse(text)
         lines = text.splitlines()
-        # Every line covered by a docstring, so a warning ABOUT the pattern is not a use.
         doc_lines: set[int] = set()
         for node in ast.walk(tree):
             if (
@@ -114,9 +89,13 @@ def _sites() -> list[tuple[str, int, str, bool]]:
                 and isinstance(node.value, ast.Constant)
                 and isinstance(node.value.value, str)
             ):
-                doc_lines.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+                doc_lines.update(
+                    range(node.lineno, (node.end_lineno or node.lineno) + 1)
+                )
         funcs = [
-            n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
         ]
         for match in _LITERAL_HOME.finditer(text):
             lineno = text[: match.start()].count("\n") + 1
@@ -167,7 +146,11 @@ def test_the_guarded_population_only_shrinks():
     a literal real-home spelling was ADDED, which needs the argument written down, not a
     bumped number.
     """
-    guarded = [f"{path}:{lineno}  {code}" for path, lineno, code, resolves in _sites() if resolves]
+    guarded = [
+        f"{path}:{lineno}  {code}"
+        for path, lineno, code, resolves in _sites()
+        if resolves
+    ]
     assert len(guarded) <= _GUARDED_CEILING, (
         f"{len(guarded)} guarded literal-home sites, ceiling is {_GUARDED_CEILING}. A new one "
         "was added inside a function that already resolves the home, which the classifier "
@@ -177,7 +160,8 @@ def test_the_guarded_population_only_shrinks():
 
 def test_the_allowlist_has_no_stale_entries():
     """A ceiling that keeps entries for modules that no longer have a site is how an
-    allowlist stops describing the code. Each entry must still be earning its exemption."""
+    allowlist stops describing the code. Each entry must still be earning its exemption.
+    """
     paths = {path for path, _, _, _ in _sites()}
     stale = sorted(set(_REAL_HOME_IS_CORRECT) - paths)
     assert stale == [], f"allowlisted modules with no literal-home site left: {stale}"
@@ -187,7 +171,9 @@ def test_every_allowlist_entry_states_a_reason():
     """The exemption is the reason, not the entry. A bare path would let the next author
     add one without arguing that the active home is the wrong answer."""
     for module, reason in _REAL_HOME_IS_CORRECT.items():
-        assert len(reason) > 40, f"{module}: exemption needs a real reason, got {reason!r}"
+        assert (
+            len(reason) > 40
+        ), f"{module}: exemption needs a real reason, got {reason!r}"
 
 
 def test_the_scanner_actually_finds_sites():
@@ -199,8 +185,12 @@ def test_the_scanner_actually_finds_sites():
     the *guarded* sites, which are real and numerous.
     """
     sites = _sites()
-    assert len(sites) >= 10, f"the scanner found only {len(sites)} sites — it has gone blind"
-    assert any(resolves for *_, resolves in sites), "no guarded site found; classifier broke"
+    assert (
+        len(sites) >= 10
+    ), f"the scanner found only {len(sites)} sites — it has gone blind"
+    assert any(
+        resolves for *_, resolves in sites
+    ), "no guarded site found; classifier broke"
 
 
 def test_the_scanner_ignores_the_historical_comments_and_docstrings():
@@ -216,26 +206,18 @@ def test_the_scanner_ignores_the_historical_comments_and_docstrings():
     """
     sites = _sites()
 
-    # `seed.py` has the literal in BOTH its docstring (`real_home`'s, explaining the rule)
-    # and its code. Exactly one site — the code — must be reported.
     seed = [s for s in sites if s[0] == "seed.py"]
     assert len(seed) == 1, f"seed.py should report only its code line, got {seed}"
-    assert "return" in seed[0][2], f"the reported seed.py line is not the code: {seed[0]}"
+    assert (
+        "return" in seed[0][2]
+    ), f"the reported seed.py line is not the code: {seed[0]}"
 
-    # `handlers/mcp.py`'s comment spells out the old hardcode across two lines. Neither is a
-    # site now that both real ones are fixed.
     mcp_text = (SRC / "dashboard" / "handlers" / "mcp.py").read_text(encoding="utf-8")
     assert 'Path.home() / ".gideon" /' in mcp_text, (
         "the comment recording the original bug was deleted — it is the record of why this "
         "rail exists"
     )
     assert [s for s in sites if s[0] == "dashboard/handlers/mcp.py"] == []
-
-
-# ── the five sites, driven ────────────────────────────────────────────────────────────────
-#
-# The rail above is a source scan, so on its own it proves only spelling. Each fixed site is
-# also executed against a temp home here, which is what proves the behaviour changed.
 
 
 @pytest.fixture
@@ -260,7 +242,9 @@ def sealed_home(tmp_path, monkeypatch):
     them together, which is the isolation the product actually ships.
     """
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    monkeypatch.setattr(pathlib.Path, "home", classmethod(lambda cls: tmp_path / "fake-user"))
+    monkeypatch.setattr(
+        pathlib.Path, "home", classmethod(lambda cls: tmp_path / "fake-user")
+    )
     (tmp_path / "fake-user").mkdir()
     return tmp_path
 
@@ -269,28 +253,30 @@ def test_the_hook_registration_writes_into_the_active_home(sealed_home, monkeypa
     """🔑 The only WRITE among the five, and the worst of them: this created the directory and
     persisted into the operator's real home, whose gateway would then RUN the hook.
     """
-    from gideon.mcp_core import _call_tool_inner
+    from gideon.integrations.mcp_core import _call_tool_inner
 
-    monkeypatch.setattr("gideon.mcp_core._resolve_session_key", lambda: "test", raising=False)
+    monkeypatch.setattr(
+        "gideon.integrations.mcp_core._resolve_session_key",
+        lambda: "test",
+        raising=False,
+    )
 
     _call_tool_inner("hook_register", {"hook_id": "h1", "context_summary": "why"})
 
     written = sealed_home / "hooks.json"
     assert written.is_file(), "the registration did not land in the active home"
     assert "h1" in written.read_text(encoding="utf-8")
-    # Nothing outside the active home, even under the sealed fake `Path.home()`.
     assert not (sealed_home / "fake-user" / ".gideon").exists()
 
 
 def test_the_session_thread_scan_reads_the_active_home(sealed_home):
     """A cross-home READ: this globbed the real home, so a tool call in an isolated session
     picked up whichever instance wrote a pid file most recently."""
-    from gideon.mcp_core import _current_session_thread_ts
+    from gideon.integrations.mcp_core import _current_session_thread_ts
 
     (sealed_home / "session_pid_123.txt").write_text("1700000000.5", encoding="utf-8")
     assert _current_session_thread_ts() == "1700000000.5"
 
-    # A pid file in a DIFFERENT home is not visible.
     other = sealed_home / "fake-user" / ".gideon"
     other.mkdir(parents=True, exist_ok=True)
     (other / "session_pid_999.txt").write_text("9999999999.9", encoding="utf-8")
@@ -306,7 +292,7 @@ def test_the_installed_agent_config_path_follows_the_active_home(sealed_home):
     test did the latter and went green while the code had ALREADY been changed away from that
     constant — a test measuring a lever the code no longer pulls.
     """
-    from gideon.dashboard.handlers.mcp import _installed_agent_json
+    from gideon.interfaces.dashboard.handlers.mcp import _installed_agent_json
 
     assert _installed_agent_json() == sealed_home / "agents" / "gideon.json"
 
@@ -316,12 +302,13 @@ def test_mcp_discovery_reads_the_active_homes_agent_config(sealed_home, monkeypa
     discovery function, with a server only the temp home declares."""
     import json
 
-    import gideon.mcp_discovery as disc
+    import gideon.integrations.mcp_discovery as disc
 
     agents = sealed_home / "agents"
     agents.mkdir(exist_ok=True)
     (agents / "gideon.json").write_text(
-        json.dumps({"mcpServers": {"only-in-temp-home": {"command": "echo"}}}), encoding="utf-8"
+        json.dumps({"mcpServers": {"only-in-temp-home": {"command": "echo"}}}),
+        encoding="utf-8",
     )
     monkeypatch.delenv("GIDEON_PROJECT_DIR", raising=False)
 

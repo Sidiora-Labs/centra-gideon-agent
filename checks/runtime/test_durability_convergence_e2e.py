@@ -21,14 +21,14 @@ import os
 import tempfile
 from pathlib import Path
 
-from gideon.durability.sync_cycle import run_sync_cycle
-from gideon.sync_transports.base import (
+from gideon.integrations.sync_transports.base import (
     ConnectionResult,
     PushResult,
     RemoteRef,
     SyncObject,
     SyncTransportProvider,
 )
+from gideon.operations.durability.sync_cycle import run_sync_cycle
 
 _REGISTRY_KEY = "registry.json"
 _TMP_PREFIX = ".tmp-"
@@ -91,7 +91,9 @@ class FolderTransport(SyncTransportProvider):
         out = []
         for ref in refs:
             try:
-                out.append(SyncObject(key=ref.key, data=(self._root / ref.key).read_bytes()))
+                out.append(
+                    SyncObject(key=ref.key, data=(self._root / ref.key).read_bytes())
+                )
             except OSError:
                 continue
         return out
@@ -135,8 +137,6 @@ def _task_ids(home: Path) -> set[str]:
 
 
 def _knowledge_event(home: Path, rows: list[dict]) -> None:
-    # A JSONL append stream (notifications is a real jsonl_append entry) — the "knowledge item
-    # added on B" side of the criterion, as an append-dedup stream.
     home.mkdir(parents=True, exist_ok=True)
     d = home / "notifications.jsonl"
     d.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
@@ -157,29 +157,25 @@ class TestCriterion4OverRealFolder:
     def test_task_on_a_and_knowledge_on_b_converge(self, tmp_path):
         remote = tmp_path / "shared"
         a, b = tmp_path / "A", tmp_path / "B"
-        # A creates a task; B adds a "knowledge item" (an append-stream event).
         _task(a, "task-a", {"id": "task-a", "title": "from A"})
-        _knowledge_event(b, [{"id": "note-b", "ts": "2026-08-06T00:00:00Z", "text": "from B"}])
+        _knowledge_event(
+            b, [{"id": "note-b", "ts": "2026-08-06T00:00:00Z", "text": "from B"}]
+        )
 
         ta, tb = FolderTransport(remote), FolderTransport(remote)
-        # One cycle each way (two rounds so both publish before both pull the other).
         run_sync_cycle(ta, a, self_id="A", now="t1")
         run_sync_cycle(tb, b, self_id="B", now="t2")
         run_sync_cycle(ta, a, self_id="A", now="t3")
         run_sync_cycle(tb, b, self_id="B", now="t4")
 
-        # The task made on A now exists on B; the note made on B now exists on A.
         assert "task-a" in _task_ids(b), "A's task did not converge onto B"
         assert "note-b" in _notif_ids(a), "B's knowledge item did not converge onto A"
-        # And both machines hold the union.
         assert "task-a" in _task_ids(a) and "note-b" in _notif_ids(b)
 
     def test_delete_on_a_stays_deleted_on_b(self, tmp_path):
         remote = tmp_path / "shared"
         a, b = tmp_path / "A", tmp_path / "B"
         _task(a, "task-x", {"id": "task-x", "title": "live"})
-        # A hard-deletes task-x and leaves a tombstone marker (the DAS-6c-iii side-log shape,
-        # which the exporter folds into the entity rows).
         (a / "tasks" / "task-x.json").unlink()
         (a / "tasks" / "_tombstones.jsonl").write_text(
             json.dumps({"id": "task-x", "deleted_at": "2026-08-06T00:00:00Z"}) + "\n",
@@ -188,16 +184,14 @@ class TestCriterion4OverRealFolder:
         _task(b, "task-x", {"id": "task-x", "title": "still here on B"})
 
         ta, tb = FolderTransport(remote), FolderTransport(remote)
-        run_sync_cycle(ta, a, self_id="A", now="t1")  # publishes the tombstone
-        run_sync_cycle(tb, b, self_id="B", now="t2")  # B pulls it
+        run_sync_cycle(ta, a, self_id="A", now="t1")
+        run_sync_cycle(tb, b, self_id="B", now="t2")
 
         assert not (
             b / "tasks" / "task-x.json"
         ).exists(), "delete did not propagate — resurrected on B"
 
     def test_registry_is_real_bytes_on_disk(self, tmp_path):
-        # Prove the transport actually persisted a shared registry (the CAS object), not an
-        # in-memory dict — the real-transport distinction this atom exists to prove.
         remote = tmp_path / "shared"
         a = tmp_path / "A"
         _task(a, "t", {"id": "t"})

@@ -17,8 +17,11 @@ import asyncio
 import json
 import socket
 
+from gideon.extensions.providers.instance_routes import (
+    _probe_failure,
+    _test_model_connectivity,
+)
 from gideon.http_errors import HTTP_ERROR_CODES
-from gideon.providers.instance_routes import _probe_failure, _test_model_connectivity
 
 
 def _body(resp) -> dict:
@@ -51,12 +54,20 @@ def _assert_wire_envelope(resp, *, code: str, status: int) -> str:
 
 def test_model_endpoint_connection_refused_is_a_502_envelope() -> None:
     """A real connect to a closed loopback port → 502 with the standard envelope."""
-    resp = asyncio.run(_test_model_connectivity(f"http://127.0.0.1:{_closed_loopback_port()}"))
+    resp = asyncio.run(
+        _test_model_connectivity(f"http://127.0.0.1:{_closed_loopback_port()}")
+    )
     message = _assert_wire_envelope(resp, code="provider_unreachable", status=502)
-    # Human guidance, not a raw exception.
     raw = resp.body.decode()
-    for leak in ("Traceback", "ConnectionRefusedError", "ClientConnectorError", "Errno"):
-        assert leak not in raw, f"raw exception text leaked to the user: {leak!r} in {raw!r}"
+    for leak in (
+        "Traceback",
+        "ConnectionRefusedError",
+        "ClientConnectorError",
+        "Errno",
+    ):
+        assert (
+            leak not in raw
+        ), f"raw exception text leaked to the user: {leak!r} in {raw!r}"
     assert "refused" in message.lower()
 
 
@@ -88,6 +99,10 @@ def test_probe_failure_classifies_connection_refused_as_unreachable() -> None:
 
 def test_the_new_provider_codes_are_registered() -> None:
     """Every code the module emits is in the append-only wire registry."""
-    for code in ("provider_unreachable", "provider_config_invalid", "provider_test_failed"):
+    for code in (
+        "provider_unreachable",
+        "provider_config_invalid",
+        "provider_test_failed",
+    ):
         assert code in HTTP_ERROR_CODES, code
         assert HTTP_ERROR_CODES[code].strip()

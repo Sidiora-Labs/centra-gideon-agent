@@ -14,16 +14,16 @@ import json
 
 import pytest
 
-from gideon.agents import defaults as agent_defaults
-from gideon.learning import proposals, refiner_tools
-from gideon.workflows import versions
-from gideon.workflows.batch_compile import (
+from gideon.automation.workflows import versions
+from gideon.automation.workflows.batch_compile import (
     ORCHESTRATION_TOOLS,
     Capability,
     is_write_tool,
     leaf_tool_posture,
 )
-from gideon.workflows.bundled_defs import bundled_root
+from gideon.automation.workflows.bundled_defs import bundled_root
+from gideon.cognition.learning import proposals, refiner_tools
+from gideon.engine.agents import defaults as agent_defaults
 
 
 @pytest.fixture(autouse=True)
@@ -31,29 +31,28 @@ def _home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
-    # The learning proposal store resolves config_dir() live, which reads GIDEON_HOME each
-    # call — so the env set above is enough to keep every write inside this tmp home.
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
-
-
-# ── layer 1: the declared tool set carries no writer or orchestrator ─────────
 
 
 def test_the_refiner_tool_set_is_propose_only() -> None:
     """Every tool the refiner holds is a read or a propose — none is a write or orchestration
     tool. Uses the classifiers the runtime leaf posture actually enforces, so adding a direct
-    template-write tool (e.g. `workflow_author`, in ORCHESTRATION_TOOLS, or any `*_write`) reds."""
-    assert refiner_tools.REFINER_TOOL_NAMES  # non-empty: an empty set would vacuously "pass"
+    template-write tool (e.g. `workflow_author`, in ORCHESTRATION_TOOLS, or any `*_write`) reds.
+    """
+    assert refiner_tools.REFINER_TOOL_NAMES
     for tool in refiner_tools.REFINER_TOOL_NAMES:
         assert not is_write_tool(tool), f"{tool} looks like a writer"
         assert tool not in ORCHESTRATION_TOOLS, f"{tool} is an orchestration tool"
 
 
-def test_the_profile_is_seeded_and_declares_the_propose_only_set(tmp_path, monkeypatch) -> None:
+def test_the_profile_is_seeded_and_declares_the_propose_only_set(
+    tmp_path, monkeypatch
+) -> None:
     """The profile is SEEDED on load (not merely buildable) — proven by co-seeding a known
-    reserved agent on the same path — and its declared tools are exactly the propose-only set."""
-    import gideon.config.loader as _loader
+    reserved agent on the same path — and its declared tools are exactly the propose-only set.
+    """
+    import gideon.core.config.loader as _loader
 
     cfg_path = tmp_path / "config.json"
     cfg_path.write_text(
@@ -64,36 +63,28 @@ def test_the_profile_is_seeded_and_declares_the_propose_only_set(tmp_path, monke
 
     cfg = _loader.AppConfig.load()
     name = agent_defaults.TEMPLATE_REFINER_AGENT_NAME
-    # Co-seeded beside the other reserved agents — proves the add-if-missing wiring ran.
     assert agent_defaults.LOOP_WORKER_AGENT_NAME in cfg.agents
     assert name in cfg.agents, "the template-refiner profile was not seeded on load"
     assert agent_defaults.is_reserved_agent(name)
     assert set(cfg.agents[name].tools) == set(refiner_tools.REFINER_TOOL_NAMES)
 
 
-# ── layer 2: a research leaf denies writers but admits the refiner's tools ───
-
-
 def test_a_research_leaf_denies_writers_yet_admits_the_refiner_tools() -> None:
     posture = leaf_tool_posture(Capability.RESEARCH)
     assert posture["read_only"] is True
-    # workflow_author — the direct template-write path — is denied at every leaf depth.
     assert "workflow_author" in posture["denied_tools"]
-    # The refiner's own tools survive a read-only leaf (neither write nor orchestration).
     for tool in refiner_tools.REFINER_TOOL_NAMES:
         assert not is_write_tool(tool)
         assert tool not in set(posture["denied_tools"])
 
 
 def test_the_refine_template_stage_runs_the_refiner_agent_read_only() -> None:
-    spec = json.loads((bundled_root() / "refine-template" / "workflow.json").read_text())
+    spec = json.loads(
+        (bundled_root() / "refine-template" / "workflow.json").read_text()
+    )
     stage = spec["root"]["children"][0]
     assert stage["config"]["agent"] == agent_defaults.TEMPLATE_REFINER_AGENT_NAME
-    # No `capability: mutating` — so the stage is a research leaf (read-only by default).
     assert stage["config"].get("capability", "research") != "mutating"
-
-
-# ── the propose tool files, and applies nothing ─────────────────────────────
 
 
 def _legal_ops() -> list[dict]:
@@ -110,14 +101,15 @@ def test_propose_template_diff_files_a_proposal_and_mutates_no_template() -> Non
     assert result["filed"] is True
     pending = proposals.list_pending()
     assert any(p.kind == proposals.Kind.TEMPLATE_DIFF.value for p in pending)
-    # It filed a PROPOSAL — no template version was written by the mere act of proposing.
     assert versions.list_versions("code-project") == []
 
 
 def test_propose_template_diff_refuses_a_frozen_region_op() -> None:
     """An op touching the frozen region (what makes a template FIRE) is refused, whole-diff —
     nothing is filed. This is the S73 gate the propose tool runs before enqueue."""
-    frozen = [{"op": "update_node", "node_id": "root", "fields": {"triggers": ["never"]}}]
+    frozen = [
+        {"op": "update_node", "node_id": "root", "fields": {"triggers": ["never"]}}
+    ]
     result = refiner_tools.file_template_diff(
         "code-project", ops=frozen, rationale="x", run_ids=["r1", "r2", "r3"]
     )
@@ -133,18 +125,15 @@ def test_gather_evidence_is_read_only_and_never_raises_on_empty() -> None:
     assert out["evidence"] == []
 
 
-# ── layer 3: the mechanism FIRES — the run key the power floor counts ─────────
-
-
 def _seed_skips(workflow: str, skips: list[tuple[str, str, str]]) -> None:
     """Real runs in the run store, real `step_skipped` rows through the real ledger writer.
 
     Nothing hand-built: the whole class of defect this section pins is a reader and a fixture
     agreeing on a key the ENGINE never emits, so a fixture is not admissible evidence here.
     """
-    from gideon.workflows import store as wf_store
-    from gideon.workflows.journal import Journal
-    from gideon.workflows.models import WorkflowRun
+    from gideon.automation.workflows import store as wf_store
+    from gideon.automation.workflows.journal import Journal
+    from gideon.automation.workflows.models import WorkflowRun
 
     for run_id, path, node_id in skips:
         if wf_store.get(run_id) is None:
@@ -167,8 +156,8 @@ def test_a_repeatedly_skipped_step_REACHES_the_agent_as_a_top_cluster() -> None:
     `workflows/bundled/refine-template/workflow.json`) — so this asserts the CALL SITE, not the
     arithmetic of a helper the shipped path might not reach.
     """
-    from gideon import mcp_core
-    from gideon.workflows.journal import ledger
+    from gideon.automation.workflows.journal import ledger
+    from gideon.integrations import mcp_core
 
     workflow = "daily-digest"
     _seed_skips(
@@ -181,23 +170,22 @@ def test_a_repeatedly_skipped_step_REACHES_the_agent_as_a_top_cluster() -> None:
         ],
     )
 
-    # ── the vacuity floor ──
-    # The injection is only load-bearing because the WRITER omits `run_id`. Assert that against a
-    # real row, so a regression that drops the injection cannot pass on rows that carry it anyway.
     raw = ledger("skipfire0")
     assert raw and "run_id" not in raw[0], f"writer already stamps run_id: {raw[0]}"
-    assert raw[0]["node_id"] == "summarize"  # the attribution half, still holding
+    assert raw[0]["node_id"] == "summarize"
 
-    out = json.loads(mcp_core._call_tool("refiner_evidence", {"workflow_name": workflow}))
+    out = json.loads(
+        mcp_core._call_tool("refiner_evidence", {"workflow_name": workflow})
+    )
     assert out["ok"] is True
 
     top = out["top_cluster"]
-    assert top is not None, f"the mechanism did not fire; clusters were {out['clusters']}"
-    # It NAMES the step — the whole point of a cluster is that a template op can target it.
+    assert (
+        top is not None
+    ), f"the mechanism did not fire; clusters were {out['clusters']}"
     assert top["node"] == "summarize"
     assert top["signature"] == "skipped summarize"
     assert top["count"] == 3
-    # Real run ids, not the anonymous bucket: this is what `distinct_runs` was counting wrong.
     assert top["distinct_runs"] == 3
     assert set(top["run_ids"]) == {"skipfire0", "skipfire1", "skipfire2"}
     assert "" not in set(top["run_ids"])
@@ -211,7 +199,7 @@ def test_one_run_is_an_ANECDOTE_and_still_proposes_nothing() -> None:
 
     Note the floor is distinct RUNS, not occurrences: `count == 3` here and it is still refused.
     """
-    from gideon import mcp_core
+    from gideon.integrations import mcp_core
 
     workflow = "one-run-only"
     _seed_skips(
@@ -223,11 +211,10 @@ def test_one_run_is_an_ANECDOTE_and_still_proposes_nothing() -> None:
         ],
     )
 
-    out = json.loads(mcp_core._call_tool("refiner_evidence", {"workflow_name": workflow}))
+    out = json.loads(
+        mcp_core._call_tool("refiner_evidence", {"workflow_name": workflow})
+    )
 
-    # ── the vacuity floor ──
-    # `None` must come from the FLOOR, not from an empty evidence set: a test where nothing was
-    # clustered at all would assert `None` for the wrong reason and pass a broken reader.
     assert len(out["clusters"]) == 1
     only = out["clusters"][0]
     assert only["node"] == "summarize" and only["count"] == 3 and only["rank"] > 0
@@ -242,18 +229,15 @@ def test_an_abandoned_run_is_attributed_like_every_other_event() -> None:
     `node_id`/`instance_path` read landed. Reconciled at the EMITTER rather than by teaching the
     reader a third spelling, which would be the dual path the clean-break tenet forbids.
     """
-    from gideon.learning import refiner
-    from gideon.workflows import store as wf_store
-    from gideon.workflows.journal import Journal, ledger
-    from gideon.workflows.models import WorkflowRun
+    from gideon.automation.workflows import store as wf_store
+    from gideon.automation.workflows.journal import Journal, ledger
+    from gideon.automation.workflows.models import WorkflowRun
+    from gideon.cognition.learning import refiner
 
     wf_store.create(WorkflowRun(id="abandoned0", workflow_name="stalled"))
     Journal("abandoned0").run_abandoned("review", elapsed_secs=12.5)
 
     row = next(r for r in ledger("abandoned0") if r["kind"] == "run_abandoned")
-    # ── the vacuity floor ──
-    # The rename is only meaningful if the OLD spelling is gone from the row; a writer stamping
-    # both would let the reader keep working while the vocabulary stayed split.
     assert "at_node_id" not in row, f"the third spelling is still emitted: {row}"
     assert row["node_id"] == "review"
 

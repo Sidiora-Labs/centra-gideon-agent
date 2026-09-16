@@ -140,7 +140,7 @@ The supervisor does not take the worker's word for it:
 
 ## Cockpit dispatch (frontend)
 
-`web/src/pages/loops/LoopsSection.tsx` dispatches on the loop's kind:
+`apps/console/src/pages/loops/LoopsSection.tsx` dispatches on the loop's kind:
 
 - `kind === 'design'` → `DesignCockpitPage.tsx` (live canvas, token views,
   and an "agentic build" path that seeds a project-bound chat with the loop id
@@ -148,7 +148,7 @@ The supervisor does not take the worker's word for it:
 - everything else → `LoopCockpitPage.tsx` (the generic loop cockpit: cycle
   trail, findings, sub-goal prompt bar, artifact/task/project links);
 - code loops additionally get the mini-IDE at
-  `web/src/pages/code/CodeCockpitPage.tsx` — Monaco-based edit/save,
+  `apps/console/src/pages/code/CodeCockpitPage.tsx` — Monaco-based edit/save,
   PTY-backed build/test commands, and the SDLC stage trail.
 
 ## Related docs

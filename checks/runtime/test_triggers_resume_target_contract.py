@@ -17,13 +17,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from gideon.triggers.models import _RESUME_TARGET_FIELDS, parse_trigger
-from gideon.triggers.wakeup import RESUME_TARGET_KEY, resume_target_of
+from gideon.automation.triggers.models import _RESUME_TARGET_FIELDS, parse_trigger
+from gideon.automation.triggers.wakeup import RESUME_TARGET_KEY, resume_target_of
 
-#: The ratified authored field set. ``node_id`` from the original R11 scope is NOT here.
 _RATIFIED_AUTHORED_FIELDS = ("run_id", "project_id", "resume_token", "answer")
 
-#: The exact keys ``resume_target_of`` normalizes a populated target down to.
 _RATIFIED_NORMALIZED_KEYS = {
     "run_id",
     "project_id",

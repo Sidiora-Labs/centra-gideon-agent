@@ -26,9 +26,8 @@ class TestSetupContext:
             app_name="slack-channel",
             get_credential=lambda k: store.get(k, ""),
             save_credential=lambda k, v: store.__setitem__(k, v),
-            settings=object(),  # ProviderSettings handle (duck-typed here)
+            settings=object(),
         )
-        # print/input default to the builtins
         assert ctx.print is print
         assert ctx.input is input
         assert ctx.app_name == "slack-channel"
@@ -53,7 +52,7 @@ class TestSetupContext:
             save_credential=lambda k, v: None,
             settings=object(),
             print=printed.append,
-            input=lambda prompt: "",  # non-interactive → empty
+            input=lambda prompt: "",
         )
         ctx.print("hello")
         assert printed == ["hello"]

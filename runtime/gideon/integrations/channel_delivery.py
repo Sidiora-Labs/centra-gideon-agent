@@ -1,0 +1,246 @@
+"""Outbound channel contract and the process-wide provider directory."""
+
+from __future__ import annotations
+
+import logging
+from threading import RLock
+from typing import Any, Callable, Protocol, runtime_checkable
+
+logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class ChannelDelivery(Protocol):
+    """Outbound delivery a channel provides to the gateway. All text is PLAIN
+    markdown — the implementation renders it to the channel's format."""
+
+    async def open_dm(self, user_id: str) -> str:
+        """Open (or resolve) a DM channel with a user; return its channel id."""
+        ...
+
+    async def deliver_text(
+        self,
+        channel: str,
+        text: str,
+        thread_ts: str = "",
+        *,
+        unfurl_links: "bool | None" = None,
+        unfurl_media: "bool | None" = None,
+        reply_broadcast: "bool | None" = None,
+    ) -> str:
+        """Post plain-markdown text to a channel/thread; return the message ts. The
+        optional link-preview / broadcast hints are generic messaging concepts a
+        channel applies if it supports them (ignored otherwise)."""
+        ...
+
+    async def deliver_rich(
+        self,
+        channel: str,
+        payload: "object",
+        fallback_text: str,
+        *,
+        thread_ts: str = "",
+        unfurl_links: bool = True,
+        unfurl_media: bool = True,
+        reply_broadcast: bool = False,
+    ) -> str:
+        """Deliver a caller-supplied structured/rich payload (e.g. Block Kit) with a
+        plain-text fallback; return the message ts. The payload is opaque to core —
+        callers pass channel-shaped structures through; a channel that can't render
+        rich content falls back to ``fallback_text``."""
+        ...
+
+    async def deliver_cron_result(
+        self, channel: str, job_name: str, job_id: str, text: str, thread_ts: str = ""
+    ) -> str:
+        """Deliver a cron job result with the channel's ack affordance; return the
+        parent message ts (for threading follow-ups)."""
+        ...
+
+    async def deliver_notification(
+        self, channel: str, title: str, text: str, thread_ts: str = ""
+    ) -> str:
+        """Deliver a titled notification (heartbeat/subagent) to a channel/thread."""
+        ...
+
+    async def deliver_chat_mirror(
+        self, channel: str, text: str, thread_ts: str = ""
+    ) -> None:
+        """Mirror a dashboard chat reply to a linked channel thread, rendering any
+        trailing ``[OPTIONS: …]`` block as the channel's interactive affordance."""
+        ...
+
+    async def deliver_subagent_reply(
+        self, channel: str, text: str, thread_ts: str = "", elapsed_secs: float = 0.0
+    ) -> None:
+        """Deliver a subagent's synthesized reply to a channel/thread, with the
+        channel's timing affordance (a footer showing how long the run took)."""
+        ...
+
+    async def resolve_user_name(self, user_id: str) -> str:
+        """Human-readable display name for a channel user id (best-effort; returns
+        the id or empty on failure). Used by inbox sender-name resolution."""
+        ...
+
+    async def resolve_user_profile(self, user_id: str) -> "dict":
+        """Full profile dict for a channel user (name/real_name/title/etc.); ``{}`` on
+        failure. Shape is provider-defined — callers read known keys defensively."""
+        ...
+
+    async def channel_info(self, channel_id: str) -> "dict":
+        """Metadata for a channel (e.g. ``{"name": ..., "is_im": ...}``); ``{}`` on
+        failure. Provider-agnostic shape — callers read known keys defensively."""
+        ...
+
+    def list_reply_channels(self) -> "list[dict]":
+        """Channels this delivery can post replies into, as ``{"id", "name"}`` dicts
+        (the channel app's own config decides — tracked/active channels). Used by the
+        dashboard's channel picker for link/handoff. May be empty."""
+        ...
+
+    def is_tracked_channel(self, channel_id: str) -> bool:
+        """Whether *channel_id* is in this channel's outbound allowlist (the app's
+        own tracked-channel config). Core consults this for targeted sends."""
+        ...
+
+    def build_thread_link(self, channel: str, ts: str) -> str:
+        """Deep link to a message/thread on this channel provider (e.g. a
+        jump-to-source URL for notifications). Returns "" when the provider has
+        no linkable surface. Core never constructs vendor URLs itself — the
+        provider owns its own link format."""
+        ...
+
+    async def upload_attachment(
+        self,
+        channel: str,
+        file_path: str,
+        *,
+        filename: str = "",
+        thread_ts: str = "",
+        title: str = "",
+        initial_comment: str = "",
+    ) -> str:
+        """Upload a file to a channel/thread; return the delivered message ts (or "")."""
+        ...
+
+    async def start_stream(
+        self, channel: str, thread_ts: str = "", initial_text: str = ""
+    ) -> str:
+        """Begin a live-updating stream message (for tool/progress animation); return
+        its ts, or "" if the channel has no streaming affordance."""
+        ...
+
+    async def append_stream_task(
+        self,
+        channel: str,
+        stream_ts: str,
+        task_id: str,
+        title: str,
+        status: str,
+    ) -> None:
+        """Append/update a progress item on an in-flight stream started by
+        start_stream. ``status`` is a generic progress state ("in_progress" /
+        "complete"). Channels without task-animation may no-op."""
+        ...
+
+    async def stop_stream(self, channel: str, stream_ts: str) -> None:
+        """Finalize a stream started by start_stream."""
+        ...
+
+    async def request_approval(
+        self,
+        event: "object",
+        *,
+        source: str,
+        parent_session_key: str = "",
+        sessions: "object | None" = None,
+        on_prompted: "Callable[[object], None] | None" = None,
+    ) -> "bool | None":
+        """Prompt the owner to approve a tool call on this channel.
+
+        Returns ``True`` (approved) / ``False`` (rejected), or ``None`` if the
+        channel can't prompt (no owner/channel) so the gateway falls back to the
+        dashboard. Implementations own the channel-specific approval UI + the wait
+        for the owner's response, and should coordinate with the dashboard via the
+        ``on_prompted`` hook (invoked with the pending record) when provided by the
+        caller. ``sessions`` is the live ConversationDirectory for cross-surface reconcile.
+
+        **The approval brief (additive meta).** ``event.tool_meta`` carries the core-
+        composed brief under
+        :data:`~gideon.security.approval_brief.APPROVAL_BRIEF_META_KEY`, so a channel can
+        tell the owner what the call would TOUCH, not just what it is called::
+
+            {"tool": str,              # tool identity, same value as event.title
+             "risk": str,              # EFFECTIVE per-invocation risk (not the
+                                       #   DECLARED event.risk_level)
+             "blastRadius": {"writes": bool, "network": bool,
+                             "shell": bool, "readOnly": bool},   # optional
+             "blastRadiusLine": str}                             # optional
+
+        Reading it is OPTIONAL and purely additive: the method's arguments are
+        unchanged, no existing field or ``tool_meta`` key is replaced, and a channel
+        that ignores the key prompts exactly as it did before. Two rules for a
+        renderer:
+
+        * ``blastRadius``/``blastRadiusLine`` are ABSENT when nothing could be
+          established — show no blast-radius line at all, rather than "nothing
+          established", which reads as "nothing happens";
+        * every facet is a POSITIVE claim, so render only the ``True`` ones. Never
+          enumerate all four with on/off states: a ``False`` means "not established",
+          and painting it as "no network" turns absence of evidence into an all-clear.
+
+        The brief is a compact summary for a surface with no room — the dashboard
+        remains the rich approval surface, and rendering logic stays in the channel's
+        own bundle."""
+        ...
+
+
+_REGISTRY: dict[str, ChannelDelivery] = {}
+_REGISTRY_LOCK = RLock()
+_PROVIDER_SUFFIXES = ("_runtime", "_channel", "_delivery")
+
+
+def provider_of(delivery: Any) -> str:
+    """Derive a compatibility namespace when the transport supplies no key."""
+    implementation = type(delivery)
+    namespace = (getattr(implementation, "__module__", "") or "").partition(".")[0]
+    suffix = next((part for part in _PROVIDER_SUFFIXES if namespace.endswith(part)), "")
+    stem = namespace.removesuffix(suffix) if suffix else namespace
+    return stem or implementation.__name__.lower()
+
+
+def register(delivery: ChannelDelivery | None, provider: str = "") -> str:
+    """Publish one provider change, or clear all providers during shutdown."""
+    global _REGISTRY
+    key = provider or (provider_of(delivery) if delivery is not None else "")
+    with _REGISTRY_LOCK:
+        updated = dict(_REGISTRY)
+        previous = updated.get(key)
+        if delivery is not None:
+            updated[key] = delivery
+        elif key:
+            updated.pop(key, None)
+        else:
+            updated.clear()
+        _REGISTRY = updated
+    if delivery is not None and previous is not None and previous is not delivery:
+        logger.debug("channel delivery re-registered for %s", key)
+    return key
+
+
+def delivery_for(provider: str) -> ChannelDelivery | None:
+    """Resolve an origin provider; an absent origin never selects another channel."""
+    snapshot = _REGISTRY
+    return snapshot.get(provider) if provider else None
+
+
+def owner_reachable() -> ChannelDelivery | None:
+    """Choose the alphabetically first connected provider for owner-directed work."""
+    snapshot = _REGISTRY
+    first = min(snapshot, default=None)
+    return snapshot[first] if first is not None else None
+
+
+def registered_providers() -> list[str]:
+    """Return a stable inventory of the currently connected providers."""
+    return sorted(_REGISTRY)

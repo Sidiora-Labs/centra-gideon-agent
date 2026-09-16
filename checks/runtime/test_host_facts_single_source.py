@@ -1,8 +1,8 @@
 """One host-fact collector, so the fit answer cannot disagree with itself (LMMV-8).
 
 The GPU/VRAM-total probe and the system-memory probe used to be collected in two unrelated
-places each: :mod:`gideon.local_models.fit` for the fit budget and
-:mod:`gideon.dashboard.handlers_system` for the system widget. Two collectors mean two
+places each: :mod:`gideon.integrations.local_models.fit` for the fit budget and
+:mod:`gideon.interfaces.dashboard.handlers_system` for the system widget. Two collectors mean two
 answers, and a fit chip that names a different VRAM total than the system card is worse than
 no chip. These tests pin the single-source split:
 
@@ -25,27 +25,26 @@ from pathlib import Path
 
 import pytest
 
-from gideon.dashboard import handlers_system
-from gideon.local_models import fit, residency
+from gideon.integrations.local_models import fit, residency
+from gideon.interfaces.dashboard import handlers_system
 
-_SRC = Path(__file__).resolve().parents[1] / "src" / "gideon"
+_SRC = Path(__file__).resolve().parents[2] / "runtime" / "gideon"
 
-#: The two strings that constitute GPU capacity DETECTION: the nvidia-smi VRAM-total query
-#: and the macOS display probe. Utilisation/used-VRAM reads match neither.
 _GPU_CAPACITY_MARKERS = ("memory.total", "SPDisplaysDataType")
 
-#: How a memory TOTAL is read from this host. Both spellings belong to residency.
 _MEMORY_TOTAL_MARKERS = ("hw.memsize", "MemTotal", "/proc/meminfo")
 
 _GB = 1024**3
 
 
 def _census(markers: tuple[str, ...]) -> dict[str, list[int]]:
-    """``{relative path: [line numbers]}`` for every file under ``src/gideon``."""
+    """``{relative path: [line numbers]}`` for every file under ``runtime/gideon``."""
     hits: dict[str, list[int]] = {}
     for path in sorted(_SRC.rglob("*.py")):
         lines = path.read_text(encoding="utf-8").splitlines()
-        found = [n for n, line in enumerate(lines, 1) if any(m in line for m in markers)]
+        found = [
+            n for n, line in enumerate(lines, 1) if any(m in line for m in markers)
+        ]
         if found:
             hits[path.relative_to(_SRC).as_posix()] = found
     return hits
@@ -54,8 +53,6 @@ def _census(markers: tuple[str, ...]) -> dict[str, list[int]]:
 def test_gpu_capacity_detection_has_exactly_one_site() -> None:
     """VRAM total / GPU identity is detected in fit.py and nowhere else."""
     hits = _census(_GPU_CAPACITY_MARKERS)
-    # Vacuity floor: if the probe were rewritten with different argv, this census would
-    # match nothing and silently "pass" while every duplicate went unseen.
     assert hits, (
         "census found no GPU capacity probe at all — the markers "
         f"{_GPU_CAPACITY_MARKERS} went stale; re-derive them from fit._probe_gpu before "
@@ -71,19 +68,24 @@ def test_handlers_system_gpu_query_is_telemetry_only() -> None:
     """The metrics handler's own nvidia-smi read asks for live values, never capacity."""
     source = (_SRC / "dashboard" / "handlers_system.py").read_text(encoding="utf-8")
     queries = [line.strip() for line in source.splitlines() if "--query-gpu=" in line]
-    # Vacuity floor: no query line means the assertions below inspect nothing.
-    assert queries, "no --query-gpu= read found in handlers_system.py — census went stale"
+    assert (
+        queries
+    ), "no --query-gpu= read found in handlers_system.py — census went stale"
     for query in queries:
-        assert "utilization.gpu" in query, f"expected a live telemetry read, got: {query}"
-        assert "memory.total" not in query, f"VRAM total belongs to fit._probe_gpu: {query}"
+        assert (
+            "utilization.gpu" in query
+        ), f"expected a live telemetry read, got: {query}"
+        assert (
+            "memory.total" not in query
+        ), f"VRAM total belongs to fit._probe_gpu: {query}"
         assert "=name," not in query, f"the GPU name belongs to fit._probe_gpu: {query}"
 
 
 def test_handlers_system_reads_no_memory_total_itself() -> None:
     """The metrics handler routes memory through residency instead of probing again."""
-    handler_hits = _census(_MEMORY_TOTAL_MARKERS).get("dashboard/handlers_system.py", [])
-    # Vacuity floor: prove the markers still match the OWNER, otherwise "not in the
-    # handler" is satisfied by a pattern that matches nothing anywhere.
+    handler_hits = _census(_MEMORY_TOTAL_MARKERS).get(
+        "dashboard/handlers_system.py", []
+    )
     owner_hits = _census(_MEMORY_TOTAL_MARKERS).get("local_models/residency.py", [])
     assert owner_hits, (
         "census found no memory-total probe in residency.py — the markers "
@@ -134,13 +136,13 @@ def test_gpu_capacity_facts_come_from_fit(monkeypatch: pytest.MonkeyPatch) -> No
     assert payload["gpu_vendor"] == "nvidia"
     assert payload["gpu_model"] == "Fake GPU 9000"
     assert payload["vram_total_gb"] == 8.0
-    # The invariant that matters: the widget and the fit budget cannot disagree, because
-    # both read the same probe.
     host = fit.host_capacity()
     assert payload["vram_total_gb"] == round(host.discrete_vram_bytes / _GB, 1)
 
 
-def test_gpu_telemetry_keys_survive_the_delegation(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gpu_telemetry_keys_survive_the_delegation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Utilisation, temperature and USED VRAM are still collected locally."""
     _stub_probe(monkeypatch, 8 * _GB)
     _stub_telemetry(monkeypatch, "42, 2048, 61\n")
@@ -186,8 +188,6 @@ def test_system_metrics_payload_keeps_memory_and_disk_keys(
     assert data["mem_total_gb"] == 16.0
     assert data["mem_free_gb"] == 4.0
     assert data["mem_used_gb"] == 12.0
-    # The disk read stays local on purpose: it is a total/used/free GAUGE, not the
-    # pre-download capacity question fit.disk_precheck answers.
     assert "disk_total_gb" in data
     assert "disk_free_gb" in data
 
@@ -197,9 +197,9 @@ def test_memory_total_matches_the_fit_budget_on_this_host() -> None:
     host = fit.host_capacity()
     if sys.platform not in ("darwin", "linux"):
         pytest.skip(f"no memory probe for {sys.platform}")
-    # A skip reads like a pass, so on a platform we DO probe, an unmeasured host is a
-    # failure rather than a silent exemption.
-    assert host.memory_measured, "residency could not measure memory on a supported platform"
+    assert (
+        host.memory_measured
+    ), "residency could not measure memory on a supported platform"
 
     totals = handlers_system._memory_totals()
     assert totals is not None

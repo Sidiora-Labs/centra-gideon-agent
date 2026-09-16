@@ -15,11 +15,11 @@ Exit 0 = contract met. Run locally after ``npm run build && python -m build``,
 and in ``release.yml`` (replacing the shallow namelist check).
 
 Usage:
-    python scripts/verify_wheel.py [--wheel dist/gideon-*.whl] [--build] [--keep]
+    python tooling/scripts/verify_wheel.py [--wheel dist/gideon-*.whl] [--build] [--keep]
 
     --wheel PATH  verify this wheel (default: newest dist/*.whl).
     --build       run ``python -m build --wheel`` first (assumes the SPA is
-                  already built into web/dist or src/gideon/static/dist).
+                  already built into apps/console/dist or runtime/gideon/static/dist).
     --keep        keep the scratch venv/home for debugging.
 
 The script deliberately uses only the stdlib (+ the wheel it installs) so it can
@@ -81,7 +81,7 @@ def _assert_spa_in_wheel(wheel: Path) -> None:
         _fail(
             f"wheel {wheel.name} does not carry the SPA ({_SPA_MARKER}). "
             "Run `npm run build` before `python -m build` so setup.py's "
-            "BuildWithWeb stages web/dist into the package."
+            "BuildWithWeb stages apps/console/dist into the package."
         )
     _log(f"OK: wheel carries the SPA — {wheel.name}")
 
@@ -134,7 +134,6 @@ def _read_ready_line(proc: "subprocess.Popen[str]", deadline: float) -> dict:
         line = line.rstrip("\n")
         if line.startswith(_READY_PREFIX):
             return json.loads(line[len(_READY_PREFIX) :])
-        # Surface startup chatter for debugging without failing on it.
         _log(f"gateway> {line}")
     _fail("timed out waiting for the gateway READY line")
 
@@ -145,7 +144,7 @@ def _http_get(url: str, timeout: float = 10.0) -> tuple[int, str, str]:
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
             body = resp.read(4096).decode("utf-8", "replace")
             return resp.status, resp.headers.get("Content-Type", ""), body
-    except urllib.error.HTTPError as exc:  # non-2xx
+    except urllib.error.HTTPError as exc:
         return exc.code, exc.headers.get("Content-Type", "") if exc.headers else "", ""
     except Exception as exc:  # noqa: BLE001
         _fail(f"GET {url} raised {type(exc).__name__}: {exc}")
@@ -154,8 +153,6 @@ def _http_get(url: str, timeout: float = 10.0) -> tuple[int, str, str]:
 def _boot_and_probe(py: Path, home: Path) -> None:
     env = dict(os.environ)
     env["GIDEON_HOME"] = str(home)
-    # Loopback-only, no-auth so `/` (the SPA shell) is served without a token —
-    # a localhost smoke test; effective_bind() pins NONE mode to 127.0.0.1.
     env["GIDEON_AUTH_MODE"] = "none"
     env.pop("PYTHONWARNINGS", None)
 
@@ -173,7 +170,6 @@ def _boot_and_probe(py: Path, home: Path) -> None:
         base = f"http://127.0.0.1:{port}"
         _log(f"gateway READY on {base} (pid={ready.get('pid')})")
 
-        # 4. /api/healthz — auth-exempt liveness, 200 JSON with the version.
         status, ctype, body = _http_get(f"{base}/api/healthz")
         if status != 200:
             _fail(f"/api/healthz returned {status} (want 200)")
@@ -185,7 +181,6 @@ def _boot_and_probe(py: Path, home: Path) -> None:
             _fail(f"/api/healthz body not ok: {body!r}")
         _log(f"OK: /api/healthz → 200 {payload}")
 
-        # 5. / — the SPA shell, 200 HTML served from the packaged static/dist.
         status, ctype, body = _http_get(f"{base}/")
         if status != 200:
             _fail(f"/ returned {status} (want 200 HTML)")
@@ -217,7 +212,7 @@ def main() -> int:
     _assert_spa_in_wheel(wheel)
     _assert_no_node()
 
-    scratch = Path(tempfile.mkdtemp(prefix="pc_verify_wheel_"))
+    scratch = Path(tempfile.mkdtemp(prefix="gideon_verify_wheel_"))
     venv_dir = scratch / "venv"
     home_dir = scratch / "home"
     home_dir.mkdir(parents=True, exist_ok=True)

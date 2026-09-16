@@ -8,26 +8,20 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from gideon.session_pid import (
-    _kill_confirmed_and_writeback,
-    _periodic_pid_sweep,
-)
+from gideon.engine.session_pid import _kill_confirmed_and_writeback, _periodic_pid_sweep
 
 
 @pytest.fixture()
 def session_pid_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     p = tmp_path / "session_pids.txt"
-    monkeypatch.setattr("gideon.session_pid._session_pid_file_path", lambda: p)
+    monkeypatch.setattr("gideon.engine.session_pid._session_pid_file_path", lambda: p)
     return p
-
-
-# ── _kill_pid_tree ──
 
 
 class TestKillPidTree:
     def test_rejects_non_positive_pid(self) -> None:
         """pid <= 0 is catastrophic — must return immediately."""
-        from gideon.session_pid import _kill_pid_tree
+        from gideon.engine.session_pid import _kill_pid_tree
 
         with patch("os.kill") as mock_kill:
             assert _kill_pid_tree(0) == (0, False)
@@ -35,7 +29,7 @@ class TestKillPidTree:
             mock_kill.assert_not_called()
 
     def test_returns_root_killed_true_on_success(self) -> None:
-        from gideon.session_pid import _kill_pid_tree
+        from gideon.engine.session_pid import _kill_pid_tree
 
         kills: list[tuple[int, int]] = []
 
@@ -43,8 +37,10 @@ class TestKillPidTree:
             kills.append((pid, sig))
 
         with (
-            patch("gideon.session_pid._is_managed_agent_process", return_value=True),
-            patch("gideon.acp.client._get_child_pids", return_value=[]),
+            patch(
+                "gideon.engine.session_pid._is_managed_agent_process", return_value=True
+            ),
+            patch("gideon.integrations.acp.client._get_child_pids", return_value=[]),
             patch("os.kill", side_effect=fake_kill),
         ):
             total, root_killed = _kill_pid_tree(99999)
@@ -54,11 +50,14 @@ class TestKillPidTree:
         assert (99999, signal.SIGKILL) in kills
 
     def test_returns_root_killed_false_when_not_agent(self) -> None:
-        from gideon.session_pid import _kill_pid_tree
+        from gideon.engine.session_pid import _kill_pid_tree
 
         with (
-            patch("gideon.session_pid._is_managed_agent_process", return_value=False),
-            patch("gideon.acp.client._get_child_pids", return_value=[]),
+            patch(
+                "gideon.engine.session_pid._is_managed_agent_process",
+                return_value=False,
+            ),
+            patch("gideon.integrations.acp.client._get_child_pids", return_value=[]),
         ):
             total, root_killed = _kill_pid_tree(99999)
 
@@ -66,7 +65,7 @@ class TestKillPidTree:
         assert root_killed is False
 
     def test_kills_children_bottom_up(self) -> None:
-        from gideon.session_pid import _kill_pid_tree
+        from gideon.engine.session_pid import _kill_pid_tree
 
         kills: list[int] = []
 
@@ -74,26 +73,32 @@ class TestKillPidTree:
             kills.append(pid)
 
         with (
-            patch("gideon.session_pid._is_managed_agent_process", return_value=True),
-            patch("gideon.acp.client._get_child_pids", return_value=[100, 200]),
+            patch(
+                "gideon.engine.session_pid._is_managed_agent_process", return_value=True
+            ),
+            patch(
+                "gideon.integrations.acp.client._get_child_pids",
+                return_value=[100, 200],
+            ),
             patch("os.kill", side_effect=fake_kill),
         ):
             total, root_killed = _kill_pid_tree(50)
 
-        # Children reversed (200, 100), then root (50)
         assert kills == [200, 100, 50]
         assert total == 3
         assert root_killed is True
 
     def test_handles_already_dead_root(self) -> None:
-        from gideon.session_pid import _kill_pid_tree
+        from gideon.engine.session_pid import _kill_pid_tree
 
         def fake_kill(pid: int, sig: int) -> None:
             raise ProcessLookupError()
 
         with (
-            patch("gideon.session_pid._is_managed_agent_process", return_value=True),
-            patch("gideon.acp.client._get_child_pids", return_value=[]),
+            patch(
+                "gideon.engine.session_pid._is_managed_agent_process", return_value=True
+            ),
+            patch("gideon.integrations.acp.client._get_child_pids", return_value=[]),
             patch("os.kill", side_effect=fake_kill),
         ):
             total, root_killed = _kill_pid_tree(99999)
@@ -102,12 +107,9 @@ class TestKillPidTree:
         assert root_killed is False
 
 
-# ── _sweep_pid_entries ──
-
-
 class TestSweepPidEntries:
     def test_prunes_dead_pids(self) -> None:
-        from gideon.session_pid import _sweep_pid_entries
+        from gideon.engine.session_pid import _sweep_pid_entries
 
         def fake_kill(pid: int, sig: int) -> None:
             raise ProcessLookupError()
@@ -122,11 +124,11 @@ class TestSweepPidEntries:
         assert "1:99999" in dead
 
     def test_skips_tagged_entries_per_predicate(self) -> None:
-        from gideon.session_pid import _sweep_pid_entries
+        from gideon.engine.session_pid import _sweep_pid_entries
 
         killed, dead, _ = _sweep_pid_entries(
             ["1:99999"],
-            should_skip_tagged=lambda gw, p: True,  # skip all
+            should_skip_tagged=lambda gw, p: True,
             should_skip_bare=lambda p: False,
         )
 
@@ -134,19 +136,19 @@ class TestSweepPidEntries:
         assert len(dead) == 0
 
     def test_skips_bare_entries_per_predicate(self) -> None:
-        from gideon.session_pid import _sweep_pid_entries
+        from gideon.engine.session_pid import _sweep_pid_entries
 
         killed, dead, _ = _sweep_pid_entries(
             ["99999"],
             should_skip_tagged=lambda gw, p: False,
-            should_skip_bare=lambda p: True,  # skip all bare
+            should_skip_bare=lambda p: True,
         )
 
         assert killed == 0
         assert len(dead) == 0
 
     def test_prunes_invalid_entries(self) -> None:
-        from gideon.session_pid import _sweep_pid_entries
+        from gideon.engine.session_pid import _sweep_pid_entries
 
         killed, dead, _ = _sweep_pid_entries(
             ["not_a_pid", "abc:def"],
@@ -159,7 +161,7 @@ class TestSweepPidEntries:
 
     def test_rejects_non_positive_pids(self) -> None:
         """pid <= 0 is catastrophic for os.kill — must be pruned immediately."""
-        from gideon.session_pid import _sweep_pid_entries
+        from gideon.engine.session_pid import _sweep_pid_entries
 
         with patch("os.kill") as mock_kill:
             killed, dead, _ = _sweep_pid_entries(
@@ -176,31 +178,34 @@ class TestSweepPidEntries:
             mock_kill.assert_not_called()
 
     def test_skips_managed_pids(self) -> None:
-        from gideon.session_pid import _sweep_pid_entries
+        from gideon.engine.session_pid import _sweep_pid_entries
 
         def fake_kill(pid: int, sig: int) -> None:
-            pass  # alive
+            pass
 
         with patch("os.kill", side_effect=fake_kill):
             killed, dead, _ = _sweep_pid_entries(
                 ["1:99999"],
                 should_skip_tagged=lambda gw, p: False,
                 should_skip_bare=lambda p: False,
-                is_managed=lambda p: True,  # all managed
+                is_managed=lambda p: True,
             )
 
         assert killed == 0
         assert len(dead) == 0
 
     def test_prunes_non_agent_alive_pids(self) -> None:
-        from gideon.session_pid import _sweep_pid_entries
+        from gideon.engine.session_pid import _sweep_pid_entries
 
         def fake_kill(pid: int, sig: int) -> None:
-            pass  # alive
+            pass
 
         with (
             patch("os.kill", side_effect=fake_kill),
-            patch("gideon.session_pid._is_managed_agent_process", return_value=False),
+            patch(
+                "gideon.engine.session_pid._is_managed_agent_process",
+                return_value=False,
+            ),
         ):
             killed, dead, _ = _sweep_pid_entries(
                 ["1:99999"],
@@ -212,7 +217,7 @@ class TestSweepPidEntries:
 
     def test_permission_error_skips_entry(self) -> None:
         """PermissionError on liveness probe means alive but owned by another user — skip."""
-        from gideon.session_pid import _sweep_pid_entries
+        from gideon.engine.session_pid import _sweep_pid_entries
 
         def fake_kill(pid: int, sig: int) -> None:
             raise PermissionError()
@@ -225,16 +230,18 @@ class TestSweepPidEntries:
             )
 
         assert killed == 0
-        assert "1:99999" not in dead  # NOT removed
+        assert "1:99999" not in dead
 
     def test_kills_alive_orphaned_agent_pid(self) -> None:
         """Exercises the successful-kill branch: alive, not managed, is agent."""
-        from gideon.session_pid import _sweep_pid_entries
+        from gideon.engine.session_pid import _sweep_pid_entries
 
         with (
-            patch("os.kill"),  # signal-0 (alive) and SIGKILL both succeed
-            patch("gideon.session_pid._is_managed_agent_process", return_value=True),
-            patch("gideon.acp.client._get_child_pids", return_value=[]),
+            patch("os.kill"),
+            patch(
+                "gideon.engine.session_pid._is_managed_agent_process", return_value=True
+            ),
+            patch("gideon.integrations.acp.client._get_child_pids", return_value=[]),
         ):
             killed, dead, _ = _sweep_pid_entries(
                 ["1:99999"],
@@ -247,7 +254,7 @@ class TestSweepPidEntries:
 
     def test_reprobe_prunes_when_root_not_killed_but_dead(self) -> None:
         """root_killed=False + re-probe ProcessLookupError → entry pruned."""
-        from gideon.session_pid import _sweep_pid_entries
+        from gideon.engine.session_pid import _sweep_pid_entries
 
         call_count = 0
 
@@ -255,13 +262,15 @@ class TestSweepPidEntries:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                return  # liveness probe: alive
-            raise ProcessLookupError()  # re-probe: dead
+                return
+            raise ProcessLookupError()
 
         with (
             patch("os.kill", side_effect=fake_kill),
-            patch("gideon.session_pid._is_managed_agent_process", return_value=True),
-            patch("gideon.session_pid._kill_pid_tree", return_value=(1, False)),
+            patch(
+                "gideon.engine.session_pid._is_managed_agent_process", return_value=True
+            ),
+            patch("gideon.engine.session_pid._kill_pid_tree", return_value=(1, False)),
         ):
             killed, dead, _ = _sweep_pid_entries(
                 ["1:99999"],
@@ -274,12 +283,14 @@ class TestSweepPidEntries:
 
     def test_reprobe_keeps_entry_when_root_not_killed_and_alive(self) -> None:
         """root_killed=False + re-probe alive → entry kept for retry."""
-        from gideon.session_pid import _sweep_pid_entries
+        from gideon.engine.session_pid import _sweep_pid_entries
 
         with (
-            patch("os.kill"),  # all probes succeed (alive)
-            patch("gideon.session_pid._is_managed_agent_process", return_value=True),
-            patch("gideon.session_pid._kill_pid_tree", return_value=(1, False)),
+            patch("os.kill"),
+            patch(
+                "gideon.engine.session_pid._is_managed_agent_process", return_value=True
+            ),
+            patch("gideon.engine.session_pid._kill_pid_tree", return_value=(1, False)),
         ):
             killed, dead, _ = _sweep_pid_entries(
                 ["1:99999"],
@@ -288,15 +299,12 @@ class TestSweepPidEntries:
             )
 
         assert killed == 1
-        assert "1:99999" not in dead  # kept for next sweep
-
-
-# ── _write_back_pid_file ──
+        assert "1:99999" not in dead
 
 
 class TestWriteBackPidFile:
     def test_removes_killed_entries(self, session_pid_file: Path) -> None:
-        from gideon.session_pid import _write_back_pid_file
+        from gideon.engine.session_pid import _write_back_pid_file
 
         session_pid_file.write_text("1:100\n1:200\n1:300\n")
         _write_back_pid_file({"1:200"})
@@ -307,7 +315,7 @@ class TestWriteBackPidFile:
         assert "1:300" in content
 
     def test_empties_file_when_all_removed(self, session_pid_file: Path) -> None:
-        from gideon.session_pid import _write_back_pid_file
+        from gideon.engine.session_pid import _write_back_pid_file
 
         session_pid_file.write_text("1:100\n")
         _write_back_pid_file({"1:100"})
@@ -315,112 +323,105 @@ class TestWriteBackPidFile:
         assert session_pid_file.read_text() == ""
 
 
-# ── _periodic_pid_sweep ──
-
-
 class TestPeriodicPidSweep:
     def test_sweeps_own_and_dead_gateway_entries(self, session_pid_file: Path) -> None:
-        from gideon.session_pid import _periodic_pid_sweep
+        from gideon.engine.session_pid import _periodic_pid_sweep
 
         my_gw = os.getpid()
-        other_gw = my_gw + 1  # guaranteed different from my_gw
+        other_gw = my_gw + 1
         session_pid_file.write_text(f"{my_gw}:99999\n{other_gw}:88888\n")
 
         def fake_kill(pid: int, sig: int) -> None:
-            raise ProcessLookupError()  # all dead (including other gateway)
-
-        with patch("os.kill", side_effect=fake_kill):
-            killed_or_dead, candidates = _periodic_pid_sweep(my_gw, set())
-
-        # Both gateways' dead entries identified (other_gw is confirmed dead)
-        assert f"{my_gw}:99999" in killed_or_dead
-        assert f"{other_gw}:88888" in killed_or_dead
-        assert candidates == []  # dead PIDs are not candidates
-
-    def test_preserves_alive_other_gateway_entries(self, session_pid_file: Path) -> None:
-        from gideon.session_pid import _periodic_pid_sweep
-
-        my_gw = os.getpid()
-        other_gw = my_gw + 1  # guaranteed different from my_gw
-        session_pid_file.write_text(f"{my_gw}:99999\n{other_gw}:88888\n")
-
-        def fake_kill(pid: int, sig: int) -> None:
-            # other_gw is alive; child PIDs are dead
-            if pid == other_gw:
-                return  # alive — no error
             raise ProcessLookupError()
 
         with patch("os.kill", side_effect=fake_kill):
             killed_or_dead, candidates = _periodic_pid_sweep(my_gw, set())
 
-        # Own gateway's dead entry identified, alive other gateway's preserved
+        assert f"{my_gw}:99999" in killed_or_dead
+        assert f"{other_gw}:88888" in killed_or_dead
+        assert candidates == []
+
+    def test_preserves_alive_other_gateway_entries(
+        self, session_pid_file: Path
+    ) -> None:
+        from gideon.engine.session_pid import _periodic_pid_sweep
+
+        my_gw = os.getpid()
+        other_gw = my_gw + 1
+        session_pid_file.write_text(f"{my_gw}:99999\n{other_gw}:88888\n")
+
+        def fake_kill(pid: int, sig: int) -> None:
+            if pid == other_gw:
+                return
+            raise ProcessLookupError()
+
+        with patch("os.kill", side_effect=fake_kill):
+            killed_or_dead, candidates = _periodic_pid_sweep(my_gw, set())
+
         assert f"{my_gw}:99999" in killed_or_dead
         assert f"{other_gw}:88888" not in killed_or_dead
         assert candidates == []
 
     def test_skips_active_pids(self, session_pid_file: Path) -> None:
-        from gideon.session_pid import _periodic_pid_sweep
+        from gideon.engine.session_pid import _periodic_pid_sweep
 
         my_gw = os.getpid()
         session_pid_file.write_text(f"{my_gw}:99999\n")
 
         def fake_kill(pid: int, sig: int) -> None:
-            pass  # alive
+            pass
 
         with patch("os.kill", side_effect=fake_kill):
-            killed_or_dead, candidates = _periodic_pid_sweep(my_gw, {99999})  # active
+            killed_or_dead, candidates = _periodic_pid_sweep(my_gw, {99999})
 
         assert len(killed_or_dead) == 0
-        assert 99999 not in candidates  # managed — not a candidate
+        assert 99999 not in candidates
 
     def test_processes_bare_entries(self, session_pid_file: Path) -> None:
-        from gideon.session_pid import _periodic_pid_sweep
+        from gideon.engine.session_pid import _periodic_pid_sweep
 
         session_pid_file.write_text("99999\n")
 
         def fake_kill(pid: int, sig: int) -> None:
-            raise ProcessLookupError()  # dead
+            raise ProcessLookupError()
 
         with patch("os.kill", side_effect=fake_kill):
             killed_or_dead, candidates = _periodic_pid_sweep(os.getpid(), set())
 
-        # Bare entries now processed (dead ones pruned) — the periodic sweep
-        # acts as the real safety net regardless of gateway restart.
         assert "99999" in killed_or_dead
         assert candidates == []
 
     def test_returns_candidates_for_orphaned_pids(self, session_pid_file: Path) -> None:
         """Alive, unmanaged, gideon-cli PIDs become candidates (not killed in phase 1)."""
-        from gideon.session_pid import _periodic_pid_sweep
+        from gideon.engine.session_pid import _periodic_pid_sweep
 
         my_gw = os.getpid()
         session_pid_file.write_text(f"{my_gw}:99999\n")
 
         def fake_kill(pid: int, sig: int) -> None:
-            pass  # alive
+            pass
 
         with (
             patch("os.kill", side_effect=fake_kill),
-            patch("gideon.session_pid._is_managed_agent_process", return_value=True),
+            patch(
+                "gideon.engine.session_pid._is_managed_agent_process", return_value=True
+            ),
         ):
             killed_or_dead, candidates = _periodic_pid_sweep(my_gw, set())
 
         assert 99999 in candidates
-        assert f"{my_gw}:99999" not in killed_or_dead  # not pruned yet — deferred to phase 2
-
-
-# ── _kill_confirmed_and_writeback ──
+        assert f"{my_gw}:99999" not in killed_or_dead
 
 
 class TestKillConfirmedAndWriteback:
     def test_kills_confirmed_and_prunes_entries(self, session_pid_file: Path) -> None:
-        from gideon.session_pid import _kill_confirmed_and_writeback
+        from gideon.engine.session_pid import _kill_confirmed_and_writeback
 
         session_pid_file.write_text("1:99999\n1:88888\n")
 
         with (
-            patch("gideon.session_pid._kill_pid_tree", return_value=(1, True)),
-            patch("gideon.session_pid._write_back_pid_file") as mock_wb,
+            patch("gideon.engine.session_pid._kill_pid_tree", return_value=(1, True)),
+            patch("gideon.engine.session_pid._write_back_pid_file") as mock_wb,
         ):
             killed = _kill_confirmed_and_writeback(1, [99999], set())
 
@@ -430,35 +431,31 @@ class TestKillConfirmedAndWriteback:
 
     def test_keeps_entry_on_kill_failure(self, session_pid_file: Path) -> None:
         """root_killed=False and process still alive → entry not pruned."""
-        from gideon.session_pid import _kill_confirmed_and_writeback
+        from gideon.engine.session_pid import _kill_confirmed_and_writeback
 
         with (
-            patch("gideon.session_pid._kill_pid_tree", return_value=(0, False)),
-            patch("os.kill"),  # re-probe: still alive
-            patch("gideon.session_pid._write_back_pid_file") as mock_wb,
+            patch("gideon.engine.session_pid._kill_pid_tree", return_value=(0, False)),
+            patch("os.kill"),
+            patch("gideon.engine.session_pid._write_back_pid_file") as mock_wb,
         ):
             killed = _kill_confirmed_and_writeback(1, [99999], set())
 
         assert killed == 0
-        # Entry not added to killed_or_dead, but writeback not called (empty set)
         mock_wb.assert_not_called()
 
     def test_no_writeback_when_nothing_to_prune(self) -> None:
-        from gideon.session_pid import _kill_confirmed_and_writeback
+        from gideon.engine.session_pid import _kill_confirmed_and_writeback
 
-        with patch("gideon.session_pid._write_back_pid_file") as mock_wb:
+        with patch("gideon.engine.session_pid._write_back_pid_file") as mock_wb:
             killed = _kill_confirmed_and_writeback(1, [], set())
 
         assert killed == 0
         mock_wb.assert_not_called()
 
 
-# ── Integration tests for _run_periodic_tasks sweep pipeline (L1574-L1628) ──
-
-
 class TestPeriodicSweepIntegration:
     """Integration tests covering the Phase 1 → 2a → 2b orchestration
-    inside SessionManager._cleanup_loop's orphan sweep block."""
+    inside ConversationDirectory._cleanup_loop's orphan sweep block."""
 
     def _make_session(self, pid: int | str = 12345):
         """Create a mock session with provider.client._pid."""
@@ -475,29 +472,29 @@ class TestPeriodicSweepIntegration:
 
         with (
             patch("os.kill"),
-            patch("gideon.session_pid._is_managed_agent_process", return_value=True),
-            patch("gideon.acp.client._get_child_pids", return_value=[]),
+            patch(
+                "gideon.engine.session_pid._is_managed_agent_process", return_value=True
+            ),
+            patch("gideon.integrations.acp.client._get_child_pids", return_value=[]),
         ):
-            # Phase 1: identify candidates
             killed_or_dead, candidates = _periodic_pid_sweep(my_gw, set())
             assert orphan_pid in candidates
 
-            # Phase 2a: re-check against live sessions (none → confirmed)
             confirmed = [p for p in candidates if p not in set()]
             assert orphan_pid in confirmed
 
-            # Phase 2b: kill and writeback
-            orphan_killed = _kill_confirmed_and_writeback(my_gw, confirmed, killed_or_dead)
+            orphan_killed = _kill_confirmed_and_writeback(
+                my_gw, confirmed, killed_or_dead
+            )
             assert orphan_killed == 1
 
-        # PID file should be cleaned
         content = session_pid_file.read_text()
         assert f"{my_gw}:{orphan_pid}" not in content
 
     @pytest.mark.asyncio
     async def test_skip_sweep_when_pid_not_int(self) -> None:
         """_collect_active_pids returns ok=False when PID is not an int."""
-        from gideon.session_pid import _collect_active_pids
+        from gideon.engine.session_pid import _collect_active_pids
 
         sess = self._make_session(pid="not_an_int")
         pids, ok = _collect_active_pids({"s1": sess})
@@ -507,10 +504,10 @@ class TestPeriodicSweepIntegration:
     @pytest.mark.asyncio
     async def test_phase2_safe_false_on_pid_extraction_failure(self) -> None:
         """_collect_active_pids returns ok=False when _pid attr missing."""
-        from gideon.session_pid import _collect_active_pids
+        from gideon.engine.session_pid import _collect_active_pids
 
         sess = MagicMock()
-        sess.provider.client = MagicMock(spec=[])  # no _pid attr
+        sess.provider.client = MagicMock(spec=[])
         pids, ok = _collect_active_pids({"s1": sess})
         assert ok is False
 
@@ -521,24 +518,26 @@ class TestPeriodicSweepIntegration:
         managed_pid = 88888
         session_pid_file.write_text(f"{my_gw}:{managed_pid}\n")
 
-        with patch("os.kill"):  # alive
+        with patch("os.kill"):
             killed_or_dead, candidates = _periodic_pid_sweep(my_gw, {managed_pid})
 
         assert managed_pid not in candidates
         assert len(killed_or_dead) == 0
 
     @pytest.mark.asyncio
-    async def test_catch_all_exception_does_not_crash(self, session_pid_file: Path) -> None:
+    async def test_catch_all_exception_does_not_crash(
+        self, session_pid_file: Path
+    ) -> None:
         """The except Exception catch-all at L1628 prevents crashes."""
         my_gw = os.getpid()
         session_pid_file.write_text(f"{my_gw}:99999\n")
 
         with patch(
-            "gideon.session_pid._periodic_pid_sweep",
+            "gideon.engine.session_pid._periodic_pid_sweep",
             side_effect=RuntimeError("boom"),
         ) as mock_sweep:
             try:
                 await asyncio.to_thread(mock_sweep, my_gw, set())
             except Exception:
-                pass  # L1628: catch-all — should not propagate
+                pass
             mock_sweep.assert_called_once()

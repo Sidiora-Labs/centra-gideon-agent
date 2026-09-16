@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from gideon.dashboard.origin import (
+from gideon.interfaces.dashboard.origin import (
     build_allowed_origins,
     build_dashboard_url,
     check_origin,
@@ -38,11 +38,15 @@ class TestBuildAllowedOrigins:
         assert "https://gideon.local" in origins
 
     def test_dashboard_url_http_with_port(self) -> None:
-        origins = build_allowed_origins(7777, local_only=True, dashboard_url="http://myhost:8080")
+        origins = build_allowed_origins(
+            7777, local_only=True, dashboard_url="http://myhost:8080"
+        )
         assert "http://myhost:8080" in origins
 
     def test_dashboard_url_no_scheme_normalized(self) -> None:
-        origins = build_allowed_origins(7777, local_only=True, dashboard_url="myhost:8080")
+        origins = build_allowed_origins(
+            7777, local_only=True, dashboard_url="myhost:8080"
+        )
         assert "http://myhost:8080" in origins
 
     def test_dashboard_url_preserves_existing_origins(self) -> None:
@@ -77,7 +81,9 @@ class TestBuildAllowedOrigins:
         assert "https://gideon.local:8443" in origins
 
     def test_dashboard_url_malformed_port_ignored(self) -> None:
-        origins = build_allowed_origins(7777, local_only=True, dashboard_url="https://host:abc")
+        origins = build_allowed_origins(
+            7777, local_only=True, dashboard_url="https://host:abc"
+        )
         assert len([o for o in origins if "host:abc" in o]) == 0
 
 
@@ -119,13 +125,14 @@ class TestSchemeAgreement:
         assert origin == f"http://{host}:9090"
 
 
-_MOD = "gideon.dashboard.origin"
+_MOD = "gideon.interfaces.dashboard.origin"
 
 
 class TestBuildDashboardUrl:
     def test_token_appended(self) -> None:
         assert (
-            build_dashboard_url("http://localhost:7777", "abc") == "http://localhost:7777?token=abc"
+            build_dashboard_url("http://localhost:7777", "abc")
+            == "http://localhost:7777?token=abc"
         )
 
     def test_empty_token_returns_bare_url(self) -> None:
@@ -172,11 +179,15 @@ class TestFormatDashboardUrls:
         lines = format_dashboard_urls("http://localhost:7777?token=abc", port=7777)
         assert "token=abc" in lines[1]
 
-    @patch.dict("os.environ", {"SSH_CONNECTION": "1.2.3.4 1234 5.6.7.8 5678"}, clear=True)
+    @patch.dict(
+        "os.environ", {"SSH_CONNECTION": "1.2.3.4 1234 5.6.7.8 5678"}, clear=True
+    )
     @patch(f"{_MOD}.devspaces_proxy_url", return_value=None)
     @patch(f"{_MOD}.machine_hostname", return_value="myhost")
     @patch(f"{_MOD}.socket.gethostbyname", side_effect=socket.gaierror)
-    def test_remote_ssh_tunnel_instructions(self, _dns: object, _mh: object, _dp: object) -> None:
+    def test_remote_ssh_tunnel_instructions(
+        self, _dns: object, _mh: object, _dp: object
+    ) -> None:
         lines = format_dashboard_urls("http://localhost:7777?token=t", port=7777)
         assert any("ssh -L 7777:localhost:7777 myhost" in ln for ln in lines)
         assert any("http://localhost:7777?token=t" in ln for ln in lines)
@@ -189,7 +200,9 @@ class TestFormatDashboardUrls:
     def test_local_with_resolvable_host_adds_remote_hint(
         self, _dns: object, _mh: object, _dp: object
     ) -> None:
-        lines = format_dashboard_urls("http://localhost:7777", port=7777, local_only=True)
+        lines = format_dashboard_urls(
+            "http://localhost:7777", port=7777, local_only=True
+        )
         assert any("Remote" in ln and "ssh -L" in ln for ln in lines)
 
     @patch.dict("os.environ", {}, clear=True)
@@ -199,28 +212,44 @@ class TestFormatDashboardUrls:
     def test_custom_host_suppresses_remote_hint(
         self, _dns: object, _mh: object, _dp: object
     ) -> None:
-        lines = format_dashboard_urls("http://localhost:7777", port=7777, has_custom_host=True)
+        lines = format_dashboard_urls(
+            "http://localhost:7777", port=7777, has_custom_host=True
+        )
         assert not any("Remote" in ln for ln in lines)
 
     @patch.dict("os.environ", {}, clear=True)
-    @patch(f"{_MOD}.devspaces_proxy_url", return_value="https://proxy.devproxy.example.com")
+    @patch(
+        f"{_MOD}.devspaces_proxy_url", return_value="https://proxy.devproxy.example.com"
+    )
     @patch(f"{_MOD}.machine_hostname", return_value="localhost")
-    def test_devspaces_proxy_shown_when_not_local(self, _mh: object, _dp: object) -> None:
-        lines = format_dashboard_urls("http://host:7777?token=t", port=7777, local_only=False)
+    def test_devspaces_proxy_shown_when_not_local(
+        self, _mh: object, _dp: object
+    ) -> None:
+        lines = format_dashboard_urls(
+            "http://host:7777?token=t", port=7777, local_only=False
+        )
         assert any("Proxy" in ln and "proxy.devproxy.example.com" in ln for ln in lines)
 
     @patch.dict("os.environ", {}, clear=True)
-    @patch(f"{_MOD}.devspaces_proxy_url", return_value="https://proxy.devproxy.example.com")
+    @patch(
+        f"{_MOD}.devspaces_proxy_url", return_value="https://proxy.devproxy.example.com"
+    )
     @patch(f"{_MOD}.machine_hostname", return_value="localhost")
     def test_devspaces_proxy_hidden_when_local(self, _mh: object, _dp: object) -> None:
-        lines = format_dashboard_urls("http://localhost:7777", port=7777, local_only=True)
+        lines = format_dashboard_urls(
+            "http://localhost:7777", port=7777, local_only=True
+        )
         assert not any("Proxy" in ln for ln in lines)
 
     @patch.dict("os.environ", {}, clear=True)
-    @patch(f"{_MOD}.devspaces_proxy_url", return_value="https://proxy.devproxy.example.com")
+    @patch(
+        f"{_MOD}.devspaces_proxy_url", return_value="https://proxy.devproxy.example.com"
+    )
     @patch(f"{_MOD}.machine_hostname", return_value="localhost")
     def test_token_propagated_to_proxy_url(self, _mh: object, _dp: object) -> None:
-        lines = format_dashboard_urls("http://host:7777?token=abc", port=7777, local_only=False)
+        lines = format_dashboard_urls(
+            "http://host:7777?token=abc", port=7777, local_only=False
+        )
         proxy_line = [ln for ln in lines if "Proxy" in ln][0]
         assert "proxy.devproxy.example.com?token=abc" in proxy_line
 
@@ -230,7 +259,9 @@ class TestFormatDashboardUrls:
 
     def test_not_local_with_non_token_query_raises(self) -> None:
         with pytest.raises(ValueError, match="token is required"):
-            format_dashboard_urls("http://host:7777?debug=1", port=7777, local_only=False)
+            format_dashboard_urls(
+                "http://host:7777?debug=1", port=7777, local_only=False
+            )
 
     def test_truthy_non_bool_local_only_raises(self) -> None:
         with pytest.raises(ValueError, match="token is required"):
@@ -247,8 +278,9 @@ class TestCheckOriginLoopbackTrust:
         request = MagicMock()
         request.headers = {"Origin": origin} if origin else {}
         request.remote = remote
-        # Only allow port 7777 — simulates the default config
-        request.app = {"allowed_origins": {"http://localhost:7777", "http://127.0.0.1:7777"}}
+        request.app = {
+            "allowed_origins": {"http://localhost:7777", "http://127.0.0.1:7777"}
+        }
         return request
 
     def test_localhost_different_port_trusted(self) -> None:

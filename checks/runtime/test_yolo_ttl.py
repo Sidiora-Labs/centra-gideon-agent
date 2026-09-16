@@ -20,12 +20,10 @@ def test_yolo_active_then_expires(tmp_path, monkeypatch):
     assert state.is_yolo_active() is True
     assert state.yolo_remaining_secs() == state._YOLO_TTL
 
-    # Just before the ceiling — still active.
     monkeypatch.setattr(time, "monotonic", lambda: base + state._YOLO_TTL - 1)
     assert state.is_yolo_active() is True
     assert 0 < state.yolo_remaining_secs() <= state._YOLO_TTL
 
-    # Past the ceiling — auto-expires on read (check-on-use).
     monkeypatch.setattr(time, "monotonic", lambda: base + state._YOLO_TTL + 1)
     assert state.is_yolo_active() is False
     assert state.yolo_remaining_secs() is None
@@ -36,7 +34,6 @@ def test_config_yolo_is_permanent(tmp_path, monkeypatch):
     base = 1000.0
     monkeypatch.setattr(time, "monotonic", lambda: base)
     state.enable_yolo(from_config=True)
-    # Far past any TTL — config YOLO never expires, and has no countdown.
     monkeypatch.setattr(time, "monotonic", lambda: base + state._YOLO_TTL * 100)
     assert state.is_yolo_active() is True
     assert state.yolo_remaining_secs() is None

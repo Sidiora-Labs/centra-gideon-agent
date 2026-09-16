@@ -16,16 +16,9 @@ pytest.importorskip("hypothesis")
 from hypothesis import given, settings  # noqa: E402
 from hypothesis import strategies as st  # noqa: E402
 
-from gideon.auth.modes import (  # noqa: E402
-    AuthConfig,
-    AuthMode,
-    effective_bind,
-)
+from gideon.security.auth.modes import AuthConfig, AuthMode, effective_bind
 
-REPO_SRC = Path(__file__).resolve().parent.parent / "src"
-
-
-# ── P6: Loopback invariant ────────────────────────────────────────────────────
+REPO_SRC = Path(__file__).resolve().parent.parent.parent / "src"
 
 
 @given(
@@ -55,9 +48,6 @@ def test_P6_non_none_mode_respects_bind_host(mode, bind_host):
     ), f"P6 unexpected rewrite: mode={mode} bind_host={bind_host!r} → {result!r}"
 
 
-# ── from_env: GIDEON_AUTH_MODE dev override ─────────────────────────────
-
-
 def test_from_env_default_is_local_token(monkeypatch):
     monkeypatch.delenv("GIDEON_AUTH_MODE", raising=False)
     assert AuthConfig.from_env().mode == AuthMode.LOCAL_TOKEN
@@ -67,7 +57,6 @@ def test_from_env_none_selects_none_mode(monkeypatch):
     monkeypatch.setenv("GIDEON_AUTH_MODE", "none")
     cfg = AuthConfig.from_env()
     assert cfg.mode == AuthMode.NONE
-    # The loopback invariant still holds for the selected mode.
     assert effective_bind(cfg) == "127.0.0.1"
 
 
@@ -76,14 +65,12 @@ def test_from_env_unknown_value_falls_back_to_local_token(monkeypatch):
     assert AuthConfig.from_env().mode == AuthMode.LOCAL_TOKEN
 
 
-# ── P12: No internal-tool residue ─────────────────────────────────────────────
-
 _RESIDUE_TERMS = [
-    r"\bAcpProvider\b",  # old class name, replaced by AcpAgentProvider
-    r"SlackMcpClient",  # deleted class
-    r"_find_slack_mcp",  # deleted function
-    r"from backend\.aim_agents",  # deleted module
-    r"from backend\.mcp_cleanup",  # deleted module
+    r"\bAcpProvider\b",
+    r"SlackMcpClient",
+    r"_find_slack_mcp",
+    r"from backend\.aim_agents",
+    r"from backend\.mcp_cleanup",
 ]
 
 
@@ -94,10 +81,8 @@ def test_P12_no_residue_in_python_src(term):
     violations: list[str] = []
 
     for py_file in REPO_SRC.rglob("*.py"):
-        # Skip __pycache__
         if "__pycache__" in py_file.parts:
             continue
-        # Skip test files for the residue pattern check
         if "test" in py_file.parts:
             continue
         try:
@@ -106,13 +91,14 @@ def test_P12_no_residue_in_python_src(term):
             continue
         for lineno, line in enumerate(text.splitlines(), 1):
             stripped = line.strip()
-            # Skip pure comment lines — residue in comments is documentation
             if stripped.startswith("#"):
                 continue
             if pattern.search(line):
                 rel = py_file.relative_to(REPO_SRC.parent)
                 violations.append(f"  {rel}:{lineno}: {line.strip()[:120]}")
 
-    assert not violations, f"P12 violated — banned term {term!r} found in source:\n" + "\n".join(
+    assert (
+        not violations
+    ), f"P12 violated — banned term {term!r} found in source:\n" + "\n".join(
         violations[:10]
     )

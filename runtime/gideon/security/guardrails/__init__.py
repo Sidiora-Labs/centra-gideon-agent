@@ -1,0 +1,172 @@
+"""Autonomy guardrails — the personal safety floor + model-call chokepoint.
+
+This package is the LLM twin of ``net/`` (the network egress chokepoint): one
+seam every non-interactive model call passes through, so the platform can meter,
+fail fast on provider outages, and record a tamper-evident attempt trail without
+touching the interactive chat stream a human is watching.
+
+Session 1 (this slice) ships the chokepoint core:
+
+* :mod:`gideon.security.guardrails.failure` — the failure-mode taxonomy + typed errors.
+* :mod:`gideon.security.guardrails.breaker` — a per-provider three-state circuit breaker.
+* :mod:`gideon.security.guardrails.audit` — the attempt-level JSONL audit trail.
+* :mod:`gideon.security.guardrails.model_call` — ``ModelCallGuard``, the provider
+  adapter that wires breaker + hard timeout + audit around a resolved
+  ``ModelProvider``.
+
+Later sessions added the budget meter, path/action denylist, incident kill switch,
+DISABLE_LIVE_WRITES and named safety profiles, plus:
+
+* :mod:`gideon.security.guardrails.autonomy` — the earned-autonomy rung ladder (§5):
+  per-action-type rungs, a DERIVED track record, user-clicked promotion and automatic
+  demotion. It sits ON TOP of the floor above and never relaxes it.
+
+The ``sdk.guardrails`` facade is still to come (see
+`the AUTONOMY-GUARDRAILS plan (internal, not in this repo)`).
+"""
+
+from gideon.security.guardrails.autonomy import (
+    RUNGS,
+    ActionTypeSpec,
+    Demotion,
+    Eligibility,
+    PromotionRule,
+    RungGrant,
+    action_type,
+    demote,
+    grant_rung,
+    granted_rung,
+    promotion_eligibility,
+    register_action_type,
+    registered_action_types,
+    reset_action_types,
+    resolve_rung,
+    rung_rank,
+    rung_state,
+)
+from gideon.security.guardrails.breaker import (
+    BreakerState,
+    CircuitBreaker,
+    get_breaker,
+    reset_breakers,
+)
+from gideon.security.guardrails.budgets import (
+    Budget,
+    BudgetVerdict,
+    SpendMeter,
+    budget_from_config,
+    get_meter,
+    reset_meter,
+    run_budget_from_config,
+)
+from gideon.security.guardrails.ceiling import (
+    Ceiling,
+    GovernanceBootError,
+    ensure_governance_boot,
+    load_ceiling,
+    reset_ceiling,
+    resolve,
+)
+from gideon.security.guardrails.denylist import (
+    DenyDecision,
+    DenyRule,
+    check_action,
+    enforce_action,
+)
+from gideon.security.guardrails.failure import (
+    BudgetExceededError,
+    CircuitOpenError,
+    FailureMode,
+    ModelCallTimeout,
+    OutputContractError,
+    PromptInjectionBlocked,
+    SecretLeakBlocked,
+)
+from gideon.security.guardrails.flags import guard_flag
+from gideon.security.guardrails.incident import (
+    IncidentState,
+    incident_active,
+    reset_incident_mirror,
+)
+from gideon.security.guardrails.model_call import ModelCallGuard, wrap_model_call_guard
+from gideon.security.guardrails.policy import (
+    HEADLESS,
+    INTERACTIVE,
+    SafetyProfile,
+    approval_policy_for_session,
+    ceiling_permits_approval,
+    get_profile,
+    is_unattended_session,
+    profile_for_session,
+    safety_profile_for,
+    unattended_dispatch_key,
+)
+from gideon.security.guardrails.scan import ScanResult, scan_outbound
+from gideon.security.guardrails.writes import live_writes_disabled
+
+__all__ = [
+    "ActionTypeSpec",
+    "BreakerState",
+    "Budget",
+    "BudgetExceededError",
+    "BudgetVerdict",
+    "Ceiling",
+    "CircuitBreaker",
+    "CircuitOpenError",
+    "Demotion",
+    "DenyDecision",
+    "DenyRule",
+    "Eligibility",
+    "FailureMode",
+    "GovernanceBootError",
+    "HEADLESS",
+    "INTERACTIVE",
+    "IncidentState",
+    "ModelCallGuard",
+    "ModelCallTimeout",
+    "OutputContractError",
+    "PromotionRule",
+    "RUNGS",
+    "RungGrant",
+    "SafetyProfile",
+    "ScanResult",
+    "PromptInjectionBlocked",
+    "SecretLeakBlocked",
+    "SpendMeter",
+    "action_type",
+    "approval_policy_for_session",
+    "budget_from_config",
+    "ceiling_permits_approval",
+    "check_action",
+    "demote",
+    "enforce_action",
+    "ensure_governance_boot",
+    "get_breaker",
+    "get_meter",
+    "get_profile",
+    "grant_rung",
+    "granted_rung",
+    "guard_flag",
+    "incident_active",
+    "is_unattended_session",
+    "live_writes_disabled",
+    "load_ceiling",
+    "profile_for_session",
+    "promotion_eligibility",
+    "register_action_type",
+    "registered_action_types",
+    "reset_action_types",
+    "reset_breakers",
+    "reset_ceiling",
+    "reset_incident_mirror",
+    "reset_meter",
+    "resolve",
+    "resolve_rung",
+    "rung_rank",
+    "rung_state",
+    "run_budget_from_config",
+    "safety_profile_for",
+    "scan_outbound",
+    "unattended_dispatch_key",
+    "wrap_model_call_guard",
+]

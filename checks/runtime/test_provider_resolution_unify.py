@@ -12,15 +12,9 @@ from unittest.mock import MagicMock, patch
 
 from fakes import FAKE_MODEL_CAPABILITY, FAKE_MODEL_TYPE, ensure_fake_model_type
 
-import gideon.providers.provider_bridge as pb
-from gideon.llm.registry import ProviderEntry, get_default_registry
+import gideon.extensions.providers.provider_bridge as pb
+from gideon.integrations.llm.registry import ProviderEntry, get_default_registry
 
-# Model provider TYPES (openai/anthropic/ollama/bedrock) register from their
-# standalone apps now, so they aren't in the registry in a bare unit test. These
-# resolution tests need SOME concrete model-provider type — register the in-tree
-# fake (tests/fakes.py) and DECLARE the caps needed on each entry (the resolver
-# reads entry.declared_capabilities first). Resolution builds via registry.build
-# → the registered type factory, so tests patch registry.build.
 ensure_fake_model_type(get_default_registry())
 _MODEL_TYPE = FAKE_MODEL_TYPE
 _MODEL_CAPS = FAKE_MODEL_CAPABILITY.capabilities
@@ -51,11 +45,10 @@ def test_active_selection_resolves_pinned_to_provider_and_model():
         seen["model_override"] = kw.get("model_override")
         return real_resolver(use_case, **kw)
 
-    # ``embedding`` so the native-agent branch (chat) doesn't short-circuit.
     reg = get_default_registry()
     with (
         patch(
-            "gideon.providers.use_cases.active_model_refs",
+            "gideon.extensions.providers.use_cases.active_model_refs",
             return_value=["UnifyCloud:my-embed"],
         ),
         patch.object(pb, "_resolve_from_config_registry", side_effect=spy),
@@ -64,7 +57,6 @@ def test_active_selection_resolves_pinned_to_provider_and_model():
         prov = pb.resolve_provider_for_use_case("embedding", agent=None)
 
     assert prov is not None
-    # The active selection pinned resolution to the named provider + model.
     assert seen.get("provider_hint") == "UnifyCloud"
     assert seen.get("model_override") == "my-embed"
 
@@ -74,13 +66,13 @@ def test_image_modality_maps_to_vision_capability():
     matching Capability enum member — it must normalise to Capability.VISION, or
     _resolve_from_config_registry's Capability(cap) raises and every vision/ocr
     resolution fails even with a vision model bound (the video-extraction bug)."""
-    from gideon.llm.capabilities import Capability
+    from gideon.integrations.llm.capabilities import Capability
 
     assert pb._capability_enum("image_modality") == Capability.VISION
     assert pb._capability_enum("video_modality") == Capability.VISION
-    assert pb._capability_enum("vision") == Capability.VISION  # already an enum value
-    assert pb._capability_enum("chat") == Capability.CHAT  # passthrough
-    assert pb._capability_enum("not_a_capability") is None  # clean None, no raise
+    assert pb._capability_enum("vision") == Capability.VISION
+    assert pb._capability_enum("chat") == Capability.CHAT
+    assert pb._capability_enum("not_a_capability") is None
 
 
 def test_vision_use_case_resolves_to_vision_capable_provider():
@@ -88,10 +80,10 @@ def test_vision_use_case_resolves_to_vision_capable_provider():
     provider must resolve (build) — closing the can_resolve/resolve divergence:
     previously can_resolve said True (a ref existed) but resolve raised because the
     capability name didn't map. Uses a registered VISION-capable entry. (Ingestion's
-    OCR/vision nodes resolve DIRECTLY to ``image_modality`` now — no ingestion use-case.)"""
+    OCR/vision nodes resolve DIRECTLY to ``image_modality`` now — no ingestion use-case.)
+    """
     reg = get_default_registry()
     if not any(e.name == "VisionCloud" for e in reg.list_entries()):
-        # the entry declares VISION directly (resolver reads declared_capabilities)
         reg.register_entry(
             ProviderEntry(
                 name="VisionCloud",
@@ -103,25 +95,22 @@ def test_vision_use_case_resolves_to_vision_capable_provider():
         )
     with (
         patch(
-            "gideon.providers.use_cases.active_model_refs", return_value=["VisionCloud:vlm-1"]
+            "gideon.extensions.providers.use_cases.active_model_refs",
+            return_value=["VisionCloud:vlm-1"],
         ),
         patch.object(reg, "build", return_value=MagicMock(name="ModelProvider")),
     ):
         prov = pb.resolve_provider_for_use_case("image_modality", agent=None)
-    assert prov is not None  # resolved, did not raise
+    assert prov is not None
 
 
 def test_active_selection_naming_unknown_provider_raises_immediately():
-    # An active selection naming a provider the registry can't build (its app isn't
-    # installed) must raise a CLEAR error immediately — NOT silently fall through to
-    # the implicit fallback (the stale-Bedrock-pin → Ollama-404 bug). The error
-    # names the provider and points at the App Store / Settings → Models.
     with (
         patch(
-            "gideon.providers.use_cases.active_model_refs",
+            "gideon.extensions.providers.use_cases.active_model_refs",
             return_value=["DoesNotExistAnywhere:m"],
         ),
-        patch("gideon.llm.registry.get_default_registry") as gdr,
+        patch("gideon.integrations.llm.registry.get_default_registry") as gdr,
     ):
         reg = MagicMock()
         reg.list_entries.return_value = []
@@ -132,9 +121,6 @@ def test_active_selection_naming_unknown_provider_raises_immediately():
         except pb.ProviderResolutionError as exc:
             raised, msg, err = True, str(exc), exc.agent_error
     assert raised
-    # PLATFORM-LEGIBILITY §2: the message is now the WHAT/WHY/FIX envelope. It
-    # still names the unresolvable provider (in WHY) and points at the fix
-    # (install / rebind), and carries the stable ERR_MODEL_UNRESOLVED code.
     assert "DoesNotExistAnywhere" in msg
     assert err is not None and err.code == "ERR_MODEL_UNRESOLVED"
     assert "install" in err.fix.lower() or "rebind" in err.fix.lower()
@@ -147,40 +133,38 @@ def test_fallback_chat_model_skips_stale_default_agent_pin():
     the pin to '' and falls through to the first active chat model instead."""
     from types import SimpleNamespace
 
-    import gideon.providers.provider_bridge as pbmod
+    import gideon.extensions.providers.provider_bridge as pbmod
 
     class _Cfg:
-        agents = {"default": SimpleNamespace(model="Bedrock:global.anthropic.claude-opus-4-8")}
+        agents = {
+            "default": SimpleNamespace(model="Bedrock:global.anthropic.claude-opus-4-8")
+        }
 
     with (
-        patch("gideon.config.loader.AppConfig") as AppCfg,
-        patch("gideon.agents.defaults.default_agent_name", return_value="default"),
+        patch("gideon.core.config.loader.AppConfig") as AppCfg,
         patch(
-            "gideon.providers.use_cases.active_model_refs",
+            "gideon.engine.agents.defaults.default_agent_name", return_value="default"
+        ),
+        patch(
+            "gideon.extensions.providers.use_cases.active_model_refs",
             return_value=["OpenAI:gpt-4o-mini"],
         ),
     ):
         AppCfg.load.return_value = _Cfg()
         got = pbmod._fallback_chat_model()
-    # The stale Bedrock pin is dropped; the active OpenAI model's bare id wins.
     assert got == "gpt-4o-mini", got
 
 
 def test_unknown_selection_does_not_fall_back_to_other_provider():
-    # The KEY behavior change: even when a DIFFERENT capable provider IS available,
-    # a selection naming an uninstalled provider must NOT silently resolve to the
-    # other one — it blocks with the clear error (per the user's decision). The
-    # implicit fallback applies ONLY when there is no active selection at all.
     _ensure_registry_entry("SomeWorkingProvider")
     reg = get_default_registry()
     with (
         patch(
-            "gideon.providers.use_cases.active_model_refs", return_value=["UninstalledProv:m"]
+            "gideon.extensions.providers.use_cases.active_model_refs",
+            return_value=["UninstalledProv:m"],
         ),
         patch.object(reg, "build", return_value=MagicMock(name="ModelProvider")),
     ):
-        # build() would succeed for a real entry, but "UninstalledProv" isn't one →
-        # the pinned attempt returns None → we must raise, not fall back.
         try:
             pb.resolve_provider_for_use_case("embedding", agent=None)
             raised = False
@@ -197,7 +181,6 @@ def test_model_axis_only_skips_acp_agent_entry():
     entry even when the acp_agent declares the chat capability.
     """
     reg = get_default_registry()
-    # Register an acp_agent entry that declares CHAT (the failing-stack shape).
     if not any(e.name == "SomeAcpAgent" for e in reg.list_entries()):
         acp_cap = reg.capability_of("acp_agent")
         reg.register_entry(
@@ -209,17 +192,13 @@ def test_model_axis_only_skips_acp_agent_entry():
                 declared_capabilities=acp_cap.capabilities,
             )
         )
-    _ensure_registry_entry("UnifyCloud")  # a real ModelProvider entry
+    _ensure_registry_entry("UnifyCloud")
 
-    with patch.object(reg, "build", return_value=MagicMock(name="ModelProvider")) as build:
+    with patch.object(
+        reg, "build", return_value=MagicMock(name="ModelProvider")
+    ) as build:
         prov = pb._resolve_from_config_registry("chat", _model_axis_only=True)
     assert prov is not None
-    # Resolution now runs through the single registry.build path for BOTH axes, so
-    # the acp_agent-skip is proven by the TYPE of the entry it selected: it built a
-    # model entry, NOT an acp_agent — even though the acp_agent also declares CHAT.
-    # (Assert on the entry TYPE, not a specific name: the shared registry singleton
-    # may hold other CHAT-capable model entries registered by earlier test files, so
-    # the exact winner is order-dependent, but it must never be an agent-runtime.)
     assert build.called
     built_name = build.call_args.args[0]
     built_entry = next(e for e in reg.list_entries() if e.name == built_name)
@@ -242,9 +221,9 @@ def test_model_axis_only_resolves_acp_agent_without_flag():
                 declared_capabilities=acp_cap.capabilities,
             )
         )
-    # Pin to the acp_agent entry via provider_hint and confirm it routes through
-    # registry.build (the single build path — the agent-runtime factory).
-    with patch.object(reg, "build", return_value=MagicMock(name="AcpAgentProvider")) as rbuild:
+    with patch.object(
+        reg, "build", return_value=MagicMock(name="AcpAgentProvider")
+    ) as rbuild:
         prov = pb._resolve_from_config_registry("chat", provider_hint="SomeAcpAgent")
     assert prov is not None
     assert rbuild.called
@@ -253,7 +232,6 @@ def test_model_axis_only_resolves_acp_agent_without_flag():
 
 def test_config_resolver_honors_explicit_provider_hint():
     _ensure_registry_entry("UnifyCloud")
-    # A second entry the hint must NOT select, to prove the hint pins the choice.
     reg = get_default_registry()
     if not any(e.name == "OtherCloud" for e in reg.list_entries()):
         reg.register_entry(
@@ -268,9 +246,6 @@ def test_config_resolver_honors_explicit_provider_hint():
     with patch.object(reg, "build", return_value=MagicMock()) as build:
         prov = pb._resolve_from_config_registry("chat", provider_hint="UnifyCloud")
     assert prov is not None
-    # Resolution builds via registry.build(build_name, ...); the hint pins build_name
-    # to the HINTED entry (UnifyCloud), not the other capable entry (OtherCloud) —
-    # proving the hint pinned the choice.
     assert build.call_args.args[0] == "UnifyCloud"
 
 
@@ -281,8 +256,6 @@ def test_model_override_threaded_as_build_kwarg():
     ``entry.model``. Regression: this used to rely on re-registering a model-replaced
     entry, but register_entry raises on a duplicate name, so the override was silently
     lost and the provider fell back to the entry/default model."""
-    # Entry with NO pinned model (like the config.json Bedrock entry — the model
-    # lives in active_models.json and is resolved per use-case).
     reg = get_default_registry()
     if not any(e.name == "UnifyPinless" for e in reg.list_entries()):
         reg.register_entry(
@@ -300,8 +273,6 @@ def test_model_override_threaded_as_build_kwarg():
             provider_hint="UnifyPinless",
             model_override="pinned-model-x",
         )
-    # The override is threaded as the `model` build kwarg (not via a doomed
-    # entry re-registration).
     assert build.call_args.kwargs.get("model") == "pinned-model-x"
 
 
@@ -320,7 +291,7 @@ def test_provider_kind_native_routes_to_native_runtime_despite_name_guess():
     with (
         patch.object(pb, "_build_native_runtime", side_effect=_fake_native),
         patch.object(pb, "_agent_provider_kind", return_value="acp"),
-    ):  # name-guess wrong
+    ):
         prov = pb.resolve_provider_for_use_case(
             "chat", agent="gideon", provider_kind="native"
         )
@@ -359,7 +330,9 @@ def test_extra_tool_roots_not_leaked_to_acp_resolver():
 
     with (
         patch.object(pb, "_agent_provider_kind", return_value="native"),
-        patch("gideon.providers.use_cases.active_model_refs", return_value=[]),
+        patch(
+            "gideon.extensions.providers.use_cases.active_model_refs", return_value=[]
+        ),
         patch.object(pb, "_resolve_from_config_registry", side_effect=_fake_cfg),
     ):
         pb.resolve_provider_for_use_case(
@@ -384,10 +357,14 @@ def test_provider_kind_acp_does_not_build_native():
     with (
         patch.object(pb, "_build_native_runtime", side_effect=_fake_native),
         patch.object(pb, "_agent_provider_kind", return_value="native"),
-        patch("gideon.providers.use_cases.active_model_refs", return_value=[]),
+        patch(
+            "gideon.extensions.providers.use_cases.active_model_refs", return_value=[]
+        ),
         patch.object(pb, "_build_acp_runtime", side_effect=_fake_acp),
         patch.object(
-            pb, "_resolve_from_config_registry", return_value=MagicMock(name="ModelProvider")
+            pb,
+            "_resolve_from_config_registry",
+            return_value=MagicMock(name="ModelProvider"),
         ),
     ):
         prov = pb.resolve_provider_for_use_case(
@@ -395,9 +372,6 @@ def test_provider_kind_acp_does_not_build_native():
         )
     assert prov is not None
     assert called.get("native") is None
-    # AAP-7 tightened this from "not native" to "the NAMED runtime". Before, the ACP kind
-    # merely skipped the native builder and then resolved a MODEL through the config
-    # registry — not native, and not the CLI either (`G158`).
     assert called.get("acp") == "acp:claude-code"
 
 
@@ -414,7 +388,7 @@ def test_colon_qualified_override_routes_to_named_provider():
     reg = get_default_registry()
     with (
         patch(
-            "gideon.providers.use_cases.active_model_refs",
+            "gideon.extensions.providers.use_cases.active_model_refs",
             return_value=["PickA:model-a", "PickB:model-b"],
         ),
         patch.object(reg, "build", return_value=MagicMock()) as build,
@@ -426,8 +400,6 @@ def test_colon_qualified_override_routes_to_named_provider():
             _force_model_axis=True,
         )
     assert prov is not None
-    # Routed to PickB (the prefixed provider), NOT PickA (the first active ref),
-    # and the bare model id reached the factory.
     assert build.call_args.args[0] == "PickB"
     assert build.call_args.kwargs.get("model") == "model-b"
 
@@ -439,15 +411,12 @@ def test_strip_provider_prefix_uses_known_provider_names(monkeypatch):
     authoritative config-provider name set. Without this the bare id "OpenAI:gpt-5.4"
     reaches the SDK verbatim → 404. A colon-bearing bare id whose prefix ISN'T a
     provider (e.g. "gpt-oss:20b") must be left intact."""
-    # Force the registry-entry path to MISS (empty registry), so the strip must
-    # rely on the known-names fallback. Patch registry.list_entries to return [].
     reg = get_default_registry()
     monkeypatch.setattr(reg, "list_entries", lambda: [])
     monkeypatch.setattr(
-        "gideon.providers.use_cases._known_provider_names",
+        "gideon.extensions.providers.use_cases._known_provider_names",
         lambda: {"OpenAI", "Anthropic", "Ollama"},
     )
     assert pb._strip_provider_prefix("OpenAI:gpt-5.4") == "gpt-5.4"
     assert pb._strip_provider_prefix("Anthropic:claude-opus-4-8") == "claude-opus-4-8"
-    # Not a provider prefix → left intact (ollama tag form).
     assert pb._strip_provider_prefix("gpt-oss:20b") == "gpt-oss:20b"

@@ -22,7 +22,7 @@ import sys
 import time
 from pathlib import Path
 
-from gideon.apps.backend_runtime import BackendSupervisor
+from gideon.extensions.apps.backend_runtime import BackendSupervisor
 
 
 def _write_entry(tmp_path: Path, app: str = "myapp") -> Path:
@@ -32,7 +32,9 @@ def _write_entry(tmp_path: Path, app: str = "myapp") -> Path:
     return entry.resolve()
 
 
-def _spawn_child_proc(tmp_path: Path, app: str = "myapp") -> tuple[subprocess.Popen, Path]:
+def _spawn_child_proc(
+    tmp_path: Path, app: str = "myapp"
+) -> tuple[subprocess.Popen, Path]:
     """Spawn a marker process as OUR direct child (parent alive → not an
     orphan). Simulates a backend owned by a live supervisor elsewhere."""
     entry = _write_entry(tmp_path, app)
@@ -44,10 +46,12 @@ def _spawn_orphan_proc(tmp_path: Path, app: str = "myapp") -> tuple[int, Path]:
     """Spawn a marker process as a TRUE ORPHAN (reparented to init): an
     intermediate shell backgrounds the python and exits immediately."""
     entry = _write_entry(tmp_path, app)
-    # The background child must NOT inherit the capture pipe (subprocess.run
-    # would block on stdout EOF forever) — detach its fds to /dev/null.
     out = subprocess.run(  # noqa: S603 — test fixture
-        ["/bin/sh", "-c", f'"{sys.executable}" "{entry}" >/dev/null 2>&1 </dev/null & echo $!'],
+        [
+            "/bin/sh",
+            "-c",
+            f'"{sys.executable}" "{entry}" >/dev/null 2>&1 </dev/null & echo $!',
+        ],
         capture_output=True,
         text=True,
         check=True,
@@ -72,19 +76,6 @@ def _kill_quiet(pid: int) -> None:
         pass
 
 
-# Process-visibility waits. Generous on CI: these poll the OS process table for
-# freshly-spawned children, and a contended runner can take far longer than a laptop
-# to publish them (the failure this budget exists for showed only in CI).
-#
-# Raised 20s -> 60s after CI still timed out mid-reparent, twice, with the pile only
-# PARTLY orphaned (observed 2-of-4 and 3-of-4 at the deadline). Reparenting to init is
-# asynchronous and unordered: the intermediate shell exits and the kernel re-points each
-# orphan independently, so on a runner executing ~18 xdist workers the tail of a 4-child
-# pile can lag seconds behind the head. The old budget was fine for "is it running" and
-# too tight for "have they ALL been re-parented" — a different, slower event. This costs
-# nothing when the wait succeeds (it returns as soon as the predicate holds) and only
-# lengthens a genuine failure, which is the right trade for a test whose whole job is to
-# prove no orphan escapes.
 _WAIT_TIMEOUT_S = 60.0
 _WAIT_STEP_S = 0.05
 
@@ -125,8 +116,6 @@ def _wait_pid_reapable(entry: Path, pid: int) -> None:
                     return
                 break
         else:
-            # The pid is not in the table at all. It either has not appeared yet or it exited;
-            # `_pid_alive` distinguishes them, and a dead one can never become reapable.
             if not _pid_alive(pid):
                 raise AssertionError(
                     f"pid {pid} exited before it could be reaped (entry={entry}); the process "
@@ -152,7 +141,9 @@ def _wait_all_dead(pids: list[int]) -> None:
         if not alive:
             return
         time.sleep(0.1)
-    raise AssertionError(f"processes survived the reap: {[p for p in pids if _pid_alive(p)]}")
+    raise AssertionError(
+        f"processes survived the reap: {[p for p in pids if _pid_alive(p)]}"
+    )
 
 
 def test_pids_running_finds_the_process(tmp_path):
@@ -160,8 +151,9 @@ def test_pids_running_finds_the_process(tmp_path):
     try:
         _wait_visible(entry, proc.pid)
         found = BackendSupervisor._pids_running(entry)
-        assert any(p == proc.pid for p, _ in found), "running backend not found by path identity"
-        # and it reports our live pid as the parent (not 1)
+        assert any(
+            p == proc.pid for p, _ in found
+        ), "running backend not found by path identity"
         ppid = next(pp for p, pp in found if p == proc.pid)
         assert ppid == os.getpid()
     finally:
@@ -209,16 +201,10 @@ def test_reap_orphans_kills_a_whole_pile(tmp_path):
         for _n in range(1, 5):
             pid = _spawn_orphan_proc(tmp_path)[0]
             pids.append(pid)
-            # Assert THIS pid is reapable before adding another to the pile. Per-pid rather than
-            # a cumulative count: see `_wait_pid_reapable` — a cumulative wait cannot tell a
-            # pending reparenting from an earlier orphan that died, and CI hits the second.
             _wait_pid_reapable(entry, pid)
         sup = BackendSupervisor()
         reaped = sup.reap_orphans("myapp", entry)
-        # A PILE, not one: the bug this test exists for was reaping a single orphan and leaving
-        # the rest. An exact count would be asserting the fidelity of one `ps` snapshot.
         assert reaped >= 2, f"expected to reap a pile, got {reaped}"
-        # THE assertion: every orphan is gone. Polls each pid, so no snapshot can hide one.
         _wait_all_dead(pids)
     finally:
         for p in pids:
@@ -231,13 +217,11 @@ def test_reap_orphans_spares_owned_process(tmp_path):
     proc, entry = _spawn_child_proc(tmp_path)
     try:
         sup = BackendSupervisor()
-        from gideon.apps.backend_runtime import RunningBackend
+        from gideon.extensions.apps.backend_runtime import RunningBackend
 
-        # register the process as owned
-        sup._procs["myapp"] = RunningBackend(name="myapp", port=1234, pid=proc.pid, proc=proc)
-        # Wait DETERMINISTICALLY. These "nothing was reaped" assertions pass vacuously
-        # if the process was never visible in the first place — a timed-out poll would
-        # make the test green while proving nothing about sparing.
+        sup._procs["myapp"] = RunningBackend(
+            name="myapp", port=1234, pid=proc.pid, proc=proc
+        )
         _wait_visible(entry, proc.pid)
         reaped = sup.reap_orphans("myapp", entry)
         assert reaped == 0, "owned backend must be spared"
@@ -254,8 +238,7 @@ def test_reap_orphans_spares_live_foreign_children(tmp_path):
     supervisor. Only true orphans (PPID 1) may be reaped."""
     proc, entry = _spawn_child_proc(tmp_path)
     try:
-        sup = BackendSupervisor()  # fresh table — does NOT own the process
-        # Same vacuous-pass hazard as the owned-process test above.
+        sup = BackendSupervisor()
         _wait_visible(entry, proc.pid)
         reaped = sup.reap_orphans("myapp", entry)
         assert reaped == 0, "live-parent process must be spared"
@@ -271,5 +254,4 @@ def test_pids_running_empty_for_unknown_path(tmp_path):
 
 def test_stop_with_no_tracked_proc_is_safe(tmp_path):
     sup = BackendSupervisor()
-    # stop with nothing tracked is a no-op (returns False), never raises
     assert sup.stop("myapp") is False

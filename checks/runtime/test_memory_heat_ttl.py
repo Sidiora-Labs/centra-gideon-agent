@@ -6,20 +6,17 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from gideon.memory_record import MemoryKind, MemoryRecord, MemoryScope
-from gideon.memory_service import MemoryService
-from gideon.vector_memory import VectorMemoryStore
+from gideon.cognition.memory_record import MemoryKind, MemoryRecord, MemoryScope
+from gideon.cognition.memory_service import MemoryService
+from gideon.cognition.vector_memory import SemanticArchive
 
 
 @pytest.fixture
 def svc(tmp_path):
-    s = VectorMemoryStore(db_path=tmp_path / "m.db", embedding_dim=3)
+    s = SemanticArchive(db_path=tmp_path / "m.db", embedding_dim=3)
     s.init()
     s.embed_fn = lambda t: [1.0, 0.0, 0.0]
     return MemoryService.over_vector_store(s)
-
-
-# ── heat ──
 
 
 def test_heat_rises_with_visits():
@@ -43,7 +40,10 @@ def test_heat_rises_with_visits():
 def test_heat_decays_with_age():
     now = datetime.now(tz=timezone.utc)
     recent = MemoryRecord(
-        id="a", kind=MemoryKind.SEMANTIC, recall_count=3, last_accessed_at=now.isoformat()
+        id="a",
+        kind=MemoryKind.SEMANTIC,
+        recall_count=3,
+        last_accessed_at=now.isoformat(),
     )
     old = MemoryRecord(
         id="b",
@@ -62,26 +62,21 @@ def test_heat_bounded():
         visit_count=100_000,
         last_accessed_at=datetime.now(tz=timezone.utc).isoformat(),
     )
-    assert huge.heat() < 5.0  # log-damped, can't run away
-
-
-# ── two-stage rerank ──
+    assert huge.heat() < 5.0
 
 
 def test_rank_episodic_returns_hits(svc):
     svc.write_episodic("the rollout plan was finalized on friday", source="test")
-    svc.write_episodic("we also discussed the database migration approach", source="test")
+    svc.write_episodic(
+        "we also discussed the database migration approach", source="test"
+    )
     ranked = svc.rank_episodic(query_text="rollout plan", limit=5)
     assert isinstance(ranked, list)
-    # every ranked hit carries the combined ranked_score
     assert all("ranked_score" in h for h in ranked)
 
 
 def test_rank_episodic_empty_without_data(svc):
     assert svc.rank_episodic(query_text="anything") == []
-
-
-# ── category-TTL ──
 
 
 def _backdate(svc, key, days):
@@ -96,7 +91,6 @@ def _backdate(svc, key, days):
 
 
 def test_expire_by_category_drops_old_debug(svc):
-    # a debug-category record well past its 7-day TTL
     svc.put(
         [
             MemoryRecord(
@@ -117,7 +111,6 @@ def test_expire_by_category_drops_old_debug(svc):
 
 
 def test_expire_keeps_durable_facts(svc):
-    # a fact with NO category → never TTL-expired, even when ancient
     svc.put(
         [
             MemoryRecord(
@@ -131,7 +124,7 @@ def test_expire_keeps_durable_facts(svc):
     )
     _backdate(svc, "pref.editor", 365)
     svc.expire_by_category()
-    assert svc.get_record("pref.editor") is not None  # survived
+    assert svc.get_record("pref.editor") is not None
 
 
 def test_expire_keeps_recent_event(svc):
@@ -151,11 +144,10 @@ def test_expire_keeps_recent_event(svc):
         ]
     )
     svc.expire_by_category()
-    assert svc.get_record("pref.recent_event") is not None  # 2 days < 30-day TTL
+    assert svc.get_record("pref.recent_event") is not None
 
 
 def test_expire_never_touches_user_explicit_global(svc):
-    # even with a TTL category, a user_explicit GLOBAL entry is protected
     svc.put(
         [
             MemoryRecord(

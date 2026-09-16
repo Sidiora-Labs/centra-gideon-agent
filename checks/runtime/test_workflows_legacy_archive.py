@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from gideon.workflows.legacy import archive_legacy_sops
+from gideon.automation.workflows.legacy import archive_legacy_sops
 
 
 def _sop(root: Path, name: str, body: str = "1. do the thing\n") -> Path:
@@ -29,7 +29,9 @@ class TestArchiveLegacySops:
         moved = archive_legacy_sops(wf)
 
         assert sorted(moved) == ["release-checklist", "weekly-review"]
-        assert not (wf / "release-checklist").exists(), "the original must be moved, not copied"
+        assert not (
+            wf / "release-checklist"
+        ).exists(), "the original must be moved, not copied"
         archived = wf / "_legacy_sops" / "release-checklist" / "WORKFLOW.md"
         assert archived.is_file()
         assert archived.read_text(encoding="utf-8") == "1. tag\n2. publish\n"
@@ -42,8 +44,9 @@ class TestArchiveLegacySops:
         assert archive_legacy_sops(wf) == ["release-checklist"]
         assert archive_legacy_sops(wf) == []
         assert archive_legacy_sops(wf) == []
-        # Exactly one archived copy — no `-2` suffix from re-archiving itself.
-        assert [p.name for p in (wf / "_legacy_sops").iterdir()] == ["release-checklist"]
+        assert [p.name for p in (wf / "_legacy_sops").iterdir()] == [
+            "release-checklist"
+        ]
 
     def test_ignores_dirs_without_a_workflow_md(self, tmp_path: Path) -> None:
         """The v2 def store will live here too; only legacy SOPs move."""
@@ -55,7 +58,9 @@ class TestArchiveLegacySops:
         assert archive_legacy_sops(wf) == []
         assert (wf / "defs" / "research.json").is_file()
         assert (wf / "runs").is_dir()
-        assert not (wf / "_legacy_sops").exists(), "no archive dir when there is nothing to archive"
+        assert not (
+            wf / "_legacy_sops"
+        ).exists(), "no archive dir when there is nothing to archive"
 
     def test_skips_underscore_dirs(self, tmp_path: Path) -> None:
         """Guards against re-archiving the archive if it ever holds a WORKFLOW.md."""
@@ -76,13 +81,17 @@ class TestArchiveLegacySops:
         assert (archive / "notes" / "WORKFLOW.md").read_text(
             encoding="utf-8"
         ) == "the ARCHIVED one\n"
-        assert (archive / "notes-2" / "WORKFLOW.md").read_text(encoding="utf-8") == "the NEW one\n"
+        assert (archive / "notes-2" / "WORKFLOW.md").read_text(
+            encoding="utf-8"
+        ) == "the NEW one\n"
 
     def test_missing_dir_is_a_no_op(self, tmp_path: Path) -> None:
         """Most homes never had the old feature; this runs at startup regardless."""
         assert archive_legacy_sops(tmp_path / "does-not-exist") == []
 
-    def test_never_raises_on_an_unreadable_entry(self, tmp_path: Path, monkeypatch) -> None:
+    def test_never_raises_on_an_unreadable_entry(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
         """A permissions problem on one stale dir must not stop the gateway booting."""
         wf = tmp_path / "workflows"
         _sop(wf, "broken")
@@ -95,7 +104,6 @@ class TestArchiveLegacySops:
                 raise OSError("permission denied")
             return real_move(src, dst)
 
-        monkeypatch.setattr("gideon.workflows.legacy.shutil.move", flaky)
-        # The good one still moves; the failure is logged, not raised.
+        monkeypatch.setattr("gideon.automation.workflows.legacy.shutil.move", flaky)
         assert archive_legacy_sops(wf) == ["fine"]
         assert (wf / "broken").exists()

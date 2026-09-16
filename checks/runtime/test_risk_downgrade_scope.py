@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.task_modes import (
+from gideon.engine.task_modes import (
     MUTATING,
     READ_ONLY,
     SHELL_TITLE_PREFIXES,
@@ -42,8 +42,6 @@ from gideon.task_modes import (
     task_mode_denies,
 )
 
-#: Tools whose declared risk a decoy must never lower. Real tools with real declared
-#: risks, named in #443's measurement.
 DESTRUCTIVE_TOOLS = [
     ("workflow_delete_def", {"name": "x"}),
     ("memory_forget", {"rule": "x"}),
@@ -52,8 +50,6 @@ DESTRUCTIVE_TOOLS = [
     ("task_delete", {"task_id": "t-1"}),
 ]
 
-#: Every spelling of the decoy. `is_read_only_bash` says yes to all of them, which is the
-#: whole point — the string is plausible, it is simply not this call's command.
 DECOYS = [
     {"command": "ls"},
     {"command": "cat /etc/hostname"},
@@ -69,8 +65,12 @@ def _with(args: dict, decoy: dict) -> dict:
 class TestDecoyCannotLowerRisk:
     """The reported half: `trust_reads` auto-approves anything resolving to `safe`."""
 
-    @pytest.mark.parametrize("tool,args", DESTRUCTIVE_TOOLS, ids=[t for t, _ in DESTRUCTIVE_TOOLS])
-    @pytest.mark.parametrize("decoy", DECOYS, ids=[d["command"].split()[0] for d in DECOYS])
+    @pytest.mark.parametrize(
+        "tool,args", DESTRUCTIVE_TOOLS, ids=[t for t, _ in DESTRUCTIVE_TOOLS]
+    )
+    @pytest.mark.parametrize(
+        "decoy", DECOYS, ids=[d["command"].split()[0] for d in DECOYS]
+    )
     def test_declared_destructive_survives_the_decoy(self, tool, args, decoy):
         baseline = resolve_effective_risk("destructive", tool, "", args)
         withdecoy = resolve_effective_risk("destructive", tool, "", _with(args, decoy))
@@ -80,14 +80,22 @@ class TestDecoyCannotLowerRisk:
             "trust_reads auto-approves `safe` with no prompt"
         )
 
-    @pytest.mark.parametrize("tool,args", DESTRUCTIVE_TOOLS, ids=[t for t, _ in DESTRUCTIVE_TOOLS])
+    @pytest.mark.parametrize(
+        "tool,args", DESTRUCTIVE_TOOLS, ids=[t for t, _ in DESTRUCTIVE_TOOLS]
+    )
     def test_declared_caution_survives_the_decoy(self, tool, args):
-        assert resolve_effective_risk("caution", tool, "", _with(args, {"command": "ls"})) != "safe"
+        assert (
+            resolve_effective_risk("caution", tool, "", _with(args, {"command": "ls"}))
+            != "safe"
+        )
 
     def test_an_undeclared_external_tool_is_not_made_safe_by_a_decoy(self):
         """An MCP tool that declares no risk is the case with the least to fall back on —
         so it is the one where a decoy would buy the most."""
-        assert resolve_effective_risk("", "vendor_wipe_database", "", {"command": "ls"}) != "safe"
+        assert (
+            resolve_effective_risk("", "vendor_wipe_database", "", {"command": "ls"})
+            != "safe"
+        )
 
     def test_the_decoy_cannot_produce_a_read_only_verdict(self):
         """A tool that legitimately answers READ_ONLY must still be forced MUTATING by a
@@ -101,17 +109,12 @@ class TestDecoyCannotLowerRisk:
         understand, whatever its name says.
         """
         assert classify_invocation("memory_recall", "", {"rule": "x"}) == READ_ONLY
-        assert classify_invocation("memory_recall", "", {"rule": "x", "command": "ls"}) == MUTATING
+        assert (
+            classify_invocation("memory_recall", "", {"rule": "x", "command": "ls"})
+            == MUTATING
+        )
 
 
-#: The subset of :data:`DESTRUCTIVE_TOOLS` that ``task_mode_denies`` actually denies, so a
-#: "the decoy no longer unlocks it" assertion has something to measure.
-#:
-#: ``memory_forget`` was deliberately ABSENT here while #2118 was open: it graded
-#: ``destructive`` by name inference but classified READ_ONLY, and ``task_mode_denies``
-#: consults only the classifier, so it ran in ask/plan with no decoy needed. #2118 is closed
-#: — ``_MUTATING_NAME_HINTS`` is now a union over ``_DESTRUCTIVE_NAME_HINTS`` — so it belongs
-#: in this list, and its presence is what keeps the decoy legs below honest about it.
 TASK_MODE_DENIED_TOOLS = [
     ("workflow_delete_def", {"name": "x"}),
     ("artifact_delete", {"slug": "x"}),
@@ -130,7 +133,9 @@ class TestDecoyCannotUnlockTaskModes:
         "tool,args", TASK_MODE_DENIED_TOOLS, ids=[t for t, _ in TASK_MODE_DENIED_TOOLS]
     )
     def test_decoy_does_not_unlock_a_denied_tool(self, mode, tool, args):
-        assert task_mode_denies(mode, tool, "", args), f"{tool} should be denied in {mode}"
+        assert task_mode_denies(
+            mode, tool, "", args
+        ), f"{tool} should be denied in {mode}"
         assert task_mode_denies(mode, tool, "", _with(args, {"command": "ls"})), (
             f"a `command` argument let {tool} RUN in {mode} mode, whose contract is that "
             "mutations do not"
@@ -138,7 +143,10 @@ class TestDecoyCannotUnlockTaskModes:
 
     def test_agent_mode_still_allows_everything(self):
         """Vacuity floor: a fix that denied everything would pass every test above."""
-        assert task_mode_denies("agent", "workflow_delete_def", "", {"command": "ls"}) == ""
+        assert (
+            task_mode_denies("agent", "workflow_delete_def", "", {"command": "ls"})
+            == ""
+        )
 
     def test_a_destructive_verb_is_denied_in_ask_and_plan(self):
         """#2118 CLOSED. This is the inverse of the test that used to pin the gap here.
@@ -152,14 +160,21 @@ class TestDecoyCannotUnlockTaskModes:
         Both heuristics must now agree for every destructive verb, in every mode whose
         contract is that mutations do not run.
         """
-        for tool in ("memory_forget", "knowledge_forget", "cache_purge", "session_destroy"):
+        for tool in (
+            "memory_forget",
+            "knowledge_forget",
+            "cache_purge",
+            "session_destroy",
+        ):
             assert infer_risk_from_name(tool) == "destructive", tool
             assert classify_invocation(tool, "", {}) == MUTATING, (
                 f"{tool} classifies read-only, so the task-mode gate will let it run — "
                 "the #2118 shape"
             )
             for mode in ("ask", "plan"):
-                assert task_mode_denies(mode, tool, "", {}), f"{tool} should be denied in {mode}"
+                assert task_mode_denies(
+                    mode, tool, "", {}
+                ), f"{tool} should be denied in {mode}"
 
     def test_the_destructive_set_is_contained_in_the_mutating_set(self):
         """The structural half — what stops #2118 recurring rather than being fixed once.
@@ -171,9 +186,14 @@ class TestDecoyCannotUnlockTaskModes:
         current membership, so it keeps holding as either set grows — the leg above would
         pass while a NEWLY added destructive verb leaked, because it names four tools.
         """
-        from gideon.task_modes import _DESTRUCTIVE_NAME_HINTS, _MUTATING_NAME_HINTS
+        from gideon.engine.task_modes import (
+            _DESTRUCTIVE_NAME_HINTS,
+            _MUTATING_NAME_HINTS,
+        )
 
-        assert _DESTRUCTIVE_NAME_HINTS, "the destructive set is empty — nothing is asserted"
+        assert (
+            _DESTRUCTIVE_NAME_HINTS
+        ), "the destructive set is empty — nothing is asserted"
         missing = [h for h in _DESTRUCTIVE_NAME_HINTS if h not in _MUTATING_NAME_HINTS]
         assert not missing, (
             f"destructive verbs absent from the mutating set: {missing}. Each one is a tool "
@@ -193,28 +213,34 @@ class TestRealShellCallsAreUnchanged:
     @pytest.mark.parametrize(
         "title,kind",
         [
-            ("bash", ""),  # native loop: its own tool, and it declares NO kind
-            ("Bash", ""),  # title casing is the model's, not ours
+            ("bash", ""),
+            ("Bash", ""),
             ("execute_bash", ""),
             ("terminal", ""),
-            ("bash", "execute"),  # ACP: kind declared
-            ("anything", "command"),  # ACP: kind alone is enough
+            ("bash", "execute"),
+            ("anything", "command"),
             ("anything", "execute"),
         ],
     )
     def test_read_only_shell_is_still_downgraded_to_safe(self, title, kind):
         assert is_shell_invocation(title, kind) is True
-        assert resolve_effective_risk("destructive", title, kind, {"command": "ls -la"}) == "safe"
+        assert (
+            resolve_effective_risk("destructive", title, kind, {"command": "ls -la"})
+            == "safe"
+        )
 
     @pytest.mark.parametrize("title,kind", [("bash", ""), ("bash", "execute")])
     def test_mutating_shell_is_still_destructive(self, title, kind):
-        assert resolve_effective_risk("destructive", title, kind, {"command": "rm -rf /"}) == (
-            "destructive"
-        )
+        assert resolve_effective_risk(
+            "destructive", title, kind, {"command": "rm -rf /"}
+        ) == ("destructive")
 
     def test_acp_json_string_input_still_parses(self):
         """ACP agents pass the arguments as a raw JSON string, not a dict."""
-        assert resolve_effective_risk("destructive", "bash", "", '{"command": "ls"}') == "safe"
+        assert (
+            resolve_effective_risk("destructive", "bash", "", '{"command": "ls"}')
+            == "safe"
+        )
         assert shell_command("bash", "", '{"command": "ls"}') == "ls"
 
     def test_read_only_shell_still_runs_in_ask_mode(self):
@@ -249,11 +275,13 @@ class TestAcpInlineCommandTitle:
         ``execute_bash``; if that is ever renamed, this gate has to notice rather than
         silently stop recognising ACP shell calls.
         """
-        from gideon.hooks import _TOOL_TITLE_PREFIXES
+        from gideon.engine.hooks import _TOOL_TITLE_PREFIXES
 
         lowered = {p.lower() for p in _TOOL_TITLE_PREFIXES}
         for prefix in SHELL_TITLE_PREFIXES:
-            assert prefix in lowered, f"{prefix!r} is no longer a title prefix hooks strips"
+            assert (
+                prefix in lowered
+            ), f"{prefix!r} is no longer a title prefix hooks strips"
 
     def test_reading_prefix_is_not_treated_as_a_shell_call(self):
         """``Reading `` names a FILE. Treating it as a command would hand
@@ -271,7 +299,9 @@ class TestUnreadableShellCall:
         `resolve_effective_risk` honours the declared risk for it."""
         for bad in (None, {}, {"other": "x"}):
             assert classify_invocation("bash", "", bad) == UNCLASSIFIED
-            assert resolve_effective_risk("destructive", "bash", "", bad) == "destructive"
+            assert (
+                resolve_effective_risk("destructive", "bash", "", bad) == "destructive"
+            )
 
     def test_unclassified_shell_never_resolves_safe(self):
         """Not even with nothing declared: trust_reads must not auto-approve a command
@@ -295,9 +325,9 @@ class TestScopedVsRawExtractor:
 
     def test_scoped_extractor_agrees_with_the_raw_one_for_shell_calls(self):
         for title, kind in (("bash", ""), ("x", "execute")):
-            assert shell_command(title, kind, {"command": "ls"}) == extract_bash_command(
-                {"command": "ls"}
-            )
+            assert shell_command(
+                title, kind, {"command": "ls"}
+            ) == extract_bash_command({"command": "ls"})
 
     def test_no_gate_reaches_the_raw_extractor(self):
         """The census that keeps this closed. `task_modes` is where every gate lives, so
@@ -307,12 +337,12 @@ class TestScopedVsRawExtractor:
         import pathlib
 
         src = (
-            pathlib.Path(__file__).resolve().parent.parent
-            / "src"
+            pathlib.Path(__file__).resolve().parent.parent.parent
+            / "runtime"
             / "gideon"
+            / "engine"
             / "task_modes.py"
         ).read_text(encoding="utf-8")
-        # Call sites, not the def and not prose about it.
         calls = [
             n
             for n, line in enumerate(src.splitlines(), 1)
@@ -333,7 +363,7 @@ class TestOneShellVocabulary:
     def test_loop_breaker_shares_the_set_rather_than_copying_it(self):
         """It held a second copy that had already drifted (no `run_script`). Two copies
         of a security-relevant set is one that gets tightened in half the places."""
-        from gideon.guardrails import loop_breaker
+        from gideon.security.guardrails import loop_breaker
 
         assert loop_breaker.SHELL_TOOLS is SHELL_TOOL_NAMES
 
@@ -349,9 +379,8 @@ class TestOneShellVocabulary:
         authoritative, where over-matching is the bug. Merging them would widen the
         gate — assert they are not the same object so a future tidy-up has to read this.
         """
-        from gideon.approval_brief import SHELL_HINTS
+        from gideon.security.approval_brief import SHELL_HINTS
 
         assert set(SHELL_HINTS) != set(SHELL_TOOL_NAMES)
-        # And the reason: the hints include fragments that are not shell TOOLS.
         assert {"exec", "spawn", "command"} & set(SHELL_HINTS)
         assert not {"exec", "spawn", "command"} & SHELL_TOOL_NAMES

@@ -21,16 +21,13 @@ import time
 
 import pytest
 
-from gideon.dashboard import session_store as ss
+from gideon.interfaces.dashboard import session_store as ss
 
 
 @pytest.fixture()
 def home(tmp_path, monkeypatch):
     monkeypatch.setattr(ss, "config_dir", lambda: tmp_path)
     return tmp_path
-
-
-# ── The signing key ─────────────────────────────────────────────────────
 
 
 def test_key_is_created_on_first_use(home):
@@ -80,9 +77,6 @@ def test_rotation_clears_the_session_records(home):
     ss.remember_session("n1", time.time() + 3600)
     ss.rotate_key()
     assert ss.load_sessions() == {}
-
-
-# ── Session records ─────────────────────────────────────────────────────
 
 
 def test_sessions_round_trip(home):
@@ -179,8 +173,10 @@ def test_the_cap_keeps_the_longest_lived(home):
 
 def test_a_write_failure_is_survivable(home, monkeypatch):
     """Failing to persist must not break the mint it was recording."""
-    monkeypatch.setattr(ss, "atomic_write", lambda *a, **k: (_ for _ in ()).throw(OSError("full")))
-    ss.remember_session("n1", time.time() + 3600)  # must not raise
+    monkeypatch.setattr(
+        ss, "atomic_write", lambda *a, **k: (_ for _ in ()).throw(OSError("full"))
+    )
+    ss.remember_session("n1", time.time() + 3600)
 
 
 def test_stats_never_leak_the_nonces(home):
@@ -191,18 +187,15 @@ def test_stats_never_leak_the_nonces(home):
     assert "secret-nonce" not in json.dumps(stats)
 
 
-# ── The pair, end to end ────────────────────────────────────────────────
-
-
 class TestSurvivesRestart:
     """The user-visible fix, exercised through the real token functions."""
 
     def _fresh_process(self, monkeypatch, tmp_path):
         """Simulate a restart: same home, cleared in-memory state and key cache."""
-        from gideon.dashboard import token_auth as ta
+        from gideon.interfaces.dashboard import token_auth as ta
 
         monkeypatch.setattr(ss, "config_dir", lambda: tmp_path)
-        ta.use_persistent_secret()  # this is the whole point: use the ON-DISK key
+        ta.use_persistent_secret()
         ta._state.clear_all()
         return ta
 
@@ -211,7 +204,6 @@ class TestSurvivesRestart:
         token = ta.generate_token("user1", ttl_seconds=3600)
         assert ta.validate_token(token)[0] is True
 
-        # …restart: memory gone, disk intact.
         ta = self._fresh_process(monkeypatch, tmp_path)
         valid, uid, reason = ta.validate_token(token)
         assert valid is True, f"token died across the restart: {reason}"
@@ -235,12 +227,16 @@ class TestSurvivesRestart:
         assert ta.validate_token(token)[0] is False
 
         ta = self._fresh_process(monkeypatch, tmp_path)
-        assert ta.validate_token(token)[0] is False, "revocation came back from the dead"
+        assert (
+            ta.validate_token(token)[0] is False
+        ), "revocation came back from the dead"
 
     def test_an_expired_stored_session_is_refused(self, tmp_path, monkeypatch):
         ta = self._fresh_process(monkeypatch, tmp_path)
         token = ta.generate_token("user1", ttl_seconds=1)
-        ss.save_session_records(_records(**{n: time.time() - 1 for n in ss.load_sessions()}))
+        ss.save_session_records(
+            _records(**{n: time.time() - 1 for n in ss.load_sessions()})
+        )
         ta._state.clear_all()
         valid, _, reason = ta.validate_token(token)
         assert valid is False
@@ -258,12 +254,9 @@ class TestSurvivesRestart:
         assert ta.validate_token(token)[0] is False
 
 
-# ── The TTL ruling ──────────────────────────────────────────────────────
-
-
 def test_browser_default_is_thirty_days():
     """Owner ruling: browser sessions ~30d; the 1-year cap is for explicit CLI tokens."""
-    from gideon.dashboard.token_auth import (
+    from gideon.interfaces.dashboard.token_auth import (
         DEFAULT_BROWSER_SESSION_TTL_SECS,
         MAX_SESSION_TTL_SECS,
     )
@@ -274,32 +267,38 @@ def test_browser_default_is_thirty_days():
 
 def test_the_year_cap_is_still_reachable_explicitly(tmp_path, monkeypatch):
     """An automation token the user asked to last a year still can."""
-    from gideon.dashboard import token_auth as ta
+    from gideon.interfaces.dashboard import token_auth as ta
 
     monkeypatch.setattr(ss, "config_dir", lambda: tmp_path)
     ta.reset_secret_cache()
     ta._state.clear_all()
     token = ta.generate_token("cli", ttl_seconds=ta.MAX_SESSION_TTL_SECS)
     payload = json.loads(
-        ta._b64url_decode(token.split(".")[0]).decode()  # noqa: SLF001 — asserting the claim
+        ta._b64url_decode(
+            token.split(".")[0]
+        ).decode()  # noqa: SLF001 — asserting the claim
     )
-    assert payload["session_exp"] - payload["iat"] == pytest.approx(ta.MAX_SESSION_TTL_SECS, abs=5)
+    assert payload["session_exp"] - payload["iat"] == pytest.approx(
+        ta.MAX_SESSION_TTL_SECS, abs=5
+    )
 
 
 def test_the_startup_url_uses_the_browser_default():
     """The two gateway mint sites open a URL a HUMAN clicks, so 30d applies."""
     import pathlib
 
-    import gideon.gateway as gw
+    import gideon.engine.gateway as gw
 
     src = pathlib.Path(gw.__file__).read_text(encoding="utf-8")
     assert "ttl_seconds=DEFAULT_BROWSER_SESSION_TTL_SECS" in src
-    assert 'generate_token("local-startup", ttl_seconds=MAX_SESSION_TTL_SECS)' not in src
+    assert (
+        'generate_token("local-startup", ttl_seconds=MAX_SESSION_TTL_SECS)' not in src
+    )
 
 
 def test_ephemeral_secret_is_an_explicit_opt_in(tmp_path, monkeypatch):
     """A swallowed key failure would silently re-introduce the logged-out-on-restart bug."""
-    from gideon.dashboard import token_auth as ta
+    from gideon.interfaces.dashboard import token_auth as ta
 
     monkeypatch.setattr(ss, "config_dir", lambda: tmp_path)
     ta.use_ephemeral_secret(b"x" * 32)
@@ -318,7 +317,7 @@ def test_the_ephemeral_toggle_is_not_overloaded():
     "invalid signature", pointing at the persistence code when the bug was in this toggle.
     Two functions, two meanings.
     """
-    from gideon.dashboard import token_auth as ta
+    from gideon.interfaces.dashboard import token_auth as ta
 
     try:
         ta.use_ephemeral_secret()

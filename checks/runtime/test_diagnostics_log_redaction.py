@@ -27,12 +27,12 @@ if sys.platform == "win32":
         _p.fork = lambda: (0, 1)
         sys.modules["pty"] = _p
 
-from gideon.dashboard.handlers.updates import (
+from gideon.interfaces.dashboard.handlers.updates import (
     _QueueLogHandler,
     _redact_log_text,
     _RingLogHandler,
 )
-from gideon.dashboard.state import DashboardState
+from gideon.interfaces.dashboard.state import ConsoleState
 
 
 class TestDiagnosticsLogRedaction:
@@ -52,12 +52,11 @@ class TestDiagnosticsLogRedaction:
         assert token_part not in redacted
         assert "[REDACTED" in redacted
 
-        # An ARBITRARY password — no recognisable provider shape, so only a
-        # positional rule catches it.
         plain = "app registry: git fetch errored for https://alice:hunter2@github.com/repo.git"
         redacted_plain = _redact_log_text(plain)
-        assert "hunter2" not in redacted_plain, "an ordinary password in a URL still leaks"
-        # …and the host survives, or the log stops being diagnosable.
+        assert (
+            "hunter2" not in redacted_plain
+        ), "an ordinary password in a URL still leaks"
         assert "github.com/repo.git" in redacted_plain
 
     def test_redact_log_text_exfiltration_url(self):
@@ -125,14 +124,14 @@ class TestDiagnosticsLogRedaction:
         handler = _RingLogHandler(ring)
         handler.setFormatter(logging.Formatter("%(message)s"))
 
-        state = DashboardState(sessions=MagicMock(count=0), start_time=0.0)
+        state = ConsoleState(sessions=MagicMock(count=0), start_time=0.0)
         ws_mock = MagicMock()
         state._ws_log_subscribers.add(ws_mock)
         handler.set_state(state)
 
         secret = "sk-proj-123456789012345678901234567890"
         record = logging.LogRecord(
-            name="gideon.llm",
+            name="gideon.integrations.llm",
             level=logging.INFO,
             pathname=__file__,
             lineno=25,

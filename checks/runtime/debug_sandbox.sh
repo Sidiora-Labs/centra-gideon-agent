@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Quick on-host check of the sandbox: prints the detected backend and runs a
-# wrapped `ls ~/.aws/` to confirm credential paths are blocked. Not part of the
-# pytest suite — see tests/test_sandbox_*.py for automated coverage.
+                                                                            
+                                                                               
+                                                                             
 PYTHONPATH="src" \
 python3 -c "
 from gideon.sandbox import detect_backend, wrap_argv

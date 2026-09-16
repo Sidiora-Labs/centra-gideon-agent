@@ -1,4 +1,4 @@
-"""Tests for ``gideon.seed_local_model`` — the bind step beside ``--seed``.
+"""Tests for ``gideon.operations.seed_local_model`` — the bind step beside ``--seed``.
 
 Both directions are pinned, because the graceful-degradation half is the one that
 regresses silently:
@@ -25,14 +25,11 @@ from pathlib import Path
 
 import pytest
 
-from gideon import seed as seed_mod
-from gideon import seed_local_model as slm
+from gideon.operations import seed as seed_mod
+from gideon.operations import seed_local_model as slm
 
 FIXTURE_NAME = "demo-home"
 
-# Two tags whose ids alone must classify correctly: the chat model is the OLDER of the
-# two chat entries so recency ordering is actually exercised, and the embedding model
-# carries a family name with no "embed" substring in the id itself.
 _TAGS = {
     "models": [
         {
@@ -135,7 +132,9 @@ def _install_stub_provider_app(home: Path) -> Path:
     app = home / "apps" / slm.PROVIDER_APP
     app.mkdir(parents=True)
     (app / "app.json").write_text(
-        json.dumps({"name": slm.PROVIDER_APP, "version": "0.1.0", "displayName": "Ollama"}),
+        json.dumps(
+            {"name": slm.PROVIDER_APP, "version": "0.1.0", "displayName": "Ollama"}
+        ),
         encoding="utf-8",
     )
     (app / "installed.json").write_text(
@@ -157,11 +156,10 @@ def _install_stub_provider_app(home: Path) -> Path:
 def _tree(home: Path) -> dict[str, int]:
     """Home-relative path -> size, for every file. The untouched-tree assertion."""
     return {
-        str(p.relative_to(home)): p.stat().st_size for p in sorted(home.rglob("*")) if p.is_file()
+        str(p.relative_to(home)): p.stat().st_size
+        for p in sorted(home.rglob("*"))
+        if p.is_file()
     }
-
-
-# ── the fixture itself stays machine-independent ────────────────────────────
 
 
 def test_the_fixture_itself_binds_no_model(seeded_home: Path) -> None:
@@ -178,9 +176,6 @@ def test_the_fixture_itself_binds_no_model(seeded_home: Path) -> None:
     assert not (seeded_home / "apps").exists()
 
 
-# ── direction 1: a model IS reachable ───────────────────────────────────────
-
-
 def test_binds_the_provider_entry_and_the_chat_use_case(
     seeded_home: Path, ollama_stub: str
 ) -> None:
@@ -191,10 +186,7 @@ def test_binds_the_provider_entry_and_the_chat_use_case(
 
     assert result.status == slm.BOUND, result.detail
     assert result.ok
-    # Newest chat-capable tag wins — not merely the first in the payload.
     assert result.model == "demo-chat:8b"
-    # An embedding family whose id has no "embed" substring must still land under
-    # embedding rather than being miscategorised as a second chat model.
     assert result.embedding_model == "nomic-text:v1"
 
     cfg = json.loads((seeded_home / "config.json").read_text(encoding="utf-8"))
@@ -203,7 +195,9 @@ def test_binds_the_provider_entry_and_the_chat_use_case(
     assert entry["model"] == "demo-chat:8b"
     assert entry["options"]["endpoint"] == ollama_stub
 
-    active = json.loads((seeded_home / "active_models.json").read_text(encoding="utf-8"))
+    active = json.loads(
+        (seeded_home / "active_models.json").read_text(encoding="utf-8")
+    )
     assert active["chat"] == [f"{slm.PROVIDER_ENTRY_NAME}:demo-chat:8b"]
     assert active["embedding"] == [f"{slm.PROVIDER_ENTRY_NAME}:nomic-text:v1"]
 
@@ -217,8 +211,11 @@ def test_the_bound_entry_resolves_through_the_real_registry(
     way the registry drops on the floor, which is exactly how a home ends up seeded,
     configured, and still unable to resolve a model.
     """
-    from gideon.llm.registry import reset_default_registry, sync_entries_from_config
-    from gideon.providers.use_cases import active_model_refs
+    from gideon.extensions.providers.use_cases import active_model_refs
+    from gideon.integrations.llm.registry import (
+        reset_default_registry,
+        sync_entries_from_config,
+    )
 
     _install_stub_provider_app(seeded_home)
     slm.bind_local_model(endpoint=ollama_stub)
@@ -226,7 +223,7 @@ def test_the_bound_entry_resolves_through_the_real_registry(
     reset_default_registry()
     try:
         sync_entries_from_config()
-        from gideon.llm.registry import get_default_registry
+        from gideon.integrations.llm.registry import get_default_registry
 
         entry = get_default_registry().get_entry(slm.PROVIDER_ENTRY_NAME)
         assert entry.type == slm.PROVIDER_TYPE
@@ -313,9 +310,6 @@ def test_installs_the_provider_app_from_a_local_source(
     assert (seeded_home / "apps" / slm.PROVIDER_APP / "installed.json").is_file()
 
 
-# ── direction 2: NO model is reachable (must degrade, not error) ─────────────
-
-
 def test_no_ollama_writes_nothing_at_all(seeded_home: Path, closed_port: str) -> None:
     """Nothing listening: the home stays byte-identical to the seeded fixture."""
     _install_stub_provider_app(seeded_home)
@@ -327,7 +321,6 @@ def test_no_ollama_writes_nothing_at_all(seeded_home: Path, closed_port: str) ->
     assert not result.ok
     assert result.wrote == []
     assert _tree(seeded_home) == before
-    # The message has to say what to do, not just that something is missing.
     assert slm.ENDPOINT_ENV in result.detail
 
 
@@ -410,9 +403,6 @@ def test_a_named_but_unpulled_model_still_binds_and_says_so(
     assert "not pulled" in result.detail
 
 
-# ── CLI surface ─────────────────────────────────────────────────────────────
-
-
 def _subprocess_env(tmp_path: Path) -> dict[str, str]:
     """Env for a child ``python -m gideon...`` run, mirroring test_seed.py.
 
@@ -422,7 +412,7 @@ def _subprocess_env(tmp_path: Path) -> dict[str, str]:
     """
     import os as _os
 
-    repo_root = Path(__file__).resolve().parent.parent
+    repo_root = Path(__file__).resolve().parent.parent.parent
     env = {**_os.environ, "HOME": str(tmp_path)}
     real_home = _os.environ.get("HOME", "")
     if real_home:
@@ -433,9 +423,16 @@ def _subprocess_env(tmp_path: Path) -> dict[str, str]:
             existing = env.get("PYTHONPATH", "")
             env["PYTHONPATH"] = user_site + (_os.pathsep + existing if existing else "")
     existing = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = str(repo_root / "src") + (_os.pathsep + existing if existing else "")
+    env["PYTHONPATH"] = str(repo_root / "runtime") + (
+        _os.pathsep + existing if existing else ""
+    )
     env["GIDEON_PROJECT_DIR"] = str(repo_root)
-    for var in (slm.ENDPOINT_ENV, slm.MODEL_ENV, slm.EMBEDDING_MODEL_ENV, slm.APPS_DIR_ENV):
+    for var in (
+        slm.ENDPOINT_ENV,
+        slm.MODEL_ENV,
+        slm.EMBEDDING_MODEL_ENV,
+        slm.APPS_DIR_ENV,
+    ):
         env.pop(var, None)
     return env
 
@@ -471,7 +468,7 @@ def test_gateway_help_documents_the_flag_and_its_overrides(tmp_path: Path) -> No
 def test_the_standalone_entry_point_exits_zero_with_no_ollama(
     tmp_path: Path, closed_port: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``python -m gideon.seed_local_model`` degrades cleanly in a real process.
+    """``python -m gideon.operations.seed_local_model`` degrades cleanly in a real process.
 
     Covers the entry point evals / research-lab homes use — a home that already exists
     and must be bound WITHOUT re-seeding or booting a gateway.
@@ -490,7 +487,7 @@ def test_the_standalone_entry_point_exits_zero_with_no_ollama(
         [
             sys.executable,
             "-m",
-            "gideon.seed_local_model",
+            "gideon.operations.seed_local_model",
             "--local-model-endpoint",
             closed_port,
         ],

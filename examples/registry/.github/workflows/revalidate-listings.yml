@@ -1,18 +1,18 @@
-# Weekly re-validation of every listing — the detection arm of DELISTING.md.
+                                                                            
 #
-# A listing is a claim about a repository that someone else keeps changing. Validating
-# once at merge and never again would leave the registry advertising apps that have
+                                                                                      
+                                                                                   
 # since gone private, dropped their license, quietly added a permission, or turned
-# outright hostile. So the same script CI runs on a PR runs over the whole file on a
-# schedule, and a failure opens the issue that starts the notice period.
+                                                                                    
+                                                                        
 #
-# This one runs from the base repo on a schedule, so its token is writable — unlike
-# validate-listings.yml, which is handed a read-only token on fork PRs.
+                                                                                   
+                                                                       
 name: revalidate-listings
 
 on:
   schedule:
-    - cron: "17 6 * * 1"   # Mondays, 06:17 UTC
+    - cron: "17 6 * * 1"                       
   workflow_dispatch:
 
 concurrency:
@@ -45,8 +45,8 @@ jobs:
 
       - name: Re-validate every listing
         id: revalidate
-        # No --base: every row is re-fetched and re-scanned. No --write either — this
-        # job does not touch the data. A stale last_validated is a fact worth seeing.
+                                                                                     
+                                                                                     
         run: |
           set +e
           uv run python validate_registry.py app-registry.json \

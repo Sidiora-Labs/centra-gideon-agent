@@ -32,15 +32,7 @@ from pathlib import Path
 
 import pytest
 
-from gideon.computer_use import enable_state as ES
-
-# ── the fixture tool ─────────────────────────────────────────────────────────
-#
-# A stand-in computer-use tool. The ONLY thing it shares with a real one is that it routes
-# through the real guard as its first statement. It exists because DCU-1 lands the guard
-# before DCU-4 lands any tool, and "every computer-use tool refuses" would otherwise be a
-# claim about the empty set. Its source is also the positive case the ratchet scanner is
-# proven against in group 4.
+from gideon.integrations.computer_use import enable_state as ES
 
 
 def computer_fixture_press(element_index: int) -> str:
@@ -60,7 +52,7 @@ _ENABLED_DOC = '{"version": 1, "enabled": true}'
 @pytest.fixture()
 def home(tmp_path, monkeypatch):
     """An isolated Gideon home for every keystone read (never the real one)."""
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     monkeypatch.delenv(ES.ENABLE_PATH_ENV, raising=False)
     ES.reset_enable_state()
@@ -75,9 +67,6 @@ def _arm(home_dir: Path, document: str = _ENABLED_DOC) -> Path:
     path.write_text(document, encoding="utf-8")
     ES.reset_enable_state()
     return path
-
-
-# ── 1. fail closed in every direction ────────────────────────────────────────
 
 
 def test_absent_enable_file_is_off(home):
@@ -108,9 +97,6 @@ def test_the_exact_document_arms_the_keystone(home):
         ("true", "not a JSON object"),
         ("[]", "not a JSON object"),
         ('"enabled"', "not a JSON object"),
-        # NOT "apps": `DCU-2` made that an ENFORCED key (it is the operator's target
-        # allowlist now), so this case needs a scope key this build genuinely cannot
-        # honour or it stops testing the refusal its id names.
         ('{"version": 1, "enabled": true, "windows": ["Inbox"]}', "does not enforce"),
         ('{"version": 1, "enabled": true, "enabeld": true}', "does not enforce"),
         ('{"version": 2, "enabled": true}', "declares version 2"),
@@ -151,7 +137,8 @@ def test_every_malformed_document_reads_as_off(home, document, needle):
 def test_unenforced_key_is_refused_rather_than_ignored(home):
     """An operator writing a scope this build cannot honour means "on, NARROWED". Honouring
     the flag while dropping the scope would grant strictly more than was asked, so the
-    document is refused instead — the same reasoning as the ceiling's unknown-key abort."""
+    document is refused instead — the same reasoning as the ceiling's unknown-key abort.
+    """
     _arm(home, '{"version": 1, "enabled": true, "only_apps": ["Mail"]}')
     assert ES.is_enabled() is False
 
@@ -178,9 +165,9 @@ def test_a_mid_run_write_cannot_arm_the_running_process(home):
     assert ES.is_enabled() is False
     path = home / "governance" / ES.ENABLE_FILENAME
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(_ENABLED_DOC, encoding="utf-8")  # no reset: what a live gateway sees
+    path.write_text(_ENABLED_DOC, encoding="utf-8")
     assert ES.is_enabled() is False
-    ES.reset_enable_state()  # the restart
+    ES.reset_enable_state()
     assert ES.is_enabled() is True
 
 
@@ -193,9 +180,6 @@ def test_a_mid_run_delete_cannot_disarm_the_running_process(home):
     assert ES.is_enabled() is True
     ES.reset_enable_state()
     assert ES.is_enabled() is False
-
-
-# ── 2. the refusal: WHAT/WHY/FIX, raised, never simulated ────────────────────
 
 
 def test_the_fixture_tool_refuses_when_the_keystone_is_absent(home):
@@ -218,8 +202,6 @@ def test_the_refusal_fix_line_is_a_runnable_out_of_band_instruction(home):
     assert ES.ENABLE_DOCUMENT in error.fix
     assert "restart" in error.fix.lower()
     assert ES.ENABLE_PATH_ENV in error.fix
-    # The WHY has to say that the in-band paths are closed BY DESIGN, or a model reads the
-    # refusal as a transient failure and retries by trying to edit a setting.
     for phrase in ("prompt", "tool call", "settings"):
         assert phrase in error.why.lower(), f"the WHY does not rule out a {phrase} flip"
 
@@ -228,7 +210,8 @@ def test_the_guard_has_no_falsy_return_path(home):
     """A silent no-op reads to a model as "the click landed", and it then reasons forward
     from a desktop state that never changed. So ``require_enabled`` either returns the armed
     state or raises — asserted structurally, because "returns None on the unhappy path" is
-    the kind of regression a behavioural test only catches at the one call site it drives."""
+    the kind of regression a behavioural test only catches at the one call site it drives.
+    """
     module = ast.parse(Path(ES.__file__).read_text(encoding="utf-8"))
     guard = next(
         node
@@ -236,7 +219,9 @@ def test_the_guard_has_no_falsy_return_path(home):
         if isinstance(node, ast.FunctionDef) and node.name == "require_enabled"
     )
     returns = [node for node in ast.walk(guard) if isinstance(node, ast.Return)]
-    assert len(returns) == 1, "a second return in the guard is a second answer to mistake"
+    assert (
+        len(returns) == 1
+    ), "a second return in the guard is a second answer to mistake"
     assert isinstance(returns[0].value, ast.Name) and returns[0].value.id == "state"
     with pytest.raises(ES.ComputerUseDisabled):
         computer_fixture_press(1)
@@ -253,18 +238,15 @@ def test_the_fixture_tool_proceeds_only_once_armed(home):
 def test_the_refusal_code_is_registered_in_the_error_registry():
     """Consumers branch on the code, never the prose, so the code has to be in the
     append-only registry rather than a string invented at the raise site."""
-    from gideon.errors import ERROR_CODES
+    from gideon.core.errors import ERROR_CODES
 
     assert ES.ERR_DISABLED in ERROR_CODES
     assert "keystone" in ERROR_CODES[ES.ERR_DISABLED]
 
 
-# ── 3. no flip surface: not config, not a route, not agent-writable ──────────
-
-
 def test_the_keystone_has_no_config_patch_surface():
     """§3 floor 1 forbids a config field precisely because the agent can PATCH one."""
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
     flat = json.dumps(_EDITABLE_CONFIG, default=str)
     assert "computer_use" not in flat and "computer-use" not in flat
@@ -274,7 +256,7 @@ def test_the_keystone_has_no_config_patch_surface():
 def test_there_is_no_computer_use_config_field_at_all():
     """Not merely absent from the PATCH allowlist — absent from the config object, so there
     is no field a future PATCH entry could be pointed at by accident."""
-    from gideon.config import AppConfig
+    from gideon.core.config import AppConfig
 
     config = AppConfig()
     assert not hasattr(config, "computer_use")
@@ -312,8 +294,18 @@ def test_the_keystone_module_itself_has_no_write_path():
             for node in ast.walk(tree)
             if isinstance(node, ast.Call)
             and isinstance(node.func, (ast.Attribute, ast.Name))
-            and (node.func.attr if isinstance(node.func, ast.Attribute) else node.func.id)
-            in {"open", "write_text", "write_bytes", "mkdir", "unlink", "touch", "chmod"}
+            and (
+                node.func.attr if isinstance(node.func, ast.Attribute) else node.func.id
+            )
+            in {
+                "open",
+                "write_text",
+                "write_bytes",
+                "mkdir",
+                "unlink",
+                "touch",
+                "chmod",
+            }
         }
     )
     assert not writes, f"the keystone module can write its own switch: {writes}"
@@ -322,20 +314,24 @@ def test_the_keystone_module_itself_has_no_write_path():
 def test_the_keystone_path_is_refused_by_the_agent_path_checks():
     """``governance/`` is in the built-in sensitive-path denylist, so every agent-reachable
     path check (action denylist, files area, bash read/write hooks) refuses the file."""
-    from gideon.security import is_sensitive_path
+    from gideon.security.security import is_sensitive_path
 
     assert is_sensitive_path(f"~/.gideon/governance/{ES.ENABLE_FILENAME}")
     assert is_sensitive_path("~/.gideon/governance")
 
 
 def test_the_action_denylist_refuses_to_write_the_keystone():
-    from gideon.guardrails.denylist import check_action
+    from gideon.security.guardrails.denylist import check_action
 
-    decision = check_action("bash", {"path": f"~/.gideon/governance/{ES.ENABLE_FILENAME}"})
+    decision = check_action(
+        "bash", {"path": f"~/.gideon/governance/{ES.ENABLE_FILENAME}"}
+    )
     assert decision.blocked and decision.matched == "builtin:sensitive_path"
 
 
-def test_the_keystone_path_is_env_overridable_for_a_real_trust_root(tmp_path, monkeypatch):
+def test_the_keystone_path_is_env_overridable_for_a_real_trust_root(
+    tmp_path, monkeypatch
+):
     """The only switch the agent's own uid genuinely cannot rewrite: a path outside the
     home that an operator can own as another uid and chmod 0444."""
     external = tmp_path / "operator" / "dcu.enable.json"
@@ -355,17 +351,6 @@ def test_the_keystone_path_is_not_frozen_at_import_time(home):
     import and no fixture could reach it (a recorded landmine in this repo)."""
     assert ES.enable_file_path() == home / "governance" / ES.ENABLE_FILENAME
 
-
-# ── 4. the reachability ratchet, and its vacuity ─────────────────────────────
-#
-# The scanner. "Dispatchable entry point" = a module-level function under
-# `gideon/computer_use/` whose name starts with `computer_` — the tool-surface naming
-# convention DESKTOP-COMPUTER-USE §2 uses for all seven tools (computer_list_apps,
-# computer_snapshot, computer_click, computer_type, computer_set_value, computer_scroll,
-# computer_perform_action). Stated limit: this rail catches a tool that follows the
-# convention and forgets the guard; it cannot catch one that abandons the convention. That
-# gap is why `test_the_packages_public_surface_is_pinned` also censuses EVERY public
-# function/class in the package, so a new dispatch surface of any name still trips something.
 
 _TOOL_PREFIX = "computer_"
 _GUARD_NAMES = frozenset({"require_enabled", "is_enabled"})
@@ -462,7 +447,9 @@ def test_the_ratchet_flags_an_entry_point_that_skips_the_guard():
 
     guarded = inspect.getsource(computer_fixture_press)
     unguarded = inspect.getsource(computer_fixture_press_unguarded)
-    assert _entry_points(guarded), "the scanner did not even RECOGNISE a computer_* tool"
+    assert _entry_points(
+        guarded
+    ), "the scanner did not even RECOGNISE a computer_* tool"
     assert _unguarded(guarded) == []
     assert _unguarded(unguarded) == ["computer_fixture_press_unguarded"]
 
@@ -528,22 +515,8 @@ def test_the_packages_public_surface_is_pinned():
             "parse_enable_document",
             "require_enabled",
             "reset_enable_state",
-            # `DCU-5`'s third grant: which tools an UNATTENDED run may invoke. An accessor
-            # beside `allowed_apps`, with the same one-reader rail on the field behind it, and
-            # NOT named `computer_*` for the same reason nothing else here is — the prefix marks
-            # "this can dispatch", and reading a grant cannot.
             "unattended_tools",
         ],
-        # DCU-2's two modules. `policy` DECIDES (steps 2 and 4 of the dispatch chain) and
-        # `gate` only RECORDS (step 5) — neither is named `computer_*`, deliberately: that
-        # prefix is what the keystone ratchet above binds to `require_enabled()`, and a
-        # second keystone reader inside the chain is the drift `require_enabled`'s own
-        # docstring was written about.
-        # `DCU-5` adds step 4b here, beside DCU-2's two: `check_autonomy` is the only screen in
-        # the package about WHO is calling rather than what they aimed at, and
-        # `unattended_not_granted_error` is its WHAT/WHY/FIX constructor — public for the reason
-        # its two siblings are, so a surface that renders an envelope instead of raising gets the
-        # identical three lines.
         "policy.py": [
             "ComputerUsePolicyRefusal",
             "app_not_allowed_error",
@@ -554,38 +527,15 @@ def test_the_packages_public_surface_is_pinned():
             "unattended_not_granted_error",
         ],
         "gate.py": ["require_computer_use"],
-        # DCU-4's three modules. `service` COMPOSES the chain and owns the package's ONE
-        # dispatchable entry point (`computer_dispatch`, which the ratchet above binds to
-        # `require_enabled` as its first statement); `tools` DECLARES the seven-tool surface
-        # and is the thin shim that forwards a call to that dispatch; `driver_host` is the
-        # ceilinged child the platform driver runs inside. Only `computer_dispatch` is named
-        # `computer_*`, deliberately — the ratchet's prefix is the marker for "this can
-        # dispatch", and neither the declaration nor the transport can.
         "service.py": [
             "ComputerUseRefusal",
             "Snapshot",
             "computer_dispatch",
-            # `DCU-7`'s one addition here: a read-only tuple of the live snapshots, for the
-            # live view's mirror. An accessor rather than render.py reaching into
-            # `_SNAPSHOTS`, and not named `computer_*` because reading a mirror cannot
-            # dispatch.
             "live_snapshots",
             "reset_snapshots",
         ],
         "tools.py": ["ToolSpec"],
         "driver_host.py": ["main", "resolve_driver", "run_op"],
-        # DCU-3's three modules — the first real platform driver, and the first code in this
-        # package that touches the OS. None is named `computer_*`, deliberately and for the same
-        # reason as `gate`/`tools`: the prefix marks "this can dispatch", and none of these can.
-        # They run INSIDE the ceilinged child, downstream of every screen, and the child holds
-        # no authority (`test_the_driver_child_makes_no_policy_decision` asserts it), so a second
-        # `require_enabled` reader here would be the drift that guard's docstring warns about.
-        #
-        # `types` is the platform-neutral vocabulary every driver speaks (DCU-6's Windows and
-        # Linux drivers will share it), `macos_ffi` is the ONLY module in the package containing
-        # ctypes — the whole OS-input surface in one auditable file, including the single
-        # function that warps the operator's real cursor — and `macos_driver` is the op layer the
-        # child dispatches into by `op_<name>`.
         "types.py": [
             "DriverError",
             "DriverRefusal",
@@ -612,11 +562,6 @@ def test_the_packages_public_surface_is_pinned():
             "type_text",
             "walk_window",
         ],
-        # #2569's module: WHICH process macOS resolved this session's Accessibility request
-        # against. Not part of `macos_ffi` because it is not an FFI call — no accessibility API
-        # reports the responsible process, so this reads back the attribution `tccd` wrote into
-        # the unified log. A READ that names a principal for a refusal's FIX and for the two live
-        # validators; it decides nothing and cannot dispatch, hence no `computer_*` prefix.
         "macos_tcc.py": ["Responsible", "reset_cache", "responsible_process"],
         "macos_driver.py": [
             "op_click",
@@ -627,14 +572,6 @@ def test_the_packages_public_surface_is_pinned():
             "op_snapshot",
             "op_type",
         ],
-        # DCU-6's three modules — the honest platform story. `unsupported_platform` owns the ONE
-        # wording ("this platform is intended, its driver is not written, macOS is the one that
-        # works"), and the two platform modules are what `DRIVER_MODULES` resolves by name, each
-        # presenting the same seven-op protocol so a future real driver replaces handlers rather
-        # than inventing a module. They are enumerated here rather than generated precisely so
-        # this census can see them: a `setattr` loop would leave both modules looking empty.
-        # None is named `computer_*` — same reason as every other driver module: they run inside
-        # the ceilinged child, hold no authority, and cannot dispatch.
         "unsupported_platform.py": ["refusal"],
         "windows_driver.py": [
             "op_click",
@@ -654,12 +591,6 @@ def test_the_packages_public_surface_is_pinned():
             "op_snapshot",
             "op_type",
         ],
-        # DCU-7's two modules — the human-facing views, and NOTHING here can dispatch:
-        # `overlay` records where an approved acting call will land (fail-open, like `gate`)
-        # and `render` mirrors what the model already read into one view model. Neither is
-        # named `computer_*` for the reason nothing else here is, and
-        # `tests/test_computer_use_live_view.py` additionally asserts by AST that neither
-        # imports a driver nor reaches the dispatch — the views-grant-nothing floor (§3.7).
         "overlay.py": [
             "TrailPoint",
             "motion_trail",
@@ -674,9 +605,6 @@ def test_the_packages_public_surface_is_pinned():
     )
 
 
-# ── 5. boot audit ────────────────────────────────────────────────────────────
-
-
 def _boot_rows(monkeypatch) -> list[dict]:
     rows: list[dict] = []
 
@@ -684,7 +612,7 @@ def _boot_rows(monkeypatch) -> list[dict]:
         def log_api_access(self, **kw):
             rows.append(kw)
 
-    import gideon.sel as sel_mod
+    import gideon.security.sel as sel_mod
 
     monkeypatch.setattr(sel_mod, "sel", lambda: _Sel())
     ES.ensure_computer_use_boot()
@@ -722,9 +650,9 @@ def test_gateway_boot_resolves_the_keystone_once(home):
     dispatch — so the SEL row exists even on a run where no tool is ever called."""
     import inspect
 
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.gateway import RuntimeCoordinator
 
-    source = inspect.getsource(GatewayOrchestrator.run)
+    source = inspect.getsource(RuntimeCoordinator.run)
     called = [
         node.func.id
         for node in ast.walk(ast.parse(source.lstrip()))

@@ -15,7 +15,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-import gideon.dashboard.handlers.updates as updates
+import gideon.interfaces.dashboard.handlers.updates as updates
 
 
 def _app() -> web.Application:
@@ -47,7 +47,9 @@ async def test_connected_frame_precedes_the_history_replay(monkeypatch):
     monkeypatch.setattr(updates, "_log_ring", ring)
     async with TestClient(TestServer(_app())) as client:
         resp = await client.get("/api/logs")
-        expected = b": connected\n\ndata: 2026-09-04 INFO gideon: hello-from-the-ring\n\n"
+        expected = (
+            b": connected\n\ndata: 2026-09-04 INFO gideon: hello-from-the-ring\n\n"
+        )
         head = await _read_head(resp, len(expected))
         assert head == expected
         resp.close()

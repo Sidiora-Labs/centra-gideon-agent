@@ -36,14 +36,12 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon import secrets_vault as sv
-from gideon.config import credentials as cred
-from gideon.config import loader
-from gideon.dashboard.handlers.secrets import register_secrets_routes
+from gideon.core.config import credentials as cred
+from gideon.core.config import loader
 from gideon.http_errors import HTTP_ERROR_CODES
+from gideon.interfaces.dashboard.handlers.secrets import register_secrets_routes
+from gideon.security import secrets_vault as sv
 
-#: Sentinels chosen so a partial leak is still caught: each is long, unique, and shares no
-#: substring with a key NAME, so a match can only come from a VALUE.
 GLOBAL_VALUE = "gv-4f2a9c7e-GLOBALSECRETVALUE-do-not-leak"
 PROJECT_VALUE = "pv-88b1d3f0-PROJECTSECRETVALUE-do-not-leak"
 HOST_VALUE = "hv-1c6e5a2b-HOSTSECRETVALUE-do-not-leak"
@@ -60,9 +58,6 @@ def home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setenv("GIDEON_HOME", str(cfg))
     monkeypatch.setattr(loader, "config_dir", lambda: cfg)
     monkeypatch.delenv(cred.CREDENTIAL_BACKEND_ENV, raising=False)
-    # 🪤 ASSERT THE REDIRECT before a single secret is written. A fixture that silently failed to
-    # redirect would run this whole file against the developer's real home, and every assertion
-    # below would still pass.
     assert loader.env_path() == cfg / ".env", "the .env redirect must hold"
     assert tmp_path in loader.env_path().parents
     return cfg
@@ -74,9 +69,9 @@ def vault(home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     for name in ("EI10_GLOBAL_TOKEN", "EI10_HOST_TOKEN"):
         monkeypatch.delenv(name, raising=False)
     cred.save_credential("EI10_GLOBAL_TOKEN", GLOBAL_VALUE)
-    cred.save_credential(sv.project_secret_key(PROJECT_ID, "EI10_DB_PASSWORD"), PROJECT_VALUE)
-    # A host row is a credential-shaped name the vault does NOT hold. Set directly in the
-    # environment, never through `save_credential`, which is what makes it inherited.
+    cred.save_credential(
+        sv.project_secret_key(PROJECT_ID, "EI10_DB_PASSWORD"), PROJECT_VALUE
+    )
     monkeypatch.setenv("EI10_HOST_TOKEN", HOST_VALUE)
     return home
 
@@ -84,7 +79,7 @@ def vault(home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def _make_app(app_token_name: str = "") -> web.Application:
     app = web.Application()
     if app_token_name:
-        # Simulate the auth middleware's app-scoped-token stamping.
+
         @web.middleware
         async def stamp_app(request, handler):
             request["app"] = app_token_name
@@ -95,13 +90,9 @@ def _make_app(app_token_name: str = "") -> web.Application:
     return app
 
 
-# ── layer 1: the structural rail ──
-
-
 class TestPresenceIsStructural:
     """Presence-only is enforced by types and imports, not by a redaction step."""
 
-    #: Module-level functions in `config.credentials` that RETURN a credential value.
     MODULE_VALUE_READERS = (
         "get_credential",
         "_dotenv_credentials",
@@ -109,18 +100,13 @@ class TestPresenceIsStructural:
         "_keychain_get",
     )
 
-    #: `AppConfig.load_credentials` is the fifth value reader and is a METHOD, not a module
-    #: function — the first draft of this rail asserted it on `config.credentials` and reddened,
-    #: which is the vacuity partner earning its place on its first run.
     METHOD_VALUE_READERS = ("load_credentials",)
 
-    #: Every name the vault's source must not reference, whichever kind it is.
     VALUE_READERS = MODULE_VALUE_READERS + METHOD_VALUE_READERS
 
-    #: The modules that make up the vault's read path.
     VAULT_SOURCES = (
-        "src/gideon/secrets_vault.py",
-        "src/gideon/dashboard/handlers/secrets.py",
+        "runtime/gideon/security/secrets_vault.py",
+        "runtime/gideon/interfaces/dashboard/handlers/secrets.py",
     )
 
     def test_the_forbidden_names_are_real(self):
@@ -131,9 +117,13 @@ class TestPresenceIsStructural:
         credential store, not the vault.
         """
         for name in self.MODULE_VALUE_READERS:
-            assert hasattr(cred, name), f"{name} is not in config.credentials — the rail is stale"
+            assert hasattr(
+                cred, name
+            ), f"{name} is not in config.credentials — the rail is stale"
         for name in self.METHOD_VALUE_READERS:
-            assert hasattr(loader.AppConfig, name), f"AppConfig.{name} is gone — the rail is stale"
+            assert hasattr(
+                loader.AppConfig, name
+            ), f"AppConfig.{name} is gone — the rail is stale"
         assert cred.get_credential("nothing-is-stored-here") == ""
 
     def test_no_vault_module_references_a_value_reader(self, repo_root: Path):
@@ -148,7 +138,6 @@ class TestPresenceIsStructural:
             referenced = {
                 node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)
             } | {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
-            # Imported names count too: `from … import get_credential` puts it in scope.
             for node in ast.walk(tree):
                 if isinstance(node, ast.ImportFrom):
                     referenced |= {a.name for a in node.names}
@@ -165,14 +154,21 @@ class TestPresenceIsStructural:
         leaks" forever. Run against a synthetic module rather than the real one, so proving the
         detector works does not require mutating shipped code.
         """
-        planted = ast.parse("from gideon.config.credentials import get_credential\n")
+        planted = ast.parse(
+            "from gideon.core.config.credentials import get_credential\n"
+        )
         referenced = {
-            a.name for n in ast.walk(planted) if isinstance(n, ast.ImportFrom) for a in n.names
+            a.name
+            for n in ast.walk(planted)
+            if isinstance(n, ast.ImportFrom)
+            for a in n.names
         }
-        assert referenced & set(self.VALUE_READERS), "the import-name detector is broken"
+        assert referenced & set(
+            self.VALUE_READERS
+        ), "the import-name detector is broken"
 
         planted2 = ast.parse(
-            "import gideon.config.credentials as c\nx = c.get_credential('K')\n"
+            "import gideon.core.config.credentials as c\nx = c.get_credential('K')\n"
         )
         attrs = {n.attr for n in ast.walk(planted2) if isinstance(n, ast.Attribute)}
         assert attrs & set(self.VALUE_READERS), "the attribute detector is broken"
@@ -187,7 +183,6 @@ class TestPresenceIsStructural:
             assert banned not in fields
         row = sv.SecretPresence(name="K")
         assert not hasattr(row, "value")
-        # Frozen: a row cannot be mutated into carrying something else after construction.
         with pytest.raises(dataclasses.FrozenInstanceError):
             row.name = "other"  # type: ignore[misc]
 
@@ -213,9 +208,6 @@ class TestPresenceIsStructural:
             assert value not in blob, "credential_names leaked a VALUE"
 
 
-# ── layer 2: the wire rail ──
-
-
 class TestNoValueCrossesTheWire:
     """No verb, on any row, returns a stored value. Driven, not reasoned about."""
 
@@ -228,9 +220,11 @@ class TestNoValueCrossesTheWire:
             body = json.loads(raw)
 
         names = {s["name"] for s in body["secrets"]}
-        # 🪤 VACUITY FLOOR. If the listing were empty the leak assertion below would pass
-        # trivially, so assert the population FIRST — all three row types must be present.
-        assert {"EI10_GLOBAL_TOKEN", "EI10_DB_PASSWORD", "EI10_HOST_TOKEN"} <= names, names
+        assert {
+            "EI10_GLOBAL_TOKEN",
+            "EI10_DB_PASSWORD",
+            "EI10_HOST_TOKEN",
+        } <= names, names
         assert body["counts"]["total"] == len(body["secrets"])
         for value in ALL_VALUES:
             assert value not in raw, f"a stored VALUE reached the GET body: {value}"
@@ -240,7 +234,9 @@ class TestNoValueCrossesTheWire:
         """The hardest case: the handler HELD this value one line before it answered."""
         fresh = "nv-9d4c2e81-JUSTSTORED-do-not-leak"
         async with TestClient(TestServer(_make_app())) as c:
-            r = await c.post("/api/secrets", json={"name": "EI10_NEW_TOKEN", "value": fresh})
+            r = await c.post(
+                "/api/secrets", json={"name": "EI10_NEW_TOKEN", "value": fresh}
+            )
             assert r.status == 200, await r.text()
             raw = await r.text()
             body = json.loads(raw)
@@ -248,7 +244,6 @@ class TestNoValueCrossesTheWire:
         assert body["secret"]["name"] == "EI10_NEW_TOKEN"
         assert body["secret"]["present"] is True
         assert fresh not in raw, "the POST echoed the value it was handed"
-        # And it really was stored — otherwise "no value in the response" is true of a no-op.
         assert cred.get_credential("EI10_NEW_TOKEN") == fresh
 
     @pytest.mark.asyncio
@@ -273,9 +268,6 @@ class TestNoValueCrossesTheWire:
                 assert (await c.get(path)).status == 404, f"{path} must not exist"
 
 
-# ── scope, host rows and refusals ──
-
-
 class TestScopesAndRefusals:
     def test_project_rows_decode_to_name_and_owner(self, vault: Path):
         rows = {(r.scope, r.name, r.project_id) for r in sv.list_presence()}
@@ -283,13 +275,15 @@ class TestScopesAndRefusals:
         assert ("project", "EI10_DB_PASSWORD", PROJECT_ID) in rows
         assert ("host", "EI10_HOST_TOKEN", "") in rows
 
-    def test_a_project_filter_narrows_only_the_project_rows(self, vault: Path, monkeypatch):
-        cred.save_credential(sv.project_secret_key("other-proj", "EI10_OTHER"), "x-value")
+    def test_a_project_filter_narrows_only_the_project_rows(
+        self, vault: Path, monkeypatch
+    ):
+        cred.save_credential(
+            sv.project_secret_key("other-proj", "EI10_OTHER"), "x-value"
+        )
         rows = sv.list_presence(project_id=PROJECT_ID)
         projects = {r.name for r in rows if r.scope == "project"}
         assert projects == {"EI10_DB_PASSWORD"}, projects
-        # Global and host rows are UNCONDITIONAL: a project resolves {{secret:…}} against the
-        # same store and the same process env, so hiding them would under-report reach.
         assert any(r.scope == "global" for r in rows)
         assert any(r.scope == "host" for r in rows)
 
@@ -299,21 +293,31 @@ class TestScopesAndRefusals:
         assert [r.scope for r in before] == ["host"]
         cred.save_credential("EI10_HOST_TOKEN", "now-in-the-vault")
         after = [r for r in sv.list_presence() if r.name == "EI10_HOST_TOKEN"]
-        assert [r.scope for r in after] == ["global"], "a vault row must shadow the host row"
+        assert [r.scope for r in after] == [
+            "global"
+        ], "a vault row must shadow the host row"
 
     def test_inherited_from_host_cannot_contradict_scope(self):
-        assert sv.SecretPresence(name="A", scope=sv.SCOPE_HOST).inherited_from_host is True
-        assert sv.SecretPresence(name="A", scope=sv.SCOPE_GLOBAL).inherited_from_host is False
-        assert sv.SecretPresence(name="A", scope=sv.SCOPE_PROJECT).inherited_from_host is False
+        assert (
+            sv.SecretPresence(name="A", scope=sv.SCOPE_HOST).inherited_from_host is True
+        )
+        assert (
+            sv.SecretPresence(name="A", scope=sv.SCOPE_GLOBAL).inherited_from_host
+            is False
+        )
+        assert (
+            sv.SecretPresence(name="A", scope=sv.SCOPE_PROJECT).inherited_from_host
+            is False
+        )
 
     @pytest.mark.asyncio
-    async def test_deleting_a_host_row_is_refused_not_silently_ignored(self, vault: Path):
+    async def test_deleting_a_host_row_is_refused_not_silently_ignored(
+        self, vault: Path
+    ):
         async with TestClient(TestServer(_make_app())) as c:
             r = await c.delete("/api/secrets?name=EI10_HOST_TOKEN")
             assert r.status == 409
             assert (await r.json())["error"]["code"] == "secret_host_readonly"
-        # The value is untouched — a refusal that had already deleted something would be worse
-        # than either outcome.
         import os
 
         assert os.environ["EI10_HOST_TOKEN"] == HOST_VALUE
@@ -344,7 +348,10 @@ class TestScopesAndRefusals:
             ({"name": "9starts-with-a-digit", "value": "v"}, "secret_name_invalid"),
             ({"name": "has-a-dash", "value": "v"}, "secret_name_invalid"),
             ({"name": "OK_NAME", "value": ""}, "secret_value_required"),
-            ({"name": "OK_NAME", "value": "v", "project_id": "bad__id"}, "secret_project_invalid"),
+            (
+                {"name": "OK_NAME", "value": "v", "project_id": "bad__id"},
+                "secret_project_invalid",
+            ),
             (
                 {"name": "OK_NAME", "value": "v", "project_id": "bad/slash"},
                 "secret_project_invalid",
@@ -370,8 +377,6 @@ class TestScopesAndRefusals:
         async with TestClient(TestServer(_make_app())) as c:
             body = await (await c.get("/api/secrets")).json()
         hint = body["empty_hint"]
-        # Only meaningful when the vault really is empty of VAULT rows; host rows may exist in
-        # any environment, so the hint is keyed on the whole listing being empty.
         if body["counts"]["total"] == 0:
             assert hint, "an empty vault must carry a next action"
             assert "{{secret:" in hint, "the hint must name the reference syntax"
@@ -389,16 +394,21 @@ class TestScopesAndRefusals:
             assert code in HTTP_ERROR_CODES, f"{code} needs an HTTP_ERROR_CODES row"
             meaning = HTTP_ERROR_CODES[code]
             assert meaning.strip(), code
-            # 🪤 A meaning that merely restates the identifier is not user-actionable. Every
-            # sentence must say something the code itself does not.
             assert meaning.lower() != code.replace("_", " "), code
-            assert len(meaning) > 40, f"{code}'s meaning is too thin to act on: {meaning!r}"
+            assert (
+                len(meaning) > 40
+            ), f"{code}'s meaning is too thin to act on: {meaning!r}"
 
 
 class TestKeyNamespace:
     @pytest.mark.parametrize(
         "project_id,name",
-        [("p1", "TOKEN"), ("proj-with-dash", "A_B_C"), ("p.1", "X"), ("under_score", "Y")],
+        [
+            ("p1", "TOKEN"),
+            ("proj-with-dash", "A_B_C"),
+            ("p.1", "X"),
+            ("under_score", "Y"),
+        ],
     )
     def test_encode_decode_round_trips(self, project_id: str, name: str):
         key = sv.project_secret_key(project_id, name)
@@ -417,42 +427,45 @@ class TestKeyNamespace:
         assert sv.valid_project_id("fine-id.1")
 
 
-# ── the export rail ──
-
-
 class TestExportCarriesFlagsNotValues:
     """A project export declares which credentials the far side needs, and carries none."""
 
     def _project(self, root: Path) -> Path:
         proj = root / "project"
         (proj / "context").mkdir(parents=True)
-        (proj / "project.json").write_text(json.dumps({"id": PROJECT_ID, "name": "EI10"}))
+        (proj / "project.json").write_text(
+            json.dumps({"id": PROJECT_ID, "name": "EI10"})
+        )
         (proj / "context" / "overview.md").write_text("# EI10\n\nA project.\n")
         return proj
 
     def test_the_manifest_names_the_project_secrets(self, vault: Path, tmp_path: Path):
-        from gideon.workflows.project_archive import export_project_archive
+        from gideon.automation.workflows.project_archive import export_project_archive
 
-        raw, plan = export_project_archive(PROJECT_ID, project_root=self._project(tmp_path))
+        raw, plan = export_project_archive(
+            PROJECT_ID, project_root=self._project(tmp_path)
+        )
         assert "EI10_DB_PASSWORD" in plan.secrets_present, plan.secrets_present
         manifest = json.loads(zipfile.ZipFile(io.BytesIO(raw)).read("manifest.json"))
         assert "EI10_DB_PASSWORD" in manifest["secrets"]
 
-    def test_no_value_appears_anywhere_in_the_zip_bytes(self, vault: Path, tmp_path: Path):
+    def test_no_value_appears_anywhere_in_the_zip_bytes(
+        self, vault: Path, tmp_path: Path
+    ):
         """Asserted over the ARCHIVE'S CONTENTS, not over the plan's intent.
 
         Reading every member back out rather than scanning the compressed bytes: DEFLATE would
         hide a plaintext value from a substring search over `raw`, so a scan of the container
         would pass on an archive that does carry the secret.
         """
-        from gideon.workflows.project_archive import export_project_archive
+        from gideon.automation.workflows.project_archive import export_project_archive
 
-        raw, plan = export_project_archive(PROJECT_ID, project_root=self._project(tmp_path))
+        raw, plan = export_project_archive(
+            PROJECT_ID, project_root=self._project(tmp_path)
+        )
 
         zf = zipfile.ZipFile(io.BytesIO(raw))
         members = zf.namelist()
-        # 🪤 VACUITY FLOOR. An empty archive carries no secret either. Assert the archive really
-        # has the project in it before concluding anything from the absence of a value.
         assert len(members) >= 3, members
         assert any(m.endswith("project.json") for m in members), members
         assert any(m.endswith("context/overview.md") for m in members), members
@@ -462,15 +475,13 @@ class TestExportCarriesFlagsNotValues:
             assert (
                 value.encode() not in decompressed
             ), f"a credential VALUE is inside the export archive: {value}"
-        # And the flag really did travel, so "no value" is not true of an export that simply
-        # forgot the secret existed.
         assert "EI10_DB_PASSWORD" in json.loads(zf.read("manifest.json"))["secrets"]
 
     def test_a_secret_named_file_inside_the_project_is_flagged_not_carried(
         self, vault: Path, tmp_path: Path
     ):
         """The OTHER route a secret reaches an export: a file the exclusion policy catches."""
-        from gideon.workflows.project_archive import export_project_archive
+        from gideon.automation.workflows.project_archive import export_project_archive
 
         proj = self._project(tmp_path)
         (proj / "context" / ".env").write_text(f"INSIDE_PROJECT={GLOBAL_VALUE}\n")
@@ -482,10 +493,12 @@ class TestExportCarriesFlagsNotValues:
         assert GLOBAL_VALUE.encode() not in decompressed
         assert ".env" in plan.secrets_present, plan.secrets_present
 
-    def test_an_unreadable_store_costs_flags_not_the_export(self, vault: Path, tmp_path: Path):
+    def test_an_unreadable_store_costs_flags_not_the_export(
+        self, vault: Path, tmp_path: Path
+    ):
         """A broken credential store must not make a project unexportable."""
-        import gideon.secrets_vault as vault_mod
-        from gideon.workflows import project_archive
+        import gideon.security.secrets_vault as vault_mod
+        from gideon.automation.workflows import project_archive
 
         def _boom(_project_id: str) -> list[str]:
             raise OSError("store unreadable")
@@ -500,10 +513,10 @@ class TestExportCarriesFlagsNotValues:
             vault_mod.project_secret_names = original  # type: ignore[assignment]
 
         assert plan.secrets_present == []
-        assert any(m.endswith("project.json") for m in zipfile.ZipFile(io.BytesIO(raw)).namelist())
-
-
-# ── the consumer-derivation rail ──
+        assert any(
+            m.endswith("project.json")
+            for m in zipfile.ZipFile(io.BytesIO(raw)).namelist()
+        )
 
 
 class TestConsumersAreDerived:
@@ -517,18 +530,22 @@ class TestConsumersAreDerived:
         is what makes a red in those tests attributable to the derivation rather than to a broken
         regex underneath it.
         """
-        from gideon.triggers.secrets import references
-        from gideon.workflows.secrets import secret_keys_referenced
+        from gideon.automation.triggers.secrets import references
+        from gideon.automation.workflows.secrets import secret_keys_referenced
 
-        spec = {"nodes": [{"id": "n1", "config": {"url": "https://x/{{secret:WF_KEY}}"}}]}
+        spec = {
+            "nodes": [{"id": "n1", "config": {"url": "https://x/{{secret:WF_KEY}}"}}]
+        }
         assert secret_keys_referenced(spec) == ["WF_KEY"]
-        assert references({"headers": {"Authorization": "Bearer {{secret:TRIG_KEY}}"}}) == [
-            "TRIG_KEY"
-        ]
+        assert references(
+            {"headers": {"Authorization": "Bearer {{secret:TRIG_KEY}}"}}
+        ) == ["TRIG_KEY"]
 
     @pytest.mark.asyncio
-    async def test_a_workflow_reference_becomes_a_consumer_link(self, vault: Path, monkeypatch):
-        import gideon.secrets_vault as vault_mod
+    async def test_a_workflow_reference_becomes_a_consumer_link(
+        self, vault: Path, monkeypatch
+    ):
+        import gideon.security.secrets_vault as vault_mod
 
         async def _refs():
             return [("nightly-sync", "Nightly sync", ["EI10_GLOBAL_TOKEN"])]
@@ -542,8 +559,9 @@ class TestConsumersAreDerived:
         )
 
         rows = {r.name: r for r in sv.list_presence(consumers=consumers)}
-        assert [c.label for c in rows["EI10_GLOBAL_TOKEN"].consumers] == ["Nightly sync"]
-        # A secret nothing references has NO links — the derivation must not smear.
+        assert [c.label for c in rows["EI10_GLOBAL_TOKEN"].consumers] == [
+            "Nightly sync"
+        ]
         assert rows["EI10_HOST_TOKEN"].consumers == ()
 
     @pytest.mark.asyncio
@@ -551,7 +569,7 @@ class TestConsumersAreDerived:
         self, vault: Path, monkeypatch
     ):
         """A project row and a global row of the same name must not share consumers."""
-        import gideon.secrets_vault as vault_mod
+        import gideon.security.secrets_vault as vault_mod
 
         store_key = sv.project_secret_key(PROJECT_ID, "EI10_DB_PASSWORD")
         cred.save_credential("EI10_DB_PASSWORD", "a-global-of-the-same-name")
@@ -564,10 +582,16 @@ class TestConsumersAreDerived:
         consumers = await vault_mod.consumers_for()
 
         rows = sv.list_presence(consumers=consumers)
-        scoped = next(r for r in rows if r.scope == "project" and r.name == "EI10_DB_PASSWORD")
-        glob = next(r for r in rows if r.scope == "global" and r.name == "EI10_DB_PASSWORD")
+        scoped = next(
+            r for r in rows if r.scope == "project" and r.name == "EI10_DB_PASSWORD"
+        )
+        glob = next(
+            r for r in rows if r.scope == "global" and r.name == "EI10_DB_PASSWORD"
+        )
         assert [c.id for c in scoped.consumers] == ["proj-only"]
-        assert glob.consumers == (), "a global row must not inherit the project row's consumers"
+        assert (
+            glob.consumers == ()
+        ), "a global row must not inherit the project row's consumers"
 
     @pytest.mark.asyncio
     async def test_a_broken_derivation_goes_WRONG_not_silently_empty(
@@ -581,10 +605,9 @@ class TestConsumersAreDerived:
         row must be measurably bare, rather than the whole map collapsing to empty and reading
         like a clean answer.
         """
-        import gideon.secrets_vault as vault_mod
+        import gideon.security.secrets_vault as vault_mod
 
         async def _wrong_key():
-            # The mutation: the derivation attributes the reference to a mis-cased key.
             return [("nightly-sync", "Nightly sync", ["ei10_global_token"])]
 
         monkeypatch.setattr(vault_mod, "_workflow_references", _wrong_key)
@@ -593,8 +616,6 @@ class TestConsumersAreDerived:
 
         rows = {r.name: r for r in sv.list_presence(consumers=consumers)}
         assert rows["EI10_GLOBAL_TOKEN"].consumers == ()
-        # The link did not vanish — it is attributable to a key no row claims, which is what a
-        # derived index makes visible and a maintained one would have hidden.
         assert "ei10_global_token" in consumers
         assert "ei10_global_token" not in {r.name for r in rows.values()}
 
@@ -602,7 +623,7 @@ class TestConsumersAreDerived:
     async def test_one_unreadable_provider_does_not_blank_the_others(
         self, vault: Path, monkeypatch
     ):
-        import gideon.secrets_vault as vault_mod
+        import gideon.security.secrets_vault as vault_mod
 
         def _boom() -> list:
             raise RuntimeError("trigger store is corrupt")
@@ -613,15 +634,14 @@ class TestConsumersAreDerived:
         monkeypatch.setattr(vault_mod, "_workflow_references", _ok)
         monkeypatch.setattr(vault_mod, "_trigger_references", _boom)
         with pytest.raises(RuntimeError):
-            # The seam is inside `_trigger_references`; a raise from the seam itself is not
-            # swallowed by `consumers_for`, which is honest — the tolerance lives where the
-            # store is actually read. Asserted so the boundary is documented rather than assumed.
             await vault_mod.consumers_for()
 
     @pytest.mark.asyncio
-    async def test_consumers_survive_an_unreadable_trigger_store(self, vault: Path, monkeypatch):
+    async def test_consumers_survive_an_unreadable_trigger_store(
+        self, vault: Path, monkeypatch
+    ):
         """The real tolerance seam: `TriggerStore()` itself failing costs links, not the listing."""
-        import gideon.triggers.store as tstore
+        import gideon.automation.triggers.store as tstore
 
         def _boom(*_a, **_k):
             raise OSError("triggers.json unreadable")
@@ -633,6 +653,6 @@ class TestConsumersAreDerived:
 @pytest.fixture
 def repo_root() -> Path:
     """The repository root, for the source-reading rails."""
-    root = Path(__file__).resolve().parents[1]
-    assert (root / "src" / "gideon").is_dir(), root
+    root = Path(__file__).resolve().parents[2]
+    assert (root / "runtime" / "gideon").is_dir(), root
     return root

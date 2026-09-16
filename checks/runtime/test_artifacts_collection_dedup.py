@@ -12,10 +12,10 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.artifacts import registry
-from gideon.artifacts.handlers import register_artifact_routes
-from gideon.artifacts.models import Artifact
-from gideon.artifacts.native import NativeArtifactProvider
+from gideon.workspace.artifacts import registry
+from gideon.workspace.artifacts.handlers import register_artifact_routes
+from gideon.workspace.artifacts.models import Artifact
+from gideon.workspace.artifacts.native import NativeArtifactProvider
 
 
 @pytest.fixture
@@ -30,7 +30,6 @@ class TestCollectionModel:
         assert Artifact.from_dict(a.to_dict(persist=True)).collection == "Dashboards"
 
     def test_tolerant_read_of_pre_collection_meta(self):
-        # A meta.json written before the field exists → loads with "".
         old = {"slug": "s", "name": "N", "kind": "widget"}
         assert Artifact.from_dict(old).collection == ""
 
@@ -39,7 +38,7 @@ class TestCollectionProvider:
     def test_create_persists_and_list_filters(self, provider):
         provider.create(name="A", content="x", collection="Reports")
         provider.create(name="B", content="y", collection="Reports")
-        provider.create(name="C", content="z")  # uncollected
+        provider.create(name="C", content="z")
         assert {a.slug for a in provider.list(collection="Reports")} == {"a", "b"}
         assert provider.list(collection="Nope") == []
 
@@ -48,12 +47,13 @@ class TestCollectionProvider:
         assert art.version == 1
         upd = provider.update(art.slug, collection="Pinned")
         assert upd is not None and upd.collection == "Pinned"
-        assert upd.version == 1  # metadata-only, no version bump
+        assert upd.version == 1
 
     def test_collection_survives_reload(self, provider):
         provider.create(name="A", content="x", collection="Keep")
-        # a fresh provider over the same root reads the persisted meta.json
-        fresh = NativeArtifactProvider(root=provider._ensure_root().parent / "artifacts")
+        fresh = NativeArtifactProvider(
+            root=provider._ensure_root().parent / "artifacts"
+        )
         got = fresh.get("a")
         assert got is not None and got.collection == "Keep"
 
@@ -95,27 +95,27 @@ async def test_rest_create_dedup_409_then_force(patched_native) -> None:
     client = await _client(patched_native)
     try:
         r1 = await client.post(
-            "/api/artifacts", json={"name": "Sales Dashboard", "content": "<div>1</div>"}
+            "/api/artifacts",
+            json={"name": "Sales Dashboard", "content": "<div>1</div>"},
         )
         assert r1.status == 201
         slug1 = (await r1.json())["slug"]
 
-        # Second save, same name, no slug/force → 409 similar_artifact_exists.
         r2 = await client.post(
-            "/api/artifacts", json={"name": "Sales Dashboard", "content": "<div>2</div>"}
+            "/api/artifacts",
+            json={"name": "Sales Dashboard", "content": "<div>2</div>"},
         )
         assert r2.status == 409
         body = await r2.json()
         assert body["error"] == "similar_artifact_exists"
         assert body["similar"]["slug"] == slug1
 
-        # No "-2" twin was minted.
         listing = await (await client.get("/api/artifacts")).json()
         assert [a["slug"] for a in listing["artifacts"]] == [slug1]
 
-        # ?force=1 bypasses → a new (disambiguated) artifact is created.
         r3 = await client.post(
-            "/api/artifacts?force=1", json={"name": "Sales Dashboard", "content": "<div>3</div>"}
+            "/api/artifacts?force=1",
+            json={"name": "Sales Dashboard", "content": "<div>3</div>"},
         )
         assert r3.status == 201
         assert (await r3.json())["slug"] != slug1
@@ -128,16 +128,15 @@ async def test_rest_collection_roundtrips(patched_native) -> None:
     client = await _client(patched_native)
     try:
         r = await client.post(
-            "/api/artifacts", json={"name": "Q3", "content": "<div/>", "collection": "Reports"}
+            "/api/artifacts",
+            json={"name": "Q3", "content": "<div/>", "collection": "Reports"},
         )
         slug = (await r.json())["slug"]
         detail = await (await client.get(f"/api/artifacts/{slug}")).json()
         assert detail["collection"] == "Reports"
-        # reassign via PATCH
         await client.patch(f"/api/artifacts/{slug}", json={"collection": "Archive"})
         detail2 = await (await client.get(f"/api/artifacts/{slug}")).json()
         assert detail2["collection"] == "Archive"
-        # filter by collection
         listing = await (await client.get("/api/artifacts?collection=Archive")).json()
         assert slug in [a["slug"] for a in listing["artifacts"]]
     finally:
@@ -157,7 +156,6 @@ async def test_rest_source_path_save_still_dedups_by_path_not_name(
             "/api/artifacts", json={"name": "W", "content": "1", "source_path": p}
         )
         assert r1.status == 201
-        # same source_path → update (200), not a name-409
         r2 = await client.post(
             "/api/artifacts", json={"name": "W", "content": "2", "source_path": p}
         )

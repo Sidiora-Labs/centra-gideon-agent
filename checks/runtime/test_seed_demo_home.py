@@ -1,6 +1,6 @@
 """Tests for the ``demo-home`` seed fixture (DL-4).
 
-``tests/test_seed.py`` covers the seeding *mechanism* (rails, audit, CLI wiring)
+``checks/runtime/test_seed.py`` covers the seeding *mechanism* (rails, audit, CLI wiring)
 against the ``empty`` fixture. This file covers the ``demo-home`` fixture's
 *content*: that the hand-authored records actually load through the production
 stores, and that every file in the fixture tree is declared as package data so
@@ -29,12 +29,12 @@ from pathlib import Path
 
 import pytest
 
-from gideon import seed as seed_mod
-from gideon.loop import files as loop_files
+from gideon.automation.loop import files as loop_files
+from gideon.operations import seed as seed_mod
 
 FIXTURE_NAME = "demo-home"
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-_FIXTURES_DIR = _REPO_ROOT / "src" / "gideon" / "tests_fixtures"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_FIXTURES_DIR = _REPO_ROOT / "runtime" / "gideon" / "tests_fixtures"
 _DEMO_DIR = _FIXTURES_DIR / FIXTURE_NAME
 
 
@@ -54,13 +54,10 @@ def seeded_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def _load_tasks() -> list:
     """The native provider's ``list_tasks`` is async and returns ``(tasks, total)``."""
-    from gideon.tasks.native import create_provider
+    from gideon.engine.tasks.native import create_provider
 
     tasks, _total = asyncio.run(create_provider().list_tasks(limit=200))
     return tasks
-
-
-# ── the fixture is reachable as a fixture at all ────────────────────────────
 
 
 def test_demo_home_is_listed_as_an_available_fixture(
@@ -86,9 +83,6 @@ def test_demo_home_seeds_the_fixture_marker(seeded_home: Path) -> None:
     )
 
 
-# ── the records LOAD (not merely exist) ────────────────────────────────────
-
-
 def test_the_demo_projects_load_through_the_production_store(seeded_home: Path) -> None:
     """Projects come back from ``HierarchyStore``, ids intact, builtins not re-minted.
 
@@ -97,12 +91,17 @@ def test_the_demo_projects_load_through_the_production_store(seeded_home: Path) 
     ships both so a re-seeded demo home keeps the same ids across captures —
     if that ever regresses, this test sees six projects instead of four.
     """
-    from gideon.tasks.hierarchy import HierarchyStore
+    from gideon.engine.tasks.hierarchy import HierarchyStore
 
     projects = HierarchyStore().list_projects()
     by_name = {p.name: p for p in projects}
 
-    assert sorted(by_name) == ["Home Server", "Personal", "Reading Pipeline", "Repeatable"], (
+    assert sorted(by_name) == [
+        "Home Server",
+        "Personal",
+        "Reading Pipeline",
+        "Repeatable",
+    ], (
         "expected exactly the fixture's four projects — extra entries mean "
         "ensure_defaults() re-minted a builtin the fixture was supposed to pin"
     )
@@ -110,21 +109,25 @@ def test_the_demo_projects_load_through_the_production_store(seeded_home: Path) 
     assert by_name["Repeatable"].is_builtin
     assert not by_name["Reading Pipeline"].is_builtin
 
-    # The demo's whole point is prose worth screenshotting, so the two authored
-    # projects must actually carry a brief.
     assert len(by_name["Reading Pipeline"].brief) > 60
     assert len(by_name["Home Server"].brief) > 60
 
 
-def test_the_demo_task_lists_load_and_point_at_their_projects(seeded_home: Path) -> None:
+def test_the_demo_task_lists_load_and_point_at_their_projects(
+    seeded_home: Path,
+) -> None:
     """Every authored list resolves to a project that exists in the fixture."""
-    from gideon.tasks.hierarchy import HierarchyStore
+    from gideon.engine.tasks.hierarchy import HierarchyStore
 
     store = HierarchyStore()
     project_ids = {p.id for p in store.list_projects()}
     lists = [tl for pid in project_ids for tl in store.list_task_lists(pid)]
 
-    assert sorted(tl.name for tl in lists) == ["Maintenance", "Reading queue", "This week"]
+    assert sorted(tl.name for tl in lists) == [
+        "Maintenance",
+        "Reading queue",
+        "This week",
+    ]
     for tl in lists:
         assert tl.project_id in project_ids, f"{tl.name} points at a missing project"
 
@@ -137,7 +140,9 @@ def test_the_demo_tasks_load_and_cover_the_status_range(seeded_home: Path) -> No
     part of the contract, not a detail of the data.
     """
     tasks = _load_tasks()
-    assert len(tasks) == 10, "a task that failed to parse is silently dropped by _read_task"
+    assert (
+        len(tasks) == 10
+    ), "a task that failed to parse is silently dropped by _read_task"
 
     statuses = {t.status.value for t in tasks}
     assert {"open", "in_progress", "done", "blocked", "cancelled"} <= statuses
@@ -145,8 +150,6 @@ def test_the_demo_tasks_load_and_cover_the_status_range(seeded_home: Path) -> No
     priorities = {t.priority.value for t in tasks}
     assert len(priorities) >= 4, f"priorities look flat: {sorted(priorities)}"
 
-    # Substance, not stubs: several tasks carry real exit criteria / plans /
-    # notes, which is what the task detail pane renders.
     assert sum(1 for t in tasks if t.exit_criteria) >= 3
     assert sum(1 for t in tasks if t.action_plan) >= 2
     assert sum(1 for t in tasks if t.notes) >= 3
@@ -185,18 +188,24 @@ def test_every_entity_filename_matches_its_id(seeded_home: Path) -> None:
         assert json.loads(path.read_text(encoding="utf-8"))["id"] == path.parent.name
 
 
-def test_the_demo_memory_loads_and_is_not_the_default_placeholder(seeded_home: Path) -> None:
-    """Memory markdown reads back through ``MemoryStore`` with authored content.
+def test_the_demo_memory_loads_and_is_not_the_default_placeholder(
+    seeded_home: Path,
+) -> None:
+    """Memory markdown reads back through ``MemoryJournal`` with authored content.
 
-    ``MemoryStore.read()`` — the combined view the consolidator and prompt
+    ``MemoryJournal.read()`` — the combined view the consolidator and prompt
     context use — *drops* preferences/projects when they still equal the shipped
     placeholder, so a fixture that left the defaults in place would contribute
     nothing to a prompt: visibly present, functionally inert. This pins the
     opposite by asserting the combined read is non-empty and carries both files.
     """
-    from gideon.memory import _DEFAULT_PREFERENCES, _DEFAULT_PROJECTS, MemoryStore
+    from gideon.cognition.memory import (
+        _DEFAULT_PREFERENCES,
+        _DEFAULT_PROJECTS,
+        MemoryJournal,
+    )
 
-    store = MemoryStore()
+    store = MemoryJournal()
     prefs = store.read_preferences()
     projects = store.read_projects()
 
@@ -207,8 +216,6 @@ def test_the_demo_memory_loads_and_is_not_the_default_placeholder(seeded_home: P
     assert prefs.strip() in combined
     assert projects.strip() in combined
 
-    # The two authored projects are the ones the task board shows, so memory
-    # and tasks describe the same world rather than two unrelated demos.
     assert "Reading Pipeline" in projects
     assert "Home Server" in projects
 
@@ -221,36 +228,18 @@ def test_the_demo_memory_loads_and_is_not_the_default_placeholder(seeded_home: P
 
 
 def test_init_does_not_overwrite_the_authored_memory(seeded_home: Path) -> None:
-    """``MemoryStore.init()`` runs on gateway boot; it must not clobber the fixture.
+    """``MemoryJournal.init()`` runs on gateway boot; it must not clobber the fixture.
 
     ``init()`` is guarded by ``if not exists()``. If that guard were ever
     dropped to an unconditional write, the demo home would boot with empty
     memory and the failure would look like the fixture was never authored.
     """
-    from gideon.memory import MemoryStore
+    from gideon.cognition.memory import MemoryJournal
 
-    store = MemoryStore()
+    store = MemoryJournal()
     before = store.read_preferences()
     store.init()
     assert store.read_preferences() == before
-
-
-# ── the SQLite-backed surfaces: knowledge + the one loop ───────────────────
-#
-# These two are the reason the fixture carries binary ``.db`` files at all.
-# ``--seed`` is a bare ``shutil.copytree`` with no hydration hook, and neither
-# store has any file-based ingest a boot would pick up:
-#
-#   * knowledge lives ONLY in ``workspace/knowledge/knowledge.db``, whose schema
-#     includes an FTS5 virtual table — markdown under ``workspace/knowledge/``
-#     would never be read;
-#   * a loop's row lives ONLY in ``loop/loops.db``, and the boot-time
-#     ``reap_orphan_dirs()`` sweep DELETES any ``loop/<8hex>/`` dir with no
-#     backing row, so a text-only loop fixture is wiped on first boot.
-#
-# ``scripts/generate_demo_home_fixture.py`` regenerates both by driving the real
-# writers. The tests below are what make a schema change that invalidates them
-# fail loudly instead of shipping a demo home that boots empty.
 
 
 def _knowledge_rows(home: Path) -> list:
@@ -259,7 +248,7 @@ def _knowledge_rows(home: Path) -> list:
     The handler runs SQL straight off ``store.db`` rather than through a list
     helper, so this mirrors the real read path.
     """
-    from gideon.knowledge.store import KnowledgeStore, knowledge_db_path
+    from gideon.cognition.knowledge.store import KnowledgeStore, knowledge_db_path
 
     store = KnowledgeStore(str(knowledge_db_path(home)))
     return store.db.execute(
@@ -267,7 +256,9 @@ def _knowledge_rows(home: Path) -> list:
     ).fetchall()
 
 
-def test_the_demo_knowledge_docs_load_through_the_production_store(seeded_home: Path) -> None:
+def test_the_demo_knowledge_docs_load_through_the_production_store(
+    seeded_home: Path,
+) -> None:
     """The seeded knowledge items come back from ``KnowledgeStore``, with prose.
 
     ``KnowledgeStore`` refuses to open at all without FTS5, so merely getting rows
@@ -277,11 +268,10 @@ def test_the_demo_knowledge_docs_load_through_the_production_store(seeded_home: 
 
     assert len(rows) == 5, (
         f"expected the fixture's five knowledge docs, got {len(rows)} — regenerate "
-        "with scripts/generate_demo_home_fixture.py"
+        "with tooling/scripts/generate_demo_home_fixture.py"
     )
     titles = [r["title"] for r in rows]
     assert all(titles), "a seeded knowledge doc has no title"
-    # The demo's whole point is prose worth screenshotting.
     for row in rows:
         assert (
             len(row["content"] or "") > 120
@@ -300,7 +290,7 @@ def test_the_demo_knowledge_docs_are_findable_through_fts(seeded_home: Path) -> 
     ``knowledge.db`` would list fine here and return nothing for every search —
     a demo where the search box looks broken. This is that rail.
     """
-    from gideon.knowledge.store import KnowledgeStore, knowledge_db_path
+    from gideon.cognition.knowledge.store import KnowledgeStore, knowledge_db_path
 
     store = KnowledgeStore(str(knowledge_db_path(seeded_home)))
     hits = store.search_items_fts("digest", limit=10)
@@ -326,25 +316,23 @@ def test_no_seeded_knowledge_doc_carries_an_absolute_path(seeded_home: Path) -> 
 
 def test_the_demo_loop_loads_through_the_production_store(seeded_home: Path) -> None:
     """Exactly one loop, fully parsed, scoped to a project that exists."""
-    from gideon.loop import store as loop_store
-    from gideon.tasks.hierarchy import HierarchyStore
+    from gideon.automation.loop import store as loop_store
+    from gideon.engine.tasks.hierarchy import HierarchyStore
 
     loops = loop_store.list_all()
     assert len(loops) == 1, f"expected the fixture's single loop, got {len(loops)}"
     loop = loops[0]
 
-    assert loop.name and loop.task and loop.summary, "the demo loop reads as a blank row"
+    assert (
+        loop.name and loop.task and loop.summary
+    ), "the demo loop reads as a blank row"
     assert (
         len(loop.plan) == 3
     ), f"the demo loop should carry its authored 3-phase plan, got {len(loop.plan)}"
-    # A phase with no exit criteria renders as an empty checklist in the cockpit.
     for phase in loop.plan:
-        assert phase.get("exit_criteria"), f"loop phase {phase.get('phase')!r} has no exit criteria"
-    # A completed loop with zero cycles reads as never run. Since PP-16 seam 4a the count is the
-    # LEDGER's `step_completed` count, not a `total_cycles` column, so this asserts the fixture
-    # ships real cycles rather than a stored number. The version this replaced asserted the column
-    # and passed against `total_cycles=6` with an EMPTY ledger — six cycles claimed, none recorded,
-    # which is what made the demo cockpit render "no per-cycle detail recorded for this loop".
+        assert phase.get(
+            "exit_criteria"
+        ), f"loop phase {phase.get('phase')!r} has no exit criteria"
     findings = loop_files.get_findings(loop.id)
     assert len(findings) == 6, (
         f"expected the fixture's six ledger cycles, got {len(findings)} — a completed loop with "
@@ -352,7 +340,9 @@ def test_the_demo_loop_loads_through_the_production_store(seeded_home: Path) -> 
     )
     assert loop_files.cycles_completed(loop.id) == len(findings)
     for f in findings:
-        assert f.get("summary") and f.get("evidence"), f"cycle {f.get('cycle')} is a stub"
+        assert f.get("summary") and f.get(
+            "evidence"
+        ), f"cycle {f.get('cycle')} is a stub"
     assert {f.get("step") for f in findings} == {"survey", "synthesize", "verify"}, (
         "the fixture's cycles must key to its three plan phases — a cycle with no `step` mines as "
         "a structureless node"
@@ -374,8 +364,8 @@ def test_the_seeded_loop_is_terminal_so_boot_does_not_spend_model_calls(
     ``--seed demo-home`` just to look at a demo. Only the two documented terminal
     states are safe to ship.
     """
-    from gideon.loop import store as loop_store
-    from gideon.loop.loop import LoopStatus
+    from gideon.automation.loop import store as loop_store
+    from gideon.automation.loop.loop import LoopStatus
 
     terminal = {LoopStatus.COMPLETE.value, LoopStatus.STOPPED.value}
     for loop in loop_store.list_all():
@@ -385,7 +375,9 @@ def test_the_seeded_loop_is_terminal_so_boot_does_not_spend_model_calls(
         )
 
 
-def test_the_seeded_loop_dir_survives_the_boot_time_orphan_reap(seeded_home: Path) -> None:
+def test_the_seeded_loop_dir_survives_the_boot_time_orphan_reap(
+    seeded_home: Path,
+) -> None:
     """``reap_orphan_dirs()`` runs once at boot and deletes any ``loop/<8hex>/``
     directory with no backing DB row.
 
@@ -393,7 +385,7 @@ def test_the_seeded_loop_dir_survives_the_boot_time_orphan_reap(seeded_home: Pat
     gateway starts. This asserts the shipped dir is backed by a real row, which
     is the whole reason ``loops.db`` is in the fixture.
     """
-    from gideon.loop import store as loop_store
+    from gideon.automation.loop import store as loop_store
 
     loop_id = loop_store.list_all()[0].id
     loop_dir = seeded_home / "loop" / loop_id
@@ -416,10 +408,14 @@ def test_the_committed_fixture_dbs_are_self_contained() -> None:
     is not state. Also pins that no generation-machine path leaked into the bytes.
     """
     dbs = sorted(_DEMO_DIR.rglob("*.db"))
-    assert len(dbs) == 2, f"expected knowledge.db + loops.db in the fixture, found {dbs}"
+    assert (
+        len(dbs) == 2
+    ), f"expected knowledge.db + loops.db in the fixture, found {dbs}"
 
     strays = sorted(
-        p.name for p in _DEMO_DIR.rglob("*") if p.name.endswith(("-wal", "-shm", ".db-journal"))
+        p.name
+        for p in _DEMO_DIR.rglob("*")
+        if p.name.endswith(("-wal", "-shm", ".db-journal"))
     )
     assert not strays, f"SQLite sidecars must not ship: {strays}"
 
@@ -440,32 +436,30 @@ def test_every_demo_surface_is_non_empty(seeded_home: Path) -> None:
     would leave the others green and still ship a half-blank demo. This pins a
     count per surface in one place, so "demo-ready" cannot degrade silently.
     """
-    from gideon.knowledge.store import KnowledgeStore, knowledge_db_path
-    from gideon.loop import store as loop_store
-    from gideon.tasks.hierarchy import HierarchyStore
+    from gideon.automation.loop import store as loop_store
+    from gideon.cognition.knowledge.store import KnowledgeStore, knowledge_db_path
+    from gideon.engine.tasks.hierarchy import HierarchyStore
 
     hierarchy = HierarchyStore()
     counts = {
         "projects": len(hierarchy.list_projects()),
         "task_lists": len(hierarchy.list_task_lists()),
         "tasks": len(_load_tasks()),
-        "knowledge": KnowledgeStore(str(knowledge_db_path(seeded_home))).get_stats()["items"],
+        "knowledge": KnowledgeStore(str(knowledge_db_path(seeded_home))).get_stats()[
+            "items"
+        ],
         "loops": len(loop_store.list_all()),
         "memory_files": len(list((seeded_home / "workspace" / "memory").rglob("*.md"))),
     }
     empty = sorted(name for name, n in counts.items() if not n)
     assert not empty, f"these demo surfaces are empty: {empty} (counts={counts})"
 
-    # Floors, not just non-zero: one token row per surface is not a demo.
     assert counts["projects"] >= 4, counts
     assert counts["tasks"] >= 10, counts
     assert counts["task_lists"] >= 3, counts
     assert counts["knowledge"] >= 5, counts
     assert counts["loops"] == 1, counts
     assert counts["memory_files"] >= 4, counts
-
-
-# ── packaging: the wheel must carry the whole tree ──────────────────────────
 
 
 def _package_data_globs() -> list[str]:
@@ -515,7 +509,9 @@ def test_the_demo_fixture_is_nested_deeper_than_one_level() -> None:
     pins that the fixture really does keep files below ``<fixture>/<file>`` —
     i.e. that there is something for the recursive glob to be load-bearing for.
     """
-    depths = [len(p.relative_to(_DEMO_DIR).parts) for p in _DEMO_DIR.rglob("*") if p.is_file()]
+    depths = [
+        len(p.relative_to(_DEMO_DIR).parts) for p in _DEMO_DIR.rglob("*") if p.is_file()
+    ]
     assert depths, f"{FIXTURE_NAME} has no files"
     assert max(depths) >= 3, (
         "the demo fixture is flat — the recursive package-data glob is no longer "

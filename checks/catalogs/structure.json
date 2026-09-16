@@ -1,0 +1,672 @@
+{
+  "data": {
+    "checks": {
+      "duplication": {
+        "families": [
+          {
+            "canonical": null,
+            "id": "http-error-envelope-helper",
+            "purpose": "Small handler helpers that independently construct the HTTP error envelope can disagree on status, code naming, or required fields. This census counts those implementations without selecting a shared helper or combining the HTTP envelope with domain exceptions. Reduce the count by establishing and using a common HTTP helper when appropriate."
+          },
+          {
+            "canonical": "runtime/gideon/automation/workflows/judge_contract.py",
+            "id": "verdict-type",
+            "purpose": "Verdict-shaped classes outside the shared workflow contract introduce additional decision formats for supervisors and evaluators to interpret. This count tracks those definitions while allowing genuinely different domain decisions to retain their own types. A definition leaves the population when it uses the shared contract or receives a more specific domain name."
+          },
+          {
+            "canonical": "runtime/gideon/core/atomic_write.py",
+            "id": "durable-write",
+            "purpose": "Functions that create a temporary file and then rename it can bypass the shared persistence hooks and durability guarantees. Count these local implementations while excluding wrappers that delegate to the canonical atomic-write function. New persistence paths must use that function so writes retain their established history and synchronization behavior."
+          }
+        ],
+        "sources": [
+          {
+            "count": 1,
+            "path": "runtime/gideon/assurance/eval/judge.py",
+            "sites": [
+              {
+                "family": "verdict-type",
+                "symbol": "JudgeVerdict"
+              }
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/automation/triggers/calendar.py",
+            "sites": [
+              {
+                "family": "verdict-type",
+                "symbol": "DutyVerdict"
+              }
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/automation/triggers/disposition.py",
+            "sites": [
+              {
+                "family": "verdict-type",
+                "symbol": "Verdict"
+              }
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/automation/triggers/screen.py",
+            "sites": [
+              {
+                "family": "verdict-type",
+                "symbol": "Verdict"
+              }
+            ]
+          },
+          {
+            "count": 2,
+            "path": "runtime/gideon/automation/workflows/gate_policy.py",
+            "sites": [
+              {
+                "family": "verdict-type",
+                "symbol": "HoldVerdict"
+              },
+              {
+                "family": "verdict-type",
+                "symbol": "PolicyVerdict"
+              }
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/automation/workflows/judge_calibration.py",
+            "sites": [
+              {
+                "family": "verdict-type",
+                "symbol": "StuckVerdict"
+              }
+            ]
+          },
+          {
+            "count": 2,
+            "path": "runtime/gideon/automation/workflows/resilience.py",
+            "sites": [
+              {
+                "family": "verdict-type",
+                "symbol": "BreakerVerdict"
+              },
+              {
+                "family": "verdict-type",
+                "symbol": "BudgetVerdict"
+              }
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/automation/workflows/verified_done.py",
+            "sites": [
+              {
+                "family": "verdict-type",
+                "symbol": "Verdict"
+              }
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/cognition/knowledge/dedup.py",
+            "sites": [
+              {
+                "family": "verdict-type",
+                "symbol": "DupVerdict"
+              }
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/cognition/learning/accountability.py",
+            "sites": [
+              {
+                "family": "verdict-type",
+                "symbol": "Verdict"
+              }
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/cognition/learning/decay.py",
+            "sites": [
+              {
+                "family": "verdict-type",
+                "symbol": "DecayVerdict"
+              }
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/cognition/learning/hygiene.py",
+            "sites": [
+              {
+                "family": "verdict-type",
+                "symbol": "HygieneVerdict"
+              }
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/cognition/learning/lesson_confidence.py",
+            "sites": [
+              {
+                "family": "verdict-type",
+                "symbol": "LessonVerdict"
+              }
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/cognition/learning/proposals.py",
+            "sites": [
+              {
+                "family": "verdict-type",
+                "symbol": "Verdict"
+              }
+            ]
+          },
+          {
+            "count": 2,
+            "path": "runtime/gideon/cognition/learning/refiner.py",
+            "sites": [
+              {
+                "family": "verdict-type",
+                "symbol": "CriticVerdict"
+              },
+              {
+                "family": "verdict-type",
+                "symbol": "OpVerdict"
+              }
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/cognition/planning/scratchpad.py",
+            "sites": [
+              {
+                "family": "verdict-type",
+                "symbol": "Verdict"
+              }
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/cognition/proactive/approval.py",
+            "sites": [
+              {
+                "family": "verdict-type",
+                "symbol": "Verdict"
+              }
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/engine/agent.py",
+            "sites": [
+              {
+                "family": "durable-write",
+                "symbol": "_atomic_json_write"
+              }
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/integrations/channel_trust.py",
+            "sites": [
+              {
+                "family": "verdict-type",
+                "symbol": "TrustVerdict"
+              }
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/integrations/inbound/mcp_http.py",
+            "sites": [
+              {
+                "family": "http-error-envelope-helper",
+                "symbol": "_rpc_error"
+              }
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/integrations/mcp_core.py",
+            "sites": [
+              {
+                "family": "durable-write",
+                "symbol": "_call_tool_inner"
+              }
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/interfaces/dashboard/handlers/durability.py",
+            "sites": [
+              {
+                "family": "http-error-envelope-helper",
+                "symbol": "_invalid_path"
+              }
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/interfaces/dashboard/handlers/feedback.py",
+            "sites": [
+              {
+                "family": "http-error-envelope-helper",
+                "symbol": "_disabled_response"
+              }
+            ]
+          },
+          {
+            "count": 2,
+            "path": "runtime/gideon/interfaces/dashboard/handlers/files.py",
+            "sites": [
+              {
+                "family": "durable-write",
+                "symbol": "api_file_upload"
+              },
+              {
+                "family": "durable-write",
+                "symbol": "api_file_write"
+              }
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/interfaces/dashboard/handlers/routing.py",
+            "sites": [
+              {
+                "family": "http-error-envelope-helper",
+                "symbol": "_bad"
+              }
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/operations/service/macos.py",
+            "sites": [
+              {
+                "family": "durable-write",
+                "symbol": "_write_plist_atomic"
+              }
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/security/guardrails/budgets.py",
+            "sites": [
+              {
+                "family": "verdict-type",
+                "symbol": "BudgetVerdict"
+              }
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/security/net/guard.py",
+            "sites": [
+              {
+                "family": "verdict-type",
+                "symbol": "IpVerdict"
+              }
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/security/supply_chain.py",
+            "sites": [
+              {
+                "family": "verdict-type",
+                "symbol": "Verdict"
+              }
+            ]
+          }
+        ],
+        "summary": {
+          "by_family": {
+            "durable-write": 5,
+            "http-error-envelope-helper": 4,
+            "verdict-type": 24
+          },
+          "files": 29,
+          "sites": 33
+        }
+      },
+      "imports": {
+        "rules": [
+          {
+            "from": [
+              "ledger"
+            ],
+            "id": "ledger-is-a-leaf",
+            "purpose": "The run ledger supplies durable records to orchestration, learning, evaluation, and user interfaces. It must remain independent of those consumers so each can use it without loading an application layer. Imports in the reverse direction are counted as dependency regressions, with the recorded population serving as the upper bound.",
+            "to": [
+              "dashboard",
+              "sdk",
+              "workflows",
+              "loop",
+              "agents",
+              "knowledge",
+              "learning"
+            ]
+          },
+          {
+            "from": [
+              "*"
+            ],
+            "id": "core-must-not-import-the-http-surface",
+            "purpose": "Domain operations should be usable from the browser, command line, and automation interfaces. Importing HTTP handlers from domain modules ties those operations to the web application. Existing imports remain measured, including composition entry points; additional edges require moving shared behavior below the interface layer.",
+            "to": [
+              "dashboard"
+            ]
+          },
+          {
+            "from": [
+              "*"
+            ],
+            "id": "core-must-not-import-its-own-published-facade",
+            "purpose": "The published client facade is the supported entry point for extension bundles. Internal code should use its underlying implementation instead of depending on that external facade, so the public API can evolve without becoming an internal dependency cycle. The stored count limits further imports in this direction.",
+            "to": [
+              "sdk"
+            ]
+          }
+        ],
+        "sources": [
+          {
+            "count": 1,
+            "path": "runtime/gideon/assurance/legibility/always_on.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat_utils"
+            ]
+          },
+          {
+            "count": 2,
+            "path": "runtime/gideon/automation/workflows/handlers.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.handlers._shared",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.sse"
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/cognition/suggestions.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.state"
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/engine/agent.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat_utils"
+            ]
+          },
+          {
+            "count": 2,
+            "path": "runtime/gideon/engine/agents/native/sdlc_tools.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.handlers.loop_routes",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.handlers.loop_routes"
+            ]
+          },
+          {
+            "count": 20,
+            "path": "runtime/gideon/engine/gateway.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat_persistence",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat_runner",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat_utils",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat_utils",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.handlers",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.handlers",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.handlers",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.handlers.autonudge",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.handlers.updates",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.origin",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.session_lifecycle",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.state",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.state",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.token_auth"
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/engine/gateway_services.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.state"
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/engine/routing/rates.py",
+            "violations": [
+              "core-must-not-import-its-own-published-facade -> gideon.sdk.model"
+            ]
+          },
+          {
+            "count": 3,
+            "path": "runtime/gideon/engine/session_organize.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat_persistence",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat_tags",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat_title"
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/extensions/app_cli.py",
+            "violations": [
+              "core-must-not-import-its-own-published-facade -> gideon.sdk.cli"
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/extensions/apps/backend_runtime.py",
+            "violations": [
+              "core-must-not-import-its-own-published-facade -> gideon.sdk.security"
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/extensions/apps/native/gideon-ui-docs/provider.py",
+            "violations": [
+              "core-must-not-import-its-own-published-facade -> gideon.sdk.tool"
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/extensions/packs/import_.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.handlers.core"
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/extensions/providers/routes.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.handlers.providers"
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/integrations/action_providers/services.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.state"
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/integrations/channel_transports/manager.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.state"
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/integrations/channel_transports/webui.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.state"
+            ]
+          },
+          {
+            "count": 2,
+            "path": "runtime/gideon/integrations/companion/discovery.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.origin",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.origin"
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/integrations/inbox_providers/native_source.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.handlers_inbox"
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/integrations/inbox_service.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.handlers_inbox"
+            ]
+          },
+          {
+            "count": 2,
+            "path": "runtime/gideon/integrations/llm/catalog.py",
+            "violations": [
+              "core-must-not-import-its-own-published-facade -> gideon.sdk.model",
+              "core-must-not-import-its-own-published-facade -> gideon.sdk.net"
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/integrations/mcp_core.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard"
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/integrations/tool_providers/app_routes.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.token_auth"
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/interfaces/cli/config.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.handlers.core"
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/interfaces/cli/doctor.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.origin"
+            ]
+          },
+          {
+            "count": 2,
+            "path": "runtime/gideon/interfaces/cli/server.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.origin",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.token_auth"
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/interfaces/dashboard/handlers/apps.py",
+            "violations": [
+              "core-must-not-import-its-own-published-facade -> gideon.sdk.security"
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/operations/resilience/doctor.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.origin"
+            ]
+          },
+          {
+            "count": 4,
+            "path": "runtime/gideon/sdk/channel.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.handlers",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.origin",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.token_auth"
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/security/auth/cli.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.token_auth"
+            ]
+          },
+          {
+            "count": 2,
+            "path": "runtime/gideon/workspace/artifacts/handlers.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat_utils",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.handlers._shared"
+            ]
+          }
+        ],
+        "summary": {
+          "by_rule": {
+            "core-must-not-import-its-own-published-facade": 7,
+            "core-must-not-import-the-http-surface": 54,
+            "ledger-is-a-leaf": 0
+          },
+          "edges": 61,
+          "files": 31
+        }
+      },
+      "size": {
+        "limits": {
+          "file_lines": 6000,
+          "step_lines": 1000,
+          "watch_lines": 2800
+        },
+        "observed": {
+          "over_limit": [],
+          "slack_steps": 0,
+          "watch_members": [
+            "runtime/gideon/core/config/loader.py",
+            "runtime/gideon/interfaces/dashboard/chat_handlers.py",
+            "runtime/gideon/interfaces/dashboard/chat_runner.py",
+            "runtime/gideon/interfaces/dashboard/handlers/files.py",
+            "runtime/gideon/interfaces/dashboard/handlers/knowledge.py",
+            "runtime/gideon/engine/gateway.py",
+            "runtime/gideon/cognition/knowledge/store.py",
+            "runtime/gideon/cognition/vector_memory.py",
+            "runtime/gideon/automation/workflows/controller.py"
+          ],
+          "watched_files": 9
+        },
+        "purpose": "Keep individual modules at or below 6000 lines and prevent growth in the population at or above 2800 lines. Existing large modules may change within that range; new entrants remain regressions. The 1000-line step measures opportunities to lower the ceiling after code is split. These limits preserve maintenance room without allowing new oversized modules."
+      }
+    },
+    "generator": "tooling/scripts/generate_structural_baseline.py",
+    "order": [
+      "structural-size",
+      "structural-import-direction",
+      "structural-duplication"
+    ]
+  },
+  "kind": "gideon.structure",
+  "version": 1
+}

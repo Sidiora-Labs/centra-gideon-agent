@@ -1,4 +1,3 @@
-# impeccable-live-ignore-start
 .impeccable/hook.cache.json
 .impeccable/hook.pending.json
 .impeccable/config.local.json
@@ -18,9 +17,7 @@ node_modules/.impeccable-live/
 src/lib/impeccable/ImpeccableLiveRoot.svelte
 src/lib/impeccable/__runtime.js
 src/lib/impeccable/[0-9a-f]*/
-# impeccable-live-ignore-end
 
-# Playwright visual/a11y harness — commit baselines (e2e/__screenshots__), ignore run artifacts
 /test-results/
 /playwright-report/
 /playwright/.cache/

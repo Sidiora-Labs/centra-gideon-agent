@@ -2,19 +2,16 @@
 
 from unittest.mock import patch
 
-from gideon.mcp_core import _call_tool
+from gideon.integrations.mcp_core import _call_tool
 
 
 class TestSpawnRunSessionKeyRouting:
-    # subagent_run lives in mcp_subagents now; its parent-session resolution still
-    # uses _resolve_session_key (owned by mcp_core, imported there). The dispatch +
-    # the _post it calls are mcp_subagents'.
     def test_uses_env_var_when_set(self):
         """GIDEON_SESSION_KEY env var is used as parent_session."""
-        from gideon.mcp_subagents import _call_tool as _sa_call_tool
+        from gideon.integrations.mcp_subagents import _call_tool as _sa_call_tool
 
         with (
-            patch("gideon.mcp_subagents._post") as mock_post,
+            patch("gideon.integrations.mcp_subagents._post") as mock_post,
             patch.dict("os.environ", {"GIDEON_SESSION_KEY": "sess-from-env"}),
         ):
             mock_post.return_value = {"id": "agent1"}
@@ -27,10 +24,10 @@ class TestSpawnRunSessionKeyRouting:
     def test_falls_back_to_pid_file(self, tmp_path):
         import os
 
-        from gideon.mcp_subagents import _call_tool as _sa_call_tool
+        from gideon.integrations.mcp_subagents import _call_tool as _sa_call_tool
 
         with (
-            patch("gideon.mcp_subagents._post") as mock_post,
+            patch("gideon.integrations.mcp_subagents._post") as mock_post,
             patch("pathlib.Path.home", return_value=tmp_path / "fake_home"),
         ):
             env = os.environ.copy()
@@ -38,7 +35,9 @@ class TestSpawnRunSessionKeyRouting:
             with patch.dict("os.environ", env, clear=True):
                 gideon_dir = tmp_path / "fake_home" / ".gideon"
                 gideon_dir.mkdir(parents=True)
-                (gideon_dir / f"session_pid_{os.getppid()}.txt").write_text("sess-from-pid")
+                (gideon_dir / f"session_pid_{os.getppid()}.txt").write_text(
+                    "sess-from-pid"
+                )
 
                 mock_post.return_value = {"id": "agent1"}
                 _sa_call_tool("subagent_run", {"task": "test"})
@@ -49,7 +48,7 @@ class TestSpawnRunSessionKeyRouting:
 class TestSendMessageUnfurlForwarding:
     def test_unfurl_params_forwarded_in_payload(self):
         """unfurl_links and unfurl_media are forwarded to /api/send-message."""
-        with patch("gideon.mcp_core._post") as mock_post:
+        with patch("gideon.integrations.mcp_core._post") as mock_post:
             mock_post.return_value = {"ok": True}
 
             _call_tool(
@@ -67,7 +66,7 @@ class TestSendMessageUnfurlForwarding:
 
     def test_unfurl_params_omitted_when_absent(self):
         """unfurl params are not in payload when not provided."""
-        with patch("gideon.mcp_core._post") as mock_post:
+        with patch("gideon.integrations.mcp_core._post") as mock_post:
             mock_post.return_value = {"ok": True}
 
             _call_tool("notify", {"text": "test"})
@@ -87,7 +86,7 @@ class TestSendMessageCronAutoOrigin:
     def test_auto_applies_origin_for_cron_caller(self):
         """Cron caller with bare send_message(text=...) → session=origin injected."""
         with (
-            patch("gideon.mcp_core._post") as mock_post,
+            patch("gideon.integrations.mcp_core._post") as mock_post,
             patch.dict("os.environ", {"GIDEON_SESSION_KEY": "cron:abc123"}),
         ):
             mock_post.return_value = {"ok": True}
@@ -99,7 +98,7 @@ class TestSendMessageCronAutoOrigin:
     def test_explicit_channel_suppresses_auto_default(self):
         """Cron caller with explicit channel=... → no session auto-default."""
         with (
-            patch("gideon.mcp_core._post") as mock_post,
+            patch("gideon.integrations.mcp_core._post") as mock_post,
             patch.dict("os.environ", {"GIDEON_SESSION_KEY": "cron:abc123"}),
         ):
             mock_post.return_value = {"ok": True}
@@ -112,7 +111,7 @@ class TestSendMessageCronAutoOrigin:
     def test_explicit_user_suppresses_auto_default(self):
         """Cron caller with explicit user=... (intentional Slack DM) → no auto-default."""
         with (
-            patch("gideon.mcp_core._post") as mock_post,
+            patch("gideon.integrations.mcp_core._post") as mock_post,
             patch.dict("os.environ", {"GIDEON_SESSION_KEY": "cron:abc123"}),
         ):
             mock_post.return_value = {"ok": True}
@@ -125,7 +124,7 @@ class TestSendMessageCronAutoOrigin:
     def test_non_cron_session_skips_auto_default(self):
         """Dashboard (non-cron) caller → no auto-default, sends to owner DM as before."""
         with (
-            patch("gideon.mcp_core._post") as mock_post,
+            patch("gideon.integrations.mcp_core._post") as mock_post,
             patch.dict("os.environ", {"GIDEON_SESSION_KEY": "dashboard:chat-1"}),
         ):
             mock_post.return_value = {"ok": True}
@@ -138,7 +137,7 @@ class TestSendMessageCronAutoOrigin:
         """Absent GIDEON_SESSION_KEY → no auto-default."""
         import os
 
-        with patch("gideon.mcp_core._post") as mock_post:
+        with patch("gideon.integrations.mcp_core._post") as mock_post:
             env = os.environ.copy()
             env.pop("GIDEON_SESSION_KEY", None)
             with patch.dict("os.environ", env, clear=True):
@@ -151,7 +150,7 @@ class TestSendMessageCronAutoOrigin:
     def test_explicit_session_origin_is_idempotent(self):
         """LLM explicitly passes session=origin from cron → still origin, no double-application."""
         with (
-            patch("gideon.mcp_core._post") as mock_post,
+            patch("gideon.integrations.mcp_core._post") as mock_post,
             patch.dict("os.environ", {"GIDEON_SESSION_KEY": "cron:abc123"}),
         ):
             mock_post.return_value = {"ok": True}
@@ -163,7 +162,7 @@ class TestSendMessageCronAutoOrigin:
     def test_explicit_session_channel_is_accepted(self):
         """session='channel' is a valid explicit opt-out value."""
         with (
-            patch("gideon.mcp_core._post") as mock_post,
+            patch("gideon.integrations.mcp_core._post") as mock_post,
             patch.dict("os.environ", {"GIDEON_SESSION_KEY": "cron:abc123"}),
         ):
             mock_post.return_value = {"ok": True}
@@ -175,11 +174,9 @@ class TestSendMessageCronAutoOrigin:
     def test_invalid_session_value_rejected(self):
         """session must match the ^(origin|channel)$ pattern; other values rejected."""
         with (
-            patch("gideon.mcp_core._post") as mock_post,
+            patch("gideon.integrations.mcp_core._post") as mock_post,
             patch.dict("os.environ", {"GIDEON_SESSION_KEY": "cron:abc123"}),
         ):
             result = _call_tool("notify", {"text": "hi", "session": "bogus"})
-            # Validator-level rejection (pattern mismatch on FieldSpec), not
-            # the handler's post-validation check. Either way, no network call.
             assert "session" in result.lower() or "error" in result.lower()
             mock_post.assert_not_called()

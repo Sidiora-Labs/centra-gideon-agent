@@ -2,7 +2,7 @@ const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("path");
 const fs = require("fs");
-const { findGideonBin } = require("../find-bin");
+const { findGideonBin } = require("../src/gateway/executable");
 
 const HOME = "/mock/home";
 const RESOURCES = "/mock/resources";
@@ -42,8 +42,8 @@ describe("findGideonBin", () => {
     assert.equal(result, venvBin);
   });
 
-  it("returns ../bin/gideon relative to dirname when only that path exists", () => {
-    const binPath = path.resolve(DIRNAME, "..", "bin", "gideon");
+  it("returns ../../bin/gideon relative to dirname when only that path exists", () => {
+    const binPath = path.resolve(DIRNAME, "..", "..", "bin", "gideon");
     const fakeFs = only(binPath);
     const result = findGideonBin(fakeFs, fakeOs, path, RESOURCES, DIRNAME);
     assert.equal(result, binPath);

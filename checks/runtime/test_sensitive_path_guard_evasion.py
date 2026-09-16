@@ -41,7 +41,7 @@ import tempfile
 
 import pytest
 
-from gideon.security import (
+from gideon.security.security import (
     _SENSITIVE_HOME_DIRS,
     is_sensitive_bash_command,
     is_sensitive_path,
@@ -50,9 +50,6 @@ from gideon.security import (
 )
 
 _HOME = str(pathlib.Path.home())
-
-
-# ── 1. Case ───────────────────────────────────────────────────────────────
 
 
 def test_no_sensitive_dir_is_reachable_by_shifting_a_key():
@@ -103,13 +100,14 @@ def test_the_case_bypass_was_real_on_this_filesystem():
         insensitive = (d / ".SSH" / "key").read_text(encoding="utf-8") == "SECRET"
     except FileNotFoundError:
         insensitive = False
-    # Blocking is correct either way; this only reports the platform.
     assert is_sensitive_path(f"{_HOME}/.SSH/key"), "the case guard is not applied"
     if not insensitive:
         pytest.skip("case-sensitive filesystem — the bypass was macOS/Windows-only")
 
 
-@pytest.mark.parametrize("path", ["/SYSTEM/x", "/USR/bin/x", "/ETC/passwd", "/etc/passwd"])
+@pytest.mark.parametrize(
+    "path", ["/SYSTEM/x", "/USR/bin/x", "/ETC/passwd", "/etc/passwd"]
+)
 def test_system_roots_are_case_insensitive_too(path):
     """`is_system_path` shared the bug: two roots behaved differently from the rest."""
     assert is_system_path(path), f"{path} is a system root and was allowed"
@@ -120,9 +118,6 @@ def test_an_ordinary_home_path_is_still_allowed():
     assert not is_sensitive_path(f"{_HOME}/Documents/notes.md")
     assert not is_sensitive_path(f"{_HOME}/code/project/README.md")
     assert not is_system_path(f"{_HOME}/code/project")
-
-
-# ── 2. Reader coverage ────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -157,7 +152,9 @@ def test_an_ordinary_home_path_is_still_allowed():
 )
 def test_every_content_returning_form_is_blocked(command):
     """The measured table, as assertions. 15 of these 18-plus forms used to pass."""
-    assert is_sensitive_bash_command(command), f"this returns credential bytes: {command}"
+    assert is_sensitive_bash_command(
+        command
+    ), f"this returns credential bytes: {command}"
 
 
 @pytest.mark.parametrize(
@@ -170,13 +167,13 @@ def test_every_content_returning_form_is_blocked(command):
         "tar cf out.tar src/",
         "diff a.py b.py",
         "jq . package.json",
-        "python -m pytest tests/",
+        "python -m pytest checks/runtime/",
         "python -c \"print(open('a.txt').read())\"",
         "npm run build",
         "git commit -m 'fix: the thing'",
         'echo "hello world"',
         "ls ~/Documents",
-        "cat src/gideon/security.py",
+        "cat runtime/gideon/security/security.py",
     ],
 )
 def test_ordinary_work_is_not_blocked(command):
@@ -186,7 +183,9 @@ def test_ordinary_work_is_not_blocked(command):
     here names a reader that was just added to the pattern; none names a credential path,
     and the path requirement is what keeps them apart.
     """
-    assert not is_sensitive_bash_command(command), f"legitimate command blocked: {command}"
+    assert not is_sensitive_bash_command(
+        command
+    ), f"legitimate command blocked: {command}"
 
 
 def test_quote_stripping_collapses_a_respelling_and_nothing_else():
@@ -208,12 +207,6 @@ def test_the_concatenation_gap_is_recorded_rather_than_claimed_closed():
         "the concatenation family is now detected — that is good news, but this test and the "
         "module docstring both claim it is NOT, so say what changed"
     )
-
-
-# ── Respellings that name a sensitive path without spelling it the guard's way ──────────────
-#
-# Both measured ALLOWED against the shipped guard, and both are in the hazard list verbatim:
-# "$HOME/.aws/...", "${HOME}/.aws/...", "cd ~ && cat .aws/credentials".
 
 
 @pytest.mark.parametrize(
@@ -258,22 +251,10 @@ def test_the_normalisation_does_not_block_ordinary_work(command):
 def test_the_home_cd_rewrite_needs_a_home_cd_to_fire():
     """The vacuity floor for the rewrite: if it fired unconditionally, the test above would be
     asserting nothing and every dot-relative path anywhere would be blocked."""
-    from gideon.security import _normalise_for_matching
+    from gideon.security.security import _normalise_for_matching
 
     assert "~/" not in _normalise_for_matching("cat .ssh/id_rsa")
     assert "~/.ssh/" in _normalise_for_matching("cd ~ && cat .ssh/id_rsa")
-
-
-# ── 3. Gideon's own secrets: two lists that disagreed (#643) ─────────
-#
-# Same family, third shape. Not "the control did not fire on a respelling" but "the
-# control did not know these files existed": `handlers/files.py` refused every one of
-# them by basename, so `/api/file-read` answered 400 — while `is_sensitive_path`, which
-# the terminal cwd guard and the bash read hook both consult, returned False.
-#
-# Measured against the shipped guard, default home: only `~/.gideon/.env` was
-# blocked. `sel_hmac.key`, `.local_secret`, `telemetry_salt` and `credentials/` were all
-# allowed, and the issue's repro read the SEL signing key through a real PTY.
 
 
 @pytest.fixture
@@ -298,14 +279,15 @@ def test_our_own_secret_names_are_refused_wherever_they_sit(name, tmp_path):
     assert is_sensitive_path(str(tmp_path / name))
     assert is_sensitive_path(f"{_HOME}/.gideon/{name}")
     assert is_sensitive_path(f"/tmp/a-copy-someone-made/{name}")
-    # Case, for the reason the top of this file establishes.
     assert is_sensitive_path(str(tmp_path / name.upper()))
 
 
 @pytest.mark.parametrize(
     "entry", [".env", "credentials", "governance", "session_key", "sessions.json"]
 )
-def test_the_active_gideon_home_is_covered_even_when_it_is_not_under_home(entry, gideon_home):
+def test_the_active_gideon_home_is_covered_even_when_it_is_not_under_home(
+    entry, gideon_home
+):
     """The sharper half of the finding. The `$HOME`-relative entries cannot follow
     `GIDEON_HOME`, so with a custom home `.env` AND `governance` were both allowed —
     meaning on every dev home and every user override the governance ceiling was
@@ -344,7 +326,7 @@ def test_a_name_that_is_ours_only_by_location_does_not_block_a_users_own_file(
 @pytest.mark.parametrize(
     "command",
     [
-        "wc -c < {home}/sel_hmac.key",  # the issue's own repro
+        "wc -c < {home}/sel_hmac.key",
         "cat {home}/sel_hmac.key",
         "od -c {home}/.local_secret",
         "cp {home}/telemetry_salt /tmp/exfil",
@@ -375,7 +357,8 @@ def test_the_bash_hook_refuses_a_read_of_our_own_keys(command, gideon_home):
 def test_the_new_pattern_does_not_block_ordinary_work(command):
     """The cost of over-blocking is a guard people route around. A project's own
     `sessions.json`, private key and certificate are its business — `files.py` keeps the
-    stricter suffix tier, scoped to the dashboard's allowlisted roots where it belongs."""
+    stricter suffix tier, scoped to the dashboard's allowlisted roots where it belongs.
+    """
     assert is_sensitive_bash_command(command) is None
 
 
@@ -391,9 +374,11 @@ def test_the_pty_gap_is_recorded_rather_than_claimed_closed(gideon_home):
     Recorded as an assertion so the limit stays visible: the cwd guard is the thing that
     changed for the terminal, not the shell's own reach.
     """
-    from gideon.security import is_sensitive_path as guard
+    from gideon.security.security import is_sensitive_path as guard
 
-    assert guard(str(gideon_home / "credentials")), "a credential dir must be a refused cwd"
+    assert guard(
+        str(gideon_home / "credentials")
+    ), "a credential dir must be a refused cwd"
     assert not guard(str(gideon_home)), "the home itself remains a legitimate cwd"
 
 
@@ -416,6 +401,7 @@ def test_the_guard_creates_nothing(tmp_path, monkeypatch):
     is_sensitive_bash_command(f"cat {fake_home}/gideon/sel_hmac.key")
 
     assert sorted(p.name for p in fake_home.iterdir()) == before
-    assert not (fake_home / "gideon").exists(), "the guard created the home it was checking"
-    # ...and it still blocks, i.e. the fix is not "stop resolving the home".
+    assert not (
+        fake_home / "gideon"
+    ).exists(), "the guard created the home it was checking"
     assert is_sensitive_path(str(fake_home / "gideon" / ".env"))

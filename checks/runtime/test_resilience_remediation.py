@@ -9,51 +9,47 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.resilience import remediation as rem
-from gideon.resilience.remediation import Deficit, RemediationJob
+from gideon.operations.resilience import remediation as rem
+from gideon.operations.resilience.remediation import Deficit, RemediationJob
 
 
 @pytest.fixture(autouse=True)
 def _isolate(tmp_path, monkeypatch):
     """Isolate the doctor/ ledger + jobs.json under tmp, and snapshot/restore the job
     registry so test jobs don't leak."""
-    monkeypatch.setattr("gideon.resilience.remediation.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gideon.operations.resilience.remediation.config_dir", lambda: tmp_path
+    )
     saved = dict(rem._JOBS)
     yield
     rem._JOBS.clear()
     rem._JOBS.update(saved)
 
 
-# ── deficit → score ───────────────────────────────────────────────────────────
-
-
 def test_penalty_is_capped_at_max_penalty():
     d = Deficit(key="k", count=1000, weight=1.0, max_penalty=10.0)
-    assert d.penalty == 10.0  # capped, not 1000
+    assert d.penalty == 10.0
 
 
 def test_health_score_subtracts_reachable_penalties():
     ds = [
-        Deficit(key="a", count=5, weight=1.0, max_penalty=20.0),  # penalty 5
-        Deficit(key="b", count=10, weight=2.0, max_penalty=10.0),  # penalty 10 (capped)
+        Deficit(key="a", count=5, weight=1.0, max_penalty=20.0),
+        Deficit(key="b", count=10, weight=2.0, max_penalty=10.0),
     ]
-    assert rem.health_score(ds) == 85.0  # 100 - 5 - 10
+    assert rem.health_score(ds) == 85.0
 
 
 def test_unreachable_deficit_excluded_from_score():
     ds = [
-        Deficit(key="a", count=10, weight=1.0, max_penalty=20.0, reachable=False),  # ignored
-        Deficit(key="b", count=3, weight=1.0, max_penalty=20.0),  # penalty 3
+        Deficit(key="a", count=10, weight=1.0, max_penalty=20.0, reachable=False),
+        Deficit(key="b", count=3, weight=1.0, max_penalty=20.0),
     ]
-    assert rem.health_score(ds) == 97.0  # only b counts (unfixable → not held against us)
+    assert rem.health_score(ds) == 97.0
 
 
 def test_health_score_clamped():
     ds = [Deficit(key="a", count=999, weight=1.0, max_penalty=200.0)]
-    assert rem.health_score(ds) == 0.0  # never negative
-
-
-# ── dependency ordering ───────────────────────────────────────────────────────
+    assert rem.health_score(ds) == 0.0
 
 
 def test_ordered_respects_after_edges():
@@ -66,11 +62,8 @@ def test_ordered_respects_after_edges():
 def test_ordered_tolerates_cycle():
     a = RemediationJob(id="a", title="a", run=lambda: "a", after=("b",))
     b = RemediationJob(id="b", title="b", run=lambda: "b", after=("a",))
-    ordered = rem._ordered([a, b])  # must not hang/raise
+    ordered = rem._ordered([a, b])
     assert {j.id for j in ordered} == {"a", "b"}
-
-
-# ── run: stop conditions + execution ──────────────────────────────────────────
 
 
 def _stub_deficits(monkeypatch, deficits):
@@ -78,7 +71,9 @@ def _stub_deficits(monkeypatch, deficits):
 
 
 def test_run_stops_when_already_healthy(monkeypatch):
-    _stub_deficits(monkeypatch, [Deficit(key="a", count=0, weight=1.0, max_penalty=10.0)])
+    _stub_deficits(
+        monkeypatch, [Deficit(key="a", count=0, weight=1.0, max_penalty=10.0)]
+    )
     result = rem.run_remediation(target_score=90, max_cost_usd=1.0, now=1000.0)
     assert result.stopped_reason == "target_score already met"
     assert result.jobs == []
@@ -91,14 +86,17 @@ def test_run_executes_job_and_improves_score(monkeypatch):
         ran["n"] += 1
         return "fixed"
 
-    rem.register_job(RemediationJob(id="fix.a", title="Fix A", run=_job, fixes_deficit="a"))
-    # First measure: deficit present (score 80); after the job runs, healthy.
+    rem.register_job(
+        RemediationJob(id="fix.a", title="Fix A", run=_job, fixes_deficit="a")
+    )
     calls = {"n": 0}
 
     def _measure():
         calls["n"] += 1
         if calls["n"] == 1:
-            return [Deficit(key="a", count=20, weight=1.0, max_penalty=20.0, job_id="fix.a")]
+            return [
+                Deficit(key="a", count=20, weight=1.0, max_penalty=20.0, job_id="fix.a")
+            ]
         return [Deficit(key="a", count=0, weight=1.0, max_penalty=20.0, job_id="fix.a")]
 
     monkeypatch.setattr(rem, "measure_deficits", _measure)
@@ -113,17 +111,27 @@ def test_run_skips_unreachable_deficit_job(monkeypatch):
     ran = {"n": 0}
     rem.register_job(
         RemediationJob(
-            id="fix.b", title="Fix B", run=lambda: ran.__setitem__("n", 1) or "x", fixes_deficit="b"
+            id="fix.b",
+            title="Fix B",
+            run=lambda: ran.__setitem__("n", 1) or "x",
+            fixes_deficit="b",
         )
     )
-    # deficit present but UNREACHABLE → job not a candidate, score unaffected by it.
     _stub_deficits(
         monkeypatch,
-        [Deficit(key="b", count=50, weight=1.0, max_penalty=20.0, reachable=False, job_id="fix.b")],
+        [
+            Deficit(
+                key="b",
+                count=50,
+                weight=1.0,
+                max_penalty=20.0,
+                reachable=False,
+                job_id="fix.b",
+            )
+        ],
     )
     result = rem.run_remediation(target_score=90, max_cost_usd=1.0, now=1000.0)
-    assert ran["n"] == 0  # never ran — unfixable now
-    # Unreachable deficit doesn't count → already at target.
+    assert ran["n"] == 0
     assert result.stopped_reason == "target_score already met"
 
 
@@ -142,12 +150,10 @@ def test_run_respects_cooldown(monkeypatch):
         monkeypatch,
         [Deficit(key="c", count=20, weight=1.0, max_penalty=20.0, job_id="fix.c")],
     )
-    # First run executes it.
     rem.run_remediation(target_score=90, max_cost_usd=1.0, now=1000.0)
     assert ran["n"] == 1
-    # A run 1 hour later → within the 24h cooldown → skipped.
     result = rem.run_remediation(target_score=90, max_cost_usd=1.0, now=1000.0 + 3600)
-    assert ran["n"] == 1  # not re-run
+    assert ran["n"] == 1
     assert any(j["status"] == "skipped_cooldown" for j in result.jobs)
 
 
@@ -155,20 +161,22 @@ def test_dry_run_does_not_execute_or_change_score(monkeypatch):
     ran = {"n": 0}
     rem.register_job(
         RemediationJob(
-            id="fix.d", title="Fix D", run=lambda: ran.__setitem__("n", 1) or "x", fixes_deficit="d"
+            id="fix.d",
+            title="Fix D",
+            run=lambda: ran.__setitem__("n", 1) or "x",
+            fixes_deficit="d",
         )
     )
     _stub_deficits(
         monkeypatch,
         [Deficit(key="d", count=20, weight=1.0, max_penalty=20.0, job_id="fix.d")],
     )
-    result = rem.run_remediation(target_score=90, max_cost_usd=1.0, now=1000.0, dry_run=True)
-    assert ran["n"] == 0  # dry-run never executes
+    result = rem.run_remediation(
+        target_score=90, max_cost_usd=1.0, now=1000.0, dry_run=True
+    )
+    assert ran["n"] == 0
     assert result.score_after == result.score_before
     assert all(j["status"] == "would_run" for j in result.jobs)
-
-
-# ── ledger ────────────────────────────────────────────────────────────────────
 
 
 def test_ledger_written_and_read_back(monkeypatch):
@@ -199,14 +207,18 @@ def test_ledger_written_and_read_back(monkeypatch):
 
 def test_builtin_deterministic_jobs_registered():
     ids = {j.id for j in rem.all_jobs()}
-    assert {"serving-fs.prune-orphans", "skills.age", "knowledge.reindex-embeddings"} <= ids
-    # all built-ins are the deterministic ($0) lane
+    assert {
+        "serving-fs.prune-orphans",
+        "skills.age",
+        "knowledge.reindex-embeddings",
+    } <= ids
     for j in rem.all_jobs():
-        if j.id in ("serving-fs.prune-orphans", "skills.age", "knowledge.reindex-embeddings"):
+        if j.id in (
+            "serving-fs.prune-orphans",
+            "skills.age",
+            "knowledge.reindex-embeddings",
+        ):
             assert j.lane == "deterministic"
-
-
-# ── absorbed heartbeat maintenance (§4.4, PR2-11) ─────────────────────────────
 
 
 _ABSORBED = {
@@ -243,10 +255,6 @@ def test_every_job_bearing_deficit_can_be_scheduled_alone(tmp_path, monkeypatch)
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     by_key = {d.key: d for d in rem.measure_deficits()}
     job_deficits = {j.fixes_deficit for j in rem.all_jobs() if j.fixes_deficit}
-    # NON-VACUITY: measure the whole set, don't skip what this env can't see. Every
-    # job-bearing deficit is observable in a bare home (each ``measure_deficits`` branch
-    # swallows its own exception, so an unmeasurable one vanishes silently — and a rail
-    # that silently checks nothing reads exactly like a passing one).
     assert job_deficits <= set(by_key), (
         f"deficit(s) {sorted(job_deficits - set(by_key))} are declared by a job but were not "
         f"measured at all — their measure branch is swallowing an exception"
@@ -266,24 +274,27 @@ def test_skills_tampered_deficit_is_a_detector_not_a_job(tmp_path, monkeypatch):
     budget nor depress a score the engine cannot improve."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     tampered = [d for d in rem.measure_deficits() if d.key == "skills_tampered"]
-    assert tampered, "skill-integrity is not measured — verify_skill_integrity is unscheduled"
+    assert (
+        tampered
+    ), "skill-integrity is not measured — verify_skill_integrity is unscheduled"
     d = tampered[0]
     assert d.reachable is False and d.job_id == ""
-    assert rem.health_score([d]) == 100.0  # unreachable → excluded from the score
+    assert rem.health_score([d]) == 100.0
     assert not [j for j in rem.all_jobs() if j.fixes_deficit == "skills_tampered"]
 
 
-def test_history_prune_job_deletes_expired_files_and_their_index_rows(tmp_path, monkeypatch):
+def test_history_prune_job_deletes_expired_files_and_their_index_rows(
+    tmp_path, monkeypatch
+):
     """The job does the WORK: expired daily-history files are gone, and so are the FTS rows
     that would otherwise keep returning snippets for deleted files."""
     from datetime import datetime, timedelta
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.memory import MemoryStore, workspace_dir
+    from gideon.cognition.memory import MemoryJournal, workspace_dir
 
-    # No explicit workspace: the JOB builds MemoryStore() from config_dir(), and passing one
-    # here would point the test at a different memory_index.db than the job writes.
-    mem = MemoryStore()
+    # No explicit workspace: the JOB builds MemoryJournal() from config_dir(), and passing one
+    mem = MemoryJournal()
     mem.init()
     hist = workspace_dir() / "memory" / "history"
     old = hist / f"{datetime.now().date() - timedelta(days=400)}.md"
@@ -298,7 +309,6 @@ def test_history_prune_job_deletes_expired_files_and_their_index_rows(tmp_path, 
     assert "1 history file" in detail
     assert not old.exists() and fresh.exists()
     assert mem.count_history_over_retention(365) == 0
-    # the deleted file left no orphan search row behind
     assert str(old) not in dict(_indexed_rows(mem))
     assert str(fresh) in dict(_indexed_rows(mem))
 
@@ -315,13 +325,13 @@ def test_fts_rebuild_job_reconciles_out_of_band_edits(tmp_path, monkeypatch):
     """The job does the WORK: a memory file edited outside the store API is measured as
     desync and the index matches disk afterwards."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.memory import MemoryStore, workspace_dir
+    from gideon.cognition.memory import MemoryJournal, workspace_dir
 
-    mem = MemoryStore()  # same resolution the job uses (see the sibling test)
+    mem = MemoryJournal()
     mem.init()
     mem.write_preferences("# User Preferences\n\nlikes tea\n")
     mem.rebuild_index()
-    assert mem.fts_desync_count() == 0  # converged
+    assert mem.fts_desync_count() == 0
 
     prefs = workspace_dir() / "memory" / "preferences.md"
     prefs.write_text("# User Preferences\n\nedited by hand\n", encoding="utf-8")
@@ -341,7 +351,7 @@ def test_sel_prune_job_removes_exactly_what_it_measured(tmp_path, monkeypatch):
     from datetime import datetime, timedelta, timezone
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.sel import sel
+    from gideon.security.sel import sel
 
     log = sel()
     log.log_api_access(caller="t", operation="fresh", outcome="ok")
@@ -359,11 +369,8 @@ def test_sel_prune_job_removes_exactly_what_it_measured(tmp_path, monkeypatch):
     assert "fresh" in body and '"event": "old"' not in body
 
 
-# ── knowledge.reindex-embeddings: the job could not work at all (#1782) ────────
-
-
 def _seeded_store(tmp_path, n=3):
-    from gideon.knowledge.store import KnowledgeStore
+    from gideon.cognition.knowledge.store import KnowledgeStore
 
     store = KnowledgeStore(tmp_path / "k.db")
     for i in range(n):
@@ -380,11 +387,12 @@ def _bind(monkeypatch, store, embed):
     `UnifiedEmbedder`, not stubs. A stub accepting anything would have passed against the
     broken code too.
     """
-    from gideon.knowledge.embedder import UnifiedEmbedder
+    from gideon.cognition.knowledge.embedder import UnifiedEmbedder
 
-    monkeypatch.setattr("gideon.knowledge.get_knowledge_store", lambda: store)
+    monkeypatch.setattr("gideon.cognition.knowledge.get_knowledge_store", lambda: store)
     monkeypatch.setattr(
-        "gideon.knowledge.get_knowledge_embedder", lambda: UnifiedEmbedder(embed)
+        "gideon.cognition.knowledge.get_knowledge_embedder",
+        lambda: UnifiedEmbedder(embed),
     )
 
 
@@ -415,12 +423,14 @@ def test_reindex_embeddings_only_touches_items_missing_a_vector(tmp_path, monkey
     assert rem._job_reindex_embeddings() == "re-embedded 1 item(s)"
 
 
-def test_a_total_reindex_failure_raises_instead_of_reporting_zero(tmp_path, monkeypatch):
+def test_a_total_reindex_failure_raises_instead_of_reporting_zero(
+    tmp_path, monkeypatch
+):
     """Raising is the only way this job can say "it did not work": `run_remediation`
     writes `last_success_ts` on any non-raising return, so a clean zero would take the
     job's 6h cooldown while the deficit it claims to fix stayed exactly where it was."""
     store = _seeded_store(tmp_path)
-    _bind(monkeypatch, store, lambda text: [])  # embeds nothing, corrupts nothing
+    _bind(monkeypatch, store, lambda text: [])
 
     with pytest.raises(RuntimeError, match="embedded none of"):
         rem._job_reindex_embeddings()
@@ -428,7 +438,9 @@ def test_a_total_reindex_failure_raises_instead_of_reporting_zero(tmp_path, monk
     assert store.count_items_missing_embedding() == 3
 
 
-def test_a_partial_reindex_reports_the_remainder_and_keeps_its_progress(tmp_path, monkeypatch):
+def test_a_partial_reindex_reports_the_remainder_and_keeps_its_progress(
+    tmp_path, monkeypatch
+):
     """A partial pass DID reduce the backlog, so it must not raise — that would discard
     the progress from the ledger and redo the same work next tick. `reembed_all` leaves a
     failed item vector-less rather than corrupt, so the remainder is simply still in the
@@ -444,8 +456,10 @@ def test_a_partial_reindex_reports_the_remainder_and_keeps_its_progress(tmp_path
 
 def test_reindex_embeddings_skips_cleanly_with_no_embedder(tmp_path, monkeypatch):
     store = _seeded_store(tmp_path)
-    monkeypatch.setattr("gideon.knowledge.get_knowledge_store", lambda: store)
-    monkeypatch.setattr("gideon.knowledge.get_knowledge_embedder", lambda: None)
+    monkeypatch.setattr("gideon.cognition.knowledge.get_knowledge_store", lambda: store)
+    monkeypatch.setattr(
+        "gideon.cognition.knowledge.get_knowledge_embedder", lambda: None
+    )
 
     assert rem._job_reindex_embeddings() == "no embedder bound — skipped"
     assert store.count_items_missing_embedding() == 3

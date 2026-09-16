@@ -27,8 +27,8 @@ import pytest
 from docx import Document
 from docx.shared import Cm, Mm, Pt
 
-from gideon.documents.docx_parser import parse_docx
-from gideon.documents.model import (
+from gideon.workspace.documents.docx_parser import parse_docx
+from gideon.workspace.documents.model import (
     PAGE_SIZE_IN,
     PAGE_SIZES,
     Block,
@@ -36,14 +36,10 @@ from gideon.documents.model import (
     PageSetup,
     ParagraphStyle,
 )
-from gideon.documents.writers.docx_writer import render_docx
+from gideon.workspace.documents.writers.docx_writer import render_docx
 
-#: One twentieth of a point in EMU. `w:pgSz` / `w:pgMar` are stored in twips, so a page
-#: dimension read back off a saved file cannot equal its exact EMU value however precisely
-#: the writer computes it. Asserting exact equality would fail on a correct writer.
 _ONE_TWIP_EMU = 635
 
-#: 2cm, the margin the atom names, in the points `PageSetup` holds.
 _TWO_CM_PT = Cm(2).pt
 
 
@@ -51,13 +47,12 @@ def _reopen(data: bytes):
     return Document(io.BytesIO(data))
 
 
-def _render(page: PageSetup | None = None, *, style: ParagraphStyle | None = None) -> bytes:
+def _render(
+    page: PageSetup | None = None, *, style: ParagraphStyle | None = None
+) -> bytes:
     block = Block(kind="paragraph", text="body")
     block.style = style
     return render_docx(DocumentModel(blocks=[block], page=page))
-
-
-# ── clause 1: A4 landscape, 2cm margins, read back by python-docx ────────────
 
 
 def test_a4_landscape_with_2cm_margins_reads_back_correctly():
@@ -75,7 +70,6 @@ def test_a4_landscape_with_2cm_margins_reads_back_correctly():
         )
     ).sections[0]
 
-    # A4 landscape is 297mm wide by 210mm tall — the SWAP is the whole point of landscape.
     assert abs(section.page_width - Mm(297)) <= _ONE_TWIP_EMU
     assert abs(section.page_height - Mm(210)) <= _ONE_TWIP_EMU
     assert section.page_width > section.page_height
@@ -113,7 +107,9 @@ def test_the_a4_landscape_geometry_survives_a_full_parse_round_trip():
     assert parsed.page is not None
     assert (parsed.page.size, parsed.page.orientation) == ("a4", "landscape")
     for edge in ("top", "bottom", "left", "right"):
-        assert getattr(parsed.page, f"margin_{edge}_pt") == pytest.approx(_TWO_CM_PT, abs=0.05)
+        assert getattr(parsed.page, f"margin_{edge}_pt") == pytest.approx(
+            _TWO_CM_PT, abs=0.05
+        )
     assert report.kinds() == []
 
 
@@ -134,53 +130,54 @@ def test_size_in_applies_orientation_and_says_nothing_when_unset():
         PAGE_SIZE_IN["a4"][1],
         PAGE_SIZE_IN["a4"][0],
     )
-    # No size named: the writer's template decides, and inventing Letter here would
-    # reformat a document that never asked for one.
     assert PageSetup().size_in() == (0.0, 0.0)
     assert PageSetup(orientation="landscape").size_in() == (0.0, 0.0)
 
 
 def test_an_unknown_page_size_raises_rather_than_defaulting():
     """Same reading as `align`/`orientation`: a typo that quietly became "writer default"
-    yields a file that looks plausible while discarding the layout the author asked for."""
+    yields a file that looks plausible while discarding the layout the author asked for.
+    """
     with pytest.raises(ValueError, match="unknown page size"):
-        PageSetup(size="A4")  # the closed set is lower-case
+        PageSetup(size="A4")
     with pytest.raises(ValueError, match="unknown page size"):
         PageSetup(size="a5")
 
-
-# ── clause 2: every paragraph-layout field round-trips ───────────────────────
-#
-# Parametrized over the (field, authored value, reader) triples so a field added to
-# `ParagraphStyle` without a row here reds `test_every_layout_field_has_a_row`.
 
 _LAYOUT_FIELDS = [
     (
         "align",
         "center",
-        lambda fmt, para: para.alignment is not None and "CENTER" in str(para.alignment),
+        lambda fmt, para: para.alignment is not None
+        and "CENTER" in str(para.alignment),
     ),
     ("space_before_pt", 18.0, lambda fmt, para: fmt.space_before == Pt(18)),
     ("space_after_pt", 6.0, lambda fmt, para: fmt.space_after == Pt(6)),
     ("line_spacing", 1.5, lambda fmt, para: fmt.line_spacing == 1.5),
     ("indent_left_pt", 36.0, lambda fmt, para: fmt.left_indent == Pt(36)),
     ("indent_right_pt", 24.0, lambda fmt, para: fmt.right_indent == Pt(24)),
-    # NEGATIVE: a hanging indent. The `> 0` reading every sibling numeric uses would drop
-    # it, and a positive-only test would call that field "round-tripping".
     ("first_line_indent_pt", -18.0, lambda fmt, para: fmt.first_line_indent == Pt(-18)),
     ("keep_with_next", True, lambda fmt, para: fmt.keep_with_next is True),
 ]
 
 
-@pytest.mark.parametrize("name,value,reader", _LAYOUT_FIELDS, ids=[f[0] for f in _LAYOUT_FIELDS])
+@pytest.mark.parametrize(
+    "name,value,reader", _LAYOUT_FIELDS, ids=[f[0] for f in _LAYOUT_FIELDS]
+)
 def test_every_paragraph_layout_field_reads_back_off_the_document(name, value, reader):
     para = _reopen(_render(style=ParagraphStyle(**{name: value}))).paragraphs[0]
 
-    assert reader(para.paragraph_format, para), f"{name}={value!r} did not reach the file"
+    assert reader(
+        para.paragraph_format, para
+    ), f"{name}={value!r} did not reach the file"
 
 
-@pytest.mark.parametrize("name,value,reader", _LAYOUT_FIELDS, ids=[f[0] for f in _LAYOUT_FIELDS])
-def test_each_layout_field_is_ABSENT_when_the_model_leaves_it_unset(name, value, reader):
+@pytest.mark.parametrize(
+    "name,value,reader", _LAYOUT_FIELDS, ids=[f[0] for f in _LAYOUT_FIELDS]
+)
+def test_each_layout_field_is_ABSENT_when_the_model_leaves_it_unset(
+    name, value, reader
+):
     """The vacuity floor for the rail above, one row at a time.
 
     Without it, a writer that hard-coded every property would pass the whole round-trip
@@ -188,10 +185,14 @@ def test_each_layout_field_is_ABSENT_when_the_model_leaves_it_unset(name, value,
     """
     para = _reopen(_render(style=ParagraphStyle())).paragraphs[0]
 
-    assert not reader(para.paragraph_format, para), f"{name} is applied to an unset style"
+    assert not reader(
+        para.paragraph_format, para
+    ), f"{name} is applied to an unset style"
 
 
-@pytest.mark.parametrize("name,value,reader", _LAYOUT_FIELDS, ids=[f[0] for f in _LAYOUT_FIELDS])
+@pytest.mark.parametrize(
+    "name,value,reader", _LAYOUT_FIELDS, ids=[f[0] for f in _LAYOUT_FIELDS]
+)
 def test_every_paragraph_layout_field_survives_a_parse_round_trip(name, value, reader):
     """The editor's own circuit: parse → edit → write → parse must not lose the field."""
     parsed, _ = parse_docx(_render(style=ParagraphStyle(**{name: value})))
@@ -214,9 +215,6 @@ def test_every_layout_field_has_a_row():
     )
 
 
-# ── clause 3: a header round-trips ───────────────────────────────────────────
-
-
 def test_a_header_and_footer_round_trip_through_the_file():
     parsed, report = parse_docx(
         _render(PageSetup(header_text="Quarterly Review", footer_text="Internal"))
@@ -235,7 +233,8 @@ def test_the_header_text_is_really_in_the_headers_own_part():
 
     assert [p.text for p in section.header.paragraphs] == ["Top of page"]
     assert "Top of page" not in "".join(
-        p.text for p in _reopen(_render(PageSetup(header_text="Top of page"))).paragraphs
+        p.text
+        for p in _reopen(_render(PageSetup(header_text="Top of page"))).paragraphs
     )
 
 
@@ -249,12 +248,13 @@ def test_an_unset_header_leaves_the_document_without_one():
 def test_page_numbers_are_a_field_not_a_frozen_digit():
     """A literal number would read the same on every page, which is the whole reason
     `page_numbers` is its own flag rather than part of `footer_text`."""
-    section = _reopen(_render(PageSetup(page_numbers=True, footer_text="Draft"))).sections[0]
+    section = _reopen(
+        _render(PageSetup(page_numbers=True, footer_text="Draft"))
+    ).sections[0]
     xml = section.footer._element.xml
 
     assert "fldSimple" in xml and "PAGE" in xml
     assert "Draft" in xml
-    # And it survives a parse.
     parsed, _ = parse_docx(_render(PageSetup(page_numbers=True, footer_text="Draft")))
     assert parsed.page is not None
     assert parsed.page.page_numbers is True
@@ -307,9 +307,6 @@ def test_a_single_paragraph_header_is_NOT_reported():
     assert model.page is not None and model.page.header_text == "just the one"
 
 
-# ── the closed set the frontend mirrors ──────────────────────────────────────
-
-
 def test_the_frontends_page_size_table_matches_the_models():
     """A cross-language rail, because the preview needs page dimensions in the browser and
     cannot import Python. A drift here is a preview that draws the wrong paper, or a size
@@ -317,13 +314,14 @@ def test_the_frontends_page_size_table_matches_the_models():
     """
     from pathlib import Path
 
-    source = Path(__file__).resolve().parents[1] / "web/src/ui/content/documentPage.ts"
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "apps/console/src/ui/content/documentPage.ts"
+    )
     text = source.read_text(encoding="utf-8")
 
     for name in PAGE_SIZES:
         if not name:
             continue
         assert f"{name}:" in text, f"{name} is missing from {source.name}"
-    # Vacuity floor: a name the model does NOT declare must be absent, or this rail would
-    # pass against a file listing every plausible paper size.
     assert "a5:" not in text

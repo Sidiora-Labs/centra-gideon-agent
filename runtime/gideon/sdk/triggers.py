@@ -36,9 +36,10 @@ building against:
   the collision is reportable. Namespace your ids.
 """
 
-from gideon.triggers.models import Issue, Trigger, parse_trigger  # noqa: F401
-from gideon.triggers.provider import TriggerStoreProvider  # noqa: F401
-from gideon.triggers.store import LoadedTrigger  # noqa: F401
+from gideon.automation.triggers.models import parse_trigger  # noqa: F401
+from gideon.automation.triggers.models import Issue, Trigger
+from gideon.automation.triggers.provider import TriggerStoreProvider  # noqa: F401
+from gideon.automation.triggers.store import LoadedTrigger  # noqa: F401
 
 __all__ = [
     "TriggerStoreProvider",

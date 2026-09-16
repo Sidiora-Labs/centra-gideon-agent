@@ -11,7 +11,7 @@ being true:
 * **Read-only** — enforced in the STORE, so the MCP tools and workflow actions hit the
   same refusal the HTTP route does. All three content-mutating methods are covered.
 * **Never auto-published** — an AST census of every ``share_session`` call site in
-  ``src/gideon``. ``test_the_call_site_census_has_teeth`` feeds that same census a
+  ``runtime/gideon``. ``test_the_call_site_census_has_teeth`` feeds that same census a
   poisoned source and asserts it flags it, because a structural assertion that cannot
   fail is decoration.
 """
@@ -27,29 +27,34 @@ from aiohttp.test_utils import TestClient, TestServer
 from chat_test_helpers import _make_state
 
 import gideon
-from gideon import session_search
-from gideon.artifacts.native import NativeArtifactProvider
-from gideon.dashboard import session_export as se
-from gideon.dashboard import session_share as sh
-from gideon.dashboard import session_starters as ss
+from gideon.engine import session_search
+from gideon.interfaces.dashboard import session_export as se
+from gideon.interfaces.dashboard import session_share as sh
+from gideon.interfaces.dashboard import session_starters as ss
+from gideon.workspace.artifacts.native import NativeArtifactProvider
 
 AWS_KEY = "AKIAIOSFODNN7EXAMPLE"
 
 MESSAGES = [
-    {"role": "user", "content": f"deploy with {AWS_KEY} please", "ts": "2026-08-11T10:00:00Z"},
+    {
+        "role": "user",
+        "content": f"deploy with {AWS_KEY} please",
+        "ts": "2026-08-11T10:00:00Z",
+    },
     {"role": "assistant", "content": "On it.", "ts": "2026-08-11T10:00:01Z"},
     {"role": "stop", "content": "ignored bookkeeping"},
 ]
-META = {"agent": "gideon", "model": "claude-opus-5", "created_at": "2026-08-11T09:59:00Z"}
+META = {
+    "agent": "gideon",
+    "model": "claude-opus-5",
+    "created_at": "2026-08-11T09:59:00Z",
+}
 
 
 @pytest.fixture
 def provider(tmp_path) -> NativeArtifactProvider:
     """A native store rooted in tmp_path — never the real artifacts dir."""
     return NativeArtifactProvider(root=tmp_path / "artifacts")
-
-
-# ── the artifact share_session produces ────────────────────────────────────────
 
 
 def test_shared_body_is_the_export_verbatim(provider):
@@ -82,7 +87,11 @@ def test_share_redacts_the_title_into_the_artifact_name(provider):
     """An auto-titled chat can carry the secret in its title — the artifact NAME is shown
     in the library list, so it leaks in a place the body redaction never covers."""
     art = sh.share_session(
-        provider, key="dashboard:s1", title=f"key {AWS_KEY}", meta=META, messages=MESSAGES
+        provider,
+        key="dashboard:s1",
+        title=f"key {AWS_KEY}",
+        meta=META,
+        messages=MESSAGES,
     )
     assert AWS_KEY not in art.name
     assert art.name.endswith("(shared chat)")
@@ -117,9 +126,6 @@ def test_resharing_writes_a_new_record_not_a_new_version(provider):
     )
     assert a.slug != b.slug
     assert a.version == b.version == 1
-
-
-# ── read-only is enforced by the STORE ─────────────────────────────────────────
 
 
 def test_update_refuses_a_readonly_artifact(provider):
@@ -157,8 +163,10 @@ def test_update_binary_refuses_a_readonly_artifact(provider, tmp_path):
     writer exists, not that today's callers can reach it."""
     art = provider.create_binary(name="pic", data=b"\x89PNG", mime="image/png")
     meta_file = tmp_path / "artifacts" / art.slug / "meta.json"
-    meta_file.write_text(meta_file.read_text().replace('"readonly": false', '"readonly": true'))
-    assert provider.get(art.slug).readonly is True  # the flip landed
+    meta_file.write_text(
+        meta_file.read_text().replace('"readonly": false', '"readonly": true')
+    )
+    assert provider.get(art.slug).readonly is True
     with pytest.raises(PermissionError, match="read-only"):
         provider.update_binary(art.slug, data=b"\x89PNGnew", mime="image/png")
 
@@ -193,9 +201,6 @@ def test_an_ordinary_artifact_is_still_editable(provider):
     assert provider.update(art.slug, content="v2") is not None
 
 
-# ── the route ──────────────────────────────────────────────────────────────────
-
-
 def _make_app(state, provider) -> web.Application:
     app = web.Application()
     app["state"] = state
@@ -211,7 +216,9 @@ def routed(tmp_path, monkeypatch, provider):
     process-global, so registering a tmp-rooted provider into it would leak into every
     later test in the session.
     """
-    monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+    )
     monkeypatch.setattr(ss.registry, "get_provider", lambda name=None: provider)
     state = _make_state(tmp_path)
     log = state.conversation_log
@@ -266,30 +273,31 @@ async def test_share_refuses_every_restricted_mode(routed, mode):
         resp = await client.post("/api/chat/sessions/s1/share")
         assert resp.status == 403
         assert provider.list() == []
-        # The export/share asymmetry is deliberate — a download is the user holding their
-        # own text for a moment — so assert it rather than leaving it to a reader.
-        assert (await client.get("/api/chat/sessions/s1/export?format=md")).status == 200
+        assert (
+            await client.get("/api/chat/sessions/s1/export?format=md")
+        ).status == 200
 
 
 @pytest.mark.asyncio
 async def test_a_persistent_chat_is_not_swept_up_by_the_restriction_gate(routed):
     """The vacuity check on the gate above: a normal chat must still share."""
     state, provider = routed
-    state.conversation_log.update_metadata("dashboard:s1", {"memory_mode": "persistent"})
+    state.conversation_log.update_metadata(
+        "dashboard:s1", {"memory_mode": "persistent"}
+    )
     async with TestClient(TestServer(_make_app(state, provider))) as client:
         assert (await client.post("/api/chat/sessions/s1/share")).status == 201
 
 
 @pytest.mark.asyncio
-async def test_share_reports_unavailable_artifacts_instead_of_500ing(routed, monkeypatch):
+async def test_share_reports_unavailable_artifacts_instead_of_500ing(
+    routed, monkeypatch
+):
     state, provider = routed
     monkeypatch.setattr(ss.registry, "get_provider", lambda name=None: None)
     async with TestClient(TestServer(_make_app(state, provider))) as client:
         resp = await client.post("/api/chat/sessions/s1/share")
         assert resp.status == 503
-
-
-# ── never auto-published: an AST census of every call site ─────────────────────
 
 
 def _share_call_sites(sources: dict[str, str]) -> set[tuple[str, str]]:
@@ -311,7 +319,9 @@ def _share_call_sites(sources: dict[str, str]) -> set[tuple[str, str]]:
                 continue
             f = node.func
             name = (
-                f.attr if isinstance(f, ast.Attribute) else f.id if isinstance(f, ast.Name) else ""
+                f.attr
+                if isinstance(f, ast.Attribute)
+                else f.id if isinstance(f, ast.Name) else ""
             )
             if name == "share_session":
                 found.add((label, parents.get(node, "<module>")))
@@ -321,7 +331,8 @@ def _share_call_sites(sources: dict[str, str]) -> set[tuple[str, str]]:
 def _core_sources() -> dict[str, str]:
     root = Path(gideon.__file__).resolve().parent
     return {
-        str(p.relative_to(root)): p.read_text(encoding="utf-8") for p in sorted(root.rglob("*.py"))
+        str(p.relative_to(root)): p.read_text(encoding="utf-8")
+        for p in sorted(root.rglob("*.py"))
     }
 
 
@@ -367,7 +378,7 @@ def test_share_is_not_in_the_auth_bypass_allowlist():
     "share", so the test names the actual mechanism and cannot be reddened by an unrelated
     comment (nor pass because the allowlist moved fields).
     """
-    from gideon.dashboard.token_auth import _BYPASS_EXACT
+    from gideon.interfaces.dashboard.token_auth import _BYPASS_EXACT
 
     assert _BYPASS_EXACT, "the bypass allowlist is empty — this rail matches nothing"
     assert not [p for p in _BYPASS_EXACT if "share" in p or "session" in p]

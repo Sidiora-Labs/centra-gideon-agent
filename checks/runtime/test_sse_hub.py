@@ -1,11 +1,11 @@
-"""Tests for the SSE substrate (gideon.dashboard.sse)."""
+"""Tests for the SSE substrate (gideon.interfaces.dashboard.sse)."""
 
 import asyncio
 import json
 
 import pytest
 
-from gideon.dashboard.sse import Periodic, SseHub, SseRegistry
+from gideon.interfaces.dashboard.sse import Periodic, SseHub, SseRegistry
 
 
 class TestSseHub:
@@ -20,7 +20,7 @@ class TestSseHub:
         hub = SseHub()
         q = hub.subscribe()
         hub.unsubscribe(q)
-        hub.unsubscribe(q)  # no raise
+        hub.unsubscribe(q)
         assert hub.subscriber_count == 0
 
     def test_publish_fans_out_to_all(self) -> None:
@@ -37,7 +37,7 @@ class TestSseHub:
         q = hub.subscribe()
         hub.publish("refresh", "crons,lessons")
         frame = q.get_nowait()
-        assert frame.data == "crons,lessons"  # NOT JSON-quoted
+        assert frame.data == "crons,lessons"
 
     def test_publish_dict_payload_is_json(self) -> None:
         hub = SseHub()
@@ -47,12 +47,11 @@ class TestSseHub:
         assert json.loads(frame.data) == {"key": "chat-1", "title": "Hi"}
 
     def test_publish_to_no_subscribers_is_noop(self) -> None:
-        SseHub().publish("x", {"a": 1})  # no raise
+        SseHub().publish("x", {"a": 1})
 
     def test_full_queue_drops_without_raising(self) -> None:
         hub = SseHub()
         q = hub.subscribe()
-        # Fill past maxsize; publish must not raise on a slow consumer.
         for i in range(200):
             hub.publish("e", {"i": i})
         assert q.full()
@@ -73,10 +72,8 @@ class TestSseRegistry:
 
     def test_publish_only_when_subscribers(self) -> None:
         reg = SseRegistry()
-        # No hub yet → publish is a silent no-op (does not resurrect a hub).
         reg.publish("loop:abc", "new_finding", {"cycle": 1})
         assert reg.peek("loop:abc") is None
-        # With a live subscriber, the event lands.
         q = reg.hub("loop:abc").subscribe()
         reg.publish("loop:abc", "new_finding", {"cycle": 2})
         frame = q.get_nowait()
@@ -87,10 +84,10 @@ class TestSseRegistry:
         reg = SseRegistry()
         hub = reg.hub("loop:abc")
         q = hub.subscribe()
-        reg._evict_if_empty("loop:abc", hub)  # still has subscriber → kept
+        reg._evict_if_empty("loop:abc", hub)
         assert reg.peek("loop:abc") is hub
         hub.unsubscribe(q)
-        reg._evict_if_empty("loop:abc", hub)  # now empty → evicted
+        reg._evict_if_empty("loop:abc", hub)
         assert reg.peek("loop:abc") is None
 
 
@@ -109,33 +106,32 @@ async def test_stream_response_delivers_then_closes(monkeypatch) -> None:
     from aiohttp import web
     from aiohttp.test_utils import TestClient, TestServer
 
-    from gideon.dashboard import sse as sse_mod
+    from gideon.interfaces.dashboard import sse as sse_mod
 
     hub = SseHub()
 
     async def handler(request: web.Request) -> web.StreamResponse:
-        return await sse_mod.stream_response(request, hub, on_connect=[("hello", {"v": 1})])
+        return await sse_mod.stream_response(
+            request, hub, on_connect=[("hello", {"v": 1})]
+        )
 
     app = web.Application()
     app.router.add_get("/s", handler)
 
     async with TestClient(TestServer(app)) as client:
         resp = await client.get("/s")
-        # Read the on_connect frame.
         line = await asyncio.wait_for(resp.content.readuntil(b"\n\n"), timeout=2)
         text = line.decode()
         assert "event: hello" in text
         assert 'data: {"v": 1}' in text
-        # Publish a live event and read it.
         hub.publish("tick", "raw-string")
         line2 = await asyncio.wait_for(resp.content.readuntil(b"\n\n"), timeout=2)
         text2 = line2.decode()
         assert "event: tick" in text2
         assert "data: raw-string" in text2
-        # Signal shutdown so the handler loop exits without hanging the test.
         sse_mod.shutdown_event.set()
         try:
-            hub.publish("bye", "x")  # wake the wait_for
+            hub.publish("bye", "x")
             await asyncio.wait_for(resp.content.read(), timeout=2)
         except (asyncio.TimeoutError, Exception):
             pass
@@ -151,8 +147,8 @@ async def test_stream_response_close_after_connect_does_not_hang() -> None:
     from aiohttp import web
     from aiohttp.test_utils import TestClient, TestServer
 
-    from gideon.dashboard import sse as sse_mod
-    from gideon.dashboard.sse import SseRegistry
+    from gideon.interfaces.dashboard import sse as sse_mod
+    from gideon.interfaces.dashboard.sse import SseRegistry
 
     registry = SseRegistry()
     feed = "knowledge:ingest:done-item"
@@ -171,8 +167,6 @@ async def test_stream_response_close_after_connect_does_not_hang() -> None:
 
     async with TestClient(TestServer(app)) as client:
         resp = await client.get("/s")
-        # The whole body arrives and the stream closes promptly (no hang).
         body = await asyncio.wait_for(resp.content.read(), timeout=2)
         assert b"event: status" in body and b'"processing_status": "done"' in body
-    # The transient hub was evicted (not left lingering).
     assert registry.peek(feed) is None

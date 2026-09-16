@@ -6,19 +6,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gideon.dashboard.handlers import api_memory_graph
-from gideon.dashboard.state import DashboardState
-
-# ---------------------------------------------------------------------------
-# Unit tests — pure logic, no HTTP
-# ---------------------------------------------------------------------------
+from gideon.interfaces.dashboard.handlers import api_memory_graph
+from gideon.interfaces.dashboard.state import ConsoleState
 
 
 class TestMemoryGraphNodeExtraction:
     """Unit tests for node extraction from different memory sources."""
 
     def _make_state(self, tmp_path, prefs="", projects="", history=""):
-        """Create a minimal DashboardState with mocked memory."""
+        """Create a minimal ConsoleState with mocked memory."""
         mem = MagicMock()
         mem.read_preferences.return_value = prefs
         mem.read_projects.return_value = projects
@@ -28,7 +24,7 @@ class TestMemoryGraphNodeExtraction:
         cb = MagicMock()
         cb.memory = mem
 
-        state = DashboardState(
+        state = ConsoleState(
             sessions=MagicMock(count=0),
             start_time=0.0,
             context_builder=cb,
@@ -37,7 +33,9 @@ class TestMemoryGraphNodeExtraction:
 
     @pytest.mark.asyncio
     async def test_empty_memory_returns_empty_graph(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = self._make_state(tmp_path)
         request = MagicMock()
         request.app = {"state": state}
@@ -50,8 +48,12 @@ class TestMemoryGraphNodeExtraction:
 
     @pytest.mark.asyncio
     async def test_preferences_become_nodes(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        state = self._make_state(tmp_path, prefs="- Prefers dark mode\n- Uses vim keybindings")
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        state = self._make_state(
+            tmp_path, prefs="- Prefers dark mode\n- Uses vim keybindings"
+        )
         request = MagicMock()
         request.app = {"state": state}
 
@@ -65,8 +67,12 @@ class TestMemoryGraphNodeExtraction:
 
     @pytest.mark.asyncio
     async def test_short_preferences_skipped(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        state = self._make_state(tmp_path, prefs="- OK\n- Yes\n- Prefers concise output")
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        state = self._make_state(
+            tmp_path, prefs="- OK\n- Yes\n- Prefers concise output"
+        )
         request = MagicMock()
         request.app = {"state": state}
 
@@ -74,11 +80,13 @@ class TestMemoryGraphNodeExtraction:
         data = json.loads(resp.body)
 
         pref_nodes = [n for n in data["nodes"] if n["group"] == "preference"]
-        assert len(pref_nodes) == 1  # Only "Prefers concise output" (>5 chars)
+        assert len(pref_nodes) == 1
 
     @pytest.mark.asyncio
     async def test_comments_and_headings_skipped_in_prefs(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = self._make_state(
             tmp_path,
             prefs="# User Preferences\n<!-- comment -->\n- Prefers dark mode",
@@ -94,7 +102,9 @@ class TestMemoryGraphNodeExtraction:
 
     @pytest.mark.asyncio
     async def test_projects_create_parent_and_detail_nodes(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = self._make_state(
             tmp_path,
             projects="## Gideon\n- Repository: ssh://git.example.com/gideon\n- Branch: main",  # noqa: E501
@@ -106,14 +116,15 @@ class TestMemoryGraphNodeExtraction:
         data = json.loads(resp.body)
 
         proj_nodes = [n for n in data["nodes"] if n["group"] == "project"]
-        assert len(proj_nodes) == 3  # parent + 2 details
+        assert len(proj_nodes) == 3
         assert any(n["label"] == "Gideon" for n in proj_nodes)
-        # Detail nodes should have edges to parent
         assert len(data["edges"]) == 2
 
     @pytest.mark.asyncio
     async def test_history_headings_become_nodes(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = self._make_state(
             tmp_path,
             history="# 2026-03-25\n#### 06:47 UTC\n[2026-03-25 01:38] Did some work on the feature",
@@ -125,13 +136,13 @@ class TestMemoryGraphNodeExtraction:
         data = json.loads(resp.body)
 
         hist_nodes = [n for n in data["nodes"] if n["group"] == "history"]
-        assert len(hist_nodes) >= 2  # heading + bracketed entry
+        assert len(hist_nodes) >= 2
 
     @pytest.mark.asyncio
     async def test_lessons_become_nodes(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        # Lessons are memory.db lesson.* rows (the sole store): plant them on the
-        # record store the graph reads through service_for(memory).get_lessons().
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = self._make_state(tmp_path)
         vs = MagicMock()
         vs.get_all_semantic.return_value = []
@@ -151,7 +162,9 @@ class TestMemoryGraphNodeExtraction:
 
     @pytest.mark.asyncio
     async def test_semantic_memory_becomes_nodes(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = self._make_state(tmp_path)
         vs = MagicMock()
         vs.get_all_semantic.return_value = [
@@ -171,12 +184,16 @@ class TestMemoryGraphNodeExtraction:
         assert any("pref.editor" in n["label"] for n in sem_nodes)
 
     @pytest.mark.asyncio
-    async def test_nodes_carry_stable_ref_for_studio_mapping(self, tmp_path, monkeypatch):
+    async def test_nodes_carry_stable_ref_for_studio_mapping(
+        self, tmp_path, monkeypatch
+    ):
         """Every graph node carries a stable un-hashed `ref` handle onto its source
         memory (`sem:<key>` for a semantic fact) so the Memory Studio can map a
         selected list entry to its node WITHOUT re-deriving the md5 id. Guards the
         FE↔graph mapping seam."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = self._make_state(tmp_path)
         vs = MagicMock()
         vs.get_all_semantic.return_value = [
@@ -190,16 +207,19 @@ class TestMemoryGraphNodeExtraction:
         resp = await api_memory_graph(request)
         data = json.loads(resp.body)
 
-        # every node has a ref; the semantic fact's ref is exactly `sem:<key>`.
         assert all(n.get("ref") for n in data["nodes"])
         sem_nodes = [n for n in data["nodes"] if n["group"] == "semantic"]
         assert sem_nodes and sem_nodes[0]["ref"] == "sem:pref.editor"
 
     @pytest.mark.asyncio
-    async def test_semantic_raw_string_value_json_does_not_crash(self, tmp_path, monkeypatch):
+    async def test_semantic_raw_string_value_json_does_not_crash(
+        self, tmp_path, monkeypatch
+    ):
         """value_json can contain raw strings (URLs, plain text) that are not
         valid JSON. The handler must not crash — it should treat them as-is."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = self._make_state(tmp_path)
         vs = MagicMock()
         vs.get_all_semantic.return_value = [
@@ -217,15 +237,18 @@ class TestMemoryGraphNodeExtraction:
 
         sem_nodes = [n for n in data["nodes"] if n["group"] == "semantic"]
         assert len(sem_nodes) == 3
-        # Raw URL should appear in the title as-is, not cause a crash
         url_node = [n for n in sem_nodes if "project.url" in n["label"]]
         assert len(url_node) == 1
         assert "https://tasks.example.com/tasks/123" in url_node[0]["title"]
 
     @pytest.mark.asyncio
-    async def test_graph_redacts_credentials_in_semantic_nodes(self, tmp_path, monkeypatch):
+    async def test_graph_redacts_credentials_in_semantic_nodes(
+        self, tmp_path, monkeypatch
+    ):
         """Memory graph endpoint must redact credentials in node labels/titles."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = self._make_state(tmp_path)
         vs = MagicMock()
         vs.get_all_semantic.return_value = [
@@ -249,8 +272,10 @@ class TestMemoryEndpointRedaction:
 
     @pytest.mark.asyncio
     async def test_semantic_redacts_credential_in_key(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        mod = importlib.import_module("gideon.dashboard.handlers")
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        mod = importlib.import_module("gideon.interfaces.dashboard.handlers")
         vs = MagicMock()
         vs.get_all_semantic.return_value = [
             {"key": "AKIAIOSFODNN7EXAMPLE", "value_json": "ok"},
@@ -264,9 +289,13 @@ class TestMemoryEndpointRedaction:
         assert "AKIAIOSFODNN7EXAMPLE" not in data["entries"][0]["key"]
 
     @pytest.mark.asyncio
-    async def test_semantic_redacts_credential_in_value_json(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        mod = importlib.import_module("gideon.dashboard.handlers")
+    async def test_semantic_redacts_credential_in_value_json(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        mod = importlib.import_module("gideon.interfaces.dashboard.handlers")
         vs = MagicMock()
         vs.get_all_semantic.return_value = [
             {"key": "k1", "value_json": "AKIAIOSFODNN7EXAMPLE"},
@@ -281,8 +310,10 @@ class TestMemoryEndpointRedaction:
 
     @pytest.mark.asyncio
     async def test_semantic_redacts_tags_as_list(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        mod = importlib.import_module("gideon.dashboard.handlers")
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        mod = importlib.import_module("gideon.interfaces.dashboard.handlers")
         vs = MagicMock()
         vs.get_all_semantic.return_value = [
             {"key": "k1", "value_json": "ok", "tags": ["safe", "AKIAIOSFODNN7EXAMPLE"]},
@@ -299,8 +330,10 @@ class TestMemoryEndpointRedaction:
 
     @pytest.mark.asyncio
     async def test_episodic_search_redacts_text(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        mod = importlib.import_module("gideon.dashboard.handlers")
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        mod = importlib.import_module("gideon.interfaces.dashboard.handlers")
         vs = MagicMock()
         vs.embed_fn = None
         vs.search_episodic.return_value = [
@@ -317,8 +350,10 @@ class TestMemoryEndpointRedaction:
 
     @pytest.mark.asyncio
     async def test_episodic_list_redacts_tags_list(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        mod = importlib.import_module("gideon.dashboard.handlers")
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        mod = importlib.import_module("gideon.interfaces.dashboard.handlers")
         vs = MagicMock()
         vs.get_episodic_list.return_value = [
             {"id": "1", "text": "ok", "tags": ["AKIAIOSFODNN7EXAMPLE"]},
@@ -335,8 +370,10 @@ class TestMemoryEndpointRedaction:
     @pytest.mark.asyncio
     async def test_semantic_redacts_all_string_fields(self, tmp_path, monkeypatch):
         """Defense-in-depth: credentials in ANY string field are redacted."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        mod = importlib.import_module("gideon.dashboard.handlers")
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        mod = importlib.import_module("gideon.interfaces.dashboard.handlers")
         vs = MagicMock()
         vs.get_all_semantic.return_value = [
             {"key": "k1", "value_json": "ok", "source": "AKIAIOSFODNN7EXAMPLE"},
@@ -350,10 +387,14 @@ class TestMemoryEndpointRedaction:
         assert "AKIAIOSFODNN7EXAMPLE" not in data["entries"][0]["source"]
 
     @pytest.mark.asyncio
-    async def test_episodic_search_redacts_all_string_fields(self, tmp_path, monkeypatch):
+    async def test_episodic_search_redacts_all_string_fields(
+        self, tmp_path, monkeypatch
+    ):
         """Defense-in-depth: credentials in ANY episodic field are redacted."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        mod = importlib.import_module("gideon.dashboard.handlers")
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        mod = importlib.import_module("gideon.interfaces.dashboard.handlers")
         vs = MagicMock()
         vs.embed_fn = None
         vs.search_episodic.return_value = [
@@ -371,8 +412,10 @@ class TestMemoryEndpointRedaction:
     @pytest.mark.asyncio
     async def test_episodic_list_redacts_all_string_fields(self, tmp_path, monkeypatch):
         """Defense-in-depth: credentials in ANY episodic field are redacted."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        mod = importlib.import_module("gideon.dashboard.handlers")
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        mod = importlib.import_module("gideon.interfaces.dashboard.handlers")
         vs = MagicMock()
         vs.get_episodic_list.return_value = [
             {"id": "1", "text": "ok", "conversation_id": "AKIAIOSFODNN7EXAMPLE"},
@@ -389,8 +432,10 @@ class TestMemoryEndpointRedaction:
     @pytest.mark.asyncio
     async def test_redaction_preserves_non_string_fields(self, tmp_path, monkeypatch):
         """Numeric and other non-string fields pass through unchanged."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        mod = importlib.import_module("gideon.dashboard.handlers")
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        mod = importlib.import_module("gideon.interfaces.dashboard.handlers")
         vs = MagicMock()
         vs.get_all_semantic.return_value = [
             {"key": "k1", "value_json": "v", "confidence": 0.95, "is_deleted": 0},
@@ -407,8 +452,10 @@ class TestMemoryEndpointRedaction:
     @pytest.mark.asyncio
     async def test_redaction_does_not_mutate_store_objects(self, tmp_path, monkeypatch):
         """Redaction must operate on copies, never mutating the store's records."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        mod = importlib.import_module("gideon.dashboard.handlers")
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        mod = importlib.import_module("gideon.interfaces.dashboard.handlers")
         original = {
             "key": "k1",
             "value_json": "AKIAIOSFODNN7EXAMPLE",
@@ -421,7 +468,6 @@ class TestMemoryEndpointRedaction:
         req = MagicMock()
         req.app = {"state": state}
         await mod.api_memory_semantic(req)
-        # Original dict must be untouched
         assert original["value_json"] == "AKIAIOSFODNN7EXAMPLE"
         assert original["tags"] == ["AKIAIOSFODNN7EXAMPLE"]
 
@@ -439,7 +485,7 @@ class TestMemoryGraphEdgeDetection:
         cb = MagicMock()
         cb.memory = mem
 
-        state = DashboardState(
+        state = ConsoleState(
             sessions=MagicMock(count=0),
             start_time=0.0,
             context_builder=cb,
@@ -447,8 +493,12 @@ class TestMemoryGraphEdgeDetection:
         return state
 
     @pytest.mark.asyncio
-    async def test_preference_referencing_project_creates_edge(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+    async def test_preference_referencing_project_creates_edge(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = self._make_state(
             tmp_path,
             prefs="- Uses Gideon for automation",
@@ -460,17 +510,21 @@ class TestMemoryGraphEdgeDetection:
         resp = await api_memory_graph(request)
         data = json.loads(resp.body)
 
-        # Should have: project parent edge to detail + pref->project edge
         cross_edges = [
             e
             for e in data["edges"]
-            if any(n["group"] == "preference" and n["id"] == e["from"] for n in data["nodes"])
+            if any(
+                n["group"] == "preference" and n["id"] == e["from"]
+                for n in data["nodes"]
+            )
         ]
         assert len(cross_edges) >= 1
 
     @pytest.mark.asyncio
     async def test_no_self_edges(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = self._make_state(
             tmp_path,
             prefs="- Uses TestProject for everything",
@@ -491,7 +545,9 @@ class TestMemoryGraphResponseFormat:
 
     @pytest.mark.asyncio
     async def test_response_has_required_fields(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         mem = MagicMock()
         mem.read_preferences.return_value = "- Test preference value"
         mem.read_projects.return_value = ""
@@ -499,7 +555,7 @@ class TestMemoryGraphResponseFormat:
         mem.vector_store = None
         cb = MagicMock()
         cb.memory = mem
-        state = DashboardState(
+        state = ConsoleState(
             sessions=MagicMock(count=0),
             start_time=0.0,
             context_builder=cb,
@@ -515,7 +571,6 @@ class TestMemoryGraphResponseFormat:
         assert isinstance(data["nodes"], list)
         assert isinstance(data["edges"], list)
 
-        # Each node has required fields
         for node in data["nodes"]:
             assert "id" in node
             assert "label" in node
@@ -524,7 +579,9 @@ class TestMemoryGraphResponseFormat:
 
     @pytest.mark.asyncio
     async def test_node_labels_truncated_at_60(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         long_pref = "- " + "A" * 200
         mem = MagicMock()
         mem.read_preferences.return_value = long_pref
@@ -533,7 +590,7 @@ class TestMemoryGraphResponseFormat:
         mem.vector_store = None
         cb = MagicMock()
         cb.memory = mem
-        state = DashboardState(
+        state = ConsoleState(
             sessions=MagicMock(count=0),
             start_time=0.0,
             context_builder=cb,
@@ -549,7 +606,9 @@ class TestMemoryGraphResponseFormat:
 
     @pytest.mark.asyncio
     async def test_node_ids_are_deterministic(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         mem = MagicMock()
         mem.read_preferences.return_value = "- Prefers dark mode"
         mem.read_projects.return_value = ""
@@ -557,7 +616,7 @@ class TestMemoryGraphResponseFormat:
         mem.vector_store = None
         cb = MagicMock()
         cb.memory = mem
-        state = DashboardState(
+        state = ConsoleState(
             sessions=MagicMock(count=0),
             start_time=0.0,
             context_builder=cb,
@@ -574,7 +633,9 @@ class TestMemoryGraphResponseFormat:
 
     @pytest.mark.asyncio
     async def test_no_duplicate_nodes(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         mem = MagicMock()
         mem.read_preferences.return_value = "- Same pref\n- Same pref"
         mem.read_projects.return_value = ""
@@ -582,7 +643,7 @@ class TestMemoryGraphResponseFormat:
         mem.vector_store = None
         cb = MagicMock()
         cb.memory = mem
-        state = DashboardState(
+        state = ConsoleState(
             sessions=MagicMock(count=0),
             start_time=0.0,
             context_builder=cb,
@@ -602,7 +663,9 @@ class TestMemoryGraphErrorHandling:
 
     @pytest.mark.asyncio
     async def test_vector_store_error_doesnt_crash(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         mem = MagicMock()
         mem.read_preferences.return_value = ""
         mem.read_projects.return_value = ""
@@ -613,7 +676,7 @@ class TestMemoryGraphErrorHandling:
         mem.vector_store = vs
         cb = MagicMock()
         cb.memory = mem
-        state = DashboardState(
+        state = ConsoleState(
             sessions=MagicMock(count=0),
             start_time=0.0,
             context_builder=cb,
@@ -624,16 +687,14 @@ class TestMemoryGraphErrorHandling:
         resp = await api_memory_graph(request)
         data = json.loads(resp.body)
 
-        # Should still return valid response, just without vector data
         assert "nodes" in data
         assert "edges" in data
 
     @pytest.mark.asyncio
     async def test_vector_store_error_degrades_gracefully(self, tmp_path, monkeypatch):
-        # memory.db lesson.* is the sole lesson store (no JSONL fallback): when the
-        # record store errors, the graph still returns a valid response and simply
-        # carries no lesson nodes rather than crashing.
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         mem = MagicMock()
         mem.read_preferences.return_value = ""
         mem.read_projects.return_value = ""
@@ -644,7 +705,7 @@ class TestMemoryGraphErrorHandling:
         mem.vector_store = vs
         cb = MagicMock()
         cb.memory = mem
-        state = DashboardState(
+        state = ConsoleState(
             sessions=MagicMock(count=0),
             start_time=0.0,
             context_builder=cb,
@@ -660,11 +721,6 @@ class TestMemoryGraphErrorHandling:
         assert lesson_nodes == [], "no lesson nodes when the record store errors"
 
 
-# ---------------------------------------------------------------------------
-# Integration tests — real HTTP server via aiohttp TestClient
-# ---------------------------------------------------------------------------
-
-
 class TestMemoryGraphHTTPIntegration:
     """Integration tests hitting the actual /api/memory/graph endpoint."""
 
@@ -676,7 +732,7 @@ class TestMemoryGraphHTTPIntegration:
         mem.vector_store = None
         cb = MagicMock()
         cb.memory = mem
-        return DashboardState(
+        return ConsoleState(
             sessions=MagicMock(count=0),
             start_time=0.0,
             context_builder=cb,
@@ -694,7 +750,9 @@ class TestMemoryGraphHTTPIntegration:
     async def test_endpoint_returns_200_with_json(self, tmp_path, monkeypatch):
         from aiohttp.test_utils import TestClient, TestServer
 
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = self._make_state(tmp_path, prefs="- Prefers dark mode")
         async with TestClient(TestServer(self._make_app(state))) as client:
             resp = await client.get("/api/memory/graph")
@@ -708,7 +766,9 @@ class TestMemoryGraphHTTPIntegration:
     async def test_endpoint_returns_empty_graph(self, tmp_path, monkeypatch):
         from aiohttp.test_utils import TestClient, TestServer
 
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = self._make_state(tmp_path)
         async with TestClient(TestServer(self._make_app(state))) as client:
             resp = await client.get("/api/memory/graph")
@@ -721,14 +781,15 @@ class TestMemoryGraphHTTPIntegration:
     async def test_endpoint_with_all_memory_types(self, tmp_path, monkeypatch):
         from aiohttp.test_utils import TestClient, TestServer
 
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = self._make_state(
             tmp_path,
             prefs="- Prefers dark mode",
             projects="## Gideon\n- Local path: /home/user/mc",
             history="# 2026-03-25\n[2026-03-25 10:00] Did some work",
         )
-        # Lessons come from memory.db lesson.* (the sole store) via get_lessons().
         vs = MagicMock()
         vs.get_all_semantic.return_value = []
         vs.get_lessons.return_value = [
@@ -744,4 +805,4 @@ class TestMemoryGraphHTTPIntegration:
             assert "project" in groups
             assert "history" in groups
             assert "lesson" in groups
-            assert len(data["edges"]) > 0  # project parent->detail edges at minimum
+            assert len(data["edges"]) > 0

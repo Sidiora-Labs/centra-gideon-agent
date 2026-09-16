@@ -29,8 +29,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from gideon.browse.extraction import extract_page
-from gideon.browse.loop import (
+from gideon.integrations.browse.extraction import extract_page
+from gideon.integrations.browse.loop import (
     MAX_STEPS_DEFAULT,
     PARK_BUDGET_EXHAUSTED,
     PARK_NAVIGATION_BLOCKED,
@@ -40,7 +40,7 @@ from gideon.browse.loop import (
     VERDICT_FORM_OK,
     run_browse_loop,
 )
-from gideon.security import is_fenced
+from gideon.security.security import is_fenced
 
 INDEX_URL = "https://example.test/docs"
 CHANGELOG_URL = "https://example.test/changelog"
@@ -84,9 +84,6 @@ def _isolated_home(tmp_path, monkeypatch):
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
     return home
-
-
-# ── harness ───────────────────────────────────────────────────────────────────
 
 
 class _FakePage:
@@ -145,7 +142,11 @@ class _FakeSession:
         self.navigations.append(url)
         if url in self.deny:
             return SimpleNamespace(
-                ok=False, allowed=False, url=url, reason="denied by the BROWSE policy", error=""
+                ok=False,
+                allowed=False,
+                url=url,
+                reason="denied by the BROWSE policy",
+                error="",
             )
         self._page.url = url
         return SimpleNamespace(ok=True, allowed=True, url=url, reason="", error="")
@@ -186,9 +187,6 @@ def _fresh_pair(*, url: str = INDEX_URL, deny: tuple[str, ...] = ()):
     return _FakeSession(page, deny=deny), page
 
 
-# ── clause 1: the ActionProvider contract + the allowlist ─────────────────────
-
-
 class TestTheProviderContract:
     def test_browse_implements_the_action_provider_abc_and_is_resolvable_by_name(self):
         """Not `issubclass` on the class the test imported — the object the DISPATCH SEAMS get.
@@ -196,8 +194,8 @@ class TestTheProviderContract:
         `get_action_provider("browse")` is the one lookup every seam performs, so resolving it
         here is what proves the provider is reachable rather than merely written.
         """
-        from gideon.action_providers.base import ActionProvider
-        from gideon.action_providers.registry import (
+        from gideon.integrations.action_providers.base import ActionProvider
+        from gideon.integrations.action_providers.registry import (
             _ensure_default_providers_registered,
             get_action_provider,
         )
@@ -208,8 +206,6 @@ class TestTheProviderContract:
         assert isinstance(provider, ActionProvider)
         assert provider.name == "browse"
         assert provider.display_name
-        # The ABC's abstract surface is satisfied without a shim: instantiating an incomplete
-        # subclass raises TypeError, so a successful construction IS the assertion.
         assert type(provider)() is not provider
 
     def test_browse_is_in_allowed_hook_providers_and_the_create_path_accepts_it(self):
@@ -219,22 +215,23 @@ class TestTheProviderContract:
         runs, not just against the frozenset — the frozenset is the mechanism, the accepted
         create is the use.
         """
-        from gideon.validation import ALLOWED_HOOK_PROVIDERS, HOOK_CREATE_SCHEMA
+        from gideon.assurance.validation import (
+            ALLOWED_HOOK_PROVIDERS,
+            HOOK_CREATE_SCHEMA,
+        )
 
         assert "browse" in ALLOWED_HOOK_PROVIDERS
 
         field = next(f for f in HOOK_CREATE_SCHEMA.fields if f.name == "provider")
         assert "browse" in field.allowed
-        # CONTROL: the same allowed-set is what rejects an unknown name, so the assertion
-        # above is not vacuously true of every string.
         assert "browse-but-typoed" not in field.allowed
 
     def test_browse_carries_an_autonomy_declaration_so_the_seams_can_govern_it(self):
         """A registered provider with no declaration is, at a seam, indistinguishable from an
         ungoverned action. Browse declares `one_tap` at both ends because a SUBMIT is an
         irreversible external write it cannot undo."""
-        from gideon.guardrails import autonomy as au
-        from gideon.guardrails.rungs import ensure_core_action_types
+        from gideon.security.guardrails import autonomy as au
+        from gideon.security.guardrails.rungs import ensure_core_action_types
 
         ensure_core_action_types()
         spec = au.action_type_for_provider("browse")
@@ -250,7 +247,7 @@ class TestTheProviderContract:
         pins WHICH. Write-capable is not a close call for a SUBMIT, and even a read-only browse
         spends a model call per step over attacker-controlled text — so it needs the opt-in.
         """
-        from gideon.triggers.screen import (
+        from gideon.automation.triggers.screen import (
             READ_ONLY_PROVIDERS,
             WRITE_CAPABLE_PROVIDERS,
             provider_is_read_only,
@@ -259,18 +256,18 @@ class TestTheProviderContract:
         assert "browse" in WRITE_CAPABLE_PROVIDERS
         assert "browse" not in READ_ONLY_PROVIDERS
         assert provider_is_read_only("browse") is False
-        # CONTROL: the predicate does return True for something, so the assertion above is not
-        # just the fail-closed default answering for every string.
         assert provider_is_read_only("notify") is True
 
-    def test_the_denylist_screens_a_browse_dispatch_at_the_real_hooks_seam(self, monkeypatch):
+    def test_the_denylist_screens_a_browse_dispatch_at_the_real_hooks_seam(
+        self, monkeypatch
+    ):
         """THE call site for the 'inheriting denylist' clause.
 
         The seam is driven for real; `enforce_action` is spied at its definition site. Delete
         the `enforce_action` call from `hooks.py` and this goes red — which is the point, because
         browse contributes nothing to that screen and inherits all of it.
         """
-        from gideon.guardrails import denylist as dl
+        from gideon.security.guardrails import denylist as dl
 
         seen: list[tuple[str, dict]] = []
 
@@ -282,7 +279,7 @@ class TestTheProviderContract:
 
         monkeypatch.setattr(dl, "enforce_action", _spy)
 
-        from gideon.hooks import ScriptHook, run_script_hook
+        from gideon.engine.hooks import ScriptHook, run_script_hook
 
         hook = ScriptHook(
             id="h1",
@@ -300,15 +297,12 @@ class TestTheProviderContract:
         assert hook.last_status == "blocked"
 
 
-# ── clause 2: the workflow action node ────────────────────────────────────────
-
-
 class TestTheWorkflowActionNode:
     def test_a_workflow_definition_naming_browse_is_accepted(self):
         """`validate_spec` is the authoring-time acceptance path. A browse action node with its
         arguments under `config.with` validates clean — no warnings either, because a flat
         argument beside `provider` reaches the provider as an empty config."""
-        from gideon.workflows.validator import validate_spec
+        from gideon.automation.workflows.validator import validate_spec
 
         res = validate_spec(
             {
@@ -318,7 +312,10 @@ class TestTheWorkflowActionNode:
                     "id": "browse-docs",
                     "config": {
                         "provider": "browse",
-                        "with": {"goal": "find the latest version", "start_url": INDEX_URL},
+                        "with": {
+                            "goal": "find the latest version",
+                            "start_url": INDEX_URL,
+                        },
                     },
                 },
             }
@@ -326,17 +323,21 @@ class TestTheWorkflowActionNode:
         assert res.ok, [i.code for i in res.issues]
         assert not [i for i in res.issues if i.code.startswith("WF_")], res.issues
 
-    def test_the_action_node_dispatches_browse_through_the_REAL_registry(self, monkeypatch):
+    def test_the_action_node_dispatches_browse_through_the_REAL_registry(
+        self, monkeypatch
+    ):
         """THE call site. `get_provider=None` means `dispatch_action` resolves the name itself
         through `action_providers.registry.get_action_provider` — the seam BA-3 had to land in,
         not a parallel path.
 
         The provider's own plumbing is faked (no browser, no model); the RESOLUTION is real.
         """
-        from gideon.action_providers import browse_provider as bp
-        from gideon.action_providers.registry import _ensure_default_providers_registered
-        from gideon.workflows.engine import dispatch_action
-        from gideon.workflows.models import InstanceState, Node
+        from gideon.automation.workflows.engine import dispatch_action
+        from gideon.automation.workflows.models import InstanceState, Node
+        from gideon.integrations.action_providers import browse_provider as bp
+        from gideon.integrations.action_providers.registry import (
+            _ensure_default_providers_registered,
+        )
 
         _ensure_default_providers_registered()
 
@@ -346,8 +347,6 @@ class TestTheWorkflowActionNode:
         monkeypatch.setattr(
             bp.BrowseActionProvider,
             "_open",
-            # `cdp_url` is keyword-only on the real seam (BA-7 resolves the target before the
-            # connect, so `_open` no longer reads the config key itself).
             lambda self, cfg, ctx, *, cdp_url="": _done((session, page, None)),
         )
 
@@ -364,18 +363,18 @@ class TestTheWorkflowActionNode:
         result = _run(dispatch_action(node, _binding_ctx(), run_id="run-1"))
 
         assert result.state is InstanceState.DONE, result.failure
-        # The engine parses the provider's JSON stdout into the node's output, so a downstream
-        # binding reads `{{nodes.browse-docs.notes}}` with nothing in between.
         assert result.output["notes"] == ["version 2.0 shipped on Tuesday"]
-        assert session.navigations == [INDEX_URL], "the node did not drive the gated session"
+        assert session.navigations == [
+            INDEX_URL
+        ], "the node did not drive the gated session"
 
     def test_the_same_node_fails_when_browse_is_not_registered(self, monkeypatch):
         """CONTROL for the test above. With the registry entry removed the identical node fails
         'unknown action provider' — so the green above is about the real resolution, not about
         the fake plumbing being reachable some other way."""
-        from gideon.action_providers import registry
-        from gideon.workflows.engine import dispatch_action
-        from gideon.workflows.models import InstanceState, Node
+        from gideon.automation.workflows.engine import dispatch_action
+        from gideon.automation.workflows.models import InstanceState, Node
+        from gideon.integrations.action_providers import registry
 
         registry._ensure_default_providers_registered()
         monkeypatch.setattr(registry, "get_action_provider", lambda _name: None)
@@ -386,9 +385,6 @@ class TestTheWorkflowActionNode:
         result = _run(dispatch_action(node, _binding_ctx()))
         assert result.state is InstanceState.FAILED
         assert "unknown action provider" in (result.failure.cause_plain or "")
-
-
-# ── clause 3: the loop, its ceiling, and per-page fencing ─────────────────────
 
 
 class TestTheLoop:
@@ -425,11 +421,9 @@ class TestTheLoop:
         assert ("click", changelog_ref) in page.actions
         assert session.navigations == [INDEX_URL, CHANGELOG_URL]
 
-        # PER PAGE, not once for the run: four perceive steps, four fenced pages.
         assert len(decide.page_prompts) == 4
         unfenced = [i for i, p in enumerate(decide.page_prompts) if not is_fenced(p)]
         assert unfenced == [], f"page(s) reached the model unfenced: {unfenced}"
-        # And the fence carries the page's provenance, so a reader can tell WHICH page.
         assert f"source={CHANGELOG_URL} source_type=web_page" in decide.page_prompts[-1]
 
     def test_the_default_ceiling_is_twenty_steps(self):
@@ -457,7 +451,8 @@ class TestTheLoop:
 
     def test_a_stuck_model_is_warned_once_and_then_the_run_ends(self):
         """§7.2 stuck detection. The warning has to reach the NEXT prompt, and a model that
-        ignores it has to stop the run — otherwise the guard is a slower infinite loop."""
+        ignores it has to stop the run — otherwise the guard is a slower infinite loop.
+        """
         session, page = _fresh_pair()
         decide = _Decide(fallback="SCROLL down")
         result = _run(
@@ -477,7 +472,9 @@ class TestTheLoop:
     def test_revisiting_a_page_warns_the_model(self):
         """Visited-URL dedup (§7.2): a warning, not a refusal — revisiting is sometimes right."""
         session, page = _fresh_pair()
-        decide = _Decide(f"NAVIGATE {CHANGELOG_URL}", f"NAVIGATE {CHANGELOG_URL}", "DONE")
+        decide = _Decide(
+            f"NAVIGATE {CHANGELOG_URL}", f"NAVIGATE {CHANGELOG_URL}", "DONE"
+        )
         _run(
             run_browse_loop(
                 goal="loop between two pages",
@@ -492,7 +489,8 @@ class TestTheLoop:
 
     def test_a_denied_first_navigation_is_a_failure_not_a_park(self):
         """A run that never loaded a page produced nothing to keep, so it fails rather than
-        parking — parking a run with no notes asks a human to look at an empty result."""
+        parking — parking a run with no notes asks a human to look at an empty result.
+        """
         session, page = _fresh_pair(deny=(INDEX_URL,))
         decide = _Decide("DONE")
         result = _run(
@@ -507,10 +505,9 @@ class TestTheLoop:
         assert result.ok is False
         assert result.parked and result.park_reason == PARK_NAVIGATION_BLOCKED
         assert result.blocked_urls == (INDEX_URL,)
-        assert decide.prompts == [], "the model was consulted about a page that never loaded"
-
-
-# ── clause 4: SUBMIT outcome verification (§7.1) ───────────────────────────────
+        assert (
+            decide.prompts == []
+        ), "the model was consulted about a page that never loaded"
 
 
 class TestSubmitVerification:
@@ -541,8 +538,9 @@ class TestSubmitVerification:
         submit_step = next(s for s in result.steps if s.action == "SUBMIT")
         assert submit_step.verification == VERDICT_FORM_OK, result.steps
         assert any("submission verified" in n for n in result.notes), result.notes
-        # The verification is its OWN call, with the post-submit page fenced in it too.
-        verify_prompts = [p for p in decide.prompts if "FORM_OK" in p and "THE PAGE NOW" in p]
+        verify_prompts = [
+            p for p in decide.prompts if "FORM_OK" in p and "THE PAGE NOW" in p
+        ]
         assert len(verify_prompts) == 1, decide.prompts
         assert is_fenced(verify_prompts[0])
         assert "Thanks" in verify_prompts[0]
@@ -551,7 +549,7 @@ class TestSubmitVerification:
         """CONTROL for the verification. A page that did not move means the post never reached
         the server, and asking a model to judge an identical page invites a hallucinated
         success — so the verdict is reached WITHOUT a model call."""
-        session, page = _fresh_pair(url=CHANGELOG_URL)  # on_submit stays None: nothing changes
+        session, page = _fresh_pair(url=CHANGELOG_URL)
         decide = _Decide("SUBMIT", "DONE")
 
         result = _run(
@@ -568,8 +566,12 @@ class TestSubmitVerification:
 
         submit_step = next(s for s in result.steps if s.action == "SUBMIT")
         assert submit_step.verification == VERDICT_FORM_FAILED
-        assert any("did not change after SUBMIT" in n for n in result.notes), result.notes
-        assert not [p for p in decide.prompts if "FORM_OK" in p], "the model was asked anyway"
+        assert any(
+            "did not change after SUBMIT" in n for n in result.notes
+        ), result.notes
+        assert not [
+            p for p in decide.prompts if "FORM_OK" in p
+        ], "the model was asked anyway"
 
     def test_a_form_failed_verdict_is_preserved_as_a_note_the_agent_can_act_on(self):
         session, page = _fresh_pair(url=CHANGELOG_URL)
@@ -593,9 +595,6 @@ class TestSubmitVerification:
         assert result.ok and not result.parked
 
 
-# ── clause 5: parking with notes preserved ────────────────────────────────────
-
-
 class TestParking:
     def test_step_exhaustion_parks_with_every_note_preserved(self):
         session, page = _fresh_pair()
@@ -615,7 +614,9 @@ class TestParking:
             )
         )
         assert result.parked and result.park_reason == PARK_STEP_EXHAUSTED
-        assert result.ok is True, "a park is not a failure — its notes are the deliverable"
+        assert (
+            result.ok is True
+        ), "a park is not a failure — its notes are the deliverable"
         assert result.notes == (
             "the index lists two guides",
             "the changelog is linked from here",
@@ -629,7 +630,9 @@ class TestParking:
         verdicts = ["ok", "ok", "exceeded"]
 
         def _budget():
-            return (verdicts.pop(0) if verdicts else "exceeded"), "day token budget exceeded"
+            return (
+                verdicts.pop(0) if verdicts else "exceeded"
+            ), "day token budget exceeded"
 
         result = _run(
             run_browse_loop(
@@ -645,7 +648,9 @@ class TestParking:
         assert result.parked and result.park_reason == PARK_BUDGET_EXHAUSTED
         assert "budget exceeded" in result.park_detail
         assert result.notes == ("one useful fact",)
-        assert len(decide.page_prompts) == 2, "the exceeded verdict did not stop the next call"
+        assert (
+            len(decide.page_prompts) == 2
+        ), "the exceeded verdict did not stop the next call"
 
     def test_the_same_task_completes_when_the_budget_is_fine(self):
         """CONTROL for the budget guard: with an OK verdict the identical script finishes, so
@@ -666,9 +671,11 @@ class TestParking:
         assert not result.parked and result.ok
         assert result.notes == ("one useful fact",)
 
-    def test_the_provider_reports_a_park_as_needs_input_with_the_notes_on_stdout(self, monkeypatch):
-        from gideon.action_providers import browse_provider as bp
-        from gideon.action_providers.base import ActionContext
+    def test_the_provider_reports_a_park_as_needs_input_with_the_notes_on_stdout(
+        self, monkeypatch
+    ):
+        from gideon.integrations.action_providers import browse_provider as bp
+        from gideon.integrations.action_providers.base import ActionContext
 
         session, page = _fresh_pair()
         decide = _Decide("NOTES the index lists two guides", fallback="SCROLL down")
@@ -691,15 +698,14 @@ class TestParking:
         assert payload["parked"] is True
         assert payload["park_reason"] == PARK_STEP_EXHAUSTED
         assert payload["notes"] == ["the index lists two guides"]
-        # The user-facing sentence: what stopped it, and that nothing was lost.
         assert "note(s) kept" in result.stderr and "2 steps" in result.stderr
 
     def test_the_action_node_parks_a_needs_input_result_into_waiting(self):
         """The engine half of the contract. WAITING with no `wake_at` is what the controller
         reads as 'nothing will wake this run' — see the run-status test below."""
-        from gideon.action_providers.base import ActionResult
-        from gideon.workflows.engine import dispatch_action
-        from gideon.workflows.models import InstanceState, Node
+        from gideon.automation.workflows.engine import dispatch_action
+        from gideon.automation.workflows.models import InstanceState, Node
+        from gideon.integrations.action_providers.base import ActionResult
 
         class _Parker:
             name = "parker"
@@ -713,22 +719,32 @@ class TestParking:
                     stderr="Browse stopped after 2 steps; 1 note(s) kept.",
                 )
 
-        node = Node.from_dict({"kind": "action", "id": "b", "config": {"provider": "parker"}})
-        result = _run(dispatch_action(node, _binding_ctx(), get_provider=lambda _n: _Parker()))
+        node = Node.from_dict(
+            {"kind": "action", "id": "b", "config": {"provider": "parker"}}
+        )
+        result = _run(
+            dispatch_action(node, _binding_ctx(), get_provider=lambda _n: _Parker())
+        )
 
         assert result.state is InstanceState.WAITING
-        assert result.wake_at in (0, 0.0, None), "a park must not schedule its own wake-up"
+        assert result.wake_at in (
+            0,
+            0.0,
+            None,
+        ), "a park must not schedule its own wake-up"
         assert result.output["notes"] == ["kept"], "the park lost the notes"
         assert "note(s) kept" in (result.degraded_reason or "")
 
-    def test_a_parked_action_node_finishes_the_run_as_needs_input(self, tmp_path, monkeypatch):
+    def test_a_parked_action_node_finishes_the_run_as_needs_input(
+        self, tmp_path, monkeypatch
+    ):
         """THE call site one layer up: a REAL `RunController`. Without this the WAITING mapping
         could be right and the run could still end COMPLETE — the engine honouring a state the
         controller never surfaces is what 'parks cleanly' has to rule out."""
-        from gideon.action_providers.base import ActionResult
-        from gideon.workflows import store
-        from gideon.workflows.controller import EngineServices, RunController
-        from gideon.workflows.models import RunStatus, WorkflowRun
+        from gideon.automation.workflows import store
+        from gideon.automation.workflows.controller import EngineServices, RunController
+        from gideon.automation.workflows.models import RunStatus, WorkflowRun
+        from gideon.integrations.action_providers.base import ActionResult
 
         home = tmp_path / "wf-home"
         home.mkdir()
@@ -752,7 +768,10 @@ class TestParking:
                     {
                         "kind": "action",
                         "id": "browse-docs",
-                        "config": {"provider": "browse", "with": {"goal": "g", "start_url": "u"}},
+                        "config": {
+                            "provider": "browse",
+                            "with": {"goal": "g", "start_url": "u"},
+                        },
                     }
                 ],
             },
@@ -768,23 +787,25 @@ class TestParking:
 
     def test_the_trigger_ledger_records_a_park_as_deferred(self):
         """The other reader of the outcome vocabulary. A status this map does not recognise is
-        recorded FAILED, which would turn every park into a red row in the runs surface."""
-        from gideon.triggers.executor import STATUS_TO_OUTCOME
-        from gideon.triggers.models import Outcome
+        recorded FAILED, which would turn every park into a red row in the runs surface.
+        """
+        from gideon.automation.triggers.executor import STATUS_TO_OUTCOME
+        from gideon.automation.triggers.models import Outcome
 
         assert STATUS_TO_OUTCOME["needs_input"] == Outcome.DEFERRED.value
 
 
-# ── provider-level refusals ───────────────────────────────────────────────────
-
-
 class TestProviderRefusals:
     def test_a_config_without_a_goal_or_a_url_is_refused_with_a_typed_envelope(self):
-        from gideon.action_providers.base import ActionContext
-        from gideon.action_providers.browse_provider import BrowseActionProvider
+        from gideon.integrations.action_providers.base import ActionContext
+        from gideon.integrations.action_providers.browse_provider import (
+            BrowseActionProvider,
+        )
 
         result = _run(
-            BrowseActionProvider().execute({"start_url": INDEX_URL}, ActionContext(event="e"))
+            BrowseActionProvider().execute(
+                {"start_url": INDEX_URL}, ActionContext(event="e")
+            )
         )
         assert result.success is False
         assert result.agent_error is not None
@@ -793,12 +814,15 @@ class TestProviderRefusals:
     def test_no_browser_target_is_a_typed_refusal_not_a_silent_success(self):
         """An action that reports success while browsing nothing is indistinguishable, to a
         workflow, from one that did the work."""
-        from gideon.action_providers.base import ActionContext
-        from gideon.action_providers.browse_provider import BrowseActionProvider
+        from gideon.integrations.action_providers.base import ActionContext
+        from gideon.integrations.action_providers.browse_provider import (
+            BrowseActionProvider,
+        )
 
         result = _run(
             BrowseActionProvider().execute(
-                {"goal": "read the docs", "start_url": INDEX_URL}, ActionContext(event="e")
+                {"goal": "read the docs", "start_url": INDEX_URL},
+                ActionContext(event="e"),
             )
         )
         assert result.success is False
@@ -806,15 +830,20 @@ class TestProviderRefusals:
         assert "cdp_url" in result.agent_error.fix
 
     def test_incident_mode_refuses_before_a_browser_is_touched(self, monkeypatch):
-        from gideon.action_providers.base import ActionContext
-        from gideon.action_providers.browse_provider import BrowseActionProvider
+        from gideon.integrations.action_providers.base import ActionContext
+        from gideon.integrations.action_providers.browse_provider import (
+            BrowseActionProvider,
+        )
 
         opened: list[int] = []
-        monkeypatch.setattr("gideon.guardrails.incident.incident_active", lambda: True)
+        monkeypatch.setattr(
+            "gideon.security.guardrails.incident.incident_active", lambda: True
+        )
         monkeypatch.setattr(
             BrowseActionProvider,
             "_open",
-            lambda self, cfg, ctx, *, cdp_url="": opened.append(1) or _done((None, None, None)),
+            lambda self, cfg, ctx, *, cdp_url="": opened.append(1)
+            or _done((None, None, None)),
         )
 
         result = _run(
@@ -828,15 +857,13 @@ class TestProviderRefusals:
         assert opened == [], "incident mode was checked after the browser was opened"
 
 
-# ── the CDP page driver's wire ─────────────────────────────────────────────────
-
-
 class TestCdpPageDriver:
     def test_the_driver_addresses_an_element_by_its_identity_over_the_real_wire(self):
         """The transport is faked; the CDP methods and the substituted identity are real. A
-        label the page controls goes in through `json.dumps`, in ONE substitution pass."""
-        from gideon.browse.extraction import ElementRef
-        from gideon.browse.page import CdpPageDriver
+        label the page controls goes in through `json.dumps`, in ONE substitution pass.
+        """
+        from gideon.integrations.browse.extraction import ElementRef
+        from gideon.integrations.browse.page import CdpPageDriver
 
         sent: list[tuple[str, dict]] = []
 
@@ -855,9 +882,15 @@ class TestCdpPageDriver:
         assert '"/login"' in expression
         assert "hit.click()" in expression
 
-    def test_a_missing_element_raises_instead_of_reporting_a_click_that_never_happened(self):
-        from gideon.browse.extraction import ElementRef
-        from gideon.browse.page import NOT_FOUND, CdpPageDriver, PageActionError
+    def test_a_missing_element_raises_instead_of_reporting_a_click_that_never_happened(
+        self,
+    ):
+        from gideon.integrations.browse.extraction import ElementRef
+        from gideon.integrations.browse.page import (
+            NOT_FOUND,
+            CdpPageDriver,
+            PageActionError,
+        )
 
         class _T:
             async def send(self, method, params=None):
@@ -867,10 +900,12 @@ class TestCdpPageDriver:
         with pytest.raises(PageActionError):
             _run(driver.click(ElementRef(ref="x", role="link", label="gone")))
 
-    def test_a_screenshot_is_written_to_a_path_and_never_returned_as_base64(self, tmp_path):
+    def test_a_screenshot_is_written_to_a_path_and_never_returned_as_base64(
+        self, tmp_path
+    ):
         import base64
 
-        from gideon.browse.page import CdpPageDriver
+        from gideon.integrations.browse.page import CdpPageDriver
 
         png = base64.b64encode(b"\x89PNG fake").decode()
 
@@ -887,16 +922,15 @@ class TestCdpPageDriver:
         assert Path(path).read_bytes().startswith(b"\x89PNG")
 
     def test_no_screenshot_dir_yields_no_capture_rather_than_an_inline_payload(self):
-        from gideon.browse.page import CdpPageDriver
+        from gideon.integrations.browse.page import CdpPageDriver
 
         class _T:
-            async def send(self, method, params=None):  # pragma: no cover - must not be called
+            async def send(
+                self, method, params=None
+            ):  # pragma: no cover - must not be called
                 raise AssertionError("captureScreenshot was sent with nowhere to write")
 
         assert _run(CdpPageDriver(_T()).screenshot()) == ""
-
-
-# ── helpers ───────────────────────────────────────────────────────────────────
 
 
 def _done(value):
@@ -908,6 +942,6 @@ def _done(value):
 
 def _binding_ctx():
     """The minimal `BindingContext` `resolve_config` needs for a literal-only config."""
-    from gideon.workflows.bindings import BindingContext
+    from gideon.automation.workflows.bindings import BindingContext
 
     return BindingContext(inputs={}, node_outputs={})

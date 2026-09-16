@@ -6,10 +6,10 @@ statement: >
   `ALLOWED_HOOK_PROVIDERS` frozenset, or hook create/update validation rejects any hook
   that uses it.
 appliesTo:
-  - src/gideon/action_providers/registry.py
-  - src/gideon/validation.py
+  - runtime/gideon/action_providers/registry.py
+  - runtime/gideon/validation.py
 requiredTests:
-  - tests/test_native_hook_providers.py::test_hook_provider_allowlist_includes_all_action_providers
+  - checks/runtime/test_native_hook_providers.py::test_hook_provider_allowlist_includes_all_action_providers
 scanner: hook-provider-parity
 source: >
   A provider can be registered in the registry yet absent from the validation allowlist,
@@ -32,10 +32,10 @@ hand-maintained; the registry is where providers actually register.
 
 When you add a new action provider, add its name to `ALLOWED_HOOK_PROVIDERS` in the same
 change. The proof is `test_hook_provider_allowlist_includes_all_action_providers`
-(`tests/test_native_hook_providers.py`), which asserts
+(`checks/runtime/test_native_hook_providers.py`), which asserts
 `set(list_action_providers()) - set(ALLOWED_HOOK_PROVIDERS)` is empty.
 
 **Note (premise correction, 2026-07-26):** this invariant is *not* checked by
-`tests/test_action_schema_executor_parity.py` — that test guards a different invariant
+`checks/runtime/test_action_schema_executor_parity.py` — that test guards a different invariant
 (an executor's `action_config` reads ⊆ its `app.json` `settingsSchema`). Cite the
 `test_native_hook_providers.py` node-id above, not the parity test.

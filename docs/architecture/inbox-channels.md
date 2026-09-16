@@ -35,7 +35,7 @@ against core protocols). Paths are relative to
 
 ## Notifications
 
-`DashboardState.notify()` (`dashboard/state.py`) is the **single choke point**
+`ConsoleState.notify()` (`dashboard/state.py`) is the **single choke point**
 for user-facing notifications. Two layers of policy apply, in this order.
 
 **1. The global gate** — `notification_allowed()`
@@ -59,7 +59,7 @@ to a rule:
   summary);
 - **targets** — `dashboard` today; `channel_dm` via
   `ChannelDelivery.deliver_notification`; `push`/`native` are accepted and
-  persisted but inert until the mobile/desktop plans land;
+  persisted but inert until the apps/mobile/desktop plans land;
 - **conditions** — keywords / name-mention that **escalate** a quieter mode to
   `immediate`. Escalation is capped at `immediate` and never adds targets the
   user didn't choose.

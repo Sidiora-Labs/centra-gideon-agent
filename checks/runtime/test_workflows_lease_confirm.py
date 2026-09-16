@@ -20,8 +20,8 @@ import asyncio
 
 import pytest
 
-from gideon.workflows import pool, service
-from gideon.workflows.pool import DEFAULT_LEASE_SECS, LeaseError
+from gideon.automation.workflows import pool, service
+from gideon.automation.workflows.pool import DEFAULT_LEASE_SECS, LeaseError
 
 NOW = 1_700_000_000.0
 
@@ -36,15 +36,12 @@ def _isolated_home(tmp_path, monkeypatch):
     `~/.gideon/workflows/runs.db`.
     """
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
-    from gideon.workflows import store as wstore
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
+    from gideon.automation.workflows import store as wstore
 
     monkeypatch.setattr(wstore, "config_dir", lambda: tmp_path)
     yield
     assert ".gideon" not in str(tmp_path)
-
-
-# ── the lease write path ──
 
 
 def test_a_claim_PERSISTS():
@@ -56,7 +53,8 @@ def test_a_claim_PERSISTS():
 
 def test_a_SECOND_holder_is_refused():
     """The property the mechanism exists for: without it, engine-projected tasks are
-    double-executed by concurrent sessions and both holders believe they own the work."""
+    double-executed by concurrent sessions and both holders believe they own the work.
+    """
     pool.claim_task("t-1", holder="session-a", now=NOW)
     lease, error = pool.claim_task("t-1", holder="session-b", now=NOW + 10)
     assert lease is None
@@ -147,9 +145,6 @@ def test_only_ONE_holder_wins_a_sequential_race():
     assert winners == ["s-0"], f"{len(winners)} sessions believed they owned one task"
 
 
-# ── the sweep ──
-
-
 def test_the_sweep_FREES_expired_leases():
     pool.claim_task("t-dead", holder="x", now=NOW - 99_999, ttl_seconds=60)
     assert pool.sweep_task_leases(NOW) == ["t-dead"]
@@ -182,9 +177,6 @@ def test_the_lease_dir_is_under_the_CONFIG_dir(tmp_path):
     assert str(pool.leases_dir()).startswith(str(tmp_path))
 
 
-# ── the confirmation resolve ──
-
-
 def test_an_UNKNOWN_verb_is_REFUSED_not_treated_as_a_reject():
     """A typo silently declining an approval would reject work the user meant to allow, and they
     would have no way to know why."""
@@ -204,8 +196,8 @@ def _a_run() -> str:
     answered without consulting the run — see the ruling in
     `test_EVERY_verb_requires_the_run_to_EXIST` below.
     """
-    from gideon.workflows import store as wstore
-    from gideon.workflows.models import WorkflowRun
+    from gideon.automation.workflows import store as wstore
+    from gideon.automation.workflows.models import WorkflowRun
 
     return wstore.create(WorkflowRun(id="", workflow_name="w")).id
 
@@ -216,7 +208,8 @@ def test_SKIP_and_QUIT_resolve_nothing_and_consume_no_token(verb):
     single-use claim on a non-answer and strand the gate forever.
 
     That invariant is unchanged and is what this leg is for. What changed is that the run has to
-    exist first — orthogonal to consuming nothing, and the two were previously conflated."""
+    exist first — orthogonal to consuming nothing, and the two were previously conflated.
+    """
     result = service.resolve_confirmation(_a_run(), verb=verb)
     assert result["ok"] is True
     assert result["resumed"] is False
@@ -275,7 +268,9 @@ def test_the_gate_answer_is_the_APPROVAL_BOOLEAN_not_the_verb(monkeypatch):
 
 def test_the_result_names_the_verb_and_the_decision(monkeypatch):
     monkeypatch.setattr(service, "resume_run", lambda run_id, **kw: {"ok": True})
-    result = service.resolve_confirmation(_a_run(), verb="approve", note="checked the diff")
+    result = service.resolve_confirmation(
+        _a_run(), verb="approve", note="checked the diff"
+    )
     assert result["verb"] == "approve"
     assert result["approved"] is True
 
@@ -305,13 +300,10 @@ def test_resolving_rides_the_ONE_resume_path(monkeypatch):
     assert called["n"] == 1
 
 
-# ── the route ──
-
-
 def test_the_confirm_route_is_MOUNTED():
     from aiohttp import web
 
-    from gideon.workflows.handlers import register_workflow_routes
+    from gideon.automation.workflows.handlers import register_workflow_routes
 
     app = web.Application()
     register_workflow_routes(app)
@@ -324,7 +316,7 @@ def test_confirm_is_guarded_by_the_SAME_operation_as_resume():
     may not answer a gate answer it through the other door."""
     import inspect
 
-    from gideon.workflows import handlers
+    from gideon.automation.workflows import handlers
 
     source = inspect.getsource(handlers.api_run_confirm)
     assert '_guard(request, "workflow_run_resume")' in source
@@ -334,7 +326,7 @@ def test_the_confirm_handler_AUDITS_the_verb():
     """ "Who approved this, and what did they say" is the question an audit exists to answer."""
     import inspect
 
-    from gideon.workflows import handlers
+    from gideon.automation.workflows import handlers
 
     source = inspect.getsource(handlers.api_run_confirm)
     assert "_audit(" in source
@@ -347,7 +339,7 @@ def test_the_handler_does_not_accept_a_CHANNEL_from_the_body():
     reason `api_run_resume` does not forward it either."""
     import inspect
 
-    from gideon.workflows import handlers
+    from gideon.automation.workflows import handlers
 
     source = inspect.getsource(handlers.api_run_confirm)
     assert "channel" not in source

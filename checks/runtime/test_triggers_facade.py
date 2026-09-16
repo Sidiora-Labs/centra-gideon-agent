@@ -15,8 +15,8 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.dashboard.handlers import triggers as T
-from gideon.hooks import ScriptHookStore
+from gideon.engine.hooks import ScriptHookStore
+from gideon.interfaces.dashboard.handlers import triggers as T
 
 
 @pytest.fixture
@@ -28,9 +28,9 @@ def state(tmp_path, monkeypatch):
     seeds the equivalent row rather than the mock. The lifecycle half stays a real
     `ScriptHookStore`, which is what these tests were always about.
     """
-    import gideon.config.loader as loader
-    from gideon.triggers.models import Trigger
-    from gideon.triggers.store import TriggerStore
+    import gideon.core.config.loader as loader
+    from gideon.automation.triggers.models import Trigger
+    from gideon.automation.triggers.store import TriggerStore
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(T, "config_dir", lambda: tmp_path)
@@ -40,8 +40,6 @@ def state(tmp_path, monkeypatch):
     st._hook_store = hook_store
     st._sessions = {}
     st._background_tasks = set()
-    # one schedule trigger (invoke-agent → action derived on read), the store-shaped equivalent of
-    # the `ScheduleJob` this fixture used to mock.
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(
         Trigger(
@@ -88,7 +86,6 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-# Patch the hook-store accessor to use the fake state's store.
 @pytest.fixture(autouse=True)
 def _patch_store(monkeypatch, state):
     monkeypatch.setattr(T, "_hook_store", lambda s: s._hook_store)
@@ -109,7 +106,6 @@ def test_list_both_kinds(state):
     kinds = {t["kind"] for t in data["triggers"]}
     assert kinds == {"schedule", "lifecycle"}
     sched = next(t for t in data["triggers"] if t["kind"] == "schedule")
-    # action derived from invoke-agent exec mode
     assert sched["id"] == "schedule:job1"
     assert sched["action"]["provider"] == "invoke-agent"
     assert sched["action"]["config"]["agent"] == "coder"
@@ -117,9 +113,16 @@ def test_list_both_kinds(state):
 
 def test_type_filter(state):
     state._hook_store.create(
-        {"name": "h", "event": "Stop", "provider": "bash", "provider_config": {"command": "x"}}
+        {
+            "name": "h",
+            "event": "Stop",
+            "provider": "bash",
+            "provider_config": {"command": "x"},
+        }
     )
-    resp = _run(T.api_triggers(_req("GET", "/api/triggers", state, query="type=lifecycle")))
+    resp = _run(
+        T.api_triggers(_req("GET", "/api/triggers", state, query="type=lifecycle"))
+    )
     data = _body(resp)
     assert data["triggers"] and all(t["kind"] == "lifecycle" for t in data["triggers"])
 
@@ -142,17 +145,23 @@ def test_create_lifecycle(state):
 
 def test_create_rejects_unknown_kind(state):
     resp = _run(
-        T.api_trigger_create(_req("POST", "/api/triggers", state, body={"trigger_type": "bogus"}))
+        T.api_trigger_create(
+            _req("POST", "/api/triggers", state, body={"trigger_type": "bogus"})
+        )
     )
     assert resp.status == 400
 
 
 def test_toggle_and_delete_lifecycle_route_by_id(state):
     hook = state._hook_store.create(
-        {"name": "h", "event": "Stop", "provider": "bash", "provider_config": {"command": "x"}}
+        {
+            "name": "h",
+            "event": "Stop",
+            "provider": "bash",
+            "provider_config": {"command": "x"},
+        }
     )
     tid = f"lifecycle:{hook.id}"
-    # toggle
     resp = _run(
         T.api_trigger_toggle(
             _req("POST", f"/api/triggers/{tid}/toggle", state, match_info={"id": tid})
@@ -160,9 +169,10 @@ def test_toggle_and_delete_lifecycle_route_by_id(state):
     )
     assert resp.status == 200
     assert state._hook_store.get(hook.id).enabled is False
-    # delete
     req = _req("DELETE", f"/api/triggers/{tid}", state, match_info={"id": tid})
-    req = make_mocked_request("DELETE", f"/api/triggers/{tid}", match_info={"id": tid}, app=req.app)
+    req = make_mocked_request(
+        "DELETE", f"/api/triggers/{tid}", match_info={"id": tid}, app=req.app
+    )
     req["user"] = "tester"
     resp = _run(T.api_trigger_detail(req))
     assert resp.status == 200
@@ -170,53 +180,45 @@ def test_toggle_and_delete_lifecycle_route_by_id(state):
 
 
 def test_run_rejects_lifecycle(state):
-    req = _req("POST", "/api/triggers/lifecycle:x/run", state, match_info={"id": "lifecycle:x"})
+    req = _req(
+        "POST", "/api/triggers/lifecycle:x/run", state, match_info={"id": "lifecycle:x"}
+    )
     resp = _run(T.api_trigger_run(req))
-    assert resp.status == 400  # lifecycle triggers fire on events, not /run
+    assert resp.status == 400
 
 
 def test_schedule_run_dispatches(state):
     state.crons.is_running.return_value = False
     state._background_tasks = set()
-    req = _req("POST", "/api/triggers/schedule:job1/run", state, match_info={"id": "schedule:job1"})
+    req = _req(
+        "POST",
+        "/api/triggers/schedule:job1/run",
+        state,
+        match_info={"id": "schedule:job1"},
+    )
     resp = _run(T.api_trigger_run(req))
     assert resp.status == 200
     assert _body(resp)["name"] == "Nightly"
 
 
-# ── P4d: variable catalog ──
-
-
 def test_variables_catalog(state):
-    from gideon.hooks import HOOK_EVENTS
-    from gideon.schedule import SCHEDULE_VARS
+    from gideon.automation.schedule import SCHEDULE_VARS
+    from gideon.engine.hooks import HOOK_EVENTS
 
     req = _req("GET", "/api/triggers/variables", state)
     resp = _run(T.api_trigger_variables(req))
     assert resp.status == 200
     body = _body(resp)
-    # schedule vars are the source-of-truth list, verbatim
     assert body["schedule"] == list(SCHEDULE_VARS)
-    # lifecycle covers every fireable event exactly once, each well-formed
     events = [e["event"] for e in body["lifecycle"]]
     assert set(events) == set(HOOK_EVENTS)
     assert len(events) == len(HOOK_EVENTS)
     for e in body["lifecycle"]:
         assert e["vars"] and e["vars"][0] == "$EVENT"
         assert e["label"] and e["desc"] and isinstance(e["blocking"], bool)
-    # PreToolUse is the canonical blocking + tool-matcher event
     pre = next(e for e in body["lifecycle"] if e["event"] == "PreToolUse")
     assert pre["blocking"] is True
     assert "$tool_name" in pre["vars"]
-
-
-# ── S67: event-kind parity (AUTOMATION-SUBSTRATE §2) ──
-#
-# Every assertion here was a measured 404/400/silent-no-op before the fix. The shipped facade
-# handled the `event` kind in list/create/DELETE only; toggle/run/PUT fell to the SCHEDULE branch,
-# which looked the id up among cron jobs, missed, and answered 404 "not found" — the API telling a
-# user that a trigger sitting in their store does not exist. `/test` answered 400 "use /run" and
-# `/run` answered 404, so there was no way to fire an event trigger by hand at all.
 
 
 @pytest.fixture
@@ -226,7 +228,7 @@ def event_store(tmp_path, monkeypatch):
     Patches `T._event_store` rather than `config_dir`: the handler resolves the store per call, so
     patching the accessor is what actually redirects it, and nothing can reach the real home.
     """
-    from gideon.event_triggers import EventTriggerStore
+    from gideon.automation.event_triggers import EventTriggerStore
 
     store = EventTriggerStore(tmp_path / "event_triggers.json")
     monkeypatch.setattr(T, "_event_store", lambda: store)
@@ -234,7 +236,7 @@ def event_store(tmp_path, monkeypatch):
 
 
 def _ev(store, **kw):
-    from gideon.event_triggers import MEMORY_UPDATE, EventTrigger
+    from gideon.automation.event_triggers import MEMORY_UPDATE, EventTrigger
 
     kw.setdefault("id", "ev1")
     kw.setdefault("pattern", MEMORY_UPDATE)
@@ -247,7 +249,11 @@ def test_event_toggle_no_longer_404s(state, event_store):
     """Measured: 404 "not found" from the schedule fallthrough, while the trigger kept firing."""
     _ev(event_store, enabled=True)
     req = _req(
-        "POST", "/api/triggers/event:ev1/toggle", state, body={}, match_info={"id": "event:ev1"}
+        "POST",
+        "/api/triggers/event:ev1/toggle",
+        state,
+        body={},
+        match_info={"id": "event:ev1"},
     )
     resp = _run(T.api_trigger_toggle(req))
     assert resp.status == 200
@@ -265,7 +271,7 @@ def test_event_toggle_honours_an_explicit_enabled(state, event_store):
         match_info={"id": "event:ev1"},
     )
     assert _run(T.api_trigger_toggle(req)).status == 200
-    assert event_store.load()[0].enabled is True  # idempotent, not flipped
+    assert event_store.load()[0].enabled is True
 
 
 def test_re_enabling_an_exhausted_trigger_resets_its_budget(state, event_store):
@@ -290,7 +296,11 @@ def test_re_enabling_an_exhausted_trigger_resets_its_budget(state, event_store):
 
 def test_event_toggle_404s_only_for_a_genuinely_absent_trigger(state, event_store):
     req = _req(
-        "POST", "/api/triggers/event:nope/toggle", state, body={}, match_info={"id": "event:nope"}
+        "POST",
+        "/api/triggers/event:nope/toggle",
+        state,
+        body={},
+        match_info={"id": "event:nope"},
     )
     assert _run(T.api_trigger_toggle(req)).status == 404
 
@@ -307,7 +317,13 @@ def test_event_put_persists_every_field(state, event_store):
         "debounce_secs": 1.5,
         "action": {"provider": "webhook", "config": {"url": "https://example.test/x"}},
     }
-    req = _req("PUT", "/api/triggers/event:ev1", state, body=body, match_info={"id": "event:ev1"})
+    req = _req(
+        "PUT",
+        "/api/triggers/event:ev1",
+        state,
+        body=body,
+        match_info={"id": "event:ev1"},
+    )
     resp = _run(T.api_trigger_detail(req))
     assert resp.status == 200
     t = event_store.load()[0]
@@ -363,7 +379,9 @@ def test_event_put_is_a_partial_patch(state, event_store):
     )
     assert _run(T.api_trigger_detail(req)).status == 200
     t = event_store.load()[0]
-    assert t.key_glob == "keep.me" and t.max_fires == 7 and t.action_provider == "notify"
+    assert (
+        t.key_glob == "keep.me" and t.max_fires == 7 and t.action_provider == "notify"
+    )
 
 
 def test_event_run_fires_through_the_shared_executor(state, event_store, monkeypatch):
@@ -372,7 +390,7 @@ def test_event_run_fires_through_the_shared_executor(state, event_store, monkeyp
     Asserted through `execute_event_action` so a future divergence between the manual and live paths
     fails here — a test button with its own dispatch would eventually certify a broken trigger.
     """
-    from gideon.action_providers import ActionResult
+    from gideon.integrations.action_providers import ActionResult
 
     calls = []
 
@@ -381,7 +399,9 @@ def test_event_run_fires_through_the_shared_executor(state, event_store, monkeyp
             calls.append(ctx.payload)
             return ActionResult(success=True, stdout="fired")
 
-    monkeypatch.setattr("gideon.action_providers.get_action_provider", lambda _n: _Stub())
+    monkeypatch.setattr(
+        "gideon.integrations.action_providers.get_action_provider", lambda _n: _Stub()
+    )
     _ev(event_store, action_provider="notify", action_config={"title": "hi"})
     req = _req(
         "POST",
@@ -403,25 +423,33 @@ def test_a_manual_fire_does_not_spend_the_budget(state, event_store, monkeypatch
     Spending it from a Run button would let a user exhaust and self-retire their own trigger by
     testing it — the same asymmetry S65 set for the hourly cap (`within_rate_window(manual=True)`).
     """
-    from gideon.action_providers import ActionResult
+    from gideon.integrations.action_providers import ActionResult
 
     class _Stub:
         async def execute(self, cfg, ctx, timeout=30):
             return ActionResult(success=True)
 
-    monkeypatch.setattr("gideon.action_providers.get_action_provider", lambda _n: _Stub())
+    monkeypatch.setattr(
+        "gideon.integrations.action_providers.get_action_provider", lambda _n: _Stub()
+    )
     _ev(event_store, max_fires=1, fire_count=0)
     req = _req(
-        "POST", "/api/triggers/event:ev1/run", state, body={}, match_info={"id": "event:ev1"}
+        "POST",
+        "/api/triggers/event:ev1/run",
+        state,
+        body={},
+        match_info={"id": "event:ev1"},
     )
     assert _run(T.api_trigger_run(req)).status == 200
     t = event_store.load()[0]
-    assert t.fire_count == 0 and t.enabled is True, "a manual fire must not retire the trigger"
+    assert (
+        t.fire_count == 0 and t.enabled is True
+    ), "a manual fire must not retire the trigger"
 
 
 def test_event_test_and_run_agree(state, event_store, monkeypatch):
     """Measured: /test said "use /run" and /run said 404 — a circular dead end."""
-    from gideon.action_providers import ActionResult
+    from gideon.integrations.action_providers import ActionResult
 
     seen = []
 
@@ -430,11 +458,17 @@ def test_event_test_and_run_agree(state, event_store, monkeypatch):
             seen.append(ctx.payload.get("test"))
             return ActionResult(success=True)
 
-    monkeypatch.setattr("gideon.action_providers.get_action_provider", lambda _n: _Stub())
+    monkeypatch.setattr(
+        "gideon.integrations.action_providers.get_action_provider", lambda _n: _Stub()
+    )
     _ev(event_store)
     for handler in (T.api_trigger_test, T.api_trigger_run):
         req = _req(
-            "POST", "/api/triggers/event:ev1/x", state, body={}, match_info={"id": "event:ev1"}
+            "POST",
+            "/api/triggers/event:ev1/x",
+            state,
+            body={},
+            match_info={"id": "event:ev1"},
         )
         resp = _run(handler(req))
         assert resp.status == 200, f"{handler.__name__} refused an event trigger"
@@ -447,10 +481,16 @@ def test_a_refused_fire_answers_200_with_a_reason(state, event_store, monkeypatc
     4xx would render a denylist decision as a malformed request; the honest shape is a successful
     response carrying `ran: false` and the reason.
     """
-    monkeypatch.setattr("gideon.action_providers.get_action_provider", lambda _n: None)
+    monkeypatch.setattr(
+        "gideon.integrations.action_providers.get_action_provider", lambda _n: None
+    )
     _ev(event_store, action_provider="ghost")
     req = _req(
-        "POST", "/api/triggers/event:ev1/run", state, body={}, match_info={"id": "event:ev1"}
+        "POST",
+        "/api/triggers/event:ev1/run",
+        state,
+        body={},
+        match_info={"id": "event:ev1"},
     )
     resp = _run(T.api_trigger_run(req))
     assert resp.status == 200
@@ -466,7 +506,9 @@ def test_event_history_is_honest_about_having_none(state, event_store):
     different from implying an empty history.
     """
     _ev(event_store, fire_count=4, last_fired_at=123.0)
-    req = _req("GET", "/api/triggers/event:ev1/history", state, match_info={"id": "event:ev1"})
+    req = _req(
+        "GET", "/api/triggers/event:ev1/history", state, match_info={"id": "event:ev1"}
+    )
     resp = _run(T.api_trigger_history(req))
     assert resp.status == 200
     body = _body(resp)
@@ -475,7 +517,12 @@ def test_event_history_is_honest_about_having_none(state, event_store):
 
 
 def test_lifecycle_history_says_why_it_is_empty(state):
-    req = _req("GET", "/api/triggers/lifecycle:x/history", state, match_info={"id": "lifecycle:x"})
+    req = _req(
+        "GET",
+        "/api/triggers/lifecycle:x/history",
+        state,
+        match_info={"id": "lifecycle:x"},
+    )
     body = _body(_run(T.api_trigger_history(req)))
     assert body["supported"] is False and "no run store" in body["reason"]
 
@@ -501,14 +548,10 @@ def test_the_facade_has_no_remaining_parity_gaps(state, event_store):
     reading the source — a branch that exists but returns 404 is not support, and that distinction
     is the entire finding of this session.
     """
-    from gideon.triggers.events import parity_report
+    from gideon.automation.triggers.events import parity_report
 
     _ev(event_store)
 
-    # `crons` is a MagicMock, so `await crons.list_runs(...)` raises TypeError and the probe's
-    # exception guard below would score schedule/history as UNSUPPORTED — a harness artifact
-    # reported as a product gap. Give the two awaited calls real coroutines so the probe measures
-    # the handler instead of the mock.
     async def _list_runs(*a, **k):
         return [], 0
 
@@ -525,23 +568,25 @@ def test_the_facade_has_no_remaining_parity_gaps(state, event_store):
         "test": (T.api_trigger_test, "POST"),
         "history": (T.api_trigger_history, "GET"),
     }
-    ids = {"event": "event:ev1", "lifecycle": "lifecycle:x", "schedule": "schedule:job1"}
-    # list/create/delete/update are exercised by the tests above; `get` has no route for ANY kind,
-    # so it is not a per-kind gap and is excluded rather than reported three times.
+    ids = {
+        "event": "event:ev1",
+        "lifecycle": "lifecycle:x",
+        "schedule": "schedule:job1",
+    }
     support = {k: {"list", "create", "delete", "update", "get"} for k in ids}
     for kind, tid in ids.items():
         for op, (handler, method) in probes.items():
-            req = _req(method, f"/api/triggers/{tid}/{op}", state, body={}, match_info={"id": tid})
-            # Deliberately NOT wrapped in try/except: a raising handler is a real failure, and
-            # swallowing it here scored a MagicMock artifact as a product gap on the first run.
+            req = _req(
+                method,
+                f"/api/triggers/{tid}/{op}",
+                state,
+                body={},
+                match_info={"id": tid},
+            )
             resp = _run(handler(req))
-            # 400 = an honest kind-level refusal (an exemption); 404 = the shipped bug.
             if resp.status != 400:
                 support[kind].add(op)
     assert parity_report(support) == {}
-
-
-# ── S70: the week grid + automation doctor (AUTO-A1, §7 criterion 12) ──
 
 
 def _seed_interval(
@@ -570,12 +615,14 @@ def _seed_interval(
     """
     from datetime import datetime, timezone
 
-    from gideon.triggers import screen
-    from gideon.triggers.models import Trigger
-    from gideon.triggers.store import TriggerStore
+    from gideon.automation.triggers import screen
+    from gideon.automation.triggers.models import Trigger
+    from gideon.automation.triggers.store import TriggerStore
 
     spec = (
-        {"kind": "cron", "expr": expr} if expr else {"kind": "interval", "interval_secs": interval}
+        {"kind": "cron", "expr": expr}
+        if expr
+        else {"kind": "interval", "interval_secs": interval}
     )
     trigger = Trigger(
         id=trigger_id,
@@ -584,7 +631,8 @@ def _seed_interval(
         enabled=enabled,
         spec=spec,
         gates=gates or {},
-        workflow=workflow or {"inline": {"provider": "run-prompt", "config": {"message": "x"}}},
+        workflow=workflow
+        or {"inline": {"provider": "run-prompt", "config": {"message": "x"}}},
         next_fire_at=datetime(2024, 1, 1, tzinfo=timezone.utc).isoformat(),
     )
     if glob:
@@ -597,7 +645,9 @@ def _seed_interval(
 def test_week_grid_annotates_suppressed_slots(state):
     """A grid that HID suppressed fires would show a schedule the user does not have."""
     state._store.delete("job1")
-    _seed_interval(state, "j1", "Hourly", gates={"quiet_hours": {"start": "22:00", "end": "08:00"}})
+    _seed_interval(
+        state, "j1", "Hourly", gates={"quiet_hours": {"start": "22:00", "end": "08:00"}}
+    )
     req = _req("GET", "/api/triggers/week", state, query="start=2024-01-01&days=1")
     resp = _run(T.api_triggers_week(req))
     assert resp.status == 200
@@ -622,7 +672,11 @@ def test_week_grid_omits_disabled_but_now_PLOTS_a_cron(state):
     _seed_interval(state, "j3", "Off", enabled=False)
     _seed_interval(state, "j2", "Cron", expr="0 9 * * *")
     body = _body(
-        _run(T.api_triggers_week(_req("GET", "/api/triggers/week", state, query="days=1")))
+        _run(
+            T.api_triggers_week(
+                _req("GET", "/api/triggers/week", state, query="days=1")
+            )
+        )
     )
     names = {o["trigger_name"] for o in body["occurrences"]}
     assert names == {"Hourly", "Cron"}
@@ -635,13 +689,21 @@ def test_week_grid_reports_which_triggers_were_capped(state):
     state._store.delete("job1")
     _seed_interval(state, "j1", "Minutely", interval=60)
     body = _body(
-        _run(T.api_triggers_week(_req("GET", "/api/triggers/week", state, query="days=7")))
+        _run(
+            T.api_triggers_week(
+                _req("GET", "/api/triggers/week", state, query="days=7")
+            )
+        )
     )
     assert body["truncated"] == ["schedule:j1"]
 
 
 def test_week_grid_rejects_a_bad_start(state):
-    resp = _run(T.api_triggers_week(_req("GET", "/api/triggers/week", state, query="start=nope")))
+    resp = _run(
+        T.api_triggers_week(
+            _req("GET", "/api/triggers/week", state, query="start=nope")
+        )
+    )
     assert resp.status == 400
 
 
@@ -650,7 +712,11 @@ def test_week_grid_bounds_the_window(state):
     state._store.delete("job1")
     _seed_interval(state, "j1", "Hourly")
     body = _body(
-        _run(T.api_triggers_week(_req("GET", "/api/triggers/week", state, query="days=9999")))
+        _run(
+            T.api_triggers_week(
+                _req("GET", "/api/triggers/week", state, query="days=9999")
+            )
+        )
     )
     from datetime import datetime
 
@@ -663,21 +729,27 @@ def test_doctor_reports_across_both_trigger_kinds(state, event_store):
     _ev(event_store, key_glob="*")
     state._store.delete("job1")
     _seed_interval(state, "j1", "Orphan", workflow={"def": "gone"})
-    _seed_interval(state, "j2", "Ungated", gates={"duty_gate": {"provider": "acme-calendar"}})
+    _seed_interval(
+        state, "j2", "Ungated", gates={"duty_gate": {"provider": "acme-calendar"}}
+    )
     resp = _run(T.api_triggers_doctor(_req("GET", "/api/triggers/doctor", state)))
     assert resp.status == 200
     body = _body(resp)
     codes = {f["code"] for f in body["findings"]}
     assert "unknown_duty_gate" in codes
-    assert "broad_watch_glob" in codes  # from the event trigger's `*` key glob
+    assert "broad_watch_glob" in codes
     assert body["healthy"] is False
     assert all(f["fix"] for f in body["findings"])
 
 
 def test_doctor_reports_healthy_when_nothing_is_wrong(state, event_store):
     state._store.delete("job1")
-    _seed_interval(state, "j1", "Fine", gates={"quiet_hours": {"start": "22:00", "end": "08:00"}})
-    body = _body(_run(T.api_triggers_doctor(_req("GET", "/api/triggers/doctor", state))))
+    _seed_interval(
+        state, "j1", "Fine", gates={"quiet_hours": {"start": "22:00", "end": "08:00"}}
+    )
+    body = _body(
+        _run(T.api_triggers_doctor(_req("GET", "/api/triggers/doctor", state)))
+    )
     assert body["healthy"] is True and body["count"] == 0
 
 

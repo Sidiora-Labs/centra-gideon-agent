@@ -10,10 +10,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gideon import session_restrictions
-from gideon.learning import Cadence, GateReason, LearningGate
-
-# ── the cases should_review used to own ──
+from gideon.cognition.learning import Cadence, GateReason, LearningGate
+from gideon.engine import session_restrictions
 
 
 def test_correction_fires_the_gate():
@@ -22,18 +20,24 @@ def test_correction_fires_the_gate():
 
 
 def test_enough_tool_calls_fires_the_gate():
-    d = LearningGate(min_tool_calls=4).decide(Cadence.PER_TURN, correction=False, tool_calls=4)
+    d = LearningGate(min_tool_calls=4).decide(
+        Cadence.PER_TURN, correction=False, tool_calls=4
+    )
     assert d.allowed
 
 
 def test_disabled_learning_denies_everything():
-    d = LearningGate(enabled=False).decide(Cadence.PER_TURN, correction=True, tool_calls=9)
+    d = LearningGate(enabled=False).decide(
+        Cadence.PER_TURN, correction=True, tool_calls=9
+    )
     assert not d.permitted and not d.worthwhile
     assert d.reason is GateReason.DISABLED
 
 
 def test_ephemeral_session_denies_everything():
-    d = LearningGate(is_ephemeral=True).decide(Cadence.PER_TURN, correction=True, tool_calls=9)
+    d = LearningGate(is_ephemeral=True).decide(
+        Cadence.PER_TURN, correction=True, tool_calls=9
+    )
     assert not d.permitted
     assert d.reason is GateReason.EPHEMERAL
 
@@ -45,7 +49,9 @@ def test_low_signal_turn_is_permitted_but_not_worthwhile():
     an LLM. Collapsing these into one boolean is what forced the facet-capture
     carve-out that bypassed the gate entirely.
     """
-    d = LearningGate(min_tool_calls=4).decide(Cadence.PER_TURN, correction=False, tool_calls=1)
+    d = LearningGate(min_tool_calls=4).decide(
+        Cadence.PER_TURN, correction=False, tool_calls=1
+    )
     assert d.permitted is True
     assert d.worthwhile is False
     assert d.reason is GateReason.NOT_WORTHWHILE
@@ -55,9 +61,6 @@ def test_correction_heuristic_off_falls_back_to_tool_count():
     gate = LearningGate(correction_heuristic=False, min_tool_calls=4)
     assert not gate.decide(Cadence.PER_TURN, correction=True, tool_calls=0).worthwhile
     assert gate.decide(Cadence.PER_TURN, correction=True, tool_calls=4).worthwhile
-
-
-# ── what the old gate could not express ──
 
 
 def test_truthiness_is_the_strict_answer():
@@ -92,7 +95,9 @@ def test_decision_carries_its_cadence():
 
 def test_run_end_needs_no_threshold():
     """A terminal run is the signal; there is no cheaper proxy to gate on."""
-    d = LearningGate(min_tool_calls=99).decide(Cadence.RUN_END, correction=False, tool_calls=0)
+    d = LearningGate(min_tool_calls=99).decide(
+        Cadence.RUN_END, correction=False, tool_calls=0
+    )
     assert d.allowed
 
 
@@ -108,9 +113,6 @@ def test_session_end_without_a_score_is_worthwhile():
     """No score supplied means the caller hasn't opted into scoring — don't invent
     a denial from a missing input."""
     assert LearningGate().decide(Cadence.SESSION_END).worthwhile
-
-
-# ── construction from live objects ──
 
 
 def test_for_session_reads_the_restrictions_registry():
@@ -130,7 +132,9 @@ def test_for_session_reads_the_restrictions_registry():
             .permitted
         )
         session_restrictions.mark_incognito("sess-gate-registry")
-        d = LearningGate.for_session(session, cfg).decide(Cadence.PER_TURN, correction=True)
+        d = LearningGate.for_session(session, cfg).decide(
+            Cadence.PER_TURN, correction=True
+        )
         assert not d.permitted
         assert d.reason is GateReason.RESTRICTED
     finally:
@@ -180,9 +184,6 @@ def test_cadence_enum_is_closed():
         Cadence("per-turn")
 
 
-# ── the turn-level composition ──
-
-
 def test_a_denied_session_is_never_classified(monkeypatch):
     """Permission must be settled WITHOUT reading the message.
 
@@ -190,8 +191,8 @@ def test_a_denied_session_is_never_classified(monkeypatch):
     content the session's memory_mode promised was out of scope. The gate decides
     first, then the message is touched.
     """
-    from gideon import after_turn_review as atr
-    from gideon.dashboard.chat_runner import learning_decision_for_turn
+    from gideon.cognition import after_turn_review as atr
+    from gideon.interfaces.dashboard.chat_runner import learning_decision_for_turn
 
     calls: list[str] = []
 
@@ -203,10 +204,7 @@ def test_a_denied_session_is_never_classified(monkeypatch):
 
     session = MagicMock()
     session.key = "gate-order"
-    session._ephemeral = True  # denied
-    # Explicitly False: a MagicMock's auto-created attribute is TRUTHY, so leaving
-    # this unset would deny for the wrong reason and the ordering assertion below
-    # would pass without exercising the ordering at all.
+    session._ephemeral = True
     session.is_restricted = False
     cfg = MagicMock(enabled=True, min_tool_calls=4, correction_heuristic=True)
 
@@ -221,7 +219,7 @@ def test_a_denied_session_is_never_classified(monkeypatch):
 
 def test_both_reviews_share_one_decision(monkeypatch):
     """The reason this function exists: two computations of one rule drift."""
-    from gideon.dashboard import chat_runner
+    from gideon.interfaces.dashboard import chat_runner
 
     computed = []
     real = chat_runner.learning_decision_for_turn
@@ -236,30 +234,24 @@ def test_both_reviews_share_one_decision(monkeypatch):
     session.key = "shared-decision"
     session._ephemeral = True
     session.is_restricted = False
-    cfg = MagicMock(enabled=True, min_tool_calls=4, correction_heuristic=True, skill_ladder=True)
+    cfg = MagicMock(
+        enabled=True, min_tool_calls=4, correction_heuristic=True, skill_ladder=True
+    )
     decision = counting(session, "hello", 4, cfg)
     computed.clear()
 
-    # Passing the decision in means neither review recomputes it.
-    chat_runner._maybe_after_turn_review(MagicMock(), session, "hello", "ok", 4, decision=decision)
+    chat_runner._maybe_after_turn_review(
+        MagicMock(), session, "hello", "ok", 4, decision=decision
+    )
     chat_runner._maybe_skill_ladder_review(
         MagicMock(), session, "hello", "ok", 4, decision=decision
     )
     assert computed == []
 
 
-# ── §3.2: every negative decision leaves a row (WF2LEA-7 clause 6) ──
-#
-# GateReason's own docstring promises the reason is "recorded, not just returned",
-# and staging.FlushOutcome.FLUSH_SKIPPED exists for "the gate denied it — recorded
-# so a config-off period is legible". Before this, NOTHING in production wrote
-# FLUSH_SKIPPED: a denial left no trace, so a permanently-disabled gate looked
-# exactly like a healthy pass that found nothing. These tests pin the loop shut.
-
-
 def _isolated_store(tmp_path, monkeypatch):
     """Point the process-global staging store at tmp_path."""
-    from gideon.learning import staging
+    from gideon.cognition.learning import staging
 
     staging.reset_store()
     store = staging.StagingStore(tmp_path)
@@ -269,7 +261,7 @@ def _isolated_store(tmp_path, monkeypatch):
 
 def _skipped_rows(store):
     """Read flush_records directly — the same way the staging tests do."""
-    from gideon.learning.staging import FlushOutcome
+    from gideon.cognition.learning.staging import FlushOutcome
 
     with store._cursor() as cur:
         rows = cur.execute(
@@ -291,7 +283,7 @@ def _skipped_rows(store):
 def test_a_permission_denial_is_recorded_with_its_typed_reason(
     tmp_path, monkeypatch, kwargs, expected
 ):
-    from gideon.learning import record_denial
+    from gideon.cognition.learning import record_denial
 
     store = _isolated_store(tmp_path, monkeypatch)
     d = LearningGate(**kwargs).decide(Cadence.PER_TURN, tool_calls=9)
@@ -300,26 +292,29 @@ def test_a_permission_denial_is_recorded_with_its_typed_reason(
     assert record_denial(d) is True
     rows = _skipped_rows(store)
     assert len(rows) == 1
-    # The typed reason — not just "declined" — is what thresholds get tuned against.
     assert expected.value in str(rows[0].get("detail", ""))
     assert str(rows[0].get("cadence")) == Cadence.PER_TURN.value
 
 
 def test_a_below_threshold_denial_is_recorded_too(tmp_path, monkeypatch):
     """Permitted but not worthwhile still explains why no expensive review ran."""
-    from gideon.learning import record_denial
+    from gideon.cognition.learning import record_denial
 
     store = _isolated_store(tmp_path, monkeypatch)
-    d = LearningGate(min_tool_calls=4).decide(Cadence.PER_TURN, correction=False, tool_calls=0)
+    d = LearningGate(min_tool_calls=4).decide(
+        Cadence.PER_TURN, correction=False, tool_calls=0
+    )
     assert d.permitted and not d.worthwhile
 
     assert record_denial(d) is True
-    assert GateReason.NOT_WORTHWHILE.value in str(_skipped_rows(store)[0].get("detail", ""))
+    assert GateReason.NOT_WORTHWHILE.value in str(
+        _skipped_rows(store)[0].get("detail", "")
+    )
 
 
 def test_an_allowed_decision_records_nothing(tmp_path, monkeypatch):
     """Only NEGATIVE decisions get a row — otherwise the table is just traffic."""
-    from gideon.learning import record_denial
+    from gideon.cognition.learning import record_denial
 
     store = _isolated_store(tmp_path, monkeypatch)
     d = LearningGate().decide(Cadence.PER_TURN, correction=True)
@@ -331,7 +326,7 @@ def test_an_allowed_decision_records_nothing(tmp_path, monkeypatch):
 
 def test_recording_never_breaks_the_capture_path(tmp_path, monkeypatch):
     """Observability must not be able to fail a turn."""
-    from gideon.learning import record_denial, staging
+    from gideon.cognition.learning import record_denial, staging
 
     staging.reset_store()
 
@@ -340,13 +335,13 @@ def test_recording_never_breaks_the_capture_path(tmp_path, monkeypatch):
 
     monkeypatch.setattr(staging, "get_store", _boom)
     d = LearningGate(enabled=False).decide(Cadence.PER_TURN)
-    assert record_denial(d) is False  # swallowed, not raised
+    assert record_denial(d) is False
 
 
 def test_chat_runner_records_the_denial_it_acts_on(tmp_path, monkeypatch):
     """The WIRING, not just the function: the real branch must write the row."""
-    from gideon.dashboard import chat_runner
-    from gideon.learning import staging
+    from gideon.cognition.learning import staging
+    from gideon.interfaces.dashboard import chat_runner
 
     store = _isolated_store(tmp_path, monkeypatch)
     monkeypatch.setattr(staging, "get_store", lambda *a, **k: store)
@@ -356,7 +351,9 @@ def test_chat_runner_records_the_denial_it_acts_on(tmp_path, monkeypatch):
     denied = LearningGate(is_restricted=True).decide(Cadence.PER_TURN, tool_calls=9)
     assert not denied.permitted
 
-    chat_runner._maybe_after_turn_review(MagicMock(), session, "hello", "ok", 9, decision=denied)
+    chat_runner._maybe_after_turn_review(
+        MagicMock(), session, "hello", "ok", 9, decision=denied
+    )
     rows = _skipped_rows(store)
     assert len(rows) == 1
     assert GateReason.RESTRICTED.value in str(rows[0].get("detail", ""))

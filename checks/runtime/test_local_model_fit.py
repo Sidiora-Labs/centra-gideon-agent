@@ -33,19 +33,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from gideon.local_models import fit
+from gideon.integrations.local_models import fit
 
 _MB = 1024 * 1024
 _GB = 1024 * 1024 * 1024
 
-#: The REAL shipped faster-whisper variant spread, in MB, read from
-#: ``GideonApps/faster-whisper/provider.py``: tiny=75, base=142, small=466,
-#: medium=1500, turbo=1600, large-v3=2900. The vacuity assertion is only worth anything
-#: against sizes a user can actually download — invented sizes prove the test, not the code.
 WHISPER_VARIANT_SIZES_MB = [75.0, 142.0, 466.0, 1500.0, 1600.0, 2900.0]
 
-#: A synthetic host small enough that the shipped spread straddles it: 4 GB of unified
-#: memory minus the 3.0 GB default reserve leaves exactly 1 GB for models.
 SMALL_HOST_GB = 4.0
 SMALL_HOST_RESERVE_GB = 3.0
 
@@ -82,9 +76,6 @@ def _host(
     )
 
 
-# ── The budget: unified memory is counted exactly once ──────────────────────────
-
-
 def test_unified_memory_vram_is_never_added_on_top_of_system_ram():
     """The double-count defect: a unified host's budget can never exceed its own RAM.
 
@@ -111,9 +102,7 @@ def test_only_a_discrete_gpu_contributes_a_second_memory_pool():
     budget = fit.usable_memory_bytes(discrete, reserve_gb=3.0)
 
     assert budget == int(16 * _GB) - int(3 * _GB) + int(8 * _GB)
-    # A genuinely separate pool is the only way a budget may exceed system RAM.
     assert budget > discrete.total_ram_bytes
-    # And the reserve is taken from RAM only, never from the VRAM pool.
     assert budget - int(8 * _GB) == int(16 * _GB) - int(3 * _GB)
 
 
@@ -121,7 +110,9 @@ def test_a_discrete_gpu_with_no_vram_reported_adds_nothing():
     """Unknown hardware (vendor unidentified, 0 VRAM) must not inflate the budget."""
     unknown = _host(ram_gb=16.0, unified=False, vram_gb=0.0)
 
-    assert fit.usable_memory_bytes(unknown, reserve_gb=3.0) == int(16 * _GB) - int(3 * _GB)
+    assert fit.usable_memory_bytes(unknown, reserve_gb=3.0) == int(16 * _GB) - int(
+        3 * _GB
+    )
 
 
 def test_the_fixed_reserve_is_subtracted_from_the_budget():
@@ -129,11 +120,9 @@ def test_the_fixed_reserve_is_subtracted_from_the_budget():
     host = _host(ram_gb=16.0)
 
     assert fit.usable_memory_bytes(host, reserve_gb=4.0) == int(16 * _GB) - int(4 * _GB)
-    # Monotonic: a bigger reserve is strictly less room, never the same number.
     assert fit.usable_memory_bytes(host, reserve_gb=6.0) < fit.usable_memory_bytes(
         host, reserve_gb=4.0
     )
-    # An omitted reserve is the documented default, not zero.
     assert fit.usable_memory_bytes(host) == fit.usable_memory_bytes(
         host, reserve_gb=fit.DEFAULT_RESERVE_GB
     )
@@ -161,19 +150,20 @@ def test_a_machine_smaller_than_the_reserve_yields_zero_not_none_and_not_negativ
 @pytest.mark.parametrize(
     ("ram_gb", "measured"),
     [
-        (0.0, False),  # nothing probed at all
-        (16.0, False),  # a plausible number the probe could not stand behind
-        (0.0, True),  # measured, but the probe returned zero total RAM
+        (0.0, False),
+        (16.0, False),
+        (0.0, True),
     ],
 )
-def test_an_unmeasured_host_yields_none_so_unknown_never_reads_as_nothing_fits(ram_gb, measured):
+def test_an_unmeasured_host_yields_none_so_unknown_never_reads_as_nothing_fits(
+    ram_gb, measured
+):
     """``None`` and ``0`` are different answers; only one should hide models."""
-    budget = fit.usable_memory_bytes(_host(ram_gb=ram_gb, measured=measured), reserve_gb=3.0)
+    budget = fit.usable_memory_bytes(
+        _host(ram_gb=ram_gb, measured=measured), reserve_gb=3.0
+    )
 
     assert budget is None
-
-
-# ── host_capacity(): the flags come from the probes, not from a guess ───────────
 
 
 def test_host_capacity_treats_an_unavailable_memory_source_as_unmeasured(monkeypatch):
@@ -184,7 +174,9 @@ def test_host_capacity_treats_an_unavailable_memory_source_as_unmeasured(monkeyp
     budget, which is exactly the ``None``/``0`` collapse this module refuses.
     """
     monkeypatch.setattr(
-        fit, "memory_pressure", lambda *a, **k: {"total_mb": 16384, "source": "unavailable"}
+        fit,
+        "memory_pressure",
+        lambda *a, **k: {"total_mb": 16384, "source": "unavailable"},
     )
     monkeypatch.setattr(fit, "_probe_gpu", lambda: {"unified": True, "vram_bytes": 0})
 
@@ -194,7 +186,9 @@ def test_host_capacity_treats_an_unavailable_memory_source_as_unmeasured(monkeyp
     assert fit.usable_memory_bytes(host, reserve_gb=3.0) is None
 
 
-def test_host_capacity_carries_a_discrete_probe_through_to_a_two_pool_budget(monkeypatch):
+def test_host_capacity_carries_a_discrete_probe_through_to_a_two_pool_budget(
+    monkeypatch,
+):
     """An nvidia-smi host is the discrete case end to end, and the probe runs ONCE."""
     calls: list[list[str]] = []
 
@@ -217,7 +211,6 @@ def test_host_capacity_carries_a_discrete_probe_through_to_a_two_pool_budget(mon
     budget = fit.usable_memory_bytes(host, reserve_gb=3.0)
     assert budget == int(32768 * _MB) - int(3 * _GB) + int(24564 * _MB)
 
-    # Cached: a second capacity read must not re-shell-out.
     fit.host_capacity()
     assert len(calls) == 1
 
@@ -238,11 +231,7 @@ def test_an_unmeasurable_filesystem_leaves_disk_measured_false(monkeypatch):
 
     assert host.disk_measured is False
     assert host.free_disk_bytes == 0
-    # The memory half is unaffected — one failed probe must not unmeasure the other.
     assert host.memory_measured is True
-
-
-# ── kv_cache_bytes: an estimate that never guesses upward ───────────────────────
 
 
 @pytest.mark.parametrize(
@@ -258,7 +247,6 @@ def test_kv_cache_grows_with_both_the_context_window_and_the_weights():
     """The estimate scales on both axes; a constant would make context tokens inert."""
     assert fit.kv_cache_bytes(8192, 4 * _GB) > fit.kv_cache_bytes(4096, 4 * _GB)
     assert fit.kv_cache_bytes(4096, 8 * _GB) > fit.kv_cache_bytes(4096, 4 * _GB)
-    # The documented rate: tokens x weight-GB x KV_BYTES_PER_TOKEN_PER_GB.
     assert fit.kv_cache_bytes(4096, _GB) == 4096 * fit.KV_BYTES_PER_TOKEN_PER_GB
 
 
@@ -266,13 +254,15 @@ def test_a_large_context_window_can_move_a_verdict_from_green_to_red():
     """The KV estimate reaches the verdict — otherwise it is a computed-but-inert number."""
     budget = 1 * _GB
 
-    assert fit.fit_verdict(size_mb=466.0, context_tokens=0, budget_bytes=budget).verdict == "green"
-    stretched = fit.fit_verdict(size_mb=466.0, context_tokens=65536, budget_bytes=budget)
+    assert (
+        fit.fit_verdict(size_mb=466.0, context_tokens=0, budget_bytes=budget).verdict
+        == "green"
+    )
+    stretched = fit.fit_verdict(
+        size_mb=466.0, context_tokens=65536, budget_bytes=budget
+    )
     assert stretched.verdict == "red"
     assert stretched.need_bytes > int(466 * _MB)
-
-
-# ── fit_verdict: four answers, and never only one of them ───────────────────────
 
 
 def test_an_unmeasured_budget_is_unknown_rather_than_red():
@@ -292,7 +282,6 @@ def test_a_model_with_no_declared_size_is_unknown_even_on_a_measured_host(size_m
 
     assert assessment.verdict == "unknown"
     assert assessment.need_bytes == 0
-    # The budget IS known here, so it is still reported — only the verdict is withheld.
     assert assessment.budget_bytes == 1 * _GB
 
 
@@ -316,8 +305,8 @@ def test_a_model_needing_more_than_the_budget_is_red_and_says_both_numbers():
     assert assessment.verdict == "red"
     assert assessment.budget_bytes == 1 * _GB
     assert assessment.need_bytes == int(2900 * _MB)
-    assert "2.8" in assessment.reason  # ~2.8 GB needed
-    assert "1.0" in assessment.reason  # ~1.0 GB available
+    assert "2.8" in assessment.reason
+    assert "1.0" in assessment.reason
 
 
 def test_a_model_inside_the_budget_but_over_the_headroom_is_yellow_not_green():
@@ -353,10 +342,8 @@ def test_at_least_one_shipped_model_is_red_and_at_least_one_is_green_on_a_small_
         for size in WHISPER_VARIANT_SIZES_MB
     }
 
-    # Both directions, named — not just "more than one distinct value".
     assert {s for s, v in verdicts.items() if v == "green"} == {75.0, 142.0, 466.0}
     assert {s for s, v in verdicts.items() if v == "red"} == {1500.0, 1600.0, 2900.0}
-    # And the degenerate-constant guard, stated separately so it fails on its own terms.
     assert len(set(verdicts.values())) > 1, f"every shipped variant returned {verdicts}"
 
 
@@ -370,9 +357,6 @@ def test_every_shipped_model_is_unknown_on_an_unmeasured_host():
     assert verdicts == {"unknown"}
 
 
-# ── Family quoting: the median variant, and stepping down ───────────────────────
-
-
 def test_median_variant_size_is_the_median_and_never_the_smallest():
     """Quoting the smallest variant promises a fit the user's actual pick will not give."""
     median = fit.median_variant_size_mb(list(WHISPER_VARIANT_SIZES_MB))
@@ -380,17 +364,16 @@ def test_median_variant_size_is_the_median_and_never_the_smallest():
     assert median == 1500.0
     assert median != min(WHISPER_VARIANT_SIZES_MB)
     assert median > min(WHISPER_VARIANT_SIZES_MB)
-    # Order of the input must not change the answer.
-    assert fit.median_variant_size_mb(list(reversed(WHISPER_VARIANT_SIZES_MB))) == median
+    assert (
+        fit.median_variant_size_mb(list(reversed(WHISPER_VARIANT_SIZES_MB))) == median
+    )
 
 
 def test_median_variant_size_takes_the_larger_of_two_middles_on_an_even_count():
     """A quote must not flatter the family: 466/1500 resolves upward, to 1500."""
     assert fit.median_variant_size_mb([75.0, 142.0, 466.0, 1500.0]) == 466.0
     assert fit.median_variant_size_mb([100.0, 200.0]) == 200.0
-    # Odd counts are the plain middle.
     assert fit.median_variant_size_mb([75.0, 142.0, 466.0]) == 142.0
-    # A family of one quotes itself.
     assert fit.median_variant_size_mb([466.0]) == 466.0
 
 
@@ -405,7 +388,6 @@ def test_largest_that_fits_steps_down_to_the_biggest_non_red_variant():
     budget = 1 * _GB
 
     assert fit.largest_that_fits(list(WHISPER_VARIANT_SIZES_MB), budget) == 466.0
-    # A generous budget steps down to nothing — the largest variant is offered as-is.
     assert fit.largest_that_fits(list(WHISPER_VARIANT_SIZES_MB), 64 * _GB) == 2900.0
 
 
@@ -426,9 +408,6 @@ def test_family_key_splits_an_ollama_style_id_and_leaves_a_bare_name_alone():
     assert fit.family_key("") == ""
 
 
-# ── disk_precheck: refuse with both numbers, or skip with a warning ─────────────
-
-
 def test_disk_precheck_refuses_with_a_typed_reason_naming_both_numbers(monkeypatch):
     """A refusal the user cannot act on without a second lookup is a bad refusal."""
     monkeypatch.setattr(shutil, "disk_usage", lambda _p: _usage(1 * _GB))
@@ -440,8 +419,8 @@ def test_disk_precheck_refuses_with_a_typed_reason_naming_both_numbers(monkeypat
     assert result.need_bytes == int(10240 * _MB)
     assert result.free_bytes == 1 * _GB
     assert result.reason.startswith("insufficient_disk_space")
-    assert "10.0" in result.reason  # the need, in GB
-    assert "1.0" in result.reason  # the free space, in GB
+    assert "10.0" in result.reason
+    assert "1.0" in result.reason
     assert result.warning == ""
 
 
@@ -479,7 +458,6 @@ def test_disk_precheck_skips_with_a_warning_when_the_filesystem_cannot_be_measur
     assert result.warning != ""
     assert result.reason == ""
     assert result.free_bytes == 0
-    # The need is still reported, so the surface can say what it could not verify.
     assert result.need_bytes == int(10240 * _MB)
 
 
@@ -494,9 +472,6 @@ def test_disk_precheck_of_an_unknown_size_is_allowed_rather_than_refused(monkeyp
     assert result.need_bytes == 0
 
 
-# ── assess(): the seam callers actually use ─────────────────────────────────────
-
-
 def test_assess_takes_a_given_host_and_reserve_without_probing_the_machine():
     """A caller that already has host facts must not trigger a second collection."""
     small = _host(ram_gb=SMALL_HOST_GB, unified=True, vram_gb=8.0)
@@ -505,13 +480,14 @@ def test_assess_takes_a_given_host_and_reserve_without_probing_the_machine():
     red = fit.assess(size_mb=2900.0, host=small, reserve_gb=SMALL_HOST_RESERVE_GB)
 
     assert (green.verdict, red.verdict) == ("green", "red")
-    # The unified host's wrongly-populated VRAM did not reach the budget here either.
     assert green.budget_bytes == 1 * _GB
 
 
 def test_assess_on_an_unmeasured_host_is_unknown_for_a_model_that_would_otherwise_fit():
     """The unknown answer survives the convenience wrapper."""
-    assessment = fit.assess(size_mb=75.0, host=_host(ram_gb=16.0, measured=False), reserve_gb=3.0)
+    assessment = fit.assess(
+        size_mb=75.0, host=_host(ram_gb=16.0, measured=False), reserve_gb=3.0
+    )
 
     assert assessment.verdict == "unknown"
     assert assessment.budget_bytes is None

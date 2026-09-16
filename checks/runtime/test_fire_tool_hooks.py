@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from gideon.hooks import (
+from gideon.engine.hooks import (
     HOOK_EVENT_PRE_TOOL_USE,
     ScriptHookStore,
     fire_tool_hooks,
@@ -51,7 +51,6 @@ class TestFireToolHooks:
 
     @pytest.mark.asyncio
     async def test_none_store_is_noop(self):
-        # Should not raise
         await fire_tool_hooks(None, "Running: echo hello")
 
     @pytest.mark.asyncio
@@ -128,7 +127,6 @@ class TestFireToolHooks:
             new_callable=AsyncMock,
             side_effect=RuntimeError("boom"),
         ):
-            # Should not raise
             await fire_tool_hooks(hook_store, "ReadFile")
 
     @pytest.mark.asyncio

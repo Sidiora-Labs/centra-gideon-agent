@@ -1,6 +1,6 @@
 """Tests for the generic, channel-agnostic LLM-text utilities."""
 
-from gideon.textfmt import extract_options, strip_thinking_tags
+from gideon.core.textfmt import extract_options, strip_thinking_tags
 
 
 class TestExtractOptions:
@@ -21,7 +21,9 @@ class TestExtractOptions:
 
 class TestStripThinkingTags:
     def test_strips_and_extracts(self):
-        cleaned, thinking = strip_thinking_tags("<thinking>reasoning here</thinking>Answer.")
+        cleaned, thinking = strip_thinking_tags(
+            "<thinking>reasoning here</thinking>Answer."
+        )
         assert cleaned == "Answer."
         assert thinking == "reasoning here"
 

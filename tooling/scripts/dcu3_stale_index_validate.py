@@ -12,7 +12,7 @@ fresh path only"*. This script measures the second half — **both triggers, sep
 carries the fresh-path positive control beside them, because a harness that only ever sees
 refusals has not distinguished *"staleness is caught"* from *"everything is refused"*.
 
-**Every step goes through** :func:`gideon.computer_use.service.computer_dispatch`, never
+**Every step goes through** :func:`gideon.integrations.computer_use.service.computer_dispatch`, never
 the driver and never the FFI. Dispatch is the only entry point this plan shipped; reaching
 around it would prove the driver works and say nothing about the chain meant to restrain it.
 The one FFI call this script makes is :func:`macos_ffi.list_gui_apps`, and it is not a drive —
@@ -49,7 +49,7 @@ through — remove it and every leg behaves identically.
 
 Usage::
 
-    PYTHONPATH=src python scripts/dcu3_stale_index_validate.py
+    PYTHONPATH=src python tooling/scripts/dcu3_stale_index_validate.py
 
 Exit status 0 only when every clause holds. Anything unproven is reported as ``unproven`` with
 the reason, never silently dropped. The run sleeps once for the snapshot TTL (read from
@@ -69,16 +69,10 @@ import time
 from pathlib import Path
 from typing import Any
 
-#: The three ``service._stale`` details, as the substrings that tell them apart. Asserted
-#: present for the leg that means them and ABSENT for the other two — one shared code with
-#: three causes is otherwise indistinguishable, and two of the three causes are vacuous here.
 DETAIL_TTL = "old and indices expire after"
 DETAIL_FINGERPRINT = "the window has changed since it was walked"
 DETAIL_UNKNOWN_ID = "no such snapshot is live in this gateway"
 
-#: Prose markers, deliberately not credential- or secret-shaped: step 7 passes every driver
-#: string through ``redact_credentials``, and a marker that got redacted would fail the
-#: read-back for a reason that has nothing to do with staleness.
 MARKER_CONTROL = "DCU-3 stale-index run wrote this on the fresh path"
 MARKER_TTL_RECOVERY = "DCU-3 stale-index run wrote this after the past-TTL re-snapshot"
 MARKER_FP_RECOVERY = "DCU-3 stale-index run wrote this after the fingerprint re-snapshot"
@@ -96,16 +90,10 @@ class Failure(Exception):
         self.detail = detail
 
 
-#: Every dispatch this run made. "One SEL row per attempt" is checked against this, not against
-#: a number written down once, so a mismatch in EITHER direction reds.
 _ATTEMPTS: list[str] = []
 
-#: Every stale-index refusal this run actually observed, in order. The SEL stale-row count is
-#: checked against this for the same reason: a hardcoded 2 would go on passing if a leg silently
-#: stopped refusing, or if a third refusal appeared that nobody meant.
 _STALE_OBSERVED: list[str] = []
 
-#: Driver operations spawned since the last :func:`_driver_ops_since` call.
 _DRIVER_OPS: list[str] = []
 
 
@@ -117,7 +105,7 @@ def _install_driver_counter() -> None:
     two triggers differ in whether the driver is reached at all, and that difference is the
     sharpest available proof of WHICH check fired.
     """
-    from gideon.computer_use import service
+    from gideon.integrations.computer_use import service
 
     real = service._run_driver
 
@@ -137,9 +125,9 @@ def _driver_ops_since() -> list[str]:
 
 def _dispatch(tool: str, params: dict[str, Any]) -> tuple[str, Any]:
     """Run one dispatch. Returns ``("ok", result)`` or ``("refused", AgentError)``."""
-    from gideon.computer_use import enable_state
-    from gideon.computer_use import policy as cu_policy
-    from gideon.computer_use import service
+    from gideon.integrations.computer_use import enable_state
+    from gideon.integrations.computer_use import policy as cu_policy
+    from gideon.integrations.computer_use import service
 
     _ATTEMPTS.append(tool)
     try:
@@ -163,7 +151,8 @@ def _rendered(error: Any) -> str:
 
 
 def _write_enable(home: Path, apps: list[str]) -> None:
-    from gideon.computer_use.enable_state import ENABLE_FILENAME, GOVERNANCE_DIRNAME
+    from gideon.integrations.computer_use.enable_state import ENABLE_FILENAME
+    from gideon.integrations.computer_use.enable_state import GOVERNANCE_DIRNAME
 
     governance = home / GOVERNANCE_DIRNAME
     governance.mkdir(parents=True, exist_ok=True)
@@ -301,7 +290,8 @@ def _front_window_walks() -> bool:
 
 def phase_stale(home: Path) -> dict[str, Any]:  # noqa: C901 - one linear transcript, read top down
     """Both stale-index triggers, separately, plus the fresh-path positive control."""
-    from gideon.computer_use import macos_ffi, service
+    from gideon.integrations.computer_use import macos_ffi
+    from gideon.integrations.computer_use import service
 
     _install_driver_counter()
     _write_enable(home, [APP])
@@ -311,14 +301,9 @@ def phase_stale(home: Path) -> dict[str, Any]:  # noqa: C901 - one linear transc
     doc_a.write_text("dcu3 stale-index scratch document A\n", encoding="utf-8")
     doc_b.write_text("dcu3 stale-index scratch document B\n", encoding="utf-8")
 
-    # Captured BEFORE the launch, because teardown may only quit what this run started —
-    # quitting an app the operator already had open would destroy their unsaved work.
     already = set(macos_ffi.list_gui_apps())
     launched = {APP} - already
 
-    # ``-F`` (fresh) matters: without it macOS restores the app's previously open windows and
-    # the front window is some earlier document, so "which window was walked" stops being
-    # observable. #2552 lost a run to exactly this.
     subprocess.run(["open", "-F", "-a", APP, str(doc_a)], check=True)
     for _ in range(30):
         if _front_window_walks():
@@ -332,22 +317,12 @@ def phase_stale(home: Path) -> dict[str, Any]:  # noqa: C901 - one linear transc
         "ttl_secs": service.SNAPSHOT_TTL_SECS,
     }
 
-    # --- POSITIVE CONTROL: a fresh, unchanged snapshot still acts ----------------------------
-    # First, and load-bearing. It rules out every vacuous reason the later refusals could fire:
-    # the keystone is on, TextEdit is allowlisted, the AXTextArea exists at the index used, the
-    # index is in range, and the OS grants this process accessibility. A run that only produced
-    # refusals could not tell any of that apart from staleness.
     control_snap = _snapshot("fresh-path-positive-control")
     report["fresh_path_positive_control"] = _write_by_index(
         control_snap, MARKER_CONTROL, "fresh-path-positive-control"
     )
     report["fresh_path_positive_control"]["fingerprint"] = str(control_snap.get("fingerprint", ""))
 
-    # --- TRIGGER 1: past TTL -----------------------------------------------------------------
-    # Document B is opened for this leg and never written to. The positive control edited
-    # document A, and an edited TextEdit document can change its own window title ("— Edited")
-    # while the run sleeps — which would make "nothing changed but the clock" false for a reason
-    # that has nothing to do with the TTL.
     subprocess.run(["open", "-F", "-a", APP, str(doc_b)], check=True)
     for _ in range(30):
         if _front_window_walks():
@@ -360,19 +335,16 @@ def phase_stale(home: Path) -> dict[str, Any]:  # noqa: C901 - one linear transc
     ttl_fingerprint = str(ttl_snap.get("fingerprint", ""))
     ttl_window = _window_title(ttl_snap)
     slept = service.SNAPSHOT_TTL_SECS + 1.5
-    time.sleep(slept)  # real time, not a patched clock: the clause is about a live desktop
+    time.sleep(slept)
     ttl_refusal = _expect_stale(
         ttl_snap,
         marker=MARKER_NEVER,
         expect_detail=DETAIL_TTL,
         forbid_details=(DETAIL_FINGERPRINT, DETAIL_UNKNOWN_ID),
-        expect_driver_ops=[],  # step 3a refuses before any window is walked
+        expect_driver_ops=[],
         clause="past-ttl",
     )
 
-    # The window did not change; the only thing that changed was age. Without this the leg
-    # cannot tell a TTL refusal from a fingerprint refusal that happened to be worded oddly —
-    # and the zero driver ops above only prove no re-walk happened, not that none was warranted.
     ttl_after = _snapshot("past-ttl")
     if str(ttl_after.get("fingerprint", "")) != ttl_fingerprint:
         raise Failure(
@@ -383,7 +355,6 @@ def phase_stale(home: Path) -> dict[str, Any]:  # noqa: C901 - one linear transc
     if _window_title(ttl_after) != ttl_window:
         raise Failure("past-ttl", "the front window changed during the sleep")
 
-    # ... and the re-snapshot is what clears it. This is the "forces a re-snapshot" half.
     report["past_ttl"] = {
         "window": ttl_window,
         "fingerprint_before": ttl_fingerprint,
@@ -395,12 +366,6 @@ def phase_stale(home: Path) -> dict[str, Any]:  # noqa: C901 - one linear transc
         ),
     }
 
-    # --- TRIGGER 2: changed fingerprint, INSIDE the TTL --------------------------------------
-    # Bringing document A forward makes the app's focused window a different document, so the
-    # walked tree has a different window title and different geometry. ``open`` goes through
-    # LaunchServices, NOT osascript: ``tell application`` needs the Apple Events grant, a
-    # DIFFERENT TCC grant from Accessibility, and on a host without it osascript blocks on a
-    # prompt nobody answers.
     fp_snap = _snapshot("changed-fingerprint")
     fp_fingerprint = str(fp_snap.get("fingerprint", ""))
     fp_window = _window_title(fp_snap)
@@ -432,7 +397,7 @@ def phase_stale(home: Path) -> dict[str, Any]:  # noqa: C901 - one linear transc
         marker=MARKER_NEVER,
         expect_detail=DETAIL_FINGERPRINT,
         forbid_details=(DETAIL_TTL, DETAIL_UNKNOWN_ID),
-        expect_driver_ops=["snapshot"],  # step 3b DID re-walk; the comparison is why it refused
+        expect_driver_ops=["snapshot"],
         clause="changed-fingerprint",
     )
     report["changed_fingerprint"] = {
@@ -447,9 +412,6 @@ def phase_stale(home: Path) -> dict[str, Any]:  # noqa: C901 - one linear transc
         ),
     }
 
-    # --- the refusal is not the tool being off, the app being off, or the element missing ----
-    # Stated as data rather than prose: all three would have refused the positive control and
-    # both recoveries too, and each carries its own distinct code.
     report["vacuous_causes_ruled_out"] = {
         "keystone_enabled": "the positive control and both recoveries acted successfully",
         "app_allowlisted": f"{APP} passed check_app on every one of those acting dispatches",
@@ -458,7 +420,6 @@ def phase_stale(home: Path) -> dict[str, Any]:  # noqa: C901 - one linear transc
         "distinct_stale_cause": "each refusal names its own detail and NOT the other two",
     }
 
-    # --- SEL: one row per attempt, and one stale row per stale refusal -----------------------
     rows = _sel_rows(home)
     if len(rows) != len(_ATTEMPTS):
         raise Failure(
@@ -473,10 +434,6 @@ def phase_stale(home: Path) -> dict[str, Any]:  # noqa: C901 - one linear transc
             f"{len(_STALE_OBSERVED)} stale refusals were observed but {len(stale_rows)} SEL rows "
             "carry the stale code",
         )
-    # Counting the rows was never enough (#2570). Both legs here refuse an index the gateway had
-    # just resolved a snapshot for, so both rows have an app to name; the past-TTL one used to
-    # record `resources=''` because step 3a raises before the dispatch assigns it, and a
-    # count-based check stayed green over a record that had lost its target.
     anonymous = [r for r in stale_rows if r.get("resources") != f"app={APP}"]
     if anonymous:
         raise Failure(
@@ -497,7 +454,6 @@ def phase_stale(home: Path) -> dict[str, Any]:  # noqa: C901 - one linear transc
         "stale_refusals_observed": list(_STALE_OBSERVED),
     }
 
-    # --- leave the machine as we found it ----------------------------------------------------
     cleanup: dict[str, Any] = {"scratch_documents": "left unsaved; discarded when the app quits"}
     for app in sorted(launched):
         subprocess.run(["pkill", "-x", app], check=False)
@@ -517,13 +473,10 @@ def _preflight() -> dict[str, Any]:
     """
     if platform.system() != "Darwin":
         raise Failure("preflight", f"this is a macOS validation; this host is {platform.system()}")
-    from gideon.computer_use import macos_ffi, macos_tcc
+    from gideon.integrations.computer_use import macos_ffi
+    from gideon.integrations.computer_use import macos_tcc
 
     trusted = macos_ffi.is_process_trusted()
-    # AFTER the grant probe: tccd writes the attribution row when it answers, so a probe run
-    # before the question has nothing of this process's to read. The PATIENT timeout, because
-    # nothing is waiting on this: `log show` costs whatever the host's log archive costs, and a
-    # validator that gave up early would record the very gap it exists to close.
     responsible = macos_tcc.responsible_process(timeout=macos_tcc.PATIENT_PROBE_TIMEOUT_SECS)
     if not trusted:
         raise Failure(

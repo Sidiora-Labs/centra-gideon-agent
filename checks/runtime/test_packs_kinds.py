@@ -26,17 +26,16 @@ from pathlib import Path
 
 import pytest
 
-from gideon.packs import bundled as pack_bundled
-from gideon.packs import onelink, prompt_cards, roster
-from gideon.packs.import_ import PackImportRefused, import_pack, inspect_pack
-
-# ── fixtures ──────────────────────────────────────────────────────────────────
+from gideon.extensions.packs import bundled as pack_bundled
+from gideon.extensions.packs import onelink, prompt_cards, roster
+from gideon.extensions.packs.import_ import PackImportRefused, import_pack, inspect_pack
 
 
 @pytest.fixture
 def build_home(tmp_path, monkeypatch):
     """A throwaway home for the BUILD leg. Building a bundled pack reads the package tree,
-    never the home — binding one anyway keeps a stray write from reaching the real home."""
+    never the home — binding one anyway keeps a stray write from reaching the real home.
+    """
     home = tmp_path / "build-home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
@@ -60,11 +59,10 @@ def _skip_connectors(pack_name: str) -> dict[str, dict[str, str]]:
     """Resolve every declared connector as ``skip`` so the round trip needs no credential."""
     source = pack_bundled.get_bundled(pack_name)
     assert source is not None
-    declared = json.loads((source.source / "connectors.json").read_text(encoding="utf-8"))
+    declared = json.loads(
+        (source.source / "connectors.json").read_text(encoding="utf-8")
+    )
     return {str(row["name"]): {"mode": "skip"} for row in declared}
-
-
-# ── §4.1 Domain OS packs: export → wipe → import on a FRESH home ──────────────
 
 
 def test_both_domain_os_packs_ship():
@@ -93,13 +91,11 @@ def test_round_trip_on_a_fresh_home_lands_the_trigger_disabled(
     assert plan.name == pack_name
     assert plan.integrity_ok and plan.lint.ok and not plan.blocked
 
-    # skills locked — committed through install_guarded, so each carries its lock file
     locked = {p.parent.name for p in (home / "skills").rglob(".gideon-lock.json")}
     skill_ids = {c.target_id for c in plan.components if c.kind == "skill"}
     assert skill_ids and skill_ids <= locked
 
-    # template runnable — the real validator, strict, on the bytes that landed
-    from gideon.workflows.validator import validate_spec
+    from gideon.automation.workflows.validator import validate_spec
 
     template = next(c for c in plan.components if c.kind == "template")
     spec = json.loads(
@@ -108,21 +104,21 @@ def test_round_trip_on_a_fresh_home_lands_the_trigger_disabled(
     result = validate_spec(spec, strict=True)
     assert result.ok, [i.code for i in result.issues]
 
-    # digest trigger DISABLED — asserted on the PERSISTED bytes, not on the plan's intent
     staged = list((home / "packs" / "staged").rglob("triggers/*.json"))
     assert staged, "the pack's trigger did not stage"
     for path in staged:
         assert json.loads(path.read_text())["enabled"] is False
 
-    # connector configure-or-substitute prompt: the declaration is surfaced, and skipping it
-    # degrades with the machine-readable marker rather than silently
     assert plan.connectors, "the pack declared no connector to prompt about"
     for row in plan.connectors:
         assert row.get("category")
-    assert [r for r in plan.connector_resolutions if r["marker"].startswith("connector_missing:")]
+    assert [
+        r
+        for r in plan.connector_resolutions
+        if r["marker"].startswith("connector_missing:")
+    ]
 
-    # setup interview binding a folder
-    from gideon.packs.installed import bind_answer, load_installed
+    from gideon.extensions.packs.installed import bind_answer, load_installed
 
     record = next(p for p in load_installed() if p.name == pack_name)
     assert record.setup_skill and record.setup_pending
@@ -136,10 +132,12 @@ def test_round_trip_on_a_fresh_home_lands_the_trigger_disabled(
     assert record.bound[folder_keys[0]] == str(target.resolve())
 
 
-def test_a_folder_binding_must_be_an_existing_directory(tmp_path, build_home, fresh_home):
+def test_a_folder_binding_must_be_an_existing_directory(
+    tmp_path, build_home, fresh_home
+):
     """A folder binding that is not a directory is refused — a bound path nothing can read
     would make "setup finished" a lie."""
-    from gideon.packs.installed import BindingError, bind_answer
+    from gideon.extensions.packs.installed import BindingError, bind_answer
 
     archive = pack_bundled.build_bundled("personal-cfo", tmp_path / "cfo.gideon")
     fresh_home()
@@ -153,7 +151,9 @@ def test_a_folder_binding_must_be_an_existing_directory(tmp_path, build_home, fr
         bind_answer("personal-cfo", "not-a-declared-key", str(tmp_path))
 
 
-def test_an_undeclared_component_file_refuses_the_build(tmp_path, monkeypatch, build_home):
+def test_an_undeclared_component_file_refuses_the_build(
+    tmp_path, monkeypatch, build_home
+):
     """The authoring gate: a component-shaped file no manifest row claims RAISES.
 
     Fail closed in this direction too — a pack that silently shipped a file its manifest does
@@ -161,9 +161,13 @@ def test_an_undeclared_component_file_refuses_the_build(tmp_path, monkeypatch, b
     """
     source = tmp_path / "packs" / "stray-pack"
     (source / "skills" / "kept").mkdir(parents=True)
-    (source / "skills" / "kept" / "SKILL.md").write_text("---\nname: kept\n---\nBody.\n")
+    (source / "skills" / "kept" / "SKILL.md").write_text(
+        "---\nname: kept\n---\nBody.\n"
+    )
     (source / "prompts").mkdir()
-    (source / "prompts" / "orphan.yaml").write_text("name: orphan\nkind: user\ncontent: hi\n")
+    (source / "prompts" / "orphan.yaml").write_text(
+        "name: orphan\nkind: user\ncontent: hi\n"
+    )
     (source / "pack.json").write_text(
         json.dumps(
             {
@@ -179,9 +183,6 @@ def test_an_undeclared_component_file_refuses_the_build(tmp_path, monkeypatch, b
     with pytest.raises(pack_bundled.BundledPackError) as excinfo:
         pack_bundled.build_bundled("stray-pack", tmp_path / "stray.gideon")
     assert "prompts/orphan.yaml" in str(excinfo.value)
-
-
-# ── §4.2 Agent/roster packs ───────────────────────────────────────────────────
 
 
 def test_the_roster_stages_with_its_tiers(tmp_path, build_home, fresh_home):
@@ -207,33 +208,34 @@ def test_only_the_always_tier_deploys(tmp_path, build_home, fresh_home):
     The negative half is the point: ``cfo-tax-analyst`` is ``phase-2``, so after the deploy it
     must be absent from ``config.json agents{}`` — installed as a persona, not hired.
     """
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     archive = pack_bundled.build_bundled("personal-cfo", tmp_path / "cfo.gideon")
     home = fresh_home()
     import_pack(archive, connector_choices=_skip_connectors("personal-cfo"))
 
     result = roster.deploy_roster("personal-cfo", home)
-    assert result == {"deployed": ["cfo"], "dormant": ["cfo-tax-analyst"], "missing": []}
+    assert result == {
+        "deployed": ["cfo"],
+        "dormant": ["cfo-tax-analyst"],
+        "missing": [],
+    }
 
     cfg = AppConfig.load()
     assert "cfo" in cfg.agents
     assert "cfo-tax-analyst" not in cfg.agents
 
-    # The persona actually landed in the seam that binds it — description, prompt and skills,
-    # not just a name. A deploy that wrote an empty profile would "succeed" and do nothing.
     profile = cfg.agents["cfo"]
     assert profile.system_prompt.startswith("You are the user's personal CFO")
     assert profile.skills == ["cfo-statement-fetch", "cfo-budget-review"]
     assert profile.source == "pack:personal-cfo"
 
-    # …and the dormant persona IS installed, so surfacing it later needs no re-import.
     assert (home / "agents" / "cfo-tax-analyst" / "agent.json").is_file()
 
 
 def test_deploy_is_idempotent(tmp_path, build_home, fresh_home):
     """Re-deploying rewrites the same profile rather than duplicating or dropping it."""
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     archive = pack_bundled.build_bundled("health-os", tmp_path / "h.gideon")
     home = fresh_home()
@@ -275,7 +277,9 @@ def _repack(path: Path, mutate) -> Path:
     return out
 
 
-def test_broken_roster_slug_blocks_the_import_naming_the_ref(tmp_path, build_home, fresh_home):
+def test_broken_roster_slug_blocks_the_import_naming_the_ref(
+    tmp_path, build_home, fresh_home
+):
     """A catalog row naming a persona the pack does not carry BLOCKS, and the refusal names
     the exact unresolved ref. A refusal that says only "roster invalid" leaves the author
     guessing which of N slugs is wrong."""
@@ -288,8 +292,6 @@ def test_broken_roster_slug_blocks_the_import_naming_the_ref(tmp_path, build_hom
 
     broken = _repack(archive, _break)
     home = fresh_home()
-    # The SEL ledger + its key are an append-only audit trail — recording a refused import is
-    # exactly their job, so they are excluded from the "nothing was written" comparison.
     audit = {"security_events.jsonl", "sel_hmac.key"}
 
     def _state() -> list[str]:
@@ -306,10 +308,8 @@ def test_broken_roster_slug_blocks_the_import_naming_the_ref(tmp_path, build_hom
     with pytest.raises(PackImportRefused) as excinfo:
         import_pack(broken, consent=True)
     assert excinfo.value.reason == "lint"
-    # The message a user actually reads names the exact unresolved ref, not just the code.
     assert "unresolved_roster_slug" in str(excinfo.value)
     assert "agent:cfo-ghost" in str(excinfo.value)
-    # Refused BEFORE any write: no component store appeared.
     assert _state() == before
 
 
@@ -348,9 +348,6 @@ def test_an_unknown_activation_tier_blocks(tmp_path, build_home, fresh_home):
     assert "invalid_activation" in str(excinfo.value)
 
 
-# ── §4.3 Prompt-card importer ─────────────────────────────────────────────────
-
-
 _CARD = """\
 # The Life OS Prompt
 
@@ -368,7 +365,7 @@ async def test_pasted_card_is_fenced_before_the_model_sees_it(tmp_path, monkeypa
     direction. The prompt-injection line in the card is present precisely so a reader can see
     it travelled as data.
     """
-    from gideon.security import is_fenced
+    from gideon.security.security import is_fenced
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     seen: dict[str, str] = {}
@@ -384,18 +381,18 @@ async def test_pasted_card_is_fenced_before_the_model_sees_it(tmp_path, monkeypa
                 "title": "Weekly Commitments",
                 "description": "Review open commitments.",
                 "content": "Review my commitments since {{since}} and name the top three.",
-                "variables": [{"name": "since", "description": "start date", "required": True}],
+                "variables": [
+                    {"name": "since", "description": "start date", "required": True}
+                ],
             }
         )
 
-    monkeypatch.setattr("gideon.llm_helpers.one_shot_completion", _fake)
+    monkeypatch.setattr("gideon.integrations.llm_helpers.one_shot_completion", _fake)
     parsed = await prompt_cards.convert_card(_CARD)
     assert parsed["target"] == "prompt"
 
-    # The card travelled fenced, and the fence is the repo's own attributed one.
     assert is_fenced(seen["prompt"])
     assert "chief of staff" in seen["prompt"]
-    # Typed output was REQUIRED of the model, on the background use case (§4.3).
     assert seen["use_case"] == "background"
     assert seen["output_type"] is dict
 
@@ -403,7 +400,7 @@ async def test_pasted_card_is_fenced_before_the_model_sees_it(tmp_path, monkeypa
 @pytest.mark.asyncio
 async def test_an_already_fenced_card_is_not_double_wrapped(tmp_path, monkeypatch):
     """Double-wrapping would nest fences and make the provenance chain unreadable."""
-    from gideon.security import fence_untrusted
+    from gideon.security.security import fence_untrusted
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     pre_fenced = fence_untrusted(_CARD, source="already", source_type="paste")
@@ -416,9 +413,16 @@ async def test_an_already_fenced_card_is_not_double_wrapped(tmp_path, monkeypatc
         ({"target": "", "name": "x"}, "did not map onto a supported entity"),
         ({"target": "prompt", "name": "Not A Slug"}, "not a usable name"),
         ({"target": "prompt", "name": "empty", "content": "  "}, "no content"),
-        ({"target": "agent", "name": "hollow", "system_prompt": ""}, "no operating prompt"),
         (
-            {"target": "template", "name": "thin", "steps": [{"id": "a", "prompt": "one"}]},
+            {"target": "agent", "name": "hollow", "system_prompt": ""},
+            "no operating prompt",
+        ),
+        (
+            {
+                "target": "template",
+                "name": "thin",
+                "steps": [{"id": "a", "prompt": "one"}],
+            },
             "fewer than two usable steps",
         ),
     ],
@@ -432,8 +436,8 @@ def test_an_unusable_mapping_is_refused(parsed, fragment):
 
 def test_each_target_builds_its_real_typed_object():
     """The three targets construct the actual repo types — not a dict that looks like one."""
-    from gideon.agents.marketplace import AgentDefinition
-    from gideon.prompt_providers.base import PromptTemplate
+    from gideon.engine.agents.marketplace import AgentDefinition
+    from gideon.integrations.prompt_providers.base import PromptTemplate
 
     target, typed, _ = prompt_cards.build_entity(
         {"target": "prompt", "name": "p1", "content": "Do {{x}}."}
@@ -449,7 +453,10 @@ def test_each_target_builds_its_real_typed_object():
         {
             "target": "template",
             "name": "t1",
-            "steps": [{"id": "one", "prompt": "First."}, {"id": "two", "prompt": "Second."}],
+            "steps": [
+                {"id": "one", "prompt": "First."},
+                {"id": "two", "prompt": "Second."},
+            ],
         }
     )
     assert target == "template" and typed["root"]["kind"] == "sequence"
@@ -459,7 +466,7 @@ def test_each_target_builds_its_real_typed_object():
 @pytest.fixture
 def proposal_store(tmp_path, monkeypatch):
     """The proposal queue under tmp_path, via the accessors the module resolves per call."""
-    from gideon.learning import proposals as P
+    from gideon.cognition.learning import proposals as P
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     monkeypatch.setattr(P, "_dir", lambda: tmp_path / "proposals")
@@ -473,15 +480,25 @@ def proposal_store(tmp_path, monkeypatch):
     "answer,kind",
     [
         (
-            {"target": "prompt", "name": "card-prompt", "content": "Summarise {{topic}}."},
+            {
+                "target": "prompt",
+                "name": "card-prompt",
+                "content": "Summarise {{topic}}.",
+            },
             "prompt",
         ),
-        ({"target": "agent", "name": "card-agent", "system_prompt": "Be terse."}, "agent"),
+        (
+            {"target": "agent", "name": "card-agent", "system_prompt": "Be terse."},
+            "agent",
+        ),
         (
             {
                 "target": "template",
                 "name": "card-template",
-                "steps": [{"id": "a", "prompt": "First."}, {"id": "b", "prompt": "Then."}],
+                "steps": [
+                    {"id": "a", "prompt": "First."},
+                    {"id": "b", "prompt": "Then."},
+                ],
             },
             "template",
         ),
@@ -495,7 +512,7 @@ async def test_a_card_files_a_proposal_and_writes_nothing(
     async def _fake(prompt, **kwargs):
         return json.dumps(answer)
 
-    monkeypatch.setattr("gideon.llm_helpers.one_shot_completion", _fake)
+    monkeypatch.setattr("gideon.integrations.llm_helpers.one_shot_completion", _fake)
     result = await prompt_cards.import_prompt_card(_CARD)
     assert result["target"] == answer["target"]
     assert result["verdict"] in ("new", "reinforce", "replace", "merge")
@@ -504,25 +521,29 @@ async def test_a_card_files_a_proposal_and_writes_nothing(
     assert [p.kind for p in pending] == [kind]
     filed = pending[0]
     assert prompt_cards.is_prompt_card_proposal(filed.to_dict())
-    # The driving card rides along FENCED for review, never raw.
-    from gideon.security import is_fenced
+    from gideon.security.security import is_fenced
 
     assert is_fenced(filed.source_excerpt)
-    # Nothing was written: no prompt, agent or workflow store exists yet.
     for area in ("prompts", "agents", "workflows"):
         assert not (tmp_path / area).exists()
 
 
 @pytest.mark.asyncio
-async def test_accepting_the_card_writes_the_typed_entity(proposal_store, tmp_path, monkeypatch):
+async def test_accepting_the_card_writes_the_typed_entity(
+    proposal_store, tmp_path, monkeypatch
+):
     """The installer is the only write path, and ``accept`` runs it after its human gate."""
 
     async def _fake(prompt, **kwargs):
         return json.dumps(
-            {"target": "prompt", "name": "card-prompt", "content": "Summarise {{topic}}."}
+            {
+                "target": "prompt",
+                "name": "card-prompt",
+                "content": "Summarise {{topic}}.",
+            }
         )
 
-    monkeypatch.setattr("gideon.llm_helpers.one_shot_completion", _fake)
+    monkeypatch.setattr("gideon.integrations.llm_helpers.one_shot_completion", _fake)
     await prompt_cards.import_prompt_card(_CARD)
     filed = proposal_store.list_pending()[0]
 
@@ -541,34 +562,36 @@ async def test_accepting_the_card_writes_the_typed_entity(proposal_store, tmp_pa
 def test_the_installer_claims_by_tag_not_by_kind():
     """Three other producers already file ``template`` proposals — claiming by kind would
     hijack theirs and hand them a payload this installer cannot write."""
-    assert prompt_cards.is_prompt_card_proposal({"kind": "template", "tags": ["prompt-card"]})
-    assert not prompt_cards.is_prompt_card_proposal({"kind": "template", "tags": ["refiner"]})
+    assert prompt_cards.is_prompt_card_proposal(
+        {"kind": "template", "tags": ["prompt-card"]}
+    )
+    assert not prompt_cards.is_prompt_card_proposal(
+        {"kind": "template", "tags": ["refiner"]}
+    )
     assert not prompt_cards.is_prompt_card_proposal({"kind": "template"})
 
 
 def test_every_proposal_kind_has_an_inbox_label():
     """Derived from the enum, so the two AP-4 kinds (and any later one) are covered without a
     stale literal. An unlabelled kind renders as the generic "Proposal"."""
-    from gideon.learning.proposals import _KIND_LABELS, Kind
+    from gideon.cognition.learning.proposals import _KIND_LABELS, Kind
 
     assert {k.value for k in Kind} == set(_KIND_LABELS)
     assert Kind.PROMPT.value in _KIND_LABELS and Kind.AGENT.value in _KIND_LABELS
-
-
-# ── §2.3 / §4.4 One-link serialization ────────────────────────────────────────
 
 
 def test_one_link_imports_through_the_same_pipeline(tmp_path, build_home, fresh_home):
     """A one-link document installs exactly what the ``.gideon`` installs — same importer."""
     archive = pack_bundled.build_bundled("health-os", tmp_path / "h.gideon")
     doc = onelink.to_onelink(archive)
-    # It is a LINK: a single JSON document, self-contained for a personal-scale pack.
     link = json.dumps(doc)
     assert doc["onelink_version"] == onelink.ONELINK_VERSION
     assert all("b64" in r for r in doc["resources"].values())
 
     home = fresh_home()
-    plan = onelink.import_onelink(json.loads(link), connector_choices=_skip_connectors("health-os"))
+    plan = onelink.import_onelink(
+        json.loads(link), connector_choices=_skip_connectors("health-os")
+    )
     assert plan.name == "health-os"
     assert {c.ref for c in plan.components} >= {
         "skill:health-journal",
@@ -576,7 +599,6 @@ def test_one_link_imports_through_the_same_pipeline(tmp_path, build_home, fresh_
         "template:health-weekly-journal",
         "trigger:health-checkup-cadence",
     }
-    # The §3 guarantees came along, not just the bytes: locks, disabled trigger, roster.
     assert (home / "skills" / "health-journal" / ".gideon-lock.json").is_file()
     staged = list((home / "packs" / "staged").rglob("triggers/*.json"))
     assert staged and json.loads(staged[0].read_text())["enabled"] is False
@@ -589,7 +611,9 @@ def test_tampered_resource_refuses_before_any_gideon_exists(tmp_path, build_home
     doc = onelink.to_onelink(archive)
     key = "skills/health-journal/SKILL.md"
     raw = base64.b64decode(doc["resources"][key]["b64"])
-    doc["resources"][key]["b64"] = base64.b64encode(raw + b"\n# injected\n").decode("ascii")
+    doc["resources"][key]["b64"] = base64.b64encode(raw + b"\n# injected\n").decode(
+        "ascii"
+    )
 
     out = tmp_path / "materialized.gideon"
     with pytest.raises(onelink.OneLinkError) as excinfo:
@@ -614,7 +638,9 @@ def test_tampered_resource_refuses_before_any_gideon_exists(tmp_path, build_home
         ),
     ],
 )
-def test_a_malformed_one_link_document_fails_closed(mutate, fragment, tmp_path, build_home):
+def test_a_malformed_one_link_document_fails_closed(
+    mutate, fragment, tmp_path, build_home
+):
     """Every disagreement is a refusal, never a best-effort partial import."""
     archive = pack_bundled.build_bundled("health-os", tmp_path / "h.gideon")
     doc = onelink.to_onelink(archive)
@@ -656,12 +682,8 @@ def test_a_url_backed_resource_is_fetched_and_verified(tmp_path, build_home):
     with zipfile.ZipFile(out) as zf:
         assert zf.read(key) == raw
 
-    # …and a fetch that returns different bytes refuses, so a URL is not a trust bypass.
     with pytest.raises(onelink.OneLinkError):
         onelink.materialize(doc, tmp_path / "bad.gideon", fetch=lambda _u: raw + b"x")
-
-
-# ── the HTTP surface (thin over the core, but reachable — drive it like a user) ─
 
 
 def _json_request(method: str, path: str, body: dict | None = None, **match):
@@ -674,7 +696,7 @@ def _json_request(method: str, path: str, body: dict | None = None, **match):
     if body is None:
         return make_mocked_request(method, path, match_info=match)
 
-    class _Protocol:  # the StreamReader's flow-control peer; a mock has none
+    class _Protocol:
         transport = None
 
         def resume_reading(self, **_kw) -> None: ...
@@ -682,7 +704,9 @@ def _json_request(method: str, path: str, body: dict | None = None, **match):
         def pause_reading(self, **_kw) -> None: ...
 
     raw = json.dumps(body).encode("utf-8")
-    payload = streams.StreamReader(protocol=_Protocol(), limit=2**16, loop=asyncio.get_event_loop())
+    payload = streams.StreamReader(
+        protocol=_Protocol(), limit=2**16, loop=asyncio.get_event_loop()
+    )
     payload.feed_data(raw)
     payload.feed_eof()
     return make_mocked_request(
@@ -707,10 +731,12 @@ def test_bundled_install_route_drives_the_whole_flow(fresh_home):
     Each step goes through the route a UI would call, so a core function that works but is
     unreachable would fail here.
     """
-    from gideon.dashboard.handlers import packs as handlers
+    from gideon.interfaces.dashboard.handlers import packs as handlers
 
     home = fresh_home()
-    status, body = _call(handlers.api_packs_bundled, _json_request("GET", "/api/packs/bundled"))
+    status, body = _call(
+        handlers.api_packs_bundled, _json_request("GET", "/api/packs/bundled")
+    )
     assert status == 200
     assert {p["name"] for p in body["packs"]} >= {"personal-cfo", "health-os"}
 
@@ -727,7 +753,9 @@ def test_bundled_install_route_drives_the_whole_flow(fresh_home):
     assert body["plan"]["name"] == "personal-cfo"
     assert body["plan"]["staged_triggers"] == ["cfo-spending-digest"]
 
-    status, body = _call(handlers.api_packs_installed, _json_request("GET", "/api/packs/installed"))
+    status, body = _call(
+        handlers.api_packs_installed, _json_request("GET", "/api/packs/installed")
+    )
     assert status == 200
     record = next(p for p in body["packs"] if p["name"] == "personal-cfo")
     assert record["unbound"] == ["finance_folder"]
@@ -748,7 +776,9 @@ def test_bundled_install_route_drives_the_whole_flow(fresh_home):
 
     status, body = _call(
         handlers.api_pack_roster_deploy,
-        _json_request("POST", "/api/packs/personal-cfo/roster/deploy", {}, name="personal-cfo"),
+        _json_request(
+            "POST", "/api/packs/personal-cfo/roster/deploy", {}, name="personal-cfo"
+        ),
     )
     assert status == 200
     assert body["deployed"] == ["cfo"] and body["dormant"] == ["cfo-tax-analyst"]
@@ -756,7 +786,7 @@ def test_bundled_install_route_drives_the_whole_flow(fresh_home):
 
 def test_routes_use_the_shared_error_envelope(fresh_home):
     """Every refusal answers `{"error": {"code", "message"}}` with a stable snake code."""
-    from gideon.dashboard.handlers import packs as handlers
+    from gideon.interfaces.dashboard.handlers import packs as handlers
 
     fresh_home()
     for handler, request, code, status in (
@@ -774,7 +804,9 @@ def test_routes_use_the_shared_error_envelope(fresh_home):
         ),
         (
             handlers.api_pack_bindings,
-            _json_request("POST", "/api/packs/nope/bindings", {"value": "x"}, name="nope"),
+            _json_request(
+                "POST", "/api/packs/nope/bindings", {"value": "x"}, name="nope"
+            ),
             "binding_key_required",
             400,
         ),
@@ -793,7 +825,7 @@ def test_routes_use_the_shared_error_envelope(fresh_home):
 
 def test_prompt_card_route_refuses_an_empty_paste(tmp_path, monkeypatch):
     """A refusal the user can read, not a 500."""
-    from gideon.dashboard.handlers import packs as handlers
+    from gideon.interfaces.dashboard.handlers import packs as handlers
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     status, body = _call(
@@ -807,7 +839,7 @@ def test_prompt_card_route_refuses_an_empty_paste(tmp_path, monkeypatch):
 
 def test_one_link_route_imports_through_the_pipeline(tmp_path, build_home, fresh_home):
     """The one-link entry point lands the same components the file import lands."""
-    from gideon.dashboard.handlers import packs as handlers
+    from gideon.interfaces.dashboard.handlers import packs as handlers
 
     archive = pack_bundled.build_bundled("health-os", tmp_path / "h.gideon")
     doc = onelink.to_onelink(archive)
@@ -836,7 +868,7 @@ def test_every_bundled_pack_file_is_declared_package_data():
     import fnmatch
     import tomllib
 
-    repo = Path(__file__).resolve().parents[1]
+    repo = Path(__file__).resolve().parents[2]
     with (repo / "pyproject.toml").open("rb") as handle:
         config = tomllib.load(handle)
     globs = [
@@ -846,9 +878,9 @@ def test_every_bundled_pack_file_is_declared_package_data():
     ]
     assert globs, "pyproject declares no packs/bundled package-data at all"
 
-    tree = repo / "src" / "gideon" / "packs" / "bundled"
+    tree = repo / "runtime" / "gideon" / "extensions" / "packs" / "bundled"
     members = [
-        p.relative_to(repo / "src" / "gideon").as_posix()
+        p.relative_to(repo / "runtime" / "gideon").as_posix()
         for p in tree.rglob("*")
         if p.is_file() and p.suffix != ".pyc" and p.name != "__init__.py"
     ]
@@ -856,6 +888,8 @@ def test_every_bundled_pack_file_is_declared_package_data():
     undeclared = [
         m
         for m in members
-        if not any(fnmatch.fnmatch(m, f"gideon/{g}") or fnmatch.fnmatch(m, g) for g in globs)
+        if not any(
+            fnmatch.fnmatch(m, f"gideon/{g}") or fnmatch.fnmatch(m, g) for g in globs
+        )
     ]
     assert undeclared == [], f"not declared as package-data: {undeclared}"

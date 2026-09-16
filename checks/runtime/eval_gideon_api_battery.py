@@ -27,7 +27,6 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-# ── The tasks (identical text for both arms; only the context differs) ───────
 TASKS: list[dict[str, str]] = [
     {
         "id": "trigger",
@@ -74,29 +73,42 @@ TASKS: list[dict[str, str]] = [
     },
 ]
 
-# ── Ground truth (verified against code 2026-07-25) ──────────────────────────
-# Each key: the accepted primary tool/route names, the REQUIRED parameters an
-# answer must name, and the tool/route that satisfies the verify-after-mutate
-# loop. ``accept`` lists alternatives that are also correct (e.g. schedule_add is
-# a valid way to wire recurring follow-up work).
 ANSWER_KEY: dict[str, dict[str, Any]] = {
     "trigger": {
         "primary": "hook_register",
         "accept": {"hook_register", "schedule_add", "schedule_natural"},
         "required_params": {"hook_register": {"hook_id", "context_summary"}},
-        "verify_terms": {"list", "read back", "re-read", "hook", "confirm", "schedule_list"},
+        "verify_terms": {
+            "list",
+            "read back",
+            "re-read",
+            "hook",
+            "confirm",
+            "schedule_list",
+        },
     },
     "knowledge": {
         "primary": "knowledge_create",
         "accept": {"knowledge_create"},
-        "required_params": {"knowledge_create": set()},  # all optional; title+content expected
+        "required_params": {
+            "knowledge_create": set()
+        },  # all optional; title+content expected
         "expected_params": {"knowledge_create": {"title", "content"}},
         "verify_tools": {"knowledge_search", "knowledge_get"},
     },
     "app_route": {
         "surface_terms": {"app_surfaces", "manifest"},
-        "invocation_terms": {"app-route tool", "proxy", "/apps/", "app_route", "app route tool"},
-        "negative_terms": {"directly", "process"},  # the answer must warn against direct access
+        "invocation_terms": {
+            "app-route tool",
+            "proxy",
+            "/apps/",
+            "app_route",
+            "app route tool",
+        },
+        "negative_terms": {
+            "directly",
+            "process",
+        },  # the answer must warn against direct access
     },
     "model_bind": {
         "route": ("PUT", "/api/models/active/{use_case}"),
@@ -125,7 +137,9 @@ def _params_of(answer: dict[str, Any]) -> set[str]:
 
 def _text_of(answer: dict[str, Any]) -> str:
     """Flatten an answer's free-text fields for term matching."""
-    parts = [str(answer.get(k, "")) for k in ("tool", "route", "verify", "notes", "answer")]
+    parts = [
+        str(answer.get(k, "")) for k in ("tool", "route", "verify", "notes", "answer")
+    ]
     parts.append(" ".join(str(x) for x in (answer.get("params", []) or [])))
     return _norm(" ".join(parts))
 
@@ -157,7 +171,6 @@ def _score_app_route(a: dict[str, Any]) -> tuple[bool, bool]:
     surface_ok = any(t in text for t in key["surface_terms"])
     invoke_ok = any(t in text for t in key["invocation_terms"])
     warns = any(t in text for t in key["negative_terms"])
-    # correct = names the manifest surface AND the proxy/app-route invocation.
     return (surface_ok and invoke_ok), (invoke_ok and not warns)
 
 
@@ -220,14 +233,11 @@ def score_answers(answers: dict[str, dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-# ── Regression test: the answer key must still match the live manifest ────────
-
-
 def _live_tools() -> dict[str, Any]:
-    from gideon.apps.manifest import AppManifest
-    from gideon.providers import registry as prov_reg
-    from gideon.providers.loader import BUNDLED_DIR
-    from gideon.tool_providers import registry as tool_reg
+    from gideon.extensions.apps.manifest import AppManifest
+    from gideon.extensions.providers import registry as prov_reg
+    from gideon.extensions.providers.loader import BUNDLED_DIR
+    from gideon.integrations.tool_providers import registry as tool_reg
 
     tool_reg._providers.clear()
     prov_reg._registry = None
@@ -240,7 +250,7 @@ def _live_tools() -> dict[str, Any]:
             m = AppManifest.from_json_file(mf)
             if m.provider:
                 reg.register(m, enabled=True)
-        from gideon.tool_providers.registry import list_all_tools
+        from gideon.integrations.tool_providers.registry import list_all_tools
 
         live = asyncio.run(list_all_tools())
         return {t.name: t for t in live if t.provider != "mcp"}
@@ -281,7 +291,6 @@ def test_answer_key_matches_the_live_manifest():
         if missing:
             problems.append(f"hook_register no longer requires {sorted(missing)}")
 
-    # knowledge_create + its verify tools exist; expected params present.
     kc = tools.get("knowledge_create")
     if not kc:
         problems.append("knowledge_create no longer exists")
@@ -307,9 +316,9 @@ def test_answer_key_matches_the_live_manifest():
         if vt not in tools:
             problems.append(f"skill verify tool {vt} no longer exists")
 
-    assert not problems, "Eval battery answer key drifted from the manifest:\n" + "\n".join(
-        problems
-    )
+    assert (
+        not problems
+    ), "Eval battery answer key drifted from the manifest:\n" + "\n".join(problems)
 
 
 def test_model_bind_route_still_registers():
@@ -317,7 +326,7 @@ def test_model_bind_route_still_registers():
     import ast
     from pathlib import Path
 
-    import gideon.dashboard.handlers.model_registry as mr
+    import gideon.interfaces.dashboard.handlers.model_registry as mr
 
     src = Path(mr.__file__).read_text(encoding="utf-8")
     tree = ast.parse(src)
@@ -365,7 +374,6 @@ def test_scorer_grades_a_perfect_paper():
     assert result["silent_misses"] == 0, result
     assert result["passes_bar"]
 
-    # Drop every verify step → correct tools, but silent misses, bar fails.
     no_verify: dict[str, dict[str, Any]] = {tid: {**a} for tid, a in perfect.items()}
     for tid in ("trigger", "knowledge", "skill"):
         no_verify[tid] = {k: v for k, v in perfect[tid].items() if k != "verify"}

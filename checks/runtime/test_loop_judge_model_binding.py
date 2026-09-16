@@ -29,8 +29,6 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-# The two entries a worker axis and a judge axis resolve to. They MUST differ — every
-# independence assertion below is meaningless if the fixture hands both axes one entry.
 WORKER_ENTRY = "worker-model-weak"
 JUDGE_ENTRY = "judge-model-strong"
 _AXIS_ENTRIES = {"loops": WORKER_ENTRY, "reasoning": JUDGE_ENTRY}
@@ -55,7 +53,7 @@ class _FakeProvider:
         pass
 
     async def stream(self, prompt):
-        from gideon.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK
+        from gideon.integrations.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK
 
         class _E:
             def __init__(self, kind, text=""):
@@ -85,7 +83,8 @@ def axis_recorder(monkeypatch):
         return _FakeProvider(_AXIS_ENTRIES.get(use_case, f"{use_case}-unmapped"))
 
     monkeypatch.setattr(
-        "gideon.providers.provider_bridge.resolve_provider_for_use_case", _resolve
+        "gideon.extensions.providers.provider_bridge.resolve_provider_for_use_case",
+        _resolve,
     )
     return seen
 
@@ -102,35 +101,40 @@ def tmp_cfg(tmp_path):
         cfg_path.write_text(json.dumps(body), encoding="utf-8")
 
     _write({})
-    with patch("gideon.config.loader.config_path", return_value=cfg_path):
+    with patch("gideon.core.config.loader.config_path", return_value=cfg_path):
         yield cfg_path, _write
 
 
 async def _drive_judges() -> None:
     """Drive all three judge call sites with their production (default) factories."""
-    from gideon.loop import gates as gates_mod
-    from gideon.loop import judge as judge_mod
+    from gideon.automation.loop import gates as gates_mod
+    from gideon.automation.loop import judge as judge_mod
 
-    verdict = await judge_mod.assess_cycle("goal", "dod", {"cycle": 1, "summary": "s"}, [])
+    verdict = await judge_mod.assess_cycle(
+        "goal", "dod", {"cycle": 1, "summary": "s"}, []
+    )
     assert verdict is not None, "primary judge did not complete"
-    skeptic = await judge_mod.assess_cycle_skeptic("goal", "dod", {"cycle": 1, "summary": "s"}, [])
+    skeptic = await judge_mod.assess_cycle_skeptic(
+        "goal", "dod", {"cycle": 1, "summary": "s"}, []
+    )
     assert skeptic is not None, "skeptic judge did not complete"
     raw = await gates_mod.judge_verdict("PASS or FAIL?")
     assert raw, "gate judge produced no text"
 
 
-# ── Independence ─────────────────────────────────────────────────────────────
-
-
 class TestJudgeBindingIsIndependentOfWorkerBinding:
-    def test_worker_and_judge_axes_resolve_to_different_entries(self, tmp_path, monkeypatch):
+    def test_worker_and_judge_axes_resolve_to_different_entries(
+        self, tmp_path, monkeypatch
+    ):
         """Ground the premise in the REAL store: `loops` and `reasoning` are separately
-        bindable, so "different entries" is a fact about the product, not a test fiction."""
-        from gideon.providers import use_cases as uc
+        bindable, so "different entries" is a fact about the product, not a test fiction.
+        """
+        from gideon.extensions.providers import use_cases as uc
 
-        monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
         (tmp_path / "active_models.json").write_text(
-            json.dumps({"loops": [WORKER_ENTRY], "reasoning": [JUDGE_ENTRY]}), encoding="utf-8"
+            json.dumps({"loops": [WORKER_ENTRY], "reasoning": [JUDGE_ENTRY]}),
+            encoding="utf-8",
         )
         assert uc.active_model_refs("loops") == [WORKER_ENTRY]
         assert uc.active_model_refs("reasoning") == [JUDGE_ENTRY]
@@ -142,9 +146,13 @@ class TestJudgeBindingIsIndependentOfWorkerBinding:
     ) -> None:
         """assess_cycle / assess_cycle_skeptic / gates.judge_verdict each resolve the
         JUDGE axis. The worker's entry must never be handed to a judge."""
-        assert WORKER_ENTRY != JUDGE_ENTRY, "vacuous fixture: both axes map to one entry"
+        assert (
+            WORKER_ENTRY != JUDGE_ENTRY
+        ), "vacuous fixture: both axes map to one entry"
         await _drive_judges()
-        assert len(axis_recorder) == 3, f"expected 3 judge resolutions, saw {axis_recorder}"
+        assert (
+            len(axis_recorder) == 3
+        ), f"expected 3 judge resolutions, saw {axis_recorder}"
         assert axis_recorder == ["reasoning", "reasoning", "reasoning"], axis_recorder
         assert "loops" not in axis_recorder, "a judge is still riding the WORKER's axis"
         resolved = {_AXIS_ENTRIES[a] for a in axis_recorder}
@@ -165,7 +173,7 @@ class TestJudgeBindingIsIndependentOfWorkerBinding:
         assert {_AXIS_ENTRIES[a] for a in axis_recorder} == {WORKER_ENTRY}
 
     def test_judge_use_case_helper_reads_config(self, tmp_cfg) -> None:
-        from gideon.loop.judge import judge_use_case
+        from gideon.automation.loop.judge import judge_use_case
 
         _cfg_path, write = tmp_cfg
         write({})
@@ -173,18 +181,17 @@ class TestJudgeBindingIsIndependentOfWorkerBinding:
         write({"judge_use_case": "code_tools"})
         assert judge_use_case() == "code_tools"
 
-    def test_unknown_axis_falls_back_to_reasoning_not_the_worker_axis(self, tmp_cfg) -> None:
+    def test_unknown_axis_falls_back_to_reasoning_not_the_worker_axis(
+        self, tmp_cfg
+    ) -> None:
         """Fail-SAFE, not fail-open: a typo must not silently hand judgment back to the
         binding that produced the work."""
-        from gideon.loop.judge import judge_use_case
+        from gideon.automation.loop.judge import judge_use_case
 
         _cfg_path, write = tmp_cfg
         for bad in ("not-an-axis", "", "   ", "LOOPS"):
             write({"judge_use_case": bad})
             assert judge_use_case() == "reasoning", bad
-
-
-# ── Degraded path: provably unchanged ────────────────────────────────────────
 
 
 class TestDegradedPathUnchanged:
@@ -197,26 +204,32 @@ class TestDegradedPathUnchanged:
             raise RuntimeError(f"no provider for {use_case}")
 
         monkeypatch.setattr(
-            "gideon.providers.provider_bridge.resolve_provider_for_use_case", _boom
+            "gideon.extensions.providers.provider_bridge.resolve_provider_for_use_case",
+            _boom,
         )
 
     @pytest.mark.asyncio
-    async def test_primary_judge_defers_and_warns(self, dead_bridge, tmp_cfg, caplog) -> None:
-        from gideon.loop import judge as judge_mod
+    async def test_primary_judge_defers_and_warns(
+        self, dead_bridge, tmp_cfg, caplog
+    ) -> None:
+        from gideon.automation.loop import judge as judge_mod
 
-        with caplog.at_level(logging.WARNING, logger="gideon.loop.judge"):
-            verdict = await judge_mod.assess_cycle("goal", "dod", {"cycle": 1, "summary": "s"}, [])
-        assert verdict is None  # defer — NEVER a false complete
+        with caplog.at_level(logging.WARNING, logger="gideon.automation.loop.judge"):
+            verdict = await judge_mod.assess_cycle(
+                "goal", "dod", {"cycle": 1, "summary": "s"}, []
+            )
+        assert verdict is None
         msgs = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
         assert any("degraded" in m for m in msgs), msgs
-        # and the WARNING names the binding to go check, so the degradation is diagnosable
         assert any("reasoning" in m and "loops.judge_use_case" in m for m in msgs), msgs
 
     @pytest.mark.asyncio
-    async def test_skeptic_judge_defers_and_warns(self, dead_bridge, tmp_cfg, caplog) -> None:
-        from gideon.loop import judge as judge_mod
+    async def test_skeptic_judge_defers_and_warns(
+        self, dead_bridge, tmp_cfg, caplog
+    ) -> None:
+        from gideon.automation.loop import judge as judge_mod
 
-        with caplog.at_level(logging.WARNING, logger="gideon.loop.judge"):
+        with caplog.at_level(logging.WARNING, logger="gideon.automation.loop.judge"):
             verdict = await judge_mod.assess_cycle_skeptic(
                 "goal", "dod", {"cycle": 1, "summary": "s"}, []
             )
@@ -228,10 +241,12 @@ class TestDegradedPathUnchanged:
         )
 
     @pytest.mark.asyncio
-    async def test_gate_judge_returns_empty_and_warns(self, dead_bridge, tmp_cfg, caplog) -> None:
-        from gideon.loop import gates as gates_mod
+    async def test_gate_judge_returns_empty_and_warns(
+        self, dead_bridge, tmp_cfg, caplog
+    ) -> None:
+        from gideon.automation.loop import gates as gates_mod
 
-        with caplog.at_level(logging.WARNING, logger="gideon.loop.gates"):
+        with caplog.at_level(logging.WARNING, logger="gideon.automation.loop.gates"):
             raw = await gates_mod.judge_verdict("PASS or FAIL?")
         assert raw == ""
         assert any(
@@ -239,29 +254,27 @@ class TestDegradedPathUnchanged:
             for r in caplog.records
             if r.levelno >= logging.WARNING
         )
-        # "" is neither a pass nor a rendered verdict — a dead judge cannot advance a stage
         assert gates_mod.verdict_is_pass(raw) is False
         assert gates_mod.verdict_rendered(raw) is False
 
     @pytest.mark.asyncio
-    async def test_config_unreadable_still_yields_reasoning_not_a_crash(self, monkeypatch) -> None:
+    async def test_config_unreadable_still_yields_reasoning_not_a_crash(
+        self, monkeypatch
+    ) -> None:
         """The helper degrades, it does not raise: an unreadable config must not take the
         judge out of the loop entirely (which would strand every cycle unassessed)."""
-        from gideon.loop.judge import judge_use_case
+        from gideon.automation.loop.judge import judge_use_case
 
         def _boom():
             raise OSError("config unreadable")
 
-        monkeypatch.setattr("gideon.config.loader.config_path", _boom)
+        monkeypatch.setattr("gideon.core.config.loader.config_path", _boom)
         assert judge_use_case() == "reasoning"
-
-
-# ── The four config wiring points ────────────────────────────────────────────
 
 
 class TestConfigWiring:
     def test_point_1_dataclass_and_meta(self) -> None:
-        from gideon.config.learning import LoopsConfig
+        from gideon.core.config.learning import LoopsConfig
 
         f = {x.name: x for x in fields(LoopsConfig)}["judge_use_case"]
         assert f.default == "reasoning"
@@ -269,7 +282,7 @@ class TestConfigWiring:
         assert f.metadata.get("help")
 
     def test_point_2_load_reads_it(self, tmp_cfg) -> None:
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         _cfg_path, write = tmp_cfg
         write({"judge_use_case": "orchestration"})
@@ -278,7 +291,7 @@ class TestConfigWiring:
         assert AppConfig.load().loops.judge_use_case == "reasoning"
 
     def test_point_3_to_dict_emits_it(self, tmp_cfg) -> None:
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         _cfg_path, write = tmp_cfg
         write({"judge_use_case": "code_tools"})
@@ -288,15 +301,13 @@ class TestConfigWiring:
         """The allowlist entry itself. `test_config_roundtrip.py` cannot see this —
         its `_EDITABLE_CONFIG` assertions are hardcoded to `evals.*` keys, so deleting
         this entry leaves that file fully green."""
-        from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+        from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
         spec = _EDITABLE_CONFIG.get("loops.judge_use_case")
         assert spec is not None, "loops.judge_use_case is not PATCH-able"
         assert spec["type"] == "enum"
         assert "reasoning" in spec["values"]
-        # Every offered value must be a real use case, else the picker offers a
-        # value load() will silently replace with `reasoning`.
-        from gideon.providers.use_cases import VALID_USE_CASES
+        from gideon.extensions.providers.use_cases import VALID_USE_CASES
 
         assert set(spec["values"]) <= set(VALID_USE_CASES)
 
@@ -308,7 +319,7 @@ class TestPatchRail:
 
     @staticmethod
     def _app() -> web.Application:
-        from gideon.dashboard.handlers import api_gideon_config_patch
+        from gideon.interfaces.dashboard.handlers import api_gideon_config_patch
 
         app = web.Application()
         app.router.add_patch("/api/config/gideon", api_gideon_config_patch)
@@ -316,7 +327,7 @@ class TestPatchRail:
 
     @pytest.mark.asyncio
     async def test_patch_persists_and_reloads(self, tmp_cfg) -> None:
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         cfg_path, _write = tmp_cfg
         assert AppConfig.load().loops.judge_use_case == "reasoning"
@@ -339,12 +350,14 @@ class TestPatchRail:
                 json={"path": "loops.judge_use_case", "value": "stt"},
             )
             assert resp.status == 400
-        assert "judge_use_case" not in json.loads(cfg_path.read_text(encoding="utf-8")).get(
-            "loops", {}
-        )
+        assert "judge_use_case" not in json.loads(
+            cfg_path.read_text(encoding="utf-8")
+        ).get("loops", {})
 
     @pytest.mark.asyncio
-    async def test_patched_value_reaches_the_judge_call_sites(self, axis_recorder, tmp_cfg) -> None:
+    async def test_patched_value_reaches_the_judge_call_sites(
+        self, axis_recorder, tmp_cfg
+    ) -> None:
         """The full round trip: a PATCH written through the API changes which axis the
         judges actually resolve. Without this, points 4 and the call sites are verified
         separately and the seam between them is untested."""

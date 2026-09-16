@@ -16,7 +16,7 @@ appear:
 So "no second store" was, until this file, an invariant held by a hand-run census
 recorded in the plan's execution log. Anything a human counted once, a later change
 un-counts silently. This is the executable version: over
-``src/gideon/**/*.py``, by AST rather than by grep (a docstring naming
+``runtime/gideon/**/*.py``, by AST rather than by grep (a docstring naming
 ``cache_read_tokens`` is not a store), (1) nothing ACCUMULATES a prompt-cache-named
 quantity, (2) the only writers of the tally are ``Stats.inc_cache_*`` and they are
 called from exactly one module, (3) the two per-turn locals that feed the telemetry
@@ -34,37 +34,19 @@ import ast
 from pathlib import Path
 
 import gideon
-from gideon.dashboard import chat_runner
-from gideon.stats import Stats
+from gideon.interfaces.dashboard import chat_runner
+from gideon.operations.stats import Stats
 
 SRC = Path(gideon.__file__).parent
 
-# Every spelling this repo uses for the prompt-cache quantity. ``cache_write`` is
-# ``pricing.py``'s name for what the providers call cache CREATION.
 _CACHE_NAMES = ("cache_read", "cache_creation", "cache_write")
 
-# The sanctioned mutators — the only way the tally is allowed to move.
 _TALLY_WRITERS = ("inc_cache_read_tokens", "inc_cache_creation_tokens")
 
-# The two per-turn locals the turn-complete telemetry reads.
 _TURN_LOCALS = ("_turn_cache_read_tokens", "_turn_cache_creation_tokens")
 
-# READ-SIDE EXEMPTION, one module, justified and floored below.
-#
-# ``usage_ledger._fold`` accumulates the cache counts, and it is NOT a second store:
-# it is a query-time group-by that reduces rows the ledger ALREADY persisted (from the
-# same terminal event that feeds ``Stats``) into a transient per-group dict, the way
-# SQL ``SUM()`` would. A second store is a long-lived tally fed from the live turn
-# path; this is a fresh dict per call on the read path.
-#
-# The exemption is not a free pass: ``test_the_read_side_exemption_is_still_read_side``
-# proves the accumulator is a distinct object on every call (so no group can share
-# state with another, and nothing survives the query), and reds if the fold stops
-# accumulating at all — an exemption must not outlive its reason.
 _READ_SIDE_FOLDS = frozenset({"usage_ledger.py"})
 
-# A module that keeps its own running total. If the scanner cannot flag this, it
-# cannot flag the real thing either.
 _POSITIVE_CONTROL = """
 class Runner:
     def __init__(self) -> None:
@@ -74,8 +56,6 @@ class Runner:
         self._cache_read_tokens += event.cache_read_tokens
 """
 
-# A module that merely PASSES the quantity around. The scanner must not flag this, or
-# half (1) would be unsatisfiable and would get weakened rather than obeyed.
 _NEGATIVE_CONTROL = """
 def render(cache_read_tokens, cache_creation_tokens):
     total = 0
@@ -112,7 +92,9 @@ def _accumulators(source: str, label: str) -> list[str]:
     for node in ast.walk(ast.parse(source)):
         if not isinstance(node, ast.AugAssign):
             continue
-        if any(frag in name for name in _target_names(node.target) for frag in _CACHE_NAMES):
+        if any(
+            frag in name for name in _target_names(node.target) for frag in _CACHE_NAMES
+        ):
             hits.append(f"{label}:{node.lineno}")
     return hits
 
@@ -148,9 +130,6 @@ def _turn_local_bindings() -> dict[str, list[ast.AST]]:
             if isinstance(target, ast.Name) and target.id in bindings:
                 bindings[target.id].append(node)
     return bindings
-
-
-# --- half (1): nothing accumulates the cache quantity -------------------------------
 
 
 def test_the_accumulator_scanner_can_actually_fail() -> None:
@@ -202,7 +181,7 @@ def test_the_read_side_exemption_is_still_read_side() -> None:
     shared object, the fold has become exactly the second store this file forbids —
     groups would bleed into each other and the total would survive the query.
     """
-    from gideon import usage_ledger
+    from gideon.operations import usage_ledger
 
     for rel in _READ_SIDE_FOLDS:
         source = (SRC / rel).read_text(encoding="utf-8")
@@ -213,16 +192,14 @@ def test_the_read_side_exemption_is_still_read_side() -> None:
 
     first, second = usage_ledger._blank_agg(), usage_ledger._blank_agg()
     assert first == second, "the fold's accumulator changed shape between calls"
-    assert first is not second, "the fold accumulates into a SHARED dict — that is a second store"
+    assert (
+        first is not second
+    ), "the fold accumulates into a SHARED dict — that is a second store"
 
     row = {"cache_read_tokens": 7, "cache_creation_tokens": 3}
     usage_ledger._fold(first, row)
     assert first["cache_read_tokens"] == 7
-    # The decisive property: folding into one group left the other group untouched.
     assert second["cache_read_tokens"] == 0, "one group's fold leaked into another"
-
-
-# --- half (2): one writer, one module ----------------------------------------------
 
 
 def test_the_only_tally_writers_are_the_stats_mutators() -> None:
@@ -232,11 +209,9 @@ def test_the_only_tally_writers_are_the_stats_mutators() -> None:
         "dashboard/chat_runner.py"
     }, f"expected exactly one module to write the cache tally, found: {sorted(calls)}"
     written = {entry.split(":")[0] for entry in calls["dashboard/chat_runner.py"]}
-    # Vacuity: a census finding nothing would satisfy an "is a subset of" assertion.
-    assert written == set(_TALLY_WRITERS), f"expected both mutators to be called, found {written}"
-
-
-# --- half (3): the turn locals are a snapshot, not a total --------------------------
+    assert written == set(
+        _TALLY_WRITERS
+    ), f"expected both mutators to be called, found {written}"
 
 
 def test_the_turn_locals_are_assigned_never_accumulated() -> None:
@@ -248,8 +223,9 @@ def test_the_turn_locals_are_assigned_never_accumulated() -> None:
     """
     bindings = _turn_local_bindings()
     for name, nodes in bindings.items():
-        # Vacuity: a renamed local would leave this loop with nothing to check.
-        assert nodes, f"{name} is bound nowhere in chat_runner.py — has it been renamed?"
+        assert (
+            nodes
+        ), f"{name} is bound nowhere in chat_runner.py — has it been renamed?"
         offenders = [n.lineno for n in nodes if isinstance(n, ast.AugAssign)]
         assert offenders == [], (
             f"{name} is accumulated at line(s) {offenders}; it must be assigned from "
@@ -257,13 +233,9 @@ def test_the_turn_locals_are_assigned_never_accumulated() -> None:
         )
 
 
-# --- half (4): the singleton grew no turn-scoped cache attribute --------------------
-
-
 def test_the_singleton_holds_no_cache_named_attribute_beside_its_counter_dict() -> None:
     """The tally lives INSIDE ``_c``; a cache-named attribute would be store number two."""
     instance = Stats()
-    # Vacuity: confirm we are looking at the object that actually holds the tally.
     assert "cache_read_tokens" in instance.snapshot()
     stray = sorted(attr for attr in vars(instance) if "cache" in attr.lower())
     assert stray == [], f"Stats grew cache-named attribute(s) outside `_c`: {stray}"

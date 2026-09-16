@@ -12,17 +12,14 @@ is pinned so it cannot silently regress.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
-from gideon import pricing
-from gideon.pricing import _canonical, estimate_cost, has_pricing
-
-SRC = Path(pricing.__file__).resolve().parent
+from gideon.integrations.model_windows import _TOKENS_FILE
+from gideon.operations.pricing import _canonical, estimate_cost, has_pricing
 
 
 def _census() -> list[str]:
     """The live catalog census: every id model_tokens.json knows about."""
-    tokens = json.loads((SRC / "model_tokens.json").read_text(encoding="utf-8"))
+    tokens = json.loads(_TOKENS_FILE.read_text(encoding="utf-8"))
     ids = [k for k in tokens if not k.startswith("_")]
     assert len(ids) >= 30, f"census suspiciously small ({len(ids)}) — wrong file?"
     return ids

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from gideon.durability import inventory as inv
+from gideon.operations.durability import inventory as inv
 
 
 class TestManifestWellFormed:
@@ -34,7 +34,9 @@ class TestManifestWellFormed:
             assert e.kind in inv.KINDS, f"{e.id}: bad kind {e.kind}"
             assert e.domain in inv.DOMAINS, f"{e.id}: bad domain {e.domain}"
             assert e.merge in inv.MERGES, f"{e.id}: bad merge {e.merge}"
-            assert e.path and not e.path.startswith("/"), f"{e.id}: path must be home-relative"
+            assert e.path and not e.path.startswith(
+                "/"
+            ), f"{e.id}: path must be home-relative"
 
     def test_secrets_are_never_exportable(self):
         """The one-way door: a secret must not appear in the export projection."""
@@ -45,7 +47,13 @@ class TestManifestWellFormed:
 
     def test_known_secrets_are_marked(self):
         secret = set(inv.secret_paths())
-        for path in (".env", ".local_secret", "sel_hmac.key", "telemetry_salt", "credentials"):
+        for path in (
+            ".env",
+            ".local_secret",
+            "sel_hmac.key",
+            "telemetry_salt",
+            "credentials",
+        ):
             assert path in secret, f"{path} must be marked secret"
 
     def test_derived_entries_excluded_from_backup_by_default(self):
@@ -71,8 +79,8 @@ class TestClaimsEverything:
         (home / "tasks" / "t-1.json").write_text("{}")
         (home / "workspace" / "knowledge").mkdir(parents=True)
         (home / "config.json").write_text("{}")
-        (home / "gateway.log").write_text("noise")  # ignored
-        (home / "locks").mkdir()  # ignored
+        (home / "gateway.log").write_text("noise")
+        (home / "locks").mkdir()
         return home
 
     def test_clean_home_is_fully_claimed(self, tmp_path):
@@ -156,23 +164,16 @@ class TestGapClosure:
         Before it was declared, EVERY fresh home failed the audit (self-QA seeds a
         script cron at first boot) and a restore reproduced the trigger row while
         losing its script — the automation survived as data and broke as behavior."""
-        # Claimed: a fresh-boot-shaped home with a seeded script cron audits clean.
         home = tmp_path / "home"
         (home / "crons").mkdir(parents=True)
         (home / "crons" / "selfqa_commit_watch.py").write_text("# script cron")
         (home / "crons" / "selfqa_commit_watch.config.json").write_text("{}")
         result = inv.audit_home(home)
         assert result.ok, f"unclaimed={result.unclaimed} dbs={result.undeclared_dbs}"
-        # The directory claim must not shadow the legacy single-file entry.
         assert inv.claim_for("crons.json").id == "crons"
         assert inv.claim_for("crons/anything.py").id == "cron_scripts"
-        # Travels: in the snapshot projection AND the portable export (scripts are
-        # user-authored automation, same standing as skills/workflows).
         assert "crons" in {e.path for e in inv.backup_entries()}
         assert "crons" in {e.path for e in inv.export_entries()}
-
-
-# ── 🔴 the claims-everything guard had never met a real home (S179) ──
 
 
 class TestTheGuardMeetsARealHome:
@@ -191,7 +192,7 @@ class TestTheGuardMeetsARealHome:
         """Each newly declared entry must be CARRIED, not merely declared. Declaring without
         capturing is the inert half of this fix: the manifest would read complete while the archive
         stayed short."""
-        import gideon.snapshot as snap
+        import gideon.workspace.snapshot as snap
 
         for entry in inv.backup_entries():
             target = tmp_path / entry.path
@@ -280,7 +281,8 @@ class TestTheGuardMeetsARealHome:
 
     def test_only_codegraph_is_a_DB_CONTAINER(self):
         """Pinned so the flag cannot spread. Every added `db_container` widens the blind spot the
-        test above exists to keep narrow — a second store needs its own argued reason."""
+        test above exists to keep narrow — a second store needs its own argued reason.
+        """
         containers = sorted(e.id for e in inv.INVENTORY if e.db_container)
         assert containers == ["codegraph"]
 

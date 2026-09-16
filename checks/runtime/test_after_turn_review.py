@@ -8,10 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from gideon import after_turn_review as atr
-from gideon.vector_memory import VectorMemoryStore
-
-# ── correction heuristic ──
+from gideon.cognition import after_turn_review as atr
+from gideon.cognition.vector_memory import SemanticArchive
 
 
 @pytest.mark.parametrize(
@@ -36,9 +34,6 @@ def test_correction_signals(msg):
         "thanks, looks great",
         "run the build",
         "",
-        # Mid-sentence negations are task INSTRUCTIONS, not corrections of the prior
-        # turn — they must NOT poison the lesson store (regression: "do not use
-        # tools" / "never commit secrets" were captured as "User correction to honor").
         "In one sentence, what are your growth notes? do not use tools.",
         "remember to never commit secrets to the repo",
         "Summarize the README and don't include code",
@@ -52,7 +47,6 @@ def test_non_corrections(msg):
 @pytest.mark.parametrize(
     "msg",
     [
-        # Real corrections OPEN with the signal (optionally after a polite lead-in).
         "No, that's not what I meant — use minimax",
         "Don't do that, use the other approach",
         "Actually, use Postgres",
@@ -63,9 +57,6 @@ def test_non_corrections(msg):
 )
 def test_opening_corrections_are_signals(msg):
     assert atr.is_correction_signal(msg) is True
-
-
-# ── environment-failure guardrail ──
 
 
 @pytest.mark.parametrize(
@@ -95,28 +86,16 @@ def test_real_preferences_not_env_failures(text):
     assert atr.is_environment_failure_claim(text) is False
 
 
-# ── trigger gate ──
-#
-# The gate itself moved to `gideon.learning.gate.LearningGate` (one decision
-# per event, shared by all three cadences). Its behaviour — including every case
-# `should_review` used to cover — is tested in `tests/test_learning_gate.py`; the
-# pure content filters above stay here because they remain this module's own.
-
-
-# ── capture (run_after_turn_review) ──
-
-
 @pytest.fixture
 def vs():
-    store = VectorMemoryStore(db_path=Path(tempfile.mkdtemp()) / "m.db")
+    store = SemanticArchive(db_path=Path(tempfile.mkdtemp()) / "m.db")
     store.init()
     return store
 
 
 @pytest.fixture
 def svc(vs):
-    # run_after_turn_review takes a MemoryService (L3); wrap the record store.
-    from gideon.memory_service import MemoryService
+    from gideon.cognition.memory_service import MemoryService
 
     return MemoryService.over_vector_store(vs)
 
@@ -141,7 +120,7 @@ def test_guardrail_blocks_env_failure_in_user_msg(vs, svc):
         correction=True,
     )
     assert learned is None
-    assert vs.get_lessons() == []  # nothing learned
+    assert vs.get_lessons() == []
 
 
 def test_guardrail_blocks_env_failure_in_assistant(vs, svc):
@@ -165,7 +144,7 @@ def test_no_capture_without_correction(svc):
 
 
 def test_no_vector_store_is_noop():
-    from gideon.memory_service import MemoryService
+    from gideon.cognition.memory_service import MemoryService
 
     assert (
         atr.run_after_turn_review(
@@ -178,15 +157,11 @@ def test_no_vector_store_is_noop():
     )
 
 
-# ── preference-facet capture (C15) — wired into the after-turn pass ──
-
-
 def test_facet_capture_style_nudge(vs, svc):
     """A style nudge (not a correction) is captured as a style facet + rendered in the
     ambient USER PROFILE block."""
-    from gideon.preference_facets import render_profile_block
+    from gideon.cognition.preference_facets import render_profile_block
 
-    # not a correction — facet capture runs regardless of the correction gate
     atr.run_after_turn_review(
         service=svc,
         user_message="please keep responses concise",
@@ -229,7 +204,7 @@ def test_veto_is_durable_while_a_style_nudge_decays(vs, svc):
     store (one home for always/never rules, non-decaying) and creates NO facet row,
     while a style nudge becomes a decaying facet and writes NO lesson. The veto matcher
     is therefore the one whose looseness is expensive — hence its higher bar."""
-    from gideon import preference_facets as pf
+    from gideon.cognition import preference_facets as pf
 
     atr.run_after_turn_review(
         service=svc,
@@ -239,7 +214,7 @@ def test_veto_is_durable_while_a_style_nudge_decays(vs, svc):
     )
     veto_lessons = [json.loads(le["value_json"]) for le in vs.get_lessons()]
     assert any("force-push" in v for v in veto_lessons)
-    assert pf.load_facets(vs) == []  # durable side only — no parallel decaying model
+    assert pf.load_facets(vs) == []
 
     atr.run_after_turn_review(
         service=svc,
@@ -249,8 +224,7 @@ def test_veto_is_durable_while_a_style_nudge_decays(vs, svc):
     )
     facets = [f for _k, f in pf.load_facets(vs)]
     assert [f.cls for f in facets] == ["style"]
-    assert len(vs.get_lessons()) == len(veto_lessons)  # the style nudge wrote no lesson
-    # …and the style facet really is the decaying kind.
+    assert len(vs.get_lessons()) == len(veto_lessons)
     fresh = pf.decayed_stability(facets[0])
     aged = pf.decay(facets[0].stability, 60.0, 30.0)
     assert aged < fresh
@@ -258,7 +232,7 @@ def test_veto_is_durable_while_a_style_nudge_decays(vs, svc):
 
 def test_facet_capture_noop_on_plain_message(vs, svc):
     """A plain task message produces no facet (conservative detector)."""
-    from gideon.preference_facets import render_profile_block
+    from gideon.cognition.preference_facets import render_profile_block
 
     atr.run_after_turn_review(
         service=svc,

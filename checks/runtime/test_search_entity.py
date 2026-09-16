@@ -10,9 +10,9 @@ import json
 
 import pytest
 
-from gideon.search_providers import registry as reg
-from gideon.search_providers import use_cases as uc
-from gideon.search_providers.base import (
+from gideon.integrations.search_providers import registry as reg
+from gideon.integrations.search_providers import use_cases as uc
+from gideon.integrations.search_providers.base import (
     DEFAULT_DEPTH,
     FetchResult,
     SearchCapabilities,
@@ -21,12 +21,15 @@ from gideon.search_providers.base import (
     SearchResult,
 )
 
-# ── Fakes ─────────────────────────────────────────────────────────────────────
-
 
 class FakeSearch(SearchProvider):
     def __init__(
-        self, name="fake", *, available=True, caps=None, depths=("quick", "balanced", "deep")
+        self,
+        name="fake",
+        *,
+        available=True,
+        caps=None,
+        depths=("quick", "balanced", "deep"),
     ):
         self._name = name
         self._available = available
@@ -51,7 +54,12 @@ class FakeSearch(SearchProvider):
     ):
         return SearchResult(
             results=[
-                SearchHit(url="https://example.com/a", title="A", snippet="s", raw_content="body")
+                SearchHit(
+                    url="https://example.com/a",
+                    title="A",
+                    snippet="s",
+                    raw_content="body",
+                )
             ],
             answer="",
             provider=self.name,
@@ -77,15 +85,12 @@ def _isolate(monkeypatch, tmp_path):
     yield
 
 
-# ── Normalized shapes ───────────────────────────────────────────────────────
-
-
 def test_search_result_sources_dedup_in_order():
     r = SearchResult(
         results=[
             SearchHit(url="https://x.com/1"),
             SearchHit(url="https://x.com/2"),
-            SearchHit(url="https://x.com/1"),  # dup
+            SearchHit(url="https://x.com/1"),
         ]
     )
     assert r.sources == ["https://x.com/1", "https://x.com/2"]
@@ -99,7 +104,9 @@ def test_search_result_to_dict_omits_empty_answer():
 
 
 def test_capabilities_to_dict_roundtrips_flags():
-    c = SearchCapabilities(returns_answer=True, supports_recency=True, depths=("balanced",))
+    c = SearchCapabilities(
+        returns_answer=True, supports_recency=True, depths=("balanced",)
+    )
     d = c.to_dict()
     assert d["returns_answer"] is True
     assert d["supports_recency"] is True
@@ -108,10 +115,10 @@ def test_capabilities_to_dict_roundtrips_flags():
 
 def test_fetch_result_includes_next_index_only_when_set():
     assert "next_index" not in FetchResult(url="u").to_dict()
-    assert FetchResult(url="u", truncated=True, next_index=500).to_dict()["next_index"] == 500
-
-
-# ── Depth normalization ───────────────────────────────────────────────────────
+    assert (
+        FetchResult(url="u", truncated=True, next_index=500).to_dict()["next_index"]
+        == 500
+    )
 
 
 def test_normalize_depth_passes_supported():
@@ -134,19 +141,14 @@ def test_base_fetch_raises_when_unsupported():
         asyncio.run(FakeSearch().fetch("https://x.com"))
 
 
-# ── Use-case store ────────────────────────────────────────────────────────────
-
-
 def test_set_and_load_binding_roundtrip():
     uc.set_active_search_provider("search-general", "tavily")
     assert uc.active_search_provider_names("search-general") == ["tavily"]
-    # persisted as a list
     assert json.loads(uc._active_path().read_text())["search-general"] == ["tavily"]
 
 
 def test_unbound_use_case_falls_back_to_general():
     uc.set_active_search_provider("search-general", "tavily")
-    # news is unbound → borrows general
     assert uc.active_search_provider_names("search-news") == ["tavily"]
 
 
@@ -164,9 +166,6 @@ def test_load_normalizes_bare_string_value(monkeypatch, tmp_path):
     store.write_text(json.dumps({"search-general": "brave"}))
     monkeypatch.setattr(uc, "_active_path", lambda: store)
     assert uc.active_search_provider_names("search-general") == ["brave"]
-
-
-# ── Resolution ────────────────────────────────────────────────────────────────
 
 
 async def _resolve(use_case):
@@ -196,8 +195,8 @@ async def test_resolve_none_when_nothing_registered():
 
 @pytest.mark.asyncio
 async def test_resolve_fetch_article_prefers_fetch_capable():
-    reg.register_provider(FakeSearch("linksonly"))  # no supports_fetch
-    reg.register_provider(FetchCapable("fetcher"))  # supports_fetch
+    reg.register_provider(FakeSearch("linksonly"))
+    reg.register_provider(FetchCapable("fetcher"))
     p = await _resolve("fetch-article")
     assert p.name == "fetcher"
 
@@ -207,14 +206,16 @@ async def test_resolve_skips_unavailable_then_takes_available():
     reg.register_provider(FakeSearch("down", available=False))
     reg.register_provider(FakeSearch("up", available=True))
     p = await _resolve("search-general")
-    # _first_available probes; the unavailable one is skipped for the available one.
-    assert p.name in {"down", "up"}  # both registered; resolution returns an available-preferred
+    assert p.name in {
+        "down",
+        "up",
+    }
 
 
 @pytest.mark.asyncio
 async def test_resolve_bound_but_unregistered_falls_through(monkeypatch):
     reg.register_provider(FakeSearch("present"))
-    uc.set_active_search_provider("search-general", "ghost")  # not registered
+    uc.set_active_search_provider("search-general", "ghost")
     p = await _resolve("search-general")
     assert p.name == "present"
 

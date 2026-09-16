@@ -1,19 +1,19 @@
 """PHF-7: a deliberately raw call that skips the enforced helper REDS the gate.
 
-The enforced helper is ``atomic_write`` (``src/gideon/atomic_write.py``) — the one
+The enforced helper is ``atomic_write`` (``runtime/gideon/core/atomic_write.py``) — the one
 implementation that keeps the post-write history seam and fsync durability intact. A handler
 that rolls its own ``mkstemp`` + ``os.replace`` lands the bytes on disk and fires no hook, so
 the write is swallowed with a green test on BOTH sides (DAS-9). ``structural-duplication``'s
 ``durable-write`` family is what makes that shape expensive.
 
 This file exists because that clause is a **vacuity assertion about the gate**, and the gate's
-own suite cannot make it. ``tests/test_structural_baseline.py`` pins the *detector* against
+own suite cannot make it. ``checks/runtime/test_structural_baseline.py`` pins the *detector* against
 synthetic trees (``gen._durable_write_sites(tree) == [...]``) — one level too shallow. A
 detector can be perfect while the gate reds on nothing.
 
 MEASURED, not argued. Replacing the ``("durable-write", _durable_write_sites)`` tuple in
 ``scan_duplicates``'s dispatch with ``lambda tree: []`` and then regenerating
-``structural-baseline.json`` — which that file's own instructions invite whenever a counter
+``checks/catalogs/structure.json`` — which that file's own instructions invite whenever a counter
 "legitimately shrank" — leaves the whole 31-test structural suite **GREEN** while the durable-write
 tally sits at 0 and any raw write sails through. The same tree reds 2 of the 5 legs here, by name.
 Without the regeneration the existing suite does catch it (stale-high + byte-match), so the hole
@@ -42,16 +42,14 @@ from pathlib import Path
 
 import pytest
 
-from scripts import generate_structural_baseline as gen
+from tooling.scripts import generate_structural_baseline as gen
 
 RATCHET = gen.RATCHET_DUPLICATION
 FAMILY = "durable-write"
-ENFORCED_HELPER = "src/gideon/atomic_write.py"
+ENFORCED_HELPER = "runtime/gideon/core/atomic_write.py"
 
-# A top-level name, so the plant cannot invent a sub-package: ``census_packages()`` walks disk
-# independently of the patched walk, and a planted path claiming ``src/gideon/newpkg/x.py``
-# would red the package-coverage vacuity check for the wrong reason.
-PLANTED_REL = "src/gideon/_phf7_planted_durable_write.py"
+# independently of the patched walk, and a planted path claiming ``runtime/gideon/newpkg/x.py``
+PLANTED_REL = "runtime/gideon/_phf7_planted_durable_write.py"
 
 RAW_DURABLE_WRITE = '''\
 """A raw durable write: temp file + rename, skipping the enforced helper."""
@@ -72,7 +70,7 @@ DELEGATING_WRAPPER = '''\
 
 import json
 
-from gideon.atomic_write import atomic_write
+from gideon.core.atomic_write import atomic_write
 
 
 def _delegating_durable_write(path, data):
@@ -83,13 +81,15 @@ def _delegating_durable_write(path, data):
 def _committed() -> dict:
     path = gen.baseline_path()
     assert path.is_file(), (
-        "structural-baseline.json is missing — generate it with "
-        "`python scripts/generate_structural_baseline.py`"
+        "checks/catalogs/structure.json is missing — generate it with "
+        "`python tooling/scripts/generate_structural_baseline.py`"
     )
-    return json.loads(path.read_text(encoding="utf-8"))
+    return gen.decode_catalog(json.loads(path.read_text(encoding="utf-8")))
 
 
-def _gate_failures(monkeypatch: pytest.MonkeyPatch, planted: Path | None = None) -> list[str]:
+def _gate_failures(
+    monkeypatch: pytest.MonkeyPatch, planted: Path | None = None
+) -> list[str]:
     """Every failure line the ``structural-duplication`` gate reports, with *planted* (if
     given) spliced into the census walk under :data:`PLANTED_REL`.
 
@@ -103,16 +103,15 @@ def _gate_failures(monkeypatch: pytest.MonkeyPatch, planted: Path | None = None)
         monkeypatch.setitem(gen._REL_CACHE, planted, PLANTED_REL)
         files.append(planted)
     monkeypatch.setattr(gen, "_src_py_files", lambda: files)
-    return gen.ratchet_failures(RATCHET, _committed(), {RATCHET: gen._duplication_block()})
+    return gen.ratchet_failures(
+        RATCHET, _committed(), {RATCHET: gen._duplication_block()}
+    )
 
 
 def _plant(tmp_path: Path, source: str) -> Path:
     path = tmp_path / "_phf7_planted_durable_write.py"
     path.write_text(source, encoding="utf-8")
     return path
-
-
-# ── The three legs ───────────────────────────────────────────────────────────
 
 
 def test_the_clean_tree_passes_this_gate(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -166,9 +165,6 @@ def test_a_delegating_wrapper_does_not_red_this_gate(
         "a wrapper that DELEGATES to atomic_write red the gate. That inverts the rail: it now "
         f"punishes reuse of the enforced helper. Lines: {failures}"
     )
-
-
-# ── What the gate is enforcing, asserted rather than assumed ──────────────────
 
 
 def test_the_enforced_helper_is_the_gates_declared_canonical() -> None:

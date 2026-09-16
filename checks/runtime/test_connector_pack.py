@@ -38,40 +38,36 @@ from pathlib import Path
 
 import pytest
 
-from gideon.apps.manifest import (
-    PACK_ARG_TYPES,
-    PACK_FETCH_METHODS,
-    PACK_SECRET_HEADERS,
-    AppManifest,
-    PackSourceEntry,
-)
-from gideon.knowledge.source_engine import SourceEngine
-from gideon.knowledge.source_recipes import (
+from gideon.cognition.knowledge.source_engine import SourceEngine
+from gideon.cognition.knowledge.source_recipes import (
     RECIPE_PROVIDERS,
     list_recipes,
     recipes_for_url,
     resolve_spec,
     validate_recipe,
 )
-from gideon.knowledge.store import KnowledgeStore
-from gideon.knowledge_providers import pack_parse
-from gideon.knowledge_providers.connector_pack import (
+from gideon.cognition.knowledge.store import KnowledgeStore
+from gideon.extensions.apps.manifest import (
+    PACK_ARG_TYPES,
+    PACK_FETCH_METHODS,
+    PACK_SECRET_HEADERS,
+    AppManifest,
+    PackSourceEntry,
+)
+from gideon.integrations.knowledge_providers import pack_parse
+from gideon.integrations.knowledge_providers.connector_pack import (
     ConnectorPackProvider,
     PackConfigError,
     render_fetch,
     validate_args,
 )
-from gideon.knowledge_providers.pack_parse import (
+from gideon.integrations.knowledge_providers.pack_parse import (
     DENIED_MODULES,
     SECRET_HEADERS,
     ParseFailure,
     harness_source,
     run_parse_script,
 )
-
-# Reached through the SDK facade on purpose: this is the exact import a pack's own
-# ``provider.py`` writes, so exercising it here means the published boundary is what the
-# tests drive rather than the core module behind it.
 from gideon.sdk.knowledge import connector_pack_provider
 
 FEED_URL = "https://api.example.com/repos/acme/widget/releases"
@@ -87,11 +83,6 @@ def store(tmp_path):
     return KnowledgeStore(str(tmp_path / "knowledge.db"))
 
 
-# ── the fixture connector pack ──────────────────────────────────────────────────────
-
-#: The pack's whole provider module. Three lines, and it imports core ONLY through
-#: ``gideon.sdk.*`` — the boundary ``test_apps_import_boundary.py`` lints. That it can
-#: be this small is the design: the pack contributes a parser, not a client.
 PROVIDER_PY = """
 from gideon.sdk.knowledge import connector_pack_provider
 
@@ -100,8 +91,6 @@ def create_provider(config=None):
     return connector_pack_provider(__file__, config)
 """
 
-#: A real parse-only script: reads the engine-fetched body on stdin, its args on argv, emits
-#: one JSON object per line. No network, no imports beyond text handling.
 PARSE_RELEASES_PY = """
 import json
 import sys
@@ -157,7 +146,7 @@ def _manifest(**over) -> dict:
             {
                 "name": "releases",
                 "displayName": "Acme releases",
-                "script": "scripts/parse_releases.py",
+                "script": "tooling/scripts/parse_releases.py",
                 "fetchSpec": {
                     "url": "https://api.example.com/repos/{{args.repo}}/releases",
                     "method": "GET",
@@ -174,10 +163,14 @@ def _manifest(**over) -> dict:
 
 def _write_pack(tmp_path: Path, *, script: str = PARSE_RELEASES_PY, **over) -> Path:
     app_dir = tmp_path / "apps" / "acme-connector"
-    (app_dir / "scripts").mkdir(parents=True, exist_ok=True)
-    (app_dir / "app.json").write_text(json.dumps(_manifest(**over), indent=2), encoding="utf-8")
+    (app_dir / "tooling/scripts").mkdir(parents=True, exist_ok=True)
+    (app_dir / "app.json").write_text(
+        json.dumps(_manifest(**over), indent=2), encoding="utf-8"
+    )
     (app_dir / "provider.py").write_text(PROVIDER_PY, encoding="utf-8")
-    (app_dir / "scripts" / "parse_releases.py").write_text(script, encoding="utf-8")
+    (app_dir / "tooling/scripts" / "parse_releases.py").write_text(
+        script, encoding="utf-8"
+    )
     return app_dir
 
 
@@ -220,7 +213,7 @@ class _FakeQueue:
 
 
 def _cfg(**over):
-    from gideon.config.loader import SourcesConfig
+    from gideon.core.config.loader import SourcesConfig
 
     base = dict(
         enabled=True,
@@ -249,7 +242,9 @@ def _setup(store, app_dir, fetcher, *, spec=None, secret="tok-123"):
         secret_resolver=(lambda name: secret),
     )
     queue = _FakeQueue()
-    engine = SourceEngine(store, queue, providers_lister=lambda: [provider], config_loader=_cfg)
+    engine = SourceEngine(
+        store, queue, providers_lister=lambda: [provider], config_loader=_cfg
+    )
     return sid, provider, engine, queue
 
 
@@ -263,23 +258,23 @@ def _items(store, sid):
     ).fetchall()
 
 
-# ── done_when 1: a pack installs and registers through KnowledgeTypeHandler ──────────
-
-
-def test_a_connector_pack_registers_through_the_knowledge_type_handler(tmp_path, monkeypatch):
+def test_a_connector_pack_registers_through_the_knowledge_type_handler(
+    tmp_path, monkeypatch
+):
     """The shipped handler builds the pack's provider and it appears as ``kind: external``.
 
     Driven through ``KnowledgeTypeHandler`` + ``load_factory`` — the real enable path — rather
     than by constructing the provider directly, because what this clause is about is the
     manifest→factory→registry leg, not the class.
     """
-    from gideon.knowledge_providers.registry import list_provider_info
-    from gideon.providers.registry import KnowledgeTypeHandler, RegisteredProvider
+    from gideon.extensions.providers.registry import (
+        KnowledgeTypeHandler,
+        RegisteredProvider,
+    )
+    from gideon.integrations.knowledge_providers.registry import list_provider_info
 
     pack = _write_pack(tmp_path)
-    # The ONE seam that resolves an installed app's dir — patched, not reimplemented, so the
-    # module load below really is the shipped `load_factory` path.
-    monkeypatch.setattr("gideon.providers.loader.app_dir", lambda name: pack)
+    monkeypatch.setattr("gideon.extensions.providers.loader.app_dir", lambda name: pack)
 
     manifest = AppManifest.from_dict(json.loads((pack / "app.json").read_text()))
     assert manifest.validate() == []
@@ -291,7 +286,9 @@ def test_a_connector_pack_registers_through_the_knowledge_type_handler(tmp_path,
     try:
         handler.register(ext, instance)
         info = {p["name"]: p for p in list_provider_info()}
-        assert "acme-connector" in info, "the pack's provider never reached the registry"
+        assert (
+            "acme-connector" in info
+        ), "the pack's provider never reached the registry"
         assert info["acme-connector"]["kind"] == "external"
         assert info["acme-connector"]["display_name"] == "Acme Connector"
     finally:
@@ -320,14 +317,13 @@ def test_the_pack_provider_module_is_importable_only_through_the_sdk(tmp_path):
     tree = ast.parse((pack / "provider.py").read_text(encoding="utf-8"))
     reached: list[str] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("gideon"):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
+            "gideon"
+        ):
             reached.append(node.module or "")
         if isinstance(node, ast.Import):
             reached += [a.name for a in node.names if a.name.startswith("gideon")]
     assert reached == ["gideon.sdk.knowledge"]
-
-
-# ── done_when 2: engine-fetched body on stdin → JSON lines → items ──────────────────
 
 
 @pytest.mark.asyncio
@@ -343,19 +339,18 @@ async def test_a_pack_parse_of_an_engine_fetched_body_lands_items(tmp_path, stor
     assert [r["title"] for r in rows] == ["widget 2.0.0", "widget 2.0.1"]
     assert len(queue.enqueued) == 2, "items must reach the ONE ingestion path"
 
-    # The engine fetched, not the script: one request, at the URL the template rendered.
     assert fetcher.requests == ["https://api.example.com/repos/acme%2Fwidget/releases"]
     assert fetcher.methods == ["GET"]
-    # The secret landed in a header and the conditional-GET plumbing rode along.
     assert fetcher.headers[0]["Authorization"] == "Bearer tok-123"
     assert fetcher.headers[0]["Accept"] == "application/json"
 
-    # The validator was persisted, so the next poll is conditional.
     assert json.loads(store.get_source_cursor(sid)) == {"etag": 'W/"abc"'}
 
 
 @pytest.mark.asyncio
-async def test_a_second_poll_of_the_same_body_creates_no_duplicate_items(tmp_path, store):
+async def test_a_second_poll_of_the_same_body_creates_no_duplicate_items(
+    tmp_path, store
+):
     """The pack path inherits the ``UNIQUE(source_id, guid)`` gate like every other kind."""
     pack = _write_pack(tmp_path)
     fetcher = _Fetcher()
@@ -383,11 +378,6 @@ async def test_the_script_receives_its_declared_args_on_argv(tmp_path, store):
     assert [i.metadata["repo"] for i in result.items] == ["acme/widget", "acme/widget"]
 
 
-# ── done_when 4 / SC#11: the script cannot open a socket ────────────────────────────
-
-#: A pack script that tries to reach a REAL listener. Written so the only way it can emit an
-#: item at all is by having connected — so "zero items" and "zero connections" are the same
-#: claim measured at two ends.
 SOCKET_PACK_PY = """
 import json
 import socket
@@ -461,9 +451,6 @@ def test_a_pack_script_that_tries_to_open_a_socket_reaches_nothing(tmp_path, lis
         rows = run_parse_script(script, b"{}", {"port": listener.port}).rows
     except ParseFailure as exc:
         failure = exc
-    # The OUTCOME first, deliberately: a `pytest.raises` block would have made the exception's
-    # code the first thing checked, and then a mutation that let the connection through but
-    # still raised somewhere else would red on the wrong line.
     assert listener.accepted == [], "a pack script reached the network"
     assert rows == []
     assert failure is not None and failure.code == ParseFailure.IMPORT_REFUSED
@@ -483,13 +470,18 @@ def test_the_socket_proof_is_not_vacuous(tmp_path, listener, monkeypatch):
     script.write_text(SOCKET_PACK_PY, encoding="utf-8")
     result = run_parse_script(script, b"{}", {"port": listener.port})
     assert [r["guid"] for r in result.rows] == ["reached-the-network"]
-    assert listener.accepted, "with the fence removed the listener must see the connection"
+    assert (
+        listener.accepted
+    ), "with the fence removed the listener must see the connection"
 
 
 @pytest.mark.parametrize(
     "name,source",
     [
-        ("urllib", "import json\nimport urllib.request\nprint(json.dumps({'guid': 'u'}))\n"),
+        (
+            "urllib",
+            "import json\nimport urllib.request\nprint(json.dumps({'guid': 'u'}))\n",
+        ),
         ("ctypes", "import json, ctypes\nprint(json.dumps({'guid': 'c'}))\n"),
         ("subprocess", "import json, subprocess\nprint(json.dumps({'guid': 's'}))\n"),
         ("os", "import json, os\nprint(json.dumps({'guid': 'o'}))\n"),
@@ -516,9 +508,6 @@ def test_every_other_route_to_a_socket_is_refused(tmp_path, name, source):
     assert exc.value.code == ParseFailure.IMPORT_REFUSED, exc.value.detail
 
 
-#: The classic no-import escape: walk ``object.__subclasses__()`` to a class defined in ``os``
-#: and read ``os.system`` out of its ``__init__.__globals__``. An import fence alone does not
-#: touch this, which is why the harness also neuters the loaded module's process calls.
 GADGET_PACK_PY = """
 import json
 
@@ -600,7 +589,12 @@ def test_each_fence_mechanism_is_named_in_the_harness_and_none_is_redundant():
     import sys
 
     out = subprocess.run(
-        [sys.executable, "-I", "-c", "import sys, json; print(json.dumps(sorted(sys.modules)))"],
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            "import sys, json; print(json.dumps(sorted(sys.modules)))",
+        ],
         capture_output=True,
         text=True,
         check=True,
@@ -618,8 +612,6 @@ def test_each_fence_mechanism_is_named_in_the_harness_and_none_is_redundant():
         f"mechanism covers which name before trusting the module docstring"
     )
     src = harness_source()
-    # No fourth mechanism crept back in: wrapping `builtins.__import__` was deleted after a
-    # mutation showed it reded nothing, and re-adding it would be an untested layer.
     assert "builtins.__import__ =" not in src
 
 
@@ -665,7 +657,7 @@ def test_the_spawn_really_carries_the_bounds_its_audit_entry_claims():
     import ast
     import inspect
 
-    from gideon.knowledge_providers import pack_parse as mod
+    from gideon.integrations.knowledge_providers import pack_parse as mod
 
     tree = ast.parse(inspect.getsource(mod.run_parse_script))
     calls = {
@@ -701,10 +693,7 @@ def test_the_harness_interpolates_the_live_denylist(tmp_path):
     src = harness_source()
     for name in ("socket", "ctypes", "os", "subprocess"):
         assert repr(name) in src
-    assert "__PC_DENIED_MODULES__" not in src
-
-
-# ── fail closed on malformed output, in all five shapes ─────────────────────────────
+    assert "__GIDEON_DENIED_MODULES__" not in src
 
 
 def test_garbage_on_stdout_yields_zero_items_not_the_good_ones(tmp_path):
@@ -740,10 +729,6 @@ def test_a_partial_line_yields_zero_items(tmp_path):
     assert exc.value.code in (ParseFailure.MALFORMED, ParseFailure.INCOMPLETE)
 
 
-#: The most determined shape of the fail-closed attack, and the one that motivates BOTH the
-#: nonce and the ``sys.modules["__main__"]`` swap: read the terminator nonce out of the
-#: harness's own globals, tamper with the fence, print rows, write a FORGED "intact"
-#: terminator, then close stdout so the harness can never write its real one last.
 FORGE_PACK_PY = """
 import json
 import sys
@@ -751,7 +736,7 @@ import sys
 nonce = getattr(sys.modules.get("__main__"), "_NONCE", "")
 sys.meta_path.pop(0)
 print(json.dumps({"guid": "forged", "title": "forged a terminator"}))
-sys.stdout.write("\\n__PC_PACK_END__" + nonce + json.dumps({"fence": "intact"}) + "\\n")
+sys.stdout.write("\\n__GIDEON_PACK_END__" + nonce + json.dumps({"fence": "intact"}) + "\\n")
 sys.stdout.flush()
 sys.stdout.close()
 """
@@ -799,12 +784,13 @@ def test_a_missing_terminator_yields_zero_items(tmp_path):
 @pytest.mark.asyncio
 async def test_a_wrong_shaped_object_yields_zero_items(tmp_path, store):
     """A row with no guid, url or title cannot be de-duplicated, so the batch is refused —
-    asserted through a real poll, where the alternative is an item re-created every poll."""
+    asserted through a real poll, where the alternative is an item re-created every poll.
+    """
     pack = _write_pack(
         tmp_path,
         sources=_manifest()["sources"],
     )
-    (pack / "scripts" / "parse_releases.py").write_text(
+    (pack / "tooling/scripts" / "parse_releases.py").write_text(
         "import json\n"
         "print(json.dumps({'guid': 'ok', 'title': 'fine'}))\n"
         "print(json.dumps({'content': 'nothing to key on'}))\n",
@@ -825,7 +811,7 @@ async def test_a_row_with_a_non_http_url_yields_zero_items(tmp_path, store):
     ``javascript:`` or ``file:`` row is refused rather than stored — and refused for the WHOLE
     batch, like every other shape failure."""
     pack = _write_pack(tmp_path, sources=_manifest()["sources"])
-    (pack / "scripts" / "parse_releases.py").write_text(
+    (pack / "tooling/scripts" / "parse_releases.py").write_text(
         "import json\n"
         "print(json.dumps({'guid': 'ok', 'title': 'fine', 'url': 'https://a.example/x'}))\n"
         "print(json.dumps({'guid': 'bad', 'title': 'bad', 'url': 'javascript:alert(1)'}))\n",
@@ -843,7 +829,9 @@ async def test_a_failed_parse_does_not_advance_the_cursor(tmp_path, store):
     """A batch we refused must be re-offered, not skipped past — otherwise a transient parser
     bug silently loses everything the feed published while it was broken."""
     pack = _write_pack(tmp_path, sources=_manifest()["sources"])
-    (pack / "scripts" / "parse_releases.py").write_text("print('nonsense')\n", encoding="utf-8")
+    (pack / "tooling/scripts" / "parse_releases.py").write_text(
+        "print('nonsense')\n", encoding="utf-8"
+    )
     sid, provider, _e, _q = _setup(
         store, pack, _Fetcher(_Resp(RELEASE_BODY, headers={"ETag": "e"}))
     )
@@ -885,9 +873,6 @@ def test_a_body_over_the_input_cap_is_refused_before_the_spawn(tmp_path, monkeyp
     assert exc.value.code == ParseFailure.TOO_LARGE
 
 
-# ── manifest schema: the pack kind is coherent, not merely well-formed ──────────────
-
-
 def test_a_wellformed_pack_manifest_validates_and_round_trips(tmp_path):
     manifest = AppManifest.from_dict(_manifest())
     assert manifest.validate() == []
@@ -920,8 +905,14 @@ def test_a_manifest_without_the_sources_block_round_trips_byte_identically():
             "must not put a secret in fetchSpec.url",
         ),
         ({"fetchSpec": {"url": "https://a.example/{{args.nope}}"}}, "undeclared arg"),
-        ({"fetchSpec": {"url": "https://a.example/{{whatever}}"}}, "unknown placeholder"),
-        ({"fetchSpec": {"url": "https://a.example/", "method": "POST"}}, "fetchSpec.method"),
+        (
+            {"fetchSpec": {"url": "https://a.example/{{whatever}}"}},
+            "unknown placeholder",
+        ),
+        (
+            {"fetchSpec": {"url": "https://a.example/", "method": "POST"}},
+            "fetchSpec.method",
+        ),
         (
             {
                 "fetchSpec": {
@@ -931,7 +922,10 @@ def test_a_manifest_without_the_sources_block_round_trips_byte_identically():
             },
             "must reference a {{secret:KEY}}",
         ),
-        ({"fetchSpec": {"url": "https://a.example/", "proxy": "socks5://x"}}, "unknown key"),
+        (
+            {"fetchSpec": {"url": "https://a.example/", "proxy": "socks5://x"}},
+            "unknown key",
+        ),
         ({"argsSchema": {"repo": {"type": "object"}}}, "argsSchema.repo.type"),
         ({"name": "Not Kebab"}, "kebab-case"),
     ],
@@ -951,22 +945,32 @@ def test_sources_without_a_knowledge_source_provider_is_refused():
         for e in AppManifest.from_dict(raw).validate()
     )
     raw = _manifest(
-        provider={"type": "knowledge", "implementation": "m:f", "capabilities": ["search"]}
+        provider={
+            "type": "knowledge",
+            "implementation": "m:f",
+            "capabilities": ["search"],
+        }
     )
-    assert any("'source' capability" in e for e in AppManifest.from_dict(raw).validate())
+    assert any(
+        "'source' capability" in e for e in AppManifest.from_dict(raw).validate()
+    )
 
 
 def test_sources_without_the_network_permission_is_refused():
     """The fetch is core's, but it happens because the pack asked — so consent must say so."""
     raw = _manifest(permissions={})
-    assert any("permissions.network" in e for e in AppManifest.from_dict(raw).validate())
+    assert any(
+        "permissions.network" in e for e in AppManifest.from_dict(raw).validate()
+    )
 
 
 def test_duplicate_source_names_are_refused():
     entry = _manifest()["sources"][0]
     assert any(
         "duplicate source name" in e
-        for e in AppManifest.from_dict(_manifest(sources=[entry, dict(entry)])).validate()
+        for e in AppManifest.from_dict(
+            _manifest(sources=[entry, dict(entry)])
+        ).validate()
     )
 
 
@@ -978,12 +982,10 @@ def test_the_secret_header_list_has_one_definition():
 
 def test_the_declared_method_and_arg_vocabularies_are_read_only_and_scalar():
     """Both closed sets are asserted literally, because widening either is a real decision:
-    a POST would be an unattended write, and a nested arg cannot go into a URL anyway."""
+    a POST would be an unattended write, and a nested arg cannot go into a URL anyway.
+    """
     assert PACK_FETCH_METHODS == frozenset({"GET", "HEAD"})
     assert PACK_ARG_TYPES == frozenset({"string", "integer", "boolean"})
-
-
-# ── rendering: args, secrets, containment ──────────────────────────────────────────
 
 
 def test_a_missing_required_arg_refuses_before_any_fetch():
@@ -1013,7 +1015,8 @@ def test_an_arg_is_percent_encoded_into_the_url_but_not_into_a_header():
 
 def test_a_missing_credential_refuses_rather_than_sending_a_blank_header():
     """An empty ``Authorization`` is a 401 nobody can diagnose, or a request that succeeded
-    against an endpoint that did not need the token — both worse than a named refusal."""
+    against an endpoint that did not need the token — both worse than a named refusal.
+    """
     entry = PackSourceEntry.from_dict(_manifest()["sources"][0])
 
     def _missing(name: str) -> str:
@@ -1029,7 +1032,7 @@ def test_the_default_credential_resolver_refuses_a_configured_but_valueless_secr
     """The shipped resolver, not an injected fake. A descriptor with no value anywhere in the
     chain must refuse by name — the injected-resolver tests above prove the propagation, and
     this proves the thing that actually runs in production."""
-    from gideon.knowledge_providers.connector_pack import _default_secret
+    from gideon.integrations.knowledge_providers.connector_pack import _default_secret
 
     home = tmp_path / "creds-home"
     home.mkdir()
@@ -1037,7 +1040,7 @@ def test_the_default_credential_resolver_refuses_a_configured_but_valueless_secr
         json.dumps({"ACME_TOKEN": {"type": "static_token"}}), encoding="utf-8"
     )
     monkeypatch.setattr(
-        "gideon.config.loader.config_dir", lambda *a, **k: home, raising=False
+        "gideon.core.config.loader.config_dir", lambda *a, **k: home, raising=False
     )
     with pytest.raises(PackConfigError, match="configured but has no value"):
         _default_secret("ACME_TOKEN")
@@ -1060,21 +1063,27 @@ def test_a_script_symlinked_out_of_the_app_dir_is_refused(tmp_path, store):
     pack = _write_pack(tmp_path)
     outside = tmp_path / "outside.py"
     outside.write_text("print('{}')\n", encoding="utf-8")
-    link = pack / "scripts" / "escape.py"
+    link = pack / "tooling/scripts" / "escape.py"
     link.symlink_to(outside)
     raw = _manifest()["sources"][0]
-    raw["script"] = "scripts/escape.py"
-    (pack / "app.json").write_text(json.dumps(_manifest(sources=[raw])), encoding="utf-8")
+    raw["script"] = "tooling/scripts/escape.py"
+    (pack / "app.json").write_text(
+        json.dumps(_manifest(sources=[raw])), encoding="utf-8"
+    )
     provider = ConnectorPackProvider(pack, store=store, secret_resolver=lambda n: "t")
     with pytest.raises(PackConfigError, match="outside the app dir"):
         provider.script_path(provider.resolve_entry("releases"))
 
 
 @pytest.mark.asyncio
-async def test_a_spec_naming_an_undeclared_pack_source_refuses_before_fetching(tmp_path, store):
+async def test_a_spec_naming_an_undeclared_pack_source_refuses_before_fetching(
+    tmp_path, store
+):
     pack = _write_pack(tmp_path)
     fetcher = _Fetcher()
-    sid, provider, _e, _q = _setup(store, pack, fetcher, spec={"pack_source": "ghost", "args": {}})
+    sid, provider, _e, _q = _setup(
+        store, pack, fetcher, spec={"pack_source": "ghost", "args": {}}
+    )
     result = await provider.poll(sid)
     assert result.items == []
     assert "declares no source 'ghost'" in result.error
@@ -1091,7 +1100,11 @@ async def test_an_unknown_spec_key_is_refused(tmp_path, store):
         store,
         pack,
         fetcher,
-        spec={"pack_source": "releases", "args": {"repo": "a/b"}, "url": "https://evil.example"},
+        spec={
+            "pack_source": "releases",
+            "args": {"repo": "a/b"},
+            "url": "https://evil.example",
+        },
     )
     result = await provider.poll(sid)
     assert "unknown key(s) ['url']" in result.error
@@ -1099,7 +1112,9 @@ async def test_an_unknown_spec_key_is_refused(tmp_path, store):
 
 
 @pytest.mark.asyncio
-async def test_a_manifest_that_became_invalid_after_install_stops_polling(tmp_path, store):
+async def test_a_manifest_that_became_invalid_after_install_stops_polling(
+    tmp_path, store
+):
     """An installed manifest is a file an update or a hand-edit can change, and it decides both
     a fetch target and which script runs — so it is re-validated per poll, not trusted.
 
@@ -1114,7 +1129,9 @@ async def test_a_manifest_that_became_invalid_after_install_stops_polling(tmp_pa
     assert (await provider.poll(sid)).items
     raw = _manifest()["sources"][0]
     raw["fetchSpec"]["headers"] = {"Authorization": "Bearer sk-live-committed"}
-    (pack / "app.json").write_text(json.dumps(_manifest(sources=[raw])), encoding="utf-8")
+    (pack / "app.json").write_text(
+        json.dumps(_manifest(sources=[raw])), encoding="utf-8"
+    )
     result = await provider.poll(sid)
     assert result.items == []
     assert "must reference a {{secret:KEY}}" in result.error
@@ -1124,24 +1141,24 @@ async def test_a_manifest_that_became_invalid_after_install_stops_polling(tmp_pa
 def test_the_factory_accepts_a_file_inside_the_pack(tmp_path, store):
     """``connector_pack_provider(__file__, config)`` is the documented three-line call."""
     pack = _write_pack(tmp_path)
-    provider = connector_pack_provider(pack / "provider.py", {"parse_timeout_secs": 5}, store=store)
+    provider = connector_pack_provider(
+        pack / "provider.py", {"parse_timeout_secs": 5}, store=store
+    )
     assert provider.name == "acme-connector"
     assert provider._timeout_secs == 5
 
 
-# ── done_when 3: bundled recipes surface in the create flow ─────────────────────────
-
-
 def test_the_bundled_recipe_directory_is_not_empty():
     """A wheel missing the ``package-data`` line ships an empty directory and every pasted URL
-    silently looks uncovered — a product regression with no error, so the count is asserted."""
+    silently looks uncovered — a product regression with no error, so the count is asserted.
+    """
     recipes = list_recipes()
     assert len(recipes) >= 5
     assert len({r.id for r in recipes}) == len(recipes)
 
 
 def test_every_bundled_recipe_is_valid_and_targets_a_known_provider():
-    from gideon.knowledge.source_recipes import recipes_dir
+    from gideon.cognition.knowledge.source_recipes import recipes_dir
 
     files = sorted(recipes_dir().glob("*.json"))
     assert files, "no recipe files found — the bundled directory is missing"
@@ -1187,10 +1204,13 @@ def test_a_matched_recipe_arrives_with_its_spec_already_resolved():
 
 def test_a_recipe_with_an_unfillable_placeholder_is_skipped_not_half_resolved():
     """A spec with a hole in its URL is a fetch of the wrong thing."""
-    from gideon.knowledge.source_recipes import SourceRecipe
+    from gideon.cognition.knowledge.source_recipes import SourceRecipe
 
     recipe = SourceRecipe(
-        id="x", display_name="X", provider="watched-feed", spec={"url": "https://a/{{owner}}"}
+        id="x",
+        display_name="X",
+        provider="watched-feed",
+        spec={"url": "https://a/{{owner}}"},
     )
     with pytest.raises(KeyError):
         resolve_spec(recipe, {})
@@ -1217,8 +1237,8 @@ def test_every_bundled_recipe_spec_is_accepted_by_its_own_provider():
     recipe is resolved against a real URL and the result goes through the same
     ``validate_spec`` the provider runs at save time AND at poll time.
     """
-    from gideon.knowledge_providers.feed_source import FeedSourceProvider
-    from gideon.knowledge_providers.web_source import WebSourceProvider
+    from gideon.integrations.knowledge_providers.feed_source import FeedSourceProvider
+    from gideon.integrations.knowledge_providers.web_source import WebSourceProvider
 
     samples = {
         "github-releases": "https://github.com/astral-sh/uv",
@@ -1252,10 +1272,12 @@ async def test_the_recipe_directory_is_reachable_over_http():
     from aiohttp import web
     from aiohttp.test_utils import make_mocked_request
 
-    from gideon.dashboard.handlers.knowledge import list_source_recipes
+    from gideon.interfaces.dashboard.handlers.knowledge import list_source_recipes
 
     resp = await list_source_recipes(
-        make_mocked_request("GET", "/api/knowledge/source-recipes", app=web.Application())
+        make_mocked_request(
+            "GET", "/api/knowledge/source-recipes", app=web.Application()
+        )
     )
     payload = json.loads(resp.body)
     assert len(payload["recipes"]) == len(list_recipes())
@@ -1279,7 +1301,7 @@ def test_the_recipe_route_is_registered_on_the_knowledge_router():
     inert-surface census keeps catching), so the registration is asserted separately."""
     import inspect
 
-    from gideon.dashboard.handlers import knowledge as handlers
+    from gideon.interfaces.dashboard.handlers import knowledge as handlers
 
     src = inspect.getsource(handlers.setup_knowledge_routes)
     assert '"/api/knowledge/source-recipes", list_source_recipes' in src
@@ -1287,6 +1309,14 @@ def test_the_recipe_route_is_registered_on_the_knowledge_router():
 
 def test_the_denylist_names_every_root_the_docstring_claims():
     """The module's claim is that the socket set bottoms out at three roots; if one of those
-    names ever leaves the constant, this reds rather than the property quietly weakening."""
-    for root in ("_socket", "_ctypes", "ctypes", "os", "subprocess", "_posixsubprocess"):
+    names ever leaves the constant, this reds rather than the property quietly weakening.
+    """
+    for root in (
+        "_socket",
+        "_ctypes",
+        "ctypes",
+        "os",
+        "subprocess",
+        "_posixsubprocess",
+    ):
         assert root in DENIED_MODULES

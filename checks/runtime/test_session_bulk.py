@@ -14,7 +14,7 @@ import json
 import pytest
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.dashboard import session_bulk as sb
+from gideon.interfaces.dashboard import session_bulk as sb
 
 
 class _Session:
@@ -41,9 +41,12 @@ class _State:
         folders: list[str] | None = None,
     ) -> None:
         self._sessions = sessions
-        self._tags = [{"id": t, "name": t} for t in (tags if tags is not None else ["t1", "t2"])]
+        self._tags = [
+            {"id": t, "name": t} for t in (tags if tags is not None else ["t1", "t2"])
+        ]
         self._folders = [
-            {"id": f, "name": f} for f in (folders if folders is not None else ["f1", "f2"])
+            {"id": f, "name": f}
+            for f in (folders if folders is not None else ["f1", "f2"])
         ]
         self.pushes = 0
 
@@ -61,7 +64,9 @@ def _quiet(monkeypatch):
             pass
 
     monkeypatch.setattr(sb, "sel", lambda: _Sel())
-    monkeypatch.setattr(sb, "resolve_session", lambda state, key: state._sessions.get(key))
+    monkeypatch.setattr(
+        sb, "resolve_session", lambda state, key: state._sessions.get(key)
+    )
 
 
 async def _bulk(state, body, *, app: str = "") -> tuple[int, dict]:
@@ -76,9 +81,6 @@ async def _bulk(state, body, *, app: str = "") -> tuple[int, dict]:
     req.json = _json  # type: ignore[method-assign]
     resp = await sb.api_chat_sessions_bulk(req)
     return resp.status, json.loads(resp.text or "{}")
-
-
-# ── validation ────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -122,9 +124,6 @@ async def test_tag_requires_a_tag_id():
     st = _State({"a": _Session()})
     status, _ = await _bulk(st, {"op": "tag", "keys": ["a"]})
     assert status == 400
-
-
-# ── the ops ───────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -201,27 +200,28 @@ async def test_an_app_caller_cannot_touch_the_users_sessions():
     """App Kit ownership isolation, mirroring the cleanup endpoint. Without it an
     installed app could archive the user's conversations."""
     st = _State({"mine": _Session(app=""), "theirs": _Session(app="some-app")})
-    _, body = await _bulk(st, {"op": "archive", "keys": ["mine", "theirs"]}, app="some-app")
+    _, body = await _bulk(
+        st, {"op": "archive", "keys": ["mine", "theirs"]}, app="some-app"
+    )
     assert body["changed"] == ["theirs"]
     assert body["missing"] == ["mine"]
     assert st._sessions["mine"].lifecycle == "active"
 
 
-# ── persistence round trip (all three meta sites) ─────────────────────────────
-
-
 @pytest.fixture
 def real_state(monkeypatch, tmp_path):
-    """A real DashboardState + ConversationLog, so the round trip is genuine."""
+    """A real ConsoleState + ConversationLog, so the round trip is genuine."""
     import time
     from unittest.mock import MagicMock
 
-    from gideon.history import ConversationLog
+    from gideon.cognition.history import ConversationLog
 
-    monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-    from gideon.dashboard.state import DashboardState
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+    )
+    from gideon.interfaces.dashboard.state import ConsoleState
 
-    return DashboardState(
+    return ConsoleState(
         sessions=MagicMock(count=0),
         start_time=time.time(),
         conversation_log=ConversationLog(tmp_path / "sessions"),
@@ -232,11 +232,11 @@ def test_lifecycle_fields_survive_a_real_write_then_read(real_state):
     """chat_persistence has three meta sites (two reads + one write). Missing any one
     drops the field silently — a bug class this repo has hit before — so this goes
     through the actual save and the actual rehydrate rather than inspecting source."""
-    from gideon.dashboard.chat_persistence import (
+    from gideon.interfaces.dashboard.chat_persistence import (
         _rehydrate_session_from_history,
         save_session_to_history,
     )
-    from gideon.dashboard.state import _ChatSession
+    from gideon.interfaces.dashboard.state import _ChatSession
 
     s = _ChatSession("chat-1-roundtrip", "test")
     s.append("user", "hello", broadcast=False)
@@ -259,13 +259,13 @@ def test_a_default_session_writes_no_lifecycle_keys(real_state):
     byte-identical and the rollout is invisible until something changes."""
     import json
 
-    from gideon.dashboard.chat_persistence import save_session_to_history
-    from gideon.dashboard.state import _ChatSession
+    from gideon.interfaces.dashboard.chat_persistence import save_session_to_history
+    from gideon.interfaces.dashboard.state import _ChatSession
 
     s = _ChatSession("chat-1-default", "test")
-    # Insert a message WITHOUT going through append(), so no activity is stamped —
-    # this is the shape of a session that predates the field.
-    s.messages.append({"role": "user", "content": "hi", "cls": "", "ts": "2026-01-01T00:00:00Z"})
+    s.messages.append(
+        {"role": "user", "content": "hi", "cls": "", "ts": "2026-01-01T00:00:00Z"}
+    )
     save_session_to_history(real_state, s, force=True)
 
     path = next(real_state.conversation_log._dir.glob("*chat-1-default*"))
@@ -279,11 +279,11 @@ def test_an_unknown_lifecycle_value_on_disk_is_ignored(real_state):
     """Meta lives on disk and is hand-editable. A junk value must not become state."""
     import json
 
-    from gideon.dashboard.chat_persistence import (
+    from gideon.interfaces.dashboard.chat_persistence import (
         _rehydrate_session_from_history,
         save_session_to_history,
     )
-    from gideon.dashboard.state import _ChatSession
+    from gideon.interfaces.dashboard.state import _ChatSession
 
     s = _ChatSession("chat-1-junk", "test")
     s.append("user", "hello", broadcast=False)
@@ -292,7 +292,7 @@ def test_an_unknown_lifecycle_value_on_disk_is_ignored(real_state):
     path = next(real_state.conversation_log._dir.glob("*chat-1-junk*"))
     lines = path.read_text(encoding="utf-8").splitlines()
     meta = json.loads(lines[0])
-    meta["lifecycle"] = "deleted"  # not a valid lifecycle
+    meta["lifecycle"] = "deleted"
     lines[0] = json.dumps(meta)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -300,9 +300,6 @@ def test_an_unknown_lifecycle_value_on_disk_is_ignored(real_state):
     back = _rehydrate_session_from_history(real_state, "chat-1-junk")
     assert back is not None
     assert back.lifecycle == "active", "a junk value must fall back to the default"
-
-
-# ── the referenced ids are validated, like the single-session paths (#771) ────
 
 
 @pytest.mark.asyncio
@@ -313,7 +310,9 @@ async def test_bulk_refuses_a_tag_id_the_vocabulary_does_not_have():
     self-heals over state that is wrong, which is what kept it invisible."""
     st = _State({"a": _Session()})
 
-    status, body = await _bulk(st, {"op": "tag", "keys": ["a"], "tag_id": "ghosttag123"})
+    status, body = await _bulk(
+        st, {"op": "tag", "keys": ["a"], "tag_id": "ghosttag123"}
+    )
 
     assert status == 400
     assert body["error"]["code"] == "unknown_tag_id"
@@ -340,7 +339,9 @@ async def test_bulk_refuses_a_folder_id_that_does_not_exist():
     paths disagreed about the same field and only one of them said so."""
     st = _State({"a": _Session()})
 
-    status, body = await _bulk(st, {"op": "folder", "keys": ["a"], "folder_id": "ghost123"})
+    status, body = await _bulk(
+        st, {"op": "folder", "keys": ["a"], "folder_id": "ghost123"}
+    )
 
     assert status == 400
     assert body["error"]["code"] == "unknown_folder_id"
@@ -362,7 +363,8 @@ async def test_a_real_tag_and_a_real_folder_still_apply():
 @pytest.mark.asyncio
 async def test_an_empty_folder_id_still_ungroups():
     """ "" is not an unknown folder, it is the ungrouped state — and it is how the UI clears a
-    folder. Validating existence naively would have broken the one value that must pass."""
+    folder. Validating existence naively would have broken the one value that must pass.
+    """
     st = _State({"a": _Session()})
     st._sessions["a"].folder_id = "f1"
 
@@ -379,7 +381,9 @@ async def test_the_refusal_precedes_the_per_key_loop():
     would show."""
     st = _State({k: _Session() for k in ("a", "b", "c")})
 
-    status, _ = await _bulk(st, {"op": "tag", "keys": ["a", "b", "c"], "tag_id": "ghost"})
+    status, _ = await _bulk(
+        st, {"op": "tag", "keys": ["a", "b", "c"], "tag_id": "ghost"}
+    )
 
     assert status == 400
     assert all(st._sessions[k].tags == [] for k in ("a", "b", "c"))

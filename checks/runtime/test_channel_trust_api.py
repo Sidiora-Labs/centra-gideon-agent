@@ -16,19 +16,21 @@ import json
 import pytest
 from aiohttp.test_utils import make_mocked_request
 
-from gideon import channel_trust as ct
-from gideon.dashboard.handlers import channel_trust as h
+from gideon.integrations import channel_trust as ct
+from gideon.interfaces.dashboard.handlers import channel_trust as h
 
 
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
     """Point the entity-settings store + SEL at tmp_path (the real home is never touched)."""
-    import gideon.config.loader as cfg
-    import gideon.providers.entity_routes as er
+    import gideon.core.config.loader as cfg
+    import gideon.extensions.providers.entity_routes as er
 
     monkeypatch.setattr(cfg, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(
-        er, "_entity_settings_path", lambda entity: tmp_path / "entity_settings" / f"{entity}.json"
+        er,
+        "_entity_settings_path",
+        lambda entity: tmp_path / "entity_settings" / f"{entity}.json",
     )
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     yield tmp_path
@@ -59,14 +61,10 @@ def _revoke(provider, sender_id):
     return asyncio.run(h.api_channel_trust_revoke(req))
 
 
-# ── read ─────────────────────────────────────────────────────────────────────
-
-
 def test_empty_store_reads_as_no_providers_not_as_an_error():
     """A fresh install has no trust state; that is an empty list, not a failure."""
     body = _get()
     assert body["providers"] == []
-    # The vocabularies still come back, so a UI can render the posture words it will need.
     assert body["default_dm_policy"] == ct.DEFAULT_DM_POLICY
     assert "pairing" in body["dm_policies"]
 
@@ -85,7 +83,9 @@ def test_read_lists_paired_senders_with_their_provenance():
         "u2": "pairing",
     }
     assert [s["name"] for s in tg["allowed_senders"]] == ["Alice", "Bob"]
-    assert all(s["added_at"] for s in tg["allowed_senders"]), "provenance needs a timestamp"
+    assert all(
+        s["added_at"] for s in tg["allowed_senders"]
+    ), "provenance needs a timestamp"
     assert [c["channel_id"] for c in tg["tracked_channels"]] == ["grp1"]
     assert tg["policies"] == {"dm": "pairing", "group": "tracked_only"}
 
@@ -94,7 +94,10 @@ def test_read_is_provider_partitioned():
     ct.allow_sender("telegram", "u1")
     ct.allow_sender("discord", "u2")
     body = _get()
-    got = {p["provider"]: [s["sender_id"] for s in p["allowed_senders"]] for p in body["providers"]}
+    got = {
+        p["provider"]: [s["sender_id"] for s in p["allowed_senders"]]
+        for p in body["providers"]
+    }
     assert got == {"discord": ["u2"], "telegram": ["u1"]}
 
 
@@ -130,9 +133,6 @@ def test_the_read_projection_withholds_the_unknown_sender_contact_log():
     assert body["providers"][0]["allowed_senders"] == []
 
 
-# ── revoke ───────────────────────────────────────────────────────────────────
-
-
 def test_revoke_removes_the_sender_and_reports_it():
     ct.allow_sender("telegram", "u1", name="Alice")
     resp = _revoke("telegram", "u1")
@@ -145,7 +145,7 @@ def test_revoke_removes_the_sender_and_reports_it():
 
 def test_revoke_emits_the_audit_row():
     """A revocation is a security event; it goes in the SEL like every other trust change."""
-    from gideon.sel import sel
+    from gideon.security.sel import sel
 
     ct.allow_sender("telegram", "u1")
     _revoke("telegram", "u1")
@@ -188,13 +188,10 @@ def test_revoke_is_provider_scoped():
     assert ct.is_allowed_sender("discord", "u1") is True
 
 
-# ── rails ────────────────────────────────────────────────────────────────────
-
-
 def test_the_error_code_is_in_the_append_only_registry():
     """A `json_error` code with no registry row is only caught by the full suite.
 
-    `tests/test_http_error_codes_append_only.py` asserts every literal code reaches the
+    `checks/runtime/test_http_error_codes_append_only.py` asserts every literal code reaches the
     registry, but it runs over the whole tree — so a targeted run of this module would ship
     a missing row green. This names the code locally.
     """
@@ -216,13 +213,12 @@ def test_trust_route_is_not_shadowed_by_the_name_route():
     """
     from pathlib import Path
 
-    import gideon.dashboard.server as server
+    import gideon.interfaces.dashboard.server as server
 
     lines = Path(server.__file__).read_text(encoding="utf-8").splitlines()
     trust = [i for i, ln in enumerate(lines) if '"/api/channels/trust"' in ln]
     named = [i for i, ln in enumerate(lines) if '"/api/channels/{name}"' in ln]
 
-    # Floor: both registrations were actually found, so a rename cannot make this vacuous.
     assert trust, "no /api/channels/trust registration found in server.py"
     assert named, "no /api/channels/{name} registration found in server.py"
     assert max(trust) < min(named), (

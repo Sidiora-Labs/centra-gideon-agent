@@ -17,40 +17,43 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from gideon.hooks import TOOL_AUTO_APPROVE, ToolHookResult
-from gideon.llm.base import (
+from gideon.engine.hooks import TOOL_AUTO_APPROVE, ToolHookResult
+from gideon.engine.subagent import (
+    CAPABILITY_MUTATING,
+    CAPABILITY_RESEARCH,
+    DelegationSupervisor,
+    resolve_capability_class,
+)
+from gideon.integrations.llm.base import (
     EVENT_COMPLETE,
     EVENT_PERMISSION_REQUEST,
     EVENT_TEXT_CHUNK,
     LLMEvent,
 )
-from gideon.subagent import (
-    CAPABILITY_MUTATING,
-    CAPABILITY_RESEARCH,
-    SubagentManager,
-    resolve_capability_class,
-)
-
-# ── shared subagent harness ─────────────────────────────────────────────────
 
 
 @pytest.fixture()
 def agent_root(tmp_path, monkeypatch):
-    monkeypatch.setattr("gideon.subagent_persistence._subagents_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gideon.engine.subagent_persistence._subagents_dir", lambda: tmp_path
+    )
     return tmp_path
 
 
 @pytest.fixture(autouse=True)
 def _mock_memory_ok(monkeypatch):
-    monkeypatch.setattr("gideon.subagent.check_memory_available", lambda **_kw: (True, 8.0))
+    monkeypatch.setattr(
+        "gideon.engine.subagent.check_memory_available", lambda **_kw: (True, 8.0)
+    )
 
 
 def _manager_with_tool(tool_title: str, *, hook_action: str = TOOL_AUTO_APPROVE):
-    """A SubagentManager whose subagent stream emits ONE permission request for ``tool_title``.
+    """A DelegationSupervisor whose subagent stream emits ONE permission request for ``tool_title``.
 
     ``provider.approve_tool`` / ``provider.reject_tool`` are AsyncMocks so a test can assert which
     fired. The hook returns ``hook_action`` (default: auto-approve) so a tool that clears the §4.1
-    research gate is admitted — isolating the gate from the surrounding approval plumbing."""
+    research gate is admitted — isolating the gate from the surrounding approval plumbing.
+    """
     sessions = MagicMock()
     sessions.get_pid = MagicMock(return_value=None)
     provider = AsyncMock()
@@ -62,7 +65,10 @@ def _manager_with_tool(tool_title: str, *, hook_action: str = TOOL_AUTO_APPROVE)
 
     async def _stream(*_a, **_kw):
         yield LLMEvent(
-            kind=EVENT_PERMISSION_REQUEST, title=tool_title, request_id=1, tool_kind="fs"
+            kind=EVENT_PERMISSION_REQUEST,
+            title=tool_title,
+            request_id=1,
+            tool_kind="fs",
         )
         yield LLMEvent(kind=EVENT_TEXT_CHUNK, text="ok")
         yield LLMEvent(kind=EVENT_COMPLETE)
@@ -82,15 +88,18 @@ def _manager_with_tool(tool_title: str, *, hook_action: str = TOOL_AUTO_APPROVE)
     ctx.hooks.auto_approve_subagent_spawn = True
     ctx.hooks.auto_approve_subagent_tools = False
 
-    manager = SubagentManager(sessions=sessions, ctx_builder=ctx)
+    manager = DelegationSupervisor(sessions=sessions, ctx_builder=ctx)
     return manager, provider
 
 
 async def _run_spawn(manager, *, capability_class=None, approval_mode="auto"):
     with (
-        patch("gideon.subagent.Stats"),
-        patch("gideon.subagent.sel"),
-        patch("gideon.guardrails.policy.ceiling_permits_approval", lambda _v: True),
+        patch("gideon.engine.subagent.Stats"),
+        patch("gideon.engine.subagent.sel"),
+        patch(
+            "gideon.security.guardrails.policy.ceiling_permits_approval",
+            lambda _v: True,
+        ),
     ):
         info = manager.spawn(
             "task",
@@ -103,17 +112,15 @@ async def _run_spawn(manager, *, capability_class=None, approval_mode="auto"):
     return info
 
 
-# ── §4.1 capability-class resolution ─────────────────────────────────────────
-
-
 def test_resolve_capability_class_auto_fired_defaults_research():
-    # "default research for auto-fired spawns" — the read-only default an unattended run gets.
     assert (
-        resolve_capability_class(capability_class="", approval_mode="auto") == CAPABILITY_RESEARCH
+        resolve_capability_class(capability_class="", approval_mode="auto")
+        == CAPABILITY_RESEARCH
     )
-    # A human-watched spawn (no auto grant) keeps the full grant — behaviour-preserving.
-    assert resolve_capability_class(capability_class="", approval_mode="") == CAPABILITY_MUTATING
-    # An explicit class always wins over the by-construction default.
+    assert (
+        resolve_capability_class(capability_class="", approval_mode="")
+        == CAPABILITY_MUTATING
+    )
     assert (
         resolve_capability_class(capability_class="mutating", approval_mode="auto")
         == CAPABILITY_MUTATING
@@ -127,14 +134,11 @@ def test_resolve_capability_class_auto_fired_defaults_research():
 def test_capability_constants_stay_coherent_across_seams():
     """A research SUBAGENT, a research LEAF and a Preview project run must mean the SAME thing —
     one write-tool policy, not three that drift."""
-    from gideon.guardrails.project_trust import PREVIEW_CAPABILITY
-    from gideon.workflows.batch_compile import Capability
+    from gideon.automation.workflows.batch_compile import Capability
+    from gideon.security.guardrails.project_trust import PREVIEW_CAPABILITY
 
     assert CAPABILITY_RESEARCH == Capability.RESEARCH.value == PREVIEW_CAPABILITY
     assert CAPABILITY_MUTATING == Capability.MUTATING.value
-
-
-# ── §4.1 the DANGEROUS direction: a research spawn must be denied write/execute ──────
 
 
 @pytest.mark.asyncio
@@ -178,54 +182,53 @@ async def test_mutating_spawn_allows_write_tool(agent_root):
     provider.reject_tool.assert_not_awaited()
 
 
-# ── cron rewire: an unattended injection turn resolves through profile_for_session ───
-
-
 def test_injection_policy_unattended_resolves_through_profile():
     """LOAD-BEARING. A cron/unattended parent's injection turn is NOT blanket AUTO_APPROVE — it is
     the profile-derived policy. Bypassing this back to AUTO_APPROVE reds here."""
-    from gideon.gateway import injection_approval_policy
-    from gideon.guardrails.policy import approval_policy_for_session
-    from gideon.llm_helpers import ToolApprovalPolicy
+    from gideon.engine.gateway import injection_approval_policy
+    from gideon.integrations.llm_helpers import ToolApprovalPolicy
+    from gideon.security.guardrails.policy import approval_policy_for_session
 
     for key in ("cron:nightly", "subagent:x", "loop-abc", "_bg"):
         got = injection_approval_policy(key)
         assert got is approval_policy_for_session(key)
-        assert got is ToolApprovalPolicy.HOOK_BASED  # HEADLESS.approval == "hook_based"
+        assert got is ToolApprovalPolicy.HOOK_BASED
         assert got is not ToolApprovalPolicy.AUTO_APPROVE
 
 
 def test_injection_policy_interactive_stays_auto_approve():
     """An interactive (dashboard chat) parent keeps AUTO_APPROVE — a human is present. This is the
     behaviour-preservation half of the rewire."""
-    from gideon.gateway import injection_approval_policy
-    from gideon.llm_helpers import ToolApprovalPolicy
+    from gideon.engine.gateway import injection_approval_policy
+    from gideon.integrations.llm_helpers import ToolApprovalPolicy
 
-    assert injection_approval_policy("dashboard:main") is ToolApprovalPolicy.AUTO_APPROVE
+    assert (
+        injection_approval_policy("dashboard:main") is ToolApprovalPolicy.AUTO_APPROVE
+    )
     assert injection_approval_policy("chat:main") is ToolApprovalPolicy.AUTO_APPROVE
 
 
 def test_injection_policy_is_derived_not_constant(monkeypatch):
     """Proof it READS the profile: forcing an unattended session's profile to approval="auto" makes
-    the injection turn AUTO_APPROVE. A hardcoded HOOK_BASED would ignore this and fail."""
-    from gideon.gateway import injection_approval_policy
-    from gideon.guardrails import policy as _policy
-    from gideon.guardrails.policy import SafetyProfile
-    from gideon.llm_helpers import ToolApprovalPolicy
+    the injection turn AUTO_APPROVE. A hardcoded HOOK_BASED would ignore this and fail.
+    """
+    from gideon.engine.gateway import injection_approval_policy
+    from gideon.integrations.llm_helpers import ToolApprovalPolicy
+    from gideon.security.guardrails import policy as _policy
+    from gideon.security.guardrails.policy import SafetyProfile
 
     monkeypatch.setattr(
-        _policy, "profile_for_session", lambda _k: SafetyProfile(name="x", approval="auto")
+        _policy,
+        "profile_for_session",
+        lambda _k: SafetyProfile(name="x", approval="auto"),
     )
     assert injection_approval_policy("cron:nightly") is ToolApprovalPolicy.AUTO_APPROVE
-
-
-# ── §4.3 project Trust/Preview gate ──────────────────────────────────────────
 
 
 @pytest.fixture()
 def trust_home(tmp_path, monkeypatch):
     """Isolate the project_trust store (and any inbox write) to tmp_path — never the real home."""
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     return tmp_path
 
 
@@ -235,7 +238,7 @@ def test_first_touch_persists_preview_and_forces_readonly(trust_home, monkeypatc
     the first touch not persisting, reds here."""
     import json
 
-    from gideon.guardrails import project_trust as pt
+    from gideon.security.guardrails import project_trust as pt
 
     prompts: list[str] = []
     monkeypatch.setattr(pt, "_prompt_trust_vs_preview", lambda d, s: prompts.append(d))
@@ -243,21 +246,23 @@ def test_first_touch_persists_preview_and_forces_readonly(trust_home, monkeypatc
     project = str(trust_home / "proj")
     (trust_home / "proj").mkdir()
 
-    # A write grant is requested, but an untrusted folder is READ-ONLY.
-    assert pt.gate_project_capability(project, CAPABILITY_MUTATING) == pt.PREVIEW_CAPABILITY
+    assert (
+        pt.gate_project_capability(project, CAPABILITY_MUTATING)
+        == pt.PREVIEW_CAPABILITY
+    )
 
-    # First touch persisted a Preview record keyed by the resolved dir.
     store = json.loads((trust_home / "project_trust.json").read_text())
     key = pt.resolve_dir(project)
-    assert key in store and store[key]["trusted"] is False and "decided_at" in store[key]
-    # And it prompted the user exactly once.
+    assert (
+        key in store and store[key]["trusted"] is False and "decided_at" in store[key]
+    )
     assert prompts == [key]
 
 
 def test_preview_does_not_reprompt_on_second_touch(trust_home, monkeypatch):
     """The prompt fires ONCE: a folder that fires every 20 minutes must not stack prompts. Second
     touch stays read-only but does not re-prompt (the decision already persisted)."""
-    from gideon.guardrails import project_trust as pt
+    from gideon.security.guardrails import project_trust as pt
 
     prompts: list[str] = []
     monkeypatch.setattr(pt, "_prompt_trust_vs_preview", lambda d, s: prompts.append(d))
@@ -266,35 +271,39 @@ def test_preview_does_not_reprompt_on_second_touch(trust_home, monkeypatch):
 
     pt.gate_project_capability(project, CAPABILITY_MUTATING)
     pt.gate_project_capability(project, CAPABILITY_MUTATING)
-    assert len(prompts) == 1  # only the first touch prompted
+    assert len(prompts) == 1
 
 
 def test_trusted_folder_honors_write_grant(trust_home):
     """An explicit Trust admits the write grant — Trust is what lets project scripts run/write."""
-    from gideon.guardrails import project_trust as pt
+    from gideon.security.guardrails import project_trust as pt
 
     project = str(trust_home / "proj")
     (trust_home / "proj").mkdir()
     pt.record_project_trust(project, trusted=True)
-    assert pt.gate_project_capability(project, CAPABILITY_MUTATING) == CAPABILITY_MUTATING
-    # A trusted folder with no grant still resolves by the caller's default (None passes through).
+    assert (
+        pt.gate_project_capability(project, CAPABILITY_MUTATING) == CAPABILITY_MUTATING
+    )
     assert pt.gate_project_capability(project, None) is None
 
 
 def test_preview_folder_stays_readonly(trust_home):
     """A folder explicitly kept in Preview (trusted=False) forces read-only regardless of grant."""
-    from gideon.guardrails import project_trust as pt
+    from gideon.security.guardrails import project_trust as pt
 
     project = str(trust_home / "proj")
     (trust_home / "proj").mkdir()
     pt.record_project_trust(project, trusted=False)
     assert pt.project_decision(project) == pt.DECISION_PREVIEW
-    assert pt.gate_project_capability(project, CAPABILITY_MUTATING) == pt.PREVIEW_CAPABILITY
+    assert (
+        pt.gate_project_capability(project, CAPABILITY_MUTATING)
+        == pt.PREVIEW_CAPABILITY
+    )
 
 
 def test_blank_cwd_passes_through(trust_home):
     """No project folder → no gate: the grant passes through unchanged (gate is project-only)."""
-    from gideon.guardrails import project_trust as pt
+    from gideon.security.guardrails import project_trust as pt
 
     assert pt.gate_project_capability("", CAPABILITY_MUTATING) == CAPABILITY_MUTATING
     assert pt.gate_project_capability("   ", None) is None
@@ -303,21 +312,24 @@ def test_blank_cwd_passes_through(trust_home):
 def test_corrupt_store_is_preview_not_trusted(trust_home):
     """Fail-CLOSED for the decision: an unreadable store treats every folder as Preview (read-only),
     never trusted. A corrupt file must never widen access."""
-    from gideon.guardrails import project_trust as pt
+    from gideon.security.guardrails import project_trust as pt
 
     (trust_home / "project_trust.json").write_text("}{ not json")
     project = str(trust_home / "proj")
     (trust_home / "proj").mkdir()
     assert pt.project_decision(project) == pt.DECISION_UNKNOWN
-    assert pt.gate_project_capability(project, CAPABILITY_MUTATING) == pt.PREVIEW_CAPABILITY
+    assert (
+        pt.gate_project_capability(project, CAPABILITY_MUTATING)
+        == pt.PREVIEW_CAPABILITY
+    )
 
 
 def test_record_and_decision_round_trip(trust_home):
     """Trust/Preview decisions persist and read back keyed by resolved dir (symlink/./ collapse)."""
-    from gideon.guardrails import project_trust as pt
+    from gideon.security.guardrails import project_trust as pt
 
     project = str(trust_home / "proj")
     (trust_home / "proj").mkdir()
     assert pt.project_decision(project) == pt.DECISION_UNKNOWN
-    pt.record_project_trust(project + "/.", trusted=True)  # a different spelling of the same dir
+    pt.record_project_trust(project + "/.", trusted=True)
     assert pt.project_decision(project) == pt.DECISION_TRUSTED

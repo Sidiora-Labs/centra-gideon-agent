@@ -1,7 +1,7 @@
 """Rails for the macOS accessibility driver (`DCU-3`).
 
 `DCU-4` shipped the dispatch, the ceilinged spawn and the snapshot store, and
-``driver_host.resolve_driver`` has been importing ``gideon.computer_use.macos_driver`` and
+``driver_host.resolve_driver`` has been importing ``gideon.integrations.computer_use.macos_driver`` and
 finding **nothing** ever since. So the question this file answers is not "does a TTL work" —
 ``test_computer_use_dispatch.py`` already proves the dispatch-side TTL and fingerprint from both
 sides — but the four things only the driver can get wrong:
@@ -50,7 +50,7 @@ import subprocess
 
 import pytest
 
-from gideon.computer_use import (
+from gideon.integrations.computer_use import (
     driver_host,
     enable_state,
     macos_driver,
@@ -59,22 +59,24 @@ from gideon.computer_use import (
     policy,
     service,
 )
-from gideon.computer_use import tools as ct
-from gideon.computer_use.types import Element, WindowWalk, fingerprint_of
+from gideon.integrations.computer_use import tools as ct
+from gideon.integrations.computer_use.types import Element, WindowWalk, fingerprint_of
 
 IS_DARWIN = platform.system() == "Darwin"
 
-_NEEDS_DARWIN = pytest.mark.skipif(not IS_DARWIN, reason="the macOS driver only runs on Darwin")
+_NEEDS_DARWIN = pytest.mark.skipif(
+    not IS_DARWIN, reason="the macOS driver only runs on Darwin"
+)
 
-#: The OS calls that move or post a pointer. An ``auto`` click, a type, a set-value and a scroll
-#: must make NONE of them; only the two explicitly-named coordinate methods may.
 _POINTER_CALLS = frozenset({"click_located", "click_global"})
 
 
 def _elements() -> list[Element]:
     """A small, realistic window: the window itself, a button, and a text area."""
     return [
-        Element(index=0, role="AXWindow", title="Untitled", frame=(0.0, 0.0, 800.0, 600.0)),
+        Element(
+            index=0, role="AXWindow", title="Untitled", frame=(0.0, 0.0, 800.0, 600.0)
+        ),
         Element(
             index=1,
             role="AXButton",
@@ -94,7 +96,7 @@ def _elements() -> list[Element]:
 
 
 class _RecordingFFI:
-    """A double for :mod:`~gideon.computer_use.macos_ffi` that records every call.
+    """A double for :mod:`~gideon.integrations.computer_use.macos_ffi` that records every call.
 
     Substituted onto the real module's attributes, so the driver's own ``ffi.press(...)`` call
     sites are the ones exercised. The exception classes are deliberately NOT replaced: the
@@ -186,11 +188,6 @@ def _code(answer: dict) -> str:
     return str(answer.get("error", {}).get("code", ""))
 
 
-# ---------------------------------------------------------------------------
-# 1. The call site this atom lands
-# ---------------------------------------------------------------------------
-
-
 @_NEEDS_DARWIN
 def test_driver_host_resolves_the_macos_driver():
     """The whole point of the atom: this returned ``None`` on every commit before it.
@@ -205,19 +202,23 @@ def test_every_dispatch_op_has_a_handler():
     """Derived from the tool surface, not tabulated, so a new tool cannot skip the driver."""
     expected = {spec.name[len("computer_") :] for spec in ct.TOOL_SURFACE}
     missing = [
-        op for op in sorted(expected) if not callable(getattr(macos_driver, f"op_{op}", None))
+        op
+        for op in sorted(expected)
+        if not callable(getattr(macos_driver, f"op_{op}", None))
     ]
     assert not missing, f"the macOS driver has no handler for {missing}"
 
 
 def test_the_handler_set_is_not_vacuous():
     """A floor under the test above: it would pass over an empty tool surface."""
-    assert len(ct.TOOL_SURFACE) == 7, "the tool surface changed; the derived op set moved with it"
+    assert (
+        len(ct.TOOL_SURFACE) == 7
+    ), "the tool surface changed; the derived op set moved with it"
 
 
 def test_the_new_error_code_is_registered():
     """``errors.ERROR_CODES`` is append-only and a new failure path must add a code."""
-    from gideon.errors import ERROR_CODES
+    from gideon.core.errors import ERROR_CODES
 
     assert macos_driver.ERR_AX_PERMISSION in ERROR_CODES
 
@@ -237,13 +238,10 @@ def test_the_dispatch_honours_the_drivers_own_refusal_codes():
     )
 
 
-# ---------------------------------------------------------------------------
-# 2. Import safety and the absent-framework path
-# ---------------------------------------------------------------------------
-
-
 def _module_source(module) -> ast.Module:
-    return ast.parse(pathlib.Path(inspect.getsourcefile(module)).read_text(encoding="utf-8"))
+    return ast.parse(
+        pathlib.Path(inspect.getsourcefile(module)).read_text(encoding="utf-8")
+    )
 
 
 def test_importing_the_ffi_touches_no_framework():
@@ -288,7 +286,7 @@ def test_the_driver_imports_and_refuses_where_the_frameworks_are_absent(monkeypa
     monkeypatch.setattr(macos_ffi, "_LOADED", None)
     monkeypatch.setattr(macos_ffi.platform, "system", lambda: "Linux")
 
-    reloaded = importlib.reload(macos_driver)  # must not raise
+    reloaded = importlib.reload(macos_driver)
     try:
         with pytest.raises(macos_ffi.FFIUnavailable):
             macos_ffi._load()
@@ -301,7 +299,9 @@ def test_the_driver_imports_and_refuses_where_the_frameworks_are_absent(monkeypa
         importlib.reload(macos_driver)
 
 
-def test_every_op_refuses_rather_than_raising_when_the_frameworks_are_unavailable(monkeypatch):
+def test_every_op_refuses_rather_than_raising_when_the_frameworks_are_unavailable(
+    monkeypatch,
+):
     """Discovered by introspection, so a future op cannot escape the guard.
 
     A raise here would reach ``driver_host`` as a generic driver fault, losing the reason. Each
@@ -320,12 +320,9 @@ def test_every_op_refuses_rather_than_raising_when_the_frameworks_are_unavailabl
         answer = getattr(macos_driver, name)(
             _act({"text": "x", "value": "x", "action": "AXPress", "direction": "up"})
         )
-        assert _code(answer) == macos_driver.ERR_DRIVER_UNAVAILABLE, f"{name} did not refuse"
-
-
-# ---------------------------------------------------------------------------
-# 3. The real OS legs (no accessibility permission required)
-# ---------------------------------------------------------------------------
+        assert (
+            _code(answer) == macos_driver.ERR_DRIVER_UNAVAILABLE
+        ), f"{name} did not refuse"
 
 
 @_NEEDS_DARWIN
@@ -379,23 +376,6 @@ def test_an_absent_application_refuses_by_name():
         macos_ffi.resolve_app_pid("NoSuchApplicationExists-DCU3")
 
 
-# ---------------------------------------------------------------------------
-# 3b. The permission refusal names the RIGHT TCC principal (#2569)
-#
-# The FIX used to send the operator to add "the binary running Gideon's gateway (its own
-# python executable, not a terminal app)". Both halves are wrong: macOS resolves the request
-# against the session's RESPONSIBLE process, and for an interpreter launched from a terminal, an
-# IDE or an app bundle that responsible process is precisely the host application the old text
-# told the operator not to add. An operator following it granted something the OS never consults,
-# which is why the grant step kept appearing to fail. These rails hold the corrected text in
-# place from both directions: the new one must name the principal it observed, and the old one
-# must not be able to come back.
-# ---------------------------------------------------------------------------
-
-#: A real ``tccd`` attribution row, recorded from the unified log on the authoring host with the
-#: home directory generalised. The whole point of #2569 is in the contrast between the two paths:
-#: ``binary_path`` is the interpreter that asked, ``responsible_path`` is the app System Settings
-#: is asking about.
 _REAL_TCCD_ROW = (
     "2026-09-06 22:53:14.570 Df tccd[66015:4d31e7] [com.apple.TCC:access] AUTHREQ_ATTRIBUTION: "
     "msgID=4242.1, attribution={responsible={TCCDProcess: identifier=dev.warp.Warp-Stable, "
@@ -407,9 +387,6 @@ _REAL_TCCD_ROW = (
     "binary_path=/System/Library/PrivateFrameworks/TCC.framework/Support/tccd}, },"
 )
 
-#: The exact instruction #2569 is about. Asserted ABSENT from the rendered FIX, because a
-#: reverted sentence is the defect: it reads as authoritative and sends the operator to tick a
-#: row macOS never reads.
 _REVERTED_FIX_FRAGMENTS = (
     "its own python executable",
     "not a terminal app",
@@ -441,7 +418,10 @@ def test_the_responsible_process_is_read_from_tccds_own_attribution_row():
     assert found.identifier == "dev.warp.Warp-Stable"
     assert found.path == "/Applications/Warp.app/Contents/MacOS/stable"
     assert "python" not in found.path
-    assert found.describe() == "dev.warp.Warp-Stable (/Applications/Warp.app/Contents/MacOS/stable)"
+    assert (
+        found.describe()
+        == "dev.warp.Warp-Stable (/Applications/Warp.app/Contents/MacOS/stable)"
+    )
 
 
 def test_a_row_belonging_to_another_process_is_never_borrowed():
@@ -459,8 +439,11 @@ def test_a_row_belonging_to_another_process_is_never_borrowed():
 
 def test_the_newest_matching_row_wins_over_an_earlier_one():
     """Two probes in one session: the answer is the one tccd decided most recently."""
-    earlier = _REAL_TCCD_ROW.replace("dev.warp.Warp-Stable", "com.amazon.kiro.crew").replace(
-        "/Applications/Warp.app/Contents/MacOS/stable", "/Applications/KiroCrew.app/x/KiroCrew"
+    earlier = _REAL_TCCD_ROW.replace(
+        "dev.warp.Warp-Stable", "com.amazon.kiro.crew"
+    ).replace(
+        "/Applications/Warp.app/Contents/MacOS/stable",
+        "/Applications/KiroCrew.app/x/KiroCrew",
     )
     found = macos_tcc._from_lines([earlier, _REAL_TCCD_ROW], 4242)
     assert found.identifier == "dev.warp.Warp-Stable"
@@ -559,11 +542,16 @@ def test_the_operator_command_runs_the_same_query_as_the_probe():
     """
     command = macos_tcc.RESPONSIBLE_PROBE_COMMAND
     argv = " ".join(macos_tcc._PROBE_ARGV)
-    assert 'subsystem == "com.apple.TCC"' in command and 'subsystem == "com.apple.TCC"' in argv
+    assert (
+        'subsystem == "com.apple.TCC"' in command
+        and 'subsystem == "com.apple.TCC"' in argv
+    )
     assert macos_tcc._ATTRIBUTION in command and macos_tcc._ATTRIBUTION in argv
     assert f"--last {macos_tcc._WINDOW}" in command and macos_tcc._WINDOW in argv
     assert "log show" in command
-    assert "AUTHREQ_SUBJECT" not in command, "the SUBJECT row does not carry the responsible path"
+    assert (
+        "AUTHREQ_SUBJECT" not in command
+    ), "the SUBJECT row does not carry the responsible path"
 
 
 def test_the_permission_fix_names_the_responsible_process_it_observed(monkeypatch):
@@ -595,7 +583,9 @@ def test_the_permission_fix_says_it_could_not_determine_the_principal(monkeypatc
     """
     _responsible(
         monkeypatch,
-        macos_tcc.Responsible(unknown_reason="the unified log did not answer within 8s"),
+        macos_tcc.Responsible(
+            unknown_reason="the unified log did not answer within 8s"
+        ),
     )
     fix = macos_driver._permission_refusal("AXError -25211").fix
     assert "System Settings" in fix and "Accessibility" in fix
@@ -607,11 +597,17 @@ def test_the_permission_fix_says_it_could_not_determine_the_principal(monkeypatc
 @pytest.mark.parametrize(
     "answer",
     [
-        macos_tcc.Responsible(identifier="com.amazon.kiro.crew", path="/Applications/KiroCrew.app"),
-        macos_tcc.Responsible(unknown_reason="/usr/bin/log is not present on this system"),
+        macos_tcc.Responsible(
+            identifier="com.amazon.kiro.crew", path="/Applications/KiroCrew.app"
+        ),
+        macos_tcc.Responsible(
+            unknown_reason="/usr/bin/log is not present on this system"
+        ),
     ],
 )
-def test_the_permission_fix_never_names_the_interpreter_as_the_principal(monkeypatch, answer):
+def test_the_permission_fix_never_names_the_interpreter_as_the_principal(
+    monkeypatch, answer
+):
     """The regression rail for #2569 itself, on BOTH branches of the new text.
 
     The defect was one specific wrong instruction, so this asserts that instruction is gone
@@ -623,7 +619,9 @@ def test_the_permission_fix_never_names_the_interpreter_as_the_principal(monkeyp
     for fragment in _REVERTED_FIX_FRAGMENTS:
         assert fragment not in error.fix, f"the #2569 instruction is back: {fragment!r}"
         assert fragment not in error.why
-    assert "responsible" in error.why.lower(), "the WHY must state the mechanism, not just the fix"
+    assert (
+        "responsible" in error.why.lower()
+    ), "the WHY must state the mechanism, not just the fix"
 
 
 @_NEEDS_DARWIN
@@ -644,11 +642,6 @@ def test_the_responsible_process_probe_answers_against_the_real_unified_log():
     else:
         assert found.unknown_reason.strip()
         assert "unknown" in found.describe()
-
-
-# ---------------------------------------------------------------------------
-# 4. The pointer never moves
-# ---------------------------------------------------------------------------
 
 
 def test_an_auto_click_presses_the_element_and_posts_no_pointer_event(ffi):
@@ -688,17 +681,23 @@ def test_set_value_posts_no_event_at_all(ffi):
 
 
 def test_scrolling_posts_a_wheel_event_and_no_pointer_event(ffi):
-    answer = macos_driver.op_scroll(_act({"element_index": 2, "direction": "down", "amount": 5}))
+    answer = macos_driver.op_scroll(
+        _act({"element_index": 2, "direction": "down", "amount": 5})
+    )
     assert "error" not in answer, answer
     assert ("scroll", (ffi.pid, -5, 0)) in ffi.calls
     assert not _POINTER_CALLS & set(ffi.names)
 
 
 def test_only_the_explicitly_named_methods_touch_a_pointer(ffi):
-    located = macos_driver.op_click({"app": "TextEdit", "click_method": "located", "x": 5, "y": 6})
+    located = macos_driver.op_click(
+        {"app": "TextEdit", "click_method": "located", "x": 5, "y": 6}
+    )
     assert "error" not in located, located
     assert ("click_located", (ffi.pid, 5.0, 6.0)) in ffi.calls
-    assert "click_global" not in ffi.names, "the located method must not warp the real cursor"
+    assert (
+        "click_global" not in ffi.names
+    ), "the located method must not warp the real cursor"
     assert located["pointer_moved"] is False
 
     warped = macos_driver.op_click({"click_method": "global", "x": 7, "y": 8})
@@ -714,10 +713,14 @@ def test_the_pointer_rail_detects_a_mouse_event(monkeypatch, ffi):
     pass just as happily against a double that recorded nothing at all.
     """
     monkeypatch.setattr(
-        macos_ffi, "press", lambda handle: ffi.calls.append(("click_global", (0.0, 0.0)))
+        macos_ffi,
+        "press",
+        lambda handle: ffi.calls.append(("click_global", (0.0, 0.0))),
     )
     macos_driver.op_click(_act({}))
-    assert _POINTER_CALLS & set(ffi.names), "the rail would not have noticed a mouse event"
+    assert _POINTER_CALLS & set(
+        ffi.names
+    ), "the rail would not have noticed a mouse event"
 
 
 def test_only_one_function_warps_the_real_cursor():
@@ -743,11 +746,6 @@ def test_no_other_module_in_the_package_warps_the_cursor():
         and path.name != "macos_ffi.py"
     ]
     assert not offenders, offenders
-
-
-# ---------------------------------------------------------------------------
-# 5. Staleness fails closed at the moment of acting — each with its vacuity case
-# ---------------------------------------------------------------------------
 
 
 def test_a_fresh_fingerprint_is_ACCEPTED_by_the_same_path_that_refuses_a_stale_one(ffi):
@@ -806,7 +804,10 @@ def test_an_index_past_the_end_refuses_as_stale_and_the_last_index_acts(ffi):
 
 
 def test_a_negative_index_refuses(ffi):
-    assert _code(macos_driver.op_click(_act({"element_index": -1}))) == macos_driver.ERR_STALE_INDEX
+    assert (
+        _code(macos_driver.op_click(_act({"element_index": -1})))
+        == macos_driver.ERR_STALE_INDEX
+    )
 
 
 def test_a_boolean_index_refuses_rather_than_reading_as_one(ffi):
@@ -816,15 +817,14 @@ def test_a_boolean_index_refuses_rather_than_reading_as_one(ffi):
     assert "press" not in ffi.names
 
 
-# ---------------------------------------------------------------------------
-# 6. The fingerprint's own contract
-# ---------------------------------------------------------------------------
-
-
 def test_the_fingerprint_ignores_the_value_a_user_is_typing():
     """Otherwise every second ``computer_type`` into the same field would refuse."""
     typed = [
-        element if element.index != 2 else dataclasses.replace(element, value="Lunch on Wednesday")
+        (
+            element
+            if element.index != 2
+            else dataclasses.replace(element, value="Lunch on Wednesday")
+        )
         for element in _elements()
     ]
     assert fingerprint_of(typed) == fingerprint_of(_elements())
@@ -842,7 +842,11 @@ def test_the_fingerprint_ignores_the_value_a_user_is_typing():
 )
 def test_the_fingerprint_notices_a_structural_change(field, changed):
     moved = [
-        element if element.index != 1 else dataclasses.replace(element, **{field: changed})
+        (
+            element
+            if element.index != 1
+            else dataclasses.replace(element, **{field: changed})
+        )
         for element in _elements()
     ]
     assert fingerprint_of(moved) != fingerprint_of(_elements())
@@ -853,16 +857,19 @@ def test_the_fingerprint_notices_an_element_appearing():
     assert fingerprint_of(grown) != fingerprint_of(_elements())
 
 
-# ---------------------------------------------------------------------------
-# 7. The element shape actually satisfies the dispatch's screens
-# ---------------------------------------------------------------------------
-
-
 def test_every_screened_key_is_a_string_never_none():
     """``check_input_target`` refuses a screened key whose value is not a string, so a ``None``
     title would turn every element into a malformed target."""
     shape = Element(index=0).to_dict()
-    for key in ("role", "subrole", "title", "value", "placeholder", "description", "help"):
+    for key in (
+        "role",
+        "subrole",
+        "title",
+        "value",
+        "placeholder",
+        "description",
+        "help",
+    ):
         assert isinstance(shape[key], str), key
 
 
@@ -874,7 +881,9 @@ def test_an_ordinary_text_element_passes_the_secure_field_screen():
 @pytest.mark.parametrize(
     "element",
     [
-        Element(index=0, role="AXTextField", subrole="AXSecureTextField", title="Password"),
+        Element(
+            index=0, role="AXTextField", subrole="AXSecureTextField", title="Password"
+        ),
         Element(index=0, role="AXTextField", title="Password"),
         Element(index=0, role="AXButton", title="Save"),
         Element(index=0),
@@ -886,11 +895,6 @@ def test_the_drivers_own_element_shape_is_refused_where_it_should_be(element):
     a driver that spelled its keys differently would be screened against nothing."""
     with pytest.raises(policy.ComputerUsePolicyRefusal):
         policy.check_input_target(element.to_dict(), tool="computer_type")
-
-
-# ---------------------------------------------------------------------------
-# 8. Named actions and directions
-# ---------------------------------------------------------------------------
 
 
 def test_perform_action_refuses_an_action_the_element_does_not_advertise(ffi):
@@ -920,13 +924,10 @@ def test_an_unknown_click_method_refuses_rather_than_falling_back(ffi):
     assert not set(ffi.names) & {"press", "click_located", "click_global"}
 
 
-# ---------------------------------------------------------------------------
-# 9. End to end through the real dispatch and the real ceilinged spawn
-# ---------------------------------------------------------------------------
-
-
 @_NEEDS_DARWIN
-def test_the_real_spawn_reaches_the_real_driver_and_its_code_survives(tmp_path, monkeypatch):
+def test_the_real_spawn_reaches_the_real_driver_and_its_code_survives(
+    tmp_path, monkeypatch
+):
     """The full chain with NOTHING faked: keystone, policy, SEL, ceilinged spawn, real driver.
 
     On a machine without the accessibility grant this asserts the honest end state — the code
@@ -936,17 +937,22 @@ def test_the_real_spawn_reaches_the_real_driver_and_its_code_survives(tmp_path, 
     """
     monkeypatch.setenv(enable_state.ENABLE_PATH_ENV, str(tmp_path / "enable.json"))
     (tmp_path / "enable.json").write_text(
-        json.dumps({"version": 1, "enabled": True, "apps": ["Finder"]}), encoding="utf-8"
+        json.dumps({"version": 1, "enabled": True, "apps": ["Finder"]}),
+        encoding="utf-8",
     )
     enable_state.reset_enable_state()
     service.reset_snapshots()
     try:
         if macos_ffi.is_process_trusted():
-            answer = asyncio.run(service.computer_dispatch("computer_snapshot", {"app": "Finder"}))
+            answer = asyncio.run(
+                service.computer_dispatch("computer_snapshot", {"app": "Finder"})
+            )
             assert answer["elements"] and answer["snapshot_id"]
         else:
             with pytest.raises(service.ComputerUseRefusal) as caught:
-                asyncio.run(service.computer_dispatch("computer_snapshot", {"app": "Finder"}))
+                asyncio.run(
+                    service.computer_dispatch("computer_snapshot", {"app": "Finder"})
+                )
             assert caught.value.error.code == macos_driver.ERR_AX_PERMISSION
             assert "System Settings" in caught.value.error.fix
     finally:
@@ -957,17 +963,21 @@ def test_the_real_spawn_reaches_the_real_driver_and_its_code_survives(tmp_path, 
 @_NEEDS_DARWIN
 def test_list_apps_end_to_end_is_narrowed_to_the_allowlist(tmp_path, monkeypatch):
     """Real spawn, real driver, real narrowing: the driver reports every running app and the
-    dispatch's step 7 hands the model only the allowlisted one, with an honest withheld count."""
+    dispatch's step 7 hands the model only the allowlisted one, with an honest withheld count.
+    """
     monkeypatch.setenv(enable_state.ENABLE_PATH_ENV, str(tmp_path / "enable.json"))
     (tmp_path / "enable.json").write_text(
-        json.dumps({"version": 1, "enabled": True, "apps": ["Finder"]}), encoding="utf-8"
+        json.dumps({"version": 1, "enabled": True, "apps": ["Finder"]}),
+        encoding="utf-8",
     )
     enable_state.reset_enable_state()
     service.reset_snapshots()
     try:
         answer = asyncio.run(service.computer_dispatch("computer_list_apps", {}))
         assert answer["apps"] == ["Finder"], answer
-        assert answer["withheld"] > 0, "a real desktop runs more than one bundled application"
+        assert (
+            answer["withheld"] > 0
+        ), "a real desktop runs more than one bundled application"
     finally:
         enable_state.reset_enable_state()
         service.reset_snapshots()

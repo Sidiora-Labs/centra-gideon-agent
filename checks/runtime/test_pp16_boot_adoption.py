@@ -19,7 +19,7 @@ from a test of the sweep's own body — which is why the rails here are about th
 2. **Startup blocked on revival.** Reviving a PLANNING loop re-runs a planner pass (a model
    call). Awaited inline, N stranded loops delayed everything after it in gateway startup.
 
-`tests/test_loop_manager.py::TestBootSweep` covers what the loop sweep DOES; this file covers
+`checks/runtime/test_loop_manager.py::TestBootSweep` covers what the loop sweep DOES; this file covers
 that it is reached, reached once, reached before the poll it precedes, retried when it fails,
 and reached through the one shared primitive rather than a second private one.
 
@@ -34,12 +34,12 @@ from pathlib import Path
 
 import pytest
 
-from gideon import concurrency
-from gideon.loop import manager as loop_manager
-from gideon.loop import watchdog as loop_watchdog
-from gideon.workflows import watchdog as run_watchdog
+from gideon.automation.loop import manager as loop_manager
+from gideon.automation.loop import watchdog as loop_watchdog
+from gideon.automation.workflows import watchdog as run_watchdog
+from gideon.core import concurrency
 
-_SRC = Path(__file__).resolve().parent.parent / "src" / "gideon"
+_SRC = Path(__file__).resolve().parent.parent.parent / "runtime" / "gideon"
 
 pytestmark = pytest.mark.anyio
 
@@ -51,15 +51,15 @@ def anyio_backend() -> str:
 
 @pytest.fixture(autouse=True)
 def _isolated_homes(tmp_path, monkeypatch):
-    """Both stores redirected. `gideon.loop.store` and `gideon.workflows.store`
+    """Both stores redirected. `gideon.automation.loop.store` and `gideon.automation.workflows.store`
     each bind `config_dir` at import, so patching the loader alone would miss them and the
     sweeps would read the real home."""
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.loop.files.config_dir", lambda: home)
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
-    from gideon.loop import files as loop_files
-    from gideon.workflows import store as run_store
+    monkeypatch.setattr("gideon.automation.loop.files.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
+    from gideon.automation.loop import files as loop_files
+    from gideon.automation.workflows import store as run_store
 
     assert loop_files.config_dir() == home, "loop store still points at another home"
     assert run_store.config_dir() == home, "run store still points at another home"
@@ -68,21 +68,25 @@ def _isolated_homes(tmp_path, monkeypatch):
 
 def _text(rel: str) -> str:
     path = _SRC / rel
-    assert path.is_file(), f"{path} does not exist — the scan below would measure nothing"
+    assert (
+        path.is_file()
+    ), f"{path} does not exist — the scan below would measure nothing"
     body = path.read_text(encoding="utf-8")
-    assert body.strip(), f"{path} is empty — an absence assertion would pass by being blind"
+    assert (
+        body.strip()
+    ), f"{path} is empty — an absence assertion would pass by being blind"
     return body
-
-
-# ── one primitive ─────────────────────────────────────────────────────────────────────────
 
 
 def test_there_is_exactly_one_boot_adoption_primitive():
     """`concurrency.boot_sweep` is it. The `reap_orphans` it replaced is gone rather than kept
-    beside it — a second generic reaper is how the two nouns drifted in the first place."""
-    assert callable(concurrency.boot_sweep), "the shared boot-adoption primitive is missing"
+    beside it — a second generic reaper is how the two nouns drifted in the first place.
+    """
+    assert callable(
+        concurrency.boot_sweep
+    ), "the shared boot-adoption primitive is missing"
     assert not hasattr(concurrency, "reap_orphans"), (
-        "gideon.concurrency exposes BOTH boot_sweep and reap_orphans. PP-16's clean break "
+        "gideon.core.concurrency exposes BOTH boot_sweep and reap_orphans. PP-16's clean break "
         "retires the second one; a caller that finds two primitives will pick one at random."
     )
 
@@ -102,13 +106,12 @@ def test_the_scan_rejects_a_symbol_that_does_not_exist():
     """Vacuity floor for the source scans: a probe that reported everything present — or
     everything absent — would pass the assertions above and below without measuring."""
     body = _text("loop/watchdog.py")
-    assert "concurrency.boot_sweep(" in body, "positive control failed — the probe sees nothing"
+    assert (
+        "concurrency.boot_sweep(" in body
+    ), "positive control failed — the probe sees nothing"
     assert (
         "concurrency.boot_sweep_that_never_existed(" not in body
     ), "negative control failed — the probe matches a symbol that does not exist"
-
-
-# ── the deleted second call site ───────────────────────────────────────────────────────────
 
 
 def test_the_gateway_has_no_loop_boot_adoption_hook():
@@ -117,8 +120,21 @@ def test_the_gateway_has_no_loop_boot_adoption_hook():
     Anchored on the loop-watchdog construction so this cannot pass by the block having moved
     or been renamed out from under it.
     """
-    body = _text("gateway.py")
-    assert "LoopWatchdog(self.dashboard_state, self.autonudge_svc)" in body, (
+    assert "SupervisorAssembly(self, logger).start()" in _text("engine/gateway.py")
+    body = _text("engine/nudge_dispatch.py")
+    import ast
+
+    calls = [
+        node
+        for node in ast.walk(ast.parse(body))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "LoopWatchdog"
+    ]
+    assert len(calls) == 1 and [ast.unparse(arg) for arg in calls[0].args] == [
+        "runtime.dashboard_state",
+        "runtime.autonudge_svc",
+    ], (
         "the gateway no longer constructs the LoopWatchdog where this rail expects it — "
         "re-anchor this scan rather than deleting it"
     )
@@ -132,7 +148,8 @@ def test_the_gateway_has_no_loop_boot_adoption_hook():
 
 def test_the_retired_entry_point_is_gone_from_the_manager():
     """A runtime check, not a text one: `mypy` cannot catch a stranded first-party import
-    (`ignore_missing_imports`), so the deletion is asserted against the imported module."""
+    (`ignore_missing_imports`), so the deletion is asserted against the imported module.
+    """
     assert not hasattr(loop_manager, "reap_orphaned_loops"), (
         "loop.manager.reap_orphaned_loops is back. Boot adoption belongs to the watchdog that "
         "owns the noun; a second entry point on the manager is the shape PP-16 retired."
@@ -158,9 +175,13 @@ def test_the_loop_boot_sweep_loads_the_kind_registry_itself():
     """
     body = _text("loop/watchdog.py")
     marker = "    async def _boot_sweep(self)"
-    assert marker in body, "LoopWatchdog._boot_sweep moved or was renamed — re-anchor this scan"
+    assert (
+        marker in body
+    ), "LoopWatchdog._boot_sweep moved or was renamed — re-anchor this scan"
     sweep = body.split(marker, 1)[1].split("    async def _rearm_running(", 1)[0]
-    assert sweep.strip(), "the sliced _boot_sweep body is empty — the scan would measure nothing"
+    assert (
+        sweep.strip()
+    ), "the sliced _boot_sweep body is empty — the scan would measure nothing"
     assert "concurrency.boot_sweep(" in sweep, (
         "positive control failed: the slice does not contain the sweep's own call, so the slice "
         "boundaries are wrong and an absence below would be meaningless"
@@ -177,9 +198,6 @@ def test_the_loop_boot_sweep_loads_the_kind_registry_itself():
     )
 
 
-# ── the call site: once, on the first poll ─────────────────────────────────────────────────
-
-
 async def test_the_loop_watchdog_sweeps_on_its_first_poll_and_only_then():
     """The sweep is wired into `_poll_once`, not merely defined. Three polls ⇒ one sweep."""
     calls: list[int] = []
@@ -192,7 +210,9 @@ async def test_the_loop_watchdog_sweeps_on_its_first_poll_and_only_then():
     wd._boot_sweep = _record.__get__(wd)  # type: ignore[method-assign]
     for _ in range(3):
         await wd._poll_once()
-    assert len(calls) == 1, f"expected exactly one boot sweep across three polls, got {len(calls)}"
+    assert (
+        len(calls) == 1
+    ), f"expected exactly one boot sweep across three polls, got {len(calls)}"
 
 
 async def test_a_loop_boot_sweep_that_raises_is_retried_on_the_next_poll():
@@ -263,9 +283,6 @@ async def test_the_retry_rails_can_fail():
     assert wd._swept is True, "_swept was never flipped after a successful sweep"
 
 
-# ── minimal fakes: `_poll_once` needs a state + svc but not a live one ─────────────────────
-
-
 class _State:
     """Enough dashboard state for a poll over an EMPTY loop store."""
 
@@ -279,7 +296,7 @@ class _State:
         pass
 
     def loop_sse(self):
-        from gideon.dashboard.sse import SseRegistry
+        from gideon.interfaces.dashboard.sse import SseRegistry
 
         return SseRegistry()
 

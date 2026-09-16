@@ -10,7 +10,7 @@ import asyncio
 
 import pytest
 
-from gideon.tasks.models import Task
+from gideon.engine.tasks.models import Task
 
 
 def _task(**kw) -> Task:
@@ -55,16 +55,16 @@ class TestReadyTasksFiltering:
         yield
 
     def _patch(self, monkeypatch, tasks, owner="keyur"):
-        from gideon.tasks import registry
+        from gideon.engine.tasks import registry
 
         async def _list(**kwargs):
             return list(tasks), len(tasks)
 
         monkeypatch.setattr(registry, "list_all_tasks", _list)
-        monkeypatch.setattr("gideon.identity.current_username", lambda: owner)
+        monkeypatch.setattr("gideon.cognition.identity.current_username", lambda: owner)
 
     def test_foreign_tasks_are_never_the_owners_ready_work(self, monkeypatch):
-        from gideon.tasks import registry
+        from gideon.engine.tasks import registry
 
         self._patch(
             monkeypatch,
@@ -78,7 +78,7 @@ class TestReadyTasksFiltering:
         assert ids == {"mine", "unclaimed"}
 
     def test_everyone_view_is_opt_in(self, monkeypatch):
-        from gideon.tasks import registry
+        from gideon.engine.tasks import registry
 
         self._patch(
             monkeypatch,
@@ -88,7 +88,7 @@ class TestReadyTasksFiltering:
         assert ids == {"mine", "theirs"}
 
     def test_no_username_returns_everything(self, monkeypatch):
-        from gideon.tasks import registry
+        from gideon.engine.tasks import registry
 
         self._patch(
             monkeypatch,
@@ -100,8 +100,8 @@ class TestReadyTasksFiltering:
     def test_readiness_is_computed_over_the_full_set(self, monkeypatch):
         """A task of mine blocked by a colleague's unfinished prerequisite is NOT
         ready. Filtering before reconciliation would call it startable."""
-        from gideon.tasks import registry
-        from gideon.tasks.models import TaskDependency
+        from gideon.engine.tasks import registry
+        from gideon.engine.tasks.models import TaskDependency
 
         blocker = _task(id="theirs", assignee="dana", status="open")
         blocked = _task(
@@ -118,7 +118,7 @@ class TestReadyTasksFiltering:
         no kwargs, so the owner-only default IS the guarantee."""
         import inspect
 
-        from gideon.tasks import registry
+        from gideon.engine.tasks import registry
 
         signature = inspect.signature(registry.ready_tasks)
         assert signature.parameters["mine_only"].default is True
@@ -133,13 +133,13 @@ class TestListEndpoint:
     def _app(self, tasks, owner="keyur", monkeypatch=None):
         from aiohttp import web
 
-        from gideon.tasks import handlers, registry
+        from gideon.engine.tasks import handlers, registry
 
         async def _list(**kwargs):
             return list(tasks), len(tasks)
 
         monkeypatch.setattr(registry, "list_all_tasks", _list)
-        monkeypatch.setattr("gideon.identity.current_username", lambda: owner)
+        monkeypatch.setattr("gideon.cognition.identity.current_username", lambda: owner)
         app = web.Application()
         app.router.add_get("/api/tasks", handlers.api_tasks_list)
         return app
@@ -148,8 +148,13 @@ class TestListEndpoint:
     async def test_default_shows_everyone(self, monkeypatch):
         from aiohttp.test_utils import TestClient, TestServer
 
-        tasks = [_task(id="mine", assignee="keyur"), _task(id="theirs", assignee="dana")]
-        async with TestClient(TestServer(self._app(tasks, monkeypatch=monkeypatch))) as client:
+        tasks = [
+            _task(id="mine", assignee="keyur"),
+            _task(id="theirs", assignee="dana"),
+        ]
+        async with TestClient(
+            TestServer(self._app(tasks, monkeypatch=monkeypatch))
+        ) as client:
             body = await (await client.get("/api/tasks")).json()
         assert {t["id"] for t in body["tasks"]} == {"mine", "theirs"}
 
@@ -157,8 +162,13 @@ class TestListEndpoint:
     async def test_mine_narrows_to_the_owner(self, monkeypatch):
         from aiohttp.test_utils import TestClient, TestServer
 
-        tasks = [_task(id="mine", assignee="keyur"), _task(id="theirs", assignee="dana")]
-        async with TestClient(TestServer(self._app(tasks, monkeypatch=monkeypatch))) as client:
+        tasks = [
+            _task(id="mine", assignee="keyur"),
+            _task(id="theirs", assignee="dana"),
+        ]
+        async with TestClient(
+            TestServer(self._app(tasks, monkeypatch=monkeypatch))
+        ) as client:
             body = await (await client.get("/api/tasks?mine=1")).json()
         assert {t["id"] for t in body["tasks"]} == {"mine"}
 
@@ -167,8 +177,13 @@ class TestListEndpoint:
         """Otherwise the UI shows "1 of 2" for a list holding one row."""
         from aiohttp.test_utils import TestClient, TestServer
 
-        tasks = [_task(id="mine", assignee="keyur"), _task(id="theirs", assignee="dana")]
-        async with TestClient(TestServer(self._app(tasks, monkeypatch=monkeypatch))) as client:
+        tasks = [
+            _task(id="mine", assignee="keyur"),
+            _task(id="theirs", assignee="dana"),
+        ]
+        async with TestClient(
+            TestServer(self._app(tasks, monkeypatch=monkeypatch))
+        ) as client:
             body = await (await client.get("/api/tasks?mine=1")).json()
         assert body["total"] == 1
 
@@ -176,7 +191,9 @@ class TestListEndpoint:
     async def test_owner_is_reported_so_rows_can_be_labelled(self, monkeypatch):
         from aiohttp.test_utils import TestClient, TestServer
 
-        async with TestClient(TestServer(self._app([], monkeypatch=monkeypatch))) as client:
+        async with TestClient(
+            TestServer(self._app([], monkeypatch=monkeypatch))
+        ) as client:
             body = await (await client.get("/api/tasks")).json()
         assert body["owner"] == "keyur"
 

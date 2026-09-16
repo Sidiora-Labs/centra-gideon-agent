@@ -5,9 +5,9 @@ One integration test over the REAL turn path, in the order a user experiences it
     propose  →  accept  →  the next matching prompt surfaces the accepted skill
              →  its usage count increments
 
-The seam driven here is ``ContextBuilder.build_message`` — the single function a
+The seam driven here is ``PromptAssembler.build_message`` — the single function a
 chat turn calls to assemble its prompt. It is chosen over calling
-``surface_skills`` (or ``SkillsLoader.get_surfaced_skills``) directly because the
+``surface_skills`` (or ``ProcedureLibrary.get_surfaced_skills``) directly because the
 claim under test is about *the next matching prompt*, and only ``build_message``
 contains the whole chain: ``skills.get_surfaced_skills(text)`` → ``load_skill``
 per hit → ``allocate_skills(...)`` → ``SkillUsageStore().record_uses(loaded)``
@@ -16,7 +16,7 @@ isolation would leave the other three unproven, and the use counter in
 particular is written *only* on that path — a test that called
 ``surface_skills`` alone could pass with the counter entirely unwired.
 
-The ContextBuilder is built ONCE, before the proposal is accepted, and both
+The PromptAssembler is built ONCE, before the proposal is accepted, and both
 turns run through that same long-lived instance — which is how the gateway holds
 it. That also makes the "before" turn a real vacuity floor rather than a
 different object: the same builder must go from *not* surfacing the skill to
@@ -31,15 +31,13 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.context import ContextBuilder
-from gideon.memory import MemoryStore
-from gideon.skills import proposals
-from gideon.skills import surfacing as surfacing_mod
-from gideon.skills.loader import SkillsLoader
-from gideon.skills.usage import SkillUsageStore
+from gideon.cognition.context import PromptAssembler
+from gideon.cognition.memory import MemoryJournal
+from gideon.extensions.skills import proposals
+from gideon.extensions.skills import surfacing as surfacing_mod
+from gideon.extensions.skills.loader import ProcedureLibrary
+from gideon.extensions.skills.usage import SkillUsageStore
 
-# The prompt shares every word of the skill's triggers, so the keyword half of
-# the union scores 1.0 — comfortably over surfacing's 0.7 gate.
 PROMPT = "please run the widget release flow now"
 TRIGGERS = "widget release flow"
 SLUG = "release-flow"
@@ -49,19 +47,18 @@ BODY_MARKER = "BODY-LV1-RELEASE-FLOW"
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
-    """Isolated home, following tests/test_skill_proposals.py's fixture exactly.
+    """Isolated home, following checks/runtime/test_skill_proposals.py's fixture exactly.
 
     Patching the skills loader's ``config_dir`` binding is enough to redirect the
     whole chain: the proposal queue (``config_dir()/skills/.proposals``), the live
     skills tree (``skills_dir()``), and the usage sidecar
     (``skills_dir()/.usage.json``) all resolve through it.
     """
-    from gideon.skills import loader as loader_mod
-    from gideon.skills import marketplace as mp
+    from gideon.extensions.skills import loader as loader_mod
+    from gideon.extensions.skills import marketplace as mp
 
     monkeypatch.setattr(loader_mod, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(mp, "SKILL_DISCOVERY_PATHS", [])
-    # No model calls: force the no-embedder branch of the semantic ∪ keyword union.
     monkeypatch.setattr(surfacing_mod, "_active_embedder", lambda: (None, ""))
     return tmp_path
 
@@ -73,25 +70,28 @@ def _pin_config(monkeypatch):
     bodies are INLINED — above the threshold the turn injects an index only and
     deliberately records no use (the body never reached the turn).
     """
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     cfg = AppConfig.load()
     cfg.skills.max_triggered = 10
     cfg.skills.progressive_disclosure_threshold = 8
-    monkeypatch.setattr("gideon.config.loader.AppConfig.load", classmethod(lambda cls: cfg))
+    monkeypatch.setattr(
+        "gideon.core.config.loader.AppConfig.load", classmethod(lambda cls: cfg)
+    )
     return cfg
 
 
-def test_accepted_skill_surfaces_on_the_next_prompt_and_counts_the_use(home, monkeypatch):
+def test_accepted_skill_surfaces_on_the_next_prompt_and_counts_the_use(
+    home, monkeypatch
+):
     _pin_config(monkeypatch)
     skills_root = home / "skills"
     usage = SkillUsageStore(path=skills_root / ".usage.json")
-    builder = ContextBuilder(
-        memory=MemoryStore(workspace=home / "ws"),
-        skills=SkillsLoader(skills_path=skills_root, install_builtins=False),
+    builder = PromptAssembler(
+        memory=MemoryJournal(workspace=home / "ws"),
+        skills=ProcedureLibrary(skills_path=skills_root, install_builtins=False),
     )
 
-    # ── 1. propose ── nothing live may change (the plan's inviolable rule).
     prop = proposals.enqueue(
         slug=SLUG,
         description="How to cut a widget release",
@@ -102,35 +102,33 @@ def test_accepted_skill_surfaces_on_the_next_prompt_and_counts_the_use(home, mon
     )
     assert prop is not None
     assert [p.id for p in proposals.list_pending()] == [prop.id]
-    assert not (skills_root / "auto" / SLUG).exists(), "a proposal must not write a live skill"
+    assert not (
+        skills_root / "auto" / SLUG
+    ).exists(), "a proposal must not write a live skill"
     assert SKILL_NAME not in {s["key"] for s in builder.skills.list_skills()}
 
-    # ── vacuity floor ── the same prompt, before accepting, surfaces nothing and
-    # counts nothing. If either assertion here were already satisfied, the
-    # post-accept assertions below would be free.
     before, _ = builder.build_message(PROMPT, is_new_session=False)
     assert BODY_MARKER not in before
     assert SKILL_NAME not in before
     assert usage.get(SKILL_NAME).count == 0
     assert usage.all_usage() == {}
 
-    # ── 2. accept ── the human approval that installs it.
     created = proposals.accept(prop.id).name
     assert created == SKILL_NAME
     assert proposals.list_pending() == []
 
-    # ── 3. the next matching prompt surfaces THAT skill, body inlined ──
     after, _ = builder.build_message(PROMPT, is_new_session=False)
-    assert f"[Skill: {SKILL_NAME}]" in after, "accepted skill did not surface on a matching prompt"
-    assert BODY_MARKER in after, "skill surfaced but its procedure never reached the turn"
-    assert "INDEX only" not in after  # bodies inlined, so a use is expected
+    assert (
+        f"[Skill: {SKILL_NAME}]" in after
+    ), "accepted skill did not surface on a matching prompt"
+    assert (
+        BODY_MARKER in after
+    ), "skill surfaced but its procedure never reached the turn"
+    assert "INDEX only" not in after
 
-    # ── 4. …and the use is counted, for that skill and no other ──
     counts = {name: u.count for name, u in usage.all_usage().items()}
     assert counts == {SKILL_NAME: 1}
     assert usage.get(SKILL_NAME).last_used_at != ""
 
-    # A second matching turn increments again — the counter accumulates rather
-    # than latching at "seen once".
     builder.build_message(PROMPT, is_new_session=False)
     assert usage.get(SKILL_NAME).count == 2

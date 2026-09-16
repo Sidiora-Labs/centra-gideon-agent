@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 
-import gideon.mcp_discovery as disc
+import gideon.integrations.mcp_discovery as disc
 
 
 def _write(path, servers: dict) -> None:
@@ -47,7 +47,7 @@ def test_discover_importable_returns_cc_servers_not_in_gideon(tmp_path, monkeypa
 
     out = disc.discover_importable_servers()
     by_name = {s["name"]: s for s in out}
-    assert set(by_name) == {"cc-only", "remote"}  # bogus dropped (no command/url)
+    assert set(by_name) == {"cc-only", "remote"}
     assert by_name["cc-only"]["backend"] == "Claude Code"
     assert by_name["cc-only"]["command"] == "npx"
     assert by_name["remote"]["url"] == "https://example.com/sse"
@@ -67,7 +67,9 @@ def test_discover_importable_excludes_already_known(tmp_path, monkeypatch):
 
 
 def test_discover_importable_no_source_file(tmp_path, monkeypatch):
-    monkeypatch.setattr(disc, "_IMPORT_JSON_PATHS", ((tmp_path / "absent.json", "Claude Code"),))
+    monkeypatch.setattr(
+        disc, "_IMPORT_JSON_PATHS", ((tmp_path / "absent.json", "Claude Code"),)
+    )
     monkeypatch.setattr(disc, "_mcp_json_paths", lambda: (tmp_path / "nope.json",))
     monkeypatch.setattr(disc, "_load_agent_config", lambda: {})
     assert disc.discover_importable_servers() == []

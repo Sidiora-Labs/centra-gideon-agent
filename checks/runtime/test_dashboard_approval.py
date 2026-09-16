@@ -7,17 +7,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from gideon.dashboard.chat import run_chat
-from gideon.dashboard.state import DashboardState, _ChatSession, parse_cls_meta
-from gideon.history import ConversationLog
-from gideon.hooks import ToolHookResult
-from gideon.llm.base import (
+from gideon.cognition.history import ConversationLog
+from gideon.engine.hooks import ToolHookResult
+from gideon.integrations.llm.base import (
     EVENT_COMPLETE,
     EVENT_PERMISSION_REQUEST,
     LLMEvent,
 )
-
-# ── Helpers ──
+from gideon.interfaces.dashboard.chat import run_chat
+from gideon.interfaces.dashboard.state import (
+    ConsoleState,
+    _ChatSession,
+    parse_cls_meta,
+)
 
 
 async def _async_iter(items: list):  # type: ignore[type-arg]
@@ -48,9 +50,6 @@ def _answer_approval(session, request_id: str, decision: str):
     """
 
     async def _responder() -> None:
-        # 2 s ceiling at 5 ms granularity: still resolves in one tick when the machine is
-        # idle, and survives a loaded runner. Deliberately not `sleep(2)` — the point is to
-        # be fast when it can be and patient when it must be.
         for _ in range(400):
             fut = session._approval_futures.get(request_id)
             if fut is not None:
@@ -65,14 +64,12 @@ def _answer_approval(session, request_id: str, decision: str):
             f"Futures present: {sorted(session._approval_futures)}"
         )
 
-    # `asyncio.create_task` rather than `get_event_loop().create_task` — the latter is
-    # deprecated and emits "There is no current event loop" under 3.12+.
     return asyncio.create_task(_responder())
 
 
 @contextmanager
 def _patch_stats():
-    with patch("gideon.dashboard.chat.sel") as mock_sel:
+    with patch("gideon.interfaces.dashboard.chat.sel") as mock_sel:
         mock_sel.return_value = MagicMock()
         yield
 
@@ -103,7 +100,7 @@ def _make_state(
     tmp_path,
     context_builder=None,
     hook_store=None,
-) -> tuple[DashboardState, AsyncMock]:
+) -> tuple[ConsoleState, AsyncMock]:
     """Return (state, client) with all async methods properly mocked."""
     sessions = MagicMock(count=0)
     sessions.get_pid = MagicMock(return_value=None)
@@ -111,7 +108,7 @@ def _make_state(
     sessions.get_or_create = AsyncMock(return_value=(client, True, False))
     sessions.record_failure = AsyncMock()
     sessions.check_context_usage = MagicMock()
-    state = DashboardState(
+    state = ConsoleState(
         sessions=sessions,
         start_time=0.0,
         conversation_log=ConversationLog(base_dir=tmp_path),
@@ -143,9 +140,6 @@ def _context_builder(hook_result: ToolHookResult = ToolHookResult.allow()) -> Ma
     cb.hooks.on_tool_call.return_value = hook_result
     cb.build_message.return_value = ("hello", None)
     return cb
-
-
-# ── Tests ──
 
 
 @pytest.mark.asyncio
@@ -209,8 +203,9 @@ class TestApprovalModes:
             await run_chat(state, session, "hello")
 
         msgs = _tool_messages(session)
-        assert not any(m["role"] == "permission" for m in msgs), "Trust mode should not prompt"
-        # Auto-approved tools are broadcast via WS, not appended to session
+        assert not any(
+            m["role"] == "permission" for m in msgs
+        ), "Trust mode should not prompt"
         state.broadcast_ws.assert_any_call(
             "tool_call",
             {
@@ -237,7 +232,9 @@ class TestApprovalModes:
             await run_chat(state, session, "hello")
 
         msgs = _tool_messages(session)
-        assert not any(m["role"] == "permission" for m in msgs), "YOLO mode should not prompt"
+        assert not any(
+            m["role"] == "permission" for m in msgs
+        ), "YOLO mode should not prompt"
         state.broadcast_ws.assert_any_call(
             "tool_call",
             {
@@ -329,7 +326,9 @@ class TestTrustYoloPropagation:
         with _patch_stats():
             await run_chat(state, session, "hello")
 
-        state.sessions.set_approval_policy.assert_called_with(f"dashboard:{session.key}", "auto")
+        state.sessions.set_approval_policy.assert_called_with(
+            f"dashboard:{session.key}", "auto"
+        )
 
     @pytest.mark.asyncio
     async def test_run_chat_propagates_yolo_to_session(self, tmp_path):
@@ -342,7 +341,9 @@ class TestTrustYoloPropagation:
         with _patch_stats():
             await run_chat(state, session, "hello")
 
-        state.sessions.set_approval_policy.assert_called_with(f"dashboard:{session.key}", "auto")
+        state.sessions.set_approval_policy.assert_called_with(
+            f"dashboard:{session.key}", "auto"
+        )
 
     @pytest.mark.asyncio
     async def test_run_chat_no_propagation_without_trust_or_yolo(self, tmp_path):
@@ -354,7 +355,9 @@ class TestTrustYoloPropagation:
         with _patch_stats():
             await run_chat(state, session, "hello")
 
-        state.sessions.set_approval_policy.assert_called_once_with(f"dashboard:{session.key}", "")
+        state.sessions.set_approval_policy.assert_called_once_with(
+            f"dashboard:{session.key}", ""
+        )
 
 
 class TestResolveApprovalSessionFallback:
@@ -442,7 +445,6 @@ class TestToolCallIdRedaction:
         with _patch_stats():
             await run_chat(state, session, "hello")
 
-        # Trust mode broadcasts tool_call via WS with tool_call_id
         state.broadcast_ws.assert_any_call(
             "tool_call",
             {
@@ -477,10 +479,9 @@ class TestBatchRejection:
         with _patch_stats():
             await run_chat(state, session, "hello")
 
-        # First tool rejected interactively, second auto-rejected
         client.reject_tool.assert_any_call("req-1")
         client.reject_tool.assert_any_call("req-2")
-        assert session._batch_rejected is False  # reset in finally
+        assert session._batch_rejected is False
 
     @pytest.mark.asyncio
     async def test_batch_rejected_reset_on_exception(self, tmp_path):
@@ -519,7 +520,6 @@ class TestToolCompletionTracking:
         with _patch_stats():
             await run_chat(state, session, "hello")
 
-        # Verify tool_call broadcast includes tool_call_id
         calls = [c for c in state.broadcast_ws.call_args_list if c[0][0] == "tool_call"]
         assert len(calls) > 0
         assert calls[0][0][1]["tool_call_id"] == "tc-42"
@@ -531,7 +531,10 @@ class TestStateMetaAndPermissions:
     def test_append_with_meta(self):
         session = _make_session()
         session.append(
-            "tool", "test", meta={"tool_call_id": "tc-1", "purpose": "testing"}, broadcast=False
+            "tool",
+            "test",
+            meta={"tool_call_id": "tc-1", "purpose": "testing"},
+            broadcast=False,
         )
         assert session.messages[-1]["meta"]["tool_call_id"] == "tc-1"
 
@@ -547,7 +550,6 @@ class TestStateMetaAndPermissions:
 
     def test_mark_permission_resolved_not_found(self):
         session = _make_session()
-        # Should not raise
         session.mark_permission_resolved("nonexistent", "approved")
 
     def test_parse_cls_meta_normalizes_request_id(self):

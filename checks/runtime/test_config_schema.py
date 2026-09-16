@@ -11,7 +11,7 @@ import typing
 from hypothesis import given
 from hypothesis import strategies as st
 
-from gideon.config.loader import (
+from gideon.core.config.loader import (
     AgentConfig,
     AgentProfile,
     AppConfig,
@@ -20,16 +20,12 @@ from gideon.config.loader import (
     MemoryStoreConfig,
     SessionConfig,
 )
-from gideon.config.schema import (
+from gideon.core.config.schema import (
     JSON_SCHEMA,
     SCHEMA_REGISTRY,
     ConfigEntry,
     config_entry_to_dict,
 )
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 ALL_CONFIG_CLASSES: list[type] = [
     AppConfig,
@@ -53,7 +49,7 @@ def _all_fields_recursive(
         result.append((path, f))
         tp = f.type
         if isinstance(tp, str):
-            import gideon.config.loader as _mod
+            import gideon.core.config.loader as _mod
 
             try:
                 tp = eval(tp, vars(_mod))  # noqa: S307
@@ -61,7 +57,6 @@ def _all_fields_recursive(
                 continue
         origin = typing.get_origin(tp)
         if origin is dict:
-            # For dict[str, DataclassType], add wildcard path and recurse
             args = typing.get_args(tp)
             if len(args) == 2:
                 val_type = args[1]
@@ -70,9 +65,6 @@ def _all_fields_recursive(
                     result.extend(_all_fields_recursive(val_type, wildcard_path))
             continue
         if origin is list:
-            # For list[DataclassType], the schema walker emits `.*` for the array
-            # element and descends into the element dataclass's fields (e.g.
-            # tools.projection_rules.*.name). Mirror that so those paths are reachable.
             args = typing.get_args(tp)
             if len(args) == 1:
                 elem_type = args[0]
@@ -88,7 +80,7 @@ def _all_fields_recursive(
 
 def _resolve_type(f: dataclasses.Field) -> type:  # type: ignore[type-arg]
     """Resolve a field's type annotation to a runtime type."""
-    import gideon.config.loader as _mod
+    import gideon.core.config.loader as _mod
 
     tp = f.type
     if isinstance(tp, str):
@@ -99,7 +91,6 @@ def _resolve_type(f: dataclasses.Field) -> type:  # type: ignore[type-arg]
     return tp  # type: ignore[return-value]
 
 
-# Expected Python type → JSON Schema type mapping
 _EXPECTED_TYPE_MAP: dict[type, str] = {
     str: "string",
     int: "integer",
@@ -110,19 +101,12 @@ _EXPECTED_TYPE_MAP: dict[type, str] = {
     dict: "object",
 }
 
-# Segment pattern for snake_case paths (also allow * for dynamic keys)
 _SNAKE_CASE_RE = re.compile(r"^[a-z][a-z0-9_]*$|^\*$")
-
-
-# ---------------------------------------------------------------------------
-# Property Tests
-# ---------------------------------------------------------------------------
 
 
 class TestConfigSchemaProperties:
     """Property-based tests for the config schema registry."""
 
-    # Feature: config-schema, Property 1: All config fields carry required metadata
     def test_all_fields_carry_required_metadata(self) -> None:
         """Every dataclass field in the config hierarchy must have
         'label' (str) and 'help' (str) in its metadata.
@@ -143,7 +127,6 @@ class TestConfigSchemaProperties:
                 meta["help"], str
             ), f"Field '{path}' help must be str, got {type(meta['help'])}"
 
-    # Feature: config-schema, Property 2: Safe defaults for missing optional metadata
     @given(
         has_tags=st.booleans(),
         has_sensitive=st.booleans(),
@@ -173,8 +156,6 @@ class TestConfigSchemaProperties:
         if has_enum:
             meta["enum"] = ["a", "b"]
 
-        # Build a ConfigEntry the same way the schema module does:
-        # extract optional keys with safe defaults
         tags = meta.get("tags", [])
         sensitive = meta.get("sensitive", False)
         deprecated = meta.get("deprecated", False)
@@ -204,7 +185,6 @@ class TestConfigSchemaProperties:
         if not has_enum:
             assert entry.enum_values is None
 
-    # Feature: config-schema, Property 3: Registry entries are structurally complete
     def test_registry_entries_structurally_complete(self) -> None:
         """Every SCHEMA_REGISTRY entry must have all required fields and
         every path must be reachable via dataclasses.fields() recursion
@@ -227,12 +207,10 @@ class TestConfigSchemaProperties:
             "default_value",
         ]
 
-        # Build set of all reachable paths from the dataclass hierarchy
         all_fields = _all_fields_recursive(AppConfig)
         reachable_paths: set[str] = set()
         for path, f in all_fields:
             reachable_paths.add(path)
-            # Also add wildcard child paths for list/dict fields
             tp = _resolve_type(f)
             origin = typing.get_origin(tp)
             if origin is list or origin is dict:
@@ -241,17 +219,16 @@ class TestConfigSchemaProperties:
         assert len(SCHEMA_REGISTRY) > 0, "Registry should not be empty"
 
         for entry in SCHEMA_REGISTRY:
-            # Verify all required attributes are present
             for attr in required_attrs:
-                assert hasattr(entry, attr), f"Entry '{entry.path}' missing attribute '{attr}'"
+                assert hasattr(
+                    entry, attr
+                ), f"Entry '{entry.path}' missing attribute '{attr}'"
 
-            # Verify path is reachable from the dataclass hierarchy
             assert entry.path in reachable_paths, (
                 f"Entry path '{entry.path}' not reachable via "
                 f"dataclasses.fields() recursion on AppConfig"
             )
 
-            # Verify type is a valid JSON Schema type
             valid_types = {
                 "string",
                 "integer",
@@ -264,10 +241,10 @@ class TestConfigSchemaProperties:
                 entry.type in valid_types
             ), f"Entry '{entry.path}' has invalid type '{entry.type}'"
 
-            # Verify kind is set
-            assert entry.kind == "core", f"Entry '{entry.path}' has unexpected kind '{entry.kind}'"
+            assert (
+                entry.kind == "core"
+            ), f"Entry '{entry.path}' has unexpected kind '{entry.kind}'"
 
-    # Feature: config-schema, Property 4: Python-to-schema type mapping is correct
     def test_python_to_schema_type_mapping(self) -> None:
         """For every field in the config hierarchy, the schema registry
         must map Python types correctly: str→string, int→integer,
@@ -275,7 +252,6 @@ class TestConfigSchemaProperties:
 
         **Validates: Requirements 3.3, 3.4**
         """
-        # Build a lookup from path → ConfigEntry
         registry_by_path: dict[str, ConfigEntry] = {e.path: e for e in SCHEMA_REGISTRY}
 
         all_fields = _all_fields_recursive(AppConfig)
@@ -283,7 +259,6 @@ class TestConfigSchemaProperties:
             tp = _resolve_type(f)
             origin = typing.get_origin(tp)
 
-            # Determine expected JSON Schema type
             if dataclasses.is_dataclass(tp) and isinstance(tp, type):
                 expected_type = "object"
                 expected_has_children = True
@@ -293,10 +268,11 @@ class TestConfigSchemaProperties:
                 expected_has_children = expected_type in ("array", "object")
             else:
                 expected_type = _EXPECTED_TYPE_MAP.get(tp, "string")
-                # Bare dict/list (no generic args) still have children
                 expected_has_children = expected_type in ("array", "object")
 
-            assert path in registry_by_path, f"Field '{path}' not found in SCHEMA_REGISTRY"
+            assert (
+                path in registry_by_path
+            ), f"Field '{path}' not found in SCHEMA_REGISTRY"
             entry = registry_by_path[path]
             assert entry.type == expected_type, (
                 f"Field '{path}': expected type '{expected_type}', "
@@ -307,7 +283,6 @@ class TestConfigSchemaProperties:
                 f"got {entry.has_children}"
             )
 
-    # Feature: config-schema, Property 5: ConfigEntry serialization round-trip
     @given(
         path=st.text(
             alphabet=st.sampled_from("abcdefghijklmnopqrstuvwxyz_."),
@@ -375,7 +350,6 @@ class TestConfigSchemaProperties:
 
         d = config_entry_to_dict(original)
 
-        # Reconstruct from dict (camelCase keys → snake_case attrs)
         reconstructed = ConfigEntry(
             path=d["path"],
             kind=d["kind"],
@@ -404,7 +378,6 @@ class TestConfigSchemaProperties:
         assert reconstructed.enum_values == original.enum_values
         assert reconstructed.default_value == original.default_value
 
-    # Feature: config-schema, Property 15: All config paths use snake_case
     def test_all_config_paths_use_snake_case(self) -> None:
         """Every segment of every SCHEMA_REGISTRY entry path must match
         [a-z][a-z0-9_]* or be the wildcard '*'.
@@ -421,11 +394,6 @@ class TestConfigSchemaProperties:
                     f"that does not match snake_case pattern "
                     f"[a-z][a-z0-9_]* or '*'"
                 )
-
-
-# ---------------------------------------------------------------------------
-# Phase 2: Agent-Workspace Bindings Schema Registry Tests
-# ---------------------------------------------------------------------------
 
 
 class TestAgentWorkspaceBindingsSchema:
@@ -480,7 +448,6 @@ class TestAgentWorkspaceBindingsSchema:
         """
         top_props = JSON_SCHEMA.get("properties", {})
 
-        # agents
         agents_schema = top_props.get("agents", {})
         assert (
             "additionalProperties" in agents_schema
@@ -491,7 +458,6 @@ class TestAgentWorkspaceBindingsSchema:
         assert "default_dir" in agents_ap.get("properties", {})
         assert "memory_store" in agents_ap.get("properties", {})
 
-        # memory_stores
         ms_schema = top_props.get("memory_stores", {})
         assert (
             "additionalProperties" in ms_schema

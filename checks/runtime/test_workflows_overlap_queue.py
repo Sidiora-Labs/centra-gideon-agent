@@ -33,14 +33,16 @@ from typing import Any, cast
 
 import pytest
 
-from gideon.action_providers.run_workflow_provider import RunWorkflowActionProvider
-from gideon.workflows import defs as defs_mod
-from gideon.workflows import overlap as overlap_mod
-from gideon.workflows import store
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.models import OverlapPolicy, RunStatus, WorkflowRun
-from gideon.workflows.overlap import MAX_QUEUE_DEPTH, OverlapAction, decide
-from gideon.workflows.watchdog import WorkflowWatchdog
+from gideon.automation.workflows import defs as defs_mod
+from gideon.automation.workflows import overlap as overlap_mod
+from gideon.automation.workflows import store
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.models import OverlapPolicy, RunStatus, WorkflowRun
+from gideon.automation.workflows.overlap import MAX_QUEUE_DEPTH, OverlapAction, decide
+from gideon.automation.workflows.watchdog import WorkflowWatchdog
+from gideon.integrations.action_providers.run_workflow_provider import (
+    RunWorkflowActionProvider,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -63,7 +65,7 @@ def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
 
 
@@ -102,7 +104,7 @@ def harness(monkeypatch):
         provider = _StubDefs(spec)
         defs_mod.register_provider(provider)
         monkeypatch.setattr(
-            "gideon.action_providers.services.get_action_services",
+            "gideon.integrations.action_providers.services.get_action_services",
             lambda: SimpleNamespace(workflows=watchdog),
         )
         return spec
@@ -122,7 +124,9 @@ async def _fire(**config: Any):
 def _busy_prior(spec: dict[str, Any]) -> WorkflowRun:
     """A prior run the engine is still driving. RUNNING in the store with no controller is
     exactly the shape adoption sees, so this is the real precondition, not a stub."""
-    prior = store.create(WorkflowRun(id="", workflow_name=NAME, status=RunStatus.RUNNING))
+    prior = store.create(
+        WorkflowRun(id="", workflow_name=NAME, status=RunStatus.RUNNING)
+    )
     store.write_spec(prior.id, spec)
     return prior
 
@@ -130,9 +134,6 @@ def _busy_prior(spec: dict[str, Any]) -> WorkflowRun:
 def _drafts() -> list[WorkflowRun]:
     rows, _ = store.list_runs(workflow_name=NAME, status=RunStatus.DRAFT, limit=50)
     return rows
-
-
-# ── the three policies, three observables ───────────────────────────────────
 
 
 class TestThreePolicies:
@@ -159,7 +160,6 @@ class TestThreePolicies:
         queued = store.get(body["run_id"])
         assert queued is not None
         assert queued.status == RunStatus.DRAFT
-        # Nothing is driving it, and the prior is untouched.
         assert harness.watchdog.controller(queued.id) is None
         assert store.get(prior.id).status == RunStatus.RUNNING
         assert [r.id for r in store.active_runs()] == [prior.id]
@@ -183,8 +183,9 @@ class TestThreePolicies:
             prior = _busy_prior(spec)
             result = await _fire()
             observed[policy] = (result.outcome, len(overlap_mod.queued_runs(NAME)))
-            # Clear the def between policies so each starts from "one prior in flight".
-            for run, _ in [(r, None) for r in store.list_runs(workflow_name=NAME, limit=50)[0]]:
+            for run, _ in [
+                (r, None) for r in store.list_runs(workflow_name=NAME, limit=50)[0]
+            ]:
                 controller = harness.watchdog.controller(run.id)
                 if controller is not None:
                     await controller.stop()
@@ -197,7 +198,9 @@ class TestThreePolicies:
         assert observed["cancel_previous"] == ("launched", 0)
         assert len(set(observed.values())) == 3
 
-    async def test_queue_starts_immediately_when_nothing_is_in_flight(self, harness) -> None:
+    async def test_queue_starts_immediately_when_nothing_is_in_flight(
+        self, harness
+    ) -> None:
         """`queue` is not `always queue` — with a free def it starts now, or a per-hour
         trigger against a one-minute workflow would never run anything directly."""
         harness.install("queue")
@@ -205,9 +208,6 @@ class TestThreePolicies:
         assert result.outcome == "launched"
         run_id = json.loads(result.stdout)["run_id"]
         await harness.watchdog.controller(run_id).run_to_completion(timeout=15)
-
-
-# ── the cap ─────────────────────────────────────────────────────────────────
 
 
 class TestCap:
@@ -225,7 +225,6 @@ class TestCap:
         assert body["reason"] == "queue_full"
         assert body["max_queue_depth"] == MAX_QUEUE_DEPTH
         assert body["queued_run_id"] == json.loads(first.stdout)["run_id"]
-        # And the cap is a cap: no second queued run was created.
         assert len(_drafts()) == 1
 
     async def test_a_dropped_start_is_logged(self, harness, caplog) -> None:
@@ -235,13 +234,11 @@ class TestCap:
         _busy_prior(spec)
         await _fire()
         with caplog.at_level(
-            "WARNING", logger="gideon.action_providers.run_workflow_provider"
+            "WARNING",
+            logger="gideon.integrations.action_providers.run_workflow_provider",
         ):
             await _fire()
         assert any("dropped a queued start" in r.getMessage() for r in caplog.records)
-
-
-# ── the drain, on the real path ──────────────────────────────────────────────
 
 
 class TestDrain:
@@ -266,7 +263,8 @@ class TestDrain:
 
     async def test_a_hand_made_draft_is_never_launched(self, harness) -> None:
         """The worst available outcome of this atom is starting work a user never asked to
-        start. An unlaunched editor draft is DRAFT for the SAME def and carries no marker."""
+        start. An unlaunched editor draft is DRAFT for the SAME def and carries no marker.
+        """
         spec = harness.install("queue")
         prior = _busy_prior(spec)
         mine = store.create(WorkflowRun(id="", workflow_name=NAME))
@@ -278,7 +276,6 @@ class TestDrain:
         )
         harness.watchdog.register(controller)
         await controller.run_to_completion(timeout=20)
-        # And the poll path, which is the other caller.
         await overlap_mod.drain_all(harness.watchdog)
 
         assert harness.watchdog.controller(mine.id) is None
@@ -290,7 +287,6 @@ class TestDrain:
         spec = harness.install("queue")
         prior = _busy_prior(spec)
         queued_id = json.loads((await _fire()).stdout)["run_id"]
-        # The prior did not survive the "restart": nothing is in flight for the def.
         prior.status = RunStatus.COMPLETE
         store.save(prior)
 
@@ -300,9 +296,12 @@ class TestDrain:
         assert fresh.controller(queued_id) is not None
         await fresh.controller(queued_id).run_to_completion(timeout=20)
 
-    async def test_the_queue_waits_while_the_prior_is_only_paused(self, harness) -> None:
+    async def test_the_queue_waits_while_the_prior_is_only_paused(
+        self, harness
+    ) -> None:
         """PAUSED counts as active, so a suspended crash-survivor still holds the queue. The
-        honest answer: a queued run waits for an explicit Resume, it does not overtake."""
+        honest answer: a queued run waits for an explicit Resume, it does not overtake.
+        """
         spec = harness.install("queue")
         prior = _busy_prior(spec)
         queued_id = json.loads((await _fire()).stdout)["run_id"]
@@ -349,9 +348,6 @@ class TestDrain:
         assert overlap_mod.queued_runs(NAME) == []
 
 
-# ── the marker ──────────────────────────────────────────────────────────────
-
-
 class TestMarker:
     async def test_the_marker_survives_a_reload(self, harness) -> None:
         """`extra` is a persisted JSON column, so the marker comes back off disk — a
@@ -372,7 +368,8 @@ class TestMarker:
 
     def test_no_new_run_status_member_was_added(self) -> None:
         """The queue is a marker, not a state. A new `RunStatus` member would be a
-        state-machine change with a frontend status union and badge `Record` to match."""
+        state-machine change with a frontend status union and badge `Record` to match.
+        """
         assert {s.value for s in RunStatus} == {
             "draft",
             "running",
@@ -385,9 +382,6 @@ class TestMarker:
         }
 
 
-# ── a dry run writes nothing ────────────────────────────────────────────────
-
-
 class TestDryRun:
     async def test_a_dry_run_against_a_busy_def_names_the_decision_and_writes_nothing(
         self, harness
@@ -398,9 +392,6 @@ class TestDryRun:
         assert result.outcome == "skip"
         assert json.loads(result.stdout)["would"] == "queue"
         assert _drafts() == []
-
-
-# ── the ratchet ─────────────────────────────────────────────────────────────
 
 
 class TestExhaustiveness:
@@ -422,7 +413,9 @@ class TestExhaustiveness:
         else (a truthiness test, a fallthrough shared by two members) would still satisfy the
         parametrized test above while leaving the next member's semantics undeclared — which
         is exactly the shape `QUEUE` hid in."""
-        source = Path(inspect.getsourcefile(overlap_mod) or "").read_text(encoding="utf-8")
+        source = Path(inspect.getsourcefile(overlap_mod) or "").read_text(
+            encoding="utf-8"
+        )
         fn = next(
             node
             for node in ast.parse(source).body
@@ -439,15 +432,19 @@ class TestExhaustiveness:
 
     def test_the_provider_refuses_an_action_it_has_no_branch_for(self) -> None:
         """The call site's dangerous default is "fall through and launch". Every member of
-        `OverlapAction` is named in the provider, so a new one cannot silently launch."""
+        `OverlapAction` is named in the provider, so a new one cannot silently launch.
+        """
         source = Path(
             inspect.getsourcefile(
-                inspect.getmodule(RunWorkflowActionProvider) or RunWorkflowActionProvider
+                inspect.getmodule(RunWorkflowActionProvider)
+                or RunWorkflowActionProvider
             )
             or ""
         ).read_text(encoding="utf-8")
         for member in OverlapAction:
-            assert f"Act.{member.name}" in source, f"OverlapAction.{member.name} has no call site"
+            assert (
+                f"Act.{member.name}" in source
+            ), f"OverlapAction.{member.name} has no call site"
 
 
 class TestDecisionTable:
@@ -467,7 +464,10 @@ class TestDecisionTable:
         )
 
     def test_the_cap_drops_rather_than_growing(self) -> None:
-        assert decide(OverlapPolicy.QUEUE, active=1, queued=MAX_QUEUE_DEPTH) == OverlapAction.DROP
+        assert (
+            decide(OverlapPolicy.QUEUE, active=1, queued=MAX_QUEUE_DEPTH)
+            == OverlapAction.DROP
+        )
 
     def test_a_pending_start_is_not_overtaken_by_a_new_one(self) -> None:
         """The window between "the prior finished" and "the drain launched it": a start

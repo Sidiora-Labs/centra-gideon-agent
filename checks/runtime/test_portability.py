@@ -1,4 +1,4 @@
-"""Tests for gideon.portability — export/import zip feature."""
+"""Tests for gideon.workspace.portability — export/import zip feature."""
 
 import io
 import json
@@ -11,8 +11,8 @@ from unittest.mock import patch
 
 import pytest
 
-from gideon.learning.staging import StagingStore
-from gideon.portability import (
+from gideon.cognition.learning.staging import StagingStore
+from gideon.workspace.portability import (
     EXPORT_EXCLUDE,
     _is_excluded,
     apply_import_zip,
@@ -27,7 +27,6 @@ def fake_gideon_home(tmp_path):
     pc = tmp_path / ".gideon"
     pc.mkdir()
 
-    # config.json
     config = {
         "agent": {"provider": "acp", "model": "auto", "yolo": False},
         "session": {"timeout_secs": 3600},
@@ -35,21 +34,26 @@ def fake_gideon_home(tmp_path):
     }
     (pc / "config.json").write_text(json.dumps(config, indent=2))
 
-    # hooks.json
-    (pc / "hooks.json").write_text(json.dumps({"hooks": [{"id": "h1", "cmd": "echo hi"}]}))
+    (pc / "hooks.json").write_text(
+        json.dumps({"hooks": [{"id": "h1", "cmd": "echo hi"}]})
+    )
 
-    # crons.json
     crons = {
-        "jobs": [{"id": "c1", "name": "daily-check", "schedule": "0 9 * * *", "message": "check"}]
+        "jobs": [
+            {
+                "id": "c1",
+                "name": "daily-check",
+                "schedule": "0 9 * * *",
+                "message": "check",
+            }
+        ]
     }
     (pc / "crons.json").write_text(json.dumps(crons, indent=2))
 
-    # notifications.jsonl
     (pc / "notifications.jsonl").write_text(
         json.dumps({"ts": "1700000000", "title": "test", "body": "notification"}) + "\n"
     )
 
-    # memory.db (SQLite)
     db_path = pc / "memory.db"
     conn = sqlite3.connect(str(db_path))
     conn.execute(
@@ -73,7 +77,6 @@ def fake_gideon_home(tmp_path):
     conn.commit()
     conn.close()
 
-    # memory_index.db (FTS5)
     idx_path = pc / "memory_index.db"
     conn = sqlite3.connect(str(idx_path))
     conn.execute(
@@ -85,7 +88,6 @@ def fake_gideon_home(tmp_path):
     conn.commit()
     conn.close()
 
-    # learning.db (the capture staging log + flush outcome records)
     learn = StagingStore(pc)
     learn.stage(
         cadence="per_turn",
@@ -96,7 +98,6 @@ def fake_gideon_home(tmp_path):
         _result["staged"] = 1
     learn.close()
 
-    # workspace/memory/
     mem_dir = pc / "workspace" / "memory"
     mem_dir.mkdir(parents=True)
     (mem_dir / "preferences.md").write_text(
@@ -114,23 +115,24 @@ def fake_gideon_home(tmp_path):
         "# 2026-05-18\n\n#### 10:00 PDT\nImplemented export feature\n"
     )
 
-    # skills/
     sk_dir = pc / "skills" / "my-skill"
     sk_dir.mkdir(parents=True)
     (sk_dir / "SKILL.md").write_text(
         "---\nname: my-skill\ndescription: Test skill\n---\n# My Skill\n"
     )
 
-    # Credential files that must be EXCLUDED
-    (pc / ".env").write_text("SLACK_BOT_TOKEN=xoxb-secret\nSLACK_APP_TOKEN=xapp-secret\n")
+    (pc / ".env").write_text(
+        "SLACK_BOT_TOKEN=xoxb-secret\nSLACK_APP_TOKEN=xapp-secret\n"
+    )
     (pc / ".local_secret").write_text("dashboard-auth-token-xyz")
     (pc / "sel_hmac.key").write_text("hmac-key-content")
     (pc / "telemetry_salt").write_text("salt-value")
-    (pc / "session_map.json").write_text(json.dumps({"dashboard:chat-1": {"sid": "abc"}}))
+    (pc / "session_map.json").write_text(
+        json.dumps({"dashboard:chat-1": {"sid": "abc"}})
+    )
     (pc / "session_pids.txt").write_text("12345\n67890\n")
     (pc / "agent_pids.txt").write_text("111:222\n333:444\n")
 
-    # Directories that must be excluded
     (pc / "snapshots").mkdir()
     (pc / "snapshots" / "old-snapshot.tar.gz").write_text("fake")
     (pc / "outbox").mkdir()
@@ -142,27 +144,23 @@ def fake_gideon_home(tmp_path):
 @pytest.fixture
 def patched_config_dir(fake_gideon_home):
     """Patch config_dir() to return our fake directory."""
-    with patch("gideon.portability.config_dir", return_value=fake_gideon_home):
+    with patch(
+        "gideon.workspace.portability.config_dir", return_value=fake_gideon_home
+    ):
         with patch.dict(os.environ, {"GIDEON_HOME": str(fake_gideon_home)}):
             yield fake_gideon_home
-
-
-# ── Export Tests ──
 
 
 class TestExport:
     def test_export_creates_valid_zip(self, patched_config_dir):
         zip_bytes, manifest = create_export_zip()
         assert len(zip_bytes) > 0
-        # v3 since DAS-10 — §2's integrity shape (schema_version/machine_id + per-member
-        # sha256) travels inside the archive. v1/v2 still IMPORT; see test_portability_dsar.
         assert manifest["version"] == 3
         assert manifest["format"] == "zip"
         assert "created_at" in manifest
         assert "hostname" in manifest
         assert "contents" in manifest
 
-        # Verify it's a valid zip
         zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
         names = zf.namelist()
         assert any("MANIFEST.json" in n for n in names)
@@ -194,14 +192,15 @@ class TestExport:
         zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
         db_entries = [n for n in zf.namelist() if n.endswith("memory.db")]
         assert len(db_entries) == 1
-        # Verify it's a valid SQLite DB
         db_bytes = zf.read(db_entries[0])
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
         tmp.write(db_bytes)
         tmp.close()
         try:
             conn = sqlite3.connect(tmp.name)
-            rows = conn.execute("SELECT key, value_json FROM semantic_memory").fetchall()
+            rows = conn.execute(
+                "SELECT key, value_json FROM semantic_memory"
+            ).fetchall()
             assert len(rows) == 1
             assert rows[0][0] == "user.name"
             conn.close()
@@ -211,7 +210,7 @@ class TestExport:
 
     def test_export_includes_workspace_files(self, patched_config_dir):
         zip_bytes, manifest = create_export_zip()
-        assert manifest["contents"]["workspace_files"] >= 4  # prefs, projects, 2 history
+        assert manifest["contents"]["workspace_files"] >= 4
         zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
         names = zf.namelist()
         assert any("preferences.md" in n for n in names)
@@ -232,7 +231,9 @@ class TestExport:
         zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
         names = zf.namelist()
         for excluded in EXPORT_EXCLUDE:
-            assert not any(n.endswith(excluded) for n in names), f"{excluded} should be excluded"
+            assert not any(
+                n.endswith(excluded) for n in names
+            ), f"{excluded} should be excluded"
         zf.close()
 
     def test_export_excludes_snapshots_dir(self, patched_config_dir):
@@ -244,7 +245,6 @@ class TestExport:
         zf.close()
 
     def test_export_excludes_pid_files(self, patched_config_dir):
-        # Add a .pid file
         (patched_config_dir / "gateway.pid").write_text("99999")
         zip_bytes, _ = create_export_zip()
         zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
@@ -253,7 +253,6 @@ class TestExport:
         zf.close()
 
     def test_export_skips_symlinks(self, patched_config_dir):
-        # Create a symlink in workspace
         link = patched_config_dir / "workspace" / "memory" / "evil_link.md"
         try:
             link.symlink_to("/etc/passwd")
@@ -268,14 +267,11 @@ class TestExport:
     def test_export_empty_gideon_dir(self, tmp_path):
         pc = tmp_path / "empty_pc"
         pc.mkdir()
-        with patch("gideon.portability.config_dir", return_value=pc):
+        with patch("gideon.workspace.portability.config_dir", return_value=pc):
             with patch.dict(os.environ, {"GIDEON_HOME": str(pc)}):
                 zip_bytes, manifest = create_export_zip()
         assert len(zip_bytes) > 0
         assert manifest["contents"].get("workspace_files", 0) == 0
-
-
-# ── Validate Tests ──
 
 
 class TestValidate:
@@ -300,7 +296,6 @@ class TestValidate:
         assert "Invalid zip" in error
 
     def test_validate_missing_manifest(self, tmp_path):
-        # Create a zip without MANIFEST.json
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
             zf.writestr("some-dir/config.json", '{"agent":{}}')
@@ -353,13 +348,10 @@ class TestValidate:
         assert "manifest" in error.lower()
 
 
-# ── Import Tests ──
-
-
 class TestImportMerge:
     def _make_export(self, source_dir):
         """Export from source_dir and return zip path."""
-        with patch("gideon.portability.config_dir", return_value=source_dir):
+        with patch("gideon.workspace.portability.config_dir", return_value=source_dir):
             with patch.dict(os.environ, {"GIDEON_HOME": str(source_dir)}):
                 zip_bytes, _ = create_export_zip()
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
@@ -371,16 +363,13 @@ class TestImportMerge:
         """Import into a fresh (empty) Gideon instance."""
         zip_path = self._make_export(patched_config_dir)
         try:
-            # Target: empty directory
             target = tmp_path / "target_mc"
             target.mkdir()
-            with patch("gideon.portability.config_dir", return_value=target):
+            with patch("gideon.workspace.portability.config_dir", return_value=target):
                 with patch.dict(os.environ, {"GIDEON_HOME": str(target)}):
                     summary = apply_import_zip(zip_path, mode="merge")
             assert len(summary["items"]) > 0
-            # memory.db should be copied
             assert (target / "memory.db").is_file()
-            # crons.json should be copied
             assert (target / "crons.json").is_file()
         finally:
             os.unlink(str(zip_path))
@@ -391,10 +380,9 @@ class TestImportMerge:
         try:
             target = tmp_path / "target_mc"
             target.mkdir()
-            with patch("gideon.portability.config_dir", return_value=target):
+            with patch("gideon.workspace.portability.config_dir", return_value=target):
                 with patch.dict(os.environ, {"GIDEON_HOME": str(target)}):
                     apply_import_zip(zip_path, mode="merge")
-                    # Import again — should not duplicate
                     apply_import_zip(zip_path, mode="merge")
             crons = json.loads((target / "crons.json").read_text())
             job_names = [j["name"] for j in crons["jobs"]]
@@ -406,7 +394,6 @@ class TestImportMerge:
         """Merging memory.db inserts new rows without overwriting existing."""
         zip_path = self._make_export(patched_config_dir)
         try:
-            # Create target with its own memory.db with different data
             target = tmp_path / "target_mc"
             target.mkdir()
             dst_db = target / "memory.db"
@@ -429,16 +416,17 @@ class TestImportMerge:
             conn.commit()
             conn.close()
 
-            with patch("gideon.portability.config_dir", return_value=target):
+            with patch("gideon.workspace.portability.config_dir", return_value=target):
                 with patch.dict(os.environ, {"GIDEON_HOME": str(target)}):
                     apply_import_zip(zip_path, mode="merge")
 
-            # Both keys should exist
             conn = sqlite3.connect(str(dst_db))
-            rows = conn.execute("SELECT key FROM semantic_memory ORDER BY key").fetchall()
+            rows = conn.execute(
+                "SELECT key FROM semantic_memory ORDER BY key"
+            ).fetchall()
             keys = [r[0] for r in rows]
-            assert "user.name" in keys  # from import
-            assert "user.team" in keys  # pre-existing
+            assert "user.name" in keys
+            assert "user.team" in keys
             conn.close()
         finally:
             os.unlink(str(zip_path))
@@ -454,7 +442,7 @@ class TestImportMerge:
         try:
             target = tmp_path / "target_learn"
             target.mkdir()
-            with patch("gideon.portability.config_dir", return_value=target):
+            with patch("gideon.workspace.portability.config_dir", return_value=target):
                 with patch.dict(os.environ, {"GIDEON_HOME": str(target)}):
                     apply_import_zip(zip_path, mode="merge")
 
@@ -481,10 +469,12 @@ class TestImportMerge:
             target = tmp_path / "target_learn_existing"
             target.mkdir()
             local = StagingStore(target)
-            local.stage(cadence="per_turn", kind="lesson", content="a local signal only")
+            local.stage(
+                cadence="per_turn", kind="lesson", content="a local signal only"
+            )
             local.close()
 
-            with patch("gideon.portability.config_dir", return_value=target):
+            with patch("gideon.workspace.portability.config_dir", return_value=target):
                 with patch.dict(os.environ, {"GIDEON_HOME": str(target)}):
                     apply_import_zip(zip_path, mode="merge")
 
@@ -503,16 +493,14 @@ class TestImportMerge:
         try:
             target = tmp_path / "target_mc"
             target.mkdir()
-            # Create a pre-existing preferences file with different content
             mem_dir = target / "workspace" / "memory"
             mem_dir.mkdir(parents=True)
             (mem_dir / "preferences.md").write_text("# Existing prefs\n- Keep this\n")
 
-            with patch("gideon.portability.config_dir", return_value=target):
+            with patch("gideon.workspace.portability.config_dir", return_value=target):
                 with patch.dict(os.environ, {"GIDEON_HOME": str(target)}):
                     apply_import_zip(zip_path, mode="merge")
 
-            # Pre-existing file should NOT be overwritten
             content = (mem_dir / "preferences.md").read_text()
             assert "Existing prefs" in content
             assert "Uses vim" not in content
@@ -525,16 +513,14 @@ class TestImportMerge:
         try:
             target = tmp_path / "target_mc"
             target.mkdir()
-            # Pre-existing notification
             (target / "notifications.jsonl").write_text(
                 json.dumps({"ts": "1700000000", "title": "existing"}) + "\n"
             )
 
-            with patch("gideon.portability.config_dir", return_value=target):
+            with patch("gideon.workspace.portability.config_dir", return_value=target):
                 with patch.dict(os.environ, {"GIDEON_HOME": str(target)}):
                     apply_import_zip(zip_path, mode="merge")
 
-            # Should still have only 1 entry (same ts)
             lines = [
                 line
                 for line in (target / "notifications.jsonl").read_text().splitlines()
@@ -554,11 +540,10 @@ class TestImportMerge:
             sk_dir.mkdir(parents=True)
             (sk_dir / "SKILL.md").write_text("# Existing skill content\n")
 
-            with patch("gideon.portability.config_dir", return_value=target):
+            with patch("gideon.workspace.portability.config_dir", return_value=target):
                 with patch.dict(os.environ, {"GIDEON_HOME": str(target)}):
                     apply_import_zip(zip_path, mode="merge")
 
-            # Existing skill should NOT be overwritten
             content = (sk_dir / "SKILL.md").read_text()
             assert "Existing skill content" in content
         finally:
@@ -567,7 +552,7 @@ class TestImportMerge:
 
 class TestImportReplace:
     def _make_export(self, source_dir):
-        with patch("gideon.portability.config_dir", return_value=source_dir):
+        with patch("gideon.workspace.portability.config_dir", return_value=source_dir):
             with patch.dict(os.environ, {"GIDEON_HOME": str(source_dir)}):
                 zip_bytes, _ = create_export_zip()
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
@@ -581,21 +566,18 @@ class TestImportReplace:
         try:
             target = tmp_path / "target_mc"
             target.mkdir()
-            # Pre-existing config with different content
-            (target / "config.json").write_text(json.dumps({"agent": {"provider": "ollama"}}))
+            (target / "config.json").write_text(
+                json.dumps({"agent": {"provider": "ollama"}})
+            )
 
-            with patch("gideon.portability.config_dir", return_value=target):
+            with patch("gideon.workspace.portability.config_dir", return_value=target):
                 with patch.dict(os.environ, {"GIDEON_HOME": str(target)}):
                     apply_import_zip(zip_path, mode="replace")
 
-            # Config should be replaced
             data = json.loads((target / "config.json").read_text())
             assert data["agent"]["provider"] == "acp"
         finally:
             os.unlink(str(zip_path))
-
-
-# ── Exclusion Logic Tests ──
 
 
 class TestExclusionLogic:
@@ -641,39 +623,38 @@ class TestExclusionLogic:
         assert not _is_excluded(PurePosixPath("skills/my-skill/SKILL.md"))
 
 
-# ── Round-Trip Tests ──
-
-
 class TestRoundTrip:
     """Verify export→import→export produces consistent state."""
 
     def test_full_round_trip(self, patched_config_dir, tmp_path):
         """Export from instance A, import to empty B, export from B — manifests should match."""
-        # Export from A
         zip_bytes_a, manifest_a = create_export_zip()
 
-        # Import to B
         target = tmp_path / "instance_b"
         target.mkdir()
         zip_path = tmp_path / "export_a.zip"
         zip_path.write_bytes(zip_bytes_a)
 
-        with patch("gideon.portability.config_dir", return_value=target):
+        with patch("gideon.workspace.portability.config_dir", return_value=target):
             with patch.dict(os.environ, {"GIDEON_HOME": str(target)}):
                 apply_import_zip(zip_path, mode="replace")
 
-        # Export from B
-        with patch("gideon.portability.config_dir", return_value=target):
+        with patch("gideon.workspace.portability.config_dir", return_value=target):
             with patch.dict(os.environ, {"GIDEON_HOME": str(target)}):
                 _, manifest_b = create_export_zip()
 
-        # Content counts should match
         assert (
-            manifest_b["contents"]["workspace_files"] == manifest_a["contents"]["workspace_files"]
+            manifest_b["contents"]["workspace_files"]
+            == manifest_a["contents"]["workspace_files"]
         )
-        assert manifest_b["contents"]["skill_count"] == manifest_a["contents"]["skill_count"]
+        assert (
+            manifest_b["contents"]["skill_count"]
+            == manifest_a["contents"]["skill_count"]
+        )
 
-    def test_export_import_preserves_semantic_memory(self, patched_config_dir, tmp_path):
+    def test_export_import_preserves_semantic_memory(
+        self, patched_config_dir, tmp_path
+    ):
         """Semantic memory entries survive a full export→import cycle."""
         zip_bytes, _ = create_export_zip()
 
@@ -682,11 +663,10 @@ class TestRoundTrip:
         zip_path = tmp_path / "export.zip"
         zip_path.write_bytes(zip_bytes)
 
-        with patch("gideon.portability.config_dir", return_value=target):
+        with patch("gideon.workspace.portability.config_dir", return_value=target):
             with patch.dict(os.environ, {"GIDEON_HOME": str(target)}):
                 apply_import_zip(zip_path, mode="replace")
 
-        # Verify semantic memory
         conn = sqlite3.connect(str(target / "memory.db"))
         rows = conn.execute("SELECT key, value_json FROM semantic_memory").fetchall()
         conn.close()
@@ -694,7 +674,9 @@ class TestRoundTrip:
         assert rows[0][0] == "user.name"
         assert json.loads(rows[0][1]) == "Alice"
 
-    def test_export_import_preserves_episodic_memory(self, patched_config_dir, tmp_path):
+    def test_export_import_preserves_episodic_memory(
+        self, patched_config_dir, tmp_path
+    ):
         """Episodic memory entries survive a full export→import cycle."""
         zip_bytes, _ = create_export_zip()
 
@@ -703,7 +685,7 @@ class TestRoundTrip:
         zip_path = tmp_path / "export.zip"
         zip_path.write_bytes(zip_bytes)
 
-        with patch("gideon.portability.config_dir", return_value=target):
+        with patch("gideon.workspace.portability.config_dir", return_value=target):
             with patch.dict(os.environ, {"GIDEON_HOME": str(target)}):
                 apply_import_zip(zip_path, mode="replace")
 
@@ -714,16 +696,13 @@ class TestRoundTrip:
         assert "deployment" in rows[0][1]
 
 
-# ── automations travel with a snapshot (S113) ──
-
-
 def _seed_automations(pc, *, names=("Nightly backup",), armed=True):
     """Write the trigger store + an event trigger + a run record the way the runtime does."""
     import asyncio
 
-    from gideon.schedule_history import ScheduleRun, ScheduleRunStore
-    from gideon.triggers.models import Trigger
-    from gideon.triggers.store import TriggerStore
+    from gideon.automation.schedule_history import ExecutionJournal, ExecutionRecord
+    from gideon.automation.triggers.models import Trigger
+    from gideon.automation.triggers.store import TriggerStore
 
     store = TriggerStore(base_dir=pc)
     for n, name in enumerate(names):
@@ -734,7 +713,9 @@ def _seed_automations(pc, *, names=("Nightly backup",), armed=True):
                 kind="clock",
                 enabled=True,
                 spec={"kind": "cron", "expr": "0 3 * * *"},
-                workflow={"inline": {"provider": "bash", "config": {"command": "backup"}}},
+                workflow={
+                    "inline": {"provider": "bash", "config": {"command": "backup"}}
+                },
                 next_fire_at="2026-01-01T03:00:00+00:00" if armed else "",
                 run_count=42,
             )
@@ -752,8 +733,8 @@ def _seed_automations(pc, *, names=("Nightly backup",), armed=True):
         )
     )
     asyncio.run(
-        ScheduleRunStore(pc).append(
-            ScheduleRun(
+        ExecutionJournal(pc).append(
+            ExecutionRecord(
                 run_id="r1",
                 job_id="clock:auto-0",
                 trigger="schedule",
@@ -780,7 +761,9 @@ class TestAutomationsInASnapshot:
 
     def test_the_trigger_store_is_captured(self, fake_gideon_home):
         _seed_automations(fake_gideon_home)
-        with patch("gideon.portability.config_dir", return_value=fake_gideon_home):
+        with patch(
+            "gideon.workspace.portability.config_dir", return_value=fake_gideon_home
+        ):
             zip_bytes, manifest = create_export_zip()
         names = zipfile.ZipFile(io.BytesIO(zip_bytes)).namelist()
         assert any(n.endswith("/triggers.json") for n in names), names
@@ -789,16 +772,21 @@ class TestAutomationsInASnapshot:
     def test_event_triggers_are_captured(self, fake_gideon_home):
         """Named in the plan's own recon note as missing alongside the trigger store."""
         _seed_automations(fake_gideon_home)
-        with patch("gideon.portability.config_dir", return_value=fake_gideon_home):
+        with patch(
+            "gideon.workspace.portability.config_dir", return_value=fake_gideon_home
+        ):
             zip_bytes, _ = create_export_zip()
         names = zipfile.ZipFile(io.BytesIO(zip_bytes)).namelist()
         assert any(n.endswith("/event_triggers.json") for n in names)
 
     def test_the_run_ledger_is_captured(self, fake_gideon_home):
         """A restored home whose triggers exist but whose history is empty reports "never ran" for
-        automations that have run for months — indistinguishable from a broken fire path."""
+        automations that have run for months — indistinguishable from a broken fire path.
+        """
         _seed_automations(fake_gideon_home)
-        with patch("gideon.portability.config_dir", return_value=fake_gideon_home):
+        with patch(
+            "gideon.workspace.portability.config_dir", return_value=fake_gideon_home
+        ):
             zip_bytes, manifest = create_export_zip()
         names = zipfile.ZipFile(io.BytesIO(zip_bytes)).namelist()
         assert any("cron-history/" in n and n.endswith(".jsonl") for n in names), names
@@ -808,7 +796,9 @@ class TestAutomationsInASnapshot:
         """🔴 Found by driving: the run-history tree exported `cron-history/.history.lock`. A
         restored lock is one held by a process that does not exist on this machine."""
         _seed_automations(fake_gideon_home)
-        with patch("gideon.portability.config_dir", return_value=fake_gideon_home):
+        with patch(
+            "gideon.workspace.portability.config_dir", return_value=fake_gideon_home
+        ):
             zip_bytes, _ = create_export_zip()
         names = zipfile.ZipFile(io.BytesIO(zip_bytes)).namelist()
         assert not [n for n in names if n.endswith(".lock")], names
@@ -816,17 +806,19 @@ class TestAutomationsInASnapshot:
     def test_a_round_trip_into_an_empty_home_restores_the_automations(
         self, fake_gideon_home, tmp_path
     ):
-        from gideon.triggers.store import TriggerStore
+        from gideon.automation.triggers.store import TriggerStore
 
         _seed_automations(fake_gideon_home, names=("Nightly backup", "Weekly report"))
-        with patch("gideon.portability.config_dir", return_value=fake_gideon_home):
+        with patch(
+            "gideon.workspace.portability.config_dir", return_value=fake_gideon_home
+        ):
             zip_bytes, _ = create_export_zip()
         zip_path = tmp_path / "snap.zip"
         zip_path.write_bytes(zip_bytes)
 
         target = tmp_path / "target"
         target.mkdir()
-        with patch("gideon.portability.config_dir", return_value=target):
+        with patch("gideon.workspace.portability.config_dir", return_value=target):
             with patch.dict(os.environ, {"GIDEON_HOME": str(target)}):
                 apply_import_zip(zip_path, mode="merge")
 
@@ -835,14 +827,18 @@ class TestAutomationsInASnapshot:
         assert (target / "event_triggers.json").is_file()
         assert (target / "cron-history" / "clock:auto-0.jsonl").is_file()
 
-    def test_a_merge_skips_a_name_the_home_already_has(self, fake_gideon_home, tmp_path):
+    def test_a_merge_skips_a_name_the_home_already_has(
+        self, fake_gideon_home, tmp_path
+    ):
         """Skip-by-NAME, mirroring `_merge_crons`: an id collision between two homes is meaningless
         (ids are slugs), while a name collision means a second copy would fire the same work twice.
         """
-        from gideon.triggers.store import TriggerStore
+        from gideon.automation.triggers.store import TriggerStore
 
         _seed_automations(fake_gideon_home, names=("Nightly backup", "Weekly report"))
-        with patch("gideon.portability.config_dir", return_value=fake_gideon_home):
+        with patch(
+            "gideon.workspace.portability.config_dir", return_value=fake_gideon_home
+        ):
             zip_bytes, _ = create_export_zip()
         zip_path = tmp_path / "snap.zip"
         zip_path.write_bytes(zip_bytes)
@@ -850,9 +846,9 @@ class TestAutomationsInASnapshot:
         target = tmp_path / "target"
         target.mkdir()
         (target / "config.json").write_text("{}")
-        _seed_automations(target, names=("Nightly backup",))  # the collision
+        _seed_automations(target, names=("Nightly backup",))
 
-        with patch("gideon.portability.config_dir", return_value=target):
+        with patch("gideon.workspace.portability.config_dir", return_value=target):
             with patch.dict(os.environ, {"GIDEON_HOME": str(target)}):
                 apply_import_zip(zip_path, mode="merge")
 
@@ -866,11 +862,14 @@ class TestAutomationsInASnapshot:
     ):
         """🔴 Runtime state is dropped on purpose. `next_fire_at` from another machine is a fire
         already scheduled elsewhere, and `run_count`/health describe runs this home never performed.
-        An imported row arrives paused so the user chooses when it starts firing here."""
-        from gideon.triggers.store import TriggerStore
+        An imported row arrives paused so the user chooses when it starts firing here.
+        """
+        from gideon.automation.triggers.store import TriggerStore
 
         _seed_automations(fake_gideon_home, names=("Weekly report",))
-        with patch("gideon.portability.config_dir", return_value=fake_gideon_home):
+        with patch(
+            "gideon.workspace.portability.config_dir", return_value=fake_gideon_home
+        ):
             zip_bytes, _ = create_export_zip()
         zip_path = tmp_path / "snap.zip"
         zip_path.write_bytes(zip_bytes)
@@ -880,7 +879,7 @@ class TestAutomationsInASnapshot:
         (target / "config.json").write_text("{}")
         _seed_automations(target, names=("Something else",))
 
-        with patch("gideon.portability.config_dir", return_value=target):
+        with patch("gideon.workspace.portability.config_dir", return_value=target):
             with patch.dict(os.environ, {"GIDEON_HOME": str(target)}):
                 apply_import_zip(zip_path, mode="merge")
 
@@ -893,11 +892,15 @@ class TestAutomationsInASnapshot:
         assert imported.next_fire_at == ""
         assert imported.run_count == 0
 
-    def test_the_home_s_own_automations_are_never_touched(self, fake_gideon_home, tmp_path):
-        from gideon.triggers.store import TriggerStore
+    def test_the_home_s_own_automations_are_never_touched(
+        self, fake_gideon_home, tmp_path
+    ):
+        from gideon.automation.triggers.store import TriggerStore
 
         _seed_automations(fake_gideon_home, names=("Weekly report",))
-        with patch("gideon.portability.config_dir", return_value=fake_gideon_home):
+        with patch(
+            "gideon.workspace.portability.config_dir", return_value=fake_gideon_home
+        ):
             zip_bytes, _ = create_export_zip()
         zip_path = tmp_path / "snap.zip"
         zip_path.write_bytes(zip_bytes)
@@ -907,12 +910,14 @@ class TestAutomationsInASnapshot:
         (target / "config.json").write_text("{}")
         _seed_automations(target, names=("Mine",))
 
-        with patch("gideon.portability.config_dir", return_value=target):
+        with patch("gideon.workspace.portability.config_dir", return_value=target):
             with patch.dict(os.environ, {"GIDEON_HOME": str(target)}):
                 apply_import_zip(zip_path, mode="merge")
 
         mine = next(
-            r.trigger for r in TriggerStore(base_dir=target).load() if r.trigger.name == "Mine"
+            r.trigger
+            for r in TriggerStore(base_dir=target).load()
+            if r.trigger.name == "Mine"
         )
         assert mine.enabled is True, "an existing automation must keep firing"
         assert mine.next_fire_at, "and must keep its armed fire"
@@ -921,71 +926,24 @@ class TestAutomationsInASnapshot:
         """§6 keeps `crons.json` read-only on disk so `automation verify-migration` can diff both
         sides — a snapshot that dropped it would break that command after a move."""
         _seed_automations(fake_gideon_home)
-        with patch("gideon.portability.config_dir", return_value=fake_gideon_home):
+        with patch(
+            "gideon.workspace.portability.config_dir", return_value=fake_gideon_home
+        ):
             zip_bytes, _ = create_export_zip()
         names = zipfile.ZipFile(io.BytesIO(zip_bytes)).namelist()
         assert any(n.endswith("/crons.json") for n in names)
 
 
-# ── the inventory ⇄ snapshot drift guard (S113) ──
-
-#: Inventory entries the snapshot does NOT yet carry. Each is real missing coverage, PINNED so the
-#: list can only shrink — a new state file added without snapshot coverage fails the test below
-#: rather than silently joining a backlog nobody re-measures.
-#:
-#: 🔴 Found by cross-checking `durability.inventory.INVENTORY` (57 entries) against both snapshot
-#: paths while closing §7 item 9: **25 of 57 declared state files travelled in neither.** The
-#: automation domain is closed by this session; the remaining 22 belong to DURABILITY-AND-SYNC,
-#: whose §1 promises "every byte of state is enumerated in one inventory" and whose plan owns the
-#: export shards. Hand-listing them here would be a silent, unreviewed scope grab into that plan.
-#: 🔴 Re-measured in S178 and it went from **24 entries to 4**. The old check grepped `snapshot.py`
-#: for each literal path, which went stale the moment coverage became inventory-DERIVED: 18 of the
-#: 24 were verified to round-trip through a real archive and come back, and 3 more are carried by an
-#: ancestor's tree copy. A ratchet that over-reports is not the safe direction — the list becomes
-#: noise and the one real gap hides among eighteen that are not.
-#:
-#: What remains is exactly the DELIBERATE omissions: every survivor is `derived=True`, so
-#: `backup_entries()` skips it on purpose ("a stale index paired with a newer store is worse than
-#: none"). Asserted below, so an entry can no longer sit here for a reason nobody re-checks.
 _SNAPSHOT_COVERAGE_GAPS: frozenset[str] = frozenset(
     {
-        # memory: the FAISS sidecar + its id map — rebuildable from memory.db, though a restore
-        # currently re-embeds from scratch.
         "memory_faiss",
         "memory_ids",
-        # platform: local model blobs and generated ACP adapters, both regenerated on demand.
         "models",
         "acp_adapters",
-        # work: the two index stores S179 declared. Both say so in their own docstrings —
-        # `session_search` "holds no truth of its own … better rebuilt than restored", `codegraph`
-        # re-parses on mtime — and a real home held 5478 codegraph databases. Declaring them was the
-        # fix (nothing claimed them); backing them up would ship a cache in every snapshot.
         "session_search_db",
         "codegraph",
-        # platform: the best-of-N outcome ledger (HC-3). `derived=True` telemetry-of-self —
-        # one bounded line per sampling call ({ts,n,criteria_digest,winner_idx,score_spread,
-        # tokens_total}, no prompt or candidate text) feeding the learning/eval question "did
-        # sampling help?". Claimed so `audit_home` sees it, deliberately not backed up: it
-        # holds no user content to lose and restoring last week's spread would say nothing
-        # about this week's bindings. The atom's own done_when specifies snapshot-excluded.
         "sampling_outcomes",
-        # work: EI-8's turn-bound file checkpoint store. The one survivor here that is NOT
-        # rebuildable — the pre-edit bytes exist nowhere else once the agent has overwritten
-        # them — and it is still a deliberate omission, on two grounds the others do not share.
-        # (1) Every manifest entry is an ABSOLUTE host path, so the tree is meaningless in
-        # another home and a restore would drop one machine's workspace copies into another's.
-        # (2) It is a live-session safety net pruned with the session, capped at
-        # `checkpoints.max_mb` PER SESSION, so carrying it would make every snapshot grow by
-        # the size of the user's recent edits for no recoverable benefit. The workspace itself
-        # holds the authoritative copy of every file in here.
         "turn_checkpoints",
-        # security: EA-1's per-request inbound trace. `derived=True` and excluded by
-        # EXTERNAL-ACCESS §10's own list, on the same grounds as the entries above: it is
-        # a local request log trimmed at 2× cap, and every security-relevant line in it is
-        # ALSO written to `security_events.jsonl`, which does travel — so the thing worth
-        # keeping is already backed up under a different name. Its sibling
-        # `inbound_clients` (the labels and bindings, token hashes only) is NOT here: that
-        # one is real state a restore must return, and it exports.
         "inbound_audit",
     }
 )
@@ -999,7 +957,7 @@ def test_every_remaining_coverage_gap_is_DERIVED(tmp_path: Path):
     store cannot be parked here: it fails `test_the_snapshot_coverage_gap_list_can_only_shrink` on
     arrival, and adding it to the list fails this test instead.
     """
-    from gideon.durability import inventory as inv
+    from gideon.operations.durability import inventory as inv
 
     by_id = {e.id: e for e in inv.INVENTORY}
     not_derived = [g for g in _SNAPSHOT_COVERAGE_GAPS if not by_id[g].derived]
@@ -1010,8 +968,8 @@ def test_every_remaining_coverage_gap_is_DERIVED(tmp_path: Path):
 
 
 def _snapshot_source_text() -> str:
-    import gideon.portability as _port
-    import gideon.snapshot as _snap
+    import gideon.workspace.portability as _port
+    import gideon.workspace.snapshot as _snap
 
     return Path(_port.__file__).read_text() + Path(_snap.__file__).read_text()
 
@@ -1028,8 +986,8 @@ def _snapshot_covered_ids(tmp: Path) -> set[str]:
     A ratchet that over-reports is not the safe direction: the list becomes noise, and the ONE entry
     that is a real gap hides among eighteen that are not. So this asks the projections directly.
     """
-    import gideon.snapshot as _snap
-    from gideon.durability import inventory as inv
+    import gideon.workspace.snapshot as _snap
+    from gideon.operations.durability import inventory as inv
 
     src = _snapshot_source_text()
     for entry in inv.backup_entries():
@@ -1044,10 +1002,6 @@ def _snapshot_covered_ids(tmp: Path) -> set[str]:
     def covered(path: str) -> bool:
         if path in src or path in reachable:
             return True
-        # A nested entry is carried by its ANCESTOR's tree copy. `workspace/knowledge/knowledge.db`
-        # and `workspace/lexicon/lexicon.db` are not enumerated by either projection — the top-level
-        # `workspace` component already stages the tree — but a real round-trip restores both
-        # (measured). Counting them as gaps would keep three permanent false entries on the list.
         parts = path.split("/")
         return any(
             "/".join(parts[:i]) in src or "/".join(parts[:i]) in reachable
@@ -1061,7 +1015,7 @@ def test_every_automation_state_file_is_in_a_snapshot(tmp_path: Path):
     """🔴 The automation domain must be COMPLETE. This session's whole point: `triggers.json` was
     declared in the inventory and carried by neither snapshot path, so `gideon snapshot` lost
     every automation the user had."""
-    from gideon.durability import inventory as inv
+    from gideon.operations.durability import inventory as inv
 
     covered = _snapshot_covered_ids(tmp_path)
     missing = [
@@ -1078,7 +1032,7 @@ def test_the_snapshot_coverage_gap_list_can_only_shrink(tmp_path: Path):
     """A new state file added without snapshot coverage must FAIL here rather than joining a backlog
     nobody re-measures. If you covered one, delete its entry; if you added state, cover it or add it
     with a reason."""
-    from gideon.durability import inventory as inv
+    from gideon.operations.durability import inventory as inv
 
     uncovered = {e.id for e in inv.INVENTORY} - _snapshot_covered_ids(tmp_path)
     new_gaps = uncovered - _SNAPSHOT_COVERAGE_GAPS
@@ -1091,10 +1045,9 @@ def test_the_snapshot_coverage_gap_list_can_only_shrink(tmp_path: Path):
         for gap in _SNAPSHOT_COVERAGE_GAPS
         if gap not in {e.id for e in inv.INVENTORY} or gap not in uncovered
     }
-    assert not stale, f"these gaps are closed or gone — remove them from the list: {sorted(stale)}"
-
-
-# ── 🔴 the export named 18 of 53 declared entries (S182) ──
+    assert (
+        not stale
+    ), f"these gaps are closed or gone — remove them from the list: {sorted(stale)}"
 
 
 def _seeded_home(tmp_path: Path) -> Path:
@@ -1162,7 +1115,7 @@ class TestExportCarriesEveryDeclaredStore:
     def test_the_export_carries_the_users_stores(self, tmp_path, monkeypatch):
         home = _seeded_home(tmp_path)
         monkeypatch.setenv("GIDEON_HOME", str(home))
-        monkeypatch.setattr("gideon.portability.config_dir", lambda: home)
+        monkeypatch.setattr("gideon.workspace.portability.config_dir", lambda: home)
 
         zip_bytes, _ = create_export_zip()
         names = zipfile.ZipFile(io.BytesIO(zip_bytes)).namelist()
@@ -1198,7 +1151,9 @@ class TestExportCarriesEveryDeclaredStore:
         ]
         assert missing_files == [], f"the export dropped these files: {missing_files}"
 
-    def test_UPLOADS_stays_excluded_and_the_asymmetry_is_deliberate(self, tmp_path, monkeypatch):
+    def test_UPLOADS_stays_excluded_and_the_asymmetry_is_deliberate(
+        self, tmp_path, monkeypatch
+    ):
         """🔴 A real asymmetry with the snapshot path, which was unwritten until S182: a SNAPSHOT
         carries `uploads/` and an EXPORT does not.
 
@@ -1207,22 +1162,20 @@ class TestExportCarriesEveryDeclaredStore:
         uploads are arbitrary user-supplied binaries of unbounded size. Pinned so the next reader
         does not "fix" it by accident once the export became inventory-derived.
         """
-        from gideon import snapshot as snap_mod
-        from gideon.portability import EXCLUDE_DIRS
+        from gideon.workspace import snapshot as snap_mod
+        from gideon.workspace.portability import EXCLUDE_DIRS
 
         home = _seeded_home(tmp_path)
         (home / "uploads").mkdir()
         (home / "uploads" / "big.bin").write_bytes(b"x" * 64)
         monkeypatch.setenv("GIDEON_HOME", str(home))
-        monkeypatch.setattr("gideon.portability.config_dir", lambda: home)
+        monkeypatch.setattr("gideon.workspace.portability.config_dir", lambda: home)
 
         zip_bytes, _ = create_export_zip()
         names = zipfile.ZipFile(io.BytesIO(zip_bytes)).namelist()
 
         assert "uploads" in EXCLUDE_DIRS
         assert not any("/uploads/" in n for n in names)
-        # ...while the snapshot side DOES carry it. If this flips, the asymmetry was changed and the
-        # comment in EXCLUDE_DIRS needs revisiting rather than the test.
         assert "uploads" in snap_mod._everything_paths(home)
 
     def test_NO_SECRET_reaches_the_export(self, tmp_path, monkeypatch):
@@ -1232,7 +1185,7 @@ class TestExportCarriesEveryDeclaredStore:
         declared. Asserted on the BYTES of every zip member, not on the filenames."""
         home = _seeded_home(tmp_path)
         monkeypatch.setenv("GIDEON_HOME", str(home))
-        monkeypatch.setattr("gideon.portability.config_dir", lambda: home)
+        monkeypatch.setattr("gideon.workspace.portability.config_dir", lambda: home)
         (home / ".env").write_text("OPENAI_API_KEY=sk-LEAK", encoding="utf-8")
         (home / ".local_secret").write_text("LEAK-local", encoding="utf-8")
         (home / "sel_hmac.key").write_text("LEAK-hmac", encoding="utf-8")
@@ -1240,7 +1193,9 @@ class TestExportCarriesEveryDeclaredStore:
         (home / "session_map.json").write_text('{"s":"LEAK-map"}', encoding="utf-8")
         (home / "session_key").write_text("LEAK-session-key", encoding="utf-8")
         (home / "credentials").mkdir()
-        (home / "credentials" / "c.json").write_text('{"tok":"LEAK-token"}', encoding="utf-8")
+        (home / "credentials" / "c.json").write_text(
+            '{"tok":"LEAK-token"}', encoding="utf-8"
+        )
 
         zip_bytes, _ = create_export_zip()
         zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
@@ -1257,7 +1212,9 @@ class TestExportCarriesEveryDeclaredStore:
         ):
             assert token not in blob, f"the export leaked {token!r}"
 
-    def test_a_NESTED_live_database_survives_the_export_INTACT(self, tmp_path, monkeypatch):
+    def test_a_NESTED_live_database_survives_the_export_INTACT(
+        self, tmp_path, monkeypatch
+    ):
         """🔴 MY OWN WIDENING INTRODUCED THIS AND A DRIVE CAUGHT IT.
 
         `workflows/runs.db` and `loop/loops.db` sit INSIDE declared trees, so the new tree walk's
@@ -1272,13 +1229,13 @@ class TestExportCarriesEveryDeclaredStore:
         """
         home = _seeded_home(tmp_path)
         monkeypatch.setenv("GIDEON_HOME", str(home))
-        monkeypatch.setattr("gideon.portability.config_dir", lambda: home)
+        monkeypatch.setattr("gideon.workspace.portability.config_dir", lambda: home)
         live = sqlite3.connect(str(home / "workflows" / "runs.db"))
         live.execute("PRAGMA journal_mode=WAL")
         live.execute("CREATE TABLE runs(id INTEGER PRIMARY KEY, v TEXT)")
         for i in range(2000):
             live.execute("INSERT INTO runs VALUES(?,?)", (i, "x" * 100))
-        live.commit()  # deliberately NOT checkpointed, and the connection stays open
+        live.commit()
 
         try:
             zip_bytes, _ = create_export_zip()
@@ -1299,8 +1256,8 @@ class TestExportCarriesEveryDeclaredStore:
         later travels by default. The three literal lists are SUBTRACTED, not replaced: they encode
         per-entry reasons (the safe backup API, the `skills/auto` skip, the `crons.json` note) a
         generic pass would lose."""
-        from gideon.durability import inventory as inv
-        from gideon.portability import _remaining_export_paths
+        from gideon.operations.durability import inventory as inv
+        from gideon.workspace.portability import _remaining_export_paths
 
         home = tmp_path / "home"
         for entry in inv.export_entries():
@@ -1315,7 +1272,6 @@ class TestExportCarriesEveryDeclaredStore:
         declared = {e.path for e in inv.export_entries()}
         assert got <= declared, "the projection must not invent paths"
         assert "tasks" in got and "projects" in got
-        # Databases are excluded here on purpose — they travel through the backup API.
         assert not any(p.endswith(".db") for p in got)
 
 
@@ -1332,7 +1288,7 @@ class TestImportReadsTheWidenedExport:
         """Export from one home, import into another — the move this feature exists for."""
         src = _seeded_home(tmp_path / "src")
         monkeypatch.setenv("GIDEON_HOME", str(src))
-        monkeypatch.setattr("gideon.portability.config_dir", lambda: src)
+        monkeypatch.setattr("gideon.workspace.portability.config_dir", lambda: src)
         zip_bytes, _ = create_export_zip()
         archive = tmp_path / "export.zip"
         archive.write_bytes(zip_bytes)
@@ -1340,7 +1296,7 @@ class TestImportReadsTheWidenedExport:
         dst = tmp_path / "dst"
         dst.mkdir()
         monkeypatch.setenv("GIDEON_HOME", str(dst))
-        monkeypatch.setattr("gideon.portability.config_dir", lambda: dst)
+        monkeypatch.setattr("gideon.workspace.portability.config_dir", lambda: dst)
 
         ok, why, _ = validate_import_zip(archive)
         assert ok, why
@@ -1364,7 +1320,7 @@ class TestImportReadsTheWidenedExport:
         owns the richer per-store merges, an import is the conservative direction."""
         src = _seeded_home(tmp_path / "src")
         monkeypatch.setenv("GIDEON_HOME", str(src))
-        monkeypatch.setattr("gideon.portability.config_dir", lambda: src)
+        monkeypatch.setattr("gideon.workspace.portability.config_dir", lambda: src)
         zip_bytes, _ = create_export_zip()
         archive = tmp_path / "export.zip"
         archive.write_bytes(zip_bytes)
@@ -1374,20 +1330,22 @@ class TestImportReadsTheWidenedExport:
         (dst / "tasks" / "x.json").write_text('{"id":"LOCAL"}', encoding="utf-8")
         (dst / "inbox.json").write_text('{"v":"LOCAL"}', encoding="utf-8")
         monkeypatch.setenv("GIDEON_HOME", str(dst))
-        monkeypatch.setattr("gideon.portability.config_dir", lambda: dst)
+        monkeypatch.setattr("gideon.workspace.portability.config_dir", lambda: dst)
 
         apply_import_zip(archive, mode="merge")
 
         assert json.loads((dst / "tasks" / "x.json").read_text())["id"] == "LOCAL"
         assert json.loads((dst / "inbox.json").read_text())["v"] == "LOCAL"
 
-    def test_a_nested_database_arrives_INTACT_through_the_round_trip(self, tmp_path, monkeypatch):
+    def test_a_nested_database_arrives_INTACT_through_the_round_trip(
+        self, tmp_path, monkeypatch
+    ):
         """The export stages it through the backup API; the import must actually place it. Asserted
         on
         ROWS read back from the imported file, not on the filename."""
         src = _seeded_home(tmp_path / "src")
         monkeypatch.setenv("GIDEON_HOME", str(src))
-        monkeypatch.setattr("gideon.portability.config_dir", lambda: src)
+        monkeypatch.setattr("gideon.workspace.portability.config_dir", lambda: src)
         live = sqlite3.connect(str(src / "workflows" / "runs.db"))
         live.execute("PRAGMA journal_mode=WAL")
         live.execute("CREATE TABLE runs(id INTEGER PRIMARY KEY)")
@@ -1404,7 +1362,7 @@ class TestImportReadsTheWidenedExport:
         dst = tmp_path / "dst"
         dst.mkdir()
         monkeypatch.setenv("GIDEON_HOME", str(dst))
-        monkeypatch.setattr("gideon.portability.config_dir", lambda: dst)
+        monkeypatch.setattr("gideon.workspace.portability.config_dir", lambda: dst)
         apply_import_zip(archive, mode="merge")
 
         imported = dst / "workflows" / "runs.db"

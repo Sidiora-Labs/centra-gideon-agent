@@ -15,12 +15,15 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.dashboard.handlers.files import api_outbox_download, api_outbox_notify
+from gideon.interfaces.dashboard.handlers.files import (
+    api_outbox_download,
+    api_outbox_notify,
+)
 
 
 @pytest.fixture
 def mock_sel():
-    with patch("gideon.sel.sel") as m:
+    with patch("gideon.security.sel.sel") as m:
         m.return_value = MagicMock()
         yield m.return_value
 
@@ -29,14 +32,14 @@ def mock_sel():
 def outbox(tmp_path):
     d = tmp_path / "outbox"
     d.mkdir()
-    with patch("gideon.config.loader.outbox_dir", return_value=d):
+    with patch("gideon.core.config.loader.outbox_dir", return_value=d):
         yield d
 
 
 async def _client(outbox) -> TestClient:
     app = web.Application()
     state = MagicMock()
-    state._sessions = {}  # no active session → notify skips the append, still 200
+    state._sessions = {}
     state.broadcast_ws = MagicMock()
     app["state"] = state
     app.router.add_post("/api/outbox/notify", api_outbox_notify)
@@ -49,14 +52,13 @@ async def _client(outbox) -> TestClient:
 @pytest.mark.asyncio
 async def test_notify_accepts_mp3_with_content_type(outbox, mock_sel) -> None:
     f = outbox / "clip.mp3"
-    f.write_bytes(b"\xff\xfb\x90\x00not-utf8-binary\x00\x01")  # non-UTF-8 bytes
+    f.write_bytes(b"\xff\xfb\x90\x00not-utf8-binary\x00\x01")
     client = await _client(outbox)
     try:
         resp = await client.post(
             "/api/outbox/notify", json={"filename": "clip.mp3", "path": str(f)}
         )
         assert resp.status == 200
-        # The broadcast carries the derived content_type.
         state = client.app["state"]
         args = state.broadcast_ws.call_args
         assert args[0][0] == "file_ready"
@@ -74,7 +76,7 @@ async def test_notify_still_rejects_non_utf8_text(outbox, mock_sel) -> None:
         resp = await client.post(
             "/api/outbox/notify", json={"filename": "data.txt", "path": str(f)}
         )
-        assert resp.status == 400  # text/* must be UTF-8
+        assert resp.status == 400
     finally:
         await client.close()
 
@@ -118,10 +120,9 @@ async def test_download_serves_media_with_content_type(outbox, mock_sel) -> None
         resp = await client.get("/api/outbox/clip.mp4")
         assert resp.status == 200
         assert resp.headers["Content-Type"] == "video/mp4"
-        # FileResponse advertises range support.
         assert resp.headers.get("Accept-Ranges") == "bytes"
         body = await resp.read()
-        assert body == f.read_bytes()  # served verbatim (no redaction mangling)
+        assert body == f.read_bytes()
     finally:
         await client.close()
 

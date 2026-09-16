@@ -46,20 +46,15 @@ from unittest import mock
 import browse_chrome
 import pytest
 
-from gideon.browse import cdp
-from gideon.config.loader import AppConfig
-from gideon.net import policy as net_policy
+from gideon.core.config.loader import AppConfig
+from gideon.integrations.browse import cdp
+from gideon.security.net import policy as net_policy
 
 ALLOWED_HOST = "allowed.local"
 DENIED_HOST = "denied.local"
 
-#: Named once so the skip/fail message says which proof stopped running.
 PROOF = "LIVE PROOF"
 
-#: The CDP reply that means this session never attached to a page target. Chrome answers
-#: it to any ``Page.*`` message on a session with no attached page, so it is what the
-#: teardown's own ``Page.stopLoading`` / ``Page.navigate`` hit when the target the fixture
-#: picked out of ``/json/list`` went away between selection and use.
 _NOT_ATTACHED = "Not attached to an active page"
 
 
@@ -105,9 +100,6 @@ def _resolver(host: str) -> list[str]:
     raise socket.gaierror(f"no fake DNS entry for {host!r}")
 
 
-# ── the site ──────────────────────────────────────────────────────────────────
-
-
 class _Site:
     """A real loopback origin that counts real requests."""
 
@@ -120,7 +112,7 @@ class _Site:
         class _Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
 
-            def log_message(self, *_args: object) -> None:  # keep pytest output clean
+            def log_message(self, *_args: object) -> None:
                 return
 
             def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler's name
@@ -175,9 +167,6 @@ class _Site:
             return list(self.hits)
 
 
-# ── the browser ───────────────────────────────────────────────────────────────
-
-
 @contextlib.contextmanager
 def _browser(chrome: str):
     """Launch a headless browser and yield ONE page target's WebSocket URL.
@@ -188,9 +177,6 @@ def _browser(chrome: str):
     """
     port = _free_port()
     profile = tempfile.mkdtemp(prefix="ba2-live-profile-")
-    # Chrome's own stderr, kept so a launch that never reaches CDP reports its real cause
-    # rather than only the generic poll timeout. On GitHub's ubuntu-latest a headless launch
-    # without --no-sandbox aborts at startup, and DEVNULL used to swallow that fatal line.
     stderr_log = tempfile.NamedTemporaryFile(prefix="ba2-live-stderr-", suffix=".log")
     proc = subprocess.Popen(
         [
@@ -198,20 +184,13 @@ def _browser(chrome: str):
             f"--remote-debugging-port={port}",
             f"--user-data-dir={profile}",
             "--headless",
-            # Required on GitHub Actions Linux runners: the sandbox cannot initialise there and
-            # /dev/shm is too small for Chrome's default; without these the process aborts before
-            # opening the CDP port. Harmless on macOS, where the suite also runs locally.
             "--no-sandbox",
             "--disable-dev-shm-usage",
             "--no-first-run",
             "--no-default-browser-check",
             "--disable-gpu",
-            # The two names the policy distinguishes; everything else is unreachable, so a
-            # guard regression cannot dial a real host from this suite.
             "--host-resolver-rules="
             f"MAP {ALLOWED_HOST} 127.0.0.1,MAP {DENIED_HOST} 127.0.0.1,MAP * ~NOTFOUND",
-            # chrome-headless-shell opens NO page target unless given a URL, and the browser
-            # -level endpoint would then need a sessionId on every Page.* message.
             "about:blank",
         ],
         stdout=subprocess.DEVNULL,
@@ -222,9 +201,13 @@ def _browser(chrome: str):
         deadline = time.time() + 30
         while time.time() < deadline and page_ws is None:
             try:
-                with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=1) as r:
+                with urllib.request.urlopen(
+                    f"http://127.0.0.1:{port}/json/list", timeout=1
+                ) as r:
                     for target in json.load(r):
-                        if target.get("type") == "page" and target.get("webSocketDebuggerUrl"):
+                        if target.get("type") == "page" and target.get(
+                            "webSocketDebuggerUrl"
+                        ):
                             page_ws = target["webSocketDebuggerUrl"]
                             break
             except Exception:
@@ -243,11 +226,7 @@ def _browser(chrome: str):
         proc.terminate()
         with contextlib.suppress(Exception):
             proc.wait(timeout=10)
-        # Closing the NamedTemporaryFile unlinks it (POSIX); Chrome's inherited fd keeps the
-        # inode alive until it exits, which the terminate/wait above has already ensured.
         stderr_log.close()
-        # The profile dir is ~10 MB of cache per launch and this fixture may run once per
-        # xdist worker, so leaving them behind fills the temp dir over a few full-suite runs.
         shutil.rmtree(profile, ignore_errors=True)
 
 
@@ -301,7 +280,7 @@ async def _marker(inner) -> dict:
 
 
 async def _scenario(page_ws: str, site: _Site, sel_rows: list) -> dict:
-    from gideon.browse.transport import WebSocketCdpTransport
+    from gideon.integrations.browse.transport import WebSocketCdpTransport
 
     inner = await WebSocketCdpTransport.connect(page_ws)
     recorder = _RecordingTransport(inner)
@@ -311,12 +290,10 @@ async def _scenario(page_ws: str, site: _Site, sel_rows: list) -> dict:
         await session.start()
         obs["start_wire"] = list(recorder.methods)
 
-        # ── A. a denied host: nothing on the wire, nothing on the server ──────
         recorder.methods.clear()
         site.clear()
         sel_rows.clear()
         denied = await session.navigate(site.url(DENIED_HOST, "/secret"))
-        # Give a hypothetical navigate-then-check implementation time to actually land.
         await asyncio.sleep(0.75)
         obs["deny"] = {
             "allowed": denied.allowed,
@@ -331,7 +308,6 @@ async def _scenario(page_ws: str, site: _Site, sel_rows: list) -> dict:
             ],
         }
 
-        # ── B. an allowed host: the vacuity partner for every "zero" above ────
         recorder.methods.clear()
         site.clear()
         sel_rows.clear()
@@ -347,14 +323,13 @@ async def _scenario(page_ws: str, site: _Site, sel_rows: list) -> dict:
         }
         obs["marker"] = await _marker(inner)
 
-        # ── C. a CLIENT-SIDE redirect to a denied host: torn down ─────────────
         before = len(session.blocks)
         recorder.methods.clear()
         site.clear()
         sel_rows.clear()
         await session.navigate(site.url(ALLOWED_HOST, "/jump-denied"))
         fired = await _settle(lambda: len(session.blocks) > before)
-        await asyncio.sleep(0.75)  # let the teardown's two messages complete
+        await asyncio.sleep(0.75)
         obs["redirect_denied"] = {
             "guard_fired": fired,
             "blocked_url": session.blocks[-1].url if session.blocks else "",
@@ -369,13 +344,14 @@ async def _scenario(page_ws: str, site: _Site, sel_rows: list) -> dict:
             "quarantined": session.quarantine_reason,
         }
 
-        # ── D. a client-side redirect to an ALLOWED host: left alone ──────────
         before = len(session.blocks)
         recorder.methods.clear()
         site.clear()
         sel_rows.clear()
         await session.navigate(site.url(ALLOWED_HOST, "/jump-allowed"))
-        landed = await _settle(lambda: any(h.startswith("/landed") for h in site.snapshot()))
+        landed = await _settle(
+            lambda: any(h.startswith("/landed") for h in site.snapshot())
+        )
         await asyncio.sleep(0.75)
         obs["redirect_allowed"] = {
             "landed": landed,
@@ -386,8 +362,6 @@ async def _scenario(page_ws: str, site: _Site, sel_rows: list) -> dict:
         }
     finally:
         await inner.close()
-    # Attribute an unattached session before any test reads these observations, so one
-    # accurate environment failure replaces three wrong policy conclusions.
     _refuse_unmeasured(obs)
     return obs
 
@@ -412,10 +386,6 @@ def live() -> dict:
             sel_rows.append(event)
 
     egress = types.SimpleNamespace(
-        # Loopback is private, so the BROWSE profile's public-only stance would deny BOTH
-        # names. The operator layer is the real mechanism that opens a LAN/loopback host,
-        # and `deny_hosts` is the real mechanism that shuts one again — so this exercises
-        # `egress_policy_for`, not a hand-built policy.
         allow_hosts=[],
         deny_hosts=[DENIED_HOST],
         allow_private=True,
@@ -434,9 +404,6 @@ def live() -> dict:
         net_policy._LAST_DENY_HOSTS = remembered
 
 
-# ── the clauses ───────────────────────────────────────────────────────────────
-
-
 def test_the_guard_script_is_installed_before_anything_navigates(live: dict) -> None:
     """Start's wire, from a real browser: enable then inject, and nothing else."""
     assert live["start_wire"] == [cdp.PAGE_ENABLE, cdp.ADD_SCRIPT]
@@ -448,7 +415,10 @@ def test_the_session_really_injected_the_real_safety_script(live: dict) -> None:
     this proves the session is what put it there."""
     marker = live["marker"]
     assert marker, "window.__gideonSafety is absent, so nothing was injected"
-    assert marker.get("failed") in ([], None), f"guard steps failed in-page: {marker.get('failed')}"
+    assert marker.get("failed") in (
+        [],
+        None,
+    ), f"guard steps failed in-page: {marker.get('failed')}"
     for step in ("fetch", "XMLHttpRequest", "media", "deviceApis"):
         assert step in marker.get("applied", []), f"{step} was not guarded: {marker}"
 
@@ -466,7 +436,8 @@ def test_a_denied_host_never_reaches_the_network(live: dict) -> None:
     assert "deny list" in deny["reason"]
     assert deny["navigate_count"] == 0, "a denied host must not produce a Page.navigate"
     assert deny["server_hits"] == [], (
-        "the browser dialled the denied origin, so the gate ran too late: " f"{deny['server_hits']}"
+        "the browser dialled the denied origin, so the gate ran too late: "
+        f"{deny['server_hits']}"
     )
 
 
@@ -475,7 +446,9 @@ def test_a_denied_navigation_is_recorded_in_the_sel(live: dict) -> None:
     assert live["deny"]["sel"] == [(cdp.NAVIGATE, "preflight", DENIED_HOST)]
 
 
-def test_an_allowed_host_does_navigate_and_is_not_audited_as_a_denial(live: dict) -> None:
+def test_an_allowed_host_does_navigate_and_is_not_audited_as_a_denial(
+    live: dict,
+) -> None:
     """The vacuity floor for all three "zero" assertions above.
 
     Without this, "no wire message" and "no server hit" are satisfied by a session that
@@ -484,12 +457,16 @@ def test_an_allowed_host_does_navigate_and_is_not_audited_as_a_denial(live: dict
     allow = live["allow"]
     assert allow["allowed"] is True and allow["ok"] is True
     assert allow["navigate_count"] == 1
-    assert any(h.startswith("/allowed") for h in allow["server_hits"]), allow["server_hits"]
+    assert any(h.startswith("/allowed") for h in allow["server_hits"]), allow[
+        "server_hits"
+    ]
     assert allow["sel"] == [], "an allowed navigation is not a denial"
     assert allow["final_url"].startswith(f"http://{ALLOWED_HOST}:")
 
 
-def test_a_real_client_side_redirect_to_a_denied_host_is_re_evaluated(live: dict) -> None:
+def test_a_real_client_side_redirect_to_a_denied_host_is_re_evaluated(
+    live: dict,
+) -> None:
     """The redirect clause, with a real page really assigning ``location``.
 
     The pre-flight authorised ``allowed.local`` and never saw ``denied.local``; only the
@@ -501,7 +478,9 @@ def test_a_real_client_side_redirect_to_a_denied_host_is_re_evaluated(live: dict
     assert red["blocked_host"] == DENIED_HOST
     assert red["blocked_url"].startswith(f"http://{DENIED_HOST}:")
     assert red["sel"] == [(cdp.FRAME_NAVIGATED, "frame_navigated", DENIED_HOST)]
-    assert not red["quarantined"], "the teardown was deliverable, so nothing should quarantine"
+    assert not red[
+        "quarantined"
+    ], "the teardown was deliverable, so nothing should quarantine"
 
 
 def test_the_denied_document_is_torn_down_not_merely_stopped(live: dict) -> None:
@@ -529,13 +508,17 @@ def test_the_redirect_request_itself_already_left_the_browser(live: dict) -> Non
     A client-side redirect is dispatched by the page; ``Page.frameNavigated`` is the browser
     telling us it already happened. The guard's reach is the DOM, not the socket — §6.3.
     """
-    assert any(h.startswith("/secret") for h in live["redirect_denied"]["server_hits"]), (
+    assert any(
+        h.startswith("/secret") for h in live["redirect_denied"]["server_hits"]
+    ), (
         "if the denied request never reached the server, this test's premise is wrong and "
         "the limit it documents should be re-measured"
     )
 
 
-def test_a_real_client_side_redirect_to_an_allowed_host_is_left_alone(live: dict) -> None:
+def test_a_real_client_side_redirect_to_an_allowed_host_is_left_alone(
+    live: dict,
+) -> None:
     """Vacuity floor for the redirect teardown: it is the DENY that tore the page down.
 
     Same mechanism, same event, allowed destination — no block, no SEL row, and the page is
@@ -543,13 +526,12 @@ def test_a_real_client_side_redirect_to_an_allowed_host_is_left_alone(live: dict
     the page on every ``Page.frameNavigated``, which would be a browser that cannot browse.
     """
     red = live["redirect_allowed"]
-    assert red["landed"], "the allowed redirect never completed, so nothing was measured"
+    assert red[
+        "landed"
+    ], "the allowed redirect never completed, so nothing was measured"
     assert red["new_blocks"] == 0, "an allowed redirect must not be blocked"
     assert red["sel"] == []
     assert red["final_url"].endswith("/landed"), red["final_url"]
-
-
-# ── the attribution rail itself, which needs no browser ───────────────────────
 
 
 def test_an_unattached_session_is_attributed_to_the_environment() -> None:

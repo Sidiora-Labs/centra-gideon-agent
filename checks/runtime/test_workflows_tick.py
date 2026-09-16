@@ -19,15 +19,15 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.workflows.admission import DEFAULT_LANE_CAPS
-from gideon.workflows.models import (
+from gideon.automation.workflows.admission import DEFAULT_LANE_CAPS
+from gideon.automation.workflows.models import (
     SUCCESS_STATES,
     InstanceState,
     JoinMode,
     Node,
     NodeKind,
 )
-from gideon.workflows.tick import (
+from gideon.automation.workflows.tick import (
     Limits,
     container_outcome,
     edge_key,
@@ -80,7 +80,8 @@ class TestPurity:
                 "kind": "parallel",
                 "id": "p",
                 "children": [
-                    {"kind": "infer", "id": f"n{i}", "config": {"prompt": "x"}} for i in range(6)
+                    {"kind": "infer", "id": f"n{i}", "config": {"prompt": "x"}}
+                    for i in range(6)
                 ],
             }
         )
@@ -175,8 +176,14 @@ class TestParallelAndNeeds:
 
     def test_quorum_completes_without_every_child(self) -> None:
         states = [InstanceState.DONE, InstanceState.DONE, InstanceState.FAILED]
-        assert container_outcome(states, join=JoinMode.QUORUM, quorum=2) == InstanceState.DONE
-        assert container_outcome(states, join=JoinMode.QUORUM, quorum=3) == InstanceState.FAILED
+        assert (
+            container_outcome(states, join=JoinMode.QUORUM, quorum=2)
+            == InstanceState.DONE
+        )
+        assert (
+            container_outcome(states, join=JoinMode.QUORUM, quorum=3)
+            == InstanceState.FAILED
+        )
 
     def test_any_join_succeeds_on_one_success(self) -> None:
         states = [InstanceState.FAILED, InstanceState.DONE]
@@ -196,7 +203,11 @@ class TestActiveEdgeJoinGating:
                 "config": {"on": "{{inputs.kind}}"},
                 "cases": {
                     "bug": {"kind": "transform", "id": "fix", "config": {"expr": "f"}},
-                    "feat": {"kind": "transform", "id": "build", "config": {"expr": "b"}},
+                    "feat": {
+                        "kind": "transform",
+                        "id": "build",
+                        "config": {"expr": "b"},
+                    },
                 },
             },
             {
@@ -234,7 +245,9 @@ class TestActiveEdgeJoinGating:
             "root.children[0].cases[feat]": InstanceState.SKIPPED,
             "root.children[0].cases[bug]": InstanceState.DONE,
         }
-        fr = frontier(root, states, inputs={"kind": "bug"}, outputs={"router": {"case": "bug"}})
+        fr = frontier(
+            root, states, inputs={"kind": "bug"}, outputs={"router": {"case": "bug"}}
+        )
         assert not fr.blocked, fr.block_reason
         assert "root.children[1]" in _paths(fr)
 
@@ -267,7 +280,7 @@ class TestActiveEdgeJoinGating:
         fr = frontier(root, states)
         assert "root.children[3]" not in _paths(fr)
         assert len(fr.waiting) == 2
-        assert not fr.blocked  # parked, not deadlocked
+        assert not fr.blocked
 
     def test_a_declined_edge_makes_its_target_skippable(self) -> None:
         """An explicitly declined edge can never be satisfied by execution, so its target
@@ -281,9 +294,20 @@ class TestActiveEdgeJoinGating:
                         "kind": "branch",
                         "id": "r",
                         "config": {"on": "{{inputs.k}}"},
-                        "cases": {"x": {"kind": "transform", "id": "cx", "config": {"expr": "1"}}},
+                        "cases": {
+                            "x": {
+                                "kind": "transform",
+                                "id": "cx",
+                                "config": {"expr": "1"},
+                            }
+                        },
                     },
-                    {"kind": "transform", "id": "dead", "needs": ["r"], "config": {"expr": "2"}},
+                    {
+                        "kind": "transform",
+                        "id": "dead",
+                        "needs": ["r"],
+                        "config": {"expr": "2"},
+                    },
                 ],
             }
         )
@@ -314,7 +338,6 @@ class TestActiveEdgeJoinGating:
             states,
             inputs={"kind": "bug"},
             outputs={"router": {"case": "bug"}},
-            # The branch declined its OTHER CASE, not the sibling.
             declined_edges={edge_key("router", "build")},
         )
         assert "root.children[1]" in _paths(fr)
@@ -366,7 +389,9 @@ class TestForeach:
         assert fr.complete and fr.outcome == InstanceState.DEGRADED
 
     def test_halt_policy_stops_scheduling_after_a_failure(self) -> None:
-        node = _node({**self.FE, "config": {**self.FE["config"], "on_item_error": "halt"}})
+        node = _node(
+            {**self.FE, "config": {**self.FE["config"], "on_item_error": "halt"}}
+        )
         states = {"root.body#0": InstanceState.FAILED}
         fr = frontier(node, states, inputs={"xs": ["a", "b", "c"]})
         assert not fr.ready
@@ -401,7 +426,11 @@ class TestLoop:
         node = _node(
             {
                 **self.LP,
-                "config": {"mode": "until", "condition": "{{inputs.never}}", "max_iterations": 2},
+                "config": {
+                    "mode": "until",
+                    "condition": "{{inputs.never}}",
+                    "max_iterations": 2,
+                },
             }
         )
         keep, reason = loop_should_continue(node, iteration=2)
@@ -410,7 +439,12 @@ class TestLoop:
     def test_an_unresolvable_until_condition_stops_rather_than_spins(self) -> None:
         """A loop that cannot evaluate its own exit test is broken; spinning forever is
         the worse of the two readings."""
-        node = _node({**self.LP, "config": {"mode": "until", "condition": "{{nodes.gone.output}}"}})
+        node = _node(
+            {
+                **self.LP,
+                "config": {"mode": "until", "condition": "{{nodes.gone.output}}"},
+            }
+        )
         keep, reason = loop_should_continue(node, iteration=1)
         assert keep is False and reason == "condition_unresolvable"
 
@@ -442,14 +476,15 @@ class TestLanes:
                 "kind": "parallel",
                 "id": "p",
                 "children": [
-                    {"kind": "infer", "id": f"n{i}", "config": {"prompt": "x"}} for i in range(5)
+                    {"kind": "infer", "id": f"n{i}", "config": {"prompt": "x"}}
+                    for i in range(5)
                 ],
             }
         )
         fr = frontier(root, {}, limits=Limits(lanes={"llm": 2, "io": 2, "compute": 64}))
         assert len(fr.ready) == 2
         assert len(fr.deferred) == 3
-        assert not fr.blocked  # deferred work is not a deadlock
+        assert not fr.blocked
 
     def test_already_running_nodes_count_against_the_cap(self) -> None:
         root = _node(
@@ -457,7 +492,8 @@ class TestLanes:
                 "kind": "parallel",
                 "id": "p",
                 "children": [
-                    {"kind": "infer", "id": f"n{i}", "config": {"prompt": "x"}} for i in range(4)
+                    {"kind": "infer", "id": f"n{i}", "config": {"prompt": "x"}}
+                    for i in range(4)
                 ],
             }
         )
@@ -494,11 +530,15 @@ class TestDeadlockDetection:
                 "kind": "parallel",
                 "id": "p",
                 "children": [
-                    {"kind": "transform", "id": "a", "needs": ["ghost"], "config": {"expr": "1"}},
+                    {
+                        "kind": "transform",
+                        "id": "a",
+                        "needs": ["ghost"],
+                        "config": {"expr": "1"},
+                    },
                 ],
             }
         )
-        # `needs` naming a non-sibling is a validation error; at runtime it must not hang.
         fr = frontier(root, {})
         assert fr.ready or fr.blocked
 
@@ -515,7 +555,8 @@ class TestContainerOutcome:
 
     def test_an_unfinished_child_keeps_the_container_running(self) -> None:
         assert (
-            container_outcome([InstanceState.DONE, InstanceState.PENDING]) == InstanceState.RUNNING
+            container_outcome([InstanceState.DONE, InstanceState.PENDING])
+            == InstanceState.RUNNING
         )
 
     def test_all_skipped_reports_skipped_not_done(self) -> None:
@@ -528,7 +569,9 @@ class TestContainerOutcome:
 
     def test_severity_ordering_picks_the_most_important_verdict(self) -> None:
         assert (
-            container_outcome([InstanceState.DONE, InstanceState.FAILED, InstanceState.SKIPPED])
+            container_outcome(
+                [InstanceState.DONE, InstanceState.FAILED, InstanceState.SKIPPED]
+            )
             == InstanceState.FAILED
         )
         assert (
@@ -566,14 +609,17 @@ class TestAllowFailure:
     def test_a_tolerated_failure_degrades_rather_than_fails_the_container(self) -> None:
         """The defect, as a test: this was FAILED before S148, discarding four good lenses."""
         assert (
-            self._outcome((True,) * 5, [InstanceState.DONE] * 4 + [InstanceState.FAILED])
+            self._outcome(
+                (True,) * 5, [InstanceState.DONE] * 4 + [InstanceState.FAILED]
+            )
             == InstanceState.DEGRADED
         )
 
     def test_DEGRADED_not_DONE_so_partial_never_reads_as_complete(self) -> None:
         """The whole design decision. `SUCCESS_STATES` includes DEGRADED so the join proceeds, but
         masking to DONE would make a partial extraction indistinguishable from a complete one — the
-        silent-drop shape: the run reports success and nothing ever says a lens was missing."""
+        silent-drop shape: the run reports success and nothing ever says a lens was missing.
+        """
         got = self._outcome((True, True), [InstanceState.DONE, InstanceState.FAILED])
         assert got == InstanceState.DEGRADED
         assert got != InstanceState.DONE
@@ -581,7 +627,9 @@ class TestAllowFailure:
 
     def test_an_UNtolerated_failure_still_fails_the_container(self) -> None:
         assert (
-            self._outcome((False,) * 5, [InstanceState.DONE] * 4 + [InstanceState.FAILED])
+            self._outcome(
+                (False,) * 5, [InstanceState.DONE] * 4 + [InstanceState.FAILED]
+            )
             == InstanceState.FAILED
         )
 
@@ -619,7 +667,9 @@ class TestAllowFailure:
         import pathlib
 
         spec = json.loads(
-            pathlib.Path("src/gideon/workflows/bundled/rich-ingest/workflow.json").read_text()
+            pathlib.Path(
+                "runtime/gideon/automation/workflows/bundled/rich-ingest/workflow.json"
+            ).read_text()
         )
         lenses: list[str] = []
         consumers: list[tuple[str, str]] = []
@@ -652,7 +702,7 @@ class TestAllowFailure:
 class TestNodeKindCoverage:
     def test_every_kind_has_a_lane(self) -> None:
         """A new kind without a lane would be unschedulable — this is the drift guard."""
-        from gideon.workflows.models import lane_for
+        from gideon.automation.workflows.models import lane_for
 
         for kind in NodeKind:
             assert lane_for(kind) in ("llm", "io", "compute")
@@ -669,18 +719,23 @@ class TestDerivedOrderingReachability:
 
     def test_a_parallel_binding_waits_without_a_hand_written_needs(self) -> None:
         """The core capability: `b` binds `a`'s output and is held until `a` is terminal, with
-        no `needs` declared. Under `PP-1` this spec was refused; the frontier now derives it."""
+        no `needs` declared. Under `PP-1` this spec was refused; the frontier now derives it.
+        """
         root = _node(
             {
                 "kind": "parallel",
                 "id": "p",
                 "children": [
                     {"kind": "transform", "id": "a", "config": {"expr": "1"}},
-                    {"kind": "transform", "id": "b", "config": {"expr": "{{nodes.a.output}}"}},
+                    {
+                        "kind": "transform",
+                        "id": "b",
+                        "config": {"expr": "{{nodes.a.output}}"},
+                    },
                 ],
             }
         )
-        assert _paths(frontier(root, {})) == ["root.children[0]"]  # only a; b waits on a
+        assert _paths(frontier(root, {})) == ["root.children[0]"]
         after = frontier(root, {"root.children[0]": InstanceState.DONE})
         assert "root.children[1]" in _paths(after)
 
@@ -697,7 +752,9 @@ class TestDerivedOrderingReachability:
                     {
                         "kind": "sequence",
                         "id": "left",
-                        "children": [{"kind": "transform", "id": "src", "config": {"expr": "1"}}],
+                        "children": [
+                            {"kind": "transform", "id": "src", "config": {"expr": "1"}}
+                        ],
                     },
                     {
                         "kind": "sequence",
@@ -724,7 +781,9 @@ class TestDerivedOrderingReachability:
                     {
                         "kind": "transform",
                         "id": "join",
-                        "config": {"expr": "{{nodes.viaA.output}} {{nodes.viaB.output}}"},
+                        "config": {
+                            "expr": "{{nodes.viaA.output}} {{nodes.viaB.output}}"
+                        },
                     },
                 ],
             }
@@ -741,7 +800,6 @@ class TestDerivedOrderingReachability:
                 states[r.path] = InstanceState.DONE
                 launched.append(r.node_id)
         assert fr.complete and fr.outcome == InstanceState.DONE
-        # src before both legs; both legs before the join — the diamond, honoured.
         assert launched.index("src") < launched.index("viaA") < launched.index("join")
         assert launched.index("src") < launched.index("viaB") < launched.index("join")
 
@@ -755,14 +813,18 @@ class TestDerivedOrderingReachability:
                 "id": "p",
                 "children": [
                     {"kind": "transform", "id": "a", "config": {"expr": "1"}},
-                    {"kind": "transform", "id": "b", "config": {"expr": "{{nodes.a.output}}"}},
+                    {
+                        "kind": "transform",
+                        "id": "b",
+                        "config": {"expr": "{{nodes.a.output}}"},
+                    },
                 ],
             }
         )
         fr = frontier(root, {"root.children[0]": InstanceState.RUNNING})
-        assert "root.children[1]" not in _paths(fr)  # b waits
-        assert "root.children[1]" not in fr.to_skip  # and is NOT skipped
-        assert not fr.blocked  # a is running — parked, not deadlocked
+        assert "root.children[1]" not in _paths(fr)
+        assert "root.children[1]" not in fr.to_skip
+        assert not fr.blocked
 
     def test_a_declined_case_skips_a_cross_container_dataflow_reader(self) -> None:
         """WF2-R18 direction #1 (deadlock avoidance) across containers. A later sibling binds a
@@ -778,8 +840,16 @@ class TestDerivedOrderingReachability:
                         "id": "r",
                         "config": {"on": "{{inputs.k}}"},
                         "cases": {
-                            "x": {"kind": "transform", "id": "cx", "config": {"expr": "1"}},
-                            "y": {"kind": "transform", "id": "cy", "config": {"expr": "2"}},
+                            "x": {
+                                "kind": "transform",
+                                "id": "cx",
+                                "config": {"expr": "1"},
+                            },
+                            "y": {
+                                "kind": "transform",
+                                "id": "cy",
+                                "config": {"expr": "2"},
+                            },
                         },
                     },
                     {
@@ -798,9 +868,11 @@ class TestDerivedOrderingReachability:
         fr = frontier(root, states, inputs={"k": "x"}, outputs={"r": {"case": "x"}})
         assert "root.children[1]" in fr.to_skip
         assert "root.children[1]" not in _paths(fr)
-        assert not fr.blocked  # to_skip counts as progress, not deadlock
+        assert not fr.blocked
 
-    def test_a_decline_skips_exactly_the_unreachable_target_not_a_live_one(self) -> None:
+    def test_a_decline_skips_exactly_the_unreachable_target_not_a_live_one(
+        self,
+    ) -> None:
         """WF2-R18 direction #2 (no early fire). Two readers sit beside a branch: one binds the
         TAKEN case, one the untaken. Only the reader of the untaken case is skipped; the reader
         of the live case must run, or the frontier fired a join early on a live leg."""
@@ -814,12 +886,28 @@ class TestDerivedOrderingReachability:
                         "id": "r",
                         "config": {"on": "{{inputs.k}}"},
                         "cases": {
-                            "x": {"kind": "transform", "id": "cx", "config": {"expr": "1"}},
-                            "y": {"kind": "transform", "id": "cy", "config": {"expr": "2"}},
+                            "x": {
+                                "kind": "transform",
+                                "id": "cx",
+                                "config": {"expr": "1"},
+                            },
+                            "y": {
+                                "kind": "transform",
+                                "id": "cy",
+                                "config": {"expr": "2"},
+                            },
                         },
                     },
-                    {"kind": "transform", "id": "dead", "config": {"expr": "{{nodes.cy.output}}"}},
-                    {"kind": "transform", "id": "live", "config": {"expr": "{{nodes.cx.output}}"}},
+                    {
+                        "kind": "transform",
+                        "id": "dead",
+                        "config": {"expr": "{{nodes.cy.output}}"},
+                    },
+                    {
+                        "kind": "transform",
+                        "id": "live",
+                        "config": {"expr": "{{nodes.cx.output}}"},
+                    },
                 ],
             }
         )
@@ -829,13 +917,14 @@ class TestDerivedOrderingReachability:
             "root.children[0].cases[y]": InstanceState.SKIPPED,
         }
         fr = frontier(root, states, inputs={"k": "x"}, outputs={"r": {"case": "x"}})
-        assert fr.to_skip == ["root.children[1]"]  # dead (reads the untaken case) only
-        assert "root.children[2]" in _paths(fr)  # live (reads the taken case) runs
+        assert fr.to_skip == ["root.children[1]"]
+        assert "root.children[2]" in _paths(fr)
 
     def test_a_non_dataflow_needs_onto_a_skipped_node_is_satisfied(self) -> None:
         """The asymmetry that keeps a join off an untaken leg. A plain `needs` (no dataflow)
         onto a SKIPPED predecessor is SATISFIED — skipped is terminal — so the reader runs
-        rather than being cascade-skipped. Only a DATAFLOW edge makes a reader unreachable."""
+        rather than being cascade-skipped. Only a DATAFLOW edge makes a reader unreachable.
+        """
         root = _node(
             {
                 "kind": "parallel",
@@ -845,22 +934,34 @@ class TestDerivedOrderingReachability:
                         "kind": "branch",
                         "id": "r",
                         "config": {"on": "{{inputs.k}}"},
-                        "cases": {"x": {"kind": "transform", "id": "cx", "config": {"expr": "1"}}},
+                        "cases": {
+                            "x": {
+                                "kind": "transform",
+                                "id": "cx",
+                                "config": {"expr": "1"},
+                            }
+                        },
                     },
-                    {"kind": "transform", "id": "after", "needs": ["cx"], "config": {"expr": "9"}},
+                    {
+                        "kind": "transform",
+                        "id": "after",
+                        "needs": ["cx"],
+                        "config": {"expr": "9"},
+                    },
                 ],
             }
         )
-        # cx was the (only) case and it is SKIPPED here — `after` merely orders after it.
         states = {
             "root.children[0]": InstanceState.DONE,
             "root.children[0].cases[x]": InstanceState.SKIPPED,
         }
         fr = frontier(root, states, inputs={"k": "x"}, outputs={"r": {"case": "x"}})
-        assert "root.children[1]" in _paths(fr)  # honoured, not skipped
+        assert "root.children[1]" in _paths(fr)
         assert "root.children[1]" not in fr.to_skip
 
-    def test_a_skipped_producer_inside_a_foreach_body_skips_only_that_items_reader(self) -> None:
+    def test_a_skipped_producer_inside_a_foreach_body_skips_only_that_items_reader(
+        self,
+    ) -> None:
         """Per-item instance resolution of the dataflow cascade — the `_producer_instance`
         risk. Item 0's `src` went SKIPPED (a decline the controller resolved per-item), so item
         0's `rd`, which binds `src`, is unreachable and skipped; item 1's `src` is DONE, so item
@@ -891,11 +992,11 @@ class TestDerivedOrderingReachability:
             }
         )
         states = {
-            "root.body#0.children[0]": InstanceState.SKIPPED,  # item 0's src declined away
-            "root.body#1.children[0]": InstanceState.DONE,  # item 1's src produced
+            "root.body#0.children[0]": InstanceState.SKIPPED,
+            "root.body#1.children[0]": InstanceState.DONE,
         }
         fr = frontier(root, states, inputs={"xs": ["x", "y"]})
-        assert "root.body#0.children[1]" in fr.to_skip  # item 0's rd: its src skipped
+        assert "root.body#0.children[1]" in fr.to_skip
         assert "root.body#0.children[1]" not in _paths(fr)
-        assert "root.body#1.children[1]" in _paths(fr)  # item 1's rd: its src done, runs
+        assert "root.body#1.children[1]" in _paths(fr)
         assert "root.body#1.children[1]" not in fr.to_skip

@@ -19,14 +19,13 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
-#: extra name -> the distribution inside it that must carry an upper bound, and why.
 _MUST_BE_BOUNDED = {
     "mcp": (
         "mcp",
         "mcp 2.0.0 renamed mcp.client.streamable_http.streamablehttp_client, which "
-        "src/gideon/mcp_client.py imports by name",
+        "runtime/gideon/integrations/mcp_client.py imports by name",
     ),
 }
 
@@ -41,7 +40,9 @@ def test_import_sensitive_extras_declare_an_upper_bound() -> None:
     unbounded: list[str] = []
     for extra, (dist, reason) in _MUST_BE_BOUNDED.items():
         assert extra in extras, f"extra {extra!r} disappeared from pyproject.toml"
-        specs = [s for s in extras[extra] if s.split(">=")[0].split("[")[0].strip() == dist]
+        specs = [
+            s for s in extras[extra] if s.split(">=")[0].split("[")[0].strip() == dist
+        ]
         assert specs, f"extra {extra!r} no longer declares {dist!r}"
         for spec in specs:
             if "<" not in spec and "==" not in spec and "~=" not in spec:
@@ -53,13 +54,17 @@ def test_import_sensitive_extras_declare_an_upper_bound() -> None:
     )
 
 
-def test_the_streamable_http_symbol_this_bound_protects_is_still_imported_by_name() -> None:
+def test_the_streamable_http_symbol_this_bound_protects_is_still_imported_by_name() -> (
+    None
+):
     """Vacuity floor: if the import goes away, the bound above is arguing for nothing.
 
     Without this, deleting the import site would leave a bound nobody can justify — and
     the next person to widen it would have no way to tell whether the reason still held.
     """
-    source = (_REPO_ROOT / "src" / "gideon" / "mcp_client.py").read_text()
+    source = (
+        _REPO_ROOT / "runtime" / "gideon" / "integrations" / "mcp_client.py"
+    ).read_text()
     assert "from mcp.client.streamable_http import streamablehttp_client" in source, (
         "mcp_client.py no longer imports streamablehttp_client by name — re-derive whether "
         "the mcp<2 bound is still needed instead of carrying it on faith"

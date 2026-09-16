@@ -18,11 +18,13 @@ import asyncio
 
 import pytest
 
-from gideon import proposals_contract as pc
-from gideon.inbox import InboxItem, InboxStore, ItemStatus
+from gideon.cognition import proposals_contract as pc
+from gideon.integrations.inbox import InboxItem, InboxStore, ItemStatus
 
 
-def _item(apply: dict, *, editable: bool = False, status: str = ItemStatus.PENDING.value):
+def _item(
+    apply: dict, *, editable: bool = False, status: str = ItemStatus.PENDING.value
+):
     payload = pc.Proposal(
         title="Do the thing",
         preview="details",
@@ -55,9 +57,6 @@ def _store(item):
     return store
 
 
-# --------------------------------------------------------------------------- closed set
-
-
 def test_apply_case_set_is_closed_and_total():
     assert set(pc._DISPATCH) == set(pc.ApplyCase)
     assert {c.value for c in pc.ApplyCase} == {
@@ -83,7 +82,9 @@ def test_malformed_apply_refuses_rather_than_guessing(apply):
 
 
 def test_unknown_case_never_falls_through_to_a_default():
-    outcome = asyncio.run(pc.apply_proposal(pc.Proposal(title="t", apply={"ghost": {}})))
+    outcome = asyncio.run(
+        pc.apply_proposal(pc.Proposal(title="t", apply={"ghost": {}}))
+    )
     assert outcome.ok is False
     assert "unknown apply case" in outcome.error
 
@@ -110,15 +111,15 @@ def test_expiry_blocks_apply_and_an_unparseable_stamp_does_not():
     outcome = asyncio.run(pc.apply_item(item, store=store))
     assert outcome.ok is False and outcome.error == "proposal expired"
     assert item.status == ItemStatus.PENDING.value
-    assert pc.Proposal.from_dict({"title": "t", "expires_at": "not-a-date"}).is_expired() is False
-
-
-# ------------------------------------------------------- each case → existing dispatcher
+    assert (
+        pc.Proposal.from_dict({"title": "t", "expires_at": "not-a-date"}).is_expired()
+        is False
+    )
 
 
 def test_action_case_routes_through_the_action_provider_registry(monkeypatch):
-    from gideon.action_providers import base as action_base
-    from gideon.action_providers import registry
+    from gideon.integrations.action_providers import base as action_base
+    from gideon.integrations.action_providers import registry
 
     seen = {}
 
@@ -145,13 +146,15 @@ def test_an_active_kill_switch_refuses_an_action_apply(monkeypatch):
     incident. This test is the one that fails: the provider must never be reached, and the item
     must stay PENDING carrying the reason — a refused approval is not a silently dropped one.
     """
-    from gideon.action_providers import registry
-    from gideon.triggers import tools as trigger_tools
+    from gideon.automation.triggers import tools as trigger_tools
+    from gideon.integrations.action_providers import registry
 
     reached = {"executed": False}
 
     class _Provider:
-        async def execute(self, action_config, ctx, timeout=30):  # pragma: no cover — must not run
+        async def execute(
+            self, action_config, ctx, timeout=30
+        ):  # pragma: no cover — must not run
             reached["executed"] = True
             raise AssertionError("the kill switch let an action provider execute")
 
@@ -168,7 +171,7 @@ def test_an_active_kill_switch_refuses_an_action_apply(monkeypatch):
 
 
 def test_workflow_case_routes_through_service_start_run(monkeypatch):
-    from gideon.workflows import service
+    from gideon.automation.workflows import service
 
     calls = {}
 
@@ -181,7 +184,6 @@ def test_workflow_case_routes_through_service_start_run(monkeypatch):
     outcome = asyncio.run(pc.apply_item(item, store=_store(item)))
     assert outcome.ok and outcome.result["run_id"] == "run-9"
     assert calls["name"] == "nightly" and calls["inputs"] == {"a": 1}
-    # Idempotent per item: a double-click is a retry, not a second run.
     assert calls["idempotency_key"] == "proposal:inbox-1"
 
 
@@ -193,7 +195,7 @@ def test_workflow_case_refuses_an_inline_def_instead_of_pretending(monkeypatch):
 
 
 def test_skill_promotion_case_routes_through_learning_proposals_accept(monkeypatch):
-    from gideon.learning import proposals as learning_proposals
+    from gideon.cognition.learning import proposals as learning_proposals
 
     calls = {}
 
@@ -213,7 +215,7 @@ def test_skill_promotion_case_routes_through_learning_proposals_accept(monkeypat
 
 
 def test_app_callback_case_routes_through_the_app_route_proxy(monkeypatch):
-    from gideon.tool_providers import app_routes
+    from gideon.integrations.tool_providers import app_routes
 
     calls = {}
 
@@ -227,14 +229,13 @@ def test_app_callback_case_routes_through_the_app_route_proxy(monkeypatch):
 
     monkeypatch.setattr(app_routes, "resolve_route", _resolve)
     monkeypatch.setattr(app_routes, "call_app_route", _call)
-    item = _item({"app_callback": {"app": "demo", "route": "confirm", "arguments": {"id": 2}}})
+    item = _item(
+        {"app_callback": {"app": "demo", "route": "confirm", "arguments": {"id": 2}}}
+    )
     outcome = asyncio.run(pc.apply_item(item, store=_store(item)))
     assert outcome.ok and outcome.result["route"] == "confirm"
     assert calls["resolve"] == ("demo", "confirm", {"id": 2})
     assert calls["called"] == "resolution"
-
-
-# ------------------------------------------------- a failed apply KEEPS the item PENDING
 
 
 @pytest.mark.parametrize(
@@ -243,34 +244,40 @@ def test_app_callback_case_routes_through_the_app_route_proxy(monkeypatch):
         (
             "action",
             {"action": {"provider": "webhook"}},
-            ("gideon.action_providers.registry", "get_action_provider", lambda n: None),
+            (
+                "gideon.integrations.action_providers.registry",
+                "get_action_provider",
+                lambda n: None,
+            ),
         ),
         ("workflow", {"workflow": {"ref": "wf"}}, None),
         ("skill_promotion", {"skill_promotion": {"pid": "lp-1"}}, None),
         ("app_callback", {"app_callback": {"app": "demo", "route": "r"}}, None),
     ],
 )
-def test_failed_apply_keeps_the_item_pending_with_the_error(case, apply, patch, monkeypatch):
+def test_failed_apply_keeps_the_item_pending_with_the_error(
+    case, apply, patch, monkeypatch
+):
     """Every case's failure path. The status MUST NOT move and the error MUST be recorded."""
     if patch is not None:
         mod = __import__(patch[0], fromlist=["x"])
         monkeypatch.setattr(mod, patch[1], patch[2])
     if case == "workflow":
-        from gideon.workflows import service
+        from gideon.automation.workflows import service
 
         async def _start_run(**kwargs):
             return {"ok": False, "error": "boom"}
 
         monkeypatch.setattr(service, "start_run", _start_run)
     if case == "skill_promotion":
-        from gideon.learning import proposals as learning_proposals
+        from gideon.cognition.learning import proposals as learning_proposals
 
         def _accept(pid, *, installer=None, actor="user"):
             raise learning_proposals.AcceptError("no proposal 'lp-1'")
 
         monkeypatch.setattr(learning_proposals, "accept", _accept)
     if case == "app_callback":
-        from gideon.tool_providers import app_routes
+        from gideon.integrations.tool_providers import app_routes
 
         def _resolve(*a, **k):
             raise RuntimeError("route not declared")
@@ -283,10 +290,11 @@ def test_failed_apply_keeps_the_item_pending_with_the_error(case, apply, patch, 
 
     assert outcome.ok is False, f"{case}: a failing apply reported success"
     assert outcome.error, f"{case}: failure carried no error"
-    assert item.status == ItemStatus.PENDING.value, f"{case}: failed apply moved the status"
+    assert (
+        item.status == ItemStatus.PENDING.value
+    ), f"{case}: failed apply moved the status"
     assert item.refs[pc.ERROR_KEY]["error"] == outcome.error
     assert pc.RESULT_KEY not in item.refs
-    # Persisted, not just in memory: an error nobody wrote down is one nobody can act on.
     assert store.items["inbox-1"].refs[pc.ERROR_KEY]["error"] == outcome.error
 
 
@@ -295,11 +303,8 @@ def test_item_without_a_payload_is_refused():
     assert asyncio.run(pc.apply_item(item)).error == "item carries no proposal payload"
 
 
-# ------------------------------------------------------------------- edit-then-approve
-
-
 def test_edit_then_approve_applies_the_EDITED_payload(monkeypatch):
-    from gideon.workflows import service
+    from gideon.automation.workflows import service
 
     calls = {}
 
@@ -313,25 +318,23 @@ def test_edit_then_approve_applies_the_EDITED_payload(monkeypatch):
     edited["apply"] = {"workflow": {"ref": "edited", "inputs": {"n": 3}}}
     outcome = asyncio.run(pc.apply_item(item, store=_store(item), edited=edited))
     assert outcome.ok and calls["name"] == "edited" and calls["inputs"] == {"n": 3}
-    # The row shows what was actually applied, not what was proposed.
     assert item.refs[pc.REFS_KEY]["apply"]["workflow"]["ref"] == "edited"
 
 
 def test_edit_on_a_non_editable_proposal_is_refused_not_ignored():
     item = _item({"workflow": {"ref": "original"}}, editable=False)
-    outcome = asyncio.run(pc.apply_item(item, store=_store(item), edited={"title": "x"}))
+    outcome = asyncio.run(
+        pc.apply_item(item, store=_store(item), edited={"title": "x"})
+    )
     assert outcome.ok is False and outcome.error == "this proposal is not editable"
     assert item.status == ItemStatus.PENDING.value
     assert item.refs[pc.REFS_KEY]["apply"] == {"workflow": {"ref": "original"}}
 
 
-# ------------------------------------------------------------- T4.1 re-expressed as C6
-
-
 def test_learning_queue_surfaces_the_c6_skill_promotion_payload(monkeypatch, tmp_path):
     """T4.1's skill path is now `apply.skill_promotion` — the first consumer of C6, not a
     bespoke wiring. The legacy ref stays so existing readers are untouched."""
-    from gideon.learning import proposals as learning_proposals
+    from gideon.cognition.learning import proposals as learning_proposals
 
     captured = {}
 
@@ -339,7 +342,7 @@ def test_learning_queue_surfaces_the_c6_skill_promotion_payload(monkeypatch, tmp
         captured.update(kwargs)
         return "inbox-x"
 
-    monkeypatch.setattr("gideon.inbox.emit_attention_item", _emit)
+    monkeypatch.setattr("gideon.integrations.inbox.emit_attention_item", _emit)
     prop = learning_proposals.Proposal(
         id="lp-42", kind="skill", title="Extract a skill", body="because"
     )

@@ -26,10 +26,10 @@ import asyncio
 
 import pytest
 
-from gideon.workflows import human_input as HI
-from gideon.workflows import store
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.models import RunStatus, WorkflowRun
+from gideon.automation.workflows import human_input as HI
+from gideon.automation.workflows import store
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.models import RunStatus, WorkflowRun
 
 pytestmark = pytest.mark.anyio
 
@@ -43,11 +43,10 @@ def anyio_backend() -> str:
 def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
 
 
-#: The genui tree a gate node authors as its prompt. `Form(...)`'s submit is the action.
 WIDGET = (
     'Log the expense.\n\n<widget kind="genui" title="Expense">\n'
     'f = Form(title: "Log an expense", fields: ["amount", "vendor"], '
@@ -71,11 +70,6 @@ def _spec() -> dict:
                     "kind": "gate",
                     "id": "ask",
                     "config": {
-                        # The GATE kind is `approval` (the only kind that parks for a human);
-                        # the ASK kind is a separate field the engine reads as `ask_kind`
-                        # (`engine._ask_payload`). Writing `kind: "form"` here instead fails the
-                        # node with "unknown gate kind" and raises NO continuation at all — which
-                        # is how this test first failed.
                         "kind": "approval",
                         "ask_kind": "form",
                         "prompt": WIDGET,
@@ -83,7 +77,11 @@ def _spec() -> dict:
                         "timeout_secs": 0,
                     },
                 },
-                {"kind": "transform", "id": "after", "config": {"expr": {"logged": True}}},
+                {
+                    "kind": "transform",
+                    "id": "after",
+                    "config": {"expr": {"logged": True}},
+                },
             ],
         },
     }
@@ -104,7 +102,11 @@ async def _settled(controller: RunController, timeout: float = 20.0) -> RunStatu
     the engine here is what would hide a resume that never restarted the loop."""
     deadline = asyncio.get_running_loop().time() + timeout
     while asyncio.get_running_loop().time() < deadline:
-        if controller.run.status in (RunStatus.COMPLETE, RunStatus.FAILED, RunStatus.CANCELLED):
+        if controller.run.status in (
+            RunStatus.COMPLETE,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+        ):
             return controller.run.status
         await asyncio.sleep(0.05)
     return controller.run.status
@@ -120,7 +122,9 @@ class TestTheGateIsReallyWaiting:
         assert controller.run.status == RunStatus.NEEDS_INPUT
         assert "after" not in controller._outputs
 
-    async def test_the_widget_markup_survives_into_the_ask_the_frontend_reads(self) -> None:
+    async def test_the_widget_markup_survives_into_the_ask_the_frontend_reads(
+        self,
+    ) -> None:
         """The FE detects the genui block in `ask.prompt`. An engine that rewrote or dropped
         the prompt would leave the widget rendering as text with no producer."""
         controller, token = await _parked()
@@ -131,7 +135,9 @@ class TestTheGateIsReallyWaiting:
 
 
 class TestTheRunAdvances:
-    async def test_a_form_submission_resolves_the_gate_and_the_run_advances(self) -> None:
+    async def test_a_form_submission_resolves_the_gate_and_the_run_advances(
+        self,
+    ) -> None:
         """The atom's clause, end to end: the widget's payload IS the gate answer, and the
         node after the gate produces its output without anybody driving the engine."""
         controller, token = await _parked()
@@ -139,7 +145,9 @@ class TestTheRunAdvances:
         assert result["ok"] is True and result["approved"] is True
 
         status = await _settled(controller)
-        assert status == RunStatus.COMPLETE, "the run must reach the end, not merely unblock"
+        assert (
+            status == RunStatus.COMPLETE
+        ), "the run must reach the end, not merely unblock"
         assert controller._outputs.get("after") == {"logged": True}, (
             "the POST-GATE node's output is the proof the run moved; a resolver that only "
             "marked the gate DONE would leave this missing"
@@ -166,7 +174,8 @@ class TestTheRunAdvances:
 
     async def test_an_unknown_token_does_not_advance_the_run(self) -> None:
         """The falsification leg for the clause above: with a bad token the SAME assertions
-        must fail, so "the run advanced" is evidence about the answer and not about time."""
+        must fail, so "the run advanced" is evidence about the answer and not about time.
+        """
         controller, _token = await _parked()
         refused = controller.resume("0" * 32, {"amount": "1", "vendor": "A"})
         assert refused["ok"] is False

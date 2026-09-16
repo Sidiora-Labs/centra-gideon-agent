@@ -38,10 +38,10 @@ import threading
 
 import pytest
 
-from gideon.workflows import human_input as HI
-from gideon.workflows import service, store
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.models import (
+from gideon.automation.workflows import human_input as HI
+from gideon.automation.workflows import service, store
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.models import (
     OriginKind,
     RunOrigin,
     RunStatus,
@@ -60,7 +60,7 @@ def anyio_backend() -> str:
 def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
 
 
@@ -118,13 +118,12 @@ class _Supervisor:
         return self._c if run_id == self._c.run.id else None
 
 
-# ── 1. the defect: an answered gate stops reading as pending ──────────────────
-
-
 def test_an_ANSWERED_gate_is_not_listed_as_pending(tmp_path, monkeypatch):
     """THE reproduction. Before the fix this returned 2, which is the `WF_AMBIGUOUS_GATE`."""
     live = HI.create_continuation("r1", node_id="live", instance_path="p_live", epoch=1)
-    answered = HI.create_continuation("r1", node_id="answered", instance_path="p_ans", epoch=1)
+    answered = HI.create_continuation(
+        "r1", node_id="answered", instance_path="p_ans", epoch=1
+    )
     assert HI.consume_continuation("r1", answered.token) is not None
 
     pending = HI.list_continuations("r1")
@@ -136,13 +135,11 @@ def test_an_ANSWERED_gate_is_not_listed_as_pending(tmp_path, monkeypatch):
 
 def test_a_run_whose_ONLY_gate_was_answered_has_nothing_pending(tmp_path, monkeypatch):
     """The second branch the defect corrupted: this used to return the DEAD token, so the
-    token-less resolver reported `WF_RESUME_UNKNOWN_TOKEN` instead of `WF_NO_PENDING_GATE`."""
+    token-less resolver reported `WF_RESUME_UNKNOWN_TOKEN` instead of `WF_NO_PENDING_GATE`.
+    """
     only = HI.create_continuation("r2", node_id="only", instance_path="p", epoch=1)
     HI.consume_continuation("r2", only.token)
     assert HI.list_continuations("r2") == []
-
-
-# ── 2. the true positive is preserved: two LIVE gates still refuse ───────────
 
 
 def test_TWO_LIVE_gates_are_still_reported_as_pending(tmp_path, monkeypatch):
@@ -158,9 +155,6 @@ def test_TWO_LIVE_gates_are_still_reported_as_pending(tmp_path, monkeypatch):
     assert {c.token for c in HI.list_continuations("r3")} == {a.token, b.token}
 
 
-# ── 3. atomicity survives the new claim location ─────────────────────────────
-
-
 def test_ATOMICITY_survives_the_new_claim_location(tmp_path, monkeypatch):
     """Re-established by measurement, not by argument.
 
@@ -173,7 +167,9 @@ def test_ATOMICITY_survives_the_new_claim_location(tmp_path, monkeypatch):
     multi = 0
     trials = 25
     for trial in range(trials):
-        cont = HI.create_continuation(f"race{trial}", node_id="a", instance_path="p", epoch=1)
+        cont = HI.create_continuation(
+            f"race{trial}", node_id="a", instance_path="p", epoch=1
+        )
         got: dict[int, object] = {}
         barrier = threading.Barrier(8)
 
@@ -188,7 +184,9 @@ def test_ATOMICITY_survives_the_new_claim_location(tmp_path, monkeypatch):
             t.join()
         if sum(1 for v in got.values() if v is not None) != 1:
             multi += 1
-    assert multi == 0, f"{multi}/{trials} trials let more than one caller consume one approval"
+    assert (
+        multi == 0
+    ), f"{multi}/{trials} trials let more than one caller consume one approval"
 
 
 def test_the_claim_is_a_LOCATION_not_a_filename_convention(tmp_path, monkeypatch):
@@ -201,15 +199,18 @@ def test_the_claim_is_a_LOCATION_not_a_filename_convention(tmp_path, monkeypatch
     HI.consume_continuation("r4", cont.token)
 
     assert (HI._claimed_dir("r4") / f"{cont.token}.json").is_file()
-    # A non-recursive glob cannot reach into a subdirectory — that is the whole mechanism.
     assert list(HI._dir("r4").glob("*.json")) == []
-    assert HI._claimed_dir("r4").is_dir(), "the claim store must be a directory, not a suffix"
+    assert HI._claimed_dir(
+        "r4"
+    ).is_dir(), "the claim store must be a directory, not a suffix"
 
 
 # ── 4. the consumers ─────────────────────────────────────────────────────────
 
 
-def test_a_REWIND_drops_the_pending_token_and_keeps_the_claimed_one(tmp_path, monkeypatch):
+def test_a_REWIND_drops_the_pending_token_and_keeps_the_claimed_one(
+    tmp_path, monkeypatch
+):
     """`drop_continuations` iterates the pending listing, so the defect reached it too: it saw
     claimed records, tried to unlink a path that the rename had already moved, and silently
     counted nothing — so a claimed record could never be reclaimed and the count was right only
@@ -222,7 +223,9 @@ def test_a_REWIND_drops_the_pending_token_and_keeps_the_claimed_one(tmp_path, mo
     assert HI.list_continuations("r5") == []
     assert (
         HI._claimed_dir("r5") / f"{answered.token}.json"
-    ).is_file(), "the rewind destroyed the audit record of an answer it did not need to touch"
+    ).is_file(), (
+        "the rewind destroyed the audit record of an answer it did not need to touch"
+    )
 
 
 async def test_a_SECOND_token_less_approval_reports_NO_PENDING_not_unknown_token(
@@ -247,7 +250,9 @@ async def test_a_SECOND_token_less_approval_reports_NO_PENDING_not_unknown_token
     ), f"an answered run reported {again['code']!r}; the answered gate is still reading as pending"
 
 
-async def test_the_needs_input_ROUTE_stops_offering_an_answered_gate(tmp_path, monkeypatch):
+async def test_the_needs_input_ROUTE_stops_offering_an_answered_gate(
+    tmp_path, monkeypatch
+):
     """The inbox surface: a card a user can click must correspond to a gate that can be answered.
 
     Driven through the same projection the HTTP route builds, so an answered approval cannot come

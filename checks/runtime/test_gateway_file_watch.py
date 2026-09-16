@@ -13,22 +13,22 @@ import asyncio
 
 import pytest
 
-from gideon import gateway as G
-from gideon.triggers.models import Trigger
-from gideon.triggers.store import TriggerStore
+from gideon.automation.triggers.models import Trigger
+from gideon.automation.triggers.store import TriggerStore
+from gideon.engine import gateway as G
 
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
-    import gideon.config.loader as loader
+    import gideon.core.config.loader as loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     return tmp_path
 
 
 def _bare_gateway():
-    """A GatewayOrchestrator without the full heavy __init__ — enough to call the fire method."""
-    return G.GatewayOrchestrator.__new__(G.GatewayOrchestrator)
+    """A RuntimeCoordinator without the full heavy __init__ — enough to call the fire method."""
+    return G.RuntimeCoordinator.__new__(G.RuntimeCoordinator)
 
 
 def _file_trigger(home, provider="notify", config=None):
@@ -40,7 +40,10 @@ def _file_trigger(home, provider="notify", config=None):
             kind="file",
             enabled=True,
             spec={"paths": ["~/x/**"]},
-            workflow={"provider": provider, "config": config or {"title_template": "t"}},
+            workflow={
+                "provider": provider,
+                "config": config or {"title_template": "t"},
+            },
         )
     )
     return store
@@ -55,7 +58,7 @@ def test_a_fire_reaches_the_declared_action_provider(home, monkeypatch):
         config={"title_template": "changed", "body_template": "{{trigger_id}}"},
     )
 
-    from gideon.action_providers.registry import (
+    from gideon.integrations.action_providers.registry import (
         _ensure_default_providers_registered,
         get_action_provider,
     )
@@ -86,7 +89,6 @@ def test_a_fire_reaches_the_declared_action_provider(home, monkeypatch):
 
 def test_a_fire_for_an_unknown_trigger_is_a_noop(home):
     gw = _bare_gateway()
-    # No store row — must return quietly, not raise.
     asyncio.run(gw._fire_file_trigger({"trigger_id": "file:ghost"}))
 
 
@@ -100,7 +102,7 @@ def test_a_provider_that_raises_does_not_crash_the_caller(home, monkeypatch):
     """🔴 A failed fire is logged, never propagated — a throwing action must not kill the poll
     loop and silently retire every other file automation."""
     _file_trigger(home, provider="notify")
-    from gideon.action_providers.registry import (
+    from gideon.integrations.action_providers.registry import (
         _ensure_default_providers_registered,
         get_action_provider,
     )
@@ -113,7 +115,6 @@ def test_a_provider_that_raises_does_not_crash_the_caller(home, monkeypatch):
 
     monkeypatch.setattr(prov, "execute", boom)
     gw = _bare_gateway()
-    # Must NOT raise.
     asyncio.run(gw._fire_file_trigger({"trigger_id": "file:notes"}))
 
 
@@ -123,41 +124,43 @@ def test_the_poll_loop_is_started_in_init_cron(monkeypatch):
     launches."""
     import inspect
 
-    src = inspect.getsource(G.GatewayOrchestrator._init_cron)
-    assert "_file_watch_poll_loop" in src
-    assert "create_task" in src
+    from gideon.engine.automation_boot import AutomationBoot
+
+    assert "AutomationBoot" in inspect.getsource(G.RuntimeCoordinator._init_cron)
+    src = inspect.getsource(AutomationBoot.start)
+    assert "_file_watch_poll_loop" in src and "create_task" in src
 
 
 def test_the_loop_lives_in_the_no_crons_else_branch(monkeypatch):
-    """A file watch is unattended background work like a cron, so --no-crons must disable it too.
-    Pinning that it sits inside the else-branch (not before the guard).
-
-    Anchored on the GUARD itself, not on `reconcile_digest_cron`. That proxy meant "the last thing
-    in the else-branch", and S108 moved the reconcilers AFTER the boot migration (they wrote a file
-    the clock engine never read), which broke the assertion without breaking the property. An anchor
-    that moves when unrelated code is reordered tests the layout, not the contract.
-    """
+    """The early-return guard must precede every task launch."""
+    import ast
     import inspect
+    import textwrap
 
-    src = inspect.getsource(G.GatewayOrchestrator._init_cron)
-    guard = src.index("if self._no_crons:")
-    assert src.index("_file_watch_task") > guard
-    # And every line of the task creation must be indented deeper than the guard, which is what
-    # actually makes it conditional rather than merely later in the function.
-    for line in src.split("\n"):
-        if "_file_watch_task = asyncio.create_task" in line:
-            indent = len(line) - len(line.lstrip())
-            guard_line = next(ln for ln in src.split("\n") if "if self._no_crons:" in ln)
-            assert indent > len(guard_line) - len(guard_line.lstrip())
-            break
-    else:  # pragma: no cover - the assertion above cannot be reached without the line
-        raise AssertionError("the file-watch task creation was not found")
+    from gideon.engine.automation_boot import AutomationBoot
+
+    body = (
+        ast.parse(textwrap.dedent(inspect.getsource(AutomationBoot.start))).body[0].body
+    )
+    guard = body[0]
+    assert isinstance(guard, ast.If)
+    assert ast.unparse(guard.test) == "self.runtime._no_crons"
+    assert isinstance(guard.body[-1], ast.Return)
+    launches = [
+        node
+        for node in body[1:]
+        if isinstance(node, ast.Assign)
+        and isinstance(node.targets[0], ast.Attribute)
+        and node.targets[0].attr == "_file_watch_task"
+    ]
+    assert len(launches) == 1
+    assert "create_task" in ast.unparse(launches[0])
 
 
 def test_shutdown_cancels_the_loop():
     """A dangling task across shutdown leaks a filesystem poll into the next process."""
     import inspect
 
-    src = inspect.getsource(G.GatewayOrchestrator._shutdown)
+    src = inspect.getsource(G.RuntimeCoordinator._shutdown)
     assert "_file_watch_task" in src
     assert ".cancel()" in src

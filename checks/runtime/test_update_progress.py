@@ -7,21 +7,23 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from aiohttp import web
 
-from gideon import self_update as su
-from gideon.dashboard.state import DashboardState
+from gideon.interfaces.dashboard.state import ConsoleState
+from gideon.operations import self_update as su
 
 
-def _make_state(monkeypatch, tmp_path) -> DashboardState:
-    """Create a minimal DashboardState for testing."""
-    monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-    return DashboardState(
+def _make_state(monkeypatch, tmp_path) -> ConsoleState:
+    """Create a minimal ConsoleState for testing."""
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+    )
+    return ConsoleState(
         sessions=MagicMock(count=0),
         start_time=0.0,
     )
 
 
 class TestUpdateProgressState:
-    """Tests for DashboardState update progress tracking."""
+    """Tests for ConsoleState update progress tracking."""
 
     def test_initial_state_is_none(self, monkeypatch, tmp_path) -> None:
         state = _make_state(monkeypatch, tmp_path)
@@ -30,7 +32,10 @@ class TestUpdateProgressState:
     def test_push_update_progress_sets_state(self, monkeypatch, tmp_path) -> None:
         state = _make_state(monkeypatch, tmp_path)
         state.push_update_progress("pulling", "Pulling latest changes…")
-        assert state._update_progress == {"step": "pulling", "detail": "Pulling latest changes…"}
+        assert state._update_progress == {
+            "step": "pulling",
+            "detail": "Pulling latest changes…",
+        }
 
     def test_push_update_progress_updates_step(self, monkeypatch, tmp_path) -> None:
         state = _make_state(monkeypatch, tmp_path)
@@ -89,12 +94,15 @@ class TestUpdateEndpoints:
     @pytest.mark.asyncio
     async def test_simulate_walks_through_steps(self, monkeypatch, tmp_path) -> None:
         """Simulate endpoint broadcasts progress for each step."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
         monkeypatch.setattr(
-            "gideon.dashboard.handlers.config_path", lambda: tmp_path / "c.json"
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.handlers.config_path",
+            lambda: tmp_path / "c.json",
         )
 
-        from gideon.dashboard.handlers import api_update_simulate
+        from gideon.interfaces.dashboard.handlers import api_update_simulate
 
         state = _make_state(monkeypatch, tmp_path)
         steps_seen: list[str] = []
@@ -116,7 +124,6 @@ class TestUpdateEndpoints:
         data = json.loads(resp.body)
         assert data["status"] == "simulating"
 
-        # Let the background task run
         await asyncio.sleep(0.2)
 
         assert "pulling" in steps_seen
@@ -124,18 +131,20 @@ class TestUpdateEndpoints:
         assert "building" in steps_seen
         assert "restarting" in steps_seen
         assert "done" in steps_seen
-        # The Amazon-era 'syncing' step is gone from the public pipeline.
         assert "syncing" not in steps_seen
 
     @pytest.mark.asyncio
     async def test_simulate_fail_at(self, monkeypatch, tmp_path) -> None:
         """Simulate endpoint stops at fail_at step."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
         monkeypatch.setattr(
-            "gideon.dashboard.handlers.config_path", lambda: tmp_path / "c.json"
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.handlers.config_path",
+            lambda: tmp_path / "c.json",
         )
 
-        from gideon.dashboard.handlers import api_update_simulate
+        from gideon.interfaces.dashboard.handlers import api_update_simulate
 
         state = _make_state(monkeypatch, tmp_path)
         steps_seen: list[str] = []
@@ -159,18 +168,21 @@ class TestUpdateEndpoints:
         assert "pulling" in steps_seen
         assert "installing" in steps_seen
         assert "failed" in steps_seen
-        assert "building" not in steps_seen  # fails before building runs
+        assert "building" not in steps_seen
         assert "restarting" not in steps_seen
 
     @pytest.mark.asyncio
     async def test_simulate_reject(self, monkeypatch, tmp_path) -> None:
         """Simulate endpoint returns 409 when reject=true."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
         monkeypatch.setattr(
-            "gideon.dashboard.handlers.config_path", lambda: tmp_path / "c.json"
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.handlers.config_path",
+            lambda: tmp_path / "c.json",
         )
 
-        from gideon.dashboard.handlers import api_update_simulate
+        from gideon.interfaces.dashboard.handlers import api_update_simulate
 
         state = _make_state(monkeypatch, tmp_path)
         app = web.Application()
@@ -187,9 +199,11 @@ class TestUpdateEndpoints:
     @pytest.mark.asyncio
     async def test_cancel_clears_progress(self, monkeypatch, tmp_path) -> None:
         """Cancel endpoint clears update progress."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
 
-        from gideon.dashboard.handlers import api_update_cancel
+        from gideon.interfaces.dashboard.handlers import api_update_cancel
 
         state = _make_state(monkeypatch, tmp_path)
         state.push_update_progress("building", "Building…")
@@ -202,18 +216,20 @@ class TestUpdateEndpoints:
 
         resp = await api_update_cancel(request)
         assert resp.status == 200
-        # Progress should be cleared after cancel
         assert state._update_progress is None
 
     @pytest.mark.asyncio
-    async def test_restart_probe_reports_active_work(self, monkeypatch, tmp_path) -> None:
+    async def test_restart_probe_reports_active_work(
+        self, monkeypatch, tmp_path
+    ) -> None:
         """?probe=1 returns the active-work snapshot (running agents + sessions)
         for the confirm gate — WITHOUT restarting."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        from gideon.dashboard.handlers import api_restart
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        from gideon.interfaces.dashboard.handlers import api_restart
 
         state = _make_state(monkeypatch, tmp_path)
-        # Two running subagents + one done; two live sessions.
         state.subagents = MagicMock()
         state.subagents.all_agents = [
             MagicMock(done=False),
@@ -231,21 +247,24 @@ class TestUpdateEndpoints:
         resp = await api_restart(request)
         data = json.loads(resp.body)
         assert resp.status == 200
-        assert data["running_agents"] == 2  # the done one is excluded
+        assert data["running_agents"] == 2
         assert data["sessions"] == 2
 
     @pytest.mark.asyncio
-    async def test_restart_triggers_graceful_reexec(self, monkeypatch, tmp_path) -> None:
+    async def test_restart_triggers_graceful_reexec(
+        self, monkeypatch, tmp_path
+    ) -> None:
         """A real POST kicks off the graceful re-exec in the background and returns
         202-style {status: restarting} immediately (never actually exec's in test —
         _graceful_reexec is mocked)."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        import gideon.dashboard.handlers.updates as upd
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        import gideon.interfaces.dashboard.handlers.updates as upd
 
         reexec_called: list[bool] = []
 
         async def fake_reexec(state, *, auth_mode=""):  # type: ignore[no-untyped-def]
-            # accepts the #46 auth_mode kwarg the handler now threads through
             reexec_called.append(True)
 
         monkeypatch.setattr(upd, "_graceful_reexec", fake_reexec)
@@ -253,16 +272,15 @@ class TestUpdateEndpoints:
         state = _make_state(monkeypatch, tmp_path)
         app = web.Application()
         app["state"] = state
-        app["auth_cfg"] = None  # _live_auth_mode tolerates a missing/None cfg
+        app["auth_cfg"] = None
         request = MagicMock()
         request.app = app
-        request.query = {}  # no probe → real restart
+        request.query = {}
 
         resp = await upd.api_restart(request)
         data = json.loads(resp.body)
         assert resp.status == 200
         assert data["status"] == "restarting"
-        # The background task runs the (mocked) re-exec.
         await asyncio.sleep(0.05)
         assert reexec_called == [True]
 
@@ -271,13 +289,13 @@ class TestUpdateEndpoints:
         """Update apply returns 409 when the tree is dirty AND there are new
         commits to pull (the dirty gate only guards a REAL pull — a
         nothing-to-pull apply degrades to restart instead, tested below)."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
-        (tmp_path / ".git").mkdir(
-            exist_ok=True
-        )  # mark as a git checkout (T4.1 detect_install_kind)
+        (tmp_path / ".git").mkdir(exist_ok=True)
 
-        from gideon.dashboard.handlers import api_update_apply
+        from gideon.interfaces.dashboard.handlers import api_update_apply
 
         state = _make_state(monkeypatch, tmp_path)
         app = web.Application()
@@ -285,7 +303,6 @@ class TestUpdateEndpoints:
         request = MagicMock()
         request.app = app
 
-        # Upstream is 3 commits ahead (real pull pending); git status is dirty.
         async def fake_exec(*args, **kwargs):  # type: ignore[no-untyped-def]
             proc = MagicMock()
             proc.returncode = 0
@@ -293,7 +310,7 @@ class TestUpdateEndpoints:
                 proc.communicate = AsyncMock(return_value=(b"3\n", b""))
             elif "status" in args:
                 proc.communicate = AsyncMock(return_value=(b" M some_file.py\n", b""))
-            else:  # fetch etc.
+            else:
                 proc.communicate = AsyncMock(return_value=(b"", b""))
             return proc
 
@@ -303,8 +320,7 @@ class TestUpdateEndpoints:
         assert resp.status == 409
         data = json.loads(resp.body)
         assert "uncommitted" in data["error"]
-        # The 409 path must release the in-flight guard for the next attempt.
-        import gideon.dashboard.handlers.updates as upd
+        import gideon.interfaces.dashboard.handlers.updates as upd
 
         assert upd._apply_in_flight is False
 
@@ -327,12 +343,12 @@ class TestUpdateApplyPipeline:
         restarting fire and _graceful_reexec is REACHED (extends coverage
         through the restart step — the old test stopped at early progress,
         masking a dead restart tail)."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
-        (tmp_path / ".git").mkdir(
-            exist_ok=True
-        )  # mark as a git checkout (T4.1 detect_install_kind)
-        import gideon.dashboard.handlers.updates as upd
+        (tmp_path / ".git").mkdir(exist_ok=True)
+        import gideon.interfaces.dashboard.handlers.updates as upd
 
         monkeypatch.setattr(upd, "_apply_in_flight", False)
 
@@ -352,8 +368,6 @@ class TestUpdateApplyPipeline:
             commands.append(args)
             proc = MagicMock()
             proc.returncode = 0
-            # Upstream is ahead → the probe sees a REAL update to pull, so the
-            # full pipeline (not the nothing-to-pull restart) runs.
             if "rev-list" in args:
                 proc.communicate = AsyncMock(return_value=(b"5\n", b""))
             else:
@@ -382,31 +396,28 @@ class TestUpdateApplyPipeline:
         await asyncio.sleep(0.05)
 
         assert steps_seen == ["pulling", "installing", "building", "restarting"]
-        # No Amazon-era steps or tooling anywhere in the pipeline.
         assert "syncing" not in steps_seen
         flat = [str(a) for cmd in commands for a in cmd]
         assert "workspace" not in flat
         assert "make" not in flat
         assert "AIPowerUserCapabilities" not in flat
-        # pip reinstall runs through the running interpreter
         assert any("pip" in cmd for cmd in commands)
         assert fe_built == [str(tmp_path)]
-        # THE point: the restart step is reached.
         assert len(reexec_calls) == 1
-        # Success path never observes the flag reset (process would be
-        # replaced), but the finally still runs in-test:
         assert upd._apply_in_flight is False
 
     @pytest.mark.asyncio
-    async def test_pip_failure_stops_before_restart(self, monkeypatch, tmp_path) -> None:
+    async def test_pip_failure_stops_before_restart(
+        self, monkeypatch, tmp_path
+    ) -> None:
         """pip install failure → error step, no frontend build, no re-exec,
         and the in-flight guard is released."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
-        (tmp_path / ".git").mkdir(
-            exist_ok=True
-        )  # mark as a git checkout (T4.1 detect_install_kind)
-        import gideon.dashboard.handlers.updates as upd
+        (tmp_path / ".git").mkdir(exist_ok=True)
+        import gideon.interfaces.dashboard.handlers.updates as upd
 
         monkeypatch.setattr(upd, "_apply_in_flight", False)
         state = _make_state(monkeypatch, tmp_path)
@@ -420,7 +431,6 @@ class TestUpdateApplyPipeline:
                 proc.communicate = AsyncMock(return_value=(b"", b"resolver exploded"))
                 proc.returncode = 1
             elif "rev-list" in args:
-                # Upstream ahead → real pipeline runs (past the restart-only probe).
                 proc.communicate = AsyncMock(return_value=(b"2\n", b""))
                 proc.returncode = 0
             else:
@@ -439,30 +449,34 @@ class TestUpdateApplyPipeline:
         assert resp.status == 200
         await asyncio.sleep(0.05)
 
-        assert state._update_progress == {"step": "error", "detail": "pip install failed"}
+        assert state._update_progress == {
+            "step": "error",
+            "detail": "pip install failed",
+        }
         fe_build.assert_not_awaited()
         reexec.assert_not_awaited()
         assert upd._apply_in_flight is False
 
     @pytest.mark.asyncio
-    async def test_dev_mode_off_on_latest_tag_restarts_only(self, monkeypatch, tmp_path) -> None:
+    async def test_dev_mode_off_on_latest_tag_restarts_only(
+        self, monkeypatch, tmp_path
+    ) -> None:
         """Git checkout, commits ahead upstream, but on the latest release TAG
         and update_dev_mode OFF → ride tags, not commits: degrade to restart-only
         (no git pull), even though the upstream has new commits (plan 34 T4.3)."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
         (tmp_path / ".git").mkdir(exist_ok=True)
-        import gideon.dashboard.handlers.updates as upd
+        import gideon.interfaces.dashboard.handlers.updates as upd
         from gideon import __version__ as _ver
 
         monkeypatch.setattr(upd, "_apply_in_flight", False)
-        # Upstream is ahead (commits exist to pull) …
         monkeypatch.setattr(su, "commits_behind_upstream", AsyncMock(return_value=3))
-        # … but the cached release tag == our running version (on the latest tag).
-        import gideon.self_update as uk
+        import gideon.operations.self_update as uk
 
         monkeypatch.setattr(uk, "read_release_cache", lambda: {"tag": f"v{_ver}"})
-        # update_dev_mode defaults OFF (no config file).
         state = _make_state(monkeypatch, tmp_path)
         steps_seen: list[str] = []
         orig = state.push_update_progress
@@ -492,8 +506,6 @@ class TestUpdateApplyPipeline:
         resp = await upd.api_update_apply(request)
         assert resp.status == 200
         await asyncio.sleep(0.05)
-        # Restart-only path: 'restarting' fired, 'pulling' never did, and no
-        # git subprocess (pull/status) ran.
         assert "restarting" in steps_seen
         assert "pulling" not in steps_seen
         assert not any("pull" in a for a in pulled)
@@ -504,12 +516,12 @@ class TestUpdateApplyPipeline:
         behaves per `rev_list` (a (returncode, stdout) tuple) and the tree is
         DIRTY — proving dirtiness doesn't matter when nothing will be pulled.
         Returns (resp_data, steps_seen, reexec_calls, commands)."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
-        (tmp_path / ".git").mkdir(
-            exist_ok=True
-        )  # mark as a git checkout (T4.1 detect_install_kind)
-        import gideon.dashboard.handlers.updates as upd
+        (tmp_path / ".git").mkdir(exist_ok=True)
+        import gideon.interfaces.dashboard.handlers.updates as upd
 
         monkeypatch.setattr(upd, "_apply_in_flight", False)
         state = _make_state(monkeypatch, tmp_path)
@@ -533,7 +545,6 @@ class TestUpdateApplyPipeline:
                 proc.returncode = rc
                 proc.communicate = AsyncMock(return_value=(out, b""))
             elif "status" in args:
-                # DIRTY tree — must not matter on the nothing-to-pull path.
                 proc.returncode = 0
                 proc.communicate = AsyncMock(return_value=(b" M dirty.py\n", b""))
             else:
@@ -601,14 +612,14 @@ class TestUpdateApplyPipeline:
     @pytest.mark.asyncio
     async def test_concurrent_apply_returns_409(self, monkeypatch, tmp_path) -> None:
         """While one apply is in flight, a second POST /api/update is 409."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
-        (tmp_path / ".git").mkdir(
-            exist_ok=True
-        )  # mark as a git checkout (T4.1 detect_install_kind)
-        import gideon.dashboard.handlers.updates as upd
+        (tmp_path / ".git").mkdir(exist_ok=True)
+        import gideon.interfaces.dashboard.handlers.updates as upd
 
-        monkeypatch.setattr(upd, "_apply_in_flight", True)  # one already running
+        monkeypatch.setattr(upd, "_apply_in_flight", True)
         state = _make_state(monkeypatch, tmp_path)
 
         exec_spy = AsyncMock()
@@ -617,9 +628,7 @@ class TestUpdateApplyPipeline:
         resp = await upd.api_update_apply(self._make_request(state))
         assert resp.status == 409
         assert "already in progress" in json.loads(resp.body)["error"]
-        # Rejected request must not touch git/pip at all.
         exec_spy.assert_not_awaited()
-        # And must NOT clear the running apply's guard.
         assert upd._apply_in_flight is True
 
 
@@ -629,13 +638,13 @@ class TestPackageRoot:
     checkout, nested at <repo>/Gideon in the monorepo layout."""
 
     def test_standalone_checkout_top_level(self, tmp_path) -> None:
-        from gideon.self_update import package_root
+        from gideon.operations.self_update import package_root
 
         (tmp_path / "pyproject.toml").write_text("[project]\n")
         assert package_root(str(tmp_path)) == str(tmp_path)
 
     def test_monorepo_nested_package(self, tmp_path) -> None:
-        from gideon.self_update import package_root
+        from gideon.operations.self_update import package_root
 
         nested = tmp_path / "Gideon"
         nested.mkdir()
@@ -643,7 +652,7 @@ class TestPackageRoot:
         assert package_root(str(tmp_path)) == str(nested)
 
     def test_no_pyproject_falls_back_to_proj(self, tmp_path) -> None:
-        from gideon.self_update import package_root
+        from gideon.operations.self_update import package_root
 
         assert package_root(str(tmp_path)) == str(tmp_path)
 
@@ -656,12 +665,12 @@ class TestReexecPreservesAuthMode:
     def test_reexec_passes_auth_mode_in_child_env(self, monkeypatch, tmp_path):
         import asyncio
 
-        import gideon.dashboard.handlers.updates as U
+        import gideon.interfaces.dashboard.handlers.updates as U
 
         state = _make_state(monkeypatch, tmp_path)
-        # neutralize the pre-exec side effects
         monkeypatch.setattr(
-            "gideon.dashboard.chat.save_all_sessions_to_history", lambda s: None
+            "gideon.interfaces.dashboard.chat.save_all_sessions_to_history",
+            lambda s: None,
         )
 
         class _Sessions:
@@ -674,7 +683,7 @@ class TestReexecPreservesAuthMode:
 
         def _fake_execve(exe, argv, env):
             captured["env"] = env
-            raise SystemExit  # stop before actually replacing the process
+            raise SystemExit
 
         monkeypatch.setattr(U.os, "execve", _fake_execve)
         monkeypatch.setattr(U.os.path, "isfile", lambda p: True)
@@ -687,11 +696,12 @@ class TestReexecPreservesAuthMode:
     def test_reexec_without_auth_mode_leaves_env_unset(self, monkeypatch, tmp_path):
         import asyncio
 
-        import gideon.dashboard.handlers.updates as U
+        import gideon.interfaces.dashboard.handlers.updates as U
 
         state = _make_state(monkeypatch, tmp_path)
         monkeypatch.setattr(
-            "gideon.dashboard.chat.save_all_sessions_to_history", lambda s: None
+            "gideon.interfaces.dashboard.chat.save_all_sessions_to_history",
+            lambda s: None,
         )
 
         class _Sessions:
@@ -712,8 +722,7 @@ class TestReexecPreservesAuthMode:
         monkeypatch.setattr(U.os, "access", lambda p, m: True)
 
         with pytest.raises(SystemExit):
-            asyncio.run(U._graceful_reexec(state))  # no auth_mode
-        # empty auth_mode → don't inject (inherit as-is), so the var stays unset
+            asyncio.run(U._graceful_reexec(state))
         assert "GIDEON_AUTH_MODE" not in captured["env"]
 
 
@@ -750,10 +759,14 @@ class TestGitCheckReadsRemoteVersion:
         self._git(origin, "init", "-q", "-b", "main")
         pkg = origin / prefix if prefix else origin
         pkg.mkdir(parents=True, exist_ok=True)
-        (pkg / "pyproject.toml").write_text('[project]\nname = "gideon"\nversion = "0.1.3"\n')
+        (pkg / "pyproject.toml").write_text(
+            '[project]\nname = "gideon"\nversion = "0.1.3"\n'
+        )
         self._git(origin, "add", "-A")
         self._git(origin, "commit", "-qm", "v0.1.3")
-        (pkg / "pyproject.toml").write_text('[project]\nname = "gideon"\nversion = "0.1.4"\n')
+        (pkg / "pyproject.toml").write_text(
+            '[project]\nname = "gideon"\nversion = "0.1.4"\n'
+        )
         self._git(origin, "add", "-A")
         self._git(origin, "commit", "-qm", "v0.1.4")
 
@@ -763,9 +776,11 @@ class TestGitCheckReadsRemoteVersion:
         return work / prefix if prefix else work
 
     @pytest.mark.parametrize("prefix", ["", "Gideon"])
-    def test_check_detects_remote_version_in_both_layouts(self, monkeypatch, tmp_path, prefix):
+    def test_check_detects_remote_version_in_both_layouts(
+        self, monkeypatch, tmp_path, prefix
+    ):
         """One commit behind a version-bumping tip ⇒ latest/available reflect it."""
-        from gideon.dashboard.handlers import updates as U
+        from gideon.interfaces.dashboard.handlers import updates as U
 
         proj = self._behind_clone(tmp_path, prefix)
         monkeypatch.setenv("GIDEON_PROJECT_DIR", str(proj))
@@ -782,11 +797,11 @@ class TestGitCheckReadsRemoteVersion:
 
     def test_check_reports_no_update_when_versions_match(self, monkeypatch, tmp_path):
         """Vacuity guard: the same probe must NOT claim an update at parity."""
-        from gideon.dashboard.handlers import updates as U
+        from gideon.interfaces.dashboard.handlers import updates as U
 
         proj = self._behind_clone(tmp_path, "")
         monkeypatch.setenv("GIDEON_PROJECT_DIR", str(proj))
-        monkeypatch.setattr(U, "_local_version", "0.1.4")  # already at the remote version
+        monkeypatch.setattr(U, "_local_version", "0.1.4")
         saved = dict(U._update_info)
         try:
             asyncio.run(U._do_update_check())
@@ -808,7 +823,7 @@ class TestCheckAgreesWithApplyUnderDevMode:
     def _run(monkeypatch, *, dev_mode: bool, behind, kind: str = "git") -> dict:
         import types
 
-        from gideon.dashboard.handlers import updates as U
+        from gideon.interfaces.dashboard.handlers import updates as U
 
         cfg = types.SimpleNamespace(
             auto_update=True,
@@ -846,4 +861,7 @@ class TestCheckAgreesWithApplyUnderDevMode:
         assert self._run(monkeypatch, dev_mode=False, behind=1)["available"] is False
 
     def test_non_git_kind_ignores_commits_behind(self, monkeypatch) -> None:
-        assert self._run(monkeypatch, dev_mode=True, behind=1, kind="pip")["available"] is False
+        assert (
+            self._run(monkeypatch, dev_mode=True, behind=1, kind="pip")["available"]
+            is False
+        )

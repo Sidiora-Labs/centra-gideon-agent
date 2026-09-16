@@ -12,13 +12,13 @@ import subprocess
 import textwrap
 from pathlib import Path
 
-from harness import scanner
-from harness.diff import _parse_added_lines, has_fix_shaped_commit, touches_specs
-from harness.selection import forced_profiles
+from checks.harness import scanner
+from checks.harness.diff import _parse_added_lines, has_fix_shaped_commit, touches_specs
+from checks.harness.selection import forced_profiles
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parent.parent
+    return Path(__file__).resolve().parent.parent.parent
 
 
 def _tracked_files(root: Path) -> list[Path]:
@@ -28,22 +28,21 @@ def _tracked_files(root: Path) -> list[Path]:
     return [root / ln.strip() for ln in out.splitlines() if ln.strip()]
 
 
-# ── The calibration guard ───────────────────────────────────────────────────────
-
-
 def test_scanner_clean_on_current_tree() -> None:
     """No ERROR-level scanner finding on the real repo. WARNINGs are allowed (advisory)."""
     root = _repo_root()
     findings = scanner.scan(_tracked_files(root), root)
     errors = [f for f in findings if f.level == scanner.ERROR]
-    assert not errors, "scanner has false-positive ERRORs on a clean tree:\n" + "\n".join(
+    assert (
+        not errors
+    ), "scanner has false-positive ERRORs on a clean tree:\n" + "\n".join(
         f.format(root) for f in errors
     )
 
 
 def test_known_checks_matches_seed_rule_scanner_refs() -> None:
     """Every scanner check-id a shipped rule spec references actually exists."""
-    from harness.specs import load_specs
+    from checks.harness.specs import load_specs
 
     referenced = {str(s.meta["scanner"]) for s in load_specs() if s.meta.get("scanner")}
     assert referenced, "seed rules should reference scanner checks"
@@ -52,12 +51,9 @@ def test_known_checks_matches_seed_rule_scanner_refs() -> None:
     ), f"rule specs reference unknown scanner checks: {referenced - scanner.known_checks()}"
 
 
-# ── Each check FIRES on a synthetic violation ────────────────────────────────────
-
-
 def test_config_four_points_fires_on_missing_load_mapping(tmp_path: Path) -> None:
     root = tmp_path
-    loader = root / "src" / "gideon" / "config" / "loader.py"
+    loader = root / "runtime" / "gideon" / "core" / "config" / "loader.py"
     loader.parent.mkdir(parents=True)
     loader.write_text(
         textwrap.dedent("""
@@ -76,18 +72,22 @@ def test_config_four_points_fires_on_missing_load_mapping(tmp_path: Path) -> Non
             """),
         encoding="utf-8",
     )
-    findings = [f for f in scanner.scan([loader], root) if f.check == "config-four-points"]
+    findings = [
+        f for f in scanner.scan([loader], root) if f.check == "config-four-points"
+    ]
     names = {f.what for f in findings}
     assert any("forgotten_field" in n for n in names)
-    assert not any("mapped_field" in n for n in names)  # properly wired → no finding
+    assert not any("mapped_field" in n for n in names)
 
 
 def test_hook_provider_parity_fires_on_unlisted_provider(tmp_path: Path) -> None:
     root = tmp_path
-    val = root / "src" / "gideon" / "validation.py"
+    val = root / "runtime" / "gideon" / "assurance" / "validation.py"
     val.parent.mkdir(parents=True)
-    val.write_text('ALLOWED_HOOK_PROVIDERS = frozenset({"bash", "webhook"})\n', encoding="utf-8")
-    ap = root / "src" / "gideon" / "action_providers"
+    val.write_text(
+        'ALLOWED_HOOK_PROVIDERS = frozenset({"bash", "webhook"})\n', encoding="utf-8"
+    )
+    ap = root / "runtime" / "gideon" / "integrations" / "action_providers"
     ap.mkdir(parents=True)
     (ap / "ghost_provider.py").write_text(
         textwrap.dedent("""
@@ -108,33 +108,39 @@ def test_hook_provider_parity_fires_on_unlisted_provider(tmp_path: Path) -> None
 
 def test_sse_event_registered_fires_on_unregistered_event(tmp_path: Path) -> None:
     root = tmp_path
-    fe = root / "web" / "src" / "pages" / "loops" / "useRunStream.ts"
+    fe = root / "apps/console" / "src" / "pages" / "loops" / "useRunStream.ts"
     fe.parent.mkdir(parents=True)
-    fe.write_text("export const RUN_LIFECYCLE = ['known_event'] as const\n", encoding="utf-8")
-    py = root / "src" / "gideon" / "loop" / "kinds" / "x.py"
+    fe.write_text(
+        "export const RUN_LIFECYCLE = ['known_event'] as const\n", encoding="utf-8"
+    )
+    py = root / "runtime" / "gideon" / "automation" / "loop" / "kinds" / "x.py"
     py.parent.mkdir(parents=True)
     py.write_text(
-        'def go(ctx, cid):\n    ctx.publish(cid, "unregistered_event", {})\n', encoding="utf-8"
+        'def go(ctx, cid):\n    ctx.publish(cid, "unregistered_event", {})\n',
+        encoding="utf-8",
     )
-    findings = [f for f in scanner.scan([py], root) if f.check == "sse-event-registered"]
+    findings = [
+        f for f in scanner.scan([py], root) if f.check == "sse-event-registered"
+    ]
     assert any("unregistered_event" in f.what for f in findings)
 
 
 def test_sse_event_registered_ignores_registered_and_nonloop(tmp_path: Path) -> None:
     root = tmp_path
-    fe = root / "web" / "src" / "pages" / "loops" / "useRunStream.ts"
+    fe = root / "apps/console" / "src" / "pages" / "loops" / "useRunStream.ts"
     fe.parent.mkdir(parents=True)
     fe.write_text("export const RUN_LIFECYCLE = ['known'] as const\n", encoding="utf-8")
-    py = root / "src" / "gideon" / "loop" / "kinds" / "x.py"
+    py = root / "runtime" / "gideon" / "automation" / "loop" / "kinds" / "x.py"
     py.parent.mkdir(parents=True)
-    # registered loop event → ok; a non-loop registry publish → ignored entirely.
     py.write_text(
         "def go(ctx, other):\n"
         '    ctx.publish(1, "known", {})\n'
         '    other.publish(1, "some_other_registry_event", {})\n',
         encoding="utf-8",
     )
-    findings = [f for f in scanner.scan([py], root) if f.check == "sse-event-registered"]
+    findings = [
+        f for f in scanner.scan([py], root) if f.check == "sse-event-registered"
+    ]
     assert findings == []
 
 
@@ -142,9 +148,11 @@ def test_app_sdk_boundary_fires_on_deep_import(tmp_path: Path) -> None:
     root = tmp_path
     appf = root / "apps" / "demo" / "provider.py"
     appf.parent.mkdir(parents=True)
-    appf.write_text("from gideon.loop.worktree import thing\n", encoding="utf-8")
+    appf.write_text(
+        "from gideon.automation.loop.worktree import thing\n", encoding="utf-8"
+    )
     findings = [f for f in scanner.scan([appf], root) if f.check == "app-sdk-boundary"]
-    assert any("gideon.loop.worktree" in f.what for f in findings)
+    assert any("gideon.automation.loop.worktree" in f.what for f in findings)
 
 
 def test_app_sdk_boundary_allows_sdk_import(tmp_path: Path) -> None:
@@ -156,26 +164,25 @@ def test_app_sdk_boundary_allows_sdk_import(tmp_path: Path) -> None:
     assert findings == []
 
 
-# ── Diff-aware selection ─────────────────────────────────────────────────────────
-
-
 def test_chat_touch_forces_replay_and_web() -> None:
-    forced = {f.profile for f in forced_profiles(["web/src/pages/chat/coalesceReducers.ts"])}
+    forced = {
+        f.profile
+        for f in forced_profiles(["apps/console/src/pages/chat/coalesceReducers.ts"])
+    }
     assert "replay" in forced
     assert "web" in forced
 
 
 def test_config_loader_touch_forces_scan() -> None:
-    forced = {f.profile for f in forced_profiles(["src/gideon/config/loader.py"])}
+    forced = {
+        f.profile for f in forced_profiles(["runtime/gideon/core/config/loader.py"])
+    }
     assert "scan" in forced
 
 
 def test_unrelated_touch_forces_nothing_sensitive() -> None:
     forced = {f.profile for f in forced_profiles(["README.md"])}
     assert "replay" not in forced and "scan" not in forced and "web" not in forced
-
-
-# ── Same-PR rule helpers ─────────────────────────────────────────────────────────
 
 
 def test_fix_shaped_detection() -> None:
@@ -185,11 +192,8 @@ def test_fix_shaped_detection() -> None:
 
 
 def test_touches_specs_detection() -> None:
-    assert touches_specs(["harness/specs/rules/new.md", "src/x.py"])
-    assert not touches_specs(["src/x.py", "web/y.ts"])
-
-
-# ── Diff line parsing ────────────────────────────────────────────────────────────
+    assert touches_specs(["checks/harness/specs/rules/new.md", "src/x.py"])
+    assert not touches_specs(["src/x.py", "apps/console/y.ts"])
 
 
 def test_parse_added_lines_reads_hunks() -> None:

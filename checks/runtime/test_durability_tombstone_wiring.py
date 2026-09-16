@@ -12,9 +12,9 @@ from __future__ import annotations
 import asyncio
 import json
 
-from gideon.config.loader import config_dir
-from gideon.durability import shards
-from gideon.durability import tombstones as tomb
+from gideon.core.config.loader import config_dir
+from gideon.operations.durability import shards
+from gideon.operations.durability import tombstones as tomb
 
 
 def _run(coro):
@@ -24,23 +24,21 @@ def _run(coro):
 class TestDeleteTaskProducesTombstone:
     def test_delete_task_records_a_marker(self, tmp_path, monkeypatch):
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        # config_dir caches nothing that would fight the env var here; build the provider.
-        from gideon.tasks.native import NativeTaskProvider, _tasks_dir
+        from gideon.engine.tasks.native import NativeTaskProvider, _tasks_dir
 
-        assert config_dir() == tmp_path  # env honored
+        assert config_dir() == tmp_path
         prov = NativeTaskProvider()
         task = _run(prov.create_task(title="doomed"))
         assert (_tasks_dir() / f"{task.id}.json").exists()
 
         assert _run(prov.delete_task(task.id)) is True
-        assert not (_tasks_dir() / f"{task.id}.json").exists()  # hard-deleted
-        # …but a sync tombstone marker was left, keyed by the task id (the shard row id).
+        assert not (_tasks_dir() / f"{task.id}.json").exists()
         markers = {t["id"] for t in tomb.read_tombstones(_tasks_dir())}
         assert task.id in markers
 
     def test_deleted_task_marker_rides_the_export(self, tmp_path, monkeypatch):
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        from gideon.tasks.native import NativeTaskProvider
+        from gideon.engine.tasks.native import NativeTaskProvider
 
         prov = NativeTaskProvider()
         keep = _run(prov.create_task(title="keep"))
@@ -55,35 +53,33 @@ class TestDeleteTaskProducesTombstone:
             if ln.strip()
         ]
         by_id = {r["id"]: r for r in rows}
-        assert keep.id in by_id and not by_id[keep.id].get("deleted_at")  # live
-        assert by_id[drop.id].get("deleted_at")  # tombstone rode along
+        assert keep.id in by_id and not by_id[keep.id].get("deleted_at")
+        assert by_id[drop.id].get("deleted_at")
 
 
 class TestDeleteTaskListProducesTombstone:
-    def test_delete_task_list_records_a_relpath_keyed_marker(self, tmp_path, monkeypatch):
+    def test_delete_task_list_records_a_relpath_keyed_marker(
+        self, tmp_path, monkeypatch
+    ):
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        from gideon.tasks.hierarchy import HierarchyStore
+        from gideon.engine.tasks.hierarchy import HierarchyStore
 
         store = HierarchyStore()
-        # A task list needs a project; use the default project the store seeds.
         projects = store.list_projects()
         assert projects, "store should seed a default project"
         tl = store.create_task_list(project_id=projects[0].id, name="sprint-1")
         assert store.delete_task_list(tl.id) is True
 
-        # The row id in the `tasks` shard is the list file's relpath-stem: task_lists/<id>.
         markers = {t["id"] for t in tomb.read_tombstones(tmp_path / "tasks")}
         assert f"task_lists/{tl.id}" in markers
 
 
 class TestPruneWiredIntoCycle:
     def test_prune_helper_trims_old_markers(self, tmp_path, monkeypatch):
-        # _prune_tombstones walks tombstone entries and prunes past the horizon.
-        from gideon.durability import service
+        from gideon.operations.durability import service
 
         tasks = tmp_path / "tasks"
         tasks.mkdir()
         tomb.record_tombstone(tasks, "ancient", now="2000-01-01T00:00:00+00:00")
-        # A generous window; "ancient" is decades past now − 4×window, so it prunes.
         service._prune_tombstones(tmp_path, 900.0)
         assert tomb.read_tombstones(tasks) == []

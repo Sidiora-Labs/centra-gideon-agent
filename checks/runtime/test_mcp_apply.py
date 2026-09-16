@@ -27,14 +27,9 @@ def _make_request(body: dict) -> MagicMock:
     return request
 
 
-# ---------------------------------------------------------------------------
-# Scope helpers: _set_gideon_entry, _set_scope_entry, _remove_gideon_entry
-# ---------------------------------------------------------------------------
-
-
 class TestSetGideonEntry:
     def test_adds_entry_when_enabling_with_spec(self, tmp_path, monkeypatch):
-        from gideon.dashboard.handlers import mcp as mcp_mod
+        from gideon.interfaces.dashboard.handlers import mcp as mcp_mod
 
         mc_path = tmp_path / "gideon.mcp.json"
         monkeypatch.setattr(mcp_mod, "_canonical_mcp_json", lambda: mc_path)
@@ -43,7 +38,7 @@ class TestSetGideonEntry:
         assert json.loads(mc_path.read_text())["mcpServers"]["srv"] == {"command": "x"}
 
     def test_disables_existing(self, tmp_path, monkeypatch):
-        from gideon.dashboard.handlers import mcp as mcp_mod
+        from gideon.interfaces.dashboard.handlers import mcp as mcp_mod
 
         mc_path = tmp_path / "gideon.mcp.json"
         mc_path.write_text(json.dumps({"mcpServers": {"srv": {"command": "x"}}}))
@@ -53,17 +48,19 @@ class TestSetGideonEntry:
         assert json.loads(mc_path.read_text())["mcpServers"]["srv"]["disabled"] is True
 
     def test_enabling_disabled_removes_flag(self, tmp_path, monkeypatch):
-        from gideon.dashboard.handlers import mcp as mcp_mod
+        from gideon.interfaces.dashboard.handlers import mcp as mcp_mod
 
         mc_path = tmp_path / "gideon.mcp.json"
-        mc_path.write_text(json.dumps({"mcpServers": {"srv": {"command": "x", "disabled": True}}}))
+        mc_path.write_text(
+            json.dumps({"mcpServers": {"srv": {"command": "x", "disabled": True}}})
+        )
         monkeypatch.setattr(mcp_mod, "_canonical_mcp_json", lambda: mc_path)
         action = mcp_mod._set_gideon_entry("srv", enabled=True)
         assert action == "enabled"
         assert "disabled" not in json.loads(mc_path.read_text())["mcpServers"]["srv"]
 
     def test_disabling_missing_with_spec_seeds_entry(self, tmp_path, monkeypatch):
-        from gideon.dashboard.handlers import mcp as mcp_mod
+        from gideon.interfaces.dashboard.handlers import mcp as mcp_mod
 
         mc_path = tmp_path / "gideon.mcp.json"
         monkeypatch.setattr(mcp_mod, "_canonical_mcp_json", lambda: mc_path)
@@ -75,36 +72,42 @@ class TestSetGideonEntry:
 
 class TestSetScopeEntry:
     def test_adds_when_enabling_absent(self, tmp_path, monkeypatch):
-        from gideon.dashboard.handlers import mcp as mcp_mod
+        from gideon.interfaces.dashboard.handlers import mcp as mcp_mod
 
         cfg_path = tmp_path / "global_mcp.json"
-        action = mcp_mod._set_scope_entry(cfg_path, "srv", enabled=True, spec={"command": "c"})
+        action = mcp_mod._set_scope_entry(
+            cfg_path, "srv", enabled=True, spec={"command": "c"}
+        )
         assert action == "added"
         assert json.loads(cfg_path.read_text())["mcpServers"]["srv"] == {"command": "c"}
 
     def test_removes_when_disabling_present(self, tmp_path, monkeypatch):
-        from gideon.dashboard.handlers import mcp as mcp_mod
+        from gideon.interfaces.dashboard.handlers import mcp as mcp_mod
 
         cfg_path = tmp_path / "global_mcp.json"
         cfg_path.write_text(
-            json.dumps({"mcpServers": {"srv": {"command": "c"}, "other": {"command": "y"}}})
+            json.dumps(
+                {"mcpServers": {"srv": {"command": "c"}, "other": {"command": "y"}}}
+            )
         )
         action = mcp_mod._set_scope_entry(cfg_path, "srv", enabled=False)
         assert action == "removed"
         servers = json.loads(cfg_path.read_text())["mcpServers"]
         assert "srv" not in servers
-        assert "other" in servers  # untouched
+        assert "other" in servers
 
     def test_enabling_already_present_noop(self, tmp_path):
-        from gideon.dashboard.handlers import mcp as mcp_mod
+        from gideon.interfaces.dashboard.handlers import mcp as mcp_mod
 
         cfg_path = tmp_path / "global_mcp.json"
         cfg_path.write_text(json.dumps({"mcpServers": {"srv": {"command": "c"}}}))
-        action = mcp_mod._set_scope_entry(cfg_path, "srv", enabled=True, spec={"command": "c"})
+        action = mcp_mod._set_scope_entry(
+            cfg_path, "srv", enabled=True, spec={"command": "c"}
+        )
         assert action == "noop"
 
     def test_disabling_absent_noop(self, tmp_path):
-        from gideon.dashboard.handlers import mcp as mcp_mod
+        from gideon.interfaces.dashboard.handlers import mcp as mcp_mod
 
         cfg_path = tmp_path / "global_mcp.json"
         action = mcp_mod._set_scope_entry(cfg_path, "srv", enabled=False)
@@ -112,7 +115,7 @@ class TestSetScopeEntry:
 
     def test_enabling_without_spec_missing(self, tmp_path, monkeypatch):
         """When no spec can be found anywhere, the helper returns missing_spec."""
-        from gideon.dashboard.handlers import mcp as mcp_mod
+        from gideon.interfaces.dashboard.handlers import mcp as mcp_mod
 
         cfg_path = tmp_path / "global_mcp.json"
         monkeypatch.setattr(mcp_mod, "_find_server_spec_anywhere", lambda name: None)
@@ -121,43 +124,38 @@ class TestSetScopeEntry:
         assert not cfg_path.exists()
 
 
-# ---------------------------------------------------------------------------
-# api_mcp_apply: preservation rule + batched writes
-# ---------------------------------------------------------------------------
-
-
 class TestApplyEndpoint:
     @pytest.mark.asyncio
     async def test_preservation_global_to_gideon(self, tmp_path, monkeypatch):
         """Turning agent config off when server was only in agent config copies to Gideon first."""  # noqa: E501
-        from gideon.dashboard.handlers import mcp as mcp_mod
+        from gideon.interfaces.dashboard.handlers import mcp as mcp_mod
 
-        # Real files: only global config has generic-mcp initially.
         mc_path = tmp_path / "gideon.mcp.json"
         global_path = tmp_path / "global_mcp.json"
         cc_path = tmp_path / "cc_global.json"
         agent_path = tmp_path / "gideon_agent.json"
 
         global_path.write_text(
-            json.dumps({"mcpServers": {"generic-mcp": {"command": "slack", "args": []}}})
+            json.dumps(
+                {"mcpServers": {"generic-mcp": {"command": "slack", "args": []}}}
+            )
         )
         agent_path.write_text(json.dumps({"mcpServers": {}}))
 
         monkeypatch.setattr(mcp_mod, "_canonical_mcp_json", lambda: mc_path)
         monkeypatch.setattr(mcp_mod, "_GLOBAL_MCP_JSON", global_path)
         monkeypatch.setattr(mcp_mod, "_CC_GLOBAL_JSON", cc_path)
-        # Point _find_server_spec_anywhere's lookup list at our tmp paths.
         monkeypatch.setattr(
             mcp_mod,
             "_find_server_spec_anywhere",
-            lambda name: ({"command": "slack", "args": []} if name == "generic-mcp" else None),
+            lambda name: (
+                {"command": "slack", "args": []} if name == "generic-mcp" else None
+            ),
         )
-        # Stub rebuild_agent_config — we only care about file writes here.
-        import gideon.agent
+        import gideon.engine.agent
 
-        monkeypatch.setattr(gideon.agent, "rebuild_agent_config", lambda: None)
+        monkeypatch.setattr(gideon.engine.agent, "rebuild_agent_config", lambda: None)
 
-        # No-op the lock to simplify testing.
         class _NoLock:
             async def __aenter__(self):
                 pass
@@ -184,18 +182,16 @@ class TestApplyEndpoint:
         assert body["ok"] is True
         assert body["applied"] == 1
 
-        # Gideon mcp.json should now have generic-mcp (preservation happened)
         pc = json.loads(mc_path.read_text())
         assert "generic-mcp" in pc["mcpServers"]
         assert pc["mcpServers"]["generic-mcp"].get("disabled") is not True
 
-        # Agent global should no longer have generic-mcp
         k = json.loads(global_path.read_text())
         assert "generic-mcp" not in k["mcpServers"]
 
     @pytest.mark.asyncio
     async def test_uninstall_removes_from_all_three(self, tmp_path, monkeypatch):
-        from gideon.dashboard.handlers import mcp as mcp_mod
+        from gideon.interfaces.dashboard.handlers import mcp as mcp_mod
 
         mc_path = tmp_path / "gideon.mcp.json"
         global_path = tmp_path / "global_mcp.json"
@@ -206,15 +202,11 @@ class TestApplyEndpoint:
         monkeypatch.setattr(mcp_mod, "_canonical_mcp_json", lambda: mc_path)
         monkeypatch.setattr(mcp_mod, "_GLOBAL_MCP_JSON", global_path)
         monkeypatch.setattr(mcp_mod, "_CC_GLOBAL_JSON", cc_path)
-        # Prevent the handler from shelling out to a real `gideon`
-        # binary if it happens to be on PATH in the test/CI environment.
-        # The handler looks up `gideon` via shutil.which; returning
-        # None short-circuits the subprocess.run call entirely.
         monkeypatch.setattr(mcp_mod.shutil, "which", lambda _name: None)
 
-        import gideon.agent
+        import gideon.engine.agent
 
-        monkeypatch.setattr(gideon.agent, "rebuild_agent_config", lambda: None)
+        monkeypatch.setattr(gideon.engine.agent, "rebuild_agent_config", lambda: None)
 
         class _NoLock:
             async def __aenter__(self):
@@ -236,21 +228,19 @@ class TestApplyEndpoint:
 
     @pytest.mark.asyncio
     async def test_calls_rebuild_agent_config_once(self, tmp_path, monkeypatch):
-        from gideon.dashboard.handlers import mcp as mcp_mod
+        from gideon.interfaces.dashboard.handlers import mcp as mcp_mod
 
-        monkeypatch.setattr(mcp_mod, "_canonical_mcp_json", lambda: tmp_path / "mc.json")
+        monkeypatch.setattr(
+            mcp_mod, "_canonical_mcp_json", lambda: tmp_path / "mc.json"
+        )
         monkeypatch.setattr(mcp_mod, "_GLOBAL_MCP_JSON", tmp_path / "global_mcp.json")
         monkeypatch.setattr(mcp_mod, "_CC_GLOBAL_JSON", tmp_path / "cc.json")
-        # The last change is an uninstall that would try to run
-        # `gideon skills mcp uninstall c` as a real subprocess if
-        # `gideon` is on PATH in CI.  Return None from shutil.which
-        # to short-circuit that path.
         monkeypatch.setattr(mcp_mod.shutil, "which", lambda _name: None)
 
-        import gideon.agent
+        import gideon.engine.agent
 
         rebuild = MagicMock()
-        monkeypatch.setattr(gideon.agent, "rebuild_agent_config", rebuild)
+        monkeypatch.setattr(gideon.engine.agent, "rebuild_agent_config", rebuild)
 
         class _NoLock:
             async def __aenter__(self):
@@ -260,7 +250,9 @@ class TestApplyEndpoint:
                 pass
 
         monkeypatch.setattr(mcp_mod, "_get_mcp_lock", lambda: _NoLock())
-        monkeypatch.setattr(mcp_mod, "_find_server_spec_anywhere", lambda n: {"command": "x"})
+        monkeypatch.setattr(
+            mcp_mod, "_find_server_spec_anywhere", lambda n: {"command": "x"}
+        )
 
         request = _make_request(
             {
@@ -275,31 +267,34 @@ class TestApplyEndpoint:
         body = json.loads(resp.body)
         assert body["ok"] is True
         assert body["applied"] == 3
-        assert rebuild.call_count == 1  # rebuild called ONCE after all edits
+        assert rebuild.call_count == 1
         assert body["rebuild"]["ok"] is True
 
     @pytest.mark.asyncio
-    async def test_import_from_claude_code_copies_spec_into_gideon(self, tmp_path, monkeypatch):
+    async def test_import_from_claude_code_copies_spec_into_gideon(
+        self, tmp_path, monkeypatch
+    ):
         """The Tools-page Import action (gideon=True + ccGlobal=True) copies a
         Claude-Code server's spec into ~/.gideon/mcp.json while leaving the
         Claude Code entry intact — so the native loop can run it."""
-        from gideon.dashboard.handlers import mcp as mcp_mod
+        from gideon.interfaces.dashboard.handlers import mcp as mcp_mod
 
         mc_path = tmp_path / "gideon.mcp.json"
         global_path = tmp_path / "global_mcp.json"
         cc_path = tmp_path / "cc_global.json"
-        # Server exists ONLY in Claude Code's config.
         cc_path.write_text(
-            json.dumps({"mcpServers": {"cc-srv": {"command": "npx", "args": ["cc-mcp"]}}})
+            json.dumps(
+                {"mcpServers": {"cc-srv": {"command": "npx", "args": ["cc-mcp"]}}}
+            )
         )
 
         monkeypatch.setattr(mcp_mod, "_canonical_mcp_json", lambda: mc_path)
         monkeypatch.setattr(mcp_mod, "_GLOBAL_MCP_JSON", global_path)
         monkeypatch.setattr(mcp_mod, "_CC_GLOBAL_JSON", cc_path)
 
-        import gideon.agent
+        import gideon.engine.agent
 
-        monkeypatch.setattr(gideon.agent, "rebuild_agent_config", lambda: None)
+        monkeypatch.setattr(gideon.engine.agent, "rebuild_agent_config", lambda: None)
 
         class _NoLock:
             async def __aenter__(self):
@@ -313,7 +308,12 @@ class TestApplyEndpoint:
         request = _make_request(
             {
                 "changes": [
-                    {"name": "cc-srv", "gideon": True, "globalMcp": False, "ccGlobal": True},
+                    {
+                        "name": "cc-srv",
+                        "gideon": True,
+                        "globalMcp": False,
+                        "ccGlobal": True,
+                    },
                 ]
             }
         )
@@ -325,16 +325,8 @@ class TestApplyEndpoint:
         pc = json.loads(mc_path.read_text())["mcpServers"]
         assert pc["cc-srv"]["command"] == "npx"
         assert pc["cc-srv"].get("disabled") is not True
-        # Claude Code entry left intact (import is additive, not a move).
         cc = json.loads(cc_path.read_text())["mcpServers"]
         assert "cc-srv" in cc
-
-
-# ---------------------------------------------------------------------------
-# Name validation: malicious / malformed server names are rejected before any
-# scope mutation or subprocess call.  These lock the _is_valid_mcp_name
-# contract in so a future regex change can't silently weaken it.
-# ---------------------------------------------------------------------------
 
 
 class TestHostileNameRejection:
@@ -342,20 +334,20 @@ class TestHostileNameRejection:
     @pytest.mark.parametrize(
         "bad_name",
         [
-            "../../etc/passwd",  # classic path traversal
-            "./local",  # leading . (not alphanumeric)
-            "/abs/path",  # leading / (not alphanumeric)
-            "-rf",  # leading dash looks like an argv flag
-            "a b",  # whitespace — shouldn't smuggle into argv
-            "a\nb",  # newline injection
-            "a;rm -rf /",  # command-sep chars
-            "a|whoami",  # pipe
-            "$(echo pwn)",  # command substitution shape
-            "`echo pwn`",  # backtick command substitution
-            "a\x00b",  # NUL byte
-            "",  # empty
-            "a" * 200,  # too long (> _MAX_MCP_NAME_LEN = 128)
-            "foo/../bar",  # embedded .. even with alphanumerics around
+            "../../etc/passwd",
+            "./local",
+            "/abs/path",
+            "-rf",
+            "a b",
+            "a\nb",
+            "a;rm -rf /",
+            "a|whoami",
+            "$(echo pwn)",
+            "`echo pwn`",
+            "a\x00b",
+            "",
+            "a" * 200,
+            "foo/../bar",
         ],
     )
     async def test_rejects_hostile_names(self, tmp_path, monkeypatch, bad_name):
@@ -364,7 +356,7 @@ class TestHostileNameRejection:
         The scope files must NOT be created/touched, and the handler must
         NOT call ``subprocess.run`` or mutate ``rebuild_agent_config``.
         """
-        from gideon.dashboard.handlers import mcp as mcp_mod
+        from gideon.interfaces.dashboard.handlers import mcp as mcp_mod
 
         mc_path = tmp_path / "mc.json"
         global_path = tmp_path / "global_mcp.json"
@@ -372,17 +364,18 @@ class TestHostileNameRejection:
         monkeypatch.setattr(mcp_mod, "_canonical_mcp_json", lambda: mc_path)
         monkeypatch.setattr(mcp_mod, "_GLOBAL_MCP_JSON", global_path)
         monkeypatch.setattr(mcp_mod, "_CC_GLOBAL_JSON", cc_path)
-        # Trap: if the handler tries to shell out despite the name-gate, fail loudly.
         monkeypatch.setattr(
             mcp_mod.shutil,
             "which",
-            lambda _name: pytest.fail("shutil.which must not be reached for invalid name"),
+            lambda _name: pytest.fail(
+                "shutil.which must not be reached for invalid name"
+            ),
         )
 
-        import gideon.agent
+        import gideon.engine.agent
 
         rebuild = MagicMock()
-        monkeypatch.setattr(gideon.agent, "rebuild_agent_config", rebuild)
+        monkeypatch.setattr(gideon.engine.agent, "rebuild_agent_config", rebuild)
 
         class _NoLock:
             async def __aenter__(self):
@@ -399,13 +392,11 @@ class TestHostileNameRejection:
 
         assert body["ok"] is True
         assert len(body["results"]) == 1
-        # Either "invalid name" (regex/len reject) or "empty name" (empty string).
         err = body["results"][0].get("error", "")
         assert err in {
             "invalid name",
             "empty name",
         }, f"expected invalid/empty name error for {bad_name!r}, got {body['results'][0]}"
-        # No file was created by the scope helpers.
         assert not mc_path.exists()
         assert not global_path.exists()
         assert not cc_path.exists()
@@ -415,18 +406,20 @@ class TestHostileNameRejection:
         """Invalid tool-override names are dropped; the server's scope
         changes still apply, and the handler reports ``tools_rejected``.
         """
-        from gideon.dashboard.handlers import mcp as mcp_mod
+        from gideon.interfaces.dashboard.handlers import mcp as mcp_mod
 
         mc_path = tmp_path / "mc.json"
         monkeypatch.setattr(mcp_mod, "_canonical_mcp_json", lambda: mc_path)
         monkeypatch.setattr(mcp_mod, "_GLOBAL_MCP_JSON", tmp_path / "global_mcp.json")
         monkeypatch.setattr(mcp_mod, "_CC_GLOBAL_JSON", tmp_path / "cc.json")
-        monkeypatch.setattr(mcp_mod, "_find_server_spec_anywhere", lambda n: {"command": "x"})
+        monkeypatch.setattr(
+            mcp_mod, "_find_server_spec_anywhere", lambda n: {"command": "x"}
+        )
         monkeypatch.setattr(mcp_mod.shutil, "which", lambda _n: None)
 
-        import gideon.agent
+        import gideon.engine.agent
 
-        monkeypatch.setattr(gideon.agent, "rebuild_agent_config", lambda: None)
+        monkeypatch.setattr(gideon.engine.agent, "rebuild_agent_config", lambda: None)
 
         class _NoLock:
             async def __aenter__(self):
@@ -444,8 +437,8 @@ class TestHostileNameRejection:
                         "name": "generic-mcp",
                         "gideon": True,
                         "toolOverrides": {
-                            "../evil": False,  # rejected
-                            "legit-tool": False,  # accepted
+                            "../evil": False,
+                            "legit-tool": False,
                         },
                     }
                 ]
@@ -457,6 +450,5 @@ class TestHostileNameRejection:
         assert body["ok"] is True
         actions = body["results"][0]["actions"]
         assert actions.get("tools_rejected") == ["../evil"]
-        # The good tool went through
         assert "tools" in actions
         assert "legit-tool" in actions["tools"]

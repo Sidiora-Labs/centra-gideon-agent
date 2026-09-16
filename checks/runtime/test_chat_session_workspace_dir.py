@@ -6,12 +6,15 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.config.loader import AgentProfile, AppConfig
-from gideon.dashboard.chat import api_chat_session_agent, api_chat_session_workspace_dir
-from gideon.dashboard.state import DashboardState, _ChatSession
+from gideon.core.config.loader import AgentProfile, AppConfig
+from gideon.interfaces.dashboard.chat import (
+    api_chat_session_agent,
+    api_chat_session_workspace_dir,
+)
+from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
 
 
-def _make_app(state: DashboardState) -> web.Application:
+def _make_app(state: ConsoleState) -> web.Application:
     app = web.Application()
     app["state"] = state
     app.router.add_post(
@@ -20,8 +23,8 @@ def _make_app(state: DashboardState) -> web.Application:
     return app
 
 
-def _mock_state(session: _ChatSession | None = None) -> DashboardState:
-    state = MagicMock(spec=DashboardState)
+def _mock_state(session: _ChatSession | None = None) -> ConsoleState:
+    state = MagicMock(spec=ConsoleState)
     state._sessions = {}
     if session:
         state._sessions[session.key] = session
@@ -37,7 +40,7 @@ class TestChatSessionWorkspaceDir:
     async def test_set_workspace_dir(self, tmp_path):
         session = _ChatSession("test")
         state = _mock_state(session)
-        with patch("gideon.dashboard.chat_handlers._save_recent_project"):
+        with patch("gideon.interfaces.dashboard.chat_handlers._save_recent_project"):
             async with TestClient(TestServer(_make_app(state))) as client:
                 resp = await client.post(
                     "/api/chat/sessions/test/workspace-dir",
@@ -77,7 +80,10 @@ class TestChatSessionWorkspaceDir:
     async def test_sensitive_path_returns_403(self, tmp_path):
         session = _ChatSession("test")
         state = _mock_state(session)
-        with patch("gideon.dashboard.chat_handlers.is_sensitive_path", return_value=True):
+        with patch(
+            "gideon.interfaces.dashboard.chat_handlers.is_sensitive_path",
+            return_value=True,
+        ):
             async with TestClient(TestServer(_make_app(state))) as client:
                 resp = await client.post(
                     "/api/chat/sessions/test/workspace-dir",
@@ -91,7 +97,7 @@ class TestChatSessionWorkspaceDir:
         session = _ChatSession("test")
         session.total_messages = 5
         state = _mock_state(session)
-        with patch("gideon.dashboard.chat_handlers._save_recent_project"):
+        with patch("gideon.interfaces.dashboard.chat_handlers._save_recent_project"):
             async with TestClient(TestServer(_make_app(state))) as client:
                 resp = await client.post(
                     "/api/chat/sessions/test/workspace-dir",
@@ -139,7 +145,6 @@ class TestAnOmittedKeyIsNotAClear:
             assert resp.status == 400
             body = await resp.json()
             assert "workspace_dir" in body["error"]
-        # The pre-existing binding survived the rejected request.
         assert session.workspace_dir == str(tmp_path)
 
     @pytest.mark.asyncio
@@ -179,14 +184,16 @@ class TestAgentBindingKeepsTheBoundWorkspace:
         monkeypatch.setenv("GIDEON_WORKSPACE", str(tmp_path / "ws"))
 
     @staticmethod
-    def _app(state: DashboardState) -> web.Application:
+    def _app(state: ConsoleState) -> web.Application:
         app = web.Application()
         app["state"] = state
-        app.router.add_post("/api/chat/sessions/{session}/agent", api_chat_session_agent)
+        app.router.add_post(
+            "/api/chat/sessions/{session}/agent", api_chat_session_agent
+        )
         return app
 
     @staticmethod
-    def _state_for(session: _ChatSession) -> DashboardState:
+    def _state_for(session: _ChatSession) -> ConsoleState:
         state = _mock_state(session)
         state.sessions = MagicMock()
         state.sessions.reset = AsyncMock()
@@ -196,8 +203,11 @@ class TestAgentBindingKeepsTheBoundWorkspace:
     async def _bind(self, session, cfg):
         state = self._state_for(session)
         with (
-            patch("gideon.dashboard.chat_handlers.AppConfig") as app_cfg,
-            patch("gideon.dashboard.chat_handlers._sync_dashboard_sessions", MagicMock()),
+            patch("gideon.interfaces.dashboard.chat_handlers.AppConfig") as app_cfg,
+            patch(
+                "gideon.interfaces.dashboard.chat_handlers._sync_dashboard_sessions",
+                MagicMock(),
+            ),
         ):
             app_cfg.load.return_value = cfg
             async with TestClient(TestServer(self._app(state))) as client:
@@ -208,7 +218,9 @@ class TestAgentBindingKeepsTheBoundWorkspace:
                 return await resp.json()
 
     @pytest.mark.asyncio
-    async def test_profile_without_default_dir_keeps_the_bound_workspace(self, tmp_path):
+    async def test_profile_without_default_dir_keeps_the_bound_workspace(
+        self, tmp_path
+    ):
         session = _ChatSession("test")
         session.workspace_dir = str(tmp_path)
         cfg = AppConfig.load()
@@ -225,7 +237,9 @@ class TestAgentBindingKeepsTheBoundWorkspace:
         session = _ChatSession("test")
         session.workspace_dir = str(tmp_path / "bound")
         cfg = AppConfig.load()
-        cfg.agents = {"bound-agent": AgentProfile(default_dir=str(tmp_path / "opinion"))}
+        cfg.agents = {
+            "bound-agent": AgentProfile(default_dir=str(tmp_path / "opinion"))
+        }
 
         await self._bind(session, cfg)
 

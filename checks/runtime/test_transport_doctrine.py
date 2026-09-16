@@ -17,13 +17,9 @@ import inspect
 import re
 from pathlib import Path
 
-from gideon.dashboard import state as state_mod
+from gideon.interfaces.dashboard import state as state_mod
 
-# Anchor source reads to the package root (this file is <root>/tests/…) so these
-# structural guards pass regardless of the pytest invocation cwd — they read repo
-# files by relative path and were silently cwd-fragile (only passed when run from
-# the Gideon/ dir, failing from the repo root).
-_ROOT = Path(__file__).resolve().parent.parent
+_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 def _read(rel: str) -> str:
@@ -33,10 +29,9 @@ def _read(rel: str) -> str:
 def test_state_has_no_global_sse_hub():
     """The dead global SSE hub + accessor must stay gone (M3)."""
     assert not hasattr(
-        state_mod.DashboardState, "sse_hub"
+        state_mod.ConsoleState, "sse_hub"
     ), "global SSE hub removed in M3 — dashboard state rides the WebSocket"
-    # The per-resource campaign registry IS expected to remain.
-    assert hasattr(state_mod.DashboardState, "loop_sse")
+    assert hasattr(state_mod.ConsoleState, "loop_sse")
 
 
 def test_broadcast_does_not_publish_to_a_global_sse_hub():
@@ -47,7 +42,7 @@ def test_broadcast_does_not_publish_to_a_global_sse_hub():
     per-resource ``loop_sse()`` publish is a different concern and is done
     by the watchdog, not here.
     """
-    src = inspect.getsource(state_mod.DashboardState._broadcast)
+    src = inspect.getsource(state_mod.ConsoleState._broadcast)
     assert "_sse.publish" not in src, (
         "_broadcast must not publish to a global SSE hub — that is the dual-emit "
         "M3 removed; always-on state rides the WebSocket"
@@ -56,9 +51,7 @@ def test_broadcast_does_not_publish_to_a_global_sse_hub():
 
 def test_no_global_api_stream_route():
     """The dead global /api/stream SSE endpoint must stay removed."""
-    server_src = _read("src/gideon/dashboard/server.py")
-    # The per-campaign /api/campaigns/{id}/stream is registered in its own
-    # handler module, not here; the global /api/stream must be gone.
+    server_src = _read("runtime/gideon/interfaces/dashboard/server.py")
     assert not re.search(
         r'add_get\(\s*["\']/api/stream["\']', server_src
     ), "/api/stream (global SSE) was removed in M3"
@@ -67,13 +60,13 @@ def test_no_global_api_stream_route():
 def test_useSSE_hook_deleted():
     """The dead, never-mounted useSSE.ts frontend hook must stay deleted (M3)."""
     assert not (
-        _ROOT / "web/src/hooks/useSSE.ts"
+        _ROOT / "apps/console/src/hooks/useSSE.ts"
     ).exists(), "useSSE.ts was dead (never mounted) and removed in M3"
 
 
 def test_per_resource_sse_substrate_present():
     """The reusable SSE substrate must remain — it powers per-resource streams."""
-    from gideon.dashboard import sse
+    from gideon.interfaces.dashboard import sse
 
     assert hasattr(sse, "SseHub")
     assert hasattr(sse, "SseRegistry")
@@ -90,20 +83,19 @@ def test_unified_loop_sse_events_are_all_registered_in_the_frontend():
     RUN_LIFECYCLE union in useRunStream.ts). Pin the contract so a new publish without the
     matching FE listener fails CI instead of silently never reaching an open cockpit.
     """
-    handler = _read("src/gideon/dashboard/handlers/loop_routes.py")
-    watchdog = _read("src/gideon/loop/watchdog.py")
-    design = _read("src/gideon/loop/kinds/design.py")
-    fe = _read("web/src/pages/loops/useRunStream.ts")
+    handler = _read("runtime/gideon/interfaces/dashboard/handlers/loop_routes.py")
+    watchdog = _read("runtime/gideon/automation/loop/watchdog.py")
+    design = _read("runtime/gideon/automation/loop/kinds/design.py")
+    fe = _read("apps/console/src/pages/loops/useRunStream.ts")
 
-    # Backend event names: direct loop_sse().publish(registry_key(..), "EVENT", ..) in
-    # the handler (the action handler publishes a variable action ∈ start/pause/resume/
-    # stop, added explicitly) + the watchdog's self._publish(loop_id, "EVENT", ..).
     published = set(
-        re.findall(r'loop_sse\(\)\.publish\(\s*registry_key\([^)]*\),\s*"([a-z_]+)"', handler)
+        re.findall(
+            r'loop_sse\(\)\.publish\(\s*registry_key\([^)]*\),\s*"([a-z_]+)"', handler
+        )
     )
-    published |= set(re.findall(r'self\._publish\(\s*[a-zA-Z_.]+,\s*"([a-z_]+)"', watchdog))
-    # The design kind (which uses THIS cockpit's useRunStream) publishes its phase-trail
-    # advance through the cycle context — same drift class as the code kind's ctx.publish.
+    published |= set(
+        re.findall(r'self\._publish\(\s*[a-zA-Z_.]+,\s*"([a-z_]+)"', watchdog)
+    )
     published |= set(re.findall(r'ctx\.publish\(\s*[a-zA-Z_.]+,\s*"([a-z_]+)"', design))
 
     m = re.search(r"const RUN_LIFECYCLE = \[([^\]]*)\]", fe)
@@ -126,12 +118,10 @@ def test_workflow_engine_sse_events_are_all_registered_in_the_frontend():
     above (C326/C367); pinned here so a new `_publish(...)` without the matching FE
     listener fails CI instead of silently never reaching an open run view.
     """
-    controller = _read("src/gideon/workflows/controller.py")
-    service = _read("src/gideon/workflows/service.py")
-    fe = _read("web/src/pages/workflows/useWorkflowStream.ts")
+    controller = _read("runtime/gideon/automation/workflows/controller.py")
+    service = _read("runtime/gideon/automation/workflows/service.py")
+    fe = _read("apps/console/src/pages/workflows/useWorkflowStream.ts")
 
-    # `self._publish("EVENT", {...})` in the controller (the sole publisher of run/node
-    # lifecycle) + the blocking-mode progress tick the service layer emits.
     published = set(re.findall(r'self\._publish\(\s*"(workflow_[a-z_]+)"', controller))
     published |= set(re.findall(r'_publish\(\s*"(workflow_[a-z_]+)"', service))
 
@@ -159,8 +149,8 @@ def test_the_coalesced_batch_frame_is_registered_and_its_members_are_foldable():
 
     Both are pinned here because neither surfaces in a test that does not read both files.
     """
-    coalescer = _read("src/gideon/workflows/coalescer.py")
-    fe = _read("web/src/pages/workflows/useWorkflowStream.ts")
+    coalescer = _read("runtime/gideon/automation/workflows/coalescer.py")
+    fe = _read("apps/console/src/pages/workflows/useWorkflowStream.ts")
 
     batch_event = re.search(r'BATCH_EVENT = "([a-z_]+)"', coalescer)
     assert batch_event, "couldn't find BATCH_EVENT in coalescer.py"
@@ -196,16 +186,19 @@ def test_code_cockpit_sse_events_are_all_registered_in_the_frontend():
     drops them and the cockpit's stage rail / gate banner / task buckets only update on the
     slow fallback poll (the regression this guards — the FE list was narrowed to the goal
     watchdog's events at the cutover, dropping every code-specific one)."""
-    handler = _read("src/gideon/dashboard/handlers/loop_routes.py")
-    watchdog = _read("src/gideon/loop/watchdog.py")
-    sdlc = _read("src/gideon/loop/kinds/sdlc.py")
-    fe = _read("web/src/pages/loops/useRunStream.ts")
+    handler = _read("runtime/gideon/interfaces/dashboard/handlers/loop_routes.py")
+    watchdog = _read("runtime/gideon/automation/loop/watchdog.py")
+    sdlc = _read("runtime/gideon/automation/loop/kinds/sdlc.py")
+    fe = _read("apps/console/src/pages/loops/useRunStream.ts")
 
     published = set(
-        re.findall(r'loop_sse\(\)\.publish\(\s*registry_key\([^)]*\),\s*"([a-z_]+)"', handler)
+        re.findall(
+            r'loop_sse\(\)\.publish\(\s*registry_key\([^)]*\),\s*"([a-z_]+)"', handler
+        )
     )
-    published |= set(re.findall(r'self\._publish\(\s*[a-zA-Z_.]+,\s*"([a-z_]+)"', watchdog))
-    # The sdlc kind publishes its orchestration events through the cycle context.
+    published |= set(
+        re.findall(r'self\._publish\(\s*[a-zA-Z_.]+,\s*"([a-z_]+)"', watchdog)
+    )
     published |= set(re.findall(r'ctx\.publish\(\s*[a-zA-Z_.]+,\s*"([a-z_]+)"', sdlc))
 
     m = re.search(r"const RUN_LIFECYCLE = \[([^\]]*)\]", fe)

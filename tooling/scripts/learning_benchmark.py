@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """THE one command for the skill-impact benchmark (LEARNING-VISIBILITY T4.2).
 
-    python scripts/learning_benchmark.py --preflight            # nothing is called
-    python scripts/learning_benchmark.py --dry-run              # the paired cell plan
-    python scripts/learning_benchmark.py --run                  # the paired runs
-    python scripts/learning_benchmark.py --run --bind-provider LocalOllama:gemma4:12b
-    python scripts/learning_benchmark.py --run --task sk_grill --trials 5
-    python scripts/learning_benchmark.py --reproduce <baseline_run_id> --run
+    python tooling/scripts/learning_benchmark.py --preflight            # nothing is called
+    python tooling/scripts/learning_benchmark.py --dry-run              # the paired cell plan
+    python tooling/scripts/learning_benchmark.py --run                  # the paired runs
+    python tooling/scripts/learning_benchmark.py --run --bind-provider LocalOllama:gemma4:12b
+    python tooling/scripts/learning_benchmark.py --run --task sk_grill --trials 5
+    python tooling/scripts/learning_benchmark.py --reproduce <baseline_run_id> --run
 
 Protocol: `docs/research/learning-benchmark-protocol.md` (PROTOCOL v1, owner-signed
 before any run). This script implements §3's arms, §4's metrics, §5's verdict rule and §8's
 publication rules; it does not restate any of them.
 
 Why a script and not a `gideon` subcommand: the verdict thresholds live in
-`harness/fanout_measure.py`, and `harness` is a repo-root dev package that is deliberately NOT in
+`checks/harness/fanout_measure.py`, and `harness` is a repo-root dev package that is deliberately NOT in
 the shipped wheel. A CLI subcommand would have to import it from `src/`, stranding an import at
 install time. So the benchmark is dev tooling that imports both trees, the verdict is computed
 HERE, and it is **written into the report** — the gateway and the dashboard only read it. That is
@@ -46,24 +46,20 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-for _p in (str(REPO_ROOT), str(REPO_ROOT / "src")):
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+for _p in (str(REPO_ROOT), str(REPO_ROOT / "runtime")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from harness import learning_verdict as verdict_lib  # noqa: E402
-from gideon.evals import learning_bench as bench  # noqa: E402
-from gideon.evals import matrix as matrix_lib  # noqa: E402
-from gideon.evals import overlay as overlay_lib  # noqa: E402
-from gideon.evals import pinning  # noqa: E402
-from gideon.evals import provenance  # noqa: E402
-from gideon.evals import skills_bench  # noqa: E402
-from gideon.evals import scenarios as scenario_lib  # noqa: E402
+from checks.harness import learning_verdict as verdict_lib  # noqa: E402
+from gideon.assurance.evals import learning_bench as bench  # noqa: E402
+from gideon.assurance.evals import matrix as matrix_lib  # noqa: E402
+from gideon.assurance.evals import overlay as overlay_lib  # noqa: E402
+from gideon.assurance.evals import pinning  # noqa: E402
+from gideon.assurance.evals import provenance  # noqa: E402
+from gideon.assurance.evals import skills_bench  # noqa: E402
+from gideon.assurance.evals import scenarios as scenario_lib  # noqa: E402
 
-#: Arm coordinate → the report's arm name. The matrix axis carries the overlay vocabulary
-#: (`on`/`off`, closed in `evals/overlay.py`); the report carries the benchmark's
-#: (`skills_on`/`skills_off`, closed in `harness/learning_verdict.py`). One mapping, declared
-#: once, so neither vocabulary has to grow a member for the other's sake.
 ARM_NAMES = {
     skills_bench.ARM_SURFACED: verdict_lib.ARM_SKILLS_ON,
     skills_bench.ARM_SUPPRESSED: verdict_lib.ARM_SKILLS_OFF,
@@ -87,7 +83,7 @@ def _default_k() -> int:
     silently produce `insufficient_trials` for every task.
     """
     try:
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         k = int(getattr(AppConfig.load().evals, "study_default_k", 0) or 0)
         return k if k > 0 else verdict_lib.MIN_TRIALS_PER_ARM
@@ -110,7 +106,6 @@ def _selected(task_ids: list[str]) -> list[bench.BenchTask]:
     return out
 
 
-# ── the two zero-cost modes ──────────────────────────────────────────────────
 
 
 def cmd_preflight(args: argparse.Namespace) -> int:
@@ -167,7 +162,6 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
     return 0
 
 
-# ── the paired run ───────────────────────────────────────────────────────────
 
 
 def _cell_payload(cell) -> dict:
@@ -223,18 +217,9 @@ def _verdict_for_task(task: bench.BenchTask, cells: list) -> verdict_lib.TaskVer
         if not spend.get("observed"):
             spend_observed = False
         spend_estimated = spend_estimated or bool(spend.get("estimated"))
-        # The guard, before the number is used. An ABSENT `tokens_recorded` is unrecorded too: a
-        # cell artifact written before #2540 never recorded whether its provider reported usage.
         if provenance.is_unrecorded(spend, "tokens_recorded") or not spend.get("tokens_recorded"):
             tokens_recorded = False
             unrecorded_cells += 1
-        # Scores are assertion pass RATES in 0..1; §5's band is in POINTS, so scale once, here,
-        # at the boundary between the matrix's unit and the verdict rule's.
-        #
-        # `Trial.tokens` is an `int` by construction, so an unrecorded count arrives as a
-        # PLACEHOLDER 0. That is safe only because `tokens_recorded=False` below makes
-        # `verdict_task` refuse before any code reads it — and it raises
-        # `IncommensurableSpendError` if it is ever reached with the flag off.
         trials[arm].append(
             verdict_lib.Trial(score=float(cell.score) * 100.0, tokens=int(spend.get("tokens") or 0))
         )
@@ -277,8 +262,10 @@ def run_spend_facts(verdicts: list) -> dict:
 
 def cmd_run(args: argparse.Namespace) -> int:
     """Run the paired arms and write the report. THIS calls models."""
-    from gideon.evals import ablation, cell_provider, store
-    from gideon.evals.runner import run_matrix
+    from gideon.assurance.evals import ablation
+    from gideon.assurance.evals import cell_provider
+    from gideon.assurance.evals import store
+    from gideon.assurance.evals.runner import run_matrix
 
     home = os.environ.get("GIDEON_HOME", "")
     trials = int(args.trials or _default_k())
@@ -286,10 +273,6 @@ def cmd_run(args: argparse.Namespace) -> int:
     moment = _now()
     run_id = _run_id(moment)
 
-    # `--bind-provider` is what makes a cell able to call a real model. It names ONE
-    # `Provider:model` ref; everything the cell needs is resolved from that one entry, and a
-    # run without the flag keeps the offline scripted default. Resolved BEFORE the first task
-    # so a typo'd ref fails now rather than after burning half a matrix.
     binding = None
     if args.bind_provider:
         try:
@@ -320,34 +303,19 @@ def cmd_run(args: argparse.Namespace) -> int:
             with ablation.live_state_unchanged():
                 result = run_matrix(spec, matrix_id=matrix_id, provider_binding=binding)
         except store.PinRequiredError as exc:
-            # §3: "the pin is the comparability claim", and `run_matrix` refuses an incomplete
-            # one BEFORE spawning. That refusal is correct behaviour, not an error to work
-            # around — an unbound home genuinely cannot record a benchmark result. Report it as
-            # a skipped task carrying the store's OWN sentence, because a traceback here would
-            # abort the remaining tasks and lose the reason.
             print(f"SKIP {task.task_id}: {exc}")
             skipped.append({"task_id": task.task_id, "skill": task.skill, "blockers": [str(exc)]})
             continue
         tv = _verdict_for_task(task, list(result.cells))
         verdicts.append(tv)
         try:
-            # READ BACK the pin `run_matrix` actually persisted, rather than recomputing one here.
-            # A second computation is a second answer: this one would not carry the cell binding
-            # `run_matrix` recorded (#2561), so the report would state the home's model beside a
-            # cells' field that was silently unrecorded.
             pin = pinning.matrix_pin(matrix_id)
             if pin is None:
                 raise RuntimeError(f"matrix {matrix_id} persisted no pin.json")
             pin_seen.setdefault("prompt_pack_sha256", pin.prompt_pack_sha256)
             pin_seen.setdefault("config_snapshot_ref", pin.config_snapshot_ref)
             pin_seen.setdefault("model_fp", pin.model_fp())
-            # The per-use-case refs behind `model_fp`, spelled out. `model_fp` is a digest, so a
-            # reader of a published table could not tell a real model from the offline replay
-            # from it — and §8 forbids publishing a number whose provenance is unreadable.
             pin_seen.setdefault("model_fingerprint", dict(pin.model_fingerprint))
-            # The SECOND fact, under its own name (#2561): what the CELLS could reach. `model_fp`
-            # above is the invoking home's and was identical for a bound run and a run where every
-            # cell failed to resolve any provider at all.
             pin_seen.setdefault("cell_model_fp", pin.cell_model_fp())
             pin_seen.setdefault(
                 "cell_model_fingerprint",
@@ -373,24 +341,15 @@ def cmd_run(args: argparse.Namespace) -> int:
             "inconclusive_band_points": verdict_lib.INCONCLUSIVE_BAND_POINTS,
             "token_match_tolerance": verdict_lib.TOKEN_MATCH_TOLERANCE,
             "min_trials_per_arm": verdict_lib.MIN_TRIALS_PER_ARM,
-            "source": "harness/fanout_measure.py",
+            "source": "checks/harness/fanout_measure.py",
         },
         "pin": pin_seen,
-        # WHAT the cells were actually allowed to call. `null` is the honest reading of an
-        # offline run and must stay distinguishable from a real one at a glance: the two
-        # produce identically-shaped score tables and only one of them is a measurement.
-        #
-        # And a THIRD state a consumer must not fold into `null`: a report that never recorded
-        # this at all. That is what `report_schema` above answers (#2562) — every report at
-        # `bench.PROVENANCE_SCHEMA` or above carries this key, so a consumer reads the STATED
-        # schema and never `'provider_binding' in report`.
         "provider_binding": (binding.to_dict() if binding is not None else None),
         "home": home,
         "tasks": [tv.to_dict() for tv in verdicts],
         "skipped": skipped,
         "measured_tasks": sum(1 for tv in verdicts if tv.verdict is not None),
         "absent_cells": sum(tv.absent_cells for tv in verdicts),
-        # The RUN-level spend facts (#2540). See `run_spend_facts` for why they are a function.
         **run_spend_facts(verdicts),
     }
     if args.reproduce:

@@ -1,21 +1,21 @@
 # Design-System Consistency Audit — S1 Drift Map
 
 **Plan:** DESIGN-SYSTEM-CONSISTENCY · **Session:** S1 (audit — measure only, no fixes)
-**Generated from:** `web/src/design/consistencyAudit.report.ts` — run `npm run audit:consistency` from the repo root to rewrite `docs/design/consistency-audit.json`. A plain `npm test` measures but writes nothing (issue 261), so regenerating is now a deliberate step.
+**Generated from:** `apps/console/src/design/consistencyAudit.report.ts` — run `npm run audit:consistency` from the repo root to rewrite `docs/design/consistency-audit.json`. A plain `npm test` measures but writes nothing (issue 261), so regenerating is now a deliberate step.
 **Status:** LIVING — regenerate the JSON, then refresh the tables below, each cycle the scanner changes.
 
-> This document is the *map*, not the fix. It quantifies where the shipped design system (`web/DESIGN.md` + `web/PRODUCT.md` are authority) drifts across `web/src`, ranked worst-first, so S2/S3 attack the highest-value targets first. **No code was changed to produce it.**
+> This document is the *map*, not the fix. It quantifies where the shipped design system (`apps/console/DESIGN.md` + `apps/console/PRODUCT.md` are authority) drifts across `apps/console/src`, ranked worst-first, so S2/S3 attack the highest-value targets first. **No code was changed to produce it.**
 
 ---
 
 ## Headline finding
 
-The token layer is **already mature and near-clean** — the shipped `tokenLint` ratchet has driven hardcoded color/spacing/radius/shadow/duration values down to a **handful of legitimate exceptions**. The dominant, measurable drift is **primitive adoption**: pages built over time render **bespoke chrome** (raw `<button>`, raw `<input>/<textarea>/<select>`) instead of the 33 shell primitives in `web/src/ui/`. This is exactly the drift the plan predicted, concentrated in the two mega-pages.
+The token layer is **already mature and near-clean** — the shipped `tokenLint` ratchet has driven hardcoded color/spacing/radius/shadow/duration values down to a **handful of legitimate exceptions**. The dominant, measurable drift is **primitive adoption**: pages built over time render **bespoke chrome** (raw `<button>`, raw `<input>/<textarea>/<select>`) instead of the 33 shell primitives in `apps/console/src/ui/`. This is exactly the drift the plan predicted, concentrated in the two mega-pages.
 
 | Metric | Count |
 |---|---|
-| Source files scanned (`web/src`, excl. `design/`) | 298 |
-| Shell primitives available (`web/src/ui/*.tsx`) | 33 |
+| Source files scanned (`apps/console/src`, excl. `design/`) | 298 |
+| Shell primitives available (`apps/console/src/ui/*.tsx`) | 33 |
 | **Raw-value drift hits** (color/spacing/radius/shadow/duration) | **7** |
 | Files with any raw-value drift | 6 |
 | **Raw `<button>` occurrences outside `ui/`** | **420** |
@@ -35,21 +35,21 @@ Weights: color drift ×5 (bypasses theming), shadow ×3, other raw-value ×2; ra
 
 | # | Score | File | Drift detail |
 |---|---|---|---|
-| 1 | 107 | `web/src/pages/code/CodeCockpitPage.tsx` | 51 raw-button, 5 raw-input |
-| 2 | 79 | `web/src/pages/ChatPage.tsx` | 34 raw-button, 11 raw-input |
-| 3 | 45 | `web/src/pages/projects/ProjectsSection.tsx` | 20 raw-button, 5 raw-input |
-| 4 | 35 | `web/src/pages/loops/LoopPlanReview.tsx` | 13 raw-button, 9 raw-input |
-| 5 | 33 | `web/src/pages/code/CodePlanReview.tsx` | 12 raw-button, 9 raw-input |
-| 6 | 27 | `web/src/pages/settings/MemoryPanel.tsx` | 9 raw-button, 9 raw-input |
-| 7 | 24 | `web/src/pages/loops/LoopCockpitPage.tsx` | 11 raw-button, 2 raw-input |
-| 8 | 24 | `web/src/pages/tools/ToolsPage.tsx` | 8 raw-button, 8 raw-input |
-| 9 | 23 | `web/src/pages/workflows/WorkflowForm.tsx` | 10 raw-button, 3 raw-input |
-| 10 | 22 | `web/src/pages/tasks/formControls.tsx` | 7 raw-button, 8 raw-input |
-| 11 | 19 | `web/src/pages/prompts/PromptEditFields.tsx` | 5 raw-button, 9 raw-input |
-| 12 | 17 | `web/src/pages/knowledge/KnowledgeDetail.tsx` | 6 raw-button, 5 raw-input |
-| 13 | 17 | `web/src/pages/knowledge/KnowledgeListPage.tsx` | 7 raw-button, 3 raw-input |
-| 14 | 17 | `web/src/pages/settings/OllamaModelManager.tsx` | 8 raw-button, 1 raw-input |
-| 15 | 17 | `web/src/pages/settings/VoicePanel.tsx` | 7 raw-button, 3 raw-input |
+| 1 | 107 | `apps/console/src/pages/code/CodeCockpitPage.tsx` | 51 raw-button, 5 raw-input |
+| 2 | 79 | `apps/console/src/pages/ChatPage.tsx` | 34 raw-button, 11 raw-input |
+| 3 | 45 | `apps/console/src/pages/projects/ProjectsSection.tsx` | 20 raw-button, 5 raw-input |
+| 4 | 35 | `apps/console/src/pages/loops/LoopPlanReview.tsx` | 13 raw-button, 9 raw-input |
+| 5 | 33 | `apps/console/src/pages/code/CodePlanReview.tsx` | 12 raw-button, 9 raw-input |
+| 6 | 27 | `apps/console/src/pages/settings/MemoryPanel.tsx` | 9 raw-button, 9 raw-input |
+| 7 | 24 | `apps/console/src/pages/loops/LoopCockpitPage.tsx` | 11 raw-button, 2 raw-input |
+| 8 | 24 | `apps/console/src/pages/tools/ToolsPage.tsx` | 8 raw-button, 8 raw-input |
+| 9 | 23 | `apps/console/src/pages/workflows/WorkflowForm.tsx` | 10 raw-button, 3 raw-input |
+| 10 | 22 | `apps/console/src/pages/tasks/formControls.tsx` | 7 raw-button, 8 raw-input |
+| 11 | 19 | `apps/console/src/pages/prompts/PromptEditFields.tsx` | 5 raw-button, 9 raw-input |
+| 12 | 17 | `apps/console/src/pages/knowledge/KnowledgeDetail.tsx` | 6 raw-button, 5 raw-input |
+| 13 | 17 | `apps/console/src/pages/knowledge/KnowledgeListPage.tsx` | 7 raw-button, 3 raw-input |
+| 14 | 17 | `apps/console/src/pages/settings/OllamaModelManager.tsx` | 8 raw-button, 1 raw-input |
+| 15 | 17 | `apps/console/src/pages/settings/VoicePanel.tsx` | 7 raw-button, 3 raw-input |
 
 *(Full ranked list of 40 in `consistency-audit.json → ranked`.)*
 
@@ -86,11 +86,11 @@ The MemoryGraph HSL and CodeMirror `0.9em` are legitimate; they should be added 
 
 **Consolidation strategy (S2):**
 - **Buttons** → replace raw `<button>` with `Button` (variant/size props) or `IconButton`. Start at the mega-pages (rank 1–2) in screenshot-verified increments.
-- **Inputs** → introduce ONE `TextField`/`Field` primitive (T2.3, genuine gap), then migrate. Do not migrate raw inputs before the primitive exists. **DONE (cycle 5):** `web/src/ui/TextField.tsx` (`TextField` + `TextArea`, size/surface/mono/leadingIcon variants) is the canonical extraction of the existing input shape — additive, zero existing-pixel change; documented in `docs/design/patterns.md`; class contract pinned by `TextField.test.tsx`. The 206-input migration is now unblocked (but each migration that changes pixels is harness-gated).
+- **Inputs** → introduce ONE `TextField`/`Field` primitive (T2.3, genuine gap), then migrate. Do not migrate raw inputs before the primitive exists. **DONE (cycle 5):** `apps/console/src/ui/TextField.tsx` (`TextField` + `TextArea`, size/surface/mono/leadingIcon variants) is the canonical extraction of the existing input shape — additive, zero existing-pixel change; documented in `docs/design/patterns.md`; class contract pinned by `TextField.test.tsx`. The 206-input migration is now unblocked (but each migration that changes pixels is harness-gated).
 - **Dialogs** → already consolidated on `Modal` (0 bespoke) — protect via the primitive-adoption lint (C1/T3.4) so it can't regress.
 
 ### Ratchet — DONE (cycle 6, C1/T3.4 third rail)
-`web/src/design/primitiveAdoption.test.ts` + `primitiveAdoption.baseline.json` now enforce that bespoke-chrome counts (raw `<button>` 420, raw form elements 206, ad-hoc dialogs 0) may only **shrink** — a NEW raw element turns the CI `web` job (vitest) red. Verified it fails on a synthetic +1 and passes at baseline. This is live in CI **without** the browser harness (it's a static vitest scan). As S2 migrations land, ratchet the baseline down in the same commit. Combined with the existing `tokenLint.test.ts` (token-lint-strict), two of C1's three rails are CI-enforced now; the axe rail mounts once the harness auth-seed lands.
+`apps/console/src/design/primitiveAdoption.test.ts` + `primitiveAdoption.baseline.json` now enforce that bespoke-chrome counts (raw `<button>` 420, raw form elements 206, ad-hoc dialogs 0) may only **shrink** — a NEW raw element turns the CI `web` job (vitest) red. Verified it fails on a synthetic +1 and passes at baseline. This is live in CI **without** the browser harness (it's a static vitest scan). As S2 migrations land, ratchet the baseline down in the same commit. Combined with the existing `tokenLint.test.ts` (token-lint-strict), two of C1's three rails are CI-enforced now; the axe rail mounts once the harness auth-seed lands.
 
 ---
 
@@ -111,7 +111,7 @@ The reporter's `scanA11y()` measures the **static** a11y posture (the axe-per-ro
 **a11y consistency verdict:** reduced-motion and focus-visible coverage are **structurally complete via global rules** — the correct, DRY posture. The S3 ratchet must therefore **protect the two global rules** (a test asserting they exist — already wired into `consistencyAudit.test.ts`) and add the **dynamic axe-per-route** scan (needs the harness). The 171 `outline-none` are safe but should NOT be individually "fixed" — that would be churn against a working global net.
 
 ### Dynamic axe WCAG AA scan + visual baselines — harness BUILT, baseline capture BLOCKED on auth
-The Playwright harness (`web/e2e/`, `web/playwright.config.ts`) is built and parses cleanly (**64 tests**: 16 routes × 2 themes × visual+axe). Chromium is installed and the specs run. **BUT** capturing *valid* baselines is **blocked**: the built SPA gates its first render on an authenticated identity/config fetch (`src/app/identity.tsx` — `loaded` gates render; the gateway needs the owner `pc_token_<port>` cookie). Driven by a fresh, unauthenticated Playwright context (both against `vite preview` and against the live gateway at `:10000`), the app **renders a blank body** — so a naive capture produced 32 *identical blank* PNGs, which is a **false safety rail** and was therefore **discarded** (not committed).
+The Playwright harness (`apps/console/e2e/`, `apps/console/playwright.config.ts`) is built and parses cleanly (**64 tests**: 16 routes × 2 themes × visual+axe). Chromium is installed and the specs run. **BUT** capturing *valid* baselines is **blocked**: the built SPA gates its first render on an authenticated identity/config fetch (`src/app/identity.tsx` — `loaded` gates render; the gateway needs the owner `gideon_token_<port>` cookie). Driven by a fresh, unauthenticated Playwright context (both against `vite preview` and against the live gateway at `:10000`), the app **renders a blank body** — so a naive capture produced 32 *identical blank* PNGs, which is a **false safety rail** and was therefore **discarded** (not committed).
 
 - **What IS proven:** harness infra correct — config, route SoT, theme seeding, axe wiring, npm scripts, README all in place; `playwright test --list` = 64 tests; `npx playwright install chromium` succeeds; the preview server builds + serves the real HTML/JS.
 - **What is BLOCKED:** meaningful baselines + a real axe reading need an **authenticated session**. This can't be done autonomously in the sandbox (no owner token).

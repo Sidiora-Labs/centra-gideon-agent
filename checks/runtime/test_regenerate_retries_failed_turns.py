@@ -30,8 +30,12 @@ from chat_test_helpers import _make_app, _make_state
 
 class TestRegenerateRetriesFailedTurns:
     @pytest.mark.asyncio
-    async def test_failed_first_turn_retries_instead_of_400(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+    async def test_failed_first_turn_retries_instead_of_400(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         session = state.get_or_create_session("s1")
         session.append("user", "hi")
@@ -42,23 +46,30 @@ class TestRegenerateRetriesFailedTurns:
         async def _capture(_state, _session, user_msg, regenerate_hint="", **kw):
             ran.append((user_msg, regenerate_hint))
 
-        with patch("gideon.dashboard.chat_regenerate.run_chat", new=_capture):
+        with patch(
+            "gideon.interfaces.dashboard.chat_regenerate.run_chat", new=_capture
+        ):
             async with TestClient(TestServer(_make_app(state))) as client:
                 resp = await client.post("/api/chat/sessions/s1/regenerate")
                 assert resp.status == 200, "a failed turn must be retryable, not a 400"
                 await asyncio.sleep(0)
 
-        # The error bubble is gone; the user message is re-run verbatim.
         assert [m["role"] for m in session.messages] == ["user"]
-        assert ran == [("hi", "")], "retry re-runs the failed user message with NO vary-hint"
-        assert session._pending_variants == [], "an error bubble is never stashed as a variant"
+        assert ran == [
+            ("hi", "")
+        ], "retry re-runs the failed user message with NO vary-hint"
+        assert (
+            session._pending_variants == []
+        ), "an error bubble is never stashed as a variant"
 
     @pytest.mark.asyncio
     async def test_failed_turn_after_a_real_exchange_retries_its_own_message(
         self, tmp_path, monkeypatch
     ):
         """[u1, a1, u2, error] must retry u2 — not truncate it and replay u1."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         session = state.get_or_create_session("s1")
         session.append("user", "first question")
@@ -71,20 +82,27 @@ class TestRegenerateRetriesFailedTurns:
         async def _capture(_state, _session, user_msg, **kw):
             ran.append(user_msg)
 
-        with patch("gideon.dashboard.chat_regenerate.run_chat", new=_capture):
+        with patch(
+            "gideon.interfaces.dashboard.chat_regenerate.run_chat", new=_capture
+        ):
             async with TestClient(TestServer(_make_app(state))) as client:
                 resp = await client.post("/api/chat/sessions/s1/regenerate")
                 assert resp.status == 200
                 await asyncio.sleep(0)
 
-        assert ran == ["second question"], "the FAILED turn's message is retried, not u1"
-        # The first exchange survives intact; only the failed tail is cut.
+        assert ran == [
+            "second question"
+        ], "the FAILED turn's message is retried, not u1"
         assert [m["role"] for m in session.messages] == ["user", "assistant", "user"]
         assert session.messages[1]["content"] == "first answer"
 
     @pytest.mark.asyncio
-    async def test_classic_regenerate_still_stashes_variant_and_hints(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+    async def test_classic_regenerate_still_stashes_variant_and_hints(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         session = state.get_or_create_session("s1")
         session.append("user", "hi")
@@ -97,19 +115,27 @@ class TestRegenerateRetriesFailedTurns:
             ran.append((user_msg, regenerate_hint))
             stashed.extend(list(session._pending_variants))
 
-        with patch("gideon.dashboard.chat_regenerate.run_chat", new=_capture):
+        with patch(
+            "gideon.interfaces.dashboard.chat_regenerate.run_chat", new=_capture
+        ):
             async with TestClient(TestServer(_make_app(state))) as client:
                 resp = await client.post("/api/chat/sessions/s1/regenerate")
                 assert resp.status == 200
                 await asyncio.sleep(0)
 
         assert len(ran) == 1 and ran[0][0] == "hi"
-        assert "regenerated the previous response" in ran[0][1], "classic path keeps the hint"
-        assert [v["content"] for v in stashed] == ["hello v1"], "real answers are stashed"
+        assert (
+            "regenerated the previous response" in ran[0][1]
+        ), "classic path keeps the hint"
+        assert [v["content"] for v in stashed] == [
+            "hello v1"
+        ], "real answers are stashed"
 
     @pytest.mark.asyncio
     async def test_error_with_no_preceding_user_still_400s(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         session = state.get_or_create_session("s1")
         session.append("error", "startup failure")
@@ -121,7 +147,9 @@ class TestRegenerateRetriesFailedTurns:
 
     @pytest.mark.asyncio
     async def test_no_answer_shaped_turn_still_400s(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         session = state.get_or_create_session("s1")
         session.append("user", "only user")

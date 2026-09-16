@@ -39,7 +39,7 @@ from pathlib import Path
 
 
 def _src_root() -> Path:
-    return Path(__file__).resolve().parents[1] / "src" / "gideon"
+    return Path(__file__).resolve().parents[2] / "runtime" / "gideon"
 
 
 def _func_node(rel: str, qualname_tail: str) -> ast.AST:
@@ -48,7 +48,10 @@ def _func_node(rel: str, qualname_tail: str) -> ast.AST:
     tree = ast.parse(path.read_text(encoding="utf-8"))
     target = qualname_tail.split(".")[-1]
     for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == target:
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == target
+        ):
             return node
     raise AssertionError(f"function {qualname_tail} not found in {rel}")
 
@@ -75,15 +78,15 @@ def _func_passes_preexec_fn(node: ast.AST) -> bool:
     return False
 
 
-# ── Hazard (a): watchdog-thread backend respawn ──────────────────────────────
-
-
 def test_backend_respawn_uses_argv_shim_not_preexec_fn():
     """SAFE-finding (a): the backend respawn Popen carries no preexec_fn and prepends the
-    ceiling shim to argv, so the watchdog daemon thread never forks-then-runs-bytecode."""
+    ceiling shim to argv, so the watchdog daemon thread never forks-then-runs-bytecode.
+    """
     node = _func_node("apps/backend_runtime.py", "BackendSupervisor.start")
     calls = _func_calls_named(node)
-    assert "spawn_shim_argv" in calls, "backend respawn must ceiling-wrap via spawn_shim_argv"
+    assert (
+        "spawn_shim_argv" in calls
+    ), "backend respawn must ceiling-wrap via spawn_shim_argv"
     assert not _func_passes_preexec_fn(node), (
         "backend respawn must NOT pass preexec_fn — that would fork the gateway from the "
         "watchdog daemon thread (the §1.1 wedge hazard)"
@@ -96,9 +99,6 @@ def test_backend_respawn_is_reached_from_watchdog_thread():
     assert "_check_and_revive" in src and "start_backend_watchdog" in src
 
 
-# ── Hazard (b): event-loop bash spawn ────────────────────────────────────────
-
-
 def test_bash_action_spawn_is_async_and_has_no_preexec_fn():
     """SAFE-finding (b): the bash action provider spawns via create_subprocess_limited
     (async, no preexec_fn), so the event loop is never blocked on a forked child."""
@@ -106,17 +106,16 @@ def test_bash_action_spawn_is_async_and_has_no_preexec_fn():
     assert "create_subprocess_limited" in _func_calls_named(
         node
     ), "bash action must ceiling-wrap (async helper)"
-    assert not _func_passes_preexec_fn(node), "bash action spawn must NOT pass preexec_fn"
+    assert not _func_passes_preexec_fn(
+        node
+    ), "bash action spawn must NOT pass preexec_fn"
 
 
 def test_native_bash_spawn_has_no_preexec_fn():
     """The native bash tool (the other event-loop bash spawn) is equally clean."""
-    node = _func_node("agents/native/builtin_tools.py", "_t_bash")
+    node = _func_node("engine/agents/native/builtin_tools.py", "_t_bash")
     assert "create_subprocess_limited" in _func_calls_named(node)
     assert not _func_passes_preexec_fn(node)
-
-
-# ── Hazard (c): the app-WORKER watchdog, the third spawner on the same boot path ──
 
 
 def test_the_harness_flags_both_families_of_app_child_process(monkeypatch, tmp_path):
@@ -136,7 +135,7 @@ def test_the_harness_flags_both_families_of_app_child_process(monkeypatch, tmp_p
     """
     import os
 
-    from gideon.apps import worker_runtime as wr
+    from gideon.extensions.apps import worker_runtime as wr
 
     assert os.environ.get(wr._SKIP_ENV) == "1", (
         f"the test harness does not set {wr._SKIP_ENV}, so a test that reaches "
@@ -144,23 +143,21 @@ def test_the_harness_flags_both_families_of_app_child_process(monkeypatch, tmp_p
         "user's home — the sibling backend flag exists because that already happened once"
     )
 
-    # The sweeps below are driven against a tmp home: an unflagged sweep also consults the
-    # budget meter, and this rail must not read or seed the real one.
-    from gideon.config import loader as _config_loader
+    from gideon.core.config import loader as _config_loader
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     monkeypatch.setattr(_config_loader, "config_dir", lambda: tmp_path)
 
-    # And the reader honors it: a flagged sweep does not even reach `list_apps`.
     listed: list[int] = []
     monkeypatch.setattr(
-        "gideon.apps.manager.list_apps", lambda *a, **k: listed.append(1) or []
+        "gideon.extensions.apps.manager.list_apps",
+        lambda *a, **k: listed.append(1) or [],
     )
     wr.WorkerSupervisor().sweep()
     assert listed == [], "the sweep ran despite the skip flag — the guard is decorative"
 
-    # Vacuity floor: WITHOUT the flag the same sweep does reach `list_apps`, so the assertion
-    # above is about the guard and not about a sweep that never lists anything.
     monkeypatch.delenv(wr._SKIP_ENV, raising=False)
     wr.WorkerSupervisor().sweep()
-    assert listed == [1], "an unflagged sweep did not list apps — this rail proves nothing"
+    assert listed == [
+        1
+    ], "an unflagged sweep did not list apps — this rail proves nothing"

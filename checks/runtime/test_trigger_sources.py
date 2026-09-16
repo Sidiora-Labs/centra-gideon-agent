@@ -23,7 +23,7 @@ import asyncio
 
 import pytest
 
-from gideon.event_triggers import (
+from gideon.automation.event_triggers import (
     APP_EVENT,
     EVENT_PATTERNS,
     PATTERN_SOURCE,
@@ -33,7 +33,7 @@ from gideon.event_triggers import (
     execute_event_action,
     matches,
 )
-from gideon.trigger_sources import (
+from gideon.automation.trigger_sources import (
     NAMESPACE_PREFIX,
     SourceEvent,
     TriggerSourceProvider,
@@ -47,16 +47,14 @@ from gideon.trigger_sources import (
     undeclared_events,
     unregister_source,
 )
-from gideon.trigger_sources.parking import (
+from gideon.automation.trigger_sources.parking import (
     bound_app,
     bound_triggers,
     park_for_app,
     unpark_for_app,
 )
-from gideon.triggers.models import TriggerHealth, TriggerState
+from gideon.automation.triggers.models import TriggerHealth, TriggerState
 
-#: The fixture app's name. GENERICALLY named on purpose — the plan's done_when ends "core
-#: contains no vendor names", and a test fixture is a tracked file like any other.
 APP = "sample-source"
 
 
@@ -125,12 +123,12 @@ def _store(tmp_path, monkeypatch):
     the engine was reading another test's unparked store. Reset before AND after, because a leak in
     either direction produces the same confusing red in an unrelated test.
     """
-    import gideon.event_triggers as et
+    import gideon.automation.event_triggers as et
 
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: home)
     et._engine = None
     try:
         yield EventTriggerStore(home / "event_triggers.json")
@@ -157,9 +155,6 @@ def _app_trigger(**over) -> EventTrigger:
     return EventTrigger(**kw)
 
 
-# ── clause 3: the #47 rule ───────────────────────────────────────────────────
-
-
 def test_trigger_source_is_in_provider_types_with_a_live_handler():
     """The #47 rule: a manifest type with no runtime handler installs and then does nothing.
 
@@ -170,17 +165,20 @@ def test_trigger_source_is_in_provider_types_with_a_live_handler():
     import re
     from pathlib import Path
 
-    from gideon.apps.manifest import PROVIDER_TYPES
+    from gideon.extensions.apps.manifest import PROVIDER_TYPES
 
     assert "trigger_source" in PROVIDER_TYPES
     registry_py = (
-        Path(__file__).resolve().parent.parent
-        / "src"
+        Path(__file__).resolve().parent.parent.parent
+        / "runtime"
         / "gideon"
+        / "extensions"
         / "providers"
         / "registry.py"
     )
-    handlers = set(re.findall(r'register_type_handler\("([a-z_]+)"', registry_py.read_text()))
+    handlers = set(
+        re.findall(r'register_type_handler\("([a-z_]+)"', registry_py.read_text())
+    )
     assert "trigger_source" in handlers
 
 
@@ -190,7 +188,7 @@ def test_a_trigger_source_manifest_validates():
     The `prompt` type shipped with a handler and no `PROVIDER_TYPES` entry, so `validate()` rejected
     every such manifest and blocked install — this is that assertion for the new type.
     """
-    from gideon.apps.manifest import ProviderConfig
+    from gideon.extensions.apps.manifest import ProviderConfig
 
     errors = ProviderConfig(
         type="trigger_source", implementation="provider:create_provider"
@@ -209,10 +207,9 @@ def test_the_app_event_pattern_is_wired_to_the_app_source():
     assert PATTERN_SOURCE[APP_EVENT] == SOURCE_APP
 
 
-# ── clause 1: end to end, fenced + provenanced ───────────────────────────────
-
-
-def test_a_declared_source_fires_an_event_trigger_END_TO_END(_source, _store, monkeypatch):
+def test_a_declared_source_fires_an_event_trigger_END_TO_END(
+    _source, _store, monkeypatch
+):
     """🔴 THE CLAUSE. A fixture app observes something; a real `event` trigger fires.
 
     Driven through every real seam — the app calls its `emit` callable, core namespaces and fences,
@@ -224,12 +221,14 @@ def test_a_declared_source_fires_an_event_trigger_END_TO_END(_source, _store, mo
     _store.upsert(_app_trigger())
     calls: list = []
     monkeypatch.setattr(
-        "gideon.action_providers.get_action_provider", lambda _n: _fake_provider(calls)
+        "gideon.integrations.action_providers.get_action_provider",
+        lambda _n: _fake_provider(calls),
     )
 
     async def _drive():
-        _source.observe("thing_happened", key="evt-1", text="the quarterly deck is ready")
-        # The engine schedules the fire as a task; yield until it has run.
+        _source.observe(
+            "thing_happened", key="evt-1", text="the quarterly deck is ready"
+        )
         for _ in range(20):
             await asyncio.sleep(0)
             if calls:
@@ -243,8 +242,6 @@ def test_a_declared_source_fires_an_event_trigger_END_TO_END(_source, _store, mo
     assert ctx.payload["source"] == SOURCE_APP
     assert ctx.payload["event_type"] == f"{NAMESPACE_PREFIX}:{APP}:thing_happened"
     assert ctx.payload["key"] == "evt-1"
-    # The fire is RECORDED, so `max_fires` and the debounce see it — a fire the store did not count
-    # is one that can run forever past its own limit.
     assert _store.load()[0].fire_count == 1
 
 
@@ -257,23 +254,25 @@ def test_the_payload_is_FENCED_AT_ORIGIN_with_the_app_s_own_provenance(_source):
     which is the only place the origin's own provenance exists.
     """
     seen: list = []
-    import gideon.event_triggers as et
+    import gideon.automation.event_triggers as et
 
     original = et.emit_event
     try:
         et.emit_event = lambda **kw: seen.append(kw)  # type: ignore[assignment]
-        emit(APP, SourceEvent(event="thing_happened", key="evt-1", text="revenue up 8%"))
+        emit(
+            APP, SourceEvent(event="thing_happened", key="evt-1", text="revenue up 8%")
+        )
     finally:
         et.emit_event = original  # type: ignore[assignment]
 
     assert len(seen) == 1
     value = seen[0]["value"]
-    from gideon.security import is_fenced
+    from gideon.security.security import is_fenced
 
-    assert is_fenced(value), "an unfenced app payload arrives at the model as instructions"
+    assert is_fenced(
+        value
+    ), "an unfenced app payload arrives at the model as instructions"
     assert "revenue up 8%" in value, "fencing must preserve the content, not redact it"
-    # The three provenance claims, each distinct and each about the APP rather than about "an
-    # event".
     assert f'source_type="{NAMESPACE_PREFIX}:{APP}"' in value or (
         f"source_type={NAMESPACE_PREFIX}:{APP}" in value
     )
@@ -293,7 +292,8 @@ def test_a_payload_fenced_at_origin_is_NOT_DOUBLE_WRAPPED(_source, _store, monke
     _store.upsert(_app_trigger())
     calls: list = []
     monkeypatch.setattr(
-        "gideon.action_providers.get_action_provider", lambda _n: _fake_provider(calls)
+        "gideon.integrations.action_providers.get_action_provider",
+        lambda _n: _fake_provider(calls),
     )
 
     async def _drive():
@@ -306,16 +306,17 @@ def test_a_payload_fenced_at_origin_is_NOT_DOUBLE_WRAPPED(_source, _store, monke
     asyncio.run(_drive())
     assert calls
     value = calls[0].payload["value"]
-    # ONE fence, not two. The escaped form (`&lt;/untrusted_content&gt;`) is the fingerprint of a
-    # double wrap, and its absence is what proves the origin attributes survived as markup.
     assert value.count("<untrusted_content") == 1, f"double-fenced: {value!r}"
     assert "&lt;/untrusted_content&gt;" not in value
-    assert "app-source:emit" in value, "the origin's provenance was replaced by the coarser one"
-    # The context line is model-bound too, and gets the same treatment.
+    assert (
+        "app-source:emit" in value
+    ), "the origin's provenance was replaced by the coarser one"
     assert calls[0].context.count("<untrusted_content") == 1
 
 
-def test_an_injection_payload_from_an_app_NEVER_REACHES_THE_PROVIDER(_source, _store, monkeypatch):
+def test_an_injection_payload_from_an_app_NEVER_REACHES_THE_PROVIDER(
+    _source, _store, monkeypatch
+):
     """The screen runs on an app payload exactly as on a memory write.
 
     An app is outside the trust boundary by the plan's own words ("app-sourced payloads are
@@ -327,7 +328,8 @@ def test_an_injection_payload_from_an_app_NEVER_REACHES_THE_PROVIDER(_source, _s
     _store.upsert(_app_trigger())
     calls: list = []
     monkeypatch.setattr(
-        "gideon.action_providers.get_action_provider", lambda _n: _fake_provider(calls)
+        "gideon.integrations.action_providers.get_action_provider",
+        lambda _n: _fake_provider(calls),
     )
     trigger = _app_trigger()
     outcome = asyncio.run(
@@ -352,24 +354,20 @@ def test_the_FROZEN_CAPABILITY_fence_is_honoured_for_an_app_sourced_fire():
     inherits that default — enumerated here as "what did this trigger TRY to do, and does the
     refused list cover everything outside its allowlist".
     """
-    from gideon.triggers.screen import (
+    from gideon.automation.triggers.screen import (
         capabilities_for_action,
         provider_is_read_only,
         unfenced_actions,
     )
 
-    # A read-only action needs no grant, and freezing one would imply an opt-in nobody made.
     assert provider_is_read_only("notify") is True
     assert capabilities_for_action(_FakeStoreTrigger("notify")) == {}
 
-    # A write-capable action DOES need one. With no block, the fence refuses it and names why.
     assert provider_is_read_only("bash") is False
     granted = capabilities_for_action(_FakeStoreTrigger("bash"))
     assert granted == {"providers": ["bash"]}
     refused = unfenced_actions({}, requested={"providers": ["bash"]})
     assert refused and refused[0][1] == "bash"
-    # With the grant frozen at save, the same request passes — and an UNRELATED write action does
-    # not, which is what makes the grant a fence rather than a switch.
     assert unfenced_actions(granted, requested={"providers": ["bash"]}) == []
     assert unfenced_actions(granted, requested={"providers": ["run-prompt"]})
 
@@ -381,9 +379,6 @@ class _FakeStoreTrigger:
         self.workflow = {"inline": {"provider": provider}}
 
 
-# ── namespacing: one app cannot forge another's events ───────────────────────
-
-
 def test_the_namespace_comes_from_the_REGISTERED_name_not_the_payload(_source):
     """🔴 An app cannot emit into another app's namespace.
 
@@ -392,7 +387,7 @@ def test_the_namespace_comes_from_the_REGISTERED_name_not_the_payload(_source):
     namespace, and a trigger globbing `app:other-app:*` is untouched.
     """
     seen: list = []
-    import gideon.event_triggers as et
+    import gideon.automation.event_triggers as et
 
     original = et.emit_event
     try:
@@ -403,7 +398,6 @@ def test_the_namespace_comes_from_the_REGISTERED_name_not_the_payload(_source):
 
     assert seen[0]["event_type"] == f"{NAMESPACE_PREFIX}:{APP}:app:other-app:thing"
     assert not seen[0]["event_type"].startswith(f"{NAMESPACE_PREFIX}:other-app:")
-    # An `other-app` trigger cannot match it, which is the property that matters.
     other = _app_trigger(event_glob=f"{NAMESPACE_PREFIX}:other-app:*")
     assert (
         matches(
@@ -425,12 +419,15 @@ def test_an_app_cannot_overwrite_the_provenance_meta_keys(_source):
     overridden rather than believed.
     """
     seen: list = []
-    import gideon.event_triggers as et
+    import gideon.automation.event_triggers as et
 
     original = et.emit_event
     try:
         et.emit_event = lambda **kw: seen.append(kw)  # type: ignore[assignment]
-        emit(APP, SourceEvent(event="thing_happened", meta={"app": "victim", "mine": "kept"}))
+        emit(
+            APP,
+            SourceEvent(event="thing_happened", meta={"app": "victim", "mine": "kept"}),
+        )
     finally:
         et.emit_event = original  # type: ignore[assignment]
 
@@ -484,9 +481,6 @@ def test_an_UNDECLARED_event_still_delivers_but_is_reported(_source):
     assert undeclared_events("nobody") == {}
 
 
-# ── matching ─────────────────────────────────────────────────────────────────
-
-
 def test_an_empty_event_glob_is_the_CATCH_ALL_for_app_events():
     """The asymmetry with `MemoryKeyPattern`, asserted so it cannot be "fixed" by accident.
 
@@ -496,10 +490,18 @@ def test_an_empty_event_glob_is_the_CATCH_ALL_for_app_events():
     """
     catch_all = _app_trigger(event_glob="")
     assert matches(
-        catch_all, source=SOURCE_APP, event_type=namespace(APP, "anything"), key="", value=""
+        catch_all,
+        source=SOURCE_APP,
+        event_type=namespace(APP, "anything"),
+        key="",
+        value="",
     )
-    narrow = EventTrigger(id="m", pattern="MemoryKeyPattern", source="memory", key_glob="")
-    assert not matches(narrow, source="memory", event_type="w", key="anything", value="")
+    narrow = EventTrigger(
+        id="m", pattern="MemoryKeyPattern", source="memory", key_glob=""
+    )
+    assert not matches(
+        narrow, source="memory", event_type="w", key="anything", value=""
+    )
 
 
 def test_an_app_event_cannot_trip_a_memory_or_inbox_trigger():
@@ -514,7 +516,6 @@ def test_an_app_event_cannot_trip_a_memory_or_inbox_trigger():
             key="",
             value="",
         )
-    # And the converse: an app trigger is not tripped by a memory write.
     assert not matches(
         _app_trigger(), source="memory", event_type="MemoryUpdate", key="k", value="v"
     )
@@ -530,11 +531,12 @@ def test_a_narrow_glob_matches_only_its_own_event():
         value="",
     )
     assert not matches(
-        app_trigger, source=SOURCE_APP, event_type=namespace(APP, "other_thing"), key="", value=""
+        app_trigger,
+        source=SOURCE_APP,
+        event_type=namespace(APP, "other_thing"),
+        key="",
+        value="",
     )
-
-
-# ── clause 2: disabling the app PARKS its triggers, typed ────────────────────
 
 
 def test_disabling_the_app_PARKS_its_bound_triggers_with_a_typed_reason(_store):
@@ -544,7 +546,11 @@ def test_disabling_the_app_PARKS_its_bound_triggers_with_a_typed_reason(_store):
     `autopause.evaluate(TRANSPORT_UNAVAILABLE)` — reused, not reinvented, so a park here means
     what a park means everywhere else in the substrate.
     """
-    from gideon.triggers.autopause import PARK_COOLDOWN_SECS, PARK_REASONS, ExitType
+    from gideon.automation.triggers.autopause import (
+        PARK_COOLDOWN_SECS,
+        PARK_REASONS,
+        ExitType,
+    )
 
     _store.upsert(_app_trigger())
     parked = park_for_app(_store, APP, now=1000.0)
@@ -552,11 +558,7 @@ def test_disabling_the_app_PARKS_its_bound_triggers_with_a_typed_reason(_store):
     assert parked == ["app-trigger"]
     row = _store.load()[0]
     assert row.state == TriggerState.PARKED.value
-    # A park is NOT a disable: `enabled` is the user's switch and must be untouched, or re-enabling
-    # the app would leave the user hunting for a toggle they never flipped.
     assert row.enabled is True
-    # The reason is from the TYPED vocabulary, plus which app — `PARK_REASONS` phrases the class of
-    # outage, and the user's next question is which one.
     assert PARK_REASONS[ExitType.TRANSPORT_UNAVAILABLE.value] in row.park_reason
     assert APP in row.park_reason
     assert row.park_retry_after == pytest.approx(1000.0 + PARK_COOLDOWN_SECS)
@@ -573,7 +575,8 @@ def test_a_parked_trigger_DOES_NOT_FIRE(_source, _store, monkeypatch):
     park_for_app(_store, APP, now=1000.0)
     calls: list = []
     monkeypatch.setattr(
-        "gideon.action_providers.get_action_provider", lambda _n: _fake_provider(calls)
+        "gideon.integrations.action_providers.get_action_provider",
+        lambda _n: _fake_provider(calls),
     )
 
     async def _drive():
@@ -647,7 +650,6 @@ def test_a_CROSS_APP_glob_is_NOT_parked_when_one_app_goes_away(_store):
     assert bound_app(f"{NAMESPACE_PREFIX}:*:thing") == ""
     assert bound_app(f"{NAMESPACE_PREFIX}:{APP}:*") == APP
     assert bound_app(f"{NAMESPACE_PREFIX}:{APP}:thing_happened") == APP
-    # Not an app-source glob at all.
     assert bound_app("project.acme.*") == ""
 
     _store.save(
@@ -667,12 +669,12 @@ def test_bound_triggers_ignores_non_app_patterns(_store):
     whose author happened to fill in an unrelated glob.
     """
     stray = EventTrigger(
-        id="stray", pattern="MemoryUpdate", source="memory", event_glob=namespace(APP, "*")
+        id="stray",
+        pattern="MemoryUpdate",
+        source="memory",
+        event_glob=namespace(APP, "*"),
     )
     assert bound_triggers([stray], APP) == []
-
-
-# ── the type handler's own lifecycle ────────────────────────────────────────
 
 
 def test_the_handler_REFUSES_a_provider_missing_the_contract():
@@ -681,7 +683,7 @@ def test_the_handler_REFUSES_a_provider_missing_the_contract():
     A source registered without a usable `start` would sit in the registry looking live and emit
     nothing, so the app would appear installed-and-working while producing no events at all.
     """
-    from gideon.providers.registry import TriggerSourceTypeHandler
+    from gideon.extensions.providers.registry import TriggerSourceTypeHandler
 
     class _Broken:
         name = "broken-source"
@@ -702,7 +704,7 @@ def test_the_handler_registers_starts_and_deregisters_parks(_store):
     actually calls, so testing it here is what makes the parking clause true in production rather
     than only in `parking.py`'s own tests.
     """
-    from gideon.providers.registry import TriggerSourceTypeHandler
+    from gideon.extensions.providers.registry import TriggerSourceTypeHandler
 
     handler = TriggerSourceTypeHandler()
     provider = _SampleSource()
@@ -710,7 +712,6 @@ def test_the_handler_registers_starts_and_deregisters_parks(_store):
 
     async def _enable_then_disable():
         handler.register(None, provider)
-        # `start` is scheduled as a task (a watch loop must not block the enable), so yield for it.
         for _ in range(10):
             await asyncio.sleep(0)
         assert APP in list_sources()
@@ -739,7 +740,7 @@ def test_the_handler_STILL_parks_when_the_provider_raises_on_stop(_store):
     The user asked for the app to be off, and a stuck watcher is not a reason to keep firing their
     automations — so deregistration and parking happen regardless of what `stop` does.
     """
-    from gideon.providers.registry import TriggerSourceTypeHandler
+    from gideon.extensions.providers.registry import TriggerSourceTypeHandler
 
     class _BadStop(_SampleSource):
         async def stop(self):
@@ -762,9 +763,6 @@ def test_the_handler_STILL_parks_when_the_provider_raises_on_stop(_store):
 
     assert APP not in list_sources()
     assert _store.load()[0].state == TriggerState.PARKED.value
-
-
-# ── the API round trip: an author can actually create one ───────────────────
 
 
 def _req(method, path, *, body=None, match_info=None):
@@ -798,7 +796,7 @@ def test_the_API_creates_and_edits_an_app_event_trigger(_store):
     `_update_event` reads an explicit field list, so a matcher missing from it silently fails to
     save while answering 200 (the exact defect S67 found across the whole event PUT path).
     """
-    from gideon.dashboard.handlers import triggers as handlers
+    from gideon.interfaces.dashboard.handlers import triggers as handlers
 
     glob = f"{NAMESPACE_PREFIX}:{APP}:thing_happened"
     resp = handlers._create_event(
@@ -812,13 +810,13 @@ def test_the_API_creates_and_edits_an_app_event_trigger(_store):
     )
     assert resp.status == 201
     created = _json_body(resp)
-    # The source is DERIVED, never taken from the wire.
     assert created["source"] == SOURCE_APP
     assert created["event_glob"] == glob
     assert _store.load()[0].event_glob == glob
 
-    # And the edit round-trips rather than answering 200 with nothing written.
-    resp = handlers._update_event("app-trigger", {"event_glob": f"{NAMESPACE_PREFIX}:{APP}:*"})
+    resp = handlers._update_event(
+        "app-trigger", {"event_glob": f"{NAMESPACE_PREFIX}:{APP}:*"}
+    )
     assert resp.status == 200
     assert _store.load()[0].event_glob == f"{NAMESPACE_PREFIX}:{APP}:*"
 
@@ -831,26 +829,25 @@ def test_the_variables_catalog_carries_the_LIVE_app_vocabulary(_source):
     """
     import asyncio
 
-    from gideon.dashboard.handlers import triggers as handlers
+    from gideon.interfaces.dashboard.handlers import triggers as handlers
 
-    resp = asyncio.run(handlers.api_trigger_variables(_req("GET", "/api/triggers/variables")))
+    resp = asyncio.run(
+        handlers.api_trigger_variables(_req("GET", "/api/triggers/variables"))
+    )
     body = _json_body(resp)
     entry = next(s for s in body["app_sources"] if s["app"] == APP)
     assert entry["label"] == "Sample Source"
     assert {e["event"] for e in entry["events"]} == {"thing_happened", "other_thing"}
-    # `source_event` is the literal string `event_glob` matches — the UI never re-derives the
-    # prefix.
     assert {e["source_event"] for e in entry["events"]} == {
         namespace(APP, "thing_happened"),
         namespace(APP, "other_thing"),
     }
 
     unregister_source(APP)
-    resp = asyncio.run(handlers.api_trigger_variables(_req("GET", "/api/triggers/variables")))
+    resp = asyncio.run(
+        handlers.api_trigger_variables(_req("GET", "/api/triggers/variables"))
+    )
     assert not [s for s in _json_body(resp)["app_sources"] if s["app"] == APP]
-
-
-# ── the SDK boundary + no vendor names ──────────────────────────────────────
 
 
 def test_an_app_reaches_the_contract_ONLY_through_the_sdk():
@@ -874,12 +871,12 @@ def test_the_seam_names_NO_VENDOR(_source):
     """
     from pathlib import Path
 
-    root = Path(__file__).resolve().parent.parent / "src" / "gideon"
+    root = Path(__file__).resolve().parent.parent.parent / "runtime" / "gideon"
     files = [
-        root / "trigger_sources" / "base.py",
-        root / "trigger_sources" / "registry.py",
-        root / "trigger_sources" / "parking.py",
-        root / "trigger_sources" / "__init__.py",
+        root / "automation" / "trigger_sources" / "base.py",
+        root / "automation" / "trigger_sources" / "registry.py",
+        root / "automation" / "trigger_sources" / "parking.py",
+        root / "automation" / "trigger_sources" / "__init__.py",
         root / "sdk" / "trigger_source.py",
     ]
     text = "\n".join(f.read_text().lower() for f in files)
@@ -888,7 +885,7 @@ def test_the_seam_names_NO_VENDOR(_source):
 
 
 def _fake_provider(calls):
-    from gideon.action_providers import ActionResult
+    from gideon.integrations.action_providers import ActionResult
 
     class _Fake:
         async def execute(self, config, ctx, timeout=30):
@@ -906,7 +903,10 @@ def test_the_health_rollup_uses_the_SHARED_vocabulary(_store):
     the wire carries `state` + `health` + the reason — otherwise the panel can only say "enabled",
     which is true and useless for a trigger that will not fire.
     """
-    from gideon.dashboard.handlers.triggers import _event_health, _serialize_event
+    from gideon.interfaces.dashboard.handlers.triggers import (
+        _event_health,
+        _serialize_event,
+    )
 
     _store.upsert(_app_trigger())
     park_for_app(_store, APP, now=1000.0)

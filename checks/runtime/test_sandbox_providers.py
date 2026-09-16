@@ -11,16 +11,23 @@ import asyncio
 
 import pytest
 
-from gideon.sandbox import PROFILE_TOOL, ResourceCeilings
-from gideon.sandbox_providers import (
+from gideon.integrations.sandbox_providers import (
     get_provider,
     list_providers,
     register_provider,
     resolve_provider,
     unregister_provider,
 )
-from gideon.sandbox_providers.base import SandboxHandle, SandboxProvider, SandboxSpec
-from gideon.sandbox_providers.none import NONE_PROVIDER_NAME, NoneSandboxProvider
+from gideon.integrations.sandbox_providers.base import (
+    SandboxHandle,
+    SandboxProvider,
+    SandboxSpec,
+)
+from gideon.integrations.sandbox_providers.none import (
+    NONE_PROVIDER_NAME,
+    NoneSandboxProvider,
+)
+from gideon.security.sandbox import PROFILE_TOOL, ResourceCeilings
 
 
 def test_none_provider_is_registered_and_available():
@@ -45,14 +52,13 @@ def test_none_handle_cleanup_is_idempotent_when_no_temp(tmp_path):
     p = NoneSandboxProvider()
     handle = p.wrap(SandboxSpec(mode="off", profile="none"), ["echo", "hi"])
     handle.cleanup()
-    handle.cleanup()  # idempotent
+    handle.cleanup()
 
 
 def test_resolve_provider_fails_open_to_none():
     """An unknown provider name resolves to the ``none`` builtin — never blocks a spawn."""
     resolved = resolve_provider("does-not-exist")
     assert resolved.name == "none"
-    # Empty name also resolves to none.
     assert resolve_provider("").name == "none"
 
 
@@ -79,7 +85,6 @@ def test_registry_register_unregister_roundtrip():
 
 
 def _ulimit_argv() -> list[str]:
-    # `sh -c 'ulimit -n'` prints the child's SOFT NOFILE limit to stdout.
     return ["/bin/sh", "-c", "ulimit -n"]
 
 
@@ -93,8 +98,6 @@ async def test_none_exec_child_ulimit_reports_nofile_ceiling():
     """
     ceilings = ResourceCeilings(nofile=256, max_pids=0, max_rss_mb=0)
     p = NoneSandboxProvider()
-    # profile=tool applies the configured NOFILE soft cap verbatim (session_host would raise it to
-    # the hard limit, which is not a fixed number to assert against).
     handle = p.wrap(
         SandboxSpec(mode="off", profile=PROFILE_TOOL, ceilings=ceilings), _ulimit_argv()
     )
@@ -113,7 +116,9 @@ async def test_none_exec_child_ulimit_reports_nofile_ceiling():
 async def test_none_exec_without_ceilings_is_unwrapped_but_runs():
     """profile='none' delivers no shim; the child still runs and produces output."""
     p = NoneSandboxProvider()
-    handle = p.wrap(SandboxSpec(mode="off", profile="none"), ["/bin/sh", "-c", "echo ok"])
+    handle = p.wrap(
+        SandboxSpec(mode="off", profile="none"), ["/bin/sh", "-c", "echo ok"]
+    )
     proc = await handle.exec(
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
@@ -129,38 +134,46 @@ def test_sandbox_type_is_in_provider_types_with_a_handler():
     import re
     from pathlib import Path
 
-    from gideon.apps.manifest import PROVIDER_TYPES
+    from gideon.extensions.apps.manifest import PROVIDER_TYPES
 
     assert "sandbox" in PROVIDER_TYPES
     registry_py = (
-        Path(__file__).resolve().parent.parent
-        / "src"
+        Path(__file__).resolve().parent.parent.parent
+        / "runtime"
         / "gideon"
+        / "extensions"
         / "providers"
         / "registry.py"
     )
-    handlers = set(re.findall(r'register_type_handler\("([a-z_]+)"', registry_py.read_text()))
+    handlers = set(
+        re.findall(r'register_type_handler\("([a-z_]+)"', registry_py.read_text())
+    )
     assert "sandbox" in handlers, "sandbox type has no register_type_handler call"
 
 
 @pytest.mark.asyncio
 async def test_subagent_spawn_threads_sandbox_to_worker_launch():
-    """SubagentManager.spawn(sandbox=...) records it on the info and forwards it to the ACP
-    worker launch via get_or_create's factory kwargs (the seam consumers read as ``sandbox``)."""
+    """DelegationSupervisor.spawn(sandbox=...) records it on the info and forwards it to the ACP
+    worker launch via get_or_create's factory kwargs (the seam consumers read as ``sandbox``).
+    """
     from unittest.mock import patch
 
-    from gideon.subagent import SubagentManager
-    from tests.test_subagent import _mock_ctx_builder_auto_spawn, _mock_sessions
+    from checks.runtime.test_subagent import (
+        _mock_ctx_builder_auto_spawn,
+        _mock_sessions,
+    )
+    from gideon.engine.subagent import DelegationSupervisor
 
     sessions = _mock_sessions()
-    manager = SubagentManager(sessions=sessions, ctx_builder=_mock_ctx_builder_auto_spawn())
-    with patch("gideon.subagent.Stats"), patch("gideon.subagent.sel"):
+    manager = DelegationSupervisor(
+        sessions=sessions, ctx_builder=_mock_ctx_builder_auto_spawn()
+    )
+    with patch("gideon.engine.subagent.Stats"), patch("gideon.engine.subagent.sel"):
         info = manager.spawn("do work", sandbox="container-tier")
         assert info is not None
         assert info.sandbox == "container-tier"
         await manager._tasks[info.id]
 
-    # A non-default sandbox is forwarded to the session factory as the ``sandbox`` kwarg.
     assert sessions.get_or_create.await_count >= 1
     kwargs = sessions.get_or_create.await_args.kwargs
     assert kwargs.get("sandbox") == "container-tier"
@@ -171,12 +184,17 @@ async def test_subagent_spawn_default_sandbox_not_forwarded():
     """The default ``none`` is NOT forwarded, so the chat/native paths stay untouched."""
     from unittest.mock import patch
 
-    from gideon.subagent import SubagentManager
-    from tests.test_subagent import _mock_ctx_builder_auto_spawn, _mock_sessions
+    from checks.runtime.test_subagent import (
+        _mock_ctx_builder_auto_spawn,
+        _mock_sessions,
+    )
+    from gideon.engine.subagent import DelegationSupervisor
 
     sessions = _mock_sessions()
-    manager = SubagentManager(sessions=sessions, ctx_builder=_mock_ctx_builder_auto_spawn())
-    with patch("gideon.subagent.Stats"), patch("gideon.subagent.sel"):
+    manager = DelegationSupervisor(
+        sessions=sessions, ctx_builder=_mock_ctx_builder_auto_spawn()
+    )
+    with patch("gideon.engine.subagent.Stats"), patch("gideon.engine.subagent.sel"):
         info = manager.spawn("do work")
         assert info is not None
         assert info.sandbox == "none"
@@ -188,7 +206,7 @@ async def test_subagent_spawn_default_sandbox_not_forwarded():
 
 def test_sandbox_type_handler_registers_into_sandbox_registry():
     """SandboxTypeHandler.register/deregister drives the sandbox_providers registry."""
-    from gideon.providers.registry import SandboxTypeHandler
+    from gideon.extensions.providers.registry import SandboxTypeHandler
 
     class _Tier(SandboxProvider):
         name = "container-tier"

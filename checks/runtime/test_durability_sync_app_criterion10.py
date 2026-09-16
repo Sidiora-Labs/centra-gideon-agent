@@ -6,7 +6,7 @@ the standard provider routes, and syncs — with zero core changes (DURABILITY-A
 show is the criterion's actual claim, which is about an app the core has never heard of:
 
 * the transport arrives as an `app.json` + a Python file INSIDE the app's own directory —
-  nothing in `src/gideon` names it, so "zero core changes" is a property of the
+  nothing in `runtime/gideon` names it, so "zero core changes" is a property of the
   fixture rather than an assertion about it;
 * its settings are read and written through `/api/providers/{name}/schema` + `/config`, the
   same routes every other provider type uses — no durability-specific config endpoint;
@@ -28,8 +28,6 @@ from aiohttp.test_utils import TestClient, TestServer
 
 APP_NAME = "acme-box-sync"
 
-#: The app's whole implementation. Nothing in core imports or names it — the file is written
-#: into a temp home by the fixture, exactly as an installed third-party app would be.
 _PROVIDER_PY = '''
 """A third-party sync transport. Imports core ONLY through the SDK."""
 
@@ -110,7 +108,10 @@ _MANIFEST = {
                 "folder": {
                     "type": "string",
                     "default": "",
-                    "x-meta": {"label": "Box folder", "help": "Where shards are written."},
+                    "x-meta": {
+                        "label": "Box folder",
+                        "help": "Where shards are written.",
+                    },
                 }
             },
         },
@@ -129,19 +130,16 @@ def installed_app(tmp_path, monkeypatch):
     remote = tmp_path / "box"
     remote.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: home)
-    # `apps_dir()` resolves `config_dir()` from this module's globals at CALL time, so this one
-    # patch also relocates `app_dir` — which is what `ProviderSettings` and the provider
-    # loader both use to find an installed app.
-    monkeypatch.setattr("gideon.apps.manager.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.extensions.apps.manager.config_dir", lambda: home)
     return home, app, remote
 
 
 @pytest.fixture
 def registered(installed_app):
     """The app registered + enabled through the real provider registry, then cleaned up."""
-    from gideon.apps.manifest import AppManifest
-    from gideon.providers.registry import get_provider_registry
+    from gideon.extensions.apps.manifest import AppManifest
+    from gideon.extensions.providers.registry import get_provider_registry
 
     home, app, remote = installed_app
     registry = get_provider_registry()
@@ -156,18 +154,16 @@ def registered(installed_app):
 def test_the_manifest_type_needs_no_core_change(registered):
     """The type is already in the closed set, so a third-party manifest is admissible as
     shipped. If this ever fails, criterion 10 needs a core change and is not met."""
-    from gideon.apps.manifest import PROVIDER_TYPES
+    from gideon.extensions.apps.manifest import PROVIDER_TYPES
 
     assert "sync" in PROVIDER_TYPES
 
 
 def test_enabling_registers_the_transport_under_its_own_name(registered):
-    from gideon.sync_transports import get_transport
+    from gideon.integrations.sync_transports import get_transport
 
     registry, home, _app, remote = registered
-    # Configure the folder through the provider settings store the routes write to, so the
-    # factory receives it exactly as a user-configured app would.
-    from gideon.providers.settings import ProviderSettings
+    from gideon.extensions.providers.settings import ProviderSettings
 
     ProviderSettings.save(APP_NAME, {"folder": str(remote)})
     assert registry.enable(APP_NAME) is True
@@ -175,13 +171,12 @@ def test_enabling_registers_the_transport_under_its_own_name(registered):
     assert transport is not None
     assert transport.name == APP_NAME
     assert transport.test().ok is True
-    # And disabling it takes it back out — the one-source-of-truth lifecycle.
     registry.disable(APP_NAME)
     assert get_transport(APP_NAME) is None
 
 
 def _providers_app() -> web.Application:
-    from gideon.providers.routes import register_routes
+    from gideon.extensions.providers.routes import register_routes
 
     @web.middleware
     async def identity(request, handler):
@@ -206,12 +201,16 @@ async def test_it_configures_through_the_standard_provider_routes(registered):
         listed = await client.get("/api/providers?type=sync")
         assert listed.status == 200
         names = [p["name"] for p in (await listed.json())["providers"]]
-        assert APP_NAME in names, "a third-party sync app is invisible to the providers list"
+        assert (
+            APP_NAME in names
+        ), "a third-party sync app is invisible to the providers list"
 
         schema = await client.get(f"/api/providers/{APP_NAME}/schema")
         assert schema.status == 200
         props = (await schema.json())["schema"]["properties"]
-        assert "folder" in props, "the app's own settings schema did not survive the route"
+        assert (
+            "folder" in props
+        ), "the app's own settings schema did not survive the route"
 
         patched = await client.patch(
             f"/api/providers/{APP_NAME}/config", json={"folder": str(remote)}
@@ -228,43 +227,52 @@ def test_it_actually_syncs_through_the_configured_transport(registered, monkeypa
     The vacuity floor is the remote folder — an empty one would mean the job "succeeded"
     without a transport ever being called, which is exactly how a skip reads as a pass.
     """
-    from gideon.config.loader import DurabilityConfig
-    from gideon.durability import service
-    from gideon.providers.settings import ProviderSettings
+    from gideon.core.config.loader import DurabilityConfig
+    from gideon.extensions.providers.settings import ProviderSettings
+    from gideon.operations.durability import service
 
     registry, home, _app, remote = registered
     ProviderSettings.save(APP_NAME, {"folder": str(remote)})
     assert registry.enable(APP_NAME) is True
 
-    # Something worth syncing, in a row-merge entry.
     (home / "tasks").mkdir(parents=True, exist_ok=True)
-    (home / "tasks" / "t1.json").write_text(json.dumps({"id": "t1", "title": "sync me"}))
+    (home / "tasks" / "t1.json").write_text(
+        json.dumps({"id": "t1", "title": "sync me"})
+    )
 
     monkeypatch.setattr(
         service,
         "_cfg",
-        lambda: DurabilityConfig(sync_enabled=True, sync_transport=APP_NAME, sync_encrypt="off"),
+        lambda: DurabilityConfig(
+            sync_enabled=True, sync_transport=APP_NAME, sync_encrypt="off"
+        ),
     )
     result = service.run_sync_job()
-    assert not result.skipped, f"the sync job skipped instead of running: {result.skipped}"
+    assert (
+        not result.skipped
+    ), f"the sync job skipped instead of running: {result.skipped}"
     assert result.ok, f"the cycle failed: {result.detail}"
     pushed = [p for p in remote.rglob("*") if p.is_file()]
     assert pushed, "the cycle reported success but the transport received nothing"
-    # The shard payload really is this machine's state, not an empty envelope.
     assert any("t1" in p.read_text(errors="ignore") for p in pushed)
-    # And the credentials rail holds on a transport core has never seen.
     for p in pushed:
         body = p.read_text(errors="ignore")
-        for secret in (".local_secret", "sel_hmac.key", "telemetry_salt", "ANTHROPIC_API_KEY"):
+        for secret in (
+            ".local_secret",
+            "sel_hmac.key",
+            "telemetry_salt",
+            "ANTHROPIC_API_KEY",
+        ):
             assert secret not in body
 
 
 def test_the_app_names_nothing_in_core(registered):
-    """ "Zero core changes", checked rather than asserted: no file under `src/gideon`
-    mentions this app. A hand-wired special case in the sync registry would show up here."""
+    """ "Zero core changes", checked rather than asserted: no file under `runtime/gideon`
+    mentions this app. A hand-wired special case in the sync registry would show up here.
+    """
     import subprocess
 
-    src = Path(__file__).resolve().parents[1] / "src" / "gideon"
+    src = Path(__file__).resolve().parents[2] / "runtime" / "gideon"
     hit = subprocess.run(
         ["grep", "-rl", APP_NAME, str(src)], capture_output=True, text=True
     ).stdout.strip()

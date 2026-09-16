@@ -7,7 +7,7 @@ matcher the code has since removed) and plan ``**Status:**`` headers drift from 
 execution logs (the 2026-08-04 audit found 25 of 66 headers wrong). This generator is the
 census that makes that drift visible. It scans tracked ``docs/**/*.md`` and emits a
 deterministic per-file counter of three finding kinds to a committed
-``docs-lint-baseline.json``; a companion test (``tests/test_docs_lint_baseline.py``)
+``docs-lint-baseline.json``; a companion test (``checks/runtime/test_docs_lint_baseline.py``)
 regenerates in-memory and asserts every per-file counter **may only shrink** — a NEW dead
 link, stale citation, or stale header raises a file's count and reds CI, naming the file
 and the finding; a cleanup that removes one lowers it and is welcome.
@@ -30,7 +30,7 @@ red is always a real regression):
    be found in the repository. Citations are matched with ``([\\w/.-]+\\.py):(\\d+)`` and a
    citation counts as stale ONLY when the file is missing (no tracked path equals it or ends
    with ``/<citation>``, so an abbreviated ``config/loader.py`` still resolves to
-   ``src/gideon/config/loader.py``). A DRIFTED LINE NUMBER (file exists, the ``:NNN``
+   ``runtime/gideon/core/config/loader.py``). A DRIFTED LINE NUMBER (file exists, the ``:NNN``
    points at a different line) is **NOT** counted: roadmap prose is full of ``file.py:NNN``
    citations whose line numbers drift constantly — SELF-VERIFICATION explicitly mandates
    "specs reference stable anchors, never line numbers" precisely because line-drift is
@@ -49,7 +49,7 @@ red is always a real regression):
    matches a stale shape (``DESIGNED``/``PROPOSED``/``READY``/``NOT STARTED``) while the file
    carries a populated ``## Execution log`` containing a ``DONE`` entry: the exact "plan
    headers lie" drift the 2026-08-04 audit surfaced. The ``**Status:**`` line is parsed with
-   the SAME regex ``tools/gen_roadmap_dashboard.py`` uses, so the two agree. This is a
+   the SAME regex ``tooling/gen_roadmap_dashboard.py`` uses, so the two agree. This is a
    heuristic, not a proof — it reproduces the known audit finding on a seeded stale header;
    it does not attempt to adjudicate every real header against reality (the log and the code
    win over the header, so this ratchets rather than blocks).
@@ -76,7 +76,7 @@ tree is byte-identical to the first.
 
 Regenerate in place (ONLY on a legitimate shrink) with::
 
-    python scripts/generate_docs_lint_baseline.py
+    python tooling/scripts/generate_docs_lint_baseline.py
 """
 
 from __future__ import annotations
@@ -88,47 +88,37 @@ import subprocess
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-# Surface-kind labels, used as the ``kind:`` prefix of every finding id.
 KIND_DEAD_LINK = "dead_link"
 KIND_STALE_CITATION = "stale_citation"
 KIND_STALE_HEADER = "stale_header"
 
-# A relative markdown link ``[text](target ...)``; the negative lookbehind skips images
-# (``![alt](src)``). Only the destination up to whitespace or ``)`` is captured.
 _LINK_RE = re.compile(r"(?<!\!)\[[^\]]*\]\(\s*([^)\s]+)")
 
-# Link destinations that are never relative repo-file links.
 _LINK_SKIP_PREFIXES = ("http://", "https://", "mailto:", "tel:", "ftp://", "//", "#", "/")
 
-# Path-like heuristic for link destinations (a real DSL token like ``value`` is skipped).
 _FILE_EXT_RE = re.compile(
     r"\.(md|py|json|txt|png|jpg|jpeg|svg|gif|yml|yaml|toml|cfg|ini|sh|ts|tsx|js|jsx|"
     r"html|css|lock|sql|webp|ico|pdf|mmd)$",
     re.I,
 )
 
-# A ``file.py:NNN`` citation. Same shape the §6.2 task specifies.
 _CITATION_RE = re.compile(r"([\w/.-]+\.py):(\d+)")
 
-# ``**Status:**`` header — the SAME regex ``tools/gen_roadmap_dashboard.py`` uses.
+# ``**Status:**`` header — the SAME regex ``tooling/gen_roadmap_dashboard.py`` uses.
 _STATUS_RE = re.compile(r"^\*\*Status:\*\*\s*(.+?)(?:\n\n|\n##|\n\*\*)", re.S | re.M)
 
-# Stale-shape status words: a header claiming the work is not yet done.
 _STALE_STATUS_RE = re.compile(r"\b(DESIGNED|PROPOSED|READY|NOT STARTED)\b", re.I)
 
-# A DONE entry in an execution log: a list bullet mentioning DONE. Anchored to a bullet so
-# the ``<!-- ... DONE ... -->`` template comment (stripped anyway) can never match.
 _DONE_ENTRY_RE = re.compile(r"(?m)^\s*[-*]\s.*\bDONE\b")
 
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 _FENCE_RE = re.compile(r"^\s*(```|~~~)")
 
-# Plans whose headers this census holds to the stale-shape heuristic.
 _PLANS_PREFIX = "docs/roadmap/plans/"
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[1]
+    return Path(__file__).resolve().parents[2]
 
 
 def _tracked_files() -> list[str]:
@@ -245,7 +235,7 @@ def build_inventory() -> dict[str, Any]:
     Shape::
 
         {
-          "generated_from": "scripts/generate_docs_lint_baseline.py",
+          "generated_from": "tooling/scripts/generate_docs_lint_baseline.py",
           "per_file": {"<relpath>": {"findings": ["kind:detail", ...], "total": N}},
           "totals": {"total": T, "by_kind": {"dead_link": N, ...}}
         }
@@ -269,7 +259,7 @@ def build_inventory() -> dict[str, Any]:
             by_kind[finding.split(":", 1)[0]] += 1
     total = sum(bucket["total"] for bucket in per_file.values())
     return {
-        "generated_from": "scripts/generate_docs_lint_baseline.py",
+        "generated_from": "tooling/scripts/generate_docs_lint_baseline.py",
         "per_file": per_file,
         "totals": {"total": total, "by_kind": by_kind},
     }

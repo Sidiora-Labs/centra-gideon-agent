@@ -13,8 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from gideon.resilience import degraded
-from gideon.resilience.degraded import DegradedContract
+from gideon.operations.resilience import degraded
+from gideon.operations.resilience.degraded import DegradedContract
 
 
 @pytest.fixture(autouse=True)
@@ -28,9 +28,6 @@ def _isolate_registry():
     degraded._CONTRACTS.clear()
     degraded._CONTRACTS.update(saved)
     degraded.reset_transition_state()
-
-
-# ── the built-in contract set ────────────────────────────────────────────────
 
 
 def test_builtin_contracts_registered():
@@ -68,7 +65,10 @@ def test_the_three_reenrichment_surfaces_carry_both_halves_of_the_contract():
     with a placeholder (``lambda: 0``, ``None``) fails here rather than passing on shape.
     """
     expected = {
-        "memory_extraction": (degraded._memory_staging_backlog, degraded._memory_staging_drain),
+        "memory_extraction": (
+            degraded._memory_staging_backlog,
+            degraded._memory_staging_drain,
+        ),
         "knowledge_ingest": (
             degraded._knowledge_heuristic_backlog,
             degraded._knowledge_heuristic_drain,
@@ -97,23 +97,22 @@ def test_feature_off_surfaces_still_have_no_drain():
         assert contract is not None and contract.drain is None, surface
 
 
-# ── availability derivation ──────────────────────────────────────────────────
-
-
 def test_availability_all_use_cases_must_resolve(monkeypatch):
     """A surface is available only when EVERY use-case it needs resolves."""
     resolvable = {"chat"}
     monkeypatch.setattr(
-        "gideon.providers.provider_bridge.can_resolve_use_case",
+        "gideon.extensions.providers.provider_bridge.can_resolve_use_case",
         lambda uc: uc in resolvable,
     )
-    degraded.register_contract(DegradedContract(surface="t_one", use_cases=("chat",), floor="f"))
+    degraded.register_contract(
+        DegradedContract(surface="t_one", use_cases=("chat",), floor="f")
+    )
     degraded.register_contract(
         DegradedContract(surface="t_both", use_cases=("chat", "embedding"), floor="f")
     )
     rows = {r["surface"]: r for r in degraded.evaluate()}
-    assert rows["t_one"]["available"] is True  # chat resolves
-    assert rows["t_both"]["available"] is False  # embedding does not
+    assert rows["t_one"]["available"] is True
+    assert rows["t_both"]["available"] is False
 
 
 def test_availability_probe_fault_fails_available_not_down(monkeypatch):
@@ -123,8 +122,12 @@ def test_availability_probe_fault_fails_available_not_down(monkeypatch):
     def _boom(uc):
         raise RuntimeError("probe exploded")
 
-    monkeypatch.setattr("gideon.providers.provider_bridge.can_resolve_use_case", _boom)
-    degraded.register_contract(DegradedContract(surface="t_fault", use_cases=("chat",), floor="f"))
+    monkeypatch.setattr(
+        "gideon.extensions.providers.provider_bridge.can_resolve_use_case", _boom
+    )
+    degraded.register_contract(
+        DegradedContract(surface="t_fault", use_cases=("chat",), floor="f")
+    )
     row = next(r for r in degraded.evaluate() if r["surface"] == "t_fault")
     assert row["available"] is True
 
@@ -132,14 +135,17 @@ def test_availability_probe_fault_fails_available_not_down(monkeypatch):
 def test_backlog_probe_is_fail_safe(monkeypatch):
     """A raising backlog probe reports 0, never propagates."""
     monkeypatch.setattr(
-        "gideon.providers.provider_bridge.can_resolve_use_case", lambda uc: False
+        "gideon.extensions.providers.provider_bridge.can_resolve_use_case",
+        lambda uc: False,
     )
 
     def _boom() -> int:
         raise RuntimeError("store gone")
 
     degraded.register_contract(
-        DegradedContract(surface="t_backlog", use_cases=("chat",), floor="f", backlog_probe=_boom)
+        DegradedContract(
+            surface="t_backlog", use_cases=("chat",), floor="f", backlog_probe=_boom
+        )
     )
     row = next(r for r in degraded.evaluate() if r["surface"] == "t_backlog")
     assert row["backlog"] == 0
@@ -147,18 +153,17 @@ def test_backlog_probe_is_fail_safe(monkeypatch):
 
 def test_degraded_surfaces_lists_only_unavailable(monkeypatch):
     monkeypatch.setattr(
-        "gideon.providers.provider_bridge.can_resolve_use_case",
+        "gideon.extensions.providers.provider_bridge.can_resolve_use_case",
         lambda uc: uc == "chat",
     )
-    degraded.register_contract(DegradedContract(surface="t_up", use_cases=("chat",), floor="f"))
+    degraded.register_contract(
+        DegradedContract(surface="t_up", use_cases=("chat",), floor="f")
+    )
     degraded.register_contract(
         DegradedContract(surface="t_down", use_cases=("embedding",), floor="f")
     )
     down = degraded.degraded_surfaces()
     assert "t_down" in down and "t_up" not in down
-
-
-# ── transition notifications (one per change; silent baseline) ───────────────
 
 
 class _RecordingState:
@@ -172,71 +177,68 @@ class _RecordingState:
 def test_first_evaluation_is_silent_baseline(monkeypatch):
     """No boot storm — the first sight of a surface only seeds the baseline."""
     monkeypatch.setattr(
-        "gideon.providers.provider_bridge.can_resolve_use_case", lambda uc: False
+        "gideon.extensions.providers.provider_bridge.can_resolve_use_case",
+        lambda uc: False,
     )
-    degraded.register_contract(DegradedContract(surface="t_new", use_cases=("chat",), floor="f"))
+    degraded.register_contract(
+        DegradedContract(surface="t_new", use_cases=("chat",), floor="f")
+    )
     state = _RecordingState()
     degraded.evaluate(notify=True, state=state)
-    assert state.notes == []  # baseline seeded, nothing emitted
+    assert state.notes == []
 
 
 def test_down_then_recovery_emits_warning_then_info(monkeypatch):
     available = {"value": True}
     monkeypatch.setattr(
-        "gideon.providers.provider_bridge.can_resolve_use_case",
+        "gideon.extensions.providers.provider_bridge.can_resolve_use_case",
         lambda uc: available["value"],
     )
     degraded.register_contract(
         DegradedContract(surface="t_flap", use_cases=("chat",), floor="the floor")
     )
     state = _RecordingState()
-    # Filter to THIS surface's notes — the built-in contracts share the monkeypatched
-    # probe and transition alongside t_flap, which is not what this test measures.
     flap = lambda: [n for n in state.notes if "t_flap" in n[1]]  # noqa: E731
 
-    degraded.evaluate(notify=True, state=state)  # baseline: available
+    degraded.evaluate(notify=True, state=state)
     assert flap() == []
 
     available["value"] = False
-    degraded.evaluate(notify=True, state=state)  # went down → warning
+    degraded.evaluate(notify=True, state=state)
     assert len(flap()) == 1
     assert flap()[0][0] == "warning" and "t_flap" in flap()[0][1]
 
     available["value"] = True
-    degraded.evaluate(notify=True, state=state)  # recovered → info
+    degraded.evaluate(notify=True, state=state)
     assert len(flap()) == 2
     assert flap()[1][0] == "info" and "recovered" in flap()[1][1]
 
 
 def test_no_change_emits_nothing(monkeypatch):
     monkeypatch.setattr(
-        "gideon.providers.provider_bridge.can_resolve_use_case", lambda uc: False
+        "gideon.extensions.providers.provider_bridge.can_resolve_use_case",
+        lambda uc: False,
     )
-    degraded.register_contract(DegradedContract(surface="t_stable", use_cases=("chat",), floor="f"))
+    degraded.register_contract(
+        DegradedContract(surface="t_stable", use_cases=("chat",), floor="f")
+    )
     state = _RecordingState()
-    degraded.evaluate(notify=True, state=state)  # baseline
-    degraded.evaluate(notify=True, state=state)  # still down — no new note
+    degraded.evaluate(notify=True, state=state)
+    degraded.evaluate(notify=True, state=state)
     degraded.evaluate(notify=True, state=state)
     assert state.notes == []
 
 
 def test_evaluate_without_notify_never_touches_state(monkeypatch):
     monkeypatch.setattr(
-        "gideon.providers.provider_bridge.can_resolve_use_case", lambda uc: False
+        "gideon.extensions.providers.provider_bridge.can_resolve_use_case",
+        lambda uc: False,
     )
-    degraded.register_contract(DegradedContract(surface="t_quiet", use_cases=("chat",), floor="f"))
-    # notify defaults False; a plain rollup for the Doctor must not notify.
+    degraded.register_contract(
+        DegradedContract(surface="t_quiet", use_cases=("chat",), floor="f")
+    )
     rows = degraded.evaluate()
     assert any(r["surface"] == "t_quiet" for r in rows)
-
-
-# ── the three drains: the CALL SITE, not the hook (PR2-9) ────────────────────
-#
-# A registered drain proves nothing on its own. What these pin is that the recovery
-# transition RUNS it, and that each drain moves real rows in a real store: a lesson batch
-# carrying its staging refs, a re-enqueued partial item, a queued recompile. Each has a
-# vacuity case that must NOT move anything, because a drain that reports work it did not do
-# is worse than one that reports none.
 
 
 @pytest.fixture
@@ -248,12 +250,14 @@ def home(tmp_path, monkeypatch):
     developer's real home. The redirect is then ASSERTED rather than assumed — a patch that
     silently missed would let this file write into ``~/.gideon``.
     """
-    from gideon.learning import staging as _staging
+    from gideon.cognition.learning import staging as _staging
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
-    monkeypatch.setattr("gideon.config.config_dir", lambda: tmp_path, raising=False)
-    from gideon.config.loader import config_dir
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gideon.core.config.config_dir", lambda: tmp_path, raising=False
+    )
+    from gideon.core.config.loader import config_dir
 
     assert config_dir() == tmp_path, "config_dir redirect did not take"
     _staging.reset_store()
@@ -263,7 +267,7 @@ def home(tmp_path, monkeypatch):
 
 def _flip(monkeypatch, available: dict):
     monkeypatch.setattr(
-        "gideon.providers.provider_bridge.can_resolve_use_case",
+        "gideon.extensions.providers.provider_bridge.can_resolve_use_case",
         lambda uc: available["value"],
     )
 
@@ -284,16 +288,20 @@ def test_recovery_fires_the_contracts_drain(home, monkeypatch):
     available = {"value": False}
     _flip(monkeypatch, available)
     degraded.register_contract(
-        DegradedContract(surface="t_drain", use_cases=("chat",), floor="f", drain=_drain)
+        DegradedContract(
+            surface="t_drain", use_cases=("chat",), floor="f", drain=_drain
+        )
     )
     state = _RecordingState()
 
-    degraded.evaluate(notify=True, state=state)  # baseline: down
+    degraded.evaluate(notify=True, state=state)
     assert calls == []
     available["value"] = True
-    degraded.evaluate(notify=True, state=state)  # recovered → drain
+    degraded.evaluate(notify=True, state=state)
 
-    assert calls == [state], "the recovery transition must run the drain, with the live state"
+    assert calls == [
+        state
+    ], "the recovery transition must run the drain, with the live state"
 
 
 def test_going_down_and_holding_steady_never_fire_the_drain(home, monkeypatch):
@@ -308,15 +316,17 @@ def test_going_down_and_holding_steady_never_fire_the_drain(home, monkeypatch):
     available = {"value": True}
     _flip(monkeypatch, available)
     degraded.register_contract(
-        DegradedContract(surface="t_nodrain", use_cases=("chat",), floor="f", drain=_drain)
+        DegradedContract(
+            surface="t_nodrain", use_cases=("chat",), floor="f", drain=_drain
+        )
     )
     state = _RecordingState()
 
-    degraded.evaluate(notify=True, state=state)  # baseline: up
+    degraded.evaluate(notify=True, state=state)
     available["value"] = False
-    degraded.evaluate(notify=True, state=state)  # went DOWN
-    degraded.evaluate(notify=True, state=state)  # still down
-    degraded.evaluate(notify=True, state=state)  # still down
+    degraded.evaluate(notify=True, state=state)
+    degraded.evaluate(notify=True, state=state)
+    degraded.evaluate(notify=True, state=state)
 
     assert calls == []
 
@@ -337,13 +347,15 @@ def test_a_raising_drain_never_breaks_the_recovery(home, monkeypatch):
     degraded.evaluate(notify=True, state=state)
     available["value"] = True
 
-    degraded.evaluate(notify=True, state=state)  # must not raise
+    degraded.evaluate(notify=True, state=state)
 
     assert any("t_boom recovered" == title for _kind, title, _body in state.notes)
 
 
 def _recovered_body(state, surface: str) -> str:
-    return next(body for _kind, title, body in state.notes if title == f"{surface} recovered")
+    return next(
+        body for _kind, title, body in state.notes if title == f"{surface} recovered"
+    )
 
 
 def _recover(monkeypatch, contract) -> "_RecordingState":
@@ -351,9 +363,9 @@ def _recover(monkeypatch, contract) -> "_RecordingState":
     _flip(monkeypatch, available)
     degraded.register_contract(contract)
     state = _RecordingState()
-    degraded.evaluate(notify=True, state=state)  # baseline: down
+    degraded.evaluate(notify=True, state=state)
     available["value"] = True
-    degraded.evaluate(notify=True, state=state)  # recovered
+    degraded.evaluate(notify=True, state=state)
     return state
 
 
@@ -379,7 +391,9 @@ def test_the_recovery_notification_reports_what_was_REENRICHED(home, monkeypatch
     assert "7 item(s) re-enriched" in _recovered_body(state, "t_summary")
 
 
-def test_a_drain_that_moved_nothing_still_reports_the_STANDING_backlog(home, monkeypatch):
+def test_a_drain_that_moved_nothing_still_reports_the_STANDING_backlog(
+    home, monkeypatch
+):
     """VACUITY. "re-enriched" has to be a claim about work actually done — a drain that
     could move nothing (no live worker behind it) must leave the backlog visible instead of
     swallowing it into a recovery message that sounds finished."""
@@ -402,11 +416,8 @@ def test_a_drain_that_moved_nothing_still_reports_the_STANDING_backlog(home, mon
     assert "5 item(s) awaiting re-enrichment" in body and "re-enriched" not in body
 
 
-# ── memory_extraction: the LEARN-R19 staging drain ───────────────────────────
-
-
 def _stage(home, contents):
-    from gideon.learning.staging import get_store
+    from gideon.cognition.learning.staging import get_store
 
     store = get_store()
     for content in contents:
@@ -418,8 +429,8 @@ def test_the_memory_drain_compiles_pending_captures_into_a_lesson_batch(home):
     """The staging log's `pending`/`staging_refs`/`mark_consumed` trio had no caller at all.
     This is it: the captures that piled up while no model was bound become ONE propose-only
     lesson batch that still points back at the entries it came from."""
-    from gideon.learning import proposals
-    from gideon.learning.staging import get_store
+    from gideon.cognition.learning import proposals
+    from gideon.cognition.learning.staging import get_store
 
     _stage(home, ["prefers tabs", "hates emoji", "ships on fridays"])
 
@@ -433,26 +444,32 @@ def test_the_memory_drain_compiles_pending_captures_into_a_lesson_batch(home):
     assert "hates emoji" in filed[0].body
 
 
-def test_the_memory_drain_leaves_entries_pending_when_nothing_was_filed(home, monkeypatch):
+def test_the_memory_drain_leaves_entries_pending_when_nothing_was_filed(
+    home, monkeypatch
+):
     """VACUITY, and the important one: consuming entries in exchange for a proposal that
     does NOT exist would delete the only record of those captures. A SKIP must cost nothing.
     """
-    from gideon.learning import proposals
-    from gideon.learning.staging import get_store
+    from gideon.cognition.learning import proposals
+    from gideon.cognition.learning.staging import get_store
 
     _stage(home, ["prefers tabs", "hates emoji"])
-    monkeypatch.setattr(proposals, "enqueue", lambda **kw: (proposals.Verdict.SKIP, None))
+    monkeypatch.setattr(
+        proposals, "enqueue", lambda **kw: (proposals.Verdict.SKIP, None)
+    )
 
     moved = asyncio.run(degraded._memory_staging_drain(None))
 
     assert moved == 0
-    assert get_store().pending_count() == 2, "a skipped proposal must not consume the entries"
+    assert (
+        get_store().pending_count() == 2
+    ), "a skipped proposal must not consume the entries"
 
 
 def test_the_memory_backlog_probe_does_not_create_the_staging_log(home):
     """The probe runs on every poll of a read-only rollup, so it must answer from the absent
     file rather than opening (and thereby writing) one."""
-    from gideon.learning.staging import DB_FILE
+    from gideon.cognition.learning.staging import DB_FILE
 
     assert degraded._memory_staging_backlog() == 0
     assert not (home / DB_FILE).exists()
@@ -460,13 +477,11 @@ def test_the_memory_backlog_probe_does_not_create_the_staging_log(home):
 
 def test_the_memory_backlog_probe_counts_past_the_page_limit(home):
     """A backlog read through `pending(limit=...)` reports the CAP once the queue passes it,
-    so a growing queue looks perfectly stable. `pending_count` is why this is a real count."""
+    so a growing queue looks perfectly stable. `pending_count` is why this is a real count.
+    """
     _stage(home, [f"lesson {i}" for i in range(degraded.DRAIN_BATCH + 7)])
 
     assert degraded._memory_staging_backlog() == degraded.DRAIN_BATCH + 7
-
-
-# ── knowledge_ingest: the KNOW-R17 heuristic tier's re-extraction ────────────
 
 
 class _RecordingQueue:
@@ -478,8 +493,8 @@ class _RecordingQueue:
 
 
 def _knowledge_store(tmp_path, monkeypatch):
-    import gideon.knowledge as K
-    from gideon.knowledge.store import KnowledgeStore
+    import gideon.cognition.knowledge as K
+    from gideon.cognition.knowledge.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "knowledge.db"))
     monkeypatch.setattr(K, "get_knowledge_store", lambda: store)
@@ -489,7 +504,9 @@ def _knowledge_store(tmp_path, monkeypatch):
 def _heuristic_item(store, title: str) -> str:
     """An item as the LLM-free ingest graph leaves it: captured and indexed, insights not
     refreshed, `partial` with the reason the runner records verbatim."""
-    item_id = store.create_typed_item(item_type="note", title=title, content=f"body of {title}")
+    item_id = store.create_typed_item(
+        item_type="note", title=title, content=f"body of {title}"
+    )
     store.update_item(
         item_id,
         processing_status="partial",
@@ -507,7 +524,9 @@ def test_the_knowledge_drain_reenqueues_the_heuristic_tier_items(tmp_path, monke
     queue = _RecordingQueue()
 
     moved = asyncio.run(
-        degraded._knowledge_heuristic_drain(SimpleNamespace(knowledge_ingest_queue=lambda: queue))
+        degraded._knowledge_heuristic_drain(
+            SimpleNamespace(knowledge_ingest_queue=lambda: queue)
+        )
     )
 
     assert moved == 1
@@ -520,16 +539,25 @@ def test_the_knowledge_drain_leaves_a_healthy_item_alone(tmp_path, monkeypatch):
     reason, are not this surface's backlog — re-enqueueing them would spend the model the
     user just got back on work nothing asked for."""
     store = _knowledge_store(tmp_path, monkeypatch)
-    done = store.create_typed_item(item_type="note", title="fully enriched", content="body")
+    done = store.create_typed_item(
+        item_type="note", title="fully enriched", content="body"
+    )
     store.update_item(done, processing_status="done", touch=False)
-    unrelated = store.create_typed_item(item_type="note", title="broken reader", content="body")
+    unrelated = store.create_typed_item(
+        item_type="note", title="broken reader", content="body"
+    )
     store.update_item(
-        unrelated, processing_status="partial", processing_error="pdf_read: bad header", touch=False
+        unrelated,
+        processing_status="partial",
+        processing_error="pdf_read: bad header",
+        touch=False,
     )
     queue = _RecordingQueue()
 
     moved = asyncio.run(
-        degraded._knowledge_heuristic_drain(SimpleNamespace(knowledge_ingest_queue=lambda: queue))
+        degraded._knowledge_heuristic_drain(
+            SimpleNamespace(knowledge_ingest_queue=lambda: queue)
+        )
     )
 
     assert (moved, queue.enqueued) == (0, [])
@@ -543,27 +571,35 @@ def test_the_knowledge_drain_moves_nothing_without_a_live_queue(tmp_path, monkey
     stamped = _heuristic_item(store, "read without a model")
 
     assert asyncio.run(degraded._knowledge_heuristic_drain(None)) == 0
-    assert store.get_item(stamped)["processing_status"] == "partial", "nothing may be touched"
-    assert degraded._knowledge_heuristic_backlog() == 1, "and the backlog must still report it"
+    assert (
+        store.get_item(stamped)["processing_status"] == "partial"
+    ), "nothing may be touched"
+    assert (
+        degraded._knowledge_heuristic_backlog() == 1
+    ), "and the backlog must still report it"
 
 
-# ── synthesis_watchers: the append_evidence floor's recompile queue ──────────
-
-
-def test_the_synthesis_drain_queues_one_recompile_per_stale_synthesis(home, monkeypatch):
+def test_the_synthesis_drain_queues_one_recompile_per_stale_synthesis(
+    home, monkeypatch
+):
     """criterion #3, the full re-enrichment flow: the evidence landed with no model, the
     compiled section above it fell behind, and the recovery queues a PROPOSED recompile —
     never an in-place rewrite of a document the reader may already have acted on."""
-    from gideon.learning import proposals
+    from gideon.cognition.learning import proposals
 
     store = _knowledge_store(home, monkeypatch)
     synthesis = store.create_typed_item(
-        item_type="insight", title="Overview of alpha", content="compiled body", tags=["alpha"]
+        item_type="insight",
+        title="Overview of alpha",
+        content="compiled body",
+        tags=["alpha"],
     )
     store.create_typed_item(
         item_type="note", title="new evidence", content="appended later", tags=["alpha"]
     )
-    assert degraded._synthesis_stale_backlog() == 1, "precondition: the synthesis is stale"
+    assert (
+        degraded._synthesis_stale_backlog() == 1
+    ), "precondition: the synthesis is stale"
 
     queued = asyncio.run(degraded._synthesis_evidence_drain(None))
 
@@ -576,10 +612,12 @@ def test_the_synthesis_drain_queues_one_recompile_per_stale_synthesis(home, monk
 def test_the_synthesis_drain_ignores_a_fresh_synthesis(home, monkeypatch):
     """VACUITY. Material that predates a synthesis is not new material, and an observed
     item is never stale — so neither the backlog nor the drain may move on them."""
-    from gideon.learning import proposals
+    from gideon.cognition.learning import proposals
 
     store = _knowledge_store(home, monkeypatch)
-    store.create_typed_item(item_type="note", title="pre-existing", content="body", tags=["beta"])
+    store.create_typed_item(
+        item_type="note", title="pre-existing", content="body", tags=["beta"]
+    )
     store.create_typed_item(
         item_type="insight", title="Overview of beta", content="compiled", tags=["beta"]
     )

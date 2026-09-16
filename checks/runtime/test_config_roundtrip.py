@@ -13,7 +13,11 @@ from unittest.mock import patch
 
 import pytest
 
-from gideon.config.loader import AppConfig, ProjectionRuleConfig, SkillCatalogConfig
+from gideon.core.config.loader import (
+    AppConfig,
+    ProjectionRuleConfig,
+    SkillCatalogConfig,
+)
 
 
 @pytest.fixture()
@@ -21,7 +25,7 @@ def cfg_file(tmp_path):
     """Redirect config_path() to a temp file for isolation."""
     p = tmp_path / "config.json"
     p.write_text("{}", encoding="utf-8")
-    with patch("gideon.config.loader.config_path", return_value=p):
+    with patch("gideon.core.config.loader.config_path", return_value=p):
         yield p
 
 
@@ -75,7 +79,7 @@ def test_save_load_roundtrip_companion(cfg_file):
 
 def test_companion_fields_in_editable_allowlist():
     """CA-4: both companion fields are PATCH-editable (the write path of the round-trip)."""
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
     assert _EDITABLE_CONFIG.get("companion.discovery_enabled") == {"type": "bool"}
     assert _EDITABLE_CONFIG.get("companion.instance_name", {}).get("type") == "str"
@@ -112,7 +116,7 @@ def test_save_load_roundtrip_local_models(cfg_file):
 
 def test_local_models_fields_in_editable_allowlist():
     """LMMV-5/LMMV-8: every knob is PATCH-editable (the write path of the round-trip)."""
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
     assert _EDITABLE_CONFIG["local_models.pressure_warn_pct"] == {
         "type": "int",
@@ -142,13 +146,20 @@ def test_the_fit_readers_read_the_configured_values_not_their_fallbacks(cfg_file
     healthy while reporting the shipped default forever. Writing a value no fallback
     could produce is what separates "wired" from "silently defaulting".
     """
-    from gideon.local_models import fit
+    from gideon.integrations.local_models import fit
 
     assert fit.configured_reserve_gb() == 3.0
     assert fit.hide_unrunnable_default() is True
 
     cfg_file.write_text(
-        json.dumps({"local_models": {"memory_reserve_gb": 11.25, "hide_unrunnable_models": False}}),
+        json.dumps(
+            {
+                "local_models": {
+                    "memory_reserve_gb": 11.25,
+                    "hide_unrunnable_models": False,
+                }
+            }
+        ),
         encoding="utf-8",
     )
     assert fit.configured_reserve_gb() == 11.25
@@ -166,7 +177,7 @@ async def test_an_out_of_range_reserve_is_rejected_by_patch_not_clamped(cfg_file
     from aiohttp import web
     from aiohttp.test_utils import TestClient, TestServer
 
-    from gideon.dashboard.handlers import api_gideon_config_patch
+    from gideon.interfaces.dashboard.handlers import api_gideon_config_patch
 
     app = web.Application()
     app.router.add_patch("/api/config/gideon", api_gideon_config_patch)
@@ -179,7 +190,6 @@ async def test_an_out_of_range_reserve_is_rejected_by_patch_not_clamped(cfg_file
             )
             assert resp.status == 400
             assert "between 0.0 and 64.0" in json.dumps(await resp.json())
-        # Nothing was written: a rejected edit leaves the shipped default in place.
         assert AppConfig.load().local_models.memory_reserve_gb == 3.0
 
         resp = await client.patch(
@@ -193,19 +203,25 @@ async def test_an_out_of_range_reserve_is_rejected_by_patch_not_clamped(cfg_file
 def test_a_nonsense_reserve_in_config_json_is_clamped_to_the_same_window(cfg_file):
     """A hand-edited config.json still loads: the read path clamps what PATCH refuses."""
     cfg_file.write_text(
-        json.dumps({"local_models": {"memory_reserve_gb": -9, "hide_unrunnable_models": True}}),
+        json.dumps(
+            {"local_models": {"memory_reserve_gb": -9, "hide_unrunnable_models": True}}
+        ),
         encoding="utf-8",
     )
     assert AppConfig.load().local_models.memory_reserve_gb == 0.0
 
-    cfg_file.write_text(json.dumps({"local_models": {"memory_reserve_gb": 4096}}), encoding="utf-8")
+    cfg_file.write_text(
+        json.dumps({"local_models": {"memory_reserve_gb": 4096}}), encoding="utf-8"
+    )
     assert AppConfig.load().local_models.memory_reserve_gb == 64.0
 
 
 def test_a_nonsense_pressure_threshold_is_clamped_to_a_real_percentage(cfg_file):
     """A threshold of 0 would warn forever and 900 could never warn — both read as broken."""
     cfg_file.write_text(
-        json.dumps({"local_models": {"pressure_warn_pct": 900, "sidecar_restart_max": -4}}),
+        json.dumps(
+            {"local_models": {"pressure_warn_pct": 900, "sidecar_restart_max": -4}}
+        ),
         encoding="utf-8",
     )
     loaded = AppConfig.load()
@@ -213,19 +229,6 @@ def test_a_nonsense_pressure_threshold_is_clamped_to_a_real_percentage(cfg_file)
     assert loaded.local_models.sidecar_restart_max == 0
 
 
-# ---------------------------------------------------------------------------
-# Exhaustive leaf-field round-trip: save() → load() must preserve EVERY field.
-#
-# A field added to a config dataclass but omitted from AppConfig.load()'s
-# explicit mapping passes to_dict()/save() (asdict covers it) yet silently
-# reads its default after reload — the exact gap that hid
-# agent.spawn_min_memory_gb, dashboard.widget_density and the inbox retention
-# trio. This walks every leaf generically so any future omission fails here.
-# ---------------------------------------------------------------------------
-
-# Sections whose leaves are walked generically. hooks/agents/memory_stores are
-# dict-typed top-level fields with their own migration/seeding semantics in
-# load() — covered by dedicated tests elsewhere, not leaf-walkable.
 _SECTIONS = [
     "agent",
     "sandbox",
@@ -250,10 +253,6 @@ _SECTIONS = [
     "updates",
 ]
 
-# Values for fields the generic flip/append rules can't produce: enum members,
-# __post_init__ clamp ranges, load()-side migrations ("acp" would be migrated
-# to native — use the open acp:<cli> form), sanitizers (bot_name), and
-# structured fields.
 _SPECIAL = {
     ("agent", "approval_mode"): "trust_reads",
     ("agent", "sandbox"): "off",
@@ -262,8 +261,6 @@ _SPECIAL = {
     ("agent", "bot_name"): "TestBot",
     ("agent", "soft_stop_budget_secs"): 12.5,
     ("dashboard", "widget_density"): "less",
-    # stream_reveal is enum-constrained (smooth|immediate) — a generated "smooth-x"
-    # would fail load()'s validation and fall back to the default.
     ("dashboard", "stream_reveal"): "immediate",
     ("dashboard", "terminal"): {"enabled": False, "persist": True},
     ("dashboard", "dashboard_layout"): {"widgets": [], "v": 1},
@@ -274,22 +271,10 @@ _SPECIAL = {
     # round-trips; `loops` deliberately is NOT used here, since a fixture should not model
     # "the judge is back on the worker's binding" as the normal case.
     ("loops", "judge_use_case"): "code_tools",
-    # memory.push_min_confidence is a probability clamped to [0,1] by load() — the
-    # generic rule's out-of-range value would (correctly) come back clamped.
     ("memory", "push_min_confidence"): 0.55,
-    # memory.vault_mode is enum-constrained (off|mirror|two_way) — a generated "off-x"
-    # would (correctly) be refused by load() and fall back through the legacy
-    # `vault_enabled` read to `off`, exactly as `stream_reveal` above. `two_way` is the
-    # real non-default that proves the field round-trips.
     ("memory", "vault_mode"): "two_way",
     ("skills", "auto_similarity_threshold"): 0.5,
-    # surface_mode_default is enum-constrained (off|passive|suggest) — a generated "off-x" would
-    # (correctly) be refused by load() and fall back to `off`, exactly as `stream_reveal` above.
-    # Declaring a real member proves the field ROUND-TRIPS without asserting that the coercion is a
-    # bug.
     ("workflows", "surface_mode_default"): "suggest",
-    # workflows.match_threshold is a cosine floor clamped to [0,1] by load() — the generic rule's
-    # 0.62 + 1.5 = 2.12 would (correctly) come back clamped, so supply an in-range non-default.
     ("workflows", "match_threshold"): 0.75,
     # workspace_default_mode is enum-constrained (scratch|worktree|in_place|container) — a
     # generated "scratch-x" would (correctly) fall back to `scratch`. `worktree` is the real
@@ -299,20 +284,13 @@ _SPECIAL = {
     ("tools", "projection_rules"): [
         ProjectionRuleConfig(name="t", match_regex="^x", strategy="log")
     ],
-    # packs.skill_catalogs is a list[SkillCatalogConfig] (AGENT-PACKS §6). load() keeps only
-    # entries with a non-empty url, so supply a real one — the generic list rule would append
-    # a bare string that load() filters out.
     ("packs", "skill_catalogs"): [
-        SkillCatalogConfig(name="taps", url="https://example.com/index.json", kind="index")
+        SkillCatalogConfig(
+            name="taps", url="https://example.com/index.json", kind="index"
+        )
     ],
-    # tools.group_defaults is a dict[str, list[str]] (surface → active tool groups);
-    # load() keeps only str→list[str] entries, so supply that shape.
     ("tools", "group_defaults"): {"background": ["core", "memory"]},
-    # guardrails.scan_mode is an enum-constrained str — a generated "redact-x"
-    # would fail load()'s validation and fall back to the default.
     ("guardrails", "scan_mode"): "block",
-    # resilience.mid_turn_policy is enum-constrained — a generated value would fail
-    # load()'s validation and fall back to the default.
     ("resilience", "mid_turn_policy"): "cancel_and_replace",
     # learning.identity_report_cadence is enum-constrained (LV-4: monthly|weekly|off) — the
     # generated "monthly-x" is refused by load() and falls back to the default, which this
@@ -320,20 +298,10 @@ _SPECIAL = {
     # `off` is deliberately not used here, since a fixture should not model "the periodic report
     # is switched off" as the normal case.
     ("learning", "identity_report_cadence"): "weekly",
-    # security.autonomy_denylist is a list[dict] — the generic list rule would
-    # append a bare string, which load() filters out (isinstance dict). Supply a
-    # real rule dict so the round-trip preserves it.
     ("security", "autonomy_denylist"): [
         {"paths": ["~/.ssh/**"], "actions": ["credential-read"], "verdict": "block"}
     ],
-    # updates.channel is enum-constrained (RUM-1: stable|beta|nightly) — a generated
-    # "stable-x" is coerced back to `stable` by load()'s _safe_choice and would read as a
-    # dropped field. `beta` is the real non-default that proves the field round-trips;
-    # `nightly` is deliberately not used here, since a fixture should not model the
-    # git-only track-main channel as the normal case.
     ("updates", "channel"): "beta",
-    # updates.auto is enum-constrained (RUM-1: off|staged) — a generated "off-x" is coerced
-    # back to `off`. `staged` is the real non-default that proves the field round-trips.
     ("updates", "auto"): "staged",
 }
 
@@ -390,7 +358,6 @@ def test_every_leaf_field_survives_save_load(cfg_file):
     expected: dict[str, dict] = {}
     for section in _SECTIONS:
         expected[section] = _mutate_leaves(section, getattr(cfg, section))
-    # Scalar top-level fields (dict-typed ones excluded — see _SECTIONS note).
     cfg.auto_update = False
     cfg.timezone = "Europe/Berlin"
     cfg.snapshot_dir = "test-value"
@@ -423,7 +390,7 @@ def test_evals_editable_allowlist_excludes_the_capture_flag():
     """EVALUATION-SUBSTRATE §10 — the runtime-editable evals subset is in the PATCH
     allowlist, but the privacy-sensitive input-capture flag is deliberately NOT
     (mirroring external_access.mcp.allow_remote's exclusion)."""
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
     assert "evals.enabled" in _EDITABLE_CONFIG
     assert "evals.study_default_k" in _EDITABLE_CONFIG
@@ -440,7 +407,7 @@ def test_load_fallbacks_match_dataclass_defaults(cfg_file):
     dataclass but 5 in load()'s .get() fallback): loading {} must equal
     constructing AppConfig() for every leaf.
     """
-    loaded = AppConfig.load()  # cfg_file fixture starts as {}
+    loaded = AppConfig.load()
     pristine = AppConfig()
     diffs: list[str] = []
     for section in _SECTIONS:
@@ -452,17 +419,9 @@ def test_load_fallbacks_match_dataclass_defaults(cfg_file):
                     f"{section}.{f.name}: dataclass default {want!r} "
                     f"but empty-config load gives {got!r}"
                 )
-    assert not diffs, "load() fallback drift vs dataclass defaults:\n" + "\n".join(diffs)
-
-
-# ---------------------------------------------------------------------------
-# RELEASE-UPDATE-MECHANISM RUM-1 — the `updates` block + legacy backfill.
-#
-# The generic leaf-walk above already proves all six fields survive save/load and
-# `test_every_leaf_field_survives_save_load` covers the round-trip; these assert the
-# two points that walk cannot see — the PATCH write path and the load-time legacy
-# mapping — each on a known-true AND a known-false case so none can pass vacuously.
-# ---------------------------------------------------------------------------
+    assert not diffs, "load() fallback drift vs dataclass defaults:\n" + "\n".join(
+        diffs
+    )
 
 
 def test_updates_defaults_are_release_tracking_and_notify_only():
@@ -478,15 +437,22 @@ def test_updates_defaults_are_release_tracking_and_notify_only():
 
 def test_updates_fields_in_editable_allowlist():
     """RUM-1: every field is PATCH-editable (the write path of the round-trip)."""
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
     assert _EDITABLE_CONFIG["updates.channel"] == {
         "type": "enum",
         "values": ["stable", "beta", "nightly"],
     }
-    assert _EDITABLE_CONFIG["updates.auto"] == {"type": "enum", "values": ["off", "staged"]}
+    assert _EDITABLE_CONFIG["updates.auto"] == {
+        "type": "enum",
+        "values": ["off", "staged"],
+    }
     assert _EDITABLE_CONFIG["updates.check_enabled"] == {"type": "bool"}
-    assert _EDITABLE_CONFIG["updates.check_interval_hours"] == {"type": "int", "min": 1, "max": 168}
+    assert _EDITABLE_CONFIG["updates.check_interval_hours"] == {
+        "type": "int",
+        "min": 1,
+        "max": 168,
+    }
     assert _EDITABLE_CONFIG["updates.pin"]["type"] == "str"
     assert _EDITABLE_CONFIG["updates.last_version"]["type"] == "str"
 
@@ -510,13 +476,17 @@ def test_legacy_auto_update_false_maps_to_off(cfg_file):
 def test_legacy_update_dev_mode_true_maps_to_nightly(cfg_file):
     """RUM-1 backfill: a home with legacy `dashboard.update_dev_mode=true` loads to
     `channel="nightly"` — the git-only track-main opt-in becomes the nightly channel."""
-    cfg_file.write_text(json.dumps({"dashboard": {"update_dev_mode": True}}), encoding="utf-8")
+    cfg_file.write_text(
+        json.dumps({"dashboard": {"update_dev_mode": True}}), encoding="utf-8"
+    )
     assert AppConfig.load().updates.channel == "nightly"
 
 
 def test_legacy_update_dev_mode_false_stays_stable(cfg_file):
     """RUM-1 backfill (known-false case): dev-mode off leaves the default stable channel."""
-    cfg_file.write_text(json.dumps({"dashboard": {"update_dev_mode": False}}), encoding="utf-8")
+    cfg_file.write_text(
+        json.dumps({"dashboard": {"update_dev_mode": False}}), encoding="utf-8"
+    )
     assert AppConfig.load().updates.channel == "stable"
 
 
@@ -547,9 +517,11 @@ def test_every_apps_field_is_patchable_or_has_a_write_path():
     field with no `_EDITABLE_CONFIG` entry leaves this file fully green while the Settings
     toggle 400s. `apps.*` is user-facing config with no dedicated PUT, so every field in the
     section must be in the allowlist."""
-    from gideon.config.loader import AppsConfig
-    from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+    from gideon.core.config.loader import AppsConfig
+    from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
-    missing = [f.name for f in fields(AppsConfig) if f"apps.{f.name}" not in _EDITABLE_CONFIG]
+    missing = [
+        f.name for f in fields(AppsConfig) if f"apps.{f.name}" not in _EDITABLE_CONFIG
+    ]
     assert not missing, f"apps config fields with no PATCH write path: {missing}"
     assert _EDITABLE_CONFIG["apps.registry_source_enabled"]["type"] == "bool"

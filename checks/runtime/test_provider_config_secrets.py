@@ -1,7 +1,7 @@
 """``/api/providers/{name}/config`` must hold the same write-only secret policy as
 ``/api/apps/{name}/config`` — one file, one ``x-meta.sensitive`` flag, one policy.
 
-It did not. ``tests/test_app_api.py::test_sensitive_config_field_is_write_only`` pinned the
+It did not. ``checks/runtime/test_app_api.py::test_sensitive_config_field_is_write_only`` pinned the
 rule on the Apps route (#43) while the Providers route — the one the Settings → Providers
 schema form actually calls — returned the stored secret verbatim on GET and echoed it back
 on PATCH. For the bundled ``slack-channel`` app that meant its Bot Token and App Token in
@@ -26,15 +26,21 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.apps.secret_fields import SECRET_MASK
+from gideon.extensions.apps.secret_fields import SECRET_MASK
 
 _SECRET = "xoxb-NOT-A-REAL-TOKEN-just-a-fixture"
 
 _SCHEMA = {
     "type": "object",
     "properties": {
-        "bot_token": {"type": "string", "x-meta": {"label": "Bot Token", "sensitive": True}},
-        "app_token": {"type": "string", "x-meta": {"label": "App Token", "sensitive": True}},
+        "bot_token": {
+            "type": "string",
+            "x-meta": {"label": "Bot Token", "sensitive": True},
+        },
+        "app_token": {
+            "type": "string",
+            "x-meta": {"label": "App Token", "sensitive": True},
+        },
         "command": {"type": "string"},
     },
 }
@@ -50,7 +56,7 @@ class _FakeProviderConfig:
 
 class _FakeExt:
     name = "fake-channel"
-    enabled = False  # keep PATCH off the registry re-cycle path
+    enabled = False
     error = ""
     provider_config = _FakeProviderConfig()
 
@@ -62,11 +68,11 @@ class _FakeRegistry:
 
 @asynccontextmanager
 async def _client(tmp_path: Path):
-    from gideon.apps import manager
-    from gideon.providers import routes as provider_routes
+    from gideon.extensions.apps import manager
+    from gideon.extensions.providers import routes as provider_routes
 
     with (
-        patch("gideon.config.loader.config_dir", return_value=tmp_path),
+        patch("gideon.core.config.loader.config_dir", return_value=tmp_path),
         patch.object(manager, "config_dir", return_value=tmp_path),
         patch.object(provider_routes, "get_provider_registry", lambda: _FakeRegistry()),
     ):
@@ -87,7 +93,11 @@ async def test_get_config_masks_sensitive_fields(tmp_path):
     async with _client(tmp_path) as client:
         r = await client.patch(
             "/api/providers/fake-channel/config",
-            json={"bot_token": _SECRET, "app_token": "xapp-1-fixture", "command": "gideon"},
+            json={
+                "bot_token": _SECRET,
+                "app_token": "xapp-1-fixture",
+                "command": "gideon",
+            },
         )
         assert r.status == 200, await r.text()
 
@@ -96,9 +106,10 @@ async def test_get_config_masks_sensitive_fields(tmp_path):
         body = json.loads(raw)
         assert body["config"]["bot_token"] == SECRET_MASK
         assert body["config"]["app_token"] == SECRET_MASK
-        assert body["config"]["command"] == "gideon", "a non-sensitive field must pass through"
+        assert (
+            body["config"]["command"] == "gideon"
+        ), "a non-sensitive field must pass through"
         assert body["_secret_set"] == ["app_token", "bot_token"]
-        # …and the real value is still on disk, unharmed.
         assert _stored(tmp_path)["bot_token"] == _SECRET
 
 
@@ -106,7 +117,9 @@ async def test_get_config_masks_sensitive_fields(tmp_path):
 async def test_patch_response_does_not_echo_the_saved_secret(tmp_path):
     async with _client(tmp_path) as client:
         raw = await (
-            await client.patch("/api/providers/fake-channel/config", json={"bot_token": _SECRET})
+            await client.patch(
+                "/api/providers/fake-channel/config", json={"bot_token": _SECRET}
+            )
         ).text()
         assert _SECRET not in raw, "PATCH echoed the token it had just been given"
         assert json.loads(raw)["config"]["bot_token"] == SECRET_MASK
@@ -120,7 +133,9 @@ async def test_patching_the_mask_back_preserves_the_stored_secret(tmp_path):
     saved an unrelated field on the same form — a worse bug than the one being fixed.
     """
     async with _client(tmp_path) as client:
-        await client.patch("/api/providers/fake-channel/config", json={"bot_token": _SECRET})
+        await client.patch(
+            "/api/providers/fake-channel/config", json={"bot_token": _SECRET}
+        )
         r = await client.patch(
             "/api/providers/fake-channel/config",
             json={"bot_token": SECRET_MASK, "command": "renamed"},
@@ -134,7 +149,9 @@ async def test_patching_the_mask_back_preserves_the_stored_secret(tmp_path):
 async def test_an_empty_sensitive_field_over_a_stored_value_preserves_it(tmp_path):
     """The second shape a round-tripped masked form produces (field cleared by the widget)."""
     async with _client(tmp_path) as client:
-        await client.patch("/api/providers/fake-channel/config", json={"bot_token": _SECRET})
+        await client.patch(
+            "/api/providers/fake-channel/config", json={"bot_token": _SECRET}
+        )
         await client.patch("/api/providers/fake-channel/config", json={"bot_token": ""})
         assert _stored(tmp_path)["bot_token"] == _SECRET
 
@@ -143,9 +160,12 @@ async def test_an_empty_sensitive_field_over_a_stored_value_preserves_it(tmp_pat
 async def test_a_real_new_value_still_overwrites(tmp_path):
     """Masking must not make a token unchangeable."""
     async with _client(tmp_path) as client:
-        await client.patch("/api/providers/fake-channel/config", json={"bot_token": _SECRET})
         await client.patch(
-            "/api/providers/fake-channel/config", json={"bot_token": "xoxb-ROTATED-fixture"}
+            "/api/providers/fake-channel/config", json={"bot_token": _SECRET}
+        )
+        await client.patch(
+            "/api/providers/fake-channel/config",
+            json={"bot_token": "xoxb-ROTATED-fixture"},
         )
         assert _stored(tmp_path)["bot_token"] == "xoxb-ROTATED-fixture"
 
@@ -160,7 +180,7 @@ def test_the_masking_policy_has_exactly_one_implementation():
     ``_SECRET_MASK`` naming an unresolved-secret placeholder for workflow previews; it is a
     different concept with a different value, which is why the value is the test.)
     """
-    src = Path(__file__).resolve().parents[1] / "src" / "gideon"
+    src = Path(__file__).resolve().parents[2] / "runtime" / "gideon"
     carriers = sorted(
         str(p.relative_to(src))
         for p in src.rglob("*.py")
@@ -175,7 +195,7 @@ def test_the_masking_policy_has_exactly_one_implementation():
 
 @pytest.mark.parametrize(
     "module",
-    ["gideon.providers.routes", "gideon.dashboard.handlers.apps"],
+    ["gideon.extensions.providers.routes", "gideon.interfaces.dashboard.handlers.apps"],
 )
 def test_both_config_routes_use_the_shared_policy(module):
     """Derived companion to the rail above: both handlers must reference the shared helpers.

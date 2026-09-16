@@ -6,11 +6,11 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.loop import files as loop_files
-from gideon.loop import supervisor
-from gideon.loop.gates import run_verify_command
-from gideon.loop.loop import Loop as _Loop
-from gideon.workflows.supervisor_policy import policy_for_kind
+from gideon.automation.loop import files as loop_files
+from gideon.automation.loop import supervisor
+from gideon.automation.loop.gates import run_verify_command
+from gideon.automation.loop.loop import Loop as _Loop
+from gideon.automation.workflows.supervisor_policy import policy_for_kind
 
 
 async def _signal(loop: "_Loop", findings: list[dict]) -> bool | None:
@@ -35,8 +35,6 @@ async def test_real_nonzero_is_fail():
 
 @pytest.mark.asyncio
 async def test_missing_binary_is_none_not_fail():
-    # exit 127 = tool not installed → can't tell, NOT a real failure (a verifiable
-    # gate must not silently spin forever reading this as "didn't pass yet").
     assert await run_verify_command("this-binary-does-not-exist-gideon", None) is None
 
 
@@ -48,21 +46,16 @@ async def test_empty_command_is_none():
 
 @pytest.mark.asyncio
 async def test_destructive_command_is_refused():
-    # The safety screen refuses a destructive command → None (never "passes").
     assert await run_verify_command("rm -rf /", None) is None
 
 
 def test_verdict_rendered_distinguishes_real_verdict_from_cant_judge():
-    # verdict_rendered tells a genuine PASS/FAIL apart from an empty/errored judge
-    # output (provider unavailable / stream timeout → judge_verdict returns "").
-    # A flaky judge must NOT be read as FAIL when deterministic gates already passed.
-    from gideon.loop.gates import verdict_is_pass, verdict_rendered
+    from gideon.automation.loop.gates import verdict_is_pass, verdict_rendered
 
     assert verdict_rendered("PASS") and verdict_is_pass("PASS")
     assert verdict_rendered("FAIL: criterion 2 unmet") and not verdict_is_pass(
         "FAIL: criterion 2 unmet"
     )
-    # empty (judge errored/timed out) or pure prose → NO verdict rendered
     assert not verdict_rendered("")
     assert not verdict_rendered(None)
     assert not verdict_rendered("the model could not be reached")
@@ -75,17 +68,17 @@ class TestOpenEndedJudgePath:
 
     @pytest.fixture(autouse=True)
     def _tmp(self, monkeypatch, tmp_path):
-        monkeypatch.setattr("gideon.loop.files.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.automation.loop.files.config_dir", lambda: tmp_path)
 
     def _loop(self, **cfg):
-        from gideon.loop import store
-        from gideon.loop.loop import Loop
+        from gideon.automation.loop import store
+        from gideon.automation.loop.loop import Loop
 
-        # judge_calibrated=True = the steady state after the P4 canary has proven the judge
-        # once at loop start; these tests exercise the per-cycle verdict path, not the canary,
-        # so they represent an already-calibrated loop (the canary path has its own tests in
-        # test_loop_instrument.py).
-        base = {"goal_type": "open_ended", "granularity": "balanced", "judge_calibrated": True}
+        base = {
+            "goal_type": "open_ended",
+            "granularity": "balanced",
+            "judge_calibrated": True,
+        }
         base.update(cfg)
         return store.create(
             Loop(
@@ -102,13 +95,16 @@ class TestOpenEndedJudgePath:
     async def test_judge_done_completes_and_persists_verdict(self, monkeypatch):
         from unittest.mock import AsyncMock
 
-        from gideon.loop import kinds, store
-        from gideon.workflows.judge_contract import JudgeVerdict, verdict_for_cycle
+        from gideon.automation.loop import kinds, store
+        from gideon.automation.workflows.judge_contract import (
+            JudgeVerdict,
+            verdict_for_cycle,
+        )
 
         kinds.ensure_loaded()
         loop = self._loop()
         monkeypatch.setattr(
-            "gideon.loop.judge.assess_cycle",
+            "gideon.automation.loop.judge.assess_cycle",
             AsyncMock(
                 return_value=JudgeVerdict(
                     verdict=verdict_for_cycle(True, False),
@@ -126,17 +122,18 @@ class TestOpenEndedJudgePath:
     async def test_judge_failure_defers_with_none(self, monkeypatch):
         from unittest.mock import AsyncMock
 
-        from gideon.loop import kinds
+        from gideon.automation.loop import kinds
 
         kinds.ensure_loaded()
         loop = self._loop()
-        monkeypatch.setattr("gideon.loop.judge.assess_cycle", AsyncMock(return_value=None))
-        # None (defer) — NOT a clean False — so the watchdog can flag degradation.
+        monkeypatch.setattr(
+            "gideon.automation.loop.judge.assess_cycle", AsyncMock(return_value=None)
+        )
         assert await _signal(loop, [{"cycle": 1}]) is None
 
     @pytest.mark.asyncio
     async def test_monitor_never_completes(self):
-        from gideon.loop import kinds
+        from gideon.automation.loop import kinds
 
         kinds.ensure_loaded()
         loop = self._loop(goal_type="monitor")
@@ -145,8 +142,8 @@ class TestOpenEndedJudgePath:
 
 @pytest.mark.asyncio
 async def test_verifiable_goal_kind_runs_the_command():
-    from gideon.loop import kinds
-    from gideon.loop.loop import Loop
+    from gideon.automation.loop import kinds
+    from gideon.automation.loop.loop import Loop
 
     kinds.ensure_loaded()
     ok = Loop(
@@ -165,9 +162,12 @@ async def test_verifiable_goal_kind_runs_the_command():
         kind_config={"goal_type": "verifiable", "verify_command": "false"},
     )
     assert await _signal(bad, []) is False
-    # open_ended defers (judge not yet wired here)
     oe = Loop(
-        id="abcd1234", name="g", kind="goal", task="t", kind_config={"goal_type": "open_ended"}
+        id="abcd1234",
+        name="g",
+        kind="goal",
+        task="t",
+        kind_config={"goal_type": "open_ended"},
     )
     assert await _signal(oe, []) is None
 
@@ -179,10 +179,11 @@ class TestJudgeIndependence:
 
     @pytest.mark.asyncio
     async def test_observe_ground_truth_runs_command_and_reads_file(self, tmp_path):
-        from gideon.loop.judge import _observe_ground_truth
+        from gideon.automation.loop.judge import _observe_ground_truth
 
-        (tmp_path / "REPORT.md").write_text("# Findings\nUNIQUE_OBSERVED_TOKEN in the report.\n")
-        # command runs (true → PASSED), and the named file is read
+        (tmp_path / "REPORT.md").write_text(
+            "# Findings\nUNIQUE_OBSERVED_TOKEN in the report.\n"
+        )
         block = await _observe_ground_truth("true", str(tmp_path), ["REPORT.md"])
         assert "supervisor observed DIRECTLY" in block
         assert "PASSED (exit 0)" in block
@@ -190,7 +191,7 @@ class TestJudgeIndependence:
 
     @pytest.mark.asyncio
     async def test_observe_ground_truth_failed_command(self, tmp_path):
-        from gideon.loop.judge import _observe_ground_truth
+        from gideon.automation.loop.judge import _observe_ground_truth
 
         block = await _observe_ground_truth("false", str(tmp_path), [])
         assert "FAILED (non-zero exit)" in block
@@ -203,23 +204,26 @@ class TestJudgeIndependence:
         debug, so an unresolvable judge provider silently no-op'd judge independence."""
         import logging
 
-        from gideon.loop import judge as judge_mod
+        from gideon.automation.loop import judge as judge_mod
 
         def _boom_factory(_key):
             raise RuntimeError("no reasoning provider configured")
 
-        with caplog.at_level(logging.WARNING, logger="gideon.loop.judge"):
+        with caplog.at_level(logging.WARNING, logger="gideon.automation.loop.judge"):
             verdict = await judge_mod.assess_cycle(
-                "goal", "dod", {"cycle": 1, "summary": "x"}, [], provider_factory=_boom_factory
+                "goal",
+                "dod",
+                {"cycle": 1, "summary": "x"},
+                [],
+                provider_factory=_boom_factory,
             )
-        assert verdict is None  # defer — never a false complete
+        assert verdict is None
         assert any("degraded" in r.message for r in caplog.records)
 
     @pytest.mark.asyncio
     async def test_observe_ground_truth_empty_when_no_anchor(self, tmp_path):
-        from gideon.loop.judge import _observe_ground_truth
+        from gideon.automation.loop.judge import _observe_ground_truth
 
-        # no command + no readable deliverable → nothing observed (stays transcript-only)
         assert await _observe_ground_truth("", str(tmp_path), ["missing.md"]) == ""
 
     @pytest.mark.asyncio
@@ -227,24 +231,24 @@ class TestJudgeIndependence:
         """V6 fix: the deliverable may live in the loop dir (unbound loop), not the workspace.
         _observe_ground_truth must search fallback_dirs too, else the skeptic wrongly reports
         'no proof the file exists' and overturns a legitimate completion."""
-        from gideon.loop.judge import _observe_ground_truth
+        from gideon.automation.loop.judge import _observe_ground_truth
 
         ws = tmp_path / "ws"
-        ws.mkdir()  # workspace: exists but no deliverable
+        ws.mkdir()
         loopdir = tmp_path / "loop"
         loopdir.mkdir()
         (loopdir / "REPORT.md").write_text("real deliverable body", encoding="utf-8")
-        # workspace-only → not found (the pre-fix behavior)
         assert await _observe_ground_truth("", str(ws), ["REPORT.md"]) == ""
-        # with the loop dir as a fallback → found
         block = await _observe_ground_truth("", str(ws), ["REPORT.md"], [str(loopdir)])
         assert "real deliverable body" in block
 
     @pytest.mark.asyncio
-    async def test_assess_cycle_injects_ground_truth_into_prompt(self, tmp_path, monkeypatch):
+    async def test_assess_cycle_injects_ground_truth_into_prompt(
+        self, tmp_path, monkeypatch
+    ):
         """assess_cycle with a verify_command + deliverable feeds the observed ground truth
         into the judge prompt — captured via a fake provider."""
-        from gideon.loop import judge as judge_mod
+        from gideon.automation.loop import judge as judge_mod
 
         (tmp_path / "OUT.md").write_text("PROOF_MARKER_C ok\n")
 
@@ -262,7 +266,10 @@ class TestJudgeIndependence:
 
             async def stream(self, prompt):
                 seen["prompt"] = prompt
-                from gideon.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK
+                from gideon.integrations.llm.base import (
+                    EVENT_COMPLETE,
+                    EVENT_TEXT_CHUNK,
+                )
 
                 class _E:
                     def __init__(self, kind, text=""):
@@ -286,7 +293,7 @@ class TestJudgeIndependence:
             async def shutdown(self):
                 await self._provider.shutdown()
 
-        monkeypatch.setattr("gideon.eval.judge.LLMJudge", _FakeJudge)
+        monkeypatch.setattr("gideon.assurance.eval.judge.LLMJudge", _FakeJudge)
         verdict = await judge_mod.assess_cycle(
             "build a thing",
             "done when OUT.md exists",
@@ -297,7 +304,6 @@ class TestJudgeIndependence:
             deliverables=["OUT.md"],
         )
         assert verdict is not None and verdict.done is False
-        # the judge prompt carried the supervisor-observed ground truth, not just the summary
         assert "PROOF_MARKER_C" in seen["prompt"]
         assert "GROUND TRUTH the supervisor observed" in seen["prompt"]
         assert "PASSED (exit 0)" in seen["prompt"]
@@ -308,11 +314,14 @@ class TestJudgeIndependence:
         kind_config into assess_cycle (so the judge can observe ground truth)."""
         from unittest.mock import AsyncMock
 
-        from gideon.loop import kinds, store
-        from gideon.loop.loop import Loop
-        from gideon.workflows.judge_contract import JudgeVerdict, verdict_for_cycle
+        from gideon.automation.loop import kinds, store
+        from gideon.automation.loop.loop import Loop
+        from gideon.automation.workflows.judge_contract import (
+            JudgeVerdict,
+            verdict_for_cycle,
+        )
 
-        monkeypatch.setattr("gideon.loop.files.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.automation.loop.files.config_dir", lambda: tmp_path)
         kinds.ensure_loaded()
         loop = store.create(
             Loop(
@@ -331,9 +340,11 @@ class TestJudgeIndependence:
             )
         )
         spy = AsyncMock(
-            return_value=JudgeVerdict(verdict=verdict_for_cycle(True, False), done_reason="ok")
+            return_value=JudgeVerdict(
+                verdict=verdict_for_cycle(True, False), done_reason="ok"
+            )
         )
-        monkeypatch.setattr("gideon.loop.judge.assess_cycle", spy)
+        monkeypatch.setattr("gideon.automation.loop.judge.assess_cycle", spy)
         await _signal(loop, [{"cycle": 1, "summary": "x"}])
         _, kwargs = spy.call_args
         assert kwargs["verify_command"] == "true"
@@ -341,21 +352,28 @@ class TestJudgeIndependence:
         assert kwargs["deliverables"] == ["OUT.md"]
 
     @pytest.mark.asyncio
-    async def test_open_ended_falls_back_to_project_context_dir(self, monkeypatch, tmp_path):
+    async def test_open_ended_falls_back_to_project_context_dir(
+        self, monkeypatch, tmp_path
+    ):
         """When the goal loop has NO workspace_dir (the common open-ended case), the judge
         must still get the effective dir — the project's context dir — so it can find the
         deliverable. Regression for live goal 0fef190e (workspace_dir='' + a deliverable →
         the ground-truth read silently no-op'd)."""
         from unittest.mock import AsyncMock
 
-        from gideon.loop import kinds, store
-        from gideon.loop.loop import Loop
-        from gideon.workflows.judge_contract import JudgeVerdict, verdict_for_cycle
+        from gideon.automation.loop import kinds, store
+        from gideon.automation.loop.loop import Loop
+        from gideon.automation.workflows.judge_contract import (
+            JudgeVerdict,
+            verdict_for_cycle,
+        )
 
-        monkeypatch.setattr("gideon.loop.files.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.automation.loop.files.config_dir", lambda: tmp_path)
         ctx = tmp_path / "ctx"
         ctx.mkdir()
-        monkeypatch.setattr("gideon.projects.context_dir", lambda pid: str(ctx))
+        monkeypatch.setattr(
+            "gideon.cognition.projects.context_dir", lambda pid: str(ctx)
+        )
         kinds.ensure_loaded()
         loop = store.create(
             Loop(
@@ -374,12 +392,13 @@ class TestJudgeIndependence:
             )
         )
         spy = AsyncMock(
-            return_value=JudgeVerdict(verdict=verdict_for_cycle(False, False), done_reason="")
+            return_value=JudgeVerdict(
+                verdict=verdict_for_cycle(False, False), done_reason=""
+            )
         )
-        monkeypatch.setattr("gideon.loop.judge.assess_cycle", spy)
+        monkeypatch.setattr("gideon.automation.loop.judge.assess_cycle", spy)
         await _signal(loop, [{"cycle": 1, "summary": "x"}])
         _, kwargs = spy.call_args
-        # the judge got the project context dir, NOT None (which would skip the read)
         assert kwargs["workspace"] == str(ctx)
 
     def test_effective_dir_falls_back_to_workspace_root(self, monkeypatch, tmp_path):
@@ -387,12 +406,14 @@ class TestJudgeIndependence:
         the default session workspace_root — where such a loop's worker actually writes
         (observed live: goal 0fef190e wrote its deliverable to the workspace root, but
         effective_dir returned '' until this fallback was added → judge saw nothing)."""
-        from gideon.loop.loop import Loop, effective_dir
+        from gideon.automation.loop.loop import Loop, effective_dir
 
         root = tmp_path / "wsroot"
         root.mkdir()
-        monkeypatch.setattr("gideon.config.loader.workspace_root", lambda: root)
-        loop = Loop(id="z", name="g", kind="goal", task="t", workspace_dir="", project_id="")
+        monkeypatch.setattr("gideon.core.config.loader.workspace_root", lambda: root)
+        loop = Loop(
+            id="z", name="g", kind="goal", task="t", workspace_dir="", project_id=""
+        )
         assert effective_dir(loop) == str(root)
 
     def test_effective_dir_greenfield_code_uses_loop_dir(self, monkeypatch, tmp_path):
@@ -402,25 +423,33 @@ class TestJudgeIndependence:
         supervisor's ground-truth gate must resolve to that same dir, or `_resolve_deliverable`
         never finds the deliverable → "stage held" forever on genuinely-complete work
         (observed live: greenfield loop 07d5a0d0, 15/15 tests green, stage held)."""
-        from gideon.loop.loop import Loop, effective_dir
+        from gideon.automation.loop.loop import Loop, effective_dir
 
         root = tmp_path / "wsroot"
         root.mkdir()
         loop_dir_path = tmp_path / "loopdir"
         loop_dir_path.mkdir()
-        monkeypatch.setattr("gideon.config.loader.workspace_root", lambda: root)
-        monkeypatch.setattr("gideon.loop.files.loop_dir", lambda lid: loop_dir_path)
-        code = Loop(id="c", name="g", kind="code", task="t", workspace_dir="", project_id="")
+        monkeypatch.setattr("gideon.core.config.loader.workspace_root", lambda: root)
+        monkeypatch.setattr(
+            "gideon.automation.loop.files.loop_dir", lambda lid: loop_dir_path
+        )
+        code = Loop(
+            id="c", name="g", kind="code", task="t", workspace_dir="", project_id=""
+        )
         assert effective_dir(code) == str(loop_dir_path)
-        # A goal loop with the same empty binding must NOT be redirected to its loop dir —
-        # it keeps only engine files there and writes its deliverable to the workspace root.
-        goal = Loop(id="c", name="g", kind="goal", task="t", workspace_dir="", project_id="")
+        goal = Loop(
+            id="c", name="g", kind="goal", task="t", workspace_dir="", project_id=""
+        )
         assert effective_dir(goal) == str(root)
-        # A code loop WITH a bound workspace still wins on tier 1 (the bound codebase).
         bound = tmp_path / "codebase"
         bound.mkdir()
         brown = Loop(
-            id="c", name="g", kind="code", task="t", workspace_dir=str(bound), project_id=""
+            id="c",
+            name="g",
+            kind="code",
+            task="t",
+            workspace_dir=str(bound),
+            project_id="",
         )
         assert effective_dir(brown) == str(bound)
 
@@ -431,11 +460,16 @@ class TestLoopVerdictSpeaksTheContract:
     """
 
     @pytest.mark.asyncio
-    async def test_evidence_refs_are_derived_from_what_was_actually_observed(self, tmp_path):
+    async def test_evidence_refs_are_derived_from_what_was_actually_observed(
+        self, tmp_path
+    ):
         """Derived from the observation BLOCK, never rebuilt from `verify_command`/`deliverables`
         — a ref built from the inputs would cite a command that never ran or a file that was
         never readable, and a proof that can be wrong is worse than no proof."""
-        from gideon.loop.judge import _observe_ground_truth, evidence_refs_from_observation
+        from gideon.automation.loop.judge import (
+            _observe_ground_truth,
+            evidence_refs_from_observation,
+        )
 
         (tmp_path / "REPORT.md").write_text("body", encoding="utf-8")
         block = await _observe_ground_truth("true", str(tmp_path), ["REPORT.md"])
@@ -447,7 +481,10 @@ class TestLoopVerdictSpeaksTheContract:
     @pytest.mark.asyncio
     async def test_an_unreadable_deliverable_is_never_cited(self, tmp_path):
         """The anchor was DECLARED but nothing was observed, so nothing is cited."""
-        from gideon.loop.judge import _observe_ground_truth, evidence_refs_from_observation
+        from gideon.automation.loop.judge import (
+            _observe_ground_truth,
+            evidence_refs_from_observation,
+        )
 
         block = await _observe_ground_truth("", str(tmp_path), ["missing.md"])
         assert block == "" and evidence_refs_from_observation(block) == []
@@ -455,11 +492,17 @@ class TestLoopVerdictSpeaksTheContract:
     @pytest.mark.asyncio
     async def test_a_failed_command_is_cited_with_its_real_state(self, tmp_path):
         """The ref carries the outcome, not just the command: citing `pytest` as proof when it
-        exited non-zero would be exactly the claim-dressed-as-evidence the contract refuses."""
-        from gideon.loop.judge import _observe_ground_truth, evidence_refs_from_observation
+        exited non-zero would be exactly the claim-dressed-as-evidence the contract refuses.
+        """
+        from gideon.automation.loop.judge import (
+            _observe_ground_truth,
+            evidence_refs_from_observation,
+        )
 
         block = await _observe_ground_truth("false", str(tmp_path), [])
-        assert evidence_refs_from_observation(block) == ["command:false → FAILED (non-zero exit)"]
+        assert evidence_refs_from_observation(block) == [
+            "command:false → FAILED (non-zero exit)"
+        ]
 
     def test_the_boolean_prompt_answer_is_projected_onto_the_closed_enum(self):
         """The bundled `task-cycle_judge` prompt asks for `done`/`regressed` booleans, so the
@@ -467,8 +510,8 @@ class TestLoopVerdictSpeaksTheContract:
         restate a fact it already stated is how a third vocabulary starts."""
         import json as _json
 
-        from gideon.loop.judge import _parse_verdict
-        from gideon.workflows.judge_contract import Verdict
+        from gideon.automation.loop.judge import _parse_verdict
+        from gideon.automation.workflows.judge_contract import Verdict
 
         cases = {
             (True, False): Verdict.PASS,
@@ -477,14 +520,18 @@ class TestLoopVerdictSpeaksTheContract:
             (False, False): Verdict.RETRY,
         }
         for (done, regressed), expected in cases.items():
-            raw = _json.dumps({"done": done, "regressed": regressed, "marginal_value": 2})
+            raw = _json.dumps(
+                {"done": done, "regressed": regressed, "marginal_value": 2}
+            )
             verdict = _parse_verdict(raw)
             assert verdict is not None
             assert verdict.verdict is expected, f"done={done} regressed={regressed}"
             assert verdict.done is done and verdict.regressed is regressed
 
     @pytest.mark.asyncio
-    async def test_an_anchored_cycles_persisted_shape_satisfies_the_contract(self, tmp_path):
+    async def test_an_anchored_cycles_persisted_shape_satisfies_the_contract(
+        self, tmp_path
+    ):
         """The measured population, held as a floor. BEFORE this atom the answer was ZERO: every
         shape the loop could persist failed `validate_verdict` at the FIRST step (`unknown verdict
         None`), the proof check never being reached. An ANCHORED cycle now round-trips through the
@@ -492,12 +539,15 @@ class TestLoopVerdictSpeaksTheContract:
         considers making it binding."""
         import json as _json
 
-        from gideon.loop.judge import (
+        from gideon.automation.loop.judge import (
             _observe_ground_truth,
             _parse_verdict,
             evidence_refs_from_observation,
         )
-        from gideon.workflows.judge_contract import JudgeHints, validate_verdict
+        from gideon.automation.workflows.judge_contract import (
+            JudgeHints,
+            validate_verdict,
+        )
 
         (tmp_path / "REPORT.md").write_text("body", encoding="utf-8")
         observed = await _observe_ground_truth("true", str(tmp_path), ["REPORT.md"])
@@ -510,7 +560,9 @@ class TestLoopVerdictSpeaksTheContract:
         assert round_tripped.passed is True, round_tripped.invalid_reason
 
     @pytest.mark.asyncio
-    async def test_a_transcript_only_cycle_would_still_fail_the_proof_precondition(self, tmp_path):
+    async def test_a_transcript_only_cycle_would_still_fail_the_proof_precondition(
+        self, tmp_path
+    ):
         """The other half of the measurement, asserted so the scoping decision cannot rot: a goal
         with no runnable command and no readable deliverable cites nothing, so it would be refused
         if the precondition were switched on. That is precisely why the loop supervisor routes on
@@ -518,19 +570,22 @@ class TestLoopVerdictSpeaksTheContract:
         which is an outage, not a gate."""
         import json as _json
 
-        from gideon.loop.judge import (
+        from gideon.automation.loop.judge import (
             _observe_ground_truth,
             _parse_verdict,
             evidence_refs_from_observation,
         )
-        from gideon.workflows.judge_contract import JudgeHints, validate_verdict
+        from gideon.automation.workflows.judge_contract import (
+            JudgeHints,
+            validate_verdict,
+        )
 
         observed = await _observe_ground_truth("", None, [])
         verdict = _parse_verdict(
             _json.dumps({"done": True, "done_reason": "met"}),
             evidence_refs_from_observation(observed),
         )
-        assert verdict is not None and verdict.done is True  # the loop still completes
+        assert verdict is not None and verdict.done is True
         refused = validate_verdict(verdict.to_dict(), JudgeHints())
         assert refused.passed is False
         assert refused.invalid_reason == "PASS without cited proof or evidence refs"

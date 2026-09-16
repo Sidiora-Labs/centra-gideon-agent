@@ -8,7 +8,7 @@ detector that catches it, and the lint rules that catch the shape before it ever
 
 import pytest
 
-from gideon.workflows.judge_calibration import (
+from gideon.automation.workflows.judge_calibration import (
     CANARY_MIN_SEPARATION,
     NODDING_MIN_RUNS,
     STUCK_FAILED_CYCLES,
@@ -30,9 +30,21 @@ from gideon.workflows.judge_calibration import (
 )
 
 
-def verdict(v: str, *, status: str = "kept", template: str = "t", node: str = "judge", overall=1.5):
+def verdict(
+    v: str,
+    *,
+    status: str = "kept",
+    template: str = "t",
+    node: str = "judge",
+    overall=1.5,
+):
     return VerdictRecord(
-        run_id="r", node_id=node, template=template, verdict=v, status=status, overall=overall
+        run_id="r",
+        node_id=node,
+        template=template,
+        verdict=v,
+        status=status,
+        overall=overall,
     )
 
 
@@ -48,18 +60,19 @@ def divergence(judge: str, human: str, *, reason: str = "", at: str = "1"):
     )
 
 
-# ── the nodding-loop detector ──
-
-
 def test_a_gate_that_never_rejects_is_flagged():
     """Statistical evidence of a check that does not check."""
-    report = assess_gate([verdict("PASS") for _ in range(10)], template="t", node_id="judge")
+    report = assess_gate(
+        [verdict("PASS") for _ in range(10)], template="t", node_id="judge"
+    )
     assert report.health is GateHealth.NODDING
     assert report.blocks_default
 
 
 def test_a_gate_that_rejects_sometimes_is_healthy():
-    records = [verdict("PASS") for _ in range(8)] + [verdict("REJECT") for _ in range(2)]
+    records = [verdict("PASS") for _ in range(8)] + [
+        verdict("REJECT") for _ in range(2)
+    ]
     report = assess_gate(records, template="t", node_id="judge")
     assert report.health is GateHealth.DISCRIMINATING
     assert not report.blocks_default
@@ -69,15 +82,19 @@ def test_a_gate_that_rejects_sometimes_is_healthy():
 def test_a_gate_that_never_passes_is_also_broken():
     """The mirror failure. Broken in the SAFE direction — it fails work that should pass,
     which is visible and annoying rather than invisible and trusted."""
-    report = assess_gate([verdict("REJECT") for _ in range(10)], template="t", node_id="judge")
+    report = assess_gate(
+        [verdict("REJECT") for _ in range(10)], template="t", node_id="judge"
+    )
     assert report.health is GateHealth.OBSTRUCTING
-    assert not report.blocks_default  # visible, so it does not need to block
+    assert not report.blocks_default
 
 
 def test_a_small_sample_is_unproven_not_nodding():
     """Accusing a new template of nodding on its third run would train authors to
     distrust the detector."""
-    report = assess_gate([verdict("PASS") for _ in range(3)], template="t", node_id="judge")
+    report = assess_gate(
+        [verdict("PASS") for _ in range(3)], template="t", node_id="judge"
+    )
     assert report.health is GateHealth.UNPROVEN
     assert not report.blocks_default
     assert "need" in report.detail
@@ -93,8 +110,13 @@ def test_discarded_verdicts_still_count_as_evidence():
     """A rewound iteration's rejection really happened. Excluding it would let a template
     look like a nodder precisely BECAUSE its judge was doing its job and forcing rewinds.
     """
-    records = [verdict("PASS") for _ in range(9)] + [verdict("REJECT", status="discard")]
-    assert assess_gate(records, template="t", node_id="judge").health is GateHealth.DISCRIMINATING
+    records = [verdict("PASS") for _ in range(9)] + [
+        verdict("REJECT", status="discard")
+    ]
+    assert (
+        assess_gate(records, template="t", node_id="judge").health
+        is GateHealth.DISCRIMINATING
+    )
 
 
 def test_no_data_yields_none_not_a_zero_rate():
@@ -108,7 +130,10 @@ def test_gates_are_assessed_per_template_and_node():
         verdict("REJECT", template="b", node="judge"),
     ]
     reports = assess_all_gates(records, min_runs=1)
-    assert {(r.template, r.node_id) for r in reports} == {("a", "judge"), ("b", "judge")}
+    assert {(r.template, r.node_id) for r in reports} == {
+        ("a", "judge"),
+        ("b", "judge"),
+    }
 
 
 def test_one_templates_nodding_does_not_taint_another():
@@ -118,9 +143,6 @@ def test_one_templates_nodding_does_not_taint_another():
     by_template = {r.template: r.health for r in assess_all_gates(records)}
     assert by_template["nodder"] is GateHealth.NODDING
     assert by_template["good"] is GateHealth.DISCRIMINATING
-
-
-# ── stuck detection ──
 
 
 def test_identical_scores_across_the_window_are_stuck():
@@ -165,9 +187,6 @@ def test_the_windows_are_tunable():
     assert detect_stuck([0.5, 0.5], identical_window=2).stuck
 
 
-# ── the judge canary ──
-
-
 def test_a_judge_that_separates_strong_from_null_is_calibrated():
     result = assess_separation(4.5, 1.0)
     assert result.calibrated is True
@@ -194,16 +213,13 @@ def test_a_probe_that_could_not_run_is_not_blind():
 def test_the_separation_threshold_matches_the_existing_canary():
     """A second, different threshold would make the same judge trustworthy to one caller
     and blind to another."""
-    from gideon.loop.instrument import _CANARY_MIN_SEPARATION
+    from gideon.automation.loop.instrument import _CANARY_MIN_SEPARATION
 
     assert CANARY_MIN_SEPARATION == _CANARY_MIN_SEPARATION
 
 
 def test_exactly_at_the_threshold_is_calibrated():
     assert assess_separation(CANARY_MIN_SEPARATION, 0.0).calibrated is True
-
-
-# ── divergence ──
 
 
 def test_a_judge_pass_the_human_rejects_is_a_false_pass():
@@ -252,9 +268,6 @@ def test_the_users_reason_is_kept_verbatim():
     assert exemplar["why_the_user_was_right"] == reason
 
 
-# ── the summary ──
-
-
 def test_the_summary_reports_the_dangerous_rate_separately():
     """An instrument 90% accurate overall but wrong in the dangerous direction every time
     is not 90% good, and one averaged figure would hide that."""
@@ -272,7 +285,9 @@ def test_the_summary_names_nodding_gates():
 
 
 def test_the_summary_separates_kept_from_discarded():
-    verdicts = [verdict("PASS") for _ in range(3)] + [verdict("REJECT", status="discard")]
+    verdicts = [verdict("PASS") for _ in range(3)] + [
+        verdict("REJECT", status="discard")
+    ]
     summary = calibration_summary(verdicts, [])
     assert summary["kept"] == 3 and summary["discarded"] == 1
 
@@ -281,9 +296,6 @@ def test_an_empty_summary_reports_none_not_zero():
     summary = calibration_summary([], [])
     assert summary["pass_rate"] is None
     assert summary["median_overall"] is None
-
-
-# ── the ledger ──
 
 
 def test_a_verdict_journals_with_its_kind():
@@ -300,7 +312,7 @@ def test_a_divergence_journals_with_its_kind_and_direction():
 
 def test_the_ledger_kinds_are_registered():
     """Without registration these events exist in code and nowhere else."""
-    from gideon.workflows.journal import LEDGER_KINDS
+    from gideon.automation.workflows.journal import LEDGER_KINDS
 
     assert "judge_verdict" in LEDGER_KINDS
     assert "judge_divergence" in LEDGER_KINDS
@@ -315,7 +327,9 @@ def test_verdicts_round_trip_through_the_journal():
 
 
 def test_divergences_round_trip_through_the_journal():
-    parsed = divergences_from_journal([journal_divergence(divergence("PASS", "REJECT"))])
+    parsed = divergences_from_journal(
+        [journal_divergence(divergence("PASS", "REJECT"))]
+    )
     assert len(parsed) == 1
     assert parsed[0].direction == "false_pass"
 
@@ -361,9 +375,6 @@ def test_a_journal_of_only_unusable_rows_yields_nothing_rather_than_raising():
     assert verdicts_from_journal([None, "x", {"kind": "other"}]) == []
 
 
-# ── prompt versioning ──
-
-
 def test_prompt_versions_ignore_whitespace():
     assert prompt_version("Be skeptical.  Assume broken.") == prompt_version(
         "Be skeptical. Assume broken."
@@ -378,9 +389,6 @@ def test_prompt_versions_change_on_real_edits():
 
 def test_an_empty_prompt_still_versions():
     assert prompt_version("")
-
-
-# ── the five anti-pattern lint rules ──
 
 
 def _loop_spec(**body_cfg):
@@ -417,7 +425,7 @@ def _loop_spec(**body_cfg):
 
 
 def _codes(spec):
-    from gideon.workflows.template_lint import lint_template
+    from gideon.automation.workflows.template_lint import lint_template
 
     return [f.code for f in lint_template(spec).findings]
 
@@ -486,24 +494,23 @@ def test_a_loop_with_only_a_cap_is_tangled():
 def test_a_model_doing_deterministic_reshaping_is_flagged():
     """A `transform` does it for zero tokens and cannot hallucinate the answer."""
     spec = _loop_spec()
-    spec["root"]["children"][0]["body"]["config"]["prompt"] = "Reformat this JSON {{last.output}}"
+    spec["root"]["children"][0]["body"]["config"][
+        "prompt"
+    ] = "Reformat this JSON {{last.output}}"
     assert "WFL_MANUAL_WORK" in _codes(spec)
 
 
 def test_a_malformed_spec_does_not_crash_the_lint():
     """A lint that crashed on a bad spec would hide every finding it had already found."""
-    from gideon.workflows.template_lint import lint_template
+    from gideon.automation.workflows.template_lint import lint_template
 
     for bad in ({"root": "not a dict"}, {}, {"root": None}):
         assert lint_template(bad) is not None
 
 
-# ── the five-moves audit ──
-
-
 def test_the_audit_locates_each_move_in_a_real_template():
-    from gideon.workflows.bundled_defs import read_template
-    from gideon.workflows.template_lint import five_moves_audit
+    from gideon.automation.workflows.bundled_defs import read_template
+    from gideon.automation.workflows.template_lint import five_moves_audit
 
     moves = five_moves_audit(read_template("goal-pursuit-open-ended").to_dict())
     assert moves["discovery"] and moves["verification"] and moves["handoff"]
@@ -512,26 +519,24 @@ def test_the_audit_locates_each_move_in_a_real_template():
 def test_the_audit_reports_an_absence_rather_than_inventing_one():
     """An absence has to be VISIBLE. A long-running template that schedules nothing never
     wakes up again, and that is the gap nobody notices in a 200-line spec."""
-    from gideon.workflows.bundled_defs import read_template
-    from gideon.workflows.template_lint import audit_report
+    from gideon.automation.workflows.bundled_defs import read_template
+    from gideon.automation.workflows.template_lint import audit_report
 
     report = audit_report(read_template("goal-pursuit-open-ended").to_dict())
-    # No shipped template self-schedules yet: the monitor variant needs
-    # AUTOMATION-SUBSTRATE's trigger tools, which do not exist.
     assert "scheduling" in report["absent_moves"]
 
 
 def test_a_read_only_template_legitimately_persists_nothing():
-    from gideon.workflows.bundled_defs import read_template
-    from gideon.workflows.template_lint import audit_report
+    from gideon.automation.workflows.bundled_defs import read_template
+    from gideon.automation.workflows.template_lint import audit_report
 
     report = audit_report(read_template("diagnose-run").to_dict())
     assert "persistence" in report["absent_moves"]
-    assert report["clean"]  # an absence is not a defect
+    assert report["clean"]
 
 
 def test_the_audit_survives_a_malformed_spec():
-    from gideon.workflows.template_lint import five_moves_audit
+    from gideon.automation.workflows.template_lint import five_moves_audit
 
     moves = five_moves_audit({"root": "nope"})
     assert set(moves) and not any(moves.values())
@@ -546,20 +551,6 @@ ANTI_PATTERN_CODES = {
     "WFL_MANUAL_WORK",
 }
 
-#: Empty, and that is the point: every finding my first draft of these rules produced on
-#: the shipped library turned out to be a FALSE POSITIVE, not a template defect.
-#:
-#: In order: the amnesiac rule only accepted `{{last.}}`/`{{iter.}}` when `{{nodes.}}`
-#: inside a loop body is equally cross-iteration state; the nodding rule demanded a field
-#: literally named `verdict` when `refuted: boolean` routes just as well; it demanded
-#: `tools_posture: verify` from `infer` nodes, which have no tools by definition; the
-#: tangled rule required `progress_field` when `streak` alone is a valid `until_dry` exit;
-#: and the blind rule only recognised verifiers with "judge" in the name, missing
-#: `verify_refute`, `completeness_critic` and `round_gaps`.
-#:
-#: Five false positives from one afternoon's rules on six templates. A lint that cries
-#: wolf on the library it ships with is a lint authors learn to ignore, which is worse
-#: than no lint — so each was fixed at the rule rather than exempted at the call site.
 KNOWN_ANTI_PATTERNS: set[tuple[str, str]] = set()
 
 
@@ -569,8 +560,8 @@ def test_no_shipped_template_has_an_UNKNOWN_anti_pattern():
     Known findings are enumerated above with their reasoning; anything else is a
     regression this test exists to catch.
     """
-    from gideon.workflows.bundled_defs import read_template, template_names
-    from gideon.workflows.template_lint import lint_template
+    from gideon.automation.workflows.bundled_defs import read_template, template_names
+    from gideon.automation.workflows.template_lint import lint_template
 
     unexpected = []
     for name in template_names():
@@ -586,8 +577,8 @@ def test_no_shipped_template_has_an_UNKNOWN_anti_pattern():
 
 def test_the_templates_this_session_authored_are_anti_pattern_free():
     """No exemptions for the new ones."""
-    from gideon.workflows.bundled_defs import read_template
-    from gideon.workflows.template_lint import lint_template
+    from gideon.automation.workflows.bundled_defs import read_template
+    from gideon.automation.workflows.template_lint import lint_template
 
     for name in (
         "goal-pursuit-open-ended",
@@ -597,7 +588,9 @@ def test_the_templates_this_session_authored_are_anti_pattern_free():
         "diagnose-run",
     ):
         spec = read_template(name).to_dict()
-        findings = [f for f in lint_template(spec).findings if f.code in ANTI_PATTERN_CODES]
+        findings = [
+            f for f in lint_template(spec).findings if f.code in ANTI_PATTERN_CODES
+        ]
         assert not findings, (name, [f.to_dict() for f in findings])
 
 

@@ -24,18 +24,10 @@ import json
 
 import pytest
 
-from gideon.action_providers import knowledge_maintain_provider as kmp
-from gideon.action_providers.base import ActionContext
-from gideon.knowledge import consolidation
+from gideon.cognition.knowledge import consolidation
+from gideon.integrations.action_providers import knowledge_maintain_provider as kmp
+from gideon.integrations.action_providers.base import ActionContext
 
-# Six items the token metric (Jaccard, floor 0.30, no embedder) groups into ONE cluster of 6,
-# sized above the default `consolidate_min_cluster` of 5 so a raised floor has somewhere to bite.
-#
-# The shared core has to be LARGE relative to each item's unique tail, and the tails have to be
-# real: measured, an earlier fixture whose items differed only by a trailing index was collapsed
-# to a single survivor by `pre_dedup` before `cluster_items` ever saw it, so the planner returned
-# no clusters and every count assertion here read 0. These six sit at min pairwise similarity
-# 0.65 — comfortably clear of both the 0.30 cluster floor and the near-duplicate hash.
 _SHARED = (
     "postgres connection pooling pgbouncer transaction mode prepared statements "
     "session backend client ceiling idle rotation"
@@ -80,8 +72,6 @@ def _no_store_or_embedder(monkeypatch):
     monkeypatch.setattr(kmp, "_open_store", lambda: object())
     monkeypatch.setattr(kmp, "_load_items", lambda store: _items())
     monkeypatch.setattr(kmp, "_similarity_for", lambda store: None)
-    # Nothing has ever been consolidated, so the min-hours gate cannot bind by default.
-    # Individual tests override this to put a recent pass on the clock.
     monkeypatch.setattr(kmp, "_hours_since_last_pass", lambda store: 10_000.0)
 
 
@@ -96,13 +86,12 @@ def _run(action_config=None):
 
     provider = kmp.KnowledgeConsolidateActionProvider()
     result = asyncio.run(
-        provider.execute(action_config or {}, ActionContext(event="", context="", payload={}))
+        provider.execute(
+            action_config or {}, ActionContext(event="", context="", payload={})
+        )
     )
     assert result.success, result.error
     return json.loads(result.stdout)
-
-
-# ── the min-hours knob reaches the gate ──
 
 
 def test_min_hours_knob_declines_a_recent_pass(tmp_path, monkeypatch):
@@ -154,9 +143,6 @@ def test_explicit_min_hours_overrides_a_low_knob(tmp_path, monkeypatch):
     assert "floor 48" in payload["reason"]
 
 
-# ── the min-cluster knob reaches `plan_consolidation(min_size=...)` ──
-
-
 def test_min_cluster_knob_reaches_the_planner(tmp_path):
     """A floor above the available cluster size drops the cluster.
 
@@ -188,9 +174,6 @@ def test_explicit_min_cluster_size_overrides_the_knob(tmp_path):
 
     _write_config(tmp_path, consolidate_min_cluster=2)
     assert _run({"min_cluster_size": 50})["plan"]["clusters"] == []
-
-
-# ── `run_consolidation_pass` — the host's sync entry point ──
 
 
 def test_pass_returns_a_positive_count_when_it_finds_work(tmp_path):
@@ -232,24 +215,24 @@ def test_pass_never_returns_negative_on_failure(monkeypatch):
 
 def test_unreadable_config_does_not_break_the_pass(tmp_path, monkeypatch):
     """`AppConfig.load` raising must fall back to the constants, not into the host."""
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     def _boom(cls=None):
         raise OSError("config.json is mid-write")
 
     monkeypatch.setattr(AppConfig, "load", classmethod(lambda cls: _boom()))
 
-    # The constants admit this store (nothing consolidated, cluster of 6 >= floor of 5), so a
-    # clean fallback is observable as a normal positive result rather than a swallowed 0.
     assert kmp.run_consolidation_pass(batch_size=0) == 1
 
 
 def test_unreadable_config_falls_back_to_the_constants(monkeypatch):
     """The fallback is the CONSTANTS specifically, not zero and not a hardcoded pair."""
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     monkeypatch.setattr(
-        AppConfig, "load", classmethod(lambda cls: (_ for _ in ()).throw(OSError("nope")))
+        AppConfig,
+        "load",
+        classmethod(lambda cls: (_ for _ in ()).throw(OSError("nope"))),
     )
 
     assert kmp._config_gate_defaults() == (

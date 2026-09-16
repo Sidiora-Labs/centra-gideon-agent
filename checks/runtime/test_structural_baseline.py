@@ -1,8 +1,8 @@
 """Shrink-only STRUCTURAL ratchets over the committed baseline (PLATFORM-HARDENING-FLOORS PHF-14).
 
-``structural-baseline.json`` is a GENERATED census (by
-``scripts/generate_structural_baseline.py``) of three structural properties of production
-``src/gideon`` — the shape of the tree rather than its behaviour:
+``checks/catalogs/structure.json`` is a GENERATED census (by
+``tooling/scripts/generate_structural_baseline.py``) of three structural properties of production
+``runtime/gideon`` — the shape of the tree rather than its behaviour:
 
   * **per-file size ceiling + a shrink-only band population** — no file may reach 6000 lines
     (one 1000-line step above the measured max of 5447), and the COUNT of files at or above the
@@ -38,7 +38,7 @@ every counter **may only shrink**:
 ⚠️  FORBIDDEN-TO-RAISE RULE (the ``done_when`` doc line — do not weaken it): when a ratchet
     reds because a counter ROSE, the fix is to FIX THE CODE — split the file, invert the
     import, reuse the existing implementation — NEVER to regenerate
-    ``structural-baseline.json`` to bless the higher number. Raising a committed count to make
+    ``checks/catalogs/structure.json`` to bless the higher number. Raising a committed count to make
     CI green re-hides exactly the decay this census exists to surface.
 
 Every ratchet also carries a VACUITY assertion, because a rail that matches nothing looks
@@ -50,7 +50,7 @@ re-walk — see ``vacuity_failures`` and the falsification tests at the bottom o
     Regenerate the committed baseline ONLY when a counter LEGITIMATELY SHRANK, and do it in
     that SAME commit::
 
-        python scripts/generate_structural_baseline.py
+        python tooling/scripts/generate_structural_baseline.py
 
     Each such commit should be able to point at the split, the inversion, or the deletion.
 """
@@ -65,24 +65,19 @@ from unittest import mock
 
 import pytest
 
-from scripts import gate_report
-from scripts import generate_structural_baseline as gen
+from tooling.scripts import gate_report
+from tooling.scripts import generate_structural_baseline as gen
 
-# The forbidden-to-raise sentence, asserted present in both the generator and this test so the
-# ``done_when`` "forbidden-to-raise doc line is present" cannot silently be dropped.
 _FORBIDDEN_TO_RAISE = "never to regenerate"
 
 
 def _committed() -> dict:
     path = gen.baseline_path()
     assert path.is_file(), (
-        "structural-baseline.json is missing — generate it with "
-        "`python scripts/generate_structural_baseline.py`"
+        "checks/catalogs/structure.json is missing — generate it with "
+        "`python tooling/scripts/generate_structural_baseline.py`"
     )
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-# ── The three ratchets ───────────────────────────────────────────────────────
+    return gen.decode_catalog(json.loads(path.read_text(encoding="utf-8")))
 
 
 @pytest.mark.parametrize("ratchet", gen.RATCHETS)
@@ -98,7 +93,7 @@ def test_no_structural_counter_rose_vs_committed_baseline(ratchet):
     assert not failures, (
         f"{ratchet} REGRESSED — the tree got structurally worse:\n  "
         + "\n  ".join(failures)
-        + "\n\nFORBIDDEN: do NOT regenerate structural-baseline.json to bless the higher "
+        + "\n\nFORBIDDEN: do NOT regenerate checks/catalogs/structure.json to bless the higher "
         "number. Fix the code named above (that is the whole point of this ratchet). "
         "Regenerate ONLY when a counter legitimately shrank, in that same commit."
     )
@@ -112,9 +107,9 @@ def test_committed_baseline_is_not_stale_on_the_shrink_side(ratchet):
     stale = gen.stale_high(ratchet, _committed(), gen.build_inventory())
     assert not stale, (
         f"the committed {ratchet} baseline is stale-HIGH — the tree improved but "
-        "structural-baseline.json was not regenerated:\n  "
+        "checks/catalogs/structure.json was not regenerated:\n  "
         + "\n  ".join(stale)
-        + "\n\nRun `python scripts/generate_structural_baseline.py` in that commit."
+        + "\n\nRun `python tooling/scripts/generate_structural_baseline.py` in that commit."
     )
 
 
@@ -123,7 +118,7 @@ def test_committed_baseline_byte_matches_a_fresh_render():
     committed file is byte-identical to a fresh render. This is what makes a legitimate shrink
     require a regeneration in the same commit."""
     assert gen.baseline_path().read_text(encoding="utf-8") == gen.build_baseline(), (
-        "structural-baseline.json does not match a fresh render. If a counter legitimately "
+        "checks/catalogs/structure.json does not match a fresh render. If a counter legitimately "
         "SHRANK, regenerate it in the same commit. If a counter ROSE, do NOT regenerate — fix "
         "the code instead."
     )
@@ -135,9 +130,6 @@ def test_the_render_is_deterministic():
     assert gen.build_baseline() == gen.build_baseline()
 
 
-# ── Never at zero (PHF-6's ruling, restated as a rail) ───────────────────────
-
-
 def test_every_threshold_shipped_at_the_measured_population_not_at_zero():
     """``done_when``: "enforced shrink-only, NEVER at zero, because a never-run gate given
     teeth at zero reds the whole tree at once".
@@ -147,8 +139,12 @@ def test_every_threshold_shipped_at_the_measured_population_not_at_zero():
     """
     committed = _committed()
     size = committed[gen.RATCHET_SIZE]
-    assert size["ceiling_lines"] > 0, "the size ceiling is 0 — that reds every file at once"
-    assert size["totals"]["watched_files"] > 0, "the watch band is empty — nothing is ratcheted"
+    assert (
+        size["ceiling_lines"] > 0
+    ), "the size ceiling is 0 — that reds every file at once"
+    assert (
+        size["totals"]["watched_files"] > 0
+    ), "the watch band is empty — nothing is ratcheted"
     assert committed[gen.RATCHET_IMPORT_DIRECTION]["totals"]["edges"] > 0, (
         "the import-direction baseline is 0 edges. If that is real, say so in the plan log — "
         "but check first that the walk did not break, because a broken walk also reports 0."
@@ -221,7 +217,9 @@ def test_every_threshold_records_its_rationale():
     assert len(size_rationale) > 200, "the size ceiling's rationale is a stub"
     for rule in committed[gen.RATCHET_IMPORT_DIRECTION]["rules"]:
         assert len(rule["rationale"]) > 200, f"{rule['name']} has no real rationale"
-        assert rule["upper"], f"{rule['name']} names no upper layer — it ratchets nothing"
+        assert rule[
+            "upper"
+        ], f"{rule['name']} names no upper layer — it ratchets nothing"
     for family in committed[gen.RATCHET_DUPLICATION]["families"]:
         assert len(family["rationale"]) > 200, f"{family['name']} has no real rationale"
 
@@ -232,7 +230,14 @@ def test_the_deliberate_non_ratchets_are_recorded_as_decisions():
     an oversight — or delete the reasoning and leave the list."""
     doc = gen.__doc__ or ""
     assert "what this deliberately does NOT ratchet" in doc
-    for omission in ("tests/", "complexity", "web/", "apps", "Total line count", "Import CYCLES"):
+    for omission in (
+        "checks/runtime/",
+        "complexity",
+        "apps/console/",
+        "apps",
+        "Total line count",
+        "Import CYCLES",
+    ):
         assert omission in doc, f"the deliberate-omission list lost {omission!r}"
 
 
@@ -244,19 +249,16 @@ def test_forbidden_to_raise_doc_line_is_present():
     assert _FORBIDDEN_TO_RAISE in (gen.__doc__ or "").lower()
     assert "FORBIDDEN-TO-RAISE" in (__doc__ or "")
     assert _FORBIDDEN_TO_RAISE in (__doc__ or "").lower()
-    # And in the message a failing developer actually reads — a doc line nobody sees when the
-    # gate reds is a doc line that will be dropped.
     source = Path(__file__).read_text(encoding="utf-8")
-    assert "FORBIDDEN: do NOT regenerate structural-baseline.json" in source, (
+    assert "FORBIDDEN: do NOT regenerate checks/catalogs/structure.json" in source, (
         "the ratchet's own failure message lost the forbidden-to-raise instruction — a "
         "developer reading only the red would regenerate"
     )
 
 
-# ── Reporting through PHF-11's aggregate ─────────────────────────────────────
-
-
-def test_three_simultaneous_structural_violations_report_as_three(monkeypatch, tmp_path):
+def test_three_simultaneous_structural_violations_report_as_three(
+    monkeypatch, tmp_path
+):
     """``done_when``: "the ratchets report THROUGH PHF-11's aggregate … so one red does not hide
     four" — proven, not asserted, and registration proven in the same breath (a ratchet that
     exists only as a pytest test is invisible to ``make gates``).
@@ -270,51 +272,48 @@ def test_three_simultaneous_structural_violations_report_as_three(monkeypatch, t
     current = gen.build_inventory()
     understated = json.loads(json.dumps(current))
 
-    # 1. size: drop a member from the committed band population, so the real tree reads as
-    # having gained a giant. A NEW BAND ENTRANT is the violation shape that survives population
-    # counting — "the biggest file gained three lines" deliberately is not one any more.
     victim_size = sorted(current[gen.RATCHET_SIZE]["watch_band_members"])[0]
     understated[gen.RATCHET_SIZE]["watch_band_members"] = [
         m for m in current[gen.RATCHET_SIZE]["watch_band_members"] if m != victim_size
     ]
-    # 2. import-direction: drop one file's edges to 0 so its real edges read as a rise.
     victim_import = sorted(current[gen.RATCHET_IMPORT_DIRECTION]["per_file"])[0]
     understated[gen.RATCHET_IMPORT_DIRECTION]["per_file"][victim_import] = {
         "edges": 0,
         "violations": [],
     }
-    # 3. duplication: same shape on the duplicate counter.
     victim_dup = sorted(current[gen.RATCHET_DUPLICATION]["per_file"])[0]
-    understated[gen.RATCHET_DUPLICATION]["per_file"][victim_dup] = {"count": 0, "sites": []}
+    understated[gen.RATCHET_DUPLICATION]["per_file"][victim_dup] = {
+        "count": 0,
+        "sites": [],
+    }
 
-    seeded = tmp_path / "structural-baseline.json"
-    seeded.write_text(json.dumps(understated) + "\n", encoding="utf-8")
+    seeded = tmp_path / "structure.json"
+    seeded.write_text(
+        json.dumps(gen.encode_catalog(understated)) + "\n", encoding="utf-8"
+    )
     monkeypatch.setattr(gen, "baseline_path", lambda: seeded)
 
     results = {r.name: r for r in gate_report.run_all_gates()}
 
     for ratchet in gen.RATCHETS:
-        assert ratchet in results, f"{ratchet} is not registered in scripts/gate_report.py"
+        assert (
+            ratchet in results
+        ), f"{ratchet} is not registered in tooling/scripts/gate_report.py"
         assert results[ratchet].ok is False, f"{ratchet} did not fail"
         assert results[ratchet].failures, f"{ratchet} failed with no failure line"
         assert not any(
             "raised" in line for line in results[ratchet].failures
         ), f"{ratchet} failed by RAISING, not by ratcheting: {results[ratchet].failures}"
     assert any(victim_size in ln for ln in results[gen.RATCHET_SIZE].failures)
-    assert any(victim_import in ln for ln in results[gen.RATCHET_IMPORT_DIRECTION].failures)
+    assert any(
+        victim_import in ln for ln in results[gen.RATCHET_IMPORT_DIRECTION].failures
+    )
     assert any(victim_dup in ln for ln in results[gen.RATCHET_DUPLICATION].failures)
 
-    # All three appear in the ONE rendered table — the point of reporting through the
-    # aggregate. (``main()``'s exit code on a failing gate is covered by
-    # ``tests/test_gate_report.py``; re-running the six gates here just to re-prove it would
-    # push this test toward the 120s per-test cap under load.)
     report = gate_report.render_report(list(results.values()))
     for ratchet in gen.RATCHETS:
         assert f"{ratchet} FAIL (" in report
     assert "SUMMARY: 3 of 6 gate(s) FAILED" in report, report
-
-
-# ── Vacuity: a rail that matches nothing looks clean ─────────────────────────
 
 
 def test_every_ratchet_has_a_vacuity_assertion_and_it_holds_on_the_real_tree():
@@ -339,11 +338,11 @@ def test_an_empty_walk_fires_the_vacuity_assertion_for_every_ratchet(monkeypatch
     assert len(failures) == len(gen.RATCHETS), failures
     for ratchet in gen.RATCHETS:
         assert any(ratchet in line and "VACUITY" in line for line in failures), failures
-    # And the ratchet reads CLEAN on that empty walk — which is exactly why vacuity must gate
-    # it. Proven, so nobody "simplifies" the vacuity check away as redundant.
     empty = gen.build_inventory()
-    assert gen.regressions_size(_committed()[gen.RATCHET_SIZE], empty[gen.RATCHET_SIZE]) == []
-    # …and the gate as a whole still FAILS, because vacuity comes first.
+    assert (
+        gen.regressions_size(_committed()[gen.RATCHET_SIZE], empty[gen.RATCHET_SIZE])
+        == []
+    )
     assert gen.ratchet_failures(gen.RATCHET_SIZE, _committed(), empty)
 
 
@@ -356,14 +355,14 @@ def test_a_ratchet_that_inspects_zero_files_fires_vacuity_even_when_the_census_i
     would not notice, since the count check is keyed on what the RATCHET saw, not on the glob.
     """
     monkeypatch.setattr(gen, "_parse", lambda path: None)
-    assert gen.census_py_files() >= gen.MIN_CENSUS_PY_FILES  # census intact
+    assert gen.census_py_files() >= gen.MIN_CENSUS_PY_FILES
 
     for ratchet in (gen.RATCHET_IMPORT_DIRECTION, gen.RATCHET_DUPLICATION):
         failures = gen.vacuity_failures(ratchet)
         assert failures, f"{ratchet} read clean on a walk that inspected 0 files"
-        assert "VACUITY" in failures[0] and "inspected 0 of the" in failures[0], failures
-    # The size ratchet needs no parse, so it is correctly still healthy — the vacuity checks
-    # are per-ratchet, not one shared flag.
+        assert (
+            "VACUITY" in failures[0] and "inspected 0 of the" in failures[0]
+        ), failures
     assert gen.vacuity_failures(gen.RATCHET_SIZE) == []
 
 
@@ -383,7 +382,6 @@ def test_dropping_a_whole_subpackage_fires_vacuity_even_though_the_count_stays_p
         gen.MIN_CENSUS_PY_FILES < len(kept) < len(real_files)
     ), f"the arithmetic this test depends on changed: {len(kept)} kept of {len(real_files)}"
 
-    # census_packages reads the disk directly, so it still knows dashboard/ exists.
     monkeypatch.setattr(gen, "_src_py_files", lambda: kept)
     failures = gen.vacuity_failures(gen.RATCHET_IMPORT_DIRECTION)
     assert failures, "a whole package left the walk and the ratchet read clean"
@@ -393,7 +391,7 @@ def test_dropping_a_whole_subpackage_fires_vacuity_even_though_the_count_stays_p
 def test_the_walk_cannot_wander_into_a_worktree_or_a_vendor_directory():
     """This repo is routinely checked out as ~200 concurrent worktrees. A census that counted
     another agent's tree is not a measurement of THIS repo, and its number would drift every
-    run. Two guarantees: the walk is rooted at ``src/gideon`` (never the repo root), and
+    run. Two guarantees: the walk is rooted at ``runtime/gideon`` (never the repo root), and
     the excluded-directory floor names every vendor/worktree dir explicitly.
 
     🪤 THIS TEST USED TO PASS VACUOUSLY IN THE EXACT CASE IT GUARDS. Its per-path loop ran over
@@ -401,8 +399,17 @@ def test_the_walk_cannot_wander_into_a_worktree_or_a_vendor_directory():
     worktree — so the loop body never executed and the assertion held over nothing while the
     census was zero and 18 other tests were red. Hence the floor below: a per-item rail must
     assert it HAD items."""
-    for excluded in (".worktrees", "node_modules", ".venv", "build", "__pycache__", ".git"):
-        assert excluded in gen._EXCLUDED_DIR_NAMES, f"{excluded} left the exclusion floor"
+    for excluded in (
+        ".worktrees",
+        "node_modules",
+        ".venv",
+        "build",
+        "__pycache__",
+        ".git",
+    ):
+        assert (
+            excluded in gen._EXCLUDED_DIR_NAMES
+        ), f"{excluded} left the exclusion floor"
     root = gen._src_root().as_posix()
     assert root.endswith("/src/gideon")
     files = gen._src_py_files()
@@ -411,9 +418,9 @@ def test_the_walk_cannot_wander_into_a_worktree_or_a_vendor_directory():
         f"This is what a broken exclusion looks like from inside this test."
     )
     for path in files:
-        assert path.as_posix().startswith(root + "/"), f"{path} is outside the census root"
-        # Relative to the root, NOT absolute: an excluded name in an ANCESTOR (`.worktrees`) is
-        # not this repo's business, and matching it was the bug.
+        assert path.as_posix().startswith(
+            root + "/"
+        ), f"{path} is outside the census root"
         rel = path.relative_to(gen._src_root())
         assert not (gen._EXCLUDED_DIR_NAMES & set(rel.parts)), path
 
@@ -427,31 +434,25 @@ def test_an_excluded_name_in_an_ANCESTOR_directory_does_not_empty_the_census():
     in perfectly ordinary package directories.
     """
     with tempfile.TemporaryDirectory() as td:
-        root = Path(td) / ".worktrees" / "wt" / "src" / "gideon"
+        root = Path(td) / ".worktrees" / "wt" / "runtime" / "gideon"
         (root / "workflows").mkdir(parents=True)
         (root / "__init__.py").write_text("", encoding="utf-8")
         (root / "workflows" / "tick.py").write_text("x = 1\n", encoding="utf-8")
-        # And one file that SHOULD still be excluded, to prove the filter is not simply off.
         (root / "workflows" / "__pycache__").mkdir()
         (root / "workflows" / "__pycache__" / "tick.cpython-312.py").write_text(
             "", encoding="utf-8"
         )
 
         with mock.patch.object(gen, "_REPO_ROOT", root.parents[1]):
-            assert gen._src_root() == root, "the patch did not take — this test measures nothing"
+            assert (
+                gen._src_root() == root
+            ), "the patch did not take — this test measures nothing"
             found = {p.relative_to(root).as_posix() for p in gen._src_py_files()}
 
     assert found == {"__init__.py", "workflows/tick.py"}, (
         f"expected the two real files and nothing else, got {sorted(found)}. An empty set is the "
         f"original bug: `.worktrees` matched on the ancestor path."
     )
-
-
-# ── Detector rails: a false CLEAR passes the ratchet silently ────────────────
-#
-# A false RED is loud (someone investigates). A false CLEAR lowers a counter and sails through
-# the shrink-only comparison, and the ratchet quietly stops watching. These synthetic-tree
-# tests pin each detector's shape so a "simplification" cannot blind it.
 
 
 def _module(tmp_path: Path, name: str, body: str):
@@ -538,12 +539,12 @@ def test_the_verdict_detector_counts_the_named_family(tmp_path):
 
 
 def test_the_import_direction_rule_resolves_relative_imports(tmp_path, monkeypatch):
-    """``from ..dashboard import x`` never contains the string ``gideon.dashboard``, so a
+    """``from ..dashboard import x`` never contains the string ``gideon.interfaces.dashboard``, so a
     grep-shaped rule would miss the most idiomatic way to write the violation. Resolving
     relative imports is what keeps the rule from being a rail that matches nothing.
 
     Driven against a SYNTHETIC src root, never by writing a probe into the real tree: a stray
-    file under ``src/gideon`` would red the byte-compare gate for every other suite
+    file under ``runtime/gideon`` would red the byte-compare gate for every other suite
     running concurrently, and a failed teardown would leave it there.
     """
     monkeypatch.setattr(gen, "_src_root", lambda: tmp_path)
@@ -556,14 +557,14 @@ def test_the_import_direction_rule_resolves_relative_imports(tmp_path, monkeypat
     tree = gen._parse(probe)
     assert tree is not None
     modules = gen._imported_gideon_modules(probe, tree)
-    assert "gideon.dashboard" in modules, modules
-    assert "gideon.workflows.journal" in modules, modules
+    assert "gideon.interfaces.dashboard" in modules, modules
+    assert "gideon.automation.workflows.journal" in modules, modules
     assert "gideon.sdk.model" in modules, modules
 
 
 def test_the_upper_layer_may_import_itself():
-    """``dashboard/`` importing ``dashboard/`` is not a violation, and neither is ``sdk/``
-    importing ``sdk/``. A rule that flagged intra-layer imports would report hundreds of false
+    """``dashboard/`` importing ``dashboard/`` is not a violation, and neither is ``packages/python-client/``
+    importing ``packages/python-client/``. A rule that flagged intra-layer imports would report hundreds of false
     reds and be deleted within a day."""
     rule = next(r for r in gen.DIRECTION_RULES if r.upper == ("dashboard",))
     assert rule.applies_to("workflows/handlers.py") is True
@@ -602,14 +603,14 @@ def test_an_ordinary_config_field_addition_to_the_largest_file_stays_green():
     ), "the largest file is not a band member, so this test no longer exercises a giant"
     counts[biggest] += 6
 
-    failures = gen.regressions_size(_committed()[gen.RATCHET_SIZE], gen.size_block_from(counts))
+    failures = gen.regressions_size(
+        _committed()[gen.RATCHET_SIZE], gen.size_block_from(counts)
+    )
     assert failures == [], (
         f"a six-line config-field addition to the repo's largest file ({biggest}) REDS the size "
         "ratchet. That is an outage, not a gate: it prices a boolean toggle at a whole-file "
         "split. Re-read the SIZE_CEILING_LINES comment.\n  " + "\n  ".join(failures)
     )
-    # And the render is unchanged, so the byte-compare gate does not demand a regeneration
-    # either — the other half of "ordinary maintenance is untaxed".
     assert gen.size_block_from(counts) == gen.size_block_from(_real_counts())
 
 
@@ -625,7 +626,7 @@ def test_a_new_giant_file_reds_by_naming_the_band_population():
     counts = _real_counts()
     committed = _committed()[gen.RATCHET_SIZE]
     before = len(committed["watch_band_members"])
-    counts["src/gideon/brand_new_giant.py"] = gen.SIZE_WATCH_BAND_LINES + 100
+    counts["runtime/gideon/brand_new_giant.py"] = gen.SIZE_WATCH_BAND_LINES + 100
 
     failures = gen.regressions_size(committed, gen.size_block_from(counts))
     assert len(failures) == 1, failures
@@ -641,9 +642,12 @@ def test_a_file_pushed_past_the_ceiling_reds_on_the_ceiling():
     biggest = max(counts, key=lambda rel: counts[rel])
     counts[biggest] = gen.SIZE_CEILING_LINES + 1
 
-    failures = gen.regressions_size(_committed()[gen.RATCHET_SIZE], gen.size_block_from(counts))
+    failures = gen.regressions_size(
+        _committed()[gen.RATCHET_SIZE], gen.size_block_from(counts)
+    )
     assert any(
-        biggest in ln and "EXCEEDS the committed per-file ceiling" in ln for ln in failures
+        biggest in ln and "EXCEEDS the committed per-file ceiling" in ln
+        for ln in failures
     ), failures
     assert any(str(gen.SIZE_CEILING_LINES) in ln for ln in failures), failures
 
@@ -654,12 +658,14 @@ def test_a_split_is_never_a_regression_and_asks_for_a_regeneration():
     counts = _real_counts()
     committed = _committed()[gen.RATCHET_SIZE]
     departing = sorted(committed["watch_band_members"])[0]
-    counts[departing] = 400  # split into smaller modules
+    counts[departing] = 400
 
     current_block = gen.size_block_from(counts)
     assert gen.regressions_size(committed, current_block) == []
     stale = gen.stale_high(
-        gen.RATCHET_SIZE, {gen.RATCHET_SIZE: committed}, {gen.RATCHET_SIZE: current_block}
+        gen.RATCHET_SIZE,
+        {gen.RATCHET_SIZE: committed},
+        {gen.RATCHET_SIZE: current_block},
     )
     assert any(departing in ln and "left the band" in ln for ln in stale), stale
 
@@ -671,3 +677,16 @@ def test_an_unknown_ratchet_name_is_rejected_rather_than_silently_passing():
         gen.ratchet_failures("structural-typo", {}, {})
     with pytest.raises(ValueError, match="unknown structural ratchet"):
         gen.scan("structural-typo")
+
+
+def test_catalog_format_round_trips_without_changing_records():
+    document = json.loads(gen.baseline_path().read_text(encoding="utf-8"))
+    assert gen.encode_catalog(gen.decode_catalog(document)) == document
+
+
+@pytest.mark.parametrize("field,value", [("version", 2), ("kind", "unrecognized")])
+def test_catalog_reader_rejects_unknown_formats(field, value):
+    document = json.loads(gen.baseline_path().read_text(encoding="utf-8"))
+    document[field] = value
+    with pytest.raises(ValueError, match="unsupported Gideon"):
+        gen.decode_catalog(document)

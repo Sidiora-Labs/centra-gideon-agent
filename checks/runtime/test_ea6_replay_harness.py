@@ -18,11 +18,9 @@ import sys
 
 import pytest
 
-from gideon.learning import proposals as proposals_mod
-from gideon.learning import replay as replay_mod
-from gideon.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK, LLMEvent
-
-# ── scripted halves of the real composition ─────────────────────────────────
+from gideon.cognition.learning import proposals as proposals_mod
+from gideon.cognition.learning import replay as replay_mod
+from gideon.integrations.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK, LLMEvent
 
 
 class ScriptedProvider:
@@ -69,7 +67,7 @@ def judge_scoring(*scores: float, reason: str = "ok"):
     ``prompt_template`` is left at ``None`` so the judge renders through the ``eval_judge``
     prompt binding the atom names — the shipped path, not a test-local string.
     """
-    from gideon.eval.judge import LLMJudge
+    from gideon.assurance.eval.judge import LLMJudge
 
     payloads = [json.dumps({"score": s, "reason": reason}) for s in scores]
     provider = ScriptedProvider(payloads)
@@ -115,8 +113,6 @@ def a_proposal(pid: str = "skill-ea6test01", kind: str = "skill"):
         title="Promote the retry-helper checklist",
         body="When editing the retry helper, always widen the test first.",
         provenance="inferred",
-        # `evidence_refs` is what `Row.bulk_acceptable` requires ("nothing to check" otherwise),
-        # so the seam test can assert the measurement changed no eligibility.
         evidence_refs=["run-1"],
         change_manifest={"predicted_fixes": ["stops the flaky retry regression"]},
     )
@@ -131,11 +127,8 @@ def cfg_file(tmp_path, monkeypatch):
     """Redirect ``config_path()`` at a temp file — never the operator's real home."""
     path = tmp_path / "config.json"
     path.write_text("{}", encoding="utf-8")
-    monkeypatch.setattr("gideon.config.loader.config_path", lambda: path)
+    monkeypatch.setattr("gideon.core.config.loader.config_path", lambda: path)
     return path
-
-
-# ── clause: NOT a gate ───────────────────────────────────────────────────────
 
 
 class TestItIsNotAGate:
@@ -148,7 +141,7 @@ class TestItIsNotAGate:
     """
 
     def test_a_regressed_verdict_still_accepts(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
         prop = a_proposal()
         proposals_mod._save(prop)  # noqa: SLF001
         report = replay_mod.ReplayReport(
@@ -162,7 +155,9 @@ class TestItIsNotAGate:
         assert reloaded.replay["verdict"] == "regressed"
 
         installed: list[str] = []
-        accepted = proposals_mod.accept(prop.id, installer=lambda p: installed.append(p.id))
+        accepted = proposals_mod.accept(
+            prop.id, installer=lambda p: installed.append(p.id)
+        )
         assert accepted.status == "accepted"
         assert installed == [prop.id], "a regressed replay must not stop the install"
 
@@ -173,7 +168,7 @@ class TestItIsNotAGate:
         with `accept` having no gate at all — "nothing blocks" is not the claim; the claim is
         "the REPLAY does not block, and the human gate still does".
         """
-        monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
         prop = a_proposal(pid="skill-ea6test02")
         proposals_mod._save(prop)  # noqa: SLF001
         proposals_mod.attach_replay(
@@ -190,11 +185,13 @@ class TestItIsNotAGate:
 
     def test_attach_moves_neither_status_nor_timestamp(self, tmp_path, monkeypatch):
         """A measurement is not a decision. Same contract as ``attach_gate``."""
-        monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
         prop = a_proposal(pid="skill-ea6test03")
         prop.updated_at = "2026-01-01T00:00:00+00:00"
         proposals_mod._save(prop)  # noqa: SLF001
-        proposals_mod.attach_replay(prop.id, {"state": "replayed", "verdict": "improved"})
+        proposals_mod.attach_replay(
+            prop.id, {"state": "replayed", "verdict": "improved"}
+        )
         after = proposals_mod.get(prop.id)
         assert after.status == "pending"
         assert after.updated_at == "2026-01-01T00:00:00+00:00"
@@ -207,7 +204,7 @@ class TestItIsNotAGate:
         in through a UI eligibility flag would be exactly as semantic a change as one in
         `accept`, and harder to notice.
         """
-        from gideon.learning.inbox import Row
+        from gideon.cognition.learning.inbox import Row
 
         regressed = Row(
             id="r1",
@@ -229,9 +226,6 @@ class TestItIsNotAGate:
         )
         assert regressed.bulk_acceptable is True
         assert regressed.bulk_acceptable == clean.bulk_acceptable
-
-
-# ── clause: an empty scored set publishes NO number ─────────────────────────
 
 
 class TestAnEmptySetPublishesNoNumber:
@@ -299,11 +293,21 @@ class TestAnEmptySetPublishesNoNumber:
     def test_summary_passes_a_null_mean_through_as_null(self):
         """The last hop before the screen. Coercing here would undo `_mean` entirely."""
         projected = replay_mod.summary(
-            {"state": "replayed", "verdict": "unmeasured", "candidate_mean": None, "cases": []}
+            {
+                "state": "replayed",
+                "verdict": "unmeasured",
+                "candidate_mean": None,
+                "cases": [],
+            }
         )
         assert projected["candidate_mean"] is None
         measured = replay_mod.summary(
-            {"state": "replayed", "verdict": "regressed", "candidate_mean": 0.0, "cases": []}
+            {
+                "state": "replayed",
+                "verdict": "regressed",
+                "candidate_mean": 0.0,
+                "cases": [],
+            }
         )
         assert measured["candidate_mean"] == 0.0
         assert projected["candidate_mean"] != measured["candidate_mean"]
@@ -317,19 +321,14 @@ class TestAnEmptySetPublishesNoNumber:
             assert projected["verdict"] == "unmeasured"
 
     def test_an_unknown_verdict_reads_as_unmeasured(self):
-        assert replay_mod.summary({"state": "replayed", "verdict": "wonderful"})["verdict"] == (
-            "unmeasured"
-        )
+        assert replay_mod.summary({"state": "replayed", "verdict": "wonderful"})[
+            "verdict"
+        ] == ("unmeasured")
 
     def test_classify_refuses_to_call_a_missing_mean_neutral(self):
         assert replay_mod.classify(None, 3.0) == replay_mod.VERDICT_UNMEASURED
         assert replay_mod.classify(3.0, None) == replay_mod.VERDICT_UNMEASURED
-        # The partner: an equal PAIR really is neutral, so `unmeasured` above is about the
-        # absence and not about the comparison always answering `unmeasured`.
         assert replay_mod.classify(3.0, 3.0) == replay_mod.VERDICT_NEUTRAL
-
-
-# ── clause: parse-failure → 0 REJECT ────────────────────────────────────────
 
 
 class TestParseFailureRejects:
@@ -347,7 +346,7 @@ class TestParseFailureRejects:
         silently inert and every unparseable case would be counted as a scored zero. This is
         the test that turns that into a red.
         """
-        from gideon.eval.judge import LLMJudge
+        from gideon.assurance.eval.judge import LLMJudge
 
         judge = LLMJudge(lambda _k: ScriptedProvider(["not json at all"]))
         run(judge.start())
@@ -357,9 +356,11 @@ class TestParseFailureRejects:
         assert replay_mod._is_parse_failure(verdict) is True  # noqa: SLF001
 
     def test_a_genuine_zero_is_not_a_parse_failure(self):
-        from gideon.eval.judge import LLMJudge
+        from gideon.assurance.eval.judge import LLMJudge
 
-        judge = LLMJudge(lambda _k: ScriptedProvider([json.dumps({"score": 0, "reason": "wrong"})]))
+        judge = LLMJudge(
+            lambda _k: ScriptedProvider([json.dumps({"score": 0, "reason": "wrong"})])
+        )
         run(judge.start())
         verdict = run(judge.judge_turn("d", "c", "u", "a"))
         assert verdict.score == 0
@@ -367,7 +368,7 @@ class TestParseFailureRejects:
 
     def test_a_parse_failure_rejects_the_case(self):
         """End to end through the real composition: unparseable judge → rejected case."""
-        from gideon.eval.judge import LLMJudge
+        from gideon.assurance.eval.judge import LLMJudge
 
         judge = LLMJudge(lambda _k: ScriptedProvider(["garbage", "garbage"]))
         run(judge.start())
@@ -417,9 +418,6 @@ class TestParseFailureRejects:
         assert "empty completion" in score.reason
 
 
-# ── clause: composes directly, NEVER eval/runner.py ─────────────────────────
-
-
 class TestNeverTheEvalRunner:
     """The atom's explicit hazard: ``eval/runner.py`` spawns a child with an env override.
 
@@ -432,27 +430,28 @@ class TestNeverTheEvalRunner:
     @staticmethod
     def _guard():
         """A meta_path finder that raises the moment ``evals.runner`` is imported."""
-        forbidden = "gideon.evals.runner"
+        forbidden = "gideon.assurance.evals.runner"
 
         class Guard:
             hit = False
 
-            def find_module(self, name, path=None):  # pragma: no cover - legacy protocol
+            def find_module(
+                self, name, path=None
+            ):  # pragma: no cover - legacy protocol
                 return None
 
             def find_spec(self, name, path=None, target=None):
                 if name == forbidden:
                     Guard.hit = True
-                    raise AssertionError(f"EA-6 imported {forbidden} — the env-mutation hazard")
+                    raise AssertionError(
+                        f"EA-6 imported {forbidden} — the env-mutation hazard"
+                    )
                 return None
 
         return Guard, forbidden
 
     def test_the_replay_path_never_imports_the_eval_runner(self):
         Guard, forbidden = self._guard()
-        # Evict it so the import machinery actually consults meta_path. Without this the
-        # guard is unreachable whenever an earlier test in the session imported the runner,
-        # and the assertion below would pass for the wrong reason.
         cached = sys.modules.pop(forbidden, None)
         sys.meta_path.insert(0, Guard())
         try:
@@ -512,10 +511,10 @@ class TestNeverTheEvalRunner:
 
     def test_the_module_imports_the_runner_nowhere_not_even_lazily(self):
         """The static half — it catches a lazily-imported reference no async test reaches."""
-        import gideon.learning.replay as mod
+        import gideon.cognition.learning.replay as mod
 
         imported = self._imported_modules(mod)
-        assert "gideon.evals.runner" not in imported
+        assert "gideon.assurance.evals.runner" not in imported
         assert not any("evals" in name for name in imported), sorted(imported)
 
     def test_the_scan_would_have_caught_the_runner(self):
@@ -525,16 +524,16 @@ class TestNeverTheEvalRunner:
         the same scan over it proves the scan can see an import at all, rather than reporting a
         pass because it looks at the wrong thing.
         """
-        import gideon.evals.gate as gate_mod
+        import gideon.assurance.evals.gate as gate_mod
 
-        assert "gideon.evals.runner" in self._imported_modules(gate_mod)
+        assert "gideon.assurance.evals.runner" in self._imported_modules(gate_mod)
 
     def test_the_module_never_names_a_home_override(self):
         """The env-mutation hazard by its other name. Prose-tolerant: only CODE is scanned."""
         import ast
         from pathlib import Path
 
-        import gideon.learning.replay as mod
+        import gideon.cognition.learning.replay as mod
 
         tree = ast.parse(Path(mod.__file__).read_text(encoding="utf-8"))
         strings = {
@@ -544,7 +543,9 @@ class TestNeverTheEvalRunner:
         }
         docstrings = set()
         for node in ast.walk(tree):
-            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            if isinstance(
+                node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+            ):
                 doc = ast.get_docstring(node, clean=False)
                 if doc is not None:
                     docstrings.add(doc)
@@ -586,7 +587,6 @@ class TestNeverTheEvalRunner:
         body = "always widen the test first"
         assert body not in baseline_prompt
         assert body in candidate_prompt
-        # And the candidate body is FENCED — it is unreviewed machine-authored text.
         assert "<untrusted_content" in candidate_prompt
 
     def test_both_arms_are_judged_on_the_same_criteria(self):
@@ -606,9 +606,6 @@ class TestNeverTheEvalRunner:
         assert judge_prompts[0] == judge_prompts[1].replace("cand", "base")
 
 
-# ── clause: budget exhaustion DEFERS with a labeled card ────────────────────
-
-
 class TestTheBudgetDefers:
     """Exhaustion produces a labelled deferral, never a silent skip.
 
@@ -622,7 +619,10 @@ class TestTheBudgetDefers:
         """`Budget(max_dollars=0)` is UNLIMITED, which is what this must never be."""
         report = run(
             replay_mod.replay_proposal(
-                a_proposal(), [a_case()], budget_dollars=0.0, completion=completion_returning()
+                a_proposal(),
+                [a_case()],
+                budget_dollars=0.0,
+                completion=completion_returning(),
             )
         )
         assert report.state == replay_mod.REPLAY_UNREPLAYED
@@ -631,7 +631,7 @@ class TestTheBudgetDefers:
         assert report.deferred is False, "no budget is a config gap, not a deferral"
 
     def test_exhaustion_defers_with_a_label(self):
-        from gideon.guardrails.failure import BudgetExceededError
+        from gideon.security.guardrails.failure import BudgetExceededError
 
         async def broke(prompt, *, use_case="background", **kw):
             raise BudgetExceededError("run", "dollars", 1.0, 2.0)
@@ -649,7 +649,9 @@ class TestTheBudgetDefers:
         assert report.deferred is True
         assert report.reason == replay_mod.UNREPLAYED_BUDGET_EXHAUSTED
         assert "deferred on the learning replay budget" in report.reason
-        assert report.state == replay_mod.REPLAY_UNREPLAYED, "nothing scored, so not 'replayed'"
+        assert (
+            report.state == replay_mod.REPLAY_UNREPLAYED
+        ), "nothing scored, so not 'replayed'"
         assert report.candidate_mean is None, "a deferral must not publish a mean"
 
     def test_a_sufficient_budget_does_not_defer(self):
@@ -668,7 +670,7 @@ class TestTheBudgetDefers:
 
     def test_a_partial_measurement_survives_the_deferral(self):
         """Cases that already scored are real evidence and stay on the report."""
-        from gideon.guardrails.failure import BudgetExceededError
+        from gideon.security.guardrails.failure import BudgetExceededError
 
         calls = {"n": 0}
 
@@ -702,7 +704,10 @@ class TestTheBudgetDefers:
         merely constructed a `Budget` would have an inert ceiling — the exact shape
         `budgets`' own docstring records for `check_run`.
         """
-        from gideon.guardrails.budgets import current_run_budget, current_run_key
+        from gideon.security.guardrails.budgets import (
+            current_run_budget,
+            current_run_key,
+        )
 
         seen: list[tuple[str, float]] = []
 
@@ -724,7 +729,7 @@ class TestTheBudgetDefers:
 
     def test_the_scope_is_released_afterwards(self):
         """A leaked run key would silently charge every later call to the replay scope."""
-        from gideon.guardrails.budgets import current_run_key
+        from gideon.security.guardrails.budgets import current_run_key
 
         judge = judge_scoring(4.0, 4.0)
         run(
@@ -737,9 +742,6 @@ class TestTheBudgetDefers:
             )
         )
         assert current_run_key() == ""
-
-
-# ── clause: ≤3/session, tool-free-preferring, provenance-pointed ────────────
 
 
 class TestMining:
@@ -777,7 +779,9 @@ class TestMining:
         root = tmp_path / "capture"
         monkeypatch.setattr(replay_mod, "capture_root_for_test", None, raising=False)
         monkeypatch.setattr(
-            "gideon.inbound.capture_store.capture_dir", lambda: root, raising=True
+            "gideon.integrations.inbound.capture_store.capture_dir",
+            lambda: root,
+            raising=True,
         )
         return root
 
@@ -825,21 +829,27 @@ class TestMining:
         """The partner for 'preferring': a tool-free-ONLY rule would return nothing here, and
         a proposal would read `unreplayed` on a home full of usable turns."""
         root = self._mine(tmp_path, monkeypatch)
-        self._write_session(root, "sess-a", [{"tool_calls": [{"name": "Edit"}]} for _ in range(2)])
+        self._write_session(
+            root, "sess-a", [{"tool_calls": [{"name": "Edit"}]} for _ in range(2)]
+        )
         cases = replay_mod.mine_cases()
         assert len(cases) == 2
         assert all(not c.tool_free for c in cases)
 
     def test_an_acknowledgement_is_not_a_case(self, tmp_path, monkeypatch):
         root = self._mine(tmp_path, monkeypatch)
-        self._write_session(root, "sess-a", [{"prompt": "thanks"}, {"prompt": "ok " * 60}])
+        self._write_session(
+            root, "sess-a", [{"prompt": "thanks"}, {"prompt": "ok " * 60}]
+        )
         cases = replay_mod.mine_cases()
         assert len(cases) == 1, "the short prompt is dropped, the long one is kept"
 
     def test_a_mega_context_is_dropped_not_clipped(self, tmp_path, monkeypatch):
         """Clipping a fenced prompt would sever `</untrusted_content>` — a fence BREAK."""
         root = self._mine(tmp_path, monkeypatch)
-        self._write_session(root, "sess-a", [{"prompt": "x" * (replay_mod.MAX_PROMPT_CHARS + 10)}])
+        self._write_session(
+            root, "sess-a", [{"prompt": "x" * (replay_mod.MAX_PROMPT_CHARS + 10)}]
+        )
         assert replay_mod.mine_cases() == []
 
     def test_the_prompt_reaches_the_arm_still_fenced(self, tmp_path, monkeypatch):
@@ -858,7 +868,9 @@ class TestMining:
         )
         assert replay_mod.mine_cases() == []
 
-    def test_a_truncated_line_drops_the_record_not_the_session(self, tmp_path, monkeypatch):
+    def test_a_truncated_line_drops_the_record_not_the_session(
+        self, tmp_path, monkeypatch
+    ):
         root = self._mine(tmp_path, monkeypatch)
         self._write_session(root, "sess-a", [{"hash": "good"}])
         with (root / "sess-a.jsonl").open("a") as handle:
@@ -866,16 +878,15 @@ class TestMining:
         (case,) = replay_mod.mine_cases()
         assert case.record_hash == "good"
 
-    def test_an_absent_capture_dir_mines_nothing_and_does_not_raise(self, tmp_path, monkeypatch):
+    def test_an_absent_capture_dir_mines_nothing_and_does_not_raise(
+        self, tmp_path, monkeypatch
+    ):
         monkeypatch.setattr(
-            "gideon.inbound.capture_store.capture_dir",
+            "gideon.integrations.inbound.capture_store.capture_dir",
             lambda: tmp_path / "nope",
             raising=True,
         )
         assert replay_mod.mine_cases() == []
-
-
-# ── the curator-cadence pass ─────────────────────────────────────────────────
 
 
 class TestTheCuratorPass:
@@ -883,8 +894,6 @@ class TestTheCuratorPass:
 
     def test_only_skill_and_template_kinds_are_replayable(self):
         assert replay_mod.REPLAYABLE_KINDS == {"skill", "template"}
-        # `template_diff` carries typed OPS, not body text — replaying the ops list would
-        # measure a JSON blob rather than the change.
         assert "template_diff" not in replay_mod.REPLAYABLE_KINDS
 
     def test_a_disabled_pass_attaches_an_honest_reason_rather_than_nothing(
@@ -892,25 +901,34 @@ class TestTheCuratorPass:
     ):
         """A proposal with no `replay` key and one saying "replay is off" look identical on a
         card otherwise, and only one of them is something the user can act on."""
-        monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
         monkeypatch.setattr(replay_mod, "replay_enabled", lambda: False)
         prop = a_proposal(pid="skill-ea6pass01")
         proposals_mod._save(prop)  # noqa: SLF001
         result = run(replay_mod.run_pass())
-        assert result == {"considered": 1, "replayed": 0, "deferred": 0, "unreplayed": 1}
+        assert result == {
+            "considered": 1,
+            "replayed": 0,
+            "deferred": 0,
+            "unreplayed": 1,
+        }
         stored = proposals_mod.get(prop.id)
         assert stored.replay["state"] == "unreplayed"
         assert stored.replay["reason"] == replay_mod.UNREPLAYED_DISABLED
 
     def test_a_lesson_batch_is_never_considered(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
         monkeypatch.setattr(replay_mod, "replay_enabled", lambda: False)
-        proposals_mod._save(a_proposal(pid="lesson-ea6x", kind="lesson_batch"))  # noqa: SLF001
+        proposals_mod._save(
+            a_proposal(pid="lesson-ea6x", kind="lesson_batch")
+        )  # noqa: SLF001
         assert run(replay_mod.run_pass())["considered"] == 0
 
-    def test_an_already_replayed_proposal_is_not_replayed_again(self, tmp_path, monkeypatch):
+    def test_an_already_replayed_proposal_is_not_replayed_again(
+        self, tmp_path, monkeypatch
+    ):
         """Re-spending on a proposal that already carries evidence is money for nothing."""
-        monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
         monkeypatch.setattr(replay_mod, "replay_enabled", lambda: False)
         prop = a_proposal(pid="skill-ea6pass02")
         prop.replay = {"state": "replayed", "verdict": "improved"}
@@ -920,7 +938,9 @@ class TestTheCuratorPass:
     def test_summarize_pass_is_silent_when_nothing_happened(self):
         assert replay_mod.summarize_pass({"considered": 0}) == ""
         assert replay_mod.summarize_pass({}) == ""
-        assert "considered=2" in replay_mod.summarize_pass({"considered": 2, "replayed": 2})
+        assert "considered=2" in replay_mod.summarize_pass(
+            {"considered": 2, "replayed": 2}
+        )
 
     def test_the_budget_is_fail_closed(self, monkeypatch):
         """Unlike the day budget's fail-OPEN, an unreadable config here means no replay.
@@ -933,7 +953,9 @@ class TestTheCuratorPass:
         def boom():
             raise RuntimeError("config unreadable")
 
-        monkeypatch.setattr("gideon.config.loader.AppConfig.load", staticmethod(boom))
+        monkeypatch.setattr(
+            "gideon.core.config.loader.AppConfig.load", staticmethod(boom)
+        )
         assert replay_mod.replay_budget() == 0.0
         assert replay_mod.replay_enabled() is False
 
@@ -943,14 +965,11 @@ class TestTheCuratorPass:
         while nothing called it."""
         from pathlib import Path
 
-        import gideon.history as history_mod
+        import gideon.cognition.history as history_mod
 
         source = Path(history_mod.__file__).read_text(encoding="utf-8")
         assert "await replay_mod.run_pass()" in source
-        assert "from gideon.learning import replay as replay_mod" in source
-
-
-# ── the config round-trip ────────────────────────────────────────────────────
+        assert "from gideon.cognition.learning import replay as replay_mod" in source
 
 
 class TestConfigRoundTrip:
@@ -959,18 +978,17 @@ class TestConfigRoundTrip:
 
     @staticmethod
     def _reload(cfg_file, learning: dict):
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         cfg_file.write_text(json.dumps({"learning": learning}), encoding="utf-8")
         return AppConfig.load()
 
     def test_both_fields_survive_a_save_load_cycle(self, cfg_file):
-        cfg = self._reload(cfg_file, {"replay_enabled": True, "replay_max_dollars": 1.25})
+        cfg = self._reload(
+            cfg_file, {"replay_enabled": True, "replay_max_dollars": 1.25}
+        )
         assert cfg.learning.replay_enabled is True
         assert cfg.learning.replay_max_dollars == 1.25
-        # The half a `to_dict`-only test misses: save it back and reload. A field in
-        # `to_dict` but absent from `load`'s mapping reverts to its default every reload,
-        # and the next save then wipes the user's value out of the file.
         cfg.save()
         again = json.loads(cfg_file.read_text(encoding="utf-8"))["learning"]
         assert again["replay_enabled"] is True
@@ -987,7 +1005,7 @@ class TestConfigRoundTrip:
         assert cfg.learning.replay_max_dollars == 0.0
 
     def test_both_are_in_the_patch_allowlist(self):
-        from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+        from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
         assert _EDITABLE_CONFIG["learning.replay_enabled"] == {"type": "bool"}
         spec = _EDITABLE_CONFIG["learning.replay_max_dollars"]
@@ -996,16 +1014,13 @@ class TestConfigRoundTrip:
     def test_both_carry_a_label_and_help(self):
         from dataclasses import fields
 
-        from gideon.config.learning import LearningConfig
+        from gideon.core.config.learning import LearningConfig
 
         by_name = {f.name: f for f in fields(LearningConfig)}
         for name in ("replay_enabled", "replay_max_dollars"):
             meta = by_name[name].metadata
             assert meta.get("label"), f"{name} has no _meta label"
             assert meta.get("help"), f"{name} has no _meta help text"
-
-
-# ── the seam, end to end ─────────────────────────────────────────────────────
 
 
 class TestTheWholeSeam:
@@ -1025,20 +1040,22 @@ class TestTheWholeSeam:
     def test_a_replayed_proposal_reaches_the_inbox_row_with_its_numbers(
         self, tmp_path, monkeypatch
     ):
-        from gideon.learning.inbox import build_view
+        from gideon.cognition.learning.inbox import build_view
 
-        monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
         capture = tmp_path / "capture"
-        TestMining._write_session(capture, "sess-real", [{"hash": "h1"}, {"hash": "h2"}])
+        TestMining._write_session(
+            capture, "sess-real", [{"hash": "h1"}, {"hash": "h2"}]
+        )
         monkeypatch.setattr(
-            "gideon.inbound.capture_store.capture_dir", lambda: capture, raising=True
+            "gideon.integrations.inbound.capture_store.capture_dir",
+            lambda: capture,
+            raising=True,
         )
 
-        # HOP 1 — mine.
         cases = replay_mod.mine_cases()
         assert len(cases) == 2, "the fixture's two turns must both mine"
 
-        # HOP 2 — replay, through a real LLMJudge: baseline 2.0, candidate 4.0, per case.
         prop = a_proposal(pid="skill-ea6seam01")
         judge = judge_scoring(2.0, 4.0, 2.0, 4.0)
         report = run(
@@ -1052,7 +1069,6 @@ class TestTheWholeSeam:
         )
         assert report.verdict == replay_mod.VERDICT_IMPROVED
 
-        # HOP 3 — attach, and read it back off disk rather than trusting the object.
         proposals_mod._save(prop)  # noqa: SLF001
         assert replay_mod.attach(prop.id, report) is True
         stored = proposals_mod.get(prop.id)
@@ -1060,10 +1076,11 @@ class TestTheWholeSeam:
         assert stored.replay["verdict"] == "improved"
         assert stored.replay["baseline_mean"] == 2.0
         assert stored.replay["candidate_mean"] == 4.0
-        # Provenance survived to the persisted record — the claim is checkable.
-        assert all(c["provenance"].startswith("capture:sess-real#") for c in stored.replay["cases"])
+        assert all(
+            c["provenance"].startswith("capture:sess-real#")
+            for c in stored.replay["cases"]
+        )
 
-        # HOP 4 — the ROW the handler serves, through the real projection.
         (row,) = build_view([stored]).rows
         served = row.to_dict()
         assert served["replay"]["state"] == "replayed"
@@ -1072,7 +1089,6 @@ class TestTheWholeSeam:
         assert served["replay"]["candidate_mean"] == 4.0
         assert served["replay"]["scored"] == 2
         assert served["replay"]["provenance"], "the card must be able to cite the turns"
-        # And the row is still acceptable — the measurement changed no eligibility.
         assert served["bulk_acceptable"] is True
 
     def test_an_unreplayed_proposal_reaches_the_row_as_an_honest_absence(
@@ -1080,9 +1096,9 @@ class TestTheWholeSeam:
     ):
         """The vacuity partner for the seam. Same projection, opposite content — so the test above
         cannot be passing because `to_dict` emits a constant."""
-        from gideon.learning.inbox import build_view
+        from gideon.cognition.learning.inbox import build_view
 
-        monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
         prop = a_proposal(pid="skill-ea6seam02")
         proposals_mod._save(prop)  # noqa: SLF001
         (row,) = build_view([proposals_mod.get(prop.id)]).rows

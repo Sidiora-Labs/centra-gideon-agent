@@ -18,7 +18,7 @@ Re-exported here (never core internals — the app boundary) so a provider app i
 ``gideon.sdk.sidecar``, exactly like ``gideon.sdk.tts``.
 """
 
-from gideon.local_models.sidecar import (  # noqa: F401
+from gideon.integrations.local_models.sidecar import (
     SidecarCrashed,
     SidecarRunner,
     SidecarWorkerError,

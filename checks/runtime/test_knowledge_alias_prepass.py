@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.knowledge.alias_prepass import (
+from gideon.cognition.knowledge.alias_prepass import (
     MAX_MENTIONS_PER_ITEM,
     build_index,
     link_known_entities,
@@ -26,9 +26,8 @@ from gideon.knowledge.alias_prepass import (
 
 @pytest.fixture()
 def store(tmp_path):
-    from gideon.knowledge.store import KnowledgeStore
+    from gideon.cognition.knowledge.store import KnowledgeStore
 
-    # KnowledgeStore takes the db path directly (no config_dir seam to patch).
     return KnowledgeStore(tmp_path / "k.db")
 
 
@@ -52,9 +51,6 @@ def _mention_ids(store, item_id) -> set[str]:
     return {r["entity_id"] for r in rows}
 
 
-# ── The index ───────────────────────────────────────────────────────────
-
-
 def test_index_is_empty_with_no_entities(store):
     """A fresh install must cost nothing — the caller no-ops on an empty index."""
     index, names = build_index(store)
@@ -63,7 +59,9 @@ def test_index_is_empty_with_no_entities(store):
 
 
 def test_index_covers_names_and_aliases(store):
-    eid = store.add_entity(name="Sparrow", entity_type="project", aliases=["@sparrow", "SPRW"])
+    eid = store.add_entity(
+        name="Sparrow", entity_type="project", aliases=["@sparrow", "SPRW"]
+    )
     index, names = build_index(store)
     assert names[eid] == "Sparrow"
     assert len(index) >= 3
@@ -82,7 +80,9 @@ def test_index_skips_malformed_aliases(store):
 
 def test_index_skips_a_non_list_alias_blob(store):
     eid = store.add_entity(name="Sparrow", entity_type="project")
-    store.db.execute("UPDATE entities SET aliases = ? WHERE id = ?", ('"a string"', eid))
+    store.db.execute(
+        "UPDATE entities SET aliases = ? WHERE id = ?", ('"a string"', eid)
+    )
     store.db.commit()
     index, names = build_index(store)
     assert eid in names
@@ -104,9 +104,6 @@ def test_index_survives_an_unreadable_table(store):
 
     index, names = build_index(_BrokenStore())
     assert len(index) == 0 and names == {}
-
-
-# ── Linking ─────────────────────────────────────────────────────────────
 
 
 def test_links_a_known_entity_by_name(store):
@@ -152,8 +149,12 @@ def test_records_context_so_the_link_is_explainable(store):
     """A reader must see WHY an item was linked without opening the document."""
     store.add_entity(name="Sparrow", entity_type="project")
     item_id = _item(store)
-    link_known_entities(store, item_id, "Long preamble. The Sparrow release ships Friday.")
-    row = store.db.execute("SELECT context FROM mentions WHERE item_id = ?", (item_id,)).fetchone()
+    link_known_entities(
+        store, item_id, "Long preamble. The Sparrow release ships Friday."
+    )
+    row = store.db.execute(
+        "SELECT context FROM mentions WHERE item_id = ?", (item_id,)
+    ).fetchone()
     assert row["context"] and "Sparrow" in row["context"]
 
 
@@ -194,10 +195,12 @@ def test_a_matcher_failure_is_survivable(store, monkeypatch):
     """Linking is an enhancement; a failure must not break ingestion."""
     store.add_entity(name="Sparrow", entity_type="project")
     item_id = _item(store)
-    import gideon.memory_graph as mg
+    import gideon.cognition.memory_graph as mg
 
     monkeypatch.setattr(
-        mg.AliasIndex, "find", lambda self, text: (_ for _ in ()).throw(RuntimeError("boom"))
+        mg.AliasIndex,
+        "find",
+        lambda self, text: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     assert link_known_entities(store, item_id, "Sparrow ships.") == 0
 
@@ -208,7 +211,7 @@ def test_uses_the_same_matcher_as_the_memory_store(store):
     Two matchers would drift, and the symptom is a document that links in one surface and not
     the other — with nothing to point at.
     """
-    from gideon.memory_graph import AliasIndex
+    from gideon.cognition.memory_graph import AliasIndex
 
     index, _ = build_index(store)
     assert isinstance(index, AliasIndex)
@@ -229,10 +232,9 @@ def test_longest_match_wins(store):
     link_known_entities(store, item_id, "The Sparrow Release ships Friday.")
     linked = _mention_ids(store, item_id)
     assert long in linked
-    assert short not in linked, "the longer surface form should have consumed the tokens"
-
-
-# ── The pipeline seam ───────────────────────────────────────────────────
+    assert (
+        short not in linked
+    ), "the longer surface form should have consumed the tokens"
 
 
 class TestEntitiesStage:
@@ -241,11 +243,13 @@ class TestEntitiesStage:
     @pytest.mark.asyncio
     async def test_links_with_no_model_bound(self, store):
         """THE headline fix: pool=None used to mean zero mentions, forever."""
-        from gideon.knowledge.pipeline.runner import _run_entities_stage
+        from gideon.cognition.knowledge.pipeline.runner import _run_entities_stage
 
         eid = store.add_entity(name="Sparrow", entity_type="project")
         item_id = _item(store)
-        await _run_entities_stage(store, item_id, "The Sparrow release ships Friday.", None)
+        await _run_entities_stage(
+            store, item_id, "The Sparrow release ships Friday.", None
+        )
         assert _mention_ids(store, item_id) == {eid}
 
     @pytest.mark.asyncio
@@ -256,7 +260,7 @@ class TestEntitiesStage:
         deterministic links — the pre-pass would appear to work only in the no-model case,
         which is much harder to notice.
         """
-        from gideon.knowledge.pipeline import runner
+        from gideon.cognition.knowledge.pipeline import runner
 
         store.add_entity(name="Sparrow", entity_type="project")
         item_id = _item(store)
@@ -266,21 +270,23 @@ class TestEntitiesStage:
                 pass
 
             async def extract(self, content):
-                # The model finds something DIFFERENT — the realistic case.
-                return {"entities": [{"name": "Kestrel", "type": "project"}], "relations": []}
+                return {
+                    "entities": [{"name": "Kestrel", "type": "project"}],
+                    "relations": [],
+                }
 
-        monkeypatch.setattr("gideon.knowledge.extractor.EntityExtractor", _FakeExtractor)
-        await runner._run_entities_stage(store, item_id, "Sparrow and something new.", object())
+        monkeypatch.setattr(
+            "gideon.cognition.knowledge.extractor.EntityExtractor", _FakeExtractor
+        )
+        await runner._run_entities_stage(
+            store, item_id, "Sparrow and something new.", object()
+        )
 
-        # Asserted by NAME, not id. `clear_item_entities` deletes an entity that loses its
-        # last mention, so the restored Sparrow is a NEW row with a new id — the link is what
-        # must survive, not the identifier. Asserting the old id here would fail on correct
-        # behavior and send the next reader hunting a phantom bug.
         assert _linked_names(store, item_id) == {"Sparrow", "Kestrel"}
 
     @pytest.mark.asyncio
     async def test_an_entity_found_by_both_yields_one_mention(self, store, monkeypatch):
-        from gideon.knowledge.pipeline import runner
+        from gideon.cognition.knowledge.pipeline import runner
 
         store.add_entity(name="Sparrow", entity_type="project")
         item_id = _item(store)
@@ -290,9 +296,14 @@ class TestEntitiesStage:
                 pass
 
             async def extract(self, content):
-                return {"entities": [{"name": "Sparrow", "type": "project"}], "relations": []}
+                return {
+                    "entities": [{"name": "Sparrow", "type": "project"}],
+                    "relations": [],
+                }
 
-        monkeypatch.setattr("gideon.knowledge.extractor.EntityExtractor", _FakeExtractor)
+        monkeypatch.setattr(
+            "gideon.cognition.knowledge.extractor.EntityExtractor", _FakeExtractor
+        )
         await runner._run_entities_stage(store, item_id, "Sparrow ships.", object())
         rows = store.db.execute(
             "SELECT COUNT(*) c FROM mentions WHERE item_id = ?", (item_id,)
@@ -300,9 +311,11 @@ class TestEntitiesStage:
         assert rows["c"] == 1
 
     @pytest.mark.asyncio
-    async def test_extraction_failure_leaves_the_prepass_links(self, store, monkeypatch):
+    async def test_extraction_failure_leaves_the_prepass_links(
+        self, store, monkeypatch
+    ):
         """A model error must not cost the deterministic links."""
-        from gideon.knowledge.pipeline import runner
+        from gideon.cognition.knowledge.pipeline import runner
 
         eid = store.add_entity(name="Sparrow", entity_type="project")
         item_id = _item(store)
@@ -314,13 +327,15 @@ class TestEntitiesStage:
             async def extract(self, content):
                 raise RuntimeError("model down")
 
-        monkeypatch.setattr("gideon.knowledge.extractor.EntityExtractor", _Boom)
+        monkeypatch.setattr(
+            "gideon.cognition.knowledge.extractor.EntityExtractor", _Boom
+        )
         await runner._run_entities_stage(store, item_id, "Sparrow ships.", object())
         assert _mention_ids(store, item_id) == {eid}
 
     @pytest.mark.asyncio
     async def test_empty_content_is_a_no_op(self, store):
-        from gideon.knowledge.pipeline.runner import _run_entities_stage
+        from gideon.cognition.knowledge.pipeline.runner import _run_entities_stage
 
         store.add_entity(name="Sparrow", entity_type="project")
         item_id = _item(store)

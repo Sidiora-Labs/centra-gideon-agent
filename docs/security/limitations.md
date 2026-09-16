@@ -16,7 +16,7 @@ Task modes (`agent` / `ask` / `plan` / `build`) decide *which tools may run*. Fo
 the **native runtime**, this gate is hard-enforced: `task_modes.py` is enforced
 in `_guard_and_invoke` **before approval is consulted, so a Trust/YOLO
 auto-approve can never bypass a task-mode restriction**
-(`src/gideon/task_modes.py`).
+(`runtime/gideon/task_modes.py`).
 
 For **ACP agents** (external CLI agents driven over the Agent Client Protocol),
 the same module is applied in the dashboard's permission handler as
@@ -47,7 +47,7 @@ server-side by the gateway. **`network` is not**, by design:
 > with a backend owns a separate OS process with its own network stack … So the flag
 > is DISCLOSURE, and the Store discloses it as such … Treat `network: true` as an
 > honest declaration, not a boundary.
-> — `src/gideon/apps/permissions.py`
+> — `runtime/gideon/apps/permissions.py`
 
 The consent surface states the non-enforcement outright. The Store shows the
 network claim **outside** the list of permissions the gateway enforces, labelled

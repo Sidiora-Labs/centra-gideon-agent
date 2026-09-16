@@ -8,8 +8,8 @@ register this fake instead of importing the ollama app's module.
 
 from __future__ import annotations
 
-from gideon.llm.capabilities import Capability, ProviderCapability
-from gideon.llm.registry import ProviderEntry, ProviderRegistry
+from gideon.integrations.llm.capabilities import Capability, ProviderCapability
+from gideon.integrations.llm.registry import ProviderEntry, ProviderRegistry
 
 FAKE_MODEL_TYPE = "fake-model"
 

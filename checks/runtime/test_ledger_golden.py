@@ -23,7 +23,7 @@ durations). Everything else — key order, numeric rounding, redaction, spill st
 is compared byte for byte.
 
 Regenerating these fixtures is a deliberate act, not a convenience: run this module as a script
-(`python tests/test_ledger_golden.py`). There is no environment variable that rewrites them, because
+(`python checks/runtime/test_ledger_golden.py`). There is no environment variable that rewrites them, because
 a golden file rewritten by the run under test blesses whatever that run did.
 """
 
@@ -41,30 +41,24 @@ from typing import Any
 
 import pytest
 
-from gideon.workflows import journal as journal_mod
-from gideon.workflows import store
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.models import (
+from gideon.automation.workflows import journal as journal_mod
+from gideon.automation.workflows import store
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.models import (
     Failure,
     FailureClass,
     InstanceState,
     RunStatus,
     WorkflowRun,
 )
-from gideon.workflows.native_defs import register_native_provider
+from gideon.automation.workflows.native_defs import register_native_provider
 
 GOLDEN_DIR = Path(__file__).parent / "fixtures" / "ledger_golden"
 
-#: Big enough to cross `MAX_INLINE_OUTPUT_BYTES` (64KB) so the middle node spills `oversize` and
-#: leaves a head+tail preview stub, which is the branch with the most fields to get wrong.
 _OVERSIZE_BODY = "spill" * 20_000
 
-#: A base64 PNG header — `is_binary_payload` matches on content, so this spills `binary` (no
-#: preview) despite being tiny. Both spill reasons in one run.
 _BINARY_BODY = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4//8/AAX+Av7czFnnAAAAAElFTkSuQmCC"  # noqa: E501
 
-#: Three transforms with a real binding chain, so the run journals a dependency-ordered sequence
-#: rather than three independent nodes.
 GOLDEN_SPEC: dict[str, Any] = {
     "name": "ledger-golden",
     "root": {
@@ -83,9 +77,6 @@ GOLDEN_SPEC: dict[str, Any] = {
 }
 
 
-# ── normalization ────────────────────────────────────────────────────────────
-
-
 def _normalize(records: list[dict[str, Any]], run_id: str) -> list[str]:
     """Serialize records for comparison, blanking only what cannot be deterministic.
 
@@ -98,10 +89,6 @@ def _normalize(records: list[dict[str, Any]], run_id: str) -> list[str]:
         norm = dict(rec)
         if "ts" in norm:
             norm["ts"] = "TS"
-        # `origin_harness` (TSE2-1) is the local `machine_id`: a random uuid minted per home, so it
-        # is provably nondeterministic in exactly the way the run-id half of `event_id` is, and is
-        # blanked for the same reason. `owner_username` is NOT normalized — it is "" in a
-        # config-less capture, deterministic, and its presence is part of what this asserts.
         if "origin_harness" in norm:
             norm["origin_harness"] = "HARNESS"
         for wall in ("duration_secs", "elapsed_secs"):
@@ -112,9 +99,6 @@ def _normalize(records: list[dict[str, Any]], run_id: str) -> list[str]:
             line = line.replace(run_id, "RUN")
         out.append(line)
     return out
-
-
-# ── capture: a real engine run ───────────────────────────────────────────────
 
 
 @contextlib.contextmanager
@@ -136,7 +120,7 @@ def _isolated(home: Path) -> Iterator[None]:
 
 async def _capture_run(home: Path) -> dict[str, list[str]]:
     """Drive the real controller over `GOLDEN_SPEC` and return both files, normalized."""
-    from gideon.workflows import defs as defs_mod
+    from gideon.automation.workflows import defs as defs_mod
 
     saved = dict(defs_mod._providers)
     defs_mod._providers.clear()
@@ -147,17 +131,20 @@ async def _capture_run(home: Path) -> dict[str, list[str]]:
             store.write_spec(run.id, GOLDEN_SPEC)
             controller = RunController(run, GOLDEN_SPEC, services=EngineServices())
             status = await controller.run_to_completion(timeout=60)
-            assert status is RunStatus.COMPLETE, f"golden run did not complete: {status}"
+            assert (
+                status is RunStatus.COMPLETE
+            ), f"golden run did not complete: {status}"
             return {
-                "journal": _normalize(store.read_jsonl(run.id, journal_mod.JOURNAL_FILE), run.id),
-                "events": _normalize(store.read_jsonl(run.id, journal_mod.EVENTS_FILE), run.id),
+                "journal": _normalize(
+                    store.read_jsonl(run.id, journal_mod.JOURNAL_FILE), run.id
+                ),
+                "events": _normalize(
+                    store.read_jsonl(run.id, journal_mod.EVENTS_FILE), run.id
+                ),
             }
     finally:
         defs_mod._providers.clear()
         defs_mod._providers.update(saved)
-
-
-# ── capture: every kind + the field-shaping emitters ─────────────────────────
 
 
 def _registered_kinds() -> list[str]:
@@ -182,13 +169,9 @@ def _drive_emitters() -> dict[str, list[str]]:
     run = store.create(WorkflowRun(id="", workflow_name="emitters"))
     j = journal_mod.Journal(run.id)
 
-    # One raw write per registered kind: proves the mirroring table (which kinds reach
-    # `events.jsonl`) and the stamping applied to every one of them.
     for kind in _registered_kinds():
         j.write(kind, marker=f"probe:{kind}")
 
-    # The typed emitters whose job is field SHAPING — enum unwrapping, rounding, tristates,
-    # nested redaction. A transform-only run reaches none of them.
     j.step_completed(
         "main.children[0]",
         "gather",
@@ -219,7 +202,9 @@ def _drive_emitters() -> dict[str, list[str]]:
         retries_exhausted=True,
         signature={"class": "network"},
     )
-    j.task_verified("main.children[0]", "gather", task_id="t1", passed=None, criterion="builds")
+    j.task_verified(
+        "main.children[0]", "gather", task_id="t1", passed=None, criterion="builds"
+    )
     pending = j.pending_outcome(
         "main.children[0]",
         "gather",
@@ -240,18 +225,13 @@ def _drive_emitters() -> dict[str, list[str]]:
         score=0.9876543,
         resolution="inconclusive",
     )
-    # Nested redaction: the secret must not survive into either file at any depth.
     j.workspace_provisioned(
-        {"mode": "worktree", "env": {"token": "sk-ant-api03-DEADBEEFdeadbeefDEADBEEFdeadbeef"}}
+        {
+            "mode": "worktree",
+            "env": {"token": "sk-ant-api03-DEADBEEFdeadbeefDEADBEEFdeadbeef"},
+        }
     )
 
-    # All three `store_output` paths, each carrying a credential so redaction is proven on the
-    # spill path too (the offloaded body is redacted before it is written, not after).
-    #
-    # Captured as its OWN golden because a spill stub never appears in a journal line: a run
-    # journals the `output_ref` and the stub rides in the node's inline output. Diffing only the
-    # two .jsonl files would leave `result_omitted`, `bytes` and the head+tail preview — three of
-    # the four things the atom says move — unproven.
     spill: list[str] = []
     for i, (case, payload) in enumerate(
         (
@@ -261,25 +241,26 @@ def _drive_emitters() -> dict[str, list[str]]:
         )
     ):
         ref, inline = j.store_output(f"main.children[{i}]", payload)
-        spill.append(json.dumps({"case": case, "ref": ref, "inline": inline}, sort_keys=True))
+        spill.append(
+            json.dumps({"case": case, "ref": ref, "inline": inline}, sort_keys=True)
+        )
 
     return {
-        "journal": _normalize(store.read_jsonl(run.id, journal_mod.JOURNAL_FILE), run.id),
+        "journal": _normalize(
+            store.read_jsonl(run.id, journal_mod.JOURNAL_FILE), run.id
+        ),
         "events": _normalize(store.read_jsonl(run.id, journal_mod.EVENTS_FILE), run.id),
         "spill": spill,
     }
 
 
-# ── the tests ────────────────────────────────────────────────────────────────
-
-
 def _assert_golden(name: str, actual: list[str]) -> None:
     path = GOLDEN_DIR / f"{name}.jsonl"
-    assert path.exists(), f"missing golden fixture {path} — regenerate with `python {__file__}`"
+    assert (
+        path.exists()
+    ), f"missing golden fixture {path} — regenerate with `python {__file__}`"
     expected = path.read_text(encoding="utf-8").splitlines()
     if actual != expected:
-        # Report the FIRST divergence with both lines: a whole-file dump of sixty JSON lines
-        # buries the one that moved.
         for i, (want, got) in enumerate(zip(expected, actual)):
             if want != got:
                 raise AssertionError(
@@ -319,9 +300,15 @@ def test_the_golden_run_exercised_both_spill_reasons_and_the_ledger_mirror():
     redaction marker, and an `events.jsonl` that is a strict non-empty subset of the journal.
     """
     spill = (GOLDEN_DIR / "emitters_spill.jsonl").read_text(encoding="utf-8")
-    assert '"reason": "oversize"' in spill, "the golden never crossed MAX_INLINE_OUTPUT_BYTES"
-    assert '"reason": "binary"' in spill, "the golden never tripped magic-prefix detection"
-    assert '"head"' in spill and '"tail"' in spill, "the oversize preview was never captured"
+    assert (
+        '"reason": "oversize"' in spill
+    ), "the golden never crossed MAX_INLINE_OUTPUT_BYTES"
+    assert (
+        '"reason": "binary"' in spill
+    ), "the golden never tripped magic-prefix detection"
+    assert (
+        '"head"' in spill and '"tail"' in spill
+    ), "the oversize preview was never captured"
     assert '"result_omitted": true' in spill
 
     emitters = (GOLDEN_DIR / "emitters_journal.jsonl").read_text(encoding="utf-8")
@@ -329,10 +316,14 @@ def test_the_golden_run_exercised_both_spill_reasons_and_the_ledger_mirror():
         assert secret not in emitters, f"{secret} reached the golden journal"
         assert secret not in spill, f"{secret} reached the golden spill stub"
 
-    j_lines = (GOLDEN_DIR / "run_journal.jsonl").read_text(encoding="utf-8").splitlines()
+    j_lines = (
+        (GOLDEN_DIR / "run_journal.jsonl").read_text(encoding="utf-8").splitlines()
+    )
     e_lines = (GOLDEN_DIR / "run_events.jsonl").read_text(encoding="utf-8").splitlines()
     assert j_lines and e_lines
-    assert len(e_lines) < len(j_lines), "events.jsonl should be the ledger SUBSET of the journal"
+    assert len(e_lines) < len(
+        j_lines
+    ), "events.jsonl should be the ledger SUBSET of the journal"
     kinds = {json.loads(line)["kind"] for line in e_lines}
     assert kinds <= journal_mod.LEDGER_KINDS
     assert journal_mod.STEP_COMPLETED in kinds
@@ -341,8 +332,8 @@ def test_the_golden_run_exercised_both_spill_reasons_and_the_ledger_mirror():
 def test_the_ledger_package_does_not_import_the_workflow_engine():
     """The seam guarantee, as a rail rather than a convention.
 
-    `gideon.ledger` exists so a SECOND producer can carry a ledger. The moment anything under
-    it imports a PRODUCER — `gideon.workflows` (the first) or `gideon.loop` (the second,
+    `gideon.assurance.ledger` exists so a SECOND producer can carry a ledger. The moment anything under
+    it imports a PRODUCER — `gideon.automation.workflows` (the first) or `gideon.automation.loop` (the second,
     PP-5) — that stops being true: a loop emitter would have to pull the engine in to journal a
     cycle, which is the dependency direction the extraction exists to reverse. Both directions are
     banned so the primitive stays below every producer. Checked statically (an AST scan, not an
@@ -353,7 +344,7 @@ def test_the_ledger_package_does_not_import_the_workflow_engine():
     modules = sorted(pkg.glob("*.py"))
     assert len(modules) >= 6, f"expected the ledger package's modules, found {modules}"
 
-    banned = ("gideon.workflows", "gideon.loop")
+    banned = ("gideon.automation.workflows", "gideon.automation.loop")
     offenders: list[str] = []
     for path in modules:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -367,12 +358,9 @@ def test_the_ledger_package_does_not_import_the_workflow_engine():
             for name in names:
                 if any(name == b or name.startswith(b + ".") for b in banned):
                     offenders.append(f"{path.name}:{node.lineno} imports {name}")
-    assert not offenders, "gideon.ledger must not depend on a producer: " + "; ".join(
-        offenders
-    )
-
-
-# ── deliberate regeneration ──────────────────────────────────────────────────
+    assert (
+        not offenders
+    ), "gideon.assurance.ledger must not depend on a producer: " + "; ".join(offenders)
 
 
 def _regenerate() -> None:
@@ -390,7 +378,9 @@ def _regenerate() -> None:
             ("emitters_events", emitters["events"]),
             ("emitters_spill", emitters["spill"]),
         ):
-            (GOLDEN_DIR / f"{name}.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+            (GOLDEN_DIR / f"{name}.jsonl").write_text(
+                "\n".join(lines) + "\n", encoding="utf-8"
+            )
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print(f"wrote goldens to {GOLDEN_DIR}")

@@ -23,19 +23,23 @@ import json
 
 import pytest
 
-from gideon.loop import tick
-from gideon.loop.tick import (
+from gideon.automation.loop import tick
+from gideon.automation.loop.tick import (
     Action,
     StepConfig,
     TickConfig,
     TickState,
     evaluate,
 )
-from gideon.workflows import journal as J
-from gideon.workflows import store, supervisor_policy
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.loop_middleware import DEFAULT_LADDER, FailureClass, Rung
-from gideon.workflows.models import WorkflowRun
+from gideon.automation.workflows import journal as J
+from gideon.automation.workflows import store, supervisor_policy
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.loop_middleware import (
+    DEFAULT_LADDER,
+    FailureClass,
+    Rung,
+)
+from gideon.automation.workflows.models import WorkflowRun
 
 NOW = 1_000.0
 
@@ -54,34 +58,30 @@ def _fail(state: TickState, *, n: int = 1, **kw) -> TickState:
     return state
 
 
-# ── the branch corpus: one case per reachable branch, including the new members ──
-#
-# Named cases rather than an ad-hoc state so a future branch that is NOT covered here is
-# visible as a missing name, not as a silently smaller loop.
-
-
 def _corpus() -> dict[str, tuple[TickConfig, TickState]]:
     gated = StepConfig(metric_pass=0.8, metric_hold=0.5)
     stall_cfg = TickConfig()
     return {
-        # 1-3: the structural branches
         "budget_exhausted": (
             TickConfig(steps=(StepConfig(),), max_cycles=2),
             _state(total_cycles=2),
         ),
         "all_steps_done": (TickConfig(steps=(StepConfig(),)), _state(step_index=1)),
         "worker_in_flight": (TickConfig(), _state(worker_in_flight=True)),
-        # 4-5: the recoverable and environment tiers
         "recoverable_wait": (stall_cfg, _fail(_state(), n=2, text="429 rate limited")),
-        "recoverable_exhausted": (stall_cfg, _fail(_state(), n=12, text="429 rate limited")),
-        "environment_broken": (stall_cfg, _fail(_state(), text="command not found: pytest")),
-        # 6: REPLAN
+        "recoverable_exhausted": (
+            stall_cfg,
+            _fail(_state(), n=12, text="429 rate limited"),
+        ),
+        "environment_broken": (
+            stall_cfg,
+            _fail(_state(), text="command not found: pytest"),
+        ),
         "replan": (stall_cfg, _state(plan_critique="the plan skips verification")),
         "replan_capped": (
             TickConfig(replan_cap=1),
             _state(plan_critique="still wrong", replans_taken=1),
         ),
-        # 7: the stall ladder, at each of its positions
         "stall_nudge": (
             stall_cfg,
             _fail(_state(), n=3, tool="bash", args={"cmd": "make test"}),
@@ -101,9 +101,13 @@ def _corpus() -> dict[str, tuple[TickConfig, TickState]]:
         ),
         "hypothesis_exhausted": (
             stall_cfg,
-            _fail(_state(nudges_issued=1), n=3, text="still failing", fix="null check line 52"),
+            _fail(
+                _state(nudges_issued=1),
+                n=3,
+                text="still failing",
+                fix="null check line 52",
+            ),
         ),
-        # 8-13: the progress branches, unchanged by PP-15
         "rollback": (
             TickConfig(steps=(gated, gated)),
             _state(step_index=1, metric=0.2, prior_step_floor=0.6),
@@ -120,7 +124,10 @@ def _corpus() -> dict[str, tuple[TickConfig, TickState]]:
             TickConfig(steps=(StepConfig(min_findings=3),)),
             _state(findings_in_step=1),
         ),
-        "advance": (TickConfig(steps=(StepConfig(), StepConfig())), _state(gate_passed=True)),
+        "advance": (
+            TickConfig(steps=(StepConfig(), StepConfig())),
+            _state(gate_passed=True),
+        ),
         "marginal_hold": (TickConfig(steps=(gated,)), _state(metric=0.6)),
         "execute": (TickConfig(steps=(StepConfig(),)), _state()),
     }
@@ -137,9 +144,6 @@ def test_the_corpus_actually_reaches_every_action_including_the_new_two():
     missing = set(Action) - reached
     assert not missing, f"the corpus never reaches {sorted(a.value for a in missing)}"
     assert Action.ESCALATE in reached and Action.REPLAN in reached
-
-
-# ── clause: purity is preserved and re-proven ──
 
 
 @pytest.mark.parametrize("name", sorted(CORPUS))
@@ -199,7 +203,9 @@ def test_evaluate_reads_no_clock(name, monkeypatch):
     for absurd in (0.0, -1.0, 9e12):
         monkeypatch.setattr("time.time", lambda v=absurd: v)
         monkeypatch.setattr("time.monotonic", lambda v=absurd: v)
-        assert evaluate(cfg, state, NOW) == baseline, f"{name}: the decision moved with the clock"
+        assert (
+            evaluate(cfg, state, NOW) == baseline
+        ), f"{name}: the decision moved with the clock"
 
 
 def test_now_is_the_only_time_input_that_changes_anything():
@@ -211,10 +217,9 @@ def test_now_is_the_only_time_input_that_changes_anything():
     assert evaluate(cfg, state, 200.0).action is not Action.HOLD
 
 
-# ── clause: a retryable class never consumes a rung ──
-
-
-@pytest.mark.parametrize("text", ["429 rate limited", "connection reset by peer", "504 Gateway"])
+@pytest.mark.parametrize(
+    "text", ["429 rate limited", "connection reset by peer", "504 Gateway"]
+)
 def test_a_retryable_class_never_consumes_a_rung(text):
     """Burning the ladder on a 429 is how a run that would have finished doesn't. Asserted
     through `applied` — the WRITE half — because "the decision said consumed_rung=False" is
@@ -235,11 +240,10 @@ def test_the_rung_a_stall_takes_is_a_function_of_persisted_position_only():
     processes handed the same persisted position must pick the same rung."""
     cfg = TickConfig()
     for taken, expected in enumerate(DEFAULT_LADDER[:-1]):
-        state = _fail(_state(nudges_issued=1, escalations_taken=taken), n=3, tool="t", args={})
+        state = _fail(
+            _state(nudges_issued=1, escalations_taken=taken), n=3, tool="t", args={}
+        )
         assert evaluate(cfg, state, NOW).rung is expected
-
-
-# ── clause: the policy DRIVES the decision ──
 
 
 def test_the_supervisor_policy_supplies_the_thresholds():
@@ -258,14 +262,16 @@ def test_the_supervisor_policy_supplies_the_thresholds():
             state = tick.applied(cfg, state, decision)
         raise AssertionError("never surfaced")
 
-    short = supervisor_policy.SupervisorPolicy(escalation_ladder=(Rung.CLASSIFIED_RETRY,))
+    short = supervisor_policy.SupervisorPolicy(
+        escalation_ladder=(Rung.CLASSIFIED_RETRY,)
+    )
     default = supervisor_policy.SupervisorPolicy()
 
-    # A declared ladder with one real rung must run out sooner than the five-rung default.
-    # Comparing the two is the assertion that the DECLARATION is what the engine read: a
-    # hard-coded ladder would give both policies the same number.
     assert _cycles_until_surfaced(short) < _cycles_until_surfaced(default)
-    assert supervisor_policy.tick_config(short).rungs() == (Rung.CLASSIFIED_RETRY, Rung.SURFACE)
+    assert supervisor_policy.tick_config(short).rungs() == (
+        Rung.CLASSIFIED_RETRY,
+        Rung.SURFACE,
+    )
 
 
 def test_the_policy_budget_and_mutations_reach_the_decision():
@@ -292,13 +298,14 @@ def test_the_marginal_value_band_becomes_a_real_metric_gate():
 
     explicit = supervisor_policy.tick_config(
         supervisor_policy.SupervisorPolicy(
-            gates=StepConfig(metric_pass=0.9, metric_hold=0.4), marginal_value_band=(1.0, 4.0)
+            gates=StepConfig(metric_pass=0.9, metric_hold=0.4),
+            marginal_value_band=(1.0, 4.0),
         )
     )
-    assert explicit.steps[0].metric_pass == 0.9, "an explicit gate must win over the band"
+    assert (
+        explicit.steps[0].metric_pass == 0.9
+    ), "an explicit gate must win over the band"
 
-
-# ── clause: REPLAN queues a REAL mutation batch, end to end ──
 
 pytestmark_anyio = pytest.mark.anyio
 
@@ -312,7 +319,7 @@ def anyio_backend() -> str:
 def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
 
 
@@ -335,9 +342,15 @@ def _replan_spec() -> dict:
                         "mode": "counted",
                         "n": 6,
                         "error_streak": 2,
-                        "supervisor": {"escalation_ladder": ["classified_retry", "surface"]},
+                        "supervisor": {
+                            "escalation_ladder": ["classified_retry", "surface"]
+                        },
                     },
-                    "body": {"kind": "infer", "id": "b", "config": {"prompt": "work {{iter}}"}},
+                    "body": {
+                        "kind": "infer",
+                        "id": "b",
+                        "config": {"prompt": "work {{iter}}"},
+                    },
                 }
             ],
         },
@@ -345,7 +358,9 @@ def _replan_spec() -> dict:
 
 
 def _make_run(spec: dict) -> WorkflowRun:
-    run = store.create(WorkflowRun(id="", workflow_name=spec.get("name", "wf"), inputs={}))
+    run = store.create(
+        WorkflowRun(id="", workflow_name=spec.get("name", "wf"), inputs={})
+    )
     store.write_spec(run.id, spec)
     return run
 
@@ -374,10 +389,6 @@ async def test_a_replan_queues_a_real_mutation_batch_and_the_run_reruns_from_it(
         prompts.append(prompt)
         if "re-derive" in prompt.lower() or "critique" in prompt.lower():
             return "revised plan: verify before shipping"
-        # Fail identically until the breaker trips and the convergence core replans; then
-        # succeed, so the run reaches the step the replan inserted. A body that failed forever
-        # would surface the loop and prove only that a batch was queued — never that the run
-        # went on to re-derive anything.
         if len([p for p in prompts if "re-derive" not in p.lower()]) <= 3:
             raise RuntimeError("boom: the same failure every time")
         return "ok"
@@ -386,7 +397,6 @@ async def test_a_replan_queues_a_real_mutation_batch_and_the_run_reruns_from_it(
     c.run.extra["plan_critique"] = "the plan never verifies its own output"
     await c.run_to_completion(timeout=40)
 
-    # 1. A real mutation landed.
     inserted = [
         n
         for n in (c.spec.get("root") or {}).get("children") or []
@@ -397,12 +407,11 @@ async def test_a_replan_queues_a_real_mutation_batch_and_the_run_reruns_from_it(
         f"root children: {[n.get('id') for n in (c.spec.get('root') or {}).get('children') or []]}"
     )
 
-    # 2. The critique is what it was built from, and the change is auditable.
     assert "never verifies its own output" in json.dumps(inserted[0])
-    assert c.run.spec_version >= 1, "a plan change that does not bump spec_version is invisible"
+    assert (
+        c.run.spec_version >= 1
+    ), "a plan change that does not bump spec_version is invisible"
 
-    # 3. The re-derived step RAN. This is the half that separates "queued a batch" from "the run
-    #    re-derived its remaining steps".
     assert any(
         "re-derive" in p.lower() for p in prompts
     ), f"the inserted replan step never executed; prompts were {prompts}"
@@ -442,7 +451,9 @@ async def test_a_replan_that_cannot_land_surfaces_instead_of_looping():
         str(i).endswith("__replan1") for i in ids
     ), "a leaf-bodied root loop has no safe insert target; a batch must not have landed"
     kinds = [r["kind"] for r in J.ledger(run.id)]
-    assert J.STEP_ESCALATED in kinds, f"it neither replanned nor surfaced: {sorted(set(kinds))}"
+    assert (
+        J.STEP_ESCALATED in kinds
+    ), f"it neither replanned nor surfaced: {sorted(set(kinds))}"
 
 
 @pytest.mark.anyio
@@ -468,8 +479,6 @@ async def test_the_ladder_replaces_the_binary_failure():
     assert any(
         d.get("rung") != Rung.SURFACE.value for d in decisions
     ), f"every decision went straight to a human; the ladder is unreachable: {decisions}"
-    # The position is PERSISTED on the run row — what a restarted process re-reads to resume at
-    # the same rung instead of starting again at the cheapest one.
     assert entry.get("nudges", 0) or entry.get(
         "escalations", 0
     ), f"the ladder position was not persisted: {entry}"
@@ -478,11 +487,13 @@ async def test_the_ladder_replaces_the_binary_failure():
 def test_the_middleware_no_longer_owns_a_second_decision():
     """The clean break, asserted. A re-introduced `check_middleware` would be a second
     convergence brain, which is the whole failure mode this atom exists to close."""
-    from gideon.workflows import loop_middleware
+    from gideon.automation.workflows import loop_middleware
 
     for gone in ("check_middleware", "LoopState", "MiddlewareVerdict"):
         assert not hasattr(loop_middleware, gone), f"{gone} is back — two brains again"
     assert not hasattr(
         loop_middleware, "Action"
     ), "loop_middleware minted a second Action vocabulary again"
-    assert FailureClass is loop_middleware.FailureClass, "the taxonomy must NOT be duplicated"
+    assert (
+        FailureClass is loop_middleware.FailureClass
+    ), "the taxonomy must NOT be duplicated"

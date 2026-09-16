@@ -41,7 +41,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from gideon.config.loader import AgentProfile
+from gideon.core.config.loader import AgentProfile
 
 
 def _declared(kind: type) -> tuple[str, ...]:
@@ -53,19 +53,26 @@ def _declared(kind: type) -> tuple[str, ...]:
     return tuple(f.name for f in dataclasses.fields(AgentProfile) if f.type is kind)
 
 
-# 13 declared-string fields, 1 declared-bool field, 3 declared-list fields.
 _STR_FIELDS = _declared(str)
 _LIST_FIELDS = _declared(list)
 
-#: Values that are not a string. `True` is in here on purpose: `isinstance(True, int)`, and a
-#: bare truthiness coercion is how a JSON `true` becomes the number 1 (or the string "True")
-#: for a field that declares neither.
 _NOT_A_STRING = (12345, {"a": 1}, [1, 2], None, True, 3.5)
 _NOT_A_BOOL = (12345, "true", "false", {"a": 1}, [1], None)
-_NOT_A_STR_LIST = (12345, "notalist", {"a": 1}, None, True, [1, 2], [{"a": 1}], ["ok", 5])
+_NOT_A_STR_LIST = (
+    12345,
+    "notalist",
+    {"a": 1},
+    None,
+    True,
+    [1, 2],
+    [{"a": 1}],
+    ["ok", 5],
+)
 
 
-def _request(body: Any, *, method: str = "POST", match: dict | None = None) -> MagicMock:
+def _request(
+    body: Any, *, method: str = "POST", match: dict | None = None
+) -> MagicMock:
     req = MagicMock()
     req.method = method
     req.json = AsyncMock(return_value=body)
@@ -93,8 +100,10 @@ def home(tmp_path, monkeypatch):
     """An isolated config home. Never the real one — these tests write config.json."""
     d = tmp_path / "home"
     d.mkdir()
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: d)
-    monkeypatch.setattr("gideon.dashboard.handlers.agents.config_dir", lambda: d)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: d)
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.handlers.agents.config_dir", lambda: d
+    )
     return d
 
 
@@ -115,18 +124,17 @@ def _agents_on_disk(home) -> dict:
 
 
 async def _create(body) -> Any:
-    from gideon.dashboard.handlers.agents import api_gideon_agents_create
+    from gideon.interfaces.dashboard.handlers.agents import api_gideon_agents_create
 
     return await api_gideon_agents_create(_request(body))
 
 
 async def _update(name, body) -> Any:
-    from gideon.dashboard.handlers.agents import api_gideon_agent_update
+    from gideon.interfaces.dashboard.handlers.agents import api_gideon_agent_update
 
-    return await api_gideon_agent_update(_request(body, method="PUT", match={"name": name}))
-
-
-# ── the spec table is the dataclass, not a hand-copy of it ────────────────────
+    return await api_gideon_agent_update(
+        _request(body, method="PUT", match={"name": name})
+    )
 
 
 class TestTheTableCannotDrift:
@@ -136,7 +144,7 @@ class TestTheTableCannotDrift:
     return to the unvalidated behaviour this change removed."""
 
     def test_every_AgentProfile_field_has_a_spec(self):
-        from gideon.dashboard.handlers.agents import _AGENT_FIELD_SPECS
+        from gideon.interfaces.dashboard.handlers.agents import _AGENT_FIELD_SPECS
 
         declared = {f.name for f in dataclasses.fields(AgentProfile)}
         assert set(_AGENT_FIELD_SPECS) == declared, (
@@ -146,7 +154,7 @@ class TestTheTableCannotDrift:
         )
 
     def test_each_spec_type_matches_the_dataclass_type(self):
-        from gideon.dashboard.handlers.agents import _AGENT_FIELD_SPECS
+        from gideon.interfaces.dashboard.handlers.agents import _AGENT_FIELD_SPECS
 
         for kind, spec_type in ((str, "str"), (bool, "bool"), (list, "str_list")):
             for name in _declared(kind):
@@ -155,7 +163,7 @@ class TestTheTableCannotDrift:
     def test_the_detail_patch_keys_are_a_subset_of_the_same_table(self):
         """The file-backed PATCH path validates the seven fields it applies with this table
         rather than a dialect of its own."""
-        from gideon.dashboard.handlers.agents import (
+        from gideon.interfaces.dashboard.handlers.agents import (
             _AGENT_DETAIL_PATCH_KEYS,
             _AGENT_FIELD_SPECS,
         )
@@ -166,8 +174,8 @@ class TestTheTableCannotDrift:
         """`coerce_edit_value` answers status 500 for an unrecognised spec `type` — a bug in
         the table, not in the request. This is what keeps that branch unreachable, so every
         refusal from these handlers is a 4xx."""
-        from gideon.config.edit_spec import ConfigValueError, coerce_edit_value
-        from gideon.dashboard.handlers.agents import _AGENT_FIELD_SPECS
+        from gideon.core.config.edit_spec import ConfigValueError, coerce_edit_value
+        from gideon.interfaces.dashboard.handlers.agents import _AGENT_FIELD_SPECS
 
         for name, spec in _AGENT_FIELD_SPECS.items():
             try:
@@ -176,18 +184,19 @@ class TestTheTableCannotDrift:
                 assert exc.status == 400, f"{name} can produce a {exc.status}"
 
 
-# ── #349 B — a wrong-typed value is a 4xx that names the field, and nothing persists ──
-
-
 class TestScalarTypesOnCreate:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("field", _STR_FIELDS)
     @pytest.mark.parametrize("bad", _NOT_A_STRING, ids=repr)
-    async def test_a_non_string_is_refused_and_nothing_is_written(self, home, field, bad):
+    async def test_a_non_string_is_refused_and_nothing_is_written(
+        self, home, field, bad
+    ):
         resp = await _create({"name": "zz-probe", field: bad})
         assert resp.status == 400, f"{field}={bad!r} was accepted"
         assert field in _error_text(resp), "the refusal must name the field"
-        assert "zz-probe" not in _agents_on_disk(home), "a refused create persisted the agent"
+        assert "zz-probe" not in _agents_on_disk(
+            home
+        ), "a refused create persisted the agent"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("bad", _NOT_A_BOOL, ids=repr)
@@ -219,18 +228,26 @@ class TestListTypesOnCreate:
 class TestScalarTypesOnUpdate:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("field", _STR_FIELDS)
-    async def test_a_non_string_is_refused_and_the_profile_is_UNCHANGED(self, home, field):
-        assert (await _create({"name": "zz-base", "description": "keep me"})).status == 200
+    async def test_a_non_string_is_refused_and_the_profile_is_UNCHANGED(
+        self, home, field
+    ):
+        assert (
+            await _create({"name": "zz-base", "description": "keep me"})
+        ).status == 200
         before = _agents_on_disk(home)["zz-base"]
 
         resp = await _update("zz-base", {field: {"an": "object"}})
         assert resp.status == 400, f"{field} was accepted"
         assert field in _error_text(resp)
-        assert _agents_on_disk(home)["zz-base"] == before, "a refused update mutated the profile"
+        assert (
+            _agents_on_disk(home)["zz-base"] == before
+        ), "a refused update mutated the profile"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("field", _LIST_FIELDS)
-    async def test_a_wrong_typed_list_no_longer_answers_200_having_done_nothing(self, home, field):
+    async def test_a_wrong_typed_list_no_longer_answers_200_having_done_nothing(
+        self, home, field
+    ):
         """This deliberately RETIRES the previous ignore-it behaviour. Being told a write
         succeeded when it changed nothing is the failure mode `config/edit_spec.py` argues is
         worse than a refusal — nothing will ever look wrong. Clearing a list stays
@@ -242,9 +259,6 @@ class TestScalarTypesOnUpdate:
         assert resp.status == 400
         assert field in _error_text(resp)
         assert _agents_on_disk(home)["zz-base"] == before
-
-
-# ── #349 A — a pathological nest is a 4xx, not a RecursionError ───────────────
 
 
 class TestNestingDepth:
@@ -272,8 +286,12 @@ class TestNestingDepth:
         assert "zz-deeptools" not in _agents_on_disk(home)
 
     @pytest.mark.asyncio
-    async def test_a_deep_value_is_a_400_on_update_and_leaves_the_profile_alone(self, home):
-        assert (await _create({"name": "zz-base", "system_prompt": "original"})).status == 200
+    async def test_a_deep_value_is_a_400_on_update_and_leaves_the_profile_alone(
+        self, home
+    ):
+        assert (
+            await _create({"name": "zz-base", "system_prompt": "original"})
+        ).status == 200
         before = _agents_on_disk(home)["zz-base"]
 
         resp = await _update("zz-base", {"system_prompt": _nested(2000)})
@@ -282,7 +300,9 @@ class TestNestingDepth:
         assert _agents_on_disk(home)["zz-base"] == before
 
     @pytest.mark.asyncio
-    async def test_a_body_deeper_than_the_TYPE_check_can_survive_is_still_a_400(self, home):
+    async def test_a_body_deeper_than_the_TYPE_check_can_survive_is_still_a_400(
+        self, home
+    ):
         """Why the depth check runs BEFORE the type check, and is not redundant with it.
 
         The type rule interpolates the rejected value into its SEL `resources` string, and
@@ -294,15 +314,18 @@ class TestNestingDepth:
         resp = await _create({"name": "zz-verydeep", "description": _nested(20_000)})
         assert resp.status == 400
         assert "description" in _error_text(resp)
-        assert len(_error_text(resp)) < 200, "the refusal must not carry the offending value"
+        assert (
+            len(_error_text(resp)) < 200
+        ), "the refusal must not carry the offending value"
         assert "zz-verydeep" not in _agents_on_disk(home)
 
     def test_the_walk_is_safe_INDEPENDENTLY_of_the_cap(self, monkeypatch):
         """A recursive walker is accidentally safe at a cap of 12 — it returns at the cap, so
         it is only ever ~12 frames deep. That is what makes the recursive form a trap rather
         than a preference: raise the cap and the guard itself becomes the thing that raises
-        `RecursionError`. Pinned by raising the cap and asserting the walk still answers."""
-        from gideon.dashboard.handlers import agents as A
+        `RecursionError`. Pinned by raising the cap and asserting the walk still answers.
+        """
+        from gideon.interfaces.dashboard.handlers import agents as A
 
         monkeypatch.setattr(A, "_MAX_AGENT_BODY_DEPTH", 10_000_000)
         assert A._agent_value_too_deep(_nested(20_000)) is False
@@ -310,7 +333,7 @@ class TestNestingDepth:
     def test_a_legitimately_shallow_value_is_not_flagged(self):
         """Vacuity floor for the depth guard itself: the shapes this endpoint accepts —
         scalars and lists of strings — must not trip it."""
-        from gideon.dashboard.handlers.agents import _agent_value_too_deep
+        from gideon.interfaces.dashboard.handlers.agents import _agent_value_too_deep
 
         assert _agent_value_too_deep("a string") is False
         assert _agent_value_too_deep(["a", "b"]) is False
@@ -318,13 +341,12 @@ class TestNestingDepth:
         assert _agent_value_too_deep(_nested(12)) is False
 
 
-# ── #349 C — a name the system owns is refused, not reconciled after the fact ──
-
-
 class TestUnavailableNames:
     @pytest.mark.asyncio
-    async def test_a_retired_name_is_refused_instead_of_answering_ok_then_vanishing(self, home):
-        from gideon.agents.defaults import RETIRED_AGENT_NAMES
+    async def test_a_retired_name_is_refused_instead_of_answering_ok_then_vanishing(
+        self, home
+    ):
+        from gideon.engine.agents.defaults import RETIRED_AGENT_NAMES
 
         for name in RETIRED_AGENT_NAMES:
             resp = await _create({"name": name})
@@ -339,9 +361,11 @@ class TestUnavailableNames:
         check has nothing to match, so `gideon-lite` was created — and seeding being
         add-if-MISSING meant the caller's profile became the built-in's, permanently, because
         PUT and DELETE then refuse it as reserved."""
-        from gideon.agents.defaults import RESERVED_AGENT_NAMES
+        from gideon.engine.agents.defaults import RESERVED_AGENT_NAMES
 
-        assert not (home / "config.json").exists(), "the premise is a config with no agents map"
+        assert not (
+            home / "config.json"
+        ).exists(), "the premise is a config with no agents map"
         for name in sorted(RESERVED_AGENT_NAMES):
             resp = await _create({"name": name, "system_prompt": "impostor"})
             assert resp.status == 403, f"{name} was accepted on a fresh config"
@@ -354,15 +378,18 @@ class TestUnavailableNames:
         next `AppConfig.load()` is indistinguishable from success to the caller.
 
         Matched on the CALL, not on the identifier: the handler's comment names the helper too,
-        so an identifier match would be satisfied by prose after the call had been deleted."""
+        so an identifier match would be satisfied by prose after the call had been deleted.
+        """
         import inspect
 
-        from gideon.dashboard.handlers import agents as A
+        from gideon.interfaces.dashboard.handlers import agents as A
 
         src = inspect.getsource(A.api_gideon_agents_create)
         call = "_unavailable_agent_name(name)"
         assert call in src
-        assert src.index(call) < src.index("cfg.save()"), "the name check must precede the write"
+        assert src.index(call) < src.index(
+            "cfg.save()"
+        ), "the name check must precede the write"
 
     @pytest.mark.asyncio
     async def test_an_ordinary_name_in_the_same_namespace_is_still_allowed(self, home):
@@ -373,15 +400,12 @@ class TestUnavailableNames:
         assert "gideon-notes" in _agents_on_disk(home)
 
 
-# ── PATCH /api/agents/detail/{name} — the same class, on the runtime config ───
-
-
 @pytest.fixture
 def file_backed(tmp_path, monkeypatch):
     """The per-file agent config the ACP agent reads at boot."""
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
-    monkeypatch.setattr("gideon.agent.AGENTS_DIR", agents_dir)
+    monkeypatch.setattr("gideon.engine.agent.AGENTS_DIR", agents_dir)
     path = agents_dir / "gideon.json"
     path.write_text(
         json.dumps(
@@ -401,14 +425,16 @@ def file_backed(tmp_path, monkeypatch):
 
 
 async def _patch_detail(name, body) -> Any:
-    from gideon.dashboard.handlers.agents import api_agent_detail
+    from gideon.interfaces.dashboard.handlers.agents import api_agent_detail
 
     return await api_agent_detail(_request(body, method="PATCH", match={"name": name}))
 
 
 class TestFileBackedPatch:
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("field", ["model", "description", "system_prompt", "approval_mode"])
+    @pytest.mark.parametrize(
+        "field", ["model", "description", "system_prompt", "approval_mode"]
+    )
     @pytest.mark.parametrize("bad", [12345, {"a": 1}, [1, 2]], ids=repr)
     async def test_a_wrong_typed_scalar_is_refused_and_the_file_is_untouched(
         self, file_backed, field, bad
@@ -417,7 +443,9 @@ class TestFileBackedPatch:
         resp = await _patch_detail("gideon", {field: bad})
         assert resp.status == 400, f"{field}={bad!r} was accepted"
         assert field in _error_text(resp)
-        assert file_backed.read_bytes() == before, "a refused PATCH rewrote the runtime config"
+        assert (
+            file_backed.read_bytes() == before
+        ), "a refused PATCH rewrote the runtime config"
 
     @pytest.mark.asyncio
     async def test_a_list_of_non_strings_is_refused(self, file_backed):
@@ -433,7 +461,7 @@ class TestFileBackedPatch:
         resp = await _patch_detail("gideon", {"description": _nested(2000)})
         assert resp.status == 400
         assert file_backed.read_bytes() == before
-        json.loads(file_backed.read_text(encoding="utf-8"))  # still valid JSON
+        json.loads(file_backed.read_text(encoding="utf-8"))
 
     @pytest.mark.asyncio
     async def test_a_legitimate_patch_still_applies(self, file_backed):
@@ -448,7 +476,9 @@ class TestFileBackedPatch:
         assert data["description"] == "patched"
         assert data["tools"] == ["server-a"]
         assert "system_prompt" not in data, "an empty scalar must still clear the key"
-        assert data["mcpServers"] == {"server-a": {"command": "x"}}, "an untouched key changed"
+        assert data["mcpServers"] == {
+            "server-a": {"command": "x"}
+        }, "an untouched key changed"
 
     @pytest.mark.asyncio
     async def test_the_validation_precedes_the_file_loop(self, file_backed):
@@ -457,9 +487,6 @@ class TestFileBackedPatch:
         resp = await _patch_detail("no-such-agent", {"description": 12345})
         assert resp.status == 400
         assert "description" in _error_text(resp)
-
-
-# ── the vacuity floor: a legitimate write still works, end to end ────────────
 
 
 _FULL_BODY = {
@@ -492,7 +519,7 @@ class TestLegitimateWritesStillWork:
         resp = await _create(dict(_FULL_BODY))
         assert resp.status == 200, _error_text(resp)
 
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         stored = dataclasses.asdict(AppConfig.load().agents["zz-real"])
         for key, value in _FULL_BODY.items():
@@ -501,16 +528,20 @@ class TestLegitimateWritesStillWork:
             assert stored[key] == value, f"{key} did not round-trip"
 
     @pytest.mark.asyncio
-    async def test_an_omitted_field_still_falls_back_to_the_dataclass_default(self, home):
+    async def test_an_omitted_field_still_falls_back_to_the_dataclass_default(
+        self, home
+    ):
         """The create path used to spell seventeen `body.get(key, <default>)` calls; it now
         passes only the keys present and lets `AgentProfile` supply the rest. Same answer —
         asserted, because "same answer" is the whole claim."""
         assert (await _create({"name": "zz-min"})).status == 200
 
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         stored = AppConfig.load().agents["zz-min"]
-        assert stored == AgentProfile(), "an omitted field diverged from its declared default"
+        assert (
+            stored == AgentProfile()
+        ), "an omitted field diverged from its declared default"
 
     @pytest.mark.asyncio
     async def test_an_update_applies_every_field_and_reports_them(self, home):
@@ -519,7 +550,7 @@ class TestLegitimateWritesStillWork:
         resp = await _update("zz-real", body)
         assert resp.status == 200, _error_text(resp)
 
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         stored = dataclasses.asdict(AppConfig.load().agents["zz-real"])
         for key, value in body.items():
@@ -528,14 +559,15 @@ class TestLegitimateWritesStillWork:
     @pytest.mark.asyncio
     async def test_clearing_a_list_and_a_string_stays_expressible(self, home):
         """The refusal above only removes WRONG TYPES. `[]` and `""` are well-typed values and
-        must keep meaning "empty", or the tightening would have removed a real capability."""
+        must keep meaning "empty", or the tightening would have removed a real capability.
+        """
         assert (
             await _create({"name": "zz-real", "skills": ["s"], "description": "d"})
         ).status == 200
         resp = await _update("zz-real", {"skills": [], "description": ""})
         assert resp.status == 200, _error_text(resp)
 
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         stored = AppConfig.load().agents["zz-real"]
         assert stored.skills == []
@@ -546,7 +578,9 @@ class TestLegitimateWritesStillWork:
         """Deliberately unchanged. Unknown keys are dropped by the allowlist and never reach a
         serializer, so they cannot produce A's crash — refusing them would be a new refusal
         riding along on a type fix."""
-        resp = await _create({"name": "zz-real", "totally_unknown": {"deep": _nested(2000)}})
+        resp = await _create(
+            {"name": "zz-real", "totally_unknown": {"deep": _nested(2000)}}
+        )
         assert resp.status == 200, _error_text(resp)
         assert "totally_unknown" not in _agents_on_disk(home)["zz-real"]
 
@@ -555,7 +589,11 @@ class TestLegitimateWritesStillWork:
         """#349 records a 200 KB `system_prompt` and a 100 000-element `triggers` list as
         persisting correctly, and the bounds in the spec table are sized so this stays true:
         a length cap would be a size policy smuggled in under a type fix."""
-        big = {"name": "zz-big", "system_prompt": "x" * 200_000, "triggers": ["t"] * 100_000}
+        big = {
+            "name": "zz-big",
+            "system_prompt": "x" * 200_000,
+            "triggers": ["t"] * 100_000,
+        }
         resp = await _create(big)
         assert resp.status == 200, _error_text(resp)
         stored = _agents_on_disk(home)["zz-big"]
@@ -567,8 +605,8 @@ class TestLegitimateWritesStillWork:
         """The name rail this change does not touch, pinned so the new checks cannot be read
         as having replaced it."""
         assert (await _create({"name": "zz-real"})).status == 200
-        assert (await _create({"name": "zz-real"})).status == 409  # duplicate
-        assert (await _create({"name": "Has Spaces"})).status == 400  # regex
-        assert (await _create({"name": ""})).status == 400  # empty
-        assert (await _create({"name": 42})).status == 400  # wrong type
-        assert (await _create([1, 2, 3])).status == 400  # body not an object
+        assert (await _create({"name": "zz-real"})).status == 409
+        assert (await _create({"name": "Has Spaces"})).status == 400
+        assert (await _create({"name": ""})).status == 400
+        assert (await _create({"name": 42})).status == 400
+        assert (await _create([1, 2, 3])).status == 400

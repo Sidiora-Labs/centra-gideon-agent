@@ -11,10 +11,14 @@ import json
 import pytest
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.dashboard.handlers import search_registry as sr
-from gideon.search_providers import registry as reg
-from gideon.search_providers import use_cases as uc
-from gideon.search_providers.base import SearchCapabilities, SearchProvider, SearchResult
+from gideon.integrations.search_providers import registry as reg
+from gideon.integrations.search_providers import use_cases as uc
+from gideon.integrations.search_providers.base import (
+    SearchCapabilities,
+    SearchProvider,
+    SearchResult,
+)
+from gideon.interfaces.dashboard.handlers import search_registry as sr
 
 
 class _Fake(SearchProvider):
@@ -42,7 +46,9 @@ class _Fake(SearchProvider):
 @pytest.fixture(autouse=True)
 def _isolate(monkeypatch, tmp_path):
     monkeypatch.setattr(reg, "_providers", {})
-    monkeypatch.setattr(uc, "_active_path", lambda: tmp_path / "active_search_providers.json")
+    monkeypatch.setattr(
+        uc, "_active_path", lambda: tmp_path / "active_search_providers.json"
+    )
     yield
 
 
@@ -54,7 +60,9 @@ async def _json(resp):
 async def test_providers_lists_capabilities_and_availability():
     reg.register_provider(_Fake("tavily", available=True, fetch=True))
     reg.register_provider(_Fake("searxng", available=False))
-    resp = await sr.api_search_providers(make_mocked_request("GET", "/api/search/providers"))
+    resp = await sr.api_search_providers(
+        make_mocked_request("GET", "/api/search/providers")
+    )
     data = await _json(resp)
     by = {p["name"]: p for p in data["providers"]}
     assert by["tavily"]["available"] is True
@@ -72,9 +80,11 @@ async def test_active_returns_all_use_cases():
 
 @pytest.mark.asyncio
 async def test_set_active_binds_provider():
-    reg.register_provider(_Fake("tavily"))  # must be registered to bind (set-time validation)
+    reg.register_provider(_Fake("tavily"))
     req = make_mocked_request(
-        "PUT", "/api/search/active/search-general", match_info={"use_case": "search-general"}
+        "PUT",
+        "/api/search/active/search-general",
+        match_info={"use_case": "search-general"},
     )
     req.json = _async_return({"providers": ["tavily"]})
     resp = await sr.api_search_active_set(req)
@@ -91,13 +101,14 @@ async def test_set_active_rejects_unknown_provider():
     (the search sibling of model bug #16)."""
     reg.register_provider(_Fake("tavily"))
     req = make_mocked_request(
-        "PUT", "/api/search/active/search-general", match_info={"use_case": "search-general"}
+        "PUT",
+        "/api/search/active/search-general",
+        match_info={"use_case": "search-general"},
     )
     req.json = _async_return({"providers": ["nosuchsearch"]})
     resp = await sr.api_search_active_set(req)
     assert resp.status == 400
     assert "Unknown search provider" in (await _json(resp))["error"]
-    # nothing bound
     assert uc.active_search_provider_names("search-general") in ([], None)
 
 
@@ -110,13 +121,14 @@ async def test_set_active_empty_clears_binding():
     req.json = _async_return({"providers": []})
     resp = await sr.api_search_active_set(req)
     assert (await _json(resp))["providers"] == []
-    # cleared → news now falls back to (empty) general
     assert uc.load_active_search_providers().get("search-news") in (None, [])
 
 
 @pytest.mark.asyncio
 async def test_set_active_rejects_invalid_use_case():
-    req = make_mocked_request("PUT", "/api/search/active/bogus", match_info={"use_case": "bogus"})
+    req = make_mocked_request(
+        "PUT", "/api/search/active/bogus", match_info={"use_case": "bogus"}
+    )
     req.json = _async_return({"providers": ["tavily"]})
     resp = await sr.api_search_active_set(req)
     assert resp.status == 400
@@ -125,7 +137,9 @@ async def test_set_active_rejects_invalid_use_case():
 @pytest.mark.asyncio
 async def test_set_active_rejects_multiple_providers():
     req = make_mocked_request(
-        "PUT", "/api/search/active/search-general", match_info={"use_case": "search-general"}
+        "PUT",
+        "/api/search/active/search-general",
+        match_info={"use_case": "search-general"},
     )
     req.json = _async_return({"providers": ["a", "b"]})
     resp = await sr.api_search_active_set(req)

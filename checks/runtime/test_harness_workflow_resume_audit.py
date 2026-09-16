@@ -23,10 +23,10 @@ import json
 
 import pytest
 
-from harness import resume_audit
-from gideon.workflows import store
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.models import WorkflowRun
+from checks.harness import resume_audit
+from gideon.automation.workflows import store
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.models import WorkflowRun
 
 pytestmark = pytest.mark.anyio
 
@@ -42,7 +42,7 @@ def _isolated_home(tmp_path, monkeypatch):
     real home (destructive-test-isolation rule)."""
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
 
 
@@ -73,17 +73,11 @@ async def _drive_to_completion(spec: dict) -> str:
     return run.id
 
 
-# ── 1. missing run is not answerable ──────────────────────────────────────────
-
-
 def test_missing_run_is_not_answerable() -> None:
     r = resume_audit.audit_workflow_run("nonexistent")
     assert not r.exists
     assert not r.ok
     assert "not found" in r.failures()[0]
-
-
-# ── 2. a completed run resumes byte-equal from disk (SC#5) ─────────────────────
 
 
 async def test_completed_run_resumes_byte_equal_from_disk() -> None:
@@ -92,17 +86,12 @@ async def test_completed_run_resumes_byte_equal_from_disk() -> None:
     assert r.ok, r.failures()
     assert r.frontier_byte_equal
     assert r.fold_matches_state
-    # A completed run reconstructs a complete, no-work frontier and its journal folds to the
-    # same three done nodes on disk.
     assert r.detail["node_count"] == 3
     assert r.detail["fold_status"] == "complete"
     snap = json.loads(r.resumed_frontier)
     assert snap["complete"] is True
     assert snap["ready"] == []
     assert all(state == "done" for state in snap["nodes"].values())
-
-
-# ── 3. a mid-flight KILL resumes byte-equal (the flagship case) ───────────────
 
 
 async def test_mid_flight_kill_resumes_byte_equal() -> None:
@@ -115,8 +104,6 @@ async def test_mid_flight_kill_resumes_byte_equal() -> None:
         await asyncio.sleep(30)
         return "never"
 
-    # The middle node is an `infer` so the injected `completion` actually blocks it — a
-    # transform completes instantly and there is no running node to catch.
     hang_spec = {
         "name": "hang",
         "root": {
@@ -132,11 +119,6 @@ async def test_mid_flight_kill_resumes_byte_equal() -> None:
     run = _make_run(hang_spec)
     live = RunController(run, hang_spec, services=EngineServices(completion=hang))
     await live.start()
-    # Wait for node 1 — the hanging `infer` — to be the one running. Waiting for ANY running
-    # instance is not the same condition: node 0 is a transform that completes in microseconds
-    # on an idle machine, but under load a poll tick can land while it is still running, and
-    # the snapshot then says node 0 is running, which is not the state the assertions below
-    # describe. Name the node, and fail loudly rather than snapshotting a half-built frontier.
     hanging = "root.children[1]"
     for _ in range(200):
         await asyncio.sleep(0.05)
@@ -148,11 +130,10 @@ async def test_mid_flight_kill_resumes_byte_equal() -> None:
         await live.stop()
         raise AssertionError(f"{hanging} never started within 10s; instances={states}")
     pre_kill = resume_audit._frontier_snapshot(live)
-    await live.stop()  # THE KILL — leaves the run resumable, not failed.
+    await live.stop()
 
     r = resume_audit.audit_workflow_run(run.id, pre_kill_frontier=pre_kill)
     assert r.ok, r.failures()
-    # The reconstructed frontier equals the live pre-kill snapshot, character for character.
     assert r.resumed_frontier == pre_kill
     snap = json.loads(r.resumed_frontier)
     assert snap["nodes"]["root.children[0]"] == "done"
@@ -161,19 +142,14 @@ async def test_mid_flight_kill_resumes_byte_equal() -> None:
     assert snap["complete"] is False
 
 
-# ── 4. idempotent reconstruction when no live snapshot is captured ────────────
-
-
 async def test_reconstruction_is_idempotent_without_a_live_snapshot() -> None:
     """When only the run's files survive (killed out of band), the persisted state IS the
-    pre-kill truth — two independent disk-only reconstructions must agree byte-for-byte."""
+    pre-kill truth — two independent disk-only reconstructions must agree byte-for-byte.
+    """
     run_id = await _drive_to_completion(_SEQ_SPEC)
-    r = resume_audit.audit_workflow_run(run_id)  # no pre_kill_frontier passed
+    r = resume_audit.audit_workflow_run(run_id)
     assert r.ok
     assert r.pre_kill_frontier == r.resumed_frontier
-
-
-# ── 5. a divergent replay (corrupted journal) FAILS the audit ─────────────────
 
 
 async def test_corrupted_journal_fails_the_fold_check() -> None:
@@ -188,15 +164,13 @@ async def test_corrupted_journal_fails_the_fold_check() -> None:
     for ln in lines:
         rec = json.loads(ln)
         if rec.get("kind") == "step_completed" and rec.get("node_id") == "seed":
-            rec["state"] = "failed"  # the divergence a format/replay break produces
+            rec["state"] = "failed"
         corrupted.append(json.dumps(rec))
     journal_path.write_text("\n".join(corrupted) + "\n", encoding="utf-8")
 
     r = resume_audit.audit_workflow_run(run_id)
     assert not r.ok
     assert not r.fold_matches_state
-    # The persisted state.json still reads seed=done, so the disk-only frontier is unchanged —
-    # only the fold check catches the divergence, which is exactly its job.
     assert r.frontier_byte_equal
     assert any("event-fold" in f for f in r.failures())
 
@@ -223,11 +197,8 @@ async def test_dropped_node_event_fails_the_fold_check() -> None:
     assert not r.fold_matches_state
 
 
-# ── 6. the CLI exposes the workflow-resume-audit command ──────────────────────
-
-
 async def test_cli_workflow_resume_audit_reports_green(capsys) -> None:
-    from harness.cli import main
+    from checks.harness.cli import main
 
     run_id = await _drive_to_completion(_SEQ_SPEC)
     rc = main(["workflow-resume-audit", run_id])
@@ -237,7 +208,7 @@ async def test_cli_workflow_resume_audit_reports_green(capsys) -> None:
 
 
 def test_cli_workflow_resume_audit_missing_run(capsys) -> None:
-    from harness.cli import main
+    from checks.harness.cli import main
 
     rc = main(["workflow-resume-audit", "nope"])
     out = capsys.readouterr().out

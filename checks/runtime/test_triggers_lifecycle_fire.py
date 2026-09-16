@@ -19,8 +19,8 @@ import pathlib
 
 import pytest
 
-from gideon.hooks import HOOK_EVENTS, LIFECYCLE_EVENT_CATALOG
-from gideon.triggers import lifecycle_fire as L
+from gideon.automation.triggers import lifecycle_fire as L
+from gideon.engine.hooks import HOOK_EVENTS, LIFECYCLE_EVENT_CATALOG
 
 
 @pytest.fixture
@@ -30,7 +30,7 @@ def spy_store(tmp_path, monkeypatch):
     Intercepts at the store's `fire` boundary because that is the ONLY path that runs a hook —
     asserting against a mock of the helper would prove the helper calls itself.
     """
-    from gideon.hooks import ScriptHookStore, set_global_hook_store
+    from gideon.engine.hooks import ScriptHookStore, set_global_hook_store
 
     store = ScriptHookStore(config_dir=pathlib.Path(tmp_path))
     fired: list[tuple[str, str, dict]] = []
@@ -43,9 +43,6 @@ def spy_store(tmp_path, monkeypatch):
     set_global_hook_store(store)
     yield fired
     set_global_hook_store(None)
-
-
-# ── the payload contract ──
 
 
 def test_every_dormant_event_has_a_builder():
@@ -62,7 +59,9 @@ def test_every_builder_names_an_event_the_catalog_declares():
     declared = set(HOOK_EVENTS)
     for name, build in L.BUILDERS.items():
         assert name in declared, f"{name} is not a declared lifecycle event"
-        assert build()["event"] == name, f"{name}'s builder emits a different event name"
+        assert (
+            build()["event"] == name
+        ), f"{name}'s builder emits a different event name"
 
 
 def test_every_builder_emits_the_pool_payload_shape():
@@ -88,7 +87,7 @@ def test_the_catalog_variables_appear_in_the_subagent_context():
     for var in row["vars"]:
         name = var.lstrip("$")
         if name in ("EVENT", "CONTEXT", "cwd"):
-            continue  # supplied by the fire machinery, not the context string
+            continue
         assert name in ctx, f"{name} missing from the SubagentSpawn context"
 
 
@@ -123,20 +122,21 @@ def test_a_builder_with_no_arguments_still_produces_a_valid_payload(build):
     assert isinstance(payload["context"], str)
 
 
-# ── the payloads deliberately withhold content ──
-
-
 def test_the_reply_text_is_not_in_the_post_response_payload():
     """Size, not content. Passing an assistant turn through the environment is the `E2BIG` failure,
     and it would hand untrusted model output to a shell script as an argument."""
-    ctx = L.post_response_payload(session_key="s", reply_chars=4096, tool_calls=3)["context"]
+    ctx = L.post_response_payload(session_key="s", reply_chars=4096, tool_calls=3)[
+        "context"
+    ]
     assert "reply_chars=4096" in ctx and "tool_calls=3" in ctx
 
 
 def test_the_lesson_body_is_not_in_the_memory_write_payload():
     """A memory body is user content. The fencing work in S69/S79 exists so untrusted text does not
     travel into places that execute."""
-    ctx = L.memory_write_payload(kind="lesson", key="workflow", scope="user_explicit")["context"]
+    ctx = L.memory_write_payload(kind="lesson", key="workflow", scope="user_explicit")[
+        "context"
+    ]
     assert "kind=lesson" in ctx and "key=workflow" in ctx
 
 
@@ -148,9 +148,6 @@ def test_the_approval_payload_carries_no_tool_input():
     )["context"]
     assert "tool=bash" in ctx
     assert "input" not in ctx
-
-
-# ── firing reaches a real store ──
 
 
 def test_every_event_reaches_the_hook_store(spy_store):
@@ -185,16 +182,16 @@ def test_fire_forwards_the_dedicated_parameters(spy_store):
 def test_a_missing_hook_store_is_a_no_op(monkeypatch):
     """The store is absent in CLI runs and most tests. An observer that raised there would fail
     every path that does not use hooks at all."""
-    from gideon.hooks import set_global_hook_store
+    from gideon.engine.hooks import set_global_hook_store
 
     set_global_hook_store(None)
-    asyncio.run(L.fire(L.pre_response_payload(session_key="s")))  # must not raise
+    asyncio.run(L.fire(L.pre_response_payload(session_key="s")))
 
 
 def test_a_broken_hook_never_raises_into_the_caller(spy_store, monkeypatch):
     """The rule `tasks/native.py` set for `TaskComplete`: a broken hook script must not turn a
     successful memory write into an exception, and the write already happened."""
-    from gideon.hooks import get_global_hook_store
+    from gideon.engine.hooks import get_global_hook_store
 
     store = get_global_hook_store()
 
@@ -205,11 +202,8 @@ def test_a_broken_hook_never_raises_into_the_caller(spy_store, monkeypatch):
     asyncio.run(L.fire(L.session_end_payload(session_key="s", reason="removed")))
 
 
-# ── the sync bridge ──
-
-
 def test_fire_sync_schedules_onto_a_running_loop(spy_store):
-    """`MemoryService.write_lesson` and `SubagentManager.spawn` are sync; `fire` is a coroutine.
+    """`MemoryService.write_lesson` and `DelegationSupervisor.spawn` are sync; `fire` is a coroutine.
 
     `asyncio.run()` from inside a running loop raises `RuntimeError`, and both call sites are
     reachable from the dashboard's loop — so the bridge schedules instead.
@@ -231,16 +225,11 @@ def test_fire_sync_with_no_loop_is_a_silent_no_op(spy_store):
     assert spy_store == []
 
 
-# ── gating: an event that says "X happened" must not fire when X did not ──
-
-
 def _fake_service(*, writes: bool, blocked: bool = False):
-    from gideon.memory_service import MemoryService
+    from gideon.cognition.memory_service import MemoryService
 
     class _VS:
-        # Signature mirrors `VectorMemoryStore.write_lesson`, scope keywords included:
-        # the service passes them through, and a fake that drops them would only prove
-        # the fake's own shape.
+        # Signature mirrors `SemanticArchive.write_lesson`, scope keywords included:
         def write_lesson(
             self,
             rule,
@@ -269,7 +258,10 @@ def _fake_service(*, writes: bool, blocked: bool = False):
 
 def test_memory_write_fires_only_on_a_successful_write(spy_store):
     async def _run():
-        assert _fake_service(writes=True).write_lesson("always lint", category="workflow") is True
+        assert (
+            _fake_service(writes=True).write_lesson("always lint", category="workflow")
+            is True
+        )
         await asyncio.sleep(0.05)
 
     asyncio.run(_run())
@@ -303,7 +295,7 @@ def test_memory_write_is_silent_when_the_write_is_BLOCKED(spy_store):
 def test_session_end_reports_which_ending_it_was(spy_store):
     """`removed` (resumable) / `destroyed` (permanent) / `shutdown`. A cleanup hook that cannot tell
     them apart either runs on every tab close or misses the case it was written for."""
-    from gideon.session import _fire_session_end, _Session
+    from gideon.engine.session import _fire_session_end, _Session
 
     class _P:
         async def shutdown(self):
@@ -311,7 +303,9 @@ def test_session_end_reports_which_ending_it_was(spy_store):
 
     async def _run():
         for reason in ("removed", "destroyed", "shutdown"):
-            await _fire_session_end(f"k-{reason}", reason, _Session(provider=_P(), prompt_count=7))
+            await _fire_session_end(
+                f"k-{reason}", reason, _Session(provider=_P(), prompt_count=7)
+            )
 
     asyncio.run(_run())
     reasons = [c.split("reason=")[1].split(" ")[0] for _e, c, _k in spy_store]
@@ -322,26 +316,24 @@ def test_session_end_turns_come_from_the_field_that_exists(spy_store):
     """🔴 Measured: a first pass read `session.messages`, which `_Session` does not carry (that lives
     on the dashboard's session object), so every fire would have reported `turns=0` — a plausible
     number that is always wrong, which is worse than an absent field."""
-    from gideon.session import _fire_session_end, _Session
+    from gideon.engine.session import _fire_session_end, _Session
 
     class _P:
         async def shutdown(self):
             return None
 
-    asyncio.run(_fire_session_end("k", "removed", _Session(provider=_P(), prompt_count=12)))
+    asyncio.run(
+        _fire_session_end("k", "removed", _Session(provider=_P(), prompt_count=12))
+    )
     assert "turns=12" in spy_store[0][1]
-
-
-# ── the dormancy ledger is now empty, and stays honest ──
 
 
 def test_the_events_module_agrees_that_nothing_is_dormant():
     """The two modules must not disagree: `lifecycle_fire` owns the fire sites, `triggers.events`
     owns what the UI reports. A wired event left in `DORMANT_EVENTS` would tell a user their working
     hook is dead."""
-    from gideon.triggers.events import DORMANT_EVENTS, dormant_events
+    from gideon.automation.triggers.events import DORMANT_EVENTS, dormant_events
 
     assert dormant_events() == []
     assert DORMANT_EVENTS == frozenset()
-    # And this module's own list is exactly what it wired.
     assert len(L.DORMANT_EVENTS) == 7

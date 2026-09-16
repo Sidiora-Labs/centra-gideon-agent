@@ -23,20 +23,20 @@ import json
 
 import pytest
 
-from gideon.workflows import store
-from gideon.workflows.journal import (
+from gideon.automation.workflows import store
+from gideon.automation.workflows.journal import (
     MAX_INLINE_OUTPUT_BYTES,
     Journal,
     is_binary_payload,
 )
-from gideon.workflows.models import WorkflowRun
+from gideon.automation.workflows.models import WorkflowRun
 
 
 @pytest.fixture(autouse=True)
 def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
     return home
 
 
@@ -50,7 +50,8 @@ class TestBinaryDetection:
     def test_raw_magic_prefixes_are_binary(self) -> None:
         """Raw bytes that reached a `str`. Recovered with latin-1, NOT utf-8: a PNG's leading
         `\\x89` utf-8-encodes to two bytes, so a utf-8 round-trip matches no magic number at
-        all — the first version of this check had exactly that bug and detected nothing."""
+        all — the first version of this check had exactly that bug and detected nothing.
+        """
         for name, magic in (
             ("png", "\x89PNG\r\n\x1a\n"),
             ("jpeg", "\xff\xd8\xff"),
@@ -82,11 +83,11 @@ class TestBinaryDetection:
             "a perfectly normal answer",
             '{"json": "output"}',
             "# a markdown report\n\nwith prose",
-            "PKG_CONFIG_PATH=/usr/lib",  # starts with PK but not PK\x03\x04
-            "%PD",  # a truncated prefix must not match
-            "H4 is a pencil grade",  # base64 gzip prefix is H4sI, not H4
+            "PKG_CONFIG_PATH=/usr/lib",
+            "%PD",
+            "H4 is a pencil grade",
             "iVBORNOT_a_png",
-            "émigré prose with an accent",  # non-ascii but text
+            "émigré prose with an accent",
         ):
             assert not is_binary_payload(text), text
 
@@ -111,10 +112,14 @@ class TestInlinePath:
     def test_the_inline_preview_is_redacted(self, journal: Journal) -> None:
         """Redaction happens before the size check, so a secret cannot ride inline just
         because the payload was small."""
-        _ref, preview = journal.store_output("root.a", {"note": "token=ghp_" + "a" * 36})
+        _ref, preview = journal.store_output(
+            "root.a", {"note": "token=ghp_" + "a" * 36}
+        )
         assert "ghp_" + "a" * 36 not in json.dumps(preview)
 
-    def test_a_value_exactly_at_the_boundary_stays_inline(self, journal: Journal) -> None:
+    def test_a_value_exactly_at_the_boundary_stays_inline(
+        self, journal: Journal
+    ) -> None:
         """The boundary is inclusive. An off-by-one here would spill outputs the widget could
         have shown, which is a silent loss of detail rather than a visible error."""
         pad = "x" * (MAX_INLINE_OUTPUT_BYTES - len('{"v": ""}'))
@@ -147,7 +152,8 @@ class TestSpill:
 
     def test_binary_wins_over_oversize_in_the_reason(self, journal: Journal) -> None:
         """A reader debugging a spill wants the ROOT reason. "oversize" for a 5MB PNG sends
-        them looking for a truncation setting instead of at the node producing binary."""
+        them looking for a truncation setting instead of at the node producing binary.
+        """
         _ref, preview = journal.store_output(
             "root.a", "%PDF-1.7" + "x" * (MAX_INLINE_OUTPUT_BYTES + 10)
         )
@@ -164,13 +170,15 @@ class TestSpill:
     def test_the_stub_is_json_serializable_and_small(self, journal: Journal) -> None:
         """It travels in an SSE frame and a journal line; a stub that itself needed spilling
         would defeat the point."""
-        _ref, preview = journal.store_output("root.a", {"v": "x" * (MAX_INLINE_OUTPUT_BYTES + 1)})
+        _ref, preview = journal.store_output(
+            "root.a", {"v": "x" * (MAX_INLINE_OUTPUT_BYTES + 1)}
+        )
         assert len(json.dumps(preview).encode("utf-8")) < 512
 
     def test_the_byte_count_is_of_the_encoded_payload(self, journal: Journal) -> None:
         """Bytes, not characters. A multi-byte output whose count was measured in characters
         would under-report by up to 4x and read as "why did that spill?"."""
-        value = "é" * (MAX_INLINE_OUTPUT_BYTES // 2 + 100)  # 2 bytes each
+        value = "é" * (MAX_INLINE_OUTPUT_BYTES // 2 + 100)
         _ref, preview = journal.store_output("root.a", value)
         assert preview["bytes"] >= len(value.encode("utf-8"))
 
@@ -198,12 +206,13 @@ class TestArtifactOffload:
         big = {"v": "x" * (MAX_INLINE_OUTPUT_BYTES + 1000)}
         ref, preview = journal.store_output("root.a", big)
         assert preview["reason"] == "oversize"
-        # The ref is a pointer, NOT an outputs/ value — this is the {{nodes.x.artifact}} signal.
         assert ref.startswith("artifacts/")
         assert preview["output_ref"] == ref
         assert (store.run_dir(journal.run_id) / ref).is_file()
 
-    def test_the_offloaded_body_is_read_back_by_node_path(self, journal: Journal) -> None:
+    def test_the_offloaded_body_is_read_back_by_node_path(
+        self, journal: Journal
+    ) -> None:
         """`read_output` falls back to artifacts/, so every existing reader sees the full body
         transparently even though it moved off outputs/."""
         big = "x" * (MAX_INLINE_OUTPUT_BYTES + 500)
@@ -232,7 +241,6 @@ class TestHeadTailPreview:
         prev = preview["preview"]
         assert "HEAD_MARKER" in prev["head"]
         assert "TAIL_MARKER" in prev["tail"]
-        # Distinct ends — not the same slice reported twice.
         assert prev["head"] != prev["tail"]
 
     def test_the_preview_is_bounded(self, journal: Journal) -> None:

@@ -107,7 +107,7 @@ cosine floor keeps weak vector hits from polluting precise keyword queries.
 - Memory is partitioned by **working directory**: `config/loader.py`'s
   `memory_dir_for_cwd(cwd)` maps a session's cwd onto
   `~/.gideon/workspace/_ext/<slug(cwd)>`, and an empty cwd onto the shared
-  `_ext/_default` partition. `context.py::ContextBuilder.get_memory_for` resolves
+  `_ext/_default` partition. `context.py::PromptAssembler.get_memory_for` resolves
   and caches one store per partition (the gateway's own workspace is aliased
   onto the main store, so a dashboard chat and the Memory UI share one).
 - **Project locality rides that seam** (`memory_locality.py`): a project-owned

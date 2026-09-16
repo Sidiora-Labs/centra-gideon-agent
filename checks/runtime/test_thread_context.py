@@ -10,9 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gideon.channel_history import ChannelHistory, HistoryEntry
-
-# ── ChannelHistory thread-aware ──
+from gideon.integrations.channel_history import ChannelHistory, HistoryEntry
 
 
 class TestChannelHistoryThreadAware:
@@ -87,7 +85,7 @@ class TestChannelHistoryThreadAware:
     def test_context_for_thread_ts_none_messages(self):
         """Messages without thread_ts are excluded when filtering by thread."""
         h = ChannelHistory()
-        h.push("C1", "alice", "no-thread")  # no thread_ts
+        h.push("C1", "alice", "no-thread")
         h.push("C1", "bob", "in-thread", thread_ts="t1")
         ctx = h.context_for("C1", thread_ts="t1")
         assert "[Current thread:]" in ctx
@@ -96,16 +94,13 @@ class TestChannelHistoryThreadAware:
         assert "no-thread" not in ctx
 
 
-# ── Trust ACP native history (no thread reminder) ──
-
-
 class TestNoThreadReminder:
     """Follow-up messages trust ACP native history — no reminder injected."""
 
     def test_no_reminder_on_follow_up(self):
         """Follow-up messages should NOT inject thread reminder — trust ACP."""
-        from gideon.context import ContextBuilder
-        from gideon.history import ConversationLog
+        from gideon.cognition.context import PromptAssembler
+        from gideon.cognition.history import ConversationLog
 
         log = MagicMock(spec=ConversationLog)
         log.recent.return_value = [
@@ -113,7 +108,7 @@ class TestNoThreadReminder:
             {"role": "assistant", "content": "X is Y."},
         ]
 
-        cb = ContextBuilder(conversation_log=log)
+        cb = PromptAssembler(conversation_log=log)
         msg, _ = cb.build_message(
             "follow up question",
             is_new_session=False,
@@ -123,15 +118,15 @@ class TestNoThreadReminder:
 
     def test_no_reminder_on_new_session(self):
         """New sessions get full history via build_session_context, not reminder."""
-        from gideon.context import ContextBuilder
-        from gideon.history import ConversationLog
+        from gideon.cognition.context import PromptAssembler
+        from gideon.cognition.history import ConversationLog
 
         log = MagicMock(spec=ConversationLog)
         log.recent.return_value = [
             {"role": "user", "content": "hello"},
         ]
 
-        cb = ContextBuilder(conversation_log=log)
+        cb = PromptAssembler(conversation_log=log)
         msg, _ = cb.build_message(
             "hi",
             is_new_session=True,
@@ -140,9 +135,9 @@ class TestNoThreadReminder:
         assert "[Recent thread context" not in msg
 
     def test_no_reminder_without_conversation_log(self):
-        from gideon.context import ContextBuilder
+        from gideon.cognition.context import PromptAssembler
 
-        cb = ContextBuilder()
+        cb = PromptAssembler()
         msg, _ = cb.build_message(
             "hi",
             is_new_session=False,
@@ -151,19 +146,16 @@ class TestNoThreadReminder:
         assert "[Recent thread context" not in msg
 
 
-# ── Wiring: thread_ts flows through ──
-
-
 class TestThreadTsWiring:
     """thread_ts passes from handler → build_message → context_for."""
 
     def test_build_message_passes_thread_ts_to_channel_history(self):
-        from gideon.context import ContextBuilder
+        from gideon.cognition.context import PromptAssembler
 
         mock_ch = MagicMock(spec=ChannelHistory)
         mock_ch.context_for.return_value = "[mocked context]"
 
-        cb = ContextBuilder()
+        cb = PromptAssembler()
         cb.channel_history = mock_ch
 
         cb.build_message(
@@ -175,12 +167,12 @@ class TestThreadTsWiring:
         mock_ch.context_for.assert_called_once_with("C1", thread_ts="t123")
 
     def test_build_message_no_thread_ts_passes_none(self):
-        from gideon.context import ContextBuilder
+        from gideon.cognition.context import PromptAssembler
 
         mock_ch = MagicMock(spec=ChannelHistory)
         mock_ch.context_for.return_value = ""
 
-        cb = ContextBuilder()
+        cb = PromptAssembler()
         cb.channel_history = mock_ch
 
         cb.build_message(
@@ -191,9 +183,6 @@ class TestThreadTsWiring:
         mock_ch.context_for.assert_called_once_with("C1", thread_ts=None)
 
 
-# ── Scenario: two concurrent threads in one channel ──
-
-
 class TestConcurrentThreadsIsolation:
     """Two threads in the same channel must not leak into each other's context."""
 
@@ -202,11 +191,8 @@ class TestConcurrentThreadsIsolation:
         Context for Thread A must contain only Thread A messages."""
         h = ChannelHistory()
 
-        # Thread A messages
         h.push("C1", "user", "explain AutoSkill Generation", thread_ts="tA")
-        # Thread B message
         h.push("C1", "user", "how many ACP sessions are running", thread_ts="tB")
-        # Thread A continuation
         h.push("C1", "user", "the output got cut off", thread_ts="tA")
 
         ctx = h.context_for("C1", thread_ts="tA")

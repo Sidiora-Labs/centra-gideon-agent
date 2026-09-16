@@ -33,18 +33,14 @@ from pathlib import Path
 import pytest
 
 import gideon.sdk.model  # noqa: F401 — sdk.model must import before provider_helpers
-
-# ``SubscriptionSource`` + ``register_subscription_source`` are imported through the SDK
-# facade on purpose: that is the ONLY path an app may use, so exercising it here is what
-# proves the app-facing surface works (and keeps it out of the inert-surface census).
-from gideon.llm.branded_specs import (
+from gideon.integrations.llm.branded_specs import (
     BrandedProviderSpec,
     spec_credential_source,
 )
-from gideon.llm.capabilities import Capability
-from gideon.llm.credentials import Credential
-from gideon.llm.registry import ProviderEntry
-from gideon.llm.subscription_credentials import (
+from gideon.integrations.llm.capabilities import Capability
+from gideon.integrations.llm.credentials import Credential
+from gideon.integrations.llm.registry import ProviderEntry
+from gideon.integrations.llm.subscription_credentials import (
     SubscriptionAuth,
     resolve_subscription_credential,
     subscription_source_status,
@@ -82,7 +78,7 @@ def _fake_anthropic(monkeypatch: pytest.MonkeyPatch) -> None:
 def _isolated_source_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every test gets an empty source registry — process-global state that would
     otherwise leak a fake vendor row into an unrelated test."""
-    from gideon.llm import subscription_credentials as subcreds
+    from gideon.integrations.llm import subscription_credentials as subcreds
 
     monkeypatch.setattr(subcreds, "_SOURCES", {})
 
@@ -121,9 +117,6 @@ def _spec(**overrides: object) -> BrandedProviderSpec:
     }
     kwargs.update(overrides)
     return BrandedProviderSpec(**kwargs)  # type: ignore[arg-type]
-
-
-# ── 1. Precedence: one test per hop of the documented order ───────────────────────────
 
 
 def test_entry_credential_outranks_the_subscription_source(tmp_path: Path) -> None:
@@ -189,7 +182,8 @@ def test_a_source_that_is_not_signed_in_falls_all_the_way_to_the_anon_placeholde
     tmp_path: Path,
 ) -> None:
     """The FIFTH hop. Construction still succeeds (the protocol client demands a populated
-    secret) — the failure is reported by ``availability()``, not by a crash at build time."""
+    secret) — the failure is reported by ``availability()``, not by a crash at build time.
+    """
     _source(tmp_path / "absent.json")
     spec = _spec(type="hop5")
     factory, _, _ = register_branded_app(spec)
@@ -220,7 +214,9 @@ def test_the_whole_five_hop_order_holds_as_one_descending_ladder(
 
     class _Store:
         def resolve(self, name: str) -> Credential:
-            return Credential(name=name, kind="api_key", secret="ENTRY-CRED", source="file")
+            return Credential(
+                name=name, kind="api_key", secret="ENTRY-CRED", source="file"
+            )
 
     def _winner(*, with_entry_cred: bool, with_opt_key: bool) -> str:
         entry = ProviderEntry(
@@ -230,20 +226,15 @@ def test_the_whole_five_hop_order_holds_as_one_descending_ladder(
             credential="my-cred" if with_entry_cred else None,
             options={"api_key": "OPT-KEY"} if with_opt_key else {},
         )
-        return factory(entry=entry, credential_store=_Store())._client.api_key  # noqa: SLF001
+        return factory(
+            entry=entry, credential_store=_Store()
+        )._client.api_key  # noqa: SLF001
 
-    # Rung 1: every one of the five is available → the explicit entry credential wins.
     assert _winner(with_entry_cred=True, with_opt_key=True) == "ENTRY-CRED"
-    # Rung 2: drop ONLY the entry credential; the per-instance key, the signed-in
-    # subscription and the env key all remain → the per-instance key wins.
     assert _winner(with_entry_cred=False, with_opt_key=True) == "OPT-KEY"
-    # Rung 3: drop the per-instance key too; source + env remain → the subscription wins.
     assert _winner(with_entry_cred=False, with_opt_key=False) == SECRET
-    # Rung 4: sign the CLI out (the store this source declares disappears, exactly as it
-    # looks before `example login`); the env key remains → the env key wins.
     store.unlink()
     assert _winner(with_entry_cred=False, with_opt_key=False) == "ENV-KEY"
-    # Rung 5: remove the env key as well → the anon placeholder, and still no crash.
     monkeypatch.delenv("LADDER_ENV_KEY")
     assert _winner(with_entry_cred=False, with_opt_key=False) == "unused"
 
@@ -265,7 +256,8 @@ def test_a_spec_with_no_credential_source_never_consults_the_resolver(
     calls: list[str] = []
     monkeypatch.setattr(
         "gideon.sdk.provider_helpers.resolve_subscription_credential",
-        lambda source: calls.append(source) or SubscriptionAuth(source=source, logged_in=False),
+        lambda source: calls.append(source)
+        or SubscriptionAuth(source=source, logged_in=False),
     )
     spec = _spec(type="nosource", credential_source="")
     factory, _, _ = register_branded_app(spec)
@@ -276,7 +268,8 @@ def test_a_spec_with_no_credential_source_never_consults_the_resolver(
 def test_both_api_key_spellings_are_stripped_from_extra_options(tmp_path: Path) -> None:
     """An entry carrying BOTH spellings must leak neither into the SDK call kwargs. The
     short-circuit ``or`` that used to pop them left ``apiKey`` behind → 'unexpected keyword
-    argument' at the wire, the same class of bug the base_url/endpoint pop was fixed for."""
+    argument' at the wire, the same class of bug the base_url/endpoint pop was fixed for.
+    """
     _signed_in(tmp_path)
     spec = _spec(type="bothspellings")
     factory, _, _ = register_branded_app(spec)
@@ -291,9 +284,6 @@ def test_both_api_key_spellings_are_stripped_from_extra_options(tmp_path: Path) 
     assert "api_key" not in extra and "apiKey" not in extra
     assert extra.get("temperature") == 0.25
     assert prov._client.api_key == "snake"  # noqa: SLF001 — snake_case wins, as before
-
-
-# ── 2. Fail soft and typed: nothing raises, and a parse error is never "signed in" ─────
 
 
 def test_a_signed_in_source_resolves_the_token(tmp_path: Path) -> None:
@@ -320,21 +310,23 @@ def test_an_absent_credential_file_is_not_signed_in_with_the_apps_login_hint(
     _source(tmp_path / "nothing-here.json")
     available, reason = subscription_source_status("example-cli")
     assert available is False
-    assert "example login" in reason  # the APP's own login verb, not core's invention
+    assert "example login" in reason
 
 
 @pytest.mark.parametrize(
     "raw",
     [
-        '{"oauth": {"accessToken": "sk-half',  # truncated mid-write
-        "",  # zero-length (created but not yet written)
+        '{"oauth": {"accessToken": "sk-half',
+        "",
         "not json at all",
-        "[]",  # valid JSON, wrong shape
+        "[]",
         '{"oauth": null}',
     ],
     ids=["truncated", "empty", "garbage", "wrong-shape", "null-branch"],
 )
-def test_a_malformed_or_half_written_store_is_NOT_authenticated(tmp_path: Path, raw: str) -> None:
+def test_a_malformed_or_half_written_store_is_NOT_authenticated(
+    tmp_path: Path, raw: str
+) -> None:
     """The single most dangerous failure mode: a parse error that read as 'signed in' would
     hand the wire an empty bearer token and report success. Every one of these is
     not-signed-in with a reason, and none of them raises."""
@@ -359,7 +351,8 @@ def test_a_missing_blank_or_non_string_token_is_not_signed_in(
 
 def test_an_expired_sign_in_is_not_signed_in(tmp_path: Path) -> None:
     path = _store(
-        tmp_path, {"oauth": {"accessToken": SECRET, "expiresAt": 1_000_000_000_000}}  # year 2001
+        tmp_path,
+        {"oauth": {"accessToken": SECRET, "expiresAt": 1_000_000_000_000}},
     )
     _source(path, expires_at_path=("oauth", "expiresAt"), expires_at_unit="ms")
     available, reason = subscription_source_status("example-cli")
@@ -368,13 +361,16 @@ def test_an_expired_sign_in_is_not_signed_in(tmp_path: Path) -> None:
 
 def test_a_future_expiry_is_still_signed_in(tmp_path: Path) -> None:
     path = _store(
-        tmp_path, {"oauth": {"accessToken": SECRET, "expiresAt": 99_999_999_999}}  # year 5138, secs
+        tmp_path,
+        {"oauth": {"accessToken": SECRET, "expiresAt": 99_999_999_999}},
     )
     _source(path, expires_at_path=("oauth", "expiresAt"), expires_at_unit="s")
     assert resolve_subscription_credential("example-cli").logged_in is True
 
 
-def test_an_unparseable_expiry_stamp_does_not_grey_out_a_working_source(tmp_path: Path) -> None:
+def test_an_unparseable_expiry_stamp_does_not_grey_out_a_working_source(
+    tmp_path: Path,
+) -> None:
     """Inventing an expiry from a stamp we cannot read would disable a provider that works.
     That judgement belongs to the vendor's endpoint (its own 401)."""
     path = _store(tmp_path, {"oauth": {"accessToken": SECRET, "expiresAt": "whenever"}})
@@ -397,10 +393,18 @@ def test_a_broken_source_declaration_raises_at_registration_time() -> None:
     """An app that mis-declares its store has a bug, not a runtime condition. Failing loudly
     at import beats degrading into a mystery 'not signed in' months later."""
     for bad in (
-        SubscriptionSource(id="", login_hint="h", credential_files=("f",), token_path=("t",)),
-        SubscriptionSource(id="x", login_hint="", credential_files=("f",), token_path=("t",)),
-        SubscriptionSource(id="x", login_hint="h", credential_files=(), token_path=("t",)),
-        SubscriptionSource(id="x", login_hint="h", credential_files=("f",), token_path=()),
+        SubscriptionSource(
+            id="", login_hint="h", credential_files=("f",), token_path=("t",)
+        ),
+        SubscriptionSource(
+            id="x", login_hint="", credential_files=("f",), token_path=("t",)
+        ),
+        SubscriptionSource(
+            id="x", login_hint="h", credential_files=(), token_path=("t",)
+        ),
+        SubscriptionSource(
+            id="x", login_hint="h", credential_files=("f",), token_path=()
+        ),
         SubscriptionSource(
             id="x",
             login_hint="h",
@@ -415,13 +419,16 @@ def test_a_broken_source_declaration_raises_at_registration_time() -> None:
 
 def test_a_credential_file_that_is_a_DIRECTORY_is_not_signed_in(tmp_path: Path) -> None:
     """``read_text`` on a directory raises OSError, not JSONDecodeError — the OSError arm
-    has to catch it or a mis-declared path becomes a traceback in the extensions list."""
+    has to catch it or a mis-declared path becomes a traceback in the extensions list.
+    """
     (tmp_path / "as-a-dir").mkdir()
     _source(tmp_path / "as-a-dir")
     assert resolve_subscription_credential("example-cli").logged_in is False
 
 
-def test_a_tilde_relative_path_is_expanded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_tilde_relative_path_is_expanded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Sources declare ``~/.example/.credentials.json``; without expansion every real
     declaration would silently miss. Pointed at tmp_path — never a real home."""
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -432,10 +439,6 @@ def test_a_tilde_relative_path_is_expanded(tmp_path: Path, monkeypatch: pytest.M
     assert resolve_subscription_credential("example-cli").secret == SECRET
 
 
-# ── 3. Read-only: proven structurally AND behaviourally ───────────────────────────────
-
-#: Names that mutate a path. Any of these appearing in the resolver module means it can
-#: write to a store it does not own.
 _WRITE_SHAPED = (
     "write_text",
     "write_bytes",
@@ -453,7 +456,10 @@ _WRITE_SHAPED = (
     "truncate",
 )
 
-_MODULE = Path(__file__).resolve().parents[1] / "src/gideon/llm/subscription_credentials.py"
+_MODULE = (
+    Path(__file__).resolve().parents[2]
+    / "runtime/gideon/integrations/llm/subscription_credentials.py"
+)
 
 
 def _write_shaped_calls(path: Path) -> set[str]:
@@ -490,12 +496,16 @@ def test_the_write_detector_is_not_vacuous() -> None:
     """A rail that matches nothing looks clean. Point the same detector at a module that
     legitimately DOES write (the credential store's own ``.env`` writer) and require a hit —
     otherwise the assertion above proves only that the detector is broken."""
-    writer = _MODULE.parents[1] / "config/loader.py"
+    writer = _MODULE.parents[2] / "core/config/credentials.py"
     assert writer.is_file()
-    assert _write_shaped_calls(writer), "detector found no writes in a module that writes"
+    assert _write_shaped_calls(
+        writer
+    ), "detector found no writes in a module that writes"
 
 
-def test_resolving_leaves_the_foreign_store_byte_for_byte_untouched(tmp_path: Path) -> None:
+def test_resolving_leaves_the_foreign_store_byte_for_byte_untouched(
+    tmp_path: Path,
+) -> None:
     """The behavioural half. Someone else's credential file must come out of a resolve with
     identical bytes, mode and mtime — no refresh, no rewrite, no normalising re-save."""
     path = _store(tmp_path, {"oauth": {"accessToken": SECRET, "extra": "keep me"}})
@@ -511,14 +521,16 @@ def test_resolving_leaves_the_foreign_store_byte_for_byte_untouched(tmp_path: Pa
     assert after.st_mtime_ns == before.st_mtime_ns
     assert after.st_mode == before.st_mode
     assert after.st_size == before.st_size
-    assert sorted(p.name for p in tmp_path.iterdir()) == [path.name]  # no sidecar/backup either
+    assert sorted(p.name for p in tmp_path.iterdir()) == [path.name]
 
 
 def test_an_EXPIRED_store_is_not_refreshed_or_rewritten(tmp_path: Path) -> None:
     """The tempting write. An expired token is where a 'helpful' implementation would call
     the vendor CLI to refresh and re-save — that is a write to another tool's store, so the
     contract is to report it and let the user re-run their own login."""
-    path = _store(tmp_path, {"oauth": {"accessToken": SECRET, "expiresAt": 1_000_000_000_000}})
+    path = _store(
+        tmp_path, {"oauth": {"accessToken": SECRET, "expiresAt": 1_000_000_000_000}}
+    )
     _source(path, expires_at_path=("oauth", "expiresAt"))
     before_bytes, before = path.read_bytes(), path.stat()
 
@@ -540,21 +552,23 @@ def test_a_malformed_store_is_not_repaired(tmp_path: Path) -> None:
     assert path.stat().st_mtime_ns == before.st_mtime_ns
 
 
-# ── 4. No leak: not in a repr, a reason, an availability line, or a log record ─────────
-
-
-def test_the_resolved_secret_is_absent_from_every_emitted_string(tmp_path: Path) -> None:
+def test_the_resolved_secret_is_absent_from_every_emitted_string(
+    tmp_path: Path,
+) -> None:
     _signed_in(tmp_path)
     auth = resolve_subscription_credential("example-cli")
-    assert auth.secret == SECRET  # it IS resolved …
+    assert auth.secret == SECRET
     for rendered in (repr(auth), str(auth), f"{auth}", auth.reason, format(auth)):
-        assert SECRET not in rendered  # … and it appears in none of these
+        assert SECRET not in rendered
 
 
-def test_an_expired_or_malformed_reason_carries_no_fragment_of_the_file(tmp_path: Path) -> None:
+def test_an_expired_or_malformed_reason_carries_no_fragment_of_the_file(
+    tmp_path: Path,
+) -> None:
     """A reason is built from the source id, the declared path and the app's hint — never
     from file content. An exception message quoting the parser's input would leak a
-    fragment of a credential, which is why the malformed arm reports a fixed sentence."""
+    fragment of a credential, which is why the malformed arm reports a fixed sentence.
+    """
     path = _store(tmp_path, '{"oauth": {"accessToken": "' + SECRET)
     _source(path)
     reason = subscription_source_status("example-cli")[1]
@@ -564,7 +578,9 @@ def test_an_expired_or_malformed_reason_carries_no_fragment_of_the_file(tmp_path
         assert fragment not in reason
 
     expired = _store(
-        tmp_path, {"oauth": {"accessToken": SECRET, "expiresAt": 1}}, name="expired.json"
+        tmp_path,
+        {"oauth": {"accessToken": SECRET, "expiresAt": 1}},
+        name="expired.json",
     )
     _source(expired, expires_at_path=("oauth", "expiresAt"))
     assert SECRET not in subscription_source_status("example-cli")[1]
@@ -591,12 +607,9 @@ def test_the_secret_field_is_declared_repr_false() -> None:
     assert secret_field.repr is False
 
 
-# ── The availability seam: providers/loader.py derives the probe ───────────────────────
-
-
 def _ext(provider_type: str, *, implementation: str = "provider:create_provider"):
-    from gideon.apps.manifest import AppManifest, ProviderConfig
-    from gideon.providers.registry import RegisteredProvider
+    from gideon.extensions.apps.manifest import AppManifest, ProviderConfig
+    from gideon.extensions.providers.registry import RegisteredProvider
 
     manifest = AppManifest(
         name="example-subscription-models",
@@ -618,14 +631,16 @@ def test_load_availability_derives_a_probe_from_the_declared_credential_source(
 ) -> None:
     """done_when's soft-failure surface: a not-signed-in source greys the bundle out in the
     extensions list WITH the app's reason, and the app writes no hook to get it."""
-    from gideon.providers import loader
+    from gideon.extensions.providers import loader
 
     _source(tmp_path / "absent.json")
     spec = _spec(type="availtest")
     register_branded_app(spec)
     assert spec_credential_source(spec.type) == "example-cli"
 
-    monkeypatch.setattr(loader, "_load_ext_module", lambda ext, path: types.ModuleType("m"))
+    monkeypatch.setattr(
+        loader, "_load_ext_module", lambda ext, path: types.ModuleType("m")
+    )
     probe = loader.load_availability(_ext(spec.type))
     assert probe is not None
     available, reason = probe()
@@ -636,12 +651,14 @@ def test_load_availability_derives_a_probe_from_the_declared_credential_source(
 def test_a_derived_probe_reports_available_once_the_cli_is_signed_in(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from gideon.providers import loader
+    from gideon.extensions.providers import loader
 
     _signed_in(tmp_path)
     spec = _spec(type="availtest-ok")
     register_branded_app(spec)
-    monkeypatch.setattr(loader, "_load_ext_module", lambda ext, path: types.ModuleType("m"))
+    monkeypatch.setattr(
+        loader, "_load_ext_module", lambda ext, path: types.ModuleType("m")
+    )
     probe = loader.load_availability(_ext(spec.type))
     assert probe is not None
     assert probe() == (True, "")
@@ -651,7 +668,7 @@ def test_an_explicit_availability_hook_still_wins_over_the_derived_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An app that wrote a hook knows something extra about its own machine."""
-    from gideon.providers import loader
+    from gideon.extensions.providers import loader
 
     _signed_in(tmp_path)
     spec = _spec(type="availtest-explicit")
@@ -669,20 +686,20 @@ def test_a_provider_declaring_no_credential_source_gets_no_derived_probe(
 ) -> None:
     """Vacuity guard on the seam: the derived probe must not appear for ordinary apps, or
     every keyed provider would start greying itself out."""
-    from gideon.providers import loader
+    from gideon.extensions.providers import loader
 
     spec = _spec(type="availtest-none", credential_source="")
     register_branded_app(spec)
-    monkeypatch.setattr(loader, "_load_ext_module", lambda ext, path: types.ModuleType("m"))
+    monkeypatch.setattr(
+        loader, "_load_ext_module", lambda ext, path: types.ModuleType("m")
+    )
     assert loader.load_availability(_ext(spec.type)) is None
-    # …and neither does one whose manifest declares no concrete provider type at all.
     assert loader.load_availability(_ext("")) is None
 
 
-# ── Spec round-trip: a new field must survive save/load ───────────────────────────────
-
-
-def test_credential_source_round_trips_through_json_and_keeps_the_spec_hashable() -> None:
+def test_credential_source_round_trips_through_json_and_keeps_the_spec_hashable() -> (
+    None
+):
     """The round-trip discipline that catches a field added to the dataclass but not to the
     serializer — the exact miss ``pricing`` was added to guard against."""
     spec = BrandedProviderSpec(
@@ -707,7 +724,9 @@ def test_credential_source_round_trips_through_json_and_keeps_the_spec_hashable(
     )
 
 
-def test_credential_source_defaults_empty_so_an_older_serialized_spec_still_loads() -> None:
+def test_credential_source_defaults_empty_so_an_older_serialized_spec_still_loads() -> (
+    None
+):
     spec = BrandedProviderSpec(type="plain")
     assert spec.credential_source == ""
     payload = spec.to_dict()
@@ -715,10 +734,12 @@ def test_credential_source_defaults_empty_so_an_older_serialized_spec_still_load
     assert BrandedProviderSpec.from_dict(payload) == spec
 
 
-def test_spec_credential_source_answers_for_a_named_instance_and_never_guesses() -> None:
+def test_spec_credential_source_answers_for_a_named_instance_and_never_guesses() -> (
+    None
+):
     """Mirrors ``spec_pricing``: resolves a user-named INSTANCE of a type, and returns ``""``
     (never a source id) for an unknown provider."""
-    from gideon.llm import branded_specs
+    from gideon.integrations.llm import branded_specs
 
     spec = BrandedProviderSpec(type="acme", credential_source="acme-cli")
     with pytest.MonkeyPatch.context() as mp:
@@ -726,16 +747,6 @@ def test_spec_credential_source_answers_for_a_named_instance_and_never_guesses()
         assert spec_credential_source("acme") == "acme-cli"
         assert spec_credential_source("acme-work") == "acme-cli"
         assert spec_credential_source("unknown") == ""
-
-
-# ── 5. One order, EVERY surface: the config-path factory (fix for the LMMV-6 finding) ──
-#
-# ``register_branded_app`` returns TWO ways to build a provider, and an app manifest's
-# ``implementation: "provider:create_provider"`` names the second one, so
-# ``ModelTypeHandler.create`` calls it per enabled instance. Only ``_factory`` had a
-# subscription hop, so a subscription app wired the documented way built a provider holding
-# the literal anon placeholder: an authenticated-LOOKING provider that 401s at first use with
-# a signed-in CLI sitting right there. Both paths now resolve hops 2-4 from one helper.
 
 
 def test_the_config_path_resolves_the_subscription_source(tmp_path: Path) -> None:
@@ -752,18 +763,22 @@ def test_the_config_path_keeps_the_SAME_precedence_as_the_registry_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The order, not just the hop: an explicit config key still outranks the subscription, a
-    signed-out source still falls THROUGH to the env, and the tail is still the placeholder."""
+    signed-out source still falls THROUGH to the env, and the tail is still the placeholder.
+    """
     store = _store(tmp_path, {"oauth": {"accessToken": SECRET}})
     _source(store)
     spec = _spec(type="cfgladder", api_key_env="CFG_ENV_KEY")
     _, create_provider, _ = register_branded_app(spec)
     monkeypatch.setenv("CFG_ENV_KEY", "ENV-KEY")
 
-    assert create_provider({"api_key": "CFG-KEY"})._client.api_key == "CFG-KEY"  # noqa: SLF001
-    # camelCase spelling resolves identically — the entry path pops both, so does this one.
-    assert create_provider({"apiKey": "CFG-CAMEL"})._client.api_key == "CFG-CAMEL"  # noqa: SLF001
+    assert (
+        create_provider({"api_key": "CFG-KEY"})._client.api_key == "CFG-KEY"
+    )  # noqa: SLF001
+    assert (
+        create_provider({"apiKey": "CFG-CAMEL"})._client.api_key == "CFG-CAMEL"
+    )  # noqa: SLF001
     assert create_provider({})._client.api_key == SECRET  # noqa: SLF001
-    store.unlink()  # sign the CLI out
+    store.unlink()
     assert create_provider({})._client.api_key == "ENV-KEY"  # noqa: SLF001
     monkeypatch.delenv("CFG_ENV_KEY")
     assert create_provider({})._client.api_key == "unused"  # noqa: SLF001
@@ -798,26 +813,21 @@ def test_both_build_paths_agree_on_every_credential_state(
         )
 
     seen: list[str] = []
-    for explicit in ("TYPED-KEY", ""):  # signed in, with and without an explicit key
+    for explicit in ("TYPED-KEY", ""):
         entry_key, cfg_key = _pair(explicit)
         assert entry_key == cfg_key
         seen.append(entry_key)
     monkeypatch.setenv("BOTH_ENV_KEY", "ENV-KEY")
-    store.unlink()  # signed out → both must fall through to the env
+    store.unlink()
     entry_key, cfg_key = _pair("")
     assert entry_key == cfg_key
     seen.append(entry_key)
     monkeypatch.delenv("BOTH_ENV_KEY")
-    entry_key, cfg_key = _pair("")  # nothing at all → both reach the placeholder
+    entry_key, cfg_key = _pair("")
     assert entry_key == cfg_key
     seen.append(entry_key)
-    # Vacuity floor: agreement is only evidence if the four states resolved to four DIFFERENT
-    # secrets. Two paths that both always returned "unused" would pass the asserts above.
     assert seen == ["TYPED-KEY", SECRET, "ENV-KEY", "unused"]
     assert len(set(seen)) == 4
-
-
-# ── 6. The connection probe can SEE a sign-in (fix for the dangling-sentence finding) ──
 
 
 def _catalog(spec: BrandedProviderSpec, **kwargs: object):
@@ -840,7 +850,7 @@ def test_test_connection_probes_with_the_subscription_token_when_signed_in(
     _signed_in(tmp_path)
     spec = _spec(type="probesub")
     register_branded_app(spec)
-    import gideon.llm.anthropic as anth
+    import gideon.integrations.llm.anthropic as anth
 
     seen: list[str] = []
 
@@ -851,9 +861,8 @@ def test_test_connection_probes_with_the_subscription_token_when_signed_in(
 
     monkeypatch.setattr(anth.AnthropicProvider, "complete", _record)
     res = _run(_catalog(spec).test_connection())
-    # A model-not-found still proves the credentials authenticated → connected.
     assert res.ok is True
-    assert seen == [SECRET]  # the probe used the CLI's token, not "" and not the placeholder
+    assert seen == [SECRET]
     assert SECRET not in (res.detail or "")
 
 
@@ -869,7 +878,7 @@ def test_a_signed_out_subscription_app_is_told_to_sign_in_not_to_set_a_nameless_
     res = _run(_catalog(spec).test_connection())
     detail = res.detail or ""
     assert res.ok is False
-    assert "example login" in detail  # the app's own login hint, from the typed reason
+    assert "example login" in detail
     assert "(set it or )" not in detail and not detail.rstrip().endswith("or )")
     assert "set it or" not in detail
 
@@ -894,7 +903,9 @@ def test_list_models_also_discovers_with_the_subscription_token(
     register_branded_app(spec)
     seen: list[str] = []
 
-    async def _fake_list(endpoint: str, api_key: str, *, default_base: str = "") -> list:
+    async def _fake_list(
+        endpoint: str, api_key: str, *, default_base: str = ""
+    ) -> list:
         seen.append(api_key)
         return []
 
@@ -924,18 +935,10 @@ def test_the_catalog_resolves_the_key_per_call_so_a_later_login_is_seen(
     assert cat._resolved_key() == (SECRET, "")  # noqa: SLF001
 
 
-# ── 7. A branded app that serves a family is recognized as serving it ─────────────────
-#
-# ``_MODEL_FAMILY_PROVIDER_TYPES`` is a hand-maintained core row, so a subscription app
-# serving ``claude-*`` was judged unable to serve it and session-restore SILENTLY swapped the
-# user's persisted model for the active provider's. The table is now the floor, unioned with
-# the types whose app declares a model of that family.
-
-
 def _only_registered(mp: pytest.MonkeyPatch, **specs: BrandedProviderSpec) -> None:
     """Make the registered-spec table exactly ``specs`` (process-global state otherwise leaks
     a fake app into an unrelated test — the same reason ``_SOURCES`` is isolated)."""
-    from gideon.llm import branded_specs
+    from gideon.integrations.llm import branded_specs
 
     mp.setattr(branded_specs, "_REGISTERED_SPECS", dict(specs))
 
@@ -943,32 +946,28 @@ def _only_registered(mp: pytest.MonkeyPatch, **specs: BrandedProviderSpec) -> No
 def test_a_branded_app_declaring_claude_models_is_recognized_as_serving_them(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from gideon.llm.catalog import model_family_provider_types
+    from gideon.integrations.llm.catalog import model_family_provider_types
 
     floor = frozenset({"anthropic", "anthropic_compatible", "bedrock"})
-    # Vacuity floor: with no app registered the answer is EXACTLY the core row, so the
-    # assertions below measure the union and not a set that was already permissive.
     with pytest.MonkeyPatch.context() as mp:
         _only_registered(mp)
         assert model_family_provider_types("claude-sonnet-4-5") == floor
 
     _only_registered(
         monkeypatch,
-        claude_subscription=_spec(type="claude_subscription", default_model="claude-sonnet-4-5"),
-        # …declared in the fallback catalog rather than as the default model: both count.
+        claude_subscription=_spec(
+            type="claude_subscription", default_model="claude-sonnet-4-5"
+        ),
         aggregator=BrandedProviderSpec(
             type="aggregator",
             fallback_models=({"id": "anthropic/claude-3-5-haiku"},),
         ),
-        # …and a negative control: an app declaring only a llama model must NOT be admitted,
-        # or the union would be "every installed app", which restricts nothing.
         llama_host=BrandedProviderSpec(type="llama_host", default_model="llama-3-70b"),
     )
     served = model_family_provider_types("claude-sonnet-4-5")
-    assert floor <= served  # the core row is still honored
+    assert floor <= served
     assert "claude_subscription" in served and "aggregator" in served
     assert "llama_host" not in served
-    # An unrecognized family stays unrestricted rather than collecting every app.
     assert model_family_provider_types("llama-3-70b") == frozenset()
 
 
@@ -976,11 +975,13 @@ def test_a_persisted_claude_model_survives_restore_under_a_subscription_provider
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The user-facing end of it: the persisted model must be kept, not silently swapped."""
-    from gideon.dashboard import chat_persistence
+    from gideon.interfaces.dashboard import chat_persistence
 
     _only_registered(
         monkeypatch,
-        claude_subscription=_spec(type="claude_subscription", default_model="claude-sonnet-4-5"),
+        claude_subscription=_spec(
+            type="claude_subscription", default_model="claude-sonnet-4-5"
+        ),
     )
 
     def _active(provider_type: str) -> bool:
@@ -990,9 +991,31 @@ def test_a_persisted_claude_model_survives_restore_under_a_subscription_provider
                 "_load_providers_raw",
                 lambda: [{"type": provider_type, "model": "some-other-model"}],
             )
-            return chat_persistence._model_matches_provider("claude-sonnet-4-5")  # noqa: SLF001
+            return chat_persistence._model_matches_provider(
+                "claude-sonnet-4-5"
+            )  # noqa: SLF001
 
     assert _active("claude_subscription") is True
-    # Negative control: the check still RESTRICTS. A rail that accepted every provider type
-    # would pass the assertion above while measuring nothing.
     assert _active("llama_host") is False
+
+
+def test_non_utf8_candidate_is_untouched_and_later_valid_store_wins(tmp_path):
+    broken = tmp_path / "binary.json"
+    broken.write_bytes(b"\xff\xfeinvalid")
+    valid = _store(tmp_path, {"oauth": {"accessToken": SECRET}}, name="valid.json")
+    _source(broken, credential_files=(str(broken), str(valid)))
+    before = broken.stat()
+    result = resolve_subscription_credential("example-cli")
+    assert result.logged_in and result.secret == SECRET
+    assert broken.read_bytes() == b"\xff\xfeinvalid"
+    assert broken.stat().st_mtime_ns == before.st_mtime_ns
+
+
+def test_failed_candidates_report_the_first_failure_without_file_contents(tmp_path):
+    malformed = _store(tmp_path, '{"secret-fragment":', name="malformed.json")
+    missing = tmp_path / "missing.json"
+    _source(malformed, credential_files=(str(malformed), str(missing)))
+    result = resolve_subscription_credential("example-cli")
+    assert not result.logged_in
+    assert "malformed or half-written" in result.reason
+    assert "secret-fragment" not in result.reason

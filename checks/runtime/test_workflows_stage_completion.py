@@ -25,16 +25,17 @@ from typing import Any
 
 import pytest
 
-from gideon.workflows import store
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.models import FailureClass, InstanceState, RunStatus, WorkflowRun
+from gideon.automation.workflows import store
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.models import (
+    FailureClass,
+    InstanceState,
+    RunStatus,
+    WorkflowRun,
+)
 
 STAGE_PATH = "root.children[0]"
 
-#: Bounded so a red (the run never terminating) costs seconds, not a hung suite. Nothing
-#: here waits on wall-clock progress: the fake's completion is driven by the number of
-#: reconciliation lookups the controller performs, so a passing run terminates on the
-#: first tick after the subagent reports done rather than after a sleep.
 RUN_TIMEOUT = 6.0
 
 
@@ -51,14 +52,16 @@ class _Info:
 
 
 class _FakeSubagents:
-    """Stands in for `SubagentManager` on exactly the two methods this path uses.
+    """Stands in for `DelegationSupervisor` on exactly the two methods this path uses.
 
     `spawn` is what `engine.dispatch_stage` already calls; `get` is the SHIPPED lookup at
     ``subagent.py:1632``, already used by ``dashboard/handlers/sessions.py:388``. A fake
     exposing a third method would be testing a registry this fix must not add.
     """
 
-    def __init__(self, *, finish_after: int = 1, error: str = "", known: bool = True) -> None:
+    def __init__(
+        self, *, finish_after: int = 1, error: str = "", known: bool = True
+    ) -> None:
         self.infos: dict[str, _Info] = {}
         self.spawns: list[dict[str, Any]] = []
         self.gets: list[str] = []
@@ -97,7 +100,9 @@ def _spec() -> dict[str, Any]:
         "root": {
             "kind": "sequence",
             "id": "root",
-            "children": [{"kind": "stage", "id": "work", "config": {"prompt": "do the thing"}}],
+            "children": [
+                {"kind": "stage", "id": "work", "config": {"prompt": "do the thing"}}
+            ],
         },
     }
 
@@ -105,7 +110,9 @@ def _spec() -> dict[str, Any]:
 @pytest.fixture
 def wired(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """A real `RunController` over a real spec, with only the subagent manager faked."""
-    monkeypatch.setattr("gideon.workflows.leases.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gideon.automation.workflows.leases.config_dir", lambda: tmp_path
+    )
 
     def _build(**kw: Any) -> tuple[RunController, _FakeSubagents, list[dict[str, Any]]]:
         fake = _FakeSubagents(**kw)
@@ -115,8 +122,6 @@ def wired(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         controller = RunController(
             run, spec, services=EngineServices(subagents=fake, cwd=str(tmp_path))
         )
-        # Spy on the ledger writer rather than the ledger FILE: the symptom recorded in the
-        # plan was "no `step_completed`", and the call is the thing under test.
         completed: list[dict[str, Any]] = []
         real = controller.journal.step_completed
 
@@ -132,9 +137,6 @@ def wired(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 def _drive(controller: RunController) -> RunStatus:
     return asyncio.run(controller.run_to_completion(timeout=RUN_TIMEOUT))
-
-
-# ── the call site ────────────────────────────────────────────────────────────
 
 
 def test_the_controller_ASKS_the_manager_whether_a_dispatched_stage_finished(wired):
@@ -166,7 +168,9 @@ def test_a_finished_stage_leaves_RUNNING_and_journals_step_completed(wired):
         inst.state is InstanceState.DONE
     ), f"a finished stage is still {inst.state.value} — this is the fifteen-minute hang"
     assert inst.completed_at, "a terminal node with no completion timestamp"
-    assert status is RunStatus.COMPLETE, f"the run never completed (status={status.value})"
+    assert (
+        status is RunStatus.COMPLETE
+    ), f"the run never completed (status={status.value})"
     assert [c["node_id"] for c in completed] == [
         "work"
     ], f"no `step_completed` for the stage: {completed}"
@@ -183,21 +187,24 @@ def test_the_stages_OUTPUT_reaches_the_binding_namespace_not_the_subagent_id(wir
     out = controller._outputs.get("work")
     assert out is not None, "the stage produced no output at all"
     rendered = repr(out)
-    assert "sub1" not in rendered, f"the binding namespace still holds the subagent id: {out!r}"
-    assert "the stage's answer" in rendered, f"the subagent's result never landed: {out!r}"
-
-
-# ── the hung stage ───────────────────────────────────────────────────────────
+    assert (
+        "sub1" not in rendered
+    ), f"the binding namespace still holds the subagent id: {out!r}"
+    assert (
+        "the stage's answer" in rendered
+    ), f"the subagent's result never landed: {out!r}"
 
 
 def test_a_reaped_stage_becomes_a_TIMEOUT_failure(wired):
     """A hung stage reaches the timeout machinery that actually owns a spawned worker's
-    deadline: `SubagentManager._reaper_loop` (``subagent.py:739``) force-kills at
+    deadline: `DelegationSupervisor._reaper_loop` (``subagent.py:739``) force-kills at
     `_default_timeout` and `_force_reap` sets `done=True` + `error="Reaped after ..."`
     (``subagent.py:791-793``). That verdict already existed and was simply unread — so
     reconciling it is what makes a hung stage visible, without a second deadline.
     """
-    controller, fake, completed = wired(error="Reaped after 900s (exceeded 900s deadline) [stage]")
+    controller, fake, completed = wired(
+        error="Reaped after 900s (exceeded 900s deadline) [stage]"
+    )
     status = _drive(controller)
 
     inst = controller.instances[STAGE_PATH]
@@ -210,7 +217,9 @@ def test_a_reaped_stage_becomes_a_TIMEOUT_failure(wired):
         inst.failure.cause_plain or ""
     ), "the manager's own verdict was discarded and replaced with a generic message"
     assert not completed, "a reaped stage must not be journalled as a completed step"
-    assert status is RunStatus.FAILED, f"the run did not surface the failure (status={status})"
+    assert (
+        status is RunStatus.FAILED
+    ), f"the run did not surface the failure (status={status})"
 
 
 def test_an_unknown_subagent_id_does_not_invent_a_verdict(wired):
@@ -230,11 +239,10 @@ def test_an_unknown_subagent_id_does_not_invent_a_verdict(wired):
     assert (
         inst.state is InstanceState.RUNNING
     ), f"an unknown subagent id was turned into {inst.state.value} — a verdict on no evidence"
-    assert inst.failure is None, "a failure was invented for a subagent nobody could look up"
+    assert (
+        inst.failure is None
+    ), "a failure was invented for a subagent nobody could look up"
     assert not completed, "an unknown subagent was journalled as a completed step"
-
-
-# ── the non-stage RUNNING path ───────────────────────────────────────────────
 
 
 def test_stage_is_the_ONLY_dispatcher_THAT_CAN_RETURN_RUNNING():
@@ -243,12 +251,12 @@ def test_stage_is_the_ONLY_dispatcher_THAT_CAN_RETURN_RUNNING():
     Parsed with `ast`, not grepped — a text scan counts the string inside comments and
     docstrings, and this file's whole subject is a claim about which code runs.
     """
-    from gideon.workflows import engine
+    from gideon.automation.workflows import engine
 
-    # From the imported module, not a cwd-relative path: a mistyped relative path reads as
-    # an empty producer set, which would satisfy no assertion but look like a clean scan.
     src = Path(engine.__file__).read_text(encoding="utf-8")
-    assert "InstanceState.RUNNING" in src, "engine.py did not load — the scan is vacuous"
+    assert (
+        "InstanceState.RUNNING" in src
+    ), "engine.py did not load — the scan is vacuous"
     tree = ast.parse(src)
 
     producers: set[str] = set()

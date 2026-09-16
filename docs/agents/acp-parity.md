@@ -122,7 +122,7 @@ said here rather than generalized — a landed mechanism is not a measured one.
 
 | What the host now supplies | Driven as-a-user on | Boundary |
 |---|---|---|
-| The `gideon-core` tool surface passed in `mcpServers` at `session/new` | **all three** (2026-08-23). Attributed by process ancestry, not by a model's self-report: `gideon mcp-core` ran under each adapter — claude-code (`O76`, exact set equality on its 68 `mcp__gideon-core__` tools; `O121` also read the adapter's own `--mcp-config` flag off the wire), codex (`C90`/`O122`), kiro-cli (`K100`/`O123`) — while **no CLI config on the machine named us at any scope**, so the protocol frame was the only channel. Falsified by zeroing the server array: the tools disappear (`O77`, `O124`) | The surface is the **platform** one. `knowledge_search`, `task_create` and `post_to_inbox` are installable-app tools and are deliberately **not** on it (`mcp_core.py`'s `_AGGREGATED_CATEGORY_MODULES`, asserted by `tests/test_native_builtin_split.py`) — they reach a session when their app is installed, not over this prong |
+| The `gideon-core` tool surface passed in `mcpServers` at `session/new` | **all three** (2026-08-23). Attributed by process ancestry, not by a model's self-report: `gideon mcp-core` ran under each adapter — claude-code (`O76`, exact set equality on its 68 `mcp__gideon-core__` tools; `O121` also read the adapter's own `--mcp-config` flag off the wire), codex (`C90`/`O122`), kiro-cli (`K100`/`O123`) — while **no CLI config on the machine named us at any scope**, so the protocol frame was the only channel. Falsified by zeroing the server array: the tools disappear (`O77`, `O124`) | The surface is the **platform** one. `knowledge_search`, `task_create` and `post_to_inbox` are installable-app tools and are deliberately **not** on it (`mcp_core.py`'s `_AGGREGATED_CATEGORY_MODULES`, asserted by `checks/runtime/test_native_builtin_split.py`) — they reach a session when their app is installed, not over this prong |
 | ~~Config seeding for kiro's agent discovery~~ — **DELETED 2026-08-23** (`AAP-4` DEVIATION 2). It never ran (its only caller was gated on an `agent_config_dir` argument no bundle in either repo passed, and the symlink source did not exist), and it was never needed: all three CLIs honour protocol-passed `mcpServers`. It was also kiro-shaped by construction — a hardcoded `gideon.json` holding a kiro agent document, where codex reads TOML `[mcp_servers.*]` and claude-code reads `gideon.mcp.json`. Nothing of ours is written into any CLI's own config, so a disabled bundle leaves nothing behind | n/a — deleted | The host writes `$GIDEON_HOME/agents/gideon.json`, which kiro does **not** read (its roots are `<cwd>/.kiro/agents` and `~/.kiro/agents` — `K6`). That was prong B's motivation, and it is independent of the protocol channel, which is live |
 | Permission authority: the host refuses to hand a Zed dialect a self-approving mode (`acceptEdits`/`dontAsk`/`bypassPermissions`) outside an explicit unattended session, and the deny-list is evaluated against the **real command** rather than the truncated permission title | **not re-driven** as a column | Covers only tools the CLI chooses to escalate — see the not-gateable residual below |
 | Unattended fail-fast: an approval request arriving on an unattended session is auto-denied with a reason and the turn ends, instead of parking forever waiting for a human | **kiro only** (`K41` — `auto-denied: unattended run, no one to approve`, `[DONE]` in 5.2 s, nothing left pending, the requested file never created). The claude and codex cells were never driven | kiro has no permission-mode axis, so it gets the fail-fast half only — there is no restrictive mode to forward |
@@ -426,13 +426,13 @@ task-mode gate and blocking PreToolUse hooks — all of which hang off the permi
 never run for it. The host cannot enumerate that set by inspection; it can only measure it.
 
 The measured residual is a registry in core (`acp/permission_authority.py`, `NOT_GATEABLE`) and
-the block below is RENDERED from it by `scripts/render_acp_parity_residual.py`, so the gate and
+the block below is RENDERED from it by `tooling/scripts/render_acp_parity_residual.py`, so the gate and
 this document cannot drift apart. **Every provider is listed even when its residual set measured
 empty, so "no entry" can never be read as "gated".** Do not hand-edit inside the markers;
-`tests/test_acp_parity_residual_render.py` fails the build when they disagree.
+`checks/runtime/test_acp_parity_residual_render.py` fails the build when they disagree.
 
-<!-- BEGIN GENERATED: not-gateable-registry (scripts/render_acp_parity_residual.py) -->
-<!-- Regenerate with: python scripts/render_acp_parity_residual.py -->
+<!-- BEGIN GENERATED: not-gateable-registry (tooling/scripts/render_acp_parity_residual.py) -->
+<!-- Regenerate with: python tooling/scripts/render_acp_parity_residual.py -->
 
 - **`claude-code`** — 2 declared residual entries.
   - Measurement: AAP-5 Phase-1 SEL re-read (O96): 7 persisted rows with outcome='ungated', provider='claude-code', across 4 sessions and 2 tool titles. RETRACTS the earlier AAP-1 zero-residual claim, which runtime disproved: chat_runner records 'ungated_declared' whenever not_gateable_entry() matched, so a plain 'ungated' row is proof the registry held nothing for that title.

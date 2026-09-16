@@ -1,6 +1,6 @@
 """The gate AGGREGATE must actually execute in CI, not merely be mentioned there.
 
-`scripts/gate_report.py` is the one surface that reports all six ratchets together
+`tooling/scripts/gate_report.py` is the one surface that reports all six ratchets together
 (config-baseline, inert-surface, docs-lint, and the three structural gates). It ran in
 **no workflow**: every gate reached CI only through its own pytest counterpart, so a
 green build never showed the table an operator reads, and a gate without a pytest twin
@@ -20,12 +20,10 @@ import re
 
 import pytest
 
-_REPO = pathlib.Path(__file__).resolve().parents[1]
+_REPO = pathlib.Path(__file__).resolve().parents[2]
 _CI = _REPO / ".github" / "workflows" / "ci.yml"
 
-#: The script the aggregate lives in. `make gates` is a thin wrapper over it, and CI
-#: invokes the script directly so a failure names the gate rather than "make: *** Error 1".
-_AGGREGATE = "scripts/gate_report.py"
+_AGGREGATE = "tooling/scripts/gate_report.py"
 
 
 def _run_lines(text: str) -> list[str]:
@@ -44,7 +42,6 @@ def _run_lines(text: str) -> list[str]:
         if inline and inline not in ("|", ">", "|-", ">-", "|+", ">+"):
             out.append(inline)
             continue
-        # Block scalar: take the more-indented lines that follow.
         base = len(indent)
         for follow in lines[i + 1 :]:
             if not follow.strip():
@@ -72,8 +69,9 @@ def test_the_parser_found_a_real_workflow(runs: list[str], ci_text: str) -> None
     """Vacuity floor #1: a matcher that parsed nothing would make every assertion below
     trivially true, which is exactly how a rail reads clean forever."""
     assert len(ci_text) > 2000, "ci.yml is implausibly short — did the read succeed?"
-    assert len(runs) > 15, f"parsed only {len(runs)} run-lines out of ci.yml; parser is broken"
-    # A control the parser must find, unrelated to this rail's subject.
+    assert (
+        len(runs) > 15
+    ), f"parsed only {len(runs)} run-lines out of ci.yml; parser is broken"
     assert any(
         "pytest" in r for r in runs
     ), "no pytest step found — the parser is not reading steps"
@@ -88,7 +86,9 @@ def test_the_gate_aggregate_is_executed(runs: list[str]) -> None:
     )
 
 
-def test_a_comment_alone_does_not_satisfy_this_rail(ci_text: str, runs: list[str]) -> None:
+def test_a_comment_alone_does_not_satisfy_this_rail(
+    ci_text: str, runs: list[str]
+) -> None:
     """Vacuity floor #2, and the reason this file parses instead of grepping.
 
     The step's own comment says ``make gates``. Assert that the phrase really is present in
@@ -96,13 +96,14 @@ def test_a_comment_alone_does_not_satisfy_this_rail(ci_text: str, runs: list[str
     search satisfied while the aggregate no longer executes.
     """
     commented = [
-        ln for ln in ci_text.split("\n") if ln.strip().startswith("#") and "make gates" in ln
+        ln
+        for ln in ci_text.split("\n")
+        if ln.strip().startswith("#") and "make gates" in ln
     ]
     assert commented, (
         "expected the step's explanatory comment to mention `make gates` — if that comment "
         "was reworded, this floor no longer proves the parser is doing real work"
     )
-    # The floor: the phrase in the comment is NOT what satisfies the rail above.
     assert not any("make gates" in r for r in runs) or any(
         _AGGREGATE in r for r in runs
     ), "the rail must key on the aggregate script in a run-line, never on prose"
@@ -114,7 +115,7 @@ def test_every_gate_in_the_aggregate_is_named_by_the_script() -> None:
     Guards the other direction: a step that runs `gate_report.py` proves nothing if the
     script silently stopped reporting a gate.
     """
-    src = (_REPO / "scripts" / "gate_report.py").read_text(encoding="utf-8")
+    src = (_REPO / "tooling/scripts" / "gate_report.py").read_text(encoding="utf-8")
     expected = (
         "config-baseline",
         "inert-surface",

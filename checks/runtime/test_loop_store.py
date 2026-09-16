@@ -7,14 +7,14 @@ import json
 
 import pytest
 
-from gideon.loop import files as loop_files
-from gideon.loop import store
-from gideon.loop.loop import Loop, LoopStatus
+from gideon.automation.loop import files as loop_files
+from gideon.automation.loop import store
+from gideon.automation.loop.loop import Loop, LoopStatus
 
 
 @pytest.fixture(autouse=True)
 def _tmp_config(monkeypatch, tmp_path):
-    monkeypatch.setattr("gideon.loop.files.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.automation.loop.files.config_dir", lambda: tmp_path)
     return tmp_path
 
 
@@ -63,15 +63,11 @@ class TestCrud:
         assert {lp.id for lp in store.list_for_project("p-1")} == {g.id, c.id}
 
     def test_list_for_project_matches_tasks_project_id(self):
-        # A loop bound to a project only via tasks_project_id (a project-less launch's
-        # auto-provisioned backing project, or a task-provisioning code loop) must show
-        # in the project's loop history — same as /linked. Was project_id-only.
         explicit = _goal(project_id="p-9")
         provisioned = _code(project_id="")
         store.set_tasks_links(provisioned.id, tasks_project_id="p-9", task_list_ids={})
         ids = {lp.id for lp in store.list_for_project("p-9")}
         assert ids == {explicit.id, provisioned.id}
-        # blank project id never matches everything
         assert store.list_for_project("") == []
 
     def test_delete_removes_row_and_dir(self):
@@ -106,9 +102,13 @@ class TestStatusTransitions:
 
 class TestSpecEditFreeze:
     def test_update_spec_allowed_prelaunch(self):
-        c = _code()  # READY = prelaunch
+        c = _code()
         store.update_spec(
-            c.id, {"task": "add oauth + SSO", "kind_config": {"entry_stage": "implementation"}}
+            c.id,
+            {
+                "task": "add oauth + SSO",
+                "kind_config": {"entry_stage": "implementation"},
+            },
         )
         got = store.get(c.id)
         assert got.task == "add oauth + SSO"
@@ -122,7 +122,7 @@ class TestSpecEditFreeze:
 
     def test_rename_works_in_any_state(self):
         c = _code()
-        store.update_status(c.id, LoopStatus.RUNNING)  # spec frozen
+        store.update_status(c.id, LoopStatus.RUNNING)
         store.rename(c.id, "Renamed while running")
         assert store.get(c.id).name == "Renamed while running"
 
@@ -135,8 +135,6 @@ class TestKindConfigQueue:
         assert store.get(c.id).kind_config["queued_task_ids"] == ["t-b"]
 
     def test_queue_dedupes_and_preserves_sibling_keys(self):
-        # queue_tasks mutates only queued_task_ids — sibling kind_config keys
-        # (entry_stage, execution_plan, …) must survive the round-trip, and dupes drop.
         c = _code(
             kind_config={
                 "entry_stage": "design",
@@ -146,28 +144,26 @@ class TestKindConfigQueue:
         )
         store.queue_tasks(c.id, ["t-a", "t-a", "t-b"])
         cfg = store.get(c.id).kind_config
-        assert cfg["queued_task_ids"] == ["t-a", "t-b"]  # deduped
-        assert cfg["entry_stage"] == "design"  # sibling preserved
-        assert cfg["execution_plan"] == [{"role": "impl"}]  # nested sibling preserved
+        assert cfg["queued_task_ids"] == ["t-a", "t-b"]
+        assert cfg["entry_stage"] == "design"
+        assert cfg["execution_plan"] == [{"role": "impl"}]
 
 
 class TestFileHelpers:
     def test_findings_round_trip_and_attribution(self):
         g = _goal()
         d = loop_files.loop_dir(g.id)
-        (d / "findings" / "cycle_001.json").write_text(json.dumps({"cycle": 1, "summary": "did x"}))
+        (d / "findings" / "cycle_001.json").write_text(
+            json.dumps({"cycle": 1, "summary": "did x"})
+        )
         (d / "findings" / "task_t-abc_001.json").write_text(
             json.dumps({"cycle": 1, "summary": "task work"})
         )
-        # PP-5: the worker's files are ingested ONCE into the ledger; get_findings projects it back.
         loop_files.record_cycle_findings(g.id)
         f = loop_files.get_findings(g.id)
         assert f[0]["summary"] == "did x"
-        # task finding gets its task_id derived from the filename (resolved at ingest)
         assert any(x.get("task_id") == "t-abc" for x in f)
-        # task_finding_count is a ledger projection too
         assert loop_files.task_finding_count(g.id, "t-abc") == 1
-        # Idempotent — a second ingest of the same files adds nothing.
         assert loop_files.record_cycle_findings(g.id) == 0
         assert len(loop_files.get_findings(g.id)) == 2
 
@@ -187,7 +183,9 @@ class TestFileHelpers:
     def test_question_round_trip_redacts(self):
         c = _code()
         loop_files.write_question(
-            c.id, "Postgres or SQLite?", why="the key AKIAIOSFODNN7EXAMPLE implies scale"
+            c.id,
+            "Postgres or SQLite?",
+            why="the key AKIAIOSFODNN7EXAMPLE implies scale",
         )
         q = loop_files.pending_question(c.id)
         assert q["question"] == "Postgres or SQLite?"
@@ -200,12 +198,10 @@ class TestRedactedView:
         red = store.get_redacted(g.id)
         assert red["kind"] == "goal"
         assert "findings" in red and "nudges" in red and "pending_question" in red
-        # files_dir — the cockpit roots its file tree + terminal here for no-workspace
-        # (doc-producing) loops; must be present + point at the loop's on-disk dir.
         assert red["files_dir"] and red["files_dir"].endswith(g.id)
 
     def test_read_deliverable_and_log(self):
-        g = _goal()  # open_ended → REPORT.md is the deliverable
+        g = _goal()
         d = loop_files.loop_dir(g.id)
         (d / "REPORT.md").write_text("# Report\nThe findings.")
         (d / "FINDINGS.md").write_text("cycle 1: did x")
@@ -215,15 +211,15 @@ class TestRedactedView:
     def test_read_deliverable_falls_back_when_no_named_doc(self):
         g = _goal()
         (loop_files.loop_dir(g.id) / "FINDINGS.md").write_text("only the log exists")
-        # no REPORT.md yet → falls back across known docs to FINDINGS.md
         assert "only the log" in store.read_deliverable(g.id)
 
     def test_get_redacted_attaches_verdicts_and_marginal_scores(self):
         g = _goal()
-        loop_files.write_verdict(g.id, 1, {"cycle": 1, "done": False, "marginal_value": 2.5})
+        loop_files.write_verdict(
+            g.id, 1, {"cycle": 1, "done": False, "marginal_value": 2.5}
+        )
         store.record_marginal_score(g.id, 2.5)
         red = store.get_redacted(g.id)
-        # the cockpit ROI rail reads these off the redacted view for the initial render
         assert red["verdicts"] and red["verdicts"][0]["marginal_value"] == 2.5
         assert red["marginal_scores"] == [2.5]
 
@@ -232,22 +228,17 @@ class TestRedactedView:
         (loop_files.loop_dir(g.id) / "findings" / "cycle_001.json").write_text(
             json.dumps({"cycle": 1, "summary": "found it"})
         )
-        loop_files.record_cycle_findings(
-            g.id
-        )  # PP-5: ingest into the ledger the list view projects
+        loop_files.record_cycle_findings(g.id)
         _goal(project_id="p-2")
         rows = store.list_redacted()
         row = next(r for r in rows if r["id"] == g.id)
-        # findings attached so list cards show count + latest-insight (parity w/ detail)
         assert row["findings"] and row["findings"][-1]["summary"] == "found it"
-        # project + kind filters
         assert {r["id"] for r in store.list_redacted(project_id="p-1")} == {g.id}
         assert all(r["kind"] == "code" for r in store.list_redacted(kind="code"))
 
 
 class TestReapOrphans:
     def test_reaps_dir_with_no_row(self, tmp_path):
-        # a valid-id dir with no backing row is GC'd
         orphan = tmp_path / "loop" / "abcdef12"
         orphan.mkdir(parents=True)
         (orphan / "status.json").write_text("{}")
@@ -255,16 +246,18 @@ class TestReapOrphans:
         assert not orphan.exists()
 
     def test_reap_spares_live_dirs_db_and_non_id_entries(self, tmp_path):
-        # A live loop's dir survives; the DB file + a non-id-shaped entry are never
-        # touched (only valid_loop_id-shaped dirs are candidates).
         g = _goal()
         live_dir = loop_files.loop_dir(g.id)
         root = tmp_path / "loop"
-        (root / "loops.db").write_text("x") if not (root / "loops.db").exists() else None
+        (
+            (root / "loops.db").write_text("x")
+            if not (root / "loops.db").exists()
+            else None
+        )
         (root / "not-a-loop-id").mkdir(exist_ok=True)
         orphan = root / "deadbeef"
         orphan.mkdir()
         loop_files.reap_orphan_dirs()
-        assert live_dir.exists()  # backing row → spared
-        assert (root / "not-a-loop-id").exists()  # wrong shape → never a candidate
-        assert not orphan.exists()  # valid id, no row → reaped
+        assert live_dir.exists()
+        assert (root / "not-a-loop-id").exists()
+        assert not orphan.exists()

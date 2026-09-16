@@ -1,7 +1,7 @@
 """Every channel's outbound reply goes to that channel (issue 959).
 
-`channel_delivery` was a single handle held in TWO places — `GatewayOrchestrator._channel_delivery`
-and `DashboardState.channel_delivery` — and every shipped transport wrote both at `start_inbound`.
+`channel_delivery` was a single handle held in TWO places — `RuntimeCoordinator._channel_delivery`
+and `ConsoleState.channel_delivery` — and every shipped transport wrote both at `start_inbound`.
 So with Discord, Slack and Telegram connected, the last registration won. Measured on
 `origin/main` by executing the real registration path:
 
@@ -37,17 +37,19 @@ reply reaching the wrong channel is a confidentiality question, not only a deliv
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from gideon import channel_delivery as cd
+from gideon.integrations import channel_delivery as cd
 
 
 def delivery(provider: str) -> Any:
     """A stand-in shaped like a real one: its class lives in `<provider>_runtime`, which is how
-    every shipped channel app is packaged (`discord_runtime.delivery.DiscordDelivery`)."""
+    every shipped channel app is packaged (`discord_runtime.delivery.DiscordDelivery`).
+    """
     cls = type(f"{provider.title()}Delivery", (), {})
     cls.__module__ = f"{provider}_runtime.delivery"
     return cls()
@@ -56,13 +58,11 @@ def delivery(provider: str) -> Any:
 @pytest.fixture(autouse=True)
 def _clean_registry():
     """The registry is process-level (like `inbox_providers.native_source`'s state hook), so a
-    test that left a handle behind would leak into the next one's `owner_reachable` pick."""
+    test that left a handle behind would leak into the next one's `owner_reachable` pick.
+    """
     cd.register(None)
     yield
     cd.register(None)
-
-
-# ── the defect ───────────────────────────────────────────────────────────────────────────
 
 
 class TestThreeChannelsCoexist:
@@ -105,7 +105,9 @@ class TestReplyResolution:
         cd.register(delivery("telegram"))
         assert cd.delivery_for(unknown) is None
 
-    def test_delivery_for_does_not_fall_back_even_when_exactly_one_is_connected(self) -> None:
+    def test_delivery_for_does_not_fall_back_even_when_exactly_one_is_connected(
+        self,
+    ) -> None:
         """The tempting shortcut: with a single channel connected, "just use it" is right often
         enough to look correct — and it is exactly how the single slot behaved."""
         cd.register(delivery("telegram"))
@@ -187,9 +189,6 @@ class TestProviderDerivation:
         assert cd.provider_of(cls()) == "odddelivery"
 
 
-# ── the two holders become one ───────────────────────────────────────────────────────────
-
-
 class TestDashboardStateIsAViewNotASlot:
     def test_assigning_the_attribute_registers_the_handle(
         self, tmp_path: Path, monkeypatch
@@ -198,32 +197,32 @@ class TestDashboardStateIsAViewNotASlot:
         (alongside its `register_channel_delivery` call — both, not either). That assignment is
         now a registration keyed by the handle's provider, so the apps need no change for this
         fix to hold."""
-        from gideon.dashboard.state import DashboardState
+        from gideon.interfaces.dashboard.state import ConsoleState
 
-        state = DashboardState.__new__(DashboardState)
+        state = ConsoleState.__new__(ConsoleState)
         state.channel_delivery = delivery("discord")
         assert cd.registered_providers() == ["discord"]
 
     def test_the_getter_is_the_owner_reachable_pick(self) -> None:
-        from gideon.dashboard.state import DashboardState
+        from gideon.interfaces.dashboard.state import ConsoleState
 
-        state = DashboardState.__new__(DashboardState)
+        state = ConsoleState.__new__(ConsoleState)
         cd.register(delivery("slack"))
         assert type(state.channel_delivery).__name__ == "SlackDelivery"
 
     def test_assigning_None_clears(self) -> None:
-        from gideon.dashboard.state import DashboardState
+        from gideon.interfaces.dashboard.state import ConsoleState
 
-        state = DashboardState.__new__(DashboardState)
+        state = ConsoleState.__new__(ConsoleState)
         cd.register(delivery("slack"))
         state.channel_delivery = None
         assert state.channel_delivery is None
         assert cd.registered_providers() == []
 
     def test_delivery_for_on_the_state_reaches_the_same_registry(self) -> None:
-        from gideon.dashboard.state import DashboardState
+        from gideon.interfaces.dashboard.state import ConsoleState
 
-        state = DashboardState.__new__(DashboardState)
+        state = ConsoleState.__new__(ConsoleState)
         handle = delivery("telegram")
         cd.register(handle)
         assert state.delivery_for("telegram") is handle
@@ -232,11 +231,11 @@ class TestDashboardStateIsAViewNotASlot:
     def test_the_orchestrator_and_the_state_resolve_ONE_registry(self) -> None:
         """🪤 The invariant the fix rests on. Two holders for one fact is why a single overwrite
         took out delivery on two unrelated paths at once."""
-        from gideon.dashboard.state import DashboardState
-        from gideon.gateway import GatewayOrchestrator
+        from gideon.engine.gateway import RuntimeCoordinator
+        from gideon.interfaces.dashboard.state import ConsoleState
 
-        orch = GatewayOrchestrator.__new__(GatewayOrchestrator)
-        state = DashboardState.__new__(DashboardState)
+        orch = RuntimeCoordinator.__new__(RuntimeCoordinator)
+        state = ConsoleState.__new__(ConsoleState)
         handle = delivery("slack")
         orch.register_channel_delivery(handle, "slack")
         assert state.channel_delivery is handle
@@ -246,10 +245,11 @@ class TestDashboardStateIsAViewNotASlot:
 class TestSessionProvider:
     def test_a_channel_session_reports_the_provider_it_came_from(self) -> None:
         """The routing key for a reply, read where it was already stamped: the one inbound door
-        creates the session with `app=provider` (`channel_inbound._route_to_session`)."""
-        from gideon.dashboard.state import DashboardState
+        creates the session with `app=provider` (`channel_inbound._route_to_session`).
+        """
+        from gideon.interfaces.dashboard.state import ConsoleState
 
-        state = DashboardState.__new__(DashboardState)
+        state = ConsoleState.__new__(ConsoleState)
         session = type("S", (), {"_app": "discord"})()
         state._sessions = {"chan-1": session}
         assert state.channel_provider_for("chan-1") == "discord"
@@ -257,24 +257,22 @@ class TestSessionProvider:
     def test_a_dashboard_session_reports_no_provider(self) -> None:
         """Which makes `delivery_for("")` None, so a dashboard turn mirrors nowhere — correct,
         and the reason the empty case is asserted in `TestReplyResolution` too."""
-        from gideon.dashboard.state import DashboardState
+        from gideon.interfaces.dashboard.state import ConsoleState
 
-        state = DashboardState.__new__(DashboardState)
+        state = ConsoleState.__new__(ConsoleState)
         state._sessions = {"web-1": type("S", (), {"_app": ""})()}
         assert state.channel_provider_for("web-1") == ""
         assert state.delivery_for(state.channel_provider_for("web-1")) is None
 
     def test_an_unknown_session_reports_no_provider_rather_than_raising(self) -> None:
-        from gideon.dashboard.state import DashboardState
+        from gideon.interfaces.dashboard.state import ConsoleState
 
-        state = DashboardState.__new__(DashboardState)
+        state = ConsoleState.__new__(ConsoleState)
         state._sessions = {}
         assert state.channel_provider_for("gone") == ""
 
 
-# ── the rails ────────────────────────────────────────────────────────────────────────────
-
-_CORE = Path(__file__).resolve().parents[1] / "src" / "gideon"
+_CORE = Path(__file__).resolve().parents[2] / "runtime" / "gideon"
 
 
 def _code(path: Path) -> str:
@@ -291,9 +289,10 @@ class TestNoSecondSlotComesBack:
     def test_the_mirror_path_resolves_the_ORIGIN_handle(self) -> None:
         """`chat_runner`'s three mirror sites (user echo, tool stream, response) must all use the
         origin-scoped handle. Reading the owner-reachable attribute there is the bug."""
-        code = _code(_CORE / "dashboard" / "chat_runner.py")
+        code = _code(_CORE / "interfaces" / "dashboard" / "chat_runner.py")
         assert (
-            "_mirror_delivery = state.delivery_for(state.channel_provider_for(session_key))" in code
+            "_mirror_delivery = state.delivery_for(state.channel_provider_for(session_key))"
+            in ast.unparse(ast.parse(code))
         )
         assert "state.channel_delivery" not in code, (
             "a mirror site went back to the owner-reachable handle — a reply carries the origin "
@@ -303,13 +302,16 @@ class TestNoSecondSlotComesBack:
     def test_no_module_assigns_the_attribute_as_a_slot(self) -> None:
         """The setter makes an assignment a registration, so an assignment is not itself wrong —
         but core assigning it would mean core is choosing a provider, which only a transport can
-        do. Zero core writers was already true before this change; the rail keeps it true."""
+        do. Zero core writers was already true before this change; the rail keeps it true.
+        """
         offenders = [
             p.relative_to(_CORE).as_posix()
             for p in _CORE.rglob("*.py")
             if "channel_delivery =" in _code(p) and p.name != "state.py"
         ]
-        assert offenders == [], f"core assigned the channel-delivery attribute: {offenders}"
+        assert (
+            offenders == []
+        ), f"core assigned the channel-delivery attribute: {offenders}"
 
     def test_the_registry_is_the_only_holder(self) -> None:
         """A private slot anywhere else is the shape that drifted. `channel_delivery.py` owns the
@@ -325,5 +327,7 @@ class TestNoSecondSlotComesBack:
         """🪤 Floor for the two rails above: if the scan read nothing, both pass on empty lists."""
         files = list(_CORE.rglob("*.py"))
         assert len(files) > 100
-        assert "_REGISTRY" in _code(_CORE / "channel_delivery.py")
-        assert "def delivery_for" in _code(_CORE / "channel_delivery.py")
+        assert "_REGISTRY" in _code(_CORE / "integrations" / "channel_delivery.py")
+        assert "def delivery_for" in _code(
+            _CORE / "integrations" / "channel_delivery.py"
+        )

@@ -37,10 +37,9 @@ from urllib.parse import urlencode
 import pytest
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.hooks import safe_read_file, validate_file_path
-from gideon.security import is_sensitive_path
+from gideon.engine.hooks import safe_read_file, validate_file_path
+from gideon.security.security import is_sensitive_path
 
-#: Paths that are hostile but plausible as a query parameter. Every one must produce an ANSWER.
 NUL_PATHS = [
     "/tmp/a\x00b",
     "/tmp/ok\x00",
@@ -48,14 +47,7 @@ NUL_PATHS = [
     "~/a\x00b",
     "\x00",
 ]
-#: Explicit ASCII ids. Without them pytest derives the id from the param string, which puts a
-#: raw/escaped NUL into the printed node id — and, worse, for the 100k-char param below produces a
-#: ~100 KB single log line. Under `--verbose` (addopts) + xdist on CI that line intermittently
-#: overflows the log/IPC stream and truncates the whole run mid-suite with no summary (#2720).
 NUL_IDS = ["nul-mid", "nul-trailing", "nul-leading", "nul-home", "nul-only"]
-
-
-# ── each validator refuses in its OWN documented way ─────────────────────────────────────────
 
 
 @pytest.mark.parametrize("raw", NUL_PATHS, ids=NUL_IDS)
@@ -68,7 +60,8 @@ def test_validate_file_path_returns_None_instead_of_raising(raw):
 @pytest.mark.parametrize("raw", NUL_PATHS, ids=NUL_IDS)
 def test_safe_read_file_raises_its_OWN_refusal(raw):
     """`PermissionError`, not `ValueError`. Callers already handle the former — it is the refusal
-    this function documents — and none of them expected the latter from a path argument."""
+    this function documents — and none of them expected the latter from a path argument.
+    """
     with pytest.raises(PermissionError):
         safe_read_file(raw)
 
@@ -80,21 +73,22 @@ def test_is_sensitive_path_fails_CLOSED(raw):
     assert is_sensitive_path(raw) is True
 
 
-# ── the class, not just the NUL instance ─────────────────────────────────────────────────────
-
-
 @pytest.mark.parametrize(
     "raw",
     [
-        "/tmp/a\x00b",  # the reported instance
+        "/tmp/a\x00b",
         "\x00\x00",
-        "/tmp/" + "a" * 100_000,  # ENAMETOOLONG territory
-        "\udcff/tmp/x",  # an unpaired surrogate — encodes to nothing valid
+        "/tmp/" + "a" * 100_000,
+        "\udcff/tmp/x",
         "/tmp/\udce9",
     ],
-    # Explicit ids: the 100k-char param would otherwise become a ~100 KB node id / log line
-    # (#2720 — see NUL_IDS above).
-    ids=["nul-instance", "double-nul", "enametoolong", "unpaired-surrogate", "lone-surrogate"],
+    ids=[
+        "nul-instance",
+        "double-nul",
+        "enametoolong",
+        "unpaired-surrogate",
+        "lone-surrogate",
+    ],
 )
 def test_validate_file_path_never_raises_for_hostile_input(raw):
     """The NUL was one member of "the OS refused to canonicalize this". The `except` around the
@@ -126,9 +120,6 @@ def test_a_genuinely_sensitive_path_is_still_refused():
     assert is_sensitive_path("~/.ssh/id_rsa") is True
 
 
-# ── the HTTP surface: a refusal, not a 500 ───────────────────────────────────────────────────
-
-
 def _read_request(path: str):
     return make_mocked_request("GET", f"/api/file-read?{urlencode({'path': path})}")
 
@@ -136,8 +127,9 @@ def _read_request(path: str):
 @pytest.mark.anyio
 async def test_file_read_answers_4xx_for_a_NUL_path():
     """🔑 The issue's title. The handler must produce a response; pre-fix the `ValueError` escaped
-    `validate_file_path` and aiohttp turned it into a 500 with a server-side traceback."""
-    from gideon.dashboard.handlers import files as F
+    `validate_file_path` and aiohttp turned it into a 500 with a server-side traceback.
+    """
+    from gideon.interfaces.dashboard.handlers import files as F
 
     response = await F.api_file_read(_read_request("/tmp/a\x00b"))
     assert 400 <= response.status < 500, f"expected a refusal, got {response.status}"
@@ -148,7 +140,7 @@ async def test_file_read_does_not_leak_the_exception_text():
     """ARCC: "Inadequate error handling that reveals system information to attackers". The refusal
     must not hand back `lstat: embedded null character in path` — that is an internal detail of the
     validator's implementation, and it tells a prober which call it reached."""
-    from gideon.dashboard.handlers import files as F
+    from gideon.interfaces.dashboard.handlers import files as F
 
     response = await F.api_file_read(_read_request("/tmp/a\x00b"))
     body = response.body.decode() if response.body else ""

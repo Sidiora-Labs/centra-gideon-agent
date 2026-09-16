@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from aiohttp import web
 
-from gideon.dashboard.handlers.sessions import api_session_keepalive
+from gideon.interfaces.dashboard.handlers.sessions import api_session_keepalive
 
 
 class _FakeSessions:
@@ -40,7 +40,9 @@ async def test_keepalive_missing_session_key_returns_400():
 async def test_keepalive_unknown_session_returns_404():
     state = MagicMock()
     state.sessions = _FakeSessions(provider=MagicMock())
-    resp = await api_session_keepalive(_make_request({"X-Session-Key": "unknown"}, state))
+    resp = await api_session_keepalive(
+        _make_request({"X-Session-Key": "unknown"}, state)
+    )
     assert resp.status == 404
 
 
@@ -58,19 +60,14 @@ def test_wait_tool_posts_keepalive_periodically():
     """wait() should POST /api/session-keepalive at least once while sleeping."""
     import time as _time
 
-    from gideon.mcp_core import _call_tool
+    from gideon.integrations.mcp_core import _call_tool
 
     with (
-        patch("gideon.mcp_core._post") as mock_post,
+        patch("gideon.integrations.mcp_core._post") as mock_post,
         patch.object(_time, "sleep", return_value=None),
     ):
         mock_post.return_value = {}
 
-        # Fake monotonic: first three calls return t=0 so the loop fires a
-        # keepalive on the first iteration; subsequent calls jump past the
-        # deadline so the loop exits cleanly. Any extra monotonic() calls
-        # from refactors fall through to a large value, still causing a
-        # clean exit.
         times = iter([0.0, 0.0, 0.0])
         _final = [1000.0]
 

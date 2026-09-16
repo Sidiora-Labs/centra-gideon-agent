@@ -22,24 +22,20 @@ applied by the sync cycle at the transport boundary, *above* every transport —
 that could encrypt for itself is a transport that could forget to.
 """
 
-from gideon.durability.crypto import (  # noqa: F401
-    PASSPHRASE_CREDENTIAL,
-    ROUTING_KEYS,
-    SALT_KEY,
-    is_routing_key,
-)
-from gideon.net.policy import (  # noqa: F401
-    SYNC,
-    SyncEndpointRefused,
-    sync_egress_policy,
-)
-from gideon.sync_transports.base import (  # noqa: F401
+from gideon.integrations.sync_transports.base import (
     ConnectionResult,
     PushResult,
     RemoteRef,
     SyncObject,
     SyncTransportProvider,
 )
+from gideon.operations.durability.crypto import (
+    PASSPHRASE_CREDENTIAL,
+    ROUTING_KEYS,
+    SALT_KEY,
+    is_routing_key,
+)
+from gideon.security.net.policy import SYNC, SyncEndpointRefused, sync_egress_policy
 
 __all__ = [
     "SyncTransportProvider",

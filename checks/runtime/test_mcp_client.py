@@ -13,7 +13,7 @@ import textwrap
 
 import pytest
 
-from gideon.mcp_client import (
+from gideon.integrations.mcp_client import (
     McpClientRegistry,
     get_mcp_client_registry,
     mcp_sdk_available,
@@ -24,7 +24,6 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-# A minimal stdio MCP server: one tool that echoes its argument.
 _FIXTURE_SERVER = textwrap.dedent("""
     from mcp.server.fastmcp import FastMCP
 
@@ -83,7 +82,7 @@ async def test_missing_command_reports_error_not_raise():
     assert conn is not None
     try:
         tools = await conn.list_tools()
-        assert tools == []  # failed handshake → empty, never raises
+        assert tools == []
         ok, err = await conn.call_tool("anything", {})
         assert ok is False
         assert "not connected" in err or "broken" in err
@@ -95,12 +94,9 @@ def test_registry_reconciles_added_and_removed(fixture_server):
     reg = McpClientRegistry()
     reg.load_from_specs({"a": fixture_server, "b": fixture_server})
     assert {n for n, _ in reg.items()} == {"a", "b"}
-    # Reconcile to a different set → "b" dropped, "c" added.
     reg.load_from_specs({"a": fixture_server, "c": fixture_server})
     assert {n for n, _ in reg.items()} == {"a", "c"}
 
 
 def test_registry_singleton_present_with_sdk():
-    # SDK is available (module-level skip otherwise), so the registry is a real
-    # object, never None.
     assert get_mcp_client_registry() is not None

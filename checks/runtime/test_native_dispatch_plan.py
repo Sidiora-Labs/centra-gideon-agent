@@ -18,7 +18,7 @@ import os
 
 import pytest
 
-from gideon.agents.native.dispatch_plan import (
+from gideon.engine.agents.native.dispatch_plan import (
     EVERYTHING,
     KIND_EVERYTHING,
     KIND_PATTERN,
@@ -45,9 +45,6 @@ def _read(path: str):
 
 def _write(path: str):
     return _res("write_file", {"path": path})
-
-
-# ── the reader/writer rule ──
 
 
 class TestReaderWriterRule:
@@ -98,16 +95,12 @@ class TestReaderWriterRule:
         assert not conflicts(k_read, k_read)
         assert conflicts(k_write, k_read)
         assert not conflicts(k_write, t_read)
-        # …and a namespace never collides with a file, in either direction.
         assert not conflicts(k_write, _read("a.py"))
         assert not conflicts(k_write, _res("grep", {"query": "x"}))
 
     def test_a_pure_meta_tool_touches_nothing(self):
         assert _res("tool_search", {"query": "x"}) == ()
         assert not conflicts(_res("tool_search", {"query": "x"}), _write("a.py"))
-
-
-# ── the pattern trap (the class the atom names) ──
 
 
 class TestPatternIsNeverNormalized:
@@ -121,8 +114,6 @@ class TestPatternIsNeverNormalized:
     def test_the_reservation_key_is_the_pattern_verbatim(self):
         (r,) = _res("glob", {"pattern": "**/*.py"})
         assert r == Reservation(READ, KIND_PATTERN, "**/*.py")
-        # The two things normalization would have done, named so the rail cannot pass by
-        # accident: no absolutizing, and no normpath collapse.
         assert r.key == "**/*.py" != os.path.abspath("**/*.py")
         assert not r.key.startswith("/")
 
@@ -135,11 +126,17 @@ class TestPatternIsNeverNormalized:
     def test_a_glob_read_does_not_serialize_a_write_it_cannot_match(self):
         """The other half — without this the rule could be satisfied by "patterns conflict
         with everything", which is safe but would concede the whole atom."""
-        assert not conflicts(_res("glob", {"pattern": "**/*.py"}), _write("pkg/notes.md"))
+        assert not conflicts(
+            _res("glob", {"pattern": "**/*.py"}), _write("pkg/notes.md")
+        )
 
     def test_a_filtered_grep_is_a_pattern_too(self):
-        assert conflicts(_res("grep", {"query": "x", "glob": "src/*.py"}), _write("src/a.py"))
-        assert not conflicts(_res("grep", {"query": "x", "glob": "src/*.py"}), _write("doc/a.md"))
+        assert conflicts(
+            _res("grep", {"query": "x", "glob": "src/*.py"}), _write("src/a.py")
+        )
+        assert not conflicts(
+            _res("grep", {"query": "x", "glob": "src/*.py"}), _write("doc/a.md")
+        )
 
     def test_a_pattern_matches_at_depth_the_way_the_shared_matcher_says(self):
         """Anchoring is the shared matcher's business (``registries.path_glob``), not a
@@ -154,17 +151,20 @@ class TestPatternIsNeverNormalized:
         (r,) = _res("glob", {"pattern": "a/**/../b/*.py"})
         assert r == EVERYTHING
         assert r.kind == KIND_EVERYTHING
-        # …so it collides with a write that a collapsed `a/b/*.py` would have matched AND
-        # with one it would have missed. Either direction of the collapse is refused.
-        assert conflicts(_res("glob", {"pattern": "a/**/../b/*.py"}), _write("a/b/x.py"))
-        assert conflicts(_res("glob", {"pattern": "a/**/../b/*.py"}), _write("z/other.md"))
+        assert conflicts(
+            _res("glob", {"pattern": "a/**/../b/*.py"}), _write("a/b/x.py")
+        )
+        assert conflicts(
+            _res("glob", {"pattern": "a/**/../b/*.py"}), _write("z/other.md")
+        )
 
     def test_an_empty_pattern_degrades_to_everything(self):
         assert _res("glob", {"pattern": ""}) == (EVERYTHING,)
 
     def test_two_patterns_are_assumed_to_intersect(self):
         """Glob-language intersection is not something this module gets to guess at, so a
-        WRITE through a pattern conflicts with any other pattern. (Reads still overlap.)"""
+        WRITE through a pattern conflicts with any other pattern. (Reads still overlap.)
+        """
         a = (Reservation(WRITE, KIND_PATTERN, "src/*.py"),)
         b = (Reservation(READ, KIND_PATTERN, "doc/*.md"),)
         assert conflicts(a, b)
@@ -174,11 +174,10 @@ class TestPatternIsNeverNormalized:
         assert conflicts(a, _res("list_dir", {"path": "totally/elsewhere"}))
 
 
-# ── fail-safe classification ──
-
-
 class TestUnclassifiedIsEverything:
-    @pytest.mark.parametrize("tool", ["bash", "reset_tools", "some_app_tool", "", "web_fetch"])
+    @pytest.mark.parametrize(
+        "tool", ["bash", "reset_tools", "some_app_tool", "", "web_fetch"]
+    )
     def test_an_unknown_tool_touches_everything(self, tool):
         assert _res(tool, {"anything": 1}) == (EVERYTHING,)
 
@@ -194,7 +193,8 @@ class TestUnclassifiedIsEverything:
 
     def test_a_missing_required_path_degrades_rather_than_reserving_the_root(self):
         """Not ``/ws`` as if the workspace directory were the file: a reservation keyed on
-        the root would collide with nothing under it and let every write race the read."""
+        the root would collide with nothing under it and let every write race the read.
+        """
         assert _read("") == (EVERYTHING,)
         assert _write("   ") == (EVERYTHING,)
         assert conflicts(_read(""), _write("anywhere/at/all.py"))
@@ -202,9 +202,6 @@ class TestUnclassifiedIsEverything:
     def test_an_unknown_tool_runs_alone(self):
         sets = [_read("a.py"), _res("bash", {"command": "ls"}), _read("b.py")]
         assert plan(sets).waves == ((0,), (1,), (2,))
-
-
-# ── the ordering guarantee ──
 
 
 class TestPartitionOrdering:

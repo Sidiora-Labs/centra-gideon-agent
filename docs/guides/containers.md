@@ -1,35 +1,33 @@
 # Running Gideon in containers
 
-The published Docker images are a projection of the **same release artifact** as
-every other install path — the gateway image bundles the wheel (with the
-prebuilt dashboard) and the web image bundles the SPA behind an nginx TLS proxy.
-There are no per-channel special builds.
+The container definitions build Gideon's gateway and console from this checkout.
+Use explicit image overrides for a registry that you have configured and published.
 
 This guide covers a self-hosted Docker Compose deployment: ports, volumes, the
 `.env` pattern, backups, and updates.
 
 ## Quick start
 
-From a checkout (or after downloading `deploy/compose/compose.yaml` and
+From a checkout (or after downloading `infrastructure/compose/compose.yaml` and
 `.env.example`):
 
 ```bash
 cp .env.example .env         # fill in provider keys / options (all optional)
-docker compose -f deploy/compose/compose.yaml up -d
+docker compose -f infrastructure/compose/compose.yaml -f infrastructure/compose/compose.build.yaml up -d --build
 ```
 
 Two services come up:
 
 | Service | Image | Purpose |
 |---|---|---|
-| `gideon-gateway` | `ghcr.io/gideon/gideon-gateway` | the agent gateway (dashboard API + channels) |
-| `gideon-web` | `ghcr.io/gideon/gideon-web` | nginx TLS/HTTP2 proxy serving the SPA + streaming to the gateway |
+| `gideon-gateway` | `gideon-gateway:local` | the agent gateway (dashboard API + channels) |
+| `gideon-web` | `gideon-web:local` | nginx TLS/HTTP2 proxy serving the SPA + streaming to the gateway |
 
-Pin a specific release with `GIDEON_IMAGE_TAG` in `.env` (defaults to
-`latest`). Build locally instead of pulling by overlaying `compose.build.yaml`:
+Set `GIDEON_GATEWAY_IMAGE` and `GIDEON_WEB_IMAGE` to complete image references
+when using published images. Build the local defaults with `compose.build.yaml`:
 
 ```bash
-docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.build.yaml up -d --build
+docker compose -f infrastructure/compose/compose.yaml -f infrastructure/compose/compose.build.yaml up -d --build
 ```
 
 ## Ports
@@ -53,7 +51,7 @@ memory, knowledge, apps, and the workspace — everything that must survive a
 container recreation.
 
 ```bash
-docker compose -f deploy/compose/compose.yaml exec gideon-gateway du -sh /data   # inspect state size
+docker compose -f infrastructure/compose/compose.yaml exec gideon-gateway du -sh /data   # inspect state size
 docker volume ls | grep gideon_home                                              # find the volume
 ```
 
@@ -69,7 +67,8 @@ sensible default. Common ones:
 
 | Variable | Default | Notes |
 |---|---|---|
-| `GIDEON_IMAGE_TAG` | `latest` | pin a release |
+| `GIDEON_GATEWAY_IMAGE` | `gideon-gateway:local` | gateway image reference |
+| `GIDEON_WEB_IMAGE` | `gideon-web:local` | console image reference |
 | `GIDEON_PORT` | `10000` | gateway port inside the container |
 | `GIDEON_BIND_HOST` | `0.0.0.0` (in compose) | so port-forwarding works |
 | `GIDEON_AUTH_MODE` | `local_token` | only `none` is honored as an override, and it forces a loopback bind |
@@ -86,7 +85,7 @@ In the default `local_token` auth mode the access URL (with a one-time token) is
 printed to the gateway logs at startup and can be regenerated:
 
 ```bash
-docker compose -f deploy/compose/compose.yaml exec gideon-gateway gideon token
+docker compose -f infrastructure/compose/compose.yaml exec gideon-gateway gideon token
 ```
 
 ## Owner login (a password instead of a token URL)
@@ -103,8 +102,8 @@ GIDEON_LOGIN_PASSWORD=a-long-passphrase-you-remember
 Then turn the login form on (once, inside the container) and restart:
 
 ```bash
-docker compose -f deploy/compose/compose.yaml exec gideon-gateway gideon auth enable
-docker compose -f deploy/compose/compose.yaml restart gideon-gateway
+docker compose -f infrastructure/compose/compose.yaml exec gideon-gateway gideon auth enable
+docker compose -f infrastructure/compose/compose.yaml restart gideon-gateway
 ```
 
 Three things worth knowing:
@@ -132,13 +131,13 @@ Snapshot state from **inside** the gateway container so the archive captures the
 
 ```bash
 # create a snapshot (written under /data/snapshots)
-docker compose -f deploy/compose/compose.yaml exec gideon-gateway gideon snapshot
+docker compose -f infrastructure/compose/compose.yaml exec gideon-gateway gideon snapshot
 
 # list snapshots
-docker compose -f deploy/compose/compose.yaml exec gideon-gateway gideon snapshot --list
+docker compose -f infrastructure/compose/compose.yaml exec gideon-gateway gideon snapshot --list
 
 # copy one out to the host (resolve the container id from `docker compose ps -q`)
-docker compose -f deploy/compose/compose.yaml cp gideon-gateway:/data/snapshots/<file>.tar.gz .
+docker compose -f infrastructure/compose/compose.yaml cp gideon-gateway:/data/snapshots/<file>.tar.gz .
 ```
 
 Restore by copying an archive back in and running
@@ -154,8 +153,8 @@ container install):
 ```bash
 # pin the new release first if you don't track `latest`
 #   GIDEON_IMAGE_TAG=vX.Y.Z   (in .env)
-docker compose -f deploy/compose/compose.yaml pull
-docker compose -f deploy/compose/compose.yaml up -d
+docker compose -f infrastructure/compose/compose.yaml pull
+docker compose -f infrastructure/compose/compose.yaml up -d
 ```
 
 State in `gideon_home` carries across the recreation. Snapshot before
@@ -168,7 +167,7 @@ The compose file includes an opt-in `gideon-slack` service behind the
 `with-slack` profile (it runs `gideon slack` against the same volume):
 
 ```bash
-docker compose -f deploy/compose/compose.yaml --profile with-slack up -d
+docker compose -f infrastructure/compose/compose.yaml --profile with-slack up -d
 ```
 
 ## Troubleshooting

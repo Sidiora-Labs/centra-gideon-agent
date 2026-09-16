@@ -23,8 +23,8 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.guardrails import autonomy, ladder, trust_record
-from gideon.guardrails.autonomy import ActionTypeSpec
+from gideon.security.guardrails import autonomy, ladder, trust_record
+from gideon.security.guardrails.autonomy import ActionTypeSpec
 
 
 @pytest.fixture(autouse=True)
@@ -32,7 +32,7 @@ def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: home)
     yield home
 
 
@@ -62,7 +62,6 @@ def notices(monkeypatch):
 def test_revokes_every_standing_grant_and_files_one_notice(notices):
     autonomy.grant_rung("action.alpha", "one_tap", evidence_window="10 clean approvals")
     autonomy.grant_rung("action.beta", "auto_with_undo", evidence_window="20 clean")
-    # gamma has no grant — it must not be demoted just for existing.
 
     revoked = ladder.revoke_granted_scopes(
         cause="the evidence was invalidated", evidence_id="ev-1", source="test"
@@ -71,8 +70,12 @@ def test_revokes_every_standing_grant_and_files_one_notice(notices):
     assert sorted(revoked) == ["action.alpha", "action.beta"]
     for key in revoked:
         record = trust_record.load_record(key)
-        assert record is not None and record.revoked, f"{key} must carry the revoked flag"
-        assert autonomy.resolve_rung(key) == "draft_only", "the next decision is the floor"
+        assert (
+            record is not None and record.revoked
+        ), f"{key} must carry the revoked flag"
+        assert (
+            autonomy.resolve_rung(key) == "draft_only"
+        ), "the next decision is the floor"
     assert trust_record.load_record("action.gamma") is None, "ungranted scope untouched"
     assert len(notices) == 1, "one event, one notice — not one per scope"
     assert notices[0]["evidence_id"] == "ev-1"
@@ -80,7 +83,9 @@ def test_revokes_every_standing_grant_and_files_one_notice(notices):
 
 
 def test_nothing_granted_means_nothing_revoked_and_nothing_filed(notices):
-    assert ladder.revoke_granted_scopes(cause="c", evidence_id="ev-2", source="test") == []
+    assert (
+        ladder.revoke_granted_scopes(cause="c", evidence_id="ev-2", source="test") == []
+    )
     assert notices == []
 
 
@@ -116,11 +121,8 @@ def test_one_unwritable_record_does_not_stop_the_rest(notices, monkeypatch):
     assert len(notices) == 1 and notices[0]["keys"] == ["action.beta"]
 
 
-# ── the nodding cause builder (workflows side of the boundary) ─────────────────────
-
-
 def test_nodding_cause_is_empty_when_there_are_no_runs():
-    from gideon.workflows.handlers import nodding_revocation_cause
+    from gideon.automation.workflows.handlers import nodding_revocation_cause
 
     assert nodding_revocation_cause() == ""
 
@@ -128,15 +130,14 @@ def test_nodding_cause_is_empty_when_there_are_no_runs():
 def test_nodding_cause_names_the_template_and_never_raises(monkeypatch):
     """A gate with a 100% pass rate over enough real verdicts is named; the judging is
     done by the REAL detector — only the run/journal reads are stubbed."""
-    from gideon.workflows import handlers as H
-    from gideon.workflows import journal as journal_mod
+    from gideon.automation.workflows import handlers as H
+    from gideon.automation.workflows import journal as journal_mod
 
     class _Run:
         id = "run-1"
         workflow_name = "nightly-digest"
 
     monkeypatch.setattr(H.store, "list_runs", lambda **kw: ([_Run()], 1))
-    # Journal entries are FLAT (kind + fields at top level), per `verdicts_from_journal`.
     entries = [
         {
             "kind": "judge_verdict",
@@ -155,7 +156,6 @@ def test_nodding_cause_names_the_template_and_never_raises(monkeypatch):
     assert "nightly-digest" in cause
     assert "does not check" in cause
 
-    # And a read failure revokes nothing: the cause is empty, never an exception.
     def boom(**kw):
         raise RuntimeError("ledger unreadable")
 

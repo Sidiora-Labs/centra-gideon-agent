@@ -13,8 +13,8 @@ import types
 
 import pytest
 
-from gideon.net.client import EgressBlocked, fetch
-from gideon.net.policy import STRICT
+from gideon.security.net.client import EgressBlocked, fetch
+from gideon.security.net.policy import STRICT
 
 
 def _resolver(mapping):
@@ -26,13 +26,8 @@ def _resolver(mapping):
     return _r
 
 
-# ── Pre-flight deny: no connection is attempted for a blocked URL ──────────────
-
-
 @pytest.mark.asyncio
 async def test_fetch_denies_before_connecting(monkeypatch):
-    # If the guard blocks, aiohttp must never be touched. Install a booby-trapped
-    # aiohttp so any use raises — proving the deny is pre-connect.
     boom = types.ModuleType("aiohttp")
 
     def _explode(*a, **k):
@@ -49,10 +44,7 @@ async def test_fetch_denies_before_connecting(monkeypatch):
             policy=STRICT,
             resolver=_resolver({"169.254.169.254": ["169.254.169.254"]}),
         )
-    assert ei.value.recovery_hints  # carries recovery guidance
-
-
-# ── Redirect-hop re-evaluation: a redirect to a private IP is blocked ──────────
+    assert ei.value.recovery_hints
 
 
 class _FakeResp:
@@ -103,8 +95,6 @@ def fake_aiohttp(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_redirect_to_private_ip_is_blocked(fake_aiohttp):
-    # First hop (public) 302→ a private host; the redirect target must be re-checked
-    # and blocked — the gap an allow_redirects=True client leaves open.
     fake_aiohttp.queue = [_FakeResp(302, {"Location": "http://internal/"})]
     with pytest.raises(EgressBlocked):
         await fetch(
@@ -138,14 +128,18 @@ async def test_too_many_redirects_blocks(fake_aiohttp):
         _FakeResp(302, {"Location": "https://a.com/3"}),
     ]
     with pytest.raises(EgressBlocked) as ei:
-        await fetch("https://a.com/1", policy=pol, resolver=_resolver({"a.com": ["8.8.8.8"]}))
+        await fetch(
+            "https://a.com/1", policy=pol, resolver=_resolver({"a.com": ["8.8.8.8"]})
+        )
     assert "redirect" in ei.value.decision.reason
 
 
 @pytest.mark.asyncio
 async def test_byte_cap_truncates(fake_aiohttp):
     pol = STRICT.with_overrides(max_bytes=4)
-    fake_aiohttp.queue = [_FakeResp(200, {"Content-Type": "text/plain"}, body=b"0123456789")]
+    fake_aiohttp.queue = [
+        _FakeResp(200, {"Content-Type": "text/plain"}, body=b"0123456789")
+    ]
     resp = await fetch(
         "https://big.com/file", policy=pol, resolver=_resolver({"big.com": ["8.8.8.8"]})
     )

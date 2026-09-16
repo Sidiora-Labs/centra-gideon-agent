@@ -1,4 +1,4 @@
-"""ET-3 — the registry data tier staged under ``scratch/registry/``.
+"""ET-3 — the registry data tier staged under ``examples/registry/``.
 
 The three clauses the listing policy lives or dies on are the first three tests:
 
@@ -26,6 +26,7 @@ stops matching reads exactly like a rail that passes.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import os
@@ -38,14 +39,13 @@ from typing import Any, Callable
 
 import pytest
 
-from gideon.apps.manifest import PROVIDER_TYPES
+from gideon.extensions.apps.manifest import PROVIDER_TYPES
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-STAGED = REPO_ROOT / "scratch" / "registry"
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+STAGED = REPO_ROOT / "examples" / "registry"
 FIXTURE_APPS = STAGED / "fixtures" / "apps"
 FIXTURE_REGISTRIES = STAGED / "fixtures" / "registries"
 
-#: The token the committed candidate documents carry in place of a local repo URL.
 PLACEHOLDER = "{{REPO_BASE}}"
 
 
@@ -58,8 +58,6 @@ def _load_validator() -> Any:
     spec = importlib.util.spec_from_file_location("registry_validate", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    # Registered BEFORE exec: @dataclass resolves annotations through
-    # sys.modules[cls.__module__], so a module executed outside sys.modules raises.
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
@@ -68,12 +66,16 @@ def _load_validator() -> Any:
 validator = _load_validator()
 
 
-# ── fixture repositories ─────────────────────────────────────────────────────
-
-
 def _git(cwd: Path, *args: str) -> None:
     subprocess.run(
-        ["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", *args],
+        [
+            "git",
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            *args,
+        ],
         cwd=cwd,
         check=True,
         capture_output=True,
@@ -101,7 +103,6 @@ def fixture_repos(tmp_path_factory: pytest.TempPathFactory) -> Path:
         shutil.copytree(src, dest)
         _commit_as_repo(dest)
         built.append(dest.name)
-    # Vacuity: the three verdict fixtures must actually exist and have been committed.
     assert built == ["clean-app", "dangerous-app", "warning-app"], built
     for name in built:
         assert (base / name / ".git").is_dir(), f"{name} was not committed"
@@ -126,8 +127,6 @@ def _variant(
 def _candidate(name: str, base: Path, tmp_path: Path) -> Path:
     """Materialise a committed candidate registry document against local repos."""
     raw = (FIXTURE_REGISTRIES / f"{name}.json").read_text(encoding="utf-8")
-    # Vacuity: if the placeholder is ever renamed, fail loudly instead of validating a
-    # URL nobody meant.
     assert PLACEHOLDER in raw, f"{name}.json no longer carries {PLACEHOLDER}"
     out = tmp_path / f"{name}.json"
     out.write_text(raw.replace(PLACEHOLDER, f"file://{base}"), encoding="utf-8")
@@ -158,9 +157,6 @@ def _codes(reasons: list[Any]) -> list[str]:
     return [r.code for r in reasons]
 
 
-# ── clause 1: a valid listing passes ─────────────────────────────────────────
-
-
 def test_a_valid_sample_listing_passes(fixture_repos: Path, tmp_path: Path) -> None:
     path = _candidate("valid", fixture_repos, tmp_path)
     report = tmp_path / "report.json"
@@ -168,16 +164,10 @@ def test_a_valid_sample_listing_passes(fixture_repos: Path, tmp_path: Path) -> N
     assert code == 0
     payload = json.loads(report.read_text(encoding="utf-8"))
     assert payload["listable"] is True
-    # Vacuity: one row was actually fetched, cloned and SCANNED. A run that validated
-    # nothing would also report listable=True, which is the silent pass this asserts
-    # against.
     assert payload["rows_validated"] == 1
     assert payload["rows"][0]["name"] == "registry-fixture-clean"
     assert payload["rows"][0]["verdict"] == "clean"
     assert payload["rows"][0]["blocking"] == []
-
-
-# ── clause 2: a dangerous verdict blocks, with the reason recorded ────────────
 
 
 def test_a_dangerous_verdict_blocks_the_listing_and_records_the_reason(
@@ -187,7 +177,14 @@ def test_a_dangerous_verdict_blocks_the_listing_and_records_the_reason(
     report = tmp_path / "report.json"
     markdown = tmp_path / "report.md"
     code = validator.main(
-        [str(path), "--allow-file-repos", "--report", str(report), "--markdown", str(markdown)]
+        [
+            str(path),
+            "--allow-file-repos",
+            "--report",
+            str(report),
+            "--markdown",
+            str(markdown),
+        ]
     )
     assert code == 1
     payload = json.loads(report.read_text(encoding="utf-8"))
@@ -196,21 +193,20 @@ def test_a_dangerous_verdict_blocks_the_listing_and_records_the_reason(
     assert row["listable"] is False
     assert row["verdict"] == "dangerous"
 
-    # The RECORDED REASON, not just the exit code: which rule, in which file.
     codes = [r["code"] for r in row["blocking"]]
     assert "scanner_dangerous:destructive_root" in codes, codes
-    detail = next(r["detail"] for r in row["blocking"] if r["code"].startswith("scanner_dangerous"))
+    detail = next(
+        r["detail"]
+        for r in row["blocking"]
+        if r["code"].startswith("scanner_dangerous")
+    )
     assert "scripts/install.sh" in detail
     assert "rm -rf /" in detail
 
-    # And the reason reaches the surface a contributor actually reads.
     body = markdown.read_text(encoding="utf-8")
     assert "**Blocked" in body
     assert "destructive_root" in body
     assert "scripts/install.sh" in body
-
-
-# ── clause 3: a warning verdict lists with display and never blocks ───────────
 
 
 def test_a_warning_verdict_lists_with_display_and_never_blocks(
@@ -220,9 +216,15 @@ def test_a_warning_verdict_lists_with_display_and_never_blocks(
     report = tmp_path / "report.json"
     markdown = tmp_path / "report.md"
     code = validator.main(
-        [str(path), "--allow-file-repos", "--report", str(report), "--markdown", str(markdown)]
+        [
+            str(path),
+            "--allow-file-repos",
+            "--report",
+            str(report),
+            "--markdown",
+            str(markdown),
+        ]
     )
-    # Listed. This is the assertion that reds if the policy is ever inverted.
     assert code == 0
     payload = json.loads(report.read_text(encoding="utf-8"))
     assert payload["listable"] is True
@@ -230,12 +232,8 @@ def test_a_warning_verdict_lists_with_display_and_never_blocks(
     assert row["listable"] is True
     assert row["blocking"] == [], "a warning must not block a listing"
 
-    # 'warning', not 'low'. The scanner downgrades warnings for the official/trusted
-    # tiers; a community registry that scanned at one of those tiers would report a
-    # softer verdict than the user's own install gate will.
     assert row["verdict"] == "warning"
 
-    # Displayed. A verdict that blocked nothing AND showed nothing would be inert.
     display = [r["code"] for r in row["display"]]
     assert "scanner_warning:curl_network" in display, display
     body = markdown.read_text(encoding="utf-8")
@@ -255,15 +253,12 @@ def test_the_dangerous_and_warning_bands_are_split_by_severity_not_by_count(
     clean = _validate_one(_row(f"file://{fixture_repos}/clean-app"))
     assert dangerous.verdict == "dangerous" and not dangerous.listable
     assert clean.verdict == "clean" and clean.listable
-    # Vacuity: the clean fixture really produced no findings, so "clean" is measured
-    # rather than a default nobody reached.
     assert clean.findings == []
 
 
-# ── the validator is not vacuous: things that must fail, do ───────────────────
-
-
-def test_a_malformed_row_is_refused_by_the_schema(fixture_repos: Path, tmp_path: Path) -> None:
+def test_a_malformed_row_is_refused_by_the_schema(
+    fixture_repos: Path, tmp_path: Path
+) -> None:
     path = _candidate("malformed-row", fixture_repos, tmp_path)
     report = tmp_path / "report.json"
     code = validator.main([str(path), "--allow-file-repos", "--report", str(report)])
@@ -279,15 +274,15 @@ def test_a_malformed_row_is_refused_by_the_schema(fixture_repos: Path, tmp_path:
         "added_invalid",
     ):
         assert expected in codes, f"{expected} missing from {codes}"
-    # Schema refusal happens before any network reach, so no verdict was produced —
-    # and `None` must never be read as clean.
     assert row["verdict"] is None
 
 
 def test_a_missing_license_file_blocks(tmp_path: Path) -> None:
     def drop_license(tree: Path) -> None:
         target = tree / "LICENSE"
-        assert target.is_file(), "vacuity: the clean fixture must ship a LICENSE to delete"
+        assert (
+            target.is_file()
+        ), "vacuity: the clean fixture must ship a LICENSE to delete"
         target.unlink()
 
     row = _validate_one(_row(_variant(tmp_path, mutate=drop_license)))
@@ -303,7 +298,9 @@ def test_a_license_the_row_disagrees_with_blocks(tmp_path: Path) -> None:
     assert "'Apache-2.0'" in detail and "'MIT'" in detail
 
 
-def test_an_unparseable_manifest_is_a_failed_validation_not_a_skip(tmp_path: Path) -> None:
+def test_an_unparseable_manifest_is_a_failed_validation_not_a_skip(
+    tmp_path: Path,
+) -> None:
     def corrupt(tree: Path) -> None:
         target = tree / "app.json"
         assert target.is_file(), "vacuity: there must be an app.json to corrupt"
@@ -330,7 +327,9 @@ def test_a_manifest_core_rejects_blocks(tmp_path: Path) -> None:
 
     def bad_version(tree: Path) -> None:
         data = json.loads((tree / "app.json").read_text(encoding="utf-8"))
-        assert data["version"] == "1.0.0", "vacuity: the fixture's version must start valid"
+        assert (
+            data["version"] == "1.0.0"
+        ), "vacuity: the fixture's version must start valid"
         data["version"] = "one point oh"
         (tree / "app.json").write_text(json.dumps(data), encoding="utf-8")
 
@@ -365,16 +364,12 @@ def test_a_refused_fetch_is_explained_as_private_or_missing(
         stdout="",
         stderr="fatal: Authentication failed for 'https://github.com/x/y/'\n",
     )
-    # Asserted at the CALL SITE, not just on the helper: the hint is only worth
-    # anything if check_repo_live actually appends it.
     monkeypatch.setattr(validator, "_run_git", lambda *a, **k: refusal)
     reason = validator.check_repo_live("https://github.com/x/y")
     assert reason is not None and reason.code == "repo_unreachable"
     assert "Authentication failed" in reason.detail
     assert "private repository and a nonexistent one" in reason.detail
 
-    # Vacuity: an ordinary failure must NOT get the hint, or it would be noise on
-    # every unrelated git error.
     other = subprocess.CompletedProcess(
         args=["git"], returncode=128, stdout="", stderr="fatal: unable to access\n"
     )
@@ -432,9 +427,6 @@ def test_duplicate_names_are_refused(fixture_repos: Path) -> None:
     assert "duplicate_name" in _codes(result.blocking)
 
 
-# ── the fetcher's rails ──────────────────────────────────────────────────────
-
-
 def test_a_file_url_is_refused_unless_the_test_flag_is_passed(
     fixture_repos: Path, tmp_path: Path
 ) -> None:
@@ -445,14 +437,11 @@ def test_a_file_url_is_refused_unless_the_test_flag_is_passed(
     assert validator.main([str(path), "--report", str(report)]) == 1
     row = json.loads(report.read_text(encoding="utf-8"))["rows"][0]
     assert "repo_url_scheme" in [r["code"] for r in row["blocking"]]
-    # Vacuity: the SAME document passes when the flag is given, so this test is
-    # measuring the flag and not some unrelated defect in the fixture.
     assert validator.main([str(path), "--allow-file-repos"]) == 0
 
 
 def test_the_ci_workflow_never_passes_the_file_repo_flag() -> None:
     flag = "--allow-file-repos"
-    # Vacuity: the flag exists, so its absence below means something.
     assert flag in (STAGED / "validate_registry.py").read_text(encoding="utf-8")
     workflows = sorted((STAGED / ".github" / "workflows").glob("*.yml"))
     assert len(workflows) == 3, [w.name for w in workflows]
@@ -470,17 +459,17 @@ def test_the_ci_workflows_name_the_index_core_actually_reads() -> None:
     Measured before this rail existed: reverting all four references to the pre-`ET-4a`
     `registry.json` left the whole core suite green (98 passed), so nothing pinned them.
     """
-    from gideon.apps.catalog import _REGISTRY_FILENAME
+    from gideon.extensions.apps.catalog import _REGISTRY_FILENAME
 
     workflows = sorted((STAGED / ".github" / "workflows").glob("*.yml"))
     bare = re.compile(r"(?<![-\w])registry\.json")
     naming = 0
     for workflow in workflows:
         body = workflow.read_text(encoding="utf-8")
-        # Any spelling other than core's means the index is not the file being validated.
-        assert not bare.search(body), f"{workflow.name} names an index core does not read"
+        assert not bare.search(
+            body
+        ), f"{workflow.name} names an index core does not read"
         naming += _REGISTRY_FILENAME in body
-    # Vacuity: a rule about how the workflows name the index is empty if none of them do.
     assert naming >= 2, f"only {naming} workflow(s) name {_REGISTRY_FILENAME}"
 
 
@@ -505,7 +494,10 @@ def test_hostile_repo_urls_are_refused(url: object, code: str) -> None:
 
 def test_a_plain_https_url_is_accepted_by_the_url_check() -> None:
     """Vacuity for the table above: the check is not simply refusing everything."""
-    assert validator.check_repo_url("https://github.com/x/y", allow_file_repos=False) is None
+    assert (
+        validator.check_repo_url("https://github.com/x/y", allow_file_repos=False)
+        is None
+    )
 
 
 @pytest.mark.parametrize("target", ["/etc/hosts", "../../../../etc/hosts"])
@@ -522,7 +514,6 @@ def test_a_symlink_escaping_the_repo_blocks(tmp_path: Path, target: str) -> None
     def add_symlink(tree: Path) -> None:
         link = tree / "notes.md"
         os.symlink(target, link)
-        # Vacuity: it really is a symlink, and it really does leave the tree.
         assert link.is_symlink()
         resolved = (link.parent / os.readlink(link)).resolve()
         assert not str(resolved).startswith(str(tree.resolve()) + os.sep)
@@ -549,9 +540,6 @@ def test_a_relative_symlink_inside_the_repo_is_left_alone(tmp_path: Path) -> Non
     assert row.listable, _codes(row.blocking)
 
 
-# ── incremental validation must not become a silent pass ─────────────────────
-
-
 def test_an_unchanged_registry_reports_zero_rows_validated(
     fixture_repos: Path, tmp_path: Path
 ) -> None:
@@ -574,15 +562,15 @@ def test_an_unchanged_registry_reports_zero_rows_validated(
     )
     assert code == 0
     payload = json.loads(report.read_text(encoding="utf-8"))
-    # A no-op PR passes, but it must SAY it validated nothing rather than reading as
-    # "everything checked out".
     assert payload["rows_validated"] == 0
     assert payload["rows_skipped_unchanged"] == 1
     assert payload["rows"] == []
     assert "No listing changes to validate" in markdown.read_text(encoding="utf-8")
 
 
-def test_a_changed_row_is_revalidated_against_a_base(fixture_repos: Path, tmp_path: Path) -> None:
+def test_a_changed_row_is_revalidated_against_a_base(
+    fixture_repos: Path, tmp_path: Path
+) -> None:
     path = _candidate("valid", fixture_repos, tmp_path)
     base = tmp_path / "base.json"
     base.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
@@ -592,7 +580,14 @@ def test_a_changed_row_is_revalidated_against_a_base(fixture_repos: Path, tmp_pa
     report = tmp_path / "report.json"
     assert (
         validator.main(
-            [str(path), "--allow-file-repos", "--base", str(base), "--report", str(report)]
+            [
+                str(path),
+                "--allow-file-repos",
+                "--base",
+                str(base),
+                "--report",
+                str(report),
+            ]
         )
         == 0
     )
@@ -607,8 +602,12 @@ def test_a_ci_stamp_refresh_does_not_read_as_a_changed_listing(
     """Only author-owned fields decide whether a row changed — otherwise every
     ``--write`` run would make the next PR re-fetch the whole registry."""
     row = _row(f"file://{fixture_repos}/clean-app")
-    stamped = dict(row, last_validated="2026-08-18T00:00:00Z", last_scan_verdict="clean")
-    result = validator.validate_registry([stamped], allow_file_repos=True, base_apps=[row])
+    stamped = dict(
+        row, last_validated="2026-08-18T00:00:00Z", last_scan_verdict="clean"
+    )
+    result = validator.validate_registry(
+        [stamped], allow_file_repos=True, base_apps=[row]
+    )
     assert result.rows_validated == 0
     assert result.rows_skipped_unchanged == 1
 
@@ -621,21 +620,19 @@ def test_a_registry_that_cannot_be_read_exits_two(tmp_path: Path) -> None:
     assert validator.main([str(missing)]) == 2
 
 
-# ── --write stamps the verdict into the data ──────────────────────────────────
-
-
 def test_write_stamps_the_verdict_and_preserves_the_document(
     fixture_repos: Path, tmp_path: Path
 ) -> None:
     path = _candidate("valid", fixture_repos, tmp_path)
     before = json.loads(path.read_text(encoding="utf-8"))
-    assert "last_scan_verdict" not in before["apps"][0], "vacuity: the stamp must be absent first"
+    assert (
+        "last_scan_verdict" not in before["apps"][0]
+    ), "vacuity: the stamp must be absent first"
     assert validator.main([str(path), "--allow-file-repos", "--write"]) == 0
     after = json.loads(path.read_text(encoding="utf-8"))
     stamped = after["apps"][0]
     assert stamped["last_scan_verdict"] == "clean"
     assert stamped["last_validated"].endswith("Z")
-    # The rest of the document survives — including the $schema pointer editors use.
     assert after["$schema"] == before["$schema"]
     assert stamped["repo"] == before["apps"][0]["repo"]
 
@@ -648,13 +645,6 @@ def test_write_never_stamps_a_blocked_row(fixture_repos: Path, tmp_path: Path) -
     assert "last_validated" not in after["apps"][0]
 
 
-# ── signer identity: three facts a row can carry, kept three ──────────────────
-#
-# The whole risk in this field is the ABSENT case, so every test here asserts against
-# a two-state reading: a row that says nothing must not come out looking like a row
-# that said "unsigned", and neither may come out looking like a row that named a signer.
-
-
 def _renamed_clean_repo(tmp_path: Path, new_name: str) -> str:
     """A clean-app clone whose manifest declares ``new_name``, so several rows can sit in
     one candidate document without tripping the unique-name rule."""
@@ -662,7 +652,6 @@ def _renamed_clean_repo(tmp_path: Path, new_name: str) -> str:
     def rename(tree: Path) -> None:
         manifest = tree / "app.json"
         data = json.loads(manifest.read_text(encoding="utf-8"))
-        # Vacuity: if the fixture's name changes, fail loudly instead of renaming nothing.
         assert data["name"] == "registry-fixture-clean", data.get("name")
         data["name"] = new_name
         manifest.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -670,7 +659,9 @@ def _renamed_clean_repo(tmp_path: Path, new_name: str) -> str:
     return _variant(tmp_path, mutate=rename, name=new_name)
 
 
-def _document(tmp_path: Path, rows: list[dict[str, Any]], *, name: str = "candidate") -> Path:
+def _document(
+    tmp_path: Path, rows: list[dict[str, Any]], *, name: str = "candidate"
+) -> Path:
     path = tmp_path / f"{name}.json"
     path.write_text(json.dumps({"apps": rows}, indent=2), encoding="utf-8")
     return path
@@ -684,7 +675,9 @@ def test_a_declared_signer_is_named_in_the_verdict(tmp_path: Path) -> None:
     assert row.to_dict()["signer"] == "AcmeSoftworks"
 
 
-def test_a_listing_that_omits_the_signer_lists_and_reads_as_no_claim(tmp_path: Path) -> None:
+def test_a_listing_that_omits_the_signer_lists_and_reads_as_no_claim(
+    tmp_path: Path,
+) -> None:
     """The declared policy for the absent case: optional, listable, published as a
     non-answer. Omission must not block and must not be reported as ``unsigned``."""
     row = _validate_one(_row(_variant(tmp_path)))
@@ -698,16 +691,20 @@ def test_an_explicit_unsigned_declaration_lists_too(tmp_path: Path) -> None:
     row = _validate_one(_row(_variant(tmp_path), signer="unsigned"))
     assert row.listable, _codes(row.blocking)
     assert row.signer_state == validator.SIGNER_UNSIGNED
-    # The identity is empty because there is no signer — but the STATE says the author
-    # took a position, which is the fact the empty identity cannot carry.
     assert row.signer is None
 
 
-def test_declared_unsigned_and_an_omitted_field_are_different_facts(tmp_path: Path) -> None:
+def test_declared_unsigned_and_an_omitted_field_are_different_facts(
+    tmp_path: Path,
+) -> None:
     """The crux. Three rows, three states, three distinguishable cells in the comment
     a reviewer actually reads. If any two of these collapse, this reds."""
     rows = [
-        _row(_renamed_clean_repo(tmp_path, "signer-named"), name="signer-named", signer="Acme"),
+        _row(
+            _renamed_clean_repo(tmp_path, "signer-named"),
+            name="signer-named",
+            signer="Acme",
+        ),
         _row(
             _renamed_clean_repo(tmp_path, "signer-unsigned"),
             name="signer-unsigned",
@@ -715,14 +712,20 @@ def test_declared_unsigned_and_an_omitted_field_are_different_facts(tmp_path: Pa
         ),
         _row(_renamed_clean_repo(tmp_path, "signer-silent"), name="signer-silent"),
     ]
-    # Vacuity: the third row must really have no 'signer' key, or this proves nothing.
     assert "signer" not in rows[2]
 
     path = _document(tmp_path, rows)
     report = tmp_path / "report.json"
     markdown = tmp_path / "report.md"
     code = validator.main(
-        [str(path), "--allow-file-repos", "--report", str(report), "--markdown", str(markdown)]
+        [
+            str(path),
+            "--allow-file-repos",
+            "--report",
+            str(report),
+            "--markdown",
+            str(markdown),
+        ]
     )
     assert code == 0
     payload = json.loads(report.read_text(encoding="utf-8"))
@@ -745,10 +748,7 @@ def test_declared_unsigned_and_an_omitted_field_are_different_facts(tmp_path: Pa
         "`signer-unsigned`": "declared unsigned",
         "`signer-silent`": "no claim",
     }
-    # Three distinct renderings, asserted as a set too: equality above would still pass
-    # if two states were given the same phrase and the mapping were updated to match.
     assert len(set(cells.values())) == 3
-    # And the comment says the named one is a claim rather than a verified fact.
     assert "**Signer** is what the row *declares*" in body
 
 
@@ -761,7 +761,9 @@ def test_the_existing_valid_sample_makes_no_signer_claim(
     assert all("signer" not in row for row in raw["apps"])
     path = _candidate("valid", fixture_repos, tmp_path)
     report = tmp_path / "report.json"
-    assert validator.main([str(path), "--allow-file-repos", "--report", str(report)]) == 0
+    assert (
+        validator.main([str(path), "--allow-file-repos", "--report", str(report)]) == 0
+    )
     row = json.loads(report.read_text(encoding="utf-8"))["rows"][0]
     assert row["signer_state"] == "undeclared"
     assert row["signer"] is None
@@ -770,7 +772,7 @@ def test_the_existing_valid_sample_makes_no_signer_claim(
 @pytest.mark.parametrize(
     "value",
     [
-        None,  # JSON null: writing the key with no value is a statement, not an omission
+        None,
         "",
         "   ",
         "has space",
@@ -797,7 +799,10 @@ def test_a_signer_may_not_be_named_after_the_reserved_declaration() -> None:
     """``unsigned`` is a legal identity shape, so it has to be spent on the declaration.
     A row that writes it gets the declaration, never an identity called "unsigned"."""
     assert validator.SIGNER_RE.match(validator.UNSIGNED_DECLARATION)
-    assert validator.classify_signer({"signer": "unsigned"}) == (validator.SIGNER_UNSIGNED, None)
+    assert validator.classify_signer({"signer": "unsigned"}) == (
+        validator.SIGNER_UNSIGNED,
+        None,
+    )
 
 
 def test_the_signer_claim_is_echoed_on_a_blocked_row(tmp_path: Path) -> None:
@@ -837,16 +842,23 @@ def test_the_validator_records_the_signer_without_verifying_anything() -> None:
     no key material; the moment this script grew a verifier it would need a trust store
     and the split it was carved out of would be gone."""
     source = (STAGED / "validate_registry.py").read_text(encoding="utf-8")
-    core_imports = sorted(
-        line.strip() for line in source.splitlines() if line.startswith("from gideon")
-    )
-    assert core_imports == [
-        "from gideon.apps.manifest import PROVIDER_TYPES, AppManifest",
-        "from gideon.supply_chain import ScanReport, SkillScanner, TrustTier, Verdict",
-    ], core_imports
-    assert "gideon.security" not in source
-    # The signer is read off the row and never derived, so it stays author-owned: nothing
-    # here stamps it, and no key material or trust store is reachable from this script.
+    core_imports = {
+        (node.module, alias.name)
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.ImportFrom)
+        and node.module
+        and node.module.startswith("gideon.")
+        for alias in node.names
+    }
+    assert core_imports == {
+        ("gideon.extensions.apps.manifest", "PROVIDER_TYPES"),
+        ("gideon.extensions.apps.manifest", "AppManifest"),
+        ("gideon.security.supply_chain", "ScanReport"),
+        ("gideon.security.supply_chain", "SkillScanner"),
+        ("gideon.security.supply_chain", "TrustTier"),
+        ("gideon.security.supply_chain", "Verdict"),
+    }, core_imports
+    assert "gideon.security.security" not in source
     assert "signer" not in validator.CI_OWNED_FIELDS
     assert "signer" in validator.AUTHOR_FIELDS
 
@@ -855,18 +867,20 @@ def test_the_listing_policy_declares_what_an_omitted_signer_means() -> None:
     """The absent case is only "handled by the declared policy" if the policy is written
     down where a contributor reads it."""
     contributing = (STAGED / "CONTRIBUTING.md").read_text(encoding="utf-8")
-    assert "**`signer` is optional, and saying nothing is a supported answer.**" in contributing
+    assert (
+        "**`signer` is optional, and saying nothing is a supported answer.**"
+        in contributing
+    )
     assert '"signer": "unsigned"' in contributing
     assert "does not verify any of this" in contributing
-
-
-# ── the schema, the live data, and the policy documents ───────────────────────
 
 
 def test_the_published_schema_matches_the_python_authority() -> None:
     """``app-registry.schema.json`` is generated. Regenerate with
     ``python validate_registry.py --emit-schema > app-registry.schema.json``."""
-    committed = json.loads((STAGED / "app-registry.schema.json").read_text(encoding="utf-8"))
+    committed = json.loads(
+        (STAGED / "app-registry.schema.json").read_text(encoding="utf-8")
+    )
     assert committed == validator.build_schema()
 
 
@@ -876,9 +890,9 @@ def test_the_allowed_types_derive_from_cores_provider_registry() -> None:
     assert "search" in validator.ALLOWED_TYPES
     assert "telepathy" not in validator.ALLOWED_TYPES
     schema_types = set(
-        validator.build_schema()["properties"]["apps"]["items"]["properties"]["types"]["items"][
-            "enum"
-        ]
+        validator.build_schema()["properties"]["apps"]["items"]["properties"]["types"][
+            "items"
+        ]["enum"]
     )
     assert schema_types == validator.ALLOWED_TYPES
 
@@ -887,26 +901,25 @@ def _live_rows() -> list[dict[str, Any]]:
     """The rows the registry actually ships. One reader, so the two rails below cannot
     disagree about what "a shipped listing" is."""
     document = json.loads((STAGED / "app-registry.json").read_text(encoding="utf-8"))
-    assert isinstance(document.get("apps"), list), "app-registry.json carries no 'apps' array"
+    assert isinstance(
+        document.get("apps"), list
+    ), "app-registry.json carries no 'apps' array"
     for row in document["apps"]:
-        assert isinstance(row, dict), f"a non-object row is in the shipped index: {row!r}"
+        assert isinstance(
+            row, dict
+        ), f"a non-object row is in the shipped index: {row!r}"
     return list(document["apps"])
 
 
-def test_every_row_in_the_live_registry_satisfies_the_schema(fixture_repos: Path) -> None:
+def test_every_row_in_the_live_registry_satisfies_the_schema(
+    fixture_repos: Path,
+) -> None:
     live = _live_rows()
-    # THE FLOOR, over the LIVE rows only. It used to be `len(rows) >= 1` asserted after a
-    # fixture row had been appended, which no input could fail — the comment there said the
-    # live file "is empty until ET-6 lists the exemplars", and ET-6 listed four on 2026-09-02.
-    # A floor that cannot fail is not a floor.
-    assert live, "the shipped app-registry.json lists nothing — this rail would prove nothing"
-    # The fixture row still rides along, but as a POSITIVE control on the checker rather than
-    # as the thing being counted: a row known to satisfy the schema must keep satisfying it.
+    assert (
+        live
+    ), "the shipped app-registry.json lists nothing — this rail would prove nothing"
     for row in live + [_row("https://github.com/gideon/registry-fixture")]:
         assert validator.check_row_schema(row, allow_file_repos=False) == [], row
-
-
-# ── the pre-install trust surface may not be a page of "no scan on record" ─────
 
 
 def test_every_shipped_listing_carries_a_real_scan_verdict() -> None:
@@ -928,21 +941,19 @@ def test_every_shipped_listing_carries_a_real_scan_verdict() -> None:
     one that was never checked. That is the conflation this rail exists to keep impossible.
     """
     rows = _live_rows()
-    # DIRECTION ONE — non-vacuity. Asserted first: the loop below is green over nothing.
-    assert rows, "the shipped app-registry.json lists nothing, so a per-listing rail is empty"
+    assert (
+        rows
+    ), "the shipped app-registry.json lists nothing, so a per-listing rail is empty"
 
     verdicts = {v.value for v in validator.Verdict}
     blocking = validator.BLOCKING_VERDICT.value
     for row in rows:
         name = row.get("name")
         verdict = row.get("last_scan_verdict")
-        # DIRECTION TWO — every readable listing carries one. `not in verdicts` covers the
-        # absent case and a hand-edited value in one assertion, because the surface treats an
-        # unrecognised string as blocking rather than as reassuring and so must this.
         assert verdict in verdicts, (
             f"{name!r} carries last_scan_verdict={verdict!r}. Re-stamp with "
-            f"'python scratch/registry/validate_registry.py "
-            f"scratch/registry/app-registry.json --write' and commit the result."
+            f"'python examples/registry/validate_registry.py "
+            f"examples/registry/app-registry.json --write' and commit the result."
         )
         assert verdict != blocking, f"{name!r} is listed with a {blocking!r} verdict"
         stamped = row.get("last_validated")
@@ -975,7 +986,7 @@ def _workflow_job_commands(path: Path, job: str) -> str:
     terminator: str | None = None
     for line in lines[lines.index(header) + 1 :]:
         if re.match(r"^ {2}[A-Za-z][\w-]*:", line):
-            break  # the next job id
+            break
         if terminator is not None:
             if line.strip() == terminator:
                 terminator = None
@@ -983,7 +994,7 @@ def _workflow_job_commands(path: Path, job: str) -> str:
         opened = re.search(r"<<-?'?([A-Za-z_]\w*)'?\s*$", line)
         if opened is not None:
             terminator = opened.group(1)
-            body.append(line[: opened.start()])  # the command, minus its redirection
+            body.append(line[: opened.start()])
             continue
         if line.strip().startswith("#"):
             continue
@@ -995,37 +1006,37 @@ def test_core_ci_keeps_the_shipped_verdicts_filled() -> None:
     """Something must call the stamper, or the rail above is a standing red waiting to happen.
 
     The three staged workflows cannot: GitHub runs workflows only from ``.github/workflows/``
-    at the repo ROOT, and they live under ``scratch/registry/``. Until the standalone registry
+    at the repo ROOT, and they live under ``examples/registry/``. Until the standalone registry
     repo exists (ET-9, owner-only, #2490) core's own ``full.yml`` owns the job.
     """
     workflows = REPO_ROOT / ".github" / "workflows"
     full = (workflows / "full.yml").read_text(encoding="utf-8")
     commands = _workflow_job_commands(workflows / "full.yml", "registry-verdicts")
-    assert "scratch/registry/validate_registry.py" in commands, "the job never runs the validator"
-    assert "scratch/registry/app-registry.json" in commands, "the job never reads the shipped index"
+    assert (
+        "examples/registry/validate_registry.py" in commands
+    ), "the job never runs the validator"
+    assert (
+        "examples/registry/app-registry.json" in commands
+    ), "the job never reads the shipped index"
 
-    # Vacuity for the two removals in _workflow_job_commands, self-proving. Each mutant that
-    # survived before them is named there; these two assertions are what keep them dead.
-    commented = [
-        line
-        for line in full.splitlines()
-        if line.strip().startswith("#") and "scratch/registry/validate_registry.py" in line
-    ]
-    assert commented, "the WHY header stopped naming the validator; comment-stripping is inert"
     heredoc = full.rsplit("<<'PY'\n", 1)[1].split("\n          PY", 1)[0]
-    for path in ("scratch/registry/app-registry.json", "scratch/registry/validate_registry.py"):
+    for path in (
+        "examples/registry/app-registry.json",
+        "examples/registry/validate_registry.py",
+    ):
         assert (
             path in heredoc
         ), f"the compare step stopped quoting {path}; heredoc-stripping is inert"
 
-    # The staged workflows are inert HERE, which is the whole reason the job above exists.
     staged = {p.name for p in (STAGED / ".github" / "workflows").glob("*.yml")}
     assert len(staged) == 3, staged
-    assert not staged & {p.name for p in workflows.glob("*.yml")}, "a staged workflow went live"
+    assert not staged & {
+        p.name for p in workflows.glob("*.yml")
+    }, "a staged workflow went live"
 
-    # And deliberately NOT on the ≤10-min PR gate: each listing costs a clone plus a scan over
-    # a third-party repository, so a forge hiccup would red an unrelated merge.
-    assert "validate_registry.py" not in (workflows / "ci.yml").read_text(encoding="utf-8")
+    assert "validate_registry.py" not in (workflows / "ci.yml").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_the_staged_content_is_complete() -> None:
@@ -1042,7 +1053,9 @@ def test_the_staged_content_is_complete() -> None:
         ".github/workflows/comment-listing-verdict.yml",
         ".github/workflows/revalidate-listings.yml",
     ):
-        assert (STAGED / expected).is_file(), f"{expected} is missing from scratch/registry/"
+        assert (
+            STAGED / expected
+        ).is_file(), f"{expected} is missing from examples/registry/"
 
 
 def test_the_listing_policy_states_the_three_outcomes() -> None:

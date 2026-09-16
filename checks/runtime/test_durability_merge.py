@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.durability import merge
-from gideon.durability.inventory import (
+from gideon.operations.durability import merge
+from gideon.operations.durability.inventory import (
     MERGE_APPEND_DEDUP,
     MERGE_LWW,
     MERGE_REPLACE_ONLY,
@@ -24,8 +24,8 @@ class TestUnionById:
         local = [{"id": "a"}, {"id": "b"}]
         remote = [{"id": "b"}, {"id": "c"}]
         r = merge.merge_union_by_id(local, remote)
-        assert [row["id"] for row in r.rows] == ["a", "b", "c"]  # sorted, union
-        assert r.added == 1 and r.kept == 2  # c added; a,b kept
+        assert [row["id"] for row in r.rows] == ["a", "b", "c"]
+        assert r.added == 1 and r.kept == 2
 
     def test_output_is_sorted_and_deterministic(self):
         local = [{"id": "z"}, {"id": "m"}]
@@ -33,7 +33,7 @@ class TestUnionById:
         r1 = merge.merge_union_by_id(local, remote)
         r2 = merge.merge_union_by_id(local, remote)
         assert [x["id"] for x in r1.rows] == ["a", "m", "z"]
-        assert r1.rows == r2.rows  # deterministic
+        assert r1.rows == r2.rows
 
     def test_without_lww_or_tombstones_local_wins_a_collision(self):
         local = [{"id": "a", "v": "local"}]
@@ -47,10 +47,9 @@ class TestTombstones:
         local = [{"id": "a", "title": "alive"}]
         remote = [{"id": "a", "deleted_at": "2026-08-06T00:00:00Z"}]
         r = merge.merge_union_by_id(local, remote, tombstones=True)
-        assert r.rows[0].get("deleted_at") and r.tombstoned == 1  # deletion survives
+        assert r.rows[0].get("deleted_at") and r.tombstoned == 1
 
     def test_local_tombstone_survives_a_remote_live_row(self):
-        # A task deleted on A stays deleted after B (which still has it live) syncs in.
         local = [{"id": "a", "deleted_at": "2026-08-06T00:00:00Z"}]
         remote = [{"id": "a", "title": "resurrected?"}]
         r = merge.merge_union_by_id(local, remote, tombstones=True)
@@ -66,7 +65,7 @@ class TestTombstones:
         local = [{"id": "a", "title": "alive"}]
         remote = [{"id": "a", "deleted_at": "2026-08-06T00:00:00Z"}]
         r = merge.merge_union_by_id(local, remote, tombstones=False)
-        assert r.rows[0] == {"id": "a", "title": "alive"}  # no tombstone precedence
+        assert r.rows[0] == {"id": "a", "title": "alive"}
 
 
 class TestLww:
@@ -80,7 +79,7 @@ class TestLww:
         local = [{"id": "a", "updated_at": "2026-08-06", "v": "local"}]
         remote = [{"id": "a", "updated_at": "2026-08-06", "v": "remote"}]
         r = merge.merge_lww_by_updated_at(local, remote)
-        assert r.rows[0]["v"] == "local"  # stable: ties favor local
+        assert r.rows[0]["v"] == "local"
 
     def test_dated_row_beats_undated(self):
         local = [{"id": "a", "v": "undated"}]
@@ -89,8 +88,6 @@ class TestLww:
         assert r.rows[0]["v"] == "dated"
 
     def test_tombstone_beats_a_newer_live_row(self):
-        # Deletion is not just another field-write — a tombstone wins even over a
-        # live row with a later updated_at.
         local = [{"id": "a", "deleted_at": "2026-08-01", "updated_at": "2026-08-01"}]
         remote = [{"id": "a", "updated_at": "2026-08-09", "v": "edited-later"}]
         r = merge.merge_lww_by_updated_at(local, remote, tombstones=True)
@@ -103,18 +100,18 @@ class TestAppendDedup:
         remote = [{"id": "2"}, {"id": "3"}, {"id": "4"}]
         r = merge.merge_append_dedup(local, remote)
         assert [x["id"] for x in r.rows] == ["1", "2", "3", "4"]
-        assert r.added == 2  # 3,4 (2 is a dup)
+        assert r.added == 2
 
     def test_reimport_is_a_noop(self):
         local = [{"id": "1"}, {"id": "2"}]
         r = merge.merge_append_dedup(local, list(local))
-        assert r.rows == local and r.added == 0  # stable ids → re-import adds nothing
+        assert r.rows == local and r.added == 0
 
     def test_keyless_rows_are_kept_not_deduped(self):
-        local = [{"ts": "x"}]  # no id
+        local = [{"ts": "x"}]
         remote = [{"ts": "y"}]
         r = merge.merge_append_dedup(local, remote)
-        assert len(r.rows) == 2  # can't dedup keyless rows — keep both
+        assert len(r.rows) == 2
 
     def test_custom_dedup_key(self):
         local = [{"guid": "g1"}]
@@ -132,7 +129,6 @@ class TestDispatch:
         assert len(merge.merge_rows(MERGE_LWW, local, remote).rows) == 2
 
     def test_db_and_replace_only_strategies_raise(self):
-        # These are not row-level merges — routing one here is a caller bug.
         with pytest.raises(ValueError, match="not a row-level merge"):
             merge.merge_rows(MERGE_SQLITE_ATTACH_IGNORE, [], [])
         with pytest.raises(ValueError, match="not a row-level merge"):
@@ -151,7 +147,6 @@ class TestConvergence:
     def test_two_machines_converge_on_union(self):
         a = [{"id": "task-a", "updated_at": "1"}]
         b = [{"id": "task-b", "updated_at": "1"}]
-        # A pulls B; B pulls A.
         a_after = merge.merge_union_by_id(a, b, tombstones=True)
         b_after = merge.merge_union_by_id(b, a, tombstones=True)
         assert (
@@ -161,8 +156,6 @@ class TestConvergence:
         )
 
     def test_delete_on_a_stays_deleted_on_b_after_sync(self):
-        # A deleted task-x (tombstone); B still has it live. After B merges A's rows,
-        # task-x is tombstoned on B too — no resurrection.
         a = [{"id": "task-x", "deleted_at": "2026-08-06"}]
         b = [{"id": "task-x", "title": "still here"}]
         b_after = merge.merge_union_by_id(b, a, tombstones=True)
@@ -174,4 +167,4 @@ class TestConvergence:
         remote = [{"id": "b", "updated_at": "3"}, {"id": "c", "updated_at": "1"}]
         once = merge.merge_lww_by_updated_at(local, remote, tombstones=True)
         twice = merge.merge_lww_by_updated_at(once.rows, remote, tombstones=True)
-        assert once.rows == twice.rows  # re-applying the same remote changes nothing
+        assert once.rows == twice.rows

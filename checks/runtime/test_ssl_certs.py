@@ -3,7 +3,7 @@
 import os
 from unittest.mock import patch
 
-from gideon._ssl_compat import _CA_CANDIDATES, _ensure_ssl_certs
+from gideon.core._ssl_compat import _CA_CANDIDATES, _ensure_ssl_certs
 
 
 class TestEnsureSslCerts:
@@ -38,10 +38,8 @@ class TestEnsureSslCerts:
         monkeypatch.delenv("SSL_CERT_FILE", raising=False)
         monkeypatch.delenv("REQUESTS_CA_BUNDLE", raising=False)
 
-        # Simulate: cafile is None (no default bundle)
         mock_paths = type("P", (), {"cafile": None, "capath": None})()
 
-        # Make the second candidate exist
         fake_bundle = tmp_path / "ca-bundle.crt"
         fake_bundle.write_text("fake cert bundle")
 
@@ -53,14 +51,16 @@ class TestEnsureSslCerts:
 
         with (
             patch("ssl.get_default_verify_paths", return_value=mock_paths),
-            patch("gideon._ssl_compat._CA_CANDIDATES", candidates),
+            patch("gideon.core._ssl_compat._CA_CANDIDATES", candidates),
         ):
             _ensure_ssl_certs()
 
         assert os.environ["SSL_CERT_FILE"] == str(fake_bundle)
         assert os.environ["REQUESTS_CA_BUNDLE"] == str(fake_bundle)
 
-    def test_does_not_overwrite_existing_requests_ca_bundle(self, monkeypatch, tmp_path):
+    def test_does_not_overwrite_existing_requests_ca_bundle(
+        self, monkeypatch, tmp_path
+    ):
         """REQUESTS_CA_BUNDLE should not be overwritten if already set."""
         monkeypatch.delenv("SSL_CERT_FILE", raising=False)
         monkeypatch.setenv("REQUESTS_CA_BUNDLE", "/existing/bundle.crt")
@@ -73,7 +73,7 @@ class TestEnsureSslCerts:
 
         with (
             patch("ssl.get_default_verify_paths", return_value=mock_paths),
-            patch("gideon._ssl_compat._CA_CANDIDATES", candidates),
+            patch("gideon.core._ssl_compat._CA_CANDIDATES", candidates),
         ):
             _ensure_ssl_certs()
 
@@ -90,7 +90,7 @@ class TestEnsureSslCerts:
 
         with (
             patch("ssl.get_default_verify_paths", return_value=mock_paths),
-            patch("gideon._ssl_compat._CA_CANDIDATES", candidates),
+            patch("gideon.core._ssl_compat._CA_CANDIDATES", candidates),
         ):
             _ensure_ssl_certs()
 
@@ -102,7 +102,6 @@ class TestEnsureSslCerts:
         monkeypatch.delenv("SSL_CERT_FILE", raising=False)
         monkeypatch.delenv("REQUESTS_CA_BUNDLE", raising=False)
 
-        # cafile points to a nonexistent path
         mock_paths = type("P", (), {"cafile": "/ghost/cert.pem", "capath": None})()
 
         fake_bundle = tmp_path / "ca-bundle.crt"
@@ -111,7 +110,7 @@ class TestEnsureSslCerts:
 
         with (
             patch("ssl.get_default_verify_paths", return_value=mock_paths),
-            patch("gideon._ssl_compat._CA_CANDIDATES", candidates),
+            patch("gideon.core._ssl_compat._CA_CANDIDATES", candidates),
         ):
             _ensure_ssl_certs()
 
@@ -129,8 +128,8 @@ class TestEnsureSslCerts:
         from unittest.mock import MagicMock
 
         mock_fn = MagicMock()
-        with patch("gideon._ssl_compat._ensure_ssl_certs", mock_fn):
-            import gideon.cli
+        with patch("gideon.core._ssl_compat._ensure_ssl_certs", mock_fn):
+            import gideon.interfaces.cli.main
 
-            importlib.reload(gideon.cli)
+            importlib.reload(gideon.interfaces.cli.main)
         mock_fn.assert_called()

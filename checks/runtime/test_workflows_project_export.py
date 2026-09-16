@@ -14,7 +14,7 @@ import tarfile
 
 import pytest
 
-from gideon.workflows.project_export import (
+from gideon.automation.workflows.project_export import (
     EXCLUDED_DIR,
     EXCLUDED_SECRET,
     MANIFEST_SCHEMA,
@@ -38,10 +38,9 @@ SECRET_VALUE = "hunter2-do-not-export"
 
 
 def export(files: dict, **kw):
-    return plan_export("p-1", project_name=kw.pop("name", "Ingest rework"), files=files, **kw)
-
-
-# ── secrets never travel ──
+    return plan_export(
+        "p-1", project_name=kw.pop("name", "Ingest rework"), files=files, **kw
+    )
 
 
 def test_a_secret_file_is_EXCLUDED():
@@ -72,7 +71,7 @@ def test_the_secret_set_is_READ_from_portability_not_re_listed():
     """`EXPORT_EXCLUDE` is itself a projection of the state inventory's `secret=True` entries.
     A local copy here would re-create the drift that let stores escape coverage before.
     """
-    from gideon.portability import EXPORT_EXCLUDE
+    from gideon.workspace.portability import EXPORT_EXCLUDE
 
     assert secret_basenames() == frozenset(EXPORT_EXCLUDE)
 
@@ -110,9 +109,6 @@ def test_an_exclusion_reason_is_REPORTED():
     assert any("photo.png" in s for s in plan.skipped)
 
 
-# ── the portable set is an ALLOWLIST ──
-
-
 @pytest.mark.parametrize("suffix", sorted(PORTABLE_SUFFIXES))
 def test_a_portable_content_type_travels(suffix):
     plan = export({f"context/note{suffix}": b"content"})
@@ -140,9 +136,6 @@ def test_an_oversize_file_is_skipped_WITH_its_size():
 def test_a_dotfile_is_refused():
     plan = export({"context/.hidden": b"x"})
     assert plan.entries == []
-
-
-# ── per-entity digests ──
 
 
 def test_every_entry_carries_its_OWN_digest():
@@ -194,15 +187,18 @@ def test_the_same_content_hashes_the_SAME_across_exports():
     assert first.entries[0].sha256 == second.entries[0].sha256
 
 
-# ── artifact + run reduction ──
-
-
 def test_an_artifact_travels_as_METADATA_not_a_body():
     """A 50-version image history would dwarf everything else, and the metadata plus lineage is
     what makes the artifact readable on the far side.
     """
     digest = artifact_digest(
-        {"slug": "a", "name": "A", "kind": "markdown", "version": 3, "content": "x" * 10_000}
+        {
+            "slug": "a",
+            "name": "A",
+            "kind": "markdown",
+            "version": 3,
+            "content": "x" * 10_000,
+        }
     )
     assert "content" not in digest
     assert digest["version"] == 3
@@ -231,9 +227,6 @@ def test_a_run_digest_carries_NO_journal():
     }
 
 
-# ── import safety mirrors the REAL filter ──
-
-
 @pytest.mark.parametrize(
     "member", ["../../../etc/passwd", "/etc/passwd", "a/../../b", "ctx/../../../x"]
 )
@@ -251,7 +244,7 @@ def test_the_safety_rules_AGREE_with_snapshots_own_filter(member):
     different rules would mean the weaker one wins wherever it runs — so these deliberately
     mirror it, and the mirroring is verified.
     """
-    from gideon.snapshot import _data_filter
+    from gideon.workspace.snapshot import _data_filter
 
     filter_accepts = _data_filter(tarfile.TarInfo(name=member)) is not None
     mine_accepts, _why = safe_member(member)
@@ -263,7 +256,7 @@ def test_the_real_filter_still_rejects_symlinks():
     — which is also where the TOCTOU gap is. This test pins that the filter still does it,
     because the plan-time check deliberately does not duplicate it.
     """
-    from gideon.snapshot import _data_filter
+    from gideon.workspace.snapshot import _data_filter
 
     info = tarfile.TarInfo(name="context/evil.md")
     info.type = tarfile.SYMTYPE
@@ -287,15 +280,6 @@ def test_an_ordinary_member_is_accepted():
     assert safe_member("context/overview.md") == (True, "")
 
 
-# ── the ZIP extractor's own resolve-and-compare ──
-#
-# `test_the_real_filter_still_rejects_symlinks` above pins `snapshot._data_filter`, which is the
-# TAR path (snapshot restore). Project import is the ZIP path, and its extraction-time half is
-# `project_archive._extract_one`'s resolve-and-compare. Nothing asserted that: removing the
-# comparison leaves this whole file green, so the layer the module's own docstring calls "what
-# closes the TOCTOU gap" was held by a test of a different mechanism. Measured.
-
-
 def _zip_with(tmp_path, member: str, body: bytes):
     """A one-member zip, returned open, so `_extract_one` has a real `ZipInfo` to write."""
     import zipfile
@@ -316,7 +300,7 @@ def test_a_NAME_CLEAN_member_whose_parent_is_a_SYMLINK_out_is_refused(tmp_path):
     resolve-and-compare in ``_extract_one`` catches this, and it must return ``None`` without
     writing the body anywhere.
     """
-    from gideon.workflows.project_archive import _extract_one
+    from gideon.automation.workflows.project_archive import _extract_one
 
     assert safe_member("a/b.txt") == (True, ""), "the premise: the NAME is clean"
 
@@ -331,13 +315,15 @@ def test_a_NAME_CLEAN_member_whose_parent_is_a_SYMLINK_out_is_refused(tmp_path):
         assert _extract_one(zf, info, work, "a/b.txt") is None
     finally:
         zf.close()
-    assert not (outside / "b.txt").exists(), "the body was written outside the extraction root"
+    assert not (
+        outside / "b.txt"
+    ).exists(), "the body was written outside the extraction root"
 
 
 def test_an_ordinary_member_IS_extracted_and_read_back(tmp_path):
     """The vacuity floor for the refusal above: `_extract_one` can succeed at all, so the
     `None` there is the guard firing rather than the helper being broken."""
-    from gideon.workflows.project_archive import _extract_one
+    from gideon.automation.workflows.project_archive import _extract_one
 
     work = tmp_path / "work"
     work.mkdir()
@@ -347,9 +333,6 @@ def test_an_ordinary_member_IS_extracted_and_read_back(tmp_path):
     finally:
         zf.close()
     assert (work / "context" / "overview.md").read_bytes() == b"# hello"
-
-
-# ── digest verification refuses ──
 
 
 def test_a_TAMPERED_entry_is_refused():
@@ -385,13 +368,12 @@ def test_a_SIZE_mismatch_is_caught_too():
     assert issue.code == "size_mismatch"
 
 
-# ── the import plan ──
-
-
 def build_archive(files: dict) -> tuple[dict, dict]:
     plan = export(files)
     manifest = plan.manifest()
-    contents = {e["path"]: files[e["path"]] for e in manifest["entries"] if e["path"] in files}
+    contents = {
+        e["path"]: files[e["path"]] for e in manifest["entries"] if e["path"] in files
+    }
     return manifest, contents
 
 
@@ -418,7 +400,9 @@ def test_ONE_corrupt_entry_costs_that_entry_not_the_project():
 
 
 def test_a_MISSING_content_entry_is_named():
-    manifest, contents = build_archive({"project.json": b"{}", "context/overview.md": b"x"})
+    manifest, contents = build_archive(
+        {"project.json": b"{}", "context/overview.md": b"x"}
+    )
     contents.pop("context/overview.md")
     plan = plan_import(manifest, contents)
     assert [r.code for r in plan.refused] == ["missing_content"]
@@ -460,9 +444,6 @@ def test_the_secrets_a_user_must_RE_ENTER_are_surfaced():
     plan = plan_import(manifest, contents)
     assert plan.secrets_expected == [".env"]
     assert "re-entered" in import_summary(plan)
-
-
-# ── collision slots ──
 
 
 def test_a_fresh_name_is_used_as_is():

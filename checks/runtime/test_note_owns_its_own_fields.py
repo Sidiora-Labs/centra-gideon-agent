@@ -1,6 +1,6 @@
 """Caller-supplied `meta` cannot overwrite the fields the platform decided (issue 423).
 
-`DashboardState.notify` built the note and then merged meta OVER it:
+`ConsoleState.notify` built the note and then merged meta OVER it:
 
     note = {"kind": kind, "title": title, "body": body, "ts": ...}
     if meta:
@@ -35,20 +35,23 @@ from typing import Any
 
 import pytest
 
-from gideon.dashboard.state import DashboardState
+from gideon.interfaces.dashboard.state import ConsoleState
 
 
 @pytest.fixture
 def state(monkeypatch, tmp_path):
     """A state whose delivery is captured rather than broadcast or written to a real home."""
-    st = DashboardState.__new__(DashboardState)
+    st = ConsoleState.__new__(ConsoleState)
     st._notification_log = []
     st._sessions = {}
     broadcast: list[dict[str, Any]] = []
     persisted: list[dict[str, Any]] = []
-    monkeypatch.setattr(st, "_broadcast", lambda note: broadcast.append(note), raising=False)
     monkeypatch.setattr(
-        "gideon.dashboard.state._persist_notification", lambda note: persisted.append(note)
+        st, "_broadcast", lambda note: broadcast.append(note), raising=False
+    )
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.state._persist_notification",
+        lambda note: persisted.append(note),
     )
     monkeypatch.setattr(st, "_operator_name", lambda: "", raising=False)
     monkeypatch.setattr(st, "_push_target", lambda kind, note: None, raising=False)
@@ -56,19 +59,21 @@ def state(monkeypatch, tmp_path):
     return st
 
 
-def _deliver(state: DashboardState, kind: str, meta: dict[str, Any] | None) -> dict[str, Any]:
+def _deliver(
+    state: ConsoleState, kind: str, meta: dict[str, Any] | None
+) -> dict[str, Any]:
     state.notify(kind, "Title", "Body", meta=meta)
     notes = state.captured["broadcast"] or state._notification_log
-    assert notes, "nothing was delivered — the fixture stopped exercising the delivery path"
+    assert (
+        notes
+    ), "nothing was delivered — the fixture stopped exercising the delivery path"
     return notes[-1]
-
-
-# ── the four fields the platform decides ─────────────────────────────────────────────────────
 
 
 def test_meta_cannot_change_the_kind_the_gate_already_evaluated():
     """🔑 The severity downgrade. `notification_allowed(kind)` ran on the parameter, so a note
-    persisted under a different kind was admitted by one policy and recorded as another."""
+    persisted under a different kind was admitted by one policy and recorded as another.
+    """
     st = _fresh()
     note = _deliver(st, "chat.error", {"kind": "info"})
     assert note["kind"] == "chat.error"
@@ -93,13 +98,11 @@ def test_meta_cannot_backdate_the_timestamp():
 
 def test_meta_cannot_pre_acknowledge_a_note():
     """🪤 `notify` never writes `acked`, so the authority-last assignment cannot protect it — it
-    needs the reserved set. A note that arrives acknowledged is one the user never sees."""
+    needs the reserved set. A note that arrives acknowledged is one the user never sees.
+    """
     st = _fresh()
     note = _deliver(st, "info", {"acked": True})
     assert "acked" not in note
-
-
-# ── the fields written further down, under a condition ───────────────────────────────────────
 
 
 def test_meta_cannot_name_its_own_source():
@@ -119,17 +122,22 @@ def test_meta_cannot_name_its_own_source():
     assert note.get("source") != "spoofed"
 
 
-@pytest.mark.parametrize("key", ["mode", "targets", "escalated_by", "badge_only", "native"])
+@pytest.mark.parametrize(
+    "key", ["mode", "targets", "escalated_by", "badge_only", "native"]
+)
 def test_meta_cannot_set_any_delivery_decision(key):
     """Each of these is a delivery decision the rule layer makes. `mode` is the sharpest: setting it
-    to `never` from meta would let an emitter silence its own note after the gate admitted it."""
+    to `never` from meta would let an emitter silence its own note after the gate admitted it.
+    """
     st = _fresh()
     note = _deliver(st, "info", {key: "spoofed"})
     assert note.get(key) != "spoofed"
 
 
 @pytest.mark.parametrize("key", ["mode", "targets", "source"])
-def test_meta_cannot_set_a_delivery_decision_when_THE_RULE_FAILS_TO_RESOLVE(key, monkeypatch):
+def test_meta_cannot_set_a_delivery_decision_when_THE_RULE_FAILS_TO_RESOLVE(
+    key, monkeypatch
+):
     """🪤 The branch that makes reserving these three worth anything.
 
     On the normal path `mode`/`targets`/`source` are assigned after the merge, so they are already
@@ -142,7 +150,7 @@ def test_meta_cannot_set_a_delivery_decision_when_THE_RULE_FAILS_TO_RESOLVE(key,
     that can't read its own config must not be able to silence the system"), so a broken rules file
     is exactly when an emitter's spoofed `source` would survive to a consumer's deep link.
     """
-    import gideon.notification_rules as rules
+    import gideon.workspace.notification_rules as rules
 
     def _boom(_kind):
         raise RuntimeError("rules file unreadable")
@@ -153,12 +161,10 @@ def test_meta_cannot_set_a_delivery_decision_when_THE_RULE_FAILS_TO_RESOLVE(key,
     assert note["mode"] == "immediate", "the fail-open default changed"
 
 
-# ── what a caller CAN still do ───────────────────────────────────────────────────────────────
-
-
 def test_ordinary_meta_still_rides_along():
     """Vacuity floor, and the whole point of `meta`. A fix that dropped everything would break the
-    push target, which reads `item_id`/`inbox_item`/`session` out of exactly this dict."""
+    push target, which reads `item_id`/`inbox_item`/`session` out of exactly this dict.
+    """
     st = _fresh()
     note = _deliver(st, "info", {"item_id": "abc123", "count": 7})
     assert note["item_id"] == "abc123"
@@ -170,19 +176,16 @@ def test_the_push_item_keys_are_all_carriable():
     "the push payload carries the id and NOTHING else". Reserving one of them by accident would make
     a phone ping unable to open the thing it is about.
     """
-    for key in DashboardState._PUSH_ITEM_KEYS:
+    for key in ConsoleState._PUSH_ITEM_KEYS:
         note = _deliver(_fresh(), "info", {key: "id-1"})
         assert note[key] == "id-1", key
-    assert not set(DashboardState._PUSH_ITEM_KEYS) & DashboardState._RESERVED_NOTE_KEYS
+    assert not set(ConsoleState._PUSH_ITEM_KEYS) & ConsoleState._RESERVED_NOTE_KEYS
 
 
 def test_no_meta_at_all_is_unchanged():
     st = _fresh()
     note = _deliver(st, "info", None)
     assert note["kind"] == "info" and note["title"] == "Title"
-
-
-# ── the rail ─────────────────────────────────────────────────────────────────────────────────
 
 
 def test_every_field_notify_sets_is_protected_one_way_or_the_other():
@@ -196,15 +199,11 @@ def test_every_field_notify_sets_is_protected_one_way_or_the_other():
     reserve it". The alternative asks each future author to work out whether their new assignment is
     conditional, which is the reasoning that produced this bug.
     """
+    import inspect
     import re
-    from pathlib import Path
 
-    src = (
-        Path(__file__).resolve().parents[1] / "src" / "gideon" / "dashboard" / "state.py"
-    ).read_text()
-    body = src[src.index("    def notify(self, kind: str") : src.index("    #: Meta keys that can")]
+    body = inspect.getsource(ConsoleState.notify)
 
-    # The unconditional assignment block is the structural protection.
     structural = set(re.findall(r'^\s+"(\w+)": ', body, re.M))
     assert {
         "kind",
@@ -214,7 +213,7 @@ def test_every_field_notify_sets_is_protected_one_way_or_the_other():
     } <= structural, "the authority-last assignment no longer sets the four base fields"
 
     written = set(re.findall(r'note\["(\w+)"\]\s*=', body))
-    unprotected = written - structural - set(DashboardState._RESERVED_NOTE_KEYS)
+    unprotected = written - structural - set(ConsoleState._RESERVED_NOTE_KEYS)
     assert unprotected == set(), (
         f"notify writes {sorted(unprotected)} but neither assigns them after the meta merge nor "
         "reserves them — a caller can set those from meta"
@@ -226,18 +225,15 @@ def test_meta_is_merged_before_the_platform_fields_not_after():
     behavioural test: `note.update(meta)` reappearing after the assignment would restore the bug
     while every "ordinary meta rides along" test kept passing.
     """
-    from pathlib import Path
+    import inspect
 
-    src = (
-        Path(__file__).resolve().parents[1] / "src" / "gideon" / "dashboard" / "state.py"
-    ).read_text()
-    body = src[src.index("    def notify(self, kind: str") : src.index("    #: Meta keys that can")]
-    # 🪤 Comments stripped first. The fix's own comment QUOTES the old `note.update(meta)` line to
-    # explain what changed, so a prose match reported the bug as still present — this rail failed on
-    # its first run for exactly that reason. A rail that reads documentation instead of code is
-    # worse than none: it reds on an accurate explanation and greens on a renamed variable.
-    code = "\n".join(line for line in body.splitlines() if not line.lstrip().startswith("#"))
-    assert "note.update(meta)" not in code, "meta is being merged over the platform's fields again"
+    body = inspect.getsource(ConsoleState.notify)
+    code = "\n".join(
+        line for line in body.splitlines() if not line.lstrip().startswith("#")
+    )
+    assert (
+        "note.update(meta)" not in code
+    ), "meta is being merged over the platform's fields again"
     assert code.index("supplied.items()") < code.index(
         '"kind": kind'
     ), "the platform's fields are no longer assigned after the meta merge"
@@ -246,9 +242,9 @@ def test_meta_is_merged_before_the_platform_fields_not_after():
 def _fresh():
     """A per-test state. Built here rather than via the fixture so the parametrized cases each get
     a clean delivery log without the fixture's argument threading."""
-    import gideon.dashboard.state as state_mod
+    import gideon.interfaces.dashboard.state as state_mod
 
-    st = DashboardState.__new__(DashboardState)
+    st = ConsoleState.__new__(ConsoleState)
     st._notification_log = []
     st._sessions = {}
     broadcast: list[dict[str, Any]] = []

@@ -45,48 +45,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-#: Amendment (e), verbatim: "Treat any sub-5-point delta as unresolved — including our own future
-#: measurements." Not a tunable. Lowering it to make a result presentable is the exact move the
-#: amendment's risk section calls out ("a plan that only ever reports wins is not measuring").
 INCONCLUSIVE_BAND_POINTS = 5.0
 
-#: How closely the two arms' token spends must agree to count as token-matched. 5% is tight enough
-#: that the budget cannot explain a >=5-point delta and loose enough to be reachable by a real
-#: local run, where you cannot dial spend exactly (you add single-agent samples until the budget is
-#: consumed).
 TOKEN_MATCH_TOLERANCE = 0.05
 
-#: Trials per arm before a verdict is offered at all. Three is a floor, not a sufficiency claim: the
-#: papers behind the fan-out literature run n=24-100 and still sit near their own noise floor, which
-#: is why the verdict reports the observed spread beside the delta instead of pretending three
-#: trials settled anything.
 MIN_TRIALS_PER_ARM = 3
 
-#: WHICH quantity the token-match gate divides. A property of the experiment's DESIGN, which is why
-#: it is a named vocabulary and not a number — there is no honest default that fits both designs:
-#:
-#: * :data:`SPEND_TOTAL` is the fan-out design's basis and this module's default. Amendment (e)
-#:   matches budget by giving the cheaper arm more samples (see
-#:   :data:`TOKEN_MATCH_TOLERANCE`: "you add single-agent samples until the budget is consumed"), so
-#:   the two arms' trial counts are DELIBERATELY unequal and the question really is what the whole
-#:   arm cost to produce its answer. Dividing by trial count here would defeat the design.
-#: * :data:`SPEND_PER_TRIAL` is a PAIRED design's basis, where both arms run the identical work the
-#:   identical number of times and spend is an OUTCOME of the treatment rather than a knob. Totals
-#:   are commensurable there only while the counts match, so a lost trial makes the gate compare
-#:   n_a attempts against n_b attempts and report the missing attempts as a spend difference.
-#:   MEASURED (`learnbench-20260907T003211Z`, protocol §6's absent-cell case): a paired arm lost two
-#:   cells, was verdicted on 3 trials against 5, and published a `token_ratio` of 0.5139 — "a 48.6%
-#:   spend difference" — where the per-trial value is 0.8565, i.e. 14.3%.
 SPEND_TOTAL = "total"
 SPEND_PER_TRIAL = "per_trial"
 
-#: Every basis the gate can divide on. Exported so a caller declares its design by naming a member
-#: rather than passing a string this module would have to guess the meaning of.
 SPEND_BASES = frozenset({SPEND_TOTAL, SPEND_PER_TRIAL})
 
-#: The arm names. Fixed rather than free-form: the comparison is always fan-out against the
-#: single-agent path on IDENTICAL work, and an observation file naming its arms something else is
-#: measuring a different question than the one amendment (e) requires before a width increase.
 ARM_FANOUT = "fanout"
 ARM_SINGLE = "single"
 
@@ -96,8 +65,6 @@ VERDICT_INCONCLUSIVE = "inconclusive"
 VERDICT_NOT_TOKEN_MATCHED = "not_token_matched"
 VERDICT_INSUFFICIENT_TRIALS = "insufficient_trials"
 
-#: Every verdict this module can return. Exported so a caller can assert the vocabulary rather than
-#: string-matching, and so "inconclusive" is a first-class outcome instead of an error path.
 VERDICTS = frozenset(
     {
         VERDICT_FANOUT_WINS,
@@ -129,7 +96,9 @@ class Trial:
     @classmethod
     def from_json(cls, obj: Any) -> Trial:
         if not isinstance(obj, dict):
-            raise MeasurementError(f"a trial must be an object, got {type(obj).__name__}")
+            raise MeasurementError(
+                f"a trial must be an object, got {type(obj).__name__}"
+            )
         for key in ("score", "tokens"):
             if obj.get(key) is None:
                 raise MeasurementError(f"trial is missing {key!r}: {obj!r}")
@@ -137,7 +106,9 @@ class Trial:
             score = float(obj["score"])
             tokens = int(obj["tokens"])
         except (TypeError, ValueError) as exc:
-            raise MeasurementError(f"trial has non-numeric score/tokens: {obj!r}") from exc
+            raise MeasurementError(
+                f"trial has non-numeric score/tokens: {obj!r}"
+            ) from exc
         if tokens < 0:
             raise MeasurementError(f"trial has negative tokens: {obj!r}")
         return cls(score=score, tokens=tokens)
@@ -178,12 +149,15 @@ class Arm:
 
     @property
     def mean_score(self) -> float:
-        return sum(t.score for t in self.trials) / len(self.trials) if self.trials else 0.0
+        return (
+            sum(t.score for t in self.trials) / len(self.trials) if self.trials else 0.0
+        )
 
     @property
     def spread(self) -> float:
         """Max minus min score within this arm — the arm's own noise, in the same unit as the
-        delta. Reported beside the delta because a delta smaller than this measures nothing."""
+        delta. Reported beside the delta because a delta smaller than this measures nothing.
+        """
         if len(self.trials) < 2:
             return 0.0
         scores = [t.score for t in self.trials]
@@ -212,8 +186,6 @@ class Comparison:
     single: Arm
     verdict: str
     notes: list[str] = field(default_factory=list)
-    #: The basis the token-match gate divided on, carried on the answer rather than only on the
-    #: call, so a reader of a published ratio can tell which denominator produced it.
     spend_basis: str = SPEND_TOTAL
 
     @property
@@ -298,7 +270,9 @@ def load_observations(path: str | Path) -> tuple[str, Arm, Arm]:
     return work, built[ARM_FANOUT], built[ARM_SINGLE]
 
 
-def compare(work: str, fanout: Arm, single: Arm, *, spend_basis: str = SPEND_TOTAL) -> Comparison:
+def compare(
+    work: str, fanout: Arm, single: Arm, *, spend_basis: str = SPEND_TOTAL
+) -> Comparison:
     """Verdict the two arms. Pure: no I/O, no clock.
 
     Order of checks is the order of honesty. Trials first (n=1 is not a measurement), then token

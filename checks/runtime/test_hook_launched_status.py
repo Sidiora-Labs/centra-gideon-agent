@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import asyncio
 
-import gideon.action_providers as action_providers_mod
-from gideon.action_providers.base import ActionResult
-from gideon.hooks import HOOK_EVENT_STOP, ScriptHook, run_script_hook
+import gideon.integrations.action_providers as action_providers_mod
+from gideon.engine.hooks import HOOK_EVENT_STOP, ScriptHook, run_script_hook
+from gideon.integrations.action_providers.base import ActionResult
 
 
 class _FakeProvider:
@@ -33,8 +33,6 @@ def _hook() -> ScriptHook:
 
 
 def _run(result: ActionResult, monkeypatch) -> ScriptHook:
-    # run_script_hook does `from gideon.action_providers import get_action_provider`
-    # at call time, so patch it on that source module.
     monkeypatch.setattr(
         action_providers_mod, "get_action_provider", lambda name: _FakeProvider(result)
     )
@@ -45,7 +43,7 @@ def _run(result: ActionResult, monkeypatch) -> ScriptHook:
 
 def test_launched_outcome_records_launched(monkeypatch):
     hook = _run(ActionResult(success=True, outcome="launched"), monkeypatch)
-    assert hook.last_status == "launched"  # NOT "ok"
+    assert hook.last_status == "launched"
     assert hook.run_count == 1
 
 
@@ -63,6 +61,7 @@ def test_ungated_block_records_advisory(monkeypatch):
     """🔴 G89. This `_run` is a bare `run_script_hook` on a `Stop` hook — no gating caller, and no
     block seam on the event either — so exit 2 was only ever a REQUEST to block. It used to record
     `blocked`, the same overstatement T7 fixed for `launched`. `blocked` is now reserved for the
-    fire that honored it; `tests/test_hook_advisory_status.py` pins both sides."""
+    fire that honored it; `checks/runtime/test_hook_advisory_status.py` pins both sides.
+    """
     hook = _run(ActionResult(success=False, blocked=True), monkeypatch)
     assert hook.last_status == "advisory"

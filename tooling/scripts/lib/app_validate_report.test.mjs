@@ -1,9 +1,3 @@
-// Unit tests for the validation harness's report shaping. Run: node --test scripts/lib/
-//
-// These cover the properties that decide whether the harness can be trusted:
-// a leg that never ran must not read as green, a SKIPPED leg must always carry a
-// reason, and the verdict/exit code must follow from the legs rather than from
-// whatever the driver happened to reach.
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'

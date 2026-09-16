@@ -9,10 +9,8 @@ import gideon
 
 
 def test_static_system_info_includes_gateway_version() -> None:
-    from gideon.dashboard import handlers_system
+    from gideon.interfaces.dashboard import handlers_system
 
-    # Reset the module-level cache so the field is computed fresh (other tests
-    # may have populated it already).
     handlers_system._STATIC_SYSTEM_INFO = None
     info = handlers_system._get_static_system_info()
 

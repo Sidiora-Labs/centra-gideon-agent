@@ -14,9 +14,9 @@ from __future__ import annotations
 import os
 
 import pytest
-from test_loop_worktree_sparse import _repo, _tree  # reuse the canonical fixtures
+from test_loop_worktree_sparse import _repo, _tree
 
-from gideon.loop import worktree as wt
+from gideon.automation.loop import worktree as wt
 
 
 class TestLockRetry:
@@ -28,7 +28,10 @@ class TestLockRetry:
             if args[:2] == ("sparse-checkout", "set"):
                 calls["n"] += 1
                 if calls["n"] == 1:
-                    return 1, "error: could not lock config file .git/config: File exists"
+                    return (
+                        1,
+                        "error: could not lock config file .git/config: File exists",
+                    )
             return real_git(cwd, *args)
 
         monkeypatch.setattr(wt, "_git", flaky)
@@ -51,11 +54,10 @@ class TestLockRetry:
         monkeypatch.setitem(wt.__dict__, "_git_orig", wt._git)
         monkeypatch.setattr(wt, "_git", broken)
         ws = _repo(tmp_path)
-        # Sparse setup fails once, no retries; worktree survives fully hydrated.
         path = wt.add_worktree(ws, "t-hard", scope=["src"])
         assert path is not None
         assert calls["n"] == 1, "a permanent failure must not be retried"
-        assert "docs/guide.md" in _tree(path)  # documented fallback: full checkout
+        assert "docs/guide.md" in _tree(path)
 
 
 class TestBatchDeterminism:

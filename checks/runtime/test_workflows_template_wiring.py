@@ -25,8 +25,8 @@ import json
 
 import pytest
 
-from gideon import mcp_core, mcp_workflows
-from gideon.workflows import template_pipeline, template_store
+from gideon.automation.workflows import template_pipeline, template_store
+from gideon.integrations import mcp_core, mcp_workflows
 
 
 @pytest.fixture
@@ -39,8 +39,10 @@ def home(tmp_path, monkeypatch):
     `~/.gideon` and passes).
     """
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: tmp_path)
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gideon.automation.workflows.store.config_dir", lambda: tmp_path
+    )
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     return tmp_path
 
 
@@ -56,8 +58,16 @@ def write_transcript(home, sid: str, records: list[dict]) -> None:
 
 
 REAL_SESSION = [
-    {"_type": "metadata", "created_at": "2026-01-01T00:00:00", "title": "Release triage"},
-    {"role": "user", "content": "Triage the open issues in the release milestone", "ts": "t0"},
+    {
+        "_type": "metadata",
+        "created_at": "2026-01-01T00:00:00",
+        "title": "Release triage",
+    },
+    {
+        "role": "user",
+        "content": "Triage the open issues in the release milestone",
+        "ts": "t0",
+    },
     {"role": "tool", "content": "github_list_issues", "meta": {"approval": "allow"}},
     {"role": "assistant", "content": "Here are the issues…", "ts": "t1"},
     {"role": "tool", "content": "github_list_issues", "meta": {"approval": "allow"}},
@@ -66,13 +76,10 @@ REAL_SESSION = [
 ]
 
 
-# ── clause 1: source_session_id → mine_session ────────────────────────────────
-
-
 class TestSourceSessionMining:
     def test_a_session_id_resolves_to_its_jsonl(self, home):
         write_transcript(home, "chat-7", REAL_SESSION)
-        from gideon import session_map
+        from gideon.engine import session_map
 
         path = session_map.transcript_path("chat-7")
         assert path is not None and path.name == "chat-7.jsonl"
@@ -84,7 +91,7 @@ class TestSourceSessionMining:
         Asserted through `read_transcript` rather than by handing records over, because the
         resolution + parse step is the part that did not exist."""
         write_transcript(home, "chat-7", REAL_SESSION)
-        from gideon import session_map
+        from gideon.engine import session_map
 
         records = session_map.read_transcript("chat-7")
         assert len(records) == len(REAL_SESSION)
@@ -94,13 +101,13 @@ class TestSourceSessionMining:
         assert [t.name for t in mined.tools] == ["github_list_issues", "shell_exec"]
 
     def test_a_missing_session_resolves_to_nothing(self, home):
-        from gideon import session_map
+        from gideon.engine import session_map
 
         assert session_map.transcript_path("nope") is None
         assert session_map.read_transcript("nope") == []
 
     def test_a_traversing_id_cannot_escape_the_sessions_dir(self, home):
-        from gideon import session_map
+        from gideon.engine import session_map
 
         for bad in ("../config", "a/b", ".hidden", ""):
             assert session_map.transcript_path(bad) is None
@@ -115,7 +122,7 @@ class TestSourceSessionMining:
             + "\n",
             encoding="utf-8",
         )
-        from gideon import session_map
+        from gideon.engine import session_map
 
         records = session_map.read_transcript("chat-8")
         assert template_pipeline.mine_session(records).user_turns == ["do the thing"]
@@ -131,7 +138,6 @@ class TestSourceSessionMining:
         )
         assert "mined_session" in out
         assert "github_list_issues" in out
-        # The denied tool is named as denied, and NOT in the signature.
         body = json.loads(out[out.index("{") :])
         mined = body["mined_session"]
         assert mined["permission_signature"] == ["github_list_issues"]
@@ -159,9 +165,6 @@ class TestSourceSessionMining:
         assert "mined_session" not in out
 
 
-# ── clause 2: eval_specs imported by a live surface ───────────────────────────
-
-
 class TestEvalSpecsAreProduced:
     def test_the_template_plan_path_produces_a_benchmark(self, home):
         """`eval_specs` had zero importers. The template plan path is now one."""
@@ -171,7 +174,11 @@ class TestEvalSpecsAreProduced:
                 "kind": "sequence",
                 "id": "main",
                 "children": [
-                    {"kind": "infer", "id": "think", "config": {"prompt": "on {{inputs.topic}}"}}
+                    {
+                        "kind": "infer",
+                        "id": "think",
+                        "config": {"prompt": "on {{inputs.topic}}"},
+                    }
                 ],
             },
             "inputs": {"topic": {"type": "string", "required": True}},
@@ -191,15 +198,17 @@ class TestEvalSpecsAreProduced:
                 "kind": "sequence",
                 "id": "main",
                 "children": [
-                    {"kind": "infer", "id": "think", "config": {"prompt": "write a summary"}}
+                    {
+                        "kind": "infer",
+                        "id": "think",
+                        "config": {"prompt": "write a summary"},
+                    }
                 ],
             },
             "inputs": {},
             "metadata": {"keywords": ["demo"]},
         }
         spec = mcp_workflows._eval_surface("demo", definition)["eval_spec"]
-        # A model-spending template is not free, and the graded checks name the work rather than
-        # asserting a result.
         assert spec["free"] is (not spec["graded_checks"])
         for key in ("passed", "score", "verdict", "grade"):
             assert key not in spec
@@ -209,7 +218,8 @@ class TestEvalSpecsAreProduced:
 
         `eval_specs` is TOLERANT rather than strict (its own docstring: pure functions over spec
         dicts), so a junk `root` degrades to a thin spec instead of erroring — either outcome is
-        acceptable here, and raising is not. What this pins is that the plan survives."""
+        acceptable here, and raising is not. What this pins is that the plan survives.
+        """
         surface = mcp_workflows._eval_surface("demo", {"root": "not-a-dict"})
         assert surface == {} or surface["eval_spec"]["template"] == "demo"
 
@@ -225,7 +235,11 @@ class TestEvalSpecsAreProduced:
                     "kind": "sequence",
                     "id": "main",
                     "children": [
-                        {"kind": "infer", "id": "think", "config": {"prompt": "summarize"}}
+                        {
+                            "kind": "infer",
+                            "id": "think",
+                            "config": {"prompt": "summarize"},
+                        }
                     ],
                 },
                 "inputs": {},
@@ -238,9 +252,6 @@ class TestEvalSpecsAreProduced:
             "workflow_plan", {"goal": "summarize notes", "template": candidate.name}
         )
         assert "eval_spec" in out
-
-
-# ── clause 3: suggest_template + persisted NudgeState ─────────────────────────
 
 
 class TestSuggestTemplateNudge:
@@ -258,7 +269,9 @@ class TestSuggestTemplateNudge:
 
     def test_it_offers_once_the_shape_has_recurred(self, home):
         for _ in range(template_pipeline.NUDGE_AFTER):
-            out = mcp_core._call_tool("suggest_template", {"shape": "summarize new issues"})
+            out = mcp_core._call_tool(
+                "suggest_template", {"shape": "summarize new issues"}
+            )
         assert "Suggest a template" in out
         assert "summarize new issues" in out
 
@@ -275,9 +288,10 @@ class TestSuggestTemplateNudge:
         re-approach: the second call reads only what is on disk."""
         for _ in range(template_pipeline.NUDGE_AFTER):
             mcp_core._call_tool("suggest_template", {"shape": "weekly report"})
-        mcp_core._call_tool("suggest_template", {"shape": "weekly report", "decision": "declined"})
+        mcp_core._call_tool(
+            "suggest_template", {"shape": "weekly report", "decision": "declined"}
+        )
 
-        # Simulate the restart: nothing is cached, so a fresh read is all a new process would have.
         assert template_store.load_nudge("weekly report").declined is True
         out = mcp_core._call_tool("suggest_template", {"shape": "weekly report"})
         assert "Do not suggest" in out
@@ -286,14 +300,18 @@ class TestSuggestTemplateNudge:
     def test_an_accepted_shape_is_not_re_offered_after_a_restart(self, home):
         for _ in range(template_pipeline.NUDGE_AFTER):
             mcp_core._call_tool("suggest_template", {"shape": "standup notes"})
-        mcp_core._call_tool("suggest_template", {"shape": "standup notes", "decision": "accepted"})
+        mcp_core._call_tool(
+            "suggest_template", {"shape": "standup notes", "decision": "accepted"}
+        )
         assert template_store.load_nudge("standup notes").accepted is True
         out = mcp_core._call_tool("suggest_template", {"shape": "standup notes"})
         assert "already saved as a template" in out
 
     def test_a_decline_is_per_shape_not_global(self, home):
         """ "no, not for this" must not become "no, never again for anything"."""
-        mcp_core._call_tool("suggest_template", {"shape": "shape-x", "decision": "declined"})
+        mcp_core._call_tool(
+            "suggest_template", {"shape": "shape-x", "decision": "declined"}
+        )
         for _ in range(template_pipeline.NUDGE_AFTER):
             out = mcp_core._call_tool("suggest_template", {"shape": "shape-y"})
         assert "Suggest a template" in out
@@ -327,9 +345,6 @@ class TestSuggestTemplateNudge:
         assert [s.shape for s in template_store.all_nudges()] == ["real-shape"]
 
 
-# ── clause 4: discover-then-freeze → the tiered matcher ───────────────────────
-
-
 class TestDiscoverThenFreeze:
     def test_a_validated_dry_run_freezes_a_session_scoped_candidate(self, home):
         out = mcp_workflows._call_tool(
@@ -341,7 +356,11 @@ class TestDiscoverThenFreeze:
                     "kind": "sequence",
                     "id": "main",
                     "children": [
-                        {"kind": "transform", "id": "seed", "config": {"expr": {"n": 1}}},
+                        {
+                            "kind": "transform",
+                            "id": "seed",
+                            "config": {"expr": {"n": 1}},
+                        },
                     ],
                 },
                 "save": False,
@@ -369,7 +388,13 @@ class TestDiscoverThenFreeze:
                 "root": {
                     "kind": "sequence",
                     "id": "main",
-                    "children": [{"kind": "transform", "id": "seed", "config": {"expr": {"n": 1}}}],
+                    "children": [
+                        {
+                            "kind": "transform",
+                            "id": "seed",
+                            "config": {"expr": {"n": 1}},
+                        }
+                    ],
                 },
                 "inputs": {},
             },
@@ -382,7 +407,6 @@ class TestDiscoverThenFreeze:
             "workflow_plan", {"goal": "probe staging", "template": candidate.name}
         )
         assert "WF_PLAN_TEMPLATE_NOT_FOUND" not in out
-        # Provenance is declared: a one-off guess must not be presented as a shipped template.
         assert "FROZEN CANDIDATE" in out
 
     def test_a_session_scoped_candidate_does_not_leak_to_another_session(self, home):
@@ -407,20 +431,24 @@ class TestDiscoverThenFreeze:
     def test_the_same_goal_updates_rather_than_duplicates(self, home):
         for _ in range(3):
             template_store.save_candidate(
-                template_pipeline.freeze_candidate({"root": {}}, "one same goal", session_id="")
+                template_pipeline.freeze_candidate(
+                    {"root": {}}, "one same goal", session_id=""
+                )
             )
         assert len(template_store.load_candidates()) == 1
 
     def test_a_bundled_template_wins_a_name_collision(self, home):
         """A shipped, tested shape beats a candidate frozen on one successful parse."""
-        from gideon.workflows import bundled_defs
+        from gideon.automation.workflows import bundled_defs
 
         bundled = list(bundled_defs.template_names())
         if not bundled:
             pytest.skip("no bundled templates in this environment")
         clash = template_pipeline.Candidate(name=bundled[0], origin_goal="impostor")
         template_store.save_candidate(clash)
-        profiles = [p for p in mcp_workflows._library_profiles() if p.name == bundled[0]]
+        profiles = [
+            p for p in mcp_workflows._library_profiles() if p.name == bundled[0]
+        ]
         assert len(profiles) == 1
         assert profiles[0].description != "impostor"
 
@@ -428,6 +456,7 @@ class TestDiscoverThenFreeze:
         """A candidate is a spec that PARSED. Freezing an invalid one would put a broken shape in
         front of the next similar intent."""
         mcp_workflows._call_tool(
-            "workflow_author", {"name": "bad-spec", "root": {"kind": "nope"}, "save": False}
+            "workflow_author",
+            {"name": "bad-spec", "root": {"kind": "nope"}, "save": False},
         )
         assert not template_store.load_candidates()

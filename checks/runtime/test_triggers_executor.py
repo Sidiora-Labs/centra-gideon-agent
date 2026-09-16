@@ -23,7 +23,7 @@ STARTED, not
    verified." S84's
    history projection maps it to `deferred` too. This is the third surface to preserve it.
 
-Every drain test uses a real `SessionManager` inbox and the real `dequeue` (which skips
+Every drain test uses a real `ConversationDirectory` inbox and the real `dequeue` (which skips
 cancelled rows).
 """
 
@@ -33,9 +33,9 @@ import asyncio
 
 import pytest
 
-from gideon.triggers import executor as E
-from gideon.triggers import wakeup as W
-from gideon.triggers.models import FIRE_OUTCOMES, Outcome, Trigger
+from gideon.automation.triggers import executor as E
+from gideon.automation.triggers import wakeup as W
+from gideon.automation.triggers.models import FIRE_OUTCOMES, Outcome, Trigger
 
 NOW = 1_800_000_000.0
 
@@ -46,9 +46,9 @@ class _Provider:
 
 
 def _manager(*keys):
-    from gideon.session import SessionManager, _Session
+    from gideon.engine.session import ConversationDirectory, _Session
 
-    manager = SessionManager.__new__(SessionManager)
+    manager = ConversationDirectory.__new__(ConversationDirectory)
     manager._sessions = {}
     for key in keys:
         manager._sessions[key] = _Session(provider=_Provider())
@@ -75,13 +75,11 @@ async def _launched(_payload):
     return _JobLike()
 
 
-# ── 🔴 the T7 sentinel rule ──
-
-
 def test_a_surviving_sentinel_defaults_to_success():
     """🔴 The three-state logic `schedule._execute` established: only a SURVIVING sentinel
     becomes `ok`.
-    An unconditional default would clobber a runner's own `"error"` — T7's honest-status bug."""
+    An unconditional default would clobber a runner's own `"error"` — T7's honest-status bug.
+    """
     assert E.classify("")[0] == Outcome.RAN.value
     assert E.classify(E.STATUS_PENDING)[0] == Outcome.RAN.value
 
@@ -96,12 +94,9 @@ def test_a_reported_error_is_never_clobbered_by_the_default():
 def test_the_sentinel_constant_matches_the_shipped_one():
     """Two different sentinels would let this module and `ScheduleService` disagree about "nothing
     reported yet", and the disagreement would surface as inconsistent statuses."""
-    from gideon.schedule import _STATUS_PENDING
+    from gideon.automation.schedule import _STATUS_PENDING
 
     assert E.STATUS_PENDING == _STATUS_PENDING
-
-
-# ── 🔴 launched ≠ succeeded ──
 
 
 def test_launched_maps_to_DEFERRED_not_RAN():
@@ -116,12 +111,11 @@ def test_launched_maps_to_DEFERRED_not_RAN():
 def test_a_deferred_outcome_is_NOT_settled():
     """Neither a success nor a failure — a rollup counting it either way would be lying in one
     direction."""
-    deferred = E.RunOutcome(trigger_id="t", session_key="s", outcome=Outcome.DEFERRED.value)
+    deferred = E.RunOutcome(
+        trigger_id="t", session_key="s", outcome=Outcome.DEFERRED.value
+    )
     assert deferred.settled is False
     assert deferred.ok is False
-
-
-# ── classification, generally ──
 
 
 def test_an_exception_wins_over_any_reported_status():
@@ -159,11 +153,10 @@ def test_a_refusal_is_distinct_from_a_failure():
     assert E.classify("error")[0] == Outcome.FAILED.value
 
 
-# ── run_one: the injected runner ──
-
-
 def test_a_runner_reporting_via_a_dict_is_honoured():
-    outcome = asyncio.run(E.run_one({"trigger_id": "t1"}, _ok, session_key="cron:t1", now=NOW))
+    outcome = asyncio.run(
+        E.run_one({"trigger_id": "t1"}, _ok, session_key="cron:t1", now=NOW)
+    )
     assert outcome.ok is True
     assert outcome.reported == "ok"
     assert outcome.run_id == "r1"
@@ -201,12 +194,11 @@ def test_the_run_is_timed():
 
 def test_the_session_key_falls_back_to_the_payload():
     outcome = asyncio.run(
-        E.run_one({"trigger_id": "t1", "session_key": "cron:from-payload"}, _ok, now=NOW)
+        E.run_one(
+            {"trigger_id": "t1", "session_key": "cron:from-payload"}, _ok, now=NOW
+        )
     )
     assert outcome.session_key == "cron:from-payload"
-
-
-# ── drain: against a real inbox ──
 
 
 def _queue_fire(manager, key, trigger_id="schedule:j1"):
@@ -329,12 +321,12 @@ def test_a_failing_runner_does_not_stop_the_drain():
     assert result.failed == 1
 
 
-# ── the delivery seam (S85) ──
-
-
 def test_a_settled_run_produces_a_delivery():
     outcome = E.RunOutcome(
-        trigger_id="schedule:j1", session_key="cron:j1", outcome=Outcome.RAN.value, run_id="r1"
+        trigger_id="schedule:j1",
+        session_key="cron:j1",
+        outcome=Outcome.RAN.value,
+        run_id="r1",
     )
     delivery = E.delivery_for(outcome, trigger_name="Nightly")
     assert delivery is not None
@@ -362,9 +354,6 @@ def test_a_DEFERRED_run_produces_NO_delivery():
     assert E.delivery_for(deferred) is None
 
 
-# ── the ledger + health rollup ──
-
-
 def test_every_executed_payload_yields_a_ledger_row():
     """S86 writes a row per fire EVALUATED; this writes one per fire that actually ran. Both
     halves are
@@ -374,8 +363,12 @@ def test_every_executed_payload_yields_a_ledger_row():
     result = E.DrainResult(
         session_key="cron:j1",
         outcomes=[
-            E.RunOutcome(trigger_id="a", session_key="cron:j1", outcome=Outcome.RAN.value),
-            E.RunOutcome(trigger_id="b", session_key="cron:j1", outcome=Outcome.FAILED.value),
+            E.RunOutcome(
+                trigger_id="a", session_key="cron:j1", outcome=Outcome.RAN.value
+            ),
+            E.RunOutcome(
+                trigger_id="b", session_key="cron:j1", outcome=Outcome.FAILED.value
+            ),
         ],
     )
     rows = E.ledger_rows(result)
@@ -392,7 +385,9 @@ def test_a_deferred_run_counts_toward_NEITHER_health_bucket():
         outcomes=[
             E.RunOutcome(trigger_id="a", session_key="s", outcome=Outcome.RAN.value),
             E.RunOutcome(trigger_id="b", session_key="s", outcome=Outcome.FAILED.value),
-            E.RunOutcome(trigger_id="c", session_key="s", outcome=Outcome.DEFERRED.value),
+            E.RunOutcome(
+                trigger_id="c", session_key="s", outcome=Outcome.DEFERRED.value
+            ),
         ],
     )
     health = E.health_delta(result)
@@ -411,7 +406,9 @@ def test_only_true_failures_advance_the_autopause_counter():
     a policy decision, not a broken automation."""
     result = E.DrainResult(
         session_key="s",
-        outcomes=[E.RunOutcome(trigger_id="a", session_key="s", outcome=Outcome.REFUSED.value)],
+        outcomes=[
+            E.RunOutcome(trigger_id="a", session_key="s", outcome=Outcome.REFUSED.value)
+        ],
     )
     assert E.health_delta(result)["consecutive_failures"] == 0
 
@@ -419,14 +416,15 @@ def test_only_true_failures_advance_the_autopause_counter():
 def test_the_drain_result_serializes_for_a_surface():
     result = E.DrainResult(
         session_key="cron:j1",
-        outcomes=[E.RunOutcome(trigger_id="a", session_key="cron:j1", outcome=Outcome.RAN.value)],
+        outcomes=[
+            E.RunOutcome(
+                trigger_id="a", session_key="cron:j1", outcome=Outcome.RAN.value
+            )
+        ],
     )
     payload = result.to_dict()
     assert payload["ran"] == 1
     assert payload["outcomes"][0]["settled"] is True
-
-
-# ── the whole chain ──
 
 
 def test_store_to_tick_to_dispatch_to_execute(tmp_path):
@@ -434,12 +432,12 @@ def test_store_to_tick_to_dispatch_to_execute(tmp_path):
 
     This is what every prior session's "NOT DONE: the service/executor" note was waiting for,
     and the
-    only mock is the runner — because §3 puts the turn behind `SubagentManager.spawn`, which
+    only mock is the runner — because §3 puts the turn behind `DelegationSupervisor.spawn`, which
     is the one
     piece that genuinely needs a model.
     """
-    from gideon.triggers import service as SVC
-    from gideon.triggers.store import TriggerStore
+    from gideon.automation.triggers import service as SVC
+    from gideon.automation.triggers.store import TriggerStore
 
     store = TriggerStore(base_dir=tmp_path)
     store.save_all(
@@ -477,12 +475,8 @@ def test_store_to_tick_to_dispatch_to_execute(tmp_path):
         assert drained.ran == 1
 
     assert sorted(executed) == ["t0", "t1", "t2"]
-    # And every trigger's next fire was persisted by the tick, so a crash now cannot double-fire.
     for i in range(3):
         assert SVC.to_epoch(store.get(f"t{i}").trigger.next_fire_at) > NOW
-
-
-# ── 🔴 three success statuses were classified FAILED (S155) ──
 
 
 def test_SKIP_is_a_no_op_not_a_failure():
@@ -494,10 +488,10 @@ def test_SKIP_is_a_no_op_not_a_failure():
     reporting `skip` would have paused its own automation after five quiet weeks.
     """
     outcome, reason = E.classify("skip")
-    assert outcome == Outcome.SKIPPED_NOOP.value, "a silent success is a no-op, not a failure"
+    assert (
+        outcome == Outcome.SKIPPED_NOOP.value
+    ), "a silent success is a no-op, not a failure"
     assert outcome != Outcome.FAILED.value
-    # The reason must say what it MEANS, not restate the status: this row folds out of the default
-    # view, so its reason is the only thing that will ever explain it.
     assert "nothing" in reason and "skip" not in reason
 
 
@@ -515,7 +509,7 @@ def test_the_noop_row_is_INERT_but_not_a_failure():
     view (its live reader `history.is_inert` had no writer for this value), while
     `TRUE_FAILURE_OUTCOMES` must NOT contain it or the autopause budget would spend on quiet runs.
     """
-    from gideon.triggers.models import (
+    from gideon.automation.triggers.models import (
         FIRE_OUTCOMES,
         INERT_OUTCOMES,
         TRUE_FAILURE_OUTCOMES,
@@ -523,14 +517,18 @@ def test_the_noop_row_is_INERT_but_not_a_failure():
 
     noop = Outcome.SKIPPED_NOOP.value
     assert noop in FIRE_OUTCOMES, "it must be a legal ledger row value"
-    assert noop in INERT_OUTCOMES, "it collapses to a row and archives out of the default view"
-    assert noop not in TRUE_FAILURE_OUTCOMES, "a quiet run must not spend the failure budget"
+    assert (
+        noop in INERT_OUTCOMES
+    ), "it collapses to a row and archives out of the default view"
+    assert (
+        noop not in TRUE_FAILURE_OUTCOMES
+    ), "a quiet run must not spend the failure budget"
 
 
 def test_a_streak_of_noops_does_NOT_autopause():
     """Driven rather than reasoned, because this is the failure that would actually hurt: five quiet
     fires in a row must leave a healthy automation running."""
-    from gideon.triggers.autopause import consecutive_failures_from
+    from gideon.automation.triggers.autopause import consecutive_failures_from
 
     rows = [{"outcome": Outcome.SKIPPED_NOOP.value, "status": "success"}] * 5
     assert consecutive_failures_from(rows) == 0
@@ -538,9 +536,12 @@ def test_a_streak_of_noops_does_NOT_autopause():
 
 def test_a_noop_counts_as_NEITHER_success_nor_failure_in_the_rollup():
     """The same call `deferred` gets: counting a no-op as a success would let a script that silently
-    stopped doing anything look healthy, and counting it as a failure would pause a working one."""
+    stopped doing anything look healthy, and counting it as a failure would pause a working one.
+    """
     outs = [
-        E.RunOutcome(trigger_id="t", session_key="s", outcome=Outcome.SKIPPED_NOOP.value)
+        E.RunOutcome(
+            trigger_id="t", session_key="s", outcome=Outcome.SKIPPED_NOOP.value
+        )
         for _ in range(3)
     ]
     health = E.health_delta(E.DrainResult(session_key="s", outcomes=outs))
@@ -552,10 +553,11 @@ def test_a_noop_counts_as_NEITHER_success_nor_failure_in_the_rollup():
 def test_EVERY_provider_success_status_is_mapped():
     """The completeness guard this pattern earned. `run_script_provider` names its success statuses
     in one tuple; every one of them must classify to a non-FAILED outcome. A provider that grows a
-    fifth success status now fails here instead of silently recording a success as a failure."""
+    fifth success status now fails here instead of silently recording a success as a failure.
+    """
     import inspect
 
-    from gideon.action_providers import run_script_provider
+    from gideon.integrations.action_providers import run_script_provider
 
     source = inspect.getsource(run_script_provider)
     assert (

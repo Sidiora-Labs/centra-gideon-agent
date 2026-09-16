@@ -31,8 +31,10 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.dashboard.handlers.security_audit import register_security_audit_routes
-from gideon.sel import _VERIFY_WINDOW, SecurityEvent, sel
+from gideon.interfaces.dashboard.handlers.security_audit import (
+    register_security_audit_routes,
+)
+from gideon.security.sel import _VERIFY_WINDOW, SecurityEvent, sel
 
 SECRET = "sk-ant-api03-PLANTEDoTTERsecretVALUE0123456789abcdefXYZ"
 
@@ -48,7 +50,7 @@ def home(tmp_path, monkeypatch):
 def _client(app_name: str = "") -> TestClient:
     app = web.Application()
     if app_name:
-        # Mirrors what the auth middleware stamps for an app-scoped token.
+
         @web.middleware
         async def stamp_app(request, handler):
             request["app"] = app_name
@@ -85,9 +87,6 @@ async def _get(client: TestClient, url: str) -> tuple[int, dict]:
     return resp.status, await resp.json()
 
 
-# ── Pagination stability ─────────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_cursor_pages_are_disjoint_under_concurrent_appends():
     """THE rail. Page 1, then append, then page 2 — no row may repeat or vanish.
@@ -100,10 +99,11 @@ async def test_cursor_pages_are_disjoint_under_concurrent_appends():
         status, page1 = await _get(client, "/api/security/audit?limit=5")
         assert status == 200
         first = [e["event_id"] for e in page1["events"]]
-        assert first == list(reversed(written))[:5], "page 1 is the 5 newest, newest first"
+        assert (
+            first == list(reversed(written))[:5]
+        ), "page 1 is the 5 newest, newest first"
         assert page1["next_cursor"] == first[-1]
 
-        # A concurrent writer lands 5 NEW events between the two page fetches.
         _write(5, prefix="late")
 
         status, page2 = await _get(
@@ -112,9 +112,15 @@ async def test_cursor_pages_are_disjoint_under_concurrent_appends():
         assert status == 200
         second = [e["event_id"] for e in page2["events"]]
 
-    assert not set(first) & set(second), f"pages overlap: {sorted(set(first) & set(second))}"
-    assert second == list(reversed(written))[5:10], "page 2 is the next 5 older, none skipped"
-    assert first + second == list(reversed(written)), "the two pages tile the original run exactly"
+    assert not set(first) & set(
+        second
+    ), f"pages overlap: {sorted(set(first) & set(second))}"
+    assert (
+        second == list(reversed(written))[5:10]
+    ), "page 2 is the next 5 older, none skipped"
+    assert first + second == list(
+        reversed(written)
+    ), "the two pages tile the original run exactly"
 
 
 @pytest.mark.asyncio
@@ -137,9 +143,6 @@ async def test_expired_cursor_is_refused_not_restarted():
     assert status == 400
     assert body["error"]["code"] == "invalid_cursor"
     assert "events" not in body
-
-
-# ── Authorization ────────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("path", ["/api/security/audit", "/api/security/audit/verify"])
@@ -174,11 +177,9 @@ async def test_app_refusal_is_itself_audited(home):
     lines = (home / "security_events.jsonl").read_text().splitlines()
     denials = [json.loads(ln) for ln in lines if ln.strip()]
     assert any(
-        d["outcome"] == "denied" and d["caller_identity"] == "app:growth" for d in denials
+        d["outcome"] == "denied" and d["caller_identity"] == "app:growth"
+        for d in denials
     ), f"no denial recorded, got {[d.get('operation') for d in denials]}"
-
-
-# ── Credential safety ────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -214,9 +215,6 @@ async def test_chain_hashes_survive_redaction():
         _, body = await _get(client, "/api/security/audit")
     for row in body["events"]:
         assert len(row["entry_hash"]) == 64 and int(row["entry_hash"], 16) >= 0
-
-
-# ── Tamper evidence ──────────────────────────────────────────────────────────
 
 
 def _tamper(home: Path, index: int) -> str:
@@ -255,11 +253,6 @@ async def test_verify_reports_checked_and_ok(home):
             "valid": 4,
             "tampered": 0,
             "windowed": True,
-            # WHICH cap was applied. `windowed` says one was set; a consumer cannot tell
-            # "I stopped at 5000" from "5000 is the whole log" without the size — and the
-            # dashboard was rendering the count as if it were the whole chain. Asserted as
-            # the exact envelope on purpose: a field added to a tamper-evidence response
-            # should have to be declared here.
             "window": _VERIFY_WINDOW,
         }
 
@@ -301,24 +294,25 @@ async def test_verify_says_which_cap_it_applied(home):
         _, capped = await _get(client, "/api/security/audit/verify")
         _, whole = await _get(client, "/api/security/audit/verify?full=1")
 
-    # A cap was set but never bit: 3 < 5000, so a consumer can prove the answer is complete.
     assert capped["windowed"] is True
     assert capped["window"] == _VERIFY_WINDOW
     assert capped["checked"] == 3
     assert capped["checked"] < capped["window"]
 
-    # An exhaustive pass reports NO cap at all, rather than a cap of infinity.
     assert whole["windowed"] is False
     assert whole["window"] is None
     assert whole["checked"] == 3
 
 
-# ── Filters: they work, and they fail closed ─────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_each_filter_narrows():
-    _write(2, prefix="a", operation="execute_bash", outcome="completed", caller_identity="cron:x")
+    _write(
+        2,
+        prefix="a",
+        operation="execute_bash",
+        outcome="completed",
+        caller_identity="cron:x",
+    )
     _write(
         2,
         prefix="b",
@@ -333,18 +327,20 @@ async def test_each_filter_narrows():
             ("outcome=denied", 2),
             ("caller=cron", 2),
             ("downstream_service=brave", 2),
-            ("operation=fetch_url&outcome=completed", 0),  # AND, not OR
+            ("operation=fetch_url&outcome=completed", 0),
         ):
             status, body = await _get(client, f"/api/security/audit?{query}")
             assert status == 200, body
-            assert body["count"] == expected, f"{query} -> {body['count']}, want {expected}"
+            assert (
+                body["count"] == expected
+            ), f"{query} -> {body['count']}, want {expected}"
 
 
 @pytest.mark.asyncio
 async def test_time_bounds_are_inclusive_of_the_named_day():
     """A date-only ``until`` must include events ON that day. Comparing against bare
     "YYYY-MM-DD" would mean midnight and exclude the whole day — a false "no events"."""
-    _write(5)  # timestamps 2026-08-01 .. 2026-08-05
+    _write(5)
     async with _client() as client:
         _, body = await _get(client, "/api/security/audit?until=2026-08-02")
         assert body["count"] == 2, [e["timestamp"] for e in body["events"]]
@@ -355,7 +351,7 @@ async def test_time_bounds_are_inclusive_of_the_named_day():
 @pytest.mark.parametrize(
     "query,code",
     [
-        ("caler=cron", "unknown_filter"),  # a typo must not silently widen the result
+        ("caler=cron", "unknown_filter"),
         ("limit=abc", "invalid_limit"),
         ("limit=0", "invalid_limit"),
         ("limit=99999", "invalid_limit"),
@@ -373,13 +369,12 @@ async def test_malformed_request_is_refused_not_ignored(query, code):
     assert "events" not in body, "a refused request must not also return data"
 
 
-# ── Isolation ────────────────────────────────────────────────────────────────
-
-
 def test_real_home_untouched(home):
     """SEL events are the classic real-home leak. Assert the outcome, not the fixture."""
     _write(2)
-    assert (home / "security_events.jsonl").exists(), "precondition: events went to the tmp home"
+    assert (
+        home / "security_events.jsonl"
+    ).exists(), "precondition: events went to the tmp home"
     real = Path.home() / ".gideon" / "security_events.jsonl"
     before = real.stat().st_mtime if real.exists() else None
     _write(2, prefix="more")

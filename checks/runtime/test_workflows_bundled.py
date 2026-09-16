@@ -23,17 +23,17 @@ from pathlib import Path
 
 import pytest
 
-from gideon.workflows.blocks import resolve_spec
-from gideon.workflows.bundled_defs import (
+from gideon.automation.workflows.blocks import resolve_spec
+from gideon.automation.workflows.bundled_defs import (
     BundledWorkflowDefProvider,
     bundled_root,
     read_template,
     register_bundled_provider,
     template_names,
 )
-from gideon.workflows.macros import expand_spec, has_macros
-from gideon.workflows.models import Node, WorkflowDef, valid_name, walk
-from gideon.workflows.validator import (
+from gideon.automation.workflows.macros import expand_spec, has_macros
+from gideon.automation.workflows.models import Node, WorkflowDef, valid_name, walk
+from gideon.automation.workflows.validator import (
     DepEdge,
     contract_reads_for_root,
     dep_edges_for_root,
@@ -48,102 +48,38 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-#: The six the plan's §6 table names. Asserted as a SET so a template silently disappearing
-#: from the wheel is a failure rather than a smaller listing.
 EXPECTED = {
-    # The general-purpose library (WF2 Slice 9a).
     "audit-sweep",
     "code-project",
     "deep-research",
     "design-review",
     "produce-and-audit",
     "project-planning",
-    # The loop-kind families (LOOPS-EVOLUTION §"Per-Kind Template Designs"): descendants
-    # of the five loop kinds the plan replaces. `deep-research` above doubles as the
-    # research-loop descendant, which is why there are five here rather than six.
     "goal-pursuit-open-ended",
     "goal-pursuit-verifiable",
-    # The monitor variant (WF2LOO-9 / R15): a parked run plus a self-created clock trigger.
-    # Its park gate has no provider to dispatch — the between-checks mechanism is the
-    # trigger substrate's resume target, not an action.
     "goal-pursuit-monitor",
     "general-project",
     "design-project",
     "diagnose-run",
-    # The knowledge maintenance trio (KNOWLEDGE-SYNTHESIS §3.4), ordered cheapest first: health
-    # is zero-LLM and gates the other two, because linting a stub spends a model call to
-    # discover it is a stub.
     "knowledge-health",
     "knowledge-lint",
     "gap-healing",
-    # The contradiction judge (§3.2): the free deterministic tier lives in the
-    # knowledge-persist action; this template is where the fast-model tier runs, as a metered
-    # `infer` node on the `fast` tier (WF2KNO-10) — a model call belongs in a node the engine
-    # meters, never inside an action provider. `infer` (not `stage`), because the fast-model
-    # pass is ONE bounded call resolved through the standard model-tier resolution
-    # (`one_shot_completion(use_case="background")`); a `stage` spawns a subagent on the
-    # orchestration/standard chain and never touches the tier resolution at all.
     "contradiction-review",
-    # The Knowledge Synthesis slate (§7.1). Four of the twelve: the ones whose mechanisms
-    # actually ship. See the plan's execution log for which were deferred and why — every
-    # omission is a missing PROVIDER (net.fetch, a calendar source), not a missing template.
     "knowledge-synthesis",
     "rich-ingest",
     "thesis-tracker",
     "publish-article",
-    # The monitor/ingest slate (§6.1 + §7.1 items 2, 3, 4 and 9 — WF2KNO-9). These four were
-    # the "missing PROVIDER" the comment above names: they need a DISPATCHABLE HTTP-egress
-    # action, and `net.fetch` was a library function until `net-fetch` was registered. Each of
-    # them dispatches that provider, which is what `test_the_monitor_slate_dispatches_a_real_
-    # egress_action` below holds them to — a template that parses but reaches nothing is the
-    # exact shape this atom was blocked on.
     "market-monitor",
     "trending-repo-digest",
     "dual-sink-watcher",
     "paper-ingest",
-    # The Learning-Flywheel template refiner (WF2LEA-6): a trigger-fired run-workflow whose
-    # stage runs the propose-only `template-refiner` agent over a template's own run ledger.
     "refine-template",
-    # The Self-QA companion (SELF-VERIFICATION §3.2, SV-9): commit-driven rather than
-    # clock-driven — the commit-watch cron script fires it with the SHAs it saw. The only
-    # bundled template whose triage node is an `action` rather than an `infer`, because its
-    # verdict has to land in the run ledger with a rationale and only a node holding the run
-    # id can write one.
     "self-qa",
-    # The decision journal's horizon review (PROACTIVE-ASSISTANT §2.3, PA-4): fired by the
-    # one-shot `system:decision-journal:<id>` trigger `log_decision` mints. Zero model calls
-    # by design — it quotes the user's own stated expectation back rather than paraphrasing
-    # it, and the outcome capture happens through `decision_resolve` because a workflow that
-    # invented an outcome with nobody present would be worse than no review at all.
     "decision-review",
-    # The budgeted harness search (EVALUATION-SUBSTRATE §8, ES-11). The only bundled template
-    # whose loop body pairs a `stage` with a `bash` action: the propose half needs a model and
-    # the adjudicate half must not have one, because a gate a model can talk its way past is
-    # not a gate. Its bash nodes shell into `gideon.evals.optimize`, whose subcommand
-    # names and `PC_OPT_*` env keys are asserted against that module in
-    # `tests/test_evals_optimize.py` — a renamed subcommand fails the TEMPLATE, not just the
-    # module, which is the only way a template's shell-out stays honest.
     "optimize-harness",
-    # The triage digest (PROACTIVE-ASSISTANT §1, PA-2). Like `self-qa` its one working node is
-    # an `action` rather than an `infer`: the zero-item short-circuit has to happen before a
-    # model is reachable, and the gate's drop rationales have to land in the run ledger.
     "morning-triage",
-    # The engine-native halves of best-of-N and check-work (HARNESS-CRAFT §2.3/§3.2, HC-5).
-    # Each is one action node over the SAME core its bundled skill calls
-    # (`sampling.best_of_n` / `check_work.derive_and_run`), so template and skill are
-    # behaviorally identical by construction — `tests/test_hc5_shared_core.py` holds the two
-    # entry points to one answer.
     "best-of-n",
     "check-work",
-    # The deliberative fan-out/fan-in shape: one question, N members answering it independently
-    # from distinct roles, one synthesis that ATTRIBUTES each position rather than selecting one.
-    # Distinct from `best-of-n`, which fans the IDENTICAL prompt out N ways and picks a winner — a
-    # council's product is a judgement assembled out of named disagreements, so its fan-in merges
-    # and credits instead of choosing. Built entirely from engine primitives (`parallel` of `infer`
-    # → `transform` → `infer`): no action provider and no core, because the members' work IS model
-    # reasoning and a model call belongs in a node the engine meters, not inside an action.
-    # `tests/test_council_template.py` holds the shape (independence, full attribution, distinct
-    # roles) that a well-meaning edit would otherwise quietly collapse.
     "council",
 }
 
@@ -160,7 +96,7 @@ def _isolated_def_registry():
     Snapshot-and-restore rather than clear-on-exit, so a provider that was legitimately registered
     before this module ran survives it.
     """
-    from gideon.workflows import defs as defs_mod
+    from gideon.automation.workflows import defs as defs_mod
 
     saved = dict(defs_mod._providers)
     try:
@@ -171,7 +107,9 @@ def _isolated_def_registry():
 
 
 def _raw(name: str) -> dict:
-    return json.loads((bundled_root() / name / "workflow.json").read_text(encoding="utf-8"))
+    return json.loads(
+        (bundled_root() / name / "workflow.json").read_text(encoding="utf-8")
+    )
 
 
 def _pipeline(spec: dict) -> dict:
@@ -238,7 +176,10 @@ class TestEachTemplate:
         """Contradictory otherwise: a default means it can be omitted."""
         for key, param in (_raw(name).get("inputs") or {}).items():
             if param.get("required"):
-                assert param.get("default") in (None, ""), f"{name}.{key} is required AND defaulted"
+                assert param.get("default") in (
+                    None,
+                    "",
+                ), f"{name}.{key} is required AND defaulted"
 
     def test_it_carries_steering_examples(self, name: str) -> None:
         """Metadata the widget surfaces and `workflow_plan` uses as few-shot (WF2-R15). A
@@ -246,8 +187,6 @@ class TestEachTemplate:
         examples = _raw(name).get("metadata", {}).get("steering_examples") or []
         assert examples, f"{name} has no steering_examples"
         kinds = {e.get("event") for e in examples}
-        # Both a kickoff and a mid-flight example: the second is what teaches a model that
-        # editing a running workflow is a normal thing to do.
         assert "kickoff" in kinds, f"{name} has no kickoff example"
         assert "mutation" in kinds, f"{name} has no mid-flight mutation example"
 
@@ -261,32 +200,41 @@ class TestEachTemplate:
 
     def test_every_action_node_names_a_registered_provider(self, name: str) -> None:
         """An unregistered provider fails at dispatch — typically after a `stage` above it has
-        already done real work. `ALLOWED_HOOK_PROVIDERS` is the registered catalog's mirror."""
-        from gideon.validation import ALLOWED_HOOK_PROVIDERS
+        already done real work. `ALLOWED_HOOK_PROVIDERS` is the registered catalog's mirror.
+        """
+        from gideon.assurance.validation import ALLOWED_HOOK_PROVIDERS
 
         root = Node.from_dict(_pipeline(_raw(name))["root"])
         for path, node in walk(root):
             if node.kind.value == "action":
                 provider = str((node.config or {}).get("provider", ""))
-                assert provider in ALLOWED_HOOK_PROVIDERS, f"{name} at {path}: {provider!r}"
+                assert (
+                    provider in ALLOWED_HOOK_PROVIDERS
+                ), f"{name} at {path}: {provider!r}"
 
     def test_a_high_risk_template_says_so(self, name: str) -> None:
         """The Store shows `risk` as the install-consent surface. A template that writes files
-        and runs commands while declaring `low` misrepresents what accepting it means."""
+        and runs commands while declaring `low` misrepresents what accepting it means.
+        """
         raw = _raw(name)
         root = Node.from_dict(_pipeline(raw)["root"])
         writes = any(
-            n.kind.value == "action" and str((n.config or {}).get("provider", "")) == "bash"
+            n.kind.value == "action"
+            and str((n.config or {}).get("provider", "")) == "bash"
             for _p, n in walk(root)
         )
         risk = str(raw.get("metadata", {}).get("risk", "low"))
         if writes:
-            assert risk in ("medium", "high"), f"{name} runs commands but declares risk={risk}"
+            assert risk in (
+                "medium",
+                "high",
+            ), f"{name} runs commands but declares risk={risk}"
 
 
 class TestConventions:
     """Cross-template conventions (WF2-R15). A six-template library only stays coherent if the
-    shapes agree; these are the ones a reviewer would otherwise have to check by hand."""
+    shapes agree; these are the ones a reviewer would otherwise have to check by hand.
+    """
 
     def test_every_review_stage_uses_the_canonical_Finding_record(self) -> None:
         """`{severity, location, problem, why, recommended_fix, status}` everywhere, so a gate
@@ -296,9 +244,18 @@ class TestConventions:
             text = json.dumps(_pipeline(_raw(name)))
             if "Finding" not in text:
                 continue
-            for field in ("severity", "location", "problem", "why", "recommended_fix", "status"):
+            for field in (
+                "severity",
+                "location",
+                "problem",
+                "why",
+                "recommended_fix",
+                "status",
+            ):
                 assert field in text, f"{name}: Finding record is missing {field!r}"
-            assert "Critical|Major|Minor|Nit" in text, f"{name}: non-canonical severity ladder"
+            assert (
+                "Critical|Major|Minor|Nit" in text
+            ), f"{name}: non-canonical severity ladder"
 
     def test_the_code_template_captures_a_baseline_before_it_mutates(self) -> None:
         """Without it, a failure after the change cannot be told apart from one that was already
@@ -315,7 +272,9 @@ class TestConventions:
         order = [n for _p, n in walk(root)]
         ids = [n.id for n in order]
         baseline_at = ids.index("baseline")
-        assert ids.index("init") < baseline_at, "the initializer establishes the baseline's floor"
+        assert (
+            ids.index("init") < baseline_at
+        ), "the initializer establishes the baseline's floor"
         for i, node in enumerate(order):
             if node.id == "init":
                 continue
@@ -334,10 +293,13 @@ class TestConventions:
             branches = [n for _p, n in walk(root) if n.kind.value == "branch"]
             assert branches, f"{name} triages but never branches on it"
             assert any(
-                "nodes.triage.output" in str((b.config or {}).get("on", "")) for b in branches
+                "nodes.triage.output" in str((b.config or {}).get("on", ""))
+                for b in branches
             ), f"{name}: no branch reads the triage verdict"
 
-    def test_every_boolean_branch_in_the_library_is_selectable_by_the_engine(self) -> None:
+    def test_every_boolean_branch_in_the_library_is_selectable_by_the_engine(
+        self,
+    ) -> None:
         """A JSON template can only spell a boolean case `true`/`false`; Python spells the value
         `True`/`False`. The engine used to key the selector on `str(value)`, so every branch here
         failed "matched no case" for BOTH values — dead in both directions, and invisible to a
@@ -350,7 +312,7 @@ class TestConventions:
           load-bearing rather than incidental — if a template ever spelled its cases `"True"`,
           this rail would pass while telling us nothing.
         """
-        from gideon.workflows.tick import case_key
+        from gideon.automation.workflows.tick import case_key
 
         census: list[tuple[str, str]] = []
         for name in template_names():
@@ -359,7 +321,10 @@ class TestConventions:
                 if node.kind.value != "branch":
                     continue
                 enum = (node.config or {}).get("enum")
-                if not isinstance(enum, list) or {str(v) for v in enum} != {"true", "false"}:
+                if not isinstance(enum, list) or {str(v) for v in enum} != {
+                    "true",
+                    "false",
+                }:
                     continue
                 census.append((name, node.id))
                 for value in (True, False):
@@ -375,7 +340,8 @@ class TestConventions:
 
     def test_a_verification_gate_is_engine_executed_not_model_declared(self) -> None:
         """The code template's gate runs a COMMAND. A gate that asked the model whether it was
-        done would make done-ness self-reported, which is the failure the gate exists for."""
+        done would make done-ness self-reported, which is the failure the gate exists for.
+        """
         root = Node.from_dict(_pipeline(_raw("code-project"))["root"])
         gates = [n for _p, n in walk(root) if n.kind.value == "gate"]
         assert any(str((g.config or {}).get("kind")) == "verify_command" for g in gates)
@@ -403,8 +369,12 @@ class TestDependencyOrderingCensus:
         per = {name: len(self._edges(name)) for name in sorted(EXPECTED)}
         total = sum(per.values())
         assert max(per.values()) >= 5, f"no single template exercises the rule: {per}"
-        assert sum(1 for c in per.values() if c) >= 10, f"too few templates covered: {per}"
-        assert total >= 50, f"the rule examined only {total} dependencies across the library"
+        assert (
+            sum(1 for c in per.values() if c) >= 10
+        ), f"too few templates covered: {per}"
+        assert (
+            total >= 50
+        ), f"the rule examined only {total} dependencies across the library"
 
     def test_every_shipped_dependency_is_ordered(self) -> None:
         """The census verdict itself. `test_it_validates_STRICTLY` would also catch a
@@ -425,10 +395,15 @@ class TestDependencyOrderingCensus:
         the count move on purpose.
         """
         declared = {
-            name: sum(len(n.needs) for _p, n in walk(Node.from_dict(_pipeline(_raw(name))["root"])))
+            name: sum(
+                len(n.needs)
+                for _p, n in walk(Node.from_dict(_pipeline(_raw(name))["root"]))
+            )
             for name in sorted(EXPECTED)
         }
-        assert not any(declared.values()), f"a template now declares `needs`: {declared}"
+        assert not any(
+            declared.values()
+        ), f"a template now declares `needs`: {declared}"
 
 
 class TestOutputContractCensus:
@@ -469,17 +444,26 @@ class TestOutputContractCensus:
         so the contract is removed.
         """
         declared = {name: sorted(self._contracts(name)) for name in sorted(EXPECTED)}
-        assert not any(declared.values()), f"a template now declares an output_contract: {declared}"
+        assert not any(
+            declared.values()
+        ), f"a template now declares an output_contract: {declared}"
 
     def test_the_rule_sees_the_measured_read_population(self) -> None:
         """The vacuity floor for the READS side. Deliberately below the measured 100/18 so
         ordinary library edits do not red it, and far above zero so a rule that stops deriving
         read paths does."""
-        per = {name: len(contract_reads_for_root(self._root(name))) for name in sorted(EXPECTED)}
+        per = {
+            name: len(contract_reads_for_root(self._root(name)))
+            for name in sorted(EXPECTED)
+        }
         total = sum(per.values())
         assert max(per.values()) >= 8, f"no single template exercises the rule: {per}"
-        assert sum(1 for c in per.values() if c) >= 14, f"too few templates covered: {per}"
-        assert total >= 80, f"the rule examined only {total} sub-path reads across the library"
+        assert (
+            sum(1 for c in per.values() if c) >= 14
+        ), f"too few templates covered: {per}"
+        assert (
+            total >= 80
+        ), f"the rule examined only {total} sub-path reads across the library"
 
     def test_no_shipped_read_is_resolved_against_a_contract(self) -> None:
         """The error half's population, stated as the zero it is. `test_it_validates_STRICTLY`
@@ -494,13 +478,17 @@ class TestOutputContractCensus:
             ]
             for name in sorted(EXPECTED)
         }
-        assert not any(judged.values()), f"a shipped read now resolves against a contract: {judged}"
+        assert not any(
+            judged.values()
+        ), f"a shipped read now resolves against a contract: {judged}"
 
     def test_the_library_ships_neither_of_the_new_issues(self) -> None:
         """Named by code, so a future contract addition is attributed to `PP-3` rather than
         landing as an anonymous line in a strict-validation diff."""
         for name in sorted(EXPECTED):
-            codes = {i.code for i in validate_spec(_pipeline(_raw(name)), strict=True).issues}
+            codes = {
+                i.code for i in validate_spec(_pipeline(_raw(name)), strict=True).issues
+            }
             assert "WF_UNSATISFIABLE_OUTPUT_REF" not in codes, name
             assert "WF_UNCONTRACTED_OUTPUT_REF" not in codes, name
 
@@ -520,7 +508,9 @@ class TestOutputContractCensus:
                 for e in dep_edges_for_root(root)
                 if e.output_reads and e.producer_id not in contracts
             }
-            read_sub = {r.producer_id for r in contract_reads_for_root(root) if not r.declared}
+            read_sub = {
+                r.producer_id for r in contract_reads_for_root(root) if not r.declared
+            }
             unscoped += len(read_any)
             subpath_scoped += len(read_sub)
         assert 60 <= unscoped <= 110, unscoped
@@ -561,7 +551,7 @@ class TestProvider:
 
     async def test_registration_is_idempotent(self) -> None:
         """It runs on every boot."""
-        from gideon.workflows.defs import get_provider
+        from gideon.automation.workflows.defs import get_provider
 
         register_bundled_provider()
         first = get_provider("bundled")
@@ -571,29 +561,38 @@ class TestProvider:
     async def test_the_bundled_provider_does_not_shadow_the_writable_one(self) -> None:
         """`author_def` picks the first NON-readonly provider. A read-only provider that
         registered as writable would make every save fail with "read-only"."""
-        from gideon.workflows.defs import get_provider, list_providers
-        from gideon.workflows.native_defs import register_native_provider
+        from gideon.automation.workflows.defs import get_provider, list_providers
+        from gideon.automation.workflows.native_defs import register_native_provider
 
         register_bundled_provider()
         register_native_provider()
         writable = [
-            n for n in list_providers() if (p := get_provider(n)) is not None and not p.readonly
+            n
+            for n in list_providers()
+            if (p := get_provider(n)) is not None and not p.readonly
         ]
         assert "native" in writable
         assert "bundled" not in writable
 
-    def test_a_corrupt_template_is_skipped_not_fatal(self, tmp_path, monkeypatch) -> None:
+    def test_a_corrupt_template_is_skipped_not_fatal(
+        self, tmp_path, monkeypatch
+    ) -> None:
         """The listing is how a user finds the broken one; one bad file must not hide five good
         ones."""
         fake = tmp_path / "bundled"
         (fake / "broken").mkdir(parents=True)
         (fake / "broken" / "workflow.json").write_text("{not json", encoding="utf-8")
-        monkeypatch.setattr("gideon.workflows.bundled_defs.bundled_root", lambda: fake)
+        monkeypatch.setattr(
+            "gideon.automation.workflows.bundled_defs.bundled_root", lambda: fake
+        )
         assert read_template("broken") is None
 
-    def test_a_template_cannot_claim_to_be_user_authored(self, tmp_path, monkeypatch) -> None:
+    def test_a_template_cannot_claim_to_be_user_authored(
+        self, tmp_path, monkeypatch
+    ) -> None:
         """`source` is forced, not trusted from the file: a hand-edited bundled template
-        presenting itself as user-authored would get a delete button pointing at the package."""
+        presenting itself as user-authored would get a delete button pointing at the package.
+        """
         fake = tmp_path / "bundled"
         (fake / "sneaky").mkdir(parents=True)
         (fake / "sneaky" / "workflow.json").write_text(
@@ -606,7 +605,9 @@ class TestProvider:
             ),
             encoding="utf-8",
         )
-        monkeypatch.setattr("gideon.workflows.bundled_defs.bundled_root", lambda: fake)
+        monkeypatch.setattr(
+            "gideon.automation.workflows.bundled_defs.bundled_root", lambda: fake
+        )
         loaded = read_template("sneaky")
         assert loaded is not None and loaded.source == "bundled"
 
@@ -619,7 +620,7 @@ def test_the_templates_are_declared_as_package_data() -> None:
     This line previously read `workflows/bundled/*/WORKFLOW.md` — a filename nothing ever
     produced, so it matched nothing at all.
     """
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     text = (root / "pyproject.toml").read_text(encoding="utf-8")
     block = re.search(r"\[tool\.setuptools\.package-data\](.*?)\n\[", text, re.S)
     assert block, "could not find the package-data block"
@@ -640,23 +641,26 @@ class TestActionArgShape:
     """
 
     def test_flat_action_arguments_are_refused_by_name(self) -> None:
-        from gideon.workflows.validator import validate_spec as v
+        from gideon.automation.workflows.validator import validate_spec as v
 
         bad = {
             "name": "t",
             "root": {
                 "kind": "action",
                 "id": "baseline",
-                "config": {"provider": "bash", "command": "make test", "allow_failure": True},
+                "config": {
+                    "provider": "bash",
+                    "command": "make test",
+                    "allow_failure": True,
+                },
             },
         }
         issues = [i for i in v(bad).issues if i.code == "WF_ACTION_ARGS_NOT_NESTED"]
         assert issues, "the shape that failed live must not validate"
-        # Names WHAT to move — "arguments go under with" alone leaves the author hunting.
         assert "command" in issues[0].message
 
     def test_the_correct_shape_validates_strictly(self) -> None:
-        from gideon.workflows.validator import validate_spec as v
+        from gideon.automation.workflows.validator import validate_spec as v
 
         good = {
             "name": "t",
@@ -670,7 +674,7 @@ class TestActionArgShape:
 
     def test_an_argumentless_provider_is_only_a_warning(self) -> None:
         """Some providers genuinely need no arguments; refusing them would be wrong."""
-        from gideon.workflows.validator import validate_spec as v
+        from gideon.automation.workflows.validator import validate_spec as v
 
         result = v(
             {
@@ -693,7 +697,11 @@ class TestActionArgShape:
                 if node.kind.value != "action":
                     continue
                 cfg = node.config or {}
-                stray = [k for k in cfg if k not in ("provider", "with", "context", "payload")]
+                stray = [
+                    k
+                    for k in cfg
+                    if k not in ("provider", "with", "context", "payload")
+                ]
                 assert not stray, f"{name} at {path}: arguments outside `with`: {stray}"
 
 
@@ -702,7 +710,7 @@ def test_the_shared_blocks_are_declared_as_package_data() -> None:
     `{{block:…}}` reference that cannot resolve is a hard ERROR, so a wheel missing the blocks
     would make every review template fail to load rather than merely lose a convention.
     """
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     text = (root / "pyproject.toml").read_text(encoding="utf-8")
     block = re.search(r"\[tool\.setuptools\.package-data\](.*?)\n\[", text, re.S)
     assert block, "could not find the package-data block"
@@ -726,22 +734,24 @@ def test_the_whole_library_passes_the_conventions_lint() -> None:
     Reported all at once rather than per-template, so a convention change shows its full blast
     radius in one CI failure instead of six sequential ones.
     """
-    from gideon.workflows.template_lint import lint_template
+    from gideon.automation.workflows.template_lint import lint_template
 
     problems: list[str] = []
     for name in template_names():
         for finding in lint_template(_raw(name), bundled=True).findings:
-            problems.append(f"{name}: [{finding.severity}] {finding.code} {finding.message}")
+            problems.append(
+                f"{name}: [{finding.severity}] {finding.code} {finding.message}"
+            )
     assert not problems, "\n".join(problems)
 
 
-#: The four templates `WF2KNO-9` shipped. Named explicitly rather than derived from a tag: the
-#: property under test is that THESE dispatch the egress action, and a tag-derived set would
-#: silently shrink to the empty set if the tag were ever renamed — and then pass.
-MONITOR_SLATE = ("market-monitor", "trending-repo-digest", "dual-sink-watcher", "paper-ingest")
+MONITOR_SLATE = (
+    "market-monitor",
+    "trending-repo-digest",
+    "dual-sink-watcher",
+    "paper-ingest",
+)
 
-#: The dispatchable HTTP-egress action provider. This atom was blocked precisely until it existed
-#: as a PROVIDER rather than as `net.fetch`, a library function no workflow node could name.
 EGRESS_PROVIDER = "net-fetch"
 
 
@@ -797,7 +807,8 @@ class TestTheMonitorSlate:
         outside = {
             name
             for name in template_names()
-            if name not in MONITOR_SLATE and EGRESS_PROVIDER not in _providers_named_by(name)
+            if name not in MONITOR_SLATE
+            and EGRESS_PROVIDER not in _providers_named_by(name)
         }
         assert outside, (
             f"every bundled template appears to dispatch {EGRESS_PROVIDER!r}, so the detector "
@@ -811,11 +822,11 @@ class TestTheMonitorSlate:
         tokens. Absent from `ALLOWED_HOOK_PROVIDERS`, a trigger or hook validates and SAVES and
         then fails at fire time — the shape this atom's own blocked_reason called out.
         """
-        from gideon.action_providers.registry import (
+        from gideon.assurance.validation import ALLOWED_HOOK_PROVIDERS
+        from gideon.integrations.action_providers.registry import (
             _ensure_default_providers_registered,
             list_action_providers,
         )
-        from gideon.validation import ALLOWED_HOOK_PROVIDERS
 
         _ensure_default_providers_registered()
         registered = list_action_providers()
@@ -858,15 +869,10 @@ class TestContradictionReviewFastTier:
         )
 
     def test_the_judge_resolves_to_the_fast_background_use_case(self) -> None:
-        from gideon.workflows.engine import resolve_use_case
+        from gideon.automation.workflows.engine import resolve_use_case
 
         judge = self._judge()
         assert (judge.config or {}).get(
             "model_tier"
-        ) == "fast", (
-            "the judge must declare the `fast` tier so it is the fast-model pass the atom names"
-        )
-        # THE contract: the standard model-tier resolution maps `fast` -> the `background` use
-        # case, which is what `one_shot_completion(use_case="background")` binds to a live model.
-        # The plan names this exact mechanism for fast-model passes.
+        ) == "fast", "the judge must declare the `fast` tier so it is the fast-model pass the atom names"
         assert resolve_use_case(judge) == "background"

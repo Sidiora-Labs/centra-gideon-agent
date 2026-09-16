@@ -12,10 +12,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from aiohttp import web
 
-# ---------------------------------------------------------------------------
-# api_sessions_restart: syncs MCP servers before restarting
-# ---------------------------------------------------------------------------
-
 
 def _make_restart_request():
     """Build a minimal request for api_sessions_restart."""
@@ -42,26 +38,27 @@ class TestApiSessionsRestartMcpSync:
     @pytest.mark.asyncio
     async def test_syncs_new_servers_before_restart(self):
         """discover + sync should run and count should appear in response."""
-        from gideon.dashboard.handlers.sessions import api_sessions_restart
+        from gideon.interfaces.dashboard.handlers.sessions import api_sessions_restart
 
         fake_server = MagicMock()
         request = _make_restart_request()
 
         with (
             patch(
-                "gideon.dashboard.handlers.sessions._reset_all_sessions",
+                "gideon.interfaces.dashboard.handlers.sessions._reset_all_sessions",
                 new_callable=AsyncMock,
                 return_value=2,
             ),
             patch(
-                "gideon.dashboard.handlers.sessions.discover_servers_to_sync",
+                "gideon.interfaces.dashboard.handlers.sessions.discover_servers_to_sync",
                 return_value=[fake_server],
             ),
             patch(
-                "gideon.dashboard.handlers.sessions.sync_to_agent_config", return_value=True
+                "gideon.interfaces.dashboard.handlers.sessions.sync_to_agent_config",
+                return_value=True,
             ),
             patch(
-                "gideon.dashboard.handlers.sessions.register_servers_for_cc",
+                "gideon.interfaces.dashboard.handlers.sessions.register_servers_for_cc",
                 return_value=True,
             ),
         ):
@@ -74,18 +71,18 @@ class TestApiSessionsRestartMcpSync:
     @pytest.mark.asyncio
     async def test_sync_failure_does_not_block_restart(self):
         """If MCP sync raises, restart must still proceed."""
-        from gideon.dashboard.handlers.sessions import api_sessions_restart
+        from gideon.interfaces.dashboard.handlers.sessions import api_sessions_restart
 
         request = _make_restart_request()
 
         with (
             patch(
-                "gideon.dashboard.handlers.sessions._reset_all_sessions",
+                "gideon.interfaces.dashboard.handlers.sessions._reset_all_sessions",
                 new_callable=AsyncMock,
                 return_value=1,
             ),
             patch(
-                "gideon.dashboard.handlers.sessions.discover_servers_to_sync",
+                "gideon.interfaces.dashboard.handlers.sessions.discover_servers_to_sync",
                 side_effect=RuntimeError("boom"),
             ),
         ):
@@ -98,20 +95,23 @@ class TestApiSessionsRestartMcpSync:
     @pytest.mark.asyncio
     async def test_no_servers_to_sync(self):
         """When discover returns empty list, synced count is 0."""
-        from gideon.dashboard.handlers.sessions import api_sessions_restart
+        from gideon.interfaces.dashboard.handlers.sessions import api_sessions_restart
 
         request = _make_restart_request()
 
         with (
             patch(
-                "gideon.dashboard.handlers.sessions._reset_all_sessions",
+                "gideon.interfaces.dashboard.handlers.sessions._reset_all_sessions",
                 new_callable=AsyncMock,
                 return_value=0,
             ),
             patch(
-                "gideon.dashboard.handlers.sessions.discover_servers_to_sync", return_value=[]
+                "gideon.interfaces.dashboard.handlers.sessions.discover_servers_to_sync",
+                return_value=[],
             ),
-            patch("gideon.dashboard.handlers.sessions.sync_to_agent_config") as mock_sync,
+            patch(
+                "gideon.interfaces.dashboard.handlers.sessions.sync_to_agent_config"
+            ) as mock_sync,
         ):
             resp = await api_sessions_restart(request)
 
@@ -122,22 +122,23 @@ class TestApiSessionsRestartMcpSync:
     @pytest.mark.asyncio
     async def test_sync_returns_false(self):
         """When sync_to_agent_config returns False, synced count stays 0."""
-        from gideon.dashboard.handlers.sessions import api_sessions_restart
+        from gideon.interfaces.dashboard.handlers.sessions import api_sessions_restart
 
         request = _make_restart_request()
 
         with (
             patch(
-                "gideon.dashboard.handlers.sessions._reset_all_sessions",
+                "gideon.interfaces.dashboard.handlers.sessions._reset_all_sessions",
                 new_callable=AsyncMock,
                 return_value=1,
             ),
             patch(
-                "gideon.dashboard.handlers.sessions.discover_servers_to_sync",
+                "gideon.interfaces.dashboard.handlers.sessions.discover_servers_to_sync",
                 return_value=[MagicMock()],
             ),
             patch(
-                "gideon.dashboard.handlers.sessions.sync_to_agent_config", return_value=False
+                "gideon.interfaces.dashboard.handlers.sessions.sync_to_agent_config",
+                return_value=False,
             ),
         ):
             resp = await api_sessions_restart(request)
@@ -149,26 +150,27 @@ class TestApiSessionsRestartMcpSync:
     @pytest.mark.asyncio
     async def test_multiple_servers_synced(self):
         """Multiple discovered servers should all be counted."""
-        from gideon.dashboard.handlers.sessions import api_sessions_restart
+        from gideon.interfaces.dashboard.handlers.sessions import api_sessions_restart
 
         request = _make_restart_request()
         servers = [MagicMock(), MagicMock(), MagicMock()]
 
         with (
             patch(
-                "gideon.dashboard.handlers.sessions._reset_all_sessions",
+                "gideon.interfaces.dashboard.handlers.sessions._reset_all_sessions",
                 new_callable=AsyncMock,
                 return_value=1,
             ),
             patch(
-                "gideon.dashboard.handlers.sessions.discover_servers_to_sync",
+                "gideon.interfaces.dashboard.handlers.sessions.discover_servers_to_sync",
                 return_value=servers,
             ),
             patch(
-                "gideon.dashboard.handlers.sessions.sync_to_agent_config", return_value=True
+                "gideon.interfaces.dashboard.handlers.sessions.sync_to_agent_config",
+                return_value=True,
             ),
             patch(
-                "gideon.dashboard.handlers.sessions.register_servers_for_cc",
+                "gideon.interfaces.dashboard.handlers.sessions.register_servers_for_cc",
                 return_value=True,
             ),
         ):
@@ -178,20 +180,15 @@ class TestApiSessionsRestartMcpSync:
         assert body["mcp_synced"] == 3
 
 
-# ---------------------------------------------------------------------------
-# _inject_skill_paths: must preserve flag-with-value args
-# ---------------------------------------------------------------------------
-
-
 class TestInjectSkillPathsPreservesFlagValues:
     """Regression test for flag-with-value arg preservation in my-mcp-server args."""
 
     def test_include_tool_tags_value_preserved(self):
         """Flag-with-value pairs must survive --skill-paths injection."""
-        from gideon.agent import _inject_skill_paths
+        from gideon.engine.agent import _inject_skill_paths
 
         bm: dict = {"args": ["--include-tool-tags", "default,code-review"]}
-        with patch("gideon.agent.Path") as mock_path_cls:
+        with patch("gideon.engine.agent.Path") as mock_path_cls:
             mock_path_cls.side_effect = lambda p: MagicMock(
                 is_dir=MagicMock(return_value=p == "/real/skills")
             )

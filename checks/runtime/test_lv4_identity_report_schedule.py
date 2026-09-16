@@ -1,6 +1,6 @@
 """LV-4's schedule half: the clock job, the cadence, and what ``off`` actually stops.
 
-`tests/test_lv4_identity_report.py` covers the composition and delivery half. This file covers
+`checks/runtime/test_lv4_identity_report.py` covers the composition and delivery half. This file covers
 the three clauses that were left `todo`, and each one is written against the failure it exists to
 catch rather than against the code that implements it:
 
@@ -8,7 +8,7 @@ catch rather than against the code that implements it:
    that a row was armed. A whole trigger subsystem in this repo once shipped where every fire
    reached a mailbox nobody opened, so an "enqueued" assertion is worth nothing here. Two legs:
    the armed row is SELECTED by the real ``service.due_ids`` when a compressed clock passes its
-   fire time, and driving it through the real ``GatewayOrchestrator._fire_store_trigger`` leaves a
+   fire time, and driving it through the real ``RuntimeCoordinator._fire_store_trigger`` leaves a
    versioned artifact and one inbox row on disk.
 
 2. **"cadence monthly | weekly | off."** Asserted as a CONVERGENCE (a cadence change reaches the
@@ -25,7 +25,7 @@ catch rather than against the code that implements it:
 Plus the two round-trip points `test_config_roundtrip.py` provably cannot see: the write path (the
 real PATCH handler, end to end onto disk and back through ``AppConfig.load``) and the frontend
 control (asserted at its call site here, and driven by a click in
-`web/src/pages/learning/identityReportCadence.test.tsx`).
+`apps/console/src/features/learning/identityReportCadence.test.tsx`).
 
 🔴 **One DISCOVERY drove a change to shipped code.** ``delivery_dedup_key`` was hardcoded to the
 calendar month, and `emit_attention_item` returns the existing open row and fires no second
@@ -46,18 +46,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gideon import learning_report as LR
-from gideon.action_providers import identity_report_provider as P
-from gideon.action_providers.base import ActionContext
-from gideon.skills import loader as loader_mod
-from gideon.skills.loader import AutoSkillProvenance, SkillsLoader
+from gideon.cognition import learning_report as LR
+from gideon.extensions.skills import loader as loader_mod
+from gideon.extensions.skills.loader import AutoSkillProvenance, ProcedureLibrary
+from gideon.integrations.action_providers import identity_report_provider as P
+from gideon.integrations.action_providers.base import ActionContext
 
 NOW = datetime(2026, 8, 20, 12, 0, tzinfo=timezone.utc)
 
-WEB = Path(__file__).resolve().parents[1] / "web" / "src"
-
-
-# ── fixtures ────────────────────────────────────────────────────────────────────────
+WEB = Path(__file__).resolve().parents[2] / "apps/console" / "src"
 
 
 @pytest.fixture
@@ -68,13 +65,13 @@ def home(tmp_path, monkeypatch):
     the loader alone leaves three of them writing into the real ``~/.gideon``, which
     matters unusually much here because half these tests assert that NOTHING was written.
     """
-    import gideon.artifacts.native as native_mod
-    import gideon.config.loader as loader_pkg
-    import gideon.dashboard.state as state_mod
-    import gideon.inbox as inbox_mod
-    import gideon.providers.entity_routes as entity_mod
-    import gideon.skills.marketplace as mp
-    from gideon.skills import proposals
+    import gideon.core.config.loader as loader_pkg
+    import gideon.extensions.providers.entity_routes as entity_mod
+    import gideon.extensions.skills.marketplace as mp
+    import gideon.integrations.inbox as inbox_mod
+    import gideon.interfaces.dashboard.state as state_mod
+    import gideon.workspace.artifacts.native as native_mod
+    from gideon.extensions.skills import proposals
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     for mod in (loader_mod, loader_pkg, inbox_mod, native_mod, entity_mod, state_mod):
@@ -98,8 +95,8 @@ def artifacts(home, monkeypatch):
     ``get_provider()`` freezes the native provider's root, and a later ``config_dir`` patch
     cannot undo that.
     """
-    from gideon.artifacts import registry
-    from gideon.artifacts.native import NativeArtifactProvider
+    from gideon.workspace.artifacts import registry
+    from gideon.workspace.artifacts.native import NativeArtifactProvider
 
     provider = NativeArtifactProvider(root=home / "artifacts")
     monkeypatch.setitem(registry._providers, "native", provider)
@@ -109,7 +106,7 @@ def artifacts(home, monkeypatch):
 
 @pytest.fixture
 def store(home):
-    from gideon.triggers.store import TriggerStore
+    from gideon.automation.triggers.store import TriggerStore
 
     return TriggerStore(base_dir=home)
 
@@ -125,33 +122,37 @@ def _embed(text: str) -> list[float]:
 
 
 def _state(tmp_path):
-    """A DashboardState with a real vector store wired where the provider looks for it.
+    """A ConsoleState with a real vector store wired where the provider looks for it.
 
     Wired through ``context_builder.memory.vector_store`` on purpose — that is the attribute
     chain ``identity_report_provider._vector_store`` reads, so a test that attached the store
     anywhere else would be measuring its own fixture rather than the provider's lookup.
     """
-    from gideon.dashboard.state import DashboardState
-    from gideon.memory import MemoryStore
-    from gideon.vector_memory import VectorMemoryStore
+    from gideon.cognition.memory import MemoryJournal
+    from gideon.cognition.vector_memory import SemanticArchive
+    from gideon.interfaces.dashboard.state import ConsoleState
 
     ws = tmp_path / "ws"
     ws.mkdir(exist_ok=True)
-    vs = VectorMemoryStore(db_path=Path(tmp_path) / "memory.db", embedding_dim=_EMBED_DIM)
+    vs = SemanticArchive(db_path=Path(tmp_path) / "memory.db", embedding_dim=_EMBED_DIM)
     vs.init()
     vs.embed_fn = _embed
-    mem = MemoryStore(workspace=ws)
+    mem = MemoryJournal(workspace=ws)
     mem.init()
     mem.vector_store = vs
     cb = MagicMock()
     cb.memory = mem
-    state = DashboardState(sessions=MagicMock(count=0), start_time=0.0, context_builder=cb)
-    assert P._vector_store(state) is vs, "the provider's store lookup does not find the fixture"
+    state = ConsoleState(
+        sessions=MagicMock(count=0), start_time=0.0, context_builder=cb
+    )
+    assert (
+        P._vector_store(state) is vs
+    ), "the provider's store lookup does not find the fixture"
     return state, vs
 
 
 def _wire_services(state, monkeypatch):
-    from gideon.action_providers import services as svc
+    from gideon.integrations.action_providers import services as svc
 
     wired = svc.ActionServices(state=state, spawn_background=lambda coro: None)
     monkeypatch.setattr(svc, "_services", wired)
@@ -166,7 +167,7 @@ def _write_cadence(value: str) -> None:
     is exercised on every use — that is the round-trip point where a field present in
     ``to_dict()`` but missing from ``load()`` silently reverts to its default.
     """
-    from gideon.config.loader import AppConfig, config_path
+    from gideon.core.config.loader import AppConfig, config_path
 
     path = config_path()
     data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
@@ -190,10 +191,16 @@ def _seed(vs) -> None:
     Load-bearing for every absence assertion below: against an EMPTY home a report is still
     delivered, so "no artifact" would not distinguish `off` from "nothing to say".
     """
-    from gideon.preference_facets import upsert_facet
+    from gideon.cognition.preference_facets import upsert_facet
 
-    upsert_facet(vs, "style", "prefers terse replies", cue="explicit", now=NOW - timedelta(days=1))
-    name = SkillsLoader(install_builtins=False).create_auto_skill(
+    upsert_facet(
+        vs,
+        "style",
+        "prefers terse replies",
+        cue="explicit",
+        now=NOW - timedelta(days=1),
+    )
+    name = ProcedureLibrary(install_builtins=False).create_auto_skill(
         "fresh-thing",
         description="what fresh-thing does",
         triggers="fresh-thing",
@@ -207,7 +214,7 @@ def _seed(vs) -> None:
 
 def _patch_model(monkeypatch, text: str) -> None:
     """Pin the ONE background completion. Patched on the MODULE the caller resolves it from."""
-    import gideon.llm_helpers as helpers
+    import gideon.integrations.llm_helpers as helpers
 
     async def _fake(*_a, **_k):
         return text
@@ -216,14 +223,11 @@ def _patch_model(monkeypatch, text: str) -> None:
 
 
 def _report_rows(home: Path) -> list:
-    from gideon.inbox import InboxStore
+    from gideon.integrations.inbox import InboxStore
 
     inbox = InboxStore()
     inbox.load()
     return [i for i in inbox.items.values() if i.item_kind == "report"]
-
-
-# ── one vocabulary, four readers ────────────────────────────────────────────────────
 
 
 class TestOneVocabulary:
@@ -238,7 +242,7 @@ class TestOneVocabulary:
     def test_there_is_no_second_enable_flag_beside_the_cadence(self):
         from dataclasses import fields
 
-        from gideon.config.learning import LearningConfig
+        from gideon.core.config.learning import LearningConfig
 
         names = {f.name for f in fields(LearningConfig)}
         assert "identity_report_cadence" in names
@@ -253,7 +257,7 @@ class TestOneVocabulary:
         `guardrails.scan_mode` keeps three hand-copied `warn/redact/block` lists; this is the
         assertion that stops a fourth copy of THIS vocabulary drifting.
         """
-        from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+        from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
         spec = _EDITABLE_CONFIG["learning.identity_report_cadence"]
         assert spec["type"] == "enum"
@@ -265,11 +269,9 @@ class TestOneVocabulary:
         A strip missing `off` would leave the switch unreachable from the only surface that
         shows the report — the field would round-trip and no user could ever set it.
         """
-        src = (WEB / "pages" / "learning" / "IdentityReportPanel.tsx").read_text(encoding="utf-8")
-        # Sliced to the array literal's own closing `]` on its own line, NOT to the first `]` in
-        # the text: the declaration carries a type annotation (`{ key: Cadence; label: string }[]`)
-        # whose brackets come first, and slicing there found ZERO keys — a scan that reads as an
-        # empty list would have compared `[] != [...]` and reported the wrong defect.
+        src = (WEB / "features" / "learning" / "IdentityReportPanel.tsx").read_text(
+            encoding="utf-8"
+        )
         block = src.split("const CADENCE_OPTIONS")[1].split("\n]")[0]
         keys = re.findall(r"key: '([a-z]+)'", block)
         assert keys == list(LR.IDENTITY_REPORT_CADENCES), keys
@@ -277,38 +279,42 @@ class TestOneVocabulary:
     def test_every_cadence_but_off_has_a_cron_expression(self):
         """And `off` deliberately has none — there is no expression meaning "never", so the
         reconciler disables the row instead of inventing one."""
-        assert set(P._CADENCE_CRON) == set(LR.IDENTITY_REPORT_CADENCES) - {LR.CADENCE_OFF}
-        from gideon.triggers.arm import arm
-        from gideon.triggers.models import Trigger
+        assert set(P._CADENCE_CRON) == set(LR.IDENTITY_REPORT_CADENCES) - {
+            LR.CADENCE_OFF
+        }
+        from gideon.automation.triggers.arm import arm
+        from gideon.automation.triggers.models import Trigger
 
         for cadence, expr in P._CADENCE_CRON.items():
-            t = Trigger(id="t", name="t", kind="clock", spec={"kind": "cron", "expr": expr})
+            t = Trigger(
+                id="t", name="t", kind="clock", spec={"kind": "cron", "expr": expr}
+            )
             assert arm(t), f"the {cadence} expression {expr!r} does not arm"
 
     def test_an_unknown_word_reads_as_the_default_not_as_off(self, home):
         """A typo must not switch the report off: "monthly " and "monthy" would then be
-        indistinguishable from a deliberate opt-out, which is a state nobody can diagnose."""
+        indistinguishable from a deliberate opt-out, which is a state nobody can diagnose.
+        """
         assert LR.normalize_cadence("monthy") == LR.DEFAULT_CADENCE
         assert LR.normalize_cadence("") == LR.DEFAULT_CADENCE
         assert LR.normalize_cadence(" WEEKLY ") == LR.CADENCE_WEEKLY
-        # And through the loader, which is where a real typo arrives — a hand-edited config.json.
-        from gideon.config.loader import AppConfig, config_path
+        from gideon.core.config.loader import AppConfig, config_path
 
-        assert home  # the redirect fixture is what makes the write below safe
+        assert home
         config_path().write_text(
-            json.dumps({"learning": {"identity_report_cadence": "monthy"}}), encoding="utf-8"
+            json.dumps({"learning": {"identity_report_cadence": "monthy"}}),
+            encoding="utf-8",
         )
         assert AppConfig.load().learning.identity_report_cadence == LR.DEFAULT_CADENCE
-
-
-# ── round-trip point 4: the write path, end to end ──────────────────────────────────
 
 
 class TestTheWritePath:
     """`test_config_roundtrip.py` covers dataclass+_meta, `load()` and `to_dict()`. These are the
     two it provably cannot see."""
 
-    def test_the_real_patch_handler_persists_the_cadence_and_load_reads_it_back(self, home):
+    def test_the_real_patch_handler_persists_the_cadence_and_load_reads_it_back(
+        self, home
+    ):
         """Driven through `api_gideon_config_patch`, not through a helper.
 
         A test that called `coerce_edit_value` directly would prove the validator works and say
@@ -317,8 +323,8 @@ class TestTheWritePath:
         fixture's redirect already reaches it; asserting the file lands under `tmp_path` below is
         what proves that rather than assuming it.
         """
-        import gideon.dashboard.handlers.core as core
-        from gideon.config.loader import AppConfig, config_path
+        import gideon.interfaces.dashboard.handlers.core as core
+        from gideon.core.config.loader import AppConfig, config_path
 
         assert str(config_path()).startswith(str(home))
         config_path().write_text("{}", encoding="utf-8")
@@ -327,11 +333,10 @@ class TestTheWritePath:
             req = MagicMock()
             req.app = {"state": MagicMock()}
             req.headers = {}
-            # A real caller identity: the handler writes a SEL row naming it, and a MagicMock
-            # here fails JSON serialization inside the audit log rather than in the code
-            # under test.
             req.get = lambda k, d=None: {"user": "owner"}.get(k, d)
-            req.json = _async(dict(path="learning.identity_report_cadence", value=value))
+            req.json = _async(
+                dict(path="learning.identity_report_cadence", value=value)
+            )
             return await core.api_gideon_config_patch(req)
 
         resp = asyncio.run(_patch(LR.CADENCE_WEEKLY))
@@ -340,22 +345,18 @@ class TestTheWritePath:
         assert on_disk["learning"]["identity_report_cadence"] == LR.CADENCE_WEEKLY
         assert AppConfig.load().learning.identity_report_cadence == LR.CADENCE_WEEKLY
 
-        # VACUITY FLOOR: the handler must REFUSE a word outside the enum. Without this the
-        # assertion above would also pass on a handler that wrote anything it was handed, and
-        # the `values` list would be decoration.
         bad = asyncio.run(_patch("fortnightly"))
         assert bad.status == 400, bad.text
         assert AppConfig.load().learning.identity_report_cadence == LR.CADENCE_WEEKLY
 
     def test_the_frontend_control_writes_that_exact_path(self):
         """Round-trip point 5, at its call site. The click is driven in
-        `web/src/pages/learning/identityReportCadence.test.tsx`; this is the census that fails
+        `apps/console/src/features/learning/identityReportCadence.test.tsx`; this is the census that fails
         if the panel stops writing the field at all."""
-        src = (WEB / "pages" / "learning" / "IdentityReportPanel.tsx").read_text(encoding="utf-8")
+        src = (WEB / "features" / "learning" / "IdentityReportPanel.tsx").read_text(
+            encoding="utf-8"
+        )
         assert "api.patchConfig('learning.identity_report_cadence'" in src
-
-
-# ── the cadence converges onto ONE system trigger ───────────────────────────────────
 
 
 class TestTheTriggerConverges:
@@ -372,7 +373,6 @@ class TestTheTriggerConverges:
         assert t.workflow["inline"]["provider"] == P.PROVIDER_NAME
         assert t.delivery == "none", "a cron-result ping about a ping"
         assert row.ok, [i.message for i in row.errors]
-        # ARMED. A registered-but-unarmed trigger never fires — the S108 defect one level up.
         assert t.next_fire_at, "the trigger was registered without a next fire"
 
     def test_reconcile_is_idempotent_and_mints_exactly_one_row(self, home, store):
@@ -385,13 +385,17 @@ class TestTheTriggerConverges:
         """The digest's contract: a user who changes this on the Learning page must not have to
         know a trigger exists somewhere to be re-registered."""
         P.reconcile_identity_report_trigger(store)
-        assert store.get(P.IDENTITY_REPORT_TRIGGER_ID).trigger.spec["expr"] == "0 9 1 * *"
+        assert (
+            store.get(P.IDENTITY_REPORT_TRIGGER_ID).trigger.spec["expr"] == "0 9 1 * *"
+        )
 
         _write_cadence(LR.CADENCE_WEEKLY)
         P.reconcile_identity_report_trigger(store)
 
         t = store.get(P.IDENTITY_REPORT_TRIGGER_ID).trigger
-        assert t.spec["expr"] == "0 9 * * 1", "the weekly cadence never reached the spec"
+        assert (
+            t.spec["expr"] == "0 9 * * 1"
+        ), "the weekly cadence never reached the spec"
         assert t.enabled is True
         assert t.next_fire_at, "converged without re-arming — the next fire is stale"
 
@@ -408,9 +412,13 @@ class TestTheTriggerConverges:
 
         spec = store.get(P.IDENTITY_REPORT_TRIGGER_ID).trigger.spec
         assert spec["expr"] == "0 9 * * 1"
-        assert spec["timezone"] == "Europe/Berlin" and spec["skip_dates"] == ["2026-12-25"]
+        assert spec["timezone"] == "Europe/Berlin" and spec["skip_dates"] == [
+            "2026-12-25"
+        ]
 
-    def test_an_unreadable_cadence_leaves_the_row_exactly_as_it_was(self, home, store, monkeypatch):
+    def test_an_unreadable_cadence_leaves_the_row_exactly_as_it_was(
+        self, home, store, monkeypatch
+    ):
         """Not "default to monthly". A reconciler that guessed would re-enable a report the user
         had switched off, on a transient config read failure."""
         _write_cadence(LR.CADENCE_OFF)
@@ -422,38 +430,60 @@ class TestTheTriggerConverges:
         P.reconcile_identity_report_trigger(store)
 
         after = store.get(P.IDENTITY_REPORT_TRIGGER_ID).trigger
-        assert after.enabled is False, "an unreadable config re-enabled a disabled report"
+        assert (
+            after.enabled is False
+        ), "an unreadable config re-enabled a disabled report"
 
     def test_the_reconciler_is_called_at_boot(self):
-        """A reconciler with no caller is the whole defect this atom existed to close: the
-        delivery function shipped with a POST route as its only caller.
-
-        Matched as a CALL through the AST, not as a substring: the name also appears in the
-        `from ... import` line beside it, so a `toContain`-style scan stays green when the call
-        is commented out and only the import survives. Measured — the first version of this
-        assertion did exactly that under M1.
-        """
+        """The gateway starts the owner that calls the registered report reconciler."""
         import ast
         import inspect
         import textwrap
+        from importlib import import_module
 
-        from gideon.gateway import GatewayOrchestrator
+        from gideon.engine.automation_boot import RECONCILERS, AutomationBoot
+        from gideon.engine.gateway import RuntimeCoordinator
 
-        tree = ast.parse(textwrap.dedent(inspect.getsource(GatewayOrchestrator)))
-        called = {
-            node.func.id
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-        }
-        assert "reconcile_identity_report_trigger" in called, sorted(
-            n for n in called if "reconcile" in n
+        def calls(owner):
+            tree = ast.parse(textwrap.dedent(inspect.getsource(owner)))
+            return [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+
+        boot_calls = calls(RuntimeCoordinator._init_cron)
+        assert any(
+            isinstance(call.func, ast.Attribute)
+            and call.func.attr == "start"
+            and isinstance(call.func.value, ast.Call)
+            and isinstance(call.func.value.func, ast.Name)
+            and call.func.value.func.id == "AutomationBoot"
+            for call in boot_calls
         )
-        # VACUITY: the walk really finds this shape of call, so an empty `called` set (a broken
-        # parse) cannot read as a pass.
-        assert "reconcile_digest_cron" in called
-
-
-# ── the job FIRES, and firing PRODUCES a report ─────────────────────────────────────
+        assert any(
+            isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id == "self"
+            and call.func.attr == "reconcile"
+            for call in calls(AutomationBoot.start)
+        )
+        registered = {(module, entry) for module, entry, _ in RECONCILERS}
+        assert (P.__name__, "reconcile_identity_report_trigger") in registered
+        assert (
+            "gideon.integrations.action_providers.digest_provider",
+            "reconcile_digest_cron",
+        ) in registered
+        assert (
+            getattr(import_module(P.__name__), "reconcile_identity_report_trigger")
+            is P.reconcile_identity_report_trigger
+        )
+        dispatch = calls(AutomationBoot.reconcile)
+        assert any(
+            isinstance(call.func, ast.Call)
+            and isinstance(call.func.func, ast.Name)
+            and call.func.func.id == "getattr"
+            and len(call.args) == 1
+            and isinstance(call.args[0], ast.Name)
+            and call.args[0].id == "store"
+            for call in dispatch
+        )
 
 
 class TestTheJobFires:
@@ -463,7 +493,7 @@ class TestTheJobFires:
 
     def test_a_compressed_clock_selects_the_armed_row_as_due(self, home, store):
         """Through the real `service.due_ids`, at a `now` past the armed fire time."""
-        from gideon.triggers.service import due_ids, to_epoch
+        from gideon.automation.triggers.service import due_ids, to_epoch
 
         P.reconcile_identity_report_trigger(store)
         t = store.get(P.IDENTITY_REPORT_TRIGGER_ID).trigger
@@ -472,15 +502,13 @@ class TestTheJobFires:
 
         rows = [r.trigger for r in store.load()]
         assert P.IDENTITY_REPORT_TRIGGER_ID in due_ids(rows, now=fire_at + 1)
-        # VACUITY: one second BEFORE its fire time it must not be due, or "due" would mean
-        # "exists" and the compressed clock would be doing nothing.
         assert P.IDENTITY_REPORT_TRIGGER_ID not in due_ids(rows, now=fire_at - 60)
 
     @pytest.mark.asyncio
     async def test_firing_it_through_the_real_dispatch_writes_the_artifact_and_the_inbox_row(
         self, home, artifacts, store, tmp_path, monkeypatch
     ):
-        """The end-to-end clause, through `GatewayOrchestrator._fire_store_trigger`.
+        """The end-to-end clause, through `RuntimeCoordinator._fire_store_trigger`.
 
         That is the ONE dispatch every store-backed fire passes through — it resolves the
         provider out of the registry, screens the payload, applies the denylist and routes the
@@ -488,7 +516,7 @@ class TestTheJobFires:
         `ALLOWED_HOOK_PROVIDERS` / `WRITE_CAPABLE_PROVIDERS` / rung-declaration wiring that a
         provider missing from one set fails at exactly this moment.
         """
-        from gideon.gateway import GatewayOrchestrator
+        from gideon.engine.gateway import RuntimeCoordinator
 
         state, vs = _state(tmp_path)
         _seed(vs)
@@ -498,8 +526,10 @@ class TestTheJobFires:
         P.reconcile_identity_report_trigger(store)
         trigger = store.get(P.IDENTITY_REPORT_TRIGGER_ID).trigger
 
-        assert artifacts.get(LR.ARTIFACT_SLUG) is None, "the fixture started with a report"
-        await object.__new__(GatewayOrchestrator)._fire_store_trigger(trigger, {})
+        assert (
+            artifacts.get(LR.ARTIFACT_SLUG) is None
+        ), "the fixture started with a report"
+        await object.__new__(RuntimeCoordinator)._fire_store_trigger(trigger, {})
 
         stored = artifacts.get(LR.ARTIFACT_SLUG)
         assert stored is not None, "the fire produced no artifact — a discarded fire"
@@ -521,17 +551,23 @@ class TestTheJobFires:
         _patch_model(monkeypatch, "")
         _write_cadence(LR.CADENCE_WEEKLY)
 
-        result = await P.IdentityReportActionProvider().execute({}, ActionContext(event="t"))
+        result = await P.IdentityReportActionProvider().execute(
+            {}, ActionContext(event="t")
+        )
 
         assert result.success, result.error
         stored = artifacts.get(LR.ARTIFACT_SLUG)
         assert stored is not None
-        assert f"Period: {LR.MIN_WINDOW_DAYS} days" in stored.content, stored.content[:200]
+        assert f"Period: {LR.MIN_WINDOW_DAYS} days" in stored.content, stored.content[
+            :200
+        ]
 
-        # The floor: the monthly cadence delivers the monthly window through the same call.
         _write_cadence(LR.CADENCE_MONTHLY)
         await P.IdentityReportActionProvider().execute({}, ActionContext(event="t"))
-        assert f"Period: {LR.DEFAULT_WINDOW_DAYS} days" in artifacts.get(LR.ARTIFACT_SLUG).content
+        assert (
+            f"Period: {LR.DEFAULT_WINDOW_DAYS} days"
+            in artifacts.get(LR.ARTIFACT_SLUG).content
+        )
 
     @pytest.mark.asyncio
     async def test_a_partial_delivery_is_reported_as_a_failure_not_a_quiet_success(
@@ -543,7 +579,7 @@ class TestTheJobFires:
         No `artifacts` fixture here on purpose: with no provider registered the artifact write
         cannot succeed, which is the real shape of this failure.
         """
-        from gideon.artifacts import registry
+        from gideon.workspace.artifacts import registry
 
         state, vs = _state(tmp_path)
         _seed(vs)
@@ -552,7 +588,9 @@ class TestTheJobFires:
         _write_cadence(LR.CADENCE_MONTHLY)
         monkeypatch.setattr(registry, "get_provider", lambda *a, **k: None)
 
-        result = await P.IdentityReportActionProvider().execute({}, ActionContext(event="t"))
+        result = await P.IdentityReportActionProvider().execute(
+            {}, ActionContext(event="t")
+        )
 
         assert result.success is False
         assert "artifact" in (result.error or "")
@@ -566,13 +604,14 @@ class TestTheJobFires:
         _wire_services(state, monkeypatch)
         monkeypatch.setattr(LR, "configured_cadence", lambda: "")
 
-        result = await P.IdentityReportActionProvider().execute({}, ActionContext(event="t"))
+        result = await P.IdentityReportActionProvider().execute(
+            {}, ActionContext(event="t")
+        )
 
         assert result.success is False and "unreadable" in (result.error or "")
-        assert artifacts.get(LR.ARTIFACT_SLUG) is None, "it delivered against an unreadable config"
-
-
-# ── `off` disables CLEANLY — two independent refusals ───────────────────────────────
+        assert (
+            artifacts.get(LR.ARTIFACT_SLUG) is None
+        ), "it delivered against an unreadable config"
 
 
 class TestOffDisablesCleanly:
@@ -595,13 +634,11 @@ class TestOffDisablesCleanly:
         row = store.get(P.IDENTITY_REPORT_TRIGGER_ID)
         assert row is not None, "`off` deleted the row instead of disabling it"
         assert row.trigger.enabled is False
-        # And it keeps the expression it would use if switched back on, so the Triggers page
-        # reads "monthly, disabled" rather than a blank schedule.
         assert row.trigger.spec["expr"] == P._CADENCE_CRON[LR.DEFAULT_CADENCE]
 
     def test_a_disabled_row_is_never_selected_by_the_clock(self, home, store):
         """The arming-side refusal, through the real `due_ids` at a `now` well past the fire."""
-        from gideon.triggers.service import due_ids, to_epoch
+        from gideon.automation.triggers.service import due_ids, to_epoch
 
         P.reconcile_identity_report_trigger(store)
         fire_at = to_epoch(store.get(P.IDENTITY_REPORT_TRIGGER_ID).trigger.next_fire_at)
@@ -617,7 +654,9 @@ class TestOffDisablesCleanly:
         assert P.IDENTITY_REPORT_TRIGGER_ID not in due_ids(off_rows, now=fire_at + 1)
 
     @pytest.mark.asyncio
-    async def test_off_produces_nothing_at_all(self, home, artifacts, tmp_path, monkeypatch):
+    async def test_off_produces_nothing_at_all(
+        self, home, artifacts, tmp_path, monkeypatch
+    ):
         """🔴 THE PRODUCING-SIDE REFUSAL. Not "fires and discards".
 
         Reachable in production even though the reconciler disables the row: a user can
@@ -633,11 +672,11 @@ class TestOffDisablesCleanly:
         def _boom(*_a, **_k):
             raise AssertionError("`off` composed the report anyway")
 
-        # Not just "no output" — the gather itself must not run. A cadence that composed and
-        # then dropped the result is the inert control this clause exists to refuse.
         monkeypatch.setattr(LR, "compose_identity_report", _boom)
 
-        result = await P.IdentityReportActionProvider().execute({}, ActionContext(event="t"))
+        result = await P.IdentityReportActionProvider().execute(
+            {}, ActionContext(event="t")
+        )
 
         assert result.success is True, "a deliberate opt-out is not an error"
         assert "off" in (result.stdout or "")
@@ -650,21 +689,21 @@ class TestOffDisablesCleanly:
         self, home, artifacts, tmp_path, monkeypatch
     ):
         """The vacuity partner for the test above, and the one that must stay green under the
-        mutation that reds it. Same seed, same wiring, same call — only the cadence differs."""
+        mutation that reds it. Same seed, same wiring, same call — only the cadence differs.
+        """
         state, vs = _state(tmp_path)
         _seed(vs)
         _wire_services(state, monkeypatch)
         _patch_model(monkeypatch, "")
         _write_cadence(LR.CADENCE_WEEKLY)
 
-        result = await P.IdentityReportActionProvider().execute({}, ActionContext(event="t"))
+        result = await P.IdentityReportActionProvider().execute(
+            {}, ActionContext(event="t")
+        )
 
         assert result.success is True, result.error
         assert artifacts.get(LR.ARTIFACT_SLUG) is not None, "the floor produced nothing"
         assert len(_report_rows(home)) == 1
-
-
-# ── the dedup key follows the cadence (the DISCOVERY) ───────────────────────────────
 
 
 class TestTheDedupKeyFollowsThePeriod:
@@ -677,10 +716,14 @@ class TestTheDedupKeyFollowsThePeriod:
         aug20 = "2026-08-20T12:00:00+00:00"
         aug27 = "2026-08-27T12:00:00+00:00"
         weekly = [
-            LR.delivery_dedup_key(LR.IdentityReport(window_days=LR.MIN_WINDOW_DAYS, generated_at=d))
+            LR.delivery_dedup_key(
+                LR.IdentityReport(window_days=LR.MIN_WINDOW_DAYS, generated_at=d)
+            )
             for d in (aug20, aug27)
         ]
-        assert weekly[0] != weekly[1], "two different weeks share one key — 1 of 4 would be told"
+        assert (
+            weekly[0] != weekly[1]
+        ), "two different weeks share one key — 1 of 4 would be told"
         monthly = [
             LR.delivery_dedup_key(
                 LR.IdentityReport(window_days=LR.DEFAULT_WINDOW_DAYS, generated_at=d)
@@ -692,8 +735,8 @@ class TestTheDedupKeyFollowsThePeriod:
     def test_the_iso_week_key_does_not_collide_across_a_new_year(self):
         """`%Y-W%V` is the trap: ISO week 1 of 2027 starts in December 2026, so a calendar year
         paired with an ISO week number gives two different weeks the same bucket."""
-        dec28_2026 = "2026-12-28T12:00:00+00:00"  # ISO 2026-W53
-        jan04_2027 = "2027-01-04T12:00:00+00:00"  # ISO 2027-W01
+        dec28_2026 = "2026-12-28T12:00:00+00:00"
+        jan04_2027 = "2027-01-04T12:00:00+00:00"
         keys = {
             LR.delivery_dedup_key(LR.IdentityReport(window_days=7, generated_at=d))
             for d in (dec28_2026, jan04_2027)
@@ -714,7 +757,9 @@ class TestTheDedupKeyFollowsThePeriod:
         same = await LR.deliver_identity_report(
             state, window_days=7, vs=vs, now=NOW + timedelta(days=1)
         )
-        assert same.inbox_item_id == first.inbox_item_id, "the same week minted a second row"
+        assert (
+            same.inbox_item_id == first.inbox_item_id
+        ), "the same week minted a second row"
         assert len(state._notification_log) == 1, "the same week pinged twice"
 
         later = await LR.deliver_identity_report(
@@ -727,9 +772,6 @@ class TestTheDedupKeyFollowsThePeriod:
         assert len(state._notification_log) == 2
 
 
-# ── the preview states the period the job will deliver ──────────────────────────────
-
-
 class TestThePreviewAgreesWithTheJob:
     @pytest.mark.asyncio
     async def test_the_get_route_derives_its_window_from_the_cadence_and_ships_it(
@@ -738,7 +780,7 @@ class TestThePreviewAgreesWithTheJob:
         """Hardcoding 30 made a weekly install's panel say "last 30 days" about a document its
         own cron writes over 7 — a config that changed the product without changing anything the
         user could see."""
-        from gideon.dashboard.handlers import learning as H
+        from gideon.interfaces.dashboard.handlers import learning as H
 
         state, _vs = _state(tmp_path)
         req = MagicMock()
@@ -757,7 +799,6 @@ class TestThePreviewAgreesWithTheJob:
         assert body["window_days"] == LR.DEFAULT_WINDOW_DAYS
         assert body["cadence"] == LR.CADENCE_MONTHLY
 
-        # An explicit `?days=` still WINS — the preview is still a preview.
         req.query = {"days": "365"}
         body = json.loads((await H.api_learning_identity_report(req)).body.decode())
         assert body["window_days"] == LR.MAX_WINDOW_DAYS

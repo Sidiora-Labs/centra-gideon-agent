@@ -17,10 +17,9 @@ from typing import cast
 
 import pytest
 
-from gideon.tool_providers.base import RiskLevel
-from gideon.workflows import autonomy as autonomy_mod
-from gideon.workflows import bundled_defs
-from gideon.workflows.autonomy import (
+from gideon.automation.workflows import autonomy as autonomy_mod
+from gideon.automation.workflows import bundled_defs
+from gideon.automation.workflows.autonomy import (
     MODE_ORDER,
     RISK_SIGNALS,
     SIGNALS_BY_NAME,
@@ -41,6 +40,7 @@ from gideon.workflows.autonomy import (
     type_attention,
     unattended_interrupts,
 )
+from gideon.integrations.tool_providers.base import RiskLevel
 
 TEMPLATES = sorted(bundled_defs.template_names())
 
@@ -50,16 +50,19 @@ def prompt_spec(text: str) -> dict:
 
 
 def action_spec(provider: str, **args) -> dict:
-    return {"root": {"kind": "action", "id": "a", "config": {"provider": provider, "with": args}}}
+    return {
+        "root": {
+            "kind": "action",
+            "id": "a",
+            "config": {"provider": provider, "with": args},
+        }
+    }
 
 
 def spec_of(name: str) -> dict:
     definition = bundled_defs.read_template(name)
     root = definition.root
     return {"root": root.to_dict() if hasattr(root, "to_dict") else root}
-
-
-# ── the registry is one place ──
 
 
 def test_the_registry_reuses_the_engines_risk_gradient():
@@ -70,7 +73,8 @@ def test_the_registry_reuses_the_engines_risk_gradient():
 
 def test_every_signal_states_a_CONSEQUENCE_not_just_a_name():
     """An informed-consent question built from a signal name is not informed. "destructive_op hit"
-    is not a decision a user can make; "this can delete data that cannot be recovered" is."""
+    is not a decision a user can make; "this can delete data that cannot be recovered" is.
+    """
     for signal in RISK_SIGNALS:
         assert signal.consequence
         assert signal.name not in signal.consequence
@@ -78,9 +82,6 @@ def test_every_signal_states_a_CONSEQUENCE_not_just_a_name():
 
 def test_signals_are_addressable_by_name():
     assert set(SIGNALS_BY_NAME) == {s.name for s in RISK_SIGNALS}
-
-
-# ── real dangers must fire ──
 
 
 @pytest.mark.parametrize(
@@ -104,7 +105,9 @@ def test_a_real_danger_fires(text, signal):
 def test_a_dangerous_provider_fires_on_its_own():
     """`bash` is dangerous by capability, whatever its command says — and a command assembled from a
     binding cannot be scanned at plan time at all."""
-    assert "destructive_op" in {h.signal for h in scan_risk(action_spec("bash", command="ls"))}
+    assert "destructive_op" in {
+        h.signal for h in scan_risk(action_spec("bash", command="ls"))
+    }
 
 
 def test_a_hit_names_the_node_and_the_evidence():
@@ -120,9 +123,6 @@ def test_the_scan_searches_action_ARGUMENTS():
     only prompts would miss every action node's actual payload."""
     hits = scan_risk(action_spec("run-script", script="drop table users"))
     assert any("drop table" in h.evidence for h in hits)
-
-
-# ── the false positives that were measured ──
 
 
 def test_the_truncate_binding_pipe_is_not_a_sql_truncate():
@@ -162,14 +162,15 @@ def test_no_shipped_template_trips_a_signal_by_accident(name):
     `bash`. A pattern hit on a shipped template is a false positive until proven otherwise, because
     these templates were reviewed and none of them deletes anything."""
     for hit in scan_risk(spec_of(name)):
-        assert "uses the" in hit.evidence, f"{name}: pattern hit {hit.signal} — {hit.evidence}"
-
-
-# ── attention typing ──
+        assert (
+            "uses the" in hit.evidence
+        ), f"{name}: pattern hit {hit.signal} — {hit.evidence}"
 
 
 def test_a_destructive_node_is_typed_HITL():
-    assert type_attention(action_spec("bash", command="rm -rf /x"))["a"] == Attention.HITL
+    assert (
+        type_attention(action_spec("bash", command="rm -rf /x"))["a"] == Attention.HITL
+    )
 
 
 def test_an_ordinary_stage_is_AFK():
@@ -185,7 +186,13 @@ def test_an_approval_gate_is_always_HITL():
 def test_an_authors_explicit_require_hitl_is_never_downgraded():
     """The author knows something the scanner does not, and a scanner that overrode them would make
     the declaration useless."""
-    spec = {"root": {"kind": "stage", "id": "a", "config": {"prompt": "x", "require_hitl": True}}}
+    spec = {
+        "root": {
+            "kind": "stage",
+            "id": "a",
+            "config": {"prompt": "x", "require_hitl": True},
+        }
+    }
     assert type_attention(spec)["a"] == Attention.HITL
 
 
@@ -200,9 +207,6 @@ def test_containers_are_not_typed():
         }
     }
     assert "r" not in type_attention(spec)
-
-
-# ── compiling to require_hitl ──
 
 
 def test_unattended_still_stops_at_HITL_nodes():
@@ -271,9 +275,6 @@ def test_publish_article_unattended_still_pauses_at_its_approval():
     assert compiled["approve"] is True
 
 
-# ── floors and the consent question ──
-
-
 def test_a_destructive_plan_cannot_be_offered_unattended():
     offer = offer_autonomy(action_spec("bash", command="rm -rf /x"))
     assert Mode.UNATTENDED not in offer.offered
@@ -287,7 +288,11 @@ def test_a_clean_plan_can_be_offered_unattended():
             "id": "r",
             "children": [
                 {"kind": "stage", "id": "a", "config": {"prompt": "summarize"}},
-                {"kind": "gate", "id": "g", "config": {"kind": "judge", "prompt": "ok?"}},
+                {
+                    "kind": "gate",
+                    "id": "g",
+                    "config": {"kind": "judge", "prompt": "ok?"},
+                },
             ],
         }
     }
@@ -298,13 +303,17 @@ def test_asking_for_more_than_the_ceiling_costs_exactly_one_question():
     """Silent honor and silent refusal are BOTH failures. Honoring "unattended" on a plan that
     deletes production is the obvious one; quietly downgrading it is the one that makes the user
     distrust the control and stop reading it."""
-    offer = offer_autonomy(action_spec("bash", command="rm -rf /x"), requested=Mode.UNATTENDED)
+    offer = offer_autonomy(
+        action_spec("bash", command="rm -rf /x"), requested=Mode.UNATTENDED
+    )
     assert offer.consent_question
     assert offer.consent_question.count("?") == 1
 
 
 def test_the_consent_question_names_the_consequence_not_the_signal():
-    offer = offer_autonomy(action_spec("bash", command="rm -rf /x"), requested=Mode.UNATTENDED)
+    offer = offer_autonomy(
+        action_spec("bash", command="rm -rf /x"), requested=Mode.UNATTENDED
+    )
     assert "cannot be recovered" in offer.consent_question
     assert "destructive_op" not in offer.consent_question
 
@@ -312,14 +321,18 @@ def test_the_consent_question_names_the_consequence_not_the_signal():
 def test_asking_for_no_more_than_allowed_asks_nothing():
     """A control that asks about everything trains the user to click through, which is the failure a
     consent question exists to prevent."""
-    offer = offer_autonomy(action_spec("bash", command="rm -rf /x"), requested=Mode.PER_STAGE)
+    offer = offer_autonomy(
+        action_spec("bash", command="rm -rf /x"), requested=Mode.PER_STAGE
+    )
     assert offer.consent_question == ""
 
 
 def test_a_template_floor_is_reported_when_it_exceeds_the_risk_ceiling():
     """The floor wins — it is the author's considered minimum and the scan is a heuristic — but the
     conflict is recorded rather than resolved silently."""
-    offer = offer_autonomy(action_spec("bash", command="rm -rf /x"), template_floor=Mode.UNATTENDED)
+    offer = offer_autonomy(
+        action_spec("bash", command="rm -rf /x"), template_floor=Mode.UNATTENDED
+    )
     assert any("floor" in reason for reason in offer.capped_by)
 
 
@@ -334,9 +347,6 @@ def test_the_capped_reason_names_the_node():
     assert any("`a`" in reason for reason in offer.capped_by)
 
 
-# ── the recommendation ──
-
-
 def test_a_verified_plan_defaults_toward_unattended():
     """If it goes wrong, something catches it."""
     spec = {
@@ -345,7 +355,11 @@ def test_a_verified_plan_defaults_toward_unattended():
             "id": "r",
             "children": [
                 {"kind": "stage", "id": "a", "config": {"prompt": "do it"}},
-                {"kind": "gate", "id": "g", "config": {"kind": "judge", "prompt": "ok?"}},
+                {
+                    "kind": "gate",
+                    "id": "g",
+                    "config": {"kind": "judge", "prompt": "ok?"},
+                },
             ],
         }
     }
@@ -353,7 +367,10 @@ def test_a_verified_plan_defaults_toward_unattended():
 
 
 def test_a_destructive_plan_never_defaults_to_unattended():
-    assert offer_autonomy(action_spec("bash", command="rm -rf /x")).recommended != Mode.UNATTENDED
+    assert (
+        offer_autonomy(action_spec("bash", command="rm -rf /x")).recommended
+        != Mode.UNATTENDED
+    )
 
 
 def test_earned_trust_raises_the_default_but_not_past_the_ceiling():
@@ -363,15 +380,14 @@ def test_earned_trust_raises_the_default_but_not_past_the_ceiling():
     assert offer_autonomy(risky, earned=Mode.UNATTENDED).recommended != Mode.UNATTENDED
 
 
-# ── the confirmation matrix ──
-
-
 @pytest.mark.parametrize("mode", MODE_ORDER)
 def test_no_mode_auto_approves_destruction(mode):
     """`unattended` means "do not ask me about the routine parts", and there is no reading of it
     that
     includes this."""
-    auto, reason = confirmation_policy(ConfirmationType.WRITE, RiskLevel.DESTRUCTIVE, mode)
+    auto, reason = confirmation_policy(
+        ConfirmationType.WRITE, RiskLevel.DESTRUCTIVE, mode
+    )
     assert auto is False
     assert "destructive" in reason
 
@@ -391,8 +407,14 @@ def test_per_stage_auto_approves_reads_only():
     """A read has nothing to approve, and asking about it is the noise that makes a user stop
     reading
     the questions that matter."""
-    assert confirmation_policy(ConfirmationType.READ, RiskLevel.SAFE, Mode.PER_STAGE)[0] is True
-    assert confirmation_policy(ConfirmationType.WRITE, RiskLevel.SAFE, Mode.PER_STAGE)[0] is False
+    assert (
+        confirmation_policy(ConfirmationType.READ, RiskLevel.SAFE, Mode.PER_STAGE)[0]
+        is True
+    )
+    assert (
+        confirmation_policy(ConfirmationType.WRITE, RiskLevel.SAFE, Mode.PER_STAGE)[0]
+        is False
+    )
 
 
 def test_a_confirmation_carries_a_resolvable_id():
@@ -439,9 +461,6 @@ def test_confirmations_are_computed_at_plan_time():
         }
     }
     assert len(build_confirmations(spec, Mode.PER_STAGE)) == 2
-
-
-# ── the two interrupts ──
 
 
 def test_only_two_interrupts_exist():
@@ -514,10 +533,9 @@ def test_a_non_unattended_mode_stops_regardless():
     assert should_interrupt(mode=Mode.PER_STAGE, confirmation=request)[0] is True
 
 
-# ── UNINFERABLE has a producer (WF2UNI-13) ──
-
-
-CREDENTIAL_SPEC = {"root": {"kind": "stage", "id": "a", "config": {"prompt": "rotate the api key"}}}
+CREDENTIAL_SPEC = {
+    "root": {"kind": "stage", "id": "a", "config": {"prompt": "rotate the api key"}}
+}
 
 
 def test_a_credential_node_carries_its_signal_name_through_the_confirmation():
@@ -569,13 +587,18 @@ def test_the_counterfactual_reports_the_stops_unattended_would_skip():
             "kind": "sequence",
             "id": "root",
             "children": [
-                {"kind": "action", "id": "w", "config": {"provider": "knowledge-persist"}},
+                {
+                    "kind": "action",
+                    "id": "w",
+                    "config": {"provider": "knowledge-persist"},
+                },
                 {"kind": "action", "id": "s", "config": {"provider": "send-message"}},
             ],
         }
     }
     verdicts = {
-        v["node_id"]: v for v in unattended_interrupts(build_confirmations(spec, Mode.PER_STAGE))
+        v["node_id"]: v
+        for v in unattended_interrupts(build_confirmations(spec, Mode.PER_STAGE))
     }
     assert verdicts["w"]["interrupts"] is False
     assert verdicts["s"]["interrupts"] is True
@@ -585,9 +608,11 @@ def test_the_counterfactual_reports_the_stops_unattended_would_skip():
 def test_the_plan_surface_carries_the_interrupt_verdicts():
     """The production reader. `_autonomy_surface` is the only consumer of this module in the run-up
     to approval; a verdict it does not emit is a verdict nobody sees."""
-    from gideon.mcp_workflows import _autonomy_surface
+    from gideon.integrations.mcp_workflows import _autonomy_surface
 
-    surface = _autonomy_surface({"inputs": {}, "root": CREDENTIAL_SPEC["root"], "metadata": {}})
+    surface = _autonomy_surface(
+        {"inputs": {}, "root": CREDENTIAL_SPEC["root"], "metadata": {}}
+    )
     assert surface["unattended_interrupts"] == [
         {
             "request_id": "cr-a",
@@ -614,12 +639,15 @@ class TestInterruptExhaustiveness:
             risk=RiskLevel.CAUTION,
             question="?",
         )
-        stop, _which, reason = should_interrupt(mode=Mode.UNATTENDED, confirmation=request)
+        stop, _which, reason = should_interrupt(
+            mode=Mode.UNATTENDED, confirmation=request
+        )
         assert isinstance(stop, bool) and reason
 
     def test_an_unhandled_confirmation_type_raises_rather_than_proceeding(self) -> None:
         """Proof the ratchet can fail. The dangerous default here is `return False` — a new type
-        that fell through the old tail would have been waved through an unattended run."""
+        that fell through the old tail would have been waved through an unattended run.
+        """
         request = ConfirmationRequest(
             request_id="c1",
             node_id="a",
@@ -645,7 +673,9 @@ class TestInterruptExhaustiveness:
 
     @staticmethod
     def _attributes_named_in(function: str, enum_name: str) -> set[str]:
-        source = Path(inspect.getsourcefile(autonomy_mod) or "").read_text(encoding="utf-8")
+        source = Path(inspect.getsourcefile(autonomy_mod) or "").read_text(
+            encoding="utf-8"
+        )
         fn = next(
             node
             for node in ast.parse(source).body
@@ -658,9 +688,6 @@ class TestInterruptExhaustiveness:
             and isinstance(node.value, ast.Name)
             and node.value.id == enum_name
         }
-
-
-# ── earned trust ──
 
 
 def test_trust_is_earned_over_several_clean_runs():
@@ -694,13 +721,12 @@ def test_the_last_choice_is_remembered():
     assert record.to_dict()["last_choice"] == "per_stage"
 
 
-# ── the combined commitment ──
-
-
 def test_the_commitment_stamps_all_three_choices_together():
     """Unattended-in-a-sandbox and unattended-on-the-real-filesystem are different grants,
     and a user who approved the first has not approved the second."""
-    stamped = commitment(mode=Mode.UNATTENDED, executor="claude", environment="worktree")
+    stamped = commitment(
+        mode=Mode.UNATTENDED, executor="claude", environment="worktree"
+    )
     assert stamped == {
         "mode": "unattended",
         "executor": "claude",
@@ -709,14 +735,11 @@ def test_the_commitment_stamps_all_three_choices_together():
     }
 
 
-# ── the wired plan tool ──
-
-
 def test_the_plan_tool_ships_the_autonomy_surface():
     bundled_defs.register_bundled_provider()
     import json
 
-    from gideon.mcp_workflows import _plan
+    from gideon.integrations.mcp_workflows import _plan
 
     out = _plan({"goal": "implement the retry logic with tests"})
     body = json.loads(out[out.find("{") :])
@@ -724,5 +747,4 @@ def test_the_plan_tool_ships_the_autonomy_surface():
     assert autonomy.get("offered")
     assert autonomy.get("recommended")
     assert "require_hitl" in body
-    # `code-project` uses `bash`, so unattended must not be on the table.
     assert "unattended" not in autonomy["offered"]

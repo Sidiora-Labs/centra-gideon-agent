@@ -7,9 +7,9 @@ servers), and the risk classifier that maps a tool name to a RiskLevel. Exposed 
 so the app imports the stable SDK path, not core internals.
 """
 
-from gideon.mcp_client import get_mcp_client_registry  # noqa: F401
-from gideon.mcp_core import get_current_session_key  # noqa: F401
-from gideon.task_modes import infer_risk_from_name  # noqa: F401
+from gideon.engine.task_modes import infer_risk_from_name  # noqa: F401
+from gideon.integrations.mcp_client import get_mcp_client_registry  # noqa: F401
+from gideon.integrations.mcp_core import get_current_session_key  # noqa: F401
 
 __all__ = [
     "get_current_session_key",

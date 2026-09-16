@@ -6,13 +6,13 @@ BOTH (inference + local-model management); a hypothetical remote one would subcl
 ``DiarizationProvider``. ``ensure_ffmpeg_in_path`` is shared for audio decoding.
 """
 
-from gideon.diarization.provider import (  # noqa: F401
+from gideon.integrations.diarization.provider import (
     DiarizationModel,
     DiarizationProvider,
     SpeakerTurn,
 )
-from gideon.local_models.provider import LocalModelProvider  # noqa: F401
-from gideon.transcribe import ensure_ffmpeg_in_path  # noqa: F401
+from gideon.integrations.local_models.provider import LocalModelProvider  # noqa: F401
+from gideon.integrations.transcribe import ensure_ffmpeg_in_path  # noqa: F401
 
 __all__ = [
     "DiarizationProvider",

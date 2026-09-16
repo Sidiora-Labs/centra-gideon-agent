@@ -26,15 +26,14 @@ from pathlib import Path
 
 import pytest
 
-from gideon import atomic_write as aw
-from gideon.durability import history_debounce as hd
-from gideon.durability import inventory as inv
-from gideon.durability import state_history as sh
+from gideon.core import atomic_write as aw
+from gideon.operations.durability import history_debounce as hd
+from gideon.operations.durability import inventory as inv
+from gideon.operations.durability import state_history as sh
 
-pytestmark = pytest.mark.skipif(not sh.git_available(), reason="git is required for time-travel")
-
-
-# ── fixtures ───────────────────────────────────────────────────────────────
+pytestmark = pytest.mark.skipif(
+    not sh.git_available(), reason="git is required for time-travel"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -46,8 +45,6 @@ def _isolate(tmp_path, monkeypatch):
     ws.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("GIDEON_HOME", str(home))
     monkeypatch.setenv("GIDEON_WORKSPACE", str(ws))
-    # A leftover subscriber from another test would make a "the seam fires" rail
-    # pass for the wrong reason.
     for hook in aw.post_write_hooks():
         aw.unregister_post_write_hook(hook)
     yield
@@ -84,9 +81,6 @@ def _git_out(root: sh.HistoryRoot, home: Path, *args: str) -> str:
     return proc.stdout
 
 
-# ── the atomic_write seam ──────────────────────────────────────────────────
-
-
 class TestPostWriteSeam:
     def test_atomic_write_notifies_registered_hooks(self, tmp_path):
         seen: list[Path] = []
@@ -112,7 +106,7 @@ class TestPostWriteSeam:
 
         def reentrant(path: Path) -> None:
             calls.append(path)
-            if len(calls) < 5:  # would recurse forever without the guard
+            if len(calls) < 5:
                 aw.atomic_write(tmp_path / "nested.json", "x")
 
         aw.register_post_write_hook(reentrant)
@@ -124,10 +118,10 @@ class TestPostWriteSeam:
             pass
 
         aw.register_post_write_hook(hook)
-        aw.register_post_write_hook(hook)  # double-register must subscribe once
+        aw.register_post_write_hook(hook)
         assert aw.post_write_hooks().count(hook) == 1
         aw.unregister_post_write_hook(hook)
-        aw.unregister_post_write_hook(hook)  # unknown hook is a no-op
+        aw.unregister_post_write_hook(hook)
         assert hook not in aw.post_write_hooks()
 
     def test_the_seam_is_wired_to_the_debouncer_by_install(self, home):
@@ -138,9 +132,6 @@ class TestPostWriteSeam:
         ), "install() must SUBSCRIBE — a debouncer nobody notifies is inert"
         hd.uninstall(flush=False)
         assert debouncer.notify not in aw.post_write_hooks()
-
-
-# ── roots and path classification ──────────────────────────────────────────
 
 
 class TestRoots:
@@ -169,15 +160,18 @@ class TestRoots:
             assert root is not None and root.id == "memory", rel
 
     def test_untracked_home_paths_route_nowhere(self, home):
-        for rel in ("security/credentials.json", ".local_secret", "knowledge/knowledge.db"):
+        for rel in (
+            "security/credentials.json",
+            ".local_secret",
+            "knowledge/knowledge.db",
+        ):
             assert sh.root_for_path(home / rel, home=home) is None, rel
 
     def test_history_storage_is_recognised_as_its_own(self, home):
-        assert sh.is_history_path(sh.history_dir(home) / "config.git" / "HEAD", home=home)
+        assert sh.is_history_path(
+            sh.history_dir(home) / "config.git" / "HEAD", home=home
+        )
         assert not sh.is_history_path(home / "config.json", home=home)
-
-
-# ── committing + timeline ──────────────────────────────────────────────────
 
 
 class TestCommit:
@@ -199,7 +193,9 @@ class TestCommit:
         (home / "config.json").write_text("{}")
         root = _root(home, ws, "config")
         assert sh.commit(root, home=home)
-        assert sh.commit(root, home=home) is None, "empty commits would make git log useless"
+        assert (
+            sh.commit(root, home=home) is None
+        ), "empty commits would make git log useless"
         assert sh.commit_count(root, home=home) == 1
 
     def test_timeline_carries_the_surface_and_the_unattended_filter(self, home, ws):
@@ -210,12 +206,13 @@ class TestCommit:
         with sh.writing_surface(sh.SURFACE_SCHEDULED):
             sh.commit(root, home=home)
 
-        # Vacuity floor: the repo must actually hold commits, or every assertion
-        # below is true of an empty timeline.
         assert sh.commit_count(root, home=home) == 2
 
         entries = sh.timeline(root, home=home)
-        assert [e["surface"] for e in entries] == [sh.SURFACE_SCHEDULED, sh.SURFACE_INTERACTIVE]
+        assert [e["surface"] for e in entries] == [
+            sh.SURFACE_SCHEDULED,
+            sh.SURFACE_INTERACTIVE,
+        ]
         slept = sh.timeline(root, home=home, unattended_only=True)
         assert len(slept) == 1 and slept[0]["surface"] == sh.SURFACE_SCHEDULED
         assert slept[0]["unattended"] is True
@@ -232,10 +229,9 @@ class TestCommit:
         (home / "projects" / "p1" / "runs.json").write_text("[]")
         root = _root(home, ws, "projects")
         assert sh.commit(root, home=home)
-        assert sorted(_git_out(root, home, "ls-files").split()) == ["p1/context/brief.md"]
-
-
-# ── secrets: BOTH halves of the contradiction ──────────────────────────────
+        assert sorted(_git_out(root, home, "ls-files").split()) == [
+            "p1/context/brief.md"
+        ]
 
 
 class TestSecrets:
@@ -260,13 +256,14 @@ class TestSecrets:
             (home / "skills" / "s.md").write_text("skill body")
             sh.commit(cfg, home=home)
             sh.commit(skills, home=home)
-        # Vacuity floor: without commits there is no object database to search.
         assert sh.commit_count(cfg, home=home) >= 1
         assert sh.commit_count(skills, home=home) >= 1
 
         for root in (cfg, skills):
             objects = _git_out(root, home, "rev-list", "--all", "--objects")
-            names = {line.split(" ", 1)[1] for line in objects.splitlines() if " " in line}
+            names = {
+                line.split(" ", 1)[1] for line in objects.splitlines() if " " in line
+            }
             assert not {
                 n for n in names if ".env" in n or "credentials" in n
             }, f"secret-shaped path reached the {root.id} object database: {names}"
@@ -298,11 +295,15 @@ class TestSecrets:
 
         sh.rollback(root, first, home=home)
 
-        assert (home / "config.json").read_text() == '{"v": 1}', "the rollback must have happened"
+        assert (
+            home / "config.json"
+        ).read_text() == '{"v": 1}', "the rollback must have happened"
         assert secret.is_file(), "the ignored secret was deleted by the rollback"
         assert secret.read_bytes() == before, "the ignored secret's bytes changed"
 
-    def test_credential_store_survives_a_rollback_that_removes_a_tracked_file(self, home, ws):
+    def test_credential_store_survives_a_rollback_that_removes_a_tracked_file(
+        self, home, ws
+    ):
         creds = home / "security" / "credentials.json"
         creds.parent.mkdir(parents=True)
         creds.write_text("SUPER-SECRET")
@@ -315,11 +316,10 @@ class TestSecrets:
 
         sh.rollback(root, first, home=home)
 
-        assert not (home / "entity_settings" / "new.json").exists(), "tracked add must be undone"
+        assert not (
+            home / "entity_settings" / "new.json"
+        ).exists(), "tracked add must be undone"
         assert creds.read_text() == "SUPER-SECRET"
-
-
-# ── rollback vs revert ─────────────────────────────────────────────────────
 
 
 class TestRollback:
@@ -334,8 +334,6 @@ class TestRollback:
 
         assert result["prior_head"] == second
         assert result["prior_ref"].startswith(sh.REF_PREFIX)
-        # The point of the ref: the rolled-away commit stays LISTABLE, so forward
-        # travel is possible instead of the commit being garbage.
         listed = _git_out(root, home, "log", "--format=%H", result["prior_ref"]).split()
         assert second in listed
         refs = sh.forward_refs(root, home=home)
@@ -348,7 +346,7 @@ class TestRollback:
         with pytest.raises(sh.HistoryError):
             sh.rollback(root, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", home=home)
         with pytest.raises(sh.HistoryError):
-            sh.rollback(root, "HEAD~1", home=home)  # not a bare id: refused, not resolved
+            sh.rollback(root, "HEAD~1", home=home)
 
     def test_git_dir_outside_the_history_dir_is_refused(self, home, ws, tmp_path):
         """The guard that keeps `reset --hard` off anything that is not ours."""
@@ -367,15 +365,21 @@ class TestRevert:
         sh.commit(root, home=home)
         (home / "entity_settings" / "bad.json").write_text("bad")
         bad = sh.commit(root, home=home)
-        (home / "config.json").write_text("cfg-v2")  # a LATER, unrelated edit
+        (home / "config.json").write_text("cfg-v2")
         sh.commit(root, home=home)
         assert sh.commit_count(root, home=home) == 3
 
         sh.revert(root, bad, home=home)
 
-        assert not (home / "entity_settings" / "bad.json").exists(), "the bad add must be undone"
-        assert (home / "config.json").read_text() == "cfg-v2", "the later edit must survive"
-        assert sh.commit_count(root, home=home) == 4, "a revert ADDS a commit, it does not rewrite"
+        assert not (
+            home / "entity_settings" / "bad.json"
+        ).exists(), "the bad add must be undone"
+        assert (
+            home / "config.json"
+        ).read_text() == "cfg-v2", "the later edit must survive"
+        assert (
+            sh.commit_count(root, home=home) == 4
+        ), "a revert ADDS a commit, it does not rewrite"
 
     def test_overlap_fails_loudly_naming_the_blocking_file(self, home, ws):
         root = _root(home, ws, "config")
@@ -391,7 +395,6 @@ class TestRevert:
 
         assert exc.value.files == ["config.json"]
         assert "config.json" in str(exc.value)
-        # Aborted cleanly: the work tree and HEAD are exactly as they were.
         assert (home / "config.json").read_text() == "line-3\n"
         assert _git_out(root, home, "rev-parse", "HEAD").strip() == head
         assert _git_out(root, home, "status", "--porcelain").strip() == ""
@@ -415,7 +418,6 @@ class TestPreview:
         assert paths == ["config.json", "entity_settings/e.json"]
         cfg = next(f for f in prev["files"] if f["path"] == "config.json")
         assert cfg["rendered"] is True and "-v2" in cfg["diff"] and "+v1" in cfg["diff"]
-        # A preview must not touch anything.
         assert (home / "config.json").read_text() == "v2\n"
 
     def test_revert_preview_shows_the_inverse_patch(self, home, ws):
@@ -448,9 +450,6 @@ class TestPreview:
         assert entry["bytes"] > 64
 
 
-# ── the adaptive debounce ──────────────────────────────────────────────────
-
-
 class FakeClock:
     """A clock the test advances explicitly. No sleeping anywhere in these rails."""
 
@@ -468,7 +467,9 @@ class TestDebounce:
     def test_the_delay_ramps_from_ten_seconds_to_zero(self):
         assert hd.delay_for_writes(1) == pytest.approx(10.0)
         ramp = [hd.delay_for_writes(n) for n in range(1, hd.SUSTAINED_WRITES + 2)]
-        assert ramp == sorted(ramp, reverse=True), "sustained writing must TIGHTEN the delay"
+        assert ramp == sorted(
+            ramp, reverse=True
+        ), "sustained writing must TIGHTEN the delay"
         assert ramp[-1] == 0.0, "the ramp must actually reach 0, not merely approach it"
 
     def test_a_burst_of_writes_collapses_into_one_commit(self, home, ws):
@@ -487,13 +488,13 @@ class TestDebounce:
             (home / "config.json").write_text(f"v{i}")
             assert deb.notify(home / "config.json") is True
             clock.advance(0.1)
-            # Nothing may fire while the window is open.
             assert deb.run_pending() == []
 
         assert deb.notifications == 5
-        assert commits == [], "five writes inside the window must not produce five commits"
+        assert (
+            commits == []
+        ), "five writes inside the window must not produce five commits"
 
-        # The 5th write's delay is 0.625s; cross it and exactly one commit lands.
         clock.advance(1.0)
         results = deb.run_pending()
         assert len(results) == 1 and results[0]["writes"] == 5
@@ -514,7 +515,6 @@ class TestDebounce:
         for i in range(3):
             (home / "config.json").write_text(f"v{i}")
             deb.notify(home / "config.json")
-            # Simulate "no debounce": force everything due on every pass.
             passes += len(deb.run_pending(force=True))
             clock.advance(0.1)
         assert passes == 3, "without debouncing each write commits separately"
@@ -522,12 +522,16 @@ class TestDebounce:
     def test_writes_after_the_burst_window_start_a_fresh_ramp(self, home, ws):
         _root(home, ws, "config")
         clock = FakeClock()
-        deb = hd.HistoryDebouncer(home=home, clock=clock, committer=lambda *a, **k: None)
+        deb = hd.HistoryDebouncer(
+            home=home, clock=clock, committer=lambda *a, **k: None
+        )
         (home / "config.json").write_text("a")
         deb.notify(home / "config.json")
         assert deb.pending_delay("config") == pytest.approx(hd.BASE_DELAY_SECS)
         deb.notify(home / "config.json")
-        assert deb.pending_delay("config") == pytest.approx(hd.BASE_DELAY_SECS * hd.DECAY)
+        assert deb.pending_delay("config") == pytest.approx(
+            hd.BASE_DELAY_SECS * hd.DECAY
+        )
 
         clock.advance(hd.BURST_WINDOW_SECS + 1)
         deb.run_pending()
@@ -579,11 +583,12 @@ class TestDebounce:
         first.start()
         assert entered.wait(timeout=5), "the first commit never started"
 
-        # Second write arrives while the first commit holds the root.
         deb.notify(home / "config.json")
         clock.advance(hd.BASE_DELAY_SECS + 1)
         second_results: list[dict] = []
-        second = threading.Thread(target=lambda: second_results.extend(deb.run_pending()))
+        second = threading.Thread(
+            target=lambda: second_results.extend(deb.run_pending())
+        )
         second.start()
         second.join(timeout=5)
 
@@ -597,7 +602,6 @@ class TestDebounce:
         assert peak == 1, f"two commits ran concurrently on one root (peak={peak})"
         assert attempts == 1
 
-        # The skipped work is re-armed, not lost.
         assert "config" in deb.pending_roots()
 
     def test_flush_commits_everything_pending(self, home, ws):
@@ -610,7 +614,9 @@ class TestDebounce:
         deb.flush()
         assert sh.commit_count(root, home=home) == 1
 
-    def test_a_burst_containing_an_unattended_write_is_attributed_unattended(self, home, ws):
+    def test_a_burst_containing_an_unattended_write_is_attributed_unattended(
+        self, home, ws
+    ):
         root = _root(home, ws, "config")
         clock = FakeClock()
         deb = hd.HistoryDebouncer(home=home, clock=clock)
@@ -633,14 +639,13 @@ class TestDebounce:
         aw.atomic_write(home / "config.json", '{"through": "the seam"}')
         aw.atomic_write(home / "security" / "credentials.json", "SUPER-SECRET")
 
-        assert deb.pending_roots() == ("config",), "only the tracked write may arm a commit"
+        assert deb.pending_roots() == (
+            "config",
+        ), "only the tracked write may arm a commit"
         clock.advance(hd.BASE_DELAY_SECS + 1)
         deb.run_pending()
         assert sh.commit_count(root, home=home) == 1
         assert sorted(_git_out(root, home, "ls-files").split()) == ["config.json"]
-
-
-# ── hourly memory commit (§3's deferred piece) ─────────────────────────────
 
 
 class TestHourlyMemoryCommit:
@@ -648,16 +653,20 @@ class TestHourlyMemoryCommit:
         (ws / "memory").mkdir(parents=True)
         (ws / "memory" / "MEMORY.md").write_text("# what I learned\n")
         results = sh.commit_memory_roots(home=home)
-        assert [r["root"] for r in results] == ["memory"], "only memory roots run hourly"
+        assert [r["root"] for r in results] == [
+            "memory"
+        ], "only memory roots run hourly"
         assert results[0]["changed"] is True
 
         root = next(r for r in sh.roots(home=home, workspace=ws) if r.id == "memory")
-        assert sh.commit_count(root, home=home) == 1  # vacuity floor
+        assert sh.commit_count(root, home=home) == 1
         entry = sh.timeline(root, home=home)[0]
         assert entry["surface"] == sh.SURFACE_SCHEDULED and entry["unattended"] is True
 
-    def test_the_service_job_runs_it_and_is_gated_on_the_config_flag(self, home, ws, monkeypatch):
-        from gideon.durability import service
+    def test_the_service_job_runs_it_and_is_gated_on_the_config_flag(
+        self, home, ws, monkeypatch
+    ):
+        from gideon.operations.durability import service
 
         (ws / "memory").mkdir(parents=True)
         (ws / "memory" / "MEMORY.md").write_text("hourly\n")
@@ -676,15 +685,18 @@ class TestHourlyMemoryCommit:
     def test_run_due_jobs_includes_the_history_job(self, home, ws, monkeypatch):
         import time
 
-        from gideon.durability import service
+        from gideon.operations.durability import service
 
         (ws / "memory").mkdir(parents=True)
         (ws / "memory" / "MEMORY.md").write_text("x\n")
-        # Stamp the OTHER jobs as just-run so this rail exercises the history leg
-        # alone; without this the tick also takes a snapshot and a restore drill.
         now = time.time()
         service.save_state(
-            {"last_export": now, "last_snapshot": now, "last_drill": now, "last_sync": now}
+            {
+                "last_export": now,
+                "last_snapshot": now,
+                "last_drill": now,
+                "last_sync": now,
+            }
         )
 
         results = service.run_due_jobs(force="history", now=now)
@@ -693,10 +705,7 @@ class TestHourlyMemoryCommit:
         assert results[0].ok, results[0].detail
         assert float(service.load_state().get("last_history", 0)) == pytest.approx(now)
         root = next(r for r in sh.roots(home=home, workspace=ws) if r.id == "memory")
-        assert sh.commit_count(root, home=home) == 1  # vacuity floor
-
-
-# ── time-travel never syncs ────────────────────────────────────────────────
+        assert sh.commit_count(root, home=home) == 1
 
 
 class TestNeverSyncs:
@@ -710,9 +719,11 @@ class TestNeverSyncs:
         for entry in inv.backup_entries(include_derived=True):
             assert sh.HISTORY_DIR_NAME not in entry.path.split("/"), entry.id
 
-    def test_a_real_shard_export_carries_nothing_from_the_history(self, home, ws, tmp_path):
+    def test_a_real_shard_export_carries_nothing_from_the_history(
+        self, home, ws, tmp_path
+    ):
         """Drive the actual exporter over a home with a POPULATED history repo."""
-        from gideon.durability import shards
+        from gideon.operations.durability import shards
 
         (home / "config.json").write_text('{"v": 1}')
         (ws / "memory").mkdir(parents=True)
@@ -720,18 +731,20 @@ class TestNeverSyncs:
         root = _root(home, ws, "config")
         sh.commit(root, home=home)
         sh.commit_memory_roots(home=home)
-        # Vacuity floor: the history must actually exist, or "absent from the
-        # export" is true of nothing.
         assert sh.commit_count(root, home=home) >= 1
         history_files = list(sh.history_dir(home).rglob("*"))
         assert len(history_files) > 10, "the history repos must be populated"
 
         out = tmp_path / "shards"
         shards.export_shards(home, out)
-        produced = [p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file()]
+        produced = [
+            p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file()
+        ]
         assert produced, "vacuity floor: an export that produced nothing proves nothing"
         assert not [p for p in produced if sh.HISTORY_DIR_NAME in p.split("/")]
-        blob = "\n".join(p.read_text(errors="replace") for p in out.rglob("*") if p.is_file())
+        blob = "\n".join(
+            p.read_text(errors="replace") for p in out.rglob("*") if p.is_file()
+        )
         assert "state-history" not in blob
         assert ".git" not in blob
 
@@ -747,12 +760,9 @@ class TestNeverSyncs:
         assert audit.ignored >= 1
 
 
-# ── config round-trip ──────────────────────────────────────────────────────
-
-
 class TestConfig:
     def test_the_default_and_to_dict_agree(self):
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         assert AppConfig().durability.time_travel is True
         assert AppConfig().to_dict()["durability"]["time_travel"] is True
@@ -760,9 +770,11 @@ class TestConfig:
     def test_the_field_round_trips_through_load(self, home):
         import json
 
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
-        (home / "config.json").write_text(json.dumps({"durability": {"time_travel": False}}))
+        (home / "config.json").write_text(
+            json.dumps({"durability": {"time_travel": False}})
+        )
         loaded = AppConfig.load()
         assert loaded.durability.time_travel is False
         assert loaded.to_dict()["durability"]["time_travel"] is False
@@ -770,35 +782,38 @@ class TestConfig:
     def test_the_field_carries_ui_metadata(self):
         from dataclasses import fields
 
-        from gideon.config.loader import DurabilityConfig
+        from gideon.core.config.loader import DurabilityConfig
 
-        meta = next(f for f in fields(DurabilityConfig) if f.name == "time_travel").metadata
-        assert meta.get("label"), "a user-facing flag needs a label for the settings surface"
+        meta = next(
+            f for f in fields(DurabilityConfig) if f.name == "time_travel"
+        ).metadata
+        assert meta.get(
+            "label"
+        ), "a user-facing flag needs a label for the settings surface"
         assert meta.get("help")
 
     def test_it_is_in_the_patch_allowlist(self):
-        from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+        from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
         assert _EDITABLE_CONFIG["durability.time_travel"] == {"type": "bool"}
 
     def test_an_unreadable_value_fails_open(self, home):
         import json
 
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
-        (home / "config.json").write_text(json.dumps({"durability": {"time_travel": "nope"}}))
+        (home / "config.json").write_text(
+            json.dumps({"durability": {"time_travel": "nope"}})
+        )
         assert (
             AppConfig.load().durability.time_travel is True
         ), "history is fail-OPEN: a garbled config must not silently stop recording"
 
 
-# ── the routes ─────────────────────────────────────────────────────────────
-
-
 def _app(*, app_token: str = ""):
     from aiohttp import web
 
-    from gideon.dashboard.handlers import durability as mod
+    from gideon.interfaces.dashboard.handlers import durability as mod
 
     @web.middleware
     async def identity(request, handler):
@@ -811,7 +826,9 @@ def _app(*, app_token: str = ""):
     app.router.add_get(
         "/api/durability/history/{root}/timeline", mod.api_durability_history_timeline
     )
-    app.router.add_post("/api/durability/history/{root}/{op}", mod.api_durability_history_operate)
+    app.router.add_post(
+        "/api/durability/history/{root}/{op}", mod.api_durability_history_operate
+    )
     return app
 
 
@@ -829,13 +846,13 @@ def seeded(home, ws, monkeypatch):
     through `service.active_home()`, and a route test that only sets the env var
     would still let a fallback read the developer's real home.
     """
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: home)
     root = _root(home, ws, "config")
     (home / "config.json").write_text("route-v1\n")
     first = sh.commit(root, home=home)
     (home / "config.json").write_text("route-v2\n")
     second = sh.commit(root, home=home)
-    assert sh.commit_count(root, home=home) == 2  # vacuity floor for every route rail
+    assert sh.commit_count(root, home=home) == 2
     return root, first, second
 
 
@@ -863,7 +880,9 @@ class TestHistoryRoutes:
             assert resp.status == 200 and body["commits"] == 3
             assert len(body["entries"]) == 3
 
-            resp = await client.get("/api/durability/history/config/timeline?unattended=1")
+            resp = await client.get(
+                "/api/durability/history/config/timeline?unattended=1"
+            )
             filtered = await resp.json()
         assert len(filtered["entries"]) == 1
         assert filtered["entries"][0]["surface"] == sh.SURFACE_SCHEDULED
@@ -881,29 +900,43 @@ class TestHistoryRoutes:
     ):
         _root_, first, _second = seeded
         async with _client() as client:
-            resp = await client.post("/api/durability/history/config/rollback", json={"sha": first})
+            resp = await client.post(
+                "/api/durability/history/config/rollback", json={"sha": first}
+            )
             assert resp.status == 200
             body = await resp.json()
         assert body["confirmed"] is False
         assert body["expected_head"]
         assert [f["path"] for f in body["preview"]["files"]] == ["config.json"]
-        assert (home / "config.json").read_text() == "route-v2\n", "a preview must not act"
+        assert (
+            home / "config.json"
+        ).read_text() == "route-v2\n", "a preview must not act"
 
     @pytest.mark.asyncio
-    async def test_confirming_with_the_previewed_head_performs_the_rollback(self, seeded, home):
+    async def test_confirming_with_the_previewed_head_performs_the_rollback(
+        self, seeded, home
+    ):
         _root_, first, second = seeded
         async with _client() as client:
             preview = await (
-                await client.post("/api/durability/history/config/rollback", json={"sha": first})
+                await client.post(
+                    "/api/durability/history/config/rollback", json={"sha": first}
+                )
             ).json()
             resp = await client.post(
                 "/api/durability/history/config/rollback",
-                json={"sha": first, "confirm": True, "expected_head": preview["expected_head"]},
+                json={
+                    "sha": first,
+                    "confirm": True,
+                    "expected_head": preview["expected_head"],
+                },
             )
             assert resp.status == 200, await resp.text()
             body = await resp.json()
         assert body["ok"] is True and body["prior_head"] == second
-        assert body["reload_required"] is True, "a config rollback needs a process reload"
+        assert (
+            body["reload_required"] is True
+        ), "a config rollback needs a process reload"
         assert (home / "config.json").read_text() == "route-v1\n"
 
     @pytest.mark.asyncio
@@ -912,25 +945,33 @@ class TestHistoryRoutes:
         root, first, _second = seeded
         async with _client() as client:
             preview = await (
-                await client.post("/api/durability/history/config/rollback", json={"sha": first})
+                await client.post(
+                    "/api/durability/history/config/rollback", json={"sha": first}
+                )
             ).json()
-            # The history moves underneath the preview.
             (home / "config.json").write_text("route-v3\n")
             sh.commit(root, home=home)
             resp = await client.post(
                 "/api/durability/history/config/rollback",
-                json={"sha": first, "confirm": True, "expected_head": preview["expected_head"]},
+                json={
+                    "sha": first,
+                    "confirm": True,
+                    "expected_head": preview["expected_head"],
+                },
             )
             assert resp.status == 409
             assert (await resp.json())["error"]["code"] == "preview_stale"
-        assert (home / "config.json").read_text() == "route-v3\n", "the refused call must not act"
+        assert (
+            home / "config.json"
+        ).read_text() == "route-v3\n", "the refused call must not act"
 
     @pytest.mark.asyncio
     async def test_confirming_without_an_expected_head_is_refused(self, seeded, home):
         _root_, first, _second = seeded
         async with _client() as client:
             resp = await client.post(
-                "/api/durability/history/config/rollback", json={"sha": first, "confirm": True}
+                "/api/durability/history/config/rollback",
+                json={"sha": first, "confirm": True},
             )
             assert resp.status == 409
         assert (home / "config.json").read_text() == "route-v2\n"
@@ -943,11 +984,17 @@ class TestHistoryRoutes:
         sh.commit(root, home=home)
         async with _client() as client:
             preview = await (
-                await client.post("/api/durability/history/config/revert", json={"sha": second})
+                await client.post(
+                    "/api/durability/history/config/revert", json={"sha": second}
+                )
             ).json()
             resp = await client.post(
                 "/api/durability/history/config/revert",
-                json={"sha": second, "confirm": True, "expected_head": preview["expected_head"]},
+                json={
+                    "sha": second,
+                    "confirm": True,
+                    "expected_head": preview["expected_head"],
+                },
             )
             assert resp.status == 409
             body = await resp.json()
@@ -964,7 +1011,9 @@ class TestHistoryRoutes:
             assert resp.status == 404
             assert (await resp.json())["error"]["code"] == "unknown_commit"
 
-            resp = await client.post("/api/durability/history/config/obliterate", json={"sha": "a"})
+            resp = await client.post(
+                "/api/durability/history/config/obliterate", json={"sha": "a"}
+            )
             assert resp.status == 404
             assert (await resp.json())["error"]["code"] == "unknown_operation"
 

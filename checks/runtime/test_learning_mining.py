@@ -8,7 +8,7 @@ argument it needs is never computed.
 What is pinned here, in the order the defects would reappear:
 
 * the producer returns REAL ``(run_id, cosine, age_days)`` triples from the real
-  ``VectorMemoryStore``, and ``similarity_verdict`` reaches its AUTO_FILE branch on them — the
+  ``SemanticArchive``, and ``similarity_verdict`` reaches its AUTO_FILE branch on them — the
   branch that could not fire before;
 * a registry MISS is a typed, recorded reason and never an empty list read as "no repetition" —
   every miss variant, because a blind detector that looks calibrated is the specific harm;
@@ -30,15 +30,15 @@ from pathlib import Path
 
 import pytest
 
-from gideon.learning import mining
-from gideon.learning import proposals as P
-from gideon.learning import run_end
-from gideon.learning.detectors import Action, similarity_verdict
-from gideon.memory_service import MemoryService
-from gideon.vector_memory import VectorMemoryStore
-from gideon.workflows import journal as journal_mod
-from gideon.workflows import store as store_mod
-from gideon.workflows.models import InstanceState, RunStatus, WorkflowRun
+from gideon.automation.workflows import journal as journal_mod
+from gideon.automation.workflows import store as store_mod
+from gideon.automation.workflows.models import InstanceState, RunStatus, WorkflowRun
+from gideon.cognition.learning import mining
+from gideon.cognition.learning import proposals as P
+from gideon.cognition.learning import run_end
+from gideon.cognition.learning.detectors import Action, similarity_verdict
+from gideon.cognition.memory_service import MemoryService
+from gideon.cognition.vector_memory import SemanticArchive
 
 
 @pytest.fixture
@@ -56,11 +56,11 @@ def home(tmp_path, monkeypatch):
     code under test. Measured here: two tests each recording one miss read a count of 2.
     """
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     monkeypatch.setattr(P, "_surface_in_inbox", lambda prop: None)
     monkeypatch.setattr(P, "_resolve_inbox_item", lambda pid, status: None)
 
-    from gideon.learning import staging as staging_mod
+    from gideon.cognition.learning import staging as staging_mod
 
     monkeypatch.setattr(staging_mod, "_INSTANCE", None)
     yield tmp_path
@@ -97,7 +97,7 @@ def _fake_embed(text: str) -> list[float]:
 @pytest.fixture
 def svc():
     """A REAL MemoryService with a real store and a real (fake-model) embedder wired."""
-    store = VectorMemoryStore(db_path=Path(tempfile.mkdtemp()) / "m.db")
+    store = SemanticArchive(db_path=Path(tempfile.mkdtemp()) / "m.db")
     store.init()
     store.embed_fn = _fake_embed
     return MemoryService.over_vector_store(store)
@@ -106,12 +106,14 @@ def svc():
 @pytest.fixture
 def svc_no_embedder():
     """A real store with NO embedder — the degraded box the miss reasons exist for."""
-    store = VectorMemoryStore(db_path=Path(tempfile.mkdtemp()) / "m.db")
+    store = SemanticArchive(db_path=Path(tempfile.mkdtemp()) / "m.db")
     store.init()
     return MemoryService.over_vector_store(store)
 
 
-def _run(name: str = "daily-report", intent: str = "", status: RunStatus = RunStatus.COMPLETE):
+def _run(
+    name: str = "daily-report", intent: str = "", status: RunStatus = RunStatus.COMPLETE
+):
     run = store_mod.create(WorkflowRun(id="", workflow_name=name, intent=intent))
     run.status = status
     return store_mod.save(run)
@@ -125,9 +127,6 @@ def _complete(run, node: str) -> None:
         cache_key="",
         state=InstanceState.DONE,
     )
-
-
-# ── clause A: the producer exists and returns real triples ──
 
 
 def test_the_producer_returns_the_triples_the_verdict_consumes(svc, home):
@@ -150,7 +149,9 @@ def test_the_producer_returns_the_triples_the_verdict_consumes(svc, home):
 
     found = mining.similar_run_matches(current, svc, journal=journal_mod)
     assert not found.blind, f"producer went blind: {found.miss}"
-    assert found.matches, "the producer returned no triples — the detector is still starved"
+    assert (
+        found.matches
+    ), "the producer returned no triples — the detector is still starved"
     for run_id, cosine, age_days in found.matches:
         assert isinstance(run_id, str) and run_id
         assert 0.0 <= float(cosine) <= 1.0001
@@ -203,9 +204,6 @@ def test_unrelated_plans_do_not_clear_the_threshold(svc, home):
     assert verdict.action == Action.SKIP.value
 
 
-# ── clause A: a registry miss is TYPED, never a silent empty list ──
-
-
 @pytest.mark.parametrize(
     "miss",
     [
@@ -225,7 +223,8 @@ def test_every_miss_reason_is_recorded_to_the_ledger(miss, home):
 
 def test_no_embedder_is_a_named_miss_not_an_empty_list(svc_no_embedder, home):
     """The exact harm: a store with no embedder degrades vector search to FTS, whose scores are NOT
-    cosines. Reporting that as "no similar plans" makes a blind detector look calibrated."""
+    cosines. Reporting that as "no similar plans" makes a blind detector look calibrated.
+    """
     run = _run()
     for node in ("fetch", "transform"):
         _complete(run, node)
@@ -279,9 +278,6 @@ def test_a_blind_producer_never_looks_like_a_calibrated_one(svc_no_embedder, hom
     assert blind.blind is True and blind.miss is not None
 
 
-# ── clause B: intent inversion ──
-
-
 def test_inversion_synthesizes_a_user_register_intent_from_execution(home):
     """plan → intent, the INVERSE direction. It must exist even with no declared intent, which is
     exactly the run that contributes nothing to an intent-keyed index otherwise."""
@@ -290,13 +286,14 @@ def test_inversion_synthesizes_a_user_register_intent_from_execution(home):
         _complete(run, node)
     inv = mining.invert_intent(run, journal=journal_mod)
     assert inv.synthesized, "a run with no declared intent produced no synthesized one"
-    # De-slugged so it shares a vocabulary with prose intents rather than embedding opaque tokens.
     assert "fetch data" in inv.synthesized
     assert "_" not in inv.synthesized
 
 
 def test_inversion_reports_drift_when_the_run_did_something_else(home):
-    run = _run(name="cleanup", intent="Reconcile the quarterly invoices with the ledger")
+    run = _run(
+        name="cleanup", intent="Reconcile the quarterly invoices with the ledger"
+    )
     for node in ("purge_tmp", "archive_logs"):
         _complete(run, node)
     inv = mining.invert_intent(run, journal=journal_mod)
@@ -315,15 +312,13 @@ def test_a_run_that_did_what_was_asked_does_not_invert(home):
 
 def test_the_synthesized_intent_reaches_the_embedded_spec(home):
     """Clause B feeds clause A: the plan's design is synthesize → embed → cluster. If the
-    synthesized sentence never reaches `spec_text`, the inversion is a value nobody reads."""
+    synthesized sentence never reaches `spec_text`, the inversion is a value nobody reads.
+    """
     run = _run(name="daily-report", intent="")
     for node in ("fetch_data", "publish_report"):
         _complete(run, node)
     inv = mining.invert_intent(run, journal=journal_mod)
     assert inv.synthesized in mining.spec_text(run, journal=journal_mod)
-
-
-# ── clause C: positive-path trace mining ──
 
 
 def test_a_recurring_successful_path_is_mined_and_filed(home):
@@ -341,7 +336,9 @@ def test_a_recurring_successful_path_is_mined_and_filed(home):
     pid = mining.file_positive_trace(traces[0])
     assert pid, "the mined trace filed no draft"
     pending = P.list_pending(kind=P.Kind.TEMPLATE.value)
-    assert any(p.id == pid for p in pending), "the draft is not PENDING — never a self-install"
+    assert any(
+        p.id == pid for p in pending
+    ), "the draft is not PENDING — never a self-install"
 
 
 def test_a_failed_run_contributes_no_positive_trace(home):
@@ -383,9 +380,6 @@ def test_the_trace_signature_collapses_the_same_step_across_runs():
     assert mining.trace_signature(["Fetch#1", "fetch"]) == mining.trace_signature(
         ["fetch", "Fetch"]
     )
-
-
-# ── the WIRING: a test is not a consumer, so pin the real production path ──
 
 
 def test_run_end_capture_drives_the_producers(svc, home):
@@ -460,14 +454,17 @@ def test_capture_files_nothing_when_the_detector_is_blind(svc_no_embedder, home)
     report = run_end.capture(run, svc_no_embedder, journal=journal_mod)
     assert report["mined"] == 0, report
     assert not [
-        p for p in P.list_pending(kind=P.Kind.TEMPLATE.value) if "Repeated plan shape" in p.title
+        p
+        for p in P.list_pending(kind=P.Kind.TEMPLATE.value)
+        if "Repeated plan shape" in p.title
     ]
     assert mining.miss_counts().get(mining.Miss.NO_EMBEDDER.value)
 
 
 def test_capture_still_mines_on_a_run_with_no_failures(svc, home):
     """The positive half must not be gated behind a failure: a clean run is the ONLY kind that can
-    carry a successful trace, and the old early-return on `not events` would have skipped it."""
+    carry a successful trace, and the old early-return on `not events` would have skipped it.
+    """
     for _ in range(3):
         prior = _run(name="clean")
         for node in ("fetch", "transform", "publish"):

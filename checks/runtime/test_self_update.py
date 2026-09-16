@@ -15,8 +15,8 @@ from __future__ import annotations
 import aiohttp
 import pytest
 
-from gideon import self_update as uk
-from gideon.self_update import detect_install_kind
+from gideon.operations import self_update as uk
+from gideon.operations.self_update import detect_install_kind
 
 
 @pytest.fixture(autouse=True)
@@ -26,7 +26,6 @@ def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_container_env_wins(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    # Even with a git tree present, the container env marker takes precedence.
     monkeypatch.setenv("GIDEON_INSTALL_KIND", "container")
     (tmp_path / ".git").mkdir()
     monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
@@ -44,27 +43,27 @@ def test_env_kind_is_case_insensitive(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_unknown_env_kind_falls_through(monkeypatch: pytest.MonkeyPatch) -> None:
-    # A junk value is ignored — resolution falls through to git/pip probing.
     monkeypatch.setenv("GIDEON_INSTALL_KIND", "banana")
     assert detect_install_kind() == "pip"
 
 
-def test_git_when_project_dir_has_dot_git(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+def test_git_when_project_dir_has_dot_git(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
     (tmp_path / ".git").mkdir()
     monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
     assert detect_install_kind() == "git"
 
 
 def test_git_worktree_dot_git_file(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    # In a git worktree/submodule, .git is a FILE pointing at the real gitdir.
     (tmp_path / ".git").write_text("gitdir: /somewhere/.git/worktrees/x\n")
     monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
     assert detect_install_kind() == "git"
 
 
-def test_git_when_dot_git_in_monorepo_parent(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    # Monorepo layout: the project dir is nested one level under the repo root
-    # (which carries .git). The parent probe catches it.
+def test_git_when_dot_git_in_monorepo_parent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
     (tmp_path / ".git").mkdir()
     nested = tmp_path / "Gideon"
     nested.mkdir()
@@ -73,22 +72,16 @@ def test_git_when_dot_git_in_monorepo_parent(monkeypatch: pytest.MonkeyPatch, tm
 
 
 def test_pip_when_no_env_no_git(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    # A project dir with NO .git (e.g. an unpacked source dir) is not "git".
     monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
     assert detect_install_kind() == "pip"
 
 
 def test_pip_when_nothing_set() -> None:
-    # No env markers, no project dir -> a plain wheel/uv/pipx install.
     assert detect_install_kind() == "pip"
 
 
 def test_install_kind_literal_values() -> None:
-    # Guard the contract's value set (C1 / C2 wire shape).
     assert uk._ENV_KINDS == {"container", "desktop"}
-
-
-# ── T4.2: tag-driven check + C2 payload ─────────────────────────────────────
 
 
 def test_normalize_version_strips_leading_v() -> None:
@@ -129,7 +122,7 @@ async def test_build_status_update_available(monkeypatch) -> None:
     assert status["latest"] == "0.2.0"
     assert status["update_available"] is True
     assert status["apply_method"] == "instructions"
-    assert status["instructions"]  # container carries pull+up commands
+    assert status["instructions"]
     assert status["commits_behind"] is None
 
 
@@ -157,13 +150,14 @@ async def test_build_status_offline_no_tag(monkeypatch) -> None:
     monkeypatch.delenv("GIDEON_INSTALL_KIND", raising=False)
     monkeypatch.delenv("GIDEON_PROJECT_DIR", raising=False)
     status = await uk.build_update_status("0.1.0")
-    # No latest known -> never claims an update is available (offline-tolerant).
     assert status["latest"] == ""
     assert status["update_available"] is False
 
 
 @pytest.mark.asyncio
-async def test_fetch_latest_release_offline_returns_cache(monkeypatch, tmp_path) -> None:
+async def test_fetch_latest_release_offline_returns_cache(
+    monkeypatch, tmp_path
+) -> None:
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     uk.write_release_cache({"tag": "v0.1.2", "etag": 'W/"x"'})
 
@@ -173,18 +167,7 @@ async def test_fetch_latest_release_offline_returns_cache(monkeypatch, tmp_path)
 
     monkeypatch.setattr(aiohttp, "ClientSession", _BoomSession)
     got = await uk.fetch_latest_release()
-    assert got["tag"] == "v0.1.2"  # degraded to the cached view, no raise
-
-
-# ── The privacy-claim call site: auto_update gates the APPLY, not the CHECK ───
-#
-# `docs/architecture/network-egress-hosts.txt` says api.github.com is the product's one
-# unprompted destination and that nothing turns the check off. That sentence used to cite a
-# config field `updates.check_enabled` which does not exist anywhere in src/ — a doc claim
-# with no code behind it, and the sort of claim a public comparison/privacy page would copy
-# verbatim (DISCOVERABILITY-LAUNCH `DL-7`). These two tests pin the real behaviour at the
-# call site so the doc cannot drift back: the check runs first and unconditionally, and
-# `auto_update` decides only whether the apply follows.
+    assert got["tag"] == "v0.1.2"
 
 
 def _orchestrator_stub(applied: list[str]):
@@ -200,9 +183,9 @@ def _orchestrator_stub(applied: list[str]):
 
 
 async def _drive_check_for_updates(monkeypatch, *, auto_update: bool):
-    """Run `GatewayOrchestrator._check_for_updates` against stubs, recording call order."""
-    from gideon.dashboard import handlers as dash_handlers
-    from gideon.gateway import GatewayOrchestrator
+    """Run `RuntimeCoordinator._check_for_updates` against stubs, recording call order."""
+    from gideon.engine.gateway import RuntimeCoordinator
+    from gideon.interfaces.dashboard import handlers as dash_handlers
 
     order: list[str] = []
     applied: list[str] = []
@@ -220,39 +203,29 @@ async def _drive_check_for_updates(monkeypatch, *, auto_update: bool):
         return _Cfg()
 
     monkeypatch.setattr(dash_handlers, "_do_update_check", _fake_check)
-    # `available` truthy so the auto_update branch is actually reached; a falsy value would
-    # short-circuit before the config read and make the ordering assertion vacuous.
     monkeypatch.setattr(dash_handlers, "_update_info", {"available": True})
-    monkeypatch.setattr("gideon.config.AppConfig.load", _load)
+    monkeypatch.setattr("gideon.core.config.AppConfig.load", _load)
 
-    await GatewayOrchestrator._check_for_updates(_orchestrator_stub(applied))
+    await RuntimeCoordinator._check_for_updates(_orchestrator_stub(applied))
     return order, applied
 
 
 @pytest.mark.asyncio
 async def test_auto_update_gates_the_apply_not_the_check(monkeypatch) -> None:
-    # auto_update OFF still contacts api.github.com: the check precedes the config read,
-    # so there is no configuration that suppresses the request. This is the fact the
-    # egress census states; if it ever stops being true, fix the census in the same change.
     order, applied = await _drive_check_for_updates(monkeypatch, auto_update=False)
     assert order == ["check", "config"], (
         "the update check must run BEFORE auto_update is consulted — got "
         f"{order}. If the check is now gated, `docs/architecture/network-egress-hosts.txt` "
         "no longer describes api.github.com correctly."
     )
-    assert applied == []  # ...and the apply is what auto_update=False actually suppressed
+    assert applied == []
 
 
 @pytest.mark.asyncio
 async def test_auto_update_on_reaches_the_apply(monkeypatch) -> None:
-    # The other branch, so the test above is a gate and not a constant: the only thing that
-    # changed is `auto_update`, and only the apply moved.
     order, applied = await _drive_check_for_updates(monkeypatch, auto_update=True)
     assert order == ["check", "config"]
     assert applied == ["apply"]
-
-
-# ── C2 wire-shape conformance (Tier-S once clients read it) ──────────────────
 
 
 @pytest.mark.asyncio
@@ -277,7 +250,6 @@ async def test_c2_wire_shape_conformance(monkeypatch) -> None:
         "instructions",
     }
 
-    # container: apply_method=instructions, commits_behind=null, instructions non-empty
     monkeypatch.setenv("GIDEON_INSTALL_KIND", "container")
     c = await uk.build_update_status("0.1.0")
     assert required <= set(c)
@@ -285,24 +257,18 @@ async def test_c2_wire_shape_conformance(monkeypatch) -> None:
     assert c["commits_behind"] is None
     assert isinstance(c["instructions"], list) and c["instructions"]
 
-    # desktop: apply_method=desktop_delegate
     monkeypatch.setenv("GIDEON_INSTALL_KIND", "desktop")
     d = await uk.build_update_status("0.1.0")
     assert d["apply_method"] == "desktop_delegate"
 
-    # pip: apply_method=pip_upgrade, commits_behind=null, instructions=[]
     monkeypatch.delenv("GIDEON_INSTALL_KIND", raising=False)
     p = await uk.build_update_status("0.1.0")
     assert p["apply_method"] == "pip_upgrade"
     assert p["commits_behind"] is None
     assert p["instructions"] == []
-    # current/latest are normalized (no leading v)
     assert p["current"] == "0.1.0"
     assert p["latest"] == "0.2.0"
     assert p["update_available"] is True
-
-
-# ── DIST-13: the default branch is resolved, not guessed ────────────────────
 
 
 class _GitScript:
@@ -321,25 +287,21 @@ class _GitScript:
 
 
 def test_default_branch_prefers_the_checked_out_branch(monkeypatch) -> None:
-    # Updating means "advance the branch I am on" — a contributor on a feature
-    # branch must not be reset onto another one.
     git = _GitScript(**{"rev-parse": (0, "feature-foo\n")})
     monkeypatch.setattr(uk, "_run_git", git)
     assert uk.resolve_default_branch("/x") == "feature-foo"
-    assert [c[0] for c in git.calls] == ["rev-parse"]  # no further probes needed
+    assert [c[0] for c in git.calls] == ["rev-parse"]
 
 
 def test_default_branch_detached_head_reads_the_remote_head(monkeypatch) -> None:
-    # A checkout parked on a release tag reports "HEAD"; origin/HEAD is the answer,
-    # and it is a LOCAL ref, so this stays offline-safe.
-    git = _GitScript(**{"rev-parse": (0, "HEAD\n"), "symbolic-ref": (0, "origin/main\n")})
+    git = _GitScript(
+        **{"rev-parse": (0, "HEAD\n"), "symbolic-ref": (0, "origin/main\n")}
+    )
     monkeypatch.setattr(uk, "_run_git", git)
     assert uk.resolve_default_branch("/x") == "main"
 
 
 def test_default_branch_falls_back_to_remote_show(monkeypatch) -> None:
-    # No refs/remotes/origin/HEAD (older clone, or a hand-added remote): ask the
-    # remote. Last among the probes because it needs the network.
     git = _GitScript(
         **{
             "rev-parse": (0, "\n"),
@@ -352,7 +314,6 @@ def test_default_branch_falls_back_to_remote_show(monkeypatch) -> None:
 
 
 def test_default_branch_ignores_an_unknown_remote_head(monkeypatch) -> None:
-    # A remote with no branches reports "HEAD branch: (unknown)" — not a branch name.
     git = _GitScript(
         **{
             "rev-parse": (0, "HEAD\n"),
@@ -370,7 +331,7 @@ def test_default_branch_last_resort_is_this_repo_s_real_default(monkeypatch) -> 
     The CLI hardcoded ``mainline`` — a branch this repository has never had — so a
     detached-HEAD update fetched an unresolvable ref and failed confusingly.
     """
-    git = _GitScript()  # every subcommand returns rc=1
+    git = _GitScript()
     monkeypatch.setattr(uk, "_run_git", git)
     assert uk.resolve_default_branch("/x") == "main"
     assert uk.DEFAULT_BRANCH_FALLBACK == "main"
@@ -387,7 +348,11 @@ def test_no_module_hardcodes_a_branch_this_repo_does_not_have() -> None:
     import gideon
 
     root = Path(gideon.__file__).parent
-    for name in ("self_update.py", "cli_server.py", "gateway.py"):
+    for name in (
+        "operations/self_update.py",
+        "interfaces/cli/server.py",
+        "engine/gateway.py",
+    ):
         assert "mainline" not in (root / name).read_text(encoding="utf-8"), name
 
 
@@ -421,23 +386,20 @@ def test_run_git_reports_a_missing_git_binary(monkeypatch) -> None:
 
 
 def test_tracked_changes_excludes_untracked_entries(monkeypatch) -> None:
-    # Untracked files survive `reset --hard`, so warning about them would train the
-    # reader to click through the warning that matters.
     git = _GitScript(**{"status": (0, " M a.py\n?? scratch.txt\nA  b.py\n")})
     monkeypatch.setattr(uk, "_run_git", git)
     assert uk.git_tracked_changes("/x") == [" M a.py", "A  b.py"]
 
 
 def test_upgrade_spec_pins_a_known_tag_and_falls_back_unpinned() -> None:
-    assert uk.upgrade_spec("v0.1.4") == "gideon==0.1.4"
-    assert uk.upgrade_spec("") == "gideon"
+    assert uk.upgrade_spec("v0.1.4") == "gideon-agent-harness==0.1.4"
+    assert uk.upgrade_spec("") == "gideon-agent-harness"
 
 
 def test_git_root_finds_the_worktree_that_carries_dot_git(tmp_path) -> None:
     nested = tmp_path / "Gideon"
     nested.mkdir()
     (tmp_path / ".git").mkdir()
-    # Git runs at the repo root even when the project dir is the nested package.
     assert uk.git_root(str(nested)) == str(tmp_path)
     assert uk.git_root("") == ""
 
@@ -455,7 +417,12 @@ def test_git_root_finds_the_worktree_that_carries_dot_git(tmp_path) -> None:
 #   - no branch ever returns the last entry (v0.1.3) → "return releases[-1]"
 #     is dead too.
 _FAKE_RELEASES: list[dict[str, object]] = [
-    {"tag": "v0.3.0-rc.1", "prerelease": True, "name": "0.3.0-rc.1", "body": "beta notes"},
+    {
+        "tag": "v0.3.0-rc.1",
+        "prerelease": True,
+        "name": "0.3.0-rc.1",
+        "body": "beta notes",
+    },
     {"tag": "v0.2.1", "prerelease": False, "name": "0.2.1", "body": "stable notes"},
     {"tag": "v0.2.0", "prerelease": False, "name": "0.2.0", "body": ""},
     {"tag": "v0.1.3", "prerelease": False, "name": "0.1.3", "body": ""},
@@ -464,24 +431,20 @@ _FAKE_RELEASES: list[dict[str, object]] = [
 
 def test_select_target_stable_excludes_prereleases() -> None:
     got = uk.select_target(_FAKE_RELEASES, "stable")
-    assert got == "v0.2.1"  # newest NON-prerelease
-    assert got != "v0.3.0-rc.1"  # ...and never the newer prerelease
+    assert got == "v0.2.1"
+    assert got != "v0.3.0-rc.1"
 
 
 def test_select_target_beta_includes_prereleases() -> None:
     got = uk.select_target(_FAKE_RELEASES, "beta")
-    assert got == "v0.3.0-rc.1"  # newest release INCLUDING prereleases
-    assert got != "v0.2.1"  # ...not merely the newest stable
+    assert got == "v0.3.0-rc.1"
+    assert got != "v0.2.1"
 
 
 def test_select_target_pin_overrides_channel_with_an_exact_hit() -> None:
-    # A non-empty pin wins over the channel and names EXACTLY the pinned release —
-    # even an OLDER one than either channel would pick.
     for channel in ("stable", "beta", "nightly"):
         assert uk.select_target(_FAKE_RELEASES, channel, "0.2.0") == "v0.2.0"
-    # A leading v on the pin is tolerated (normalized both sides).
     assert uk.select_target(_FAKE_RELEASES, "stable", "v0.2.0") == "v0.2.0"
-    # Guard: the pin answer is genuinely the pinned tag, not a channel default.
     assert uk.select_target(_FAKE_RELEASES, "stable", "0.2.0") != uk.select_target(
         _FAKE_RELEASES, "stable"
     )
@@ -491,19 +454,15 @@ def test_select_target_pin_overrides_channel_with_an_exact_hit() -> None:
 
 
 def test_select_target_pin_miss_returns_empty() -> None:
-    # A pin to a version with no matching release resolves to "" (not the newest).
     assert uk.select_target(_FAKE_RELEASES, "stable", "9.9.9") == ""
     assert uk.select_target(_FAKE_RELEASES, "beta", "9.9.9") == ""
 
 
 def test_select_target_nightly_is_branch_tracking_not_a_tag() -> None:
-    # nightly follows the checked-out branch, so there is no release tag to name.
     assert uk.select_target(_FAKE_RELEASES, "nightly") == ""
 
 
 def test_select_target_prerelease_detected_by_tag_suffix() -> None:
-    # The `prerelease` flag is False, but a `-rc`/`-beta` tag suffix ALSO marks a
-    # prerelease (tag convention §3.6): stable skips it, beta takes it.
     rels: list[dict[str, object]] = [
         {"tag": "v0.4.0-rc.1", "prerelease": False, "name": "", "body": ""},
         {"tag": "v0.3.9", "prerelease": False, "name": "", "body": ""},
@@ -513,8 +472,6 @@ def test_select_target_prerelease_detected_by_tag_suffix() -> None:
 
 
 def test_select_target_beta_tie_prefers_the_published_release() -> None:
-    # When a stable release and its own release candidate share a version, beta
-    # offers the PUBLISHED one — the tie-break, not an accident of list order.
     rels: list[dict[str, object]] = [
         {"tag": "v0.3.0-rc.1", "prerelease": True, "name": "", "body": ""},
         {"tag": "v0.3.0", "prerelease": False, "name": "", "body": ""},
@@ -523,7 +480,6 @@ def test_select_target_beta_tie_prefers_the_published_release() -> None:
 
 
 def test_select_target_empty_list_returns_empty() -> None:
-    # No releases known (offline, empty cache) -> "" on every channel, never raises.
     for channel in ("stable", "beta", "nightly"):
         assert uk.select_target([], channel) == ""
     assert uk.select_target([], "stable", "0.2.0") == ""
@@ -538,17 +494,16 @@ async def test_resolve_target_proves_all_four_branches(monkeypatch) -> None:
         return _FAKE_RELEASES
 
     monkeypatch.setattr(uk, "fetch_releases", _fake_releases)
-    assert await uk.resolve_target("stable") == "v0.2.1"  # stable
-    assert await uk.resolve_target("beta") == "v0.3.0-rc.1"  # beta
-    assert await uk.resolve_target("stable", "0.2.0") == "v0.2.0"  # pin-hit (overrides)
-    assert await uk.resolve_target("beta", "9.9.9") == ""  # pin-miss
+    assert await uk.resolve_target("stable") == "v0.2.1"
+    assert await uk.resolve_target("beta") == "v0.3.0-rc.1"
+    assert await uk.resolve_target("stable", "0.2.0") == "v0.2.0"
+    assert await uk.resolve_target("beta", "9.9.9") == ""
 
 
 @pytest.mark.asyncio
 async def test_resolve_target_offline_no_cache_returns_empty_never_raises(
     monkeypatch, tmp_path
 ) -> None:
-    # Offline with no prior cache: "" on every branch, and NEVER a raise.
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
 
     class _BoomSession:
@@ -562,9 +517,9 @@ async def test_resolve_target_offline_no_cache_returns_empty_never_raises(
 
 
 @pytest.mark.asyncio
-async def test_fetch_releases_offline_returns_cached_list(monkeypatch, tmp_path) -> None:
-    # A network failure degrades to the cached list; resolve_target then still
-    # answers from that cache (offline-tolerant).
+async def test_fetch_releases_offline_returns_cached_list(
+    monkeypatch, tmp_path
+) -> None:
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     uk.write_releases_cache(
         {
@@ -582,11 +537,11 @@ async def test_fetch_releases_offline_returns_cached_list(monkeypatch, tmp_path)
 
     monkeypatch.setattr(aiohttp, "ClientSession", _BoomSession)
     rels = await uk.fetch_releases()
-    assert [r["tag"] for r in rels] == ["v0.3.0-rc.1", "v0.2.1"]  # cached view, no raise
-    assert await uk.resolve_target("stable") == "v0.2.1"  # resolves from the cache
-
-
-# ── RUM-2: the ETag-cached fetch path (200 refresh + 304 conditional) ────────
+    assert [r["tag"] for r in rels] == [
+        "v0.3.0-rc.1",
+        "v0.2.1",
+    ]
+    assert await uk.resolve_target("stable") == "v0.2.1"
 
 
 class _FakeResp:
@@ -632,17 +587,20 @@ async def test_fetch_releases_200_maps_and_caches(monkeypatch, tmp_path) -> None
     payload = [
         {"tag_name": "v0.3.0-rc.1", "name": "rc", "body": "b", "prerelease": True},
         {"tag_name": "v0.2.1", "name": "stable", "body": "s", "prerelease": False},
-        "not-a-dict",  # a junk element is dropped defensively
+        "not-a-dict",
     ]
+    monkeypatch.setattr(
+        uk, "_RELEASES_LIST_URL", "https://api.github.com/repos/gideon/checks/releases"
+    )
     resp = _FakeResp(200, payload, {"ETag": 'W/"fresh"'})
     monkeypatch.setattr(aiohttp, "ClientSession", lambda *a, **k: _FakeSession(resp))
 
     rels = await uk.fetch_releases()
-    # tag_name -> tag, prerelease preserved, junk element dropped.
     assert [r["tag"] for r in rels] == ["v0.3.0-rc.1", "v0.2.1"]
     assert rels[0]["prerelease"] is True and rels[1]["prerelease"] is False
-    # Hit the releases LIST endpoint (not releases/latest), and cached the ETag.
-    assert "/releases" in _FakeSession.last_url and "latest" not in _FakeSession.last_url
+    assert (
+        "/releases" in _FakeSession.last_url and "latest" not in _FakeSession.last_url
+    )
     assert uk.read_releases_cache()["etag"] == 'W/"fresh"'
 
 
@@ -653,13 +611,18 @@ async def test_fetch_releases_304_returns_cache_and_sends_conditional(
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     uk.write_releases_cache(
         {
-            "releases": [{"tag": "v0.2.1", "prerelease": False, "name": "", "body": ""}],
+            "releases": [
+                {"tag": "v0.2.1", "prerelease": False, "name": "", "body": ""}
+            ],
             "etag": 'W/"prev"',
         }
+    )
+    monkeypatch.setattr(
+        uk, "_RELEASES_LIST_URL", "https://api.github.com/repos/gideon/checks/releases"
     )
     resp = _FakeResp(304)
     monkeypatch.setattr(aiohttp, "ClientSession", lambda *a, **k: _FakeSession(resp))
 
     rels = await uk.fetch_releases()
-    assert [r["tag"] for r in rels] == ["v0.2.1"]  # returned the cached list on 304
-    assert _FakeSession.last_headers.get("If-None-Match") == 'W/"prev"'  # sent the ETag
+    assert [r["tag"] for r in rels] == ["v0.2.1"]
+    assert _FakeSession.last_headers.get("If-None-Match") == 'W/"prev"'

@@ -9,7 +9,7 @@ persistence, and the memory-privacy modes. Paths are relative to
 A session is one conversation thread, whatever surface it lives on (dashboard
 chat, channel thread, loop worker, webhook, subagent).
 
-- **`session.py` — `SessionManager`.** Owns live session state. Each session
+- **`session.py` — `ConversationDirectory`.** Owns live session state. Each session
   has a FIFO message queue (`deque` of pending messages) guarded by a
   semaphore, so messages arriving on the same channel thread are serialized —
   a turn finishes before the next queued message starts.
@@ -57,7 +57,7 @@ chat, channel thread, loop worker, webhook, subagent).
    prompt via `_expand_prompt_mention` (user prompts live at
    `~/.gideon/prompts/`, snippets at `prompt_snippets/`; the composer's
    @-menu suggests prompts only at message start).
-2. **Context assembly** — `context.py` (`ContextBuilder`) builds the system
+2. **Context assembly** — `context.py` (`PromptAssembler`) builds the system
    context: the `{{bot_name}}` variable (live-resolved from `agent.bot_name`),
    memory context, and — for channel-linked sessions — the
    `channel-thread-context` snippet. `context_engine.py` and

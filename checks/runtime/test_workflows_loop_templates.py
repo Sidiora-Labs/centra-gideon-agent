@@ -14,8 +14,8 @@ import json
 
 import pytest
 
-from gideon.workflows.bundled_defs import read_template, template_names
-from gideon.workflows.judge_contract import (
+from gideon.automation.workflows.bundled_defs import read_template, template_names
+from gideon.automation.workflows.judge_contract import (
     FallbackCheck,
     Isolation,
     Ratchet,
@@ -23,21 +23,15 @@ from gideon.workflows.judge_contract import (
     hints_from_dict,
     judge_instruction,
 )
-from gideon.workflows.template_lint import lint_template
-from gideon.workflows.validator import validate_spec
+from gideon.automation.workflows.template_lint import lint_template
+from gideon.automation.workflows.validator import validate_spec
 
-#: The loop-kind families this session authored. Named explicitly rather than derived
-#: from a tag, so a template silently losing its tag cannot silently leave this suite.
 LOOP_TEMPLATES = (
     "goal-pursuit-open-ended",
     "goal-pursuit-verifiable",
     "general-project",
     "design-project",
     "diagnose-run",
-    # The code/SDLC descendant (WF2LOO-10). It joins this suite rather than getting its own
-    # weaker one: it is one of the plan's per-kind templates, so the judge contract, the
-    # runtime_hints split, the loop bounds and the shipping metadata are the SAME contract
-    # for it. Its own R5 structural gates are tested in `test_workflows_code_project.py`.
     "code-project",
 )
 
@@ -95,14 +89,9 @@ def _judges(spec: dict):
         n
         for n in _nodes(spec["root"])
         if n.get("id", "").startswith("judge")
-        # `accept` is a judge gate. `verify` is deliberately NOT here: a
-        # verify_command gate is a shell exit code, and demanding a verdict schema or an
-        # anti-leniency preamble from a shell command is a category error.
-        or n.get("id", "") == "accept" or (n.get("config") or {}).get("kind") == "judge"
+        or n.get("id", "") == "accept"
+        or (n.get("config") or {}).get("kind") == "judge"
     ]
-
-
-# ── they exist and load ──
 
 
 @pytest.mark.parametrize("name", LOOP_TEMPLATES)
@@ -128,9 +117,6 @@ def test_the_template_is_lint_clean_as_bundled(name):
     assert result.clean, [f.to_dict() for f in result.findings]
 
 
-# ── the platform's oldest rule ──
-
-
 @pytest.mark.parametrize("name", LOOP_TEMPLATES)
 def test_no_stage_certifies_its_own_work(name):
     """The rule a self-reported `done: boolean` breaks at the spec level.
@@ -141,12 +127,12 @@ def test_no_stage_certifies_its_own_work(name):
     """
     spec = _spec(name)
     work_nodes = [
-        n for n in _nodes(spec["root"]) if n.get("kind") == "stage" and n not in _judges(spec)
+        n
+        for n in _nodes(spec["root"])
+        if n.get("kind") == "stage" and n not in _judges(spec)
     ]
     for node in work_nodes:
         schema = (node.get("config") or {}).get("schema") or {}
-        # `done` is the specific field the plan flags. A worker may report PROGRESS
-        # (which the loop reads) but never completion.
         assert "done" not in schema, f"{name}:{node.get('id')} self-reports done"
 
 
@@ -161,10 +147,10 @@ def test_every_work_loop_is_closed_by_a_judge(name):
     judge_ids = {n.get("id") for n in _judges(spec)}
     for loop in loops:
         body_ids = {n.get("id") for n in _nodes(loop.get("body") or {})}
-        # Either the loop body contains a judge, or the loop is a refinement loop whose
-        # output feeds a downstream judge/gate.
         downstream = judge_ids - body_ids
-        assert (body_ids & judge_ids) or downstream, f"{name}: loop {loop.get('id')} unjudged"
+        assert (
+            body_ids & judge_ids
+        ) or downstream, f"{name}: loop {loop.get('id')} unjudged"
 
 
 @pytest.mark.parametrize("name", LOOP_TEMPLATES)
@@ -203,7 +189,11 @@ def test_cross_model_isolation_is_no_longer_flagged():
                 {
                     "kind": "gate",
                     "id": "accept",
-                    "config": {"kind": "judge", "prompt": "p", "isolation": "cross_model"},
+                    "config": {
+                        "kind": "judge",
+                        "prompt": "p",
+                        "isolation": "cross_model",
+                    },
                 }
             ],
         },
@@ -213,7 +203,9 @@ def test_cross_model_isolation_is_no_longer_flagged():
     assert (
         "WFL_UNENFORCEABLE_ISOLATION" not in codes
     ), "the lint was retired once cross_model became enforceable at the gate"
-    assert result.ok, "a plain cross_model judge is now a clean, enforceable declaration"
+    assert (
+        result.ok
+    ), "a plain cross_model judge is now a clean, enforceable declaration"
 
 
 @pytest.mark.parametrize("declared", ["fresh", "cross_model", None, ""])
@@ -244,9 +236,6 @@ def test_no_judge_can_write(name):
         assert (judge.get("config") or {}).get("tools_posture") != "full"
 
 
-# ── the typed verdict contract ──
-
-
 @pytest.mark.parametrize("name", LOOP_TEMPLATES)
 def test_every_judge_returns_the_typed_verdict_shape(name):
     """Loop nodes route on data, not prose — so the verdict field has to be there."""
@@ -255,11 +244,14 @@ def test_every_judge_returns_the_typed_verdict_shape(name):
         cfg = judge.get("config") or {}
         schema = cfg.get("schema") or {}
         if not schema:
-            # A gate-kind judge carries its shape in the instruction the engine composes.
-            assert "verdict" in _effective_prompt(spec, judge), f"{name}:{judge.get('id')}"
+            assert "verdict" in _effective_prompt(
+                spec, judge
+            ), f"{name}:{judge.get('id')}"
             continue
         assert "verdict" in schema, f"{name}:{judge.get('id')}"
-        assert "cannot_judge" in schema, f"{name}:{judge.get('id')} has no refusal channel"
+        assert (
+            "cannot_judge" in schema
+        ), f"{name}:{judge.get('id')} has no refusal channel"
 
 
 @pytest.mark.parametrize("name", LOOP_TEMPLATES)
@@ -269,7 +261,9 @@ def test_every_judge_prompt_names_the_closed_enum(name):
     for judge in _judges(spec):
         prompt = _effective_prompt(spec, judge)
         for member in (Verdict.PASS, Verdict.REJECT):
-            assert member.value in prompt, f"{name}:{judge.get('id')} omits {member.value}"
+            assert (
+                member.value in prompt
+            ), f"{name}:{judge.get('id')} omits {member.value}"
 
 
 @pytest.mark.parametrize("name", LOOP_TEMPLATES)
@@ -289,9 +283,6 @@ def test_every_judge_prompt_carries_the_anti_leniency_doctrine(name):
     for judge in _judges(_spec(name)):
         prompt = ((judge.get("config") or {}).get("prompt") or "").lower()
         assert "do not talk yourself into approving" in prompt or "skeptic" in prompt
-
-
-# ── runtime_hints ──
 
 
 @pytest.mark.parametrize("name", LOOP_TEMPLATES)
@@ -320,7 +311,9 @@ def test_every_rubric_criterion_appears_in_a_judge_prompt(name):
     inputs/nodes/item/iter/last), so the criteria have to be inlined."""
     spec = _spec(name)
     hints = hints_from_dict(spec["runtime_hints"]["judge"])
-    prompts = " ".join(((n.get("config") or {}).get("prompt") or "") for n in _judges(spec)).lower()
+    prompts = " ".join(
+        ((n.get("config") or {}).get("prompt") or "") for n in _judges(spec)
+    ).lower()
     for criterion in hints.rubric:
         assert criterion.criterion.lower() in prompts, f"{name}: {criterion.criterion}"
 
@@ -330,7 +323,9 @@ def test_every_forbidden_mode_appears_in_a_judge_prompt(name):
     """A denylist the judge never reads cannot be checked against."""
     spec = _spec(name)
     hints = hints_from_dict(spec["runtime_hints"]["judge"])
-    prompts = " ".join(((n.get("config") or {}).get("prompt") or "") for n in _judges(spec)).lower()
+    prompts = " ".join(
+        ((n.get("config") or {}).get("prompt") or "") for n in _judges(spec)
+    ).lower()
     for mode in hints.forbidden_success_modes:
         assert mode.lower() in prompts, f"{name}: {mode}"
 
@@ -349,9 +344,6 @@ def test_the_breaker_is_parameterized(name):
     assert breaker.get("no_progress_stop", 0) >= 1
 
 
-# ── loop termination ──
-
-
 @pytest.mark.parametrize("name", LOOP_TEMPLATES)
 def test_every_loop_has_a_real_exit_and_a_hard_cap(name):
     """A loop with only a cap is a busy-loop that always burns its budget; a loop with
@@ -362,7 +354,9 @@ def test_every_loop_has_a_real_exit_and_a_hard_cap(name):
         if mode == "until":
             assert cfg.get("condition"), f"{name}:{loop.get('id')} has no condition"
         elif mode == "until_dry":
-            assert cfg.get("progress_field"), f"{name}:{loop.get('id')} has no progress field"
+            assert cfg.get(
+                "progress_field"
+            ), f"{name}:{loop.get('id')} has no progress field"
             assert cfg.get("streak", 0) >= 1
         assert cfg.get("max_iterations", 0) >= 1, f"{name}:{loop.get('id')} has no cap"
 
@@ -392,16 +386,21 @@ def test_every_declared_progress_field_can_be_emitted_by_its_body():
             checked += 1
             body = loop.get("body") or {}
             emitters = [
-                n for n in _nodes(body) if field in ((n.get("config") or {}).get("schema") or {})
+                n
+                for n in _nodes(body)
+                if field in ((n.get("config") or {}).get("schema") or {})
             ]
             assert emitters, (
                 f"{name}:{loop.get('id')} declares progress_field {field!r} but no node in "
                 "its body declares it in a schema — the engine can never read it"
             )
             assert any(
-                field in str((n.get("config") or {}).get("prompt") or "") for n in emitters
+                field in str((n.get("config") or {}).get("prompt") or "")
+                for n in emitters
             ), f"{name}:{loop.get('id')} never tells the body what {field!r} means"
-    assert checked >= 2, "the two shipped until_dry templates that declare a field must be swept"
+    assert (
+        checked >= 2
+    ), "the two shipped until_dry templates that declare a field must be swept"
 
 
 @pytest.mark.parametrize("name", LOOP_TEMPLATES)
@@ -410,9 +409,6 @@ def test_every_loop_declares_a_stall_timeout(name):
     for loop in (n for n in _nodes(_spec(name)["root"]) if n.get("kind") == "loop"):
         cfg = loop.get("config") or {}
         assert cfg.get("timeout_stall_secs", 0) > 0, f"{name}:{loop.get('id')}"
-
-
-# ── shipping metadata ──
 
 
 @pytest.mark.parametrize("name", LOOP_TEMPLATES)
@@ -428,9 +424,6 @@ def test_no_input_is_both_required_and_defaulted(name):
     """They contradict each other: a default means it can be omitted."""
     for key, param in (_spec(name).get("inputs") or {}).items():
         if param.get("required"):
-            # `default: null` is what the LOADER normalizes an absent default to, so
-            # asserting the key is missing tests the loader rather than the template.
-            # A MEANINGFUL default alongside `required` is the actual contradiction.
             assert param.get("default") in (None, ""), f"{name}:{key}"
 
 
@@ -439,7 +432,8 @@ def test_the_template_carries_both_steering_examples(name):
     """The mutation example is what teaches a model that editing a RUNNING workflow is
     a normal thing to do."""
     events = {
-        e.get("event") for e in ((_spec(name).get("metadata") or {}).get("steering_examples") or [])
+        e.get("event")
+        for e in ((_spec(name).get("metadata") or {}).get("steering_examples") or [])
     }
     assert {"kickoff", "mutation"} <= events, f"{name}: {events}"
 
@@ -458,13 +452,11 @@ def test_a_writing_template_declares_write_capability(name):
     installing it permits."""
     spec = _spec(name)
     has_full_tools = any(
-        (n.get("config") or {}).get("tools_posture") == "full" for n in _nodes(spec["root"])
+        (n.get("config") or {}).get("tools_posture") == "full"
+        for n in _nodes(spec["root"])
     )
     if has_full_tools:
         assert "write" in ((spec.get("metadata") or {}).get("capabilities") or [])
-
-
-# ── the verifiable variant's own contract ──
 
 
 def test_the_verifiable_variant_captures_a_baseline_before_editing():
@@ -498,9 +490,6 @@ def test_the_verifiable_variants_fallback_is_the_command():
     assert hints.fallback_check is FallbackCheck.COMMAND_EXIT_CODE
 
 
-# ── the design template's own contract ──
-
-
 def test_the_design_template_diverges_before_committing():
     """The second option is only useful if it could not have been reached from the
     first."""
@@ -510,7 +499,9 @@ def test_the_design_template_diverges_before_committing():
 
 
 def test_the_design_evaluator_is_not_either_generator():
-    evaluate = next(n for n in _nodes(_spec("design-project")["root"]) if n.get("id") == "evaluate")
+    evaluate = next(
+        n for n in _nodes(_spec("design-project")["root"]) if n.get("id") == "evaluate"
+    )
     assert (evaluate.get("config") or {}).get("isolation") == "fresh"
 
 
@@ -522,10 +513,9 @@ def test_the_design_refinement_loop_has_a_reachable_exit():
     condition = (refine.get("config") or {}).get("condition") or ""
     body_schema = ((refine.get("body") or {}).get("config") or {}).get("schema") or {}
     field = condition.replace("{{", "").replace("}}", "").strip().split(".")[-1]
-    assert field in body_schema, f"condition reads {field!r}, body sets {sorted(body_schema)}"
-
-
-# ── the diagnose template's own contract ──
+    assert (
+        field in body_schema
+    ), f"condition reads {field!r}, body sets {sorted(body_schema)}"
 
 
 def test_the_diagnose_template_localizes_before_explaining():
@@ -544,7 +534,9 @@ def test_the_diagnose_template_names_all_four_layers():
 
 
 def test_the_diagnose_template_requires_ruling_out_the_others():
-    classify = next(n for n in _nodes(_spec("diagnose-run")["root"]) if n.get("id") == "classify")
+    classify = next(
+        n for n in _nodes(_spec("diagnose-run")["root"]) if n.get("id") == "classify"
+    )
     assert "ruled_out" in ((classify.get("config") or {}).get("schema") or {})
 
 
@@ -554,9 +546,6 @@ def test_the_diagnose_template_is_read_only():
     assert "write" not in ((spec.get("metadata") or {}).get("capabilities") or [])
     for node in _nodes(spec["root"]):
         assert (node.get("config") or {}).get("tools_posture") != "full"
-
-
-# ── the whole library still holds ──
 
 
 def test_the_new_templates_did_not_break_the_shipped_library():
@@ -571,11 +560,7 @@ def test_the_loop_families_are_all_present():
     """The five loop kinds the plan replaces each have a descendant."""
     shipped = set(template_names())
     assert set(LOOP_TEMPLATES) <= shipped
-    # deep-research is the research-loop descendant and pre-dates this session.
     assert "deep-research" in shipped
-
-
-# ── the contract on the judge STAGES (WF2LOO-13) ──
 
 
 @pytest.mark.parametrize("name", LOOP_TEMPLATES)
@@ -606,7 +591,9 @@ def test_the_scores_keys_are_the_exact_rubric_criteria(name):
     """
     spec = _spec(name)
     hints = hints_from_dict(spec["runtime_hints"]["judge"])
-    prompts = " ".join(((n.get("config") or {}).get("prompt") or "") for n in _judges(spec))
+    prompts = " ".join(
+        ((n.get("config") or {}).get("prompt") or "") for n in _judges(spec)
+    )
     assert "{criterion: integer}" not in prompts, (
         f"{name} still asks for `scores: {{criterion: integer}}` — a placeholder key invites the "
         "model to invent one, and an invented key scores nothing"
@@ -621,7 +608,9 @@ def test_the_scores_keys_are_the_exact_rubric_criteria(name):
 def test_the_prompt_offers_the_whole_closed_verdict_set(name):
     """A vocabulary the prompt does not offer cannot be returned, and `RETRY` joined the set when
     the two verdict enums were merged."""
-    prompts = " ".join(((n.get("config") or {}).get("prompt") or "") for n in _judges(_spec(name)))
+    prompts = " ".join(
+        ((n.get("config") or {}).get("prompt") or "") for n in _judges(_spec(name))
+    )
     for member in Verdict:
         assert f'"{member.value}"' in prompts, f"{name} never offers {member.value}"
 

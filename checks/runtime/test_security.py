@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from gideon.security import (
+from gideon.security.security import (
     audit_bash_command,
     is_sensitive_bash_command,
     is_sensitive_path,
@@ -54,7 +54,6 @@ class TestIsSystemPath:
         ],
     )
     def test_children_of_mount_temp_parents_allowed(self, p):
-        # The bare parent is blocked, but a real workspace BENEATH it is fine.
         assert is_system_path(p) is False
 
 
@@ -158,13 +157,12 @@ class TestRedactCredentialsBase64:
         assert encoded not in result
 
     def test_ignores_benign_base64(self) -> None:
-        # Normal base64 that doesn't decode to credentials
         text = "aW1wb3J0IHRoaXM=  # import this"
         result, warnings = redact_credentials(text)
         assert result == text
 
     def test_ignores_short_base64(self) -> None:
-        text = "SGVsbG8="  # "Hello" — too short to trigger (< 40 chars)
+        text = "SGVsbG8="
         result, warnings = redact_credentials(text)
         assert result == text
 
@@ -174,7 +172,7 @@ class TestSandboxDeniedCommands:
 
     @pytest.fixture()
     def denied_commands(self) -> list[str]:
-        from gideon.security import BUILTIN_DENIED_COMMAND_PATTERNS
+        from gideon.security.security import BUILTIN_DENIED_COMMAND_PATTERNS
 
         return list(BUILTIN_DENIED_COMMAND_PATTERNS)
 
@@ -183,8 +181,6 @@ class TestSandboxDeniedCommands:
         import re
 
         return any(re.search(p, cmd, re.IGNORECASE) for p in patterns)
-
-    # --- AWS CLI: allowed ---
 
     def test_aws_describe_allowed(self, denied_commands: list[str]) -> None:
         assert not self._is_denied("aws ec2 describe-instances", denied_commands)
@@ -197,16 +193,18 @@ class TestSandboxDeniedCommands:
         assert not self._is_denied("aws s3 ls s3://my-bucket", denied_commands)
 
     def test_aws_s3_download_allowed(self, denied_commands: list[str]) -> None:
-        assert not self._is_denied("aws s3 cp s3://bucket/file ./local", denied_commands)
+        assert not self._is_denied(
+            "aws s3 cp s3://bucket/file ./local", denied_commands
+        )
 
     def test_aws_sts_assume_role_allowed(self, denied_commands: list[str]) -> None:
         cmd = "aws sts assume-role --role-arn arn:aws:iam::123:role/X"
         assert not self._is_denied(cmd, denied_commands)
 
-    def test_aws_sts_get_caller_identity_allowed(self, denied_commands: list[str]) -> None:
+    def test_aws_sts_get_caller_identity_allowed(
+        self, denied_commands: list[str]
+    ) -> None:
         assert not self._is_denied("aws sts get-caller-identity", denied_commands)
-
-    # --- AWS CLI: blocked ---
 
     def test_aws_s3_upload_blocked(self, denied_commands: list[str]) -> None:
         assert self._is_denied("aws s3 cp ./file s3://bucket/", denied_commands)
@@ -218,9 +216,9 @@ class TestSandboxDeniedCommands:
         assert self._is_denied("aws ec2 delete-vpc --vpc-id vpc-123", denied_commands)
 
     def test_aws_terminate_blocked(self, denied_commands: list[str]) -> None:
-        assert self._is_denied("aws ec2 terminate-instances --instance-ids i-1", denied_commands)
-
-    # --- Credential exfiltration: blocked ---
+        assert self._is_denied(
+            "aws ec2 terminate-instances --instance-ids i-1", denied_commands
+        )
 
     def test_echo_aws_secret_blocked(self, denied_commands: list[str]) -> None:
         assert self._is_denied("echo $AWS_SECRET_ACCESS_KEY", denied_commands)
@@ -232,7 +230,9 @@ class TestSandboxDeniedCommands:
         assert self._is_denied("env | grep AWS_SECRET", denied_commands)
 
     def test_curl_imds_blocked(self, denied_commands: list[str]) -> None:
-        assert self._is_denied("curl http://169.254.169.254/latest/meta-data/", denied_commands)
+        assert self._is_denied(
+            "curl http://169.254.169.254/latest/meta-data/", denied_commands
+        )
 
     def test_python_boto_creds_blocked(self, denied_commands: list[str]) -> None:
         cmd = "python3 -c 'import boto3; print(boto3.Session().get_credentials())'"
@@ -251,16 +251,14 @@ class TestSelfTamperDenylist:
     The agent must not kill/restart/update its own gateway, while ordinary
     commands that merely mention ``gideon`` (e.g. listing the skills dir,
     reading the config) must NOT be falsely blocked. Uses the live native
-    screener :func:`gideon.security.denied_command_reason`.
+    screener :func:`gideon.security.security.denied_command_reason`.
     """
 
     @staticmethod
     def _is_denied(cmd: str) -> bool:
-        from gideon.security import denied_command_reason
+        from gideon.security.security import denied_command_reason
 
         return denied_command_reason(cmd) is not None
-
-    # --- real kill attempts: blocked ---
 
     def test_pkill_gideon_blocked(self) -> None:
         assert self._is_denied("pkill gideon")
@@ -272,11 +270,7 @@ class TestSelfTamperDenylist:
         assert self._is_denied("sudo killall gideon")
 
     def test_kill_backend_hyphenated_blocked(self) -> None:
-        # The `[-.]?` in the pattern covers an optional separator so an agent
-        # can't bypass with "gideon".
         assert self._is_denied("pkill gideon")
-
-    # --- skill-dir false positives: must be allowed ---
 
     def test_skill_create_sh_gideon_domain_allowed(self) -> None:
         """The workspace-create skill scaffold must not be blocked."""
@@ -294,7 +288,6 @@ class TestSelfTamperDenylist:
         assert not self._is_denied("bash ~/.gideon/skills/something.sh")
 
     def test_cat_gideon_config_allowed(self) -> None:
-        # "cat" has no "kill" word anywhere — must not match.
         assert not self._is_denied("cat ~/.gideon/config.json")
 
 
@@ -309,30 +302,30 @@ class TestBuiltinDenyPatterns:
 
     def test_allows_command_with_credential_in_path(self) -> None:
         """Commands in dirs like CredentialValidatorServiceCDK must not be blocked."""
-        from gideon.security import is_denied
+        from gideon.security.security import is_denied
 
         cmd = "cd /home/user/src/CredentialValidatorServiceCDK && git status"
         assert is_denied(cmd) is None
 
     def test_allows_credential_in_package_name(self) -> None:
         """Package names containing 'credential' must not be blocked."""
-        from gideon.security import is_denied
+        from gideon.security.security import is_denied
 
         assert is_denied("credential-rotation-service build") is None
         assert is_denied("get-credentials --profile default") is None
 
     def test_blocks_get_secret(self) -> None:
-        from gideon.security import is_denied
+        from gideon.security.security import is_denied
 
         assert is_denied("get_secret_value") is not None
 
     def test_blocks_read_secret(self) -> None:
-        from gideon.security import is_denied
+        from gideon.security.security import is_denied
 
         assert is_denied("read_secret_store") is not None
 
     def test_blocks_git_push(self) -> None:
-        from gideon.security import is_denied
+        from gideon.security.security import is_denied
 
         assert is_denied("git push origin main") is not None
         assert is_denied("git push origin main --force") is not None
@@ -340,41 +333,40 @@ class TestBuiltinDenyPatterns:
         assert is_denied("git -C /Volumes/Foo/Bar push --force") is not None
         assert is_denied("git_push") is not None
         assert is_denied("git_push origin main") is not None
-        # git stash push is safe (local-only, no remote side effects)
         assert is_denied("git stash push") is None
         assert is_denied("git stash push -m 'wip'") is None
         assert is_denied("git -C /path stash push") is None
         assert is_denied("git -c core.autocrlf=true stash push -m 'wip'") is None
-        # path containing "stash" must not bypass deny
         assert is_denied("git -C /tmp/stash push origin main --force") is not None
-        # command chaining/substitution must not bypass deny
         assert is_denied("git stash push; git push origin main --force") is not None
         assert is_denied("git stash push && git push origin main") is not None
-        assert is_denied('git stash push -m "$(git push origin main --force)"') is not None
+        assert (
+            is_denied('git stash push -m "$(git push origin main --force)"') is not None
+        )
         assert is_denied("git stash push -m `git push origin main`") is not None
 
     def test_blocks_delete_stack(self) -> None:
-        from gideon.security import is_denied
+        from gideon.security.security import is_denied
 
         assert is_denied("delete_stack --stack-name foo") is not None
 
     def test_blocks_terminate_instance(self) -> None:
-        from gideon.security import is_denied
+        from gideon.security.security import is_denied
 
         assert is_denied("terminate_instance i-123") is not None
 
     def test_allows_git_status(self) -> None:
-        from gideon.security import is_denied
+        from gideon.security.security import is_denied
 
         assert is_denied("git status") is None
 
     def test_allows_git_log(self) -> None:
-        from gideon.security import is_denied
+        from gideon.security.security import is_denied
 
         assert is_denied("git -P log --oneline -5") is None
 
     def test_allows_cr_command(self) -> None:
-        from gideon.security import is_denied
+        from gideon.security.security import is_denied
 
         assert is_denied("cr --summary 'Fix test discovery'") is None
 
@@ -384,7 +376,7 @@ class TestRedactExfiltrationUrls:
 
     def test_external_long_query_redacted(self) -> None:
         """External domains with long query strings are still redacted."""
-        from gideon.security import redact_exfiltration_urls
+        from gideon.security.security import redact_exfiltration_urls
 
         url = "https://evil.com/steal?data=" + "A" * 250
         result, warnings = redact_exfiltration_urls(f"Link: {url}")
@@ -400,18 +392,18 @@ class TestRedactExfiltrationUrls:
         explicit credential pattern.  This is intentionally strict — anyone
         can provision a destination, so the heuristic flags the payload size.
         """
-        from gideon.security import redact_exfiltration_urls
+        from gideon.security.security import redact_exfiltration_urls
 
         params = "&".join(f"p{i}=value{i}" for i in range(30))
         url = f"https://app.example.dev/app/?mode=CODE&{params}"
-        assert len(url.split("?", 1)[1]) >= 200  # confirm query > threshold
+        assert len(url.split("?", 1)[1]) >= 200
         result, warnings = redact_exfiltration_urls(f"Link: {url}")
         assert "[REDACTED" in result
         assert len(warnings) == 1
 
     def test_federate_url_with_encoded_destination_redacted(self) -> None:
         """Federate URLs with heavy URL-encoding are redacted (encoded-blob pattern)."""
-        from gideon.security import redact_exfiltration_urls
+        from gideon.security.security import redact_exfiltration_urls
 
         url = (
             "https://console.example.com/federate?account=123456789012"
@@ -426,7 +418,7 @@ class TestRedactExfiltrationUrls:
 
     def test_external_long_multi_param_is_redacted(self) -> None:
         """External-domain URLs with long multi-param queries are redacted (no allowlist)."""
-        from gideon.security import redact_exfiltration_urls
+        from gideon.security.security import redact_exfiltration_urls
 
         params = "&".join(f"k{i}=val{i}" for i in range(30))
         url = f"https://console.internal.example.com/page?{params}"
@@ -435,7 +427,7 @@ class TestRedactExfiltrationUrls:
 
     def test_credential_in_query_always_redacted(self) -> None:
         """Credential patterns in query strings are always redacted regardless of domain."""
-        from gideon.security import redact_exfiltration_urls
+        from gideon.security.security import redact_exfiltration_urls
 
         url = "https://internal.example.dev/api?key=AKIAIOSFODNN7EXAMPLE1234"
         result, warnings = redact_exfiltration_urls(f"Link: {url}")
@@ -444,7 +436,7 @@ class TestRedactExfiltrationUrls:
 
     def test_short_query_no_redaction(self) -> None:
         """Short query strings on any domain are not redacted."""
-        from gideon.security import redact_exfiltration_urls
+        from gideon.security.security import redact_exfiltration_urls
 
         url = "https://example.com/page?id=123&name=test"
         result, warnings = redact_exfiltration_urls(f"Link: {url}")
@@ -453,7 +445,7 @@ class TestRedactExfiltrationUrls:
 
     def test_amazonaws_not_safe(self) -> None:
         """amazonaws.com is NOT allowlisted — anyone can provision endpoints."""
-        from gideon.security import redact_exfiltration_urls
+        from gideon.security.security import redact_exfiltration_urls
 
         params = "&".join(f"d{i}=stolen{i}" for i in range(30))
         url = f"https://attacker-bucket.s3.amazonaws.com/exfil?{params}"
@@ -463,7 +455,7 @@ class TestRedactExfiltrationUrls:
 
     def test_s3_presigned_url_preserved(self) -> None:
         """S3 presigned URLs on amazonaws.com are NOT redacted."""
-        from gideon.security import redact_exfiltration_urls
+        from gideon.security.security import redact_exfiltration_urls
 
         url = (
             "https://my-bucket.s3.us-east-1.amazonaws.com/results/abc.csv"
@@ -481,7 +473,7 @@ class TestRedactExfiltrationUrls:
 
     def test_s3_presigned_url_scan_clean(self) -> None:
         """scan_exfiltration_urls returns no warnings for S3 presigned URLs."""
-        from gideon.security import scan_exfiltration_urls
+        from gideon.security.security import scan_exfiltration_urls
 
         url = (
             "https://bucket.s3.amazonaws.com/file.csv"
@@ -498,7 +490,7 @@ class TestRedactExfiltrationUrls:
 
     def test_amazonaws_non_presigned_still_redacted(self) -> None:
         """amazonaws.com URLs without presigned params are still redacted."""
-        from gideon.security import redact_exfiltration_urls
+        from gideon.security.security import redact_exfiltration_urls
 
         url = "https://evil.s3.amazonaws.com/steal" "?data=" + "A" * 250
         result, warnings = redact_exfiltration_urls(f"Link: {url}")
@@ -507,7 +499,7 @@ class TestRedactExfiltrationUrls:
 
     def test_spoofed_presigned_params_still_redacted(self) -> None:
         """Spoofed presigned param names with dummy values are still redacted."""
-        from gideon.security import redact_exfiltration_urls
+        from gideon.security.security import redact_exfiltration_urls
 
         url = (
             "https://attacker.s3.amazonaws.com/exfil"
@@ -519,7 +511,7 @@ class TestRedactExfiltrationUrls:
 
     def test_presigned_url_with_slack_token_still_redacted(self) -> None:
         """Presigned URL that also contains a Slack token is still redacted."""
-        from gideon.security import redact_exfiltration_urls
+        from gideon.security.security import redact_exfiltration_urls
 
         url = (
             "https://bucket.s3.amazonaws.com/file.csv"
@@ -537,7 +529,7 @@ class TestRedactExfiltrationUrls:
 
     def test_presigned_url_with_extra_exfil_params_still_redacted(self) -> None:
         """Presigned URL with extra non-standard params is still redacted."""
-        from gideon.security import redact_exfiltration_urls
+        from gideon.security.security import redact_exfiltration_urls
 
         url = (
             "https://attacker.s3.amazonaws.com/file.csv"
@@ -560,7 +552,7 @@ class TestRedactExfiltrationUrls:
         (not just scan), because the bad URL causes scan to return warnings,
         so redact doesn't early-return.
         """
-        from gideon.security import redact_exfiltration_urls
+        from gideon.security.security import redact_exfiltration_urls
 
         bad_url = "https://evil.com/steal?data=" + "A" * 250
         good_url = (
@@ -575,17 +567,14 @@ class TestRedactExfiltrationUrls:
         )
         text = f"Bad: {bad_url} Good: {good_url}"
         result, warnings = redact_exfiltration_urls(text)
-        # Bad URL should be redacted
         assert "[REDACTED" in result
-        # Good presigned URL should survive
         assert "my-bucket.s3.us-east-1.amazonaws.com" in result
         assert "X-Amz-Signature=" in result
 
     def test_presigned_url_with_sts_security_token_preserved(self) -> None:
         """Presigned URL with realistic base64 STS session token is preserved."""
-        from gideon.security import scan_exfiltration_urls
+        from gideon.security.security import scan_exfiltration_urls
 
-        # Realistic 200+ char base64 STS token (matches _EXFIL_PATTERNS blob pattern)
         sts_token = "IQoJb3JpZ2luX2VjE" + "A" * 180 + "=="
         url = (
             "https://my-bucket.s3.us-east-1.amazonaws.com/results.csv"
@@ -599,11 +588,13 @@ class TestRedactExfiltrationUrls:
             f"&X-Amz-Security-Token={sts_token}"
         )
         warnings = scan_exfiltration_urls(f"Link: {url}")
-        assert len(warnings) == 0, "STS token in Security-Token should not trigger warning"
+        assert (
+            len(warnings) == 0
+        ), "STS token in Security-Token should not trigger warning"
 
     def test_presigned_url_with_exfil_in_allowed_param_redacted(self) -> None:
         """Exfil payload in an allowed param value is caught by value scanning."""
-        from gideon.security import scan_exfiltration_urls
+        from gideon.security.security import scan_exfiltration_urls
 
         url = (
             "https://evil.s3.us-east-1.amazonaws.com/out.csv"
@@ -615,11 +606,13 @@ class TestRedactExfiltrationUrls:
             "&X-Amz-Signature=abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
         )
         warnings = scan_exfiltration_urls(f"Link: {url}")
-        assert len(warnings) > 0, "Exfil payload in allowed param value should be flagged"
+        assert (
+            len(warnings) > 0
+        ), "Exfil payload in allowed param value should be flagged"
 
     def test_presigned_url_with_exfil_in_credential_scope_redacted(self) -> None:
         """Arbitrary data in credential scope is caught by structural validation."""
-        from gideon.security import scan_exfiltration_urls
+        from gideon.security.security import scan_exfiltration_urls
 
         url = (
             "https://evil.s3.us-east-1.amazonaws.com/out.csv"
@@ -635,7 +628,7 @@ class TestRedactExfiltrationUrls:
 
     def test_presigned_url_with_fake_security_token_redacted(self) -> None:
         """Non-STS payload in Security-Token is caught by structural validation."""
-        from gideon.security import scan_exfiltration_urls
+        from gideon.security.security import scan_exfiltration_urls
 
         url = (
             "https://evil.s3.us-east-1.amazonaws.com/out.csv"
@@ -748,8 +741,6 @@ class TestAuditBashCommand:
         ],
     )
     def test_catastrophic_rm_flagged(self, cmd: str) -> None:
-        # Recursive-force rm of home/cwd/parent/root/glob — incl. cases the old plain
-        # substring list missed ($HOME, '.', flag-order variants like 'rm -fr').
         assert audit_bash_command(cmd) is not None, cmd
 
     @pytest.mark.parametrize(
@@ -769,9 +760,6 @@ class TestAuditBashCommand:
         ],
     )
     def test_targeted_rm_not_false_flagged(self, cmd: str) -> None:
-        # A NAMED target is legitimate cleanup — must NOT be blocked. The old list's
-        # plain "rm -rf /" / "rm -rf ~" substrings wrongly matched these (rm -rf /tmp,
-        # rm -rf ~/.cache); the anchored matcher leaves them clean.
         assert audit_bash_command(cmd) is None, cmd
 
 
@@ -779,13 +767,22 @@ class TestShouldRecordObserveHistory:
     """Tests for should_record_observe_history()."""
 
     def test_authorized_with_history(self) -> None:
-        assert should_record_observe_history(channel_history={}, user_authorized=True) is True
+        assert (
+            should_record_observe_history(channel_history={}, user_authorized=True)
+            is True
+        )
 
     def test_unauthorized_rejected(self) -> None:
-        assert should_record_observe_history(channel_history={}, user_authorized=False) is False
+        assert (
+            should_record_observe_history(channel_history={}, user_authorized=False)
+            is False
+        )
 
     def test_no_history_rejected(self) -> None:
-        assert should_record_observe_history(channel_history=None, user_authorized=True) is False
+        assert (
+            should_record_observe_history(channel_history=None, user_authorized=True)
+            is False
+        )
 
 
 class TestRedactAndTruncate:
@@ -836,7 +833,9 @@ class TestScanHistory:
 
     def test_respects_last_n(self, tmp_path) -> None:
         history_file = tmp_path / "session1.jsonl"
-        entries = [json.dumps({"role": "assistant", "content": "rm -rf /"}) for _ in range(200)]
+        entries = [
+            json.dumps({"role": "assistant", "content": "rm -rf /"}) for _ in range(200)
+        ]
         history_file.write_text("\n".join(entries))
         findings = scan_history(tmp_path, last_n=5)
         assert len(findings) == 5

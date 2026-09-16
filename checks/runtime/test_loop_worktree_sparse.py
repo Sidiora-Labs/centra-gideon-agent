@@ -26,7 +26,7 @@ import threading
 
 import pytest
 
-from gideon.loop import worktree as wt
+from gideon.automation.loop import worktree as wt
 
 pytestmark = pytest.mark.skipif(not wt.git_available(), reason="git not installed")
 
@@ -36,7 +36,9 @@ def _wt_root(tmp_path, monkeypatch):
     """Worktrees under a temp config dir, and the per-process caches cleared — both
     ``_FILE_COUNT_CACHE`` and ``_TRACKED_DIRS_CACHE`` are keyed by workspace abspath, so
     a leftover entry from another test's tmp_path would answer for this one."""
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path / "gideon")
+    monkeypatch.setattr(
+        "gideon.core.config.loader.config_dir", lambda: tmp_path / "gideon"
+    )
     wt._FILE_COUNT_CACHE.clear()
     wt._TRACKED_DIRS_CACHE.clear()
     yield
@@ -67,7 +69,7 @@ def _repo(tmp_path, name="repo", extra: dict[str, str] | None = None) -> str:
     (d / "src" / "app.py").write_text("print('app')\n")
     (d / "src" / "util.py").write_text("X = 1\n")
     (d / "docs" / "guide.md").write_text("# guide\n")
-    (d / "web" / "main.ts").write_text("export const a = 1;\n")
+    (d / "apps/console" / "main.ts").write_text("export const a = 1;\n")
     (d / "README.md").write_text("# root\n")
     for rel, body in (extra or {}).items():
         p = d / rel
@@ -90,18 +92,15 @@ def _tree(path: str) -> set[str]:
     return out
 
 
-# ── scope derivation ──────────────────────────────────────────────────────────
-
-
 class TestScopeDerivation:
     def test_extracts_path_tokens_from_task_text(self):
         got = wt.scope_candidates(
-            "Update src/gideon/loop/worktree.py and add tests/test_x.py; "
+            "Update runtime/gideon/automation/loop/worktree.py and add checks/runtime/test_x.py; "
             "see the `docs/reference/configuration.md` table."
         )
         assert got == [
-            "src/gideon/loop/worktree.py",
-            "tests/test_x.py",
+            "runtime/gideon/automation/loop/worktree.py",
+            "checks/runtime/test_x.py",
             "docs/reference/configuration.md",
         ]
 
@@ -111,11 +110,13 @@ class TestScopeDerivation:
         assert wt.scope_candidates("refactor the worktree module and its tests") == []
 
     def test_a_sentence_final_directory_mention_is_not_a_dot_token(self):
-        """Found by driving the real path: "…do not touch web/." yielded the token
-        ``web/.``, which then resolved to the ``web`` directory and silently widened the
+        """Found by driving the real path: "…do not touch apps/console/." yielded the token
+        ``apps/console/.``, which then resolved to the ``web`` directory and silently widened the
         scope. The final component must start with a word char."""
-        assert wt.scope_candidates("Do not touch web/.") == []
-        assert wt.scope_candidates("Edit web/main.ts.") == ["web/main.ts"]
+        assert wt.scope_candidates("Do not touch apps/console/.") == []
+        assert wt.scope_candidates("Edit apps/console/main.ts.") == [
+            "apps/console/main.ts"
+        ]
 
     def test_negative_polarity_is_not_modelled(self):
         """Documented, not accidental: a forbidding mention still contributes its path.
@@ -124,7 +125,9 @@ class TestScopeDerivation:
         recovered by auto-widening. Since neither can break a task, modelling polarity
         would add a natural-language guess to a path that is explicitly a HINT. Pinned so
         the behaviour is a decision rather than a surprise."""
-        assert wt.scope_candidates("Do not touch web/src/pages") == ["web/src/pages"]
+        assert wt.scope_candidates("Do not touch apps/console/src/pages") == [
+            "apps/console/src/pages"
+        ]
 
     def test_resolves_files_to_their_parent_directory(self, tmp_path):
         """Cone entries are DIRECTORIES, so a named file contributes its parent."""
@@ -144,7 +147,9 @@ class TestScopeDerivation:
 
     def test_a_real_path_survives_alongside_a_fake_one(self, tmp_path):
         ws = _repo(tmp_path)
-        assert wt.resolve_scope(ws, ["nope/whatever.py", "web/main.ts"]) == ["web"]
+        assert wt.resolve_scope(ws, ["nope/whatever.py", "apps/console/main.ts"]) == [
+            "web"
+        ]
 
     def test_traversal_candidates_are_refused(self, tmp_path):
         ws = _repo(tmp_path)
@@ -155,7 +160,12 @@ class TestScopeDerivation:
         enumerate it."""
         ws = _repo(tmp_path)
         monkeypatch.setattr(wt, "_MAX_SCOPE_DIRS", 2)
-        assert wt.resolve_scope(ws, ["src/app.py", "docs/guide.md", "web/main.ts"]) == []
+        assert (
+            wt.resolve_scope(
+                ws, ["src/app.py", "docs/guide.md", "apps/console/main.ts"]
+            )
+            == []
+        )
 
     def test_no_git_answer_means_full_hydration(self, tmp_path, monkeypatch):
         """``git ls-files`` failing must degrade to a full checkout, never to a guess."""
@@ -163,9 +173,6 @@ class TestScopeDerivation:
         monkeypatch.setattr(wt, "_git", lambda *a, **k: (1, "boom"))
         wt._TRACKED_DIRS_CACHE.clear()
         assert wt.resolve_scope(ws, ["src/app.py"]) == []
-
-
-# ── the config field, AT ITS CONSUMER ─────────────────────────────────────────
 
 
 class TestConfigGate:
@@ -183,7 +190,9 @@ class TestConfigGate:
         monkeypatch.setattr(wt, "sparse_enabled", lambda: False)
         assert wt.scope_for_task(ws, "Fix src/app.py") == []
 
-    def test_config_off_produces_a_full_checkout_end_to_end(self, tmp_path, monkeypatch):
+    def test_config_off_produces_a_full_checkout_end_to_end(
+        self, tmp_path, monkeypatch
+    ):
         """The flag's OUTCOME, not just its return value: with it off, the worktree
         holds every file."""
         ws = _repo(tmp_path)
@@ -196,7 +205,7 @@ class TestConfigGate:
     def test_real_config_object_carries_the_field(self, tmp_path, monkeypatch):
         """Guards the wiring itself: a renamed/removed dataclass field would make
         ``sparse_enabled`` silently fail-open to False and disable HC-2 wholesale."""
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         cfg = AppConfig()
         assert cfg.loops.worktree_sparse is True
@@ -210,16 +219,20 @@ class TestConfigGate:
         being switched off — and every sparse feature would be silently dead."""
         import json
 
-        from gideon.config import loader
+        from gideon.core.config import loader
 
         home = tmp_path / "home"
         home.mkdir()
-        (home / "config.json").write_text(json.dumps({"loops": {"worktree_sparse": False}}))
+        (home / "config.json").write_text(
+            json.dumps({"loops": {"worktree_sparse": False}})
+        )
         monkeypatch.setattr(loader, "config_dir", lambda: home)
         assert loader.AppConfig.load().loops.worktree_sparse is False
         assert wt.sparse_enabled() is False
 
-        (home / "config.json").write_text(json.dumps({"loops": {"worktree_sparse": True}}))
+        (home / "config.json").write_text(
+            json.dumps({"loops": {"worktree_sparse": True}})
+        )
         assert wt.sparse_enabled() is True, "fail-open masked the real read"
 
 
@@ -231,9 +244,11 @@ def test_sdlc_scheduler_calls_the_scoped_batch_api():
     import inspect
     import textwrap
 
-    from gideon.loop.kinds import sdlc
+    from gideon.automation.loop.kinds import sdlc
 
-    tree = ast.parse(textwrap.dedent(inspect.getsource(sdlc.CodeKind._schedule_parallel)))
+    tree = ast.parse(
+        textwrap.dedent(inspect.getsource(sdlc.CodeKind._schedule_parallel))
+    )
     calls = {
         ast.unparse(n.func)
         for n in ast.walk(tree)
@@ -241,10 +256,9 @@ def test_sdlc_scheduler_calls_the_scoped_batch_api():
     }
     assert "worktree.add_worktrees" in calls, calls
     assert "worktree.scope_for_task" in calls, calls
-    assert "worktree.add_worktree" not in calls, "serial per-task creation is still here"
-
-
-# ── sparse hydration ──────────────────────────────────────────────────────────
+    assert (
+        "worktree.add_worktree" not in calls
+    ), "serial per-task creation is still here"
 
 
 class TestSparseHydration:
@@ -256,7 +270,7 @@ class TestSparseHydration:
         tree = _tree(path)
         assert "src/app.py" in tree
         assert "docs/guide.md" not in tree, "sparse hydration did not reduce the tree"
-        assert "web/main.ts" not in tree
+        assert "apps/console/main.ts" not in tree
         assert wt.sparse_scope(path) == ["src"]
 
     def test_root_files_stay_hydrated(self, tmp_path):
@@ -269,7 +283,7 @@ class TestSparseHydration:
     def test_no_scope_hydrates_everything(self, tmp_path):
         ws = _repo(tmp_path)
         path = wt.add_worktree(ws, "t-full", scope=[])
-        assert {"src/app.py", "docs/guide.md", "web/main.ts"} <= _tree(path)
+        assert {"src/app.py", "docs/guide.md", "apps/console/main.ts"} <= _tree(path)
         assert wt.sparse_scope(path) == []
 
     def test_branch_carries_the_whole_repo_despite_a_sparse_tree(self, tmp_path):
@@ -279,10 +293,7 @@ class TestSparseHydration:
         path = wt.add_worktree(ws, "t-branch", scope=["src"])
         listed = _git(path, "ls-tree", "-r", "--name-only", "HEAD").stdout.split()
         assert "docs/guide.md" in listed
-        assert "web/main.ts" in listed
-
-
-# ── auto-widening ─────────────────────────────────────────────────────────────
+        assert "apps/console/main.ts" in listed
 
 
 class TestAutoWiden:
@@ -322,7 +333,7 @@ class TestAutoWiden:
         ws = _repo(tmp_path)
         path = wt.add_worktree(ws, "t-lost", scope=["src"])
         os.makedirs(os.path.join(path, "web"), exist_ok=True)
-        with open(os.path.join(path, "web/lost.ts"), "w") as f:
+        with open(os.path.join(path, "apps/console/lost.ts"), "w") as f:
             f.write("export const gone = 1;\n")
 
         with pytest.MonkeyPatch.context() as mp:
@@ -331,7 +342,7 @@ class TestAutoWiden:
 
         assert result.ok is True, "merge did not even report success — premise stale"
         assert not (
-            tmp_path / "repo" / "web" / "lost.ts"
+            tmp_path / "repo" / "apps/console" / "lost.ts"
         ).exists(), "premise stale: the write survived without widening"
 
     def test_widening_makes_an_out_of_scope_write_land(self, tmp_path):
@@ -352,9 +363,13 @@ class TestAutoWiden:
         _git(path, "add", "-A")
         _git(path, "commit", "-qm", "work")
         listed = _git(path, "ls-tree", "-r", "--name-only", "HEAD").stdout.split()
-        assert "docs/new.md" in listed, "the out-of-scope write did not reach the commit"
+        assert (
+            "docs/new.md" in listed
+        ), "the out-of-scope write did not reach the commit"
 
-    def test_widening_does_not_fail_the_write_on_a_modified_in_scope_file(self, tmp_path):
+    def test_widening_does_not_fail_the_write_on_a_modified_in_scope_file(
+        self, tmp_path
+    ):
         """An in-cone edit needs no widening; the cone must be left alone (a widen that
         fired here would erode sparseness on every ordinary task)."""
         ws = _repo(tmp_path)
@@ -379,16 +394,17 @@ class TestAutoWiden:
         with open(os.path.join(path, "src/app.py"), "a") as f:
             f.write("# in scope\n")
         os.makedirs(os.path.join(path, "web"), exist_ok=True)
-        with open(os.path.join(path, "web/extra.ts"), "w") as f:
+        with open(os.path.join(path, "apps/console/extra.ts"), "w") as f:
             f.write("export const b = 2;\n")
 
         assert wt.merge_worktree(ws, "t-merge").ok is True
 
-        assert (tmp_path / "repo" / "web" / "extra.ts").is_file()
+        assert (tmp_path / "repo" / "apps/console" / "extra.ts").is_file()
         head = _git(ws, "show", "--name-only", "--format=", "HEAD").stdout
         assert (
-            "web/extra.ts" in head
-            or "web/extra.ts" in _git(ws, "ls-tree", "-r", "--name-only", "HEAD").stdout
+            "apps/console/extra.ts" in head
+            or "apps/console/extra.ts"
+            in _git(ws, "ls-tree", "-r", "--name-only", "HEAD").stdout
         )
 
 
@@ -411,9 +427,6 @@ def test_merge_back_is_diff_identical_to_a_full_checkout(tmp_path):
     assert (
         results[0] and results[0] == results[1]
     ), f"sparse merge-back diverged from full: {results}"
-
-
-# ── bounded pool ──────────────────────────────────────────────────────────────
 
 
 class TestPoolBound:
@@ -519,9 +532,6 @@ class TestPoolBound:
         assert wt.add_worktrees(_repo(tmp_path), []) == {}
 
 
-# ── reuse pool ────────────────────────────────────────────────────────────────
-
-
 class TestReusePool:
     def test_reset_removes_a_leftover_file(self, tmp_path):
         """The reuse pool's reason to exist: a surviving worktree must not hand the next
@@ -552,7 +562,9 @@ class TestReusePool:
         with open(os.path.join(path, "staged.txt"), "w") as f:
             f.write("staged\n")
         _git(path, "add", "staged.txt")
-        assert _git(path, "diff", "--cached", "--name-only").stdout.strip() == "staged.txt"
+        assert (
+            _git(path, "diff", "--cached", "--name-only").stdout.strip() == "staged.txt"
+        )
 
         assert wt.reset_worktree(ws, "t-index") is True
 
@@ -621,7 +633,7 @@ def test_conflict_redo_resets_then_falls_back_to_teardown():
     import inspect
     import textwrap
 
-    from gideon.loop.kinds import sdlc
+    from gideon.automation.loop.kinds import sdlc
 
     tree = ast.parse(textwrap.dedent(inspect.getsource(sdlc.CodeKind._reap_merge_done)))
     calls = [
@@ -631,7 +643,6 @@ def test_conflict_redo_resets_then_falls_back_to_teardown():
     ]
     assert "worktree.reset_worktree" in calls, calls
     assert "worktree.remove_worktree" in calls, "the teardown fallback is gone"
-    # The teardown must be GUARDED by the reset's failure, not run unconditionally.
     guarded = [
         n
         for n in ast.walk(tree)

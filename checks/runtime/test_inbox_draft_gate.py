@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from aiohttp import web
 
-from gideon.dashboard.handlers_inbox import api_inbox_draft
+from gideon.interfaces.dashboard.handlers_inbox import api_inbox_draft
 
 
 def _req(item) -> tuple[MagicMock, AsyncMock]:
@@ -24,7 +24,6 @@ def _req(item) -> tuple[MagicMock, AsyncMock]:
     draft_spy = AsyncMock(return_value=item)
     svc = MagicMock()
     svc.draft_reply = draft_spy
-    # _get_inbox prefers the running service's (state, inbox) pair.
     svc.state = MagicMock()
     svc.inbox = SimpleNamespace(items={item.id: item} if item is not None else {})
     r = MagicMock()
@@ -53,7 +52,6 @@ async def test_read_only_item_refuses_before_the_model_runs():
     resp = await api_inbox_draft(req)
     assert resp.status == 400
     assert "does not support replies" in (await _json(resp))["error"]
-    # The whole point: no model call happened.
     draft_spy.assert_not_awaited()
 
 

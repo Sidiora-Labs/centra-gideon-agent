@@ -41,10 +41,10 @@ import datetime as dt
 
 import pytest
 
-from gideon.gateway import GatewayOrchestrator
-from gideon.triggers import service as SVC
-from gideon.triggers.models import Trigger
-from gideon.triggers.store import TriggerStore
+from gideon.automation.triggers import service as SVC
+from gideon.automation.triggers.models import Trigger
+from gideon.automation.triggers.store import TriggerStore
+from gideon.engine.gateway import RuntimeCoordinator
 
 NOW = 1_700_000_000.0
 HOUR = 3600.0
@@ -73,7 +73,9 @@ class _State:
         self.sent: list[dict] = []
 
     def notify(self, *, kind, title, body, meta=None):
-        self.sent.append({"kind": kind, "title": title, "body": body, "meta": meta or {}})
+        self.sent.append(
+            {"kind": kind, "title": title, "body": body, "meta": meta or {}}
+        )
         return True
 
 
@@ -94,12 +96,9 @@ def _clock(tid, *, next_at=0.0, interval=60, catch_up=False, spec=None):
 
 
 def _orchestrator(state=None):
-    gateway = GatewayOrchestrator.__new__(GatewayOrchestrator)
+    gateway = RuntimeCoordinator.__new__(RuntimeCoordinator)
     gateway.dashboard_state = state
     return gateway
-
-
-# ── the sweep itself ──
 
 
 def test_the_boot_sweep_LEAVES_NOTHING_immediately_due(tmp_path):
@@ -125,11 +124,14 @@ def test_the_sweep_STAGGERS_rather_than_bunching(tmp_path):
 def test_a_DROPPED_slot_resumes_on_the_triggers_OWN_schedule(tmp_path):
     """🔴 Found by driving the newly-wired sweep. A `catch_up: false` 03:00 daily backup, overdue
     because the laptop was shut, was re-armed to **09:02** — the slot `missed_dropped` had just
-    decided to DROP fired six hours late anyway, ignoring the trigger's own cron expression."""
+    decided to DROP fired six hours late anyway, ignoring the trigger's own cron expression.
+    """
     now = dt.datetime(2023, 11, 15, 9, 0, tzinfo=dt.timezone.utc).timestamp()
     missed = dt.datetime(2023, 11, 15, 3, 0, tzinfo=dt.timezone.utc).timestamp()
     store = TriggerStore(base_dir=tmp_path)
-    store.save_all([_clock("backup", spec={"kind": "cron", "expr": "0 3 * * *"}, next_at=missed)])
+    store.save_all(
+        [_clock("backup", spec={"kind": "cron", "expr": "0 3 * * *"}, next_at=missed)]
+    )
 
     SVC.boot(store, now=now)
     landed = dt.datetime.fromtimestamp(
@@ -154,12 +156,10 @@ def test_catch_up_fires_ONCE_and_the_refusals_are_EXPLAINED(tmp_path):
     assert plan["no"]["reason"]
 
 
-# ── the review reaches the user ──
-
-
 def test_the_missed_review_SURFACES_as_one_notification():
     """Criterion 7's "missed slots appear in the review card". ONE notification naming the count,
-    not one per slot: a laptop opened after a weekend would otherwise deliver hundreds."""
+    not one per slot: a laptop opened after a weekend would otherwise deliver hundreds.
+    """
     state = _State()
     _orchestrator(state)._surface_missed_review(
         {
@@ -175,7 +175,9 @@ def test_the_missed_review_SURFACES_as_one_notification():
     sent = state.sent[0]
     assert sent["meta"]["event"] == "automation.missed_review"
     assert sent["meta"]["missed"] == 41, sent["meta"]
-    assert sent["meta"]["statusUrl"] == "#/triggers", "it must be reachable, not just announced"
+    assert (
+        sent["meta"]["statusUrl"] == "#/triggers"
+    ), "it must be reachable, not just announced"
     assert "41 scheduled runs were missed" in sent["body"]
     assert "catch-up" in sent["body"], "and it says which will fire on their own"
 
@@ -192,11 +194,10 @@ def test_NOTHING_missed_says_NOTHING():
 
 def test_the_surface_NEVER_raises_without_a_dashboard():
     """The sweep already re-armed the schedule; failing to announce it must not undo that."""
-    _orchestrator(None)._surface_missed_review({"review": {"rows": [{"trigger_id": "a"}]}})
+    _orchestrator(None)._surface_missed_review(
+        {"review": {"rows": [{"trigger_id": "a"}]}}
+    )
     _orchestrator(_State())._surface_missed_review({})
-
-
-# ── the boot report is what the gateway actually logs ──
 
 
 def test_the_boot_report_carries_every_field_the_gateway_reads(tmp_path):
@@ -208,7 +209,6 @@ def test_the_boot_report_carries_every_field_the_gateway_reads(tmp_path):
     report = SVC.boot(store, now=NOW)
     assert {"rearmed", "total", "review", "catch_up", "next_sleep"} <= set(report)
     assert {"rows", "summaries", "truncated"} <= set(report["review"])
-    # Driven through the real surface, so the shapes are asserted together rather than assumed.
     state = _State()
     _orchestrator(state)._surface_missed_review(report)
     assert len(state.sent) == 1
@@ -224,9 +224,6 @@ def test_the_sweep_is_a_dry_run_when_asked(tmp_path):
     assert store.get("t1").trigger.next_fire_at == before
 
 
-# ── crash-safety: the spool survives a restart ──
-
-
 def test_a_fire_with_NO_RUNNING_LOOP_is_spooled_not_dropped(tmp_path, monkeypatch):
     """🔴 `event_triggers._schedule_fire` recorded the fire, asked for a running loop, and `return`ed
     when there was none — so a sync CLI memory write incremented `fire_count` and dropped the action
@@ -234,12 +231,12 @@ def test_a_fire_with_NO_RUNNING_LOOP_is_spooled_not_dropped(tmp_path, monkeypatc
     path and its docstring calls it "THE fix for the measured bug"; it had no caller, so the bug it
     names was still live."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.config import loader
+    from gideon.core.config import loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
 
-    import gideon.event_triggers as et
-    from gideon.triggers.dispatch import drain_spool
+    import gideon.automation.event_triggers as et
+    from gideon.automation.triggers.dispatch import drain_spool
 
     store = et.EventTriggerStore(tmp_path / "event_triggers.json")
     store.save(
@@ -256,27 +253,34 @@ def test_a_fire_with_NO_RUNNING_LOOP_is_spooled_not_dropped(tmp_path, monkeypatc
     engine = et.EventTriggerEngine()
     engine._store = store
 
-    # No running loop — this IS the sync CLI write.
     engine.on_event(
-        source=et.SOURCE_MEMORY, event_type="memory_write", key="notes/x", value="hi", now=NOW
+        source=et.SOURCE_MEMORY,
+        event_type="memory_write",
+        key="notes/x",
+        value="hi",
+        now=NOW,
     )
 
-    assert store.load()[0].fire_count == 1, "the fire was counted against max_fires either way"
+    assert (
+        store.load()[0].fire_count == 1
+    ), "the fire was counted against max_fires either way"
     envelopes, bad = drain_spool()
     assert bad == 0
-    assert [e.payload["key"] for e in envelopes] == ["notes/x"], "so it must not be lost"
+    assert [e.payload["key"] for e in envelopes] == [
+        "notes/x"
+    ], "so it must not be lost"
 
 
 def test_a_spool_failure_does_not_BREAK_THE_MEMORY_WRITE(tmp_path, monkeypatch):
     """The write is the user's actual work and this is bookkeeping layered on top of it. An
     unwritable disk must not take down ordinary use."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.config import loader
+    from gideon.core.config import loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
 
-    import gideon.event_triggers as et
-    from gideon.triggers import dispatch
+    import gideon.automation.event_triggers as et
+    from gideon.automation.triggers import dispatch
 
     def _boom(*a, **kw):
         raise OSError("read-only file system")
@@ -298,19 +302,19 @@ def test_a_spool_failure_does_not_BREAK_THE_MEMORY_WRITE(tmp_path, monkeypatch):
     engine._store = store
     engine.on_event(
         source=et.SOURCE_MEMORY, event_type="memory_write", key="k", value="v", now=NOW
-    )  # must not raise
+    )
 
 
 def test_a_LIVE_fire_still_dispatches_rather_than_spooling(tmp_path, monkeypatch):
     """The spool is the no-loop path ONLY. Spooling a fire that could have run now would turn every
     live memory-trigger fire into a delayed one."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.config import loader
+    from gideon.core.config import loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
 
-    import gideon.event_triggers as et
-    from gideon.triggers.dispatch import drain_spool
+    import gideon.automation.event_triggers as et
+    from gideon.automation.triggers.dispatch import drain_spool
 
     store = et.EventTriggerStore(tmp_path / "event_triggers.json")
     store.save(
@@ -334,9 +338,13 @@ def test_a_LIVE_fire_still_dispatches_rather_than_spooling(tmp_path, monkeypatch
             lambda t, **kw: _record(fired, kw["key"]),
         )
         engine.on_event(
-            source=et.SOURCE_MEMORY, event_type="memory_write", key="live", value="v", now=NOW
+            source=et.SOURCE_MEMORY,
+            event_type="memory_write",
+            key="live",
+            value="v",
+            now=NOW,
         )
-        await asyncio.sleep(0)  # let the created task run
+        await asyncio.sleep(0)
         return fired
 
     async def _record(sink, key):

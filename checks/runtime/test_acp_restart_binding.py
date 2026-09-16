@@ -22,39 +22,41 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from gideon.dashboard.chat_persistence import (
+from gideon.cognition.history import ConversationLog
+from gideon.engine.hooks import ToolHookResult
+from gideon.integrations.llm.base import EVENT_COMPLETE, LLMEvent
+from gideon.interfaces.dashboard.chat_persistence import (
     _rehydrate_session_from_history,
     restore_recent_sessions,
     save_session_to_history,
 )
-from gideon.dashboard.chat_runner import run_chat
-from gideon.dashboard.chat_utils import apply_task_mode
-from gideon.dashboard.state import DashboardState, _ChatSession
-from gideon.history import ConversationLog
-from gideon.hooks import ToolHookResult
-from gideon.llm.base import EVENT_COMPLETE, LLMEvent
+from gideon.interfaces.dashboard.chat_runner import run_chat
+from gideon.interfaces.dashboard.chat_utils import apply_task_mode
+from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
 
 SESSION = "chat-3-g5"
 HISTORY_KEY = "dashboard:" + SESSION
 
 
-def _state(tmp_path: Path) -> DashboardState:
+def _state(tmp_path: Path) -> ConsoleState:
     sessions = MagicMock(count=0)
     sessions.get_pid = MagicMock(return_value=None)
     sessions.remove = AsyncMock()
     sessions.set_task_mode = MagicMock()
-    return DashboardState(
+    return ConsoleState(
         sessions=sessions,
         start_time=0.0,
         conversation_log=ConversationLog(base_dir=tmp_path),
     )
 
 
-def _bound_session(state: DashboardState, *, task_mode: str = "plan") -> _ChatSession:
+def _bound_session(state: ConsoleState, *, task_mode: str = "plan") -> _ChatSession:
     """A live session in the posture O16 measured: ACP-bound, non-default task mode."""
     s = state.get_or_create_session(SESSION)
     s.messages.append({"role": "user", "content": "hello", "ts": "2026-08-21T10:00:00"})
-    s.messages.append({"role": "assistant", "content": "hi", "ts": "2026-08-21T10:00:01"})
+    s.messages.append(
+        {"role": "assistant", "content": "hi", "ts": "2026-08-21T10:00:01"}
+    )
     s.acp_provider = "acp:claude-agent-acp"
     s.acp_provider_agent = "default"
     s.workspace_dir = "/tmp/g5-ws"
@@ -63,22 +65,25 @@ def _bound_session(state: DashboardState, *, task_mode: str = "plan") -> _ChatSe
 
 
 def _meta(tmp_path: Path) -> dict:
-    line = (tmp_path / f"dashboard_{SESSION}.jsonl").read_text(encoding="utf-8").splitlines()[0]
+    line = (
+        (tmp_path / f"dashboard_{SESSION}.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()[0]
+    )
     return json.loads(line)
 
 
-def _restart(tmp_path: Path) -> tuple[DashboardState, _ChatSession | None]:
+def _restart(tmp_path: Path) -> tuple[ConsoleState, _ChatSession | None]:
     """Simulate the restart: a brand-new state over the same history, bulk restore."""
     fresh = _state(tmp_path)
     restore_recent_sessions(fresh, window_minutes=60)
     return fresh, fresh._sessions.get(SESSION)
 
 
-# ── claims 1 + 3: the binding and the task mode must come back ────────────────
-
-
 class TestBindingSurvivesARestart:
-    def test_acp_binding_is_the_same_runtime_after_a_restart(self, tmp_path, monkeypatch):
+    def test_acp_binding_is_the_same_runtime_after_a_restart(
+        self, tmp_path, monkeypatch
+    ):
         """The RESTORED BINDING, not a dict key.
 
         This is the assertion that has to fail if the writer is dropped: the session
@@ -86,7 +91,9 @@ class TestBindingSurvivesARestart:
         before, because the alternative is not "a missing field" — it is a turn that
         resolves on the native axis with a different tool set and different confinement.
         """
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         st = _state(tmp_path)
         s = _bound_session(st)
         save_session_to_history(st, s, force=True)
@@ -104,7 +111,9 @@ class TestBindingSurvivesARestart:
         first brings back a session the UI labels "Plan" whose tools still run, which is
         strictly worse than losing the mode outright.
         """
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         st = _state(tmp_path)
         save_session_to_history(st, _bound_session(st, task_mode="plan"), force=True)
 
@@ -121,7 +130,9 @@ class TestBindingSurvivesARestart:
         Keeping the rail here means the next person to touch the meta line finds all
         three fields asserted in one place.
         """
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         st = _state(tmp_path)
         save_session_to_history(st, _bound_session(st), force=True)
 
@@ -136,14 +147,20 @@ class TestBindingSurvivesARestart:
         existing sessions' lines stay byte-identical. An unconditional ``task_mode``
         would rewrite every session file in the home on the next turn.
         """
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         st = _state(tmp_path)
         save_session_to_history(st, _bound_session(st, task_mode="agent"), force=True)
         assert "task_mode" not in _meta(tmp_path)
 
-    def test_a_hand_edited_task_mode_cannot_escape_the_closed_set(self, tmp_path, monkeypatch):
+    def test_a_hand_edited_task_mode_cannot_escape_the_closed_set(
+        self, tmp_path, monkeypatch
+    ):
         """A junk mode restores as Agent, never as an un-gated unknown."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         st = _state(tmp_path)
         save_session_to_history(st, _bound_session(st), force=True)
         path = tmp_path / f"dashboard_{SESSION}.jsonl"
@@ -159,7 +176,9 @@ class TestBindingSurvivesARestart:
 
 
 class TestTurnSaveDoesNotClobberTheBindEndpoint:
-    def test_bind_endpoint_write_survives_the_next_turn_save(self, tmp_path, monkeypatch):
+    def test_bind_endpoint_write_survives_the_next_turn_save(
+        self, tmp_path, monkeypatch
+    ):
         """The measured mechanism behind claim 1.
 
         ``POST /api/chat/sessions/{s}/acp-agent`` persists the binding with
@@ -168,10 +187,12 @@ class TestTurnSaveDoesNotClobberTheBindEndpoint:
         ``created_at``/``last_consolidated``/``side`` — so the merge survived exactly
         until the end of the next turn and then vanished. That ordering is the test.
         """
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         st = _state(tmp_path)
         s = _bound_session(st)
-        save_session_to_history(st, s, force=True)  # the file must exist to merge into
+        save_session_to_history(st, s, force=True)
         st.conversation_log.update_metadata(
             HISTORY_KEY, {"acp_provider": "acp:other-cli", "acp_provider_agent": "gpu"}
         )
@@ -179,7 +200,7 @@ class TestTurnSaveDoesNotClobberTheBindEndpoint:
 
         s.acp_provider = "acp:other-cli"
         s.acp_provider_agent = "gpu"
-        save_session_to_history(st, s, force=True)  # the next turn ends
+        save_session_to_history(st, s, force=True)
 
         assert _meta(tmp_path)["acp_provider"] == "acp:other-cli"
         _, restored = _restart(tmp_path)
@@ -193,33 +214,41 @@ class TestTurnSaveDoesNotClobberTheBindEndpoint:
         inert-reader shape. Asserting the two paths produce the SAME binding is the
         rail that stops them drifting again.
         """
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         st = _state(tmp_path)
         save_session_to_history(st, _bound_session(st), force=True)
 
         _, bulk = _restart(tmp_path)
         targeted = _rehydrate_session_from_history(_state(tmp_path), SESSION)
         assert bulk is not None and targeted is not None
-        for attr in ("acp_provider", "acp_provider_agent", "workspace_dir", "_task_mode"):
+        for attr in (
+            "acp_provider",
+            "acp_provider_agent",
+            "workspace_dir",
+            "_task_mode",
+        ):
             assert getattr(bulk, attr) == getattr(targeted, attr), attr
 
 
-# ── the requirement that matters: an un-restorable binding is never silent ────
-
-
-def _runner_state(tmp_path: Path) -> tuple[DashboardState, MagicMock]:
+def _runner_state(tmp_path: Path) -> tuple[ConsoleState, MagicMock]:
     sessions = MagicMock(count=0)
     sessions.reset = AsyncMock()
     client = AsyncMock()
     client.provider_id = "native"
     client.stream = MagicMock(
-        side_effect=lambda *a, **kw: _aiter([LLMEvent(kind=EVENT_COMPLETE, stop_reason="end_turn")])
+        side_effect=lambda *a, **kw: _aiter(
+            [LLMEvent(kind=EVENT_COMPLETE, stop_reason="end_turn")]
+        )
     )
     sessions.get_or_create = AsyncMock(return_value=(client, True, False))
     sessions.record_failure = AsyncMock()
     sessions.check_context_usage = MagicMock()
-    state = DashboardState(
-        sessions=sessions, start_time=0.0, conversation_log=ConversationLog(base_dir=tmp_path)
+    state = ConsoleState(
+        sessions=sessions,
+        start_time=0.0,
+        conversation_log=ConversationLog(base_dir=tmp_path),
     )
     cb = MagicMock()
     cb.hooks.on_tool_call.return_value = ToolHookResult.allow()
@@ -238,8 +267,8 @@ async def _aiter(items):
         yield i
 
 
-async def _drive(state: DashboardState, session: _ChatSession) -> None:
-    with patch("gideon.dashboard.chat_runner.sel", MagicMock()):
+async def _drive(state: ConsoleState, session: _ChatSession) -> None:
+    with patch("gideon.interfaces.dashboard.chat_runner.sel", MagicMock()):
         await run_chat(state, session, "hello")
 
 
@@ -270,7 +299,9 @@ class TestAnUnrestorableBindingIsAnnounced:
         await _drive(state, s)
 
         notices = _binding_notices(bcast)
-        assert notices, "an un-restorable runtime binding resolved on the native axis in silence"
+        assert (
+            notices
+        ), "an un-restorable runtime binding resolved on the native axis in silence"
         assert "acp:claude-agent-acp" in notices[0]
         assert "confinement" in notices[0]
 
@@ -297,7 +328,7 @@ class TestAnUnrestorableBindingIsAnnounced:
     @pytest.mark.asyncio
     async def test_an_explicit_pick_is_not_reported_as_a_fallback(self, tmp_path):
         """Choosing the native axis by hand is a decision, not a silent substitution."""
-        from gideon.dashboard.chat_handlers import api_chat_session_agent
+        from gideon.interfaces.dashboard.chat_handlers import api_chat_session_agent
 
         state, bcast = _runner_state(tmp_path)
         s = state.get_or_create_session(SESSION)
@@ -308,15 +339,12 @@ class TestAnUnrestorableBindingIsAnnounced:
         request.app = {"state": state}
         request.match_info = {"session": SESSION}
         request.json = AsyncMock(return_value={"agent": "gideon"})
-        with patch("gideon.dashboard.chat_handlers.sel", MagicMock()):
+        with patch("gideon.interfaces.dashboard.chat_handlers.sel", MagicMock()):
             await api_chat_session_agent(request)
         assert s._acp_meta_binding == ""
 
         await _drive(state, s)
         assert _binding_notices(bcast) == []
-
-
-# ── claim 4: resume_sid is no longer None, and the reason it was is DELETED ──
 
 
 class TestResumeSidSurvivesARestart:
@@ -338,18 +366,21 @@ class TestResumeSidSurvivesARestart:
 
     def _map(self, tmp_path, monkeypatch):
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        monkeypatch.setattr("gideon.session_map.config_dir", lambda: tmp_path)
-        monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
-        from gideon.session_map import SessionMap
+        monkeypatch.setattr("gideon.engine.session_map.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
+        from gideon.engine.session_map import SessionMap
 
         return SessionMap()
 
-    def test_the_sid_is_returned_and_kept_with_no_session_file(self, tmp_path, monkeypatch):
+    def test_the_sid_is_returned_and_kept_with_no_session_file(
+        self, tmp_path, monkeypatch
+    ):
         m = self._map(tmp_path, monkeypatch)
         m.set(HISTORY_KEY, "2cb03780-dead-beef", cwd=str(tmp_path))
-        assert not (tmp_path / "sessions").exists(), "precondition: no session files at all"
+        assert not (
+            tmp_path / "sessions"
+        ).exists(), "precondition: no session files at all"
         assert m.get(HISTORY_KEY) == "2cb03780-dead-beef"
-        # The destructive half: the entry is still on disk for the NEXT restart.
         assert json.loads((tmp_path / "session_map.json").read_text())[HISTORY_KEY]
 
     def test_startup_prune_does_not_wipe_it(self, tmp_path, monkeypatch):
@@ -367,9 +398,6 @@ class TestResumeSidSurvivesARestart:
         m._data[HISTORY_KEY] = {"sid": "", "thread_ts": None, "channel_id": None}
         assert m.get(HISTORY_KEY) is None
         assert m.prune() == 1
-
-
-# ── `G157`: the first message after a restart must not run on a blank session ──
 
 
 class TestAColdKeyPostRehydratesItsBinding:
@@ -394,17 +422,20 @@ class TestAColdKeyPostRehydratesItsBinding:
 
     def _persisted_session(self, tmp_path):
         """A session on disk carrying an ACP binding, with nothing in memory."""
-        state = DashboardState(
-            sessions=MagicMock(count=0), start_time=0.0, conversation_log=self._log(tmp_path)
+        state = ConsoleState(
+            sessions=MagicMock(count=0),
+            start_time=0.0,
+            conversation_log=self._log(tmp_path),
         )
         s = _ChatSession(SESSION)
         s.acp_provider = "acp:claude-code"
         s.workspace_dir = str(tmp_path / "ws")
         s.append("user", "hi", "msg msg-u")
         save_session_to_history(state, s)
-        # The restart: a brand-new state, nothing in memory.
-        restarted = DashboardState(
-            sessions=MagicMock(count=0), start_time=0.0, conversation_log=self._log(tmp_path)
+        restarted = ConsoleState(
+            sessions=MagicMock(count=0),
+            start_time=0.0,
+            conversation_log=self._log(tmp_path),
         )
         assert SESSION not in restarted._sessions
         return restarted
@@ -416,7 +447,9 @@ class TestAColdKeyPostRehydratesItsBinding:
         blank = restarted.get_or_create_session(SESSION)
         assert blank.acp_provider == ""
 
-    def test_rehydrating_first_restores_the_binding_the_turn_will_resolve(self, tmp_path):
+    def test_rehydrating_first_restores_the_binding_the_turn_will_resolve(
+        self, tmp_path
+    ):
         """What ``api_chat`` now does before ``get_or_create_session``. The rehydrate
         REGISTERS the restored session, so the create returns that one — the object the
         turn reads ``acp_provider`` off."""
@@ -453,14 +486,12 @@ class TestAColdKeyPostRehydratesItsBinding:
         a no-op that returns the already-registered session."""
         import inspect
 
-        from gideon.dashboard import chat_handlers
+        from gideon.interfaces.dashboard import chat_handlers
 
         src = inspect.getsource(chat_handlers.api_chat)
-        # Matched WITHOUT the closing paren: the claim is the ORDER of the two calls, not
-        # the rehydrate's argument list (it now also passes `include_archived=True`, so a
-        # send may seed an archived key — the same key `session_key_exists` above already
-        # declared writable).
         assert "_rehydrate_session_from_history(state, session_name" in src
-        assert src.index("_rehydrate_session_from_history(state, session_name") < src.index(
+        assert src.index(
+            "_rehydrate_session_from_history(state, session_name"
+        ) < src.index(
             "state.get_or_create_session(session_name"
         ), "api_chat resolves the session before restoring its binding"

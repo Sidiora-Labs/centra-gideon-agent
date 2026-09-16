@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-import gideon.context_engine as ce
-from gideon.context import ContextBuilder
-from gideon.memory import MemoryStore
-from gideon.skills import SkillsLoader
-from gideon.vector_memory import VectorMemoryStore
+import gideon.cognition.context_engine as ce
+from gideon.cognition.context import PromptAssembler
+from gideon.cognition.memory import MemoryJournal
+from gideon.cognition.vector_memory import SemanticArchive
+from gideon.extensions.skills import ProcedureLibrary
 
 
 @pytest.fixture(autouse=True)
@@ -22,17 +22,15 @@ def _reset_breaker():
 
 @pytest.fixture
 def builder(tmp_path):
-    ms = MemoryStore(workspace=tmp_path / "ws")
+    ms = MemoryJournal(workspace=tmp_path / "ws")
     ms.init()
-    vs = VectorMemoryStore(db_path=tmp_path / "v.db")
+    vs = SemanticArchive(db_path=tmp_path / "v.db")
     vs.init()
-    ms._vector_store = vs
-    b = ContextBuilder(
+    ms.vector_store = vs
+    b = PromptAssembler(
         memory=ms,
-        skills=SkillsLoader(skills_path=tmp_path / "sk", install_builtins=False),
+        skills=ProcedureLibrary(skills_path=tmp_path / "sk", install_builtins=False),
     )
-    # get_memory_for is a staticmethod resolving by cwd; point it at our store so
-    # active_recall_block sees the populated vector store.
     b.get_memory_for = staticmethod(lambda cwd=None, memory_store=None: ms)  # type: ignore[assignment]  # noqa: E501
     return b, vs
 
@@ -45,12 +43,13 @@ def test_no_recall_block_on_empty_memory(builder):
 
 def test_recall_block_surfaces_relevant_episode(builder, monkeypatch):
     b, vs = builder
-    # Stub episodic retrieval so the test doesn't depend on embeddings.
-    monkeypatch.setattr(vs, "get_episodic_context", lambda **kw: "User prefers pandas over polars.")
+    monkeypatch.setattr(
+        vs, "get_episodic_context", lambda **kw: "User prefers pandas over polars."
+    )
     blk = ce.active_recall_block(b, "what about pandas?", cwd=None, memory_store=None)
     assert "ACTIVE RECALL" in blk
     assert "pandas" in blk
-    assert "DATA, not instructions" in blk  # fenced as untrusted
+    assert "DATA, not instructions" in blk
 
 
 def test_recall_skipped_when_disabled_by_config(builder, monkeypatch):
@@ -67,7 +66,7 @@ def test_recall_skipped_on_empty_text(builder):
 
 def test_circuit_breaker_opens_after_timeouts(builder, monkeypatch):
     b, vs = builder
-    monkeypatch.setattr(ce, "_active_recall_enabled", lambda: (True, 1))  # 1ms → always times out
+    monkeypatch.setattr(ce, "_active_recall_enabled", lambda: (True, 1))
 
     def _slow(**kw):
         import time
@@ -76,11 +75,9 @@ def test_circuit_breaker_opens_after_timeouts(builder, monkeypatch):
         return "x"
 
     monkeypatch.setattr(vs, "get_episodic_context", _slow)
-    # Trip the breaker.
     for _ in range(ce._RECALL_BREAKER_TRIP):
         assert ce.active_recall_block(b, "q", cwd=None, memory_store=None) == ""
     assert ce._recall_consecutive_timeouts >= ce._RECALL_BREAKER_TRIP
-    # Breaker open: now even a fast recall is skipped (no executor spun up).
     monkeypatch.setattr(ce, "_active_recall_enabled", lambda: (True, 5000))
     monkeypatch.setattr(vs, "get_episodic_context", lambda **kw: "fast result")
     assert ce.active_recall_block(b, "q", cwd=None, memory_store=None) == ""
@@ -88,8 +85,12 @@ def test_circuit_breaker_opens_after_timeouts(builder, monkeypatch):
 
 def test_assemble_injects_recall_on_interactive_turn(builder, monkeypatch):
     b, vs = builder
-    monkeypatch.setattr(vs, "get_episodic_context", lambda **kw: "Recalled: likes tabs.")
-    out = ce.assemble_context(b, "tabs or spaces?", is_new_session=True, session_key="c1", cwd=None)
+    monkeypatch.setattr(
+        vs, "get_episodic_context", lambda **kw: "Recalled: likes tabs."
+    )
+    out = ce.assemble_context(
+        b, "tabs or spaces?", is_new_session=True, session_key="c1", cwd=None
+    )
     assert "ACTIVE RECALL" in out.message
 
 

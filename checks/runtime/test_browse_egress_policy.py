@@ -14,8 +14,8 @@ import socket
 
 import pytest
 
-from gideon.net.guard import evaluate
-from gideon.net.policy import BROWSE, STRICT, EgressPolicy, get_policy
+from gideon.security.net.guard import evaluate
+from gideon.security.net.policy import BROWSE, STRICT, EgressPolicy, get_policy
 
 
 def _resolver(mapping):
@@ -34,9 +34,6 @@ _LAN = _resolver({"nas.local": ["192.168.1.50"]})
 _LOOPBACK = _resolver({"localhost": ["127.0.0.1"]})
 
 
-# ── registration: the assertion that catches the silent STRICT fallback ────────
-
-
 def test_the_profile_is_registered_under_its_name():
     """Without a ``_PROFILES`` entry this returns STRICT and nothing else in the system
     complains — the browse surface would silently run on a 5 MB / 30 s / pinned-IP policy
@@ -47,12 +44,10 @@ def test_the_profile_is_registered_under_its_name():
 
 def test_the_lookup_actually_discriminates():
     """Vacuity check for the test above: ``get_policy`` always returns *something*, so the
-    registration assertion only means anything if an unregistered name resolves elsewhere."""
+    registration assertion only means anything if an unregistered name resolves elsewhere.
+    """
     assert get_policy("definitely-not-a-profile") is STRICT
     assert get_policy("browse") is not STRICT
-
-
-# ── the ceilings, each pinned at its exact number ──────────────────────────────
 
 
 def test_every_raised_ceiling_differs_from_strict():
@@ -65,7 +60,8 @@ def test_every_raised_ceiling_differs_from_strict():
 
 def test_max_redirects_is_ten():
     """Consent walls / geo bounces / SSO hops exceed five on ordinary public sites, and
-    every hop is re-evaluated by the guard (§6.2). Bounded, so a loop still terminates."""
+    every hop is re-evaluated by the guard (§6.2). Bounded, so a loop still terminates.
+    """
     assert BROWSE.max_redirects == 10
 
 
@@ -76,11 +72,9 @@ def test_timeout_is_sixty_seconds():
 
 def test_max_bytes_is_fifty_megabytes():
     """Sized for what our own code reads back over CDP (serialized DOM / text / screenshot).
-    It does not meter Chrome's subresource bytes — see the §6.3 gap note in the profile."""
+    It does not meter Chrome's subresource bytes — see the §6.3 gap note in the profile.
+    """
     assert BROWSE.max_bytes == 50_000_000
-
-
-# ── pin_resolved_ip: the security judgement, pinned so a flip is deliberate ────
 
 
 def test_pin_resolved_ip_is_false_because_chrome_owns_its_own_resolver():
@@ -102,9 +96,6 @@ def test_the_guard_still_returns_pinned_ips_as_evidence():
     d = evaluate("https://example.com/page", BROWSE, resolver=_PUBLIC)
     assert d.allow is True
     assert d.pinned_ips == ["93.184.216.34"]
-
-
-# ── stance: everything BROWSE deliberately did NOT relax ───────────────────────
 
 
 def test_the_public_only_stance_is_unchanged():
@@ -167,12 +158,6 @@ def test_a_url_with_no_host_is_refused_before_any_resolution():
     assert evaluate("https://", BROWSE, resolver=_explode).allow is False
 
 
-# ── operator control: BROWSE did not opt out of security.egress ────────────────
-#
-# ``egress_policy_for`` reads AppConfig lazily and best-effort, so these fake the config
-# object rather than writing a config.json — the layering contract is what is under test.
-
-
 class _FakeEgress:
     def __init__(self, allow_hosts=(), deny_hosts=(), allow_private=False):
         self.allow_hosts = list(allow_hosts)
@@ -192,11 +177,11 @@ def _with_operator_egress(monkeypatch, eg: _FakeEgress):
         def load():
             return _Cfg
 
-    monkeypatch.setattr("gideon.config.loader.AppConfig", _Cfg)
+    monkeypatch.setattr("gideon.core.config.loader.AppConfig", _Cfg)
 
 
 def test_an_operator_allow_host_makes_a_lan_host_reachable(monkeypatch):
-    from gideon.net.policy import egress_policy_for
+    from gideon.security.net.policy import egress_policy_for
 
     _with_operator_egress(monkeypatch, _FakeEgress(allow_hosts=["nas.local"]))
     p = egress_policy_for(BROWSE)
@@ -204,7 +189,6 @@ def test_an_operator_allow_host_makes_a_lan_host_reachable(monkeypatch):
     assert p.name == "browse", "layering must not change which profile this is"
     assert p.max_bytes == BROWSE.max_bytes and p.pin_resolved_ip is False
     assert evaluate("http://nas.local/admin", p, resolver=_LAN).allow is True
-    # ...and only that host: the rest of the private range is still blocked.
     other = evaluate(
         "http://other.local/x", p, resolver=_resolver({"other.local": ["192.168.1.51"]})
     )
@@ -212,7 +196,7 @@ def test_an_operator_allow_host_makes_a_lan_host_reachable(monkeypatch):
 
 
 def test_an_operator_deny_host_blocks_a_public_host(monkeypatch):
-    from gideon.net.policy import egress_policy_for
+    from gideon.security.net.policy import egress_policy_for
 
     _with_operator_egress(monkeypatch, _FakeEgress(deny_hosts=["example.com"]))
     p = egress_policy_for(BROWSE)
@@ -223,7 +207,7 @@ def test_an_operator_deny_host_blocks_a_public_host(monkeypatch):
 
 
 def test_an_operator_deny_outranks_their_own_allow(monkeypatch):
-    from gideon.net.policy import egress_policy_for
+    from gideon.security.net.policy import egress_policy_for
 
     _with_operator_egress(
         monkeypatch, _FakeEgress(allow_hosts=["nas.local"], deny_hosts=["nas.local"])
@@ -233,7 +217,7 @@ def test_an_operator_deny_outranks_their_own_allow(monkeypatch):
 
 
 def test_an_operator_can_opt_the_whole_instance_into_private_egress(monkeypatch):
-    from gideon.net.policy import egress_policy_for
+    from gideon.security.net.policy import egress_policy_for
 
     _with_operator_egress(monkeypatch, _FakeEgress(allow_private=True))
     p = egress_policy_for(BROWSE)
@@ -243,17 +227,14 @@ def test_an_operator_can_opt_the_whole_instance_into_private_egress(monkeypatch)
 
 def test_with_no_operator_config_the_profile_is_unchanged(monkeypatch):
     """The fail-safe direction: an unreadable/absent config must not widen anything."""
-    from gideon.net.policy import egress_policy_for
+    from gideon.security.net.policy import egress_policy_for
 
     _with_operator_egress(monkeypatch, _FakeEgress())
     assert egress_policy_for(BROWSE) == BROWSE
 
 
-# ── the profile is a plain EgressPolicy, so the tier plane composes with it ────
-
-
 def test_a_run_egress_tier_can_narrow_browse_but_never_widen_it():
-    from gideon.net.policy import egress_policy_for_profile
+    from gideon.security.net.policy import egress_policy_for_profile
 
     assert isinstance(BROWSE, EgressPolicy)
     off = egress_policy_for_profile(BROWSE, "off")

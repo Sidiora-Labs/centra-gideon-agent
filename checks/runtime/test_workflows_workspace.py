@@ -19,7 +19,7 @@ strict reader over an evolving format discards the data it was meant to protect 
 
 import pytest
 
-from gideon.workflows.workspace import (
+from gideon.automation.workflows.workspace import (
     RESERVED_ENV_PREFIXES,
     RESERVED_ENV_VARS,
     SETUP_MARKER_DIR,
@@ -44,9 +44,6 @@ from gideon.workflows.workspace import (
 
 def codes(issues) -> set[str]:
     return {i.code for i in issues}
-
-
-# ── the mode is a declaration, never a guess ──
 
 
 def test_the_default_mode_is_SCRATCH():
@@ -96,9 +93,6 @@ def test_no_workspace_block_yields_the_default_spec():
     assert issues == []
 
 
-# ── preserve patterns ──
-
-
 def test_preserve_patterns_survive_parsing():
     """The adoption-critical detail: a worktree with no `.env` is a worktree where every
     build fails,
@@ -116,9 +110,6 @@ def test_a_greedy_preserve_pattern_is_REFUSED(pattern):
     _spec, issues = parse_workspace({"preserve_patterns": [pattern]})
     assert "greedy_preserve_pattern" in codes(issues)
     assert any(i.fatal for i in issues)
-
-
-# ── reserved env vars ──
 
 
 @pytest.mark.parametrize("name", sorted(RESERVED_ENV_VARS))
@@ -163,9 +154,6 @@ def test_a_non_object_env_section_is_refused():
     assert any(i.fatal for i in issues)
 
 
-# ── the secret filter ──
-
-
 def test_an_ungranted_secret_is_ABSENT_not_empty():
     """An empty string reads to a child as "configured and blank", producing an authentication error
     instead of a missing-configuration one — much harder to diagnose."""
@@ -185,7 +173,9 @@ def test_a_granted_secret_resolves():
 def test_withheld_keys_are_RETURNED_so_the_cockpit_can_show_them():
     """A child failing for reasons nobody can see is the alternative. "2 declared secrets were not
     granted" is diagnosable; a mysterious auth error is not."""
-    spec, _ = parse_workspace({"env": {"A": "{{secret:A}}", "B": "{{secret:B}}", "C": "literal"}})
+    spec, _ = parse_workspace(
+        {"env": {"A": "{{secret:A}}", "B": "{{secret:B}}", "C": "literal"}}
+    )
     _env, withheld = spawn_env(spec, granted={})
     assert set(withheld) == {"A", "B"}
 
@@ -216,7 +206,9 @@ def test_inherit_does_NOT_pass_a_host_SECRET_without_a_grant():
 def test_an_inherited_secret_CAN_be_explicitly_granted():
     spec, _ = parse_workspace({"env": {"GITHUB_TOKEN": None}})
     env, _withheld = spawn_env(
-        spec, granted={"GITHUB_TOKEN": "ghp_real"}, host_env={"GITHUB_TOKEN": "ghp_real"}
+        spec,
+        granted={"GITHUB_TOKEN": "ghp_real"},
+        host_env={"GITHUB_TOKEN": "ghp_real"},
     )
     assert env == {"GITHUB_TOKEN": "ghp_real"}
 
@@ -242,7 +234,6 @@ def test_the_secret_hint_list_covers_a_provider_specific_credential_shape():
 @pytest.mark.parametrize(
     "name",
     [
-        # a bare `PAT`, and the same token under every naming convention a second account gets
         "PAT",
         "GH_PAT",
         "PAT_GITHUB",
@@ -266,11 +257,6 @@ def test_a_PAT_is_credential_bearing_however_it_is_spelled(name):
         "PATTERN_FILE",
         "COMPATIBILITY",
         "LANG",
-        # The native-library search paths. `pat` used to be spelled as the substring `_pat`, so
-        # every one of these read as a credential and was stripped from a batch leaf's env — a
-        # native extension then failed to load and presented as a broken leaf. Bare `PATH` is not
-        # in this list on purpose: it has no `_pat` in it, so it never broke, and probing it is
-        # what hid the defect.
         "LD_LIBRARY_PATH",
         "DYLD_LIBRARY_PATH",
         "DYLD_FALLBACK_LIBRARY_PATH",
@@ -279,7 +265,6 @@ def test_a_PAT_is_credential_bearing_however_it_is_spelled(name):
         "C_INCLUDE_PATH",
         "NODE_PATH",
         "GEM_PATH",
-        # the other two shapes `pat` as a character run swept up
         "RE_PATTERN",
         "COMPAT_MODE",
     ],
@@ -310,13 +295,10 @@ def test_the_env_filter_and_the_spec_scanner_AGREE(name, expected):
     matching as SUBSTRINGS. A token-split rule applied to the whole list would stop matching both
     — silently narrowing credential protection while fixing a false positive.
     """
-    from gideon.workflows import secrets
+    from gideon.automation.workflows import secrets
 
     assert looks_secret(name) is expected
     assert secrets.is_secret_key(name) is expected
-
-
-# ── presence flags, never values ──
 
 
 def test_the_serialized_spec_carries_presence_NOT_values():
@@ -335,15 +317,19 @@ def test_presence_flags_distinguish_THREE_states():
         {"env": {"A": "{{secret:A}}", "B": "{{secret:B}}", "C": None, "D": "x"}}
     )
     flags = presence_flags(spec, granted={"A": "v"})["env"]
-    assert flags == {"A": "granted", "B": "declared_not_granted", "C": "inherited", "D": "literal"}
+    assert flags == {
+        "A": "granted",
+        "B": "declared_not_granted",
+        "C": "inherited",
+        "D": "literal",
+    }
 
 
 def test_presence_flags_never_include_a_value():
     spec, _ = parse_workspace({"env": {"KEY": "{{secret:KEY}}"}})
-    assert "supersecret" not in str(presence_flags(spec, granted={"KEY": "supersecret"}))
-
-
-# ── provisioning order ──
+    assert "supersecret" not in str(
+        presence_flags(spec, granted={"KEY": "supersecret"})
+    )
 
 
 def test_preserve_runs_BEFORE_setup():
@@ -394,9 +380,6 @@ def test_a_fatal_issue_makes_the_plan_NOT_ok():
     assert plan_provisioning(WorkspaceSpec(), issues=issues).ok is False
 
 
-# ── setup idempotency ──
-
-
 def test_setup_is_marker_guarded_because_it_runs_on_EVERY_resume():
     """A `npm install` that re-runs is slow; a `git clone` that re-runs fails. A setup block that
     fails on resume makes resume unusable."""
@@ -408,9 +391,6 @@ def test_the_marker_is_CONTENT_addressed_so_an_edited_step_re_runs():
     """A marker keyed by index would skip an edited step as though it had already run."""
     assert setup_marker("npm ci") == setup_marker("npm ci")
     assert setup_marker("npm ci") != setup_marker("npm ci --force")
-
-
-# ── folder contracts: warnings, never fatal ──
 
 
 def test_the_default_lifecycle_is_TRANSIENT():
@@ -439,7 +419,9 @@ def test_an_unparseable_contract_yields_DEFAULTS_plus_a_warning():
 def test_UNKNOWN_fields_are_kept_not_dropped():
     """A round-trip that silently lost them would corrupt a newer app's contract when an older core
     rewrote the file — the 23-of-25-dropped-memories bug class."""
-    contract, issues = parse_folder_contract({"role": "notes", "future_field": {"nested": 1}})
+    contract, issues = parse_folder_contract(
+        {"role": "notes", "future_field": {"nested": 1}}
+    )
     assert contract.unknown == {"future_field": {"nested": 1}}
     assert contract.to_dict()["future_field"] == {"nested": 1}
     assert issues == []
@@ -463,7 +445,9 @@ def test_agent_writable_DEFAULTS_to_false():
 
 
 def test_an_immutable_folder_refuses_writes():
-    contract, _ = parse_folder_contract({"lifecycle": "immutable", "agent_writable": True})
+    contract, _ = parse_folder_contract(
+        {"lifecycle": "immutable", "agent_writable": True}
+    )
     allowed, why = may_write(contract)
     assert allowed is False
     assert "immutable" in why
@@ -472,13 +456,17 @@ def test_an_immutable_folder_refuses_writes():
 def test_immutable_plus_writable_resolves_toward_the_SAFETY_declaration():
     """The contradiction is the author's, and the immutable declaration is the one with a safety
     purpose — so it wins, and the conflict is reported."""
-    contract, issues = parse_folder_contract({"lifecycle": "immutable", "agent_writable": True})
+    contract, issues = parse_folder_contract(
+        {"lifecycle": "immutable", "agent_writable": True}
+    )
     assert contract.agent_writable is False
     assert "immutable_but_writable" in codes(issues)
 
 
 def test_a_declared_writable_folder_allows_writes():
-    contract, _ = parse_folder_contract({"agent_writable": True, "lifecycle": "permanent"})
+    contract, _ = parse_folder_contract(
+        {"agent_writable": True, "lifecycle": "permanent"}
+    )
     assert may_write(contract) == (True, "")
 
 

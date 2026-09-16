@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.dashboard.handlers import skills as skills_h
+from gideon.interfaces.dashboard.handlers import skills as skills_h
 
 
 def _make_skill(root: Path, name: str, files: dict[str, str]) -> Path:
@@ -41,25 +41,29 @@ def skill_root(tmp_path, monkeypatch):
     """A single skill discovery root, wired into _all_skill_paths."""
     root = tmp_path / "skills"
     root.mkdir()
-    monkeypatch.setattr("gideon.agent._all_skill_paths", lambda: [str(root)])
+    monkeypatch.setattr("gideon.engine.agent._all_skill_paths", lambda: [str(root)])
     return root
 
 
 def _files(name: str, path: str | None = None) -> tuple[int, dict]:
     query = f"?path={path}" if path is not None else ""
-    req = make_mocked_request("GET", f"/api/skills/{name}/files{query}", match_info={"name": name})
+    req = make_mocked_request(
+        "GET", f"/api/skills/{name}/files{query}", match_info={"name": name}
+    )
     resp = asyncio.run(skills_h.api_skill_files(req))
     return resp.status, json.loads(resp.body.decode())
 
 
 def test_tree_lists_paths_and_sizes(skill_root):
-    _make_skill(skill_root, "greet", {"SKILL.md": "---\nname: greet\n---\nhi", "ref.md": "xyz"})
+    _make_skill(
+        skill_root, "greet", {"SKILL.md": "---\nname: greet\n---\nhi", "ref.md": "xyz"}
+    )
     status, body = _files("greet")
     assert status == 200
     paths = {f["path"]: f["size"] for f in body["files"]}
     assert paths["SKILL.md"] == len("---\nname: greet\n---\nhi".encode())
     assert paths["ref.md"] == 3
-    assert all("content" not in f for f in body["files"])  # tree omits contents
+    assert all("content" not in f for f in body["files"])
 
 
 def test_single_file_returns_content(skill_root):
@@ -109,9 +113,8 @@ def test_entry_cap_honored(skill_root, monkeypatch):
 
 def test_sensitive_file_omitted_from_tree(skill_root, monkeypatch):
     _make_skill(skill_root, "greet", {"SKILL.md": "x", "creds.txt": "secret"})
-    # Mark the resolved creds.txt path as sensitive.
     monkeypatch.setattr(
-        "gideon.security.is_sensitive_path",
+        "gideon.security.security.is_sensitive_path",
         lambda p: p.endswith("creds.txt"),
     )
     status, body = _files("greet")
@@ -122,7 +125,7 @@ def test_sensitive_file_omitted_from_tree(skill_root, monkeypatch):
 def test_sensitive_file_403_on_direct_read(skill_root, monkeypatch):
     _make_skill(skill_root, "greet", {"SKILL.md": "x", "creds.txt": "secret"})
     monkeypatch.setattr(
-        "gideon.security.is_sensitive_path",
+        "gideon.security.security.is_sensitive_path",
         lambda p: p.endswith("creds.txt"),
     )
     status, body = _files("greet", "creds.txt")
@@ -137,9 +140,13 @@ class TestLoadedByAgents:
         class _Cfg:
             agents = {"helper": _Profile()}
 
-        monkeypatch.setattr("gideon.config.AppConfig.load", staticmethod(lambda: _Cfg()))
+        monkeypatch.setattr(
+            "gideon.core.config.AppConfig.load", staticmethod(lambda: _Cfg())
+        )
         # No AGENTS_DIR resources path for this test.
-        monkeypatch.setattr("gideon.agent.AGENTS_DIR", Path("/nonexistent-agents-dir"))
+        monkeypatch.setattr(
+            "gideon.engine.agent.AGENTS_DIR", Path("/nonexistent-agents-dir")
+        )
         out = skills_h._loaded_by_agents(["greet", "search", "other"])
         assert out["greet"] == ["helper"]
         assert out["search"] == ["helper"]
@@ -156,18 +163,19 @@ class TestLoadedByAgents:
         class _Cfg:
             agents = {}
 
-        monkeypatch.setattr("gideon.config.AppConfig.load", staticmethod(lambda: _Cfg()))
-        monkeypatch.setattr("gideon.agent.AGENTS_DIR", agents_dir)
+        monkeypatch.setattr(
+            "gideon.core.config.AppConfig.load", staticmethod(lambda: _Cfg())
+        )
+        monkeypatch.setattr("gideon.engine.agent.AGENTS_DIR", agents_dir)
         out = skills_h._loaded_by_agents(["greet", "search"])
         assert out["greet"] == ["acp-agent"]
         assert out["search"] == []
 
 
-# ── S6 integrity surface (POST /api/skills/{name}/verify + list annotation) ──────
-
-
 def _verify(name: str) -> tuple[int, dict]:
-    req = make_mocked_request("POST", f"/api/skills/{name}/verify", match_info={"name": name})
+    req = make_mocked_request(
+        "POST", f"/api/skills/{name}/verify", match_info={"name": name}
+    )
     resp = asyncio.run(skills_h.api_skill_verify(req))
     return resp.status, json.loads(resp.body.decode())
 
@@ -185,15 +193,16 @@ def test_verify_detects_tamper(skill_root):
     import hashlib
     import json as _json
 
-    skill = _make_skill(skill_root, "locked", {"SKILL.md": "---\nname: locked\n---\nbody"})
+    skill = _make_skill(
+        skill_root, "locked", {"SKILL.md": "---\nname: locked\n---\nbody"}
+    )
     baseline = hashlib.sha256("---\nname: locked\n---\nbody".encode()).hexdigest()
     (skill / ".gideon-lock.json").write_text(
-        _json.dumps({"id": "locked", "sha256": {"SKILL.md": baseline}}), encoding="utf-8"
+        _json.dumps({"id": "locked", "sha256": {"SKILL.md": baseline}}),
+        encoding="utf-8",
     )
-    # intact first
     status, body = _verify("locked")
     assert body["integrity"] == "intact"
-    # tamper → detected
     (skill / "SKILL.md").write_text("---\nname: locked\n---\nEVIL", encoding="utf-8")
     status, body = _verify("locked")
     assert status == 200
@@ -218,4 +227,4 @@ def test_list_annotates_integrity(skill_root):
     resp = asyncio.run(skills_h.api_skills_list(req))
     skills = json.loads(resp.body.decode())
     greet = next(s for s in skills if s["name"] == "greet")
-    assert greet["integrity"] == "unverified"  # no lock → unverified
+    assert greet["integrity"] == "unverified"

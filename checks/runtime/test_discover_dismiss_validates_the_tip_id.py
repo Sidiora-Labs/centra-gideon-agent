@@ -26,7 +26,7 @@ format regex would be the weaker half of that guidance for no gain.
 
 The 400 is safe as UX and is not asserted here: the frontend already wraps this call in
 ``reportingWrite('dismiss that tip', …)``, pinned by
-``web/src/pages/chat/dismissalFailureReported.test.ts``, so a refusal surfaces as an error
+``apps/console/src/pages/chat/dismissalFailureReported.test.ts``, so a refusal surfaces as an error
 rather than an X that appears to work — and it can never fire from the UI at all, whose ids
 come from the GET payload, i.e. from the catalog. Re-asserting it here would red two files
 for one reason.
@@ -42,8 +42,8 @@ from pathlib import Path
 import pytest
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.dashboard.handlers import legibility as handler
-from gideon.legibility import discover as dc
+from gideon.assurance.legibility import discover as dc
+from gideon.interfaces.dashboard.handlers import legibility as handler
 
 NOT_ENGAGED: dict[str, bool] = {}
 
@@ -51,7 +51,7 @@ JUNK = (
     "definitely-not-a-tip",
     "<script>alert(1)</script>",
     "x" * 200_000,
-    "Chat",  # case matters; ids are stable slugs
+    "Chat",
     "../../etc/passwd",
     "chat\nchat",
 )
@@ -60,7 +60,9 @@ JUNK = (
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """The established fixture for this file's store (see `test_discover.py`)."""
-    monkeypatch.setattr("gideon.providers.entity_routes.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gideon.extensions.providers.entity_routes.config_dir", lambda: tmp_path
+    )
     return tmp_path
 
 
@@ -83,9 +85,6 @@ async def _post(body: object) -> tuple[int, dict]:
     return resp.status, json.loads(resp.text or "{}")
 
 
-# ── the refusal ──────────────────────────────────────────────────────────────────────────
-
-
 @pytest.mark.parametrize("junk", JUNK)
 def test_an_id_outside_the_catalog_is_not_persisted(junk: str, home: Path):
     """🔑 The defect itself, at the layer that owns the write."""
@@ -96,9 +95,11 @@ def test_an_id_outside_the_catalog_is_not_persisted(junk: str, home: Path):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("junk", JUNK)
-async def test_the_endpoint_refuses_it_with_400_and_stores_nothing(junk: str, home: Path):
+async def test_the_endpoint_refuses_it_with_400_and_stores_nothing(
+    junk: str, home: Path
+):
     """The issue's own ask: reject with 400, and leave the stored list unchanged."""
-    dc.dismiss("tasks")  # a real prior dismissal, so "unchanged" means something
+    dc.dismiss("tasks")
     before = _stored(home)
 
     status, body = await _post({"id": junk})
@@ -153,9 +154,6 @@ async def test_the_existing_shape_checks_still_answer_first(home: Path):
     assert _stored(home) is None
 
 
-# ── the prune: junk already on disk ──────────────────────────────────────────────────────
-
-
 def test_a_dismissal_prunes_junk_an_older_build_wrote(home: Path):
     """The half of the issue a 400 alone does not fix: *"grows unboundedly with junk that
     can never be cleared through the UI"*. Anyone who ran the reproduction — or any older
@@ -163,11 +161,18 @@ def test_a_dismissal_prunes_junk_an_older_build_wrote(home: Path):
 
     An idempotent backfill on the write path, not a migration: the next dismissal cleans it.
     """
-    from gideon.providers.entity_routes import _save_entity_settings
+    from gideon.extensions.providers.entity_routes import _save_entity_settings
 
     _save_entity_settings(
         "legibility",
-        {"dismissed_discover_tips": ["<script>alert(1)</script>", "chat", "junk", "x" * 5000]},
+        {
+            "dismissed_discover_tips": [
+                "<script>alert(1)</script>",
+                "chat",
+                "junk",
+                "x" * 5000,
+            ]
+        },
     )
 
     assert dc.dismiss("tasks") == {"chat", "tasks"}
@@ -178,7 +183,7 @@ def test_the_reader_does_not_carry_junk_even_before_a_write(home: Path):
     """`load_dismissed` narrows too, so a home with junk reads clean immediately rather than
     waiting for the user's next dismissal. Its contract is "the set of dismissed tip ids",
     and junk is not a tip id."""
-    from gideon.providers.entity_routes import _save_entity_settings
+    from gideon.extensions.providers.entity_routes import _save_entity_settings
 
     _save_entity_settings("legibility", {"dismissed_discover_tips": ["junk", "chat"]})
     assert dc.load_dismissed() == {"chat"}
@@ -186,13 +191,10 @@ def test_the_reader_does_not_carry_junk_even_before_a_write(home: Path):
 
 def test_a_non_list_field_still_reads_as_empty(home: Path):
     """Pre-existing tolerance for a hand-mangled file, preserved."""
-    from gideon.providers.entity_routes import _save_entity_settings
+    from gideon.extensions.providers.entity_routes import _save_entity_settings
 
     _save_entity_settings("legibility", {"dismissed_discover_tips": "chat"})
     assert dc.load_dismissed() == set()
-
-
-# ── the rails ────────────────────────────────────────────────────────────────────────────
 
 
 def test_the_allowlist_is_the_catalog_not_a_copy_of_it():
@@ -212,10 +214,16 @@ def test_no_id_the_writer_accepts_is_inert():
     a file that is re-read on every Discover request and that no UI can clear. A future
     author who widens what the writer takes has to break this to do it.
     """
-    baseline = {tip.id for tip in dc.select_visible(dismissed=set(), engaged=NOT_ENGAGED)}
+    baseline = {
+        tip.id for tip in dc.select_visible(dismissed=set(), engaged=NOT_ENGAGED)
+    }
     for tip_id in sorted(dc.TIP_IDS):
-        after = {tip.id for tip in dc.select_visible(dismissed={tip_id}, engaged=NOT_ENGAGED)}
-        assert baseline - after == {tip_id}, f"dismissing {tip_id!r} hid the wrong thing"
+        after = {
+            tip.id for tip in dc.select_visible(dismissed={tip_id}, engaged=NOT_ENGAGED)
+        }
+        assert baseline - after == {
+            tip_id
+        }, f"dismissing {tip_id!r} hid the wrong thing"
 
 
 def test_running_it_twice_is_still_idempotent(home: Path):

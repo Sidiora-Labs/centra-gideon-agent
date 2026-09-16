@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.hooks import (
+from gideon.engine.hooks import (
     TOOL_AUTO_APPROVE,
     TOOL_DENY,
     HookManager,
@@ -47,7 +47,9 @@ def _decision(patterns: list[str], title: str) -> str:
     failed for a reason that had nothing to do with the code under test.
     """
     result = HookManager(HooksConfig(auto_approve_tools=patterns)).on_tool_call(title)
-    return {TOOL_DENY: "denied", TOOL_AUTO_APPROVE: "auto_approve"}.get(result.action, "prompt")
+    return {TOOL_DENY: "denied", TOOL_AUTO_APPROVE: "auto_approve"}.get(
+        result.action, "prompt"
+    )
 
 
 @pytest.mark.parametrize(
@@ -103,7 +105,10 @@ def test_a_CLASS_WIDE_prefix_pattern_still_authorises_chains():
     "every shell call", which is `*` for one tool class. `Running: ls*` names one command and
     stays guarded, which is the line between the two.
     """
-    assert _decision(["Running: *"], "Running: export PATH=x && npm run test") == "auto_approve"
+    assert (
+        _decision(["Running: *"], "Running: export PATH=x && npm run test")
+        == "auto_approve"
+    )
     assert _decision(["Reading *"], "Reading ~/notes.md") == "auto_approve"
     assert _decision(["Running: ls*"], "Running: ls; whoami") == "prompt"
 
@@ -133,11 +138,9 @@ def test_the_separator_set_is_the_denys_own(monkeypatch):
     separators, tightening `security`'s set later would silently leave the allow path behind
     — which is exactly how this gap opened in the first place.
     """
-    import gideon.security as sec
+    import gideon.security.security as sec
 
     monkeypatch.setattr(sec, "_CMD_SEPARATOR_RE", __import__("re").compile("ZZQQ"))
-    # With the shared regex swapped for one that matches nothing, chaining is invisible —
-    # proof that `hooks` reads `security`'s set at call time instead of keeping its own.
     assert not _chains_beyond_pattern("ls*", "ls; whoami")
 
 

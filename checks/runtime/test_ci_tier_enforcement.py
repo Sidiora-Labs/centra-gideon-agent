@@ -1,12 +1,12 @@
 """Every npm workspace that HAS tests must be a tier CI actually runs.
 
-Measured gap (2026-08-18): ``desktop/`` had been an npm workspace member with a
+Measured gap (2026-08-18): ``apps/desktop/`` had been an npm workspace member with a
 ``test`` script and 92 ``node --test`` cases since it landed, and **no workflow ran
 them** — ``grep -rln desktop .github/workflows/`` found nothing, the root
 ``package.json`` had ``test:web`` but no ``test:desktop``, and
-``scripts/run_prepush.sh`` did not run them either. The tier was enforced only by
-whoever remembered to type ``npm test`` inside ``desktop/``. That includes
-``desktop/test/packaging.test.js``, which is what catches an ``electron-builder``
+``tooling/scripts/run_prepush.sh`` did not run them either. The tier was enforced only by
+whoever remembered to type ``npm test`` inside ``apps/desktop/``. That includes
+``apps/desktop/test/packaging.test.js``, which is what catches an ``electron-builder``
 ``build.files`` list that no longer matches ``main.js``'s requires — a dmg that
 crashes on launch.
 
@@ -15,7 +15,7 @@ member carrying a ``test`` script must also get a root ``test:<name>`` script an
 CI step that runs it, or this file reds.
 
 Parsed from source, not executed — node is not a test dependency of the Python
-suite (same convention as ``tests/test_desktop_seam.py``'s vocabulary rail).
+suite (same convention as ``checks/runtime/test_desktop_seam.py``'s vocabulary rail).
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ import json
 import re
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 ROOT_PKG = REPO_ROOT / "package.json"
 CI_YML = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
@@ -39,7 +39,11 @@ def _tested_workspaces() -> list[str]:
     for name in _root_manifest()["workspaces"]:
         manifest = REPO_ROOT / name / "package.json"
         assert manifest.is_file(), f"workspace {name!r} has no package.json"
-        if json.loads(manifest.read_text(encoding="utf-8")).get("scripts", {}).get("test"):
+        if (
+            json.loads(manifest.read_text(encoding="utf-8"))
+            .get("scripts", {})
+            .get("test")
+        ):
             tested.append(name)
     return tested
 
@@ -51,9 +55,6 @@ def _ci_run_commands() -> list[str]:
     declared test dependency, and the shape being asserted is "a step's command
     is exactly this string", which the raw line carries.
     """
-    # Single-line `run:` only. Block scalars (`run: |`) are the multi-command steps;
-    # none of the tier invocations below live in one, and the vacuity floor proves
-    # the scan still sees the real steps.
     lines = CI_YML.read_text(encoding="utf-8").splitlines()
     out = []
     for line in lines:
@@ -86,7 +87,6 @@ def test_every_tested_workspace_has_a_root_test_script():
     ``test:<name>`` script — there is no ``cd desktop && npm ci``.
     """
     tested = _tested_workspaces()
-    # Vacuity floor: both known tiers must be discovered, or the walk found nothing.
     assert set(tested) >= {"web", "desktop"}, f"workspace discovery broke: {tested}"
 
     scripts = _root_manifest()["scripts"]

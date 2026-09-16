@@ -1,11 +1,11 @@
 """``gideon.sdk.*`` must import cleanly whichever submodule an app reaches for FIRST.
 
 ``gideon.sdk`` is the only sanctioned import path for an app bundle
-(``tests/test_apps_import_boundary.py`` pins that direction), so an SDK submodule that
+(``checks/runtime/test_apps_import_boundary.py`` pins that direction), so an SDK submodule that
 loads only when a SIBLING was imported before it is a boundary defect, not a style nit.
 
-The defect this file exists to keep out: ``sdk/provider_helpers.py`` imported its core
-machinery from the sibling facade ``sdk/model.py``, which re-exports
+The defect this file exists to keep out: ``packages/python-client/provider_helpers.py`` imported its core
+machinery from the sibling facade ``packages/python-client/model.py``, which re-exports
 ``register_branded_app`` from ``provider_helpers`` — a module-scope cycle. From a cold
 interpreter ``import gideon.sdk.model`` worked and ``import
 gideon.sdk.provider_helpers`` raised ``ImportError: cannot import name
@@ -33,11 +33,8 @@ import pytest
 
 import gideon
 
-#: Both SDK modules that were the two halves of the cycle. Each must load FIRST.
 _SDK_MODULES = ("gideon.sdk.model", "gideon.sdk.provider_helpers")
 
-#: The sibling facade ``provider_helpers`` must never import at module scope — that edge is
-#: the cycle. ``sdk.model`` imports ``provider_helpers``; the traffic runs one way only.
 _FACADE = "gideon.sdk.model"
 _HELPERS_PATH = Path(gideon.__file__).resolve().parent / "sdk" / "provider_helpers.py"
 
@@ -49,14 +46,20 @@ def _src_root() -> str:
     return str(Path(gideon.__file__).resolve().parent.parent)
 
 
-def _cold_import(module: str, *, extra_path: str | None = None, home: Path) -> tuple[int, str]:
+def _cold_import(
+    module: str, *, extra_path: str | None = None, home: Path
+) -> tuple[int, str]:
     """Import ``module`` FIRST in a brand-new interpreter. Returns ``(returncode, stderr)``.
 
     ``GIDEON_HOME`` is pointed at ``home`` so a child that touches state on import can
     never reach the real home. Not ``-I``: isolated mode drops ``PYTHONPATH``, which is how
     the child finds an uninstalled source tree.
     """
-    path = _src_root() if extra_path is None else os.pathsep.join([extra_path, _src_root()])
+    path = (
+        _src_root()
+        if extra_path is None
+        else os.pathsep.join([extra_path, _src_root()])
+    )
     proc = subprocess.run(
         [sys.executable, "-c", f"import {module}"],
         capture_output=True,
@@ -77,7 +80,7 @@ def test_each_sdk_module_imports_first_from_a_cold_interpreter(module, tmp_path)
         f"{[m for m in _SDK_MODULES if m != module][0]!r} presumably still works — that is a "
         "module-scope import cycle inside the SDK, whose winner is decided by whichever "
         "module an app happens to name first. Break the cycle by importing the shared core "
-        "machinery from `gideon.llm.*` directly; do NOT defer the import to a "
+        "machinery from `gideon.integrations.llm.*` directly; do NOT defer the import to a "
         "different position, which only moves which order happens to work.\n\n"
         f"child stderr:\n{stderr}"
     )
@@ -102,7 +105,9 @@ def test_the_cold_import_probe_reds_on_a_real_cycle(tmp_path):
         encoding="utf-8",
     )
 
-    code, stderr = _cold_import("cyclic_probe_pkg.alpha", extra_path=str(tmp_path), home=tmp_path)
+    code, stderr = _cold_import(
+        "cyclic_probe_pkg.alpha", extra_path=str(tmp_path), home=tmp_path
+    )
     assert code != 0, (
         "the cold-import helper reported SUCCESS for a module pair that is definitionally "
         f"circular — it cannot detect the defect it is here to detect. stderr:\n{stderr}"
@@ -112,10 +117,12 @@ def test_the_cold_import_probe_reds_on_a_real_cycle(tmp_path):
         f"(a path/env problem would also red this) — stderr:\n{stderr}"
     )
 
-    # And the same helper is GREEN on a non-circular module in the same tree, so the red
-    # above is attributable to the CYCLE and not to the throwaway package being unimportable.
-    ok_code, ok_stderr = _cold_import("cyclic_probe_pkg", extra_path=str(tmp_path), home=tmp_path)
-    assert ok_code == 0, f"the throwaway package is unimportable for its own reasons:\n{ok_stderr}"
+    ok_code, ok_stderr = _cold_import(
+        "cyclic_probe_pkg", extra_path=str(tmp_path), home=tmp_path
+    )
+    assert (
+        ok_code == 0
+    ), f"the throwaway package is unimportable for its own reasons:\n{ok_stderr}"
 
 
 def _module_scope_imports(path: Path) -> set[str]:
@@ -126,9 +133,11 @@ def _module_scope_imports(path: Path) -> set[str]:
     missed by a string match.
     """
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    pkg_parts = path.resolve().parent.relative_to(Path(_src_root())).as_posix().split("/")
+    pkg_parts = (
+        path.resolve().parent.relative_to(Path(_src_root())).as_posix().split("/")
+    )
     found: set[str] = set()
-    for node in tree.body:  # top level ONLY
+    for node in tree.body:
         if isinstance(node, ast.Import):
             found.update(a.name for a in node.names if a.name.startswith("gideon"))
         elif isinstance(node, ast.ImportFrom):
@@ -145,17 +154,15 @@ def test_provider_helpers_does_not_import_the_sibling_facade_at_module_scope():
     """Pins the MECHANISM, so a reviewer sees the rule rather than inferring it from a
     subprocess red: ``sdk.model`` re-exports ``register_branded_app`` from
     ``provider_helpers``, so ``provider_helpers`` importing ``sdk.model`` back closes the
-    loop. Both modules are thin re-export surfaces over ``gideon.llm.*`` — there is
+    loop. Both modules are thin re-export surfaces over ``gideon.integrations.llm.*`` — there is
     nothing to gain by routing one through the other."""
     imported = _module_scope_imports(_HELPERS_PATH)
     assert _FACADE not in imported, (
         f"{_HELPERS_PATH.name} imports the sibling facade {_FACADE!r} at module scope, which "
         "re-exports this module's `register_branded_app` — that is the cycle. Import the "
-        "core machinery from `gideon.llm.*` directly instead."
+        "core machinery from `gideon.integrations.llm.*` directly instead."
     )
-    # Vacuity: the parser sees this file's imports at all. A rule whose input is an empty set
-    # is a rule that matches nothing and reads clean forever.
-    assert {m for m in imported if m.startswith("gideon.llm")}, (
-        f"parsed ZERO `gideon.llm.*` module-scope imports out of {_HELPERS_PATH} — the "
+    assert {m for m in imported if m.startswith("gideon.integrations.llm")}, (
+        f"parsed ZERO `gideon.integrations.llm.*` module-scope imports out of {_HELPERS_PATH} — the "
         "assertion above is vacuous; fix the parser before trusting its green"
     )

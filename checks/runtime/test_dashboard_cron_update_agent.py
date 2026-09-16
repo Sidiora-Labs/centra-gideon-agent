@@ -14,16 +14,16 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from gideon.dashboard.handlers import triggers as T
-from gideon.dashboard.handlers.triggers import api_trigger_detail
-from gideon.triggers.models import Trigger
-from gideon.triggers.store import TriggerStore
+from gideon.automation.triggers.models import Trigger
+from gideon.automation.triggers.store import TriggerStore
+from gideon.interfaces.dashboard.handlers import triggers as T
+from gideon.interfaces.dashboard.handlers.triggers import api_trigger_detail
 
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     """A tmp home the handler resolves its store through (its own module-level `config_dir`)."""
-    import gideon.config.loader as loader
+    import gideon.core.config.loader as loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(T, "config_dir", lambda: tmp_path)
@@ -77,7 +77,9 @@ class TestScheduleTriggerUpdateAgent:
     @pytest.mark.asyncio
     async def test_the_agent_is_persisted_inside_the_canonical_action(self, home):
         _seed(home)
-        resp = await api_trigger_detail(_make_request(_agent_action("bxt-brain-leader")))
+        resp = await api_trigger_detail(
+            _make_request(_agent_action("bxt-brain-leader"))
+        )
         assert resp.status == 200
         assert _stored_config(home)["agent"] == "bxt-brain-leader"
 
@@ -86,7 +88,9 @@ class TestScheduleTriggerUpdateAgent:
         _seed(home)
         resp = await api_trigger_detail(_make_request(_agent_action("worker")))
         assert resp.status == 200
-        inline = (TriggerStore(base_dir=home).get("abc123").trigger.workflow or {})["inline"]
+        inline = (TriggerStore(base_dir=home).get("abc123").trigger.workflow or {})[
+            "inline"
+        ]
         assert inline["provider"] == "invoke-agent"
 
     @pytest.mark.asyncio

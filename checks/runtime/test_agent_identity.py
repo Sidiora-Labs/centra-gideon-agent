@@ -8,7 +8,7 @@ disappearing with the feature that happened to need it first.
 
 from __future__ import annotations
 
-from gideon.agents.identity import resolve_agent_id
+from gideon.engine.agents.identity import resolve_agent_id
 
 
 class TestResolveAgentId:
@@ -17,11 +17,12 @@ class TestResolveAgentId:
         assert resolve_agent_id("gideon-loop", "native", None) == "gideon-loop"
 
     def test_acp_turn_carries_the_mode(self) -> None:
-        assert resolve_agent_id(None, "acp:test-cli", "researcher") == "acp:test-cli/researcher"
+        assert (
+            resolve_agent_id(None, "acp:test-cli", "researcher")
+            == "acp:test-cli/researcher"
+        )
 
     def test_acp_turn_without_a_mode_is_just_the_cli(self) -> None:
-        # An empty mode must NOT produce a trailing slash — the binding id is compared
-        # verbatim against the frontend agent catalog.
         assert resolve_agent_id(None, "acp:claude-code", "") == "acp:claude-code"
         assert resolve_agent_id(None, "acp:claude-code", None) == "acp:claude-code"
 
@@ -30,8 +31,6 @@ class TestResolveAgentId:
         assert resolve_agent_id(None, "", "fallback") == "fallback"
 
     def test_everything_absent_is_empty_not_none(self) -> None:
-        # Callers stamp this onto records and compare it as a string; None would
-        # serialize as null and break equality against the catalog.
         assert resolve_agent_id(None, None, None) == ""
 
     def test_whitespace_is_stripped(self) -> None:

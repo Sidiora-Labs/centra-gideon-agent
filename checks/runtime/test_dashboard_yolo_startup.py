@@ -3,12 +3,12 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from gideon.dashboard.server import _apply_startup_yolo
-from gideon.dashboard.state import DashboardState
+from gideon.interfaces.dashboard.server import _apply_startup_yolo
+from gideon.interfaces.dashboard.state import ConsoleState
 
 
-def _make_state() -> DashboardState:
-    return DashboardState(
+def _make_state() -> ConsoleState:
+    return ConsoleState(
         sessions=MagicMock(),
         start_time=0.0,
     )
@@ -23,7 +23,7 @@ def test_apply_startup_yolo_enables_when_config_true() -> None:
     state = _make_state()
     assert state.is_yolo_active() is False
 
-    with patch("gideon.sel.sel") as mock_sel:
+    with patch("gideon.security.sel.sel") as mock_sel:
         _apply_startup_yolo(state, _cfg(yolo=True))
 
     assert state.is_yolo_active() is True
@@ -38,7 +38,7 @@ def test_apply_startup_yolo_noop_when_config_false() -> None:
     """``agent.yolo=false`` leaves dashboard in interactive mode and emits no audit."""
     state = _make_state()
 
-    with patch("gideon.sel.sel") as mock_sel:
+    with patch("gideon.security.sel.sel") as mock_sel:
         _apply_startup_yolo(state, _cfg(yolo=False))
 
     assert state.is_yolo_active() is False
@@ -52,7 +52,7 @@ def test_apply_startup_yolo_refuses_when_sel_fails() -> None:
     def _boom(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("sel down")
 
-    with patch("gideon.sel.sel", side_effect=_boom):
+    with patch("gideon.security.sel.sel", side_effect=_boom):
         _apply_startup_yolo(state, _cfg(yolo=True))
 
     assert state.is_yolo_active() is False
@@ -62,8 +62,10 @@ def test_apply_startup_yolo_refuses_when_log_api_access_fails() -> None:
     """Audit emission failure (not just sel() resolution) must also fail closed."""
     state = _make_state()
 
-    with patch("gideon.sel.sel") as mock_sel:
-        mock_sel.return_value.log_api_access.side_effect = RuntimeError("sel write failed")
+    with patch("gideon.security.sel.sel") as mock_sel:
+        mock_sel.return_value.log_api_access.side_effect = RuntimeError(
+            "sel write failed"
+        )
         _apply_startup_yolo(state, _cfg(yolo=True))
 
     assert state.is_yolo_active() is False
@@ -72,25 +74,27 @@ def test_apply_startup_yolo_refuses_when_log_api_access_fails() -> None:
 class TestDashboardYoloFromConfig:
     """Config-driven YOLO is permanent (no 6h TTL) and cannot be downgraded to a
     TTL by a subsequent interactive toggle. State delegates to the canonical
-    :mod:`gideon.trust_mode`; these assert on the observable posture and its
+    :mod:`gideon.security.trust_mode`; these assert on the observable posture and its
     single source of truth.
     """
 
     def test_from_config_sets_flag_and_no_ttl(self) -> None:
-        import gideon.trust_mode as tm
+        import gideon.security.trust_mode as tm
 
         state = _make_state()
         state.enable_yolo(from_config=True)
         assert state.is_yolo_active() is True
         assert tm.yolo_from_config() is True
-        assert state.yolo_remaining_secs() is None  # permanent → no countdown
+        assert state.yolo_remaining_secs() is None
 
     def test_interactive_enable_cannot_downgrade_config(self) -> None:
         """Dashboard toggle must not overwrite config-permanent yolo with 6h TTL."""
         state = _make_state()
         state.enable_yolo(from_config=True)
-        state.enable_yolo()  # interactive — should be no-op
-        assert state.yolo_remaining_secs() is None, "Config yolo should remain permanent"
+        state.enable_yolo()
+        assert (
+            state.yolo_remaining_secs() is None
+        ), "Config yolo should remain permanent"
 
     def test_config_yolo_never_expires(self) -> None:
         state = _make_state()
@@ -99,7 +103,7 @@ class TestDashboardYoloFromConfig:
             assert state.is_yolo_active() is True
 
     def test_disable_clears_from_config(self) -> None:
-        import gideon.trust_mode as tm
+        import gideon.security.trust_mode as tm
 
         state = _make_state()
         state.enable_yolo(from_config=True)

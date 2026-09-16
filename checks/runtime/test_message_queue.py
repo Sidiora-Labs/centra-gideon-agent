@@ -1,13 +1,11 @@
-"""Tests for the channel message queue on SessionManager."""
+"""Tests for the channel message queue on ConversationDirectory."""
 
 import asyncio
 from unittest.mock import MagicMock
 
 import pytest
 
-from gideon.session import SessionManager, _Session
-
-# ── Unit tests for _Session queue fields ──
+from gideon.engine.session import ConversationDirectory, _Session
 
 
 class TestSessionQueue:
@@ -28,13 +26,13 @@ class TestSessionQueue:
         assert "ts1" not in s2.cancelled
 
 
-# ── Unit tests for SessionManager queue methods ──
+# ── Unit tests for ConversationDirectory queue methods ──
 
 
 class TestSessionManagerQueue:
     @staticmethod
-    def _make_mgr() -> tuple[SessionManager, _Session]:
-        mgr = SessionManager.__new__(SessionManager)
+    def _make_mgr() -> tuple[ConversationDirectory, _Session]:
+        mgr = ConversationDirectory.__new__(ConversationDirectory)
         mgr._sessions = {}
         mgr._lock = asyncio.Lock()
         provider = MagicMock()
@@ -97,7 +95,7 @@ class TestSessionManagerQueue:
         result = mgr.dequeue("thread1")
         assert result is not None
         assert result[0] == "ts2"
-        assert "ts1" not in sess.cancelled  # cleaned up
+        assert "ts1" not in sess.cancelled
 
     def test_cancel_queued_removes_from_queue(self):
         mgr, sess = self._make_mgr()
@@ -110,7 +108,7 @@ class TestSessionManagerQueue:
     @pytest.mark.asyncio
     async def test_cancel_queued_adds_to_cancelled_if_not_in_queue(self):
         mgr, sess = self._make_mgr()
-        await sess.semaphore.acquire()  # simulate in-flight processing
+        await sess.semaphore.acquire()
         assert mgr.cancel_queued("thread1", "ts_inflight") is False
         assert "ts_inflight" in sess.cancelled
         sess.semaphore.release()
@@ -128,7 +126,7 @@ class TestSessionManagerQueue:
         mgr, sess = self._make_mgr()
         sess.cancelled.add("ts1")
         assert mgr.is_cancelled("thread1", "ts1") is True
-        assert mgr.is_cancelled("thread1", "ts1") is False  # consumed
+        assert mgr.is_cancelled("thread1", "ts1") is False
 
     def test_is_cancelled_unknown_session(self):
         mgr, _ = self._make_mgr()
@@ -141,9 +139,6 @@ class TestSessionManagerQueue:
         mgr.clear_queue("thread1")
         assert len(sess.queue) == 0
         assert sess.cancelled == set()
-
-
-# ── Integration test: message_deleted event handling ──
 
 
 class TestMessageDeletedEvent:

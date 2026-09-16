@@ -1,6 +1,6 @@
 """Tests for get_update_info accessor in dashboard/handlers.py."""
 
-from gideon.dashboard.handlers import get_update_info
+from gideon.interfaces.dashboard.handlers import get_update_info
 
 
 class TestGetUpdateInfo:

@@ -16,23 +16,14 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.providers.registry import (
+from gideon.extensions.providers.registry import (
     EntitySeamHandler,
     ProviderRegistry,
     get_provider_registry,
     reset_provider_registry,
 )
 
-# The types that are enable/disable + Settings seams only (no consumed registry
-# owned through this seam). Real-registry types are asserted separately.
-# ``channel`` graduated to a real handler (ChannelTypeHandler registers a
-# transport in channel_transports), so it is no longer a seam.
 SEAM_TYPES = {"agent", "skills", "notification"}
-# ``knowledge`` graduated to a real handler (KnowledgeTypeHandler registers a
-# provider in knowledge_providers.registry, consumed by list_provider_info +
-# search_all — WATCHED-SOURCES §1.3), so it is no longer a seam.
-# ``inbox`` graduated the same way (InboxTypeHandler registers a source in
-# inbox_providers.registry, consumed by get_default_provider — INU-8).
 REAL_REGISTRY_TYPES = {
     "model",
     "task",
@@ -45,7 +36,6 @@ REAL_REGISTRY_TYPES = {
     "knowledge",
     "inbox",
 }
-# Types with a genuine factory↔registry contract mismatch flagged for an owner.
 MISMATCH_TYPES = {"skills"}
 
 
@@ -58,8 +48,6 @@ def _fresh_registry():
 
 def _handlers() -> dict[str, object]:
     reg = get_provider_registry()
-    # _type_handlers is the registry's internal map; reading it is the point of
-    # this test (assert the seam's shape), so we accept the private access.
     return dict(reg._type_handlers)
 
 
@@ -111,13 +99,10 @@ def test_register_is_a_no_op_and_does_not_leak_instances():
     touch nothing) by calling them with a sentinel that would explode if used."""
 
     class _Boom:
-        # Any attribute access (e.g. ``.name``) would raise — proving the no-op
-        # never inspects or stores the instance.
         def __getattr__(self, item):  # noqa: ANN001
             raise AssertionError(f"register/deregister touched the instance: .{item}")
 
     handler = EntitySeamHandler(source_of_truth="test sentinel — nowhere real")
-    # ext is unused by the no-op; None is fine and proves it isn't dereferenced.
     assert handler.register(None, _Boom()) is None
     assert handler.deregister(None, _Boom()) is None
 
@@ -131,23 +116,18 @@ def test_seam_handler_create_runs_factory_for_non_none_instances():
 
     class _NoneFactoryHandler(EntitySeamHandler):
         def create(self, ext):  # noqa: ANN001
-            return None  # mirrors agents.marketplace / knowledge_providers factories
+            return None
 
     reg.register_type_handler("agent", _NoneFactoryHandler(source_of_truth="x"))
-    # No manifest registered → enabling an unknown name is a clean False, not a
-    # crash (lifecycle parity with the real handlers).
     assert reg.enable("does-not-exist") is False
     assert none_handler.source_of_truth == "factory returns None"
-
-
-# ── WATCHED-SOURCES §1.3: knowledge is a REAL registry handler now ──
 
 
 def test_knowledge_uses_real_handler_not_seam():
     """knowledge graduated from EntitySeamHandler → KnowledgeTypeHandler: enabling an
     external knowledge provider must register it into knowledge_providers.registry so
     list_provider_info surfaces it. A seam no-op would silently drop it."""
-    from gideon.providers.registry import KnowledgeTypeHandler
+    from gideon.extensions.providers.registry import KnowledgeTypeHandler
 
     handlers = _handlers()
     assert isinstance(handlers["knowledge"], KnowledgeTypeHandler)
@@ -157,13 +137,13 @@ def test_knowledge_type_handler_registers_external_provider():
     """The handler's register/deregister round-trips a KnowledgeProvider through the
     domain registry — the fixture appears in list_provider_info as kind:external and
     is gone after deregister (single source of truth, real consumer)."""
-    from gideon.knowledge_providers import registry as kreg
-    from gideon.knowledge_providers.base import (
+    from gideon.extensions.providers.registry import KnowledgeTypeHandler
+    from gideon.integrations.knowledge_providers import registry as kreg
+    from gideon.integrations.knowledge_providers.base import (
         KnowledgeItem,
         KnowledgeProvider,
         KnowledgeSource,
     )
-    from gideon.providers.registry import KnowledgeTypeHandler
 
     class _FixtureProvider(KnowledgeProvider):
         @property
@@ -183,18 +163,18 @@ def test_knowledge_type_handler_registers_external_provider():
         async def get_item(self, item_id: str):
             return None
 
-    # Clean slate for the module-global registry, then round-trip via the handler.
     kreg.unregister_provider("watched-fixture")
     handler = KnowledgeTypeHandler()
     inst = _FixtureProvider()
     try:
-        handler.register(None, inst)  # ext unused by register()
+        handler.register(None, inst)
         info = {p["name"]: p for p in kreg.list_provider_info()}
         assert "watched-fixture" in info
         assert info["watched-fixture"]["kind"] == "external"
         assert info["watched-fixture"]["always_on"] is False
-        # The native provider is still the always-on native row.
-        assert info["native"]["kind"] == "native" and info["native"]["always_on"] is True
+        assert (
+            info["native"]["kind"] == "native" and info["native"]["always_on"] is True
+        )
 
         handler.deregister(None, inst)
         assert "watched-fixture" not in {p["name"] for p in kreg.list_provider_info()}
@@ -206,16 +186,19 @@ def test_native_factory_still_returns_none_no_double_register():
     """The bundled native factory returns None (store not available at factory time);
     _enable_one skips register for None, so the real handler does not double-register
     the native provider that state.knowledge_provider() already owns."""
-    from gideon.knowledge_providers.registry import create_native_provider
+    from gideon.integrations.knowledge_providers.registry import create_native_provider
 
     assert create_native_provider() is None
     assert create_native_provider({"anything": 1}) is None
 
 
 def test_source_poll_contract_reexported_via_sdk():
-    """The poll contract (§1.1) is defined and re-exported through sdk/knowledge so an
-    app subclasses KnowledgeSourceProvider and returns SourcePollResult of SourceItem."""
-    from gideon.knowledge_providers.base import KnowledgeSourceProvider as CoreSourceProvider
+    """The poll contract (§1.1) is defined and re-exported through packages/python-client/knowledge so an
+    app subclasses KnowledgeSourceProvider and returns SourcePollResult of SourceItem.
+    """
+    from gideon.integrations.knowledge_providers.base import (
+        KnowledgeSourceProvider as CoreSourceProvider,
+    )
     from gideon.sdk.knowledge import (
         KnowledgeSourceProvider,
         SourceItem,
@@ -223,14 +206,13 @@ def test_source_poll_contract_reexported_via_sdk():
     )
 
     assert KnowledgeSourceProvider is CoreSourceProvider
-    # A source provider IS a knowledge provider (search/get) PLUS poll.
-    from gideon.knowledge_providers.base import KnowledgeProvider
+    from gideon.integrations.knowledge_providers.base import KnowledgeProvider
 
     assert issubclass(KnowledgeSourceProvider, KnowledgeProvider)
     assert hasattr(KnowledgeSourceProvider, "poll")
 
-    # The result/item dataclasses carry the dedup + cursor + attribution fields the
-    # engine (WS-2) relies on.
-    res = SourcePollResult(items=[SourceItem(guid="g1", title="t", also_seen_in=["rss"])])
+    res = SourcePollResult(
+        items=[SourceItem(guid="g1", title="t", also_seen_in=["rss"])]
+    )
     assert res.cursor == "" and res.error == ""
     assert res.items[0].guid == "g1" and res.items[0].also_seen_in == ["rss"]

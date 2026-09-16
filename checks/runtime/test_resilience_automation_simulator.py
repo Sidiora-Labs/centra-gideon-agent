@@ -21,13 +21,11 @@ from typing import Any
 import pytest
 from aiohttp.test_utils import make_mocked_request
 
-import gideon.config as config_pkg
-import gideon.config.loader as config_loader
-from gideon.dashboard.handlers import doctor as doctor_h
-from gideon.triggers.models import Trigger
-from gideon.triggers.store import TriggerStore
-
-# ── harness ───────────────────────────────────────────────────────────────────
+import gideon.core.config as config_pkg
+import gideon.core.config.loader as config_loader
+from gideon.automation.triggers.models import Trigger
+from gideon.automation.triggers.store import TriggerStore
+from gideon.interfaces.dashboard.handlers import doctor as doctor_h
 
 
 @pytest.fixture()
@@ -78,12 +76,12 @@ def _clock(
         name="Deploy check",
         kind="clock",
         spec={"kind": "cron", "expr": "0 9 * * *", "timezone": "America/New_York"},
-        workflow={"provider": provider, "config": dict(config or {"command": "echo hi"})},
+        workflow={
+            "provider": provider,
+            "config": dict(config or {"command": "echo hi"}),
+        },
         **kw,
     )
-
-
-# ── the response is TOTAL over the five facts §3.3 names ──────────────────────
 
 
 def test_response_carries_every_one_of_the_five_facts(home):
@@ -96,9 +94,6 @@ def test_response_carries_every_one_of_the_five_facts(home):
     assert body["dry_run"] is True
 
 
-# ── fact 1: resolved next-fire ────────────────────────────────────────────────
-
-
 def test_next_fire_renders_the_armed_schedule(home):
     """The PERSISTED `next_fire_at` wins — the instant the tick will actually act on."""
     _put(home, _clock(next_fire_at="2031-03-04T14:00:00+00:00"))
@@ -107,10 +102,6 @@ def test_next_fire_renders_the_armed_schedule(home):
     assert fact["armed"] is True
     assert fact["source"] == "armed"
     assert fact["at"].startswith("2031-03-04T14:00")
-    # The cadence prose comes from the shipped `schedule.format_schedule`, not a second
-    # formatter: a hand-rolled one rendered `0 9 * * * (America/New_York)`. The tz ABBREVIATION
-    # is deliberately not pinned — `format_schedule` resolves it against today's DST offset, so
-    # asserting "EST" would be a test that reds itself every March.
     assert fact["cadence"].startswith("At 9:00 AM E")
     assert "0 9 * * *" not in fact["cadence"]
 
@@ -122,7 +113,7 @@ def test_next_fire_reports_a_computed_answer_for_an_unarmed_row(home):
     collapsing them into the armed case would hide exactly the automations a user is asking
     the trust surface about.
     """
-    _put(home, _clock())  # no next_fire_at
+    _put(home, _clock())
     _status, body = _simulate("clock:deploy")
     fact = body["next_fire"]
     assert fact["armed"] is False
@@ -131,13 +122,12 @@ def test_next_fire_reports_a_computed_answer_for_an_unarmed_row(home):
     assert fact["at"]
 
 
-# ── fact 2: rendered action_config with $vars ─────────────────────────────────
-
-
 def _saved_prompt(home: Path, name: str, content: str, variables: list[dict]) -> None:
-    from gideon.prompt_providers import get_default_provider
-    from gideon.prompt_providers.base import PromptTemplate, PromptVariable
-    from gideon.prompt_providers.registry import _ensure_default_providers_registered
+    from gideon.integrations.prompt_providers import get_default_provider
+    from gideon.integrations.prompt_providers.base import PromptTemplate, PromptVariable
+    from gideon.integrations.prompt_providers.registry import (
+        _ensure_default_providers_registered,
+    )
 
     _ensure_default_providers_registered()
     provider = get_default_provider()
@@ -162,7 +152,10 @@ def test_action_config_substitutes_vars_into_the_saved_prompt(home):
         home,
         _clock(
             provider="run-prompt",
-            config={"prompt_id": "deploy-check", "vars": {"service": "gateway", "env": "prod"}},
+            config={
+                "prompt_id": "deploy-check",
+                "vars": {"service": "gateway", "env": "prod"},
+            },
         ),
     )
     _status, body = _simulate("clock:deploy")
@@ -201,7 +194,7 @@ def test_secret_references_are_named_never_resolved(home, monkeypatch):
     """A `{{secret:KEY}}` in the config is NAMED in the preview and the credential store is
     never read — a would-execute description that resolved secrets would put a live token one
     JSON response away from a browser."""
-    import gideon.triggers.secrets as secrets_mod
+    import gideon.automation.triggers.secrets as secrets_mod
 
     def _boom(_key: str) -> str:  # pragma: no cover - asserted NOT to run
         raise AssertionError("the simulator resolved a credential")
@@ -211,7 +204,9 @@ def test_secret_references_are_named_never_resolved(home, monkeypatch):
         home,
         _clock(
             provider="bash",
-            config={"command": "curl -H 'Authorization: Bearer {{secret:DEPLOY_TOKEN}}' x"},
+            config={
+                "command": "curl -H 'Authorization: Bearer {{secret:DEPLOY_TOKEN}}' x"
+            },
         ),
     )
     _status, body = _simulate("clock:deploy")
@@ -220,9 +215,6 @@ def test_secret_references_are_named_never_resolved(home, monkeypatch):
     rendered = fact["config"]["command"]
     assert "«secret:DEPLOY_TOKEN" in rendered
     assert "{{secret:DEPLOY_TOKEN}}" not in rendered
-
-
-# ── fact 3: target session key ────────────────────────────────────────────────
 
 
 def test_session_key_is_the_pinned_per_trigger_key(home):
@@ -240,9 +232,6 @@ def test_session_key_renders_a_conversation_binding_differently(home):
     fact = body["session_key"]
     assert fact["mode"] == "conversation"
     assert fact["key"] == "sess-42"
-
-
-# ── fact 4: capability grants ────────────────────────────────────────────────
 
 
 def test_capability_grants_refuse_a_write_capable_action_with_no_frozen_set(home):
@@ -283,9 +272,6 @@ def test_capability_grants_pass_a_write_capable_action_the_frozen_set_lists(home
     assert fact["needs_fence"] == {"providers": ["bash"]}
 
 
-# ── fact 5: observe-mode result (AUTOMATION-SUBSTRATE's dry fire + T9 honesty) ─
-
-
 def test_observe_mode_reports_a_true_observe_run_for_run_prompt(home):
     _put(home, _clock(provider="run-prompt", config={"prompt_id": "nope"}))
     _status, body = _simulate("clock:deploy")
@@ -294,7 +280,6 @@ def test_observe_mode_reports_a_true_observe_run_for_run_prompt(home):
     assert fact["supported"] is True
     assert fact["mode"] == "observe"
     assert fact["executed"] is False
-    # The gate plan comes from AUTOMATION-SUBSTRATE's `manual_gate_plan`, not from here.
     assert fact["gate_plan"]["executes"] is False
     assert fact["gate_plan"]["dry_run"] is True
     assert "screen" in fact["gate_plan"]["enforced"]
@@ -314,7 +299,9 @@ def test_observe_mode_is_only_a_preview_for_a_deterministic_provider(home):
     assert fact["executed"] is False
 
 
-def test_observe_mode_distinguishes_an_unknown_provider_from_a_missing_observe_mode(home):
+def test_observe_mode_distinguishes_an_unknown_provider_from_a_missing_observe_mode(
+    home,
+):
     """A row naming a provider nobody registered is BROKEN, and reporting that as "this
     provider has no observe mode" would read as a deliberate design decision."""
     _put(home, _clock(provider="no-such-provider"))
@@ -322,9 +309,6 @@ def test_observe_mode_distinguishes_an_unknown_provider_from_a_missing_observe_m
     fact = body["observe_mode"]
     assert fact["provider_known"] is False
     assert fact["supported"] is False
-
-
-# ── zero side effects ─────────────────────────────────────────────────────────
 
 
 def test_the_dry_run_leaves_the_store_byte_identical(home):
@@ -349,9 +333,11 @@ def test_no_action_executes_and_no_model_is_called(home, monkeypatch):
     A dry fire must never reach `ActionProvider.execute` (that is the property
     `automation_run(dry_run)` exists to have) and must never spend a token.
     """
-    import gideon.llm_helpers as llm
-    from gideon.action_providers.bash_provider import BashActionProvider
-    from gideon.action_providers.run_prompt_provider import RunPromptActionProvider
+    import gideon.integrations.llm_helpers as llm
+    from gideon.integrations.action_providers.bash_provider import BashActionProvider
+    from gideon.integrations.action_providers.run_prompt_provider import (
+        RunPromptActionProvider,
+    )
 
     async def _no_llm(*_a: Any, **_k: Any):  # pragma: no cover - asserted NOT to run
         raise AssertionError("the simulator called a model")
@@ -369,9 +355,6 @@ def test_no_action_executes_and_no_model_is_called(home, monkeypatch):
         assert status == 200
 
 
-# ── AUTO-R15's typed issue records reach the surface ──────────────────────────
-
-
 def test_a_near_miss_row_surfaces_its_closest_match_suggestion(home):
     """AUTO-R15: an agent that wrote `debounce_seconds` is told which key it meant. The
     would-execute description carries the typed issue records verbatim, `closest` included —
@@ -387,9 +370,6 @@ def test_a_near_miss_row_surfaces_its_closest_match_suggestion(home):
     _status, body = _simulate("clock:deploy")
     suggestions = [i["closest"] for i in body["trigger"]["issues"] if i["closest"]]
     assert "debounce_secs" in suggestions
-
-
-# ── the registered error envelope ─────────────────────────────────────────────
 
 
 def test_missing_trigger_id_uses_the_registered_wire_code(home):

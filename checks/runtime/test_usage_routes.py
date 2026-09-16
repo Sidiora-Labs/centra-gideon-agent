@@ -10,14 +10,14 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon import usage_ledger as ul
-from gideon.dashboard.handlers.usage import register_usage_routes
-from gideon.usage_ledger import TurnUsage
+from gideon.interfaces.dashboard.handlers.usage import register_usage_routes
+from gideon.operations import usage_ledger as ul
+from gideon.operations.usage_ledger import TurnUsage
 
 
 @pytest.fixture(autouse=True)
 def _home(tmp_path, monkeypatch):
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     return tmp_path
 
 
@@ -129,7 +129,9 @@ async def test_window_filter_threads_through(_home):
     )
     c = await _client()
     try:
-        body = await (await c.get("/api/usage/totals?since=2026-08-03T00:00:00+00:00")).json()
+        body = await (
+            await c.get("/api/usage/totals?since=2026-08-03T00:00:00+00:00")
+        ).json()
         assert body["totals"]["cost_usd"] == 2.0 and body["totals"]["turns"] == 1
     finally:
         await c.close()
@@ -173,20 +175,15 @@ async def test_session_filter_threads_through(_home):
         await c.close()
 
 
-# ── GET /api/usage — the per-day spend fold (MRT-3) ─────────────────────────────────────
-#
-# The sibling routes above read the retained tail of the same ledger. This one reads the DURABLE
-# per-day fold over it, grouped into the purpose vocabulary — and reports the guarded-attempt spend
-# it deliberately does NOT sum (a loop's inner inference is in both records, with no shared id).
-
-
 def _today() -> str:
     from datetime import datetime, timezone
 
     return datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
 
 
-def _seed_attempt(home, *, use_case: str, dollars: float, provider="anthropic", model="claude-x"):
+def _seed_attempt(
+    home, *, use_case: str, dollars: float, provider="anthropic", model="claude-x"
+):
     """Append one guarded-attempt row — the axis the fold censuses instead of summing."""
     import json
     import time
@@ -238,7 +235,7 @@ async def test_usage_fold_route_returns_rows_total_and_estimated_share(_home):
         assert keyed["loop"]["dollars_est"] == 0.25
         assert body["total"]["calls"] == 2
         assert body["total"]["dollars_est"] == 1.25
-        assert body["estimated_share"] == 1.0  # a turn carries no reported-cost flag
+        assert body["estimated_share"] == 1.0
         assert len(body["series"]) == 1 and body["series"][0]["date"] == _today()
     finally:
         await c.close()
@@ -253,7 +250,7 @@ async def test_usage_fold_route_states_the_spend_it_does_not_count(_home):
     c = await _client()
     try:
         body = await (await c.get("/api/usage?window=day")).json()
-        assert body["total"]["dollars_est"] == 1.0  # NOT 1.0 + 0.4 + 0.6
+        assert body["total"]["dollars_est"] == 1.0
         assert body["uncounted"]["calls"] == 2
         assert body["uncounted"]["total_dollars_est"] == 1.0
         assert body["uncounted"]["by_use_case"] == {"reasoning": 1, "loops": 1}

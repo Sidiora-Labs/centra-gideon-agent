@@ -12,7 +12,7 @@ a log — and a reader who has to reconstruct it will not.
 
 import pytest
 
-from gideon import project_context as pctx
+from gideon.cognition import project_context as pctx
 
 
 @pytest.fixture()
@@ -21,16 +21,16 @@ def project(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    import gideon.config.loader as loader
+    import gideon.core.config.loader as loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: home)
-    from gideon.tasks.hierarchy import HierarchyStore
+    from gideon.engine.tasks.hierarchy import HierarchyStore
 
     store = HierarchyStore()
     monkeypatch.setattr(store, "_projects_dir", lambda: _mk(home / "projects"))
     created = store.create_project("Ingest rework")
     monkeypatch.setattr(
-        "gideon.tasks.hierarchy.HierarchyStore._projects_dir",
+        "gideon.engine.tasks.hierarchy.HierarchyStore._projects_dir",
         lambda self: _mk(home / "projects"),
     )
     return created.id
@@ -39,9 +39,6 @@ def project(tmp_path, monkeypatch):
 def _mk(path):
     path.mkdir(parents=True, exist_ok=True)
     return path
-
-
-# ── the overview is revised IN PLACE ──
 
 
 def test_an_absent_overview_reads_as_empty():
@@ -70,29 +67,33 @@ def test_the_overview_is_capped(project):
     assert len(pctx.read_overview(project)) <= pctx.MAX_OVERVIEW_CHARS
 
 
-def test_writing_to_an_unknown_project_FAILS_rather_than_creating_one(tmp_path, monkeypatch):
+def test_writing_to_an_unknown_project_FAILS_rather_than_creating_one(
+    tmp_path, monkeypatch
+):
     """`resolve_project_id` auto-creates projects. A context write that also did would mean a typo'd
     id silently invents a project and puts the user's overview in it."""
     assert pctx.write_overview("p-nope", "text") is False
 
 
-def test_reading_an_unknown_project_does_not_create_a_directory(project, tmp_path, monkeypatch):
+def test_reading_an_unknown_project_does_not_create_a_directory(
+    project, tmp_path, monkeypatch
+):
     """A READ path that materialized a project would mean opening a project page invents one."""
     pctx.read_overview("p-doesnotexist")
     assert not (tmp_path / "home" / "projects" / "p-doesnotexist").exists()
 
 
-# ── the ledgers are APPEND-ONLY ──
-
-
 def test_a_ledger_entry_appends(project):
-    assert pctx.append_ledger(project, "decisions", "chose sqlite over postgres") is True
+    assert (
+        pctx.append_ledger(project, "decisions", "chose sqlite over postgres") is True
+    )
     assert pctx.read_ledger(project, "decisions") == ["chose sqlite over postgres"]
 
 
 def test_appending_twice_keeps_BOTH(project):
     """There is no update and no delete. A ledger whose entries could be edited would stop being
-    evidence of what was decided when — which is the one question it exists to answer."""
+    evidence of what was decided when — which is the one question it exists to answer.
+    """
     pctx.append_ledger(project, "decisions", "first")
     pctx.append_ledger(project, "decisions", "second")
     assert pctx.read_ledger(project, "decisions") == ["first", "second"]
@@ -110,7 +111,9 @@ def test_the_three_ledgers_are_SEPARATE_files(project):
 
 
 def test_an_out_of_scope_entry_renders_its_reason(project):
-    pctx.append_ledger(project, "out_of_scope", "mobile app", reason="no device to test on")
+    pctx.append_ledger(
+        project, "out_of_scope", "mobile app", reason="no device to test on"
+    )
     assert "no device to test on" in pctx.read_ledger(project, "out_of_scope")[0]
 
 
@@ -144,7 +147,7 @@ def test_the_ledger_file_carries_its_own_purpose_as_a_header(project):
     becomes
     the place things go to be forgotten."""
     pctx.append_ledger(project, "fog", "how do retries interact with the cache?")
-    from gideon.tasks.hierarchy import HierarchyStore
+    from gideon.engine.tasks.hierarchy import HierarchyStore
 
     text = (HierarchyStore().context_dir(project) / "not-yet-specified.md").read_text()
     assert "promote" in text
@@ -158,11 +161,8 @@ def test_an_unknown_project_ledger_read_is_empty():
     assert pctx.read_ledger("p-nope", "decisions") == []
 
 
-# ── the injected block ──
-
-
 def test_the_block_carries_brief_and_overview_together(project):
-    from gideon.tasks.hierarchy import HierarchyStore
+    from gideon.engine.tasks.hierarchy import HierarchyStore
 
     HierarchyStore().update_project(project, brief="rework the ingest path")
     pctx.write_overview(project, "batching is done")
@@ -186,11 +186,10 @@ def test_the_block_never_raises(monkeypatch):
     def explode(_):
         raise RuntimeError("store is broken")
 
-    monkeypatch.setattr("gideon.tasks.hierarchy.HierarchyStore.get_project", explode)
+    monkeypatch.setattr(
+        "gideon.engine.tasks.hierarchy.HierarchyStore.get_project", explode
+    )
     assert pctx.context_block("p-1") == ""
-
-
-# ── the handoff snapshot ──
 
 
 def test_the_snapshot_labels_where_each_field_CAME_FROM(project):
@@ -224,26 +223,23 @@ def test_the_snapshot_surfaces_open_questions(project):
     ]
 
 
-# ── the preamble does not recommend redundant reads ──
-
-
 def test_only_files_that_were_ACTUALLY_inlined_are_excluded(project):
     """CONTENT-based, not name-based. A blanket exclusion on the reserved filenames looked
     equivalent and was not: a hand-authored `decisions.md` that is not in ledger line format
     inlines nothing, and excluding it by name would hide a file the agent has never seen.
     Hiding an unread file is the worse failure of the two — a redundant pointer wastes a tool
     call, a hidden file loses the context entirely."""
-    from gideon.tasks.hierarchy import HierarchyStore
+    from gideon.engine.tasks.hierarchy import HierarchyStore
 
     context = HierarchyStore().context_dir(project)
-    # The reserved NAME with no ledger lines in it: nothing is inlined, so it stays listed.
     (context / "decisions.md").write_text("# Decisions\nUse minimax.\n")
     assert pctx.inlined_context_files(project) == frozenset()
 
-    # Once real ledger lines exist the content IS inlined, and the pointer is redundant.
     pctx.append_ledger(project, "decisions", "chose sqlite")
     pctx.write_overview(project, "batching is done")
-    assert pctx.inlined_context_files(project) == frozenset({"decisions.md", "overview.md"})
+    assert pctx.inlined_context_files(project) == frozenset(
+        {"decisions.md", "overview.md"}
+    )
 
 
 def test_the_chat_preamble_does_not_list_files_it_already_INLINED(project):
@@ -251,20 +247,21 @@ def test_the_chat_preamble_does_not_list_files_it_already_INLINED(project):
     and under "read any for continuity", inviting four tool calls to re-read what the agent had
     already been given. A listing that recommends redundant work is one an agent learns to ignore
     wholesale, taking the genuinely unread files with it."""
-    from gideon.dashboard.chat_utils import _project_context_preamble
-    from gideon.tasks.hierarchy import HierarchyStore
+    from gideon.engine.tasks.hierarchy import HierarchyStore
+    from gideon.interfaces.dashboard.chat_utils import _project_context_preamble
 
     pctx.write_overview(project, "batching is done")
     pctx.append_ledger(project, "decisions", "chose sqlite")
-    # A file whose content is NOT inlined must still be listed — the exclusion is targeted, not a
-    # blanket suppression of the listing.
-    (HierarchyStore().context_dir(project) / "scratch-notes.md").write_text("hand-written")
+    (HierarchyStore().context_dir(project) / "scratch-notes.md").write_text(
+        "hand-written"
+    )
 
     preamble = _project_context_preamble(project)
-    listed = [line.strip()[2:].split(" ")[0] for line in preamble.splitlines() if "•" in line]
+    listed = [
+        line.strip()[2:].split(" ")[0] for line in preamble.splitlines() if "•" in line
+    ]
     assert "scratch-notes.md" in listed
     assert "overview.md" not in listed
     assert "decisions.md" not in listed
-    # The CONTENT is still there — the fix removed a redundant pointer, not the context.
     assert "batching is done" in preamble
     assert "chose sqlite" in preamble

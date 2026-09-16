@@ -15,16 +15,10 @@ import pathlib
 
 import pytest
 
-from gideon.durability import (
-    conflict_merge,
-    conflicts,
-)
-from gideon.durability import inventory as inv
-from gideon.durability import (
-    reconcile,
-    writeback,
-)
-from gideon.durability.registry import Registry
+from gideon.operations.durability import conflict_merge, conflicts
+from gideon.operations.durability import inventory as inv
+from gideon.operations.durability import reconcile, writeback
+from gideon.operations.durability.registry import Registry
 
 _ENTRY = inv.StateEntry(
     id="tasks_test",
@@ -47,22 +41,20 @@ def _write_local(home: pathlib.Path, rows: list[dict]) -> None:
     writeback.apply_rows(_ENTRY.kind, home / _ENTRY.path, rows)
 
 
-# ── detection: the both-sides-edited rule ────────────────────────────────────
-
-
 class TestDetection:
     def test_both_sides_edited_since_ancestor_is_a_conflict(self):
         base = _row("t1", "base")
         local = _row("t1", "local edit", "2026-02-01T00:00:00Z")
         remote = _row("t1", "remote edit", "2026-02-02T00:00:00Z")
         ancestors = {"t1": conflicts.row_sha(base)}
-        found = conflicts.detect_conflicts(_ENTRY, [local], [remote], ancestors, now="NOW")
+        found = conflicts.detect_conflicts(
+            _ENTRY, [local], [remote], ancestors, now="NOW"
+        )
         assert [c.entity_id for c in found] == ["t1"]
         rec = found[0]
         assert rec.ancestor_sha == ancestors["t1"]
         assert rec.local_sha == conflicts.row_sha(local)
         assert rec.remote_sha == conflicts.row_sha(remote)
-        # Both versions are IN the record — neither is destroyed by detection.
         assert rec.local_row == local and rec.remote_row == remote
         assert rec.status == conflicts.STATUS_NEEDS_REVIEW and rec.proposal is None
 
@@ -73,7 +65,6 @@ class TestDetection:
         remote = _row("t1", "remote edit", "2026-02-02T00:00:00Z")
         ancestors = {"t1": conflicts.row_sha(base)}
         assert conflicts.detect_conflicts(_ENTRY, [base], [remote], ancestors) == []
-        # …and symmetrically when only the local side moved.
         local = _row("t1", "local edit", "2026-02-01T00:00:00Z")
         assert conflicts.detect_conflicts(_ENTRY, [local], [base], ancestors) == []
 
@@ -106,15 +97,20 @@ class TestDetection:
         anc = {"t1": conflicts.row_sha(base)}
         a = conflicts.detect_conflicts(_ENTRY, [local], [remote], anc)[0]
         b = conflicts.detect_conflicts(_ENTRY, [local], [remote], anc)[0]
-        assert a.id == b.id  # re-detection dedups instead of piling up
+        assert a.id == b.id
 
     def test_domain_routes_to_the_review_surface(self):
-        assert conflicts.surface_for_domain(inv.DOMAIN_MEMORY) == conflicts.SURFACE_MEMORY
-        assert conflicts.surface_for_domain(inv.DOMAIN_KNOWLEDGE) == conflicts.SURFACE_KNOWLEDGE
-        assert conflicts.surface_for_domain(inv.DOMAIN_WORK) == conflicts.SURFACE_DURABILITY
-
-
-# ── the queue ────────────────────────────────────────────────────────────────
+        assert (
+            conflicts.surface_for_domain(inv.DOMAIN_MEMORY) == conflicts.SURFACE_MEMORY
+        )
+        assert (
+            conflicts.surface_for_domain(inv.DOMAIN_KNOWLEDGE)
+            == conflicts.SURFACE_KNOWLEDGE
+        )
+        assert (
+            conflicts.surface_for_domain(inv.DOMAIN_WORK)
+            == conflicts.SURFACE_DURABILITY
+        )
 
 
 class TestQueue:
@@ -136,7 +132,7 @@ class TestQueue:
         q = conflicts.ConflictQueue(tmp_path)
         rec = self._conflict()
         assert q.record(rec) is True
-        assert q.record(rec) is False  # same divergence → one row
+        assert q.record(rec) is False
         items = q.items()
         assert len(items) == 1 and items[0].id == rec.id
         assert items[0].local_row == rec.local_row
@@ -169,31 +165,23 @@ class TestQueue:
         assert len(q.items()) == 1
 
 
-# ── the registry's ancestor map ──────────────────────────────────────────────
-
-
 class TestAncestorRegistry:
     def test_ancestors_round_trip_through_the_shared_registry(self):
         r = Registry.empty()
         r.record_ancestors("tasks_test", {"t1": "sha1"})
         reloaded = Registry.loads(r.to_bytes())
         assert reloaded.ancestors_for("tasks_test") == {"t1": "sha1"}
-        assert reloaded.sha() == r.sha()  # canonical bytes, so CAS still works
+        assert reloaded.sha() == r.sha()
 
     def test_corrupt_ancestors_degrade_to_no_ancestry(self):
         raw = json.dumps({"machines": {}, "ancestors": {"tasks_test": "nope"}}).encode()
         assert Registry.loads(raw).ancestors_for("tasks_test") == {}
 
 
-# ── reconcile: local stays authoritative ─────────────────────────────────────
-
-
 class TestReconcileHoldsLocal:
     def _setup(self, tmp_path):
         base = _row("t1", "base")
         local = _row("t1", "LOCAL EDIT", "2026-02-01T00:00:00Z")
-        # The remote's updated_at is NEWER, so plain LWW would overwrite the local row —
-        # which is exactly what the conflict hold must prevent.
         remote = _row("t1", "REMOTE EDIT", "2026-09-09T00:00:00Z")
         _write_local(tmp_path, [local])
         return base, local, remote
@@ -212,22 +200,22 @@ class TestReconcileHoldsLocal:
             now="NOW",
         )
         assert res.conflicts == 1
-        assert res.verdict == "consumed"  # recorded, so re-pulling forever would add nothing
+        assert res.verdict == "consumed"
         assert path.read_bytes() == before, "the local version must stay authoritative"
         assert json.loads(path.read_text())["text"] == "LOCAL EDIT"
         queued = q.items()
         assert len(queued) == 1 and queued[0].remote_row == remote
-        # A held id keeps its OLD ancestor, so the conflict re-detects next cycle.
         assert "t1" not in res.new_ancestors
 
     def test_a_conflict_stays_held_on_a_later_cycle(self, tmp_path):
         base, local, remote = self._setup(tmp_path)
         q = conflicts.ConflictQueue(tmp_path)
         anc = {"t1": conflicts.row_sha(base)}
-        reconcile.reconcile_entry(tmp_path, _ENTRY, [remote], ancestors=anc, queue=q, now="NOW")
+        reconcile.reconcile_entry(
+            tmp_path, _ENTRY, [remote], ancestors=anc, queue=q, now="NOW"
+        )
         path = tmp_path / _ENTRY.path / "t1.json"
         before = path.read_bytes()
-        # Second cycle, same divergence: nothing new recorded, local still authoritative.
         res = reconcile.reconcile_entry(
             tmp_path, _ENTRY, [remote], ancestors=anc, queue=q, now="N2"
         )
@@ -269,9 +257,6 @@ class TestReconcileHoldsLocal:
         assert (tmp_path / _ENTRY.path / "t2.json").is_file()
 
 
-# ── the propose-only pass ────────────────────────────────────────────────────
-
-
 class TestProposeOnly:
     def _queued(self, tmp_path):
         q = conflicts.ConflictQueue(tmp_path)
@@ -292,7 +277,9 @@ class TestProposeOnly:
         return q
 
     @pytest.mark.asyncio
-    async def test_draft_is_a_proposal_never_an_application(self, tmp_path, monkeypatch):
+    async def test_draft_is_a_proposal_never_an_application(
+        self, tmp_path, monkeypatch
+    ):
         q = self._queued(tmp_path)
         _write_local(tmp_path, [_row("t1", "LOCAL EDIT")])
         before = (tmp_path / _ENTRY.path / "t1.json").read_bytes()
@@ -300,20 +287,24 @@ class TestProposeOnly:
 
         async def fake(prompt, **kw):
             seen["use_case"] = kw.get("use_case")
-            return json.dumps({"merged": {"id": "t1", "text": "MERGED"}, "rationale": "why"})
+            return json.dumps(
+                {"merged": {"id": "t1", "text": "MERGED"}, "rationale": "why"}
+            )
 
         monkeypatch.setattr(conflict_merge, "one_shot_completion", fake)
         report = await conflict_merge.draft_proposals(tmp_path, now="T1")
         assert report.drafted == 1 and report.failed == 0
-        assert seen["use_case"] == "background"  # the reasoning axis, per §4.2
+        assert seen["use_case"] == "background"
         rec = q.items()[0]
         assert rec.proposal == {"id": "t1", "text": "MERGED"}
         assert rec.rationale == "why" and rec.proposed_at == "T1"
-        assert rec.status == conflicts.STATUS_NEEDS_REVIEW  # never auto-applied
+        assert rec.status == conflicts.STATUS_NEEDS_REVIEW
         assert (tmp_path / _ENTRY.path / "t1.json").read_bytes() == before
 
     @pytest.mark.asyncio
-    async def test_no_model_keeps_the_conflict_without_a_proposal(self, tmp_path, monkeypatch):
+    async def test_no_model_keeps_the_conflict_without_a_proposal(
+        self, tmp_path, monkeypatch
+    ):
         """Fail-open: a missing model must never lose the conflict and never resolve it."""
         q = self._queued(tmp_path)
 
@@ -327,7 +318,7 @@ class TestProposeOnly:
         assert rec.status == conflicts.STATUS_NEEDS_REVIEW
         assert rec.proposal is None
         assert "no model configured" in rec.proposal_error
-        assert len(q.items()) == 1  # the conflict survived
+        assert len(q.items()) == 1
 
     @pytest.mark.asyncio
     async def test_unparseable_answer_is_also_fail_open(self, tmp_path, monkeypatch):
@@ -344,7 +335,9 @@ class TestProposeOnly:
         assert rec.proposal_error
 
     @pytest.mark.asyncio
-    async def test_a_failed_draft_is_not_retried_every_pass(self, tmp_path, monkeypatch):
+    async def test_a_failed_draft_is_not_retried_every_pass(
+        self, tmp_path, monkeypatch
+    ):
         self._queued(tmp_path)
         calls = {"n": 0}
 
@@ -370,36 +363,55 @@ class TestProposeOnly:
         assert q.items()[0].proposal == {"id": "t1"}
 
 
-# ── source-level rail: the dangerous direction is unreachable ────────────────
-
-
 def test_conflict_modules_cannot_write_the_live_store():
     """A propose-only surface must be structurally unable to apply. Not "doesn't today" —
     unreachable: neither conflict module may import the writeback/reconcile path or call any
     store-writing helper. A later edit that wires one up trips this."""
-    src = pathlib.Path(__file__).resolve().parents[1] / "src" / "gideon" / "durability"
-    banned_modules = {"gideon.durability.writeback", "gideon.durability.reconcile"}
-    banned_calls = {"apply_rows", "reconcile_entry", "atomic_write", "atomic_write_bytes"}
+    src = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "runtime"
+        / "gideon"
+        / "operations"
+        / "durability"
+    )
+    banned_modules = {
+        "gideon.operations.durability.writeback",
+        "gideon.operations.durability.reconcile",
+    }
+    banned_calls = {
+        "apply_rows",
+        "reconcile_entry",
+        "atomic_write",
+        "atomic_write_bytes",
+    }
     checked = 0
     for name in ("conflict_merge.py", "conflicts.py"):
         path = src / name
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module:
-                assert node.module not in banned_modules, f"{name} imports {node.module}"
+                assert (
+                    node.module not in banned_modules
+                ), f"{name} imports {node.module}"
                 for alias in node.names:
                     full = f"{node.module}.{alias.name}"
                     assert full not in banned_modules, f"{name} imports {full}"
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    assert alias.name not in banned_modules, f"{name} imports {alias.name}"
+                    assert (
+                        alias.name not in banned_modules
+                    ), f"{name} imports {alias.name}"
             if isinstance(node, ast.Call):
                 fn = node.func
-                fname = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
+                fname = (
+                    fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
+                )
                 if name == "conflict_merge.py":
                     assert fname not in banned_calls, f"{name} calls {fname}()"
         checked += 1
-    assert checked == 2, "the rail must actually have scanned both modules (vacuity floor)"
+    assert (
+        checked == 2
+    ), "the rail must actually have scanned both modules (vacuity floor)"
 
 
 def test_the_queue_never_lands_in_an_entrys_store_path():
@@ -408,11 +420,9 @@ def test_the_queue_never_lands_in_an_entrys_store_path():
     assert conflicts.CONFLICTS_PATH.startswith("sync/")
     assert inv.is_ignored("sync"), "the sync root must be an ignored machine-local dir"
     assert not any(
-        e.path == conflicts.CONFLICTS_PATH or e.path.startswith("sync/") for e in inv.INVENTORY
+        e.path == conflicts.CONFLICTS_PATH or e.path.startswith("sync/")
+        for e in inv.INVENTORY
     )
-
-
-# ── criterion 5, end to end through the real cycle ───────────────────────────
 
 
 class TestCriterionFive:
@@ -425,46 +435,44 @@ class TestCriterionFive:
     """
 
     def _write_task(self, home, tid, title, updated):
-        # Written through the cycle's own writer, so a later byte-comparison measures content
-        # rather than JSON formatting the reconcile normalizes.
         writeback.apply_rows(
             inv.KIND_JSON_ENTITY_DIR,
             home / "tasks",
             [{"id": tid, "data": {"id": tid, "title": title, "updated_at": updated}}],
         )
 
-    def test_offline_same_task_edit_yields_a_review_item_and_applies_nothing(self, tmp_path):
-        from gideon.durability.sync_cycle import read_registry, run_sync_cycle
-        from tests.test_durability_sync_cycle import SharedStore
+    def test_offline_same_task_edit_yields_a_review_item_and_applies_nothing(
+        self, tmp_path
+    ):
+        from checks.runtime.test_durability_sync_cycle import SharedStore
+        from gideon.operations.durability.sync_cycle import (
+            read_registry,
+            run_sync_cycle,
+        )
 
         store = SharedStore()
         a, b = tmp_path / "A", tmp_path / "B"
-        # 1. A creates the task and publishes; B pulls it; A pulls B's echo. Both agree now,
-        #    so the shared registry carries a common ancestor sha for t1.
         self._write_task(a, "t1", "base", "2026-01-01T00:00:00Z")
         assert run_sync_cycle(store, a, self_id="A", now="t1").ok
         assert run_sync_cycle(store, b, self_id="B", now="t2").ok
         assert run_sync_cycle(store, a, self_id="A", now="t3").ok
         ancestor = read_registry(store).ancestors_for("tasks").get("t1")
-        assert ancestor, "the pull must publish the agreed ancestor sha into the registry"
+        assert (
+            ancestor
+        ), "the pull must publish the agreed ancestor sha into the registry"
 
-        # 2. Both edit the same task offline. B's timestamp is NEWER, so plain LWW would
-        #    overwrite A's edit — the conflict hold is what prevents that.
         self._write_task(a, "t1", "A edit", "2026-02-01T00:00:00Z")
         self._write_task(b, "t1", "B edit", "2026-03-01T00:00:00Z")
         assert run_sync_cycle(store, a, self_id="A", now="t4").ok
 
-        # 3. B syncs and sees A's divergent version.
         before = (b / "tasks" / "t1.json").read_bytes()
         report = run_sync_cycle(store, b, self_id="B", now="t5")
         assert report.ok and report.conflicts == 1
         assert "conflict" in report.detail
 
-        # Applies nothing: B's local version is byte-identical and still authoritative.
         assert (b / "tasks" / "t1.json").read_bytes() == before
         assert json.loads((b / "tasks" / "t1.json").read_text())["title"] == "B edit"
 
-        # And it is a review item carrying BOTH versions and all three shas.
         queued = conflicts.ConflictQueue(b).items(status=conflicts.STATUS_NEEDS_REVIEW)
         assert len(queued) == 1
         rec = queued[0]
@@ -472,10 +480,8 @@ class TestCriterionFive:
         assert rec.ancestor_sha == ancestor
         assert rec.local_row["data"]["title"] == "B edit"
         assert rec.remote_row["data"]["title"] == "A edit"
-        assert rec.proposal is None  # no model in this test → needs-review without a draft
+        assert rec.proposal is None
 
-        # The ancestor is NOT advanced for a held id, so the conflict re-detects rather than
-        # self-resolving on the next cycle.
         assert read_registry(store).ancestors_for("tasks").get("t1") == ancestor
         assert run_sync_cycle(store, b, self_id="B", now="t6").ok
         assert len(conflicts.ConflictQueue(b).items()) == 1

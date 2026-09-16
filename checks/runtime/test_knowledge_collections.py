@@ -18,7 +18,7 @@ import sqlite3
 
 import pytest
 
-from gideon.knowledge.store import KnowledgeStore
+from gideon.cognition.knowledge.store import KnowledgeStore
 
 
 @pytest.fixture
@@ -28,9 +28,6 @@ def store(tmp_path):
 
 def _item(store, title: str, content: str = "body") -> str:
     return store.create_typed_item(item_type="note", title=title, content=content)
-
-
-# ── migration: an existing DB must upgrade in place ───────────────────────────
 
 
 def test_a_pre_collections_db_upgrades_in_place_without_losing_items(tmp_path):
@@ -52,12 +49,14 @@ def test_a_pre_collections_db_upgrades_in_place_without_losing_items(tmp_path):
     cols = {r[1] for r in st.db.execute("PRAGMA table_info(items)").fetchall()}
     assert {"read_state", "favorited"} <= cols
     tables = {
-        r[0] for r in st.db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        r[0]
+        for r in st.db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
     }
     assert {"collections", "collection_items"} <= tables
     item = st.get_item("i1")
     assert item is not None and item["title"] == "Old note"
-    # A pre-existing row has NULL read_state on disk; the API contract is the enum.
     assert item["read_state"] == "unread"
     assert item["favorited"] is False
 
@@ -68,9 +67,6 @@ def test_opening_twice_is_idempotent(tmp_path):
     iid = _item(first, "One")
     second = KnowledgeStore(dbp)
     assert second.get_item(iid) is not None
-
-
-# ── manual collections ────────────────────────────────────────────────────────
 
 
 def test_create_and_resolve_a_manual_shelf(store):
@@ -142,9 +138,6 @@ def test_archived_items_do_not_appear_on_a_shelf(store):
     assert store.resolve_collection(cid) == []
 
 
-# ── smart collections ─────────────────────────────────────────────────────────
-
-
 def test_a_smart_shelf_resolves_its_query(store):
     _item(store, "Pandoc guide", "converting markdown to pdf")
     _item(store, "Coffee notes", "the grinder settings")
@@ -196,9 +189,6 @@ def test_a_smart_and_a_manual_shelf_hand_back_the_same_shape(store):
     assert set(m) == set(s)
 
 
-# ── the rail ──────────────────────────────────────────────────────────────────
-
-
 def test_new_shelves_go_to_the_end_of_the_rail(store):
     """The user's ordering is theirs; a create must not reshuffle it."""
     a = store.create_collection(name="First")
@@ -240,9 +230,6 @@ def test_updating_with_no_recognized_field_reports_false(store):
 def test_a_nameless_shelf_is_refused(store):
     with pytest.raises(ValueError, match="name is required"):
         store.create_collection(name="   ")
-
-
-# ── item curation ─────────────────────────────────────────────────────────────
 
 
 def test_read_state_cycles_through_all_three(store):
@@ -289,9 +276,6 @@ def test_curating_a_missing_item_reports_false(store):
     assert store.set_favorited("nope", True) is False
 
 
-# ── bulk curation (S2, T2.3) ──────────────────────────────────────────────────
-
-
 def test_bulk_reports_changed_unchanged_and_missing_separately(store):
     """The whole reason the endpoint returns per-item results.
 
@@ -300,7 +284,7 @@ def test_bulk_reports_changed_unchanged_and_missing_separately(store):
     "everything broke" look identical to the UI.
     """
     a, b = _item(store, "A"), _item(store, "B")
-    store.set_read_state(b, "read")  # already in the target state
+    store.set_read_state(b, "read")
 
     res = store.bulk_apply("read_state", [a, b, "ghost"], state="read")
 
@@ -328,7 +312,6 @@ def test_bulk_favorite_and_unfavorite(store):
     a = _item(store, "A")
     assert store.bulk_apply("favorite", [a], value=True)["changed"] == [a]
     assert store.get_item(a)["favorited"] is True
-    # Re-running is unchanged, not changed — the count a user sees stays honest.
     assert store.bulk_apply("favorite", [a], value=True)["unchanged"] == [a]
     assert store.bulk_apply("favorite", [a], value=False)["changed"] == [a]
     assert store.get_item(a)["favorited"] is False
@@ -367,7 +350,7 @@ def test_bulk_uncollect_removes_membership_only(store):
 
     assert res["changed"] == [a]
     assert store.resolve_collection(shelf) == []
-    assert store.get_item(a) is not None  # the item itself survives
+    assert store.get_item(a) is not None
 
 
 def test_bulk_collect_refuses_a_smart_shelf(store):
@@ -425,9 +408,6 @@ def test_bulk_read_state_does_not_reorder_a_recency_sorted_library(store):
     assert store.get_item(a)["updated_at"] == before
 
 
-# ── tag taxonomy (S2, T2.2) ───────────────────────────────────────────────────
-
-
 def _tag_ids(store) -> dict:
     return {t["name"]: t["id"] for t in store.list_tags()}
 
@@ -435,8 +415,9 @@ def _tag_ids(store) -> dict:
 def test_tags_round_trip_as_a_plain_list_of_strings(store):
     """Storage moved to rows; the API shape did NOT. Every consumer — the agent tool
     schemas, the HTTP layer, the whole frontend — still gets `list[str]`."""
-    iid = store.create_typed_item(item_type="note", title="N", content="c", tags=["b", "a"])
-    # Name-ordered, because rows have no insertion order to preserve.
+    iid = store.create_typed_item(
+        item_type="note", title="N", content="c", tags=["b", "a"]
+    )
     assert store.get_item(iid)["tags"] == ["a", "b"]
 
 
@@ -448,16 +429,23 @@ def test_write_paths_drop_blanks_and_duplicates(store):
 
 
 def test_update_replaces_tags_rather_than_merging(store):
-    iid = store.create_typed_item(item_type="note", title="N", content="c", tags=["a", "b"])
+    iid = store.create_typed_item(
+        item_type="note", title="N", content="c", tags=["a", "b"]
+    )
     store.update_item(iid, tags=["z"])
     assert store.get_item(iid)["tags"] == ["z"]
 
 
 def test_usage_counts_exclude_archived_items(store):
     """Counts come from the join so they can respect the live-library scope. A stored
-    counter could not: archiving an item would have to decrement every one of its tags."""
-    live = store.create_typed_item(item_type="note", title="L", content="c", tags=["shared"])
-    gone = store.create_typed_item(item_type="note", title="G", content="c", tags=["shared"])
+    counter could not: archiving an item would have to decrement every one of its tags.
+    """
+    live = store.create_typed_item(
+        item_type="note", title="L", content="c", tags=["shared"]
+    )
+    gone = store.create_typed_item(
+        item_type="note", title="G", content="c", tags=["shared"]
+    )
     assert {t["name"]: t["usage_count"] for t in store.list_tags()}["shared"] == 2
 
     store.update_item(gone, is_archived=1)
@@ -467,36 +455,40 @@ def test_usage_counts_exclude_archived_items(store):
 
 
 def test_hierarchy_reparents_and_reports_the_parent_name(store):
-    store.create_typed_item(item_type="note", title="N", content="c", tags=["rust", "async"])
+    store.create_typed_item(
+        item_type="note", title="N", content="c", tags=["rust", "async"]
+    )
     ids = _tag_ids(store)
     assert store.set_tag_parent(ids["async"], ids["rust"]) is True
     by_name = {t["name"]: t for t in store.list_tags()}
     assert by_name["async"]["parent_name"] == "rust"
-    assert by_name["rust"]["parent_id"] is None  # a root
+    assert by_name["rust"]["parent_id"] is None
 
 
 def test_hierarchy_refuses_cycles(store):
     """The chat-folders hierarchy this mirrors has no cycle guard, so A->B->A is
     constructible there. A cycle here would hang any recursive walk of the taxonomy."""
-    store.create_typed_item(item_type="note", title="N", content="c", tags=["a", "b", "c"])
+    store.create_typed_item(
+        item_type="note", title="N", content="c", tags=["a", "b", "c"]
+    )
     ids = _tag_ids(store)
     with pytest.raises(ValueError, match="tag_cycle"):
-        store.set_tag_parent(ids["a"], ids["a"])  # self-parent
+        store.set_tag_parent(ids["a"], ids["a"])
     store.set_tag_parent(ids["b"], ids["a"])
     with pytest.raises(ValueError, match="tag_cycle"):
-        store.set_tag_parent(ids["a"], ids["b"])  # would close a 2-cycle
+        store.set_tag_parent(ids["a"], ids["b"])
     store.set_tag_parent(ids["c"], ids["b"])
     with pytest.raises(ValueError, match="tag_cycle"):
-        store.set_tag_parent(ids["a"], ids["c"])  # would close a 3-cycle
+        store.set_tag_parent(ids["a"], ids["c"])
 
 
 def test_rename_is_one_row_and_refuses_a_collision(store):
-    iid = store.create_typed_item(item_type="note", title="N", content="c", tags=["old", "keep"])
+    iid = store.create_typed_item(
+        item_type="note", title="N", content="c", tags=["old", "keep"]
+    )
     ids = _tag_ids(store)
     assert store.rename_tag(ids["old"], "new") is True
     assert store.get_item(iid)["tags"] == ["keep", "new"]
-    # Renaming ONTO an existing name is a merge, which is a different, lossier
-    # operation — refuse rather than silently merging.
     with pytest.raises(ValueError, match="tag_name_taken"):
         store.rename_tag(_tag_ids(store)["new"], "keep")
 
@@ -516,7 +508,9 @@ def test_rename_stops_the_old_term_matching_in_search(store):
 
 def test_merge_moves_memberships_and_clears_the_source_term(store):
     a = store.create_typed_item(item_type="note", title="A", content="c", tags=["src"])
-    b = store.create_typed_item(item_type="note", title="B", content="c", tags=["src", "dst"])
+    b = store.create_typed_item(
+        item_type="note", title="B", content="c", tags=["src", "dst"]
+    )
     ids = _tag_ids(store)
 
     result = store.merge_tags(ids["src"], ids["dst"])
@@ -531,24 +525,29 @@ def test_merge_moves_memberships_and_clears_the_source_term(store):
 def test_merge_keeps_the_more_human_provenance(store):
     """If either side was user-authored the merged membership is, so a merge can never
     downgrade a user's tag into one enrichment may overwrite."""
-    iid = store.create_typed_item(item_type="note", title="N", content="c", tags=["mine"])
+    iid = store.create_typed_item(
+        item_type="note", title="N", content="c", tags=["mine"]
+    )
     store.update_item(iid, tags=["mine", "ai-tag"], tag_source="ai")
     ids = _tag_ids(store)
-    # Re-assert one as the user's, then merge the AI one into it.
-    store.update_item(iid, tags=["mine", "ai-tag"])  # default source='user'
+    store.update_item(iid, tags=["mine", "ai-tag"])
     store.merge_tags(ids["ai-tag"], ids["mine"])
     assert store.tags_are_all_ai_authored(iid) is False
 
 
 def test_merge_reparents_children_of_the_source(store):
-    store.create_typed_item(item_type="note", title="N", content="c", tags=["src", "dst", "kid"])
+    store.create_typed_item(
+        item_type="note", title="N", content="c", tags=["src", "dst", "kid"]
+    )
     ids = _tag_ids(store)
     store.set_tag_parent(ids["kid"], ids["src"])
 
     store.merge_tags(ids["src"], ids["dst"])
 
     by_name = {t["name"]: t for t in store.list_tags()}
-    assert by_name["kid"]["parent_name"] == "dst", "a child must follow, not be orphaned"
+    assert (
+        by_name["kid"]["parent_name"] == "dst"
+    ), "a child must follow, not be orphaned"
 
 
 def _tag_cycles(store) -> list[str]:
@@ -580,17 +579,18 @@ def test_merging_a_tag_into_one_nested_under_it_leaves_no_cycle(store):
     A tag inside a cycle is neither a root (`parent_id === null`) nor any root's child, so
     `TagManager.tsx` cannot place it and appends it as a bottom-of-list straggler, flat and
     detached from where the user filed it, along with everything beneath it."""
-    store.create_typed_item(item_type="note", title="N", content="c", tags=["a", "b", "c"])
+    store.create_typed_item(
+        item_type="note", title="N", content="c", tags=["a", "b", "c"]
+    )
     ids = _tag_ids(store)
     assert store.set_tag_parent(ids["b"], ids["a"]) is True
     assert store.set_tag_parent(ids["c"], ids["b"]) is True
 
-    store.merge_tags(ids["a"], ids["c"])  # fold the GRANDPARENT into its grandchild
+    store.merge_tags(ids["a"], ids["c"])
 
     assert _tag_cycles(store) == []
     rows = {t["name"]: t for t in store.list_tags()}
     assert "a" not in rows
-    # `c` inherits the merged-away tag's position — a root here, since `a` was one.
     assert not rows["c"].get("parent_name")
     assert rows["b"]["parent_name"] == "c", "the child still follows the merge"
 
@@ -598,12 +598,14 @@ def test_merging_a_tag_into_one_nested_under_it_leaves_no_cycle(store):
 def test_a_merged_away_parent_hands_its_branch_position_to_the_survivor(store):
     """The generalization: the survivor takes the SOURCE's place, so a merge inside a
     branch keeps the branch where the user put it instead of promoting it to a root."""
-    store.create_typed_item(item_type="note", title="N", content="c", tags=["p", "a", "b"])
+    store.create_typed_item(
+        item_type="note", title="N", content="c", tags=["p", "a", "b"]
+    )
     ids = _tag_ids(store)
     assert store.set_tag_parent(ids["a"], ids["p"]) is True
     assert store.set_tag_parent(ids["b"], ids["a"]) is True
 
-    store.merge_tags(ids["a"], ids["b"])  # fold `a` into its child, under `p`
+    store.merge_tags(ids["a"], ids["b"])
 
     assert _tag_cycles(store) == []
     rows = {t["name"]: t for t in store.list_tags()}
@@ -612,7 +614,9 @@ def test_a_merged_away_parent_hands_its_branch_position_to_the_survivor(store):
 
 def test_delete_reparents_children_to_root_rather_than_cascading(store):
     """Deleting a parent must not silently destroy the branch beneath it."""
-    store.create_typed_item(item_type="note", title="N", content="c", tags=["parent", "child"])
+    store.create_typed_item(
+        item_type="note", title="N", content="c", tags=["parent", "child"]
+    )
     ids = _tag_ids(store)
     store.set_tag_parent(ids["child"], ids["parent"])
 
@@ -624,11 +628,12 @@ def test_delete_reparents_children_to_root_rather_than_cascading(store):
 
 
 def test_delete_removes_the_tag_from_items_and_from_search(store):
-    iid = store.create_typed_item(item_type="note", title="Alpha", content="c", tags=["doomed"])
+    iid = store.create_typed_item(
+        item_type="note", title="Alpha", content="c", tags=["doomed"]
+    )
     store.delete_tag(_tag_ids(store)["doomed"])
     assert store.get_item(iid)["tags"] == []
     assert store.search_items_fts("doomed", limit=5) == []
-    # The item itself survives and stays findable by its other text.
     assert [h["id"] for h in store.search_items_fts("Alpha", limit=5)] == [iid]
 
 
@@ -636,7 +641,9 @@ def test_the_fts_index_survives_a_rebuild(store):
     """`rebuild` against an external-content table whose source cannot produce every
     column WIPES THE INDEX AND REPORTS SUCCESS (measured; integrity-check still says
     ok afterwards). The FTS table sources from a view precisely so this stays safe."""
-    iid = store.create_typed_item(item_type="note", title="Alpha", content="body", tags=["rust"])
+    iid = store.create_typed_item(
+        item_type="note", title="Alpha", content="body", tags=["rust"]
+    )
     store.db.execute("INSERT INTO items_fts (items_fts) VALUES ('rebuild')")
     store.db.commit()
     assert [h["id"] for h in store.search_items_fts("rust", limit=5)] == [iid]
@@ -647,7 +654,9 @@ def test_non_ascii_tags_are_searchable(store):
     """A pre-existing bug this migration fixes: `json.dumps` defaults to
     ensure_ascii=True, so a tag like 日本語 was stored — and indexed — as escape
     sequences, making it unfindable. Measured 0 matches before, 1 after."""
-    iid = store.create_typed_item(item_type="note", title="N", content="c", tags=["日本語"])
+    iid = store.create_typed_item(
+        item_type="note", title="N", content="c", tags=["日本語"]
+    )
     assert store.get_item(iid)["tags"] == ["日本語"]
     assert [h["id"] for h in store.search_items_fts("日本語", limit=5)] == [iid]
 
@@ -698,27 +707,27 @@ def test_the_tag_migration_survives_every_hostile_value(tmp_path):
 
     st = KnowledgeStore(dbp)
 
-    # The column is gone and the tables exist.
-    assert "tags" not in {r[1] for r in st.db.execute("PRAGMA table_info(items)").fetchall()}
+    assert "tags" not in {
+        r[1] for r in st.db.execute("PRAGMA table_info(items)").fetchall()
+    }
     tables = {
-        r[0] for r in st.db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        r[0]
+        for r in st.db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
     }
     assert {"tags", "item_tags"} <= tables
 
-    assert st.get_item("dup")["tags"] == ["rust", "systems"]  # duplicate collapsed
-    assert st.get_item("blank")["tags"] == ["kept"]  # blanks dropped
-    assert st.get_item("unicode")["tags"] == ["日本語"]  # escapes decoded
-    assert st.get_item("broken")["tags"] == ["not json at all"]  # salvaged, not lost
+    assert st.get_item("dup")["tags"] == ["rust", "systems"]
+    assert st.get_item("blank")["tags"] == ["kept"]
+    assert st.get_item("unicode")["tags"] == ["日本語"]
+    assert st.get_item("broken")["tags"] == ["not json at all"]
     assert st.get_item("nulled")["tags"] == []
     assert st.get_item("aiauthored")["tags"] == ["caching", "redis"]
 
-    # Provenance: only the item whose insights.topics match its tags is AI-authored, so
-    # only that one may be refreshed by a later enrichment pass.
     assert st.tags_are_all_ai_authored("aiauthored") is True
     assert st.tags_are_all_ai_authored("dup") is False
 
-    # Search works against the migrated index — including the term that was previously
-    # unfindable because json.dumps had escaped it.
     assert [h["id"] for h in st.search_items_fts("rust", limit=5)] == ["dup"]
     assert [h["id"] for h in st.search_items_fts("日本語", limit=5)] == ["unicode"]
 
@@ -752,9 +761,6 @@ def test_reopening_a_migrated_db_is_idempotent(tmp_path):
     assert second.db.execute("SELECT COUNT(*) FROM item_tags").fetchone()[0] == counts
 
 
-# ── shelf names are unique, like tag names (#755) ─────────────────────────────
-
-
 def test_a_duplicate_shelf_name_is_refused(store):
     """`tags.name` is `TEXT NOT NULL UNIQUE` and the tag UI says "Merge them instead of
     renaming"; `collections.name` had neither, so two shelves called "ZFS incident evidence"
@@ -768,7 +774,9 @@ def test_a_duplicate_shelf_name_is_refused(store):
     assert [c["name"] for c in store.list_collections()] == ["ZFS incident evidence"]
 
 
-@pytest.mark.parametrize("variant", ["  ZFS incident evidence  ", "zfs INCIDENT evidence"])
+@pytest.mark.parametrize(
+    "variant", ["  ZFS incident evidence  ", "zfs INCIDENT evidence"]
+)
 def test_a_name_a_reader_cannot_distinguish_is_a_duplicate(variant, store):
     """Case- and whitespace-insensitive, unlike the `tags` UNIQUE index. Two chips reading
     "Evidence" and "evidence" are as indistinguishable as two identical ones, and a guard that

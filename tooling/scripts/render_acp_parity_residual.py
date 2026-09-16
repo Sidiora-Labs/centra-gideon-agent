@@ -2,7 +2,7 @@
 """Render the ACP not-gateable residual registry INTO the parity doc (AAP-5 §2.2).
 
 ``ACP-AGENT-PARITY.md`` §2.2 requires that the residual not-gateable set be
-enumerated in ONE place — :data:`gideon.acp.permission_authority.NOT_GATEABLE`
+enumerated in ONE place — :data:`gideon.integrations.acp.permission_authority.NOT_GATEABLE`
 — and that §2.7's parity doc (``docs/agents/acp-parity.md``) **render** that
 registry rather than re-derive it in prose. A hand-written table beside the
 registry is exactly the drift the requirement exists to prevent, and it had
@@ -11,16 +11,16 @@ already happened: the doc's third column carried sweep prose
 per-entry ``observation`` — the field whose whole job is to name the measurement
 that PROVED the residue — was not in the doc at all.
 
-Mechanism (the house generator idiom — ``scripts/generate_*_baseline.py`` plus a
+Mechanism (the house generator idiom — ``tooling/scripts/generate_*_baseline.py`` plus a
 companion pytest ratchet): this script owns one marker-delimited block inside the
 doc. Everything between :data:`MARKER_BEGIN` and :data:`MARKER_END` is generated;
 everything outside it is hand-written prose that states MECHANISM, never the
 enumeration.
 
-    python scripts/render_acp_parity_residual.py            # write the block
-    python scripts/render_acp_parity_residual.py --check     # fail on drift
+    python tooling/scripts/render_acp_parity_residual.py            # write the block
+    python tooling/scripts/render_acp_parity_residual.py --check     # fail on drift
 
-``tests/test_acp_parity_residual_render.py`` is the always-on rail: it fails when
+``checks/runtime/test_acp_parity_residual_render.py`` is the always-on rail: it fails when
 the doc and the registry disagree, and it carries a vacuity floor so a rail that
 matches NOTHING cannot read as clean.
 
@@ -39,21 +39,19 @@ import dataclasses
 import sys
 from pathlib import Path
 
-from gideon.acp import permission_authority
+from gideon.integrations.acp import permission_authority
 
 MARKER_BEGIN = (
-    "<!-- BEGIN GENERATED: not-gateable-registry (scripts/render_acp_parity_residual.py) -->"
+    "<!-- BEGIN GENERATED: not-gateable-registry (tooling/scripts/render_acp_parity_residual.py) -->"
 )
 MARKER_END = "<!-- END GENERATED: not-gateable-registry -->"
 
-#: ``ProviderCoverage.provider`` restates the registry key, which is already the
-#: bullet's label — rendering it twice is noise, not drift protection.
 _REDUNDANT_FIELDS = frozenset({"provider"})
 
 
 def doc_path() -> Path:
     """Repo-root location of the §2.7 parity doc."""
-    return Path(__file__).resolve().parents[1] / "docs" / "agents" / "acp-parity.md"
+    return Path(__file__).resolve().parents[2] / "docs" / "agents" / "acp-parity.md"
 
 
 def _flatten(value: object) -> str:
@@ -117,7 +115,7 @@ def render_block() -> str:
     """The generated markdown between the markers (markers NOT included)."""
     registry = permission_authority.NOT_GATEABLE
     lines: list[str] = [
-        "<!-- Regenerate with: python scripts/render_acp_parity_residual.py -->",
+        "<!-- Regenerate with: python tooling/scripts/render_acp_parity_residual.py -->",
         "",
     ]
     if not registry:
@@ -180,7 +178,7 @@ def main(argv: list[str] | None = None) -> int:
     if check_only:
         print(
             f"DRIFT: {path} does not match acp/permission_authority.NOT_GATEABLE.\n"
-            "Run: python scripts/render_acp_parity_residual.py",
+            "Run: python tooling/scripts/render_acp_parity_residual.py",
             file=sys.stderr,
         )
         return 1

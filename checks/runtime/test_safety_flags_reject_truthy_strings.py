@@ -23,12 +23,11 @@ import pathlib
 
 import pytest
 
-from gideon import hooks
-from gideon.safety_flags import strict_bool
+from gideon.engine import hooks
+from gideon.security.safety_flags import strict_bool
 
 SRC = pathlib.Path(hooks.__file__).resolve().parent
 
-#: ``(module, flag)`` for every safety flag that reads user-controlled data.
 GUARDED_FLAGS = [
     ("hooks.py", "auto_approve_subagent_spawn"),
     ("hooks.py", "auto_approve_subagent_tools"),
@@ -39,7 +38,9 @@ GUARDED_FLAGS = [
 
 
 class TestTheHelper:
-    @pytest.mark.parametrize("value", ["false", "False", " FALSE ", "no", "off", "0", "", "n"])
+    @pytest.mark.parametrize(
+        "value", ["false", "False", " FALSE ", "no", "off", "0", "", "n"]
+    )
     def test_a_falsey_spelling_never_enables_the_control(self, value):
         assert strict_bool(value, field="t") is False
 
@@ -59,7 +60,9 @@ class TestTheHelper:
         with caplog.at_level("WARNING"):
             assert strict_bool(value, field="probe.flag", default=False) is False
         named = [r for r in caplog.records if "probe.flag" in r.getMessage()]
-        assert named, f"no WARNING naming the field: {[r.getMessage() for r in caplog.records]}"
+        assert (
+            named
+        ), f"no WARNING naming the field: {[r.getMessage() for r in caplog.records]}"
 
     def test_the_default_is_honoured_for_None(self):
         assert strict_bool(None, field="t", default=False) is False
@@ -93,7 +96,6 @@ class TestTheCallSites:
             name = node.func.id if isinstance(node.func, ast.Name) else ""
             if name not in ("bool", "strict_bool"):
                 continue
-            # does this call mention the flag anywhere inside it?
             if flag not in ast.dump(node):
                 continue
             (strict if name == "strict_bool" else bare).append(node.lineno)

@@ -29,12 +29,13 @@ import time
 
 import pytest
 
-from gideon.embedding_providers import base
-from gideon.embedding_providers import registry as reg
-from gideon.embedding_providers.base import EmbeddingProvider, run_embed_sync
+from gideon.integrations.embedding_providers import base
+from gideon.integrations.embedding_providers import registry as reg
+from gideon.integrations.embedding_providers.base import (
+    EmbeddingProvider,
+    run_embed_sync,
+)
 
-# A budget small enough to measure and a workload far larger than it. The gap is what
-# makes the "did the timeout actually bound the caller?" question answerable.
 BUDGET = 0.25
 FAR_LONGER = 3.0
 
@@ -78,15 +79,10 @@ def _in_running_loop(fn):
     """Call a sync ``fn`` from inside a running event loop, as an async handler does."""
 
     async def _outer():
-        asyncio.get_running_loop()  # assert the premise: we really are on a loop
+        asyncio.get_running_loop()
         return fn()
 
     return asyncio.run(_outer())
-
-
-# --------------------------------------------------------------------------------------
-# 1. The timeout bounds the CALLER. This is the assertion the old shape failed.
-# --------------------------------------------------------------------------------------
 
 
 def test_timeout_bounds_the_caller_inside_a_running_loop():
@@ -111,7 +107,6 @@ def test_timeout_bounds_the_caller_inside_a_running_loop():
         f"the timeout did not bound the caller: returned after {elapsed:.2f}s "
         f"on a {BUDGET}s budget for {FAR_LONGER}s of work"
     )
-    # And it really was the budget that ended the wait, not the work finishing early.
     assert elapsed >= BUDGET * 0.8
 
 
@@ -149,12 +144,6 @@ def _spy_on_timeouts(monkeypatch) -> list[float]:
     return seen
 
 
-# The four sites keep their ORIGINAL budgets — 30s in base, 60s remote, 60s direct, 30s
-# for the native dimension lookup. Unifying them silently would be a behaviour change
-# nobody asked for, so each is pinned. One test per site: a stub that fails to build must
-# not take the other three legs down with it (and a skip would read as a pass).
-
-
 def test_base_get_embed_fn_keeps_its_30s_timeout(monkeypatch):
     seen = _spy_on_timeouts(monkeypatch)
     assert _FakeProvider(vec=[1.0]).get_embed_fn()("t") == [1.0]
@@ -175,7 +164,7 @@ def test_llm_embed_fn_keeps_its_60s_timeout(monkeypatch):
         def build(self, name, **kwargs):
             return _LLMish()
 
-    from gideon.llm import registry as llm_reg
+    from gideon.integrations.llm import registry as llm_reg
 
     monkeypatch.setattr(llm_reg, "get_default_registry", lambda: _FakeLLMRegistry())
 
@@ -201,7 +190,7 @@ def test_native_dim_lookup_keeps_its_30s_timeout(monkeypatch):
 
     class _Native(_FakeProvider):
         async def list_models(self):
-            from gideon.embedding_providers.base import EmbeddingModel
+            from gideon.integrations.embedding_providers.base import EmbeddingModel
 
             return [EmbeddingModel(name="m1", dimension=384)]
 
@@ -212,17 +201,6 @@ def test_native_dim_lookup_keeps_its_30s_timeout(monkeypatch):
     assert seen == [30], "the dim lookup must not fall through to the embed probe"
 
 
-# --------------------------------------------------------------------------------------
-# 2. No per-call churn.
-#
-# Asserted three ways, because one leg is not enough:
-#   (a) ``ThreadPoolExecutor.__init__`` is called ZERO times over N embeds — stronger
-#       than "not N", since the bridge creates no executor at all;
-#   (b) ``sync_bridge_loop()`` returns the SAME loop object across all N calls (identity
-#       of the shared resource);
-#   (c) ``threading.active_count()`` grows by at most 1 over N embeds.
-# --------------------------------------------------------------------------------------
-
 N_CALLS = 25
 
 
@@ -230,7 +208,7 @@ def test_n_embeds_create_no_executors_and_one_bridge_loop(monkeypatch):
     provider = _FakeProvider(vec=[0.1, 0.2, 0.3])
     embed_fn = provider.get_embed_fn()
 
-    base.sync_bridge_loop()  # start the bridge first so (c) measures only per-call growth
+    base.sync_bridge_loop()
 
     made: list[int] = []
     real_init = concurrent.futures.ThreadPoolExecutor.__init__
@@ -239,7 +217,9 @@ def test_n_embeds_create_no_executors_and_one_bridge_loop(monkeypatch):
         made.append(1)
         return real_init(self, *a, **k)
 
-    monkeypatch.setattr(concurrent.futures.ThreadPoolExecutor, "__init__", _counting_init)
+    monkeypatch.setattr(
+        concurrent.futures.ThreadPoolExecutor, "__init__", _counting_init
+    )
 
     def _call():
         before = threading.active_count()
@@ -254,12 +234,14 @@ def test_n_embeds_create_no_executors_and_one_bridge_loop(monkeypatch):
 
     assert provider.calls == N_CALLS, "the embeds did not actually run"
     assert vecs == [[0.1, 0.2, 0.3]] * N_CALLS
-    # (a) no executor at all — the old shape made one per text.
     assert made == [], f"{len(made)} ThreadPoolExecutor(s) created for {N_CALLS} embeds"
-    # (b) one shared loop, not one per text.
-    assert len(loops) == 1, f"{len(loops)} distinct bridge loops across {N_CALLS} embeds"
+    assert (
+        len(loops) == 1
+    ), f"{len(loops)} distinct bridge loops across {N_CALLS} embeds"
     # (c) no thread churn.
-    assert thread_delta <= 1, f"thread count grew by {thread_delta} over {N_CALLS} embeds"
+    assert (
+        thread_delta <= 1
+    ), f"thread count grew by {thread_delta} over {N_CALLS} embeds"
 
 
 def test_the_bridge_thread_is_a_daemon_and_is_never_joined():
@@ -271,15 +253,10 @@ def test_the_bridge_thread_is_a_daemon_and_is_never_joined():
     assert bridge[0].daemon is True
 
 
-# --------------------------------------------------------------------------------------
-# 3. Both paths still work: with a running loop, and without one.
-# --------------------------------------------------------------------------------------
-
-
 def test_embed_returns_its_vector_with_no_running_loop():
     provider = _FakeProvider(vec=[1.0, 2.0, 3.0])
     with pytest.raises(RuntimeError):
-        asyncio.get_running_loop()  # premise: no loop on this thread
+        asyncio.get_running_loop()
     assert provider.get_embed_fn()("hello") == [1.0, 2.0, 3.0]
     assert provider.calls == 1
 
@@ -304,11 +281,6 @@ def test_direct_embed_site_works_on_both_paths(monkeypatch):
     assert provider.calls == 2
 
 
-# --------------------------------------------------------------------------------------
-# 4. Vacuity: the bridge must not invent a vector.
-# --------------------------------------------------------------------------------------
-
-
 def test_a_provider_returning_none_still_yields_none():
     provider = _FakeProvider(vec=None)
     embed_fn = provider.get_embed_fn()
@@ -328,14 +300,8 @@ def test_direct_embed_yields_none_for_a_none_provider(monkeypatch):
     assert _in_running_loop(lambda: fn("async")) is None
 
 
-# --------------------------------------------------------------------------------------
-# 5. The re-entrancy guard: submitting to the loop you are running on would deadlock.
-# --------------------------------------------------------------------------------------
-
-
 def test_calling_the_bridge_from_inside_the_bridge_loop_is_refused():
     async def _reentrant():
-        # Running ON the bridge loop, ask the bridge to run something else.
         return run_embed_sync(_noop, timeout=BUDGET)
 
     async def _noop():

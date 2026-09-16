@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from gideon.workflows import store as st
-from gideon.workflows.models import (
+from gideon.automation.workflows import store as st
+from gideon.automation.workflows.models import (
     InstanceState,
     NodeInstance,
     OriginKind,
@@ -31,7 +31,7 @@ from gideon.workflows.models import (
 def isolated(tmp_path: Path, monkeypatch) -> Path:
     """Patch BOTH bindings: the store imported `config_dir` by value, so patching only
     the config module leaves the store pointed at the real home."""
-    import gideon.config.loader as cfg
+    import gideon.core.config.loader as cfg
 
     monkeypatch.setattr(cfg, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(st, "config_dir", lambda: tmp_path)
@@ -49,7 +49,7 @@ class TestRunCrud:
         run = st.create(_run())
         assert len(run.id) == 8
         assert st.run_dir(run.id).is_dir()
-        assert run.created_at  # stamped on create
+        assert run.created_at
 
     def test_a_new_run_is_its_own_root(self) -> None:
         run = st.create(_run())
@@ -60,7 +60,9 @@ class TestRunCrud:
             _run(
                 status=RunStatus.RUNNING,
                 intent="find the latency cause",
-                origin=RunOrigin(kind=OriginKind.CHAT, session_key="s1", tool_call_id="t1"),
+                origin=RunOrigin(
+                    kind=OriginKind.CHAT, session_key="s1", tool_call_id="t1"
+                ),
                 budget=RunBudget(max_tokens=5000, max_cost=1.5, max_retries=2),
                 inputs={"topic": "checkout"},
                 pinned=True,
@@ -85,7 +87,7 @@ class TestRunCrud:
         run.total_tokens = 99
         st.save(run)
         rows, total = st.list_runs()
-        assert total == 1  # updated, not duplicated
+        assert total == 1
         assert rows[0].status is RunStatus.COMPLETE
         assert rows[0].total_tokens == 99
 
@@ -140,11 +142,12 @@ class TestPolicyOverridesLegacySchema:
             conn.execute("ALTER TABLE runs DROP COLUMN policy_overrides")
             conn.commit()
             cols = [r[1] for r in conn.execute("PRAGMA table_info(runs)")]
-            assert "policy_overrides" not in cols, "the drop did not land — this proves nothing"
+            assert (
+                "policy_overrides" not in cols
+            ), "the drop did not land — this proves nothing"
         finally:
             conn.close()
 
-        # The next store call goes through `_connect`, which must heal the schema.
         got = st.get(legacy.id)
         assert got is not None and got.intent == "made before the column existed"
         assert got.policy_overrides == {}
@@ -181,39 +184,41 @@ class TestRetiredTaskListId:
 
         conn = sqlite3.connect(str(st._db_path()))
         try:
-            # Vacuity guards: the FRESH schema really lacks the column (otherwise the ALTER
-            # below simulates nothing) and the INSERT list no longer names it.
             cols = [r[1] for r in conn.execute("PRAGMA table_info(runs)")]
             assert cols, "no `runs` columns — did the table stop being created?"
             assert "task_list_id" not in cols, f"the retired column is back: {cols}"
-            assert "task_list_id" not in st._COLUMNS, "the retired column is back in _COLUMNS"
-            conn.execute("ALTER TABLE runs ADD COLUMN task_list_id TEXT NOT NULL DEFAULT ''")
-            conn.execute("UPDATE runs SET task_list_id = 'tl-legacy' WHERE id = ?", (legacy.id,))
+            assert (
+                "task_list_id" not in st._COLUMNS
+            ), "the retired column is back in _COLUMNS"
+            conn.execute(
+                "ALTER TABLE runs ADD COLUMN task_list_id TEXT NOT NULL DEFAULT ''"
+            )
+            conn.execute(
+                "UPDATE runs SET task_list_id = 'tl-legacy' WHERE id = ?", (legacy.id,)
+            )
             conn.commit()
-            # …and the legacy value really is in the row new code is about to read.
             planted = conn.execute(
                 "SELECT task_list_id FROM runs WHERE id = ?", (legacy.id,)
             ).fetchone()[0]
-            assert planted == "tl-legacy", "the raw plant did not land — this test proves nothing"
+            assert (
+                planted == "tl-legacy"
+            ), "the raw plant did not land — this test proves nothing"
         finally:
             conn.close()
 
-        # (a) The legacy row reads fine, and the retired name resurfaces nowhere on the model.
         got = st.get(legacy.id)
         assert got is not None and got.project_id == "proj-a"
         assert not hasattr(got, "task_list_id")
-        # (c) Nothing spilled into the tolerant reader — the column is simply never read.
         assert got.extra == {}
 
-        # (b) A NEW row still writes against the legacy shape, and round-trips clean.
         made = st.create(_run(id="cafe0001", intent="post-retirement write"))
         back = st.get(made.id)
         assert back is not None and back.intent == "post-retirement write"
         assert back.extra == {}
         back.status = RunStatus.COMPLETE
-        st.save(back)  # the column-named UPDATE leg of the writer, on the same legacy schema
+        st.save(back)
         assert st.get(made.id).status is RunStatus.COMPLETE
-        assert st.list_runs()[1] == 2  # both rows visible through the ordinary list
+        assert st.list_runs()[1] == 2
 
 
 class TestQueries:
@@ -230,7 +235,7 @@ class TestQueries:
                 )
             )
         _, total = st.list_runs(root_run_id=parent.id)
-        assert total == 4  # the parent plus its three children
+        assert total == 4
 
     def test_filter_by_name_and_status(self) -> None:
         st.create(_run(workflow_name="a", status=RunStatus.COMPLETE))
@@ -245,10 +250,10 @@ class TestQueries:
         st.create(_run(project_id="proj-a"))
         st.create(_run(project_id="proj-a"))
         st.create(_run(project_id="proj-b"))
-        st.create(_run())  # no project
+        st.create(_run())
         assert st.list_runs(project_id="proj-a")[1] == 2
         assert st.list_runs(project_id="proj-b")[1] == 1
-        assert st.list_runs()[1] == 4  # unfiltered still sees every run
+        assert st.list_runs()[1] == 4
 
     def test_pagination_reports_the_unpaged_total(self) -> None:
         for _ in range(5):
@@ -300,7 +305,9 @@ class TestRunDirectory:
         st.write_state(
             run.id,
             {
-                "root": NodeInstance(path="root", state=InstanceState.DONE, epoch=2, attempt=1),
+                "root": NodeInstance(
+                    path="root", state=InstanceState.DONE, epoch=2, attempt=1
+                ),
                 "root.children[0]": NodeInstance(
                     path="root.children[0]",
                     state=InstanceState.DEGRADED,
@@ -369,7 +376,6 @@ class TestArtifactOffload:
         rather than trusted — the provider only reads run-local artifacts."""
         run = st.create(_run())
         st.write_artifact(run.id, "root.a", {"secret": "in-run"})
-        # Plant a file OUTSIDE the run's artifacts dir that an escape would try to reach.
         outside = st.run_dir(run.id).parent / "elsewhere.json"
         outside.write_text('{"output": "leaked"}', encoding="utf-8")
         assert st.read_artifact(run.id, "../elsewhere.json") is None
@@ -395,7 +401,6 @@ class TestArtifactOffload:
         rel = st.archive_output(run.id, "root.a", 2)
         assert rel.startswith("outputs/attic/v002/")
         assert (st.run_dir(run.id) / rel).is_file()
-        # The live artifact is gone — read_output no longer resolves it.
         assert st.read_output(run.id, "root.a") is None
 
 
@@ -404,7 +409,10 @@ class TestAppendOnlyLogs:
         run = st.create(_run())
         st.append_jsonl(run.id, "journal.jsonl", {"e": "start"})
         st.append_jsonl(run.id, "journal.jsonl", {"e": "done"})
-        assert [r["e"] for r in st.read_jsonl(run.id, "journal.jsonl")] == ["start", "done"]
+        assert [r["e"] for r in st.read_jsonl(run.id, "journal.jsonl")] == [
+            "start",
+            "done",
+        ]
 
     def test_a_corrupt_line_is_skipped_not_fatal(self) -> None:
         """A crash mid-append leaves a half-written final line. Dropping it is correct;
@@ -414,7 +422,10 @@ class TestAppendOnlyLogs:
         with (st.run_dir(run.id) / "journal.jsonl").open("a", encoding="utf-8") as fh:
             fh.write('{"e": "trunc\n')
         st.append_jsonl(run.id, "journal.jsonl", {"e": "three"})
-        assert [r["e"] for r in st.read_jsonl(run.id, "journal.jsonl")] == ["one", "three"]
+        assert [r["e"] for r in st.read_jsonl(run.id, "journal.jsonl")] == [
+            "one",
+            "three",
+        ]
 
     def test_non_dict_lines_are_skipped(self) -> None:
         run = st.create(_run())
@@ -434,11 +445,11 @@ class TestStickyCancel:
         run = st.create(_run())
         assert st.cancel_requested(run.id) is False
         st.request_cancel(run.id)
-        assert st.cancel_requested(run.id) is True  # a fresh read, no cached flag
+        assert st.cancel_requested(run.id) is True
 
     def test_clear_is_idempotent(self) -> None:
         run = st.create(_run())
         st.request_cancel(run.id)
         st.clear_cancel(run.id)
-        st.clear_cancel(run.id)  # must not raise on an absent file
+        st.clear_cancel(run.id)
         assert st.cancel_requested(run.id) is False

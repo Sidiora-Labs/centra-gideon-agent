@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.after_turn_review import is_environment_failure_claim
-from gideon.learning.detectors import (
+from gideon.cognition.after_turn_review import is_environment_failure_claim
+from gideon.cognition.learning.detectors import (
     AUTO_FILE_SCORE,
     DROP_SCORE,
     FAILURE_MODES,
@@ -50,9 +50,6 @@ _STRONG = [
 ]
 
 
-# ── the measured guardrail gap this session closed ──
-
-
 @pytest.mark.parametrize(
     "text",
     [
@@ -76,7 +73,9 @@ def test_the_widened_env_filter_catches_real_transport_failures(text):
     §3.3 routes every `step_failed` through this filter, so each miss was a flaky network becoming a
     DURABLE lesson — which teaches the agent to refuse a valid action later.
     """
-    assert is_environment_failure_claim(text), f"env failure would become a lesson: {text!r}"
+    assert is_environment_failure_claim(
+        text
+    ), f"env failure would become a lesson: {text!r}"
 
 
 @pytest.mark.parametrize(
@@ -101,10 +100,9 @@ def test_the_env_filter_does_not_eat_real_lessons(text):
     only counts with failure context; `rate limited` (past tense) is a report while "rate limiter"
     is ordinary vocabulary.
     """
-    assert not is_environment_failure_claim(text), f"real lesson filtered as env: {text!r}"
-
-
-# ── §3.2: hard pre-gates ──
+    assert not is_environment_failure_claim(
+        text
+    ), f"real lesson filtered as env: {text!r}"
 
 
 def test_a_one_step_plan_is_not_a_procedure():
@@ -129,9 +127,9 @@ def test_a_near_death_plan_makes_a_bad_template():
 
 def test_a_plan_at_the_budget_line_still_qualifies():
     """The gate is `>`, not `>=` — a run exactly at the line has not exceeded it."""
-    assert gate(Candidate(run_id="r", steps=_STRONG, budget_burn=MAX_BUDGET_BURN)).action != (
-        Action.SKIP.value
-    )
+    assert gate(
+        Candidate(run_id="r", steps=_STRONG, budget_burn=MAX_BUDGET_BURN)
+    ).action != (Action.SKIP.value)
 
 
 def test_pre_gates_run_before_scoring():
@@ -140,11 +138,10 @@ def test_pre_gates_run_before_scoring():
     assert decision.score.total == 0.0
 
 
-# ── §3.2: the deterministic score ──
-
-
 def test_a_plan_with_no_slot_is_a_recording_not_a_template():
-    decision = gate(Candidate(run_id="r", steps=["fetch the report", "summarize the above"]))
+    decision = gate(
+        Candidate(run_id="r", steps=["fetch the report", "summarize the above"])
+    )
     assert decision.skip_reason == Skip.NO_SLOTS.value
 
 
@@ -193,20 +190,25 @@ def test_the_score_is_reproducible():
 def test_the_score_components_are_visible():
     """A scalar cannot say WHICH signal was weak, and the thresholds are tuned from data."""
     payload = structural_score(Candidate(run_id="r", steps=_STRONG)).to_dict()
-    assert set(payload) == {"verb_diversity", "dependencies", "slots", "hardcoded", "total"}
+    assert set(payload) == {
+        "verb_diversity",
+        "dependencies",
+        "slots",
+        "hardcoded",
+        "total",
+    }
 
 
 def test_the_score_is_bounded():
-    huge = Candidate(run_id="r", steps=["build {{a}} {{b}} {{c}} {{d}} from the above"] * 6)
+    huge = Candidate(
+        run_id="r", steps=["build {{a}} {{b}} {{c}} {{d}} from the above"] * 6
+    )
     assert 0.0 <= structural_score(huge).total <= 1.0
 
 
 def test_an_empty_plan_scores_zero():
     assert structural_score(Candidate(run_id="r", steps=[])).total == 0.0
     assert structural_score(Candidate(run_id="r", steps=["  ", ""])).total == 0.0
-
-
-# ── §3.2: the LLM runs only at the boundary ──
 
 
 def test_a_high_score_auto_files_with_ZERO_model_calls():
@@ -220,7 +222,11 @@ def test_a_low_score_is_dropped_with_no_model_call():
     decision = gate(
         Candidate(
             run_id="r",
-            steps=["poke https://x.internal/a/b/c {{q}}", "poke /Users/x/y/z again", "poke it"],
+            steps=[
+                "poke https://x.internal/a/b/c {{q}}",
+                "poke /Users/x/y/z again",
+                "poke it",
+            ],
         )
     )
     assert decision.action == Action.SKIP.value
@@ -267,11 +273,10 @@ def test_every_decision_carries_a_human_reason_too():
         assert gate(candidate).reason
 
 
-# ── §3.2: the plan-similarity detector ──
-
-
 def test_repeated_similar_plans_suggest_a_template():
-    decision = similarity_verdict(matches=[("a", 0.90, 3.0), ("b", 0.88, 10.0)], now=0.0)
+    decision = similarity_verdict(
+        matches=[("a", 0.90, 3.0), ("b", 0.88, 10.0)], now=0.0
+    )
     assert decision.action == Action.AUTO_FILE.value
 
 
@@ -286,7 +291,9 @@ def test_stale_priors_are_reported_DIFFERENTLY_from_too_few():
 
     Counting either would propose a template for work nobody does any more.
     """
-    decision = similarity_verdict(matches=[("a", 0.9, 300.0), ("b", 0.9, 400.0)], now=0.0)
+    decision = similarity_verdict(
+        matches=[("a", 0.9, 300.0), ("b", 0.9, 400.0)], now=0.0
+    )
     assert decision.skip_reason == Skip.STALE_PRIORS.value
     assert SIMILARITY_WINDOW_DAYS == 30
 
@@ -301,14 +308,14 @@ def test_no_matches_at_all_is_handled():
     assert similarity_verdict(matches=[], now=0.0).action == Action.SKIP.value
 
 
-# ── §3.3: typed failure modes ──
-
-
 @pytest.mark.parametrize(
     "text,expected",
     [
         ("json decode error: unexpected field 'x'", FailureMode.SCHEMA_VIOLATION.value),
-        ("UNIQUE constraint failed on users.email", FailureMode.CONSTRAINT_VIOLATION.value),
+        (
+            "UNIQUE constraint failed on users.email",
+            FailureMode.CONSTRAINT_VIOLATION.value,
+        ),
         ("deadline exceeded after 30s", FailureMode.TIMEOUT.value),
         ("no module named requests", FailureMode.DEPENDENCY.value),
         ("missing env var AWS_REGION", FailureMode.CONFIG.value),
@@ -335,7 +342,9 @@ def test_the_environment_check_wins_outright():
 def test_unmatched_text_is_UNKNOWN_never_a_guess():
     """An unclassified failure must be visible as such, or `failure_distribution` attributes it
     to whichever mode the pattern list leans toward."""
-    assert classify_failure("something inexplicable happened") == FailureMode.UNKNOWN.value
+    assert (
+        classify_failure("something inexplicable happened") == FailureMode.UNKNOWN.value
+    )
     assert classify_failure("") == FailureMode.UNKNOWN.value
 
 
@@ -344,14 +353,16 @@ def test_the_mode_enum_is_closed_and_covers_the_rca_seed():
         assert seed in FAILURE_MODES
 
 
-# ── §3.3: distribution and dominant-mode targeting ──
-
-
 def test_the_distribution_reports_only_nonzero_modes():
     """A table of twelve zeros hides what is happening, and lets a reader mistake absence for a
     measured zero."""
-    counts = failure_distribution(["json decode error"] * 3 + ["connection refused"] * 2)
-    assert counts == {FailureMode.SCHEMA_VIOLATION.value: 3, FailureMode.ENVIRONMENT.value: 2}
+    counts = failure_distribution(
+        ["json decode error"] * 3 + ["connection refused"] * 2
+    )
+    assert counts == {
+        FailureMode.SCHEMA_VIOLATION.value: 3,
+        FailureMode.ENVIRONMENT.value: 2,
+    }
 
 
 def test_the_distribution_is_ordered_worst_first():
@@ -364,7 +375,11 @@ def test_the_dominant_mode_excludes_what_a_refiner_cannot_FIX():
 
     A refiner cannot fix the network; proposing against it would be a diff that cannot work.
     """
-    failures = ["connection refused"] * 8 + ["json decode error"] * 5 + ["deadline exceeded"] * 3
+    failures = (
+        ["connection refused"] * 8
+        + ["json decode error"] * 5
+        + ["deadline exceeded"] * 3
+    )
     assert failure_distribution(failures)[FailureMode.ENVIRONMENT.value] == 8
     assert dominant_mode(failures) == FailureMode.SCHEMA_VIOLATION.value
 
@@ -384,9 +399,6 @@ def test_unknown_is_never_dominant():
 def test_an_empty_corpus_yields_no_dominant_mode():
     assert dominant_mode([]) == ""
     assert failure_distribution([]) == {}
-
-
-# ── §3.3: lesson worthiness and keys ──
 
 
 @pytest.mark.parametrize("mode", sorted(NON_LESSON_MODES))
@@ -424,7 +436,7 @@ def test_a_key_survives_missing_parts():
 def test_the_dedupe_signature_is_SHARED_with_the_refiner():
     """Two signature schemes would make a clustered failure and its lesson un-joinable — the refiner
     would target a cluster whose lesson it could not find."""
-    from gideon.learning.refiner import failure_signature
+    from gideon.cognition.learning.refiner import failure_signature
 
     text = "json decode error at line 42 of /tmp/x.json (trace a3f9c8d1)"
     assert dedupe_signature(text) in failure_signature(text)

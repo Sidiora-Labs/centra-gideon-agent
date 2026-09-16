@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.workflows.bindings import BindingContext, BindingError
-from gideon.workflows.conditions import evaluate, truthy
+from gideon.automation.workflows.bindings import BindingContext, BindingError
+from gideon.automation.workflows.conditions import evaluate, truthy
 
 
 def _ctx(**inputs) -> BindingContext:
@@ -46,8 +46,6 @@ class TestTruthiness:
             (0, False),
             ("yes", True),
             ("", False),
-            # The reason this rule exists: half the values the engine tests come back from a
-            # model as text, and `bool("false")` is True.
             ("false", False),
             ("False", False),
             ("0", False),
@@ -72,7 +70,8 @@ class TestLeaves:
 
     def test_a_bare_path_resolves_the_same_way(self) -> None:
         """`success_when` must be brace-free: `resolve_config` resolves every braced binding
-        BEFORE a node runs, and at that moment the node's own `output` does not exist."""
+        BEFORE a node runs, and at that moment the node's own `output` does not exist.
+        """
         assert evaluate("nodes.init.output.can_start", _ctx()) is True
         assert evaluate("nodes.init.output.can_pick_next", _ctx()) is False
 
@@ -148,11 +147,15 @@ class TestCombinators:
         assert evaluate("inputs.a != 'x'", _ctx(a="y")) is True
 
     def test_precedence_puts_or_below_and(self) -> None:
-        # false && false || true  →  (false && false) || true  →  true
-        assert evaluate("inputs.a && inputs.b || inputs.c", _ctx(a=False, b=False, c=True)) is True
-        # Parentheses override it.
         assert (
-            evaluate("inputs.a && (inputs.b || inputs.c)", _ctx(a=False, b=False, c=True)) is False
+            evaluate("inputs.a && inputs.b || inputs.c", _ctx(a=False, b=False, c=True))
+            is True
+        )
+        assert (
+            evaluate(
+                "inputs.a && (inputs.b || inputs.c)", _ctx(a=False, b=False, c=True)
+            )
+            is False
         )
 
     def test_a_quoted_operator_is_not_a_combinator(self) -> None:
@@ -160,7 +163,8 @@ class TestCombinators:
 
     def test_every_term_is_resolved_even_when_the_answer_is_already_known(self) -> None:
         """Not short-circuited on purpose: a typo on the right of an `||` whose left side
-        happens to be true would otherwise stay hidden until the day the left side flips."""
+        happens to be true would otherwise stay hidden until the day the left side flips.
+        """
         with pytest.raises(BindingError):
             evaluate("inputs.a || nodes.nope.output.x", _ctx(a=True))
 
@@ -193,5 +197,6 @@ class TestTheGateRegression:
 
     def test_the_old_interpolated_reading_would_have_passed(self) -> None:
         """The proof that the old path was broken rather than merely different: rendering the
-        expression to a string and asking `truthy` about it says yes to a false comparison."""
+        expression to a string and asking `truthy` about it says yes to a false comparison.
+        """
         assert truthy("false == true") is True

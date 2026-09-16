@@ -13,7 +13,7 @@ import {
   REGISTRY_STORAGE_KEY,
   rememberGateway,
   writeRegistry,
-} from '../www/shell/registry.mjs'
+} from '../www/connection/registry.mjs'
 
 function fakeStorage(initial = {}) {
   const map = new Map(Object.entries(initial))
@@ -28,8 +28,6 @@ function fakeStorage(initial = {}) {
 const put = (storage, registry) => storage.map.set(REGISTRY_STORAGE_KEY, JSON.stringify(registry))
 
 test('the vocabulary is endpoints.ts`s vocabulary', () => {
-  // `tests/test_mobile_shell.py` holds these against `web/src/lib/endpoints.ts` itself; this is
-  // the same claim from the JS side, so a drift reds in whichever suite runs first.
   assert.equal(REGISTRY_STORAGE_KEY, 'companion:endpoints')
   assert.deepEqual([...REGISTRY_FIELDS], ['active', 'endpoints'])
   assert.deepEqual([...ENDPOINT_FIELDS], ['id', 'label', 'base_url', 'kind', 'device_session_ref'])
@@ -39,7 +37,6 @@ test('the vocabulary is endpoints.ts`s vocabulary', () => {
 test('an id is minted, never derived from the URL', () => {
   const a = newEndpointId()
   assert.match(a, /^ep_[a-z0-9]{12}$/)
-  // Deterministic rand proves the alphabet mapping, not just the shape.
   assert.equal(newEndpointId(() => 0), 'ep_aaaaaaaaaaaa')
 
   const storage = fakeStorage()
@@ -154,4 +151,22 @@ test('a round trip preserves every declared field', () => {
   rememberGateway(storage, { baseUrl: 'http://10.0.0.4:10000', label: 'Studio', mintId: () => 'ep_one' })
   const [row] = readRegistry(storage).endpoints
   assert.deepEqual(Object.keys(row).sort(), [...ENDPOINT_FIELDS].sort())
+})
+
+test('remembering a known endpoint preserves its session reference and other endpoints', () => {
+  const storage = fakeStorage()
+  put(storage, {
+    active: 'ep_other',
+    endpoints: [
+      { id: 'ep_known', base_url: 'http://10.0.0.1', label: 'Existing', kind: 'remote', device_session_ref: 'session-reference' },
+      { id: 'ep_other', base_url: 'http://10.0.0.2', label: 'Other', kind: 'remote', device_session_ref: '' },
+    ],
+  })
+  const before = readRegistry(storage)
+  const { registry } = rememberGateway(storage, { baseUrl: 'http://10.0.0.1', label: 'Renamed' })
+  assert.equal(registry.active, 'ep_known')
+  assert.equal(registry.endpoints[0].device_session_ref, 'session-reference')
+  assert.equal(registry.endpoints[0].label, 'Renamed')
+  assert.deepEqual(registry.endpoints[1], before.endpoints[1])
+  assert.equal(before.endpoints[0].label, 'Existing')
 })

@@ -2,10 +2,9 @@
   "name": "gideon-desktop",
   "version": "0.1.0",
   "description": "Gideon \u2014 AI agent desktop app",
-  "homepage": "https://gideon.dev",
   "license": "MIT",
   "desktopName": "gideon-desktop",
-  "main": "main.js",
+  "main": "src/application/main.js",
   "scripts": {
     "start": "electron .",
     "test": "node --test test/*.test.js",
@@ -21,7 +20,7 @@
     "productName": "Gideon",
     "mac": {
       "category": "public.app-category.developer-tools",
-      "icon": "icon.png",
+      "icon": "assets/gideon.png",
       "target": [
         "dmg"
       ]
@@ -31,9 +30,9 @@
     },
     "linux": {
       "category": "Development",
-      "icon": "icon.png",
-      "maintainer": "Gideon contributors <noreply@gideon.dev>",
-      "synopsis": "Gideon — AI agent desktop app",
+      "icon": "assets/gideon.png",
+      "maintainer": "Gideon contributors <maintainers@gideon.invalid>",
+      "synopsis": "Gideon \u2014 AI agent desktop app",
       "syncDesktopName": true,
       "target": [
         "AppImage",
@@ -41,26 +40,36 @@
       ]
     },
     "files": [
-      "main.js",
-      "context-menu.js",
-      "find-bin.js",
-      "capabilities.js",
-      "pushToTalk.js",
-      "trayPresence.js",
-      "loginItem.js",
-      "nativeNotifications.js",
-      "gatewayShutdown.js",
-      "gatewayEnv.js",
-      "gatewayUrl.js",
-      "endpointRegistry.js",
-      "shellStore.js",
-      "connectMode.js",
-      "connectDialog.js",
-      "connectPreload.js",
-      "connectDialog.html",
-      "preload.js",
-      "loading.html",
-      "icon.png"
+      "src/application/main.js",
+      "src/bridge/dashboard-preload.js",
+      "src/bridge/connection-preload.js",
+      "src/native/capabilities.js",
+      "src/native/push-to-talk.js",
+      "src/native/tray-presence.js",
+      "src/native/login-item.js",
+      "src/native/notifications.js",
+      "src/native/context-menu.js",
+      "src/gateway/executable.js",
+      "src/gateway/environment.js",
+      "src/gateway/shutdown.js",
+      "src/connection/address.js",
+      "src/storage/endpoint-registry.js",
+      "src/storage/shell-store.js",
+      "src/connection/controller.js",
+      "src/connection/dialog.js",
+      "views/connection.html",
+      "views/loading.html",
+      "assets/gideon.png",
+      "src/gateway/login-path.js",
+      "assets/gideon.svg",
+      "src/application/window-workspace.js",
+      "src/application/local-gateway.js",
+      "src/application/endpoint-session.js",
+      "src/application/desktop-application.js",
+      "assets/gideon-dark.png",
+      "assets/gideon-light.png",
+      "assets/tray-dark.png",
+      "assets/tray-light.png"
     ],
     "extraResources": [
       {
@@ -70,6 +79,8 @@
           "**/*"
         ]
       }
-    ]
-  }
+    ],
+    "publish": null
+  },
+  "private": true
 }

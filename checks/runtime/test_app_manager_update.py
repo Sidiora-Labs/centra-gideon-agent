@@ -13,13 +13,13 @@ from pathlib import Path
 
 import pytest
 
-from gideon.apps import app_manager, manager
-from gideon.supply_chain import Verdict
+from gideon.extensions.apps import app_manager, manager
+from gideon.security.supply_chain import Verdict
 
 
 @pytest.fixture(autouse=True)
 def _isolate_apps(tmp_path, monkeypatch):
-    import gideon.config.loader as loader
+    import gideon.core.config.loader as loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(manager, "config_dir", lambda: tmp_path)
@@ -36,7 +36,12 @@ def _src(
 ) -> Path:
     d = tmp_path / subdir / "demo-app"
     d.mkdir(parents=True)
-    mani = {"name": "demo-app", "version": version, "displayName": "Demo", "description": "x"}
+    mani = {
+        "name": "demo-app",
+        "version": version,
+        "displayName": "Demo",
+        "description": "x",
+    }
     if setup:
         mani["setup"] = setup
     (d / "app.json").write_text(json.dumps(mani), encoding="utf-8")
@@ -56,13 +61,13 @@ class TestUpdate:
 
     def test_update_preserves_data_dir(self, tmp_path):
         app_manager.install(_src(tmp_path, version="1.0.0"))
-        # write app state into data/
         data = manager.app_dir("demo-app") / "data"
         data.mkdir(parents=True, exist_ok=True)
         (data / "state.json").write_text('{"runs": 5}', encoding="utf-8")
         app_manager.update(_src(tmp_path, version="1.1.0", subdir="src2"))
-        # data/ survived the swap
-        assert (manager.app_dir("demo-app") / "data" / "state.json").read_text() == '{"runs": 5}'
+        assert (
+            manager.app_dir("demo-app") / "data" / "state.json"
+        ).read_text() == '{"runs": 5}'
 
     def test_update_runs_onupdate_hook(self, tmp_path):
         app_manager.install(_src(tmp_path, version="1.0.0"))
@@ -84,12 +89,11 @@ class TestUpdate:
                 tmp_path,
                 version="2.0.0",
                 subdir="src2",
-                files={"scripts/evil.sh": "rm -rf / --no-preserve-root\n"},
+                files={"tooling/scripts/evil.sh": "rm -rf / --no-preserve-root\n"},
             ),
             confirm=True,
         )
         assert not res.ok and res.scan.verdict is Verdict.DANGEROUS
-        # old version untouched
         assert manager._read_installed("demo-app").version == "1.0.0"
         assert manager.app_dir("demo-app").is_dir()
 
@@ -104,7 +108,6 @@ class TestUpdate:
             )
         )
         assert not res.ok and "rolled back" in res.error
-        # rolled back to 1.0.0, app still present, no leftover rollback dir
         assert manager._read_installed("demo-app").version == "1.0.0"
         assert manager.app_dir("demo-app").is_dir()
         assert not (manager.apps_dir() / ".demo-app.rollback").exists()
@@ -116,8 +119,6 @@ class TestUpdate:
 
 class TestCrashRecovery:
     def test_recovers_interrupted_update(self, tmp_path):
-        # Simulate a crash AFTER move(live→rollback) but BEFORE move(new→live):
-        # live is gone, a .rollback dir holds the old app.
         app_manager.install(_src(tmp_path, version="1.0.0"))
         live = manager.app_dir("demo-app")
         rollback = manager.apps_dir() / ".demo-app.rollback"
@@ -131,8 +132,6 @@ class TestCrashRecovery:
         assert not rollback.exists()
 
     def test_drops_stale_rollback(self, tmp_path):
-        # live present AND a .rollback exists (swap completed, crash before cleanup):
-        # the rollback is stale → dropped, live untouched.
         app_manager.install(_src(tmp_path, version="1.0.0"))
         rollback = manager.apps_dir() / ".demo-app.rollback"
         rollback.mkdir()

@@ -1,14 +1,14 @@
-# Listing validation — runs on every PR that touches app-registry.json.
+                                                                       
 #
-# THIS WORKFLOW HAS NO WRITE ACCESS, ON PURPOSE. Almost every listing PR arrives from
-# a fork, and a `pull_request` run from a fork is handed a READ-ONLY token whatever
-# `permissions:` asks for. So this job validates and writes its verdict to an
-# ARTIFACT, and the sibling `comment-listing-verdict.yml` (`workflow_run`, which runs
-# from the base repo and does have write access) posts it to the PR. That split is
-# copied from Gideon core's ci.yml / pr-feedback.yml pair for the same reason.
+                                                                                     
+                                                                                   
+                                                                             
+                                                                                     
+                                                                                  
+                                                                              
 #
-# It also means the untrusted half of the pipeline — the half that fetches and reads
-# a stranger's repository — never holds a token that can write anything.
+                                                                                    
+                                                                        
 name: validate-listings
 
 on:
@@ -34,9 +34,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # The validator shells out to git to fetch third-party repos. Leaving the
-          # runner's token in this checkout's git config is exactly the credential we
-          # do not want anywhere near that.
+                                                                                   
+                                                                                     
+                                           
           persist-credentials: false
           fetch-depth: 0
 
@@ -50,8 +50,8 @@ jobs:
           uv pip install -r requirements.txt
 
       - name: Recover the base branch's app-registry.json
-        # Only rows this PR added or changed are re-fetched and re-scanned. A base
-        # branch without the file (first listing ever) reads as an empty registry.
+                                                                                  
+                                                                                  
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
@@ -92,6 +92,6 @@ jobs:
           retention-days: 7
 
       - name: Fail the check when a listing is blocked
-        # Last, so the artifact is always uploaded — a blocked PR is precisely the one
-        # whose reason the contributor needs to read.
+                                                                                      
+                                                     
         run: exit "${{ steps.validate.outputs.exit_code }}"

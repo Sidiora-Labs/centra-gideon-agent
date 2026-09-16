@@ -68,41 +68,24 @@ from pathlib import Path
 
 import pytest
 
-from gideon.apps.manifest import PROVIDER_TYPES
-from gideon.cli_app_new import provider_type_rows, provider_types
+from gideon.extensions.apps.manifest import PROVIDER_TYPES
+from gideon.interfaces.cli.app_new import provider_type_rows, provider_types
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 _WANTS_LIST = _REPO_ROOT / "docs" / "maintainers" / "app-bounty-wants-list.md"
 _DRAFTS = _REPO_ROOT / "docs" / "maintainers" / "community-bounty-drafts.md"
 
-#: ``ET-7``'s literal bar: "≥6 `bounty` GitHub issues live (channels + providers +
-#: sources from the wants-list)".
 _MIN_ROWS = 6
 _FAMILIES = frozenset({"channel", "provider", "source"})
 
-#: The three channels CHANNEL-EXPANSION T7.3 names. Not derived from the table under
-#: test — the point is to pin the plan's list against both files independently.
 _T73_CHANNELS = ("WhatsApp", "Signal", "Matrix")
 
-#: The ``Ground`` cell value that makes a row a claim about another repository's contents
-#: at a moment in time — the only kind of row that can rot without anybody touching it.
 _MEASURED_GROUND = "measured gap"
 
-#: The stamp a measured-gap row must end with. The ref is matched as a git object name
-#: rather than as free text on purpose: "measured recently @ main" would satisfy a lax
-#: pattern while naming nothing a reader could diff against, which is the un-checkable
-#: claim this rail exists to refuse.
 _STAMP_RE = re.compile(r"\bmeasured (\d{4}-\d{2}-\d{2}) @ ([0-9a-f]{7,40})\b")
 
-#: The one paragraph that stamps the population every measured gap was counted over.
 _POPULATION_MARKER = "**Measurement population:**"
 
-#: Core-side premises the measured-gap rows rest on, keyed by the row's provider type.
-#: Each value is (what a violation MEANS in that row's own words, the ONLY name core may
-#: have registered for that type). These are the half of each measurement that lives in
-#: THIS repo, so they are re-read from the real registries on every run rather than taken
-#: on trust from the stamp. A type absent from this map is an apps-side-only claim, which
-#: core cannot check at all — ``inbox`` and ``trigger_source`` are both that.
 _CORE_PREMISES: dict[str, tuple[str, str]] = {
     "duty_gate": (
         "row 'Calendar-backed on-duty gate' says core registers exactly one builtin "
@@ -121,14 +104,11 @@ _CORE_PREMISES: dict[str, tuple[str, str]] = {
     ),
 }
 
-#: Read off the REAL registries in a clean interpreter. Home is repointed at a tmp dir
-#: because this subprocess is outside ``conftest``'s real-home guard, and importing core
-#: must not be able to write into the developer's actual ``~/.gideon``.
 _CORE_PREMISE_PROBE = """\
 import json
-from gideon.triggers.calendar import duty_gate_names
-from gideon.knowledge_providers import registry as knowledge_registry
-from gideon.memory_providers import registry as memory_registry
+from gideon.automation.triggers.calendar import duty_gate_names
+from gideon.integrations.knowledge_providers import registry as knowledge_registry
+from gideon.integrations.memory_providers import registry as memory_registry
 
 print(
     json.dumps(
@@ -217,14 +197,16 @@ def population_stamp(wants_text: str) -> tuple[str, str]:
     return found[0]
 
 
-def test_population_stamp_is_a_real_measurement(population_stamp: tuple[str, str]) -> None:
+def test_population_stamp_is_a_real_measurement(
+    population_stamp: tuple[str, str],
+) -> None:
     """The population stamp names a day that has happened and a ref somebody can diff.
 
     A future date is not a measurement anybody took, and it is the shape a placeholder
     stamp takes when someone fills the field in to make this suite green.
     """
     stamped, ref = population_stamp
-    measured_on = date.fromisoformat(stamped)  # reds on 2026-02-30 and friends
+    measured_on = date.fromisoformat(stamped)
     assert measured_on <= date.today(), (
         f"{_WANTS_LIST.name}: population stamped {stamped}, which is in the future — "
         "a measurement nobody has taken yet"
@@ -241,7 +223,9 @@ def test_every_measured_gap_row_is_dated(rows: list[Row]) -> None:
     evidence.
     """
     undated = [
-        r.number for r in rows if r.ground == _MEASURED_GROUND and not _STAMP_RE.search(r.why)
+        r.number
+        for r in rows
+        if r.ground == _MEASURED_GROUND and not _STAMP_RE.search(r.why)
     ]
     assert not undated, (
         f"{_WANTS_LIST.name}: measured-gap row(s) {undated} carry no "
@@ -249,7 +233,11 @@ def test_every_measured_gap_row_is_dated(rows: list[Row]) -> None:
         "GideonApps at a moment in time; an undated one cannot be re-verified and "
         "must not reach a public bounty issue."
     )
-    borrowed = [r.number for r in rows if r.ground != _MEASURED_GROUND and _STAMP_RE.search(r.why)]
+    borrowed = [
+        r.number
+        for r in rows
+        if r.ground != _MEASURED_GROUND and _STAMP_RE.search(r.why)
+    ]
     assert not borrowed, (
         f"{_WANTS_LIST.name}: row(s) {borrowed} carry a measurement stamp but their ground "
         f"is not {_MEASURED_GROUND!r} — a plan-named row must not present itself as measured"
@@ -257,7 +245,9 @@ def test_every_measured_gap_row_is_dated(rows: list[Row]) -> None:
     for row in rows:
         if row.ground == _MEASURED_GROUND:
             stamps = _STAMP_RE.findall(row.why)
-            assert len(stamps) == 1, f"{row!r} carries {len(stamps)} stamps; expected exactly 1"
+            assert (
+                len(stamps) == 1
+            ), f"{row!r} carries {len(stamps)} stamps; expected exactly 1"
 
 
 def test_row_stamps_all_agree_with_the_population_stamp(
@@ -297,7 +287,9 @@ def test_core_side_premise_of_each_measured_gap_still_holds(
     The apps-side half (does any *app* implement the type) is NOT checked and cannot be:
     core CI has no ``GideonApps`` checkout. That half is what the stamp dates.
     """
-    measured_types = {_unwrap_code(r.type) for r in rows if r.ground == _MEASURED_GROUND}
+    measured_types = {
+        _unwrap_code(r.type) for r in rows if r.ground == _MEASURED_GROUND
+    }
     probed = sorted(measured_types & _CORE_PREMISES.keys())
     assert probed, (
         "no measured-gap row has a core-side premise to re-measure — if the table's provider "
@@ -307,7 +299,6 @@ def test_core_side_premise_of_each_measured_gap_still_holds(
     env = {
         **os.environ,
         "PYTHONPATH": str(_REPO_ROOT / "src"),
-        # Outside conftest's real-home guard: importing core must not touch the real home.
         "HOME": str(tmp_path),
         "GIDEON_HOME": str(tmp_path / ".gideon"),
     }
@@ -330,7 +321,9 @@ def test_core_side_premise_of_each_measured_gap_still_holds(
         meaning, only_allowed = _CORE_PREMISES[provider_type]
         registered = set(registries[provider_type])
         if not registered <= {only_allowed}:
-            dead.append(f"{provider_type}: {meaning} (registered: {sorted(registered)})")
+            dead.append(
+                f"{provider_type}: {meaning} (registered: {sorted(registered)})"
+            )
     assert not dead, (
         "wants-list measured-gap row(s) rest on a core-side premise that no longer holds:\n  "
         + "\n  ".join(dead)
@@ -342,7 +335,9 @@ def test_core_side_premise_of_each_measured_gap_still_holds(
 def test_every_wanted_type_is_a_real_provider_type(rows: list[Row]) -> None:
     """A row naming a type outside ``PROVIDER_TYPES`` asks for an uninstallable app."""
     bad = {
-        r.number: _unwrap_code(r.type) for r in rows if _unwrap_code(r.type) not in PROVIDER_TYPES
+        r.number: _unwrap_code(r.type)
+        for r in rows
+        if _unwrap_code(r.type) not in PROVIDER_TYPES
     }
     assert not bad, (
         f"wants-list row(s) name provider types core does not have: {bad}. "
@@ -364,11 +359,11 @@ def test_every_wanted_type_scaffolds_today(rows: list[Row]) -> None:
         f"wants-list names type(s) `gideon app new` cannot scaffold: {missing}. "
         "Either the type table regressed or the row is aspirational."
     )
-    # Every row's type resolves to a row in the printed table, so the issue's
-    # `--type <t>` line is copy-pasteable.
     table = {row.type for row in provider_type_rows()}
     unlisted = sorted({_unwrap_code(r.type) for r in rows} - table)
-    assert not unlisted, f"type(s) absent from the printed --list-types table: {unlisted}"
+    assert (
+        not unlisted
+    ), f"type(s) absent from the printed --list-types table: {unlisted}"
 
 
 def test_clears_et7_count_and_family_bar(rows: list[Row]) -> None:
@@ -378,7 +373,9 @@ def test_clears_et7_count_and_family_bar(rows: list[Row]) -> None:
         "(channels + providers + sources)"
     )
     families = {r.family for r in rows}
-    assert families <= _FAMILIES, f"unknown family value(s): {sorted(families - _FAMILIES)}"
+    assert (
+        families <= _FAMILIES
+    ), f"unknown family value(s): {sorted(families - _FAMILIES)}"
     assert families == _FAMILIES, (
         f"wants-list covers only {sorted(families)}; ET-7 names all three families "
         f"({sorted(_FAMILIES)})"
@@ -401,18 +398,23 @@ def test_channel_rows_match_the_drafted_issue_prose(rows: list[Row]) -> None:
         f"{', '.join(_T73_CHANNELS)}), got {[r.app for r in channel_rows]}"
     )
     for row in channel_rows:
-        assert _unwrap_code(row.type) == "channel", f"{row!r} is family=channel but type≠channel"
+        assert (
+            _unwrap_code(row.type) == "channel"
+        ), f"{row!r} is family=channel but type≠channel"
 
     for name in _T73_CHANNELS:
-        assert any(name in r.app for r in channel_rows), f"wants-list has no {name} channel row"
+        assert any(
+            name in r.app for r in channel_rows
+        ), f"wants-list has no {name} channel row"
         assert f"Community channel app: {name}" in drafts, (
             f"{_DRAFTS.name} carries no drafted issue for {name}, but the wants-list "
             "lists it as a channel bounty"
         )
 
-    # The gate is stated in BOTH files or in neither — a list that dropped the
-    # owner-approval caveat would invite posting unapproved consent copy.
-    for path, text in ((_WANTS_LIST, _WANTS_LIST.read_text(encoding="utf-8")), (_DRAFTS, drafts)):
+    for path, text in (
+        (_WANTS_LIST, _WANTS_LIST.read_text(encoding="utf-8")),
+        (_DRAFTS, drafts),
+    ):
         assert (
             "PENDING OWNER APPROVAL" in text
         ), f"{path.name} no longer marks the risk-policy paragraph PENDING OWNER APPROVAL"
@@ -426,15 +428,15 @@ def test_cited_in_tree_paths_exist(rows: list[Row]) -> None:
     nothing.
     """
     for rel in (
-        "src/gideon/cli_app_new.py",
-        "src/gideon/testing/channel_conformance.py",
+        "runtime/gideon/interfaces/cli/app_new.py",
+        "runtime/gideon/assurance/testing/channel_conformance.py",
         "docs/guides/build-a-channel-app.md",
     ):
         assert (_REPO_ROOT / rel).is_file(), f"wants-list cites missing path {rel}"
     text = _WANTS_LIST.read_text(encoding="utf-8")
     for rel in (
-        "src/gideon/cli_app_new.py",
-        "src/gideon/testing/channel_conformance.py",
+        "runtime/gideon/interfaces/cli/app_new.py",
+        "runtime/gideon/assurance/testing/channel_conformance.py",
         "guides/build-a-channel-app.md",
     ):
         assert rel in text, f"wants-list stopped citing {rel}"

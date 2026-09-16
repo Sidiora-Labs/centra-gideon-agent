@@ -9,7 +9,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 
 def _make_app() -> web.Application:
-    from gideon.dashboard.handlers import api_gideon_config_patch
+    from gideon.interfaces.dashboard.handlers import api_gideon_config_patch
 
     app = web.Application()
     app.router.add_patch("/api/config/gideon", api_gideon_config_patch)
@@ -36,15 +36,12 @@ def _seed_config() -> dict:
 def tmp_config(tmp_path):
     cfg_path = tmp_path / "config.json"
     cfg_path.write_text(json.dumps(_seed_config()), encoding="utf-8")
-    with patch("gideon.config.loader.config_path", return_value=cfg_path):
+    with patch("gideon.core.config.loader.config_path", return_value=cfg_path):
         yield cfg_path
 
 
 async def _patch(client, path, value):
     return await client.patch("/api/config/gideon", json={"path": path, "value": value})
-
-
-# ── General ──────────────────────────────────────────────────────────────
 
 
 class TestPatchGeneral:
@@ -63,9 +60,6 @@ class TestPatchGeneral:
                 headers={"Content-Type": "application/json"},
             )
             assert resp.status == 400
-
-
-# ── Enum validator ───────────────────────────────────────────────────────
 
 
 class TestEnumValidator:
@@ -96,7 +90,6 @@ class TestEnumValidator:
             resp = await _patch(c, "dashboard.terminal.persist", True)
             assert resp.status == 200
             saved = json.loads(tmp_config.read_text(encoding="utf-8"))
-            # the leaf landed nested, and the section stayed an object (not a bool)
             assert saved["dashboard"]["terminal"]["persist"] is True
             assert isinstance(saved["dashboard"], dict)
 
@@ -104,7 +97,6 @@ class TestEnumValidator:
     async def test_nested_3part_preserves_sibling_keys(self, tmp_config) -> None:
         """Setting the nested leaf must not drop a pre-existing sibling under the same
         parent (e.g. dashboard.terminal.enabled stays when persist is added)."""
-        # seed a sibling first
         import json as _json
 
         data = _json.loads(tmp_config.read_text(encoding="utf-8"))
@@ -114,11 +106,8 @@ class TestEnumValidator:
             resp = await _patch(c, "dashboard.terminal.persist", True)
             assert resp.status == 200
             saved = _json.loads(tmp_config.read_text(encoding="utf-8"))
-            assert saved["dashboard"]["terminal"]["enabled"] is True  # sibling preserved
+            assert saved["dashboard"]["terminal"]["enabled"] is True
             assert saved["dashboard"]["terminal"]["persist"] is True
-
-
-# ── Int validator ────────────────────────────────────────────────────────
 
 
 class TestIntValidator:
@@ -145,9 +134,6 @@ class TestIntValidator:
         async with TestClient(TestServer(_make_app())) as c:
             resp = await _patch(c, "session.timeout_secs", "abc")
             assert resp.status == 400
-
-
-# ── Float validator ──────────────────────────────────────────────────────
 
 
 class TestFloatValidator:
@@ -182,9 +168,6 @@ class TestFloatValidator:
             assert resp.status == 400
 
 
-# ── Bool validator ───────────────────────────────────────────────────────
-
-
 class TestBoolValidator:
     @pytest.mark.asyncio
     async def test_valid_bool_passes(self, tmp_config) -> None:
@@ -197,9 +180,6 @@ class TestBoolValidator:
         async with TestClient(TestServer(_make_app())) as c:
             resp = await _patch(c, "auto_update", "true")
             assert resp.status == 400
-
-
-# ── Str validator (pool_agent) ───────────────────────────────────────────
 
 
 class TestStrValidator:
@@ -236,9 +216,6 @@ class TestStrValidator:
             assert "invalid value" in data["error"]
 
 
-# ── Egress validator (security.egress operator overrides) ──────────────────
-
-
 class TestEgressValidator:
     @pytest.mark.asyncio
     async def test_valid_egress_persists(self, tmp_config) -> None:
@@ -266,7 +243,11 @@ class TestEgressValidator:
             resp = await _patch(
                 c,
                 "security.egress",
-                {"allow_hosts": ["http://evil.com/x"], "deny_hosts": [], "allow_private": False},
+                {
+                    "allow_hosts": ["http://evil.com/x"],
+                    "deny_hosts": [],
+                    "allow_private": False,
+                },
             )
             assert resp.status == 400
             assert "bare domain" in (await resp.json())["error"]
@@ -281,7 +262,9 @@ class TestEgressValidator:
     async def test_rejects_non_bool_private(self, tmp_config) -> None:
         async with TestClient(TestServer(_make_app())) as c:
             resp = await _patch(
-                c, "security.egress", {"allow_hosts": [], "deny_hosts": [], "allow_private": "yes"}
+                c,
+                "security.egress",
+                {"allow_hosts": [], "deny_hosts": [], "allow_private": "yes"},
             )
             assert resp.status == 400
 
@@ -292,19 +275,21 @@ class TestEgressValidator:
             resp = await _patch(
                 c,
                 "security.egress",
-                {"allow_hosts": [], "deny_hosts": [], "allow_private": False, "evil": "x"},
+                {
+                    "allow_hosts": [],
+                    "deny_hosts": [],
+                    "allow_private": False,
+                    "evil": "x",
+                },
             )
             assert resp.status == 200
             saved = json.loads(tmp_config.read_text())["security"]["egress"]
             assert "evil" not in saved
 
 
-# ── Projection-rules validator (tools.projection_rules, TokenJuice OP6) ──────
-
-
 class TestProjectionRulesValidator:
     def teardown_method(self):
-        from gideon.tool_providers.projection import set_user_rules
+        from gideon.integrations.tool_providers.projection import set_user_rules
 
         set_user_rules([])
 
@@ -320,13 +305,10 @@ class TestProjectionRulesValidator:
             )
             assert resp.status == 200
             saved = json.loads(tmp_config.read_text())["tools"]["projection_rules"]
-            # The rule persists (the file may carry the full dataclass form with
-            # default op fields — load()'s migration write-back serializes via asdict).
             assert saved[0]["name"] == "acme"
             assert saved[0]["match_regex"] == r"^\[ACME\]"
             assert saved[0]["strategy"] == "log"
-        # Live-applied: the engine now dispatches a matching sample to 'log'.
-        from gideon.tool_providers.projection import infer_content_type
+        from gideon.integrations.tool_providers.projection import infer_content_type
 
         assert infer_content_type("[ACME] boot\nstep\n") == "log"
 
@@ -334,7 +316,9 @@ class TestProjectionRulesValidator:
     async def test_rejects_invalid_regex(self, tmp_config) -> None:
         async with TestClient(TestServer(_make_app())) as c:
             resp = await _patch(
-                c, "tools.projection_rules", [{"name": "x", "match_regex": "(", "strategy": "log"}]
+                c,
+                "tools.projection_rules",
+                [{"name": "x", "match_regex": "(", "strategy": "log"}],
             )
             assert resp.status == 400
             assert "regex" in (await resp.json())["error"].lower()
@@ -364,13 +348,27 @@ class TestProjectionRulesValidator:
                 c,
                 "tools.projection_rules",
                 [
-                    {"name": "acme", "match_regex": "foo", "strategy": "test", "evil": "x"},
+                    {
+                        "name": "acme",
+                        "match_regex": "foo",
+                        "strategy": "test",
+                        "evil": "x",
+                    },
                 ],
             )
             assert resp.status == 200
             saved = json.loads(tmp_config.read_text())["tools"]["projection_rules"][0]
             assert "evil" not in saved
-            allowed = {"name", "match_regex", "strategy", "head", "tail", "keep", "skip", "count"}
+            allowed = {
+                "name",
+                "match_regex",
+                "strategy",
+                "head",
+                "tail",
+                "keep",
+                "skip",
+                "count",
+            }
             assert set(saved) <= allowed
 
     @pytest.mark.asyncio
@@ -397,25 +395,18 @@ class TestProjectionRulesValidator:
             saved = json.loads(tmp_config.read_text())["tools"]["projection_rules"][0]
             assert saved["head"] == 5 and saved["tail"] == 3
             assert saved["skip"] == r"^DEBUG" and saved["count"] == r"^heartbeat"
-            # bad op regex → 400
             resp = await _patch(
                 c,
                 "tools.projection_rules",
                 [{"name": "x", "match_regex": "ok", "strategy": "log", "keep": "("}],
             )
             assert resp.status == 400
-            # negative head → 400
             resp = await _patch(
                 c,
                 "tools.projection_rules",
                 [{"name": "x", "match_regex": "ok", "strategy": "log", "head": -1}],
             )
             assert resp.status == 400
-
-
-# ── P11 engagement-ranking flag: the full config-flag thread (PATCH → config.json →
-#    AppConfig.load reads it back). Guards the [[feedback_config_flag_two_maps]] footgun —
-#    a flag missing from the load-map silently reads its default forever. ──
 
 
 class TestEngagementRankingFlag:
@@ -436,15 +427,21 @@ class TestEngagementRankingFlag:
     @pytest.mark.asyncio
     async def test_half_life_float_bounds(self, tmp_config) -> None:
         async with TestClient(TestServer(_make_app())) as c:
-            assert (await _patch(c, "inbox.engagement_half_life_days", 6.5)).status == 200
-            assert (await _patch(c, "inbox.engagement_half_life_days", -1.0)).status == 400
-            assert (await _patch(c, "inbox.engagement_half_life_days", 999.0)).status == 400
+            assert (
+                await _patch(c, "inbox.engagement_half_life_days", 6.5)
+            ).status == 200
+            assert (
+                await _patch(c, "inbox.engagement_half_life_days", -1.0)
+            ).status == 400
+            assert (
+                await _patch(c, "inbox.engagement_half_life_days", 999.0)
+            ).status == 400
 
     def test_flag_loads_from_config_json_not_just_default(self, tmp_path) -> None:
         """The load-map leg: a value in config.json must actually reach AppConfig — the
         exact gap the two-maps footgun creates (field on the dataclass but absent from
         AppConfig.load → always the default)."""
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
         cfg = _seed_config()
         cfg["inbox"] = {
@@ -454,17 +451,11 @@ class TestEngagementRankingFlag:
         }
         p = tmp_path / "config.json"
         p.write_text(json.dumps(cfg), encoding="utf-8")
-        with patch("gideon.config.loader.config_path", return_value=p):
+        with patch("gideon.core.config.loader.config_path", return_value=p):
             loaded = AppConfig.load()
         assert loaded.inbox.engagement_ranking_enabled is True
         assert loaded.inbox.engagement_half_life_days == 3.25
-        # round-trips back out through to_dict (asdict(inbox)) too
         assert loaded.to_dict()["inbox"]["engagement_ranking_enabled"] is True
-
-
-# ── agent.bot_name: sanitize at the WRITE boundary (S05 C6) — the file must
-#    match what load() produces, or config.json carries markdown/braces while
-#    runtime sees the stripped name (split-brain). ──
 
 
 class TestBotNamePatch:
@@ -474,7 +465,6 @@ class TestBotNamePatch:
             resp = await _patch(c, "agent.bot_name", "**{Astra}** <script>")
             assert resp.status == 200
             saved = json.loads(tmp_config.read_text())
-            # markdown/braces/angle brackets stripped by the loader's sanitizer
             assert saved["agent"]["bot_name"] == "Astra script"
 
     @pytest.mark.asyncio
@@ -491,9 +481,6 @@ class TestBotNamePatch:
             assert (await _patch(c, "agent.bot_name", "x" * 51)).status == 400
 
 
-# ── ET-4: apps.registry_source_enabled ───────────────────────────────────────
-
-
 class TestAppsRegistrySource:
     """A real PATCH round-trip for the seeding flag: allowlisted → persisted → reloaded.
 
@@ -503,15 +490,14 @@ class TestAppsRegistrySource:
 
     @pytest.mark.asyncio
     async def test_patch_persists_and_reloads(self, tmp_config) -> None:
-        from gideon.config.loader import AppConfig
+        from gideon.core.config.loader import AppConfig
 
-        assert AppConfig.load().apps.registry_source_enabled is True  # shipped default
+        assert AppConfig.load().apps.registry_source_enabled is True
         async with TestClient(TestServer(_make_app())) as c:
             resp = await _patch(c, "apps.registry_source_enabled", False)
             assert resp.status == 200, await resp.text()
         raw = json.loads(tmp_config.read_text(encoding="utf-8"))
         assert raw["apps"]["registry_source_enabled"] is False
-        # …and the loader reads back what the PATCH wrote (not the default).
         assert AppConfig.load().apps.registry_source_enabled is False
 
     @pytest.mark.asyncio
@@ -523,9 +509,6 @@ class TestAppsRegistrySource:
         assert "apps" not in raw or "registry_source_enabled" not in raw.get("apps", {})
 
 
-# ── agent.log_level applies LIVE, not only at the next restart (#673) ─────────
-
-
 class TestLogLevelAppliesLive:
     @pytest.mark.asyncio
     async def test_patching_log_level_sets_the_live_logger(self, tmp_config) -> None:
@@ -534,22 +517,15 @@ class TestLogLevelAppliesLive:
         lg = logging.getLogger("gideon")
         prior = lg.level
         try:
-            # A known baseline distinct from the target so the assertion is meaningful.
             lg.setLevel(logging.WARNING)
             async with TestClient(TestServer(_make_app())) as c:
                 resp = await _patch(c, "agent.log_level", "DEBUG")
                 assert resp.status == 200
-            # The Agent-defaults PATCH must APPLY the level live (the Diagnostics
-            # POST /api/logs/level path already did), not merely persist it.
             assert lg.level == logging.DEBUG
-            # …and it still persists for the restart path.
             saved = json.loads(tmp_config.read_text(encoding="utf-8"))
             assert saved["agent"]["log_level"] == "DEBUG"
         finally:
             lg.setLevel(prior)
-
-
-# ── agent.yolo applies LIVE in BOTH directions, not only at the next start (#672) ──
 
 
 def _make_app_with_state(state) -> web.Application:
@@ -573,10 +549,9 @@ class _FakeState:
 
 class TestYoloAppliesLive:
     @pytest.mark.asyncio
-    async def test_turning_yolo_off_revokes_the_bypass_immediately(self, tmp_config) -> None:
-        # The security-relevant direction (#672): revoking must not wait for a
-        # restart, and must go through state.disable_yolo() so the trust_mode
-        # on-disable callback clears untrusted per-session auto-approve policies.
+    async def test_turning_yolo_off_revokes_the_bypass_immediately(
+        self, tmp_config
+    ) -> None:
         state = _FakeState()
         async with TestClient(TestServer(_make_app_with_state(state))) as c:
             resp = await _patch(c, "agent.yolo", False)
@@ -585,34 +560,27 @@ class TestYoloAppliesLive:
 
     @pytest.mark.asyncio
     async def test_sel_down_fails_the_whole_patch_closed(self, tmp_config) -> None:
-        # The endpoint's own write-audit is deliberately unguarded, so a dead
-        # audit sink fails the WHOLE patch closed (500) — the yolo seam never
-        # runs in either direction. This pins the ordering: the seam sits AFTER
-        # the write-audit, so a future reorder cannot grant an unaudited bypass.
         state = _FakeState()
-        with patch("gideon.sel.sel", side_effect=RuntimeError("sel down")):
+        with patch("gideon.security.sel.sel", side_effect=RuntimeError("sel down")):
             async with TestClient(TestServer(_make_app_with_state(state))) as c:
                 resp = await _patch(c, "agent.yolo", True)
                 assert resp.status == 500
         assert state.calls == []
 
     @pytest.mark.asyncio
-    async def test_turning_yolo_on_applies_live_with_startup_semantics(self, tmp_config) -> None:
-        # Enable mirrors the boot seed: permanent (from_config=True), so the same
-        # key means the same thing whether it was read at startup or patched live.
+    async def test_turning_yolo_on_applies_live_with_startup_semantics(
+        self, tmp_config
+    ) -> None:
         state = _FakeState()
         async with TestClient(TestServer(_make_app_with_state(state))) as c:
             resp = await _patch(c, "agent.yolo", True)
             assert resp.status == 200
         assert ("enable", True) in state.calls
-        # …and it still persists for the restart path.
         saved = json.loads(tmp_config.read_text(encoding="utf-8"))
         assert saved["agent"]["yolo"] is True
 
     @pytest.mark.asyncio
     async def test_no_state_does_not_break_the_config_write(self, tmp_config) -> None:
-        # The seam degrades to persist-only when no dashboard state is attached
-        # (test apps, early startup) — never a 500 on the config write itself.
         async with TestClient(TestServer(_make_app())) as c:
             resp = await _patch(c, "agent.yolo", True)
             assert resp.status == 200

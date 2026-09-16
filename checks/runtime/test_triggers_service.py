@@ -28,9 +28,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-from gideon.triggers import service as SVC
-from gideon.triggers.models import Outcome, Trigger
-from gideon.triggers.store import TriggerStore
+from gideon.automation.triggers import service as SVC
+from gideon.automation.triggers.models import Outcome, Trigger
+from gideon.automation.triggers.store import TriggerStore
 
 _ALL_DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
@@ -68,9 +68,6 @@ def _trigger(tid="t1", *, next_at=0.0, interval=3600, enabled=True, **over):
 
 def _tick(store, **over):
     return asyncio.run(SVC.tick(store, now=over.pop("now", NOW), **over))
-
-
-# ── the type seam ──
 
 
 def test_an_iso_timestamp_converts_to_an_epoch():
@@ -121,9 +118,6 @@ def test_an_empty_epoch_yields_an_empty_string_not_epoch_zero():
     assert SVC.to_iso(-5) == ""
 
 
-# ── an empty / quiet store ──
-
-
 def test_an_empty_store_ticks_harmlessly(store):
     result = _tick(store)
     assert result.fires == []
@@ -149,9 +143,6 @@ def test_an_unarmed_trigger_is_not_treated_as_due_now(store):
     assert _tick(store).fires == []
 
 
-# ── a due trigger ──
-
-
 def test_a_due_trigger_fires_with_a_ran_row(store):
     store.save_all([_trigger(next_at=NOW - 10)])
     result = _tick(store)
@@ -174,9 +165,6 @@ def test_the_row_records_the_slot_it_was_scheduled_for(store):
     assert row["scheduled_for"] == pytest.approx(NOW - 40, abs=1)
 
 
-# ── §3.1: persist-before-execute ──
-
-
 def test_the_next_fire_is_PERSISTED_before_the_fire_is_handed_out(store):
     """🔴 §3.1's rule. A crash between the tick and the dispatch loses ONE fire; a crash with the old
     `next_fire_at` still on disk fires TWICE, and a double-fire is the failure a user cannot undo.
@@ -185,7 +173,7 @@ def test_the_next_fire_is_PERSISTED_before_the_fire_is_handed_out(store):
     result = _tick(store)
     assert result.rescheduled == ["t1"]
     persisted = SVC.to_epoch(store.get("t1").trigger.next_fire_at)
-    assert persisted > NOW  # advanced past now, not left in the past
+    assert persisted > NOW
 
 
 def test_the_persisted_value_is_the_ISO_the_schema_declares(store):
@@ -209,16 +197,13 @@ def test_a_dry_run_changes_nothing_on_disk(store):
     assert result.rescheduled == []
 
 
-# ── §3.1: recompute from completion, anchored to creation ──
-
-
 def test_the_next_fire_is_computed_from_COMPLETION(store):
     """Not from the missed slot: a run that overruns its interval would otherwise produce a catch-up
     storm."""
     trigger = _trigger(next_at=NOW - 10, interval=3600)
-    assert SVC.next_after_completion(trigger, completed_at=NOW, now=NOW) == pytest.approx(
-        NOW + 3600, abs=2
-    )
+    assert SVC.next_after_completion(
+        trigger, completed_at=NOW, now=NOW
+    ) == pytest.approx(NOW + 3600, abs=2)
 
 
 def test_a_cron_recomputes_from_its_own_expression():
@@ -238,10 +223,9 @@ def test_a_cron_recomputes_from_its_own_expression():
         spec={"kind": "cron", "expr": "0 9 * * *"},
         workflow={"provider": "run-prompt", "config": {}},
     )
-    # NOW is 08:00Z, so the next slot is today's 09:00Z regardless of when the run completed.
     assert SVC.next_after_completion(cron, completed_at=NOW, now=NOW) == 1_800_003_600.0
     late = SVC.next_after_completion(cron, completed_at=NOW + 1800, now=NOW + 1800)
-    assert late == 1_800_003_600.0  # a 30-min-late completion does not push the 9am slot
+    assert late == 1_800_003_600.0
 
 
 def test_an_elapsed_one_shot_yields_no_recompute():
@@ -261,9 +245,6 @@ def test_an_elapsed_one_shot_yields_no_recompute():
 def test_a_zero_interval_does_not_schedule_an_immediate_refire():
     broken = _trigger(next_at=NOW - 10, interval=0)
     assert SVC.next_after_completion(broken, completed_at=NOW, now=NOW) == 0.0
-
-
-# ── §3: the sleep contract ──
 
 
 def test_the_sleep_is_capped_for_external_edit_pickup(store):
@@ -288,9 +269,6 @@ def test_a_disabled_trigger_does_not_hold_the_loop_awake(store):
     assert _tick(store).next_sleep == SVC.MAX_SLEEP_SECS
 
 
-# ── §3: coalescing ──
-
-
 def test_same_second_triggers_coalesce_into_one_wake(store):
     """§3: "coalescing same-second firings so N triggers replacing one 60s heartbeat don't wake the
     laptop N times". All five are still DUE — coalescing is about the wake, not about dropping
@@ -300,9 +278,6 @@ def test_same_second_triggers_coalesce_into_one_wake(store):
     result = _tick(store)
     assert len(result.fires) == 5
     assert len(result.ledger_rows) == 5
-
-
-# ── §7 crit 8: zero silent drops ──
 
 
 def test_a_suppressed_trigger_still_produces_a_typed_row(store):
@@ -350,9 +325,6 @@ def test_a_broken_store_row_is_skipped_not_fired(store):
     assert [f.trigger.id for f in result.fires] == ["t1"]
 
 
-# ── §3.1: boot ──
-
-
 def test_boot_rearms_an_overdue_trigger(store):
     store.save_all([_trigger(next_at=NOW - 7200)])
     report = SVC.boot(store, now=NOW)
@@ -392,9 +364,6 @@ def test_boot_is_a_dry_run_when_asked(store):
     assert store.get("t1").trigger.next_fire_at == before
 
 
-# ── §3.2: the spool is a separate wake source ──
-
-
 def test_the_spool_drain_is_exposed_separately_from_the_tick():
     """§3: sync-context fires spool to disk, "drained on next tick". Exposed rather than
     buried inside
@@ -403,9 +372,6 @@ def test_the_spool_drain_is_exposed_separately_from_the_tick():
     envelopes, dropped = SVC.drain_spooled_fires(limit=10)
     assert isinstance(envelopes, list)
     assert isinstance(dropped, int)
-
-
-# ── the store-changed signal ──
 
 
 def test_the_tick_reports_when_another_process_wrote_the_store(tmp_path):
@@ -428,9 +394,6 @@ def test_the_result_serializes_for_a_surface(store):
     assert "suppressed" in payload
 
 
-# ── S142: the boot sweep, which had zero callers ──
-
-
 def test_the_review_is_snapshot_BEFORE_re_arming(store):
     """🔴 THE ORDERING BUG, found by wiring the sweep. `plan_boot`'s recovery pushes an overdue
     `next_fire_at` forward IN PLACE on the same `Trigger` objects, and the missed anchor is derived
@@ -439,9 +402,9 @@ def test_the_review_is_snapshot_BEFORE_re_arming(store):
     evidence has to be read first."""
     store.save_all([_trigger("t1", next_at=NOW - 3600, interval=60)])
     report = SVC.boot(store, now=NOW)
-    total = len(report["review"]["rows"]) + sum(s["count"] for s in report["review"]["summaries"])
-    # 61, not 60: the anchor is the ARMED slot minus one interval, so the count spans the armed fire
-    # itself through now. That is the honest reading — the armed fire is the first one missed.
+    total = len(report["review"]["rows"]) + sum(
+        s["count"] for s in report["review"]["summaries"]
+    )
     assert total == 61, total
     assert report["rearmed"], "and it still re-armed"
 
@@ -481,7 +444,9 @@ def test_a_DROPPED_missed_slot_resumes_ON_ITS_OWN_GRID(store):
 
     now = dt.datetime(2023, 11, 15, 9, 0, tzinfo=dt.timezone.utc).timestamp()
     missed = dt.datetime(2023, 11, 15, 3, 0, tzinfo=dt.timezone.utc).timestamp()
-    store.save_all([_trigger("backup", spec={"kind": "cron", "expr": "0 3 * * *"}, next_at=missed)])
+    store.save_all(
+        [_trigger("backup", spec={"kind": "cron", "expr": "0 3 * * *"}, next_at=missed)]
+    )
     SVC.boot(store, now=now)
     landed = SVC.to_epoch(store.get("backup").trigger.next_fire_at)
     when = dt.datetime.fromtimestamp(landed, dt.timezone.utc)
@@ -492,12 +457,14 @@ def test_a_DROPPED_missed_slot_resumes_ON_ITS_OWN_GRID(store):
 def test_the_grid_resume_KEEPS_the_stagger(store):
     """§3.1 requires both halves: recovered on boot AND spread so a restart does not fire everything
     in one second. Driven — six co-phased hourly triggers all resume to exactly `now + 3600` without
-    the jitter, so the stampede returns one interval later instead of being prevented."""
-    store.save_all([_trigger(f"t{i}", next_at=NOW - 7200, interval=3600) for i in range(6)])
+    the jitter, so the stampede returns one interval later instead of being prevented.
+    """
+    store.save_all(
+        [_trigger(f"t{i}", next_at=NOW - 7200, interval=3600) for i in range(6)]
+    )
     report = SVC.boot(store, now=NOW)
     stamps = {row["next_fire_at"] for row in report["rearmed"]}
     assert len(stamps) == 6, stamps
-    # …and still within the jitter window of the real grid slot, not re-phased to boot time.
     assert all(NOW + 3600 <= s < NOW + 3600 + 121 for s in stamps), stamps
 
 
@@ -514,7 +481,9 @@ def test_a_boot_sweep_leaves_NOTHING_immediately_due(store):
     wired: ten minutely triggers overdue by an hour were **10 of 10 due in the same instant**,
     because boot only ran `migrate_and_arm` (which arms rows with NO `next_fire_at`) and left an
     already-armed overdue row with its stale past fire."""
-    store.save_all([_trigger(f"t{i}", next_at=NOW - 3600, interval=60) for i in range(10)])
+    store.save_all(
+        [_trigger(f"t{i}", next_at=NOW - 3600, interval=60) for i in range(10)]
+    )
     assert len(SVC.due_ids([r.trigger for r in store.load()], now=NOW)) == 10
     SVC.boot(store, now=NOW)
     assert SVC.due_ids([r.trigger for r in store.load()], now=NOW) == []
@@ -523,18 +492,19 @@ def test_a_boot_sweep_leaves_NOTHING_immediately_due(store):
 def test_drain_spooled_fires_returns_what_the_spool_holds(tmp_path, monkeypatch):
     """The service-level accessor criterion 7's crash-safety hangs off."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.config import loader
+    from gideon.core.config import loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
-    from gideon.triggers.dispatch import Envelope, spool_fire
+    from gideon.automation.triggers.dispatch import Envelope, spool_fire
 
-    spool_fire(Envelope(seq=0, source="event:e", kind="memory.memory_write", payload={"key": "k"}))
+    spool_fire(
+        Envelope(
+            seq=0, source="event:e", kind="memory.memory_write", payload={"key": "k"}
+        )
+    )
     envelopes, bad = SVC.drain_spooled_fires()
     assert [e.source for e in envelopes] == ["event:e"]
     assert bad == 0
-
-
-# ── the spacing meter: last_fired_at (S151) ──
 
 
 def test_a_granted_fire_writes_last_fired_at(store):
@@ -558,12 +528,14 @@ def test_a_SUPPRESSED_fire_does_NOT_write_it(store):
     store.save_all([trigger])
     result = _tick(store, now=NOW)
     assert not result.fires, "quiet hours must suppress it"
-    assert store.get("t1").trigger.last_fired_at == "", "a suppressed fire is not a fire"
+    assert (
+        store.get("t1").trigger.last_fired_at == ""
+    ), "a suppressed fire is not a fire"
 
 
 def test_debounce_suppresses_the_next_tick_end_to_end(store):
     """The whole chain on a real store: fire → stamp → suppress → allow again past the window."""
-    from gideon.triggers import claims as C
+    from gideon.automation.triggers import claims as C
 
     trigger = _trigger("deb", next_at=NOW - 1, interval=60)
     trigger.gates = {"debounce_secs": 300}
@@ -572,8 +544,6 @@ def test_debounce_suppresses_the_next_tick_end_to_end(store):
     first = _tick(store, now=NOW)
     assert [f.trigger.id for f in first.fires] == ["deb"]
 
-    # Release the claim so the OVERLAP gate cannot mask the spacing gate — the S133 lesson: a second
-    # gate refusing first makes the gate under test look like it works.
     C.release_claim("deb", base_dir=store.base_dir)
     live = store.get("deb").trigger
     live.next_fire_at = SVC.to_iso(NOW + 30)
@@ -591,7 +561,9 @@ def test_debounce_suppresses_the_next_tick_end_to_end(store):
     live.next_fire_at = SVC.to_iso(NOW + 350)
     store.upsert(live)
     third = _tick(store, now=NOW + 400)
-    assert [f.trigger.id for f in third.fires] == ["deb"], "past the window it fires again"
+    assert [f.trigger.id for f in third.fires] == [
+        "deb"
+    ], "past the window it fires again"
 
 
 def test_a_future_last_fired_at_clamps_rather_than_going_negative(store):
@@ -606,9 +578,6 @@ def test_a_future_last_fired_at_clamps_rather_than_going_negative(store):
     assert not result.fires, "clamped to 0s ago, so the debounce still applies"
     row = next(r for r in result.ledger_rows if r.get("trigger_id") == "t1")
     assert row["gate"] == "spacing"
-
-
-# ── 🔴 parking was a one-way door (S159) ──
 
 
 def _parkable(store, tmp_path, tid="clock:sync"):
@@ -628,7 +597,7 @@ def _parkable(store, tmp_path, tid="clock:sync"):
 
 
 def _park(store, *, retry_after, state=None, tid="clock:sync"):
-    from gideon.triggers.models import TriggerState
+    from gideon.automation.triggers.models import TriggerState
 
     t = store.get(tid).trigger
     t.state = state or TriggerState.PARKED.value
@@ -638,11 +607,13 @@ def _park(store, *, retry_after, state=None, tid="clock:sync"):
 
 
 def _slots(store, tmp_path, n, start, tid="clock:sync"):
-    from gideon.triggers import claims
+    from gideon.automation.triggers import claims
 
     fires, unparked = 0, []
     for i in range(n):
-        r = asyncio.run(SVC.tick(store, now=start + i * 120, base_dir=tmp_path, persist=True))
+        r = asyncio.run(
+            SVC.tick(store, now=start + i * 120, base_dir=tmp_path, persist=True)
+        )
         fires += len(r.fires)
         unparked += r.unparked
         claims.release_claim(tid, base_dir=tmp_path)
@@ -658,7 +629,7 @@ def test_a_PARKED_trigger_comes_BACK_once_its_cooldown_elapses(store, tmp_path):
     `parked` indefinitely**. `TriggerState.PARKED`'s own docstring says parking "is not a failure —
     it is 'the resource this needs is busy', which resolves on its own"; nothing made it resolve.
     """
-    from gideon.triggers.models import TriggerState
+    from gideon.automation.triggers.models import TriggerState
 
     _parkable(store, tmp_path)
     _park(store, retry_after=NOW + 10_100)
@@ -671,7 +642,7 @@ def test_a_PARKED_trigger_comes_BACK_once_its_cooldown_elapses(store, tmp_path):
 def test_a_PENDING_cooldown_keeps_it_parked(store, tmp_path):
     """The control case: unparking on a timer that has not elapsed would make the cooldown
     decorative, and a flapping resource would be hammered."""
-    from gideon.triggers.models import TriggerState
+    from gideon.automation.triggers.models import TriggerState
 
     _parkable(store, tmp_path)
     _park(store, retry_after=NOW + 20_000)
@@ -698,7 +669,7 @@ def test_AUTOPAUSED_and_QUARANTINED_are_NEVER_revived_on_a_timer(store, tmp_path
     Reviving either on a timer
        would override a judgement someone made — and for quarantine it would re-run the thing that
        looked like an attack."""
-    from gideon.triggers.models import TriggerState
+    from gideon.automation.triggers.models import TriggerState
 
     for state in (TriggerState.AUTOPAUSED.value, TriggerState.QUARANTINED.value):
         _parkable(store, tmp_path, tid=f"clock:{state}")
@@ -713,7 +684,7 @@ def test_the_park_cooldown_is_PERSISTED_by_the_outcome_path():
     dropped it, so even a caller that asked `unpark_due` had nothing to read."""
     import inspect
 
-    from gideon import gateway
+    from gideon.engine import gateway
 
     source = inspect.getsource(gateway)
     assert "live.park_retry_after = (" in source
@@ -726,7 +697,8 @@ def test_the_unpark_runs_BEFORE_the_due_set_is_computed():
     """
     import inspect
 
-    source = inspect.getsource(SVC.tick)
+    assert "TickPass(" in inspect.getsource(SVC.tick)
+    source = inspect.getsource(SVC.TickPass.run)
     assert source.index("_unpark_ready(") < source.index("for trigger_id in due_ids(")
 
 
@@ -735,15 +707,37 @@ def test_unparking_does_NOT_reset_the_failure_counter(store, tmp_path):
     `consecutive_failures` untouched, deliberately, so a flapping credential cannot clear a real
     streak). Clearing it on unpark would hand a genuinely failing trigger a fresh budget every time
     an unrelated outage parked it."""
-    import inspect
+    from gideon.automation.schedule_history import ExecutionJournal, ExecutionRecord
+    from gideon.automation.triggers.autopause import consecutive_failures_from
+    from gideon.automation.triggers.models import TriggerState
 
-    source = inspect.getsource(SVC._unpark_ready)
-    assert "consecutive_failures" in source, "the reasoning must be recorded"
-    assert "consecutive_failures = 0" not in source
-    assert "consecutive_failures=0" not in source
+    trigger = _parkable(store, tmp_path)
+    trigger.state = TriggerState.PARKED.value
+    trigger.park_retry_after = NOW - 1
+    store.upsert(trigger)
+    rows = [store.get(trigger.id).trigger]
 
+    async def exercise():
+        journal = ExecutionJournal(tmp_path)
+        for index in range(3):
+            await journal.append(
+                ExecutionRecord(
+                    job_id=trigger.id,
+                    trigger="failed",
+                    status="failure",
+                    started_at=NOW - 10 + index,
+                )
+            )
+        before, _ = await journal.list_for_job(trigger.id, 0, 50)
+        assert consecutive_failures_from(before) == 3
+        assert SVC._unpark_ready(store, rows, now=NOW, persist=True) == [trigger.id]
+        assert rows[0].state == TriggerState.ACTIVE.value
+        assert store.get(trigger.id).trigger.state == TriggerState.ACTIVE.value
+        after, _ = await journal.list_for_job(trigger.id, 0, 50)
+        assert after == before
+        assert consecutive_failures_from(after) == 3
 
-# ── 🔴 the TICK now records lateness (S170) ──
+    asyncio.run(exercise())
 
 
 def test_the_TICK_records_an_overdue_fire_as_ran_late(store, tmp_path):
@@ -752,7 +746,9 @@ def test_the_TICK_records_an_overdue_fire_as_ran_late(store, tmp_path):
     both stamps — `FireContext` carries no `scheduled_for`, which is why `firepath` cannot decide
     this and adding one there would duplicate a value the tick already owns."""
     _parkable(store, tmp_path, tid="clock:late")
-    result = asyncio.run(SVC.tick(store, now=NOW + 2400, base_dir=tmp_path, persist=True))
+    result = asyncio.run(
+        SVC.tick(store, now=NOW + 2400, base_dir=tmp_path, persist=True)
+    )
     row = next(r for r in result.ledger_rows if r["trigger_id"] == "clock:late")
     assert row["outcome"] == "ran_late"
     assert "after its scheduled slot" in row["reason"]
@@ -766,9 +762,6 @@ def test_the_TICK_leaves_an_ON_TIME_fire_alone(store, tmp_path):
     row = next(r for r in result.ledger_rows if r["trigger_id"] == "clock:ontime")
     assert row["outcome"] == "ran"
     assert row["reason"] == ""
-
-
-# ── 🔴 the suppressed-fire row was built and never stored (S171) ──
 
 
 def _quiet(store, tmp_path, tid="clock:q"):
@@ -788,10 +781,10 @@ def _quiet(store, tmp_path, tid="clock:q"):
 
 
 def _stored(tmp_path, tid):
-    from gideon.schedule_history import ScheduleRunStore
+    from gideon.automation.schedule_history import ExecutionJournal
 
     async def _go():
-        return await ScheduleRunStore(tmp_path).list_for_job(tid, 0, 50)
+        return await ExecutionJournal(tmp_path).list_for_job(tid, 0, 50)
 
     return asyncio.run(_go())[1]
 
@@ -804,7 +797,7 @@ def test_a_SUPPRESSED_fire_is_PERSISTED_not_only_returned(store, tmp_path, monke
     Measured: six ticks of a quiet-hours trigger produced six `skipped_gate` rows in memory and ZERO
     rows in the store, so the history a user reads had no record any of it happened —
     indistinguishable from a scheduler that never woke."""
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     _quiet(store, tmp_path)
     for i in range(6):
         asyncio.run(SVC.tick(store, now=NOW + i * 120, base_dir=tmp_path, persist=True))
@@ -814,10 +807,12 @@ def test_a_SUPPRESSED_fire_is_PERSISTED_not_only_returned(store, tmp_path, monke
 def test_a_DRY_RUN_persists_nothing(store, tmp_path, monkeypatch):
     """`persist=False` is what `automation doctor` uses to report what a real tick WOULD do. Writing
     history from a dry run would make the diagnostic change the thing it diagnoses."""
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     _quiet(store, tmp_path, tid="clock:dry")
     for i in range(4):
-        asyncio.run(SVC.tick(store, now=NOW + i * 120, base_dir=tmp_path, persist=False))
+        asyncio.run(
+            SVC.tick(store, now=NOW + i * 120, base_dir=tmp_path, persist=False)
+        )
     assert _stored(tmp_path, "clock:dry") == 0
 
 
@@ -825,9 +820,9 @@ def test_a_GRANTED_fire_is_NOT_written_here(store, tmp_path, monkeypatch):
     """`gateway._record_fire_outcome` owns the row for a fire that actually ran, once it settles.
     Writing one here too would double-count every success in `count_since` — the rate meter S152
     built, which reads this very store."""
-    from gideon.triggers import claims
+    from gideon.automation.triggers import claims
 
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     _parkable(store, tmp_path, tid="clock:ok")
     for i in range(3):
         asyncio.run(SVC.tick(store, now=NOW + i * 120, base_dir=tmp_path, persist=True))
@@ -835,24 +830,15 @@ def test_a_GRANTED_fire_is_NOT_written_here(store, tmp_path, monkeypatch):
     assert _stored(tmp_path, "clock:ok") == 0
 
 
-# ── 🔴 the ledger wrote to the AMBIENT home, not the TICK'S (a real-home write leak) ──
-#
-# Why the three tests above did not catch this: every one of them patches `config_dir()` to
-# `tmp_path`, the SAME directory it passes as `base_dir`. Both roots agree, so the write lands in
-# the right place whichever one the code picked, and the assertion cannot tell them apart. They
-# test that a row is written; they cannot test WHERE. The fixture below splits the two roots so
-# that question has an answer.
-
-
 def _seed_ledger(root, tid, n, *, start=NOW):
     """`n` settled rows for `tid` in the ledger under `root`, through the real store."""
-    from gideon.schedule_history import ScheduleRun, ScheduleRunStore
+    from gideon.automation.schedule_history import ExecutionJournal, ExecutionRecord
 
     async def _go():
-        runs = ScheduleRunStore(root)
+        runs = ExecutionJournal(root)
         for i in range(n):
             await runs.append(
-                ScheduleRun(
+                ExecutionRecord(
                     run_id=f"seed-{tid}-{i}",
                     job_id=tid,
                     trigger="clock",
@@ -881,7 +867,7 @@ def homes(tmp_path, monkeypatch):
     same reason: an isolated home does not by itself confine the workspace, and nothing in this
     suite should be able to reach the operator's real one.
     """
-    from gideon.config.loader import config_dir
+    from gideon.core.config.loader import config_dir
 
     home = tmp_path / "home"
     decoy = tmp_path / "decoy"
@@ -890,14 +876,12 @@ def homes(tmp_path, monkeypatch):
         d.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("GIDEON_HOME", str(decoy))
     monkeypatch.setenv("GIDEON_WORKSPACE", str(workspace))
-    # Vacuity guard: if the env var stopped steering `config_dir()`, the decoy would silently BE
-    # the tick's home and every assertion below would hold for the wrong reason.
     assert config_dir().resolve() == decoy.resolve()
     return home, decoy
 
 
 def test_a_SUPPRESSED_row_lands_in_the_TICKS_home_not_the_AMBIENT_one(homes):
-    """🔴 THE DEFECT. `_persist_suppression` built its `ScheduleRunStore` from `config_dir()` while
+    """🔴 THE DEFECT. `_persist_suppression` built its `ExecutionJournal` from `config_dir()` while
     the tick around it ran under `base_dir`, so a tick driven against an isolated home appended its
     suppression rows to whatever home the environment happened to name — in practice the operator's
     real `~/.gideon/cron-history/`. `tick`'s own docstring had already ruled on this for the
@@ -913,9 +897,7 @@ def test_a_SUPPRESSED_row_lands_in_the_TICKS_home_not_the_AMBIENT_one(homes):
     for i in range(3):
         asyncio.run(SVC.tick(store, now=NOW + i * 120, base_dir=home, persist=True))
 
-    # POSITIVE: the rows are in the home the tick actually ran under.
     assert _stored(home, "clock:leak") == 3
-    # NEGATIVE: and the ambient home was never touched — no per-job log, no index, no directory.
     assert not (decoy / "cron-history").exists()
 
 
@@ -926,7 +908,8 @@ def test_the_RATE_METER_reads_the_TICKS_ledger_not_the_AMBIENT_one(homes):
 
     The decoy is seeded MORE heavily than the tick's home so the two answers cannot coincide, and
     the decoy count is asserted directly as a positive control: without it, reading `2` could just
-    as easily mean the seed silently failed as it could mean the right ledger was read."""
+    as easily mean the seed silently failed as it could mean the right ledger was read.
+    """
     from types import SimpleNamespace
 
     home, decoy = homes
@@ -934,7 +917,5 @@ def test_the_RATE_METER_reads_the_TICKS_ledger_not_the_AMBIENT_one(homes):
     _seed_ledger(home, "clock:rate", 2)
     trigger = SimpleNamespace(id="clock:rate", gates={"max_runs_per_hour": 10})
 
-    # Positive control: the decoy really does hold 5 readable rows for this job.
     assert asyncio.run(SVC._fires_in_window(trigger, now=NOW + 60, base_dir=decoy)) == 5
-    # The meter under test reads the tick's ledger, so it must see 2 — never the decoy's 5.
     assert asyncio.run(SVC._fires_in_window(trigger, now=NOW + 60, base_dir=home)) == 2

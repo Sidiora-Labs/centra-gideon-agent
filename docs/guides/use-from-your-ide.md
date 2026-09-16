@@ -209,7 +209,7 @@ actually requires, and they are verified below; the JSON key names are your clie
 **Two traps worth naming:**
 
 - **`Authorization: Bearer` is correct for `/mcp` and wrong everywhere else.** The dashboard's
-  owner token goes in `?token=…` or a `pc_token_<port>` cookie; a Bearer header against any
+  owner token goes in `?token=…` or a `gideon_token_<port>` cookie; a Bearer header against any
   `/api/…` path gets you `403 {"error": "Token required"}` instead. `/mcp` is the exception — it is
   exempt from the dashboard's cookie auth and carries this bearer credential instead. So if you see
   `Token required`, your client is talking to the wrong path. Also do not try to reuse the dashboard

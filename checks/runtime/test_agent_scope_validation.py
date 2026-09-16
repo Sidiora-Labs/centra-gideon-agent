@@ -32,8 +32,8 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.triggers.models import SPEC_KEYS, Trigger, validate_spec
-from gideon.triggers.store import TriggerStore
+from gideon.automation.triggers.models import SPEC_KEYS, Trigger, validate_spec
+from gideon.automation.triggers.store import TriggerStore
 
 BASE = {"source": "memory", "pattern": "MemoryUpdate"}
 
@@ -56,9 +56,6 @@ def _row(store, scope=...):
         )
     )
     return store.get("event:v")
-
-
-# ── the shapes that used to pass silently ──
 
 
 def test_a_BARE_STRING_scope_is_refused(store):
@@ -89,9 +86,6 @@ def test_a_NON_STRING_entry_is_refused(store):
 def test_a_BLANK_entry_is_refused(store):
     """A whitespace id would match no agent while looking populated."""
     assert _row(store, ["   "]).ok is False
-
-
-# ── the valid shapes still work ──
 
 
 def test_a_VALID_scope_is_accepted(store):
@@ -130,14 +124,11 @@ def test_only_the_EVENT_kind_validates_it():
     assert not [i for i in issues if "agent_scope" in i.path]
 
 
-# ── the doctor makes the unenforced state visible ──
-
-
 def test_the_doctor_reports_an_UNENFORCED_scope():
     """🔴 The honest part. The field is validated now, but still read by no fire path, so an author
     who set it is fenced by nothing. A validated-but-unenforced security field with no warning is
     the inert control wearing a clean shirt."""
-    from gideon.triggers.calendar import diagnose
+    from gideon.automation.triggers.calendar import diagnose
 
     rows = [{"id": "schedule:event:x", "spec": {**BASE, "agent_scope": ["a"]}}]
     finding = next(
@@ -150,7 +141,7 @@ def test_the_doctor_reports_an_UNENFORCED_scope():
 
 
 def test_the_doctor_is_SILENT_for_an_unscoped_trigger():
-    from gideon.triggers.calendar import diagnose
+    from gideon.automation.triggers.calendar import diagnose
 
     rows = [{"id": "schedule:event:y", "spec": dict(BASE)}]
     assert not [
@@ -160,19 +151,19 @@ def test_the_doctor_is_SILENT_for_an_unscoped_trigger():
     ]
 
 
-# ── the legacy agent-scoped path is intact ──
-
-
 def test_the_chat_path_has_NO_GLOBAL_firing_fallback():
     """Decision 2's actual requirement, asserted rather than trusted: the resolver returns [] on any
     failure so a broken lookup fires NOTHING instead of falling back to every hook."""
     import inspect
 
-    from gideon.dashboard import chat_runner
+    from gideon.interfaces.dashboard import chat_runner
 
     src = inspect.getsource(chat_runner)
     assert "fire_for_ids" in src
-    assert "never silently fall back to global firing" in src or "no global firing path" in src
+    assert (
+        "never silently fall back to global firing" in src
+        or "no global firing path" in src
+    )
 
 
 def test_the_substrate_event_kind_has_no_chat_turn_source():
@@ -187,8 +178,9 @@ def test_the_substrate_event_kind_has_no_chat_turn_source():
     chat-turn-shaped source. It cannot reach the scope: `trigger_sources.emit` namespaces every app
     event under `app:<name>:<event>` and emits with `source=SOURCE_APP`, so an app naming its event
     `chat_turn` still arrives as an `app` event and matches only `AppEvent` triggers. A chat-turn
-    SOURCE — a new `EVENT_SOURCES` member — is what would break the pin, which is exactly right."""
-    from gideon.event_triggers import EVENT_PATTERNS, EVENT_SOURCES
+    SOURCE — a new `EVENT_SOURCES` member — is what would break the pin, which is exactly right.
+    """
+    from gideon.automation.event_triggers import EVENT_PATTERNS, EVENT_SOURCES
 
     assert EVENT_PATTERNS == (
         "MemoryUpdate",
@@ -199,5 +191,4 @@ def test_the_substrate_event_kind_has_no_chat_turn_source():
         "InboxAddress",
         "AppEvent",
     )
-    # The invariant that keeps agent_scope legitimately unread: no source is a chat turn.
     assert "chat" not in EVENT_SOURCES and "chat_turn" not in EVENT_SOURCES

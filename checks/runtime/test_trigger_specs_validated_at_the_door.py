@@ -25,7 +25,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.triggers.arm import semantic_spec_issues
+from gideon.automation.triggers.arm import semantic_spec_issues
 
 
 def _errors(kind, spec):
@@ -42,22 +42,19 @@ class TestSemanticSpecIssues:
         assert len(errs) == 1 and "never fire" in errs[0].message
 
     def test_out_of_range_fields_are_an_error(self):
-        # "99 99 * * *" counts five tokens — the frontend hint passes it — but croniter refuses.
         assert _errors("clock", {"kind": "cron", "expr": "99 99 * * *"})
         assert _errors("clock", {"kind": "cron", "expr": "0 9 * * 8"})
 
     def test_daily_alias_is_valid(self):
-        # #687's other half: "@daily" is croniter-valid and must NOT be rejected.
         spec = {"kind": "cron", "expr": "@daily"}
         assert _errors("clock", spec) == [] and _warnings("clock", spec) == []
 
     def test_six_field_seconds_cron_is_an_error(self):
-        # #612: croniter accepts it, the five-field contract does not.
         errs = _errors("clock", {"kind": "cron", "expr": "* * * * * *"})
         assert len(errs) == 1 and "5 fields" in errs[0].message
 
     def test_sub_floor_five_field_cadence_warns_but_is_not_an_error(self):
-        spec = {"kind": "cron", "expr": "* * * * *"}  # every 60s
+        spec = {"kind": "cron", "expr": "* * * * *"}
         assert _errors("clock", spec) == []
         warns = _warnings("clock", spec)
         assert len(warns) == 1 and "floor" in warns[0].message
@@ -66,26 +63,30 @@ class TestSemanticSpecIssues:
         assert _warnings("clock", {"kind": "cron", "expr": "0 9 * * 1"}) == []
 
     def test_non_iso_skip_date_is_an_error(self):
-        errs = _errors("clock", {"kind": "cron", "expr": "0 9 * * 1", "skip_dates": ["not-a-date"]})
+        errs = _errors(
+            "clock", {"kind": "cron", "expr": "0 9 * * 1", "skip_dates": ["not-a-date"]}
+        )
         assert len(errs) == 1 and "never suppress" in errs[0].message
 
     def test_impossible_calendar_date_is_an_error(self):
-        assert _errors("clock", {"kind": "cron", "expr": "0 9 * * 1", "skip_dates": ["2026-02-30"]})
+        assert _errors(
+            "clock", {"kind": "cron", "expr": "0 9 * * 1", "skip_dates": ["2026-02-30"]}
+        )
 
     def test_never_firing_skip_date_warns(self):
-        # #560's exact row: Mondays cron, 2026-12-25 is a Friday — inert.
         warns = _warnings(
             "clock", {"kind": "cron", "expr": "0 9 * * 1", "skip_dates": ["2026-12-25"]}
         )
         assert len(warns) == 1 and "never fires on 2026-12-25" in warns[0].message
 
     def test_matching_skip_date_is_clean(self):
-        # 2026-12-28 IS a Monday — a real skip, no finding.
         spec = {"kind": "cron", "expr": "0 9 * * 1", "skip_dates": ["2026-12-28"]}
         assert semantic_spec_issues("clock", spec) == []
 
     def test_skip_dates_validated_for_interval_kind_too(self):
-        assert _errors("clock", {"kind": "interval", "interval_secs": 3600, "skip_dates": ["soon"]})
+        assert _errors(
+            "clock", {"kind": "interval", "interval_secs": 3600, "skip_dates": ["soon"]}
+        )
 
     def test_non_clock_kinds_are_untouched(self):
         assert semantic_spec_issues("event", {"source": "inbox"}) == []
@@ -93,12 +94,12 @@ class TestSemanticSpecIssues:
 
 class TestCreateRefusesAtTheDoor:
     def _store(self, tmp_path):
-        from gideon.triggers.store import TriggerStore
+        from gideon.automation.triggers.store import TriggerStore
 
         return TriggerStore(tmp_path / "triggers.json")
 
     def test_garbage_cron_is_refused(self, tmp_path):
-        from gideon.triggers import tools
+        from gideon.automation.triggers import tools
 
         result = tools.create(
             self._store(tmp_path),
@@ -110,21 +111,25 @@ class TestCreateRefusesAtTheDoor:
         assert not result.ok and "never fire" in result.text
 
     def test_unregistered_provider_is_refused(self, tmp_path):
-        from gideon.triggers import tools
+        from gideon.automation.triggers import tools
 
         result = tools.create(
             self._store(tmp_path),
             name="ghost provider",
             kind="clock",
             spec={"kind": "cron", "expr": "0 9 * * *"},
-            workflow={"inline": {"provider": "definitely-not-registered", "config": {}}},
+            workflow={
+                "inline": {"provider": "definitely-not-registered", "config": {}}
+            },
         )
         assert not result.ok
         assert "unknown action provider" in result.text
-        assert "Registered providers" in result.text, "the refusal names the live registry"
+        assert (
+            "Registered providers" in result.text
+        ), "the refusal names the live registry"
 
     def test_valid_create_echoes_inert_skip_date_warning(self, tmp_path):
-        from gideon.triggers import tools
+        from gideon.automation.triggers import tools
 
         result = tools.create(
             self._store(tmp_path),
@@ -137,7 +142,7 @@ class TestCreateRefusesAtTheDoor:
         assert "never fires on 2026-12-25" in result.text
 
     def test_clean_create_still_works(self, tmp_path):
-        from gideon.triggers import tools
+        from gideon.automation.triggers import tools
 
         result = tools.create(
             self._store(tmp_path),
@@ -152,16 +157,20 @@ class TestCreateRefusesAtTheDoor:
 @pytest.mark.asyncio
 class TestApiAndDoctor:
     def _app_state(self, tmp_path, monkeypatch):
-        import gideon.dashboard.handlers.triggers as h
+        import gideon.interfaces.dashboard.handlers.triggers as h
 
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        from gideon.triggers.store import TriggerStore
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        from gideon.automation.triggers.store import TriggerStore
 
         store = TriggerStore(tmp_path / "triggers.json")
         monkeypatch.setattr(h, "_trigger_store", lambda: store)
         return h, store
 
-    async def test_post_api_triggers_rejects_garbage_cron_with_400(self, tmp_path, monkeypatch):
+    async def test_post_api_triggers_rejects_garbage_cron_with_400(
+        self, tmp_path, monkeypatch
+    ):
         h, _ = self._app_state(tmp_path, monkeypatch)
         from unittest.mock import MagicMock
 
@@ -179,7 +188,9 @@ class TestApiAndDoctor:
                     "action": {"provider": "notify", "config": {}},
                 },
             )
-            assert resp.status == 400, "#483: any-string cron must be a 400, not a dead row"
+            assert (
+                resp.status == 400
+            ), "#483: any-string cron must be a 400, not a dead row"
             body = await resp.json()
             assert "never fire" in body["error"]
 
@@ -187,9 +198,8 @@ class TestApiAndDoctor:
         h, store = self._app_state(tmp_path, monkeypatch)
         from unittest.mock import MagicMock
 
-        from gideon.triggers.models import Trigger
+        from gideon.automation.triggers.models import Trigger
 
-        # #560's live row, written straight to the store (pre-fix rows exist in the wild).
         store.upsert(
             Trigger(
                 id="t560",
@@ -214,4 +224,6 @@ class TestApiAndDoctor:
         codes = {f["code"] for f in findings}
         assert "unfireable_spec" in codes, "the malformed skip date is reported"
         assert "inert_spec_entry" in codes, "the never-firing skip date is reported"
-        assert all(f["fix"] for f in findings), "a doctor finding always says what to do"
+        assert all(
+            f["fix"] for f in findings
+        ), "a doctor finding always says what to do"

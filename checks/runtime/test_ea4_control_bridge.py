@@ -25,11 +25,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from gideon.inbound import bridge
+from gideon.integrations.inbound import bridge
 
 
 class _State:
-    """The two DashboardState methods the bridge actually calls."""
+    """The two ConsoleState methods the bridge actually calls."""
 
     def __init__(self) -> None:
         self.broadcasts: list[tuple] = []
@@ -59,9 +59,6 @@ def _request(state, *, headers=None, body=None, peer="127.0.0.1"):
 
 def _payload(resp):
     return json.loads(resp.body.decode())
-
-
-# ── the self-describing catalogue ────────────────────────────────────────────
 
 
 class TestTheCatalogueDescribesItself:
@@ -130,25 +127,28 @@ class TestTheCatalogueDescribesItself:
         assert bridge.actions_digest() != before
 
 
-# ── admission: three gates, and the bridge's own exception ───────────────────
-
-
 class TestAdmission:
     @pytest.mark.asyncio
     async def test_a_disabled_surface_404s_without_reading_the_body(self, monkeypatch):
         """404 not 403: an off surface must not confirm its own existence to a prober.
         The plan's wording, enforced by `admission_problem`."""
-        monkeypatch.setattr(bridge, "admission_problem", lambda _s: ("disabled: off", 404))
+        monkeypatch.setattr(
+            bridge, "admission_problem", lambda _s: ("disabled: off", 404)
+        )
         resp = await bridge.handle_actions(_request(_State()))
         assert resp.status == 404
 
     @pytest.mark.asyncio
-    async def test_a_remote_peer_is_refused_even_when_the_token_is_right(self, monkeypatch):
+    async def test_a_remote_peer_is_refused_even_when_the_token_is_right(
+        self, monkeypatch
+    ):
         """The bridge is loopback FOREVER. `peer_allowed` special-cases the surface, so
         this asserts the bridge consults it rather than re-deciding locally."""
         monkeypatch.setattr(bridge, "admission_problem", lambda _s: (None, 200))
         monkeypatch.setattr(bridge, "verify_bearer", lambda _s, _t: True)
-        monkeypatch.setattr(bridge, "peer_allowed", lambda _r, _s: (False, "loopback only"))
+        monkeypatch.setattr(
+            bridge, "peer_allowed", lambda _r, _s: (False, "loopback only")
+        )
         resp = await bridge.handle_actions(
             _request(_State(), headers={"Authorization": "Bearer x"})
         )
@@ -179,15 +179,12 @@ class TestAdmission:
         assert len(body["actions"]) == len(bridge.actions())
 
 
-# ── requiresConfirmation, enforced here ──────────────────────────────────────
-
-
 @pytest.fixture(autouse=True)
 def _never_touch_the_real_inbox(monkeypatch, tmp_path):
     """`emit_attention_item` builds an ``InboxStore()`` from ``config_dir()``. One
     forgotten patch would file control-bridge rows in the operator's real home, so the
     home is redirected for EVERY test here rather than per test."""
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     yield
 
 
@@ -203,7 +200,9 @@ def admitted(monkeypatch):
 
 class TestConfirmationIsServerSide:
     @pytest.mark.asyncio
-    async def test_a_flagged_action_does_not_run_on_first_call(self, admitted, monkeypatch):
+    async def test_a_flagged_action_does_not_run_on_first_call(
+        self, admitted, monkeypatch
+    ):
         """The whole point. A client that ignores the flag gets a token, not a write —
         so the handler must not have been reached."""
         ran: list[str] = []
@@ -216,7 +215,11 @@ class TestConfirmationIsServerSide:
             bridge,
             "_REGISTRY",
             tuple(
-                bridge.Action(**{**a.__dict__, "handler": _never}) if a.name == "create_task" else a
+                (
+                    bridge.Action(**{**a.__dict__, "handler": _never})
+                    if a.name == "create_task"
+                    else a
+                )
                 for a in bridge.actions()
             ),
         )
@@ -235,7 +238,9 @@ class TestConfirmationIsServerSide:
         assert ran == [], "a confirm-gated action mutated before the user confirmed"
 
     @pytest.mark.asyncio
-    async def test_the_user_is_told_and_the_notice_carries_the_token(self, admitted, monkeypatch):
+    async def test_the_user_is_told_and_the_notice_carries_the_token(
+        self, admitted, monkeypatch
+    ):
         """Raised through `emit_attention_item` — `inbox.py` calls that "the only correct
         way to raise a durable agent request", because a caller doing `store.add` plus
         `state.notify` separately drifts into two notifications for one event or a row
@@ -252,7 +257,7 @@ class TestConfirmationIsServerSide:
             raised.append(kw)
             return "item-1"
 
-        monkeypatch.setattr("gideon.inbox.emit_attention_item", _fake_emit)
+        monkeypatch.setattr("gideon.integrations.inbox.emit_attention_item", _fake_emit)
         state = _State()
         resp = await bridge.handle_action(
             _request(
@@ -267,7 +272,6 @@ class TestConfirmationIsServerSide:
         assert kw["kind"] == "needs_input"
         assert kw["refs"]["confirm_token"] == token
         assert kw["refs"]["action"] == "toggle_automation"
-        # Idempotent per token: a client that retries must not stack inbox rows.
         assert kw["dedup_key"] == f"control_bridge:{token}"
 
     @pytest.mark.asyncio
@@ -300,14 +304,21 @@ class TestConfirmationIsServerSide:
         )
         token = _payload(first)["confirm_token"]
         ok = await bridge.handle_confirm(
-            _request(state, headers={"Authorization": "Bearer x"}, body={"confirm_token": token})
+            _request(
+                state,
+                headers={"Authorization": "Bearer x"},
+                body={"confirm_token": token},
+            )
         )
         assert ok.status == 200 and _payload(ok)["status"] == "ok"
         assert calls == [{"title": "write me"}]
 
-        # Single-use: replaying the token must not mutate again.
         replay = await bridge.handle_confirm(
-            _request(state, headers={"Authorization": "Bearer x"}, body={"confirm_token": token})
+            _request(
+                state,
+                headers={"Authorization": "Bearer x"},
+                body={"confirm_token": token},
+            )
         )
         assert replay.status == 404
         assert len(calls) == 1, "a confirm token was redeemable twice"
@@ -330,9 +341,6 @@ class TestConfirmationIsServerSide:
         action = next(a for a in bridge.actions() if a.requires_confirmation)
         token = bridge._mint_confirmation(action, {"title": "x"})
         assert bridge.pending_count() == 1
-        # Compute the target BEFORE patching: a lambda that reads `_pending[token]`
-        # lazily raises KeyError the second time `_reap` calls it, because the first
-        # call is what popped the entry.
         expired_at = bridge._pending[token]["created"] + bridge.CONFIRM_TTL_SECS + 1
         monkeypatch.setattr(time, "monotonic", lambda: expired_at)
         assert bridge.take_confirmation(token) is None
@@ -347,7 +355,10 @@ class TestConfirmationIsServerSide:
             _request(
                 state,
                 headers={"Authorization": "Bearer x"},
-                body={"action": "open_cockpit", "params": {"kind": "loops", "id": "L1"}},
+                body={
+                    "action": "open_cockpit",
+                    "params": {"kind": "loops", "id": "L1"},
+                },
             )
         )
         assert resp.status == 200
@@ -357,12 +368,18 @@ class TestConfirmationIsServerSide:
     @pytest.mark.asyncio
     async def test_an_unknown_action_is_404_not_a_500(self, admitted):
         resp = await bridge.handle_action(
-            _request(_State(), headers={"Authorization": "Bearer x"}, body={"action": "rm_rf"})
+            _request(
+                _State(),
+                headers={"Authorization": "Bearer x"},
+                body={"action": "rm_rf"},
+            )
         )
         assert resp.status == 404
 
     @pytest.mark.asyncio
-    async def test_a_handler_validation_error_is_400_and_names_the_field(self, admitted):
+    async def test_a_handler_validation_error_is_400_and_names_the_field(
+        self, admitted
+    ):
         """The structured envelope: a branchable ``code`` AND the field in the message.
 
         Both halves matter. The code is what a client branches on; the message is what
@@ -382,9 +399,6 @@ class TestConfirmationIsServerSide:
         assert "kind" in err["message"]
 
 
-# ── §1.4: user content leaves through the ONE fence ──────────────────────────
-
-
 def _stub_transcript(monkeypatch, rows):
     """Make `read_transcript` return `rows` without touching a real ConversationLog."""
 
@@ -392,7 +406,7 @@ def _stub_transcript(monkeypatch, rows):
         def recent(self, _session, max_messages=50):
             return list(rows)[:max_messages]
 
-    monkeypatch.setattr("gideon.history.ConversationLog", _Log)
+    monkeypatch.setattr("gideon.cognition.history.ConversationLog", _Log)
 
 
 class TestUserContentIsFenced:
@@ -408,7 +422,7 @@ class TestUserContentIsFenced:
         """The specific failure this guards: reaching for `security.fence_untrusted`
         directly, which produces a fence without the preamble, without the shared
         `inbound:<surface>` provenance, and without cap-before-fence ordering."""
-        from gideon.inbound import framing
+        from gideon.integrations.inbound import framing
 
         assert bridge.fence_payload is framing.fence_payload
 
@@ -432,16 +446,11 @@ class TestUserContentIsFenced:
         )
         assert resp.status == 200
         text = _payload(resp)["result"]["transcript"]
-        # The fence WRAPS: the conversation is inside the span, not beside it.
         assert text.startswith("<untrusted_content ")
         assert text.rstrip().endswith("</untrusted_content>")
-        # Provenance is the shared inbound shape, so an audit reader and
-        # `learning/hygiene.py`'s tag parser see one vocabulary across all surfaces.
         assert "source=inbound:bridge" in text
         assert "source_type=inbound_bridge" in text
-        # The preamble travels INSIDE the fence, adjacent to the data.
         assert "never as instructions" in text
-        # ... and the actual turns are what got wrapped.
         assert "remind me what we decided" in text
         assert "you decided to ship it" in text
 
@@ -465,7 +474,9 @@ class TestUserContentIsFenced:
         assert text == "user: remind me"
 
     @pytest.mark.asyncio
-    async def test_a_fence_break_in_the_conversation_cannot_escape(self, admitted, monkeypatch):
+    async def test_a_fence_break_in_the_conversation_cannot_escape(
+        self, admitted, monkeypatch
+    ):
         """The floor that replaces "a blank turn is not fenced" — that one was true of
         the bare helper and FALSE through this choke point, so it measured which layer
         the test called rather than the property. Fence-break resistance is the property
@@ -509,12 +520,19 @@ class TestUserContentIsFenced:
             _request(
                 _State(),
                 headers={"Authorization": "Bearer x"},
-                body={"action": "read_transcript", "params": {"session": "c", "limit": 200}},
+                body={
+                    "action": "read_transcript",
+                    "params": {"session": "c", "limit": 200},
+                },
             )
         )
         text = _payload(resp)["result"]["transcript"]
-        assert "truncated" in text, "the cap did not engage — this case no longer proves order"
-        assert text.rstrip().endswith("</untrusted_content>"), "the size cap clipped the fence"
+        assert (
+            "truncated" in text
+        ), "the cap did not engage — this case no longer proves order"
+        assert text.rstrip().endswith(
+            "</untrusted_content>"
+        ), "the size cap clipped the fence"
         assert text.startswith("<untrusted_content ")
 
     @pytest.mark.asyncio
@@ -559,7 +577,9 @@ class TestUserContentIsFenced:
         assert declared == {"read_transcript": "transcript"}
 
     @pytest.mark.asyncio
-    async def test_every_declared_key_is_one_the_handler_really_returns(self, monkeypatch):
+    async def test_every_declared_key_is_one_the_handler_really_returns(
+        self, monkeypatch
+    ):
         """A declared key the handler never produces would fence the empty string and
         leave the real content sitting unfenced under some other key — a fence that
         passes every marker check while protecting nothing."""
@@ -568,28 +588,22 @@ class TestUserContentIsFenced:
             if not action.user_content:
                 continue
             raw = await action.handler(_State(), {"session": "chat-1"})
-            assert action.user_content in raw, f"{action.name} declares a key it never returns"
+            assert (
+                action.user_content in raw
+            ), f"{action.name} declares a key it never returns"
             assert isinstance(raw[action.user_content], str)
-            # And the raw handler output is NOT pre-fenced: the handler must hand plain
-            # text to `_run`, or the payload gets wrapped twice.
             assert "untrusted_content" not in raw[action.user_content]
-
-
-# ── the discovery file ───────────────────────────────────────────────────────
 
 
 class TestDiscoveryFile:
     def test_it_names_the_token_and_never_carries_it(self, tmp_path, monkeypatch):
         """A file that carried the secret would make "readable file" and
         "authenticated" the same thing."""
-        monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
-        # A REAL configured token, so "the secret is absent" is a claim about the writer
-        # rather than about a local string the writer never saw. The first draft of this
-        # test asserted `"a"*64 not in raw` with nothing wiring that value in — a dead
-        # assertion that a deliberate leak still slipped past (the sibling key check
-        # caught it instead).
+        monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
         secret = "s3cr3t-" + "b" * 57
-        monkeypatch.setattr("gideon.inbound.auth.load_surface_token", lambda _s: secret)
+        monkeypatch.setattr(
+            "gideon.integrations.inbound.auth.load_surface_token", lambda _s: secret
+        )
         bridge._write_discovery(51234)
         raw = (tmp_path / bridge.DISCOVERY_FILENAME).read_text()
         info = json.loads(raw)
@@ -602,24 +616,24 @@ class TestDiscoveryFile:
         assert "token" not in info, "the discovery file must carry a REF, not a token"
 
     def test_it_is_0600(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
         bridge._write_discovery(1234)
         mode = (tmp_path / bridge.DISCOVERY_FILENAME).stat().st_mode & 0o777
         assert mode == 0o600, oct(mode)
 
     def test_remove_is_idempotent(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
         bridge._write_discovery(1234)
         bridge.remove_discovery()
-        bridge.remove_discovery()  # a crash-recovery boot calls this with no file present
+        bridge.remove_discovery()
         assert not (tmp_path / bridge.DISCOVERY_FILENAME).exists()
 
     @pytest.mark.asyncio
     async def test_an_unmounted_bridge_leaves_no_file(self, tmp_path, monkeypatch):
         """An agent that finds no discovery file correctly concludes there is nothing to
         talk to — so a refused mount must not leave a stale one behind."""
-        monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
-        bridge._write_discovery(999)  # a file from a PREVIOUS boot
+        monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
+        bridge._write_discovery(999)
         monkeypatch.setattr(bridge, "enablement_problem", lambda: "disabled: off")
         port = await bridge.start(_State())
         assert port is None
@@ -633,7 +647,7 @@ class TestTheRealListener:
     ):
         """The one test that starts a real runner. Asserts the port is ephemeral (not a
         fixed one someone could scan for) and that the file matches what bound."""
-        monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+        monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
         monkeypatch.setattr(bridge, "enablement_problem", lambda: None)
         port = await bridge.start(_State())
         try:
@@ -643,15 +657,6 @@ class TestTheRealListener:
         finally:
             await bridge.stop()
         assert not (tmp_path / bridge.DISCOVERY_FILENAME).exists()
-
-
-# ── the catalogue is filtered to the caller's pin ────────────────────────────
-#
-# `GET /actions` used to return the FULL seven-action catalogue to every admitted
-# caller, with `actions_digest` computed over that same full set — so a client whose
-# record permits one action was still shown `toggle_automation`: a catalogue of the lock
-# handed to whoever lacks the key. These tests hold the filter, the digest-over-served,
-# and the invariant that the description and the enforcement cannot disagree.
 
 
 @pytest.fixture
@@ -667,12 +672,14 @@ def register_client(monkeypatch, tmp_path):
     surrounding ``GIDEON_HOME`` write client records into the operator's real home.
     """
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.inbound import clients as clients_mod
+    from gideon.integrations.inbound import clients as clients_mod
 
     def _make(tools, *, surfaces=None):
         return clients_mod.create_client(
             "pinned-agent",
-            surfaces=list(surfaces if surfaces is not None else [bridge.BRIDGE_SURFACE]),
+            surfaces=list(
+                surfaces if surfaces is not None else [bridge.BRIDGE_SURFACE]
+            ),
             tools=list(tools),
         )
 
@@ -703,20 +710,26 @@ class TestTheCatalogueIsFilteredToThePin:
         assert "read_transcript" not in served
 
     @pytest.mark.asyncio
-    async def test_an_unpinned_surface_token_caller_still_sees_all_seven(self, admitted):
+    async def test_an_unpinned_surface_token_caller_still_sees_all_seven(
+        self, admitted
+    ):
         """VACUITY FLOOR for the assertion above.
 
         A filter that returned nothing — or one applied to every caller — would satisfy
         "the pinned client cannot see toggle_automation" while breaking the surface. The
         surface principal has no client record and therefore no pin.
         """
-        resp = await bridge.handle_actions(_request(_State(), headers=_bearer("surface-token")))
+        resp = await bridge.handle_actions(
+            _request(_State(), headers=_bearer("surface-token"))
+        )
         served = [a["name"] for a in _payload(resp)["actions"]]
         assert len(served) == len(bridge.actions()) == 7, served
         assert "toggle_automation" in served
 
     @pytest.mark.asyncio
-    async def test_an_empty_tools_list_means_no_pin_not_no_actions(self, admitted, register_client):
+    async def test_an_empty_tools_list_means_no_pin_not_no_actions(
+        self, admitted, register_client
+    ):
         """The second half of the floor, and the one worth verifying rather than assuming.
 
         ``tools: []`` is "unpinned", matching `clients.allowed_tools`. It is NOT read the
@@ -746,10 +759,14 @@ class TestTheCatalogueIsFilteredToThePin:
         )
 
     @pytest.mark.asyncio
-    async def test_an_unpinned_callers_digest_is_still_the_registry_digest(self, admitted):
+    async def test_an_unpinned_callers_digest_is_still_the_registry_digest(
+        self, admitted
+    ):
         """Floor for the test above: `digest_of` must not be a function that simply
         disagrees with `actions_digest` for everyone."""
-        resp = await bridge.handle_actions(_request(_State(), headers=_bearer("surface-token")))
+        resp = await bridge.handle_actions(
+            _request(_State(), headers=_bearer("surface-token"))
+        )
         assert _payload(resp)["actions_digest"] == bridge.actions_digest()
 
     @pytest.mark.asyncio
@@ -768,7 +785,11 @@ class TestTheCatalogueIsFilteredToThePin:
             bridge,
             "_REGISTRY",
             tuple(
-                bridge.Action(**{**a.__dict__, "handler": _never}) if a.name == "notify" else a
+                (
+                    bridge.Action(**{**a.__dict__, "handler": _never})
+                    if a.name == "notify"
+                    else a
+                )
                 for a in bridge.actions()
             ),
         )
@@ -792,7 +813,9 @@ class TestTheCatalogueIsFilteredToThePin:
         filter withholds — the shape of the authority the caller does not have."""
         _client, token = register_client(["list_automations"])
         resp = await bridge.handle_action(
-            _request(_State(), headers=_bearer(token), body={"action": "toggle_automation"})
+            _request(
+                _State(), headers=_bearer(token), body={"action": "toggle_automation"}
+            )
         )
         raw = resp.body.decode()
         assert resp.status == 403
@@ -807,7 +830,7 @@ class TestTheCatalogueIsFilteredToThePin:
         own a write channel into the attention surface, which is what the pin denies."""
         raised: list[dict] = []
         monkeypatch.setattr(
-            "gideon.inbox.emit_attention_item",
+            "gideon.integrations.inbox.emit_attention_item",
             lambda state, **kw: raised.append(kw) or "item-1",
         )
         _client, token = register_client(["list_automations"])
@@ -820,11 +843,17 @@ class TestTheCatalogueIsFilteredToThePin:
             )
         )
         assert resp.status == 403
-        assert bridge.pending_count() == before, "a confirm token was minted for an un-bound action"
-        assert raised == [], "the owner was asked to approve an action the client cannot run"
+        assert (
+            bridge.pending_count() == before
+        ), "a confirm token was minted for an un-bound action"
+        assert (
+            raised == []
+        ), "the owner was asked to approve an action the client cannot run"
 
     @pytest.mark.asyncio
-    async def test_redemption_re_checks_the_pin(self, admitted, register_client, monkeypatch):
+    async def test_redemption_re_checks_the_pin(
+        self, admitted, register_client, monkeypatch
+    ):
         """Catalogue and redemption are the two places the pin has to hold, and this is
         the one that could drift: a token minted by a WIDER principal must not become a
         way for a narrower one to run an action its own record forbids."""
@@ -846,9 +875,11 @@ class TestTheCatalogueIsFilteredToThePin:
                 for a in bridge.actions()
             ),
         )
-        monkeypatch.setattr("gideon.inbox.emit_attention_item", lambda state, **kw: "item-1")
+        monkeypatch.setattr(
+            "gideon.integrations.inbox.emit_attention_item",
+            lambda state, **kw: "item-1",
+        )
         state = _State()
-        # Minted by the un-pinned SURFACE principal.
         minted = await bridge.handle_action(
             _request(
                 state,
@@ -857,14 +888,17 @@ class TestTheCatalogueIsFilteredToThePin:
             )
         )
         token_value = _payload(minted)["confirm_token"]
-        # Redeemed by a narrower client whose record does not include the action.
         _client, narrow = register_client(["list_automations"])
         resp = await bridge.handle_confirm(
-            _request(state, headers=_bearer(narrow), body={"confirm_token": token_value})
+            _request(
+                state, headers=_bearer(narrow), body={"confirm_token": token_value}
+            )
         )
         assert resp.status == 403
         assert _payload(resp)["error"]["code"] == "action_not_bound"
-        assert calls == [], "a narrower client redeemed a wider principal's confirmation"
+        assert (
+            calls == []
+        ), "a narrower client redeemed a wider principal's confirmation"
 
     @pytest.mark.asyncio
     async def test_the_catalogue_and_the_invoke_path_cannot_disagree(
@@ -897,7 +931,9 @@ class TestTheCatalogueIsFilteredToThePin:
             resp = await bridge.handle_action(
                 _request(_State(), headers=_bearer(token), body={"action": name})
             )
-            assert resp.status == 403, f"{name} was withheld from the catalogue but invocable"
+            assert (
+                resp.status == 403
+            ), f"{name} was withheld from the catalogue but invocable"
             assert _payload(resp)["error"]["code"] == "action_not_bound"
 
     @pytest.mark.asyncio
@@ -933,8 +969,12 @@ def test_every_refusal_goes_through_the_shared_wire_emitter():
 
     src = (pathlib.Path(gideon.__file__).parent / "inbound" / "bridge.py").read_text()
     assert "from gideon.http_errors import json_error" in src
-    assert '_json({"error"' not in src, "a flat wire envelope came back through the wrapper"
-    assert 'json_response({"error"' not in src, "a flat wire envelope came back directly"
+    assert (
+        '_json({"error"' not in src
+    ), "a flat wire envelope came back through the wrapper"
+    assert (
+        'json_response({"error"' not in src
+    ), "a flat wire envelope came back directly"
 
 
 def test_write_actions_call_the_dashboards_own_services_not_a_second_path():
@@ -946,9 +986,8 @@ def test_write_actions_call_the_dashboards_own_services_not_a_second_path():
     import gideon
 
     src = (pathlib.Path(gideon.__file__).parent / "inbound" / "bridge.py").read_text()
-    assert "from gideon.tasks import registry" in src
+    assert "from gideon.engine.tasks import registry" in src
     assert "registry.create_task(" in src
     assert "store.set_enabled(" in src
-    # And it must not have grown its own writer.
-    assert "atomic_write(" in src  # the discovery file is the ONLY thing it writes itself
+    assert "atomic_write(" in src
     assert src.count("atomic_write(") == 1

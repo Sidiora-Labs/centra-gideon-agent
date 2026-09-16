@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from gideon.documents.from_markup import (
+from gideon.workspace.documents.from_markup import (
     deck_from_markdown,
     document_from_markdown,
     inline_text,
@@ -22,11 +22,6 @@ from gideon.documents.from_markup import (
 
 def _flat(text: str) -> list[tuple[str, bool, bool, bool, str]]:
     return [(r.text, r.bold, r.italic, r.code, r.link) for r in parse_inline(text)]
-
-
-# --------------------------------------------------------------------------------------
-# The four inline forms
-# --------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("src", ["**bold**", "__bold__"])
@@ -56,7 +51,6 @@ def test_a_bare_url_is_not_a_link() -> None:
 
 
 def test_an_empty_url_is_not_a_link() -> None:
-    # `link=""` is the contract's "not a link", so `[label]()` must not claim to be one.
     assert _flat("[label]()") == [("label", False, False, False, "")]
 
 
@@ -80,11 +74,6 @@ def test_mixed_line_splits_into_one_run_per_span() -> None:
         ("h", False, False, False, "u"),
         (" i", False, False, False, ""),
     ]
-
-
-# --------------------------------------------------------------------------------------
-# Nesting: SUPPORTED, by recursing into the span's content
-# --------------------------------------------------------------------------------------
 
 
 def test_italic_nested_inside_bold_is_supported() -> None:
@@ -115,11 +104,6 @@ def test_code_inside_bold_stays_code_and_stays_bold() -> None:
     ]
 
 
-# --------------------------------------------------------------------------------------
-# Code spans are literal
-# --------------------------------------------------------------------------------------
-
-
 def test_code_span_contents_are_literal() -> None:
     assert _flat("`**not bold**`") == [("**not bold**", False, False, True, "")]
 
@@ -129,7 +113,6 @@ def test_a_code_span_keeps_lone_asterisks_and_brackets() -> None:
 
 
 def test_a_delimiter_inside_a_code_span_does_not_close_emphasis() -> None:
-    # The `**` inside the span must not be mistaken for the bold closer.
     assert _flat("**a `x**y` b**") == [
         ("a ", True, False, False, ""),
         ("x**y", True, False, True, ""),
@@ -139,11 +122,6 @@ def test_a_delimiter_inside_a_code_span_does_not_close_emphasis() -> None:
 
 def test_an_empty_backtick_pair_is_not_a_code_span() -> None:
     assert _flat("a `` b") == [("a `` b", False, False, False, "")]
-
-
-# --------------------------------------------------------------------------------------
-# Unmatched markers stay literal — dropping user content is the unacceptable failure
-# --------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -175,11 +153,6 @@ def test_a_partial_link_keeps_its_leftover_bracket() -> None:
     ]
 
 
-# --------------------------------------------------------------------------------------
-# Empty input pins to NO runs
-# --------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("src", ["", "   ", "\t\n ", "\n"])
 def test_blank_input_yields_no_runs(src: str) -> None:
     assert parse_inline(src) == []
@@ -192,13 +165,6 @@ def test_edge_whitespace_is_trimmed_like_the_old_stripper_did() -> None:
     ]
 
 
-# --------------------------------------------------------------------------------------
-# Compatibility proof: MEASURED outputs of origin/main's `_strip_inline`
-# --------------------------------------------------------------------------------------
-
-# Every value below was produced by RUNNING `origin/main`'s `_strip_inline` (the four
-# `re.sub` calls plus a trailing `.strip()`) on the key. They are measurements, not
-# guesses, and they are what the seven converted call sites used to emit.
 OLD_STRIP_INLINE: dict[str, str] = {
     "plain text": "plain text",
     "**bold**": "bold",
@@ -239,34 +205,27 @@ OLD_STRIP_INLINE: dict[str, str] = {
     "[**bold link**](u)": "bold link",
 }
 
-# The six inputs where the new parser DELIBERATELY differs. Both columns are measured:
-# `old` from `origin/main`'s function, `new` from the parser under test. In every case the
-# new output KEEPS characters the old one silently ate — the one case that is not a pure
-# bug fix is the code span, which is the atom's own "code spans are literal" requirement.
 DELIBERATE_DIVERGENCE: list[tuple[str, str, str]] = [
-    # The old stripper ran its bold/italic substitutions BEFORE the code substitution, so
-    # a code span's markers were eaten. The atom requires them to survive.
     ("`**not bold**`", "not bold", "**not bold**"),
-    # An emphasis opener followed by whitespace is not an opener; arithmetic keeps its `*`.
     ("2 * 3 * 4", "2  3  4", "2 * 3 * 4"),
     ("empty ** ** marker", "empty   marker", "empty ** ** marker"),
-    # An `_` inside a word is not emphasis; identifiers keep their underscores.
     ("snake_case_name here", "snakecasename here", "snake_case_name here"),
     ("a_b_c_d", "abc_d", "a_b_c_d"),
-    # A run of 4+ delimiters is nobody's emphasis, so none of it is consumed.
     ("empty **** marker", "empty ** marker", "empty **** marker"),
 ]
 
 
 @pytest.mark.parametrize(("src", "expected"), sorted(OLD_STRIP_INLINE.items()))
-def test_joined_run_text_matches_the_measured_old_output(src: str, expected: str) -> None:
+def test_joined_run_text_matches_the_measured_old_output(
+    src: str, expected: str
+) -> None:
     assert inline_text(parse_inline(src)) == expected
 
 
 @pytest.mark.parametrize(("src", "old", "new"), DELIBERATE_DIVERGENCE)
 def test_deliberate_divergences_are_pinned(src: str, old: str, new: str) -> None:
     assert inline_text(parse_inline(src)) == new
-    assert new != old  # the row is only a divergence if the values actually differ
+    assert new != old
 
 
 def _is_subsequence(needle: str, haystack: str) -> bool:
@@ -284,7 +243,7 @@ def test_no_measured_character_is_ever_dropped(src: str) -> None:
     This is the general no-dropped-content rail: it holds across the agreeing cases AND
     the divergences, because every divergence only ever ADDS back characters.
     """
-    if src in OLD_STRIP_INLINE:  # a measured "" is a real value, not a miss
+    if src in OLD_STRIP_INLINE:
         old = OLD_STRIP_INLINE[src]
     else:
         old = next(r[1] for r in DELIBERATE_DIVERGENCE if r[0] == src)
@@ -293,22 +252,15 @@ def test_no_measured_character_is_ever_dropped(src: str) -> None:
     assert _is_subsequence(new, src), f"{new!r} invents text not present in {src!r}"
 
 
-# --------------------------------------------------------------------------------------
-# The clean break: `_strip_inline` does not survive anywhere
-# --------------------------------------------------------------------------------------
+_REPO = Path(__file__).resolve().parents[2]
 
-_REPO = Path(__file__).resolve().parents[1]
-
-#: Every tree that SHIPS, the file types to read in it, and names that are genuinely present
-#: there. `docs/` and this file are excluded deliberately: the plan and the compatibility
-#: table above MUST keep naming `_strip_inline` for the deletion to stay auditable.
 _SHIPPED_SOURCE = (
     (
-        _REPO / "src" / "gideon",
+        _REPO / "runtime" / "gideon",
         ("*.py",),
         ("parse_inline", "inline_text", "document_from_markdown", "class Block"),
     ),
-    (_REPO / "web" / "src", ("*.ts", "*.tsx"), ("displayText",)),
+    (_REPO / "apps/console" / "src", ("*.ts", "*.tsx"), ("displayText",)),
 )
 
 
@@ -316,26 +268,24 @@ def test_strip_inline_is_cited_nowhere_in_shipped_source() -> None:
     """The old name is gone from the whole product, not just the package that held it.
 
     Scoping this to `documents/` — where the function lived — is the narrow reading that let
-    `web/src/pages/knowledge/readingOutline.ts` go on citing `_strip_inline` for its stripping
+    `apps/console/src/pages/knowledge/readingOutline.ts` go on citing `_strip_inline` for its stripping
     behaviour long after that behaviour was INVERTED into run parsing. A dangling citation of a
     deleted function is how the old mental model comes back, so the rail spans both trees.
     """
     for root, globs, present_names in _SHIPPED_SOURCE:
         assert root.is_dir(), f"shipped source tree not found at {root}"
         files = sorted(path for pattern in globs for path in root.rglob(pattern))
-        assert len(files) >= 3, f"only {len(files)} files scanned under {root} — too narrow"
+        assert (
+            len(files) >= 3
+        ), f"only {len(files)} files scanned under {root} — too narrow"
         blob = "\n".join(p.read_text(encoding="utf-8") for p in files)
-        # Vacuity floor, PER TREE: the same read must find names that ARE there. Without it a
-        # typo'd needle, a wrong path or an empty blob keeps this green forever while the
-        # citation sits in the file — exactly the false green that hid the web/ one.
         for present in present_names:
-            assert present in blob, f"vacuity guard failed: {present!r} not found under {root}"
-        assert "_strip_inline" not in blob, f"`_strip_inline` is still cited under {root}"
-
-
-# --------------------------------------------------------------------------------------
-# The converted call sites
-# --------------------------------------------------------------------------------------
+            assert (
+                present in blob
+            ), f"vacuity guard failed: {present!r} not found under {root}"
+        assert (
+            "_strip_inline" not in blob
+        ), f"`_strip_inline` is still cited under {root}"
 
 
 def test_a_paragraph_carries_runs_and_derives_its_text() -> None:
@@ -348,7 +298,6 @@ def test_a_paragraph_carries_runs_and_derives_its_text() -> None:
         ("code", False, True),
         (" here.", False, False),
     ]
-    # `text` comes from the model's derivation, not from a second computation here.
     assert block.text == "Some bold and code here."
 
 
@@ -387,14 +336,11 @@ def test_table_cells_stay_plain_strings() -> None:
 def test_a_code_fence_is_still_verbatim() -> None:
     block = document_from_markdown("```\na **b** c\n```").blocks[0]
     assert block.kind == "code"
-    assert block.text == "a **b** c"  # never inline-parsed
+    assert block.text == "a **b** c"
 
 
 def test_deck_titles_and_bodies_stay_plain_strings() -> None:
     deck = deck_from_markdown("# My **deck**\n\n## Slide *one*\n\n- a `b` c")
     assert deck.title == "My deck"
     assert deck.slides[0].title == "Slide one"
-    # DFE-8 replaced `Slide.body: list[str]` with `bullets: list[Bullet]` so a bullet can
-    # carry its indent depth. The claim here is unchanged and is still the point of this
-    # file: inline runs (**bold**, *em*, `code`) are FLATTENED to plain text on the way in.
     assert [b.text for b in deck.slides[0].bullets] == ["a b c"]

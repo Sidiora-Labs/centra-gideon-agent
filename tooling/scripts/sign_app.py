@@ -4,14 +4,14 @@
 Three subcommands:
 
   gen-key   generate an Ed25519 keypair: ``<Signer>.pub`` (minisign format, goes in
-            ``src/gideon/trusted_keys/``) + ``<Signer>.seed`` (the SECRET, 0600).
+            ``runtime/gideon/security/trusted_keys/``) + ``<Signer>.seed`` (the SECRET, 0600).
   sign      write ``.gideon-signature.sha256`` (a canonical whole-tree digest manifest)
             and ``.gideon-signature.sha256.minisig`` (the detached signature over it).
-  verify    run the shipped verifier (``gideon.signing.verify_bundle``) against a
+  verify    run the shipped verifier (``gideon.security.signing.verify_bundle``) against a
             bundle and print the state/signer/reason. The round-trip check.
 
 **Why the signature covers a digest manifest and not just ``app.json``:** signing the
-manifest alone leaves ``scripts/`` unsigned, so an attacker swaps the unsigned half and
+manifest alone leaves ``tooling/scripts/`` unsigned, so an attacker swaps the unsigned half and
 the signature still checks out. The manifest lists a sha256 for EVERY file, and the
 verifier re-derives it from the tree and demands byte equality, so a changed, added,
 removed or renamed file all fail one comparison.
@@ -38,23 +38,20 @@ import secrets
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT / "src"))
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT / "runtime"))
 
-from gideon.signing import (  # noqa: E402  (path bootstrap must precede the import)
-    MANIFEST_FILENAME,
-    SIGNATURE_FILENAME,
-    ManifestError,
-    TrustedKey,
-    build_digest_manifest,
-    verify_bundle,
-)
+from gideon.security.signing import MANIFEST_FILENAME
+from gideon.security.signing import SIGNATURE_FILENAME
+from gideon.security.signing import ManifestError
+from gideon.security.signing import TrustedKey
+from gideon.security.signing import build_digest_manifest
+from gideon.security.signing import verify_bundle
 
 _ALG_PREHASHED = b"ED"
 _SEED_HEADER = "# Gideon signing SEED — SECRET. Never commit. Never share."
 
 
-# ── key generation ──────────────────────────────────────────────────────────────
 
 
 def _ed25519() -> tuple[object, object]:
@@ -117,7 +114,6 @@ def _read_seed(path: Path) -> tuple[bytes, bytes]:
     return raw[:8], raw[8:]
 
 
-# ── signing ─────────────────────────────────────────────────────────────────────
 
 
 def sign_bundle(bundle: Path, seed_path: Path, *, trusted_comment: str = "") -> Path:
@@ -126,9 +122,6 @@ def sign_bundle(bundle: Path, seed_path: Path, *, trusted_comment: str = "") -> 
     key_id, seed = _read_seed(seed_path)
     private = private_cls.from_private_bytes(seed)  # type: ignore[attr-defined]
 
-    # Remove any stale signature first, so the manifest is built over the same tree the
-    # verifier will see (a leftover .minisig is excluded from the manifest either way,
-    # but a stale manifest FILE would otherwise be regenerated from itself).
     (bundle / MANIFEST_FILENAME).unlink(missing_ok=True)
     (bundle / SIGNATURE_FILENAME).unlink(missing_ok=True)
 
@@ -166,7 +159,6 @@ def _own_key(seed_path: Path) -> dict[bytes, TrustedKey]:
     return {key_id: TrustedKey(signer=seed_path.stem, key_id=key_id, public_key=public)}
 
 
-# ── CLI ─────────────────────────────────────────────────────────────────────────
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -192,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
         pub, seed = gen_key(args.signer, args.out_dir)
         print(f"public key: {pub}")
         print(f"SECRET seed: {seed}  (mode 0600 — move it to your password manager)")
-        print(f"install the public half: cp {pub} src/gideon/trusted_keys/")
+        print(f"install the public half: cp {pub} runtime/gideon/security/trusted_keys/")
         return 0
 
     if args.cmd == "sign":
@@ -200,9 +192,6 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit(f"not a directory: {args.bundle}")
         sig = sign_bundle(args.bundle, args.seed)
         print(f"signed {args.bundle} → {sig.name}")
-        # Round-trip against the key we just signed with, NOT the packaged trust store:
-        # this asserts the crypto, and the next line separately reports whether the
-        # verifying end actually trusts this signer yet.
         info = verify_bundle(args.bundle, keys=_own_key(args.seed))
         print(f"self-check: state={info.state.value} signer={info.signer or '-'} {info.reason}")
         store = verify_bundle(args.bundle)

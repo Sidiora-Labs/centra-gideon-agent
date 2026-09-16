@@ -9,25 +9,27 @@ from __future__ import annotations
 
 import sqlite3 as _stdlib_sqlite
 
-from gideon import sqlite_compat
+from gideon.core import sqlite_compat
 
 
 def test_all_consumers_share_this_binding():
     """The six former per-module imports now resolve to this module's driver, so a
     test that patches SQLite has ONE bind point instead of seven."""
-    from gideon import memory, portability, snapshot, vector_memory
-    from gideon.knowledge import retrieval
-    from gideon.loop import store
+    from gideon.automation.loop import store
+    from gideon.cognition import memory, vector_memory
+    from gideon.cognition.knowledge import retrieval
+    from gideon.workspace import portability, snapshot
 
     for mod in (snapshot, memory, portability, vector_memory, retrieval, store):
-        assert mod.sqlite3 is sqlite_compat.sqlite3, f"{mod.__name__} bound a different sqlite3"
+        assert (
+            mod.sqlite3 is sqlite_compat.sqlite3
+        ), f"{mod.__name__} bound a different sqlite3"
 
 
 def test_probe_reports_the_real_driver_and_version():
     cap = sqlite_compat.probe()
     assert cap.driver in ("pysqlite3", "sqlite3")
     assert cap.driver == sqlite_compat.driver_name()
-    # A real version string like "3.45.1" (never the "unknown" fallback on a healthy env).
     assert cap.version and cap.version[0].isdigit()
 
 
@@ -128,7 +130,6 @@ def test_resolved_driver_is_a_real_sqlite_module():
     """Whatever resolved, it behaves like the DB-API sqlite3 (connect + Error)."""
     assert hasattr(sqlite_compat.sqlite3, "connect")
     assert issubclass(sqlite_compat.sqlite3.Error, Exception)
-    # If the stdlib resolved, it IS the stdlib module (sanity on the fallback path).
     if sqlite_compat.driver_name() == "sqlite3":
         assert sqlite_compat.sqlite3 is _stdlib_sqlite
 
@@ -149,9 +150,11 @@ def test_no_production_site_uses_a_bare_with_on_a_connection():
     import re
     from pathlib import Path
 
-    src = Path(__file__).resolve().parent.parent / "src" / "gideon"
+    src = Path(__file__).resolve().parent.parent.parent / "runtime" / "gideon"
     files = sorted(src.rglob("*.py"))
-    assert len(files) > 100, f"only {len(files)} source files scanned — did the tree move?"
+    assert (
+        len(files) > 100
+    ), f"only {len(files)} source files scanned — did the tree move?"
 
     pattern = re.compile(r"with\s+(?:\w+\.)*sqlite3\.connect\(")
     offenders = [

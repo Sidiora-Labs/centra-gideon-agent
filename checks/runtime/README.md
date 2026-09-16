@@ -13,7 +13,7 @@ make test
 python -m pytest
 
 # Specific file
-python -m pytest tests/test_provider_registry.py -v
+python -m pytest checks/runtime/test_provider_registry.py -v
 
 # Filter by keyword
 python -m pytest -k provider_lazy_imports -v
@@ -34,9 +34,9 @@ That stage runs `black --check`, `isort --check-only`, `flake8`, `mypy`, and
 ## Bytecode cache (mutation testing is only evidence with this armed)
 
 Every run points its bytecode cache at a fresh temp directory —
-`tests/conftest.py` calls `pycache_guard.activate()` before it imports anything
+`checks/runtime/conftest.py` calls `pycache_guard.activate()` before it imports anything
 under test. Nothing you have to remember, and nothing to add to a mutation
-cycle: it applies to `make test`, a targeted `pytest tests/test_x.py::test_y`,
+cycle: it applies to `make test`, a targeted `pytest checks/runtime/test_x.py::test_y`,
 and CI alike.
 
 It exists because CPython validates a `.pyc` against the source's
@@ -49,7 +49,7 @@ disk, in the false-confidence direction (the mutation reads as *caught*).
 `python -B` does **not** fix this — it stops the interpreter *writing* a cache,
 not *reading* one — and `-p no:cacheprovider` is about `.pytest_cache`, not
 `__pycache__`. Rationale, measurements and the alternative that was weighed:
-`tests/pycache_guard.py`. Proof: `tests/test_pycache_guard.py`.
+`checks/runtime/pycache_guard.py`. Proof: `checks/runtime/test_pycache_guard.py`.
 
 It covers stale bytecode only. A mutation run that *dies* partway through leaves
 the mutation in the source, no cache involved, and this rail does not see that
@@ -61,7 +61,7 @@ self-certifying. From here the run enforces the bytecode half.
 
 ## Conventions
 
-- Test files: `tests/test_<module>.py`
+- Test files: `checks/runtime/test_<module>.py`
 - pytest-asyncio is configured in strict mode — every async test needs
   `@pytest.mark.asyncio`
 - Use the `tmp_path` fixture for filesystem tests
@@ -72,10 +72,10 @@ self-certifying. From here the run enforces the bytecode half.
 
 ## Smoke tests
 
-- `tests/smoke_gateway.sh` — end-to-end gateway security smoke test (requires
+- `checks/runtime/smoke_gateway.sh` — end-to-end gateway security smoke test (requires
   a running gateway on `localhost:10000`)
-- `tests/smoke_sandbox.sh` — sandbox isolation smoke test
-- `tests/debug_sandbox.sh` — on-host sandbox check (detected backend + wrapped `ls ~/.aws/`)
+- `checks/runtime/smoke_sandbox.sh` — sandbox isolation smoke test
+- `checks/runtime/debug_sandbox.sh` — on-host sandbox check (detected backend + wrapped `ls ~/.aws/`)
 
 These are not run by `make test`; they are manual scripts for verifying live
 behavior against a running gateway.

@@ -9,10 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.knowledge.store import KnowledgeStore
-from gideon.vector_memory import VectorMemoryStore
-
-# ── Knowledge store ──
+from gideon.cognition.knowledge.store import KnowledgeStore
+from gideon.cognition.vector_memory import SemanticArchive
 
 
 def _kstore(tmp_path) -> KnowledgeStore:
@@ -21,9 +19,13 @@ def _kstore(tmp_path) -> KnowledgeStore:
 
 def _add(store, title, content, summary="", embedding=None):
     """Create one logical-doc item, optionally with a raw embedding blob."""
-    iid = store.create_typed_item(item_type="note", title=title, content=content, summary=summary)
+    iid = store.create_typed_item(
+        item_type="note", title=title, content=content, summary=summary
+    )
     if embedding is not None:
-        store.db.execute("UPDATE items SET embedding = ? WHERE id = ?", (embedding, iid))
+        store.db.execute(
+            "UPDATE items SET embedding = ? WHERE id = ?", (embedding, iid)
+        )
         store.db.commit()
     return iid
 
@@ -36,12 +38,9 @@ def test_knowledge_clear_and_reembed(tmp_path):
     assert store.count_items_to_reembed() == 2
     cleared = store.clear_embeddings()
     assert cleared == 2
-    # All embeddings now NULL.
     rows = store.db.execute("SELECT embedding FROM items").fetchall()
     assert all(r["embedding"] is None for r in rows)
 
-    # A fake embedder that returns a vector per item. embed_for_item takes the same
-    # (title, summary, content) shape the real embedder + reembed_all use.
     class _Emb:
         def embed_for_item(self, title, summary, content=None):
             return [0.1, 0.2, 0.3]
@@ -66,7 +65,7 @@ def test_reembed_all_cannot_use_a_bare_callable(tmp_path):
     caller handing over `get_active_embed_fn()` gets a plausible-looking report whose
     `reembedded` is 0, and nothing else in the system objects.
     """
-    from gideon.knowledge.embedder import UnifiedEmbedder
+    from gideon.cognition.knowledge.embedder import UnifiedEmbedder
 
     store = _kstore(tmp_path)
     _add(store, "Title A", "content a")
@@ -78,7 +77,6 @@ def test_reembed_all_cannot_use_a_bare_callable(tmp_path):
     assert store.reembed_all(embed) == {"reembedded": 0, "failed": 2, "total": 2}
     assert store.count_items_missing_embedding() == 2, "nothing was embedded"
 
-    # The same function, wrapped in the embedder the working callers pass.
     assert store.reembed_all(UnifiedEmbedder(embed)) == {
         "reembedded": 2,
         "failed": 0,
@@ -94,14 +92,13 @@ def test_count_items_missing_embedding_detects_interrupted_reindex(tmp_path):
     store = _kstore(tmp_path)
     _add(store, "Has text A", "content a", embedding=b"\x00\x00")
     _add(store, "Has text B", "content b", embedding=b"\x11\x11")
-    assert store.count_items_missing_embedding() == 0  # whole store → nothing to resume
+    assert store.count_items_missing_embedding() == 0
 
-    store.clear_embeddings()  # re-index begins → vectors nulled
-    assert store.count_items_missing_embedding() == 2  # interrupted signature
+    store.clear_embeddings()
+    assert store.count_items_missing_embedding() == 2
 
-    # A text-less item must NOT trigger a phantom resume.
     store.create_typed_item(item_type="note", title="", content="")
-    assert store.count_items_missing_embedding() == 2  # still just the 2 text-bearing
+    assert store.count_items_missing_embedding() == 2
 
 
 def test_count_items_needing_reembed_detects_stale_dim(tmp_path):
@@ -110,19 +107,13 @@ def test_count_items_needing_reembed_detects_stale_dim(tmp_path):
     against the new model. count_items_needing_reembed(active_dim) catches missing OR
     stale-dim; the missing-only signal would leave the store silently unsearchable."""
     store = _kstore(tmp_path)
-    # 384-dim vectors (384 floats * 4 bytes = 1536 bytes) from a previous model.
     v384 = b"\x00" * (384 * 4)
     _add(store, "Item A", "content a", embedding=v384)
     _add(store, "Item B", "content b", embedding=v384)
-    # missing-only sees a "whole" store (vectors present) — the gap the old hook had.
     assert store.count_items_missing_embedding() == 0
-    # But against the ACTIVE model's 768 dim, both are stale → need re-embed.
     assert store.count_items_needing_reembed(768) == 2
-    # Same dim → nothing needs re-embedding.
     assert store.count_items_needing_reembed(384) == 0
-    # Unknown active dim (embedder not ready) → falls back to missing-only (0 here).
     assert store.count_items_needing_reembed(None) == 0
-    # A NULL vector counts as needing re-embed regardless of dim.
     store.clear_embeddings()
     assert store.count_items_needing_reembed(768) == 2
 
@@ -133,28 +124,25 @@ def test_knowledge_reembed_tolerates_failure(tmp_path):
 
     class _NullEmb:
         def embed_for_item(self, title, summary, content=None):
-            return None  # model unavailable for this item
+            return None
 
     res = store.reembed_all(_NullEmb())
     assert res["reembedded"] == 0 and res["failed"] == 1 and res["total"] == 1
 
 
-# ── Vector (episodic) memory ──
-
-
 def test_memory_reembed_episodic(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    store = VectorMemoryStore(db_path=tmp_path / "v.db")
+    store = SemanticArchive(db_path=tmp_path / "v.db")
     store.init()
-    # Seed episodic rows WITHOUT embeddings (text preserved).
     store.embed_fn = None
-    assert store.write_episodic("the user prefers dark mode in the editor", conversation_id="c1")
+    assert store.write_episodic(
+        "the user prefers dark mode in the editor", conversation_id="c1"
+    )
     assert store.write_episodic(
         "the project deadline is the end of the quarter", conversation_id="c1"
     )
     assert store.count_episodic_to_reembed() == 2
 
-    # Now wire an embed_fn and re-embed.
     store.embed_fn = lambda text: [0.5, 0.5, 0.5]
     store._embedding_dim = 3
     res = store.reembed_all()
@@ -167,17 +155,15 @@ def test_memory_reembed_episodic(tmp_path, monkeypatch):
 
 def test_memory_reembed_noop_without_embed_fn(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    store = VectorMemoryStore(db_path=tmp_path / "v.db")
+    store = SemanticArchive(db_path=tmp_path / "v.db")
     store.init()
     store.embed_fn = None
     store.write_episodic(
-        "a sufficiently long episodic memory to pass length checks", conversation_id="c1"
+        "a sufficiently long episodic memory to pass length checks",
+        conversation_id="c1",
     )
     res = store.reembed_all()
     assert res == {"reembedded": 0, "failed": 0, "total": 0}
-
-
-# ── Readiness gate (handler refuses to wipe when model not ready) ──
 
 
 @pytest.mark.asyncio
@@ -187,14 +173,15 @@ async def test_reindex_start_blocks_when_model_not_ready(monkeypatch):
 
     from aiohttp.test_utils import make_mocked_request
 
-    from gideon.dashboard.handlers import embedding_reindex as H
+    from gideon.interfaces.dashboard.handlers import embedding_reindex as H
 
-    # No active embedding model / not downloaded → get_active_embed_fn returns None.
     monkeypatch.setattr(
-        "gideon.embedding_providers.registry.get_active_embed_fn", lambda: None
+        "gideon.integrations.embedding_providers.registry.get_active_embed_fn",
+        lambda: None,
     )
     monkeypatch.setattr(
-        "gideon.embedding_providers.registry._active_embedding_spec", lambda: None
+        "gideon.integrations.embedding_providers.registry._active_embedding_spec",
+        lambda: None,
     )
 
     state = SimpleNamespace(embedding_reindex=lambda: SimpleNamespace())
@@ -206,17 +193,6 @@ async def test_reindex_start_blocks_when_model_not_ready(monkeypatch):
     assert json.loads(resp.body)["code"] == "model_not_ready"
 
 
-# ── KL-12/KL-14: the chunk backfill as a graph-maintenance pass ──────────────
-#
-# The backfill's product surface is that it runs by itself: a user who upgrades gets deep
-# recall over the library they already have without knowing to ask for it. It used to run
-# from a boot hook, which fires exactly once — so a gateway left up for a week never chunked
-# anything ingested after start. It is now a maintenance pass, and is tested as one: that it
-# chunks a pre-existing library, that it is cheap when there is nothing to do, that it defers
-# when no model is bound, that ONE call is ONE bounded batch (the host owns the loop), and
-# that something actually registers it.
-
-
 class _ChunkEmbedder:
     def embed(self, text):
         return [1.0, 0.0, 0.0, 0.0]
@@ -226,9 +202,11 @@ class _ChunkEmbedder:
 
 
 def _stub_resolve(monkeypatch, embedder):
-    from gideon.dashboard.handlers import embedding_reindex as handler
+    from gideon.interfaces.dashboard.handlers import embedding_reindex as handler
 
-    monkeypatch.setattr(handler, "_resolve_embed", lambda app: (embedder, None, "stub:model"))
+    monkeypatch.setattr(
+        handler, "_resolve_embed", lambda app: (embedder, None, "stub:model")
+    )
 
 
 def _stub_store(monkeypatch, store):
@@ -237,13 +215,13 @@ def _stub_store(monkeypatch, store):
     The pass runs from a tick and has no aiohttp app, so this accessor — not an app dict —
     is the seam. Patched so the real home is never opened.
     """
-    import gideon.knowledge as knowledge
+    import gideon.cognition.knowledge as knowledge
 
     monkeypatch.setattr(knowledge, "get_knowledge_store", lambda: store)
 
 
 def test_chunk_backfill_pass_chunks_the_pre_existing_library(tmp_path, monkeypatch):
-    from gideon.dashboard.embedding_reindex import chunk_backfill_pass
+    from gideon.interfaces.dashboard.embedding_reindex import chunk_backfill_pass
 
     store = _kstore(tmp_path)
     for i in range(3):
@@ -254,27 +232,33 @@ def test_chunk_backfill_pass_chunks_the_pre_existing_library(tmp_path, monkeypat
 
     assert chunk_backfill_pass(batch_size=25) == 3
     assert store.count_items_missing_chunks() == 0
-    assert all(store.get_chunks(r["id"]) for r in store.db.execute("SELECT id FROM items"))
+    assert all(
+        store.get_chunks(r["id"]) for r in store.db.execute("SELECT id FROM items")
+    )
 
 
-def test_chunk_backfill_pass_is_a_cheap_no_op_on_a_chunked_library(tmp_path, monkeypatch):
+def test_chunk_backfill_pass_is_a_cheap_no_op_on_a_chunked_library(
+    tmp_path, monkeypatch
+):
     """It runs on EVERY tick, so "nothing to do" must not resolve a model (which probes the
     provider) and must report 0 so the host stops claiming sub-batches."""
-    from gideon.dashboard.embedding_reindex import chunk_backfill_pass
+    from gideon.interfaces.dashboard.embedding_reindex import chunk_backfill_pass
 
     store = _kstore(tmp_path)
-    _add(store, "blank", "")  # no content — never in the backlog
+    _add(store, "blank", "")
     calls = []
-    from gideon.dashboard.handlers import embedding_reindex as handler
+    from gideon.interfaces.dashboard.handlers import embedding_reindex as handler
 
     _stub_store(monkeypatch, store)
-    monkeypatch.setattr(handler, "_resolve_embed", lambda app: calls.append(1) or (None, None, ""))
+    monkeypatch.setattr(
+        handler, "_resolve_embed", lambda app: calls.append(1) or (None, None, "")
+    )
     assert chunk_backfill_pass(batch_size=25) == 0
     assert calls == [], "the embedder must not be resolved when the backlog is empty"
 
 
 def test_chunk_backfill_pass_defers_when_no_model_is_ready(tmp_path, monkeypatch):
-    from gideon.dashboard.embedding_reindex import chunk_backfill_pass
+    from gideon.interfaces.dashboard.embedding_reindex import chunk_backfill_pass
 
     store = _kstore(tmp_path)
     _add(store, "doc", "# H\n\nreal content\n")
@@ -288,7 +272,7 @@ def test_chunk_backfill_pass_claims_one_bounded_batch_per_call(tmp_path, monkeyp
     """The host loops until a pass returns 0, so ONE call must be ONE bounded batch. A pass
     that drained the whole library per call would hold the store for a big library and make
     `max_batches` meaningless."""
-    from gideon.dashboard.embedding_reindex import chunk_backfill_pass
+    from gideon.interfaces.dashboard.embedding_reindex import chunk_backfill_pass
 
     store = _kstore(tmp_path)
     for i in range(3):
@@ -300,19 +284,25 @@ def test_chunk_backfill_pass_claims_one_bounded_batch_per_call(tmp_path, monkeyp
     assert store.count_items_missing_chunks() == 1, "the rest stays in the backlog"
     assert chunk_backfill_pass(batch_size=2) == 1
     assert store.count_items_missing_chunks() == 0
-    assert chunk_backfill_pass(batch_size=2) == 0, "0 == nothing left, which stops the host"
+    assert (
+        chunk_backfill_pass(batch_size=2) == 0
+    ), "0 == nothing left, which stops the host"
 
 
-def test_a_chunk_backfill_fault_does_not_take_down_the_maintenance_host(tmp_path, monkeypatch):
+def test_a_chunk_backfill_fault_does_not_take_down_the_maintenance_host(
+    tmp_path, monkeypatch
+):
     """The pass propagates and the HOST isolates it. Asserted at the host rather than by
     swallowing inside the pass: a pass that ate its own faults would report success forever
     with the backlog untouched, and nothing downstream could tell."""
-    import gideon.knowledge as knowledge
-    from gideon.config import loader
-    from gideon.dashboard.embedding_reindex import register_chunk_backfill_pass
-    from gideon.knowledge import maintenance
+    import gideon.cognition.knowledge as knowledge
+    from gideon.cognition.knowledge import maintenance
+    from gideon.core.config import loader
+    from gideon.interfaces.dashboard.embedding_reindex import (
+        register_chunk_backfill_pass,
+    )
 
-    monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)  # watermark file, not the home
+    monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(maintenance, "_PASSES", {})
 
     def _boom():
@@ -320,8 +310,9 @@ def test_a_chunk_backfill_fault_does_not_take_down_the_maintenance_host(tmp_path
 
     monkeypatch.setattr(knowledge, "get_knowledge_store", _boom)
     ran = []
-    # Sorted after "chunk_backfill", so it only runs if the failing pass did not end the run.
-    maintenance.register_pass("zz_other", lambda *, batch_size: ran.append(batch_size) or 0)
+    maintenance.register_pass(
+        "zz_other", lambda *, batch_size: ran.append(batch_size) or 0
+    )
     register_chunk_backfill_pass()
 
     result = maintenance.execute(batch_size=5)
@@ -335,11 +326,13 @@ def test_the_gateway_registers_the_chunk_backfill_maintenance_pass(monkeypatch):
     import ast
     import pathlib
 
-    from gideon.dashboard.embedding_reindex import register_chunk_backfill_pass
-    from gideon.knowledge import maintenance
+    from gideon.cognition.knowledge import maintenance
+    from gideon.interfaces.dashboard.embedding_reindex import (
+        register_chunk_backfill_pass,
+    )
 
     src = pathlib.Path(
-        __import__("gideon.dashboard.server", fromlist=["x"]).__file__
+        __import__("gideon.interfaces.dashboard.server", fromlist=["x"]).__file__
     ).read_text()
     tree = ast.parse(src)
     called = {
@@ -359,9 +352,10 @@ def test_the_gateway_registers_the_chunk_backfill_maintenance_pass(monkeypatch):
         and node.args
         and isinstance(node.args[0], ast.Name)
     }
-    assert "_backfill_item_chunks_startup" not in appended, "the boot hook must stay deleted"
+    assert (
+        "_backfill_item_chunks_startup" not in appended
+    ), "the boot hook must stay deleted"
 
-    # …and the registrar really registers, under the name the host will look up.
     monkeypatch.setattr(maintenance, "_PASSES", {})
     register_chunk_backfill_pass()
     assert maintenance.registered_passes() == ["chunk_backfill"]

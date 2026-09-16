@@ -6,17 +6,13 @@ import asyncio
 
 import pytest
 
-from gideon.channel_transports.base import (
+from gideon.integrations.channel_transports.base import (
     ChannelCapabilities,
     ChannelMessage,
     ChannelTransportProvider,
     OutboundMessage,
 )
-from gideon.channel_transports.webui import WebUITransport
-
-# NOTE: SlackTransport moved to the standalone slack-channel app (apps/slack-channel/);
-# its capability test lives there as apps/slack-channel/test_provider.py. This module
-# covers the generic channel contract + the core-built-in WebUI transport only.
+from gideon.integrations.channel_transports.webui import WebUITransport
 
 
 def test_channel_message_shape():
@@ -34,9 +30,6 @@ def test_capabilities_defaults_conservative():
 def test_capabilities_to_dict():
     d = ChannelCapabilities(inbound=True, threads=True, max_text_len=100).to_dict()
     assert d["inbound"] is True and d["threads"] is True and d["max_text_len"] == 100
-
-
-# ── ABC defaults ──
 
 
 class _BareTransport(ChannelTransportProvider):
@@ -69,13 +62,10 @@ def test_info_includes_capabilities():
     assert "capabilities" in t.info()
 
 
-# ── concrete adapters declare real capabilities ──
-
-
 def test_webui_capabilities():
     c = WebUITransport().capabilities()
     assert c.inbound and c.rich_text and c.attachments
-    assert c.reactions is False  # web UI has no emoji reactions
+    assert c.reactions is False
 
 
 def test_adapters_expose_caps_in_info():

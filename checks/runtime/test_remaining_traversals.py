@@ -1,6 +1,6 @@
 """The three traversal instances `record_ids` did not reach (#655, #430, #739).
 
-The unvalidated-id-to-path class was closed by :mod:`gideon.record_ids` for the stores that
+The unvalidated-id-to-path class was closed by :mod:`gideon.core.record_ids` for the stores that
 name a record ``<dir>/<id>``. These three are the same class reached differently, so the primitive
 alone did not cover them:
 
@@ -29,8 +29,8 @@ from pathlib import Path
 
 import pytest
 
-from gideon.dashboard.handlers import files as F
-from gideon.record_ids import UnsafeRecordId
+from gideon.core.record_ids import UnsafeRecordId
+from gideon.interfaces.dashboard.handlers import files as F
 
 
 @pytest.fixture()
@@ -43,9 +43,6 @@ def roots(tmp_path, monkeypatch):
     (outside / ".env").write_text("SECRET=1")
     monkeypatch.setattr(F, "_dashboard_roots", lambda: [("Workspace", str(root))])
     return root, outside
-
-
-# ── #430: the gitfile pointer ─────────────────────────────────────────────────
 
 
 class TestGitdirContainment:
@@ -61,7 +58,8 @@ class TestGitdirContainment:
 
     def test_a_RELATIVE_pointer_out_of_root_is_refused(self, roots):
         """git resolves a relative gitdir against the marker's directory, so the escape does not
-        need an absolute path — and a check that only rejected absolute ones would miss this."""
+        need an absolute path — and a check that only rejected absolute ones would miss this.
+        """
         root, outside = roots
         (outside / ".git").mkdir()
         probe = root / "probe"
@@ -107,7 +105,9 @@ class TestGitdirContainment:
         (wt / ".git").write_text(f"gitdir: {link / '.git' / 'worktrees' / 'wt'}\n")
         assert F._git_repo_root(str(wt)) == str(wt)
 
-    @pytest.mark.parametrize("body", ["", "not a gitdir line\n", "gitdir:\n", "gitdir:   \n"])
+    @pytest.mark.parametrize(
+        "body", ["", "not a gitdir line\n", "gitdir:\n", "gitdir:   \n"]
+    )
     def test_a_garbage_pointer_is_not_a_repo(self, roots, body):
         root, _ = roots
         probe = root / "probe"
@@ -116,15 +116,16 @@ class TestGitdirContainment:
         assert F._git_repo_root(str(probe)) is None
 
 
-# ── #739 + the quarantine: skill install directory names ──────────────────────
-
-
 class TestSkillInstallDirectoryName:
-    FILES = [{"path": "SKILL.md", "contents": "---\nname: ok\ndescription: d\n---\n\nbody\n"}]
+    FILES = [
+        {"path": "SKILL.md", "contents": "---\nname: ok\ndescription: d\n---\n\nbody\n"}
+    ]
 
-    @pytest.mark.parametrize("name", ["../../evil", "/tmp/evil", "..", "a/b", "a\\b", ""], ids=repr)
+    @pytest.mark.parametrize(
+        "name", ["../../evil", "/tmp/evil", "..", "a/b", "a\\b", ""], ids=repr
+    )
     def test_an_escaping_skill_name_is_refused(self, name, tmp_path):
-        from gideon.skills.marketplace import install_skill_files
+        from gideon.extensions.skills.marketplace import install_skill_files
 
         base = tmp_path / "skills"
         base.mkdir()
@@ -134,7 +135,7 @@ class TestSkillInstallDirectoryName:
     def test_an_ordinary_skill_name_still_installs(self, tmp_path):
         """Vacuity floor: every file path was already validated, so a guard that refused all names
         would pass the tests above and break installing anything."""
-        from gideon.skills.marketplace import install_skill_files
+        from gideon.extensions.skills.marketplace import install_skill_files
 
         base = tmp_path / "skills"
         base.mkdir()
@@ -145,7 +146,7 @@ class TestSkillInstallDirectoryName:
     def test_nothing_is_created_outside_the_base(self, tmp_path):
         """The property, not just the exception: a refusal must also not have `mkdir`'d on its way
         to raising."""
-        from gideon.skills.marketplace import install_skill_files
+        from gideon.extensions.skills.marketplace import install_skill_files
 
         base = tmp_path / "skills"
         base.mkdir()
@@ -164,7 +165,7 @@ class TestSkillInstallDirectoryName:
         """
         import inspect
 
-        from gideon.skills import marketplace as M
+        from gideon.extensions.skills import marketplace as M
 
         src = inspect.getsource(M.install_scanned)
         assert (
@@ -174,12 +175,9 @@ class TestSkillInstallDirectoryName:
 
         staged_root = Path(tempfile.mkdtemp())
         with pytest.raises(UnsafeRecordId):
-            from gideon.record_ids import record_path
+            from gideon.core.record_ids import record_path
 
             record_path(staged_root, "../../evil", suffix="", kind="skill name")
-
-
-# ── #655: /api/reveal ─────────────────────────────────────────────────────────
 
 
 class TestRevealRootAllowlist:
@@ -201,9 +199,6 @@ class TestRevealRootAllowlist:
         _root, outside = roots
         resp = await F.api_reveal_path(self._request({"path": str(outside / ".env")}))
         assert resp.status == 400
-        # The STRUCTURED envelope, unlike this module's six flat siblings emitting the
-        # same sentence: `test_wire_error_envelope_census` ratchets the flat population
-        # down, so a new refusal joins the shape the project converges on.
         error = _json.loads(resp.body.decode())["error"]
         assert error["code"] == "invalid_path"
         assert "forbidden" in error["message"]
@@ -216,7 +211,9 @@ class TestRevealRootAllowlist:
         assert resp.status == 400
 
     @pytest.mark.asyncio
-    async def test_the_guard_it_skipped_is_the_one_it_now_calls(self, roots, monkeypatch):
+    async def test_the_guard_it_skipped_is_the_one_it_now_calls(
+        self, roots, monkeypatch
+    ):
         """Pins the wiring rather than the outcome: an equivalent hand-rolled check here would pass
         the two tests above and drift from `_validate_dashboard_path` the first time that changes.
         """
@@ -232,14 +229,15 @@ class TestRevealRootAllowlist:
         assert seen == ["/etc/hosts"]
 
     @pytest.mark.asyncio
-    async def test_an_in_root_path_is_not_refused_by_the_new_guard(self, roots, monkeypatch):
+    async def test_an_in_root_path_is_not_refused_by_the_new_guard(
+        self, roots, monkeypatch
+    ):
         """Vacuity floor: the only caller is the explorer's Reveal button, passing a path the
         explorer enumerated. A guard that refused those would make the button permanently broken.
         """
         root, _ = roots
         target = root / "notes.md"
         target.write_text("hello")
-        # Stop short of actually launching a file manager.
         monkeypatch.setattr(F.sys, "platform", "linux", raising=False)
         monkeypatch.setattr(F.shutil, "which", lambda _n: None)
         resp = await F.api_reveal_path(self._request({"path": str(target)}))

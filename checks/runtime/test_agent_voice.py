@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from gideon.agents.marketplace import AgentDefinition
-from gideon.config.loader import _compose_voice
-
-# ── compose: voice goes BEFORE the operating rules ──
+from gideon.core.config.loader import _compose_voice
+from gideon.engine.agents.marketplace import AgentDefinition
 
 
 def test_compose_prepends_voice():
@@ -21,10 +19,7 @@ def test_compose_empty_voice_is_prompt_asis():
 
 def test_compose_empty_prompt_with_voice():
     out = _compose_voice("Witty.", "")
-    assert "VOICE" in out and "Witty." in out  # the voice header + the persona
-
-
-# ── marketplace AgentDefinition round-trip (S6 loader-allowlist gotcha) ──
+    assert "VOICE" in out and "Witty." in out
 
 
 def test_marketplace_voice_round_trips():
@@ -38,19 +33,15 @@ def test_marketplace_voice_default_empty():
     assert d.voice == ""
 
 
-# ── config AgentProfile round-trip via disk ──
-
-
 def test_config_profile_voice_round_trips(tmp_path, monkeypatch):
     import json
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.config.loader import AppConfig, config_path
+    from gideon.core.config.loader import AppConfig, config_path
 
     config_path().write_text(
         json.dumps({"agents": {"bot": {"voice": "dry wit", "system_prompt": "rules"}}})
     )
     cfg = AppConfig.load()
     assert cfg.agents["bot"].voice == "dry wit"
-    # survives a save round-trip (asdict serialization emits voice)
     assert cfg.to_dict()["agents"]["bot"]["voice"] == "dry wit"

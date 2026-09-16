@@ -29,7 +29,7 @@ dispatched tool subprocess  NO           ``builtin_tools.py:1512-1529`` — the 
                                          for a cancel to consult, and the timeout's
                                          ``proc.kill()`` signalled one pid, so the shell's own
                                          children survived even there. The authoritative spawn
-                                         census (``tests/test_spawn_ceiling_audit.py``) lists
+                                         census (``checks/runtime/test_spawn_ceiling_audit.py``) lists
                                          two per-turn agent-influenced async spawns a stop must
                                          reach — this one and
                                          ``sandbox_providers/none.py::_NoneHandle.exec``, which
@@ -40,7 +40,7 @@ spawned subagent            NO           ``subagent.py`` had the machinery — `
                                          (:768, kill→cancel→reap→tombstone→audit),
                                          ``cancel``/``cancel_fanout`` (:2246/:2263) and a
                                          parent-keyed enumeration (:987) — and NOTHING called
-                                         any of it on a stop. ``SessionManager.stop_turn``
+                                         any of it on a stop. ``ConversationDirectory.stop_turn``
                                          (``session.py:1796``) cleared the queue, cancelled the
                                          provider and reset the session; the fan-out kept
                                          running, kept spending, and later delivered results
@@ -100,16 +100,8 @@ import time
 
 import pytest
 
-from gideon import cancellation
-from gideon.acp.types import (
-    STOP_REASON_CANCELLED,
-    STOP_REASON_STOPPED_BY_USER,
-    is_cancelled_stop,
-)
-from gideon.agents.native.builtin_tools import NativeBuiltinToolProvider
-from gideon.agents.native.runtime import NativeAgentRuntime
-from gideon.agents.provider import AgentRuntimeDefinition
-from gideon.cancellation import (
+from gideon.core import cancellation
+from gideon.core.cancellation import (
     CANCEL_INTERNAL,
     CANCEL_USER,
     REQUEST_FIRST,
@@ -117,23 +109,30 @@ from gideon.cancellation import (
     REQUEST_REPEAT,
     CancelScope,
 )
-from gideon.llm.events import (
+from gideon.engine.agents.native.builtin_tools import NativeBuiltinToolProvider
+from gideon.engine.agents.native.runtime import NativeAgentRuntime
+from gideon.engine.agents.provider import AgentRuntimeDefinition
+from gideon.integrations.acp.types import (
+    STOP_REASON_CANCELLED,
+    STOP_REASON_STOPPED_BY_USER,
+    is_cancelled_stop,
+)
+from gideon.integrations.llm.events import (
     EVENT_COMPLETE,
     EVENT_TEXT_CHUNK,
     EVENT_TOOL_CALL,
     EVENT_TOOL_RESULT,
     AgentEvent,
 )
-from gideon.tool_providers.base import ToolDefinition, ToolProvider, ToolResult
+from gideon.integrations.tool_providers.base import (
+    ToolDefinition,
+    ToolProvider,
+    ToolResult,
+)
 
-# Poll budgets. Generous enough for a loaded CI box, bounded so a wedge fails the test
-# instead of hanging the suite.
 _APPEAR_TIMEOUT = 15.0
 _DEATH_TIMEOUT = 15.0
 _POLL = 0.02
-
-
-# ── helpers ───────────────────────────────────────────────────────────────────
 
 
 def _pid_alive(pid: int) -> bool:
@@ -213,7 +212,11 @@ class _CountingTool(ToolProvider):
         return "Counter"
 
     async def list_tools(self):
-        return [ToolDefinition(name=self._name, description="d", parameters={"type": "object"})]
+        return [
+            ToolDefinition(
+                name=self._name, description="d", parameters={"type": "object"}
+            )
+        ]
 
     async def invoke(self, tool_name, arguments):
         self.dispatches.append(dict(arguments))
@@ -259,8 +262,12 @@ class _WavePlanTool(ToolProvider):
 
     async def list_tools(self):
         return [
-            ToolDefinition(name="blocker", description="d", parameters={"type": "object"}),
-            ToolDefinition(name="read_file", description="d", parameters={"type": "object"}),
+            ToolDefinition(
+                name="blocker", description="d", parameters={"type": "object"}
+            ),
+            ToolDefinition(
+                name="read_file", description="d", parameters={"type": "object"}
+            ),
         ]
 
     async def invoke(self, tool_name, arguments):
@@ -272,7 +279,9 @@ class _WavePlanTool(ToolProvider):
 
 
 def _count_call(cid: str) -> AgentEvent:
-    return AgentEvent(kind=EVENT_TOOL_CALL, tool_call_id=cid, title="count_me", tool_input="{}")
+    return AgentEvent(
+        kind=EVENT_TOOL_CALL, tool_call_id=cid, title="count_me", tool_input="{}"
+    )
 
 
 def _read_call(cid: str, path: str) -> AgentEvent:
@@ -287,7 +296,9 @@ def _read_call(cid: str, path: str) -> AgentEvent:
 
 
 async def _build_runtime(tmp_path, turns, counter: _CountingTool | None = None):
-    tools: list[ToolProvider] = [NativeBuiltinToolProvider(tmp_path, sandbox_mode="none")]
+    tools: list[ToolProvider] = [
+        NativeBuiltinToolProvider(tmp_path, sandbox_mode="none")
+    ]
     if counter is not None:
         tools.append(counter)
     rt = NativeAgentRuntime(
@@ -297,8 +308,6 @@ async def _build_runtime(tmp_path, turns, counter: _CountingTool | None = None):
         cwd=tmp_path,
     )
     await rt.start()
-    # Auto-approve: this file is about what a STOP reaches, so the approval gate must
-    # not park the turn before the child it is meant to reap ever spawns.
     rt.set_approval_policy("auto")
     return rt
 
@@ -325,8 +334,9 @@ class _Driver:
         if not self.task.done():
             self.task.cancel()
         with contextlib.suppress(Exception):
-            await asyncio.wait_for(asyncio.gather(self.task, return_exceptions=True), 20)
-        # Never leave a fixture child behind, whatever the assertions did.
+            await asyncio.wait_for(
+                asyncio.gather(self.task, return_exceptions=True), 20
+            )
         with contextlib.suppress(Exception):
             await self._rt._cancel.reap_children()
 
@@ -342,14 +352,11 @@ class _Driver:
         return done[-1]
 
 
-# ── the primitive ─────────────────────────────────────────────────────────────
-
-
 class TestCancelScopeIsOneSignal:
     def test_a_stop_with_no_turn_in_flight_is_a_no_op(self):
         scope = CancelScope()
         assert scope.request() == REQUEST_NO_TURN
-        assert scope.cancelled is False  # nothing was in flight to cancel
+        assert scope.cancelled is False
 
     def test_a_stop_after_the_turn_finished_is_a_no_op_not_a_failure(self):
         scope = CancelScope()
@@ -412,9 +419,6 @@ class TestStopReasonVocabulary:
         assert channel.is_cancelled_stop(STOP_REASON_STOPPED_BY_USER)
 
 
-# ── the real driven stop ──────────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 class TestARealDrivenStop:
     async def test_no_child_process_survives_the_stop(self, tmp_path):
@@ -433,7 +437,9 @@ class TestARealDrivenStop:
         )
         async with _Driver(rt) as driver:
             pids = await _wait_for(
-                lambda: list(rt._cancel._children), _APPEAR_TIMEOUT, "the bash child"
+                lambda: list(rt._cancel._state.children),
+                _APPEAR_TIMEOUT,
+                "the bash child",
             )
             assert len(pids) == 1
             child = pids[0]
@@ -449,12 +455,15 @@ class TestARealDrivenStop:
             )
             _assert_ours(grandchild)
             assert _pid_alive(child), "the child should be running before the stop"
-            assert _pid_alive(grandchild), "the grandchild should be running before the stop"
+            assert _pid_alive(
+                grandchild
+            ), "the grandchild should be running before the stop"
 
             assert await rt.cancel() == "acked"
 
-            # Poll for the OS to report BOTH gone — reaped, not merely signalled.
-            await _wait_for(lambda: not _pid_alive(child), _DEATH_TIMEOUT, "the child to be reaped")
+            await _wait_for(
+                lambda: not _pid_alive(child), _DEATH_TIMEOUT, "the child to be reaped"
+            )
             await _wait_for(
                 lambda: not _pid_alive(grandchild),
                 _DEATH_TIMEOUT,
@@ -483,7 +492,11 @@ class TestARealDrivenStop:
             counter=counter,
         )
         async with _Driver(rt) as driver:
-            await _wait_for(lambda: list(rt._cancel._children), _APPEAR_TIMEOUT, "the bash child")
+            await _wait_for(
+                lambda: list(rt._cancel._state.children),
+                _APPEAR_TIMEOUT,
+                "the bash child",
+            )
             dispatched_before = len(counter.dispatches)
             await rt.cancel()
             await driver.finish()
@@ -493,20 +506,21 @@ class TestARealDrivenStop:
             "queued-but-unstarted calls must be dropped WITHOUT executing; "
             f"{len(counter.dispatches)} ran after the signal"
         )
-        # Each dropped call is still answered, or the next turn's history replay breaks.
         dropped = [
             e
             for e in driver.events
-            if e.kind == EVENT_TOOL_RESULT and "cancelled before this tool ran" in e.tool_output
+            if e.kind == EVENT_TOOL_RESULT
+            and "cancelled before this tool ran" in e.tool_output
         ]
         assert len(dropped) == 3
         assert rt.last_stop_report()["tool_calls_dropped"] == 3
-        # And the history is well-formed: every tool_call has a paired result.
         called = sum(1 for m in rt._messages for _ in (m.get("tool_calls") or []))
         results = sum(1 for m in rt._messages if m.get("role") == "tool")
         assert called == results == 4
 
-    async def test_a_stop_in_one_wave_drops_the_calls_in_every_later_wave(self, tmp_path, caplog):
+    async def test_a_stop_in_one_wave_drops_the_calls_in_every_later_wave(
+        self, tmp_path, caplog
+    ):
         """The same property on HC-6's WAVE dispatcher, which is where it now lives.
 
         The test above is a batch the planner serializes (unclassified tools each land in
@@ -542,16 +556,22 @@ class TestARealDrivenStop:
         await rt.start()
         rt.set_approval_policy("auto")
 
-        with caplog.at_level(logging.INFO, logger="gideon.agents.native.runtime"):
+        with caplog.at_level(
+            logging.INFO, logger="gideon.engine.agents.native.runtime"
+        ):
             async with _Driver(rt) as driver:
-                await _wait_for(lambda: tool.entered.is_set(), _APPEAR_TIMEOUT, "the blocker")
+                await _wait_for(
+                    lambda: tool.entered.is_set(), _APPEAR_TIMEOUT, "the blocker"
+                )
                 await rt.cancel()
                 tool.release.set()
                 await driver.finish()
 
-        # The shipped timing line is the evidence that the wave really was wide — HC-1's
-        # contract: read the line production emits, don't keep a second stopwatch.
-        timing = [r.getMessage() for r in caplog.records if r.getMessage().startswith("tool batch")]
+        timing = [
+            r.getMessage()
+            for r in caplog.records
+            if r.getMessage().startswith("tool batch")
+        ]
         assert timing, "the batch dispatcher's timing line did not ship"
         assert "waves=2" in timing[-1] and "widest=3" in timing[-1], timing[-1]
 
@@ -562,14 +582,15 @@ class TestARealDrivenStop:
         dropped = [
             e
             for e in driver.events
-            if e.kind == EVENT_TOOL_RESULT and "cancelled before this tool ran" in e.tool_output
+            if e.kind == EVENT_TOOL_RESULT
+            and "cancelled before this tool ran" in e.tool_output
         ]
         assert len(dropped) == 3
         assert rt.last_stop_report()["tool_calls_dropped"] == 3
-        # A call that never ran never claimed on screen that it did.
         cards = [e for e in driver.events if e.kind == EVENT_TOOL_CALL]
-        assert len(cards) == 1, f"a dropped call must not emit a tool-call card: {cards}"
-        # History still well-formed for the next inference.
+        assert (
+            len(cards) == 1
+        ), f"a dropped call must not emit a tool-call card: {cards}"
         called = sum(1 for m in rt._messages for _ in (m.get("tool_calls") or []))
         results = sum(1 for m in rt._messages if m.get("role") == "tool")
         assert called == results == 4
@@ -581,7 +602,11 @@ class TestARealDrivenStop:
             [[_bash_call("c1", "sleep 300"), AgentEvent(kind=EVENT_COMPLETE)]],
         )
         async with _Driver(rt) as driver:
-            await _wait_for(lambda: list(rt._cancel._children), _APPEAR_TIMEOUT, "the bash child")
+            await _wait_for(
+                lambda: list(rt._cancel._state.children),
+                _APPEAR_TIMEOUT,
+                "the bash child",
+            )
             assert rt._model.cancels == 0
             await rt.cancel()
             await driver.finish()
@@ -589,13 +614,19 @@ class TestARealDrivenStop:
         assert rt._model.cancels == 1, "cancel() must propagate to the model provider"
         assert rt.last_stop_report()["model_request_aborted"] is True
 
-    async def test_the_turn_ends_with_an_explicit_stopped_by_user_outcome(self, tmp_path):
+    async def test_the_turn_ends_with_an_explicit_stopped_by_user_outcome(
+        self, tmp_path
+    ):
         rt = await _build_runtime(
             tmp_path,
             [[_bash_call("c1", "sleep 300"), AgentEvent(kind=EVENT_COMPLETE)]],
         )
         async with _Driver(rt) as driver:
-            await _wait_for(lambda: list(rt._cancel._children), _APPEAR_TIMEOUT, "the bash child")
+            await _wait_for(
+                lambda: list(rt._cancel._state.children),
+                _APPEAR_TIMEOUT,
+                "the bash child",
+            )
             await rt.cancel()
             events = await driver.finish()
 
@@ -606,16 +637,22 @@ class TestARealDrivenStop:
         ), "a user stop must be distinguishable from an internal give-up"
         assert not terminal.stop_reason.startswith("error")
 
-    async def test_an_internal_give_up_still_reads_as_cancelled_not_stopped_by_user(self, tmp_path):
+    async def test_an_internal_give_up_still_reads_as_cancelled_not_stopped_by_user(
+        self, tmp_path
+    ):
         """The other side of the distinction: a shutdown is not a user stop."""
         rt = await _build_runtime(
             tmp_path,
             [[_bash_call("c1", "sleep 300"), AgentEvent(kind=EVENT_COMPLETE)]],
         )
         async with _Driver(rt) as driver:
-            await _wait_for(lambda: list(rt._cancel._children), _APPEAR_TIMEOUT, "the bash child")
+            await _wait_for(
+                lambda: list(rt._cancel._state.children),
+                _APPEAR_TIMEOUT,
+                "the bash child",
+            )
             await rt.shutdown()
-            await rt._cancel.reap_children()  # shutdown() does not own the tool children
+            await rt._cancel.reap_children()
             events = await driver.finish()
 
         terminal = [e for e in events if e.kind == EVENT_COMPLETE][-1]
@@ -640,7 +677,9 @@ class TestARealDrivenStop:
         )
         async with _Driver(rt) as driver:
             pids = await _wait_for(
-                lambda: list(rt._cancel._children), _APPEAR_TIMEOUT, "the bash child"
+                lambda: list(rt._cancel._state.children),
+                _APPEAR_TIMEOUT,
+                "the bash child",
             )
             _assert_ours(pids[0])
             assert await rt.cancel() == "acked"
@@ -649,7 +688,9 @@ class TestARealDrivenStop:
             for _ in range(2):
                 assert await rt.cancel() in ("acked", "no_turn")
             assert rt.last_stop_report() == first, "a repeat press must not re-record"
-            assert rt._model.cancels == 1, "a repeat press must not re-abort the request"
+            assert (
+                rt._model.cancels == 1
+            ), "a repeat press must not re-abort the request"
             await driver.finish()
 
     async def test_a_repeat_press_on_a_pinned_turn_is_acked(self, tmp_path):
@@ -668,12 +709,18 @@ class TestARealDrivenStop:
 
         tool = _BlockingTool()
         rt = await _build_runtime(
-            tmp_path, [[_count_call("c1"), AgentEvent(kind=EVENT_COMPLETE)]], counter=tool
+            tmp_path,
+            [[_count_call("c1"), AgentEvent(kind=EVENT_COMPLETE)]],
+            counter=tool,
         )
         async with _Driver(rt) as driver:
-            await _wait_for(lambda: tool.dispatches, _APPEAR_TIMEOUT, "the tool to be entered")
+            await _wait_for(
+                lambda: tool.dispatches, _APPEAR_TIMEOUT, "the tool to be entered"
+            )
             assert await rt.cancel() == "acked"
-            assert await rt.cancel() == "acked", "the turn is still in flight — still acked"
+            assert (
+                await rt.cancel() == "acked"
+            ), "the turn is still in flight — still acked"
             assert await rt.cancel() == "acked"
             assert rt._model.cancels == 1
             release.set()
@@ -699,8 +746,10 @@ class TestARealDrivenStop:
         assert events[-1].stop_reason == "end_turn"
 
         assert await rt.cancel() == "no_turn"
-        assert await rt.cancel() == "no_turn"  # still a no-op, still not a raise
-        assert rt._model.cancels == 0, "a no-op stop must not abort a request that isn't there"
+        assert await rt.cancel() == "no_turn"
+        assert (
+            rt._model.cancels == 0
+        ), "a no-op stop must not abort a request that isn't there"
 
     async def test_spend_before_the_stop_is_attributed_not_dropped(self, tmp_path):
         """A stop between ReAct cycles used to report zero tokens for a turn that had
@@ -710,49 +759,61 @@ class TestARealDrivenStop:
         rt = await _build_runtime(
             tmp_path,
             [
-                # cycle 1: a cheap tool call, real usage reported
                 [
                     _count_call("c1"),
                     AgentEvent(
-                        kind=EVENT_COMPLETE, input_tokens=100, output_tokens=40, cost_usd=0.01
+                        kind=EVENT_COMPLETE,
+                        input_tokens=100,
+                        output_tokens=40,
+                        cost_usd=0.01,
                     ),
                 ],
-                # cycle 2: the long bash the stop lands on, more usage
                 [
                     _bash_call("c2", "sleep 300"),
                     AgentEvent(
-                        kind=EVENT_COMPLETE, input_tokens=70, output_tokens=30, cost_usd=0.02
+                        kind=EVENT_COMPLETE,
+                        input_tokens=70,
+                        output_tokens=30,
+                        cost_usd=0.02,
                     ),
                 ],
             ],
             counter=counter,
         )
         async with _Driver(rt) as driver:
-            await _wait_for(lambda: list(rt._cancel._children), _APPEAR_TIMEOUT, "the bash child")
+            await _wait_for(
+                lambda: list(rt._cancel._state.children),
+                _APPEAR_TIMEOUT,
+                "the bash child",
+            )
             await rt.cancel()
             events = await driver.finish()
 
         terminal = [e for e in events if e.kind == EVENT_COMPLETE][-1]
         assert terminal.stop_reason == STOP_REASON_STOPPED_BY_USER
-        assert terminal.input_tokens == 170, "both cycles' input tokens must be attributed"
+        assert (
+            terminal.input_tokens == 170
+        ), "both cycles' input tokens must be attributed"
         assert terminal.output_tokens == 70
         assert terminal.cost_usd == pytest.approx(0.03)
 
-    async def test_the_stopped_turns_spend_reaches_the_usage_ledger(self, tmp_path, monkeypatch):
+    async def test_the_stopped_turns_spend_reaches_the_usage_ledger(
+        self, tmp_path, monkeypatch
+    ):
         """End of the attribution chain: the row the cost surfaces read.
 
         Driven through the same seam the chat write-site uses
         (``usage_ledger.record_from_event``) rather than asserting on the event again,
         because "attributed" means a durable row exists, not that a field was set.
         """
-        from gideon import usage_ledger
-        from gideon.config import loader
+        from gideon.core.config import loader
+        from gideon.operations import usage_ledger
 
-        # `usage_ledger._path()` imports config_dir per call, so patching it on the
-        # loader really redirects the write — the real home is never touched.
         home = tmp_path / "home"
         monkeypatch.setattr(loader, "config_dir", lambda: home)
-        assert usage_ledger._path().is_relative_to(home), "the ledger must write under tmp_path"
+        assert usage_ledger._path().is_relative_to(
+            home
+        ), "the ledger must write under tmp_path"
 
         rt = await _build_runtime(
             tmp_path,
@@ -760,13 +821,20 @@ class TestARealDrivenStop:
                 [
                     _bash_call("c1", "sleep 300"),
                     AgentEvent(
-                        kind=EVENT_COMPLETE, input_tokens=90, output_tokens=25, cost_usd=0.05
+                        kind=EVENT_COMPLETE,
+                        input_tokens=90,
+                        output_tokens=25,
+                        cost_usd=0.05,
                     ),
                 ]
             ],
         )
         async with _Driver(rt) as driver:
-            await _wait_for(lambda: list(rt._cancel._children), _APPEAR_TIMEOUT, "the bash child")
+            await _wait_for(
+                lambda: list(rt._cancel._state.children),
+                _APPEAR_TIMEOUT,
+                "the bash child",
+            )
             await rt.cancel()
             events = await driver.finish()
 
@@ -786,9 +854,6 @@ class TestARealDrivenStop:
         assert spend["output_tokens"] == 25
 
 
-# ── the kill path's own safety ────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 class TestTheKillPathIsSafe:
     async def test_it_terminates_AND_reaps(self, tmp_path):
@@ -797,8 +862,12 @@ class TestTheKillPathIsSafe:
         )
         _assert_ours(proc.pid)
         assert await cancellation.terminate_and_reap(proc) is True
-        assert proc.returncode is not None, "reaped means wait() completed, not just signalled"
-        await _wait_for(lambda: not _pid_alive(proc.pid), _DEATH_TIMEOUT, "the child to be gone")
+        assert (
+            proc.returncode is not None
+        ), "reaped means wait() completed, not just signalled"
+        await _wait_for(
+            lambda: not _pid_alive(proc.pid), _DEATH_TIMEOUT, "the child to be gone"
+        )
 
     async def test_it_kills_a_child_that_ignores_sigterm(self, tmp_path):
         """SIGTERM then SIGKILL. A child trapping TERM must still die."""
@@ -812,10 +881,14 @@ class TestTheKillPathIsSafe:
         _assert_ours(proc.pid)
         assert await cancellation.terminate_and_reap(proc, grace=0.3) is True
         assert proc.returncode is not None
-        await _wait_for(lambda: not _pid_alive(proc.pid), _DEATH_TIMEOUT, "the trapping child")
+        await _wait_for(
+            lambda: not _pid_alive(proc.pid), _DEATH_TIMEOUT, "the trapping child"
+        )
 
     async def test_an_already_exited_child_is_still_reaped(self):
-        proc = await asyncio.create_subprocess_exec("true", stdout=asyncio.subprocess.DEVNULL)
+        proc = await asyncio.create_subprocess_exec(
+            "true", stdout=asyncio.subprocess.DEVNULL
+        )
         await asyncio.sleep(0.1)
         assert await cancellation.terminate_and_reap(proc) is True
         assert proc.returncode is not None
@@ -823,7 +896,9 @@ class TestTheKillPathIsSafe:
     async def test_a_child_that_finished_on_its_own_is_untracked(self):
         scope = CancelScope()
         scope.begin_turn()
-        proc = await asyncio.create_subprocess_exec("true", stdout=asyncio.subprocess.DEVNULL)
+        proc = await asyncio.create_subprocess_exec(
+            "true", stdout=asyncio.subprocess.DEVNULL
+        )
         token = cancellation.bind_scope(scope)
         try:
             with cancellation.track_child(proc):
@@ -845,7 +920,9 @@ class TestTheKillPathRefusesWhatItDidNotSpawn:
         signal set includes the gateway. Such a pid gets a single-pid terminate.
         """
         calls: list[tuple] = []
-        monkeypatch.setattr(cancellation.os, "killpg", lambda pid, sig: calls.append((pid, sig)))
+        monkeypatch.setattr(
+            cancellation.os, "killpg", lambda pid, sig: calls.append((pid, sig))
+        )
         monkeypatch.setattr(cancellation, "_is_group_leader", lambda pid: False)
 
         class _Fake:
@@ -863,7 +940,9 @@ class TestTheKillPathRefusesWhatItDidNotSpawn:
     def test_it_never_signals_pid_zero_or_one(self, monkeypatch):
         """``killpg(0, …)`` means "my own group" — suicide. Guarded structurally."""
         calls: list[tuple] = []
-        monkeypatch.setattr(cancellation.os, "killpg", lambda pid, sig: calls.append((pid, sig)))
+        monkeypatch.setattr(
+            cancellation.os, "killpg", lambda pid, sig: calls.append((pid, sig))
+        )
 
         class _Fake:
             def __init__(self, pid):
@@ -890,9 +969,6 @@ class TestTheKillPathRefusesWhatItDidNotSpawn:
             pass
 
 
-# ── the spawn site declares its own group ─────────────────────────────────────
-
-
 def test_the_bash_tool_spawns_into_its_own_process_group():
     """Structural, and load-bearing for the kill path.
 
@@ -904,7 +980,7 @@ def test_the_bash_tool_spawns_into_its_own_process_group():
     import ast
     import inspect
 
-    from gideon.agents.native import builtin_tools
+    from gideon.engine.agents.native import builtin_tools
 
     src = inspect.getsource(builtin_tools.NativeBuiltinToolProvider._t_bash)
     tree = ast.parse(src.lstrip() if src.startswith(" ") else src)
@@ -917,7 +993,9 @@ def test_the_bash_tool_spawns_into_its_own_process_group():
     ]
     assert len(spawns) == 1
     kwargs = {kw.arg: kw.value for kw in spawns[0].keywords}
-    assert "start_new_session" in kwargs, "the bash child must lead its own process group"
+    assert (
+        "start_new_session" in kwargs
+    ), "the bash child must lead its own process group"
     assert isinstance(kwargs["start_new_session"], ast.Constant)
     assert kwargs["start_new_session"].value is True
 
@@ -939,14 +1017,12 @@ def test_the_wave_loop_checks_the_signal_before_each_call():
     import inspect
     import re
 
-    from gideon.agents.native.runtime import NativeAgentRuntime
+    from gideon.engine.agents.native.runtime import NativeAgentRuntime
 
     src = inspect.getsource(NativeAgentRuntime._execute_wave)
-    # Every site in this method that can hand a call to an invocation, in source order.
     dispatch_sites = [
         m.start()
         for m in re.finditer(r"self\._(?:run_tool|prefetch)\(", src)
-        # …except the one that IS the drop (it runs nothing).
         if "_drop_queued_call" not in src[max(0, m.start() - 200) : m.start()]
     ]
     assert dispatch_sites, "the wave loop must still dispatch something"
@@ -957,7 +1033,6 @@ def test_the_wave_loop_checks_the_signal_before_each_call():
     assert min(checks) < min(
         dispatch_sites
     ), "the stop check must precede the first dispatch site in _execute_wave"
-    # And it must NOT have been hoisted up to the batch, where it would only fire once.
     batch_src = inspect.getsource(NativeAgentRuntime._execute_tool_batch)
     assert "_cancelled" not in batch_src, (
         "a check in _execute_tool_batch fires once for the whole batch; it belongs in "
@@ -972,17 +1047,14 @@ def test_cancelled_is_a_read_only_view_of_the_one_scope():
     stop become indistinguishable. Keeping the attribute read-only forces every writer
     to name a cause.
     """
-    from gideon.agents.native.runtime import NativeAgentRuntime
+    from gideon.engine.agents.native.runtime import NativeAgentRuntime
 
     assert isinstance(NativeAgentRuntime.__dict__["_cancelled"], property)
     assert NativeAgentRuntime.__dict__["_cancelled"].fset is None
 
 
-# ── the subagent layer ────────────────────────────────────────────────────────
-
-
 def _sub_sessions():
-    """A SessionManager-shaped double whose reset() records the keys it killed."""
+    """A ConversationDirectory-shaped double whose reset() records the keys it killed."""
     from unittest.mock import AsyncMock, MagicMock
 
     sessions = MagicMock()
@@ -1004,7 +1076,7 @@ def _sub_ctx():
 
 def _live_child(mgr, agent_id: str, parent: str, *, queued: bool = False):
     """Register a live SubagentInfo directly — the state a mid-fan-out stop finds."""
-    from gideon.subagent import SubagentInfo
+    from gideon.engine.subagent import SubagentInfo
 
     info = SubagentInfo(id=agent_id, task="t", parent_session_key=parent)
     info.queued = queued
@@ -1016,11 +1088,15 @@ def _live_child(mgr, agent_id: str, parent: str, *, queued: bool = False):
 
 @pytest.mark.asyncio
 class TestASpawnedSubagentIsReachedByAStop:
-    async def test_it_stops_running_and_queued_children_of_the_parent(self, monkeypatch):
-        from gideon.subagent import SubagentManager
+    async def test_it_stops_running_and_queued_children_of_the_parent(
+        self, monkeypatch
+    ):
+        from gideon.engine.subagent import DelegationSupervisor
 
         sessions = _sub_sessions()
-        mgr = SubagentManager(sessions=sessions, ctx_builder=_sub_ctx(), is_yolo=lambda: True)
+        mgr = DelegationSupervisor(
+            sessions=sessions, ctx_builder=_sub_ctx(), is_yolo=lambda: True
+        )
         monkeypatch.setattr(mgr, "_write_tombstone", lambda info, cause: None)
         running = _live_child(mgr, "a1", "dashboard:main")
         queued = _live_child(mgr, "a2", "dashboard:main", queued=True)
@@ -1032,15 +1108,15 @@ class TestASpawnedSubagentIsReachedByAStop:
         assert queued.done and queued.cancelled
         assert queued not in mgr._queue, "a queued child must be dropped, not started"
         assert not other.done, "a stop must not reach another session's children"
-        # The RUNNING one goes through the one kill path — session reset, not a flag.
         assert any(
-            c.args and c.args[0] == "subagent:a1" for c in sessions.reset.await_args_list
+            c.args and c.args[0] == "subagent:a1"
+            for c in sessions.reset.await_args_list
         ), "the running child's session must actually be reset (killed), not just marked"
 
     async def test_a_second_stop_finds_nothing_to_stop(self, monkeypatch):
-        from gideon.subagent import SubagentManager
+        from gideon.engine.subagent import DelegationSupervisor
 
-        mgr = SubagentManager(
+        mgr = DelegationSupervisor(
             sessions=_sub_sessions(), ctx_builder=_sub_ctx(), is_yolo=lambda: True
         )
         monkeypatch.setattr(mgr, "_write_tombstone", lambda info, cause: None)
@@ -1051,17 +1127,14 @@ class TestASpawnedSubagentIsReachedByAStop:
     async def test_a_stop_refuses_further_spawns_for_that_fanout(self, monkeypatch):
         """A spawn already in flight toward the queue must be refused, not started
         after the signal — reusing the existing fan-out stop rather than a new gate."""
-        from gideon.subagent import SubagentManager
+        from gideon.engine.subagent import DelegationSupervisor
 
-        mgr = SubagentManager(
+        mgr = DelegationSupervisor(
             sessions=_sub_sessions(), ctx_builder=_sub_ctx(), is_yolo=lambda: True
         )
         monkeypatch.setattr(mgr, "_write_tombstone", lambda info, cause: None)
         _live_child(mgr, "a1", "dashboard:main")
 
-        # Observed AT the kill, not after: `_maybe_clear_fanout` deliberately drops the
-        # stop state once the lane is fully drained (so a LATER fan-out reusing the key
-        # starts clean), which is why a post-hoc assertion on the dict is vacuous.
         seen: list[dict] = []
         real_cancel = mgr.cancel
 
@@ -1075,9 +1148,9 @@ class TestASpawnedSubagentIsReachedByAStop:
         assert seen[0]["dashboard:main"] == "parent turn stopped by user"
 
     async def test_an_empty_or_unknown_parent_is_a_no_op(self):
-        from gideon.subagent import SubagentManager
+        from gideon.engine.subagent import DelegationSupervisor
 
-        mgr = SubagentManager(
+        mgr = DelegationSupervisor(
             sessions=_sub_sessions(), ctx_builder=_sub_ctx(), is_yolo=lambda: True
         )
         assert await mgr.stop_children_of("") == 0
@@ -1086,13 +1159,15 @@ class TestASpawnedSubagentIsReachedByAStop:
     async def test_the_manager_registers_itself_with_the_session_manager(self):
         """The wiring, not just the method: an unregistered stopper is a closed gap
         that still looks closed from the subagent side."""
-        from gideon.config.loader import AppConfig
-        from gideon.session import SessionManager
-        from gideon.subagent import SubagentManager
+        from gideon.core.config.loader import AppConfig
+        from gideon.engine.session import ConversationDirectory
+        from gideon.engine.subagent import DelegationSupervisor
 
-        sessions = SessionManager(AppConfig())
+        sessions = ConversationDirectory(AppConfig())
         assert sessions._stop_children is None
-        mgr = SubagentManager(sessions=sessions, ctx_builder=_sub_ctx(), is_yolo=lambda: True)
+        mgr = DelegationSupervisor(
+            sessions=sessions, ctx_builder=_sub_ctx(), is_yolo=lambda: True
+        )
         assert sessions._stop_children == mgr.stop_children_of
 
 
@@ -1117,10 +1192,10 @@ class TestStopTurnReachesSpawnedWork:
     async def test_stop_turn_stops_the_sessions_spawned_children(self):
         from unittest.mock import AsyncMock
 
-        from gideon.config.loader import AppConfig
-        from gideon.session import SessionManager
+        from gideon.core.config.loader import AppConfig
+        from gideon.engine.session import ConversationDirectory
 
-        sessions = SessionManager(AppConfig())
+        sessions = ConversationDirectory(AppConfig())
         stopped: list[str] = []
 
         async def _stopper(key: str) -> int:
@@ -1139,17 +1214,19 @@ class TestStopTurnReachesSpawnedWork:
         outcome = await sessions.stop_turn("dashboard:main")
 
         assert outcome == "soft"
-        assert stopped == ["dashboard:main"], "stop_turn must reach the spawned children"
+        assert stopped == [
+            "dashboard:main"
+        ], "stop_turn must reach the spawned children"
         assert noted == [2], "the count must land on the turn's stop record"
 
     async def test_a_child_stopper_that_raises_does_not_block_the_parents_stop(self):
         """Fail-open: the user pressed stop on the PARENT."""
         from unittest.mock import AsyncMock
 
-        from gideon.config.loader import AppConfig
-        from gideon.session import SessionManager
+        from gideon.core.config.loader import AppConfig
+        from gideon.engine.session import ConversationDirectory
 
-        sessions = SessionManager(AppConfig())
+        sessions = ConversationDirectory(AppConfig())
 
         async def _boom(key: str) -> int:
             raise RuntimeError("child stop exploded")
@@ -1171,12 +1248,12 @@ class TestStopTurnReachesSpawnedWork:
         """
         from unittest.mock import AsyncMock
 
-        from gideon.config.loader import AppConfig
-        from gideon.session import SessionManager
+        from gideon.core.config.loader import AppConfig
+        from gideon.engine.session import ConversationDirectory
 
-        sessions = SessionManager(AppConfig())
+        sessions = ConversationDirectory(AppConfig())
         provider = AsyncMock()
-        provider.cancel = AsyncMock(return_value="no_turn")  # the turn already finished
+        provider.cancel = AsyncMock(return_value="no_turn")
         session = _fake_session(provider)
         sessions._sessions["dashboard:main"] = session  # type: ignore[assignment]
 
@@ -1188,7 +1265,7 @@ class TestStopTurnReachesSpawnedWork:
 
 def test_the_stop_card_reports_what_the_stop_reached():
     """Clause 4's record, at the surface that renders it (the shape PR2-13 consumes)."""
-    from gideon.dashboard.chat_handlers import _stop_reach_report
+    from gideon.interfaces.dashboard.chat_handlers import _stop_reach_report
 
     class _Prov:
         def last_stop_report(self):
@@ -1203,7 +1280,7 @@ def test_the_stop_card_reports_what_the_stop_reached():
 
 
 def test_a_provider_that_cannot_report_yields_nothing_rather_than_a_guess():
-    from gideon.dashboard.chat_handlers import _stop_reach_report
+    from gideon.interfaces.dashboard.chat_handlers import _stop_reach_report
 
     class _Boom:
         def last_stop_report(self):

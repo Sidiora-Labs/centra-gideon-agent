@@ -18,12 +18,12 @@ import json
 
 import pytest
 
-from gideon.learning import loop_end
-from gideon.learning import proposals as P
-from gideon.loop import files as loop_files
-from gideon.loop import journal as loop_journal
-from gideon.loop import store
-from gideon.loop.loop import Loop, LoopStatus
+from gideon.automation.loop import files as loop_files
+from gideon.automation.loop import journal as loop_journal
+from gideon.automation.loop import store
+from gideon.automation.loop.loop import Loop, LoopStatus
+from gideon.cognition.learning import loop_end
+from gideon.cognition.learning import proposals as P
 
 
 @pytest.fixture
@@ -35,19 +35,23 @@ def home(tmp_path, monkeypatch):
     is patched too. The staging singleton is reset so a per-test miss count does not accumulate.
     """
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
-    monkeypatch.setattr("gideon.loop.files.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.automation.loop.files.config_dir", lambda: tmp_path)
     monkeypatch.setattr(P, "_surface_in_inbox", lambda prop: None)
     monkeypatch.setattr(P, "_resolve_inbox_item", lambda pid, status: None)
-    from gideon.learning import staging as staging_mod
+    from gideon.cognition.learning import staging as staging_mod
 
     monkeypatch.setattr(staging_mod, "_INSTANCE", None)
     yield tmp_path
     staging_mod._INSTANCE = None
 
 
-def _loop(kind: str = "code", task: str = "add oauth login", complete: bool = True) -> Loop:
-    cfg = {"code": {"entry_stage": "design"}, "goal": {"goal_type": "open_ended"}}.get(kind, {})
+def _loop(
+    kind: str = "code", task: str = "add oauth login", complete: bool = True
+) -> Loop:
+    cfg = {"code": {"entry_stage": "design"}, "goal": {"goal_type": "open_ended"}}.get(
+        kind, {}
+    )
     loop = store.create(Loop(id="", name="L", kind=kind, task=task, kind_config=cfg))
     if complete:
         store.update_status(loop.id, LoopStatus.COMPLETE)
@@ -58,11 +62,10 @@ def _write_finding(loop_id: str, cycle: int, stage: str, **extra) -> None:
     """Write ONE worker finding file — the worker's per-cycle deliverable (unchanged interface)."""
     d = loop_files.loop_dir(loop_id)
     (d / "findings" / f"cycle_{cycle:03d}.json").write_text(
-        json.dumps({"cycle": cycle, "stage": stage, "summary": f"{stage} work", **extra})
+        json.dumps(
+            {"cycle": cycle, "stage": stage, "summary": f"{stage} work", **extra}
+        )
     )
-
-
-# ── the headline: the flywheel produces a proposal from loop evidence ──
 
 
 def test_flywheel_produces_a_proposal_from_loop_evidence(home):
@@ -72,26 +75,22 @@ def test_flywheel_produces_a_proposal_from_loop_evidence(home):
     The before/after is in ONE test on purpose: the worker files exist the whole time; what changes
     is whether they were ingested into the ledger the mining reader reads.
     """
-    from gideon.learning import mining
+    from gideon.cognition.learning import mining
 
     loops = [_loop("code") for _ in range(3)]
     for loop in loops:
         _write_finding(loop.id, 1, "implement")
         _write_finding(loop.id, 2, "validate")
 
-    # BEFORE: the worker files exist, but nothing is on the ledger — the blind spot. Mining sees
-    # no completed steps for any loop, so it produces nothing.
     traces_before, _miss = mining.positive_path_candidates(
         workflow_name="loop:code", journal=loop_journal, store=loop_end._LoopRunStore()
     )
     assert traces_before == []
     assert not P.list_pending(kind=P.Kind.TEMPLATE.value)
 
-    # THE PP-5 EMIT: ingest each loop's cycles into the ledger (`step_started`/`step_completed`).
     for loop in loops:
         assert loop_files.record_cycle_findings(loop.id) == 2
 
-    # AFTER: three loops took the same named path — a procedure worth naming. The flywheel files it.
     after = loop_end.capture(loops[0], service=None)
     assert after["proposed"] >= 1, "the flywheel mined no proposal from loop evidence"
     pending = P.list_pending(kind=P.Kind.TEMPLATE.value)
@@ -102,22 +101,18 @@ def test_flywheel_produces_a_proposal_from_loop_evidence(home):
 def test_mining_reads_loop_steps_off_the_ledger(home):
     """`learning.mining` handed the loop journal reads a loop's completed steps — the reader
     parity that makes a loop a first-class mining subject."""
-    from gideon.learning import mining
+    from gideon.cognition.learning import mining
 
     loop = _loop("code")
     _write_finding(loop.id, 1, "implement")
     _write_finding(loop.id, 2, "validate")
 
-    # Before ingest: no steps on the ledger → an empty "did".
     empty = mining.invert_intent(loop_end._LoopRunView.of(loop), journal=loop_journal)
     assert "no steps completed" in empty.did
 
     loop_files.record_cycle_findings(loop.id)
     inv = mining.invert_intent(loop_end._LoopRunView.of(loop), journal=loop_journal)
     assert "implement" in inv.did and "validate" in inv.did
-
-
-# ── read the trajectory back FROM THE LEDGER ALONE ──
 
 
 def test_trajectory_reconstructs_from_the_ledger_alone(home):
@@ -135,23 +130,26 @@ def test_trajectory_reconstructs_from_the_ledger_alone(home):
     findings = loop_files.get_findings(loop.id)
     assert [f["stage"] for f in findings] == ["implement", "validate"]
     assert findings[0]["key_insight"] == "wired the button"
-    # No projection carries the ingest bookkeeping key.
     assert all("_source_file" not in f for f in findings)
 
     verdicts = loop_files.get_verdicts(loop.id)
-    assert len(verdicts) == 1 and verdicts[0]["cycle"] == 2 and verdicts[0]["done"] is True
+    assert (
+        len(verdicts) == 1 and verdicts[0]["cycle"] == 2 and verdicts[0]["done"] is True
+    )
 
-    # The second store is GONE: delete the worker's raw files and the verdicts dir; the projection
-    # is unchanged because it reads the ledger, not the files.
     import shutil
 
     shutil.rmtree(loop_files.loop_dir(loop.id) / "findings")
     assert not (loop_files.loop_dir(loop.id) / "verdicts").exists()
-    assert [f["stage"] for f in loop_files.get_findings(loop.id)] == ["implement", "validate"]
+    assert [f["stage"] for f in loop_files.get_findings(loop.id)] == [
+        "implement",
+        "validate",
+    ]
     assert loop_files.get_verdicts(loop.id)[0]["done"] is True
 
-    # The full journal carries the whole trajectory in order, step_started markers included.
-    journal_seq = [e["kind"] for e in loop_files.read_jsonl(loop.id, loop_journal.JOURNAL_FILE)]
+    journal_seq = [
+        e["kind"] for e in loop_files.read_jsonl(loop.id, loop_journal.JOURNAL_FILE)
+    ]
     assert journal_seq == [
         loop_journal.STEP_STARTED,
         loop_journal.STEP_COMPLETED,
@@ -159,9 +157,6 @@ def test_trajectory_reconstructs_from_the_ledger_alone(home):
         loop_journal.STEP_COMPLETED,
         loop_journal.JUDGE_VERDICT,
     ]
-    # The durable ledger mirror (events.jsonl) carries the LEDGER_KINDS the flywheel reads —
-    # step_completed + judge_verdict — exactly as the workflow ledger does (step_started is a
-    # journal-only progress marker, not a durable ledger kind).
     events_seq = [e["kind"] for e in loop_journal.ledger(loop.id)]
     assert events_seq == [
         loop_journal.STEP_COMPLETED,
@@ -170,33 +165,28 @@ def test_trajectory_reconstructs_from_the_ledger_alone(home):
     ]
 
 
-# ── a supervisor assessment lands in the reconciled vocabulary ──
-
-
 def test_judge_verdict_carries_the_reconciled_vocabulary(home):
     """A supervisor assessment is a `judge_verdict` carrying the reconciled `JudgeVerdict` shape
     (WF2LOO-16), not a loop-local dialect."""
-    from gideon.workflows.judge_contract import JudgeVerdict, Verdict
+    from gideon.automation.workflows.judge_contract import JudgeVerdict, Verdict
 
     loop = _loop("goal")
     verdict = JudgeVerdict(
-        verdict=Verdict.PASS, done_reason="goal met", marginal_value=3.0, quality_score=4.0
+        verdict=Verdict.PASS,
+        done_reason="goal met",
+        marginal_value=3.0,
+        quality_score=4.0,
     )
     loop_files.write_verdict(loop.id, 1, {"cycle": 1, **verdict.to_dict()})
 
     events = loop_journal.ledger(loop.id, kinds={loop_journal.JUDGE_VERDICT})
     assert len(events) == 1
     ev = events[0]
-    # The reconciled keys are on the ledger record at top level — the same words a workflow verdict
-    # carries, so the flywheel reads one vocabulary.
     for key in ("verdict", "done", "marginal_value", "quality_score", "done_reason"):
         assert key in ev, f"reconciled key {key!r} missing from the judge_verdict event"
     assert ev["verdict"] == Verdict.PASS.value
     assert ev["done"] is True
     assert ev["marginal_value"] == 3.0
-
-
-# ── all four emit points land the right kind ──
 
 
 def test_the_four_emit_points(home):
@@ -206,11 +196,14 @@ def test_the_four_emit_points(home):
 
     _write_finding(loop.id, 1, "implement")
     loop_files.record_cycle_findings(loop.id)
-    loop_files.write_verdict(loop.id, 1, {"cycle": 1, "verdict": "RETRY", "done": False})
+    loop_files.write_verdict(
+        loop.id, 1, {"cycle": 1, "verdict": "RETRY", "done": False}
+    )
     loop_files.record_breaker_trip(loop.id, 1, "the cycle report has not changed")
-    loop_files.record_watcher_reaped(loop.id, cycles=1, reason="worker process lost to restart")
+    loop_files.record_watcher_reaped(
+        loop.id, cycles=1, reason="worker process lost to restart"
+    )
 
-    # The durable ledger mirror (events.jsonl) carries the four LEDGER_KINDS.
     events_kinds = {e["kind"] for e in loop_journal.ledger(loop.id)}
     assert events_kinds == {
         loop_journal.STEP_COMPLETED,
@@ -218,10 +211,10 @@ def test_the_four_emit_points(home):
         loop_journal.BREAKER_TRIP,
         loop_journal.WATCHER_REAPED,
     }
-    # step_started is emitted too — a journal-only progress marker, like the workflow engine's.
-    journal_kinds = {e["kind"] for e in loop_files.read_jsonl(loop.id, loop_journal.JOURNAL_FILE)}
+    journal_kinds = {
+        e["kind"] for e in loop_files.read_jsonl(loop.id, loop_journal.JOURNAL_FILE)
+    }
     assert loop_journal.STEP_STARTED in journal_kinds
-    # The breaker/reaper events carry their reason so a refiner can tell WHY the run was cut off.
     trip = loop_journal.ledger(loop.id, kinds={loop_journal.BREAKER_TRIP})[0]
     assert trip["reason"] == "the cycle report has not changed" and trip["cycle"] == 1
     reap = loop_journal.ledger(loop.id, kinds={loop_journal.WATCHER_REAPED})[0]
@@ -238,6 +231,8 @@ def test_event_ids_are_stable_across_reopen(home):
     loop_files.record_cycle_findings(loop.id)
 
     ids = [e["event_id"] for e in loop_journal.ledger(loop.id)]
-    assert len(ids) == len(set(ids)), "duplicate event ids — seq was not recovered on reopen"
+    assert len(ids) == len(
+        set(ids)
+    ), "duplicate event ids — seq was not recovered on reopen"
     seqs = [e["seq"] for e in loop_files.read_jsonl(loop.id, loop_journal.JOURNAL_FILE)]
     assert seqs == sorted(seqs) and seqs[0] == 1

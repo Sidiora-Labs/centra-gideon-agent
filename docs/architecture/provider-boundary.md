@@ -7,8 +7,10 @@ vendor's endpoints, auth, catalogs, binaries, wire quirks — lives in an app
 bundle. This document records where the line is drawn and, for each surface
 that *looks* vendor-flavored but stays in core, why that judgment was made.
 
-Paths are relative to `Gideon/src/gideon/` unless noted;
-`apps/` is the first-party bundle directory at the workspace root.
+Runtime source lives under `runtime/gideon/`. Application bundle locations come from
+the operator-configured catalogue or local checkout; repository `apps/` contains the
+console and native shells. Bundle-relative examples below do not designate a public
+application repository.
 
 ## Why a boundary at all
 
@@ -18,7 +20,7 @@ edits. It also keeps core testable in isolation (the core test suite collects
 and passes without the sibling `apps/` directory present) and keeps
 vendor-specific dependencies (SDKs, scrapers, block-format builders) out of the
 core dependency set. Apps import core **only** through the `gideon.sdk.*`
-facade (26 modules), enforced by `tests/test_apps_import_boundary.py`.
+facade (26 modules), enforced by `checks/runtime/test_apps_import_boundary.py`.
 
 ## The boundary-judgment table
 
@@ -33,7 +35,7 @@ is a deliberate, documented judgment (also recorded in-module at each site).
 | `acp/dialect.py` (`ClaudeCodeDialect`, `CodexDialect`) | core | **Protocol-shape strategies**, not vendor logic. They encode the small frame-shape differences between the Zed-maintained ACP adapters. App bundles select a dialect by id (`options["dialect"]`); nothing in core infers a vendor from argv or binary names. |
 | `llm/catalog.py` family map + `infer_capabilities()` | core | **Fallback-only reference data.** Providers that *declare* capabilities always win; the vendor-name markers only classify unknown models discovered via `/v1/models`. Same class as public model-pricing tables (`pricing.py`, `model_pricing.json`) — data about the world, not an integration. |
 | `security.py` `xox[bpas]-` token patterns; `sandbox.py` `SLACK_*` env denylist | core | **Secret-DETECTION data.** These patterns exist to *redact and block* leaked credentials. Renaming them to something generic would break the control they implement. Deliberate keep. |
-| `CRED_SLACK_*` constants | core `config/loader.py`, re-exported by `sdk/channel.py` | The literal `.env` credential-store key names (`SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`) that existing installs already hold. The loader is the credential store's home (the bottom layer, below all apps); `sdk/channel.py` re-exports them as the app-facing surface, so the slack app imports via the SDK and no import direction is inverted. Renaming the keys would break existing installs for zero gain. |
+| `CRED_SLACK_*` constants | core `config/loader.py`, re-exported by `packages/python-client/channel.py` | The literal `.env` credential-store key names (`SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`) that existing installs already hold. The loader is the credential store's home (the bottom layer, below all apps); `packages/python-client/channel.py` re-exports them as the app-facing surface, so the slack app imports via the SDK and no import direction is inverted. Renaming the keys would break existing installs for zero gain. |
 | `constants.APP_LOGGER_ROOTS` (`"slack_runtime"`) | core | The list of app logger namespaces the CLI log setup (`cli.py`) and the dashboard log-level handler consume. Apps *registering* their own logger roots (instead of core listing them) is a post-publication roadmap item — deliberately not built yet. |
 | Everything else vendor-specific | `apps/` bundles | Endpoints, auth flows, catalogs, binary resolution, block/attachment formats, scraping — all bundle-resident. |
 
@@ -41,12 +43,13 @@ is a deliberate, documented judgment (also recorded in-module at each site).
 
 The families an app can belong to are not a list this document keeps — they are
 exactly `PROVIDER_TYPES` (`apps/manifest.py`), which a manifest is validated
-against at install time. Read that frozenset for what exists; read
-[GideonApps](https://github.com/Gideon/GideonApps) for who
-implements it. What matters here is where the boundary sits inside each family:
+against at install time. Read that frozenset for accepted capabilities and the
+operator-configured application catalogue for available implementations. A catalogue
+entry is not evidence that an integration is installed or qualified. The boundary
+inside each family is:
 
 - **Model providers** come in three construction shapes, all bundle-resident:
-  protocol-thin branded apps (built on `sdk/provider_helpers.py`
+  protocol-thin branded apps (built on `packages/python-client/provider_helpers.py`
   `register_branded_app`), generic-endpoint apps taking a base URL, and
   full-protocol apps owning their own wire translation. Local-inference apps
   (whisper, TTS, embeddings, diarization) additionally implement the

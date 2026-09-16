@@ -1,6 +1,6 @@
 """SH-5 — the adversarial corpus harness against ``SkillScanner`` / ``install_scanned``.
 
-Six attack classes, stored one directory per class under ``tests/security/corpus/``.
+Six attack classes, stored one directory per class under ``checks/runtime/security/corpus/``.
 Five were named by SECURITY-HARDENING S3/C3; ``baseline-tamper`` was added by SH-7:
 
 * ``archive`` — zip-slip / absolute-path / mid-path traversal / case-collision.
@@ -41,13 +41,17 @@ from typing import Any, Callable
 
 import pytest
 
-from gideon import security, supply_chain
-from gideon.sel import SecurityEventLog
-from gideon.skills import marketplace as mk
-from gideon.skills.marketplace import SkillDetail, SkillInstallRefused, SkillsMarketplace
-from gideon.supply_chain import TrustTier, Verdict, default_scanner
+from gideon.extensions.skills import marketplace as mk
+from gideon.extensions.skills.marketplace import (
+    SkillDetail,
+    SkillInstallRefused,
+    SkillsMarketplace,
+)
+from gideon.security import security, supply_chain
+from gideon.security.sel import SecurityEventLog
+from gideon.security.supply_chain import TrustTier, Verdict, default_scanner
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 CORPUS_ROOT = Path(__file__).resolve().parent / "corpus"
 ATTACK_CLASSES = (
     "archive",
@@ -59,9 +63,6 @@ ATTACK_CLASSES = (
 )
 
 
-# ── corpus loading ──────────────────────────────────────────────────────────────
-
-
 def load_cases(attack_class: str) -> list[dict[str, Any]]:
     """Load one class's cases. Discovery FAILS LOUDLY: an empty or missing class dir
     raises instead of yielding zero parametrizations, because a collection that
@@ -69,7 +70,10 @@ def load_cases(attack_class: str) -> list[dict[str, Any]]:
     class_dir = CORPUS_ROOT / attack_class
     if not class_dir.is_dir():
         raise AssertionError(f"corpus class dir missing: {class_dir}")
-    cases = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(class_dir.glob("*.json"))]
+    cases = [
+        json.loads(p.read_text(encoding="utf-8"))
+        for p in sorted(class_dir.glob("*.json"))
+    ]
     if not cases:
         raise AssertionError(f"corpus class {attack_class!r} has no cases")
     return cases
@@ -101,9 +105,6 @@ def payload(case: dict[str, Any], key: str = "files") -> list[dict[str, Any]]:
             contents = contents + "# pad\n" * (int(pad) // 6 + 1)
         entries.append({"path": entry["path"], "contents": contents})
     return entries
-
-
-# ── drivers ─────────────────────────────────────────────────────────────────────
 
 
 class AdversarialMarket(SkillsMarketplace):
@@ -155,7 +156,9 @@ def tree_digest(root: Path) -> dict[str, str]:
     root = Path(root)
     for path in sorted(root.rglob("*")):
         if path.is_file() and path.name != ".gideon-lock.json":
-            out[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+            out[path.relative_to(root).as_posix()] = hashlib.sha256(
+                path.read_bytes()
+            ).hexdigest()
     return out
 
 
@@ -167,7 +170,7 @@ def instrument_scan(
     """Record the digest of the bytes the gate actually scanned, and optionally run an
     attacker callback in the window between the scan and the commit.
 
-    ``install_scanned`` imports ``scan_dir`` from :mod:`gideon.supply_chain` at
+    ``install_scanned`` imports ``scan_dir`` from :mod:`gideon.security.supply_chain` at
     call time, so patching the module attribute instruments the real chokepoint."""
     real_scan_dir = supply_chain.scan_dir
     seen: dict[str, dict[str, str]] = {}
@@ -221,9 +224,6 @@ def staged_scan(case: dict[str, Any], tmp_path: Path, tier: TrustTier) -> Any:
     return default_scanner.scan(staged, tier)
 
 
-# ── per-expectation assertions (the rails) ──────────────────────────────────────
-
-
 def assert_unsafe_path_refused(case: dict[str, Any], tmp_path: Path) -> None:
     """Traversal/absolute-path entries must be refused by BOTH the quarantine stager and
     the commit-side writer, and the named escape target must not exist afterwards."""
@@ -252,8 +252,10 @@ def assert_dangerous(case: dict[str, Any], tmp_path: Path) -> None:
             ), f"{case['id']} variant {i} not dangerous via scan_text: {variant!r}"
             staged = tmp_path / f"v{i}" / "helper"
             staged.mkdir(parents=True)
-            (staged / "scripts").mkdir()
-            (staged / "scripts" / "setup.sh").write_text(variant, encoding="utf-8")
+            (staged / "tooling/scripts").mkdir()
+            (staged / "tooling/scripts" / "setup.sh").write_text(
+                variant, encoding="utf-8"
+            )
             dir_report = default_scanner.scan(staged)
             assert (
                 dir_report.verdict is Verdict.DANGEROUS
@@ -273,10 +275,14 @@ def assert_dangerous_every_tier(case: dict[str, Any], tmp_path: Path) -> None:
     launder outright malice through the gate — for ANY tier, including ``builtin``."""
     for tier in TrustTier:
         report = staged_scan(case, tmp_path / tier.value, tier)
-        assert report.verdict is Verdict.DANGEROUS, f"{tier.value} downgraded a dangerous payload"
+        assert (
+            report.verdict is Verdict.DANGEROUS
+        ), f"{tier.value} downgraded a dangerous payload"
         market = AdversarialMarket(payload(case), tier=tier.value)
         with pytest.raises((SkillInstallRefused, ValueError)) as excinfo:
-            mk.install_scanned(market, "adversarial", "helper", tmp_path / "live" / tier.value)
+            mk.install_scanned(
+                market, "adversarial", "helper", tmp_path / "live" / tier.value
+            )
         if isinstance(excinfo.value, SkillInstallRefused):
             assert excinfo.value.dangerous is True
         assert not (tmp_path / "live" / tier.value / "helper" / "SKILL.md").exists()
@@ -286,12 +292,16 @@ def assert_refused_even_forced(case: dict[str, Any], tmp_path: Path) -> None:
     """``force`` clears a calculated WARNING. It must never clear DANGEROUS."""
     market = AdversarialMarket(payload(case))
     with pytest.raises(SkillInstallRefused) as excinfo:
-        mk.install_scanned(market, "adversarial", "helper", tmp_path / "live", force=True)
+        mk.install_scanned(
+            market, "adversarial", "helper", tmp_path / "live", force=True
+        )
     assert excinfo.value.dangerous is True
     assert not (tmp_path / "live" / "helper").exists()
 
 
-def assert_warning_blocks_unforced_install(case: dict[str, Any], tmp_path: Path) -> None:
+def assert_warning_blocks_unforced_install(
+    case: dict[str, Any], tmp_path: Path
+) -> None:
     """Zero-width splitting takes the pattern rules out of play, so the invisible-codepoint
     rule is the last control standing. Pin what actually holds: the finding fires, the
     verdict is not clean, and an unforced community install refuses.
@@ -311,11 +321,17 @@ def assert_warning_blocks_unforced_install(case: dict[str, Any], tmp_path: Path)
     assert not (tmp_path / "live" / "helper").exists()
 
     forced = mk.install_scanned(
-        AdversarialMarket(payload(case)), "adversarial", "helper", tmp_path / "forced", force=True
+        AdversarialMarket(payload(case)),
+        "adversarial",
+        "helper",
+        tmp_path / "forced",
+        force=True,
     )
     assert forced.report.verdict is Verdict.WARNING
     lock = json.loads(
-        (tmp_path / "forced" / "helper" / ".gideon-lock.json").read_text(encoding="utf-8")
+        (tmp_path / "forced" / "helper" / ".gideon-lock.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert lock["verdict"] == "warning"
 
@@ -342,7 +358,9 @@ def assert_installed_equals_scanned(
     assert seen["scanned"], "the scan was never instrumented — the rail proved nothing"
     assert installed == seen["scanned"], "installed bytes differ from scanned bytes"
     assert market.fetch_calls == 1, f"the install re-fetched ({market.fetch_calls}x)"
-    body = (tmp_path / "live" / "helper" / "scripts" / "setup.sh").read_text(encoding="utf-8")
+    body = (tmp_path / "live" / "helper" / "tooling/scripts" / "setup.sh").read_text(
+        encoding="utf-8"
+    )
     for entry in swap:
         if entry["path"].endswith("setup.sh"):
             assert body != entry["contents"], "the swapped bytes landed"
@@ -368,7 +386,7 @@ def assert_midscan_payload_swap_refused(
     instrument_scan(monkeypatch, at_scan=on_attacker_thread(mutate))
     with pytest.raises(ValueError, match="dangerous"):
         mk.install_scanned(market, "adversarial", "helper", tmp_path / "live")
-    assert not (tmp_path / "live" / "helper" / "scripts").exists()
+    assert not (tmp_path / "live" / "helper" / "tooling/scripts").exists()
 
 
 def assert_integrity_tamper_detected(case: dict[str, Any], tmp_path: Path) -> None:
@@ -383,12 +401,14 @@ def assert_integrity_tamper_detected(case: dict[str, Any], tmp_path: Path) -> No
     (skill_dir / "extra.sh").write_text("echo smuggled\n", encoding="utf-8")
     report = mk.verify_skill_integrity(skill_dir)
     assert report.ok is False
-    assert "scripts/setup.sh" in report.mutated, report.mutated
+    assert "tooling/scripts/setup.sh" in report.mutated, report.mutated
     assert "extra.sh" in report.added, report.added
     assert "TAMPERED" in report.summary()
 
 
-def assert_oversize_skipped_by_walk_refused_at_commit(case: dict[str, Any], tmp_path: Path) -> None:
+def assert_oversize_skipped_by_walk_refused_at_commit(
+    case: dict[str, Any], tmp_path: Path
+) -> None:
     """A dangerous script padded past the per-file read cap is skipped by the quarantine
     walk (documented, deliberate — the scanner does not read unbounded blobs). Defense in
     depth is what refuses it: the commit-side per-file gate has no cap."""
@@ -396,16 +416,18 @@ def assert_oversize_skipped_by_walk_refused_at_commit(case: dict[str, Any], tmp_
     staged = tmp_path / "staged" / "helper"
     staged.mkdir(parents=True)
     write_entries(staged, files)
-    blob = staged / "scripts" / "setup.sh"
+    blob = staged / "tooling/scripts" / "setup.sh"
     assert blob.stat().st_size > supply_chain._MAX_FILE_BYTES
-    assert default_scanner.scan(staged).verdict is Verdict.CLEAN, "cap behaviour changed"
+    assert (
+        default_scanner.scan(staged).verdict is Verdict.CLEAN
+    ), "cap behaviour changed"
 
     with pytest.raises(ValueError, match="dangerous"):
         mk.install_skill_files(files, "helper", tmp_path / "live")
     market = AdversarialMarket(files)
     with pytest.raises(ValueError, match="dangerous"):
         mk.install_scanned(market, "adversarial", "helper", tmp_path / "live2")
-    assert not (tmp_path / "live2" / "helper" / "scripts").exists()
+    assert not (tmp_path / "live2" / "helper" / "tooling/scripts").exists()
 
 
 def assert_manifest_rejected(case: dict[str, Any], tmp_path: Path) -> None:
@@ -418,16 +440,6 @@ def assert_manifest_rejected(case: dict[str, Any], tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="SKILL.md"):
         mk.install_scanned(market, "adversarial", "helper", tmp_path / "live2")
     assert not (tmp_path / "live2" / "helper" / "SKILL.md").exists()
-
-
-# ── baseline-tamper drivers (SH-7) ──────────────────────────────────────────────
-#
-# The tamper is applied to a TEMP COPY of the packaged data file, never to the installed
-# one: ``security.resources`` is swapped for a shim that resolves
-# ``baseline_denylist.json`` inside ``tmp_path``, so the REAL ``_read_packaged_baseline``
-# does the reading, hashing and raising. (SH-6's unit tests substitute the whole reader,
-# which re-implements the parse; going through the real function is what makes this
-# corpus class end-to-end rather than a second copy of the same assertions.)
 
 
 class _TamperedResources:
@@ -448,11 +460,17 @@ def _baseline_doc(case_tamper: dict[str, Any], patterns_key: str = "patterns") -
     else:
         digest = str(case_tamper["sha256"])
     return json.dumps(
-        {"version": int(case_tamper.get("version", 1)), "sha256": digest, "patterns": patterns}
+        {
+            "version": int(case_tamper.get("version", 1)),
+            "sha256": digest,
+            "patterns": patterns,
+        }
     )
 
 
-def _install_tampered_file(raw: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _install_tampered_file(
+    raw: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = tmp_path / "tampered-package"
     root.mkdir(parents=True, exist_ok=True)
     (root / security.BASELINE_DENYLIST_FILE).write_text(raw, encoding="utf-8")
@@ -476,7 +494,11 @@ def _sel_rows(home: Path, event_type: str) -> list[dict[str, Any]]:
     path = home / "security_events.jsonl"
     if not path.exists():
         return []
-    rows = [json.loads(ln) for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    rows = [
+        json.loads(ln)
+        for ln in path.read_text(encoding="utf-8").splitlines()
+        if ln.strip()
+    ]
     return [r for r in rows if r["event_type"] == event_type]
 
 
@@ -505,9 +527,13 @@ def assert_baseline_file_tamper_detected(
 
     report = security.verify_baseline_denylist()
 
-    assert report["file_verified"] is False, f"{case['id']}: the rewrite was not detected"
+    assert (
+        report["file_verified"] is False
+    ), f"{case['id']}: the rewrite was not detected"
     assert case["detail_contains"] in report["detail"], report["detail"]
-    assert report["sha256"] == security._BASELINE_SHA256, "the tampered digest was ADOPTED"
+    assert (
+        report["sha256"] == security._BASELINE_SHA256
+    ), "the tampered digest was ADOPTED"
     assert report["count"] == before, "the enforced set changed size after the tamper"
     rows = _sel_rows(tmp_path, "baseline_denylist_tamper_attempt")
     assert len(rows) == 1, f"{case['id']}: tamper not audited ({len(rows)} events)"
@@ -555,7 +581,9 @@ def assert_baseline_healed_and_audited(
     healed = security.baseline_denied_command_patterns()
 
     assert len(healed) == before, "the heal did not restore the full baseline"
-    assert list(security.BUILTIN_DENIED_COMMAND_PATTERNS) == list(healed), "live list not repaired"
+    assert list(security.BUILTIN_DENIED_COMMAND_PATTERNS) == list(
+        healed
+    ), "live list not repaired"
     rows = _sel_rows(tmp_path, case["sel_event"])
     assert len(rows) == 1, f"{case['id']}: heal not audited ({len(rows)} events)"
     assert rows[0]["outcome"] == "healed"
@@ -577,32 +605,42 @@ def assert_baseline_shrink_refused_and_audited(
     """
     _use_home(tmp_path, monkeypatch)
     tamper = case["tamper"]
-    _install_tampered_file(_baseline_doc(tamper, "file_patterns"), tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        security, "_BASELINE_PATTERNS", tuple(str(p) for p in tamper["snapshot_patterns"])
+    _install_tampered_file(
+        _baseline_doc(tamper, "file_patterns"), tmp_path, monkeypatch
     )
-    security.BUILTIN_DENIED_COMMAND_PATTERNS[:] = [str(p) for p in tamper["live_patterns"]]
+    monkeypatch.setattr(
+        security,
+        "_BASELINE_PATTERNS",
+        tuple(str(p) for p in tamper["snapshot_patterns"]),
+    )
+    security.BUILTIN_DENIED_COMMAND_PATTERNS[:] = [
+        str(p) for p in tamper["live_patterns"]
+    ]
 
     effective = security.baseline_denied_command_patterns()
 
     for source in ("snapshot_patterns", "live_patterns", "file_patterns"):
         for pattern in tamper[source]:
-            assert pattern in effective, f"{case['id']}: {source} dropped {pattern!r} — not a union"
+            assert (
+                pattern in effective
+            ), f"{case['id']}: {source} dropped {pattern!r} — not a union"
     assert len(effective) >= max(
         len(tamper["snapshot_patterns"]),
         len(tamper["live_patterns"]),
         len(tamper["file_patterns"]),
     ), f"{case['id']}: the effective set is smaller than one of the copies it unions"
-    assert len(set(effective)) == len(effective), f"{case['id']}: the union did not dedupe"
+    assert len(set(effective)) == len(
+        effective
+    ), f"{case['id']}: the union did not dedupe"
     rows = _sel_rows(tmp_path, "baseline_denylist_tamper_attempt")
-    assert len(rows) == 1, f"{case['id']}: rejected shrink not audited ({len(rows)} events)"
+    assert (
+        len(rows) == 1
+    ), f"{case['id']}: rejected shrink not audited ({len(rows)} events)"
     assert rows[0]["metadata"]["reason"] == case["sel_reason"]
     assert rows[0]["outcome"] == "rejected"
     _still_enforcing(case)
 
 
-# ``expect`` → rail. A corpus case whose expect is absent here is a fixture nobody
-# asserts on, and TestCorpusIsComplete reds on it.
 NEEDS_MONKEYPATCH = {
     "installed_equals_scanned",
     "midscan_payload_swap_refused",
@@ -644,7 +682,9 @@ def expect_rail_red(rail: Callable[..., None], *args: Any) -> None:
     raise AssertionError(f"{rail.__name__} still passed against a weakened scanner")
 
 
-def run_case(case: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def run_case(
+    case: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     handler = HANDLERS[case["expect"]]
     if case["expect"] in NEEDS_MONKEYPATCH:
         handler(case, tmp_path, monkeypatch)
@@ -652,13 +692,12 @@ def run_case(case: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPat
         handler(case, tmp_path)
 
 
-# ── the five classes ────────────────────────────────────────────────────────────
-
-
 class TestArchiveClass:
     """Zip-slip, absolute-path escape, mid-path traversal, case-collision."""
 
-    @pytest.mark.parametrize("case", load_cases("archive"), ids=ids_of(load_cases("archive")))
+    @pytest.mark.parametrize(
+        "case", load_cases("archive"), ids=ids_of(load_cases("archive"))
+    )
     def test_case(self, case, tmp_path, monkeypatch):
         run_case(case, tmp_path, monkeypatch)
 
@@ -697,7 +736,9 @@ class TestDegenerateManifestClass:
     """Oversized blobs and manifests that parse to nonsense."""
 
     @pytest.mark.parametrize(
-        "case", load_cases("degenerate-manifest"), ids=ids_of(load_cases("degenerate-manifest"))
+        "case",
+        load_cases("degenerate-manifest"),
+        ids=ids_of(load_cases("degenerate-manifest")),
     )
     def test_case(self, case, tmp_path, monkeypatch):
         run_case(case, tmp_path, monkeypatch)
@@ -755,22 +796,23 @@ class TestBaselineTamperClass:
         assert len(patterns) == len(security._BASELINE_PATTERNS)
 
 
-# ── the corpus's own floor ──────────────────────────────────────────────────────
-
-
 class TestCorpusIsComplete:
     """The vacuity floor. A corpus that quietly stopped asserting anything — a class dir
     emptied, a fixture added but never wired, a payload that became executable — must
     fail here rather than look like a clean run."""
 
     def test_all_attack_classes_present_and_populated(self):
-        assert sorted(p.name for p in CORPUS_ROOT.iterdir() if p.is_dir()) == sorted(ATTACK_CLASSES)
+        assert sorted(p.name for p in CORPUS_ROOT.iterdir() if p.is_dir()) == sorted(
+            ATTACK_CLASSES
+        )
         for cls in ATTACK_CLASSES:
             assert load_cases(cls), cls
 
     def test_every_case_is_wired_to_an_assertion(self):
         for case_id, case in ALL_CASES.items():
-            assert case["expect"] in HANDLERS, f"{case_id}: unhandled expect {case['expect']!r}"
+            assert (
+                case["expect"] in HANDLERS
+            ), f"{case_id}: unhandled expect {case['expect']!r}"
 
     def test_case_metadata_is_coherent(self):
         for cls in ATTACK_CLASSES:
@@ -779,7 +821,9 @@ class TestCorpusIsComplete:
                 assert case["id"].startswith(f"{cls}/"), case["id"]
                 assert case["summary"].strip(), case["id"]
                 assert case.get("files") or case.get("variants"), case["id"]
-        assert len(ALL_CASES) == sum(len(load_cases(c)) for c in ATTACK_CLASSES), "duplicate ids"
+        assert len(ALL_CASES) == sum(
+            len(load_cases(c)) for c in ATTACK_CLASSES
+        ), "duplicate ids"
 
     def test_corpus_payloads_are_inert(self):
         """A malicious sample must never be runnable by the test run itself: every corpus
@@ -787,7 +831,9 @@ class TestCorpusIsComplete:
         for path in sorted(CORPUS_ROOT.rglob("*")):
             if path.is_file():
                 assert path.suffix == ".json", f"non-JSON corpus artifact: {path}"
-                assert not path.stat().st_mode & 0o111, f"executable corpus file: {path}"
+                assert (
+                    not path.stat().st_mode & 0o111
+                ), f"executable corpus file: {path}"
 
     def test_methodology_doc_documents_every_class(self):
         doc = REPO_ROOT / "docs" / "security" / "scanner-testing.md"
@@ -795,7 +841,7 @@ class TestCorpusIsComplete:
         text = doc.read_text(encoding="utf-8")
         for cls in ATTACK_CLASSES:
             assert cls in text, f"{cls} undocumented in scanner-testing.md"
-        assert "tests/security/corpus" in text
+        assert "checks/runtime/security/corpus" in text
         assert "pytest" in text
 
     def test_nightly_job_runs_the_corpus(self):
@@ -803,7 +849,9 @@ class TestCorpusIsComplete:
         assert wf.is_file(), f"missing workflow: {wf}"
         text = wf.read_text(encoding="utf-8")
         assert "security-corpus:" in text, "no security-corpus job in full.yml"
-        assert "tests/security" in text, "the nightly job does not run the corpus"
+        assert (
+            "checks/runtime/security" in text
+        ), "the nightly job does not run the corpus"
         assert "schedule:" in text and "cron:" in text
 
 
@@ -819,23 +867,31 @@ class TestCorpusRedsOnAWeakenedScanner:
     def _case(case_id: str) -> dict[str, Any]:
         return ALL_CASES[case_id]
 
-    def test_dropping_destructive_root_reds_verdict_evasion(self, tmp_path, monkeypatch):
+    def test_dropping_destructive_root_reds_verdict_evasion(
+        self, tmp_path, monkeypatch
+    ):
         case = self._case("verdict-evasion/destructive-root-variants")
         assert_dangerous(case, tmp_path / "intact")
         monkeypatch.setattr(
             supply_chain,
             "_DANGEROUS_SCRIPT",
-            tuple(r for r in supply_chain._DANGEROUS_SCRIPT if r[0] != "destructive_root"),
+            tuple(
+                r for r in supply_chain._DANGEROUS_SCRIPT if r[0] != "destructive_root"
+            ),
         )
         expect_rail_red(assert_dangerous, case, tmp_path / "weakened")
 
-    def test_emptying_invisible_charset_reds_invisible_char(self, tmp_path, monkeypatch):
+    def test_emptying_invisible_charset_reds_invisible_char(
+        self, tmp_path, monkeypatch
+    ):
         case = self._case("invisible-char/bidi-override-in-manifest")
         assert_dangerous_every_tier(case, tmp_path / "intact")
         monkeypatch.setattr(supply_chain, "_INVISIBLE_CHARS", set())
         expect_rail_red(assert_dangerous_every_tier, case, tmp_path / "weakened")
 
-    def test_neutering_manifest_validation_reds_degenerate_manifest(self, tmp_path, monkeypatch):
+    def test_neutering_manifest_validation_reds_degenerate_manifest(
+        self, tmp_path, monkeypatch
+    ):
         case = self._case("degenerate-manifest/missing-frontmatter")
         assert_manifest_rejected(case, tmp_path / "intact")
         monkeypatch.setattr(mk, "_validate_skill_md", lambda contents: [])
@@ -854,7 +910,7 @@ class TestCorpusRedsOnAWeakenedScanner:
             for entry in files:
                 rel = entry.get("path", "")
                 if ".." in rel or rel.startswith("/"):
-                    continue  # the weakness: skip, don't refuse
+                    continue
                 out = staged_skill / rel
                 out.parent.mkdir(parents=True, exist_ok=True)
                 out.write_bytes(mk._entry_bytes(entry))
@@ -883,7 +939,9 @@ class TestCorpusRedsOnAWeakenedScanner:
             return real_writer(swapped, skill_name, target_base)
 
         monkeypatch.setattr(mk, "install_skill_files", substituting_writer)
-        expect_rail_red(assert_installed_equals_scanned, case, tmp_path / "weakened", monkeypatch)
+        expect_rail_red(
+            assert_installed_equals_scanned, case, tmp_path / "weakened", monkeypatch
+        )
 
     def test_rereading_the_fingerprint_from_disk_reds_baseline_tamper(
         self, tmp_path, monkeypatch, baseline_state_restored
@@ -900,10 +958,15 @@ class TestCorpusRedsOnAWeakenedScanner:
         assert_baseline_file_tamper_detected(case, tmp_path / "intact", monkeypatch)
         monkeypatch.undo()
 
-        tampered_digest = security._baseline_digest([str(p) for p in case["tamper"]["patterns"]])
+        tampered_digest = security._baseline_digest(
+            [str(p) for p in case["tamper"]["patterns"]]
+        )
         monkeypatch.setattr(security, "_BASELINE_SHA256", tampered_digest)
         expect_rail_red(
-            assert_baseline_file_tamper_detected, case, tmp_path / "weakened", monkeypatch
+            assert_baseline_file_tamper_detected,
+            case,
+            tmp_path / "weakened",
+            monkeypatch,
         )
 
     def test_suppressing_the_tamper_audit_reds_baseline_tamper(
@@ -916,11 +979,16 @@ class TestCorpusRedsOnAWeakenedScanner:
         real failure, so the rail must red on it rather than only on a shrink.
         """
         case = self._case("baseline-tamper/snapshot-and-file-both-rebound")
-        assert_baseline_shrink_refused_and_audited(case, tmp_path / "intact", monkeypatch)
+        assert_baseline_shrink_refused_and_audited(
+            case, tmp_path / "intact", monkeypatch
+        )
         monkeypatch.undo()
         security._BASELINE_TAMPER_REPORTED.clear()
 
         monkeypatch.setattr(security, "_note_baseline_tamper", lambda digest: False)
         expect_rail_red(
-            assert_baseline_shrink_refused_and_audited, case, tmp_path / "weakened", monkeypatch
+            assert_baseline_shrink_refused_and_audited,
+            case,
+            tmp_path / "weakened",
+            monkeypatch,
         )

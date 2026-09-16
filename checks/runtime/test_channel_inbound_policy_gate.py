@@ -35,23 +35,18 @@ import inspect
 
 import pytest
 
-from gideon import channel_inbound as ci
-from gideon import channel_trust as ct
-from gideon.channel_transports.base import ChannelMessage
-from gideon.testing.channel_conformance import CapturingState
+from gideon.assurance.testing.channel_conformance import CapturingState
+from gideon.integrations import channel_inbound as ci
+from gideon.integrations import channel_trust as ct
+from gideon.integrations.channel_transports.base import ChannelMessage
 
 PROVIDER = "telegram"
 
-#: Per DM policy: does an outstanding, correct pairing code let its sender in?
-#:
-#: ``pairing``    → yes, that is the policy's whole point (``reason="paired"``).
-#: ``owner_only`` → no, and the code must SURVIVE: the owner's Allow is the only door, so a
-#:                  stranger's guess must not spend the owner's live code either.
-#: ``open``       → the sender is admitted before redemption is ever considered (everyone is),
-#:                  so the code is untouched and there is nothing to pair.
-#:
-#: Keyed by policy so :data:`channel_trust.DM_POLICIES` is the authority on the key set.
-CODE_OPENS_THE_DOOR: dict[str, bool] = {"pairing": True, "owner_only": False, "open": False}
+CODE_OPENS_THE_DOOR: dict[str, bool] = {
+    "pairing": True,
+    "owner_only": False,
+    "open": False,
+}
 
 
 @pytest.fixture(autouse=True)
@@ -62,12 +57,14 @@ def isolated(tmp_path, monkeypatch):
     identity and not on the store — so ``tmp_path`` isolation alone would let one test's
     verdict be replayed to the next test that builds the same message id.
     """
-    import gideon.config.loader as cfg
-    import gideon.providers.entity_routes as er
+    import gideon.core.config.loader as cfg
+    import gideon.extensions.providers.entity_routes as er
 
     monkeypatch.setattr(cfg, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(
-        er, "_entity_settings_path", lambda entity: tmp_path / "entity_settings" / f"{entity}.json"
+        er,
+        "_entity_settings_path",
+        lambda entity: tmp_path / "entity_settings" / f"{entity}.json",
     )
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     ci.reset_admissions()
@@ -83,7 +80,7 @@ def turns(monkeypatch):
     async def _fake_run_chat(state, session, message, **kw):
         started.append((session.key, message))
 
-    monkeypatch.setattr("gideon.dashboard.chat.run_chat", _fake_run_chat)
+    monkeypatch.setattr("gideon.interfaces.dashboard.chat.run_chat", _fake_run_chat)
     return started
 
 
@@ -93,7 +90,9 @@ def _set_dm_policy(policy: str) -> None:
     store[PROVIDER] = ct._provider_record(store, PROVIDER)
     store[PROVIDER]["policies"]["dm"] = policy
     ct._write_store(store)
-    assert ct.trust_policies(PROVIDER)["dm"] == policy, "fixture failed to set the DM policy"
+    assert (
+        ct.trust_policies(PROVIDER)["dm"] == policy
+    ), "fixture failed to set the DM policy"
 
 
 def _msg(text: str, *, sender: str = "stranger", mid: str = "m1") -> ChannelMessage:
@@ -109,24 +108,25 @@ class _Services:
         self.dashboard_state = state
 
     async def deliver_channel_inbound(self, provider, msg, *, is_dm=True):
-        from gideon.dashboard.chat import run_chat
+        from gideon.interfaces.dashboard.chat import run_chat
 
-        return await ci.deliver_inbound(self, provider, msg, is_dm=is_dm, turn_runner=run_chat)
+        return await ci.deliver_inbound(
+            self, provider, msg, is_dm=is_dm, turn_runner=run_chat
+        )
 
 
 def _through_the_door(state, msg, *, is_dm: bool = True):
     """One inbound message through ``deliver_inbound``, with any started turn settled."""
 
     async def go():
-        verdict = await _Services(state).deliver_channel_inbound(PROVIDER, msg, is_dm=is_dm)
+        verdict = await _Services(state).deliver_channel_inbound(
+            PROVIDER, msg, is_dm=is_dm
+        )
         await asyncio.sleep(0)
         await asyncio.sleep(0)
         return verdict
 
     return asyncio.run(go())
-
-
-# ── the vocabulary this file is parametrised over ─────────────────────────────
 
 
 def test_every_dm_policy_has_a_declared_pairing_outcome():
@@ -143,9 +143,6 @@ def test_every_dm_policy_has_a_declared_pairing_outcome():
         f"vocabulary={sorted(ct.DM_POLICIES)} cases={sorted(CODE_OPENS_THE_DOOR)}"
     )
     assert ct.DEFAULT_DM_POLICY in CODE_OPENS_THE_DOOR
-
-
-# ── the defect: owner_only must refuse a VALID code, and not spend it ─────────
 
 
 def test_owner_only_refuses_a_valid_code_and_does_not_consume_it(turns):
@@ -167,7 +164,9 @@ def test_owner_only_refuses_a_valid_code_and_does_not_consume_it(turns):
         "stronger than pairing"
     )
     assert verdict.meta.get("paired") is not True
-    assert ct.is_allowed_sender(PROVIDER, "stranger") is False, "the sender became trusted"
+    assert (
+        ct.is_allowed_sender(PROVIDER, "stranger") is False
+    ), "the sender became trusted"
     assert ct._pairing_code_outstanding(PROVIDER) is True, (
         "the refusal consumed the owner's live pairing code — a stranger could burn every "
         "code the owner mints without ever getting in"
@@ -186,10 +185,9 @@ def test_owner_only_still_refuses_the_senders_next_message(turns):
 
     assert follow_up.allowed is False
     assert ct.is_allowed_sender(PROVIDER, "stranger") is False
-    assert turns == [], "an owner-unapproved sender reached an agent turn under owner_only"
-
-
-# ── the redundancy: deleting the pre-gate block did not break pairing ────────
+    assert (
+        turns == []
+    ), "an owner-unapproved sender reached an agent turn under owner_only"
 
 
 def test_pairing_still_pairs_end_to_end_through_the_door(turns):
@@ -207,11 +205,15 @@ def test_pairing_still_pairs_end_to_end_through_the_door(turns):
     paired = _through_the_door(state, _msg(code, mid="m1"))
 
     assert paired.reason == "paired"
-    assert paired.allowed is False, "a pairing code must not become a question for the agent"
+    assert (
+        paired.allowed is False
+    ), "a pairing code must not become a question for the agent"
     assert paired.canned_reply == ct.CANNED_PAIRED_REPLY
     assert paired.meta.get("paired") is True
     assert ct.is_allowed_sender(PROVIDER, "stranger") is True
-    assert ct._pairing_code_outstanding(PROVIDER) is False, "single-use: the code was consumed"
+    assert (
+        ct._pairing_code_outstanding(PROVIDER) is False
+    ), "single-use: the code was consumed"
     assert turns == [], "the code itself reached a session"
 
     follow_up = _through_the_door(state, _msg("hello for real", mid="m2"))
@@ -232,10 +234,10 @@ def test_a_valid_code_opens_only_the_policies_that_declare_it(policy, turns):
 
     assert (
         verdict.reason == "paired"
-    ) is opens, f"policy {policy!r}: expected paired={opens}, got reason={verdict.reason!r}"
+    ) is opens, (
+        f"policy {policy!r}: expected paired={opens}, got reason={verdict.reason!r}"
+    )
     assert ct.is_allowed_sender(PROVIDER, "stranger") is opens
-    # Consumed exactly when it was honoured; ``open`` admits the sender without redeeming,
-    # so the owner's live code survives there too.
     assert ct._pairing_code_outstanding(PROVIDER) is (not opens)
 
 
@@ -249,7 +251,9 @@ def test_a_wrong_code_is_refused_without_burning_the_live_code(policy, turns):
 
     verdict = _through_the_door(state, _msg(wrong))
 
-    assert verdict.reason != "paired", f"policy {policy!r} paired a sender on a wrong code"
+    assert (
+        verdict.reason != "paired"
+    ), f"policy {policy!r} paired a sender on a wrong code"
     assert verdict.meta.get("paired") is not True
     assert (
         ct._pairing_code_outstanding(PROVIDER) is True
@@ -258,14 +262,10 @@ def test_a_wrong_code_is_refused_without_burning_the_live_code(policy, turns):
         assert verdict.allowed is False
         assert ct.is_allowed_sender(PROVIDER, "stranger") is False
 
-    # The real code still works afterwards — the guess cost the owner nothing.
     ci.reset_admissions()
     if policy == "pairing":
         assert _through_the_door(state, _msg(code, mid="m2")).reason == "paired"
         assert ct.is_allowed_sender(PROVIDER, "stranger") is True
-
-
-# ── vacuity floor: "refuse everything" must not pass this file ───────────────
 
 
 def test_the_door_is_not_simply_refusing_everything(turns):
@@ -280,8 +280,12 @@ def test_the_door_is_not_simply_refusing_everything(turns):
     ct.allow_sender(PROVIDER, "friend", name="Friend", via="owner")
     state = CapturingState()
 
-    approved = _through_the_door(state, _msg("what's the weather?", sender="friend", mid="m1"))
-    assert approved.allowed is True, "owner_only must still admit the sender the owner allowed"
+    approved = _through_the_door(
+        state, _msg("what's the weather?", sender="friend", mid="m1")
+    )
+    assert (
+        approved.allowed is True
+    ), "owner_only must still admit the sender the owner allowed"
     assert [t[1] for t in turns] == ["what's the weather?"]
 
     _set_dm_policy("open")
@@ -289,9 +293,6 @@ def test_the_door_is_not_simply_refusing_everything(turns):
     stranger = _through_the_door(state, _msg("hi there", sender="stranger", mid="m2"))
     assert stranger.allowed is True, "policy open must admit an unknown sender"
     assert [t[1] for t in turns] == ["what's the weather?", "hi there"]
-
-
-# ── structural: the door reaches no verdict the gate would not have reached ──
 
 
 def test_decide_returns_only_what_the_gate_returned():
@@ -308,12 +309,16 @@ def test_decide_returns_only_what_the_gate_returned():
         len(returns) == 1
     ), f"_decide has {len(returns)} return statements; the gate is the only one"
     value = returns[0].value
-    assert isinstance(value, ast.Call) and getattr(value.func, "id", "") == "guard_inbound", (
+    assert (
+        isinstance(value, ast.Call) and getattr(value.func, "id", "") == "guard_inbound"
+    ), (
         "_decide returns something other than guard_inbound's verdict — a second trust "
         "decision site above the gate is exactly the defect this file pins"
     )
     assert not [
-        n for n in ast.walk(tree) if isinstance(n, ast.Call) and "redeem" in ast.dump(n.func)
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and "redeem" in ast.dump(n.func)
     ], "_decide redeems a pairing code again; redemption belongs inside guard_inbound"
 
 
@@ -328,7 +333,8 @@ def test_channel_inbound_imports_no_trust_primitive_but_the_gate():
     imported = {
         alias.asname or alias.name
         for node in ast.walk(src)
-        if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("channel_trust")
+        if isinstance(node, ast.ImportFrom)
+        and (node.module or "").endswith("channel_trust")
         for alias in node.names
     }
 

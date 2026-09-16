@@ -18,7 +18,7 @@ import re
 
 import pytest
 
-from gideon.workflows.surfacing import (
+from gideon.automation.workflows.surfacing import (
     DEFAULT_MODE_MIGRATED,
     DEFAULT_MODE_NEW,
     DIGEST_BEGIN,
@@ -58,9 +58,6 @@ def meta(**kw) -> SurfacingMeta:
     return SurfacingMeta(**{**base, **kw})
 
 
-# ── manual-first is the default ──
-
-
 def test_a_NEW_def_does_not_surface():
     """The retreat position the plan's cited precedent arrived at the hard way: auto-trigger by
     default meant pasted content kept firing workflows."""
@@ -94,12 +91,11 @@ def test_a_PASSIVE_def_does_not_earn_a_suggestion():
     """Guidance is not a proposal. A passive def that suggested execution would make the two
     modes one mode with extra steps.
     """
-    ok, reasons = may_suggest("deploy to staging", meta(surface_mode=SurfaceMode.PASSIVE))
+    ok, reasons = may_suggest(
+        "deploy to staging", meta(surface_mode=SurfaceMode.PASSIVE)
+    )
     assert ok is False
     assert Veto.MODE_OFF in reasons
-
-
-# ── the negative-trigger veto matches the shipped one ──
 
 
 @pytest.mark.parametrize(
@@ -115,10 +111,12 @@ def test_the_veto_AGREES_with_the_skills_implementation(query):
     """One veto syntax across both surfaces. Two implementations would leave one silently
     ignoring the other's vetoes, and a user who learned `!` once would be wrong half the time.
     """
-    from gideon.skills.surfacing import _keyword_score
+    from gideon.extensions.skills.surfacing import _keyword_score
 
     triggers = "deploy to staging, ship the release, !dry run"
-    _score, skills_negated = _keyword_score(set(re.findall(r"\w+", query.lower())), triggers)
+    _score, skills_negated = _keyword_score(
+        set(re.findall(r"\w+", query.lower())), triggers
+    )
     mine = Veto.NEGATIVE_TRIGGER in veto_reasons(query, meta(match_text=triggers))
     assert mine == skills_negated
 
@@ -130,7 +128,9 @@ def test_a_negative_trigger_VETOES():
 
 
 def test_trigger_phrases_split_positive_from_negative():
-    positive, negative = trigger_phrases("deploy to staging, ship it, !dry run, !rehearsal")
+    positive, negative = trigger_phrases(
+        "deploy to staging, ship it, !dry run, !rehearsal"
+    )
     assert positive == ["deploy to staging", "ship it"]
     assert negative == ["dry run", "rehearsal"]
 
@@ -145,9 +145,6 @@ def test_a_bare_bang_is_not_a_negative_trigger():
     assert trigger_phrases("deploy, !")[1] == []
 
 
-# ── the failure this discipline exists for ──
-
-
 def test_PASTED_content_never_suggests():
     """The cited failure verbatim: a paste contains every trigger phrase anybody ever wrote."""
     query = "deploy to staging\n```\nTraceback (most recent call last)\n```"
@@ -157,7 +154,8 @@ def test_PASTED_content_never_suggests():
 
 
 @pytest.mark.parametrize(
-    "marker", ["```", "> quoted line", "Traceback (most recent call last)", "--- a/file.py"]
+    "marker",
+    ["```", "> quoted line", "Traceback (most recent call last)", "--- a/file.py"],
 )
 def test_each_paste_marker_vetoes(marker):
     assert Veto.PASTED_CONTENT in veto_reasons(f"deploy to staging {marker}", meta())
@@ -225,9 +223,6 @@ def test_a_CLEAN_request_suggests():
     assert reasons == []
 
 
-# ── the metadata lint ──
-
-
 def test_ONE_trigger_phrase_is_flagged():
     """One phrase is a keyword, not a trigger surface."""
     findings = lint_metadata(meta(match_text="deploy"))
@@ -244,7 +239,9 @@ def test_TOO_MANY_trigger_phrases_are_flagged():
 
 def test_a_PROSE_trigger_is_flagged():
     """A sentence matches everything weakly and nothing strongly."""
-    findings = lint_metadata(meta(match_text="when you want to deploy the thing, ship it"))
+    findings = lint_metadata(
+        meta(match_text="when you want to deploy the thing, ship it")
+    )
     assert any("reads as prose" in f for f in findings)
 
 
@@ -267,7 +264,9 @@ def test_a_when_to_use_that_SUMMARIZES_STEPS_is_flagged(text):
     """A reader who can infer the procedure from metadata will follow the metadata, which is
     stale by construction.
     """
-    assert any("summarize the STEPS" in f for f in lint_metadata(meta(when_to_use=text)))
+    assert any(
+        "summarize the STEPS" in f for f in lint_metadata(meta(when_to_use=text))
+    )
 
 
 def test_PASSIVE_mode_with_no_digest_is_flagged():
@@ -282,7 +281,9 @@ def test_an_OFF_def_is_not_linted_for_triggers():
     """Off is a decision. Demanding trigger phrases from a def nobody wants to surface would make
     the lint noise that hides the real findings.
     """
-    findings = lint_metadata(meta(match_text="", surface_mode=SurfaceMode.OFF, agent_digest=""))
+    findings = lint_metadata(
+        meta(match_text="", surface_mode=SurfaceMode.OFF, agent_digest="")
+    )
     assert not any("trigger" in f for f in findings)
 
 
@@ -322,9 +323,6 @@ def test_GENUINE_prose_is_still_flagged(text):
     assert any("prose" in f for f in lint_metadata(meta(match_text=text)))
 
 
-# ── collision checking ──
-
-
 def test_a_trigger_COLLISION_is_reported():
     """Two defs answering one phrase means the matcher picks one and the author cannot tell
     which.
@@ -359,12 +357,10 @@ def test_no_existing_defs_means_no_collisions():
     assert collisions("deploy to staging", {}) == []
 
 
-# ── one source, two wrappers ──
-
-
 def test_the_digest_is_rendered_VERBATIM_inside_fences():
     """A model-paraphrased do/don't rule is a rule nobody wrote, and it gets paraphrased toward
-    whatever the model was already inclined to do — the behaviour the rule existed to change."""
+    whatever the model was already inclined to do — the behaviour the rule existed to change.
+    """
     rendered = render_passive(meta(), name="staging-deploy")
     assert DIGEST in rendered
     assert DIGEST_BEGIN in rendered
@@ -416,9 +412,6 @@ def test_the_summary_rides_the_passive_header():
     assert "Run the staging deploy checklist" in render_passive(meta(), name="x")
 
 
-# ── SOP migration ──
-
-
 def test_a_migrated_SOP_keeps_PASSIVE_surfacing():
     result = migrate_sop({"name": "backup", "triggers": "back up the db, run a backup"})
     assert result.metadata.surface_mode is SurfaceMode.PASSIVE
@@ -433,7 +426,9 @@ def test_a_migration_does_NOT_grant_suggest():
 
 def test_an_auto_surface_FALSE_sop_migrates_to_off():
     """That is what the user already said."""
-    result = migrate_sop({"name": "quiet", "auto_surface": False, "triggers": "a b, c d"})
+    result = migrate_sop(
+        {"name": "quiet", "auto_surface": False, "triggers": "a b, c d"}
+    )
     assert result.metadata.surface_mode is SurfaceMode.OFF
 
 
@@ -448,7 +443,11 @@ def test_a_migration_REPORTS_what_it_assumed():
 def test_a_migration_carries_the_description_into_the_DIGEST():
     """Passive mode injects the digest, so a migrated SOP with no digest would surface empty."""
     result = migrate_sop(
-        {"name": "backup", "triggers": "a b, c d", "description": "never skip the checksum"}
+        {
+            "name": "backup",
+            "triggers": "a b, c d",
+            "description": "never skip the checksum",
+        }
     )
     assert "never skip the checksum" in result.metadata.agent_digest
 
@@ -464,19 +463,19 @@ def test_a_migration_TRUNCATES_an_overlong_summary_rather_than_refusing():
     assert len(result.metadata.summary) == MAX_SUMMARY_CHARS
 
 
-# ── per-def graduation ──
-
-
 def test_graduation_is_PER_DEF():
     """A def earns execution-suggestion mode individually, which is what makes incremental trust
-    possible. A global switch would grant it to every def the moment one proved itself."""
+    possible. A global switch would grant it to every def the moment one proved itself.
+    """
     promoted, error = graduate(meta(surface_mode=SurfaceMode.PASSIVE))
     assert error == ""
     assert promoted.surface_mode is SurfaceMode.SUGGEST
 
 
 def test_graduation_PRESERVES_everything_else():
-    original = meta(surface_mode=SurfaceMode.PASSIVE, cadence_days=30, scope="workspace")
+    original = meta(
+        surface_mode=SurfaceMode.PASSIVE, cadence_days=30, scope="workspace"
+    )
     promoted, _ = graduate(original)
     assert promoted.cadence_days == 30
     assert promoted.scope == "workspace"
@@ -485,7 +484,9 @@ def test_graduation_PRESERVES_everything_else():
 
 def test_a_def_with_ONE_trigger_cannot_graduate():
     """Promoting it would turn earned trust into firing on everything."""
-    promoted, error = graduate(meta(match_text="deploy", surface_mode=SurfaceMode.PASSIVE))
+    promoted, error = graduate(
+        meta(match_text="deploy", surface_mode=SurfaceMode.PASSIVE)
+    )
     assert promoted is None
     assert "trigger phrases" in error
 
@@ -494,9 +495,6 @@ def test_an_ALREADY_suggesting_def_is_refused_not_re_promoted():
     promoted, error = graduate(meta(surface_mode=SurfaceMode.SUGGEST))
     assert promoted is None
     assert "already" in error
-
-
-# ── the reachability doctor ──
 
 
 def test_an_UNREACHABLE_def_is_reported():
@@ -529,9 +527,6 @@ def test_the_doctor_checks_every_def():
     assert len(findings) == 2
 
 
-# ── the metadata round trip ──
-
-
 def test_every_field_round_trips():
     original = SurfacingMeta(
         match_text="a b, c d, !skip",
@@ -554,7 +549,8 @@ def test_an_unknown_FREEDOM_level_reads_as_medium():
     """Medium is the middle: erring high would loosen gate strictness on a def whose author meant to
     tighten it, and erring low would make an exploratory def rigid."""
     assert (
-        SurfacingMeta.from_dict({"freedom_level": "chaotic"}).freedom_level is FreedomLevel.MEDIUM
+        SurfacingMeta.from_dict({"freedom_level": "chaotic"}).freedom_level
+        is FreedomLevel.MEDIUM
     )
 
 
@@ -573,10 +569,11 @@ def test_there_is_no_guidance_LIFECYCLE_field_to_declare():
     import dataclasses as dc
 
     assert "lifecycle" not in {f.name for f in dc.fields(SurfacingMeta)}
-    # A def file hand-edited to carry the old key still loads: `from_dict` names what it reads, so
-    # a dropped field is ignored rather than a crash on a def somebody already wrote.
     assert (
-        SurfacingMeta.from_dict({"lifecycle": "until_deactivated", "summary": "s"}).summary == "s"
+        SurfacingMeta.from_dict(
+            {"lifecycle": "until_deactivated", "summary": "s"}
+        ).summary
+        == "s"
     )
 
 
@@ -592,17 +589,16 @@ def test_a_PRE_EXISTING_def_with_none_of_these_keys_loads():
 def test_a_MALFORMED_precondition_entry_is_dropped():
     """A non-dict precondition cannot be evaluated, and keeping it would make the gate raise on a
     def that otherwise works."""
-    restored = SurfacingMeta.from_dict({"preconditions": [{"kind": "file"}, "junk", None]})
+    restored = SurfacingMeta.from_dict(
+        {"preconditions": [{"kind": "file"}, "junk", None]}
+    )
     assert restored.preconditions == [{"kind": "file"}]
-
-
-# ── the scope vocabulary is shared ──
 
 
 def test_the_scope_words_reuse_S45s_ladder():
     """Two ladders would disagree about promotion order, and the disagreement would show up as a
     candidate promoted past a tier nobody meant to skip."""
-    from gideon.workflows.template_pipeline import SCOPE_LADDER
+    from gideon.automation.workflows.template_pipeline import SCOPE_LADDER
 
     assert SurfacingMeta().scope in SCOPE_LADDER
     for word in SCOPE_LADDER:

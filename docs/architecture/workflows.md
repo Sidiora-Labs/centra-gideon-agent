@@ -291,7 +291,7 @@ transcript with extra steps.
 
 ## Events
 
-Per-run SSE on `DashboardState.workflow_sse()` (key `workflow:<run_id>`), plus
+Per-run SSE on `ConsoleState.workflow_sse()` (key `workflow:<run_id>`), plus
 WebSocket refetch signals. Deliberately NOT routed through `notify()`: that is
 the user-notification gate behind mute/severity/quiet-hours, and a quiet-hours
 setting would silently eat a run's entire event stream.
@@ -375,7 +375,7 @@ libraries are documented in
 The bundled `self-qa` template's `evidence` node is an **`action`** node backed by
 `selfqa-evidence`, not an LLM `stage`: sealing a proof bundle is deterministic work a model
 must not be trusted to fake ("compute the digests; do not estimate them"). Two new modules
-under `src/gideon/selfqa/` carry that work, consumed by the
+under `runtime/gideon/selfqa/` carry that work, consumed by the
 `action_providers/selfqa_evidence_provider.py` provider:
 
 | Module | Job |

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.workflows import preflight as PF
+from gideon.automation.workflows import preflight as PF
 
 pytestmark = pytest.mark.anyio
 
@@ -35,7 +35,11 @@ SPEC_LLM = {
         "kind": "sequence",
         "id": "s",
         "children": [
-            {"kind": "infer", "id": "fast", "config": {"prompt": "x", "model_tier": "fast"}},
+            {
+                "kind": "infer",
+                "id": "fast",
+                "config": {"prompt": "x", "model_tier": "fast"},
+            },
             {
                 "kind": "stage",
                 "id": "deep",
@@ -50,13 +54,13 @@ def _spec(root: dict, **meta) -> dict:
     return {"name": "w", "root": root, "metadata": meta}
 
 
-# ── credentials ──────────────────────────────────────────────────────────────
-
-
 class TestCredentials:
     def test_a_missing_declared_credential_is_an_error(self) -> None:
         result = PF.preflight(
-            _spec({"kind": "sequence", "id": "s"}, requirements={"credentials": ["GH_TOKEN"]}),
+            _spec(
+                {"kind": "sequence", "id": "s"},
+                requirements={"credentials": ["GH_TOKEN"]},
+            ),
             credential_resolver=lambda k: False,
         )
         assert not result.ok
@@ -65,7 +69,10 @@ class TestCredentials:
 
     def test_a_present_credential_passes(self) -> None:
         result = PF.preflight(
-            _spec({"kind": "sequence", "id": "s"}, requirements={"credentials": ["GH_TOKEN"]}),
+            _spec(
+                {"kind": "sequence", "id": "s"},
+                requirements={"credentials": ["GH_TOKEN"]},
+            ),
             credential_resolver=lambda k: True,
         )
         assert result.ok
@@ -81,13 +88,18 @@ class TestCredentials:
                     {
                         "kind": "action",
                         "id": "a",
-                        "config": {"provider": "bash", "token": "{{secret:UNDECLARED}}"},
+                        "config": {
+                            "provider": "bash",
+                            "token": "{{secret:UNDECLARED}}",
+                        },
                     }
                 ],
             }
         )
         result = PF.preflight(
-            spec, credential_resolver=lambda k: False, provider_lookup=lambda n: object()
+            spec,
+            credential_resolver=lambda k: False,
+            provider_lookup=lambda n: object(),
         )
         assert "UNDECLARED" in result.checked["credentials"]
         assert not result.ok
@@ -102,15 +114,11 @@ class TestCredentials:
             _spec({"kind": "sequence", "id": "s"}, requirements={"credentials": ["K"]}),
             credential_resolver=exploding,
         )
-        # A per-key failure is skipped, not converted into a false "missing".
         assert result.ok
 
     def test_no_requirements_means_nothing_to_check(self) -> None:
         result = PF.preflight(_spec({"kind": "sequence", "id": "s"}))
         assert result.ok and result.checked["credentials"] == []
-
-
-# ── binaries ─────────────────────────────────────────────────────────────────
 
 
 class TestBinaries:
@@ -139,9 +147,6 @@ class TestBinaries:
         assert result.ok
 
 
-# ── models ───────────────────────────────────────────────────────────────────
-
-
 class TestModels:
     def test_every_llm_nodes_use_case_is_collected(self) -> None:
         seen: list[str] = []
@@ -152,14 +157,13 @@ class TestModels:
 
         result = PF.preflight(SPEC_LLM, model_probe=probe)
         assert result.ok
-        # fast → background, reasoning → reasoning (the default tier map).
         assert set(seen) == {"background", "reasoning"}
 
     def test_an_unresolvable_use_case_is_an_error(self) -> None:
         result = PF.preflight(SPEC_LLM, model_probe=lambda uc: False)
         assert not result.ok
         assert {f.code for f in result.errors} == {"WF_PRE_MODEL_UNRESOLVED"}
-        assert len(result.errors) == 2  # one per distinct use case
+        assert len(result.errors) == 2
 
     def test_a_judge_gate_resolves_on_the_reasoning_tier(self) -> None:
         """Matching engine.dispatch_gate — a judge reasons, so preflight must check the tier
@@ -169,7 +173,11 @@ class TestModels:
                 "kind": "sequence",
                 "id": "s",
                 "children": [
-                    {"kind": "gate", "id": "j", "config": {"kind": "judge", "prompt": "ok?"}}
+                    {
+                        "kind": "gate",
+                        "id": "j",
+                        "config": {"kind": "judge", "prompt": "ok?"},
+                    }
                 ],
             }
         )
@@ -203,16 +211,15 @@ class TestModels:
         assert "can_resolve_use_case" in source
 
 
-# ── action providers ─────────────────────────────────────────────────────────
-
-
 class TestActionProviders:
     def test_an_unknown_provider_is_an_error(self) -> None:
         spec = _spec(
             {
                 "kind": "sequence",
                 "id": "s",
-                "children": [{"kind": "action", "id": "a", "config": {"provider": "nope"}}],
+                "children": [
+                    {"kind": "action", "id": "a", "config": {"provider": "nope"}}
+                ],
             }
         )
         result = PF.preflight(spec, provider_lookup=lambda n: None)
@@ -224,7 +231,9 @@ class TestActionProviders:
             {
                 "kind": "sequence",
                 "id": "s",
-                "children": [{"kind": "action", "id": "a", "config": {"provider": "bash"}}],
+                "children": [
+                    {"kind": "action", "id": "a", "config": {"provider": "bash"}}
+                ],
             }
         )
         assert PF.preflight(spec, provider_lookup=lambda n: object()).ok
@@ -237,7 +246,11 @@ class TestActionProviders:
                 "kind": "sequence",
                 "id": "s",
                 "children": [
-                    {"kind": "action", "id": "a", "config": {"provider": "{{inputs.which}}"}}
+                    {
+                        "kind": "action",
+                        "id": "a",
+                        "config": {"provider": "{{inputs.which}}"},
+                    }
                 ],
             }
         )
@@ -249,13 +262,12 @@ class TestActionProviders:
             {
                 "kind": "sequence",
                 "id": "s",
-                "children": [{"kind": "action", "id": "a", "config": {"provider": "bash"}}],
+                "children": [
+                    {"kind": "action", "id": "a", "config": {"provider": "bash"}}
+                ],
             }
         )
         assert PF.preflight(spec).ok
-
-
-# ── result shape ─────────────────────────────────────────────────────────────
 
 
 class TestResultShape:
@@ -275,7 +287,10 @@ class TestResultShape:
 
     def test_it_serializes_with_findings_and_what_was_checked(self) -> None:
         body = PF.preflight(
-            _spec({"kind": "sequence", "id": "s"}, requirements={"binaries": ["zzz-absent"]}),
+            _spec(
+                {"kind": "sequence", "id": "s"},
+                requirements={"binaries": ["zzz-absent"]},
+            ),
             which=lambda b: None,
         ).to_dict()
         assert set(body) == {"ok", "findings", "checked"}
@@ -293,9 +308,6 @@ class TestResultShape:
         assert finding.message != finding.remediation
 
 
-# ── the start_run gate ───────────────────────────────────────────────────────
-
-
 class TestStartRunIsGated:
     """The behaviour every `skip_preflight=True` in the tool tests implies: without the
     skip, a run that cannot possibly work is refused BEFORE it starts."""
@@ -304,10 +316,14 @@ class TestStartRunIsGated:
     def _home(self, tmp_path, monkeypatch):
         home = tmp_path / "home"
         home.mkdir()
-        monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
+        monkeypatch.setattr(
+            "gideon.automation.workflows.store.config_dir", lambda: home
+        )
         return home
 
-    async def test_a_run_needing_an_unconfigured_model_is_refused(self, monkeypatch) -> None:
+    async def test_a_run_needing_an_unconfigured_model_is_refused(
+        self, monkeypatch
+    ) -> None:
         """The whole point: caught here it costs nothing; caught at node 7 it has already
         paid for six nodes.
 
@@ -315,10 +331,11 @@ class TestStartRunIsGated:
         "this temp home happens to have no model" makes the test pass or fail on whatever
         else configured a provider in the same process."""
         monkeypatch.setattr(
-            "gideon.providers.provider_bridge.can_resolve_use_case", lambda uc: False
+            "gideon.extensions.providers.provider_bridge.can_resolve_use_case",
+            lambda uc: False,
         )
-        from gideon.workflows import defs as defs_mod
-        from gideon.workflows import service
+        from gideon.automation.workflows import defs as defs_mod
+        from gideon.automation.workflows import service
 
         class Mem(defs_mod.WorkflowDefProvider):
             def __init__(self) -> None:
@@ -357,8 +374,8 @@ class TestStartRunIsGated:
     async def test_a_model_free_workflow_starts_without_a_model(self) -> None:
         """Preflight must not demand what a spec does not use — a pure-transform workflow
         needs no model at all."""
-        from gideon.workflows import defs as defs_mod
-        from gideon.workflows import service
+        from gideon.automation.workflows import defs as defs_mod
+        from gideon.automation.workflows import service
 
         class Mem(defs_mod.WorkflowDefProvider):
             def __init__(self) -> None:
@@ -407,7 +424,9 @@ class TestStartRunIsGated:
                 root={
                     "kind": "sequence",
                     "id": "s",
-                    "children": [{"kind": "transform", "id": "t", "config": {"expr": 1}}],
+                    "children": [
+                        {"kind": "transform", "id": "t", "config": {"expr": 1}}
+                    ],
                 },
             )
             sup = Sup()
@@ -417,63 +436,66 @@ class TestStartRunIsGated:
             defs_mod.unregister_provider("pf-mem2")
 
 
-# ── the manifest drift gate ──────────────────────────────────────────────────
-
-
 class TestManifestDrift:
     """The manifest is GENERATED, and this is the CI gate that keeps it honest. A drifted
     catalog makes an author write specs the engine rejects — the manifest-vs-reality bug
     class this codebase keeps refinding."""
 
     def test_node_kinds_match_the_enum_exactly(self) -> None:
-        from gideon.workflows.models import NodeKind
-        from gideon.workflows.service import manifest
+        from gideon.automation.workflows.models import NodeKind
+        from gideon.automation.workflows.service import manifest
 
-        assert {k["kind"] for k in manifest()["node_kinds"]} == {k.value for k in NodeKind}
+        assert {k["kind"] for k in manifest()["node_kinds"]} == {
+            k.value for k in NodeKind
+        }
 
     def test_container_flags_match_the_real_set(self) -> None:
-        from gideon.workflows.models import CONTAINER_KINDS
-        from gideon.workflows.service import manifest
+        from gideon.automation.workflows.models import CONTAINER_KINDS
+        from gideon.automation.workflows.service import manifest
 
         containers = {k["kind"] for k in manifest()["node_kinds"] if k["container"]}
         assert containers == {k.value for k in CONTAINER_KINDS}
 
     def test_lanes_match_lane_for(self) -> None:
-        from gideon.workflows.models import NodeKind, lane_for
-        from gideon.workflows.service import manifest
+        from gideon.automation.workflows.models import NodeKind, lane_for
+        from gideon.automation.workflows.service import manifest
 
         for entry in manifest()["node_kinds"]:
             assert entry["lane"] == lane_for(NodeKind(entry["kind"])), entry["kind"]
 
     def test_gate_kinds_match_the_enum(self) -> None:
-        from gideon.workflows.models import GateKind
-        from gideon.workflows.service import manifest
+        from gideon.automation.workflows.models import GateKind
+        from gideon.automation.workflows.service import manifest
 
         assert set(manifest()["gate_kinds"]) == {g.value for g in GateKind}
 
     def test_mutation_ops_match_the_enum(self) -> None:
-        from gideon.workflows.mutations import OpKind
-        from gideon.workflows.service import manifest
+        from gideon.automation.workflows.mutations import OpKind
+        from gideon.automation.workflows.service import manifest
 
         assert set(manifest()["mutation_ops"]) == {o.value for o in OpKind}
 
     def test_pipes_match_the_real_pipe_table(self) -> None:
-        from gideon.workflows.bindings import PIPES
-        from gideon.workflows.service import manifest
+        from gideon.automation.workflows.bindings import PIPES
+        from gideon.automation.workflows.service import manifest
 
         assert set(manifest()["pipes"]) == set(PIPES)
 
     def test_instance_states_and_run_statuses_match(self) -> None:
-        from gideon.workflows.models import InstanceState, RunStatus
-        from gideon.workflows.service import manifest
+        from gideon.automation.workflows.models import InstanceState, RunStatus
+        from gideon.automation.workflows.service import manifest
 
         body = manifest()
         assert set(body["instance_states"]) == {s.value for s in InstanceState}
         assert set(body["run_statuses"]) == {s.value for s in RunStatus}
 
     def test_loop_and_item_error_modes_match(self) -> None:
-        from gideon.workflows.models import ItemErrorPolicy, JoinMode, LoopMode
-        from gideon.workflows.service import manifest
+        from gideon.automation.workflows.models import (
+            ItemErrorPolicy,
+            JoinMode,
+            LoopMode,
+        )
+        from gideon.automation.workflows.service import manifest
 
         body = manifest()
         assert set(body["join_modes"]) == {j.value for j in JoinMode}
@@ -481,7 +503,7 @@ class TestManifestDrift:
         assert set(body["item_error_policies"]) == {p.value for p in ItemErrorPolicy}
 
     def test_the_spec_semver_is_reported(self) -> None:
-        from gideon.workflows.models import SPEC_SEMVER
-        from gideon.workflows.service import manifest
+        from gideon.automation.workflows.models import SPEC_SEMVER
+        from gideon.automation.workflows.service import manifest
 
         assert manifest()["spec_semver"] == SPEC_SEMVER

@@ -1,6 +1,6 @@
 """LMMV-8 — the fit answer as the HTTP surface serves it (payload + pre-download check).
 
-These tests drive the HANDLERS, not :mod:`gideon.local_models.fit`. The module's own
+These tests drive the HANDLERS, not :mod:`gideon.integrations.local_models.fit`. The module's own
 arithmetic is covered by ``test_local_model_fit.py``; what is at stake here is the WIRING:
 that ``GET /api/models/available`` carries the one budget and a per-row verdict, that an
 unmeasured host reports ``null`` rather than ``0``, that a family quotes its MEDIAN variant
@@ -22,12 +22,12 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.dashboard import model_downloads as M
-from gideon.dashboard.handlers import model_downloads as H
-from gideon.dashboard.handlers import model_registry as R
-from gideon.local_models import fit
-from gideon.local_models import registry as LR
-from gideon.local_models.provider import LocalModel
+from gideon.integrations.local_models import fit
+from gideon.integrations.local_models import registry as LR
+from gideon.integrations.local_models.provider import LocalModel
+from gideon.interfaces.dashboard import model_downloads as M
+from gideon.interfaces.dashboard.handlers import model_downloads as H
+from gideon.interfaces.dashboard.handlers import model_registry as R
 
 _MB = 1024 * 1024
 _GB = 1024 * 1024 * 1024
@@ -42,9 +42,6 @@ def _isolated_home(monkeypatch, tmp_path):
     fit.reset_gpu_probe_cache()
     yield
     fit.reset_gpu_probe_cache()
-
-
-# ── GET /api/models/available ──
 
 
 class _Prov:
@@ -66,8 +63,6 @@ class _ConfigCatalog:
     async def list_models(self):
         class _MI:
             def to_dict(self):
-                # A remote model may still declare a size; it must STILL get no fit chip,
-                # because nothing is downloaded and no memory budget applies to it.
                 return {"id": "gpt-x", "name": "gpt-x", "size_mb": 999_999}
 
         return [_MI()]
@@ -94,7 +89,9 @@ def _wire_payload(monkeypatch, *, host: fit.HostCapacity, models, hide_unrunnabl
     monkeypatch.setattr(R, "_discover_video_gen_models", _none)
 
     prov = _Prov()
-    monkeypatch.setattr(LR, "get_provider", lambda name: prov if name == "ollama" else None)
+    monkeypatch.setattr(
+        LR, "get_provider", lambda name: prov if name == "ollama" else None
+    )
     monkeypatch.setattr(LR, "registered", lambda: [("ollama", prov)])
     monkeypatch.setattr(LR, "catalog_for", _catalog(*models))
 
@@ -104,7 +101,9 @@ def _wire_payload(monkeypatch, *, host: fit.HostCapacity, models, hide_unrunnabl
 
 
 async def _available() -> dict:
-    resp = await R.api_models_available(make_mocked_request("GET", "/api/models/available"))
+    resp = await R.api_models_available(
+        make_mocked_request("GET", "/api/models/available")
+    )
     return json.loads(resp.body.decode())
 
 
@@ -112,7 +111,9 @@ def _rows(payload: dict, provider: str) -> dict[str, dict]:
     for card in payload["providers"]:
         if card["name"] == provider:
             return {m["name"]: m for m in card["models"]}
-    raise AssertionError(f"no {provider!r} card in {[c['name'] for c in payload['providers']]}")
+    raise AssertionError(
+        f"no {provider!r} card in {[c['name'] for c in payload['providers']]}"
+    )
 
 
 _MEASURED_8GB = fit.HostCapacity(
@@ -122,8 +123,6 @@ _MEASURED_8GB = fit.HostCapacity(
     gpu_model="Apple M2",
 )
 
-#: One family with four variants (median 6000, minimum 2000 — deliberately far apart) plus a
-#: colonless model, which is a family of one.
 _FAMILY = [
     LocalModel(name="qwen3:2b", size_mb=2000),
     LocalModel(name="qwen3:4b", size_mb=4000),
@@ -136,11 +135,13 @@ _FAMILY = [
 @pytest.mark.asyncio
 async def test_payload_carries_the_fit_block(monkeypatch):
     """The response reports the ONE budget every row was judged against."""
-    _wire_payload(monkeypatch, host=_MEASURED_8GB, models=_FAMILY, hide_unrunnable=False)
+    _wire_payload(
+        monkeypatch, host=_MEASURED_8GB, models=_FAMILY, hide_unrunnable=False
+    )
     payload = await _available()
 
     block = payload["fit"]
-    assert block["budget_mb"] == 8 * 1024  # 8 GiB, reserve 0
+    assert block["budget_mb"] == 8 * 1024
     assert block["total_ram_mb"] == 8 * 1024
     assert block["unified_memory"] is True
     assert block["gpu_model"] == "Apple M2"
@@ -162,17 +163,15 @@ async def test_local_rows_carry_a_verdict_reason_and_need(monkeypatch):
     rows = _rows(await _available(), "ollama")
 
     assert rows["qwen3:2b"]["fit"] == "green"
-    assert rows["qwen3:6b"]["fit"] == "yellow"  # fits, but eats most of the 8 GB
+    assert rows["qwen3:6b"]["fit"] == "yellow"
     assert rows["qwen3:16b"]["fit"] == "red"
 
-    # The verdict is judged against the weights the row actually pulls, so the family's
-    # largest variant is NOT painted with the median's verdict.
     assert rows["qwen3:16b"]["fit_need_mb"] == pytest.approx(16000, rel=0.01)
     assert rows["qwen3:2b"]["fit_need_mb"] == pytest.approx(2000, rel=0.01)
 
     for name in ("qwen3:2b", "qwen3:6b", "qwen3:16b", "piper-en"):
         assert rows[name]["fit_reason"], f"{name} has a verdict with no reason"
-    assert "8.0 GB" in rows["qwen3:16b"]["fit_reason"]  # the refusal names the capacity
+    assert "8.0 GB" in rows["qwen3:16b"]["fit_reason"]
 
 
 @pytest.mark.asyncio
@@ -187,7 +186,6 @@ async def test_quoted_size_is_the_family_median_not_its_minimum(monkeypatch):
         assert rows[name]["quoted_size_mb"] == median, name
         assert rows[name]["quoted_size_mb"] != smallest, name
 
-    # A colonless name is a family of one: its quote is its own size, unchanged.
     assert rows["piper-en"]["quoted_size_mb"] == 60.0
 
 
@@ -198,7 +196,6 @@ async def test_red_row_steps_down_to_the_largest_variant_that_fits(monkeypatch):
     rows = _rows(await _available(), "ollama")
 
     assert rows["qwen3:16b"]["fit_step_down"] == "qwen3:6b"
-    # A row that already fits has nowhere to step down to.
     assert rows["qwen3:2b"]["fit_step_down"] is None
     assert rows["piper-en"]["fit_step_down"] is None
 
@@ -248,9 +245,6 @@ async def test_host_is_probed_once_per_request_not_once_per_model(monkeypatch):
     assert len(calls) == 1, f"probed {len(calls)} times for {len(_FAMILY)} models"
 
 
-# ── POST /api/models/downloads ──
-
-
 def _req(method, path, reg, *, body=None, match_info=None):
     app = web.Application()
 
@@ -285,7 +279,9 @@ def _download_env(monkeypatch):
 
     def _wire(*, cache_dir, models):
         prov = _Prov(cache_dir)
-        monkeypatch.setattr(LR, "get_provider", lambda name: prov if name == "ollama" else None)
+        monkeypatch.setattr(
+            LR, "get_provider", lambda name: prov if name == "ollama" else None
+        )
         monkeypatch.setattr(LR, "catalog_for", _catalog(*models))
 
     return _wire
@@ -301,11 +297,16 @@ async def test_download_refused_when_the_weights_cannot_land(_download_env, tmp_
     """The refusal names BOTH numbers: what it needs and what is free."""
     _download_env(
         cache_dir=str(tmp_path),
-        models=[LocalModel(name="huge", size_mb=10_000_000)],  # ~10 TB
+        models=[LocalModel(name="huge", size_mb=10_000_000)],
     )
     reg = M.ModelDownloadRegistry()
     resp = await H.api_model_download_start(
-        _req("POST", "/api/models/downloads", reg, body={"provider": "ollama", "model": "huge"})
+        _req(
+            "POST",
+            "/api/models/downloads",
+            reg,
+            body={"provider": "ollama", "model": "huge"},
+        )
     )
 
     assert resp.status == 400
@@ -314,7 +315,6 @@ async def test_download_refused_when_the_weights_cannot_land(_download_env, tmp_
     both = re.search(r"needs ([\d.]+) GB, ([\d.]+) GB free", error)
     assert both, error
     assert float(both.group(1)) > float(both.group(2))
-    # Refused BEFORE the fetch: no job was created for it.
     assert reg.list() == []
 
 
@@ -327,7 +327,12 @@ async def test_unmeasurable_disk_allows_the_download_and_warns(_download_env, tm
     )
     reg = M.ModelDownloadRegistry()
     resp = await H.api_model_download_start(
-        _req("POST", "/api/models/downloads", reg, body={"provider": "ollama", "model": "good"})
+        _req(
+            "POST",
+            "/api/models/downloads",
+            reg,
+            body={"provider": "ollama", "model": "good"},
+        )
     )
 
     assert resp.status == 202
@@ -343,7 +348,12 @@ async def test_measurable_disk_with_room_starts_clean(_download_env, tmp_path):
     _download_env(cache_dir=str(tmp_path), models=[LocalModel(name="good", size_mb=10)])
     reg = M.ModelDownloadRegistry()
     resp = await H.api_model_download_start(
-        _req("POST", "/api/models/downloads", reg, body={"provider": "ollama", "model": "good"})
+        _req(
+            "POST",
+            "/api/models/downloads",
+            reg,
+            body={"provider": "ollama", "model": "good"},
+        )
     )
 
     assert resp.status == 202
@@ -352,7 +362,9 @@ async def test_measurable_disk_with_room_starts_clean(_download_env, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_already_downloaded_model_is_never_refused_for_space(_download_env, tmp_path):
+async def test_already_downloaded_model_is_never_refused_for_space(
+    _download_env, tmp_path
+):
     """Nothing lands for a model already on disk, so nothing may be refused."""
     _download_env(
         cache_dir=str(tmp_path),
@@ -360,7 +372,12 @@ async def test_already_downloaded_model_is_never_refused_for_space(_download_env
     )
     reg = M.ModelDownloadRegistry()
     resp = await H.api_model_download_start(
-        _req("POST", "/api/models/downloads", reg, body={"provider": "ollama", "model": "huge"})
+        _req(
+            "POST",
+            "/api/models/downloads",
+            reg,
+            body={"provider": "ollama", "model": "huge"},
+        )
     )
 
     assert resp.status == 202

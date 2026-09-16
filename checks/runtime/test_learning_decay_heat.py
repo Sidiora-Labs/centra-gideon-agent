@@ -17,28 +17,28 @@ import math
 
 import pytest
 
-from gideon.learning.decay import KIND_MULTIPLIERS, evaluate, strength
-from gideon.memory_record import (
+from gideon.cognition.learning.decay import KIND_MULTIPLIERS, evaluate, strength
+from gideon.cognition.memory_record import (
     _DECAY_PROFILES,
     MemoryKind,
     MemoryRecord,
     MemoryScope,
     decay_profile,
 )
-from gideon.memory_service import MemoryService
-from gideon.vector_memory import VectorMemoryStore
+from gideon.cognition.memory_service import MemoryService
+from gideon.cognition.vector_memory import SemanticArchive
 
 
 @pytest.fixture(autouse=True)
 def _isolated_home(tmp_path, monkeypatch):
     """Nothing here may touch the real home."""
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
 
 
 @pytest.fixture
 def svc(tmp_path):
-    store = VectorMemoryStore(db_path=tmp_path / "m.db", embedding_dim=3)
+    store = SemanticArchive(db_path=tmp_path / "m.db", embedding_dim=3)
     store.init()
     store.embed_fn = lambda t: [1.0, 0.0, 0.0]
     return MemoryService.over_vector_store(store)
@@ -68,21 +68,10 @@ def _rec(kind: MemoryKind, *, days: float, visits: int = 0, importance: float = 
     )
 
 
-# ── The migration: old numbers vs new numbers ──
-
-#: What the private curve produced at 30 days with no visits, for EVERY kind — it had
-#: no per-kind rate and no importance axis, so one number covered all eight classes.
 OLD_HEAT_30D = 0.5 * math.exp(-1.0)
 
-#: What the kernel produces, per kind, same inputs. Pinned because these are the
-#: numbers the promotion gate and the retrieval boost now see.
 NEW_HEAT_30D = {
-    # A memory slot is now the slowest-decaying class (0.3 — MGAV-8): the user wrote it into
-    # an always-injected register, so decay is not the instrument that retires one (their own
-    # tombstone is). Still not exempt — see IMPORTANCE_DAMPING's docstring on pin-once rot.
     MemoryKind.SLOT: 0.441351,
-    # A user-taught approval rule is the slowest-decaying class (0.4, matching
-    # "strategy") — a standing instruction outlives the digest that minted it.
     MemoryKind.APPROVAL: 0.423373,
     MemoryKind.SEMANTIC: 0.406126,
     MemoryKind.PREFERENCE: 0.406126,
@@ -99,15 +88,18 @@ def test_old_heat_curve_is_gone():
     """No kind still produces the private curve's answer. This is the behaviour change."""
     assert round(OLD_HEAT_30D, 6) == 0.18394
     for kind in MemoryKind:
-        assert _rec(kind, days=30).heat(now=_now()) != pytest.approx(OLD_HEAT_30D, abs=1e-6)
+        assert _rec(kind, days=30).heat(now=_now()) != pytest.approx(
+            OLD_HEAT_30D, abs=1e-6
+        )
 
 
 @pytest.mark.parametrize("kind", list(MemoryKind))
 def test_new_heat_is_the_kernel(kind):
     got = _rec(kind, days=30).heat(now=_now())
     assert got == pytest.approx(NEW_HEAT_30D[kind], abs=1e-6)
-    # …and it is literally the kernel, not a coincidence at one point on the curve.
-    expected = 0.5 * strength(kind=decay_profile(kind), active_days_since_use=30.0, importance=0.5)
+    expected = 0.5 * strength(
+        kind=decay_profile(kind), active_days_since_use=30.0, importance=0.5
+    )
     assert got == pytest.approx(expected, abs=1e-9)
 
 
@@ -124,7 +116,6 @@ def test_importance_now_slows_decay():
     plain = _rec(MemoryKind.SEMANTIC, days=60, importance=0.0).heat(now=_now())
     important = _rec(MemoryKind.SEMANTIC, days=60, importance=1.0).heat(now=_now())
     assert important > plain
-    # Not an exemption: even at importance 1.0 the term is below a fresh record's.
     fresh = _rec(MemoryKind.SEMANTIC, days=0, importance=0.0).heat(now=_now())
     assert important < fresh
 
@@ -144,22 +135,18 @@ def test_idle_days_is_none_for_an_unstamped_record():
     assert bare.heat(now=_now()) == pytest.approx(0.0, abs=1e-9)
 
 
-# ── The closed enum, enumerated exhaustively ──
-
-
 def test_every_memory_kind_has_a_profile_the_kernel_knows():
     assert set(_DECAY_PROFILES) == set(MemoryKind)
     for kind, profile in _DECAY_PROFILES.items():
-        assert profile in KIND_MULTIPLIERS, f"{kind.value} maps to unknown profile {profile}"
+        assert (
+            profile in KIND_MULTIPLIERS
+        ), f"{kind.value} maps to unknown profile {profile}"
 
 
 def test_an_unmapped_kind_raises_rather_than_defaulting():
     """A new memory class with no decay decision must not silently age like a skill."""
     with pytest.raises(ValueError, match="no decay profile"):
         decay_profile("teleportation")  # type: ignore[arg-type]
-
-
-# ── Doctrine: strength gates eviction and review ONLY ──
 
 
 def test_the_kernels_verdict_never_reorders_retrieval(svc):
@@ -176,13 +163,13 @@ def test_the_kernels_verdict_never_reorders_retrieval(svc):
     assert not unused_verdict.prune
 
     keys: dict[str, str] = {}
-    for tool, visits, days in (("decayed-and-used", 9, 400.0), ("fresh-and-unused", 0, 0.0)):
+    for tool, visits, days in (
+        ("decayed-and-used", 9, 400.0),
+        ("fresh-and-unused", 0, 0.0),
+    ):
         key = svc.record_procedural(tool=tool, task_shape="shape", outcome="success")
         keys[tool] = key
         svc._vs.db.execute(
-            # `updated_at` is the semantic table's recency stamp — `heat` reads
-            # last_accessed_at → updated_at → created_at, and this table has no
-            # last_accessed_at column.
             "UPDATE semantic_memory SET scope=?, recall_count=?, updated_at=? WHERE key=?",
             (MemoryScope.GLOBAL.value, visits, _stamp(days), key),
         )
@@ -205,7 +192,6 @@ def test_strength_alone_cannot_win_a_rank():
     fresh_unused = _rec(MemoryKind.SEMANTIC, days=0, visits=0).heat(now=_now())
     stale_used = _rec(MemoryKind.SEMANTIC, days=365, visits=9).heat(now=_now())
     assert stale_used > fresh_unused
-    # The margin is structural (0.7 usage vs 0.5 recency), not incidental.
     assert 0.7 * (math.log1p(9) / math.log(10)) > 0.5 * 1.0
 
 
@@ -217,10 +203,12 @@ def test_memory_ranking_modules_never_import_the_eviction_verdict():
     """
     from pathlib import Path
 
-    import gideon.memory_service as ms
-    import gideon.memory_vault as mv
+    import gideon.cognition.memory_service as ms
+    import gideon.cognition.memory_vault as mv
 
     for module in (ms, mv):
         src = Path(module.__file__).read_text()
-        assert "DecayVerdict" not in src, f"{module.__name__} imports the eviction verdict"
+        assert (
+            "DecayVerdict" not in src
+        ), f"{module.__name__} imports the eviction verdict"
         assert "evaluate_decay" not in src

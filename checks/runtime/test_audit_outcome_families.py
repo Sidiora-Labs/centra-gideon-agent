@@ -2,7 +2,7 @@
 
 Settings → Audit log offers outcome filter pills. They used to be defined in the dashboard as
 two literal substrings — ``denied`` and ``failed`` — against a log whose writers emit **62**
-distinct outcome words. Measured across ``src/gideon``:
+distinct outcome words. Measured across ``runtime/gideon``:
 
     denied 163 · rejected 24 · blocked 5 · refused 1        "Denied" matched 163 of 193
     failure 23 · error 21 · failed 4                        "Failed" matched 4 of 48
@@ -26,13 +26,13 @@ from pathlib import Path
 
 import pytest
 
-from gideon.sel import (
+from gideon.security.sel import (
     AUDIT_OUTCOME_FAMILIES,
     AUDIT_OUTCOME_SUCCESS,
     _audit_matches,
 )
 
-_SRC = Path(__file__).resolve().parents[1] / "src" / "gideon"
+_SRC = Path(__file__).resolve().parents[2] / "runtime" / "gideon"
 _LITERAL = re.compile(r'outcome="([a-z_]+)"')
 
 
@@ -47,10 +47,12 @@ def _emitted_outcomes() -> dict[str, int]:
 
 def test_the_vocabulary_scan_resolves() -> None:
     """Vacuity floor. Every assertion below is 'for each emitted outcome …', so a scan that
-    finds nothing passes everything — the failure mode this whole file exists to prevent."""
+    finds nothing passes everything — the failure mode this whole file exists to prevent.
+    """
     emitted = _emitted_outcomes()
-    assert len(emitted) >= 50, f"only {len(emitted)} outcome literals found; the scan broke"
-    # The four that motivated the fix must be in it, or the regex has drifted.
+    assert (
+        len(emitted) >= 50
+    ), f"only {len(emitted)} outcome literals found; the scan broke"
     for value in ("denied", "rejected", "failure", "error"):
         assert emitted.get(value, 0) > 0, value
 
@@ -59,11 +61,14 @@ def test_the_vocabulary_scan_resolves() -> None:
 def test_no_family_offers_a_term_nobody_writes(family: dict) -> None:
     """A filter value that matches no emitted outcome can only ever return zero rows — the
     same silent-zero defect as a missing value, arriving from the other direction. (This test
-    caught two invented values, ``not_permitted`` and ``timeout``, before they shipped.)"""
+    caught two invented values, ``not_permitted`` and ``timeout``, before they shipped.)
+    """
     emitted = _emitted_outcomes()
     for value in family["values"]:  # type: ignore[index]
         matching = [word for word in emitted if value in word]
-        assert matching, f"{family['key']}: no writer emits anything containing {value!r}"
+        assert (
+            matching
+        ), f"{family['key']}: no writer emits anything containing {value!r}"
 
 
 def test_the_families_cover_what_motivated_them() -> None:
@@ -78,8 +83,12 @@ def test_the_families_cover_what_motivated_them() -> None:
         assert covered(denied, word), word
     for word in ("failure", "failed", "error"):
         assert covered(failed, word), word
-    # And the prefixed variants come along, which is why substring matching is kept.
-    for word in ("denied_running", "denied_mismatch", "rejected_spawn", "refused_incident"):
+    for word in (
+        "denied_running",
+        "denied_mismatch",
+        "rejected_spawn",
+        "refused_incident",
+    ):
         assert covered(denied, word), word
     assert covered(failed, "hook_error")
 
@@ -90,7 +99,9 @@ def test_the_families_are_disjoint_and_exclude_success() -> None:
     seen: dict[str, str] = {}
     for family in AUDIT_OUTCOME_FAMILIES:
         for value in family["values"]:  # type: ignore[index]
-            assert value not in seen, f"{value!r} is in both {seen.get(value)} and {family['key']}"
+            assert (
+                value not in seen
+            ), f"{value!r} is in both {seen.get(value)} and {family['key']}"
             seen[value] = str(family["key"])
     for good in AUDIT_OUTCOME_SUCCESS:
         for family in AUDIT_OUTCOME_FAMILIES:
@@ -119,12 +130,6 @@ def test_the_unclassified_remainder_is_visible_not_silent() -> None:
         or any(good in word for good in AUDIT_OUTCOME_SUCCESS)
     }
     unclassified = sorted(set(emitted) - classified)
-    # 33 (was 32) — ES-6's `halted_on_budget`, and the raise is the decision this rail exists to
-    # force rather than a way around it. A gate that stopped on its declared ceiling is the control
-    # WORKING: nothing was denied to a caller (so not `denied`), the mechanism did not break (so not
-    # `failed`), and the sweep is incomplete (so not a success either). It stays unclassified for
-    # the same reason `expired` does — putting it in a family would make the audit log assert a
-    # refusal or a fault that never happened.
     assert len(unclassified) <= 33, (
         "a new outcome word appeared — classify it into a family, into "
         f"AUDIT_OUTCOME_SUCCESS, or raise this ceiling deliberately:\n{unclassified}"
@@ -140,7 +145,6 @@ def test_a_family_is_one_any_of_query() -> None:
     assert _audit_matches({"outcome": "failure"}, {"outcome": failed}, "", "")
     assert _audit_matches({"outcome": "hook_error"}, {"outcome": failed}, "", "")
     assert not _audit_matches({"outcome": "success"}, {"outcome": failed}, "", "")
-    # The single-value form must keep behaving exactly as before.
     assert _audit_matches({"outcome": "denied_running"}, {"outcome": "denied"}, "", "")
     assert not _audit_matches({"outcome": "error"}, {"outcome": "failed"}, "", "")
 
@@ -149,9 +153,14 @@ def test_or_is_within_a_field_and_and_is_across_fields() -> None:
     """The regression this change could have introduced: turning the field AND into an OR would
     widen every audit query silently."""
     row = {"outcome": "error", "operation": "DELETE /api/terminal/sessions/abc"}
-    assert _audit_matches(row, {"outcome": "failure,error", "operation": "DELETE"}, "", "")
-    assert not _audit_matches(row, {"outcome": "failure,error", "operation": "POST"}, "", "")
-    assert not _audit_matches(row, {"outcome": "denied,rejected", "operation": "DELETE"}, "", "")
-    # An empty or comma-only needle must not become "match everything but claim a filter".
+    assert _audit_matches(
+        row, {"outcome": "failure,error", "operation": "DELETE"}, "", ""
+    )
+    assert not _audit_matches(
+        row, {"outcome": "failure,error", "operation": "POST"}, "", ""
+    )
+    assert not _audit_matches(
+        row, {"outcome": "denied,rejected", "operation": "DELETE"}, "", ""
+    )
     assert _audit_matches(row, {"outcome": ""}, "", "")
     assert _audit_matches(row, {"outcome": " , "}, "", "")

@@ -1,6 +1,6 @@
 """The exemplars back the done-when: they discover, they run, and they prove the mechanism.
 
-Atom SV-8 (§4.1): `harness/exemplars/` holds a runnable exemplar per landed WF2 slice — a
+Atom SV-8 (§4.1): `checks/harness/exemplars/` holds a runnable exemplar per landed WF2 slice — a
 standalone spec + a ≤30s smoke script + a rationale note — and "a test proves they run".
 This is that test. It is the "proves they run" half of the done-when.
 
@@ -19,13 +19,14 @@ from pathlib import Path
 
 import pytest
 
-from harness.exemplars import discover_exemplars, exemplars_root, incomplete_slices
+from checks.harness.exemplars import (
+    discover_exemplars,
+    exemplars_root,
+    incomplete_slices,
+)
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-#: The WF2 slices the plan names as landed and in scope for the SV-8 backfill (§4.1: Slices
-#: 0-5, with Slice 2 as the named required_artifacts example). Pinning the set here means a
-#: slice dropped from the tree fails this test rather than silently shrinking coverage.
 _EXPECTED_SLICES = {"slice_0", "slice_1", "slice_2", "slice_3", "slice_4", "slice_5"}
 
 _EXEMPLARS = discover_exemplars()
@@ -39,10 +40,9 @@ def test_the_landed_slices_each_have_a_complete_exemplar() -> None:
     missing its exemplar/smoke/rationale shows up here (a slice merged without its exemplar
     is visible), instead of being quietly skipped by discovery.
     """
-    assert (
-        not incomplete_slices()
-    ), "these slice dirs are missing one of exemplar.py / smoke.sh / RATIONALE.md: " + ", ".join(
-        incomplete_slices()
+    assert not incomplete_slices(), (
+        "these slice dirs are missing one of exemplar.py / smoke.sh / RATIONALE.md: "
+        + ", ".join(incomplete_slices())
     )
     found = set(_IDS)
     assert (
@@ -53,7 +53,7 @@ def test_the_landed_slices_each_have_a_complete_exemplar() -> None:
 def test_there_is_at_least_one_exemplar() -> None:
     """A guard against the discovery silently finding nothing (a passing-because-empty test
     is how a backfill obligation rots)."""
-    assert _EXEMPLARS, "no exemplars discovered under harness/exemplars/"
+    assert _EXEMPLARS, "no exemplars discovered under checks/harness/exemplars/"
 
 
 @pytest.mark.parametrize("exemplar", _EXEMPLARS, ids=_IDS)
@@ -75,7 +75,6 @@ def test_each_exemplar_smoke_script_runs_and_proves_its_mechanism(exemplar) -> N
         f"{exemplar.slice} smoke failed (exit {proc.returncode}).\n"
         f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
     )
-    # The exemplar prints a single "PASS <slice>: ..." line naming what it proved.
     assert (
         f"PASS {exemplar.slice}" in proc.stdout
     ), f"{exemplar.slice} smoke exited 0 but did not print its PASS line:\n{proc.stdout}"
@@ -94,7 +93,9 @@ def test_slice_2_is_the_required_artifacts_example() -> None:
         timeout=60,
         env=_isolated_env(),
     )
-    assert result.returncode == 0, f"slice_2 exemplar failed:\n{result.stdout}\n{result.stderr}"
+    assert (
+        result.returncode == 0
+    ), f"slice_2 exemplar failed:\n{result.stdout}\n{result.stderr}"
     assert "artifact gate failed" in result.stdout
     assert (root / "exemplar.py").is_file()
 
@@ -107,18 +108,6 @@ def _isolated_env() -> dict[str, str]:
     env["GIDEON_HOME"] = tempfile.mkdtemp(prefix="gideon-exemplar-")
     return env
 
-
-# ── The interpreter the smoke scripts run on (#2718) ────────────────────────────────────────────
-#
-# Every smoke script used to resolve `.venv/bin/python` against its OWN repo root and fall back to
-# a bare `python3`. A `git worktree` has no `.venv`, so in a worktree the fallback took an
-# interpreter with no `gideon` installed and the exemplar died on `ModuleNotFoundError` — in
-# THIS file, which the change under review never touched. Three contributors each spent a
-# diagnosis on it, and the conclusion was recorded as folklore rather than fixed.
-#
-# These pin the two properties that keep it fixed. The first is the one that matters: six copies of
-# the resolution is what let one bug live in all six at once, so the rail is that there is exactly
-# ONE copy.
 
 _RESOLVER = exemplars_root() / "resolve_py.sh"
 
@@ -139,24 +128,29 @@ def test_the_interpreter_rule_has_exactly_one_owner() -> None:
         body = smoke.read_text(encoding="utf-8")
         if "resolve_py.sh" not in body:
             unsourced.append(smoke.name and f"{smoke.parent.name}/{smoke.name}")
-        # The exact shape that was wrong: a bare `python3` accepted as an interpreter.
         if 'PY="python3"' in body:
             rerolled.append(f"{smoke.parent.name}/{smoke.name}")
-    assert not unsourced, f"these smoke scripts do not source resolve_py.sh: {unsourced}"
+    assert (
+        not unsourced
+    ), f"these smoke scripts do not source resolve_py.sh: {unsourced}"
     assert not rerolled, (
         "these smoke scripts fall back to a bare `python3`, which has none of this repo's dev "
         f"dependencies and turns a wrong-interpreter error into a missing-module one: {rerolled}"
     )
 
 
-def test_an_unresolvable_interpreter_says_so_instead_of_failing_later(tmp_path: Path) -> None:
+def test_an_unresolvable_interpreter_says_so_instead_of_failing_later(
+    tmp_path: Path,
+) -> None:
     """With nothing to resolve, the resolver exits 1 naming the knob — not a module error.
 
     Driven for real in a directory that is not a git repo and has no `.venv`, because the whole
     defect was a fallback that *succeeded* at picking an interpreter and failed 30 lines later. A
     test asserting the message without exercising the no-candidate path would not have caught it.
     """
-    (tmp_path / "resolve_py.sh").write_text(_RESOLVER.read_text(encoding="utf-8"), encoding="utf-8")
+    (tmp_path / "resolve_py.sh").write_text(
+        _RESOLVER.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     driver = tmp_path / "drive.sh"
     driver.write_text(
         'set -euo pipefail\nREPO_ROOT="$(pwd)"\nsource ./resolve_py.sh\necho "PY=$PY"\n',
@@ -164,17 +158,28 @@ def test_an_unresolvable_interpreter_says_so_instead_of_failing_later(tmp_path: 
     )
     env = {k: v for k, v in __import__("os").environ.items() if k != "GIDEON_PY"}
     proc = subprocess.run(
-        ["bash", str(driver)], cwd=tmp_path, capture_output=True, text=True, timeout=60, env=env
+        ["bash", str(driver)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
     )
-    assert proc.returncode == 1, f"expected a loud refusal, got {proc.returncode}:\n{proc.stdout}"
+    assert (
+        proc.returncode == 1
+    ), f"expected a loud refusal, got {proc.returncode}:\n{proc.stdout}"
     assert "GIDEON_PY" in proc.stderr, f"the refusal must name the knob:\n{proc.stderr}"
     assert "python3" in proc.stderr, "it must say why a bare python3 is not used"
-    assert "PY=" not in proc.stdout, "it must not resolve anything on the no-candidate path"
+    assert (
+        "PY=" not in proc.stdout
+    ), "it must not resolve anything on the no-candidate path"
 
 
 def test_gideon_py_wins_when_set(tmp_path: Path) -> None:
     """An explicit interpreter overrides both search paths — how CI and non-venv setups pin it."""
-    (tmp_path / "resolve_py.sh").write_text(_RESOLVER.read_text(encoding="utf-8"), encoding="utf-8")
+    (tmp_path / "resolve_py.sh").write_text(
+        _RESOLVER.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     driver = tmp_path / "drive.sh"
     driver.write_text(
         'set -euo pipefail\nREPO_ROOT="$(pwd)"\nsource ./resolve_py.sh\necho "PY=$PY"\n',
@@ -183,7 +188,12 @@ def test_gideon_py_wins_when_set(tmp_path: Path) -> None:
     env = dict(__import__("os").environ)
     env["GIDEON_PY"] = "/bin/sh"
     proc = subprocess.run(
-        ["bash", str(driver)], cwd=tmp_path, capture_output=True, text=True, timeout=60, env=env
+        ["bash", str(driver)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
     )
     assert proc.returncode == 0, f"{proc.stdout}\n{proc.stderr}"
     assert "PY=/bin/sh" in proc.stdout, proc.stdout

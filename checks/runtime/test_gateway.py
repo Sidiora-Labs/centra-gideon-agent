@@ -1,4 +1,4 @@
-"""Tests for gideon.gateway (GatewayOrchestrator) coverage."""
+"""Tests for gideon.engine.gateway (RuntimeCoordinator) coverage."""
 
 import asyncio
 import time
@@ -7,15 +7,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from gideon.config.loader import AppConfig
-from gideon.gateway import _MAX_INJECT_ATTEMPTS, GatewayOrchestrator
-from gideon.triggers.delivery import (
+from gideon.automation.triggers.delivery import (
     _EPOCH_RE,
     _EPOCH_WINDOW_SECS,
     _VOLATILE_RE,
     FAILURE_REMINDER_SECS,
     failure_hash,
 )
+from gideon.core.config.loader import AppConfig
+from gideon.engine.gateway import _MAX_INJECT_ATTEMPTS, RuntimeCoordinator
 
 
 def _make_orchestrator(
@@ -25,8 +25,8 @@ def _make_orchestrator(
     no_dashboard: bool = False,
     no_crons: bool = False,
     no_open: bool = False,
-) -> GatewayOrchestrator:
-    """Build a GatewayOrchestrator with mocked credentials."""
+) -> RuntimeCoordinator:
+    """Build a RuntimeCoordinator with mocked credentials."""
     cfg = AppConfig()
     creds: dict[str, str] = {}
     if slack_enabled:
@@ -39,7 +39,7 @@ def _make_orchestrator(
         if owner_id:
             creds["GIDEON_OWNER_ID"] = owner_id
     with patch.object(cfg, "load_credentials", return_value=creds):
-        orch = GatewayOrchestrator(
+        orch = RuntimeCoordinator(
             cfg,
             no_dashboard=no_dashboard,
             no_crons=no_crons,
@@ -48,11 +48,8 @@ def _make_orchestrator(
     return orch
 
 
-# ─── Helper utilities ────────────────────────────────────────────────────
-
-
 def _mock_sessions():
-    """Return a mock SessionManager with common methods."""
+    """Return a mock ConversationDirectory with common methods."""
     s = MagicMock()
     s.get_or_create = AsyncMock(return_value=(MagicMock(), True, False))
     s.release = MagicMock()
@@ -69,12 +66,10 @@ def _mock_sessions():
 
 
 def _mock_dashboard_state():
-    """Return a mock DashboardState."""
+    """Return a mock ConsoleState."""
     ds = MagicMock()
     ds._sessions = {}
     ds._yolo = False
-    # The gateway reads YOLO through is_yolo_active() (TTL-aware), not the raw
-    # field — mirror the field so per-test `ds._yolo = …` flows through.
     ds.is_yolo_active.side_effect = lambda: ds._yolo
     ds.notify = MagicMock()
     ds.push_sessions_update = MagicMock()
@@ -112,11 +107,6 @@ def _mock_channel_delivery(channel="D_U1"):
     return d
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: __init__ and constructor
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestGatewayOrchestratorInit:
     """Constructor and attribute initialization."""
 
@@ -133,9 +123,6 @@ class TestGatewayOrchestratorInit:
         assert orch._no_open is True
 
     def test_slack_disabled_without_tokens(self):
-        # Slack client/state now live in the slack-channel app's SlackRuntime; the
-        # orchestrator no longer owns a `.slack` attribute. Core only tracks the
-        # token-derived enabled flag.
         orch = _make_orchestrator(slack_enabled=False)
         assert orch._slack_enabled is False
 
@@ -155,11 +142,6 @@ class TestGatewayOrchestratorInit:
         assert orch.subagent_mgr is None
         assert orch.dashboard_state is None
         assert orch._channel_delivery is None
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: failure_hash utility (moved from gateway._result_hash — S161)
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestFailureHash:
@@ -205,41 +187,40 @@ class TestFailureHash:
         assert a == b
 
 
-# open_dm retry logic moved to the slack-channel app's SlackDelivery.open_dm
-# (see apps/slack-channel/tests/test_delivery.py) — core no longer owns it.
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: _init_services
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestInitServices:
     """Service initialization cluster."""
 
     def test_init_services_creates_all(self):
         orch = _make_orchestrator(slack_enabled=True)
-        with patch("gideon.gateway.MemoryStore") as mock_mem:
+        with patch("gideon.engine.gateway.MemoryJournal") as mock_mem:
             mock_mem_inst = MagicMock()
             mock_mem_inst.init = MagicMock()
             mock_mem_inst.rebuild_index = MagicMock(return_value=5)
             mock_mem.return_value = mock_mem_inst
-            with patch("gideon.vector_memory.VectorMemoryStore") as mock_vm:
+            with patch("gideon.cognition.vector_memory.SemanticArchive") as mock_vm:
                 mock_vm_inst = MagicMock()
                 mock_vm_inst.init = MagicMock()
                 mock_vm.return_value = mock_vm_inst
-                with patch("gideon.gateway.SkillsLoader"):
-                    with patch("gideon.gateway.HookManager"):
-                        with patch("gideon.gateway.ContextBuilder"):
-                            with patch("gideon.gateway.ConversationLog") as mock_cl:
+                with patch("gideon.engine.gateway.ProcedureLibrary"):
+                    with patch("gideon.engine.gateway.HookManager"):
+                        with patch("gideon.engine.gateway.PromptAssembler"):
+                            with patch(
+                                "gideon.engine.gateway.ConversationLog"
+                            ) as mock_cl:
                                 mock_cl_inst = MagicMock()
                                 mock_cl_inst.init = MagicMock()
                                 mock_cl.return_value = mock_cl_inst
-                                with patch("gideon.gateway.SessionManager"):
-                                    with patch("gideon.gateway.HistoryConsolidator"):
-                                        with patch("gideon.gateway.ChannelHistory"):
+                                with patch(
+                                    "gideon.engine.gateway.ConversationDirectory"
+                                ):
+                                    with patch(
+                                        "gideon.engine.gateway.HistoryConsolidator"
+                                    ):
+                                        with patch(
+                                            "gideon.engine.gateway.ChannelHistory"
+                                        ):
                                             with patch(
-                                                "gideon.agent.rebuild_agent_config",
+                                                "gideon.engine.agent.rebuild_agent_config",
                                                 return_value=Path("/tmp/a"),
                                             ):
                                                 with patch(
@@ -259,27 +240,35 @@ class TestInitServices:
 
     def test_init_services_dashboard_only_mode(self):
         orch = _make_orchestrator(slack_enabled=False)
-        with patch("gideon.gateway.MemoryStore") as mock_mem:
+        with patch("gideon.engine.gateway.MemoryJournal") as mock_mem:
             mock_mem_inst = MagicMock()
             mock_mem_inst.init = MagicMock()
             mock_mem_inst.rebuild_index = MagicMock(return_value=0)
             mock_mem.return_value = mock_mem_inst
-            with patch("gideon.vector_memory.VectorMemoryStore") as mock_vm:
+            with patch("gideon.cognition.vector_memory.SemanticArchive") as mock_vm:
                 mock_vm_inst = MagicMock()
                 mock_vm_inst.init = MagicMock()
                 mock_vm.return_value = mock_vm_inst
-                with patch("gideon.gateway.SkillsLoader"):
-                    with patch("gideon.gateway.HookManager"):
-                        with patch("gideon.gateway.ContextBuilder"):
-                            with patch("gideon.gateway.ConversationLog") as mock_cl:
+                with patch("gideon.engine.gateway.ProcedureLibrary"):
+                    with patch("gideon.engine.gateway.HookManager"):
+                        with patch("gideon.engine.gateway.PromptAssembler"):
+                            with patch(
+                                "gideon.engine.gateway.ConversationLog"
+                            ) as mock_cl:
                                 mock_cl_inst = MagicMock()
                                 mock_cl_inst.init = MagicMock()
                                 mock_cl.return_value = mock_cl_inst
-                                with patch("gideon.gateway.SessionManager"):
-                                    with patch("gideon.gateway.HistoryConsolidator"):
-                                        with patch("gideon.gateway.ChannelHistory"):
+                                with patch(
+                                    "gideon.engine.gateway.ConversationDirectory"
+                                ):
+                                    with patch(
+                                        "gideon.engine.gateway.HistoryConsolidator"
+                                    ):
+                                        with patch(
+                                            "gideon.engine.gateway.ChannelHistory"
+                                        ):
                                             with patch(
-                                                "gideon.agent.rebuild_agent_config",
+                                                "gideon.engine.agent.rebuild_agent_config",
                                                 return_value=Path("/tmp/a"),
                                             ):
                                                 with patch(
@@ -293,11 +282,6 @@ class TestInitServices:
 
         assert orch._channel_delivery is None
         assert orch.sessions is not None
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: _interactive_approval
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestInteractiveApproval:
@@ -329,7 +313,7 @@ class TestInteractiveApproval:
         event.title = "dangerous command"
         event.tool_input = ""
         event.tool_purpose = ""
-        with patch("gideon.trust_mode.is_yolo_active", return_value=False):
+        with patch("gideon.security.trust_mode.is_yolo_active", return_value=False):
             result = await callback(event, "")
         assert result is True
 
@@ -344,7 +328,7 @@ class TestInteractiveApproval:
         event.title = "cmd"
         event.tool_input = ""
         event.tool_purpose = ""
-        with patch("gideon.trust_mode.is_yolo_active", return_value=True):
+        with patch("gideon.security.trust_mode.is_yolo_active", return_value=True):
             result = await callback(event, "")
         assert result is True
 
@@ -362,7 +346,7 @@ class TestInteractiveApproval:
         event.title = "rm -rf /"
         event.tool_input = ""
         event.tool_purpose = ""
-        with patch("gideon.trust_mode.is_yolo_active", return_value=False):
+        with patch("gideon.security.trust_mode.is_yolo_active", return_value=False):
             result = await callback(event, "")
         assert result is False
         ds.request_approval.assert_awaited_once()
@@ -385,8 +369,8 @@ class TestInteractiveApproval:
         event.title = "safe cmd"
         event.tool_input = ""
         event.tool_purpose = ""
-        with patch("gideon.trust_mode.is_yolo_active", return_value=False):
-            with patch("gideon.sel.sel") as mock_sel:
+        with patch("gideon.security.trust_mode.is_yolo_active", return_value=False):
+            with patch("gideon.security.sel.sel") as mock_sel:
                 mock_sel.return_value.log_api_access = MagicMock()
                 result = await callback(event, "")
         assert result is True
@@ -408,8 +392,8 @@ class TestInteractiveApproval:
         event.title = "cmd"
         event.tool_input = ""
         event.tool_purpose = ""
-        with patch("gideon.trust_mode.is_yolo_active", return_value=False):
-            with patch("gideon.sel.sel") as mock_sel:
+        with patch("gideon.security.trust_mode.is_yolo_active", return_value=False):
+            with patch("gideon.security.sel.sel") as mock_sel:
                 mock_sel.return_value.log_api_access = MagicMock()
                 result = await callback(event, "")
         assert result is True
@@ -420,7 +404,7 @@ class TestInteractiveApproval:
         cfg = AppConfig()
         cfg.hooks = {"auto_approve_sources": ["cron"]}
         with patch.object(cfg, "load_credentials", return_value={}):
-            orch = GatewayOrchestrator(cfg)
+            orch = RuntimeCoordinator(cfg)
         orch.dashboard_state = _mock_dashboard_state()
         orch.dashboard_state._yolo = False
         orch.dashboard_state._sessions = {}
@@ -430,14 +414,9 @@ class TestInteractiveApproval:
         event.title = "auto"
         event.tool_input = ""
         event.tool_purpose = ""
-        with patch("gideon.trust_mode.is_yolo_active", return_value=False):
+        with patch("gideon.security.trust_mode.is_yolo_active", return_value=False):
             result = await callback(event, "")
         assert result is True
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: _deliver_result
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestDeliverResult:
@@ -472,9 +451,11 @@ class TestDeliverResult:
         session.key = "my-session"
         ds.resolve_session = MagicMock(return_value=session)
         orch.dashboard_state = ds
-        with patch("gideon.gateway.sel") as mock_sel:
+        with patch("gideon.engine.gateway.sel") as mock_sel:
             mock_sel.return_value.log_api_access = MagicMock()
-            await orch._deliver_result("Title", "task", "result", "dashboard:my-session")
+            await orch._deliver_result(
+                "Title", "task", "result", "dashboard:my-session"
+            )
         session.append.assert_called_once()
 
     @pytest.mark.asyncio
@@ -483,7 +464,7 @@ class TestDeliverResult:
         ds = _mock_dashboard_state()
         ds.resolve_session = MagicMock(return_value=None)
         orch.dashboard_state = ds
-        with patch("gideon.gateway.sel") as mock_sel:
+        with patch("gideon.engine.gateway.sel") as mock_sel:
             mock_sel.return_value.log_api_access = MagicMock()
             await orch._deliver_result("Title", "task", "result", "dashboard:gone")
         ds.notify.assert_not_called()
@@ -504,7 +485,6 @@ class TestDeliverResult:
         orch.dashboard_state = _mock_dashboard_state()
         await orch._deliver_result("Title", "task", "result", "channel:C123:1234.5678")
         orch._channel_delivery.deliver_notification.assert_awaited_once()
-        # thread_ts is threaded through as the 4th positional arg
         call_args = orch._channel_delivery.deliver_notification.call_args
         assert call_args[0][0] == "C123"
         assert call_args[0][3] == "1234.5678"
@@ -529,7 +509,7 @@ class TestDeliverResult:
         session.queue_depth = 0
         ds.resolve_session = MagicMock(return_value=session)
         orch.dashboard_state = ds
-        with patch("gideon.gateway.sel") as mock_sel:
+        with patch("gideon.engine.gateway.sel") as mock_sel:
             mock_sel.return_value.log_api_access = MagicMock()
             await orch._deliver_result("Title", "task", "result", "prompt:dashboard:s1")
         session.enqueue_or_run_prompt.assert_called_once()
@@ -540,9 +520,11 @@ class TestDeliverResult:
         ds = _mock_dashboard_state()
         ds.resolve_session = MagicMock(return_value=None)
         orch.dashboard_state = ds
-        with patch("gideon.gateway.sel") as mock_sel:
+        with patch("gideon.engine.gateway.sel") as mock_sel:
             mock_sel.return_value.log_api_access = MagicMock()
-            await orch._deliver_result("Title", "task", "result", "prompt:dashboard:gone")
+            await orch._deliver_result(
+                "Title", "task", "result", "prompt:dashboard:gone"
+            )
         ds.notify.assert_not_called()
 
     @pytest.mark.asyncio
@@ -555,15 +537,10 @@ class TestDeliverResult:
         session.queue_depth = 2
         ds.resolve_session = MagicMock(return_value=session)
         orch.dashboard_state = ds
-        with patch("gideon.gateway.sel") as mock_sel:
+        with patch("gideon.engine.gateway.sel") as mock_sel:
             mock_sel.return_value.log_api_access = MagicMock()
             await orch._deliver_result("Title", "task", "result", "prompt:dashboard:s1")
         ds.notify.assert_not_called()
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: _shutdown
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestShutdown:
@@ -572,7 +549,7 @@ class TestShutdown:
     @pytest.mark.asyncio
     async def test_shutdown_with_no_services(self):
         orch = _make_orchestrator()
-        await orch._shutdown()  # should not raise
+        await orch._shutdown()
 
     @pytest.mark.asyncio
     async def test_shutdown_stops_the_background_services(self):
@@ -587,8 +564,6 @@ class TestShutdown:
         orch._dashboard_runner = MagicMock()
         orch._dashboard_runner.cleanup = AsyncMock()
         await orch._shutdown()
-        # No `cron_svc.stop()` any more (S112): the class is gone, and the loops it used to sit
-        # beside (clock, reaper, file-watch) are cancelled through `_task.cancel()` below.
         orch.heartbeat_svc.stop.assert_called_once()
 
     @pytest.mark.asyncio
@@ -606,11 +581,6 @@ class TestShutdown:
         assert task.cancelled()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: _check_for_updates
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestCheckForUpdates:
     """Update check logic."""
 
@@ -618,8 +588,14 @@ class TestCheckForUpdates:
     async def test_no_update_available(self):
         orch = _make_orchestrator()
         orch.dashboard_state = _mock_dashboard_state()
-        with patch("gideon.dashboard.handlers._do_update_check", new_callable=AsyncMock):
-            with patch("gideon.dashboard.handlers._update_info", {"available": False}):
+        with patch(
+            "gideon.interfaces.dashboard.handlers._do_update_check",
+            new_callable=AsyncMock,
+        ):
+            with patch(
+                "gideon.interfaces.dashboard.handlers._update_info",
+                {"available": False},
+            ):
                 await orch._check_for_updates()
 
     @pytest.mark.asyncio
@@ -628,16 +604,15 @@ class TestCheckForUpdates:
         ds = _mock_dashboard_state()
         orch.dashboard_state = ds
         orch._auto_apply_update = AsyncMock()
-        import gideon.dashboard.handlers as _h
+        import gideon.interfaces.dashboard.handlers as _h
 
         orig = _h._update_info.copy()
-        # Create a config with auto_update=False
         fake_cfg = MagicMock()
         fake_cfg.auto_update = False
         try:
             _h._update_info.update({"available": True, "version": "9.9.9"})
             with patch.object(_h, "_do_update_check", new_callable=AsyncMock):
-                with patch("gideon.config.AppConfig.load", return_value=fake_cfg):
+                with patch("gideon.core.config.AppConfig.load", return_value=fake_cfg):
                     await orch._check_for_updates()
         finally:
             _h._update_info.clear()
@@ -649,16 +624,11 @@ class TestCheckForUpdates:
     async def test_update_check_exception_handled(self):
         orch = _make_orchestrator()
         with patch(
-            "gideon.dashboard.handlers._do_update_check",
+            "gideon.interfaces.dashboard.handlers._do_update_check",
             new_callable=AsyncMock,
             side_effect=RuntimeError("network"),
         ):
-            await orch._check_for_updates()  # should not raise
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: _auto_apply_update
-# ═══════════════════════════════════════════════════════════════════════════
+            await orch._check_for_updates()
 
 
 class TestAutoApplyUpdate:
@@ -668,7 +638,7 @@ class TestAutoApplyUpdate:
     async def test_no_project_dir_returns_early(self):
         orch = _make_orchestrator()
         with patch.dict("os.environ", {"GIDEON_PROJECT_DIR": ""}, clear=False):
-            await orch._auto_apply_update()  # should not raise
+            await orch._auto_apply_update()
 
     @pytest.mark.asyncio
     async def test_non_main_branch_skips(self):
@@ -683,7 +653,6 @@ class TestAutoApplyUpdate:
                 return_value=proc,
             ) as mock_exec:
                 await orch._auto_apply_update()
-        # Branch gate: exactly one subprocess (branch detection) — no fetch.
         assert mock_exec.await_count == 1
 
     @pytest.mark.asyncio
@@ -701,11 +670,9 @@ class TestAutoApplyUpdate:
             call_count[0] += 1
             proc = AsyncMock()
             if call_count[0] == 1:
-                # branch detection → detached HEAD
                 proc.communicate = AsyncMock(return_value=(b"HEAD\n", b""))
                 proc.returncode = 0
             else:
-                # fetch (fail it to stop the pipeline right after the gate)
                 fetch_args.append(args)
                 proc.communicate = AsyncMock(return_value=(b"", b"err"))
                 proc.returncode = 1
@@ -715,13 +682,7 @@ class TestAutoApplyUpdate:
         with patch.dict("os.environ", {"GIDEON_PROJECT_DIR": "/tmp/proj"}):
             with patch("asyncio.create_subprocess_exec", side_effect=_fake_exec):
                 await orch._auto_apply_update()
-        # Gate passed: fetch ran, targeting origin main.
         assert fetch_args and fetch_args[0][:4] == ("git", "fetch", "origin", "main")
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: _check_missing_deps
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestCheckMissingDeps:
@@ -730,12 +691,7 @@ class TestCheckMissingDeps:
     def test_check_missing_deps_no_missing(self):
         orch = _make_orchestrator()
         with patch("importlib.util.find_spec", return_value=MagicMock()):
-            orch._check_missing_deps()  # should not raise
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: _init_cron
-# ═══════════════════════════════════════════════════════════════════════════
+            orch._check_missing_deps()
 
 
 class TestInitCron:
@@ -756,34 +712,65 @@ class TestInitCron:
           accident. Asserted on the boot path's code rather than on a mock, because a MagicMock
           answers any attribute and would pass vacuously.
         """
+        import ast
         import inspect
+        import textwrap
 
-        from gideon.gateway import GatewayOrchestrator
+        from gideon.engine.automation_boot import AutomationBoot
+        from gideon.engine.gateway import RuntimeCoordinator
 
-        src = inspect.getsource(GatewayOrchestrator._init_cron)
-        code = "\n".join(ln for ln in src.split("\n") if not ln.strip().startswith("#"))
-        # No legacy engine to construct or drive.
-        assert "ScheduleService" not in code
-        assert "cron_svc" not in code
+        assert (
+            "AutomationBoot(self, home=config_dir, logger=logger).start()"
+            in inspect.getsource(RuntimeCoordinator._init_cron)
+        )
+        code = inspect.getsource(AutomationBoot)
+        assert "ScheduleService" not in code and "cron_svc" not in code
         assert "load_without_timer" not in code
-        # The store engine, its reaper, and the boot migration ARE armed.
-        assert "self._clock_task = asyncio.create_task(self._clock_loop())" in code
-        assert "self._reaper_task = asyncio.create_task(self._trigger_reaper_loop())" in code
-        assert "migrate_and_arm()" in code
-        # And run-history rotation, the one thing the retired boot call still did.
-        assert "ScheduleRunStore(config_dir()).rotate_all()" in code
+        tree = ast.parse(textwrap.dedent(inspect.getsource(AutomationBoot.start)))
+        launches = {
+            node.targets[0].attr: node.value.args[0].func.attr
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Assign)
+            and isinstance(node.targets[0], ast.Attribute)
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Attribute)
+            and node.value.func.attr == "create_task"
+        }
+        assert launches == {
+            "_clock_task": "_clock_loop",
+            "_reaper_task": "_trigger_reaper_loop",
+            "_file_watch_task": "_file_watch_poll_loop",
+            "_web_watch_task": "_web_watch_poll_loop",
+        }
+        assert "migrate_and_arm()" in inspect.getsource(AutomationBoot.migrate)
+        assert "ExecutionJournal(self.home()).rotate_all()" in inspect.getsource(
+            AutomationBoot.rotate
+        )
 
     @pytest.mark.asyncio
     async def test_init_cron_respects_no_crons(self):
-        """`--no-crons` must gate the whole automation runtime, not just the legacy half."""
+        import ast
         import inspect
+        import textwrap
 
-        from gideon.gateway import GatewayOrchestrator
+        from gideon.engine.automation_boot import AutomationBoot
 
-        src = inspect.getsource(GatewayOrchestrator._init_cron)
-        guard = src.index("if self._no_crons:")
-        for armed in ("_clock_task", "_reaper_task", "_file_watch_task", "migrate_and_arm()"):
-            assert src.index(armed) > guard, f"{armed} must sit inside the --no-crons else-branch"
+        body = (
+            ast.parse(textwrap.dedent(inspect.getsource(AutomationBoot.start)))
+            .body[0]
+            .body
+        )
+        guard = body[0]
+        assert isinstance(guard, ast.If)
+        assert ast.unparse(guard.test) == "self.runtime._no_crons"
+        assert isinstance(guard.body[-1], ast.Return)
+        code = inspect.getsource(AutomationBoot.start)
+        assert (
+            code.index("self.migrate()")
+            < code.index("self.reconcile(store)")
+            < code.index("self.recover(store)")
+            < code.index("self.runtime._clock_task")
+        )
 
     @pytest.mark.xfail(reason="pre-existing cron-callback red — #7", strict=False)
     @pytest.mark.asyncio
@@ -799,7 +786,7 @@ class TestInitCron:
         orch.dashboard_state = _mock_dashboard_state()
         orch._channel_delivery = _mock_channel_delivery()
 
-        with patch("gideon.gateway.ScheduleService") as mock_cs:
+        with patch("gideon.engine.gateway.ScheduleService") as mock_cs:
             mock_cs_inst = MagicMock()
             mock_cs_inst.start = AsyncMock()
             mock_cs_inst.load_without_timer = AsyncMock()
@@ -809,7 +796,6 @@ class TestInitCron:
             mock_cs.return_value = mock_cs_inst
             await orch._init_cron()
 
-        # Extract the callback
         callback = mock_cs.call_args[1]["on_job"]
 
         job = MagicMock()
@@ -836,12 +822,12 @@ class TestInitCron:
         job.consecutive_failures = 0
 
         with patch(
-            "gideon.gateway.stream_and_collect",
+            "gideon.engine.gateway.stream_and_collect",
             new_callable=AsyncMock,
             return_value="cron result",
         ):
             with patch(
-                "gideon.gateway.build_schedule_session_context",
+                "gideon.engine.gateway.build_schedule_session_context",
                 return_value=("cron:j1", "run task"),
             ):
                 result = await callback(job)
@@ -863,7 +849,7 @@ class TestInitCron:
         orch.dashboard_state = _mock_dashboard_state()
         orch._channel_delivery = _mock_channel_delivery()
 
-        with patch("gideon.gateway.ScheduleService") as mock_cs:
+        with patch("gideon.engine.gateway.ScheduleService") as mock_cs:
             mock_cs_inst = MagicMock()
             mock_cs_inst.start = AsyncMock()
             mock_cs_inst.load_without_timer = AsyncMock()
@@ -899,21 +885,20 @@ class TestInitCron:
         job.consecutive_failures = 0
 
         with patch(
-            "gideon.gateway.stream_and_collect",
+            "gideon.engine.gateway.stream_and_collect",
             new_callable=AsyncMock,
             return_value="stable output",
         ):
             with patch(
-                "gideon.gateway.build_schedule_session_context",
+                "gideon.engine.gateway.build_schedule_session_context",
                 return_value=("cron:j2", "run"),
             ):
-                with patch("gideon.sel.sel") as mock_sel:
+                with patch("gideon.security.sel.sel") as mock_sel:
                     mock_sel.return_value.log_tool_invocation = MagicMock()
                     result = await callback(job)
 
         assert result == "stable output"
         assert job.consecutive_dupes == 2
-        # Cron result delivery should NOT have been called (suppressed)
         orch._channel_delivery.deliver_cron_result.assert_not_awaited()
 
     @pytest.mark.xfail(reason="pre-existing cron-callback red — #7", strict=False)
@@ -930,7 +915,7 @@ class TestInitCron:
         orch.dashboard_state = None
         orch._channel_delivery = None
 
-        with patch("gideon.gateway.ScheduleService") as mock_cs:
+        with patch("gideon.engine.gateway.ScheduleService") as mock_cs:
             mock_cs_inst = MagicMock()
             mock_cs_inst.start = AsyncMock()
             mock_cs_inst.load_without_timer = AsyncMock()
@@ -966,24 +951,19 @@ class TestInitCron:
         job.consecutive_failures = 0
 
         with patch(
-            "gideon.gateway.stream_and_collect",
+            "gideon.engine.gateway.stream_and_collect",
             new_callable=AsyncMock,
             return_value="silent result",
         ):
             with patch(
-                "gideon.gateway.build_schedule_session_context",
+                "gideon.engine.gateway.build_schedule_session_context",
                 return_value=("cron:j3", "run"),
             ):
-                with patch("gideon.sel.sel") as mock_sel:
+                with patch("gideon.security.sel.sel") as mock_sel:
                     mock_sel.return_value.log_tool_invocation = MagicMock()
                     result = await callback(job)
 
         assert result == "silent result"
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: _init_subagents
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestInitSubagents:
@@ -996,8 +976,8 @@ class TestInitSubagents:
         orch.ctx_builder = MagicMock()
         orch.ctx_builder.hooks = MagicMock()
         orch.dashboard_state = _mock_dashboard_state()
-        with patch("gideon.trust_mode.is_yolo_active", return_value=False):
-            with patch("gideon.gateway.SubagentManager") as mock_sm:
+        with patch("gideon.security.trust_mode.is_yolo_active", return_value=False):
+            with patch("gideon.engine.gateway.DelegationSupervisor") as mock_sm:
                 mock_sm_inst = MagicMock()
                 mock_sm_inst.start_reaper = MagicMock()
                 mock_sm_inst._max_concurrent = 10
@@ -1013,19 +993,14 @@ class TestInitSubagents:
         orch.ctx_builder = MagicMock()
         orch.ctx_builder.hooks = MagicMock()
         orch.dashboard_state = None
-        with patch("gideon.trust_mode.is_yolo_active", return_value=False):
-            with patch("gideon.gateway.SubagentManager") as mock_sm:
+        with patch("gideon.security.trust_mode.is_yolo_active", return_value=False):
+            with patch("gideon.engine.gateway.DelegationSupervisor") as mock_sm:
                 mock_sm_inst = MagicMock()
                 mock_sm_inst.start_reaper = MagicMock()
                 mock_sm_inst._max_concurrent = 5
                 mock_sm.return_value = mock_sm_inst
                 orch._init_subagents()
         assert orch.subagent_mgr._max_concurrent == 5
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: _init_heartbeat
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestInitHeartbeat:
@@ -1040,18 +1015,13 @@ class TestInitHeartbeat:
         orch.ctx_builder.hooks = MagicMock()
         orch.consolidator = MagicMock()
         orch.dashboard_state = _mock_dashboard_state()
-        with patch("gideon.gateway.HeartbeatService") as mock_hs:
+        with patch("gideon.engine.gateway.HeartbeatService") as mock_hs:
             mock_hs_inst = MagicMock()
             mock_hs_inst.start = AsyncMock()
             mock_hs.return_value = mock_hs_inst
             await orch._init_heartbeat()
         assert orch.heartbeat_svc is not None
         mock_hs_inst.start.assert_awaited_once()
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: _notif_meta
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestNotifMeta:
@@ -1084,7 +1054,9 @@ class TestNotifMeta:
         orch = self._orch()
         result = orch._notif_meta("C123:1234.567890")
         assert result == {"channel_link": "https://chat.example/C123/1234.567890"}
-        orch._channel_delivery.build_thread_link.assert_called_once_with("C123", "1234.567890")
+        orch._channel_delivery.build_thread_link.assert_called_once_with(
+            "C123", "1234.567890"
+        )
 
     def test_channel_key_without_delivery_returns_none(self):
         assert self._orch(with_delivery=False)._notif_meta("C123:1.2") is None
@@ -1097,11 +1069,6 @@ class TestNotifMeta:
 
     def test_hook_key_returns_none(self):
         assert self._orch()._notif_meta("hook:h1") is None
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: _init_dashboard and _init_mcp_discovery
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestInitDashboard:
@@ -1120,7 +1087,7 @@ class TestInitDashboard:
         ds = _mock_dashboard_state()
         runner = MagicMock()
         with patch(
-            "gideon.gateway.start_dashboard",
+            "gideon.engine.gateway.start_dashboard",
             new_callable=AsyncMock,
             return_value=(runner, ds),
         ):
@@ -1130,18 +1097,16 @@ class TestInitDashboard:
 
     def test_init_mcp_discovery_logs(self):
         orch = _make_orchestrator()
-        with patch("gideon.mcp_discovery.list_servers", return_value=[]):
-            orch._init_mcp_discovery()  # should not raise
+        with patch("gideon.integrations.mcp_discovery.list_servers", return_value=[]):
+            orch._init_mcp_discovery()
 
     def test_init_mcp_discovery_handles_error(self):
         orch = _make_orchestrator()
-        with patch("gideon.mcp_discovery.list_servers", side_effect=RuntimeError("fail")):
-            orch._init_mcp_discovery()  # should not raise
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: Volatile regex patterns
-# ═══════════════════════════════════════════════════════════════════════════
+        with patch(
+            "gideon.integrations.mcp_discovery.list_servers",
+            side_effect=RuntimeError("fail"),
+        ):
+            orch._init_mcp_discovery()
 
 
 class TestVolatilePatterns:
@@ -1162,15 +1127,7 @@ class TestVolatilePatterns:
     def test_constants_values(self):
         assert _MAX_INJECT_ATTEMPTS == 2
         assert _EPOCH_WINDOW_SECS == 300
-        # `FAILURE_REMINDER_SECS` moved to `triggers.delivery` with the control that reads it
-        # (S161). `_SUCCESS_REMINDER_SECS` and `_CRON_MSG_LIMIT` were DELETED: both were
-        # orphaned when the legacy cron dedup path was retired, with zero readers left.
         assert FAILURE_REMINDER_SECS == 3600
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: Cron failure paths
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestCronFailurePaths:
@@ -1190,7 +1147,7 @@ class TestCronFailurePaths:
         orch.dashboard_state = _mock_dashboard_state()
         orch._channel_delivery = _mock_channel_delivery()
 
-        with patch("gideon.gateway.ScheduleService") as mock_cs:
+        with patch("gideon.engine.gateway.ScheduleService") as mock_cs:
             mock_cs_inst = MagicMock()
             mock_cs_inst.start = AsyncMock()
             mock_cs_inst.load_without_timer = AsyncMock()
@@ -1227,15 +1184,15 @@ class TestCronFailurePaths:
         job._acp_retried = False
 
         with patch(
-            "gideon.gateway.stream_and_collect",
+            "gideon.engine.gateway.stream_and_collect",
             new_callable=AsyncMock,
             side_effect=RuntimeError("boom"),
         ):
             with patch(
-                "gideon.gateway.build_schedule_session_context",
+                "gideon.engine.gateway.build_schedule_session_context",
                 return_value=("cron:jfail", "run"),
             ):
-                with patch("gideon.sel.sel") as mock_sel:
+                with patch("gideon.security.sel.sel") as mock_sel:
                     mock_sel.return_value.log_tool_invocation = MagicMock()
                     with pytest.raises(RuntimeError, match="boom"):
                         await callback(job)
@@ -1257,7 +1214,7 @@ class TestCronFailurePaths:
         orch.dashboard_state = _mock_dashboard_state()
         orch._channel_delivery = _mock_channel_delivery()
 
-        with patch("gideon.gateway.ScheduleService") as mock_cs:
+        with patch("gideon.engine.gateway.ScheduleService") as mock_cs:
             mock_cs_inst = MagicMock()
             mock_cs_inst.start = AsyncMock()
             mock_cs_inst.load_without_timer = AsyncMock()
@@ -1288,27 +1245,25 @@ class TestCronFailurePaths:
         job.last_posted_hash = ""
         job.consecutive_dupes = 0
         job.last_posted_at = 0.0
-        # Pre-set failure hash to match what will be generated
         job.last_failure_hash = failure_hash("RuntimeError: boom")
         job.last_failure_at = time.time()
         job.consecutive_failures = 1
         job._acp_retried = False
 
         with patch(
-            "gideon.gateway.stream_and_collect",
+            "gideon.engine.gateway.stream_and_collect",
             new_callable=AsyncMock,
             side_effect=RuntimeError("boom"),
         ):
             with patch(
-                "gideon.gateway.build_schedule_session_context",
+                "gideon.engine.gateway.build_schedule_session_context",
                 return_value=("cron:jfail2", "run"),
             ):
-                with patch("gideon.sel.sel") as mock_sel:
+                with patch("gideon.security.sel.sel") as mock_sel:
                     mock_sel.return_value.log_tool_invocation = MagicMock()
                     with pytest.raises(RuntimeError, match="boom"):
                         await callback(job)
 
-        # Delivery should NOT be called (suppressed)
         orch._channel_delivery.deliver_text.assert_not_awaited()
         assert job.consecutive_failures == 2
 
@@ -1326,7 +1281,7 @@ class TestCronFailurePaths:
         orch.dashboard_state = None
         orch._channel_delivery = None
 
-        with patch("gideon.gateway.ScheduleService") as mock_cs:
+        with patch("gideon.engine.gateway.ScheduleService") as mock_cs:
             mock_cs_inst = MagicMock()
             mock_cs_inst.start = AsyncMock()
             mock_cs_inst.load_without_timer = AsyncMock()
@@ -1362,25 +1317,19 @@ class TestCronFailurePaths:
         job.consecutive_failures = 0
 
         with patch(
-            "gideon.gateway.stream_and_collect",
+            "gideon.engine.gateway.stream_and_collect",
             new_callable=AsyncMock,
             return_value="agent result",
         ):
             with patch(
-                "gideon.gateway.build_schedule_session_context",
+                "gideon.engine.gateway.build_schedule_session_context",
                 return_value=("cron:jmulti", "run"),
             ):
                 result = await callback(job)
 
         assert result == "agent result"
         assert job.last_result == "agent result"
-        # get_or_create called twice (once per agent)
         assert orch.sessions.get_or_create.await_count == 2
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: run_gateway entry point
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestRunGateway:
@@ -1388,18 +1337,15 @@ class TestRunGateway:
 
     @pytest.mark.asyncio
     async def test_run_gateway_creates_orchestrator(self):
-        from gideon.gateway import run_gateway
+        from gideon.engine.gateway import run_gateway
 
         cfg = AppConfig()
         with patch.object(cfg, "load_credentials", return_value={}):
-            with patch.object(GatewayOrchestrator, "run", new_callable=AsyncMock) as mock_run:
+            with patch.object(
+                RuntimeCoordinator, "run", new_callable=AsyncMock
+            ) as mock_run:
                 await run_gateway(cfg, no_dashboard=True, no_crons=True)
         mock_run.assert_awaited_once()
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: _init_autonudge
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestInitAutonudge:
@@ -1408,16 +1354,18 @@ class TestInitAutonudge:
     @pytest.mark.asyncio
     async def test_disabled_when_feature_flag_off(self):
         orch = _make_orchestrator()
-        with patch("gideon.gateway.autonudge_enabled", return_value=False):
+        with patch("gideon.engine.gateway.autonudge_enabled", return_value=False):
             await orch._init_autonudge()
-        assert not hasattr(orch, "autonudge_svc") or orch.autonudge_svc is None  # noqa: E501
+        assert (
+            not hasattr(orch, "autonudge_svc") or orch.autonudge_svc is None
+        )  # noqa: E501
 
     @pytest.mark.asyncio
     async def test_enabled_creates_service(self):
         orch = _make_orchestrator()
         orch.dashboard_state = _mock_dashboard_state()
-        with patch("gideon.gateway.autonudge_enabled", return_value=True):
-            with patch("gideon.gateway.AutoNudgeService") as mock_ans:
+        with patch("gideon.engine.gateway.autonudge_enabled", return_value=True):
+            with patch("gideon.engine.gateway.AutoNudgeService") as mock_ans:
                 mock_inst = MagicMock()
                 mock_inst.start = AsyncMock()
                 mock_inst.subscribe = MagicMock()
@@ -1425,11 +1373,6 @@ class TestInitAutonudge:
                 await orch._init_autonudge()
         assert orch.autonudge_svc is not None
         mock_inst.start.assert_awaited_once()
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: _init_inbox
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestInitInbox:
@@ -1441,7 +1384,8 @@ class TestInitInbox:
         items through the bound chat model, so the service is ALWAYS constructed.
         ``inbox.enabled=False`` only means no message-source (poll) provider is
         attached — not that the service is absent. (Old behavior: inbox_svc is None
-        when disabled — removed; _init_inbox reads self._cfg.inbox, not AppConfig.load.)"""
+        when disabled — removed; _init_inbox reads self._cfg.inbox, not AppConfig.load.)
+        """
         orch = _make_orchestrator()
         orch.ctx_builder = MagicMock()
         orch.ctx_builder.memory = MagicMock()
@@ -1450,12 +1394,7 @@ class TestInitInbox:
         orch._cfg.inbox.enabled = False
         await orch._init_inbox()
         assert orch.inbox_svc is not None
-        assert orch.inbox_svc._provider is None  # disabled → no poll source
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: _auto_apply_update git path
-# ═══════════════════════════════════════════════════════════════════════════
+        assert orch.inbox_svc._provider is None
 
 
 class TestAutoApplyUpdateGitPath:
@@ -1467,18 +1406,15 @@ class TestAutoApplyUpdateGitPath:
         ds = _mock_dashboard_state()
         orch.dashboard_state = ds
 
-        # branch detection succeeds, fetch fails
         call_count = [0]
 
         async def _fake_exec(*args, **kwargs):
             call_count[0] += 1
             proc = AsyncMock()
             if call_count[0] == 1:
-                # branch detection
                 proc.communicate = AsyncMock(return_value=(b"main\n", b""))
                 proc.returncode = 0
             else:
-                # fetch fails
                 proc.communicate = AsyncMock(return_value=(b"", b"error"))
                 proc.returncode = 1
             proc.wait = AsyncMock(return_value=proc.returncode)
@@ -1501,15 +1437,12 @@ class TestAutoApplyUpdateGitPath:
             call_count[0] += 1
             proc = AsyncMock()
             if call_count[0] == 1:
-                # branch detection
                 proc.communicate = AsyncMock(return_value=(b"main\n", b""))
                 proc.returncode = 0
             elif call_count[0] == 2:
-                # fetch succeeds
                 proc.communicate = AsyncMock(return_value=(b"", b""))
                 proc.returncode = 0
             else:
-                # diff --quiet returns 0 (no diff)
                 proc.returncode = 0
             proc.wait = AsyncMock(return_value=proc.returncode)
             return proc
@@ -1538,13 +1471,13 @@ class TestAutoApplyUpdateGitPath:
             call_count[0] += 1
             proc = AsyncMock()
             proc.kill = MagicMock()
-            if call_count[0] == 1:  # branch detection → main
+            if call_count[0] == 1:
                 proc.communicate = AsyncMock(return_value=(b"main\n", b""))
                 proc.returncode = 0
-            elif call_count[0] == 2:  # fetch succeeds
+            elif call_count[0] == 2:
                 proc.communicate = AsyncMock(return_value=(b"", b""))
                 proc.returncode = 0
-            elif call_count[0] == 3:  # diff --quiet → new commits exist
+            elif call_count[0] == 3:
                 proc.returncode = 1
             else:
                 proc.returncode = 0
@@ -1554,26 +1487,19 @@ class TestAutoApplyUpdateGitPath:
         with (
             patch.dict("os.environ", {"GIDEON_PROJECT_DIR": "/tmp/proj"}),
             patch(
-                "gideon.self_update.git_tracked_changes",
-                return_value=[" M src/gideon/gateway.py"],  # a dirty tracked edit
+                "gideon.operations.self_update.git_tracked_changes",
+                return_value=[" M runtime/gideon/engine/gateway.py"],
             ),
         ):
             with patch("asyncio.create_subprocess_exec", side_effect=_fake_exec):
                 await orch._auto_apply_update()
 
-        # The user's uncommitted edit is safe: no destructive reset was spawned.
         assert not any(
             tuple(a[:3]) == ("git", "reset", "--hard") for a in spawned
         ), f"auto-update spawned a destructive reset over a dirty tree: {spawned}"
-        # The refusal is surfaced as an actionable paused state, not a silent no-op.
         ds.push_update_progress.assert_any_call(
             "error", "Update paused — commit or stash your local changes first."
         )
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: run method (partial — covers init sequence)
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestRunMethod:
@@ -1586,7 +1512,6 @@ class TestRunMethod:
 
         orch = _make_orchestrator()
 
-        # Mock all init methods
         orch._init_services = MagicMock()
         orch._init_cron = AsyncMock()
         orch._init_heartbeat = AsyncMock()
@@ -1598,11 +1523,13 @@ class TestRunMethod:
         orch._check_for_updates = AsyncMock()
         orch._shutdown = AsyncMock()
 
-        # Set shutdown immediately
         gideon.shutdown_event.set()
         try:
-            with patch("gideon.session.cleanup_orphaned_sessions"):
-                with patch("gideon.dashboard.handlers._bg_mcp_probe", new_callable=AsyncMock):
+            with patch("gideon.engine.session.cleanup_orphaned_sessions"):
+                with patch(
+                    "gideon.interfaces.dashboard.handlers._bg_mcp_probe",
+                    new_callable=AsyncMock,
+                ):
                     with patch("os._exit"):
                         with patch("resource.getrlimit", return_value=(256, 10240)):
                             with patch("resource.setrlimit"):
@@ -1635,8 +1562,11 @@ class TestRunMethod:
 
         gideon.shutdown_event.set()
         try:
-            with patch("gideon.session.cleanup_orphaned_sessions"):
-                with patch("gideon.dashboard.handlers._bg_mcp_probe", new_callable=AsyncMock):
+            with patch("gideon.engine.session.cleanup_orphaned_sessions"):
+                with patch(
+                    "gideon.interfaces.dashboard.handlers._bg_mcp_probe",
+                    new_callable=AsyncMock,
+                ):
                     with patch("os._exit"):
                         with patch("resource.getrlimit", return_value=(256, 10240)):
                             with patch("resource.setrlimit"):
@@ -1646,11 +1576,6 @@ class TestRunMethod:
 
         orch._init_dashboard.assert_not_awaited()
         orch._init_api_server.assert_awaited_once()
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: _init_api_server
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestInitApiServer:
@@ -1666,29 +1591,12 @@ class TestInitApiServer:
         ds = _mock_dashboard_state()
         runner = MagicMock()
         with patch(
-            "gideon.dashboard.start_api_server",
+            "gideon.interfaces.dashboard.start_api_server",
             new_callable=AsyncMock,
             return_value=(runner, ds),
         ):
             await orch._init_api_server()
         assert orch.dashboard_state is ds
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: Cron success reminder after 24h
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-# TestCronSuccessReminder was DELETED (S161). It drove the legacy 24h success-dedup reminder by
-# setting `job.last_posted_hash` / `last_posted_at` — fields the gateway no longer reads at all
-# (measured: 0 occurrences in `gateway.py`). It had been `xfail`-marked for a pre-existing red,
-# so it was a permanently-failing test of a retired control: it could neither pass nor catch a
-# regression. Its live half — the hash behaviour — is covered by TestFailureHash above.
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: _subagent_done callback (via _init_subagents)
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestSubagentDone:
@@ -1702,8 +1610,8 @@ class TestSubagentDone:
         orch.ctx_builder.hooks = MagicMock()
         orch.ctx_builder.build_message = MagicMock(return_value=("msg", None))
         orch.dashboard_state = _mock_dashboard_state()
-        with patch("gideon.trust_mode.is_yolo_active", return_value=False):
-            with patch("gideon.gateway.SubagentManager") as mock_sm:
+        with patch("gideon.security.trust_mode.is_yolo_active", return_value=False):
+            with patch("gideon.engine.gateway.DelegationSupervisor") as mock_sm:
                 mock_sm_inst = MagicMock()
                 mock_sm_inst.start_reaper = MagicMock()
                 mock_sm_inst.running = []
@@ -1718,7 +1626,6 @@ class TestSubagentDone:
     async def test_dashboard_session_idle_triggers_run_chat(self):
         """Subagent done → dashboard session idle → run_chat."""
         orch, mock_sm = self._setup_orch_with_subagent_mgr()
-        # Get the on_done callback
         on_done = mock_sm.call_args[1]["on_done"]
 
         session = MagicMock()
@@ -1743,7 +1650,7 @@ class TestSubagentDone:
         info.started = 0.0
 
         with patch(
-            "gideon.dashboard.chat_runner.run_chat",
+            "gideon.interfaces.dashboard.chat_runner.run_chat",
             new_callable=AsyncMock,
             return_value=None,
         ):
@@ -1760,12 +1667,10 @@ class TestSubagentDone:
 
         session = MagicMock()
         session.running = True
-        # Create a task that completes but session stays running
         never_done = asyncio.get_event_loop().create_future()
         never_done.set_result(None)
         session.task = asyncio.ensure_future(asyncio.sleep(0))
-        await session.task  # let it complete
-        # But session.running stays True (simulating another claim)
+        await session.task
         session.running = True
         session.key = "busy-session"
         session.mode = ""
@@ -1809,7 +1714,7 @@ class TestSubagentDone:
         info.started = 0.0
 
         with patch(
-            "gideon.gateway.stream_and_collect",
+            "gideon.engine.gateway.stream_and_collect",
             new_callable=AsyncMock,
             return_value="llm response",
         ):
@@ -1879,7 +1784,7 @@ class TestSubagentDone:
         info.started = time.monotonic() - 3.0
 
         with patch(
-            "gideon.gateway.stream_and_collect",
+            "gideon.engine.gateway.stream_and_collect",
             new_callable=AsyncMock,
             return_value="synthesized response",
         ):
@@ -1908,11 +1813,6 @@ class TestSubagentDone:
 
         await on_done([info])
         orch.dashboard_state.notify.assert_called()
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: _interactive_approval Slack path
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestInteractiveApprovalSlack:
@@ -1945,7 +1845,7 @@ class TestInteractiveApprovalSlack:
         event.tool_input = ""
         event.tool_purpose = ""
 
-        with patch("gideon.trust_mode.is_yolo_active", return_value=False):
+        with patch("gideon.security.trust_mode.is_yolo_active", return_value=False):
             result = await callback(event, "")
 
         assert result is True
@@ -1972,7 +1872,7 @@ class TestInteractiveApprovalSlack:
         event.tool_input = ""
         event.tool_purpose = ""
 
-        with patch("gideon.trust_mode.is_yolo_active", return_value=False):
+        with patch("gideon.security.trust_mode.is_yolo_active", return_value=False):
             result = await callback(event, "")
 
         assert result is False
@@ -1983,7 +1883,9 @@ class TestInteractiveApprovalSlack:
         """Channel approval raises → falls back to dashboard approval."""
         orch = _make_orchestrator(slack_enabled=True, owner_id="U1")
         orch._channel_delivery = _mock_channel_delivery()
-        orch._channel_delivery.request_approval = AsyncMock(side_effect=RuntimeError("slack down"))
+        orch._channel_delivery.request_approval = AsyncMock(
+            side_effect=RuntimeError("slack down")
+        )
         orch.sessions = _mock_sessions()
         ds = _mock_dashboard_state()
         ds._yolo = False
@@ -1998,16 +1900,11 @@ class TestInteractiveApprovalSlack:
         event.tool_input = ""
         event.tool_purpose = ""
 
-        with patch("gideon.trust_mode.is_yolo_active", return_value=False):
+        with patch("gideon.security.trust_mode.is_yolo_active", return_value=False):
             result = await callback(event, "")
 
         assert result is True
         ds.request_approval.assert_awaited_once()
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: Heartbeat callback
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestHeartbeatCallback:
@@ -2026,17 +1923,16 @@ class TestHeartbeatCallback:
         orch._channel_delivery = _mock_channel_delivery()
         orch._deliver_result = AsyncMock()
 
-        with patch("gideon.gateway.HeartbeatService") as mock_hs:
+        with patch("gideon.engine.gateway.HeartbeatService") as mock_hs:
             mock_hs_inst = MagicMock()
             mock_hs_inst.start = AsyncMock()
             mock_hs.return_value = mock_hs_inst
             await orch._init_heartbeat()
 
-        # Get the on_task callback
         callback = mock_hs.call_args[1]["on_task"]
 
         with patch(
-            "gideon.gateway.stream_and_collect",
+            "gideon.engine.gateway.stream_and_collect",
             new_callable=AsyncMock,
             return_value="heartbeat done",
         ):
@@ -2058,7 +1954,7 @@ class TestHeartbeatCallback:
         orch.dashboard_state = None
         orch._deliver_result = AsyncMock()
 
-        with patch("gideon.gateway.HeartbeatService") as mock_hs:
+        with patch("gideon.engine.gateway.HeartbeatService") as mock_hs:
             mock_hs_inst = MagicMock()
             mock_hs_inst.start = AsyncMock()
             mock_hs.return_value = mock_hs_inst
@@ -2067,7 +1963,7 @@ class TestHeartbeatCallback:
         callback = mock_hs.call_args[1]["on_task"]
 
         with patch(
-            "gideon.gateway.stream_and_collect",
+            "gideon.engine.gateway.stream_and_collect",
             new_callable=AsyncMock,
             return_value="still checking HEARTBEAT_KEEP",
         ):
@@ -2088,7 +1984,7 @@ class TestHeartbeatCallback:
         orch.consolidator = MagicMock()
         orch.dashboard_state = None
 
-        with patch("gideon.gateway.HeartbeatService") as mock_hs:
+        with patch("gideon.engine.gateway.HeartbeatService") as mock_hs:
             mock_hs_inst = MagicMock()
             mock_hs_inst.start = AsyncMock()
             mock_hs.return_value = mock_hs_inst
@@ -2097,17 +1993,12 @@ class TestHeartbeatCallback:
         callback = mock_hs.call_args[1]["on_task"]
 
         with patch(
-            "gideon.gateway.stream_and_collect",
+            "gideon.engine.gateway.stream_and_collect",
             new_callable=AsyncMock,
             side_effect=RuntimeError("llm error"),
         ):
             with pytest.raises(RuntimeError, match="llm error"):
                 await callback("broken task", "")
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: _auto_apply_update venv path
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestAutoApplyUpdateVenvPath:
@@ -2132,12 +2023,13 @@ class TestAutoApplyUpdateVenvPath:
                 proc.communicate = AsyncMock(return_value=(b"", b""))
                 proc.returncode = 0
             elif call_count[0] == 3:
-                proc.returncode = 1  # diff --quiet → has changes
+                proc.returncode = 1
             elif call_count[0] == 4:
-                proc.returncode = 0  # git reset --hard
+                proc.returncode = 0
             elif call_count[0] == 5:
-                # pip install -e .
-                proc.communicate = AsyncMock(return_value=(b"", b"boom" if pip_rc else b""))
+                proc.communicate = AsyncMock(
+                    return_value=(b"", b"boom" if pip_rc else b"")
+                )
                 proc.returncode = pip_rc
             else:
                 proc.returncode = 0
@@ -2162,17 +2054,22 @@ class TestAutoApplyUpdateVenvPath:
 
         with (
             patch.dict("os.environ", {"GIDEON_PROJECT_DIR": "/tmp/proj"}),
-            patch("gideon.self_update.git_tracked_changes", return_value=[]),
+            patch("gideon.operations.self_update.git_tracked_changes", return_value=[]),
         ):
             with patch(
                 "asyncio.create_subprocess_exec",
                 side_effect=self._fake_exec_factory(call_count),
             ):
-                with patch("gideon.gateway.build_frontend_async", new_callable=AsyncMock):
-                    with patch("gideon.dashboard.handlers.updates._graceful_reexec", reexec):
-                        # execv must NOT be the restart path when a dashboard
-                        # state exists — if it is reached the test fails loudly.
-                        with patch("os.execv", side_effect=AssertionError("direct execv")):
+                with patch(
+                    "gideon.engine.gateway.build_frontend_async", new_callable=AsyncMock
+                ):
+                    with patch(
+                        "gideon.interfaces.dashboard.handlers.updates._graceful_reexec",
+                        reexec,
+                    ):
+                        with patch(
+                            "os.execv", side_effect=AssertionError("direct execv")
+                        ):
                             await orch._auto_apply_update()
 
         ds.push_update_progress.assert_any_call("pulling", "Fetching latest changes…")
@@ -2195,27 +2092,27 @@ class TestAutoApplyUpdateVenvPath:
 
         with (
             patch.dict("os.environ", {"GIDEON_PROJECT_DIR": "/tmp/proj"}),
-            patch("gideon.self_update.git_tracked_changes", return_value=[]),
+            patch("gideon.operations.self_update.git_tracked_changes", return_value=[]),
         ):
             with patch(
                 "asyncio.create_subprocess_exec",
                 side_effect=self._fake_exec_factory(call_count, pip_rc=1),
             ):
                 with patch(
-                    "gideon.gateway.build_frontend_async", new_callable=AsyncMock
+                    "gideon.engine.gateway.build_frontend_async", new_callable=AsyncMock
                 ) as fe_build:
-                    with patch("gideon.dashboard.handlers.updates._graceful_reexec", reexec):
-                        with patch("os.execv", side_effect=AssertionError("direct execv")):
+                    with patch(
+                        "gideon.interfaces.dashboard.handlers.updates._graceful_reexec",
+                        reexec,
+                    ):
+                        with patch(
+                            "os.execv", side_effect=AssertionError("direct execv")
+                        ):
                             await orch._auto_apply_update()
 
         ds.push_update_progress.assert_any_call("error", "pip install failed")
         fe_build.assert_not_awaited()
         reexec.assert_not_awaited()
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: Subagent channel injection timeout
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestSubagentSlackInjection:
@@ -2229,8 +2126,8 @@ class TestSubagentSlackInjection:
         orch.ctx_builder.build_message = MagicMock(return_value=("msg", None))
         orch.dashboard_state = _mock_dashboard_state()
         orch._channel_delivery = _mock_channel_delivery()
-        with patch("gideon.trust_mode.is_yolo_active", return_value=False):
-            with patch("gideon.gateway.SubagentManager") as mock_sm:
+        with patch("gideon.security.trust_mode.is_yolo_active", return_value=False):
+            with patch("gideon.engine.gateway.DelegationSupervisor") as mock_sm:
                 mock_sm_inst = MagicMock()
                 mock_sm_inst.start_reaper = MagicMock()
                 mock_sm_inst.running = []
@@ -2260,13 +2157,12 @@ class TestSubagentSlackInjection:
         info.started = 0.0
 
         with patch(
-            "gideon.gateway.stream_and_collect",
+            "gideon.engine.gateway.stream_and_collect",
             new_callable=AsyncMock,
             side_effect=asyncio.TimeoutError,
         ):
             await on_done([info])
 
-        # Should have notified injection failed
         orch.subagent_mgr.notify_injection_failed.assert_called()
 
     @pytest.mark.asyncio
@@ -2289,18 +2185,13 @@ class TestSubagentSlackInjection:
         info.started = 0.0
 
         with patch(
-            "gideon.gateway.stream_and_collect",
+            "gideon.engine.gateway.stream_and_collect",
             new_callable=AsyncMock,
             side_effect=asyncio.TimeoutError,
         ):
             await on_done([info])
 
         orch.subagent_mgr.notify_injection_failed.assert_called()
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: _deliver_result truncation
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestDeliverResultTruncation:
@@ -2316,20 +2207,13 @@ class TestDeliverResultTruncation:
         session.queue_depth = 0
         ds.resolve_session = MagicMock(return_value=session)
         orch.dashboard_state = ds
-        # Create a result larger than MAX_PROMPT_BYTES
         large_result = "x" * 200000
-        with patch("gideon.gateway.sel") as mock_sel:
+        with patch("gideon.engine.gateway.sel") as mock_sel:
             mock_sel.return_value.log_api_access = MagicMock()
             await orch._deliver_result("T", "s", large_result, "prompt:dashboard:s1")
         session.enqueue_or_run_prompt.assert_called_once()
-        # Verify the prompt was truncated
         call_args = session.enqueue_or_run_prompt.call_args[0]
-        assert len(call_args[0].encode("utf-8")) <= 131072 + 100  # MAX_PROMPT_BYTES + overhead
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: embedding wiring
-# ═══════════════════════════════════════════════════════════════════════════
+        assert len(call_args[0].encode("utf-8")) <= 131072 + 100
 
 
 class TestEmbeddingWiring:
@@ -2341,10 +2225,12 @@ class TestEmbeddingWiring:
         orch.vector_memory = MagicMock()
         orch.vector_memory.embed_fn = None
         with patch(
-            "gideon.embedding_providers.registry.get_active_embed_fn",
+            "gideon.integrations.embedding_providers.registry.get_active_embed_fn",
             return_value=lambda x: [0.0],
         ):
-            from gideon.embedding_providers.registry import get_active_embed_fn
+            from gideon.integrations.embedding_providers.registry import (
+                get_active_embed_fn,
+            )
 
             fn = get_active_embed_fn()
             if fn:
@@ -2357,21 +2243,17 @@ class TestEmbeddingWiring:
         orch.vector_memory = MagicMock()
         orch.vector_memory.embed_fn = None
         with patch(
-            "gideon.embedding_providers.registry.get_active_embed_fn",
+            "gideon.integrations.embedding_providers.registry.get_active_embed_fn",
             return_value=None,
         ):
-            from gideon.embedding_providers.registry import get_active_embed_fn
+            from gideon.integrations.embedding_providers.registry import (
+                get_active_embed_fn,
+            )
 
             fn = get_active_embed_fn()
             if fn:
                 orch.vector_memory.embed_fn = fn
         assert orch.vector_memory.embed_fn is None
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: _interactive_approval with thread context
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestApprovalThreadContext:
@@ -2402,16 +2284,11 @@ class TestApprovalThreadContext:
         event.title = "cmd"
         event.tool_input = ""
         event.tool_purpose = ""
-        with patch("gideon.trust_mode.is_yolo_active", return_value=False):
-            with patch("gideon.sel.sel") as mock_sel:
+        with patch("gideon.security.trust_mode.is_yolo_active", return_value=False):
+            with patch("gideon.security.sel.sel") as mock_sel:
                 mock_sel.return_value.log_api_access = MagicMock()
                 result = await callback(event, "")
         assert result is False
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: Cron ACP retry path
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestCronAcpRetry:
@@ -2431,7 +2308,7 @@ class TestCronAcpRetry:
         orch.dashboard_state = _mock_dashboard_state()
         orch._channel_delivery = None
 
-        with patch("gideon.gateway.ScheduleService") as mock_cs:
+        with patch("gideon.engine.gateway.ScheduleService") as mock_cs:
             mock_cs_inst = MagicMock()
             mock_cs_inst.start = AsyncMock()
             mock_cs_inst.load_without_timer = AsyncMock()
@@ -2467,7 +2344,7 @@ class TestCronAcpRetry:
         job.consecutive_failures = 0
         job._acp_retried = False
 
-        from gideon.acp.client import AcpError
+        from gideon.integrations.acp.client import AcpError
 
         call_count = [0]
 
@@ -2477,19 +2354,16 @@ class TestCronAcpRetry:
                 raise AcpError("process not running")
             return "retry success"
 
-        with patch("gideon.gateway.stream_and_collect", side_effect=_fake_stream):
+        with patch(
+            "gideon.engine.gateway.stream_and_collect", side_effect=_fake_stream
+        ):
             with patch(
-                "gideon.gateway.build_schedule_session_context",
+                "gideon.engine.gateway.build_schedule_session_context",
                 return_value=("cron:jacp", "run"),
             ):
                 result = await callback(job)
 
         assert result == "retry success"
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: Subagent _inject_with_retry paths
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestInjectWithRetry:
@@ -2503,8 +2377,8 @@ class TestInjectWithRetry:
         orch.ctx_builder.build_message = MagicMock(return_value=("msg", None))
         orch.dashboard_state = _mock_dashboard_state()
         orch._channel_delivery = _mock_channel_delivery()
-        with patch("gideon.trust_mode.is_yolo_active", return_value=False):
-            with patch("gideon.gateway.SubagentManager") as mock_sm:
+        with patch("gideon.security.trust_mode.is_yolo_active", return_value=False):
+            with patch("gideon.engine.gateway.DelegationSupervisor") as mock_sm:
                 mock_sm_inst = MagicMock()
                 mock_sm_inst.start_reaper = MagicMock()
                 mock_sm_inst.running = []
@@ -2518,7 +2392,7 @@ class TestInjectWithRetry:
     @pytest.mark.asyncio
     async def test_acp_process_died_during_injection(self):
         """AcpProcessDied during injection → resets session."""
-        from gideon.acp.client import AcpProcessDied
+        from gideon.integrations.acp.client import AcpProcessDied
 
         orch, mock_sm = self._setup()
         on_done = mock_sm.call_args[1]["on_done"]
@@ -2536,7 +2410,7 @@ class TestInjectWithRetry:
         info.started = 0.0
 
         with patch(
-            "gideon.gateway.stream_and_collect",
+            "gideon.engine.gateway.stream_and_collect",
             new_callable=AsyncMock,
             side_effect=AcpProcessDied("dead"),
         ):
@@ -2547,7 +2421,7 @@ class TestInjectWithRetry:
     @pytest.mark.asyncio
     async def test_prompt_busy_exhausted(self):
         """PromptBusyExhaustedError → resets session."""
-        from gideon.llm_helpers import PromptBusyExhaustedError
+        from gideon.integrations.llm_helpers import PromptBusyExhaustedError
 
         orch, mock_sm = self._setup()
         on_done = mock_sm.call_args[1]["on_done"]
@@ -2565,18 +2439,13 @@ class TestInjectWithRetry:
         info.started = 0.0
 
         with patch(
-            "gideon.gateway.stream_and_collect",
+            "gideon.engine.gateway.stream_and_collect",
             new_callable=AsyncMock,
             side_effect=PromptBusyExhaustedError("exhausted"),
         ):
             await on_done([info])
 
         orch.subagent_mgr.notify_injection_failed.assert_called()
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: _init_autonudge _fire callback
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestAutonudgeFire:
@@ -2587,15 +2456,14 @@ class TestAutonudgeFire:
         """Fire with no dashboard → returns False."""
         orch = _make_orchestrator()
         orch.dashboard_state = None
-        with patch("gideon.gateway.autonudge_enabled", return_value=True):
-            with patch("gideon.gateway.AutoNudgeService") as mock_ans:
+        with patch("gideon.engine.gateway.autonudge_enabled", return_value=True):
+            with patch("gideon.engine.gateway.AutoNudgeService") as mock_ans:
                 mock_inst = MagicMock()
                 mock_inst.start = AsyncMock()
                 mock_inst.subscribe = MagicMock()
                 mock_ans.return_value = mock_inst
                 await orch._init_autonudge()
 
-        # Get the on_fire callback
         on_fire = mock_ans.call_args[1]["on_fire"]
         loop = MagicMock()
         loop.id = "loop1"
@@ -2613,8 +2481,8 @@ class TestAutonudgeFire:
         ds = _mock_dashboard_state()
         ds._sessions = {}
         orch.dashboard_state = ds
-        with patch("gideon.gateway.autonudge_enabled", return_value=True):
-            with patch("gideon.gateway.AutoNudgeService") as mock_ans:
+        with patch("gideon.engine.gateway.autonudge_enabled", return_value=True):
+            with patch("gideon.engine.gateway.AutoNudgeService") as mock_ans:
                 mock_inst = MagicMock()
                 mock_inst.start = AsyncMock()
                 mock_inst.subscribe = MagicMock()
@@ -2642,8 +2510,8 @@ class TestAutonudgeFire:
         session.key = "busy"
         ds._sessions = {"busy": session}
         orch.dashboard_state = ds
-        with patch("gideon.gateway.autonudge_enabled", return_value=True):
-            with patch("gideon.gateway.AutoNudgeService") as mock_ans:
+        with patch("gideon.engine.gateway.autonudge_enabled", return_value=True):
+            with patch("gideon.engine.gateway.AutoNudgeService") as mock_ans:
                 mock_inst = MagicMock()
                 mock_inst.start = AsyncMock()
                 mock_inst.subscribe = MagicMock()
@@ -2661,11 +2529,6 @@ class TestAutonudgeFire:
         assert result is False
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: _init_inbox enabled path
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestInitInboxEnabled:
     """Inbox service when enabled in config."""
 
@@ -2675,7 +2538,7 @@ class TestInitInboxEnabled:
         the FILESYSTEM message-source provider (Slack-independent by design). Old
         behavior — 'no-op without a Slack client, inbox_svc stays None' — was removed
         when inbox triage moved off the Slack dependency."""
-        orch = _make_orchestrator()  # no slack
+        orch = _make_orchestrator()
         orch.ctx_builder = MagicMock()
         orch.ctx_builder.memory = MagicMock()
         orch.sessions = _mock_sessions()
@@ -2683,16 +2546,8 @@ class TestInitInboxEnabled:
         orch._cfg.inbox.enabled = True
         await orch._init_inbox()
         assert orch.inbox_svc is not None
-        # Enabled + no Slack → the default provider resolves to the filesystem source
-        # (get_default_provider("filesystem")). If that provider isn't installed the
-        # binding is None but the service still exists — either way it's not Slack.
         prov = orch.inbox_svc._provider
         assert prov is None or getattr(prov, "source_name", "") != "slack"
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: _init_dashboard wiring
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestInitDashboardWiring:
@@ -2713,13 +2568,11 @@ class TestInitDashboardWiring:
         ds = _mock_dashboard_state()
         runner = MagicMock()
         with patch(
-            "gideon.gateway.start_dashboard",
+            "gideon.engine.gateway.start_dashboard",
             new_callable=AsyncMock,
             return_value=(runner, ds),
         ) as mock_start:
             await orch._init_dashboard()
-        # Clean-break contract: start_dashboard has NO channel-client kwarg at
-        # all — outbound goes through the registered ChannelDelivery.
         assert "slack_client" not in mock_start.call_args.kwargs
         assert ds.no_crons is False
 
@@ -2736,17 +2589,12 @@ class TestInitDashboardWiring:
         ds = _mock_dashboard_state()
         runner = MagicMock()
         with patch(
-            "gideon.gateway.start_dashboard",
+            "gideon.engine.gateway.start_dashboard",
             new_callable=AsyncMock,
             return_value=(runner, ds),
         ):
             await orch._init_dashboard()
         assert ds.no_crons is True
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: Cron with acked_items
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestCronAckedItems:
@@ -2765,7 +2613,7 @@ class TestCronAckedItems:
         orch.dashboard_state = None
         orch._channel_delivery = None
 
-        with patch("gideon.gateway.ScheduleService") as mock_cs:
+        with patch("gideon.engine.gateway.ScheduleService") as mock_cs:
             mock_cs_inst = MagicMock()
             mock_cs_inst.start = AsyncMock()
             mock_cs_inst.load_without_timer = AsyncMock()
@@ -2801,28 +2649,22 @@ class TestCronAckedItems:
         job.consecutive_failures = 0
 
         with patch(
-            "gideon.gateway.stream_and_collect",
+            "gideon.engine.gateway.stream_and_collect",
             new_callable=AsyncMock,
             return_value="acked result",
         ):
             with patch(
-                "gideon.gateway.build_schedule_session_context",
+                "gideon.engine.gateway.build_schedule_session_context",
                 return_value=("cron:jack", "run"),
             ):
-                with patch("gideon.sel.sel") as mock_sel:
+                with patch("gideon.security.sel.sel") as mock_sel:
                     mock_sel.return_value.log_tool_invocation = MagicMock()
                     result = await callback(job)
 
         assert result == "acked result"
-        # Verify acked_items were passed to build_message
         call_args = orch.ctx_builder.build_message.call_args[0][0]
         assert "item1" in call_args
         assert "item2" in call_args
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: _retrigger_recovery
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestRetriggerRecovery:
@@ -2835,8 +2677,8 @@ class TestRetriggerRecovery:
         orch.ctx_builder.hooks = MagicMock()
         orch.ctx_builder.build_message = MagicMock(return_value=("msg", None))
         orch.dashboard_state = _mock_dashboard_state()
-        with patch("gideon.trust_mode.is_yolo_active", return_value=False):
-            with patch("gideon.gateway.SubagentManager") as mock_sm:
+        with patch("gideon.security.trust_mode.is_yolo_active", return_value=False):
+            with patch("gideon.engine.gateway.DelegationSupervisor") as mock_sm:
                 mock_sm_inst = MagicMock()
                 mock_sm_inst.start_reaper = MagicMock()
                 mock_sm_inst.running = []
@@ -2900,20 +2742,12 @@ class TestRetriggerRecovery:
         orch.dashboard_state.broadcast_ws.assert_called()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: run() signal handling and bg session
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestRunSignalAndBgSession:
     """Run method signal handling and background session."""
 
     @pytest.mark.asyncio
     async def test_run_wires_active_embedding(self):
         """run() wires the embedding fn from the Settings > Models binding."""
-        # no_dashboard=True so the bg-session task short-circuits the dashboard
-        # branch (otherwise it races on _local_only/_dashboard_port set by the
-        # mocked _init_dashboard).
         orch = _make_orchestrator(no_dashboard=True)
 
         orch._init_services = MagicMock()
@@ -2929,31 +2763,27 @@ class TestRunSignalAndBgSession:
         orch._check_for_updates = AsyncMock()
         orch._shutdown = AsyncMock()
 
-        # Use a fresh asyncio.Event bound to this test's loop. The shared
-        # module-level shutdown_event can be polluted by prior tests in full-file runs.
         fresh_event = asyncio.Event()
         fresh_event.set()
         with patch(
-            "gideon.embedding_providers.registry.get_active_embed_fn",
+            "gideon.integrations.embedding_providers.registry.get_active_embed_fn",
             return_value=lambda x: [0.0],
         ) as mock_embed:
             with patch("gideon.shutdown_event", fresh_event):
-                with patch("gideon.gateway.shutdown_event", fresh_event):
-                    with patch("gideon.session.cleanup_orphaned_sessions"):
+                with patch("gideon.engine.gateway.shutdown_event", fresh_event):
+                    with patch("gideon.engine.session.cleanup_orphaned_sessions"):
                         with patch(
-                            "gideon.dashboard.handlers._bg_mcp_probe", new_callable=AsyncMock
+                            "gideon.interfaces.dashboard.handlers._bg_mcp_probe",
+                            new_callable=AsyncMock,
                         ):
                             with patch("os._exit"):
-                                with patch("resource.getrlimit", return_value=(256, 10240)):
+                                with patch(
+                                    "resource.getrlimit", return_value=(256, 10240)
+                                ):
                                     with patch("resource.setrlimit"):
                                         await orch.run()
 
         mock_embed.assert_called()
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: _check_missing_deps pip install path
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestBgSessionDashboardBranch:
@@ -2975,11 +2805,9 @@ class TestBgSessionDashboardBranch:
         orch._check_for_updates = AsyncMock()
         orch._shutdown = AsyncMock()
 
-        # Real-ish sessions stub so _start_bg_session passes the assert
         orch.sessions = MagicMock()
         orch.sessions.start_pool = AsyncMock()
 
-        # Stub _init_dashboard to set the attributes _start_bg_session reads
         async def _init_dash():
             orch._local_only = True
             orch._configured_host = None
@@ -2990,33 +2818,37 @@ class TestBgSessionDashboardBranch:
         fresh_event = asyncio.Event()
         fresh_event.set()
         with patch(
-            "gideon.embedding_providers.registry.get_active_embed_fn", return_value=None
+            "gideon.integrations.embedding_providers.registry.get_active_embed_fn",
+            return_value=None,
         ):
             with patch("gideon.shutdown_event", fresh_event):
-                with patch("gideon.gateway.shutdown_event", fresh_event):
+                with patch("gideon.engine.gateway.shutdown_event", fresh_event):
                     with patch(
-                        "gideon.gateway.resolve_dashboard_host", return_value="127.0.0.1"
+                        "gideon.engine.gateway.resolve_dashboard_host",
+                        return_value="127.0.0.1",
                     ):
                         with patch(
-                            "gideon.gateway.build_dashboard_url",
+                            "gideon.engine.gateway.build_dashboard_url",
                             return_value="http://127.0.0.1:6779/?t=tok",
                         ):
                             with patch(
-                                "gideon.gateway.format_dashboard_urls",
+                                "gideon.engine.gateway.format_dashboard_urls",
                                 return_value=["url-line-1", "url-line-2"],
                             ):
-                                with patch("gideon.session.cleanup_orphaned_sessions"):
+                                with patch(
+                                    "gideon.engine.session.cleanup_orphaned_sessions"
+                                ):
                                     with patch(
-                                        "gideon.dashboard.handlers._bg_mcp_probe",
+                                        "gideon.interfaces.dashboard.handlers._bg_mcp_probe",
                                         new_callable=AsyncMock,
                                     ):
                                         with patch("os._exit"):
                                             with patch(
-                                                "resource.getrlimit", return_value=(256, 10240)
+                                                "resource.getrlimit",
+                                                return_value=(256, 10240),
                                             ):
                                                 with patch("resource.setrlimit"):
                                                     await orch.run()
-                                                    # Let bg_session task drain
                                                     await asyncio.sleep(0)
                                                     await asyncio.sleep(0)
 
@@ -3026,14 +2858,53 @@ class TestBgSessionDashboardBranch:
 class TestCheckMissingDepsPip:
     """Dep repair via pip install."""
 
-    def test_pip_install_on_missing_dep(self):
-        orch = _make_orchestrator()
-        with patch("importlib.util.find_spec", return_value=None):
-            with patch.dict("os.environ", {"GIDEON_PROJECT_DIR": "/proj"}):
-                with patch("subprocess.run") as mock_run:
-                    mock_run.return_value = MagicMock(returncode=0)
-                    orch._check_missing_deps()
-                mock_run.assert_called_once()
+    def test_pip_install_on_missing_dep(self, tmp_path):
+        import os
+        import subprocess
+        import venv
+        import zipfile
+
+        environment = tmp_path / "environment"
+        venv.EnvBuilder(with_pip=True).create(environment)
+        wheel = tmp_path / "gideon_dep_probe-1.0-py3-none-any.whl"
+        metadata = "gideon_dep_probe-1.0.dist-info"
+        entries = {
+            "gideon_dep_probe.py": 'VALUE = "installed"\n',
+            f"{metadata}/METADATA": "Metadata-Version: 2.1\nName: gideon-dep-probe\nVersion: 1.0\n",
+            f"{metadata}/WHEEL": "Wheel-Version: 1.0\nGenerator: Gideon test\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+        }
+        entries[f"{metadata}/RECORD"] = "".join(
+            f"{name},,\n" for name in (*entries, f"{metadata}/RECORD")
+        )
+        with zipfile.ZipFile(wheel, "w") as archive:
+            for name, content in entries.items():
+                archive.writestr(name, content)
+        program = (
+            "import logging\n"
+            "from gideon.engine.gateway_maintenance import DependencyRepair\n"
+            f"repair = DependencyRepair([('gideon_dep_probe', {str(wheel)!r})], logging.getLogger('install'))\n"
+            "repair.run()\n"
+            "import gideon_dep_probe\n"
+            "assert gideon_dep_probe.VALUE == 'installed'\n"
+            "repair.run()\n"
+        )
+        variables = dict(
+            os.environ,
+            GIDEON_PROJECT_DIR=str(tmp_path),
+            GIDEON_HOME=str(tmp_path / "home"),
+            PYTHONPATH=str(Path(__file__).resolve().parents[2] / "runtime"),
+            PIP_NO_INDEX="1",
+            PIP_DISABLE_PIP_VERSION_CHECK="1",
+        )
+        result = subprocess.run(
+            [str(environment / "bin" / "python"), "-c", program],
+            env=variables,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.stdout.count("Dependencies installed") == 1
 
     def test_pip_install_failure(self):
         orch = _make_orchestrator()
@@ -3041,12 +2912,7 @@ class TestCheckMissingDepsPip:
             with patch.dict("os.environ", {"GIDEON_PROJECT_DIR": "/proj"}):
                 with patch("subprocess.run") as mock_run:
                     mock_run.return_value = MagicMock(returncode=1, stderr=b"error")
-                    orch._check_missing_deps()  # should not raise
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tests: Cron with Slack delivery failure
-# ═══════════════════════════════════════════════════════════════════════════
+                    orch._check_missing_deps()
 
 
 class TestCronSlackDeliveryFailure:
@@ -3069,7 +2935,7 @@ class TestCronSlackDeliveryFailure:
             side_effect=RuntimeError("channel error")
         )
 
-        with patch("gideon.gateway.ScheduleService") as mock_cs:
+        with patch("gideon.engine.gateway.ScheduleService") as mock_cs:
             mock_cs_inst = MagicMock()
             mock_cs_inst.start = AsyncMock()
             mock_cs_inst.load_without_timer = AsyncMock()
@@ -3105,19 +2971,18 @@ class TestCronSlackDeliveryFailure:
         job.consecutive_failures = 0
 
         with patch(
-            "gideon.gateway.stream_and_collect",
+            "gideon.engine.gateway.stream_and_collect",
             new_callable=AsyncMock,
             return_value="result",
         ):
             with patch(
-                "gideon.gateway.build_schedule_session_context",
+                "gideon.engine.gateway.build_schedule_session_context",
                 return_value=("cron:jslack", "run"),
             ):
                 result = await callback(job)
 
         assert result == "result"
-        # Dashboard should have been notified about the Slack failure
-        assert ds.notify.call_count >= 2  # once for result, once for slack failure
+        assert ds.notify.call_count >= 2
 
 
 class TestShutdownReapsAppBackends:
@@ -3129,7 +2994,7 @@ class TestShutdownReapsAppBackends:
     @pytest.mark.asyncio
     async def test_shutdown_calls_stop_all_before_session_teardown(self):
         orch = _make_orchestrator(owner_id="U1")
-        orch.dashboard_state = None  # skip the history-save branch
+        orch.dashboard_state = None
         orch._handler_tasks = []
         orch.loop_watchdog = None
         orch.heartbeat_svc = None
@@ -3151,12 +3016,11 @@ class TestShutdownReapsAppBackends:
         orch.subagent_mgr = None
 
         with patch(
-            "gideon.apps.backend_runtime.get_backend_supervisor",
+            "gideon.extensions.apps.backend_runtime.get_backend_supervisor",
             return_value=sup,
         ):
             await orch._shutdown()
 
-        # stop_all ran, and ran BEFORE the (potentially slow) session teardown.
         assert "stop_all" in order, "app backends were never reaped on shutdown"
         assert order.index("stop_all") < order.index("sessions.close_all"), (
             "app-backend reap must precede ACP/session teardown so it isn't "
@@ -3179,10 +3043,9 @@ class TestShutdownReapsAppBackends:
         sup = MagicMock()
         sup.stop_all = MagicMock(side_effect=RuntimeError("boom"))
         with patch(
-            "gideon.apps.backend_runtime.get_backend_supervisor",
+            "gideon.extensions.apps.backend_runtime.get_backend_supervisor",
             return_value=sup,
         ):
-            # Must not raise despite stop_all blowing up.
             await orch._shutdown()
         sup.stop_all.assert_called_once()
 
@@ -3208,7 +3071,7 @@ class TestRuntimeBaseIsPublishedForChildren:
         orch._publish_runtime_base()
         import os
 
-        from gideon import gateway_base
+        from gideon.engine import gateway_base
 
         assert os.environ["GIDEON_PORT"] == "10051"
         assert gateway_base.live_port() == 10051

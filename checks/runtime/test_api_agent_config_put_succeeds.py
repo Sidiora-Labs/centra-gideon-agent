@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from aiohttp import web
 
-from gideon.dashboard.handlers import api_agent_config
+from gideon.interfaces.dashboard.handlers import api_agent_config
 
 
 @pytest.mark.asyncio
@@ -30,16 +30,27 @@ async def test_api_agent_config_put_succeeds(tmp_path):
     request.json = mock_json
 
     with (
-        patch("gideon.dashboard.handlers._installed_agent_config", return_value=installed),
-        patch("gideon.dashboard.handlers._find_agent_config", return_value=defaults),
-        patch("gideon.dashboard.handlers._reset_all_sessions", new_callable=AsyncMock),
-        patch("gideon.dashboard.handlers.config_path", return_value=pc_cfg),
         patch(
-            "gideon.agent.build_agent_config",
-            return_value={"toolsSettings": {"execute_bash": {"deniedCommands": ["rm -rf"]}}},
+            "gideon.interfaces.dashboard.handlers._installed_agent_config",
+            return_value=installed,
         ),
         patch(
-            "gideon.agent.get_shipped_tools",
+            "gideon.interfaces.dashboard.handlers._find_agent_config",
+            return_value=defaults,
+        ),
+        patch(
+            "gideon.interfaces.dashboard.handlers._reset_all_sessions",
+            new_callable=AsyncMock,
+        ),
+        patch("gideon.interfaces.dashboard.handlers.config_path", return_value=pc_cfg),
+        patch(
+            "gideon.engine.agent.build_agent_config",
+            return_value={
+                "toolsSettings": {"execute_bash": {"deniedCommands": ["rm -rf"]}}
+            },
+        ),
+        patch(
+            "gideon.engine.agent.get_shipped_tools",
             return_value={"tools": ["a", "c"], "allowedTools": ["b"]},
         ),
     ):
@@ -47,7 +58,6 @@ async def test_api_agent_config_put_succeeds(tmp_path):
         response = await api_agent_config(request)
 
     assert response.status == 200
-    # Verify the handler actually wrote the config files
     assert installed.exists()
     assert json.loads(installed.read_text())["name"] == "test"
     assert pc_cfg.exists()

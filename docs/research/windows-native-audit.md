@@ -1,3 +1,5 @@
+> Ported upstream reference. Dated release, audit, and publication claims describe the donor project and do not certify this Gideon implementation.
+
 # Windows-native audit (Platform-Reach rung 3)
 
 **Status:** audit only. This document costs the work of running Gideon as a
@@ -137,7 +139,7 @@ and the most costly to get wrong.
 ### 3. Symlinks — junction/copy vs `symlink`
 
 **As-built (POSIX).** Symlinks are *created* in exactly three places, all wiring
-the built SPA `web/dist` into the served `static/dist`:
+the built SPA `apps/console/dist` into the served `static/dist`:
 
 - `frontend.py:71` (`ensure_dev_dist_symlink`), `frontend.py:98`
   (`_propagate_dist` post-build), `resilience/fixes.py:137` (doctor auto-fix).
@@ -156,7 +158,7 @@ dashboard SPA never links and the UI is broken on a default Windows install.
 | Option | What it is | Effort | Risk |
 |---|---|---|---|
 | **Directory junction** (`mklink /J`, or `_winapi.CreateJunction`) | Junctions need no special privilege and behave like a dir symlink for reads | S | Low — only 3 create sites; junctions cover the dir case cleanly |
-| **Copy fallback** | If link/junction fails, copy `web/dist` → `static/dist` | S | Low functionally; the known cost is a stale copy shadowing a rebuild (the exact hazard `resilience/doctor.py:555` already watches for) — must invalidate on build |
+| **Copy fallback** | If link/junction fails, copy `apps/console/dist` → `static/dist` | S | Low functionally; the known cost is a stale copy shadowing a rebuild (the exact hazard `resilience/doctor.py:555` already watches for) — must invalidate on build |
 | Require Developer Mode | Document it as a prerequisite | S | Med — a hostile first-run experience; many users cannot enable Developer Mode on managed machines |
 
 **Verdict.** The cheapest mechanism to port. A junction-or-copy fallback at 3 sites

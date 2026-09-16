@@ -6,8 +6,8 @@ which field is a Gideon extension — so a skill written for another harness
 can be dropped in without guesswork, and one written here can be handed out
 without surprises.
 
-Everything below was **verified against the parser** (`src/gideon/skills/loader.py`)
-rather than inferred from it, and is pinned by `tests/test_skill_format_compat.py`.
+Everything below was **verified against the parser** (`runtime/gideon/skills/loader.py`)
+rather than inferred from it, and is pinned by `checks/runtime/test_skill_format_compat.py`.
 
 ## The shape
 
@@ -88,7 +88,7 @@ instead of either ignoring them or reading the whole directory:
 resources:
   - path: reference/api-notes.md
     description: field-by-field notes on the vendor payload
-  - path: scripts/check.sh
+  - path: tooling/scripts/check.sh
   - reference/changelog.md
 ```
 
@@ -117,7 +117,7 @@ because a resource that violates one fails visibly rather than silently:
   symlink out of the skill directory is refused after resolution.
 - **Capped, visibly.** A resource larger than 32 KB comes back truncated with an
   explicit notice — never a silent cut.
-- **Read, never run.** A `scripts/*` resource is returned as *text*. Running it is
+- **Read, never run.** A `tooling/scripts/*` resource is returned as *text*. Running it is
   the ordinary command path's job, with the screening that path applies.
 - Resource content is treated as untrusted data (it is third-party authored), so
   it arrives fenced: the model reads it, it does not obey it.
@@ -187,7 +187,7 @@ loses `triggers`/`resources` handling and nothing else.
 It buys interoperability and **not** a trust exemption. Every install — foreign or
 local — goes through the one supply-chain gate (quarantine → scan at the source's
 trust tier → commit the exact scanned bytes), and a `dangerous` verdict is refused
-with no override, `--force` included. `tests/test_skill_install_guarded.py` pins
+with no override, `--force` included. `checks/runtime/test_skill_install_guarded.py` pins
 both halves: the conformant skill committing byte-identical, and the floor holding
 for that same skill when it ships a destructive script.
 
@@ -231,11 +231,11 @@ installs, lists (under its directory key), never trigger-matches, and logs
 nothing. From the outside it is indistinguishable from a skill the author simply
 never wrote triggers for. That silent-failure mode is why the BOM and
 leading-whitespace cases are handled rather than documented as gotchas, and why
-`tests/test_skill_format_compat.py` pins each one.
+`checks/runtime/test_skill_format_compat.py` pins each one.
 
 ## See also
 
-- `src/gideon/skills/loader.py` — the parser itself; this page is its contract.
-- `tests/test_skill_format_compat.py` — the executable version of this page.
+- `runtime/gideon/skills/loader.py` — the parser itself; this page is its contract.
+- `checks/runtime/test_skill_format_compat.py` — the executable version of this page.
 - The Skills surface in the dashboard (Settings → Skills) lists what is installed,
   which tier it came from, and its trigger phrases.

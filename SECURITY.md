@@ -1,88 +1,27 @@
-# Security Policy
+# Gideon security
 
-Gideon runs an autonomous agent on your own machine, so its security model
-is defense-in-depth: authentication modes, command screening, an OS sandbox, one
-egress chokepoint, app-scoped tokens, supply-chain scanning, untrusted-content
-fencing, and a tamper-evident audit log. The architecture is documented in
-[`docs/architecture/security.md`](docs/architecture/security.md), and the public
-threat model — including the OWASP Agentic Security Top-10 (ASI) mapping and an
-honest statement of limitations — lives in
-[`docs/security/threat-model.md`](docs/security/threat-model.md).
+Gideon can access local files, run tools, and communicate with configured services. Gateway credentials and the machine account running the process therefore grant meaningful access. The runtime contains authentication, approval, credential-handling, application-permission, command-screening, and audit mechanisms; their presence is not a security certification or a guarantee that every integration has the same enforcement.
 
-## Reporting a vulnerability
+The current architecture and limitations are described in [docs/architecture/security.md](docs/architecture/security.md), [docs/security/threat-model.md](docs/security/threat-model.md), and [docs/security/limitations.md](docs/security/limitations.md). Read those documents alongside the implementation for the revision being deployed.
 
-**Please report security issues privately — do not open a public issue.**
+## Report a suspected vulnerability
 
-Use GitHub's private vulnerability reporting: go to the
-[Security tab](https://github.com/Gideon/Gideon/security) and click
-**"Report a vulnerability"**. This opens a private advisory visible only to you
-and the maintainer.
+Use an established private channel to the operator or maintainer who supplied this checkout. This repository does not designate a public security inbox, hosted advisory endpoint, response deadline, or supported release matrix. If the deployed repository offers private vulnerability reporting, verify that it belongs to the operator before sending a report.
 
-Include, where you can:
+Include the affected revision and component, the deployment context, reproduction steps, and the trust boundary crossed. Use a minimal demonstration with synthetic credentials and isolated state. Remove real tokens, private conversation content, and personal data from attachments. Coordinate disclosure through the same private channel.
 
-- the affected component (auth, command screening, sandbox, egress, tokens,
-  supply-chain scanner, fencing, or the Security Event Log);
-- a description of the impact and a proof-of-concept or reproduction steps;
-- the version or commit you observed it on.
+Relevant reports include unauthorized gateway access, permission or sandbox bypass, secret exposure, unsafe application installation, and untrusted input causing actions outside the user's granted authority. Identify whether an issue occurs with the normal approval configuration or requires an explicitly permissive setting.
 
-### What to expect
+## Operate and develop with isolated state
 
-Gideon is maintained by a single person, so these are honest expectations,
-not contractual SLAs:
+Set `GIDEON_HOME` explicitly for development, tests, and separate instances. Configuration and private state otherwise live under `~/.gideon`. Keep this directory and its backups accessible only to the intended account, and do not commit it to the repository.
 
-- **Acknowledgement within 7 days** of your report.
-- **A fix or a remediation plan within 30 days** for confirmed issues.
+Treat gateway authentication tokens, provider credentials, and authenticated startup output as secrets. In particular, `gateway --json-ready` prints connection information that includes a token. Redact it before sharing logs.
 
-If a report stalls past these windows, a polite nudge on the advisory thread is
-welcome.
+Use the approval mode appropriate to the actions being granted. `gateway --approval yolo` explicitly permits automatic tool approval; it changes the authority given to the agent. Review application permissions and provider configuration before enabling an integration, and check the relevant platform's isolation behavior before relying on it.
 
-## Supported versions
+For a suspected compromise, stop the affected gateway, revoke or rotate exposed credentials with their issuing services, and preserve necessary evidence in a restricted location. Review state and installed applications before restarting. Security checks should run against an isolated copy with test credentials.
 
-Gideon is pre-1.0. Only the latest released minor version receives security
-fixes; there are no backports to older 0.x lines.
+## Qualification boundary
 
-| Version | Supported |
-|---|---|
-| Latest 0.x minor | ✅ |
-| Older 0.x | ❌ |
-
-## Scope
-
-### In scope
-
-Security issues that let an attacker cross a trust boundary the product claims to
-hold:
-
-- **Remote code execution** or gateway compromise from a non-owner input.
-- **Authentication bypass** — reaching an authenticated `/api` surface without a
-  valid token, or an app-scoped token reaching paths outside its declared
-  permissions.
-- **Sandbox / scanner / egress bypass** — executing a command the screening layer
-  should deny, installing content the supply-chain scanner rated `dangerous`, or
-  making an outbound request that evades the egress chokepoint.
-- **Token or credential leakage** — an app backend or exported artifact obtaining
-  the owner's credentials, or credentials appearing in logs, exports, or the
-  Security Event Log.
-
-### Out of scope
-
-- **Self-inflicted YOLO / auto-approve footguns.** Gideon lets its owner
-  lower their own guardrails (e.g. enabling auto-approve); the owner choosing to
-  do so is not a vulnerability. See the limitations in the threat model.
-- **Issues that require an already-compromised host** (root on the machine, a
-  compromised OS account, physical access). Gideon does not defend the
-  owner against themselves or against a host that is already owned.
-- **Hardening requests** — "you should also add control X." These are valuable and
-  welcome, but file them as a normal issue, not a private advisory.
-- **Declaration-only surfaces documented as such**, e.g. an app's `network`
-  permission (an app backend is its own OS process with its own network stack;
-  the declaration is surfaced honestly at install consent but is not a
-  gateway-enforced boundary — see the threat model's limitations section).
-
-## Apps and third-party bundles
-
-Installable apps go through a separate supply-chain path (quarantine → scan →
-consent → install). Vulnerabilities in that pipeline, or in the first-party app
-bundles, are reported here as well; the companion policy in the
-[GideonApps](https://github.com/Gideon/GideonApps) repository
-covers app-bundle-specific scope.
+The ongoing rewrite has focused local checks. It has not established a complete security audit, universal sandbox support, successful operation of every provider, or a certified native release. Deployment decisions require evidence for the particular configuration, platform, integrations, and revision being used.

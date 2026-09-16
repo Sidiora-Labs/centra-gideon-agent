@@ -1,0 +1,86 @@
+"""Which artifact kinds have an editable document model, and how each crosses the wire.
+
+``GET``/``PUT /api/artifacts/{slug}/model`` need three things per kind — a parser, a
+serializer and a strict deserializer — and before this module they were three hard-wired
+``docx`` imports in ``artifacts/handlers.py`` beside a hand-kept ``_MODEL_KINDS = ("docx",)``
+tuple. Two problems with that: adding a second kind meant branching the route, and the
+tuple could name a kind whose parser did not exist (a declared kind with no runtime, which
+answers a capability question with a lie).
+
+So the table IS the capability: :data:`MODEL_KINDS` is derived from it, which makes
+"advertised" and "implemented" the same fact. A kind is absent until its three functions
+exist, and present the moment they do.
+
+The parsers are imported lazily, inside :func:`get_codec`, because they pull in openpyxl /
+python-docx / python-pptx and the gateway must not pay for a document library on a route
+nobody called.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
+
+from gideon.workspace.documents.docx_parser import LossReport
+
+
+@dataclass(frozen=True)
+class ModelCodec:
+    """One kind's full model round trip: bytes in, JSON out, JSON in, model out.
+
+    Frozen because a codec is a capability declaration — something that could swap a
+    parser at run time would make the version of a document a user loaded and the version
+    they saved two different contracts.
+    """
+
+    kind: str
+    parse: Callable[[bytes], tuple[Any, LossReport]]
+    to_dict: Callable[[Any], dict[str, Any]]
+    from_dict: Callable[[Any], Any]
+
+
+def get_codec(kind: str) -> ModelCodec | None:
+    """The codec for *kind*, or ``None`` when no document model ships for it.
+
+    ``None`` rather than a raise, matching ``registry.get_writer``: "can this be edited?"
+    is a question the route asks about *user-supplied* input, and an exception would make
+    every caller wrap a lookup it is allowed to fail.
+    """
+    if kind == "docx":
+        from gideon.workspace.documents.docx_parser import parse_docx
+        from gideon.workspace.documents.model_json import (
+            document_from_dict,
+            document_to_dict,
+        )
+
+        return ModelCodec(
+            kind="docx",
+            parse=parse_docx,
+            to_dict=document_to_dict,
+            from_dict=document_from_dict,
+        )
+    if kind == "xlsx":
+        from gideon.workspace.documents.sheet_json import sheet_from_dict, sheet_to_dict
+        from gideon.workspace.documents.xlsx_parser import parse_xlsx
+
+        return ModelCodec(
+            kind="xlsx",
+            parse=parse_xlsx,
+            to_dict=sheet_to_dict,
+            from_dict=sheet_from_dict,
+        )
+    if kind == "pptx":
+        from gideon.workspace.documents.deck_json import deck_from_dict, deck_to_dict
+        from gideon.workspace.documents.pptx_parser import parse_pptx
+
+        return ModelCodec(
+            kind="pptx",
+            parse=parse_pptx,
+            to_dict=deck_to_dict,
+            from_dict=deck_from_dict,
+        )
+    return None
+
+
+MODEL_KINDS: tuple[str, ...] = ("docx", "xlsx", "pptx")

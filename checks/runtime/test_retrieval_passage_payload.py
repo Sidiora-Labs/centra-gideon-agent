@@ -9,19 +9,17 @@ sentinel chunks and the exact off-by-one join T02 warns about.
 
 from __future__ import annotations
 
-from gideon.action_providers.knowledge_retrieve_provider import (
+from gideon.integrations.action_providers.knowledge_retrieve_provider import (
     DETAIL_CAPS,
     _passage_window,
     _shape_hit,
 )
 
-# A document of three distinct sentinel regions, each well over the compact cap
-# so the head window can never accidentally contain a deep sentinel.
 _HEAD = "\n".join(f"alpha-head-{i} " + "pad " * 40 for i in range(30))
 _MID = "\n".join(f"bravo-middle-{i} " + "pad " * 40 for i in range(30))
 _TAIL = "\n".join(f"charlie-tail-{i} " + "pad " * 40 for i in range(30))
 _DOC = _HEAD + "\n" + _MID + "\n" + _TAIL
-_MID_START = len(_HEAD.split("\n")) + 1  # 1-based first line of the middle region
+_MID_START = len(_HEAD.split("\n")) + 1
 
 
 class TestPassageWindow:
@@ -31,7 +29,7 @@ class TestPassageWindow:
         alpha-head text for the same hit."""
         cap = DETAIL_CAPS["compact"]
         old_behavior = _DOC[:cap]
-        assert "bravo-middle-0" not in old_behavior  # the defect was real
+        assert "bravo-middle-0" not in old_behavior
 
         text, windowed = _passage_window(_DOC, [_MID_START, _MID_START + 2], cap)
         assert windowed
@@ -44,14 +42,14 @@ class TestPassageWindow:
         doc = "\n".join(f"L{i}" for i in range(1, 11))
         text, windowed = _passage_window(doc, [5, 6], cap=1000)
         assert windowed
-        # One line of leading context (L4), then the passage itself.
         assert "L5" in text and "L6" in text
         body = text.lstrip("…")
-        assert body.split("\n")[0] == "L4"  # context line, not a dropped L5
+        assert body.split("\n")[0] == "L4"
 
     def test_matched_text_is_at_the_front_so_the_cap_cannot_cut_it(self) -> None:
-        text, _ = _passage_window(_DOC, [_MID_START, _MID_START + 1], DETAIL_CAPS["compact"])
-        # The first sentinel token appears within the first couple of lines.
+        text, _ = _passage_window(
+            _DOC, [_MID_START, _MID_START + 1], DETAIL_CAPS["compact"]
+        )
         head_of_window = "\n".join(text.split("\n")[:3])
         assert "bravo-middle" in head_of_window
 

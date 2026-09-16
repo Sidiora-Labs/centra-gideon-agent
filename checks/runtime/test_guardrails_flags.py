@@ -11,18 +11,16 @@ from dataclasses import fields, is_dataclass
 
 import pytest
 
-from gideon.guardrails.flags import guard_flag
-
-# ── guard_flag: fail-safe parsing ────────────────────────────────────────────
+from gideon.security.guardrails.flags import guard_flag
 
 
 @pytest.mark.parametrize(
     "value,expected",
     [
-        (None, True),  # missing → enabled
+        (None, True),
         (True, True),
-        (False, False),  # explicit bool honored
-        ("", True),  # empty string → enabled (fail-safe)
+        (False, False),
+        ("", True),
         ("0", False),
         ("false", False),
         ("False", False),
@@ -35,17 +33,14 @@ from gideon.guardrails.flags import guard_flag
         ("1", True),
         ("true", True),
         ("yes", True),
-        ("garbage", True),  # unknown token → enabled (fail-safe)
+        ("garbage", True),
         (1, True),
         (0, False),
-        (object(), True),  # unknown shape → enabled
+        (object(), True),
     ],
 )
 def test_guard_flag_fail_safe(value, expected):
     assert guard_flag(value) is expected
-
-
-# ── Safe-default schema test: guard-class fields default SAFE ────────────────
 
 
 def _walk_guard_class_fields(dc, prefix=""):
@@ -68,12 +63,10 @@ def test_guard_class_fields_default_safe():
     A config typo is stripped by _validate_config_data → the dataclass default
     applies, so a guard-class field's default MUST be safe (§5). This test fails
     the build if a future guard-class field ships with a leaky default."""
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     cfg = AppConfig()
     found = list(_walk_guard_class_fields(cfg))
-    # At least the one we know about must be present (guards against the tag being
-    # silently dropped in a refactor).
     assert any(
         p == "guardrails.scan_mode" for p, _, _ in found
     ), "guardrails.scan_mode lost its guard_class tag"
@@ -88,6 +81,6 @@ def test_guard_class_fields_default_safe():
 def test_scan_mode_default_is_not_leaky():
     """Explicit regression: the outbound scan must default to redact, never warn
     (warn would send secrets to a remote provider)."""
-    from gideon.config.loader import AppConfig
+    from gideon.core.config.loader import AppConfig
 
     assert AppConfig().guardrails.scan_mode == "redact"

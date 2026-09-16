@@ -2,7 +2,7 @@
 
 What happens to a tool's name between its `ToolDefinition` and the moment the
 runtime dispatches a call back to it. The invariant this page (and the census
-rail, `tests/test_tool_name_wire_fidelity.py`) protects: **a chat turn that
+rail, `checks/runtime/test_tool_name_wire_fidelity.py`) protects: **a chat turn that
 references a tool by any form the wire can produce dispatches to exactly that
 tool, on this turn and on every later turn.**
 

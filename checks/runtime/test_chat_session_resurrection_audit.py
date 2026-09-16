@@ -19,12 +19,12 @@ this is not a missing convention — it is two writers outside an established on
 
 **What this module audits.** The durable question is *who owns "does this session key
 exist, and may it be written?"*. That owner is
-:func:`~gideon.dashboard.chat_persistence.session_key_exists`, and the hazard is a
+:func:`~gideon.interfaces.dashboard.chat_persistence.session_key_exists`, and the hazard is a
 writer that reaches ``state.get_or_create_session`` with a CLIENT-SUPPLIED name without
 asking it first — because ``get_or_create_session`` mints a blank session on a miss.
 
 The census is an AST walk (no import side effects) over every
-``get_or_create_session`` call site in ``src/gideon``, keyed by
+``get_or_create_session`` call site in ``runtime/gideon``, keyed by
 ``file::qualname``. The keys are partitioned across the two hardcoded allowlists below.
 **A new, unmapped call site reds this test naming its file:line** — the author must
 consciously classify it as client-named (and then it must call the owner) or
@@ -46,17 +46,13 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 from chat_test_helpers import _make_app, _make_state
 
-SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "gideon"
+SRC = pathlib.Path(__file__).resolve().parents[2] / "runtime" / "gideon"
 
-#: The one owner. A client-named writer must call this before creating anything.
 _OWNER = "session_key_exists"
 
-#: The creator whose miss-branch mints a blank session — the mechanism being audited.
 _CREATOR = "get_or_create_session"
 
 
-# ── CLIENT-NAMED: the session name arrives from a REQUEST, so existence must be
-#    proved first. Every key here is additionally asserted to call the owner. ──
 _CLIENT_NAMED_MUST_GUARD: dict[str, str] = {
     "dashboard/chat_handlers.py::api_chat": (
         "POST /api/chat — `body['session']` is client-supplied; the resurrection this "
@@ -68,28 +64,22 @@ _CLIENT_NAMED_MUST_GUARD: dict[str, str] = {
     ),
 }
 
-# ── CREATES-BY-DESIGN: minting on a miss is the point. Either no name is passed at
-#    all (the callee auto-generates ``chat-N-<ts>``), or the name is SERVER-derived
-#    from a resource that owns it (a cron job, a loop, a plan, an API client id), or
-#    the site sits BEHIND an existence check that is the check. ──
 _CREATES_BY_DESIGN: dict[str, str] = {
-    # ── no name at all → the callee mints `chat-N-<ts>` ──
     "channel_inbound.py::_route_to_session": (
         "no name — an unlinked channel thread mints a session, then link_channel binds it"
     ),
     "dashboard/handlers/investigate.py::api_investigate": "no name — investigate mints its own",
-    "gateway.py::GatewayOrchestrator._deliver_result": "no name — result delivery mints its own",
+    "gateway.py::RuntimeCoordinator._deliver_result": "no name — result delivery mints its own",
     "dashboard/chat_fork.py::api_chat_session_fork": (
         "name=None — a fork mints a NEW key; the PARENT it reads is resolved and 404s"
     ),
-    "dashboard/chat_fork.py::api_chat_session_fork_rewound": ("name=None — same as the fork above"),
-    # ── the explicit create route ──
+    "dashboard/chat_fork.py::api_chat_session_fork_rewound": (
+        "name=None — same as the fork above"
+    ),
     "dashboard/chat_handlers.py::api_chat_session_create": (
         "POST /api/chat/sessions IS the create verb — this is the one route whose job "
         "is to mint a key, and it is what a client uses instead of naming a dead one"
     ),
-    # ── SERVER-derived key: the owning resource's identity IS the session name, so a
-    #    miss means 'this resource has no session yet', never 'the client typed a key' ──
     "dashboard/schedule_inject.py::inject_schedule_result_to_session": (
         "name=`cron-{job.id}` — derived from the cron job that owns the session"
     ),
@@ -103,7 +93,6 @@ _CREATES_BY_DESIGN: dict[str, str] = {
         "id, and create-on-first-use is this dialect's whole contract (it has no delete "
         "verb of its own, so there is no deleted state for a client to resurrect through)"
     ),
-    # ── behind the existence check, or driven BY the log ──
     "dashboard/chat_persistence.py::_rehydrate_session_from_history": (
         "reached only AFTER resolve_history_key + get_metadata confirmed the key is "
         "persisted — this site IS the existence check the owner delegates to"
@@ -112,9 +101,6 @@ _CREATES_BY_DESIGN: dict[str, str] = {
         "iterates keys the conversation log itself listed, so existence is a given"
     ),
 }
-
-
-# ── the scanner ───────────────────────────────────────────────────────────────
 
 
 def scan_source(source: str, rel: str, creators: dict, guards: dict) -> None:
@@ -180,20 +166,9 @@ def scan() -> tuple[dict[str, list[int]], dict[str, list[int]], int]:
     return creators, guards, scanned
 
 
-#: Vacuity floor for the walk. The tree has ~950 modules; a scan that walks a handful
-#: has lost its root, and "no unmapped call sites" would read as an improvement.
 FILES_SCANNED_FLOOR = 800
 
-#: The ``{session}``-addressed route population, derived from the real route table.
-#: A FLOOR: the family this audit reasons about ("every other writer to a session")
-#: is exactly this set, and a derivation that stopped finding it would make the
-#: classification above look complete when it had simply gone blind. Measured at 50
-#: (47 in ``dashboard/server.py`` + lifecycle/export/share in the two
-#: ``register_routes`` modules).
 SESSION_ROUTE_FLOOR = 45
-
-
-# ── vacuity: a census that measures nothing must not read as clean ────────────
 
 
 def test_the_census_is_not_vacuous():
@@ -228,7 +203,6 @@ def test_the_session_route_family_is_still_derivable():
         f"{SESSION_ROUTE_FLOOR}). The route-table walk lost its target, so this audit's "
         f"scope claim is unverified. Routes found: {sorted(routes)}"
     )
-    # The two writers this module exists for must be IN the derived family, not assumed.
     assert ("POST", "/api/chat/sessions/{session}/resume") in routes, sorted(routes)
 
 
@@ -243,7 +217,9 @@ def _session_routes() -> set[tuple[str, str]]:
     ):
         tree = ast.parse((SRC / rel).read_text(encoding="utf-8"))
         for node in ast.walk(tree):
-            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            if not isinstance(node, ast.Call) or not isinstance(
+                node.func, ast.Attribute
+            ):
                 continue
             attr = node.func.attr
             if not attr.startswith("add_"):
@@ -254,12 +230,13 @@ def _session_routes() -> set[tuple[str, str]]:
             if not node.args:
                 continue
             p = node.args[0]
-            if isinstance(p, ast.Constant) and isinstance(p.value, str) and "{session}" in p.value:
+            if (
+                isinstance(p, ast.Constant)
+                and isinstance(p.value, str)
+                and "{session}" in p.value
+            ):
                 out.add((method, p.value))
     return out
-
-
-# ── the classification ratchet ────────────────────────────────────────────────
 
 
 def test_every_session_creator_call_site_is_classified():
@@ -275,7 +252,7 @@ def test_every_session_creator_call_site_is_classified():
     unmapped = sorted(set(creators) - allow)
     assert not unmapped, (
         f"Unmapped `{_CREATOR}` call site(s) — classify each in "
-        f"tests/test_chat_session_resurrection_audit.py as CLIENT-NAMED (the session "
+        f"checks/runtime/test_chat_session_resurrection_audit.py as CLIENT-NAMED (the session "
         f"name comes from a request → call "
         f"chat_persistence.{_OWNER} first and 404 `session_not_found` on a miss) or "
         f"CREATES-BY-DESIGN (no name, or a server-derived one):\n"
@@ -315,12 +292,6 @@ def test_every_client_named_writer_actually_calls_the_owner():
     )
 
 
-# ── the vacuity floors for the ratchet, proved against source ─────────────────
-#
-# "No unmapped call site" and "every client-named writer guards" are both satisfied by a
-# working scanner AND by a scanner that has stopped matching. These tell those apart.
-
-
 _SYNTHETIC = '''
 class State:
     def get_or_create_session(self, name=None):
@@ -350,7 +321,6 @@ def test_the_scanner_sees_a_planted_unguarded_writer():
     scan_source(_SYNTHETIC, "synthetic.py", creators, guards)
     assert "synthetic.py::a_new_unguarded_writer" in creators, creators
     assert "synthetic.py::a_properly_guarded_writer" in creators, creators
-    # The method DEFINITION is not a call site and must not be counted as one.
     assert "synthetic.py::State.get_or_create_session" not in creators, creators
 
 
@@ -368,7 +338,6 @@ def test_the_scanner_tells_a_guarded_writer_from_an_unguarded_one():
 
 
 _HANDLERS = SRC / "dashboard" / "chat_handlers.py"
-#: The live guard line in ``api_chat``. The plant below removes it.
 _GUARD_LINE = "        if not session_key_exists(state, session_name):"
 
 
@@ -384,7 +353,6 @@ def test_stripping_the_real_guard_reds_the_ratchet():
     """
     real = _HANDLERS.read_text(encoding="utf-8")
 
-    # 1) As it ships, api_chat guards — so a red below is the plant, not the tree.
     creators: dict[str, list[int]] = {}
     guards: dict[str, list[int]] = {}
     scan_source(real, "dashboard/chat_handlers.py", creators, guards)
@@ -393,10 +361,9 @@ def test_stripping_the_real_guard_reds_the_ratchet():
         f"attribute the plant. guards={sorted(guards)}"
     )
 
-    # 2) The plant APPLIED. A swap that silently matched nothing would make step 3 a
-    #    tautology about unmodified source — the exact shape of a vacuous guard.
     stripped = real.replace(
-        _GUARD_LINE + '\n            return json_error("session_not_found", status=404)\n',
+        _GUARD_LINE
+        + '\n            return json_error("session_not_found", status=404)\n',
         "",
         1,
     )
@@ -405,9 +372,10 @@ def test_stripping_the_real_guard_reds_the_ratchet():
         f"drifted from the shipped source, so this floor is measuring nothing. "
         f"Re-anchor it on api_chat's live `{_OWNER}` refusal."
     )
-    assert _GUARD_LINE not in stripped, "the swap applied but the guard is still present"
+    assert (
+        _GUARD_LINE not in stripped
+    ), "the swap applied but the guard is still present"
 
-    # 3) The detector notices — api_chat still reaches the creator, now unguarded.
     creators2: dict[str, list[int]] = {}
     guards2: dict[str, list[int]] = {}
     scan_source(stripped, "dashboard/chat_handlers.py", creators2, guards2)
@@ -440,7 +408,9 @@ def test_a_new_unguarded_writer_planted_into_the_real_module_is_unmapped():
     scan_source(planted, "dashboard/chat_handlers.py", creators, guards)
 
     key = "dashboard/chat_handlers.py::api_chat_planted_writer"
-    assert key in creators, f"the planted writer was not censused at all: {sorted(creators)}"
+    assert (
+        key in creators
+    ), f"the planted writer was not censused at all: {sorted(creators)}"
     allow = set(_CLIENT_NAMED_MUST_GUARD) | set(_CREATES_BY_DESIGN)
     assert key not in allow, (
         "the planted writer is somehow already allowlisted — the allowlist keys are not "
@@ -449,19 +419,12 @@ def test_a_new_unguarded_writer_planted_into_the_real_module_is_unmapped():
     assert key not in guards, "the planted writer must not read as guarded"
 
 
-# ── the behavioural rail: the defect itself, against an independent oracle ────
-#
-# The oracle is never the route under test. Existence is asserted from
-# ``state._sessions`` and from the on-disk JSONL, plus a SECOND endpoint
-# (``GET /api/chat/sessions/{key}``) — not from the send route's own reply.
-
-
 @pytest.fixture(autouse=True)
 def _isolate_home(tmp_path, monkeypatch):
     """Every write lands in tmp_path — never the real ``~/.gideon``."""
-    import gideon.config.loader as cfg
-    import gideon.dashboard.state as st
-    import gideon.session_workspace as ws
+    import gideon.core.config.loader as cfg
+    import gideon.engine.session_workspace as ws
+    import gideon.interfaces.dashboard.state as st
 
     monkeypatch.setattr(cfg, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(st, "config_dir", lambda: tmp_path)
@@ -471,7 +434,7 @@ def _isolate_home(tmp_path, monkeypatch):
 
 def _seed_persisted_chat(state):
     """A session with turns PERSISTED to the JSONL (append alone is memory-only)."""
-    from gideon.dashboard.chat_persistence import save_session_to_history
+    from gideon.interfaces.dashboard.chat_persistence import save_session_to_history
 
     session = state.get_or_create_session(name=None)
     session.append("user", "the original question", "msg u0", broadcast=False)
@@ -494,7 +457,7 @@ async def test_a_send_to_a_deleted_session_is_a_coded_404(tmp_path):
     Measured before the fix: 200, and the key was back in the sidebar with only the
     resurrecting turn — "delete" degraded to "close".
     """
-    from gideon.dashboard.chat_utils import _history_key_for
+    from gideon.interfaces.dashboard.chat_utils import _history_key_for
 
     state = _make_state(tmp_path)
     session = _seed_persisted_chat(state)
@@ -505,16 +468,16 @@ async def test_a_send_to_a_deleted_session_is_a_coded_404(tmp_path):
     client = await _client(state)
     try:
         assert (await client.delete(f"/api/chat/sessions/{key}")).status == 200
-        # Independent oracles: memory, disk, and a SECOND endpoint.
         assert key not in state._sessions
         assert not state.conversation_log.has_log(hk)
         assert (await client.get(f"/api/chat/sessions/{key}")).status == 404
 
-        resp = await client.post("/api/chat", json={"session": key, "message": "resurrect"})
+        resp = await client.post(
+            "/api/chat", json={"session": key, "message": "resurrect"}
+        )
         assert resp.status == 404, f"a send to a deleted session answered {resp.status}"
         assert (await resp.json())["error"]["code"] == "session_not_found"
 
-        # And it STAYED deleted — measured against the oracles, not the reply above.
         assert key not in state._sessions, "the refused send created the session anyway"
         assert not state.conversation_log.has_log(hk), "the refused send wrote history"
         assert (await client.get(f"/api/chat/sessions/{key}")).status == 404
@@ -525,7 +488,7 @@ async def test_a_send_to_a_deleted_session_is_a_coded_404(tmp_path):
 @pytest.mark.asyncio
 async def test_a_resume_of_a_deleted_session_is_a_coded_404(tmp_path):
     """The second writer, found by deriving the family rather than taking the ticket."""
-    from gideon.dashboard.chat_utils import _history_key_for
+    from gideon.interfaces.dashboard.chat_utils import _history_key_for
 
     state = _make_state(tmp_path)
     session = _seed_persisted_chat(state)
@@ -538,9 +501,13 @@ async def test_a_resume_of_a_deleted_session_is_a_coded_404(tmp_path):
         assert key not in state._sessions
 
         resp = await client.post(f"/api/chat/sessions/{key}/resume", json={})
-        assert resp.status == 404, f"a resume of a deleted session answered {resp.status}"
+        assert (
+            resp.status == 404
+        ), f"a resume of a deleted session answered {resp.status}"
         assert (await resp.json())["error"]["code"] == "session_not_found"
-        assert key not in state._sessions, "the refused resume created the session anyway"
+        assert (
+            key not in state._sessions
+        ), "the refused resume created the session anyway"
         assert not state.conversation_log.has_log(hk)
     finally:
         await client.close()
@@ -575,7 +542,6 @@ async def test_omitting_the_session_still_starts_a_new_conversation(tmp_path):
     state = _make_state(tmp_path)
     client = await _client(state)
     try:
-        # ``?ws=1`` so the reply is JSON rather than a held-open SSE stream.
         resp = await client.post("/api/chat?ws=1", json={"message": "a brand new chat"})
         assert resp.status == 200, await resp.text()
         minted = (await resp.json())["session"]
@@ -593,26 +559,26 @@ async def test_a_disk_only_session_is_still_writable_after_eviction(tmp_path):
     That must still work — the guard's predicate is "persisted metadata", not "resident".
     Simulated by evicting the session from ``state._sessions`` while leaving its JSONL.
     """
-    from gideon.dashboard.chat_utils import _history_key_for
+    from gideon.interfaces.dashboard.chat_utils import _history_key_for
 
     state = _make_state(tmp_path)
     session = _seed_persisted_chat(state)
     key = session.key
     hk = _history_key_for(key)
 
-    # Evict from memory ONLY — the disk history stays, exactly as after a restart.
     state._sessions.pop(key, None)
     assert key not in state._sessions
     assert state.conversation_log.has_log(hk), "precondition: history still on disk"
 
     client = await _client(state)
     try:
-        resp = await client.post("/api/chat?ws=1", json={"session": key, "message": "still here?"})
+        resp = await client.post(
+            "/api/chat?ws=1", json={"session": key, "message": "still here?"}
+        )
         assert resp.status == 200, (
             f"a disk-only session was refused ({resp.status}) — the guard is asking "
             f"'resident?' instead of 'persisted?': {await resp.text()}"
         )
-        # And it came back WITH its history, not as a blank session.
         assert key in state._sessions
         contents = [m["content"] for m in state._sessions[key].messages]
         assert "the original question" in contents, contents
@@ -630,7 +596,7 @@ def _archive(state, key: str) -> str:
     turn is older than a day, and the point here is the resulting STATE, not the route
     that produces it.
     """
-    from gideon.dashboard.chat_utils import _history_key_for
+    from gideon.interfaces.dashboard.chat_utils import _history_key_for
 
     hk = _history_key_for(key)
     path = state.conversation_log._path(hk)
@@ -669,39 +635,37 @@ async def test_an_archived_session_is_still_writable_by_both_writers(tmp_path):
     than asserted as correct. Do not "fix" this test by asserting the empty transcript is
     right.
     """
-    from gideon.dashboard.chat_persistence import resolve_session
+    from gideon.interfaces.dashboard.chat_persistence import resolve_session
 
     state = _make_state(tmp_path)
     key = _seed_persisted_chat(state).key
     hk = _archive(state, key)
 
-    # The archived state is real, and it IS the state resolve_session refuses. Asserted
-    # against the disk (the oracle), not against the predicate under test.
-    assert state.conversation_log.has_log(hk), "precondition: the archived history is on disk"
+    assert state.conversation_log.has_log(
+        hk
+    ), "precondition: the archived history is on disk"
     assert state.conversation_log.get_metadata(hk).get("closed") is True
     assert resolve_session(state, key) is None, (
         "resolve_session no longer refuses an archived session, so this test can no "
         "longer tell the two predicates apart — re-anchor it on whatever `closed` became"
     )
-    state._sessions.pop(key, None)  # resolve_session may have rehydrated on the way past
+    state._sessions.pop(key, None)
 
     client = await _client(state)
     try:
-        # WRITER 2: resume is the documented way back into an archived chat.
         resp = await client.post(f"/api/chat/sessions/{key}/resume", json={})
         assert resp.status == 200, (
             f"resume of an ARCHIVED session was refused ({resp.status}) — the predicate "
             f"is asking 'is it live?' instead of 'does it exist?': {await resp.text()}"
         )
 
-        # WRITER 1: and a send lands on it too.
-        _archive(state, key)  # re-archive: resume is entitled to have cleared the flag
-        resp = await client.post("/api/chat?ws=1", json={"session": key, "message": "still here?"})
+        _archive(state, key)
+        resp = await client.post(
+            "/api/chat?ws=1", json={"session": key, "message": "still here?"}
+        )
         assert (
             resp.status == 200
         ), f"a send to an ARCHIVED session was refused ({resp.status}): {await resp.text()}"
-        # The archived conversation is still THERE — the refusal-free path did not
-        # quietly destroy what /cleanup put away. Oracle is the file, not a reply.
         assert state.conversation_log.has_log(hk)
     finally:
         await client.close()
@@ -721,12 +685,12 @@ async def test_an_unreadable_log_does_not_lock_the_user_out(tmp_path):
     ``path.read_text`` does on EIO), and the oracle is the route's status code plus the
     file's own presence on disk — never the predicate under test.
     """
-    from gideon.dashboard.chat_utils import _history_key_for
+    from gideon.interfaces.dashboard.chat_utils import _history_key_for
 
     state = _make_state(tmp_path)
     key = _seed_persisted_chat(state).key
     hk = _history_key_for(key)
-    state._sessions.pop(key, None)  # disk-only, as after a restart
+    state._sessions.pop(key, None)
 
     log = state.conversation_log
     log._meta_cache.pop(hk, None)
@@ -742,7 +706,9 @@ async def test_an_unreadable_log_does_not_lock_the_user_out(tmp_path):
 
     client = await _client(state)
     try:
-        resp = await client.post("/api/chat?ws=1", json={"session": key, "message": "still here?"})
+        resp = await client.post(
+            "/api/chat?ws=1", json={"session": key, "message": "still here?"}
+        )
         assert resp.status == 200, (
             f"an unreadable log refused a send ({resp.status}) on a session whose file "
             f"IS on disk — a broken disk now locks the user out of their own chat, which "
@@ -803,7 +769,7 @@ def test_a_predicate_that_blows_up_answers_exists(tmp_path):
     whose every method raises. Without this, flipping that ``return True`` to
     ``return False`` is a silent, untested behaviour change.
     """
-    from gideon.dashboard.chat_persistence import session_key_exists
+    from gideon.interfaces.dashboard.chat_persistence import session_key_exists
 
     class Unusable:
         def has_log(self, key):

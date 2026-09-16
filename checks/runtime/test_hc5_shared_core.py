@@ -42,14 +42,11 @@ from pathlib import Path
 
 import pytest
 
-from gideon.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK, LLMEvent
-from gideon.workflows.models import InstanceState, Node, walk
+from gideon.automation.workflows.models import InstanceState, Node, walk
+from gideon.integrations.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK, LLMEvent
 
 PROMPT = "write a two-line release note for the sparse-worktree change"
 CRITERIA = "specific, under 60 characters per line, no hype"
-
-
-# ── shared fakes (the sampling suite's, in miniature) ─────────────────────────
 
 
 class _JudgeProvider:
@@ -97,7 +94,7 @@ class _JudgeProvider:
 def _stub_samples(monkeypatch, *, fail: bool = False) -> None:
     """Deterministic, STATELESS completion stub: the text is a function of the
     temperature, so the tool call and the template dispatch see identical slates."""
-    import gideon.llm_helpers as llm_helpers
+    import gideon.integrations.llm_helpers as llm_helpers
 
     async def fake_one_shot(prompt, *, use_case="background", temperature=None, **_kw):
         if fail:
@@ -110,10 +107,12 @@ def _stub_samples(monkeypatch, *, fail: bool = False) -> None:
 def _stub_judge(monkeypatch, scores: dict[str, float]) -> None:
     """Patch the seam the core's DEFAULT judge factory resolves through — the path both
     the MCP tool and the action provider take, since neither injects a factory."""
-    from gideon.providers import provider_bridge
+    from gideon.extensions.providers import provider_bridge
 
     provider = _JudgeProvider(scores)
-    monkeypatch.setattr(provider_bridge, "resolve_provider_for_use_case", lambda _uc: provider)
+    monkeypatch.setattr(
+        provider_bridge, "resolve_provider_for_use_case", lambda _uc: provider
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -124,11 +123,8 @@ def _isolated_home(tmp_path, monkeypatch):
     return tmp_path
 
 
-# ── driving the REAL template node through the engine seam ───────────────────
-
-
 def _template_action_node(template: str, node_id: str) -> Node:
-    from gideon.workflows.bundled_defs import read_template
+    from gideon.automation.workflows.bundled_defs import read_template
 
     wf = read_template(template)
     assert wf is not None, f"bundled template {template!r} did not load"
@@ -139,26 +135,22 @@ def _template_action_node(template: str, node_id: str) -> Node:
 
 
 def _dispatch(node: Node, inputs: dict, *, cwd: str = ""):
-    from gideon.action_providers.registry import _ensure_default_providers_registered
-    from gideon.workflows.bindings import BindingContext
-    from gideon.workflows.engine import dispatch_action
+    from gideon.automation.workflows.bindings import BindingContext
+    from gideon.automation.workflows.engine import dispatch_action
+    from gideon.integrations.action_providers.registry import (
+        _ensure_default_providers_registered,
+    )
 
     _ensure_default_providers_registered()
     ctx = BindingContext(inputs=inputs)
     return asyncio.run(dispatch_action(node, ctx, run_id="run-hc5", cwd=cwd))
 
 
-# ── best-of-n: tool (skill) vs template ──────────────────────────────────────
-
-
 class TestBestOfNParity:
-    #: A deliberate TIE at the top (idx 1 and idx 2 both score 4.5): the winner must be
-    #: the LOWEST index of the top scorers through BOTH entry points, so a template that
-    #: re-owned selection (say, max() over a re-ordered slate) diverges here.
     SCORES = {"candidate@0.2": 3.0, "candidate@0.7": 4.5, "candidate@1.0": 4.5}
 
     def _tool_result(self) -> dict:
-        from gideon.mcp_subagents import _best_of_n
+        from gideon.integrations.mcp_subagents import _best_of_n
 
         raw = _best_of_n({"prompt": PROMPT, "n": 3, "criteria": CRITERIA})
         return json.loads(raw)
@@ -181,16 +173,16 @@ class TestBestOfNParity:
         assert result.state is InstanceState.DONE, result.failure
         tmpl = result.output
 
-        # One contract, key for key — the docstring in `sampling.best_of_n` promises the
-        # same envelope to the tool, the skill and this template.
         assert set(tmpl) == set(tool)
         assert tmpl["winner"] == tool["winner"]
-        assert tmpl["winner_idx"] == tool["winner_idx"] == 1, "tie must break to the LOWEST index"
+        assert (
+            tmpl["winner_idx"] == tool["winner_idx"] == 1
+        ), "tie must break to the LOWEST index"
         assert tmpl["judged"] is tool["judged"] is True
         assert tmpl["n"] == tool["n"] == 3
-        assert [(c["idx"], c["temperature"], c["text"]) for c in tmpl["candidates"]] == [
-            (c["idx"], c["temperature"], c["text"]) for c in tool["candidates"]
-        ]
+        assert [
+            (c["idx"], c["temperature"], c["text"]) for c in tmpl["candidates"]
+        ] == [(c["idx"], c["temperature"], c["text"]) for c in tool["candidates"]]
         assert [(j["idx"], j["score"]) for j in tmpl["judgments"]] == [
             (j["idx"], j["score"]) for j in tool["judgments"]
         ]
@@ -215,7 +207,7 @@ class TestBestOfNParity:
         _stub_samples(monkeypatch, fail=True)
         _stub_judge(monkeypatch, {})
 
-        from gideon.mcp_subagents import _best_of_n
+        from gideon.integrations.mcp_subagents import _best_of_n
 
         tool_raw = _best_of_n({"prompt": PROMPT, "n": 3, "criteria": CRITERIA})
         assert tool_raw.startswith("No candidate:")
@@ -227,9 +219,6 @@ class TestBestOfNParity:
         assert result.output["note"] in tool_raw
 
 
-# ── check-work: core (the skill's flow) vs template ──────────────────────────
-
-
 def _workspace(tmp_path: Path) -> tuple[Path, str]:
     """A work root with one claim satisfied and the claims text naming it."""
     ws = tmp_path / "ws"
@@ -237,11 +226,9 @@ def _workspace(tmp_path: Path) -> tuple[Path, str]:
     (ws / "src" / "mod.py").write_text("def derive_checks(claims):\n    return []\n")
     (ws / "docs").mkdir()
     (ws / "docs" / "notes.md").write_text("# notes\n")
-    # TWO sentences on purpose: the core derives per-claim, and one sentence naming
-    # both files would attach `derive_checks` as the CONTENT needle to `docs/notes.md`
-    # too — a legitimate core FAIL, which is not this fixture's job.
     claims = (
-        "Added `derive_checks()` to `src/mod.py`. " "Wrote `docs/notes.md` with the design notes."
+        "Added `derive_checks()` to `src/mod.py`. "
+        "Wrote `docs/notes.md` with the design notes."
     )
     return ws, claims
 
@@ -251,7 +238,7 @@ class TestCheckWorkParity:
         """Same claims + same root through the §3.1 core (the skill's documented flow,
         and the SDLC hook's call) and through the template's `check` node ⇒ the same
         checks, statuses, evidence and rendered report."""
-        from gideon.check_work import derive_and_run, render_report
+        from gideon.assurance.check_work import derive_and_run, render_report
 
         ws, claims = _workspace(tmp_path)
         core = derive_and_run(claims, root=ws)
@@ -264,9 +251,9 @@ class TestCheckWorkParity:
 
         assert tmpl["verdict"] == core.verdict == "pass"
         assert tmpl["note"] == core.note
-        assert [(c["label"], c["how"], c["status"], c["evidence"]) for c in tmpl["checks"]] == [
-            (r.check.label, r.check.how, r.status, r.evidence) for r in core.results
-        ]
+        assert [
+            (c["label"], c["how"], c["status"], c["evidence"]) for c in tmpl["checks"]
+        ] == [(r.check.label, r.check.how, r.status, r.evidence) for r in core.results]
         assert tmpl["report"] == render_report(core)
 
     def test_a_failed_check_fails_the_template_node_as_it_fails_the_hook(
@@ -275,7 +262,7 @@ class TestCheckWorkParity:
         """A claimed-but-missing file is verdict `fail` in the core; the template's
         rendering of that verdict is a FAILED node (the SDLC hook's `ok = verdict !=
         "fail"` mapping), with the full report kept in the output."""
-        from gideon.check_work import derive_and_run
+        from gideon.assurance.check_work import derive_and_run
 
         ws, _ = _workspace(tmp_path)
         claims = "Wrote `docs/missing.md` with the rollout plan."
@@ -286,13 +273,15 @@ class TestCheckWorkParity:
         result = _dispatch(node, {"claims": claims, "root": str(ws)})
         assert result.state is InstanceState.FAILED
         assert result.output["verdict"] == "fail"
-        assert [c["status"] for c in result.output["checks"]] == [r.status for r in core.results]
+        assert [c["status"] for c in result.output["checks"]] == [
+            r.status for r in core.results
+        ]
 
     def test_a_blank_root_falls_back_to_the_run_workspace(self, tmp_path, monkeypatch):
         """The template's `root` input defaults to "" and the provider then checks the
         run's own workspace — where an upstream stage's files land — so a workflow can
         end with this node without restating a path the engine already holds."""
-        from gideon.check_work import derive_and_run
+        from gideon.assurance.check_work import derive_and_run
 
         ws, claims = _workspace(tmp_path)
         core = derive_and_run(claims, root=ws)
@@ -308,7 +297,7 @@ class TestCheckWorkParity:
         command is `unverifiable` through the template exactly as the core reports it
         with no runner — the node never shells out on its own authority."""
         ws, _ = _workspace(tmp_path)
-        claims = "Ran `pytest tests/test_mod.py` and it passed clean."
+        claims = "Ran `pytest checks/runtime/test_mod.py` and it passed clean."
 
         node = _template_action_node("check-work", "check")
         result = _dispatch(node, {"claims": claims, "root": str(ws)})
@@ -317,19 +306,26 @@ class TestCheckWorkParity:
         assert statuses == {"unverifiable"}, result.output["checks"]
 
 
-# ── the wrappers stay wrappers ────────────────────────────────────────────────
-
-
 def test_the_template_providers_call_the_cores_not_copies():
     """The whole HC-5 contract is "CALLING the §2.1/§3.1 cores (no reimplementation)".
     Pin it at the source level: each provider imports its core's entry point, and
     neither imports the pieces a reimplementation would need."""
-    from gideon.action_providers import best_of_n_provider, check_work_provider
+    from gideon.integrations.action_providers import (
+        best_of_n_provider,
+        check_work_provider,
+    )
 
     sampling_src = Path(best_of_n_provider.__file__).read_text(encoding="utf-8")
-    assert "from gideon.sampling import best_of_n" in sampling_src
-    assert "LLMJudge" not in sampling_src, "judging belongs to the core, not the wrapper"
+    assert "from gideon.integrations.sampling import best_of_n" in sampling_src
+    assert (
+        "LLMJudge" not in sampling_src
+    ), "judging belongs to the core, not the wrapper"
 
     check_src = Path(check_work_provider.__file__).read_text(encoding="utf-8")
-    assert "derive_and_run" in check_src and "from gideon.check_work import" in check_src
-    assert "reconstruct_claims" not in check_src, "derivation belongs to the core, not the wrapper"
+    assert (
+        "derive_and_run" in check_src
+        and "from gideon.assurance.check_work import" in check_src
+    )
+    assert (
+        "reconstruct_claims" not in check_src
+    ), "derivation belongs to the core, not the wrapper"

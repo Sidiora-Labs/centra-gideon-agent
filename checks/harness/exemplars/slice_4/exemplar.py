@@ -15,7 +15,7 @@ Two mechanisms, one pure and one end-to-end:
    cache served the untouched prefix at zero model calls). This is the acceptance bar
    Slice 4 set: answerable from the ledger, not from logs.
 
-Runnable standalone: `python -m harness.exemplars.slice_4.exemplar` (or `smoke.sh`).
+Runnable standalone: `python -m checks.harness.exemplars.slice_4.exemplar` (or `smoke.sh`).
 """
 
 from __future__ import annotations
@@ -23,15 +23,18 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from gideon.workflows import journal as J
-from gideon.workflows import mutations as M
-from gideon.workflows import store
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.models import InstanceState, Node, RunStatus, WorkflowRun
+from gideon.automation.workflows import journal as J
+from gideon.automation.workflows import mutations as M
+from gideon.automation.workflows import store
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.models import (
+    InstanceState,
+    Node,
+    RunStatus,
+    WorkflowRun,
+)
 
 
-#: `n2` binds `n1`; `n3` binds `n2`; `n_unrelated` binds nothing. Editing `n2` must re-run
-#: `n2` and `n3` (its binding closure), leave `n1` cached, and never touch `n_unrelated`.
 def _spec(second_prompt: str) -> dict[str, Any]:
     return {
         "name": "slice4-cascade",
@@ -41,7 +44,11 @@ def _spec(second_prompt: str) -> dict[str, Any]:
             "children": [
                 {"kind": "infer", "id": "n1", "config": {"prompt": "first"}},
                 {"kind": "infer", "id": "n2", "config": {"prompt": second_prompt}},
-                {"kind": "infer", "id": "n3", "config": {"prompt": "third {{nodes.n2.output}}"}},
+                {
+                    "kind": "infer",
+                    "id": "n3",
+                    "config": {"prompt": "third {{nodes.n2.output}}"},
+                },
                 {"kind": "infer", "id": "n_unrelated", "config": {"prompt": "aside"}},
             ],
         },
@@ -51,7 +58,9 @@ def _spec(second_prompt: str) -> dict[str, Any]:
 def _echo():
     calls: list[str] = []
 
-    async def fn(prompt: str, *, use_case: str = "background", output_type: Any = None) -> str:
+    async def fn(
+        prompt: str, *, use_case: str = "background", output_type: Any = None
+    ) -> str:
         calls.append(prompt)
         return f"out{len(calls)}"
 
@@ -88,8 +97,6 @@ async def _drive() -> str | None:
     if len(fn.calls) != 4:
         return f"expected 4 model calls on the first run, got {len(fn.calls)}"
 
-    # Edit n2's prompt and resume. The resume cache keys on (path, epoch, inputs, spec) so
-    # n2's changed config invalidates n2, and n3's changed input invalidates n3.
     before = len(fn.calls)
     spec_v2 = _spec("second EDITED")
     store.write_spec(run.id, spec_v2)
@@ -106,12 +113,15 @@ async def _drive() -> str | None:
     if reran != 2:
         return f"expected exactly the closure (n2, n3 = 2 calls) to re-run, got {reran}"
     if fn.calls[-2] != "second EDITED" or not fn.calls[-1].startswith("third "):
-        return f"the re-run did not execute the edited closure in order: {fn.calls[-2:]}"
+        return (
+            f"the re-run did not execute the edited closure in order: {fn.calls[-2:]}"
+        )
 
-    # The ledger is the acceptance surface: cached hits for the untouched nodes.
     cached = [r for r in J.ledger(run.id) if r["kind"] == J.STEP_CACHED]
     if not any(r.get("cached") for r in cached):
-        return "no STEP_CACHED ledger records — the resume cache did not serve the prefix"
+        return (
+            "no STEP_CACHED ledger records — the resume cache did not serve the prefix"
+        )
     return None
 
 

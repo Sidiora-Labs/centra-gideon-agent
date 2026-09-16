@@ -1,3 +1,5 @@
+> Ported upstream reference. Dated release, audit, and publication claims describe the donor project and do not certify this Gideon implementation.
+
 # Community channel-app bounty drafts (CE-9)
 
 Ready-to-post GitHub issue drafts for the three most-wanted community channel
@@ -10,14 +12,14 @@ These three are the **channel** rows of
 [app-bounty-wants-list.md](app-bounty-wants-list.md), the single list ECOSYSTEM-TOOLING's
 `ET-7` bounty board files from. That file enumerates what is wanted (channels, providers,
 sources) and is machine-checked; this file carries the public issue prose for the three
-channels. Keep them in step — `tests/test_bounty_wants_list.py` reds if they disagree.
+channels. Keep them in step — `checks/runtime/test_bounty_wants_list.py` reds if they disagree.
 
 The other two CE-9 legs are already satisfied in-tree and are cited by every
 draft:
 
 - **Scaffold**: `gideon app new --type channel` works today — the type
   table is *derived* from `PROVIDER_TYPES` + the provider registry
-  (`src/gideon/cli_app_new.py`), so `channel` needs no registration step;
+  (`runtime/gideon/cli_app_new.py`), so `channel` needs no registration step;
   a scaffold run emits the full six-file app with a real
   `ChannelTransportProvider` stub introspected from `gideon.sdk.channel`.
 - **Trigger sources**: remote events (a message arriving on a bridged channel)

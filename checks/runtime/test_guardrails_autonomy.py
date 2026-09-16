@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from gideon.guardrails import autonomy as au
+from gideon.security.guardrails import autonomy as au
 
 
 @pytest.fixture(autouse=True)
@@ -35,15 +35,15 @@ def _isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: home)
     cfg = home / "config.json"
     cfg.write_text("{}", encoding="utf-8")
-    monkeypatch.setattr("gideon.config.loader.config_path", lambda: cfg)
-    from gideon import sel as sel_mod
+    monkeypatch.setattr("gideon.core.config.loader.config_path", lambda: cfg)
+    from gideon.security import sel as sel_mod
 
     sel_mod.SecurityEventLog._instance = None
     sel_mod.SecurityEventLog._initialized = False
-    from gideon import feedback as fb
+    from gideon.cognition import feedback as fb
 
     fb._invalidate()
     yield home
@@ -68,7 +68,7 @@ def _approve(key: str, *, when: datetime, outcome: str = "approved") -> None:
     intended one afterwards — the shape (event_type, metadata, outcome) still comes from
     the real writer, only the clock is moved.
     """
-    from gideon.sel import sel
+    from gideon.security.sel import sel
 
     log = sel()
     log.log_tool_invocation(
@@ -92,9 +92,6 @@ def _earn_eligibility(key: str = KEY, *, approvals: int = 10, days: int = 7) -> 
     now = datetime.now(timezone.utc)
     for i in range(approvals):
         _approve(key, when=now - timedelta(days=days * i / max(1, approvals - 1)))
-
-
-# ── the ladder itself ─────────────────────────────────────────────────────────
 
 
 class TestLadder:
@@ -126,9 +123,6 @@ class TestLadder:
         the field default, so a type has to opt in deliberately."""
         spec = au.ActionTypeSpec(key="app:mailer.send", leaves_machine=True)
         assert au.rung_rank(spec.ceiling) < au.rung_rank(au.RUNG_AUTONOMOUS)
-
-
-# ── done_when 1: the evidence bar ─────────────────────────────────────────────
 
 
 class TestEligibilityIsEarned:
@@ -168,7 +162,7 @@ class TestEligibilityIsEarned:
     def test_a_thumbs_down_counts_as_a_rejection(self):
         """FEEDBACK-SIGNAL (plan 58) is the second evidence source: a 👎 on this type's
         output is attributed by ``producer_id`` and blocks the promotion."""
-        from gideon.feedback import record_feedback
+        from gideon.cognition.feedback import record_feedback
 
         _register(ceiling=au.RUNG_AUTO_WITH_UNDO)
         _earn_eligibility()
@@ -188,7 +182,7 @@ class TestEligibilityIsEarned:
     def test_a_thumbs_up_is_not_counted_as_an_approval(self):
         """👍 is silent-positive in plan 58 — it gives accuracy a denominator, it does
         not buy autonomy. Only a human APPROVAL verdict is evidence."""
-        from gideon.feedback import record_feedback
+        from gideon.cognition.feedback import record_feedback
 
         _register(ceiling=au.RUNG_AUTO_WITH_UNDO)
         for i in range(20):
@@ -255,13 +249,11 @@ class TestEligibilityIsEarned:
         elig = au.promotion_eligibility("app:mailer.send")
         assert not elig.eligible
         assert "leaves the machine" in elig.reason
-        # The same evidence DOES propose the next rung for a local type.
-        _register(key="local.rename", floor=au.RUNG_AUTO_WITH_UNDO, ceiling=au.RUNG_AUTONOMOUS)
+        _register(
+            key="local.rename", floor=au.RUNG_AUTO_WITH_UNDO, ceiling=au.RUNG_AUTONOMOUS
+        )
         _earn_eligibility("local.rename", approvals=40, days=60)
         assert au.promotion_eligibility("local.rename").next_rung == au.RUNG_AUTONOMOUS
-
-
-# ── done_when 2: demotion is immediate, with a cooldown ───────────────────────
 
 
 class TestDemotionIsImmediate:
@@ -293,7 +285,6 @@ class TestDemotionIsImmediate:
         _register(ceiling=au.RUNG_AUTO_WITH_UNDO)
         _earn_eligibility()
         au.demote(KEY, "undone")
-        # Age the recorded cooldown past now (a demotion 30 days ago with a 14d cooldown).
         path = au._store_path()
         data = json.loads(path.read_text(encoding="utf-8"))
         stale = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
@@ -323,9 +314,6 @@ class TestDemotionIsImmediate:
         assert state is not None and len(state.demotions) == au._MAX_DEMOTIONS
 
 
-# ── promotion is always a click ───────────────────────────────────────────────
-
-
 class TestPromotionIsAlwaysAClick:
     def test_eligibility_alone_never_promotes(self):
         _register(ceiling=au.RUNG_AUTO_WITH_UNDO)
@@ -348,7 +336,7 @@ class TestPromotionIsAlwaysAClick:
         assert au.grant_rung("nobody.declared.this", au.RUNG_ONE_TAP) is None
 
     def test_a_grant_is_sel_audited(self):
-        from gideon.sel import sel
+        from gideon.security.sel import sel
 
         _register(ceiling=au.RUNG_AUTO_WITH_UNDO)
         au.grant_rung(KEY, au.RUNG_ONE_TAP, evidence_window="12 approvals over 9 days")
@@ -359,12 +347,9 @@ class TestPromotionIsAlwaysAClick:
         assert "guardrails.autonomy_demoted" in ops
 
 
-# ── done_when 3: the incident clamp ───────────────────────────────────────────
-
-
 class TestIncidentClamp:
     def test_an_active_incident_clamps_above_one_tap(self, monkeypatch):
-        from gideon.guardrails import incident
+        from gideon.security.guardrails import incident
 
         _register(ceiling=au.RUNG_AUTONOMOUS)
         au.grant_rung(KEY, au.RUNG_AUTONOMOUS)
@@ -372,7 +357,6 @@ class TestIncidentClamp:
 
         incident.activate("drive test")
         assert au.resolve_rung(KEY) == au.RUNG_ONE_TAP
-        # The GRANT is untouched — an incident suspends, it does not demote.
         assert au.granted_rung(KEY) == au.RUNG_AUTONOMOUS
         incident.resume()
         assert au.resolve_rung(KEY) == au.RUNG_AUTONOMOUS
@@ -380,7 +364,7 @@ class TestIncidentClamp:
     def test_the_clamp_outranks_a_higher_floor(self):
         """A declared floor above one_tap does not survive the kill switch — that is
         what makes it a kill switch and not a suggestion."""
-        from gideon.guardrails import incident
+        from gideon.security.guardrails import incident
 
         _register(floor=au.RUNG_AUTO_WITH_UNDO, ceiling=au.RUNG_AUTONOMOUS)
         assert au.resolve_rung(KEY) == au.RUNG_AUTO_WITH_UNDO
@@ -388,14 +372,14 @@ class TestIncidentClamp:
         assert au.resolve_rung(KEY) == au.RUNG_ONE_TAP
 
     def test_one_tap_and_below_are_untouched(self):
-        from gideon.guardrails import incident
+        from gideon.security.guardrails import incident
 
         _register(floor=au.RUNG_ONE_TAP, ceiling=au.RUNG_ONE_TAP)
         incident.activate("drive test")
         assert au.resolve_rung(KEY) == au.RUNG_ONE_TAP
 
     def test_no_promotion_is_proposed_during_an_incident(self):
-        from gideon.guardrails import incident
+        from gideon.security.guardrails import incident
 
         _register(ceiling=au.RUNG_AUTO_WITH_UNDO)
         _earn_eligibility()
@@ -403,9 +387,6 @@ class TestIncidentClamp:
         elig = au.promotion_eligibility(KEY)
         assert not elig.eligible
         assert "incident" in elig.reason
-
-
-# ── done_when 4: the record is derived, never cached ──────────────────────────
 
 
 class TestTheRecordIsNeverCached:
@@ -417,7 +398,6 @@ class TestTheRecordIsNeverCached:
         raw = json.loads(au._store_path().read_text(encoding="utf-8"))
         assert set(raw[KEY]) == {"rung", "granted_at", "evidence_window", "demotions"}
         assert set(raw[KEY]["demotions"][0]) == {"at", "cause", "cooldown_until"}
-        # No derived counter anywhere in the serialized document.
         blob = json.dumps(raw)
         for banned in ("clean_approvals", "rejections", "observed_days", "eligible"):
             assert banned not in blob
@@ -441,9 +421,6 @@ class TestTheRecordIsNeverCached:
         assert not au.promotion_eligibility(KEY).eligible
 
 
-# ── fail-closed rails ─────────────────────────────────────────────────────────
-
-
 class TestFailsClosed:
     def test_a_corrupt_store_grants_nothing(self):
         _register(ceiling=au.RUNG_AUTONOMOUS)
@@ -459,13 +436,17 @@ class TestFailsClosed:
 
     def test_an_unknown_stored_rung_does_not_resolve_above_the_floor(self):
         _register(floor=au.RUNG_ONE_TAP, ceiling=au.RUNG_AUTONOMOUS)
-        au._store_path().write_text(json.dumps({KEY: {"rung": "god_mode"}}), encoding="utf-8")
+        au._store_path().write_text(
+            json.dumps({KEY: {"rung": "god_mode"}}), encoding="utf-8"
+        )
         assert au.resolve_rung(KEY) == au.RUNG_ONE_TAP
 
     def test_one_corrupt_entry_does_not_erase_the_others(self):
         _register(key="good.type", ceiling=au.RUNG_AUTONOMOUS)
         au._store_path().write_text(
-            json.dumps({"bad.type": "not-an-object", "good.type": {"rung": "auto_with_undo"}}),
+            json.dumps(
+                {"bad.type": "not-an-object", "good.type": {"rung": "auto_with_undo"}}
+            ),
             encoding="utf-8",
         )
         assert au.resolve_rung("good.type") == au.RUNG_AUTO_WITH_UNDO
@@ -476,7 +457,12 @@ class TestFailsClosed:
         _earn_eligibility()
         au._store_path().write_text(
             json.dumps(
-                {KEY: {"rung": "draft_only", "demotions": [{"at": "", "cooldown_until": "soon"}]}}
+                {
+                    KEY: {
+                        "rung": "draft_only",
+                        "demotions": [{"at": "", "cooldown_until": "soon"}],
+                    }
+                }
             ),
             encoding="utf-8",
         )
@@ -502,50 +488,52 @@ class TestFailsClosed:
         assert au.resolve_rung(KEY) == au.RUNG_ONE_TAP
 
 
-# ── configuration: the operator's bar actually moves the decision ─────────────
-
-
 class TestConfigWiring:
     def test_the_config_threshold_moves_the_bar(self):
         """The production read path: ``AppConfig.load()`` → ``_rule_for`` → verdict."""
-        from gideon.config.loader import AppConfig, config_path
+        from gideon.core.config.loader import AppConfig, config_path
 
         _register(ceiling=au.RUNG_AUTO_WITH_UNDO)
         _earn_eligibility(approvals=4, days=8)
         assert not au.promotion_eligibility(KEY).eligible
 
         config_path().write_text(
-            json.dumps({"guardrails": {"autonomy": {"clean_approvals": 4}}}), encoding="utf-8"
+            json.dumps({"guardrails": {"autonomy": {"clean_approvals": 4}}}),
+            encoding="utf-8",
         )
         assert AppConfig.load().guardrails.autonomy.clean_approvals == 4
         assert au.promotion_eligibility(KEY).eligible
 
     def test_the_cooldown_length_comes_from_config(self):
-        from gideon.config.loader import config_path
+        from gideon.core.config.loader import config_path
 
         _register(ceiling=au.RUNG_AUTO_WITH_UNDO)
         config_path().write_text(
-            json.dumps({"guardrails": {"autonomy": {"cooldown_days": 0}}}), encoding="utf-8"
+            json.dumps({"guardrails": {"autonomy": {"cooldown_days": 0}}}),
+            encoding="utf-8",
         )
         record = au.demote(KEY, "rejected")
-        # A zero-day cooldown expires immediately, so a grant is possible again.
         assert record.cooldown_until
         assert au.grant_rung(KEY, au.RUNG_ONE_TAP) == au.RUNG_ONE_TAP
 
     def test_a_type_that_declares_its_own_rule_keeps_it(self):
-        from gideon.config.loader import config_path
+        from gideon.core.config.loader import config_path
 
         config_path().write_text(
-            json.dumps({"guardrails": {"autonomy": {"clean_approvals": 1}}}), encoding="utf-8"
+            json.dumps({"guardrails": {"autonomy": {"clean_approvals": 1}}}),
+            encoding="utf-8",
         )
-        _register(ceiling=au.RUNG_AUTO_WITH_UNDO, promotion=au.PromotionRule(clean_approvals=25))
+        _register(
+            ceiling=au.RUNG_AUTO_WITH_UNDO,
+            promotion=au.PromotionRule(clean_approvals=25),
+        )
         _earn_eligibility(approvals=10, days=9)
         elig = au.promotion_eligibility(KEY)
         assert not elig.eligible
         assert "of 25" in elig.reason
 
     def test_the_thresholds_are_runtime_editable(self):
-        from gideon.dashboard.handlers.core import _EDITABLE_CONFIG
+        from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
         for leaf in (
             "clean_approvals",
@@ -560,23 +548,22 @@ class TestConfigWiring:
         def _boom():
             raise RuntimeError("config unavailable")
 
-        monkeypatch.setattr("gideon.config.loader.AppConfig.load", staticmethod(_boom))
+        monkeypatch.setattr(
+            "gideon.core.config.loader.AppConfig.load", staticmethod(_boom)
+        )
         assert au._config_rule() == au.PromotionRule()
         assert au._config_window_days() == 30
 
 
-# ── durability ────────────────────────────────────────────────────────────────
-
-
 class TestTheStoreTravels:
     def test_the_store_is_in_the_snapshot_core_files(self):
-        import gideon.snapshot as snap
+        import gideon.workspace.snapshot as snap
 
         staged = {f for files in snap.CORE_FILES.values() for f in files}
         assert "autonomy_rungs.json" in staged
 
     def test_the_store_is_a_declared_inventory_entry(self):
-        from gideon.durability import inventory as inv
+        from gideon.operations.durability import inventory as inv
 
         entry = inv.claim_for("autonomy_rungs.json")
         assert entry is not None and entry.id == "autonomy_rungs"

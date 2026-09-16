@@ -6,21 +6,22 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.dashboard.chat import api_chat_session_reasoning_effort
-from gideon.dashboard.state import DashboardState, _ChatSession
+from gideon.interfaces.dashboard.chat import api_chat_session_reasoning_effort
+from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
 
 
-def _make_app(state: DashboardState) -> web.Application:
+def _make_app(state: ConsoleState) -> web.Application:
     app = web.Application()
     app["state"] = state
     app.router.add_post(
-        "/api/chat/sessions/{session}/reasoning-effort", api_chat_session_reasoning_effort
+        "/api/chat/sessions/{session}/reasoning-effort",
+        api_chat_session_reasoning_effort,
     )
     return app
 
 
-def _mock_state(session: _ChatSession | None = None) -> DashboardState:
-    state = MagicMock(spec=DashboardState)
+def _mock_state(session: _ChatSession | None = None) -> ConsoleState:
+    state = MagicMock(spec=ConsoleState)
     state._sessions = {}
     if session:
         state._sessions[session.key] = session
@@ -45,8 +46,6 @@ class TestChatSessionReasoningEffort:
             data = await resp.json()
             assert data == {"ok": True, "reasoning_effort": level}
             assert session.reasoning_effort == level
-            # Mid-session change resets the session so the subprocess
-            # respawns with the new --effort flag.
             state.sessions.reset.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -65,8 +64,6 @@ class TestChatSessionReasoningEffort:
 
     @pytest.mark.asyncio
     async def test_no_op_when_unchanged_skips_session_reset(self):
-        # Setting the same value twice must not reset the session
-        # (avoids needless subprocess respawn on repeated UI clicks).
         session = _ChatSession("test")
         session.reasoning_effort = "medium"
         state = _mock_state(session)
@@ -80,9 +77,6 @@ class TestChatSessionReasoningEffort:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        # No fixed scale now — reject only MALFORMED tokens (uppercase, spaces,
-        # shell metachars, path traversal, leading digit). Legit backend-declared
-        # values like "extreme"/"ultra" are accepted (see test_accepts_any_backend_token).
         "bad_value",
         ["LOW", " low", "low ", "0", "; rm -rf /", "max --evil", "../etc"],
     )
@@ -99,10 +93,10 @@ class TestChatSessionReasoningEffort:
             state.sessions.reset.assert_not_called()
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("value", ["low", "high", "max", "minimal", "xhigh", "extreme"])
+    @pytest.mark.parametrize(
+        "value", ["low", "high", "max", "minimal", "xhigh", "extreme"]
+    )
     async def test_accepts_any_backend_token(self, value: str):
-        # Effort values come from the bound agent's backend — accept any well-formed
-        # short lowercase token, not just the native ladder.
         session = _ChatSession("test")
         state = _mock_state(session)
         async with TestClient(TestServer(_make_app(state))) as client:
@@ -151,26 +145,31 @@ class TestValidateReasoningEffortPersistence:
     """Persistence-layer allowlist guard prevents subprocess arg injection
     via tampered metadata."""
 
-    @pytest.mark.parametrize("level", ["", "low", "medium", "high", "max", "minimal", "xhigh"])
+    @pytest.mark.parametrize(
+        "level", ["", "low", "medium", "high", "max", "minimal", "xhigh"]
+    )
     def test_passes_through_wellformed(self, level: str):
-        # Any well-formed token passes (backends declare their own values).
-        from gideon.dashboard.chat_persistence import _validate_reasoning_effort
+        from gideon.interfaces.dashboard.chat_persistence import (
+            _validate_reasoning_effort,
+        )
 
         assert _validate_reasoning_effort(level) == level
 
     @pytest.mark.parametrize(
-        # Only injection-shaped / malformed tokens are discarded — the format guard
-        # (short lowercase a-z0-9_- , leading letter) blocks these, not a value list.
         "tampered",
         ["LOW", "; rm -rf /", "max --evil-flag", "../../../etc", " low"],
     )
     def test_discards_malformed(self, tampered: str):
-        from gideon.dashboard.chat_persistence import _validate_reasoning_effort
+        from gideon.interfaces.dashboard.chat_persistence import (
+            _validate_reasoning_effort,
+        )
 
         assert _validate_reasoning_effort(tampered) == ""
 
     def test_discards_non_string(self):
-        from gideon.dashboard.chat_persistence import _validate_reasoning_effort
+        from gideon.interfaces.dashboard.chat_persistence import (
+            _validate_reasoning_effort,
+        )
 
         assert _validate_reasoning_effort(5) == ""
         assert _validate_reasoning_effort(None) == ""

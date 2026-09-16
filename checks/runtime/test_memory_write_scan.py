@@ -5,7 +5,7 @@ invisible-Unicode payload is blocked, so a poisoned tool output can't persist a 
 instruction that re-injects on later turns. Direct user writes are trusted (never scanned).
 """
 
-from gideon.memory_service import MemoryService
+from gideon.cognition.memory_service import MemoryService
 
 
 class _FakeVS:
@@ -25,25 +25,26 @@ class _FakeVS:
 
 
 def _svc():
-    # _vs is a property returning _explicit_vs when set — inject our stub there.
     svc = MemoryService.__new__(MemoryService)
     svc._explicit_vs = _FakeVS()
     return svc
 
 
-_BIDI = "Fact about the project‮gnittes suoregnad"  # RLO override → dangerous
+_BIDI = "Fact about the project‮gnittes suoregnad"
 
 
 def test_untrusted_bidi_write_blocked():
     svc = _svc()
     ok = svc.write_episodic(_BIDI, source="consolidation")
     assert ok is False
-    assert svc._vs.episodic == []  # nothing written
+    assert svc._vs.episodic == []
 
 
 def test_untrusted_clean_write_passes():
     svc = _svc()
-    ok = svc.write_episodic("A normal learned fact about the codebase.", source="consolidation")
+    ok = svc.write_episodic(
+        "A normal learned fact about the codebase.", source="consolidation"
+    )
     assert ok is True
     assert len(svc._vs.episodic) == 1
 

@@ -35,13 +35,11 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from gideon.browse import cdp
-from gideon.config.loader import AppConfig
-from gideon.net import policy as net_policy
-from gideon.net.policy import egress_policy_for
+from gideon.core.config.loader import AppConfig
+from gideon.integrations.browse import cdp
+from gideon.security.net import policy as net_policy
+from gideon.security.net.policy import egress_policy_for
 
-# Public addresses, so the guard's public-only stance is never what denies a host here —
-# only the policy is.
 _DNS = {
     "allowed.example": ["93.184.216.34"],
     "denied.example": ["93.184.216.35"],
@@ -69,7 +67,6 @@ class FakeTransport:
 
     async def send(self, method: str, params: dict | None = None) -> dict:
         if method in self._fail_on:
-            # Nothing is recorded: a send that raised never reached the wire.
             raise RuntimeError(f"transport is down for {method}")
         self.sent.append((method, dict(params or {})))
         return {}
@@ -141,7 +138,7 @@ def sel_rows(monkeypatch):
 def safety_script_calls(monkeypatch):
     """Stub the sibling's ``browse/safety_script`` module and record how it was called."""
     calls: list[dict] = []
-    module = types.ModuleType("gideon.browse.safety_script")
+    module = types.ModuleType("gideon.integrations.browse.safety_script")
 
     def safety_script(*, allow_hosts: tuple[str, ...] = ()) -> str:
         calls.append({"allow_hosts": allow_hosts})
@@ -149,7 +146,7 @@ def safety_script_calls(monkeypatch):
 
     module.SAFETY_SCRIPT = "/* in-page guard */"
     module.safety_script = safety_script
-    monkeypatch.setitem(sys.modules, "gideon.browse.safety_script", module)
+    monkeypatch.setitem(sys.modules, "gideon.integrations.browse.safety_script", module)
     return calls
 
 
@@ -167,9 +164,6 @@ def _frame(url: str) -> dict:
     return {"frame": {"id": "FRAME1", "url": url}}
 
 
-# ── the ordering clause ───────────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_denied_host_sends_zero_page_navigate():
     """THE clause: the block happens BEFORE ``Page.navigate`` reaches the wire."""
@@ -179,7 +173,8 @@ async def test_denied_host_sends_zero_page_navigate():
     outcome = await session.navigate("https://denied.example/secret")
 
     assert transport.count(cdp.NAVIGATE) == 0, (
-        "a denied host must not produce a Page.navigate message; " f"wire was {transport.methods}"
+        "a denied host must not produce a Page.navigate message; "
+        f"wire was {transport.methods}"
     )
     assert outcome.allowed is False and outcome.ok is False
     assert outcome.host == "denied.example"
@@ -258,11 +253,12 @@ async def test_the_guard_is_called_with_the_real_browse_profile(monkeypatch):
     )
     assert policy.name == "browse"
     assert policy.max_redirects == 10, "STRICT's 5 would mean the session fell back"
-    assert policy.max_bytes == 50_000_000, "STRICT's 5 MB would mean the session fell back"
-    assert policy.pin_resolved_ip is False, "BROWSE cannot pin; True would be another profile"
-
-
-# ── the SEL row ───────────────────────────────────────────────────────────────
+    assert (
+        policy.max_bytes == 50_000_000
+    ), "STRICT's 5 MB would mean the session fell back"
+    assert (
+        policy.pin_resolved_ip is False
+    ), "BROWSE cannot pin; True would be another profile"
 
 
 @pytest.mark.asyncio
@@ -312,9 +308,6 @@ async def test_audit_failure_does_not_turn_a_deny_into_a_navigation(monkeypatch)
     assert outcome.allowed is False
 
 
-# ── client-side redirects ─────────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_frame_navigated_to_a_denied_host_tears_the_page_down(sel_rows):
     transport = FakeTransport()
@@ -322,7 +315,6 @@ async def test_frame_navigated_to_a_denied_host_tears_the_page_down(sel_rows):
     await session.navigate("https://allowed.example/page")
     sel_rows.clear()
 
-    # The page redirects itself somewhere the pre-flight never saw.
     await transport.listener(cdp.FRAME_NAVIGATED, _frame("https://denied.example/evil"))
 
     assert transport.methods[-2:] == [cdp.STOP_LOADING, cdp.NAVIGATE]
@@ -341,7 +333,9 @@ async def test_frame_navigated_to_an_allowed_host_is_left_alone(sel_rows):
     before = list(transport.methods)
     sel_rows.clear()
 
-    await transport.listener(cdp.FRAME_NAVIGATED, _frame("https://redirected.example/ok"))
+    await transport.listener(
+        cdp.FRAME_NAVIGATED, _frame("https://redirected.example/ok")
+    )
 
     assert transport.methods == before, "an allowed redirect must not be torn down"
     assert sel_rows == []
@@ -357,7 +351,9 @@ async def test_the_teardown_navigation_is_not_re_judged():
     after_teardown = list(transport.methods)
 
     await transport.listener(cdp.FRAME_NAVIGATED, _frame(cdp.BLANK_URL))
-    await transport.listener(cdp.FRAME_NAVIGATED, _frame("chrome-error://chromewebdata/"))
+    await transport.listener(
+        cdp.FRAME_NAVIGATED, _frame("chrome-error://chromewebdata/")
+    )
 
     assert transport.methods == after_teardown
     assert len(session.blocks) == 1
@@ -378,9 +374,6 @@ async def test_a_file_scheme_redirect_is_denied_not_ignored(sel_rows):
     assert session.blocks[-1].url == "file:///etc/passwd"
 
 
-# ── the operator stays in control ─────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_operator_deny_list_is_on_the_path(operator_egress, sel_rows):
     """``egress_policy_for`` is used, not the bare profile: an operator deny still bites."""
@@ -388,17 +381,18 @@ async def test_operator_deny_list_is_on_the_path(operator_egress, sel_rows):
     session = await _started(transport)
 
     allowed_first = await session.navigate("https://operator-denied.example/a")
-    assert allowed_first.ok is True, "base profile allows this host, so the test can discriminate"
+    assert (
+        allowed_first.ok is True
+    ), "base profile allows this host, so the test can discriminate"
 
     operator_egress.deny_hosts = ["operator-denied.example"]
     outcome = await session.navigate("https://operator-denied.example/b")
 
     assert outcome.allowed is False
-    assert transport.count(cdp.NAVIGATE) == 1, "only the pre-config navigation reached the wire"
+    assert (
+        transport.count(cdp.NAVIGATE) == 1
+    ), "only the pre-config navigation reached the wire"
     assert sel_rows[-1].metadata["host"] == "operator-denied.example"
-
-
-# ── fail closed, every way in ─────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -421,7 +415,9 @@ async def test_a_denied_host_stays_denied_when_the_config_read_fails(monkeypatch
 
     outcome = await session.navigate("https://denied.example/secret")
 
-    assert outcome.allowed is False, "a config-read error must not un-deny a denied host"
+    assert (
+        outcome.allowed is False
+    ), "a config-read error must not un-deny a denied host"
     assert "deny list" in outcome.reason
     assert transport.count(cdp.NAVIGATE) == 0
 
@@ -553,7 +549,7 @@ async def test_a_missing_safety_script_module_fails_closed(monkeypatch):
     the cache just re-imported it from disk and the test stopped exercising anything. The merge is
     what exposed that; on either branch alone it looked green.
     """
-    monkeypatch.setitem(sys.modules, "gideon.browse.safety_script", None)
+    monkeypatch.setitem(sys.modules, "gideon.integrations.browse.safety_script", None)
     transport = FakeTransport()
     session = _session(transport)
 
@@ -575,9 +571,10 @@ async def test_a_transport_failure_is_not_reported_as_a_navigation():
     assert outcome.ok is False, "a send that raised is not a navigation"
     assert outcome.allowed is True, "the gate did allow it; only the transport failed"
     assert transport.count(cdp.NAVIGATE) == 0
-    assert session.quarantine_reason, "unknown browser state must quarantine the session"
+    assert (
+        session.quarantine_reason
+    ), "unknown browser state must quarantine the session"
 
-    # And the quarantine holds: the session refuses even an allowed URL afterwards.
     transport._fail_on = set()
     again = await session.navigate("https://allowed.example/page")
     assert again.allowed is False and transport.count(cdp.NAVIGATE) == 0

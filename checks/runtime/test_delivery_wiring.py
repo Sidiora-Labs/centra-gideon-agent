@@ -23,11 +23,12 @@ from __future__ import annotations
 import asyncio
 import types
 
-import gideon.action_providers as AP
-from gideon.gateway import GatewayOrchestrator
-from gideon.triggers.delivery import build_delivery, deliver, is_duplicate
-from gideon.triggers.models import Trigger
-from gideon.triggers.store import TriggerStore
+import gideon.integrations.action_providers as AP
+from gideon.automation.triggers.delivery import build_delivery, deliver, is_duplicate
+from gideon.automation.triggers.models import Trigger
+from gideon.automation.triggers.store import TriggerStore
+from gideon.engine.gateway import RuntimeCoordinator
+from gideon.engine.trigger_dispatch import TriggerDispatch
 
 
 class _State:
@@ -43,7 +44,9 @@ class _State:
         self.sent: list[dict] = []
 
     def notify(self, *, kind, title, body, meta=None):
-        self.sent.append({"kind": kind, "title": title, "body": body, "meta": meta or {}})
+        self.sent.append(
+            {"kind": kind, "title": title, "body": body, "meta": meta or {}}
+        )
         return True
 
 
@@ -58,7 +61,7 @@ class _Boom:
 
 
 def _fire(tmp_path, monkeypatch, provider, tid="clock:n") -> _State:
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(
         Trigger(
@@ -76,15 +79,14 @@ def _fire(tmp_path, monkeypatch, provider, tid="clock:n") -> _State:
     real = AP.get_action_provider
     try:
         AP.get_action_provider = lambda name: provider
-        orch = object.__new__(GatewayOrchestrator)
+        orch = object.__new__(RuntimeCoordinator)
         orch.dashboard_state = state
-        asyncio.run(orch._fire_store_trigger(store.get(tid).trigger, {"trigger_id": tid}))
+        asyncio.run(
+            orch._fire_store_trigger(store.get(tid).trigger, {"trigger_id": tid})
+        )
     finally:
         AP.get_action_provider = real
     return state
-
-
-# ── the defect ──
 
 
 def test_a_COMPLETED_fire_notifies(tmp_path, monkeypatch):
@@ -118,14 +120,15 @@ def test_the_notification_NAMES_the_trigger(tmp_path, monkeypatch):
     assert "nightly index" in _fire(tmp_path, monkeypatch, _Ok()).sent[0]["title"]
 
 
-# ── the no-double-ping half ──
-
-
 def test_a_RETRY_of_the_same_run_does_NOT_double_ping():
     """🔴 Criterion 10's second clause. `event_id` is stable across retries by construction, so a
     redelivery is suppressed on identity rather than on a timestamp guess."""
-    first = build_delivery(trigger_id="clock:n", trigger_name="n", ok=True, run_id="run-1")
-    retry = build_delivery(trigger_id="clock:n", trigger_name="n", ok=True, run_id="run-1")
+    first = build_delivery(
+        trigger_id="clock:n", trigger_name="n", ok=True, run_id="run-1"
+    )
+    retry = build_delivery(
+        trigger_id="clock:n", trigger_name="n", ok=True, run_id="run-1"
+    )
     seen: set[str] = set()
     state = _State()
     assert deliver(state, first, delivered_ids=seen) is True
@@ -137,8 +140,16 @@ def test_a_DIFFERENT_run_still_pings():
     """Dedup must not silence the next legitimate run — that would be worse than double-pinging."""
     seen: set[str] = set()
     state = _State()
-    deliver(state, build_delivery(trigger_id="t", ok=True, run_id="run-1"), delivered_ids=seen)
-    deliver(state, build_delivery(trigger_id="t", ok=True, run_id="run-2"), delivered_ids=seen)
+    deliver(
+        state,
+        build_delivery(trigger_id="t", ok=True, run_id="run-1"),
+        delivered_ids=seen,
+    )
+    deliver(
+        state,
+        build_delivery(trigger_id="t", ok=True, run_id="run-2"),
+        delivered_ids=seen,
+    )
     assert len(state.sent) == 2
 
 
@@ -153,21 +164,21 @@ def test_is_duplicate_tolerates_NO_seen_set():
     assert is_duplicate(build_delivery(trigger_id="t", ok=True), None) is False
 
 
-# ── it must not build a second notification path ──
-
-
 def test_it_routes_through_STATE_NOTIFY():
     """R18: "the substrate does not build a second notification path". Going around `notify` would
     bypass `notification_allowed` and the per-(source, kind) rule — a muted channel would start
     talking."""
     import inspect
 
-    assert "state.notify" in inspect.getsource(deliver)
+    from gideon.automation.triggers.delivery import NotificationAttempt
+
+    assert "NotificationAttempt" in inspect.getsource(deliver)
+    assert "state.notify" in inspect.getsource(NotificationAttempt.send)
 
 
 def test_NO_dashboard_state_is_survived(tmp_path, monkeypatch):
     """A `--no-dashboard` gateway has no state to notify through, and a fire must still succeed."""
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(
         Trigger(
@@ -183,12 +194,14 @@ def test_NO_dashboard_state_is_survived(tmp_path, monkeypatch):
     real = AP.get_action_provider
     try:
         AP.get_action_provider = lambda name: _Ok()
-        orch = object.__new__(GatewayOrchestrator)  # no dashboard_state at all
+        orch = object.__new__(RuntimeCoordinator)
         asyncio.run(
-            orch._fire_store_trigger(store.get("clock:n").trigger, {"trigger_id": "clock:n"})
+            orch._fire_store_trigger(
+                store.get("clock:n").trigger, {"trigger_id": "clock:n"}
+            )
         )
     finally:
-        AP.get_action_provider = real  # nothing raised
+        AP.get_action_provider = real
 
 
 def test_a_NOTIFY_FAILURE_does_not_fail_the_fire(tmp_path, monkeypatch):
@@ -198,7 +211,7 @@ def test_a_NOTIFY_FAILURE_does_not_fail_the_fire(tmp_path, monkeypatch):
         def notify(self, **kwargs):
             raise OSError("notification bus down")
 
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(
         Trigger(
@@ -214,16 +227,15 @@ def test_a_NOTIFY_FAILURE_does_not_fail_the_fire(tmp_path, monkeypatch):
     real = AP.get_action_provider
     try:
         AP.get_action_provider = lambda name: _Ok()
-        orch = object.__new__(GatewayOrchestrator)
+        orch = object.__new__(RuntimeCoordinator)
         orch.dashboard_state = Angry()
         asyncio.run(
-            orch._fire_store_trigger(store.get("clock:n").trigger, {"trigger_id": "clock:n"})
+            orch._fire_store_trigger(
+                store.get("clock:n").trigger, {"trigger_id": "clock:n"}
+            )
         )
     finally:
-        AP.get_action_provider = real  # nothing raised
-
-
-# ── the wiring ──
+        AP.get_action_provider = real
 
 
 def test_the_FIRE_PATH_delivers():
@@ -231,24 +243,21 @@ def test_the_FIRE_PATH_delivers():
     `executor.delivery_for` was itself uncalled."""
     import inspect
 
-    src = inspect.getsource(GatewayOrchestrator._fire_store_trigger)
+    src = inspect.getsource(TriggerDispatch.execute)
     assert "_deliver_fire_outcome" in src
 
 
-# ── 🔴 every fire shared one event id, so a healthy automation notified ONCE (S161) ──
-
-
 def _gw():
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.gateway import RuntimeCoordinator
 
-    gw = GatewayOrchestrator.__new__(GatewayOrchestrator)
+    gw = RuntimeCoordinator.__new__(RuntimeCoordinator)
     gw.dashboard_state = _State()
     return gw
 
 
 def _trigger(tmp_path, *, policy=None, tid="clock:daily"):
-    from gideon.triggers.models import Trigger
-    from gideon.triggers.store import TriggerStore
+    from gideon.automation.triggers.models import Trigger
+    from gideon.automation.triggers.store import TriggerStore
 
     store = TriggerStore(base_dir=tmp_path)
     t = Trigger(
@@ -277,7 +286,7 @@ def test_a_HEALTHY_automation_notifies_on_EVERY_fire(tmp_path, monkeypatch):
     ever**; fires 2-5 were silently discarded as "already sent". Criterion 10's dedup is for
     the same event REDELIVERED (a transport retry); applied to distinct fires it became a mute.
     """
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     _store, trigger = _trigger(tmp_path)
     gw = _gw()
     for _ in range(5):
@@ -289,7 +298,7 @@ def test_the_attempt_key_is_a_COUNTER_not_a_TIMESTAMP(tmp_path, monkeypatch):
     """🔴 A bug in my own first fix. `int(time.time() * 1000)` collides for fires in the same tick —
     measured, 5 rapid reads returned ONE distinct value, so 5 fires still produced only 2
     notifications. A counter is monotonic whatever the clock's resolution."""
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     gw = _gw()
     keys = [gw._next_delivery_attempt() for _ in range(5)]
     assert len(set(keys)) == 5, f"attempt keys must be distinct, got {keys}"
@@ -300,41 +309,48 @@ def test_a_REPEATED_identical_failure_is_SUPPRESSED(tmp_path, monkeypatch):
     path kept the legacy `_FAILURE_REMINDER_SECS` constant and `_result_hash` helper and dropped the
     check that used them. `event_id` cannot cover this: it dedupes the same event redelivered, not
     different fires carrying an identical error."""
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     _store, trigger = _trigger(tmp_path, policy={"dedupe_hash": True})
     gw = _gw()
     for _ in range(6):
-        gw._deliver_fire_outcome(trigger, ok=False, error="ConnectionError: host unreachable")
+        gw._deliver_fire_outcome(
+            trigger, ok=False, error="ConnectionError: host unreachable"
+        )
     assert len(gw.dashboard_state.sent) == 1
 
 
 def test_dedup_is_OPT_IN(tmp_path, monkeypatch):
     """Gated on the declared key. Coalescing alerts for a user who did not ask would be the opposite
     failure — a broken automation going quieter than they expect."""
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     for policy in ({}, {"dedupe_hash": False}):
         _store, trigger = _trigger(tmp_path, policy=policy, tid=f"clock:{policy!r}")
         gw = _gw()
         for _ in range(6):
-            gw._deliver_fire_outcome(trigger, ok=False, error="ConnectionError: host unreachable")
+            gw._deliver_fire_outcome(
+                trigger, ok=False, error="ConnectionError: host unreachable"
+            )
         assert len(gw.dashboard_state.sent) == 6, policy
 
 
 def test_a_DIFFERENT_error_always_alerts(tmp_path, monkeypatch):
     """Dedup is per-error, not per-trigger: a second, different fault is news."""
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     _store, trigger = _trigger(tmp_path, policy={"dedupe_hash": True})
     gw = _gw()
     for i in range(6):
-        gw._deliver_fire_outcome(trigger, ok=False, error=f"ConnectionError: host-{i} down")
+        gw._deliver_fire_outcome(
+            trigger, ok=False, error=f"ConnectionError: host-{i} down"
+        )
     assert len(gw.dashboard_state.sent) == 6
 
 
 def test_a_NEW_error_RESETS_the_window(tmp_path, monkeypatch):
     """A,A,B,B,A → 3 alerts. The hash is persisted on every non-suppressed alert, so a new
     error starts its own window instead of inheriting the previous one's remaining time — and
-    a RETURN to the first error is news again, because the last alert the user saw was B."""
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: tmp_path)
+    a RETURN to the first error is news again, because the last alert the user saw was B.
+    """
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     _store, trigger = _trigger(tmp_path, policy={"dedupe_hash": True})
     gw = _gw()
     for err in ("A: one", "A: one", "B: two", "B: two", "A: one"):
@@ -345,14 +361,25 @@ def test_a_NEW_error_RESETS_the_window(tmp_path, monkeypatch):
 def test_the_reminder_window_lets_a_still_broken_automation_RE_ALERT():
     """Suppression is capped, never unbounded: "it stopped telling me" and "it got fixed" must not
     look the same. Driven on the pure decision so the clock is an argument."""
-    from gideon.triggers.delivery import FAILURE_REMINDER_SECS, suppress_repeat_failure
+    from gideon.automation.triggers.delivery import (
+        FAILURE_REMINDER_SECS,
+        suppress_repeat_failure,
+    )
 
-    _first, digest = suppress_repeat_failure(error="X: boom", last_hash="", last_at=0.0, now=1000.0)
+    _first, digest = suppress_repeat_failure(
+        error="X: boom", last_hash="", last_at=0.0, now=1000.0
+    )
     inside, _ = suppress_repeat_failure(
-        error="X: boom", last_hash=digest, last_at=1000.0, now=1000.0 + FAILURE_REMINDER_SECS - 1
+        error="X: boom",
+        last_hash=digest,
+        last_at=1000.0,
+        now=1000.0 + FAILURE_REMINDER_SECS - 1,
     )
     outside, _ = suppress_repeat_failure(
-        error="X: boom", last_hash=digest, last_at=1000.0, now=1000.0 + FAILURE_REMINDER_SECS + 1
+        error="X: boom",
+        last_hash=digest,
+        last_at=1000.0,
+        now=1000.0 + FAILURE_REMINDER_SECS + 1,
     )
     assert inside is True and outside is False
 
@@ -360,20 +387,24 @@ def test_the_reminder_window_lets_a_still_broken_automation_RE_ALERT():
 def test_dedup_does_NOT_touch_the_autopause_counter():
     """The legacy control advanced `consecutive_failures` while suppressing the notification,
     and that separation is the point: dedup is about how loudly the user is told, never about
-    whether the failure counted. Coupling them lets a repeating error escape autopause."""
+    whether the failure counted. Coupling them lets a repeating error escape autopause.
+    """
     import inspect
 
-    from gideon.gateway import GatewayOrchestrator
+    from gideon.engine.gateway import RuntimeCoordinator
+    from gideon.engine.trigger_outcomes import TriggerPublication
 
-    source = inspect.getsource(GatewayOrchestrator._dedupe_repeat_failure)
-    assert "consecutive_failures" in source, "the reasoning must be recorded"
-    assert "consecutive_failures =" not in source and "consecutive_failures=" not in source
+    source = inspect.getsource(TriggerPublication.repeated_failure)
+    assert "suppress_repeat_failure" in source
+    assert (
+        "consecutive_failures =" not in source and "consecutive_failures=" not in source
+    )
 
 
 def test_the_hash_normalises_VOLATILE_data():
     """The same outage must not produce a fresh hash every minute just because its message carries
     the clock — otherwise dedup never fires on the errors most likely to repeat."""
-    from gideon.triggers.delivery import failure_hash
+    from gideon.automation.triggers.delivery import failure_hash
 
     a = "ConnectionError: host down at 2026-08-04T19:00:00Z"
     b = "ConnectionError: host down at 2026-08-04T20:00:00Z"
@@ -384,7 +415,9 @@ def test_the_hash_normalises_VOLATILE_data():
 def test_an_EMPTY_error_never_suppresses():
     """The first alert of anything always goes out; a missing error text is not evidence of a
     repeat. Fail-LOUD, the safe direction for a notification."""
-    from gideon.triggers.delivery import suppress_repeat_failure
+    from gideon.automation.triggers.delivery import suppress_repeat_failure
 
-    suppress, digest = suppress_repeat_failure(error="", last_hash="abc", last_at=1.0, now=2.0)
+    suppress, digest = suppress_repeat_failure(
+        error="", last_hash="abc", last_at=1.0, now=2.0
+    )
     assert suppress is False and digest == ""

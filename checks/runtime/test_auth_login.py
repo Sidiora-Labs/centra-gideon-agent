@@ -19,11 +19,11 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.auth import credentials as creds
-from gideon.config import credentials as cred_store
-from gideon.dashboard import token_auth
-from gideon.dashboard.handlers import auth as auth_h
+from gideon.core.config import credentials as cred_store
 from gideon.http_errors import HTTP_ERROR_CODES
+from gideon.interfaces.dashboard import token_auth
+from gideon.interfaces.dashboard.handlers import auth as auth_h
+from gideon.security.auth import credentials as creds
 
 GOOD_PASSWORD = "correct-horse-battery-staple"
 PORT = 10000
@@ -32,8 +32,8 @@ PORT = 10000
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
     """An isolated home + a durable signing key, and no leaked lockout/session state."""
-    import gideon.config.loader as loader
-    from gideon.dashboard import session_store
+    import gideon.core.config.loader as loader
+    from gideon.interfaces.dashboard import session_store
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     monkeypatch.setattr(creds, "config_dir", lambda: tmp_path)
@@ -65,9 +65,6 @@ def _app() -> web.Application:
     return app
 
 
-# ── The happy path, and what the cookie is ────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_login_mints_a_working_session_cookie(_isolated) -> None:
     creds.set_password("jordan", GOOD_PASSWORD)
@@ -80,12 +77,9 @@ async def test_login_mints_a_working_session_cookie(_isolated) -> None:
         body = await resp.json()
         assert body["ok"] is True and body["expires_in"] > 0
 
-        cookie = resp.cookies.get(f"pc_token_{PORT}")
+        cookie = resp.cookies.get(f"gideon_token_{PORT}")
         assert cookie is not None, "no session cookie was set"
         token = cookie.value
-        # THE contract: the login-minted token validates through the SAME path as a
-        # link-minted one. If this ever needs its own validator, the plan's "one token
-        # model" criterion has been broken.
         valid, user, _reason = token_auth.validate_token(token, use_session_exp=True)
         assert valid is True and user == "jordan"
 
@@ -99,7 +93,7 @@ async def test_the_cookie_is_httponly_and_lax(_isolated) -> None:
         resp = await client.post(
             "/api/auth/login", json={"username": "jordan", "password": GOOD_PASSWORD}
         )
-        morsel = resp.cookies[f"pc_token_{PORT}"]
+        morsel = resp.cookies[f"gideon_token_{PORT}"]
         assert morsel["httponly"]
         assert morsel["samesite"].lower() == "lax"
         assert morsel["path"] == "/"
@@ -125,10 +119,9 @@ async def test_a_bad_ttl_in_config_falls_back_rather_than_failing(_isolated) -> 
             "/api/auth/login", json={"username": "jordan", "password": GOOD_PASSWORD}
         )
         assert resp.status == 200
-        assert (await resp.json())["expires_in"] == token_auth.DEFAULT_BROWSER_SESSION_TTL_SECS
-
-
-# ── Refusals, and the absence of an oracle ────────────────────────────────
+        assert (await resp.json())[
+            "expires_in"
+        ] == token_auth.DEFAULT_BROWSER_SESSION_TTL_SECS
 
 
 @pytest.mark.asyncio
@@ -141,7 +134,9 @@ async def test_a_bad_ttl_in_config_falls_back_rather_than_failing(_isolated) -> 
         ("jordan", ""),
     ],
 )
-async def test_bad_credentials_all_return_the_same_code(_isolated, username, password) -> None:
+async def test_bad_credentials_all_return_the_same_code(
+    _isolated, username, password
+) -> None:
     """Wrong user and wrong password must be indistinguishable to the caller."""
     creds.set_password("jordan", GOOD_PASSWORD)
     _enable_login(_isolated)
@@ -153,17 +148,15 @@ async def test_bad_credentials_all_return_the_same_code(_isolated, username, pas
         assert await resp.json() == {
             "error": {
                 "code": "auth_invalid_credentials",
-                # The message comes from the REGISTRY, never from the request — that is
-                # what makes every rejection byte-identical and unusable to enumerate.
                 "message": HTTP_ERROR_CODES["auth_invalid_credentials"],
             }
         }
-        assert f"pc_token_{PORT}" not in resp.cookies
+        assert f"gideon_token_{PORT}" not in resp.cookies
 
 
 @pytest.mark.asyncio
 async def test_login_refused_when_not_enabled(_isolated) -> None:
-    creds.set_password("jordan", GOOD_PASSWORD)  # credential exists, feature off
+    creds.set_password("jordan", GOOD_PASSWORD)
     async with TestClient(TestServer(_app())) as client:
         resp = await client.post(
             "/api/auth/login", json={"username": "jordan", "password": GOOD_PASSWORD}
@@ -185,7 +178,9 @@ async def test_login_refused_when_no_credential_is_configured(_isolated) -> None
 
 
 @pytest.mark.asyncio
-async def test_a_corrupt_credential_file_refuses_rather_than_falling_open(_isolated) -> None:
+async def test_a_corrupt_credential_file_refuses_rather_than_falling_open(
+    _isolated,
+) -> None:
     creds.set_password("jordan", GOOD_PASSWORD)
     creds.credentials_path().write_text("{ garbage", encoding="utf-8")
     _enable_login(_isolated)
@@ -203,7 +198,9 @@ async def test_a_malformed_body_is_a_refusal_not_a_crash(_isolated) -> None:
     async with TestClient(TestServer(_app())) as client:
         for payload in (b"not json", b"[1,2,3]", b"null"):
             resp = await client.post(
-                "/api/auth/login", data=payload, headers={"Content-Type": "application/json"}
+                "/api/auth/login",
+                data=payload,
+                headers={"Content-Type": "application/json"},
             )
             assert resp.status == 401
 
@@ -220,11 +217,7 @@ async def test_a_cross_origin_login_is_rejected(_isolated) -> None:
             headers={"Origin": "http://evil.example"},
         )
         assert resp.status == 403
-        assert f"pc_token_{PORT}" not in resp.cookies
-        # The rejection must be DISTINGUISHABLE from bad credentials (#963): a LAN/tunnel
-        # user with a CORRECT password was told "Wrong username or password." because the
-        # origin branch returned the credentials code. Same distinctness reasoning as
-        # auth_not_enabled — the origin is the caller's own address, not a secret.
+        assert f"gideon_token_{PORT}" not in resp.cookies
         body = await resp.json()
         assert body["error"]["code"] == "auth_origin_not_allowed"
         assert body["error"]["code"] != "auth_invalid_credentials"
@@ -238,10 +231,10 @@ def test_the_login_page_never_defaults_an_unknown_error_to_bad_credentials() -> 
     message that names the caller's own origin and the config that fixes it."""
     script = auth_h._LOGIN_SCRIPT
     assert "|| 'auth_invalid_credentials'" not in script
-    assert "|| 'auth_enroll_code_invalid'" not in script  # same fallback family
+    assert "|| 'auth_enroll_code_invalid'" not in script
     assert "auth_origin_not_allowed" in script
     assert "GIDEON_CORS_ORIGINS" in script
-    assert "location.origin" in script  # the message names the address that was rejected
+    assert "location.origin" in script
 
 
 def test_the_csrf_middleware_emits_the_wire_envelope_not_plain_text() -> None:
@@ -252,7 +245,7 @@ def test_the_csrf_middleware_emits_the_wire_envelope_not_plain_text() -> None:
     where a unit harness cannot reach."""
     import inspect
 
-    from gideon.dashboard import server as dash_server
+    from gideon.interfaces.dashboard import server as dash_server
 
     src = inspect.getsource(dash_server)
     assert 'text="CSRF check failed' not in src
@@ -262,9 +255,6 @@ def test_the_csrf_middleware_emits_the_wire_envelope_not_plain_text() -> None:
     assert 'json_error("auth_origin_not_allowed", status=403)' in body
 
 
-# ── Lockout ───────────────────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_lockout_after_the_threshold_with_retry_after(_isolated) -> None:
     creds.set_password("jordan", GOOD_PASSWORD)
@@ -272,11 +262,11 @@ async def test_lockout_after_the_threshold_with_retry_after(_isolated) -> None:
     async with TestClient(TestServer(_app())) as client:
         for _ in range(3):
             resp = await client.post(
-                "/api/auth/login", json={"username": "jordan", "password": "nope-nope-nope"}
+                "/api/auth/login",
+                json={"username": "jordan", "password": "nope-nope-nope"},
             )
             assert resp.status == 401
 
-        # The 4th attempt is refused before the password is even considered.
         resp = await client.post(
             "/api/auth/login", json={"username": "jordan", "password": "nope-nope-nope"}
         )
@@ -293,7 +283,8 @@ async def test_lockout_refuses_even_the_correct_password(_isolated) -> None:
     async with TestClient(TestServer(_app())) as client:
         for _ in range(2):
             await client.post(
-                "/api/auth/login", json={"username": "jordan", "password": "wrong-wrong-wrong"}
+                "/api/auth/login",
+                json={"username": "jordan", "password": "wrong-wrong-wrong"},
             )
         resp = await client.post(
             "/api/auth/login", json={"username": "jordan", "password": GOOD_PASSWORD}
@@ -308,16 +299,17 @@ async def test_a_successful_login_clears_the_failure_count(_isolated) -> None:
     async with TestClient(TestServer(_app())) as client:
         for _ in range(2):
             await client.post(
-                "/api/auth/login", json={"username": "jordan", "password": "wrong-wrong-wrong"}
+                "/api/auth/login",
+                json={"username": "jordan", "password": "wrong-wrong-wrong"},
             )
         ok = await client.post(
             "/api/auth/login", json={"username": "jordan", "password": GOOD_PASSWORD}
         )
         assert ok.status == 200
-        # Two more failures must NOT now trip the (3-attempt) threshold.
         for _ in range(2):
             resp = await client.post(
-                "/api/auth/login", json={"username": "jordan", "password": "wrong-wrong-wrong"}
+                "/api/auth/login",
+                json={"username": "jordan", "password": "wrong-wrong-wrong"},
             )
             assert resp.status == 401
 
@@ -330,14 +322,14 @@ async def test_the_failure_window_expires(_isolated, monkeypatch) -> None:
     async with TestClient(TestServer(_app())) as client:
         for _ in range(2):
             await client.post(
-                "/api/auth/login", json={"username": "jordan", "password": "wrong-wrong-wrong"}
+                "/api/auth/login",
+                json={"username": "jordan", "password": "wrong-wrong-wrong"},
             )
         locked = await client.post(
             "/api/auth/login", json={"username": "jordan", "password": GOOD_PASSWORD}
         )
         assert locked.status == 429
 
-        # Jump past the window.
         real_monotonic = auth_h.time.monotonic
         monkeypatch.setattr(
             auth_h.time, "monotonic", lambda: real_monotonic() + 16 * 60, raising=False
@@ -366,11 +358,10 @@ def test_the_tracked_ip_table_is_capped() -> None:
     auth_h.reset_lockouts()
 
 
-# ── TOTP at login ─────────────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
-async def test_totp_required_but_missing_returns_its_own_code(_isolated, monkeypatch) -> None:
+async def test_totp_required_but_missing_returns_its_own_code(
+    _isolated, monkeypatch
+) -> None:
 
     monkeypatch.setattr(cred_store, "save_credential", lambda k, v: None)
     creds.set_password("jordan", GOOD_PASSWORD)
@@ -383,12 +374,12 @@ async def test_totp_required_but_missing_returns_its_own_code(_isolated, monkeyp
         )
         assert resp.status == 401
         assert (await resp.json())["error"]["code"] == "auth_totp_required"
-        assert f"pc_token_{PORT}" not in resp.cookies
+        assert f"gideon_token_{PORT}" not in resp.cookies
 
 
 @pytest.mark.asyncio
 async def test_a_valid_totp_code_completes_the_login(_isolated, monkeypatch) -> None:
-    from gideon.auth import totp
+    from gideon.security.auth import totp
 
     monkeypatch.setattr(cred_store, "save_credential", lambda k, v: None)
     secret = totp.new_secret()
@@ -406,12 +397,12 @@ async def test_a_valid_totp_code_completes_the_login(_isolated, monkeypatch) -> 
             },
         )
         assert resp.status == 200
-        assert resp.cookies.get(f"pc_token_{PORT}") is not None
+        assert resp.cookies.get(f"gideon_token_{PORT}") is not None
 
 
 @pytest.mark.asyncio
 async def test_a_wrong_totp_code_is_refused_and_counted(_isolated, monkeypatch) -> None:
-    from gideon.auth import totp
+    from gideon.security.auth import totp
 
     monkeypatch.setattr(cred_store, "save_credential", lambda k, v: None)
     secret = totp.new_secret()
@@ -423,11 +414,14 @@ async def test_a_wrong_totp_code_is_refused_and_counted(_isolated, monkeypatch) 
         for _ in range(2):
             resp = await client.post(
                 "/api/auth/login",
-                json={"username": "jordan", "password": GOOD_PASSWORD, "totp": "000000"},
+                json={
+                    "username": "jordan",
+                    "password": GOOD_PASSWORD,
+                    "totp": "000000",
+                },
             )
             assert resp.status == 401
             assert (await resp.json())["error"]["code"] == "auth_invalid_credentials"
-        # A wrong code counts toward lockout — otherwise the second factor is brute-forceable.
         resp = await client.post(
             "/api/auth/login",
             json={"username": "jordan", "password": GOOD_PASSWORD, "totp": "000000"},
@@ -436,7 +430,9 @@ async def test_a_wrong_totp_code_is_refused_and_counted(_isolated, monkeypatch) 
 
 
 @pytest.mark.asyncio
-async def test_totp_required_with_no_secret_enrolled_refuses(_isolated, monkeypatch) -> None:
+async def test_totp_required_with_no_secret_enrolled_refuses(
+    _isolated, monkeypatch
+) -> None:
     """`require_totp` with nothing enrolled must refuse, not silently skip the factor."""
     monkeypatch.delenv(creds.TOTP_SECRET_KEY, raising=False)
     creds.set_password("jordan", GOOD_PASSWORD)
@@ -449,9 +445,6 @@ async def test_totp_required_with_no_secret_enrolled_refuses(_isolated, monkeypa
         assert (await resp.json())["error"]["code"] == "auth_totp_required"
 
 
-# ── Logout revokes ────────────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_logout_revokes_the_session_not_just_the_cookie(_isolated) -> None:
     """Clearing the cookie alone leaves the token live for anyone holding a copy."""
@@ -461,17 +454,16 @@ async def test_logout_revokes_the_session_not_just_the_cookie(_isolated) -> None
         login = await client.post(
             "/api/auth/login", json={"username": "jordan", "password": GOOD_PASSWORD}
         )
-        token = login.cookies[f"pc_token_{PORT}"].value
+        token = login.cookies[f"gideon_token_{PORT}"].value
         assert token_auth.validate_token(token, use_session_exp=True)[0] is True
 
         out = await client.post("/api/auth/logout")
         assert out.status == 200
         assert (await out.json())["revoked"] is True
 
-        # The token itself is dead, not merely forgotten by this browser.
         valid, _u, _r = token_auth.validate_token(token, use_session_exp=True)
         assert valid is False
-        assert out.cookies[f"pc_token_{PORT}"].value == ""
+        assert out.cookies[f"gideon_token_{PORT}"].value == ""
 
 
 @pytest.mark.asyncio
@@ -484,7 +476,7 @@ async def test_logout_without_a_session_is_not_an_error(_isolated) -> None:
 
 def test_revoke_token_clears_the_durable_store(_isolated) -> None:
     """The restart property: a revoked session must not come back after a reboot."""
-    from gideon.dashboard import session_store
+    from gideon.interfaces.dashboard import session_store
 
     token = token_auth.generate_token("jordan", ttl_seconds=3600)
     nonce = json.loads(token_auth._b64url_decode(token.split(".")[0]))["nonce"]
@@ -493,7 +485,6 @@ def test_revoke_token_clears_the_durable_store(_isolated) -> None:
     assert token_auth.revoke_token(token) is True
     assert nonce not in session_store.load_sessions()
 
-    # Simulate a restart: memory is empty, only the durable store speaks.
     token_auth._state.clear_all()
     assert token_auth.validate_token(token, use_session_exp=True)[0] is False
 
@@ -501,9 +492,6 @@ def test_revoke_token_clears_the_durable_store(_isolated) -> None:
 def test_revoke_token_on_a_malformed_token_is_false_not_a_crash() -> None:
     assert token_auth.revoke_token("not-a-token") is False
     assert token_auth.revoke_token("") is False
-
-
-# ── The /login page and the redirect ──────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -516,7 +504,6 @@ async def test_login_page_renders_when_enabled(_isolated) -> None:
         html = await resp.text()
         assert "Sign in" in html
         assert "/api/auth/login" in html
-        # The local escape hatch stays discoverable on the page itself.
         assert "gideon token" in html
 
 
@@ -547,11 +534,7 @@ async def test_auth_status_exposes_only_two_booleans(_isolated) -> None:
     async with TestClient(TestServer(_app())) as client:
         body = await (await client.get("/api/auth/status")).json()
         assert set(body) == {"login_enabled", "totp_required"}
-        # An unauthenticated caller learns nothing about WHO or WHETHER a credential exists.
         assert "jordan" not in json.dumps(body)
-
-
-# ── The deny path: redirect vs the paste-token gate ───────────────────────
 
 
 def _deny_for(path: str, method: str = "GET"):
@@ -630,9 +613,6 @@ def test_a_corrupt_config_keeps_the_gate(_isolated) -> None:
     assert "gideon token" in resp.text
 
 
-# ── Exemptions ────────────────────────────────────────────────────────────
-
-
 def test_only_the_three_login_routes_are_exempt() -> None:
     """A too-broad exemption is how an auth surface springs a hole."""
     exact = token_auth._BYPASS_EXACT
@@ -663,9 +643,6 @@ async def test_the_guarded_auth_routes_require_a_session() -> None:
         assert resp.status == 403, f"{path} was reachable without a session"
 
 
-# ── Settings → Account (T3.4) ─────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_session_view_reports_configured_state(_isolated) -> None:
     creds.set_password("jordan", GOOD_PASSWORD)
@@ -675,7 +652,6 @@ async def test_session_view_reports_configured_state(_isolated) -> None:
         assert body["credential_configured"] is True
         assert body["username"] == "jordan"
         assert body["login_enabled"] is True
-        # Still never the material itself.
         blob = json.dumps(body)
         assert "argon2" not in blob and GOOD_PASSWORD not in blob
 
@@ -699,7 +675,6 @@ async def test_setting_a_short_password_is_a_400_naming_the_floor(_isolated) -> 
         assert resp.status == 400
         body = await resp.json()
         assert "at least" in body["error"]
-        # The rejected value must not be echoed back.
         assert "short" not in body["error"].replace("at least", "")
 
 

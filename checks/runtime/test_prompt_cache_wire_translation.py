@@ -31,9 +31,13 @@ from typing import Any
 
 import pytest
 
-from gideon.llm.anthropic import _VOLATILE_MESSAGE_KEY, _translate_messages
-from gideon.llm.credentials import Credential
-from gideon.llm.prompt_cache import CACHE_HINT_KEY, PromptCache, mark_cacheable_prefix
+from gideon.integrations.llm.anthropic import _VOLATILE_MESSAGE_KEY, _translate_messages
+from gideon.integrations.llm.credentials import Credential
+from gideon.integrations.llm.prompt_cache import (
+    CACHE_HINT_KEY,
+    PromptCache,
+    mark_cacheable_prefix,
+)
 
 _EPHEMERAL = {"type": "ephemeral"}
 
@@ -58,9 +62,6 @@ def _markers(obj: Any) -> list[Any]:
     return found
 
 
-# ── Marker placement: the LAST block of the hinted span ───────────────────────
-
-
 def test_hinted_system_message_makes_system_block_shaped_with_the_marker():
     """§C4's core case: the marker forces ``system=`` from ``str`` to a text-block list."""
     messages = [_hint({"role": "system", "content": "stable head"})]
@@ -68,8 +69,9 @@ def test_hinted_system_message_makes_system_block_shaped_with_the_marker():
     system, out = _translate_messages(messages)
 
     assert isinstance(system, list)
-    assert system == [{"type": "text", "text": "stable head", "cache_control": _EPHEMERAL}]
-    # The marker is on the LAST (here: only) block, and nowhere in the message list.
+    assert system == [
+        {"type": "text", "text": "stable head", "cache_control": _EPHEMERAL}
+    ]
     assert "cache_control" in system[-1]
     assert _markers(out) == []
 
@@ -98,7 +100,6 @@ def test_hinted_plain_user_message_becomes_one_marked_text_block():
     system, out = _translate_messages(messages)
 
     assert system == ""
-    # Unhinted message keeps today's bare-string content.
     assert out[0] == {"role": "user", "content": "first"}
     assert out[1] == {
         "role": "assistant",
@@ -129,7 +130,6 @@ def test_marker_lands_on_the_last_block_not_the_first():
 
     blocks = out[0]["content"]
     assert [b["type"] for b in blocks] == ["text", "tool_use"]
-    # Exact position: last block only.
     assert "cache_control" not in blocks[0]
     assert blocks[-1]["cache_control"] == _EPHEMERAL
     assert len(_markers(out)) == 1
@@ -143,9 +143,16 @@ def test_hinted_block_shaped_content_marks_the_last_block_without_mutating_the_c
     _, out = _translate_messages(messages)
 
     assert out[0]["content"][0] == {"type": "text", "text": "a"}
-    assert out[0]["content"][-1] == {"type": "text", "text": "b", "cache_control": _EPHEMERAL}
+    assert out[0]["content"][-1] == {
+        "type": "text",
+        "text": "b",
+        "cache_control": _EPHEMERAL,
+    }
     # The caller's list and its final block dict are untouched.
-    assert caller_blocks == [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]
+    assert caller_blocks == [
+        {"type": "text", "text": "a"},
+        {"type": "text", "text": "b"},
+    ]
 
 
 def test_hinted_tool_result_marks_its_block():
@@ -159,9 +166,6 @@ def test_hinted_tool_result_marks_its_block():
         "content": "sunny",
         "cache_control": _EPHEMERAL,
     }
-
-
-# ── No-ops: a marker is never placed on nothing ──────────────────────────────
 
 
 @pytest.mark.parametrize("content", ["", None])
@@ -190,7 +194,6 @@ def test_hint_on_the_volatile_note_is_ignored():
 
     assert system == ""
     assert _markers(out) == []
-    # PCS-1 relocation still holds: the note ships, at the tail.
     assert out[-1] == {"role": "user", "content": "turn note"}
 
 
@@ -221,19 +224,13 @@ def test_neutral_hint_key_never_reaches_the_wire():
         assert CACHE_HINT_KEY not in msg
 
 
-# ── The adapter's declared posture ───────────────────────────────────────────
-
-
 def test_anthropic_declares_explicit(fake_anthropic_module):
     """The native loop reads this attr by getattr, exactly as it reads supports_tools."""
-    from gideon.llm.anthropic import AnthropicProvider
+    from gideon.integrations.llm.anthropic import AnthropicProvider
 
     assert AnthropicProvider.prompt_cache is PromptCache.EXPLICIT
     inst = AnthropicProvider(model="claude-x", credential=_cred())
     assert getattr(inst, "prompt_cache", PromptCache.NONE) is PromptCache.EXPLICIT
-
-
-# ── Request kwargs: byte-identical when unhinted (soul guardrail 2) ──────────
 
 
 class _FakeStreamIter:
@@ -308,9 +305,6 @@ _CONVERSATION: list[dict] = [
     {"role": "tool", "tool_call_id": "toolu_1", "content": "sunny"},
 ]
 
-# The exact kwargs this conversation produced BEFORE PCS-4, written out by hand from the
-# pre-PCS-4 translation rules: system concatenated into a bare ``str``; plain messages as
-# ``{role, content}``; tool_calls → [text, tool_use]; tool → a user turn of tool_result.
 _PRE_PCS4_KWARGS: dict[str, Any] = {
     "model": "claude-x",
     "messages": [
@@ -319,12 +313,19 @@ _PRE_PCS4_KWARGS: dict[str, Any] = {
             "role": "assistant",
             "content": [
                 {"type": "text", "text": "checking"},
-                {"type": "tool_use", "id": "toolu_1", "name": "w", "input": {"city": "sf"}},
+                {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "w",
+                    "input": {"city": "sf"},
+                },
             ],
         },
         {
             "role": "user",
-            "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "sunny"}],
+            "content": [
+                {"type": "tool_result", "tool_use_id": "toolu_1", "content": "sunny"}
+            ],
         },
     ],
     "max_tokens": 4096,
@@ -333,7 +334,7 @@ _PRE_PCS4_KWARGS: dict[str, Any] = {
 
 
 async def _capture_kwargs(messages: list[dict]) -> dict[str, Any]:
-    from gideon.llm.anthropic import AnthropicProvider
+    from gideon.integrations.llm.anthropic import AnthropicProvider
 
     provider = AnthropicProvider(model="claude-x", credential=_cred())
     fake = _FakeMessages()
@@ -345,7 +346,9 @@ async def _capture_kwargs(messages: list[dict]) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_unhinted_request_kwargs_are_byte_identical_to_today(fake_anthropic_module):
+async def test_unhinted_request_kwargs_are_byte_identical_to_today(
+    fake_anthropic_module,
+):
     """No hint anywhere ⇒ exactly the pre-PCS-4 kwargs, ``system`` still a bare str."""
     kwargs = await _capture_kwargs(_CONVERSATION)
 
@@ -356,10 +359,14 @@ async def test_unhinted_request_kwargs_are_byte_identical_to_today(fake_anthropi
 
 
 @pytest.mark.asyncio
-async def test_a_none_provider_posture_still_yields_the_same_kwargs(fake_anthropic_module):
+async def test_a_none_provider_posture_still_yields_the_same_kwargs(
+    fake_anthropic_module,
+):
     """The marker layer at PromptCache.NONE hands the list back untouched, so the
     request that reaches the wire is the pre-PCS-4 one."""
-    kwargs = await _capture_kwargs(mark_cacheable_prefix(_CONVERSATION, PromptCache.NONE))
+    kwargs = await _capture_kwargs(
+        mark_cacheable_prefix(_CONVERSATION, PromptCache.NONE)
+    )
 
     assert kwargs == _PRE_PCS4_KWARGS
 
@@ -377,10 +384,8 @@ async def test_hinted_request_differs_from_today_only_by_the_marked_block(
     kwargs = await _capture_kwargs(hinted)
 
     assert _markers(kwargs) == [_EPHEMERAL]
-    # system= stays a bare str: the hinted message is not a system message here.
     assert type(kwargs["system"]) is str
     assert kwargs["system"] == _PRE_PCS4_KWARGS["system"]
-    # Strip the one added key and the request is byte-identical to today's.
     stripped = kwargs["messages"][1]["content"][-1].copy()
     stripped.pop("cache_control")
     assert stripped == _PRE_PCS4_KWARGS["messages"][1]["content"][-1]
@@ -407,18 +412,12 @@ async def test_block_shaped_system_reaches_the_wire(fake_anthropic_module):
     assert _markers(kwargs) == [_EPHEMERAL]
 
 
-# ── T2.5 rails sweep: vendor cache syntax lives in ONE core module ───────────
+_CORE = Path(__file__).resolve().parents[2] / "runtime" / "gideon"
+_ALLOWED = {"integrations/llm/anthropic.py"}
 
-_CORE = Path(__file__).resolve().parents[1] / "src" / "gideon"
-#: The ONLY core file permitted to name Anthropic's cache syntax. `llm/anthropic.py` is
-#: one of the two in-core protocol clients enumerated in
-#: docs/architecture/provider-boundary.md, so this creates no new boundary exception.
-_ALLOWED = {"llm/anthropic.py"}
-
-#: ACTIONABLE vendor cache syntax — a wire key or a marker literal, never a bare word.
 _VENDOR_CACHE_SYNTAX = [
     re.compile(r"cache_control"),
-    re.compile(r"cachePoint"),  # Bedrock's shape — belongs in the bedrock app (PCS-8)
+    re.compile(r"cachePoint"),
     re.compile(r"""["']type["']\s*:\s*["']ephemeral["']"""),
 ]
 
@@ -454,7 +453,9 @@ def test_the_sweep_is_not_vacuous():
 
 def test_the_neutral_marker_module_stays_vendor_free():
     """The seam PCS-3 owns must never learn a vendor's syntax (its own rail's twin)."""
-    src = (_CORE / "llm" / "prompt_cache.py").read_text(encoding="utf-8")
+    src = (_CORE / "integrations" / "llm" / "prompt_cache.py").read_text(
+        encoding="utf-8"
+    )
     for pat in _VENDOR_CACHE_SYNTAX:
         assert not pat.search(src)
     assert "ephemeral" not in src

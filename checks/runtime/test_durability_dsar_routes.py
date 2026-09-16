@@ -30,8 +30,8 @@ def home(tmp_path, monkeypatch):
     (h / "tasks" / "t1.json").write_text(json.dumps({"id": "t1"}))
     (h / ".env").write_text("ANTHROPIC_API_KEY=sk-ant-ROUTECANARY0001\n")
     monkeypatch.setenv("GIDEON_HOME", str(h))
-    monkeypatch.setattr("gideon.portability.config_dir", lambda: h)
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: h)
+    monkeypatch.setattr("gideon.workspace.portability.config_dir", lambda: h)
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: h)
     return h
 
 
@@ -41,7 +41,7 @@ def _app(*, app_token: str = "") -> web.Application:
     `app_token` non-empty simulates an app-scoped caller — the same `request["app"]`
     the real middleware sets from a token's `app` claim.
     """
-    from gideon.dashboard.handlers import durability as mod
+    from gideon.interfaces.dashboard.handlers import durability as mod
 
     @web.middleware
     async def identity(request, handler):
@@ -53,11 +53,10 @@ def _app(*, app_token: str = "") -> web.Application:
     app.router.add_post("/api/durability/export", mod.api_durability_export)
     app.router.add_post("/api/durability/import", mod.api_durability_import)
     app.router.add_get("/api/durability/archive", mod.api_durability_archive)
-    app.router.add_post("/api/durability/archive/{id}/restore", mod.api_durability_archive_restore)
+    app.router.add_post(
+        "/api/durability/archive/{id}/restore", mod.api_durability_archive_restore
+    )
     return app
-
-
-# ── the app-token refusal (least privilege) ──────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -93,9 +92,6 @@ async def test_the_owner_is_not_refused(home):
         assert resp.headers["Content-Type"] == "application/zip"
 
 
-# ── export ───────────────────────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_export_returns_a_zip_with_no_secret_bytes(home):
     async with TestClient(TestServer(_app())) as client:
@@ -112,7 +108,11 @@ async def test_export_scopes_to_the_requested_domains(home):
     async with TestClient(TestServer(_app())) as client:
         resp = await client.post("/api/durability/export", json={"domains": ["work"]})
         blob = await resp.read()
-    names = [n.split("/", 1)[1] for n in zipfile.ZipFile(io.BytesIO(blob)).namelist() if "/" in n]
+    names = [
+        n.split("/", 1)[1]
+        for n in zipfile.ZipFile(io.BytesIO(blob)).namelist()
+        if "/" in n
+    ]
     assert "tasks/t1.json" in names
     assert "config.json" not in names
     assert 'filename="gideon-export-work-' in resp.headers["Content-Disposition"]
@@ -134,9 +134,6 @@ async def test_export_rejects_a_non_list_domains_field(home):
         resp = await client.post("/api/durability/export", json={"domains": "work"})
         assert resp.status == 400
         assert (await resp.json())["error"]["code"] == "bad_domains"
-
-
-# ── import: plan-first, and the confirm gate on replace ──────────────────────
 
 
 def _archive(tmp: Path, *, theme: str = "imported") -> Path:
@@ -173,10 +170,11 @@ async def test_import_without_a_mode_validates_and_applies_nothing(home, tmp_pat
 async def test_import_merge_applies(home, tmp_path):
     archive = _archive(tmp_path)
     async with TestClient(TestServer(_app())) as client:
-        resp = await client.post("/api/durability/import?mode=merge", data=_multipart(archive))
+        resp = await client.post(
+            "/api/durability/import?mode=merge", data=_multipart(archive)
+        )
         body = await resp.json()
     assert body["ok"] is True and body["applied"] is True
-    # Merge is copy-if-missing, so the home's own config is untouched.
     assert json.loads((home / "config.json").read_text())["theme"] == "dark"
 
 
@@ -189,7 +187,9 @@ async def test_import_replace_without_confirm_is_refused(home, tmp_path):
     """
     archive = _archive(tmp_path)
     async with TestClient(TestServer(_app())) as client:
-        resp = await client.post("/api/durability/import?mode=replace", data=_multipart(archive))
+        resp = await client.post(
+            "/api/durability/import?mode=replace", data=_multipart(archive)
+        )
         body = await resp.json()
     assert resp.status == 409
     assert body["error"]["code"] == "confirm_required"
@@ -227,9 +227,6 @@ async def test_import_rejects_a_corrupt_archive_before_writing(home, tmp_path):
     assert (home / "config.json").read_text() == before
 
 
-# ── archive + archive restore ────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_archive_lists_nothing_on_a_fresh_home(home):
     async with TestClient(TestServer(_app())) as client:
@@ -243,7 +240,9 @@ async def test_archive_lists_nothing_on_a_fresh_home(home):
 async def test_archive_restore_rejects_an_archive_outside_the_snapshot_dir(home):
     """Path containment: a caller may not point a restore at any tar on disk."""
     async with TestClient(TestServer(_app())) as client:
-        resp = await client.post("/api/durability/archive/..%2F..%2Fetc%2Fpasswd/restore", json={})
+        resp = await client.post(
+            "/api/durability/archive/..%2F..%2Fetc%2Fpasswd/restore", json={}
+        )
         assert resp.status == 404
         assert (await resp.json())["error"]["code"] == "archive_not_found"
 
@@ -260,7 +259,9 @@ async def test_archive_restore_refuses_replace_over_http_always(home):
     """
     async with TestClient(TestServer(_app())) as client:
         for body in ({"mode": "replace"}, {"mode": "replace", "confirm": True}):
-            resp = await client.post("/api/durability/archive/whatever.tar.gz/restore", json=body)
+            resp = await client.post(
+                "/api/durability/archive/whatever.tar.gz/restore", json=body
+            )
             assert resp.status == 409, body
             assert (await resp.json())["error"]["code"] == "gateway_running", body
 

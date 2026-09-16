@@ -27,18 +27,15 @@ def provider(tmp_path, monkeypatch):
     cache entry itself (monkeypatch.setitem restores it) and pass the root explicitly,
     since NativeArtifactProvider resolves config_dir() eagerly in __init__.
     """
-    import gideon.config.loader as cfg
+    import gideon.core.config.loader as cfg
 
     monkeypatch.setattr(cfg, "config_dir", lambda: tmp_path)
-    from gideon.artifacts import registry
-    from gideon.artifacts.native import NativeArtifactProvider
+    from gideon.workspace.artifacts import registry
+    from gideon.workspace.artifacts.native import NativeArtifactProvider
 
     prov = NativeArtifactProvider(root=tmp_path / "artifacts")
     monkeypatch.setitem(registry._providers, "native", prov)
     return prov
-
-
-# ── text branch ───────────────────────────────────────────────────────────────
 
 
 def test_a_text_version_fetch_reports_its_own_version(provider):
@@ -48,7 +45,6 @@ def test_a_text_version_fetch_reports_its_own_version(provider):
     v1 = provider.get(art.slug, version=1)
     v2 = provider.get(art.slug, version=2)
 
-    # The payload's self-description matches the bytes it carries.
     assert (v1.version, v1.content) == (1, "v1 body")
     assert (v2.version, v2.content) == (2, "v2 body")
 
@@ -67,9 +63,6 @@ def test_a_missing_version_is_still_none_not_a_mislabeled_head(provider):
     assert provider.get(art.slug, version=99) is None
 
 
-# ── binary branch ─────────────────────────────────────────────────────────────
-
-
 def test_a_binary_version_fetch_reports_its_own_version(provider):
     art = provider.create_binary(name="Chart", data=b"\x89PNGv1", mime="image/png")
     provider.update_binary(art.slug, data=b"\x89PNGv2", mime="image/png")
@@ -78,6 +71,5 @@ def test_a_binary_version_fetch_reports_its_own_version(provider):
     head = provider.get(art.slug)
 
     assert v1.version == 1
-    # The content ref points at the pinned version, consistent with the label.
     assert v1.content.endswith("/raw?version=1")
     assert head.version == 2

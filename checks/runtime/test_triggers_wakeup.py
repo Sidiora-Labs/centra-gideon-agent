@@ -19,7 +19,7 @@ semaphore is
 2. It returns False when the session does not exist, which is normal for a trigger whose session was
    never opened. So "could not queue" is REPORTED rather than assumed to be a delivery.
 
-Every test drives a real `SessionManager`. A mock cannot show either hazard, because both live in
+Every test drives a real `ConversationDirectory`. A mock cannot show either hazard, because both live in
 `enqueue`'s own branch on `session.semaphore.locked()`.
 """
 
@@ -27,8 +27,8 @@ from __future__ import annotations
 
 import asyncio
 
-from gideon.triggers import wakeup as W
-from gideon.triggers.models import Trigger
+from gideon.automation.triggers import wakeup as W
+from gideon.automation.triggers.models import Trigger
 
 NOW = 1_800_000_000.0
 
@@ -39,7 +39,7 @@ class _Provider:
 
 
 def _manager(*keys):
-    """A real `SessionManager` with real `_Session` rows — not a mock.
+    """A real `ConversationDirectory` with real `_Session` rows — not a mock.
 
     Constructed via `__new__` to skip the provider factory and event loop the full constructor
     wants:
@@ -47,9 +47,9 @@ def _manager(*keys):
     boot in a
     unit test would be a different subsystem's setup.
     """
-    from gideon.session import SessionManager, _Session
+    from gideon.engine.session import ConversationDirectory, _Session
 
-    manager = SessionManager.__new__(SessionManager)
+    manager = ConversationDirectory.__new__(ConversationDirectory)
     manager._sessions = {}
     for key in keys:
         manager._sessions[key] = _Session(provider=_Provider())
@@ -84,9 +84,6 @@ class _Fire:
         self.claim = object()
 
 
-# ── §3.2: key formats centralized, not reinvented ──
-
-
 def test_a_trigger_targets_the_shipped_cron_prefix():
     """§3.2 says to extend the session-key conventions table rather than invent a parallel
     one. `cron:`
@@ -106,7 +103,10 @@ def test_a_pinned_session_renders_as_the_same_cron_key():
 
 def test_a_conversation_binding_targets_the_live_chat():
     """An in-chat nudge renders into the conversation, not into a background session."""
-    assert W.session_key_for("j3", session="conversation:dashboard:main") == "dashboard:main"
+    assert (
+        W.session_key_for("j3", session="conversation:dashboard:main")
+        == "dashboard:main"
+    )
 
 
 def test_an_empty_conversation_binding_falls_back_to_the_trigger_key():
@@ -117,9 +117,6 @@ def test_an_empty_conversation_binding_falls_back_to_the_trigger_key():
 def test_a_namespaced_id_keeps_its_namespace_for_non_schedule_kinds():
     """The id namespace IS §6's migration map; rewriting it here would break the mapping."""
     assert W.session_key_for("event:e1") == "cron:event:e1"
-
-
-# ── the two wakeup kinds ──
 
 
 def test_a_fire_becomes_a_droppable_wake():
@@ -144,7 +141,7 @@ def test_a_resume_is_never_droppable():
 def test_droppability_delegates_to_the_shipped_predicate():
     """`dispatch.droppable` is the shipped rule. Re-deriving it here would let the spool and the
     dispatcher disagree about which payloads may be discarded."""
-    from gideon.triggers.dispatch import droppable
+    from gideon.automation.triggers.dispatch import droppable
 
     assert droppable("wake") is True
     assert droppable("resume") is False
@@ -165,12 +162,12 @@ def test_a_resume_targets_the_session_that_PARKED():
     gate never
     got my reply"."""
     resume = W.resume_for(
-        trigger_id="schedule:j1", session_key="workflow:run-7", answer={"ok": True}, now=NOW
+        trigger_id="schedule:j1",
+        session_key="workflow:run-7",
+        answer={"ok": True},
+        now=NOW,
     )
     assert resume.session_key == "workflow:run-7"
-
-
-# ── 🔴 hazard 1: the idle-session drop ──
 
 
 def test_a_wake_reaches_an_IDLE_session():
@@ -198,9 +195,6 @@ def test_the_structured_payload_rides_the_queue_kwargs():
     assert kwargs["wakeup"]["kind"] == "wake"
 
 
-# ── §3.2: wake vs resume drop semantics ──
-
-
 def test_a_wake_for_a_RUNNING_session_is_dropped():
     """§3.2's "natural implementation of `overlap: skip`" — the running session drains the inbox
     itself, so a second wake is noise."""
@@ -217,7 +211,8 @@ def test_a_RESUME_for_a_running_session_is_still_queued():
     manager = _manager("cron:j1")
     _lock(manager, "cron:j1")
     delivery = W.deliver(
-        manager, W.resume_for(trigger_id="j1", session_key="cron:j1", answer={"ok": 1}, now=NOW)
+        manager,
+        W.resume_for(trigger_id="j1", session_key="cron:j1", answer={"ok": 1}, now=NOW),
     )
     assert delivery.disposition == W.Disposition.QUEUED.value
     assert len(manager._sessions["cron:j1"].queue) == 1
@@ -226,7 +221,8 @@ def test_a_RESUME_for_a_running_session_is_still_queued():
 def test_is_running_reads_the_same_semaphore_enqueue_checks():
     """Asking a different question (provider alive, session exists) would make the dispatcher
     and the
-    queue disagree about "busy", landing the payload on the wrong side of the drop rule."""
+    queue disagree about "busy", landing the payload on the wrong side of the drop rule.
+    """
     manager = _manager("cron:j1")
     assert W.is_running(manager, "cron:j1") is False
     _lock(manager, "cron:j1")
@@ -236,9 +232,6 @@ def test_is_running_reads_the_same_semaphore_enqueue_checks():
 def test_a_missing_session_is_not_running():
     """Nothing is executing, so a `wake` for it is not redundant."""
     assert W.is_running(_manager(), "cron:nope") is False
-
-
-# ── 🔴 hazard 2: a missing session is reported, never assumed ──
 
 
 def test_a_wake_with_no_session_reports_NO_SESSION():
@@ -255,7 +248,8 @@ def test_a_wake_with_no_session_reports_NO_SESSION():
 def test_a_resume_with_no_session_is_REQUEUED_not_lost():
     """§3.2: "must re-queue until the parked lock releases"."""
     delivery = W.deliver(
-        _manager(), W.resume_for(trigger_id="j1", session_key="cron:gone", answer={}, now=NOW)
+        _manager(),
+        W.resume_for(trigger_id="j1", session_key="cron:gone", answer={}, now=NOW),
     )
     assert delivery.disposition == W.Disposition.REQUEUED.value
     assert delivery.needs_retry is True
@@ -284,9 +278,6 @@ def test_a_raising_enqueue_never_propagates():
     }
 
 
-# ── the message id ──
-
-
 def test_the_message_id_is_stable_across_a_redelivery():
     """The queue's `cancelled` set keys on the message id, so a fresh id per attempt would make a
     cancelled fire un-cancellable on retry."""
@@ -301,9 +292,6 @@ def test_different_fires_get_different_ids():
     a = W._msg_ts(W.wakeup_for(_Fire(_trigger()), seq=1, now=NOW))
     b = W._msg_ts(W.wakeup_for(_Fire(_trigger()), seq=2, now=NOW))
     assert a != b
-
-
-# ── batching: the tick → dispatch seam ──
 
 
 def test_dispatch_fires_preserves_tick_order():
@@ -340,7 +328,8 @@ def test_the_retry_queue_holds_only_the_resumes_that_must_come_back():
     deliveries = [
         W.deliver(manager, W.wakeup_for(_Fire(_trigger("schedule:a")), seq=1, now=NOW)),
         W.deliver(
-            manager, W.resume_for(trigger_id="b", session_key="cron:gone", answer={}, now=NOW)
+            manager,
+            W.resume_for(trigger_id="b", session_key="cron:gone", answer={}, now=NOW),
         ),
     ]
     retry = W.retry_queue(deliveries)
@@ -357,15 +346,13 @@ def test_the_summary_names_every_disposition_even_at_zero():
     assert report["total"] == 1
 
 
-# ── end to end: S88's tick into this dispatcher ──
-
-
 def test_a_real_tick_dispatches_through_to_the_session_queues(tmp_path):
     """The whole seam, driven: store → tick → dispatch → session inbox. §3.2's crash-safety is
     that the
-    payload lives in the inbox, which is only checkable if the payload actually arrives there."""
-    from gideon.triggers import service as SVC
-    from gideon.triggers.store import TriggerStore
+    payload lives in the inbox, which is only checkable if the payload actually arrives there.
+    """
+    from gideon.automation.triggers import service as SVC
+    from gideon.automation.triggers.store import TriggerStore
 
     store = TriggerStore(base_dir=tmp_path)
     store.save_all(
@@ -395,7 +382,9 @@ def test_a_real_tick_dispatches_through_to_the_session_queues(tmp_path):
 
 def test_a_dispatch_result_serializes_for_the_ledger():
     manager = _manager("cron:a")
-    delivery = W.deliver(manager, W.wakeup_for(_Fire(_trigger("schedule:a")), seq=1, now=NOW))
+    delivery = W.deliver(
+        manager, W.wakeup_for(_Fire(_trigger("schedule:a")), seq=1, now=NOW)
+    )
     payload = delivery.to_dict()
     assert payload["disposition"] == "queued"
     assert payload["session_key"] == "cron:a"

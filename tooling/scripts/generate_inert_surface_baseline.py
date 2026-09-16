@@ -10,8 +10,8 @@ or unit test cannot see the gap; only a *census of both ends of each seam* can.
 
 This generator IS that census. For each of five declared-surface kinds it enumerates the
 declared surfaces, applies a cheap deterministic writer/reader heuristic, and emits a
-per-file counter of inert surfaces to a committed ``inert-surface-baseline.json``. A
-companion test (``tests/test_inert_surface_baseline.py``) regenerates in-memory and
+per-file counter of inert surfaces to a committed ``checks/catalogs/inert-surfaces.json``. A
+companion test (``checks/runtime/test_inert_surface_baseline.py``) regenerates in-memory and
 asserts every per-file counter **may only shrink** versus the committed baseline: a NEW
 declared-but-inert surface raises a file's count and reds CI, naming the file and the
 surface; a cleanup that adds the missing writer/reader lowers it and is welcome.
@@ -32,9 +32,9 @@ surface; a cleanup that adds the missing writer/reader lowers it and is welcome.
     is left for PHF-8 to wire — do not "fix" any surface this census reports here.
 
 Detection heuristics are calibrated for a LOW false-positive rate (they under-report
-rather than cry wolf, mirroring ``harness/scanner.py``): a "reader" found anywhere in
+rather than cry wolf, mirroring ``checks/harness/scanner.py``): a "reader" found anywhere in
 production ``src/`` clears a surface, so the census only reports the strongest declared-
-and-untouched cases. Readers in ``tests/`` deliberately do NOT count — a test that
+and-untouched cases. Readers in ``checks/runtime/`` deliberately do NOT count — a test that
 references a surface is exactly the hand-built state that hides the seam gap.
 
 ⚠️  A FALSE RED IS A BUG IN THIS TOOL, AND THE FIX IS TO TEACH IT THE SHAPE. The census
@@ -76,7 +76,7 @@ Per-surface-kind heuristic (each documented at its detector below):
 
 Regenerate in place (ONLY on a legitimate shrink) with::
 
-    python scripts/generate_inert_surface_baseline.py
+    python tooling/scripts/generate_inert_surface_baseline.py
 """
 
 from __future__ import annotations
@@ -87,16 +87,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-# Make the repo root importable so ``scripts.generate_config_baseline`` resolves whether
-# this file is run as a script (``python scripts/...``) or imported under pytest (whose
-# ``pythonpath`` already includes it). The config-leaf census reuses that SH3.1 walk as
-# its single source of truth rather than re-deriving the schema here.
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-for _p in (_REPO_ROOT, _REPO_ROOT / "src"):
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+for _p in (_REPO_ROOT, _REPO_ROOT / "runtime"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-# Surface-kind labels, used as the ``kind:`` prefix of every surface id.
 KIND_CONFIG = "config"
 KIND_ENUM = "enum"
 KIND_TRIGGER_KIND = "trigger_kind"
@@ -107,11 +102,11 @@ _ENUM_BASES = {"Enum", "IntEnum", "StrEnum", "Flag", "IntFlag"}
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[1]
+    return Path(__file__).resolve().parents[2]
 
 
 def _src_root() -> Path:
-    return _repo_root() / "src" / "gideon"
+    return _repo_root() / "runtime" / "gideon"
 
 
 def _rel(path: Path) -> str:
@@ -127,11 +122,10 @@ def _parse(path: Path) -> ast.Module | None:
 
 
 def _src_py_files() -> list[Path]:
-    """All Python files under ``src/gideon`` (production code only, sorted)."""
+    """All Python files under ``runtime/gideon`` (production code only, sorted)."""
     return sorted(_src_root().rglob("*.py"))
 
 
-# ── Shared reader index ──────────────────────────────────────────────────────
 
 
 def _attribute_names_in_src(files: list[Path]) -> set[str]:
@@ -153,20 +147,16 @@ def _attribute_names_in_src(files: list[Path]) -> set[str]:
     return names
 
 
-# ── Kind: config (reuses the SH3.1 config walk) ──────────────────────────────
 
 
-#: The ``AppConfig`` methods that may hold the load mapping. ``load()`` itself is a one-line
-#: delegate — the mapping lives in ``load_with_migration_state()``, which returns the parsed
-#: config plus whether it needed migrating (PHF-15 split the two so ``load()`` could stop
-#: writing). Kept as a set rather than one name so the mapping can move again without
-#: silently emptying this detector. Mirrored in ``harness/scanner.py``.
 _LOAD_MAPPING_METHODS = frozenset({"load", "load_with_migration_state"})
 
 
-def _load_body_kwarg_names(loader_tree: ast.Module) -> set[str]:
+def _load_body_kwarg_names(
+    loader_tree: ast.Module, policies: ast.Module | None = None
+) -> set[str]:
     """Every keyword-argument name used anywhere in ``AppConfig``'s load mapping — the set of
-    field names it assigns (mirrors ``harness/scanner.py`` config-four-points).
+    field names it assigns (mirrors ``checks/harness/scanner.py`` config-four-points).
 
     Raises if no anchor method is found. That is deliberate: returning an empty set instead
     reports EVERY config leaf as inert, which is 295 bogus failures that read like a real
@@ -184,6 +174,14 @@ def _load_body_kwarg_names(loader_tree: ast.Module) -> set[str]:
                     found.add(item.name)
                     for call in ast.walk(item):
                         if isinstance(call, ast.Call):
+                            if (
+                                policies is not None
+                                and isinstance(call.func, ast.Name)
+                                and call.func.id == "decode_configuration"
+                            ):
+                                from gideon.core.config.codec import mapped_fields
+
+                                names.update(mapped_fields(policies))
                             for kw in call.keywords:
                                 if kw.arg:
                                     names.add(kw.arg)
@@ -191,7 +189,7 @@ def _load_body_kwarg_names(loader_tree: ast.Module) -> set[str]:
         raise RuntimeError(
             "config/loader.py has no AppConfig method named any of "
             f"{sorted(_LOAD_MAPPING_METHODS)} — the config-inertness detector lost its "
-            "anchor. Re-point _LOAD_MAPPING_METHODS (here and in harness/scanner.py) at "
+            "anchor. Re-point _LOAD_MAPPING_METHODS (here and in checks/harness/scanner.py) at "
             "whichever method now holds the load mapping."
         )
     return names
@@ -199,20 +197,23 @@ def _load_body_kwarg_names(loader_tree: ast.Module) -> set[str]:
 
 def _config_leaf_paths() -> list[str]:
     """Leaf config paths from the SH3.1 baseline generator (single source of truth)."""
-    from scripts.generate_config_baseline import build_baseline as config_baseline
+    from tooling.scripts.generate_config_baseline import (
+        build_baseline as config_baseline,
+        decode_catalog as decode_configuration,
+    )
 
-    return [entry["path"] for entry in json.loads(config_baseline())]
+    return [entry["path"] for entry in decode_configuration(json.loads(config_baseline()))]
 
 
 def _inert_config_surfaces() -> list[tuple[str, str]]:
     """A config leaf whose field name is NOT set in ``AppConfig.load()`` has no reader: the
     user's saved value silently reverts to the default on every reload. Attributed to the
     loader (the one file that owns the declaration + the load mapping)."""
-    loader = _src_root() / "config" / "loader.py"
+    loader = _src_root() / "core" / "config" / "loader.py"
     tree = _parse(loader)
     if tree is None:
         return []
-    load_kwargs = _load_body_kwarg_names(tree)
+    load_kwargs = _load_body_kwarg_names(tree, _parse(loader.with_name("decoding.py")))
     out: list[tuple[str, str]] = []
     for path in _config_leaf_paths():
         leaf = path.split(".")[-1]
@@ -221,7 +222,6 @@ def _inert_config_surfaces() -> list[tuple[str, str]]:
     return out
 
 
-# ── Kind: enum ────────────────────────────────────────────────────────────────
 
 
 def _enum_members(tree: ast.Module) -> list[tuple[str, str]]:
@@ -231,7 +231,11 @@ def _enum_members(tree: ast.Module) -> list[tuple[str, str]]:
         if not isinstance(node, ast.ClassDef):
             continue
         base_names = {
-            b.id if isinstance(b, ast.Name) else (b.attr if isinstance(b, ast.Attribute) else "")
+            (
+                b.id
+                if isinstance(b, ast.Name)
+                else (b.attr if isinstance(b, ast.Attribute) else "")
+            )
             for b in node.bases
         }
         if not (base_names & _ENUM_BASES):
@@ -262,12 +266,12 @@ def _module_file(module: str) -> Path | None:
 def _absolute_import_module(node: ast.ImportFrom, path: Path) -> str | None:
     """The absolute dotted module an ``ImportFrom`` names, resolving ``.``/``..`` against the
     importing file's own package (``from .models import X`` inside ``workflows/`` →
-    ``gideon.workflows.models``)."""
+    ``gideon.automation.workflows.models``)."""
     if not node.level:
         return node.module
     try:
         parts = path.resolve().relative_to(_src_root()).parts[:-1]
-    except ValueError:  # a file outside src/ (a fixture tree) has no package to climb
+    except ValueError:
         return None
     package = ["gideon", *parts]
     climb = node.level - 1
@@ -315,8 +319,6 @@ def _enum_name_bindings(
     return classes, modules
 
 
-#: Builtins that consume EVERY member of the iterable handed to them. ``E(value)``-style
-#: value lookup and ``x in E`` containment are deliberately absent — see the enum detector.
 _ITERATING_BUILTINS = frozenset(
     {"list", "tuple", "set", "frozenset", "sorted", "iter", "reversed", "enumerate"}
 )
@@ -330,7 +332,9 @@ def _iterated_expressions(tree: ast.Module) -> list[ast.expr]:
     for node in ast.walk(tree):
         if isinstance(node, (ast.For, ast.AsyncFor)):
             out.append(node.iter)
-        elif isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+        elif isinstance(
+            node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+        ):
             out.extend(gen.iter for gen in node.generators)
         elif (
             isinstance(node, ast.Call)
@@ -377,7 +381,9 @@ def _iterated_enum_classes(
     return iterated
 
 
-def _inert_enum_members(files: list[Path], attr_names: set[str]) -> list[tuple[Path, str]]:
+def _inert_enum_members(
+    files: list[Path], attr_names: set[str]
+) -> list[tuple[Path, str]]:
     """``(file, "Class.MEMBER")`` for every enum member with neither a reader nor an iterator.
 
     THE RULE (two independent clears, either one is enough):
@@ -457,7 +463,9 @@ def _inert_enum_members(files: list[Path], attr_names: set[str]) -> list[tuple[P
         members = _enum_members(tree)
         if members:
             declared[f.resolve()] = members
-    enum_names = {path: {cls for cls, _ in members} for path, members in declared.items()}
+    enum_names = {
+        path: {cls for cls, _ in members} for path, members in declared.items()
+    }
     iterated = _iterated_enum_classes(files, enum_names)
     out: list[tuple[Path, str]] = []
     for path, members in declared.items():
@@ -469,7 +477,9 @@ def _inert_enum_members(files: list[Path], attr_names: set[str]) -> list[tuple[P
     return out
 
 
-def _inert_enum_surfaces(files: list[Path], attr_names: set[str]) -> list[tuple[str, str]]:
+def _inert_enum_surfaces(
+    files: list[Path], attr_names: set[str]
+) -> list[tuple[str, str]]:
     """An enum member is inert when its name is never accessed as an attribute anywhere in
     ``src/`` AND its class is never iterated as a whole — see ``_inert_enum_members`` and
     ``_iterated_enum_classes`` for the two halves."""
@@ -479,7 +489,6 @@ def _inert_enum_surfaces(files: list[Path], attr_names: set[str]) -> list[tuple[
     ]
 
 
-# ── Kind: trigger_kind ────────────────────────────────────────────────────────
 
 
 def _tuple_string_members(tree: ast.Module, name: str) -> list[str]:
@@ -534,11 +543,12 @@ def _inert_trigger_kind_surfaces() -> list[tuple[str, str]]:
             ):
                 referenced.add(node.value)
     return [
-        (_rel(models), f"{KIND_TRIGGER_KIND}:{kind}") for kind in kinds if kind not in referenced
+        (_rel(models), f"{KIND_TRIGGER_KIND}:{kind}")
+        for kind in kinds
+        if kind not in referenced
     ]
 
 
-# ── Kind: editable_config ─────────────────────────────────────────────────────
 
 
 def _editable_config_keys(tree: ast.Module) -> list[str]:
@@ -582,12 +592,15 @@ def _inert_editable_config_surfaces() -> list[tuple[str, str]]:
     def backed(key: str) -> bool:
         if key in leaves:
             return True
-        return any(leaf.startswith(key + ".") or key.startswith(leaf + ".") for leaf in leaves)
+        return any(
+            leaf.startswith(key + ".") or key.startswith(leaf + ".") for leaf in leaves
+        )
 
-    return [(_rel(core), f"{KIND_EDITABLE_CONFIG}:{key}") for key in keys if not backed(key)]
+    return [
+        (_rel(core), f"{KIND_EDITABLE_CONFIG}:{key}") for key in keys if not backed(key)
+    ]
 
 
-# ── Kind: sdk_export ──────────────────────────────────────────────────────────
 
 
 def _module_all(tree: ast.Module) -> list[str]:
@@ -606,12 +619,12 @@ def _module_all(tree: ast.Module) -> list[str]:
 
 def _sdk_imported_names() -> set[str]:
     """Every symbol imported via ``from gideon.sdk[...] import <name>`` OUTSIDE the
-    sdk package, scanning production ``src/`` and (as consumers exist there) ``tests/`` and
-    a repo-local ``apps/`` if present. Cross-imports from within ``sdk/`` do NOT count —
+    sdk package, scanning production ``src/`` and (as consumers exist there) ``checks/runtime/`` and
+    a repo-local ``apps/`` if present. Cross-imports from within ``packages/python-client/`` do NOT count —
     the boundary question is whether anything outside the facade consumes the export."""
     names: set[str] = set()
     root = _repo_root()
-    for base in (root / "src", root / "tests", root / "apps"):
+    for base in (root / "runtime", root / "checks" / "runtime", root / "apps"):
         if not base.is_dir():
             continue
         for f in sorted(base.rglob("*.py")):
@@ -648,7 +661,6 @@ def _inert_sdk_export_surfaces() -> list[tuple[str, str]]:
     return out
 
 
-# ── Assembly ──────────────────────────────────────────────────────────────────
 
 
 def _all_inert_surfaces() -> list[tuple[str, str]]:
@@ -670,7 +682,7 @@ def build_inventory() -> dict[str, Any]:
     Shape::
 
         {
-          "generated_from": "scripts/generate_inert_surface_baseline.py",
+          "generated_from": "tooling/scripts/generate_inert_surface_baseline.py",
           "per_file": {"<relpath>": {"inert": N, "surfaces": ["kind:name", ...]}},
           "totals": {"inert": T, "by_kind": {"<kind>": N, ...}}
         }
@@ -694,18 +706,58 @@ def build_inventory() -> dict[str, Any]:
         bucket["inert"] = len(bucket["surfaces"])
         total += bucket["inert"]
     return {
-        "generated_from": "scripts/generate_inert_surface_baseline.py",
+        "generated_from": "tooling/scripts/generate_inert_surface_baseline.py",
         "per_file": per_file,
         "totals": {"inert": total, "by_kind": by_kind},
     }
 
 
+def encode_catalog(inventory: dict[str, Any]) -> dict[str, Any]:
+    sources = []
+    for path, entry in sorted(inventory["per_file"].items()):
+        declarations = [
+            {"kind": kind, "symbol": symbol}
+            for kind, symbol in (surface.split(":", 1) for surface in sorted(entry["surfaces"]))
+        ]
+        sources.append({"path": path, "count": entry["inert"], "declarations": declarations})
+    return {
+        "version": 1,
+        "kind": "gideon.inert-surfaces",
+        "data": {
+            "generator": inventory["generated_from"],
+            "sources": sources,
+            "summary": {"total": inventory["totals"]["inert"], "kinds": inventory["totals"]["by_kind"]},
+        },
+    }
+
+
+def decode_catalog(document: dict[str, Any]) -> dict[str, Any]:
+    if document.get("version") != 1 or document.get("kind") != "gideon.inert-surfaces":
+        raise ValueError("unsupported Gideon inert-surface catalog")
+    data = document["data"]
+    per_file = {}
+    for source in data["sources"]:
+        path = source["path"]
+        if path in per_file:
+            raise ValueError(f"duplicate source in inert-surface catalog: {path}")
+        per_file[path] = {
+            "inert": source["count"],
+            "surfaces": [f"{item['kind']}:{item['symbol']}" for item in source["declarations"]],
+        }
+    return {
+        "generated_from": data["generator"],
+        "per_file": per_file,
+        "totals": {"inert": data["summary"]["total"], "by_kind": data["summary"]["kinds"]},
+    }
+
+
 def build_baseline() -> str:
-    """Render the inventory as a deterministic JSON string (sorted, trailing newline)."""
-    return json.dumps(build_inventory(), indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    return json.dumps(encode_catalog(build_inventory()), indent=2, sort_keys=True, ensure_ascii=False) + "\n"
 
 
-def regressions(baseline_per_file: dict[str, Any], current_per_file: dict[str, Any]) -> list[str]:
+def regressions(
+    baseline_per_file: dict[str, Any], current_per_file: dict[str, Any]
+) -> list[str]:
     """Files whose inert counter ROSE versus the baseline (shrink-only ratchet).
 
     Returns a sorted list of human-readable regression lines — one per file whose current
@@ -731,12 +783,13 @@ def regressions(baseline_per_file: dict[str, Any], current_per_file: dict[str, A
 
 
 def baseline_path() -> Path:
-    """Repo-root location of the committed ``inert-surface-baseline.json``."""
-    return _repo_root() / "inert-surface-baseline.json"
+    """Repo-root location of the committed ``checks/catalogs/inert-surfaces.json``."""
+    return _repo_root() / "checks/catalogs/inert-surfaces.json"
 
 
 def main() -> None:
     path = baseline_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(build_baseline(), encoding="utf-8")
     print(f"wrote {path}")
 

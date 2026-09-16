@@ -29,17 +29,15 @@ def isolated_home(tmp_path, monkeypatch):
     """A GIDEON_HOME that is emphatically not the real one."""
     home = tmp_path / "dev-home"
     home.mkdir()
-    # `config_dir()` reads the env var on every call and caches nothing (loader.py:222-232),
-    # so setting it is the whole fixture — no cache to invalidate.
     monkeypatch.setenv("GIDEON_HOME", str(home))
     return home
 
 
 def _resolvers():
     """The three paths, each read the way its own module reads it."""
-    from gideon.config.loader import config_dir
-    from gideon.dashboard.handlers.mcp import _canonical_mcp_json
-    from gideon.mcp_discovery import _mcp_json_paths
+    from gideon.core.config.loader import config_dir
+    from gideon.integrations.mcp_discovery import _mcp_json_paths
+    from gideon.interfaces.dashboard.handlers.mcp import _canonical_mcp_json
 
     return {
         "config_dir": config_dir() / "mcp.json",
@@ -53,7 +51,9 @@ def test_all_three_resolvers_agree_on_the_isolated_home(isolated_home):
     paths = _resolvers()
     expected = isolated_home / "mcp.json"
     for name, path in paths.items():
-        assert path == expected, f"{name} resolved {path}, not the isolated home's {expected}"
+        assert (
+            path == expected
+        ), f"{name} resolved {path}, not the isolated home's {expected}"
 
 
 def test_the_native_client_reads_the_isolated_store_not_the_real_one(isolated_home):
@@ -66,7 +66,7 @@ def test_the_native_client_reads_the_isolated_store_not_the_real_one(isolated_ho
         json.dumps({"mcpServers": {"dev-only": {"command": "/bin/true", "args": []}}}),
         encoding="utf-8",
     )
-    from gideon.mcp_client import _gideon_mcp_specs
+    from gideon.integrations.mcp_client import _gideon_mcp_specs
 
     specs = _gideon_mcp_specs()
     assert list(specs) == ["dev-only"], f"the native client read {list(specs)}"
@@ -79,8 +79,8 @@ def test_the_two_former_constants_are_resolved_per_call(monkeypatch, tmp_path):
     "set the env var earlier" was never a fix. These must answer differently for two different
     homes within one process — which a constant cannot do.
     """
-    from gideon.dashboard.handlers.mcp import _canonical_mcp_json
-    from gideon.mcp_discovery import _mcp_json_paths
+    from gideon.integrations.mcp_discovery import _mcp_json_paths
+    from gideon.interfaces.dashboard.handlers.mcp import _canonical_mcp_json
 
     seen = []
     for name in ("home-a", "home-b"):
@@ -92,7 +92,9 @@ def test_the_two_former_constants_are_resolved_per_call(monkeypatch, tmp_path):
     (disc_a, hand_a), (disc_b, hand_b) = seen
     assert disc_a != disc_b, "mcp_discovery still answers one frozen path"
     assert hand_a != hand_b, "handlers/mcp still answers one frozen path"
-    assert disc_a == hand_a and disc_b == hand_b, "the two resolvers disagree within one home"
+    assert (
+        disc_a == hand_a and disc_b == hand_b
+    ), "the two resolvers disagree within one home"
 
 
 def test_no_module_hardcodes_the_real_home_for_mcp_json():
@@ -107,11 +109,13 @@ def test_no_module_hardcodes_the_real_home_for_mcp_json():
     import subprocess
     from pathlib import Path
 
-    src = Path(__file__).resolve().parent.parent / "src"
+    src = Path(__file__).resolve().parent.parent.parent / "src"
     out = subprocess.run(
         ["grep", "-rn", 'Path.home() / ".gideon" / "mcp.json"', str(src)],
         capture_output=True,
         text=True,
     )
     hits = [line for line in out.stdout.splitlines() if line.strip()]
-    assert not hits, "an mcp.json path bypasses config_dir() again:\n  " + "\n  ".join(hits)
+    assert not hits, "an mcp.json path bypasses config_dir() again:\n  " + "\n  ".join(
+        hits
+    )

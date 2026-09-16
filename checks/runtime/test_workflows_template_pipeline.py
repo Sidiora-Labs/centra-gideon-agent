@@ -14,7 +14,7 @@ against the ways it can be too eager: sentence-initial capitals, domain acronyms
 
 import pytest
 
-from gideon.workflows.template_pipeline import (
+from gideon.automation.workflows.template_pipeline import (
     NON_ENTITY_TOKENS,
     NUDGE_AFTER,
     NUDGE_COOLDOWN,
@@ -37,12 +37,14 @@ def tool(name: str, **meta) -> dict:
     return {"role": "tool", "content": name, "meta": meta}
 
 
-# ── session mining ──
-
-
 def test_mining_counts_the_tools_the_session_actually_used():
-    mined = mine_session([tool("knowledge_search"), tool("knowledge_search"), tool("web_fetch")])
-    assert {t.name: t.calls for t in mined.tools} == {"knowledge_search": 2, "web_fetch": 1}
+    mined = mine_session(
+        [tool("knowledge_search"), tool("knowledge_search"), tool("web_fetch")]
+    )
+    assert {t.name: t.calls for t in mined.tools} == {
+        "knowledge_search": 2,
+        "web_fetch": 1,
+    }
 
 
 def test_tools_are_ordered_by_use():
@@ -63,7 +65,9 @@ def test_a_DENIED_tool_is_excluded_from_the_permission_signature():
 def test_a_denial_excludes_the_tool_even_if_a_later_call_SUCCEEDED():
     """A denial is a decision about the tool, not about one call. Letting a later success override
     it would make the refusal a speed bump."""
-    mined = mine_session([tool("bash", approval="deny"), tool("bash", approval="allow")])
+    mined = mine_session(
+        [tool("bash", approval="deny"), tool("bash", approval="allow")]
+    )
     assert mined.permission_signature == []
 
 
@@ -91,7 +95,8 @@ def test_metadata_supplies_the_title():
 
 def test_mining_is_tolerant_of_records_it_does_not_recognize():
     """A transcript is append-only history written by several code paths over time. A miner that
-    raised on one unfamiliar record would fail on exactly the long sessions worth mining."""
+    raised on one unfamiliar record would fail on exactly the long sessions worth mining.
+    """
     mined = mine_session(
         [None, "a string", {"role": "system"}, {"weird": True}, tool("web_fetch")]  # type: ignore
     )
@@ -123,9 +128,6 @@ def test_a_tool_record_with_no_name_is_skipped():
     assert mine_session([{"role": "tool", "content": ""}]).tools == []
 
 
-# ── entity scrubbing ──
-
-
 def test_a_real_entity_becomes_a_slot():
     scrubbed, mapping = scrub_entities("summarize the Northwind Trading renewal")
     assert "{entity_1}" in scrubbed
@@ -142,7 +144,8 @@ def test_a_domain_acronym_SURVIVES(token):
 
 def test_the_allowlist_is_the_single_point_of_truth():
     """A scrubber and a scorer with two ideas of "not an entity" disagree silently — one path
-    parameterizes an acronym and the other does not, and nothing reports the difference."""
+    parameterizes an acronym and the other does not, and nothing reports the difference.
+    """
     assert "API" in NON_ENTITY_TOKENS
     assert len(set(NON_ENTITY_TOKENS)) == len(NON_ENTITY_TOKENS)
 
@@ -184,9 +187,6 @@ def test_empty_text_scrubs_to_nothing():
     assert scrub_entities("") == ("", {})
 
 
-# ── parameterizing a whole spec ──
-
-
 def spec_with(*prompts) -> dict:
     return {
         "root": {
@@ -202,7 +202,8 @@ def spec_with(*prompts) -> dict:
 
 def test_every_slot_is_DECLARED_as_an_input():
     """Session 42 measured both directions of this: a declared input nothing reads is a control
-    that silently does nothing, and a binding with no declared input dies at run start."""
+    that silently does nothing, and a binding with no declared input dies at run start.
+    """
     out, mapping = parameterize(spec_with("review the Northwind Trading contract"))
     assert set(mapping) == set(out["inputs"])
 
@@ -245,15 +246,16 @@ def test_scrubbing_reaches_a_loop_body():
             "kind": "loop",
             "id": "l",
             "config": {"mode": "counted", "n": 2},
-            "body": {"kind": "stage", "id": "inner", "config": {"prompt": "check Acme Corp"}},
+            "body": {
+                "kind": "stage",
+                "id": "inner",
+                "config": {"prompt": "check Acme Corp"},
+            },
         }
     }
     out, mapping = parameterize(spec)
     assert mapping
     assert "{entity_1}" in out["root"]["body"]["config"]["prompt"]
-
-
-# ── discover-then-freeze ──
 
 
 def test_a_generated_spec_freezes_at_SESSION_scope():
@@ -275,7 +277,10 @@ def test_the_candidate_name_is_deterministic():
 def test_the_candidate_remembers_the_goal_it_came_from():
     """It is what the matcher matches against. Without it the candidate is unreachable, which makes
     freezing it pointless."""
-    assert freeze_candidate({}, "research cold starts").origin_goal == "research cold starts"
+    assert (
+        freeze_candidate({}, "research cold starts").origin_goal
+        == "research cold starts"
+    )
 
 
 def test_one_reuse_does_not_promote():
@@ -301,13 +306,13 @@ def test_promotion_is_ONE_rung_per_threshold_crossing():
     for _ in range(PROMOTE_AFTER * 3):
         candidate = record_reuse(candidate)
         scopes.append(candidate.scope)
-    # One rung per threshold crossing, in order — not a jump to the top on the first crossing.
     assert scopes == ["session", "agent", "agent", "workspace", "workspace", "global"]
 
 
 def test_a_single_reuse_never_skips_a_rung():
     """The invariant behind the ladder: whatever the reuse count, one recorded reuse advances at
-    most one rung. A candidate arriving with a stale high count must not teleport to global."""
+    most one rung. A candidate arriving with a stale high count must not teleport to global.
+    """
     stale = Candidate(name="c", scope="session", reuses=99)
     assert record_reuse(stale).scope == "agent"
 
@@ -320,7 +325,8 @@ def test_the_top_rung_does_not_promote_further():
 
 def test_recording_a_reuse_returns_a_NEW_candidate():
     """The caller persists it. Mutating in place would make a failed write leave the in-memory
-    count ahead of disk, and the candidate would promote on a reuse that was never saved."""
+    count ahead of disk, and the candidate would promote on a reuse that was never saved.
+    """
     original = freeze_candidate({}, "g")
     record_reuse(original)
     assert original.reuses == 0
@@ -333,26 +339,29 @@ def test_a_promoted_candidate_serializes_with_its_state():
     assert payload["session_id"] == "s1"
 
 
-# ── the nudge, and its anti-nag rules ──
-
-
 def test_the_nudge_waits_for_a_pattern():
     """Three, so it arrives on the repetition that proves a pattern rather than on the coincidence
     of doing something twice."""
-    fires, why = should_nudge(NudgeState(shape="weekly digest", occurrences=2), turn=100)
+    fires, why = should_nudge(
+        NudgeState(shape="weekly digest", occurrences=2), turn=100
+    )
     assert fires is False
     assert "2/3" in why
 
 
 def test_the_nudge_fires_at_the_threshold():
-    fires, why = should_nudge(NudgeState(shape="weekly digest", occurrences=NUDGE_AFTER), turn=100)
+    fires, why = should_nudge(
+        NudgeState(shape="weekly digest", occurrences=NUDGE_AFTER), turn=100
+    )
     assert fires
     assert "recurred" in why
 
 
 def test_a_DECLINED_shape_is_settled():
     """ "No, not for this" must not become "ask me again next week about the same thing"."""
-    fires, why = should_nudge(NudgeState(shape="s", occurrences=99, declined=True), turn=10_000)
+    fires, why = should_nudge(
+        NudgeState(shape="s", occurrences=99, declined=True), turn=10_000
+    )
     assert fires is False
     assert "declined" in why
 

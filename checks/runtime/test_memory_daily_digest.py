@@ -12,19 +12,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-from gideon.memory_service import MemoryService
-from gideon.vector_memory import VectorMemoryStore
+from gideon.cognition.memory_service import MemoryService
+from gideon.cognition.vector_memory import SemanticArchive
 
-# The first digest test to land on a fresh xdist worker pays a one-time ~3s first-touch cost
-# (importing/initialising the faiss + memory stack); every case here is otherwise ~0.01s
-# (measured: 3.17s setup on the first test, 13s for the module single-process; #1611 saw 41s
-# under light load). The suite runs `--dist worksteal`, which ignores `xdist_group` (PHF-9), so
-# a heavy module cannot be pulled into its own serial group — and under pathological local
-# contention (dozens of worktrees + rival pytest processes) that first-touch case is starved
-# past the 120s ceiling, tripping pytest-timeout and crashing the worker (#1611; CI, unstarved,
-# stays green). A per-module 300s budget is headroom over the measured floor and mirrors
-# test_inert_surface_baseline's fix; being per-test scope, not the global timeout, it does not
-# mask the next slow test.
 pytestmark = pytest.mark.timeout(300)
 
 _EMB_DIM = 64
@@ -47,7 +37,7 @@ def _distinct_embed(text: str):
 @pytest.fixture
 def svc(tmp_path):
     _seen_texts.clear()
-    vs = VectorMemoryStore(db_path=tmp_path / "mem.db", embedding_dim=_EMB_DIM)
+    vs = SemanticArchive(db_path=tmp_path / "mem.db", embedding_dim=_EMB_DIM)
     vs.init()
     vs.embed_fn = _distinct_embed
     return MemoryService.over_vector_store(vs)
@@ -59,15 +49,14 @@ def _write_episodic_on(svc, text, day_iso, conv="s1"):
     ok = svc.write_episodic(text, conversation_id=conv, tags=["t"])
     assert ok, f"episodic write unexpectedly deduped/rejected: {text!r}"
     vs = svc._vs
-    row = vs.db.execute("SELECT id FROM episodic_memories ORDER BY rowid DESC LIMIT 1").fetchone()
+    row = vs.db.execute(
+        "SELECT id FROM episodic_memories ORDER BY rowid DESC LIMIT 1"
+    ).fetchone()
     vs.db.execute(
         "UPDATE episodic_memories SET created_at = ? WHERE id = ?",
         (f"{day_iso}T12:00:00+00:00", row["id"]),
     )
     vs.db.commit()
-
-
-# ── daily digest ─────────────────────────────────────────────────────────────
 
 
 def _digest_for(svc, day):
@@ -90,12 +79,10 @@ def test_digest_is_idempotent(svc):
     _write_episodic_on(svc, "first thing that happened", "2026-07-01")
     now = datetime(2026, 7, 4, tzinfo=timezone.utc)
     assert svc.build_daily_digest(now=now) == 1
-    # Re-running creates nothing new (keyed by date).
     assert svc.build_daily_digest(now=now) == 0
 
 
 def test_digest_skips_today(svc):
-    # Today is still accruing — never digest it.
     _write_episodic_on(svc, "happening now", "2026-07-04")
     now = datetime(2026, 7, 4, tzinfo=timezone.utc)
     assert svc.build_daily_digest(now=now) == 0
@@ -104,7 +91,9 @@ def test_digest_skips_today(svc):
 def test_digest_uses_summarizer_when_given(svc):
     _write_episodic_on(svc, "raw event text", "2026-07-01")
     now = datetime(2026, 7, 4, tzinfo=timezone.utc)
-    svc.build_daily_digest(now=now, summarizer=lambda day, texts: f"SUMMARY[{day}]:{len(texts)}")
+    svc.build_daily_digest(
+        now=now, summarizer=lambda day, texts: f"SUMMARY[{day}]:{len(texts)}"
+    )
     d = _digest_for(svc, "2026-07-01")
     assert d is not None and d["text"] == "SUMMARY[2026-07-01]:1"
 
@@ -118,7 +107,7 @@ def test_digest_falls_back_when_summarizer_raises(svc):
 
     svc.build_daily_digest(now=now, summarizer=_boom)
     d = _digest_for(svc, "2026-07-01")
-    assert d is not None and "resilient event" in d["text"]  # extractive fallback
+    assert d is not None and "resilient event" in d["text"]
 
 
 def test_daily_digests_listing(svc):
@@ -128,10 +117,7 @@ def test_daily_digests_listing(svc):
     svc.build_daily_digest(now=now)
     listing = svc.daily_digests()
     days = [d["day"] for d in listing]
-    assert days == ["2026-07-02", "2026-07-01"]  # newest first
-
-
-# ── provenance-first recall ──────────────────────────────────────────────────
+    assert days == ["2026-07-02", "2026-07-01"]
 
 
 def test_recall_carries_provenance(svc):

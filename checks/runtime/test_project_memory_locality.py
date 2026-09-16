@@ -20,14 +20,15 @@ from __future__ import annotations
 
 import pytest
 
-from gideon import memory_locality, security
-from gideon.config.loader import memory_dir_for_cwd
-from gideon.context import ContextBuilder
-from gideon.context_engine import active_recall_block
-from gideon.tasks.hierarchy import HierarchyStore
-from gideon.workflows import store as wf_store
-from gideon.workflows.controller import EngineServices, RunController
-from gideon.workflows.models import RunStatus, WorkflowRun
+from gideon.automation.workflows import store as wf_store
+from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.models import RunStatus, WorkflowRun
+from gideon.cognition import memory_locality
+from gideon.cognition.context import PromptAssembler
+from gideon.cognition.context_engine import active_recall_block
+from gideon.core.config.loader import memory_dir_for_cwd
+from gideon.engine.tasks.hierarchy import HierarchyStore
+from gideon.security import security
 
 pytestmark = pytest.mark.anyio
 
@@ -53,9 +54,9 @@ def _isolated_home(tmp_path, monkeypatch):
     ws.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
     monkeypatch.setenv("GIDEON_WORKSPACE", str(ws))
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
-    monkeypatch.setattr("gideon.tasks.hierarchy.config_dir", lambda: home)
-    from gideon import context as context_mod
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.engine.tasks.hierarchy.config_dir", lambda: home)
+    from gideon.cognition import context as context_mod
 
     monkeypatch.setattr(context_mod, "_memory_stores", {})
     return home
@@ -67,7 +68,9 @@ def _action_spec() -> dict:
         "root": {
             "kind": "sequence",
             "id": "s",
-            "children": [{"kind": "action", "id": "a", "config": {"provider": "recorder"}}],
+            "children": [
+                {"kind": "action", "id": "a", "config": {"provider": "recorder"}}
+            ],
         },
     }
 
@@ -93,38 +96,43 @@ def _recording_provider(seen: list[dict]):
     return lambda name: P()
 
 
-async def _run_in_project(project_id: str, *, cwd: str = "") -> tuple[RunController, list[dict]]:
+async def _run_in_project(
+    project_id: str, *, cwd: str = ""
+) -> tuple[RunController, list[dict]]:
     seen: list[dict] = []
     spec = _action_spec()
-    run = wf_store.create(WorkflowRun(id="", workflow_name="locality", project_id=project_id))
+    run = wf_store.create(
+        WorkflowRun(id="", workflow_name="locality", project_id=project_id)
+    )
     wf_store.write_spec(run.id, spec)
     controller = RunController(
-        run, spec, services=EngineServices(get_provider=_recording_provider(seen), cwd=cwd)
+        run,
+        spec,
+        services=EngineServices(get_provider=_recording_provider(seen), cwd=cwd),
     )
     assert await controller.run_to_completion(timeout=20) == RunStatus.COMPLETE
     return controller, seen
 
 
-# ── clause 1: a project-owned run's memory lands in the project partition ────
-
-
 class TestProjectPartitionBinding:
-    async def test_a_project_run_writes_into_its_own_partition_not_default(self, _isolated_home):
+    async def test_a_project_run_writes_into_its_own_partition_not_default(
+        self, _isolated_home
+    ):
         project = HierarchyStore().create_project(name="Widget")
         context_dir = str(HierarchyStore().context_dir(project.id))
 
         controller, _seen = await _run_in_project(project.id)
 
-        # The run's stage cwd IS the project's context dir…
         assert controller.services.cwd == context_dir
-        # …and memory resolved for that cwd is the project's own partition, not the shared one.
         partition = memory_dir_for_cwd(context_dir)
         assert partition != memory_dir_for_cwd(None)
-        store = ContextBuilder.get_memory_for(controller.services.cwd)
+        store = PromptAssembler.get_memory_for(controller.services.cwd)
         store.add_preference("widget cadence is weekly")
 
         written = [
-            p for p in partition.rglob("*.md") if "widget cadence is weekly" in p.read_text()
+            p
+            for p in partition.rglob("*.md")
+            if "widget cadence is weekly" in p.read_text()
         ]
         assert written, f"no memory written under the project partition {partition}"
         default_partition = memory_dir_for_cwd(None)
@@ -163,19 +171,16 @@ class TestProjectPartitionBinding:
         assert seen[0].get("run_id")
 
 
-# ── clause 2: partition-first recall, ordering only ─────────────────────────
-
-
 class TestPartitionFirstRecall:
     @staticmethod
-    def _builder() -> ContextBuilder:
-        builder = ContextBuilder()
-        builder.memory.init()  # the GLOBAL partition store (registered under _default)
+    def _builder() -> PromptAssembler:
+        builder = PromptAssembler()
+        builder.memory.init()
         return builder
 
     @staticmethod
     def _local_store(context_dir: str):
-        store = ContextBuilder.get_memory_for(context_dir)
+        store = PromptAssembler.get_memory_for(context_dir)
         return store
 
     def test_local_hits_come_first_and_global_hits_are_labeled_and_fenced(self):
@@ -185,16 +190,16 @@ class TestPartitionFirstRecall:
         builder.memory.add_preference("zorbulon owner is Dana")
         self._local_store(context_dir).add_preference("zorbulon cadence is weekly")
 
-        block = active_recall_block(builder, "zorbulon", cwd=context_dir, memory_store=None)
+        block = active_recall_block(
+            builder, "zorbulon", cwd=context_dir, memory_store=None
+        )
 
-        # The FTS renderer wraps matched terms (`>>>zorbulon<<<`), so the assertions match on
-        # the surrounding text — the recalled FRAGMENT, not the reconstructed sentence.
-        assert "cadence is weekly" in block  # the local partition
-        assert "owner is Dana" in block  # the global partition — still admitted
-        assert block.index("cadence is weekly") < block.index("owner is Dana")  # ordering
-        assert memory_locality.CROSS_PARTITION_SOURCE in block  # explicitly source-labeled
-        # Fenced via the real fencing API — an attributed fence carries no bare marker, so
-        # `is_fenced` is the only correct check here.
+        assert "cadence is weekly" in block
+        assert "owner is Dana" in block
+        assert block.index("cadence is weekly") < block.index(
+            "owner is Dana"
+        )  # ordering
+        assert memory_locality.CROSS_PARTITION_SOURCE in block
         assert security.is_fenced(block)
 
     def test_a_global_only_hit_still_surfaces_ordering_not_admission(self):
@@ -203,9 +208,11 @@ class TestPartitionFirstRecall:
         context_dir = str(HierarchyStore().context_dir(project.id))
         builder = self._builder()
         builder.memory.add_preference("zorbulon owner is Dana")
-        self._local_store(context_dir)  # the project partition exists and is EMPTY
+        self._local_store(context_dir)
 
-        block = active_recall_block(builder, "zorbulon", cwd=context_dir, memory_store=None)
+        block = active_recall_block(
+            builder, "zorbulon", cwd=context_dir, memory_store=None
+        )
 
         assert "owner is Dana" in block
         assert memory_locality.CROSS_PARTITION_SOURCE in block
@@ -213,7 +220,8 @@ class TestPartitionFirstRecall:
 
     def test_a_global_partition_session_gets_no_cross_partition_block(self):
         """A session already IN the global partition has no other partition to reach for; a
-        "cross-partition" label pointing at itself would be a lie and a duplicated block."""
+        "cross-partition" label pointing at itself would be a lie and a duplicated block.
+        """
         builder = self._builder()
         builder.memory.add_preference("zorbulon owner is Dana")
 

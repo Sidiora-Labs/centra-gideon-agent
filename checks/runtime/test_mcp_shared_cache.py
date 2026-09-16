@@ -19,8 +19,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import gideon.mcp_shared as mcp_shared
-from gideon import gateway_base
+import gideon.integrations.mcp_shared as mcp_shared
+from gideon.engine import gateway_base
 
 
 @pytest.fixture(autouse=True)
@@ -43,9 +43,6 @@ def fake_sel():
     audit = MagicMock()
     with patch.object(mcp_shared, "sel", return_value=audit):
         yield audit
-
-
-# Helpers ──────────────────────────────────────────────────────────────
 
 
 def _make_http_response(payload: dict) -> MagicMock:
@@ -80,15 +77,9 @@ def patch_session_setup(monkeypatch, tmp_path):
     parser that this module no longer calls.
     """
     monkeypatch.setenv(gateway_base.PORT_ENV, "7777")
-    # Provide a writeable config_dir() with a .local_secret.
     monkeypatch.setattr(mcp_shared, "config_dir", lambda: tmp_path)
     (tmp_path / ".local_secret").write_text("test-secret")
     return tmp_path
-
-
-# ─────────────────────────────────────────────────────────────────────
-# Successful resolution path.
-# ─────────────────────────────────────────────────────────────────────
 
 
 class TestSuccessCaching:
@@ -96,10 +87,11 @@ class TestSuccessCaching:
         self, fake_sel, patch_session_setup, monkeypatch
     ):
         monkeypatch.setenv("GIDEON_SESSION_KEY", "subagent:abc")
-        urlopen = MagicMock(return_value=_make_http_response({"exclude": ["foo", "bar"]}))
+        urlopen = MagicMock(
+            return_value=_make_http_response({"exclude": ["foo", "bar"]})
+        )
         with patch.object(mcp_shared.urllib.request, "urlopen", urlopen):
             assert mcp_shared._resolve_excluded_tools() == {"foo", "bar"}
-        # Second call must NOT hit the gateway again.
         urlopen.reset_mock()
         with patch.object(mcp_shared.urllib.request, "urlopen", urlopen):
             assert mcp_shared._resolve_excluded_tools() == {"foo", "bar"}
@@ -113,66 +105,70 @@ class TestSuccessCaching:
         with patch.object(mcp_shared.urllib.request, "urlopen", urlopen):
             assert mcp_shared._resolve_excluded_tools() == set()
 
-    def test_filters_non_string_entries(self, fake_sel, patch_session_setup, monkeypatch):
+    def test_filters_non_string_entries(
+        self, fake_sel, patch_session_setup, monkeypatch
+    ):
         monkeypatch.setenv("GIDEON_SESSION_KEY", "subagent:abc")
-        urlopen = MagicMock(return_value=_make_http_response({"exclude": ["foo", 42, None, "bar"]}))
+        urlopen = MagicMock(
+            return_value=_make_http_response({"exclude": ["foo", 42, None, "bar"]})
+        )
         with patch.object(mcp_shared.urllib.request, "urlopen", urlopen):
             assert mcp_shared._resolve_excluded_tools() == {"foo", "bar"}
 
 
-# ─────────────────────────────────────────────────────────────────────
-# Startup-race short cache (no session key, 404).
-# ─────────────────────────────────────────────────────────────────────
-
-
 class TestShortCacheStartupRace:
-    def test_no_session_key_uses_short_cache(self, fake_sel, patch_session_setup, monkeypatch):
+    def test_no_session_key_uses_short_cache(
+        self, fake_sel, patch_session_setup, monkeypatch
+    ):
         monkeypatch.delenv("GIDEON_SESSION_KEY", raising=False)
-        # No session_pid file in cfg_dir → resolver can't find a key.
-        # urlopen should never be called.
         urlopen = MagicMock()
         with patch.object(mcp_shared.urllib.request, "urlopen", urlopen):
             assert mcp_shared._resolve_excluded_tools() == set()
         assert urlopen.call_count == 0
-        # Audit event recorded.
-        ops = [c.kwargs.get("operation") for c in fake_sel.log_api_access.call_args_list]
+        ops = [
+            c.kwargs.get("operation") for c in fake_sel.log_api_access.call_args_list
+        ]
         assert "tool_policy.no_session_key" in ops
-        # Short cache populated, NOT long.
         assert mcp_shared._last_startup_race_time > 0
         assert mcp_shared._last_failure_time == 0.0
 
-    def test_404_response_uses_short_cache(self, fake_sel, patch_session_setup, monkeypatch):
+    def test_404_response_uses_short_cache(
+        self, fake_sel, patch_session_setup, monkeypatch
+    ):
         monkeypatch.setenv("GIDEON_SESSION_KEY", "subagent:abc")
         urlopen = MagicMock(side_effect=_make_http_error(404))
         with patch.object(mcp_shared.urllib.request, "urlopen", urlopen):
             assert mcp_shared._resolve_excluded_tools() == set()
-        ops = [c.kwargs.get("operation") for c in fake_sel.log_api_access.call_args_list]
+        ops = [
+            c.kwargs.get("operation") for c in fake_sel.log_api_access.call_args_list
+        ]
         assert "tool_policy.agent_not_resolved" in ops
         assert mcp_shared._last_startup_race_time > 0
         assert mcp_shared._last_failure_time == 0.0
 
-    def test_short_cache_window_short_circuits(self, fake_sel, patch_session_setup, monkeypatch):
-        # Trip the short cache, then ensure the next call doesn't re-query.
+    def test_short_cache_window_short_circuits(
+        self, fake_sel, patch_session_setup, monkeypatch
+    ):
         monkeypatch.setenv("GIDEON_SESSION_KEY", "subagent:abc")
         urlopen = MagicMock(side_effect=_make_http_error(404))
         with patch.object(mcp_shared.urllib.request, "urlopen", urlopen):
             mcp_shared._resolve_excluded_tools()
         urlopen.reset_mock()
-        # A second call inside the cache window is silent — should hit the
-        # negative-cache short-circuit and never call urlopen again.
         with patch.object(mcp_shared.urllib.request, "urlopen", urlopen):
             assert mcp_shared._resolve_excluded_tools() == set()
         assert urlopen.call_count == 0
-        ops = [c.kwargs.get("operation") for c in fake_sel.log_api_access.call_args_list]
+        ops = [
+            c.kwargs.get("operation") for c in fake_sel.log_api_access.call_args_list
+        ]
         assert "tool_policy.negative_cache_hit" in ops
 
-    def test_short_cache_expires_after_ttl(self, fake_sel, patch_session_setup, monkeypatch):
-        # Simulate the short TTL expiry by advancing monotonic.
+    def test_short_cache_expires_after_ttl(
+        self, fake_sel, patch_session_setup, monkeypatch
+    ):
         monkeypatch.setenv("GIDEON_SESSION_KEY", "subagent:abc")
         urlopen = MagicMock(side_effect=_make_http_error(404))
         with patch.object(mcp_shared.urllib.request, "urlopen", urlopen):
             mcp_shared._resolve_excluded_tools()
-        # Move time past the short TTL.
         with patch.object(
             mcp_shared.time,
             "monotonic",
@@ -183,13 +179,7 @@ class TestShortCacheStartupRace:
             urlopen.reset_mock()
             with patch.object(mcp_shared.urllib.request, "urlopen", urlopen):
                 mcp_shared._resolve_excluded_tools()
-            # Cache window expired → resolver retried (urlopen called once).
             assert urlopen.call_count == 1
-
-
-# ─────────────────────────────────────────────────────────────────────
-# Long failure cache.
-# ─────────────────────────────────────────────────────────────────────
 
 
 class TestLongCacheFailures:
@@ -198,14 +188,16 @@ class TestLongCacheFailures:
         urlopen = MagicMock(side_effect=_make_http_error(500))
         with patch.object(mcp_shared.urllib.request, "urlopen", urlopen):
             assert mcp_shared._resolve_excluded_tools() == set()
-        ops = [c.kwargs.get("operation") for c in fake_sel.log_api_access.call_args_list]
+        ops = [
+            c.kwargs.get("operation") for c in fake_sel.log_api_access.call_args_list
+        ]
         assert "tool_policy.resolution_failed" in ops
-        # Long cache populated.
         assert mcp_shared._last_failure_time > 0
-        # Short cache untouched.
         assert mcp_shared._last_startup_race_time == 0.0
 
-    def test_url_error_uses_long_cache(self, fake_sel, patch_session_setup, monkeypatch):
+    def test_url_error_uses_long_cache(
+        self, fake_sel, patch_session_setup, monkeypatch
+    ):
         monkeypatch.setenv("GIDEON_SESSION_KEY", "subagent:abc")
         urlopen = MagicMock(side_effect=urllib.error.URLError("connection refused"))
         with patch.object(mcp_shared.urllib.request, "urlopen", urlopen):
@@ -225,11 +217,6 @@ class TestLongCacheFailures:
         assert urlopen.call_count == 0
 
 
-# ─────────────────────────────────────────────────────────────────────
-# Warning suppression.
-# ─────────────────────────────────────────────────────────────────────
-
-
 class TestWarningSuppression:
     def _drive_failures(self, fake_sel, patch_session_setup, monkeypatch, n: int):
         """Trigger *n* sequential long-cache failures by busting the cache
@@ -243,19 +230,21 @@ class TestWarningSuppression:
             with patch.object(mcp_shared.urllib.request, "urlopen", urlopen):
                 mcp_shared._resolve_excluded_tools()
 
-    def test_first_failures_emit_warnings(self, caplog, fake_sel, patch_session_setup, monkeypatch):
-        caplog.set_level(logging.WARNING, logger="gideon.mcp_shared")
+    def test_first_failures_emit_warnings(
+        self, caplog, fake_sel, patch_session_setup, monkeypatch
+    ):
+        caplog.set_level(logging.WARNING, logger="gideon.integrations.mcp_shared")
         self._drive_failures(fake_sel, patch_session_setup, monkeypatch, n=2)
         warning_messages = [r.getMessage() for r in caplog.records]
-        warn_count = sum(1 for m in warning_messages if "Tool policy resolution failed" in m)
+        warn_count = sum(
+            1 for m in warning_messages if "Tool policy resolution failed" in m
+        )
         assert warn_count == 2
 
     def test_warning_after_threshold_is_suppressed_with_notice(
         self, caplog, fake_sel, patch_session_setup, monkeypatch
     ):
-        caplog.set_level(logging.WARNING, logger="gideon.mcp_shared")
-        # 3 failures: first 2 emit the full warning, 3rd emits the
-        # one-shot suppression notice.
+        caplog.set_level(logging.WARNING, logger="gideon.integrations.mcp_shared")
         self._drive_failures(fake_sel, patch_session_setup, monkeypatch, n=3)
         msgs = [r.getMessage() for r in caplog.records]
         full_warns = sum(1 for m in msgs if "Tool policy resolution failed" in m)
@@ -263,26 +252,24 @@ class TestWarningSuppression:
         assert full_warns == 2
         assert suppressed_notice == 1
 
-    def test_subsequent_failures_silent(self, caplog, fake_sel, patch_session_setup, monkeypatch):
-        caplog.set_level(logging.WARNING, logger="gideon.mcp_shared")
-        # 5 failures total — only 3 log lines (2 warnings + 1 suppression notice).
+    def test_subsequent_failures_silent(
+        self, caplog, fake_sel, patch_session_setup, monkeypatch
+    ):
+        caplog.set_level(logging.WARNING, logger="gideon.integrations.mcp_shared")
         self._drive_failures(fake_sel, patch_session_setup, monkeypatch, n=5)
-        msgs = [r.getMessage() for r in caplog.records if r.name == "gideon.mcp_shared"]
+        msgs = [
+            r.getMessage()
+            for r in caplog.records
+            if r.name == "gideon.integrations.mcp_shared"
+        ]
         assert len(msgs) == 3
 
 
-# ─────────────────────────────────────────────────────────────────────
-# Cross-cache interaction.
-# ─────────────────────────────────────────────────────────────────────
-
-
 class TestCachesAreIndependent:
-    def test_short_cache_hit_alone_short_circuits(self, fake_sel, patch_session_setup, monkeypatch):
-        # Set the env var so the resolver would otherwise reach urlopen —
-        # the cache short-circuit at the top is the ONLY thing preventing
-        # the call, which is exactly what this test asserts.
+    def test_short_cache_hit_alone_short_circuits(
+        self, fake_sel, patch_session_setup, monkeypatch
+    ):
         monkeypatch.setenv("GIDEON_SESSION_KEY", "subagent:abc")
-        # Manually populate only the short cache.
         mcp_shared._last_startup_race_time = mcp_shared.time.monotonic()
         mcp_shared._last_failure_time = 0.0
         urlopen = MagicMock()
@@ -290,9 +277,9 @@ class TestCachesAreIndependent:
             assert mcp_shared._resolve_excluded_tools() == set()
         assert urlopen.call_count == 0
 
-    def test_long_cache_hit_alone_short_circuits(self, fake_sel, patch_session_setup, monkeypatch):
-        # See ``test_short_cache_hit_alone_short_circuits`` rationale — set
-        # the session key so urlopen would be reachable absent the cache.
+    def test_long_cache_hit_alone_short_circuits(
+        self, fake_sel, patch_session_setup, monkeypatch
+    ):
         monkeypatch.setenv("GIDEON_SESSION_KEY", "subagent:abc")
         mcp_shared._last_failure_time = mcp_shared.time.monotonic()
         mcp_shared._last_startup_race_time = 0.0
@@ -301,8 +288,9 @@ class TestCachesAreIndependent:
             assert mcp_shared._resolve_excluded_tools() == set()
         assert urlopen.call_count == 0
 
-    def test_neither_cache_hit_does_query(self, fake_sel, patch_session_setup, monkeypatch):
-        # Both caches expired (or never set) → resolver MUST query.
+    def test_neither_cache_hit_does_query(
+        self, fake_sel, patch_session_setup, monkeypatch
+    ):
         monkeypatch.setenv("GIDEON_SESSION_KEY", "subagent:abc")
         urlopen = MagicMock(return_value=_make_http_response({"exclude": []}))
         with patch.object(mcp_shared.urllib.request, "urlopen", urlopen):

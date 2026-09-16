@@ -19,7 +19,7 @@ runs, so the window that exists to hold real revision history would hold near-du
 
 import pytest
 
-from gideon.workflows.publish import (
+from gideon.automation.workflows.publish import (
     BUNDLE_SCHEMA,
     HANDOFF_SECTIONS,
     MATERIAL_CHANGE_RATIO,
@@ -40,9 +40,6 @@ from gideon.workflows.publish import (
 )
 
 LONG = "The ingest pipeline batches every thirty seconds. " * 20
-
-
-# ── parsing the declaration ──
 
 
 def test_a_bare_name_is_accepted():
@@ -92,7 +89,9 @@ def test_a_binary_kind_is_not_publishable():
 def test_an_unknown_lineage_EDGE_is_refused():
     """The three edge types answer three different questions. A fourth invented edge would be an
     untyped link nobody can interpret, which is what typing them was for."""
-    spec, error = parse_publish({"publish": {"artifact": "R", "lineage": {"caused_by": ["run:1"]}}})
+    spec, error = parse_publish(
+        {"publish": {"artifact": "R", "lineage": {"caused_by": ["run:1"]}}}
+    )
     assert spec is None
     assert "unknown lineage edge" in error
 
@@ -101,9 +100,6 @@ def test_a_non_object_publish_is_refused():
     spec, error = parse_publish({"publish": ["a", "b"]})
     assert spec is None
     assert error
-
-
-# ── material-change gating ──
 
 
 def test_identical_content_does_not_earn_a_version():
@@ -120,7 +116,9 @@ def test_a_whitespace_only_change_is_not_material():
 
 
 def test_a_real_rewrite_IS_material():
-    changed, why = materially_changed(LONG, "A completely different summary of the pipeline.")
+    changed, why = materially_changed(
+        LONG, "A completely different summary of the pipeline."
+    )
     assert changed is True
     assert "%" in why
 
@@ -134,7 +132,8 @@ def test_a_tiny_edit_below_the_threshold_is_not_material():
 
 def test_publishing_over_a_real_body_with_an_EMPTY_one_is_refused():
     """The single most destructive publish: a node that failed to produce output replacing a good
-    artifact with nothing, and bumping the version so the good body is one revert away at best."""
+    artifact with nothing, and bumping the version so the good body is one revert away at best.
+    """
     changed, why = materially_changed(LONG, "   ")
     assert changed is False
     assert "empty" in why
@@ -157,9 +156,6 @@ def test_the_hash_ignores_whitespace():
 
 def test_the_hash_distinguishes_real_differences():
     assert content_hash("a b") != content_hash("a c")
-
-
-# ── the upsert decision ──
 
 
 def spec(name: str = "Weekly digest", **kw) -> PublishSpec:
@@ -192,7 +188,9 @@ def test_a_new_version_carries_a_CHANGE_NOTE():
 
 
 def test_an_explicit_change_note_wins_over_the_derived_one():
-    plan = upsert_plan(spec(), "different", existing_content=LONG, change_note="addressed review")
+    plan = upsert_plan(
+        spec(), "different", existing_content=LONG, change_note="addressed review"
+    )
     assert plan.change_note == "addressed review"
 
 
@@ -200,19 +198,27 @@ def test_provenance_is_attached_on_every_action_INCLUDING_the_noop():
     """A reader asking "which run produced this" needs an answer even when the latest run changed
     nothing — otherwise a converged refinement loop makes the artifact look abandoned by its
     producer."""
-    plan = upsert_plan(spec(), LONG, existing_content=LONG, run_id="r-1", node_id="write")
+    plan = upsert_plan(
+        spec(), LONG, existing_content=LONG, run_id="r-1", node_id="write"
+    )
     assert plan.meta == {"run_id": "r-1", "node_id": "write"}
 
 
 def test_the_source_lineage_edge_names_the_run_and_node():
-    plan = upsert_plan(spec(), "body", existing_content=None, run_id="r-1", node_id="write")
+    plan = upsert_plan(
+        spec(), "body", existing_content=None, run_id="r-1", node_id="write"
+    )
     assert plan.lineage[Lineage.SOURCE.value] == ["run:r-1#write"]
 
 
 def test_republishing_from_the_same_run_does_not_duplicate_the_edge():
     existing = {Lineage.SOURCE.value: ["run:r-1#write"]}
     plan = upsert_plan(
-        spec(lineage=existing), "body", existing_content=None, run_id="r-1", node_id="write"
+        spec(lineage=existing),
+        "body",
+        existing_content=None,
+        run_id="r-1",
+        node_id="write",
     )
     assert plan.lineage[Lineage.SOURCE.value] == ["run:r-1#write"]
 
@@ -230,16 +236,16 @@ def test_declared_lineage_survives_the_upsert():
     assert plan.lineage[Lineage.SOURCE.value] == ["run:r-1"]
 
 
-# ── evidence bundles ──
-
-
 def files(*names) -> list[EvidenceFile]:
-    return [EvidenceFile(name=n, kind="image", size=100, sha256=f"hash-{n}") for n in names]
+    return [
+        EvidenceFile(name=n, kind="image", size=100, sha256=f"hash-{n}") for n in names
+    ]
 
 
 def test_a_bundle_carries_a_digest_per_file():
     """An evidence bundle exists so "what did my machine do while I slept" has PROOF. A manifest
-    listing a screenshot with no digest cannot tell you it is still the one the run took."""
+    listing a screenshot with no digest cannot tell you it is still the one the run took.
+    """
     bundle = evidence_bundle(files("after.png", "before.png"))
     assert all(f["sha256"] for f in bundle["files"])
 
@@ -278,9 +284,6 @@ def test_a_file_with_no_expiry_omits_the_key():
     assert "expires_at" not in files("a.png")[0].to_dict()
 
 
-# ── the terminal handoff report ──
-
-
 def test_every_section_is_present_even_when_nothing_was_recorded():
     """An absent `side_effects` section reads as "nothing was committed or sent", which is a claim —
     and it is the claim a user most wants to be true and least wants to be guessed."""
@@ -304,8 +307,11 @@ def test_a_single_string_section_is_accepted():
 
 def test_a_skip_WITHOUT_a_reason_is_flagged():
     """A skip with no reason is the most misleading line in a report: the reader cannot tell a
-    deliberate omission from a silent failure, so they must re-do the work to find out."""
-    report = handoff_report(skipped=["the deploy step", "linting because the config was missing"])
+    deliberate omission from a silent failure, so they must re-do the work to find out.
+    """
+    report = handoff_report(
+        skipped=["the deploy step", "linting because the config was missing"]
+    )
     assert skipped_without_reason(report) == ["the deploy step"]
 
 
@@ -326,9 +332,6 @@ def test_a_reasoned_skip_is_accepted(text):
     assert skipped_without_reason(handoff_report(skipped=[text])) == []
 
 
-# ── the results ledger ──
-
-
 def test_a_reverted_attempt_is_RECORDED_not_dropped():
     """An attempt log that dropped failures would make a five-attempt convergence look like a
     first-try success, and the next run would repeat the four failures."""
@@ -338,7 +341,9 @@ def test_a_reverted_attempt_is_RECORDED_not_dropped():
 
 
 def test_the_ledger_is_append_only():
-    rows = append_ledger_rows([ledger_row(1, outcome="ok")], [ledger_row(2, outcome="ok")])
+    rows = append_ledger_rows(
+        [ledger_row(1, outcome="ok")], [ledger_row(2, outcome="ok")]
+    )
     assert [r["attempt"] for r in rows] == [1, 2]
 
 
@@ -355,26 +360,30 @@ def test_appending_to_an_empty_ledger_works():
     assert len(append_ledger_rows([], [ledger_row(1, outcome="ok")])) == 1
 
 
-# ── the engine seam ──
-
-
 def test_a_malformed_declaration_FAILS_the_node():
     """The whole property: a declaration is a promise about output. Degrading to "no publish" would
-    let a node whose author declared a deliverable report success while producing nothing."""
-    from gideon.workflows.engine import NodeResult, apply_publish
-    from gideon.workflows.models import InstanceState, Node
+    let a node whose author declared a deliverable report success while producing nothing.
+    """
+    from gideon.automation.workflows.engine import NodeResult, apply_publish
+    from gideon.automation.workflows.models import InstanceState, Node
 
     node = Node.from_dict(
-        {"kind": "stage", "id": "s", "config": {"prompt": "x", "publish": {"kind": "markdown"}}}
+        {
+            "kind": "stage",
+            "id": "s",
+            "config": {"prompt": "x", "publish": {"kind": "markdown"}},
+        }
     )
-    result = apply_publish(node, NodeResult(state=InstanceState.DONE, output="body"), run_id="r")
+    result = apply_publish(
+        node, NodeResult(state=InstanceState.DONE, output="body"), run_id="r"
+    )
     assert result.state is InstanceState.FAILED
     assert "invalid publish declaration" in result.failure.cause_plain
 
 
 def test_a_node_with_no_publish_block_is_untouched():
-    from gideon.workflows.engine import NodeResult, apply_publish
-    from gideon.workflows.models import InstanceState, Node
+    from gideon.automation.workflows.engine import NodeResult, apply_publish
+    from gideon.automation.workflows.models import InstanceState, Node
 
     node = Node.from_dict({"kind": "stage", "id": "s", "config": {"prompt": "x"}})
     result = apply_publish(node, NodeResult(state=InstanceState.DONE, output="body"))
@@ -384,27 +393,33 @@ def test_a_node_with_no_publish_block_is_untouched():
 
 def test_a_FAILED_node_does_not_publish():
     """Publishing the output of a node that failed would store a deliverable the run does not stand
-    behind — and the artifact would carry the run's provenance while contradicting its outcome."""
-    from gideon.workflows.engine import NodeResult, apply_publish
-    from gideon.workflows.models import InstanceState, Node
+    behind — and the artifact would carry the run's provenance while contradicting its outcome.
+    """
+    from gideon.automation.workflows.engine import NodeResult, apply_publish
+    from gideon.automation.workflows.models import InstanceState, Node
 
     node = Node.from_dict(
         {"kind": "stage", "id": "s", "config": {"prompt": "x", "publish": "Report"}}
     )
-    result = apply_publish(node, NodeResult(state=InstanceState.FAILED, output="partial"))
+    result = apply_publish(
+        node, NodeResult(state=InstanceState.FAILED, output="partial")
+    )
     assert result.published is None
 
 
 def test_a_non_text_output_is_a_recorded_NOOP():
     """A node whose output is structured data the caller binds elsewhere has still done its job.
-    Recording the no-op keeps the absence visible instead of looking like a lost publish."""
-    from gideon.workflows.engine import NodeResult, apply_publish
-    from gideon.workflows.models import InstanceState, Node
+    Recording the no-op keeps the absence visible instead of looking like a lost publish.
+    """
+    from gideon.automation.workflows.engine import NodeResult, apply_publish
+    from gideon.automation.workflows.models import InstanceState, Node
 
     node = Node.from_dict(
         {"kind": "stage", "id": "s", "config": {"prompt": "x", "publish": "Report"}}
     )
-    result = apply_publish(node, NodeResult(state=InstanceState.DONE, output={"rows": [1, 2]}))
+    result = apply_publish(
+        node, NodeResult(state=InstanceState.DONE, output={"rows": [1, 2]})
+    )
     assert result.published["action"] == "noop"
     assert "not text" in result.published["reason"]
 
@@ -414,7 +429,7 @@ def test_the_publish_outcome_is_a_DECLARED_field_so_it_reaches_the_journal():
     would show a published artifact with no record of the publish."""
     from dataclasses import fields
 
-    from gideon.workflows.engine import NodeResult
+    from gideon.automation.workflows.engine import NodeResult
 
     assert "published" in {f.name for f in fields(NodeResult)}
 
@@ -422,8 +437,8 @@ def test_the_publish_outcome_is_a_DECLARED_field_so_it_reaches_the_journal():
 def test_a_string_output_stays_reachable_at_its_original_binding_path():
     """Wrapping it in a dict would break every `{{nodes.x.output}}` downstream, so publishing a
     node's output would change what its consumers read."""
-    from gideon.workflows.engine import NodeResult, apply_publish
-    from gideon.workflows.models import InstanceState, Node
+    from gideon.automation.workflows.engine import NodeResult, apply_publish
+    from gideon.automation.workflows.models import InstanceState, Node
 
     node = Node.from_dict(
         {"kind": "stage", "id": "s", "config": {"prompt": "x", "publish": "Report"}}
@@ -434,15 +449,12 @@ def test_a_string_output_stays_reachable_at_its_original_binding_path():
     assert result.output == "the body"
 
 
-# ── provenance has to REACH the artifact ──
-
-
 def test_lineage_flattens_to_SCALAR_keys():
     """Measured: `clean_event_metadata` bounds event metadata to string-keyed scalars ≤256 chars — a
     deliberate size bound. Passing the nested lineage dict through stringified it into a Python repr
     (`"{'informed_by': ['knowledge:item-7']}"`) that no reader can parse. Widening the sanitizer
     would loosen a bound that exists on purpose."""
-    from gideon.workflows.publish import flatten_lineage
+    from gideon.automation.workflows.publish import flatten_lineage
 
     flat = flatten_lineage({"source": ["run:r-1#write"], "informed_by": ["k:7", "k:9"]})
     assert flat == {"lineage_source": "run:r-1#write", "lineage_informed_by": "k:7,k:9"}
@@ -453,7 +465,7 @@ def test_lineage_round_trips():
     """The writer and reader ship together, so the format is one decision in one place. A
     writer whose
     reader lives elsewhere is a format that drifts."""
-    from gideon.workflows.publish import flatten_lineage, parse_lineage
+    from gideon.automation.workflows.publish import flatten_lineage, parse_lineage
 
     original = {"source": ["run:r-1#write"], "informed_by": ["k:7", "k:9"]}
     assert parse_lineage(flatten_lineage(original)) == original
@@ -462,15 +474,17 @@ def test_lineage_round_trips():
 def test_an_empty_edge_is_OMITTED_not_written_as_blank():
     """A key whose value is empty reads as "this edge was considered and found nothing", which is a
     claim the publish never made."""
-    from gideon.workflows.publish import flatten_lineage
+    from gideon.automation.workflows.publish import flatten_lineage
 
     assert flatten_lineage({"related": []}) == {}
 
 
 def test_parsing_ignores_non_lineage_metadata_keys():
-    from gideon.workflows.publish import parse_lineage
+    from gideon.automation.workflows.publish import parse_lineage
 
-    assert parse_lineage({"run_id": "r-1", "lineage_source": "run:r-1"}) == {"source": ["run:r-1"]}
+    assert parse_lineage({"run_id": "r-1", "lineage_source": "run:r-1"}) == {
+        "source": ["run:r-1"]
+    }
 
 
 def test_the_artifact_WRITERS_can_carry_event_provenance():
@@ -479,7 +493,7 @@ def test_the_artifact_WRITERS_can_carry_event_provenance():
     artifact landed carrying none of it. Provenance computed and discarded."""
     import inspect
 
-    from gideon.artifacts.native import NativeArtifactProvider
+    from gideon.workspace.artifacts.native import NativeArtifactProvider
 
     for method in ("create", "update", "create_binary"):
         params = inspect.signature(getattr(NativeArtifactProvider, method)).parameters
@@ -491,15 +505,12 @@ def test_publishing_records_the_run_on_the_artifacts_own_event(tmp_path, monkeyp
     has an answer on disk."""
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: home)
-    # `workflows.store` binds `config_dir` at IMPORT, so patching the loader alone leaves the
-    # publish journal writing to the REAL home. Measured: this test wrote
-    # ~/.gideon/workflows/runs/<id>/publishes.jsonl until both were patched.
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
-    from gideon.artifacts import native, registry
-    from gideon.workflows.engine import NodeResult, apply_publish
-    from gideon.workflows.models import InstanceState, Node
-    from gideon.workflows.publish import parse_lineage
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
+    from gideon.automation.workflows.engine import NodeResult, apply_publish
+    from gideon.automation.workflows.models import InstanceState, Node
+    from gideon.automation.workflows.publish import parse_lineage
+    from gideon.workspace.artifacts import native, registry
 
     provider = native.NativeArtifactProvider()
     monkeypatch.setattr(provider, "_root", home / "artifacts", raising=False)
@@ -521,7 +532,9 @@ def test_publishing_records_the_run_on_the_artifacts_own_event(tmp_path, monkeyp
         )
         result = apply_publish(
             node,
-            NodeResult(state=InstanceState.DONE, output="A body about the ingest internals."),
+            NodeResult(
+                state=InstanceState.DONE, output="A body about the ingest internals."
+            ),
             run_id="r-prov",
         )
         assert result.published["action"] == "create"
@@ -537,15 +550,8 @@ def test_publishing_records_the_run_on_the_artifacts_own_event(tmp_path, monkeyp
         registry.unregister_provider(provider.name)
 
 
-# ── media self-containment (§2.2c) ───────────────────────────────────────────
-#
-# The property: a published body that references a workspace file must not break when that file
-# moves. The reference is rewritten to a content-hash name and the bytes are copied into the
-# artifact's own version dir, so the version survives the workspace being deleted.
-
-
 def test_local_refs_are_rewritten_to_content_hash_names():
-    from gideon.workflows.publish import rewrite_media_refs
+    from gideon.automation.workflows.publish import rewrite_media_refs
 
     content = "See ![chart](out/chart.png) and [notes](notes.md)."
     body, copies, unresolved = rewrite_media_refs(
@@ -553,7 +559,6 @@ def test_local_refs_are_rewritten_to_content_hash_names():
     )
     assert unresolved == []
     assert {c.reference for c in copies} == {"out/chart.png", "notes.md"}
-    # The stem survives so a versions listing stays readable; the digest is what makes it immutable.
     assert "![chart](chart@aaaaaaaaaaaa.png)" in body
     assert "[notes](notes@aaaaaaaaaaaa.md)" in body
 
@@ -561,9 +566,11 @@ def test_local_refs_are_rewritten_to_content_hash_names():
 def test_remote_and_opted_out_refs_are_left_alone():
     """A URL is already self-contained, and `@` means "leave this pointer alone" everywhere else in
     the product — copying either would be the publish overriding an explicit choice."""
-    from gideon.workflows.publish import rewrite_media_refs
+    from gideon.automation.workflows.publish import rewrite_media_refs
 
-    content = "![a](https://example.com/x.png) ![b](@live/pointer.png) ![c](/etc/passwd)"
+    content = (
+        "![a](https://example.com/x.png) ![b](@live/pointer.png) ![c](/etc/passwd)"
+    )
     body, copies, unresolved = rewrite_media_refs(content, lambda ref: (b"x", "b" * 64))
     assert copies == []
     assert unresolved == []
@@ -573,7 +580,7 @@ def test_remote_and_opted_out_refs_are_left_alone():
 def test_an_unresolvable_ref_is_reported_and_left_verbatim():
     """Not replaced with a placeholder: a body whose broken image became `[missing]` would read as
     though the run produced something it did not."""
-    from gideon.workflows.publish import rewrite_media_refs
+    from gideon.automation.workflows.publish import rewrite_media_refs
 
     body, copies, unresolved = rewrite_media_refs("![x](gone.png)", lambda ref: None)
     assert copies == []
@@ -584,7 +591,7 @@ def test_an_unresolvable_ref_is_reported_and_left_verbatim():
 def test_one_file_referenced_twice_is_copied_once():
     """Content-addressed means the second reference resolves to the same copy — otherwise a body
     citing one chart in two places would burn two slots for identical bytes."""
-    from gideon.workflows.publish import rewrite_media_refs
+    from gideon.automation.workflows.publish import rewrite_media_refs
 
     calls: list[str] = []
 
@@ -598,17 +605,16 @@ def test_one_file_referenced_twice_is_copied_once():
     assert body.count("x@cccccccccccc.png") == 2
 
 
-def test_store_version_file_refuses_a_name_that_could_shadow_a_snapshot(tmp_path, monkeypatch):
+def test_store_version_file_refuses_a_name_that_could_shadow_a_snapshot(
+    tmp_path, monkeypatch
+):
     """The structural guard: a companion named `v3.png` would be counted as a version snapshot by
     `_list_version_numbers` and pruned as one."""
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: home)
-    # `workflows.store` binds `config_dir` at IMPORT, so patching the loader alone leaves the
-    # publish journal writing to the REAL home. Measured: this test wrote
-    # ~/.gideon/workflows/runs/<id>/publishes.jsonl until both were patched.
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
-    from gideon.artifacts import native
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
+    from gideon.workspace.artifacts import native
 
     provider = native.NativeArtifactProvider()
     monkeypatch.setattr(provider, "_root", home / "artifacts", raising=False)
@@ -625,14 +631,11 @@ def test_publish_copies_referenced_files_into_the_version_dir(tmp_path, monkeypa
 
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: home)
-    # `workflows.store` binds `config_dir` at IMPORT, so patching the loader alone leaves the
-    # publish journal writing to the REAL home. Measured: this test wrote
-    # ~/.gideon/workflows/runs/<id>/publishes.jsonl until both were patched.
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
-    from gideon.artifacts import native, registry
-    from gideon.workflows.engine import NodeResult, apply_publish
-    from gideon.workflows.models import InstanceState, Node
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
+    from gideon.automation.workflows.engine import NodeResult, apply_publish
+    from gideon.automation.workflows.models import InstanceState, Node
+    from gideon.workspace.artifacts import native, registry
 
     cwd = tmp_path / "ws"
     (cwd / "out").mkdir(parents=True)
@@ -668,7 +671,6 @@ def test_publish_copies_referenced_files_into_the_version_dir(tmp_path, monkeypa
         art = provider.find_similar("Media report")
         landed = provider._artifact_dir(art.slug) / "versions" / name
         assert landed.read_bytes() == b"\x89PNG-pretend"
-        # The stored body points at the copy, not at the workspace path.
         detail = provider.get(art.slug)
         assert name in detail.content
         assert "out/chart.png" not in detail.content
@@ -681,14 +683,11 @@ def test_publish_refuses_to_copy_a_file_outside_the_run_cwd(tmp_path, monkeypatc
     into an artifact the dashboard serves."""
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: home)
-    # `workflows.store` binds `config_dir` at IMPORT, so patching the loader alone leaves the
-    # publish journal writing to the REAL home. Measured: this test wrote
-    # ~/.gideon/workflows/runs/<id>/publishes.jsonl until both were patched.
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
-    from gideon.artifacts import native, registry
-    from gideon.workflows.engine import NodeResult, apply_publish
-    from gideon.workflows.models import InstanceState, Node
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
+    from gideon.automation.workflows.engine import NodeResult, apply_publish
+    from gideon.automation.workflows.models import InstanceState, Node
+    from gideon.workspace.artifacts import native, registry
 
     (tmp_path / "secret.txt").write_bytes(b"a credential")
     cwd = tmp_path / "ws"
@@ -707,7 +706,9 @@ def test_publish_refuses_to_copy_a_file_outside_the_run_cwd(tmp_path, monkeypatc
         )
         result = apply_publish(
             node,
-            NodeResult(state=InstanceState.DONE, output="Look at [it](../secret.txt) closely."),
+            NodeResult(
+                state=InstanceState.DONE, output="Look at [it](../secret.txt) closely."
+            ),
             run_id="r-escape",
             cwd=str(cwd),
         )
@@ -715,7 +716,6 @@ def test_publish_refuses_to_copy_a_file_outside_the_run_cwd(tmp_path, monkeypatc
         assert media["stored"] == []
         assert media["self_contained"] is False
         assert media["unresolved"][0]["reference"] == "../secret.txt"
-        # The reference is left verbatim, so the break is visible rather than silently rewritten.
         assert "a credential" not in (
             provider.get(provider.find_similar("Escape probe").slug).content
         )
@@ -728,15 +728,12 @@ def test_publish_journals_the_outcome_for_the_outbox(tmp_path, monkeypatch):
     nothing writes is the worst shape of inert code."""
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("gideon.config.loader.config_dir", lambda: home)
-    # `workflows.store` binds `config_dir` at IMPORT, so patching the loader alone leaves the
-    # publish journal writing to the REAL home. Measured: this test wrote
-    # ~/.gideon/workflows/runs/<id>/publishes.jsonl until both were patched.
-    monkeypatch.setattr("gideon.workflows.store.config_dir", lambda: home)
-    from gideon.artifacts import native, registry
-    from gideon.workflows import filedrop, store
-    from gideon.workflows.engine import NodeResult, apply_publish
-    from gideon.workflows.models import InstanceState, Node
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: home)
+    monkeypatch.setattr("gideon.automation.workflows.store.config_dir", lambda: home)
+    from gideon.automation.workflows import filedrop, store
+    from gideon.automation.workflows.engine import NodeResult, apply_publish
+    from gideon.automation.workflows.models import InstanceState, Node
+    from gideon.workspace.artifacts import native, registry
 
     provider = native.NativeArtifactProvider()
     monkeypatch.setattr(provider, "_root", home / "artifacts", raising=False)
@@ -751,7 +748,9 @@ def test_publish_journals_the_outcome_for_the_outbox(tmp_path, monkeypatch):
         )
         apply_publish(
             node,
-            NodeResult(state=InstanceState.DONE, output="A body worth publishing once."),
+            NodeResult(
+                state=InstanceState.DONE, output="A body worth publishing once."
+            ),
             run_id="r-outbox",
         )
         rows = store.read_jsonl("r-outbox", "publishes.jsonl")

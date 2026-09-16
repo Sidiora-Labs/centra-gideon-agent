@@ -2,8 +2,8 @@
 
 import pytest
 
-from gideon.dashboard.chat import _validate_tool_name
-from gideon.validation import MAX_TOOL_NAME_LEN
+from gideon.assurance.validation import MAX_TOOL_NAME_LEN
+from gideon.interfaces.dashboard.chat import _validate_tool_name
 
 
 class TestToolNameValidation:
@@ -43,9 +43,7 @@ class TestToolNameValidation:
 
     def test_unicode_normalization(self):
         """Hidden Unicode characters are stripped."""
-        # Zero-width space
         assert _validate_tool_name("Tool\u200bName") == "ToolName"
-        # Direction override
         assert _validate_tool_name("Tool\u202eName") == "ToolName"
 
     def test_whitespace_trimmed(self):

@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from gideon.tool_providers import tool_prefs
+from gideon.integrations.tool_providers import tool_prefs
 
 
 @pytest.fixture
@@ -18,10 +18,8 @@ def home(tmp_path, monkeypatch):
 def test_disable_then_enable_roundtrips(home):
     assert tool_prefs.set_enabled("Builder", "SomeTool", False)["ok"] is True
     assert tool_prefs.is_disabled("Builder", "SomeTool") is True
-    # persisted
     data = json.loads((home / "tool_prefs.json").read_text())
     assert "Builder:SomeTool" in data["disabled"]
-    # re-enable
     tool_prefs.set_enabled("Builder", "SomeTool", True)
     assert tool_prefs.is_disabled("Builder", "SomeTool") is False
 
@@ -30,11 +28,10 @@ def test_core_locked_cannot_be_disabled(home):
     for locked in ("bash", "read_file", "tool_search", "tool_schema", "finish"):
         res = tool_prefs.set_enabled("builtin", locked, False)
         assert res["ok"] is False and res.get("locked") is True
-        assert tool_prefs.is_disabled("builtin", locked) is False  # never disabled
+        assert tool_prefs.is_disabled("builtin", locked) is False
 
 
 def test_locked_entry_in_file_is_ignored(home):
-    # Even if a stale locked key lands in the file, is_disabled ignores it.
     (home / "tool_prefs.json").write_text(json.dumps({"disabled": ["builtin:bash"]}))
     assert tool_prefs.is_disabled("builtin", "bash") is False
 
@@ -56,9 +53,13 @@ def test_key_for_uses_other_when_provider_blank(home):
 @pytest.mark.asyncio
 async def test_runtime_excludes_disabled_tool(home, monkeypatch):
     """A disabled native tool is absent from the runtime's defs AND index."""
-    from gideon.agents.native.runtime import NativeAgentRuntime
-    from gideon.agents.provider import AgentRuntimeDefinition
-    from gideon.tool_providers.base import ToolDefinition, ToolProvider, ToolResult
+    from gideon.engine.agents.native.runtime import NativeAgentRuntime
+    from gideon.engine.agents.provider import AgentRuntimeDefinition
+    from gideon.integrations.tool_providers.base import (
+        ToolDefinition,
+        ToolProvider,
+        ToolResult,
+    )
 
     class _P(ToolProvider):
         @property
@@ -93,30 +94,28 @@ async def test_runtime_excludes_disabled_tool(home, monkeypatch):
         _model = "scripted"
 
         async def complete(self, messages, *, tools=None, model=None):
-            from gideon.llm.events import EVENT_COMPLETE, AgentEvent
+            from gideon.integrations.llm.events import EVENT_COMPLETE, AgentEvent
 
             yield AgentEvent(kind=EVENT_COMPLETE)
 
     tool_prefs.set_enabled("myprov", "drop_me", False)
     rt = NativeAgentRuntime(
-        definition=AgentRuntimeDefinition(name="T", provider="native", model="scripted"),
+        definition=AgentRuntimeDefinition(
+            name="T", provider="native", model="scripted"
+        ),
         model_provider=_M(),
         tool_providers=[_P()],
     )
     await rt.start()
     names = {d.name for d in rt._tool_defs}
     assert "keep_me" in names
-    assert "drop_me" not in names  # dropped from schema/catalog
-    assert "drop_me" not in rt._tool_index  # AND uncallable
-
-
-# ── UT4: provider-level disable ──
+    assert "drop_me" not in names
+    assert "drop_me" not in rt._tool_index
 
 
 def test_disable_whole_provider_roundtrips(home):
     assert tool_prefs.set_provider_enabled("myprov", False)["ok"] is True
     assert tool_prefs.is_provider_disabled("myprov") is True
-    # every tool of a disabled provider reads as disabled
     assert tool_prefs.is_disabled("myprov", "anything") is True
     tool_prefs.set_provider_enabled("myprov", True)
     assert tool_prefs.is_provider_disabled("myprov") is False
@@ -130,7 +129,6 @@ def test_platform_provider_cannot_be_disabled(home):
 
 
 def test_provider_disable_independent_of_tool_disable(home):
-    # tool + provider disable lists are independent keys in the doc
     tool_prefs.set_enabled("myprov", "t1", False)
     tool_prefs.set_provider_enabled("other", False)
     assert tool_prefs.load_disabled() == {"myprov:t1"}
@@ -139,9 +137,13 @@ def test_provider_disable_independent_of_tool_disable(home):
 
 @pytest.mark.asyncio
 async def test_runtime_skips_disabled_provider_toolset(home):
-    from gideon.agents.native.runtime import NativeAgentRuntime
-    from gideon.agents.provider import AgentRuntimeDefinition
-    from gideon.tool_providers.base import ToolDefinition, ToolProvider, ToolResult
+    from gideon.engine.agents.native.runtime import NativeAgentRuntime
+    from gideon.engine.agents.provider import AgentRuntimeDefinition
+    from gideon.integrations.tool_providers.base import (
+        ToolDefinition,
+        ToolProvider,
+        ToolResult,
+    )
 
     class _P(ToolProvider):
         @property
@@ -155,7 +157,10 @@ async def test_runtime_skips_disabled_provider_toolset(home):
         async def list_tools(self):
             return [
                 ToolDefinition(
-                    name=f"k_{i}", description="d", parameters={"type": "object"}, provider="killme"
+                    name=f"k_{i}",
+                    description="d",
+                    parameters={"type": "object"},
+                    provider="killme",
                 )
                 for i in range(3)
             ]
@@ -168,17 +173,18 @@ async def test_runtime_skips_disabled_provider_toolset(home):
         _model = "scripted"
 
         async def complete(self, messages, *, tools=None, model=None):
-            from gideon.llm.events import EVENT_COMPLETE, AgentEvent
+            from gideon.integrations.llm.events import EVENT_COMPLETE, AgentEvent
 
             yield AgentEvent(kind=EVENT_COMPLETE)
 
     tool_prefs.set_provider_enabled("killme", False)
     rt = NativeAgentRuntime(
-        definition=AgentRuntimeDefinition(name="T", provider="native", model="scripted"),
+        definition=AgentRuntimeDefinition(
+            name="T", provider="native", model="scripted"
+        ),
         model_provider=_M(),
         tool_providers=[_P()],
     )
     await rt.start()
-    # the whole provider's toolset is gone from schema AND dispatch index
     assert not any(d.name.startswith("k_") for d in rt._tool_defs)
     assert not any(n.startswith("k_") for n in rt._tool_index)

@@ -7,39 +7,36 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.dashboard.chat import _extract_bash_command
-from gideon.dashboard.state import (
-    DashboardState,
+from gideon.cognition.history import ConversationLog
+from gideon.interfaces.dashboard.chat import _extract_bash_command
+from gideon.interfaces.dashboard.state import (
+    ConsoleState,
     _ChatSession,
     is_read_only_bash,
 )
-from gideon.history import ConversationLog
-
-# ── Helpers ──
 
 
 def _make_state(tmp_path):
     sessions = MagicMock(count=0)
     sessions.get_pid = MagicMock(return_value=None)
     sessions.remove = AsyncMock()
-    return DashboardState(
+    return ConsoleState(
         sessions=sessions,
         start_time=0.0,
         conversation_log=ConversationLog(base_dir=tmp_path),
     )
 
 
-def _make_app(state: DashboardState) -> web.Application:
-    from gideon.dashboard.chat import api_chat_mode, api_chat_session_approve
+def _make_app(state: ConsoleState) -> web.Application:
+    from gideon.interfaces.dashboard.chat import api_chat_mode, api_chat_session_approve
 
     app = web.Application()
     app["state"] = state
-    app.router.add_post("/api/chat/sessions/{session}/approve", api_chat_session_approve)
+    app.router.add_post(
+        "/api/chat/sessions/{session}/approve", api_chat_session_approve
+    )
     app.router.add_post("/api/chat/mode", api_chat_mode)
     return app
-
-
-# ── is_read_only_bash classification ──
 
 
 class TestIsReadOnlyBash:
@@ -87,7 +84,7 @@ class TestIsReadOnlyBash:
 
     def test_background_operator_rejected(self):
         assert is_read_only_bash("ls & rm -rf /") is False
-        assert is_read_only_bash("ls && cat file") is True  # && still works
+        assert is_read_only_bash("ls && cat file") is True
 
     def test_pipe_chains(self):
         assert is_read_only_bash("grep -r 'foo' src/ | head -20") is True
@@ -131,9 +128,6 @@ class TestIsReadOnlyBash:
         assert is_read_only_bash("   ") is False
 
 
-# ── _extract_bash_command ──
-
-
 class TestExtractBashCommand:
     """Verify JSON tool_input parsing."""
 
@@ -146,7 +140,9 @@ class TestExtractBashCommand:
     def test_json_with_indent(self):
         import json
 
-        tool_input = json.dumps({"command": "ls -la", "__tool_use_purpose": "list files"}, indent=2)
+        tool_input = json.dumps(
+            {"command": "ls -la", "__tool_use_purpose": "list files"}, indent=2
+        )
         assert _extract_bash_command(tool_input) == "ls -la"
 
     def test_json_missing_command(self):
@@ -162,13 +158,12 @@ class TestExtractBashCommand:
         assert _extract_bash_command("") == ""
 
 
-# ── Approval endpoint: trust_reads action ──
-
-
 class TestTrustReadsApproval:
     @pytest.mark.asyncio
     async def test_trust_reads_sets_flag(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         session = state.get_or_create_session("s1")
         loop = asyncio.get_running_loop()
@@ -181,14 +176,15 @@ class TestTrustReadsApproval:
             )
             data = await resp.json()
             assert data["ok"] is True
-            # trust_reads is deferred — set by main loop after future consumed
             assert session._trust_reads is False
             assert session._trust is False
             assert fut.result() == "approved_trust_reads"
 
     @pytest.mark.asyncio
     async def test_trust_reads_mode_endpoint(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         session = state.get_or_create_session("s1")
 
@@ -204,18 +200,19 @@ class TestTrustReadsApproval:
 
     @pytest.mark.asyncio
     async def test_normal_mode_resets_trust_reads(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         session = state.get_or_create_session("s1")
         session._trust_reads = True
 
         async with TestClient(TestServer(_make_app(state))) as client:
-            await client.post("/api/chat/mode", json={"mode": "normal", "session": "s1"})
+            await client.post(
+                "/api/chat/mode", json={"mode": "normal", "session": "s1"}
+            )
             assert session._trust_reads is False
             assert session._trust is False
-
-
-# ── Approval endpoint: the action vocabulary is closed ──
 
 
 class TestApproveActionVocabulary:
@@ -228,8 +225,12 @@ class TestApproveActionVocabulary:
     """
 
     @pytest.mark.asyncio
-    async def test_unknown_action_is_400_and_leaves_approval_pending(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+    async def test_unknown_action_is_400_and_leaves_approval_pending(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         session = state.get_or_create_session("s1")
         loop = asyncio.get_running_loop()
@@ -237,17 +238,22 @@ class TestApproveActionVocabulary:
         session._approval_futures["test"] = fut
 
         async with TestClient(TestServer(_make_app(state))) as client:
-            resp = await client.post("/api/chat/sessions/s1/approve", json={"action": "approve"})
+            resp = await client.post(
+                "/api/chat/sessions/s1/approve", json={"action": "approve"}
+            )
             data = await resp.json()
         assert resp.status == 400
         assert "approve" in data["error"]
         assert "approved" in data["allowed"]
-        # The decisive half: the tool was NOT denied behind the caller's back.
         assert not fut.done()
 
     @pytest.mark.asyncio
-    async def test_omitted_action_still_fails_closed_as_reject(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+    async def test_omitted_action_still_fails_closed_as_reject(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         session = state.get_or_create_session("s1")
         loop = asyncio.get_running_loop()
@@ -263,9 +269,18 @@ class TestApproveActionVocabulary:
 
     @pytest.mark.asyncio
     async def test_every_frontend_verb_is_accepted(self, tmp_path, monkeypatch):
-        """Guards the FE/BE vocabulary seam — web/src/pages/ChatPage.tsx's union."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
-        for verb in ("approved", "rejected", "trust", "trust_agent", "trust_reads", "yolo"):
+        """Guards the FE/BE vocabulary seam — apps/console/src/pages/ChatPage.tsx's union."""
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        for verb in (
+            "approved",
+            "rejected",
+            "trust",
+            "trust_agent",
+            "trust_reads",
+            "yolo",
+        ):
             state = _make_state(tmp_path)
             session = state.get_or_create_session(f"s-{verb}")
             loop = asyncio.get_running_loop()
@@ -278,9 +293,6 @@ class TestApproveActionVocabulary:
                 )
             assert resp.status == 200, f"{verb} was rejected by the vocabulary guard"
             assert fut.done()
-
-
-# ── Session to_dict includes trust_reads ──
 
 
 class TestSessionTrustReadsDict:
@@ -298,13 +310,12 @@ class TestSessionTrustReadsDict:
         assert d["trust"] is False
 
 
-# ── Mode endpoint: trust_reads without a session id ──
-
-
 class TestTrustReadsModeAllSessions:
     @pytest.mark.asyncio
     async def test_trust_reads_all_sessions(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         s1 = state.get_or_create_session("s1")
         s2 = state.get_or_create_session("s2")
@@ -317,7 +328,9 @@ class TestTrustReadsModeAllSessions:
 
     @pytest.mark.asyncio
     async def test_normal_resets_all_sessions(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         s1 = state.get_or_create_session("s1")
         s2 = state.get_or_create_session("s2")
@@ -330,16 +343,15 @@ class TestTrustReadsModeAllSessions:
             assert s2._trust_reads is False
 
 
-# ── Mode endpoint: unknown-session and unknown-mode validation ──
-
-
 class TestModeValidation:
     """#769 (trust_reads unknown-session guard) + #767 (unknown-mode rejection)."""
 
     @pytest.mark.asyncio
     async def test_trust_reads_unknown_session_rejected(self, tmp_path, monkeypatch):
         """#769: a truthy-but-absent session must 400, not relax the whole fleet."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         s1 = state.get_or_create_session("s1")
         s2 = state.get_or_create_session("s2")
@@ -352,14 +364,15 @@ class TestModeValidation:
             data = await resp.json()
             assert data["ok"] is False
             assert data["error"] == "unknown session"
-            # No existing session flipped — the fleet-wide relax is the bug.
             assert s1._trust_reads is False
             assert s2._trust_reads is False
 
     @pytest.mark.asyncio
     async def test_trust_reads_none_session_applies_all(self, tmp_path, monkeypatch):
         """session=None still applies to every session."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         s1 = state.get_or_create_session("s1")
         s2 = state.get_or_create_session("s2")
@@ -373,7 +386,9 @@ class TestModeValidation:
     @pytest.mark.asyncio
     async def test_trust_reads_known_session_only(self, tmp_path, monkeypatch):
         """A known session name flips only that session."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         s1 = state.get_or_create_session("s1")
         s2 = state.get_or_create_session("s2")
@@ -389,7 +404,9 @@ class TestModeValidation:
     @pytest.mark.asyncio
     async def test_unknown_mode_rejected(self, tmp_path, monkeypatch):
         """#767: an unrecognized mode must 400 instead of falling through to normal."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         session = state.get_or_create_session("s1")
         session._trust = True
@@ -400,26 +417,26 @@ class TestModeValidation:
             data = await resp.json()
             assert data["ok"] is False
             assert "invalid mode" in data["error"]
-            # Rejected before any apply — existing state untouched.
             assert session._trust is True
 
     @pytest.mark.asyncio
     async def test_known_mode_still_works(self, tmp_path, monkeypatch):
         """A valid mode is unaffected by the new guard."""
-        monkeypatch.setattr("gideon.dashboard.state.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
         state = _make_state(tmp_path)
         session = state.get_or_create_session("s1")
 
         async with TestClient(TestServer(_make_app(state))) as client:
-            resp = await client.post("/api/chat/mode", json={"mode": "trust", "session": "s1"})
+            resp = await client.post(
+                "/api/chat/mode", json={"mode": "trust", "session": "s1"}
+            )
             assert resp.status == 200
             data = await resp.json()
             assert data["ok"] is True
             assert data["mode"] == "trust"
             assert session._trust is True
-
-
-# ── Permission metadata: is_read_only flag ──
 
 
 class TestPermissionMetadata:

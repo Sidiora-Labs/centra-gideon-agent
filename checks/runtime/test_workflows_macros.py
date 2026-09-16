@@ -24,15 +24,15 @@ import copy
 
 import pytest
 
-from gideon.workflows.blocks import resolve_spec
-from gideon.workflows.macros import (
+from gideon.automation.workflows.blocks import resolve_spec
+from gideon.automation.workflows.macros import (
     MAX_DEPTH,
     MacroError,
     expand_spec,
     has_macros,
     macro_names,
 )
-from gideon.workflows.validator import validate_spec
+from gideon.automation.workflows.validator import validate_spec
 
 
 def _pipeline(spec: dict) -> dict:
@@ -43,9 +43,10 @@ def _pipeline(spec: dict) -> dict:
 
 
 def _spec(node: dict) -> dict:
-    # `root_seq`, not `s`: a macro case in this file legitimately uses `id: "s"`, and a wrapper
-    # sharing it would fail the duplicate-id check for a reason that is the fixture's fault.
-    return {"name": "t", "root": {"kind": "sequence", "id": "root_seq", "children": [node]}}
+    return {
+        "name": "t",
+        "root": {"kind": "sequence", "id": "root_seq", "children": [node]},
+    }
 
 
 def _nodes(spec: dict) -> dict[str, dict]:
@@ -70,7 +71,12 @@ def _nodes(spec: dict) -> dict[str, dict]:
 
 class TestRegistry:
     def test_the_four_documented_macros_exist(self) -> None:
-        assert macro_names() == ["judge_panel", "research_sweep", "route", "verify_panel"]
+        assert macro_names() == [
+            "judge_panel",
+            "research_sweep",
+            "route",
+            "verify_panel",
+        ]
 
     def test_an_unknown_macro_names_the_available_ones(self) -> None:
         """A typo'd macro is the common authoring error, and "unknown macro" alone leaves the
@@ -89,7 +95,9 @@ class TestPurity:
                 "macro": "route",
                 "id": "r",
                 "config": {"subject": "x"},
-                "cases": {"a": {"kind": "transform", "id": "ta", "config": {"expr": 1}}},
+                "cases": {
+                    "a": {"kind": "transform", "id": "ta", "config": {"expr": 1}}
+                },
             }
         )
         before = copy.deepcopy(spec)
@@ -140,7 +148,8 @@ class TestJudgePanel:
 
     def test_every_judge_is_infer_not_stage(self) -> None:
         """WF2-R16. A judge reads text and returns a score — no session, no tools, no lane
-        slot. `stage` would make a five-judge panel five concurrent subagent sessions."""
+        slot. `stage` would make a five-judge panel five concurrent subagent sessions.
+        """
         judges = self._panel()["root"]["children"][0]["children"][0]["children"]
         assert judges
         assert all(j["kind"] == "infer" for j in judges)
@@ -178,7 +187,11 @@ class TestJudgePanel:
                 {
                     "macro": "judge_panel",
                     "id": "p",
-                    "config": {"subject": "x", "lenses": ["a"], "model_tier": "reasoning"},
+                    "config": {
+                        "subject": "x",
+                        "lenses": ["a"],
+                        "model_tier": "reasoning",
+                    },
                 }
             )
         )
@@ -187,7 +200,9 @@ class TestJudgePanel:
 
     def test_missing_lenses_is_a_clear_error(self) -> None:
         with pytest.raises(MacroError, match="lenses"):
-            expand_spec(_spec({"macro": "judge_panel", "id": "p", "config": {"subject": "x"}}))
+            expand_spec(
+                _spec({"macro": "judge_panel", "id": "p", "config": {"subject": "x"}})
+            )
 
     def test_a_nameless_lens_is_refused(self) -> None:
         with pytest.raises(MacroError, match="name"):
@@ -250,8 +265,16 @@ class TestRoute:
                     "id": "triage",
                     "config": {"subject": "{{inputs.task}}", "criteria": "how big?"},
                     "cases": {
-                        "small": {"kind": "transform", "id": "quick", "config": {"expr": 1}},
-                        "large": {"kind": "stage", "id": "full", "config": {"prompt": "do it"}},
+                        "small": {
+                            "kind": "transform",
+                            "id": "quick",
+                            "config": {"expr": 1},
+                        },
+                        "large": {
+                            "kind": "stage",
+                            "id": "full",
+                            "config": {"prompt": "do it"},
+                        },
                     },
                 }
             )
@@ -264,13 +287,19 @@ class TestRoute:
 
     def test_the_classifier_defaults_to_the_FAST_tier(self) -> None:
         """Choosing which of three paths to take is a cheap judgment. Paying reasoning-tier
-        prices to route INTO a reasoning-tier branch doubles the decision's cost for nothing."""
-        assert _nodes(self._route())["triage_classify"]["config"]["model_tier"] == "fast"
+        prices to route INTO a reasoning-tier branch doubles the decision's cost for nothing.
+        """
+        assert (
+            _nodes(self._route())["triage_classify"]["config"]["model_tier"] == "fast"
+        )
 
     def test_the_branch_declares_the_enum_so_coverage_is_checked_at_save(self) -> None:
         """Without it, an uncovered category raises a binding error mid-run — after the
         classifier has already spent its tokens."""
-        assert _nodes(self._route())["triage_dispatch"]["config"]["enum"] == ["small", "large"]
+        assert _nodes(self._route())["triage_dispatch"]["config"]["enum"] == [
+            "small",
+            "large",
+        ]
 
     def test_the_branch_reads_the_classifiers_category(self) -> None:
         on = _nodes(self._route())["triage_dispatch"]["config"]["on"]
@@ -288,8 +317,14 @@ class TestRoute:
                     "macro": "route",
                     "id": "r",
                     "config": {"subject": "x"},
-                    "cases": {"a": {"kind": "transform", "id": "ta", "config": {"expr": 1}}},
-                    "default": {"kind": "transform", "id": "fallback", "config": {"expr": 0}},
+                    "cases": {
+                        "a": {"kind": "transform", "id": "ta", "config": {"expr": 1}}
+                    },
+                    "default": {
+                        "kind": "transform",
+                        "id": "fallback",
+                        "config": {"expr": 0},
+                    },
                 }
             )
         )
@@ -297,7 +332,9 @@ class TestRoute:
 
     def test_missing_cases_is_a_clear_error(self) -> None:
         with pytest.raises(MacroError, match="cases"):
-            expand_spec(_spec({"macro": "route", "id": "r", "config": {"subject": "x"}}))
+            expand_spec(
+                _spec({"macro": "route", "id": "r", "config": {"subject": "x"}})
+            )
 
 
 class TestResearchSweep:
@@ -315,7 +352,9 @@ class TestResearchSweep:
             )
         )
 
-    def test_it_expands_to_parallel_search_then_dedup_then_per_source_read(self) -> None:
+    def test_it_expands_to_parallel_search_then_dedup_then_per_source_read(
+        self,
+    ) -> None:
         nodes = _nodes(self._sweep())
         assert nodes["sweep_sweep"]["kind"] == "parallel"
         assert nodes["sweep_sources"]["kind"] == "transform"
@@ -344,7 +383,11 @@ class TestResearchSweep:
 
     def test_missing_modes_is_a_clear_error(self) -> None:
         with pytest.raises(MacroError, match="modes"):
-            expand_spec(_spec({"macro": "research_sweep", "id": "s", "config": {"question": "q"}}))
+            expand_spec(
+                _spec(
+                    {"macro": "research_sweep", "id": "s", "config": {"question": "q"}}
+                )
+            )
 
 
 class TestNesting:
@@ -355,7 +398,11 @@ class TestNesting:
                 "kind": "parallel",
                 "id": "p",
                 "children": [
-                    {"macro": "judge_panel", "id": "j", "config": {"subject": "x", "lenses": ["a"]}}
+                    {
+                        "macro": "judge_panel",
+                        "id": "j",
+                        "config": {"subject": "x", "lenses": ["a"]},
+                    }
                 ],
             },
         }
@@ -384,7 +431,11 @@ class TestNesting:
                 "kind": "loop",
                 "id": "l",
                 "config": {"mode": "counted", "n": 2},
-                "body": {"macro": "verify_panel", "id": "v", "config": {"findings": "{{x}}"}},
+                "body": {
+                    "macro": "verify_panel",
+                    "id": "v",
+                    "config": {"findings": "{{x}}"},
+                },
             }
         )
         assert "v_refute" in _nodes(expand_spec(spec))
@@ -392,11 +443,15 @@ class TestNesting:
     def test_runaway_recursion_fails_loudly(self) -> None:
         """A macro expanding into itself is an authoring bug; a RecursionError would report it
         as a crash with no spec path in it."""
-        import gideon.workflows.macros as m
+        import gideon.automation.workflows.macros as m
 
         original = dict(m._MACROS)
         try:
-            m._MACROS["loopy"] = lambda node: {"macro": "loopy", "id": "x", "config": {}}
+            m._MACROS["loopy"] = lambda node: {
+                "macro": "loopy",
+                "id": "x",
+                "config": {},
+            }
             with pytest.raises(MacroError, match=str(MAX_DEPTH)):
                 expand_spec(_spec({"macro": "loopy", "id": "x", "config": {}}))
         finally:
@@ -408,11 +463,11 @@ class TestExpansionsValidate:
     """The reason to expand before the write: a malformed macro must fail at save with a real
     node path, not mid-run with a synthetic one."""
 
-    # Each case is self-contained: a binding must reference a node the SAME spec creates, or the
-    # validator's unknown-node-ref check fires on the fixture rather than on the macro. The
-    # verify case therefore reads the judge panel's synthesis, and the judge panel travels with
-    # it — which also makes the pair the realistic composition (find, then refute).
-    JUDGE = {"macro": "judge_panel", "id": "j", "config": {"subject": "x", "lenses": ["a", "b"]}}
+    JUDGE = {
+        "macro": "judge_panel",
+        "id": "j",
+        "config": {"subject": "x", "lenses": ["a", "b"]},
+    }
     CASES = [
         [JUDGE],
         [
@@ -435,7 +490,9 @@ class TestExpansionsValidate:
                 "macro": "route",
                 "id": "r",
                 "config": {"subject": "x"},
-                "cases": {"a": {"kind": "transform", "id": "ta", "config": {"expr": 1}}},
+                "cases": {
+                    "a": {"kind": "transform", "id": "ta", "config": {"expr": 1}}
+                },
             }
         ],
     ]
@@ -444,7 +501,11 @@ class TestExpansionsValidate:
     def test_each_macro_expands_to_a_STRICTLY_valid_spec(self, nodes: list) -> None:
         spec = {
             "name": "t",
-            "root": {"kind": "sequence", "id": "root_seq", "children": copy.deepcopy(nodes)},
+            "root": {
+                "kind": "sequence",
+                "id": "root_seq",
+                "children": copy.deepcopy(nodes),
+            },
         }
         result = validate_spec(_pipeline(spec), strict=True)
         assert result.issues == [], [i.to_dict() for i in result.issues]
@@ -458,6 +519,9 @@ class TestExpansionsValidate:
             for node in group:
                 if not any(c.get("id") == node.get("id") for c in children):
                     children.append(copy.deepcopy(node))
-        spec = {"name": "t", "root": {"kind": "sequence", "id": "root_seq", "children": children}}
+        spec = {
+            "name": "t",
+            "root": {"kind": "sequence", "id": "root_seq", "children": children},
+        }
         result = validate_spec(_pipeline(spec), strict=True)
         assert result.issues == [], [i.to_dict() for i in result.issues]

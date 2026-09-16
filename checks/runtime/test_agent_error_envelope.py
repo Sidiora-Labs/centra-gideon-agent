@@ -11,18 +11,16 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.action_providers.base import ActionResult, provider_failure
-from gideon.agents.native.tools import format_tool_result
-from gideon.errors import AgentError
-from gideon.providers.provider_bridge import ProviderResolutionError
-from gideon.tool_providers.base import ToolResult
-from gideon.validation import (
+from gideon.assurance.validation import (
     HOOK_CREATE_SCHEMA,
     ValidationError,
     validate_tool_args,
 )
-
-# ── the envelope itself ──
+from gideon.core.errors import AgentError
+from gideon.engine.agents.native.tools import format_tool_result
+from gideon.extensions.providers.provider_bridge import ProviderResolutionError
+from gideon.integrations.action_providers.base import ActionResult, provider_failure
+from gideon.integrations.tool_providers.base import ToolResult
 
 
 def test_render_is_three_labeled_lines():
@@ -31,7 +29,9 @@ def test_render_is_three_labeled_lines():
 
 
 def test_render_appends_suggestions_when_present():
-    e = AgentError(code="ERR_X", what="w", why="y", fix="f", suggestions=("alpha", "beta"))
+    e = AgentError(
+        code="ERR_X", what="w", why="y", fix="f", suggestions=("alpha", "beta")
+    )
     assert e.render().endswith("DID YOU MEAN: alpha, beta")
 
 
@@ -52,12 +52,11 @@ def test_agent_error_is_frozen():
         e.code = "ERR_Y"  # type: ignore[misc]
 
 
-# ── ToolResult → the LLM string boundary ──
-
-
 def test_format_tool_result_renders_envelope_over_bare_error():
     e = AgentError(code="ERR_TOOL_ARG_INVALID", what="w", why="y", fix="f")
-    out = format_tool_result(ToolResult(success=False, error="ignored bare error", agent_error=e))
+    out = format_tool_result(
+        ToolResult(success=False, error="ignored bare error", agent_error=e)
+    )
     assert out == e.render()
     assert "ignored bare error" not in out
 
@@ -65,7 +64,9 @@ def test_format_tool_result_renders_envelope_over_bare_error():
 def test_format_tool_result_envelope_then_recovery_hints():
     e = AgentError(code="ERR_X", what="w", why="y", fix="f")
     out = format_tool_result(
-        ToolResult(success=False, error="x", agent_error=e, recovery_hints=["do the thing"])
+        ToolResult(
+            success=False, error="x", agent_error=e, recovery_hints=["do the thing"]
+        )
     )
     assert out == e.render() + "\nHint: do the thing"
 
@@ -78,9 +79,6 @@ def test_tool_result_agent_error_defaults_none():
     assert ToolResult(success=True, output="ok").agent_error is None
 
 
-# ── action-provider failure wrapper (the three dispatch seams share it) ──
-
-
 def test_provider_failure_builds_the_generic_envelope():
     e = provider_failure("webhook", RuntimeError("connection refused"))
     assert e.code == "ERR_ACTION_PROVIDER_FAILED"
@@ -91,9 +89,6 @@ def test_provider_failure_builds_the_generic_envelope():
 
 def test_action_result_agent_error_defaults_none():
     assert ActionResult(success=False).agent_error is None
-
-
-# ── provider resolution ──
 
 
 def test_provider_resolution_error_message_is_the_envelope_render():
@@ -109,29 +104,33 @@ def test_provider_resolution_error_without_envelope_is_the_plain_message():
     assert exc.agent_error is None
 
 
-# ── validation rejections ──
-
-
 def test_hook_provider_rejection_carries_the_hook_code_and_allowed_set():
     with pytest.raises(ValidationError) as ei:
         validate_tool_args(
-            {"name": "n", "provider": "nope", "provider_config": {}, "event": "PreToolUse"},
+            {
+                "name": "n",
+                "provider": "nope",
+                "provider_config": {},
+                "event": "PreToolUse",
+            },
             HOOK_CREATE_SCHEMA,
         )
     err = ei.value.agent_error
     assert err is not None
     assert err.code == "ERR_HOOK_PROVIDER_UNKNOWN"
-    # did-you-mean = the allowed set, so an agent self-corrects next turn
     assert "bash" in err.suggestions and "webhook" in err.suggestions
-    # the exception's string form IS the render (one message)
     assert str(ei.value) == err.render()
 
 
 def test_generic_enum_rejection_uses_the_tool_arg_code():
     with pytest.raises(ValidationError) as ei:
-        # event is an enum field with no override → generic code
         validate_tool_args(
-            {"name": "n", "provider": "bash", "provider_config": {}, "event": "NotAnEvent"},
+            {
+                "name": "n",
+                "provider": "bash",
+                "provider_config": {},
+                "event": "NotAnEvent",
+            },
             HOOK_CREATE_SCHEMA,
         )
     err = ei.value.agent_error
@@ -139,7 +138,7 @@ def test_generic_enum_rejection_uses_the_tool_arg_code():
 
 
 def test_validation_without_envelope_is_the_plain_field_message():
-    from gideon.validation import FieldSpec, validate_field
+    from gideon.assurance.validation import FieldSpec, validate_field
 
     with pytest.raises(ValidationError) as ei:
         validate_field(None, FieldSpec("thing", str, required=True))

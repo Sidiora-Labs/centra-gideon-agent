@@ -21,12 +21,7 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from gideon.acp import translate
-from gideon.acp.adapter import acp_event_to_agent_event
-from gideon.acp.dialect import DefaultDialect
-from gideon.acp.types import JsonRpcMessage
-from gideon.llm.events import AgentEvent
-from gideon.task_modes import (
+from gideon.engine.task_modes import (
     MUTATING,
     READ_ONLY,
     UNCLASSIFIED,
@@ -34,19 +29,20 @@ from gideon.task_modes import (
     resolve_effective_risk,
     task_mode_denies,
 )
-
-# ── the two production call shapes, replicated exactly ────────────────────────
-#
-# Both are pinned structurally by ``TestTheProductionCallShapes`` below, so a change
-# in ``chat_runner`` that stops routing through ``resolve_effective_risk`` — or starts
-# feeding the declared kind to the task-mode gate, which §2.2 forbids — reds here
-# instead of silently making these tests measure a path production no longer takes.
+from gideon.integrations.acp import translate
+from gideon.integrations.acp.adapter import acp_event_to_agent_event
+from gideon.integrations.acp.dialect import DefaultDialect
+from gideon.integrations.acp.types import JsonRpcMessage
+from gideon.integrations.llm.events import AgentEvent
 
 
 def _production_risk(event: AgentEvent) -> str:
     """What ``chat_runner`` records as ``metadata.risk`` and shows on the card."""
     return resolve_effective_risk(
-        getattr(event, "risk_level", "") or "", event.title, event.tool_kind, event.tool_input
+        getattr(event, "risk_level", "") or "",
+        event.title,
+        event.tool_kind,
+        event.tool_input,
     )
 
 
@@ -60,8 +56,14 @@ def _production_gate(event: AgentEvent, mode: str) -> str:
     return task_mode_denies(mode, event.title, "", event.tool_input)
 
 
-def _tool_call_frame(tool_call_id: str, title: str, kind: str, raw_input: object) -> JsonRpcMessage:
-    update: dict = {"sessionUpdate": "tool_call", "toolCallId": tool_call_id, "title": title}
+def _tool_call_frame(
+    tool_call_id: str, title: str, kind: str, raw_input: object
+) -> JsonRpcMessage:
+    update: dict = {
+        "sessionUpdate": "tool_call",
+        "toolCallId": tool_call_id,
+        "title": title,
+    }
     if kind:
         update["kind"] = kind
     update["rawInput"] = raw_input
@@ -70,7 +72,12 @@ def _tool_call_frame(tool_call_id: str, title: str, kind: str, raw_input: object
 
 
 def _permission_frame(
-    request_id: int, tool_call_id: str, title: str, *, kind: str = "", raw_input: object = None
+    request_id: int,
+    tool_call_id: str,
+    title: str,
+    *,
+    kind: str = "",
+    raw_input: object = None,
 ) -> JsonRpcMessage:
     """A ``session/request_permission`` frame.
 
@@ -119,7 +126,6 @@ class _Turn:
         )
 
 
-# ── direction 1: a read-only call must not be labelled destructive ────────────
 class TestNotLabelledDestructive:
     def test_pending_shell_frame_is_not_audited_as_destructive(self):
         """`O10`: ``Terminal``/``execute``/``risk: destructive`` for a read-only command.
@@ -134,16 +140,22 @@ class TestNotLabelledDestructive:
         turn = _Turn()
         opened = turn.tool_call(_tool_call_frame("t1", "Terminal", "execute", {}))
         assert opened.tool_kind == "execute", "the kind IS on this frame"
-        assert opened.tool_input == "", "and the command is NOT — that is the whole defect"
+        assert (
+            opened.tool_input == ""
+        ), "and the command is NOT — that is the whole defect"
 
         assert (
-            classify_invocation(opened.title, opened.tool_kind, opened.tool_input) is UNCLASSIFIED
+            classify_invocation(opened.title, opened.tool_kind, opened.tool_input)
+            is UNCLASSIFIED
         )
         risk = _production_risk(opened)
-        assert risk != "destructive", "absence of a command is not evidence of destruction"
-        assert risk == "caution", "but it is not safe either — the user still gets a card"
+        assert (
+            risk != "destructive"
+        ), "absence of a command is not evidence of destruction"
+        assert (
+            risk == "caution"
+        ), "but it is not safe either — the user still gets a card"
 
-        # The same call, once the command arrives, resolves on the command itself.
         turn.tool_call_update(
             JsonRpcMessage(
                 method="session/update",
@@ -158,14 +170,20 @@ class TestNotLabelledDestructive:
         )
         card = turn.permission(_permission_frame(7, "t1", "Terminal"))
         assert card.tool_kind == "execute", "correlated from the tool_call frame"
-        assert _production_risk(card) == "safe", "a read-only command is SAFE, not destructive"
+        assert (
+            _production_risk(card) == "safe"
+        ), "a read-only command is SAFE, not destructive"
 
     def test_a_genuinely_destructive_command_keeps_its_verdict(self):
         """The fix must not buy its calibration by under-labelling the real thing."""
         turn = _Turn()
-        turn.tool_call(_tool_call_frame("t2", "Terminal", "execute", {"command": "rm -rf build"}))
+        turn.tool_call(
+            _tool_call_frame("t2", "Terminal", "execute", {"command": "rm -rf build"})
+        )
         card = turn.permission(_permission_frame(8, "t2", "Terminal"))
-        assert classify_invocation(card.title, card.tool_kind, card.tool_input) is MUTATING
+        assert (
+            classify_invocation(card.title, card.tool_kind, card.tool_input) is MUTATING
+        )
         assert _production_risk(card) == "destructive"
 
     def test_a_declared_read_kind_reaches_the_risk_decision(self):
@@ -177,12 +195,10 @@ class TestNotLabelledDestructive:
         "name/kind-based" downgrade the trust_reads row records as PARTIAL.
         """
         turn = _Turn()
-        turn.tool_call(_tool_call_frame("t3", "Read File", "read", {"abs_path": "/tmp/probe.txt"}))
+        turn.tool_call(
+            _tool_call_frame("t3", "Read File", "read", {"abs_path": "/tmp/probe.txt"})
+        )
         card = turn.permission(_permission_frame(9, "t3", "Read File"))
-        # The VERDICT first, deliberately: dropping the correlation must red on the risk
-        # this surface reports, not merely on an empty field. A field assertion alone
-        # would let a future change satisfy the test by populating the field with
-        # something the resolver ignores.
         assert _production_risk(card) == "safe"
         assert card.tool_kind == "read"
 
@@ -191,10 +207,11 @@ class TestNotLabelledDestructive:
         turn = _Turn()
         turn.tool_call(_tool_call_frame("t4", "Terminal", "execute", {}))
         card = turn.permission(_permission_frame(10, "t4", "apply_patch", kind="edit"))
-        assert card.tool_kind == "edit", "the frame's own declaration is not overwritten"
+        assert (
+            card.tool_kind == "edit"
+        ), "the frame's own declaration is not overwritten"
 
 
-# ── direction 2: ask mode must not deny a read-only ls ────────────────────────
 class TestAskModeAllowsAReadOnlyLs:
     def test_command_carried_inline_on_the_permission_frame(self):
         """`O13`: "a follow-up read-only ``ls`` bash was denied by the same gate".
@@ -206,12 +223,12 @@ class TestAskModeAllowsAReadOnlyLs:
         with an empty input, and the title-hint fallback ("Running: …" trips the ``run``
         mutating hint) denied a read-only ``ls``.
         """
-        turn = _Turn()  # no preceding tool_call frame: the command is only on this one
+        turn = _Turn()
         card = turn.permission(
-            _permission_frame(11, "t5", "Running: ls -la", raw_input={"command": "ls -la"})
+            _permission_frame(
+                11, "t5", "Running: ls -la", raw_input={"command": "ls -la"}
+            )
         )
-        # The GATE ANSWER first, deliberately: this must red on the denial of a
-        # read-only `ls` — the user-visible defect — not merely on an empty field.
         assert _production_gate(card, "ask") == "", "a read-only ls RUNS in ask mode"
         assert _production_gate(card, "plan") == "", "and in plan mode"
         assert _production_risk(card) == "safe"
@@ -221,7 +238,9 @@ class TestAskModeAllowsAReadOnlyLs:
     def test_a_mutation_is_still_denied_in_ask_mode(self):
         turn = _Turn()
         turn.tool_call(
-            _tool_call_frame("t6", "Write", "edit", {"abs_path": "/tmp/x", "content": ""})
+            _tool_call_frame(
+                "t6", "Write", "edit", {"abs_path": "/tmp/x", "content": ""}
+            )
         )
         card = turn.permission(_permission_frame(12, "t6", "Write"))
         assert "Ask mode" in _production_gate(card, "ask")
@@ -234,7 +253,9 @@ class TestAskModeAllowsAReadOnlyLs:
         a verdict out of nothing, reached without any adapter misbehaving.
         """
         turn = _Turn()
-        turn.tool_call(_tool_call_frame("t7", "Terminal", "execute", {"command": "ls -la"}))
+        turn.tool_call(
+            _tool_call_frame("t7", "Terminal", "execute", {"command": "ls -la"})
+        )
         first = turn.permission(_permission_frame(13, "t7", "Terminal"))
         second = turn.permission(_permission_frame(14, "t7", "Terminal"))
         assert first.tool_input == second.tool_input != ""
@@ -242,7 +263,6 @@ class TestAskModeAllowsAReadOnlyLs:
         assert _production_risk(second) == "safe"
 
 
-# ── requirement: an unknown kind stays representable and fails closed ─────────
 class TestUnknownStaysRepresentable:
     def test_unclassified_is_a_third_answer_not_a_missing_one(self):
         """``tool_kind: str = ""`` is a DEFAULT (``llm/events.py:46``), so an unsupplied
@@ -251,8 +271,13 @@ class TestUnknownStaysRepresentable:
         either of the two that assert something.
         """
         assert classify_invocation("Terminal", "execute", "") is UNCLASSIFIED
-        assert classify_invocation("Terminal", "execute", {"command": "ls"}) is READ_ONLY
-        assert classify_invocation("Terminal", "execute", {"command": "rm -rf /"}) is MUTATING
+        assert (
+            classify_invocation("Terminal", "execute", {"command": "ls"}) is READ_ONLY
+        )
+        assert (
+            classify_invocation("Terminal", "execute", {"command": "rm -rf /"})
+            is MUTATING
+        )
 
     def test_unclassified_never_resolves_permissive(self):
         """Polarity: unknown RISK fails safe, not permissive.
@@ -262,8 +287,10 @@ class TestUnknownStaysRepresentable:
         """
         assert resolve_effective_risk("", "Terminal", "execute", "") == "caution"
         assert resolve_effective_risk("", "Terminal", "command", "") == "caution"
-        # A real declaration is a fact about the TOOL and still wins over the floor.
-        assert resolve_effective_risk("destructive", "Terminal", "execute", "") == "destructive"
+        assert (
+            resolve_effective_risk("destructive", "Terminal", "execute", "")
+            == "destructive"
+        )
 
     def test_unclassified_is_denied_by_the_task_mode_gate(self):
         """The GATE's conservative answer is the opposite of the LABEL's: deny.
@@ -276,7 +303,6 @@ class TestUnknownStaysRepresentable:
         assert task_mode_denies("agent", "Terminal", "execute", "") == ""
 
 
-# ── the boundaries this fix depends on ────────────────────────────────────────
 class TestTheAdapterLink:
     def test_acp_event_to_agent_event_carries_tool_kind(self):
         """`#1877`'s shape: the adapter is documented "field-for-field" and dropped one.
@@ -285,10 +311,16 @@ class TestTheAdapterLink:
         downstream object is a shape production cannot produce.
         """
         turn = _Turn()
-        assert turn.tool_call(_tool_call_frame("t8", "Read File", "read", {})).tool_kind == "read"
+        assert (
+            turn.tool_call(_tool_call_frame("t8", "Read File", "read", {})).tool_kind
+            == "read"
+        )
         turn2 = _Turn()
         turn2.tool_call(_tool_call_frame("t9", "Terminal", "execute", {}))
-        assert turn2.permission(_permission_frame(15, "t9", "Terminal")).tool_kind == "execute"
+        assert (
+            turn2.permission(_permission_frame(15, "t9", "Terminal")).tool_kind
+            == "execute"
+        )
 
 
 class TestTheProductionCallShapes:
@@ -296,7 +328,7 @@ class TestTheProductionCallShapes:
 
     @staticmethod
     def _chat_runner() -> ast.Module:
-        import gideon.dashboard.chat_runner as cr
+        import gideon.interfaces.dashboard.chat_runner as cr
 
         return ast.parse(pathlib.Path(cr.__file__).read_text())
 
