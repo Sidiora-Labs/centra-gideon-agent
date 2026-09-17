@@ -526,7 +526,7 @@ def _update_container() -> None:
     print("  Run these on the host:\n")
     for cmd in self_update.container_instructions():
         print(f"      {cmd}")
-    print("\n  See docs/guides/containers.md. Your data lives in the mounted volume")
+    print("\n  See docs/guides/CONTAINERS.md. Your data lives in the mounted volume")
     print("  and survives the recreate; `gideon snapshot` first if you want a copy.")
 
 

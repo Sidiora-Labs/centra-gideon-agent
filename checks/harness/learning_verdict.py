@@ -3,7 +3,7 @@
 `checks/harness/fanout_measure.py` owns the statistical posture this repo verdicts paired arms
 with: the 5-point inconclusive band, the 5% token-match tolerance, the 3-trial floor, and
 the rule that within-arm spread beats the delta. The learning benchmark
-(`docs/research/learning-benchmark-protocol.md` §5) is prescribed against exactly
+(`docs/reference/LEARNING_BENCHMARK_PROTOCOL.md` §5) is prescribed against exactly
 those constants — and cannot use that module's entry points, because `load_observations`
 requires arms literally named `fanout` and `single` and refuses anything else. Measured:
 `harness fanout-measure` on arms named `skills_on`/`skills_off` exits 2.

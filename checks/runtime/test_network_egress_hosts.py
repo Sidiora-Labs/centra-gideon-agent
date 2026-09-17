@@ -8,7 +8,7 @@ field nothing reads, except the thing nobody reads here is a promise to the user
 
 So this is a census of DESTINATIONS. Every routable hostname appearing as a literal in
 shipped code — core `runtime/gideon/**/*.py` and the SPA `apps/console/src/**/*.{ts,tsx}` — must be
-listed in `docs/architecture/network-egress-hosts.txt` with a judgment saying whether it is
+listed in `docs/architecture/NETWORK_EGRESS_HOSTS.txt` with a judgment saying whether it is
 fetched and by whose action. A new host reds CI; a listed host that has disappeared reds it
 too, so the table stays an exact mirror rather than accumulating.
 
@@ -35,7 +35,7 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parents[2]
 _CORE = _ROOT / "runtime" / "gideon"
 _WEB = _ROOT / "apps/console" / "src"
-_TABLE = _ROOT / "docs" / "architecture" / "network-egress-hosts.txt"
+_TABLE = _ROOT / "docs" / "architecture" / "NETWORK_EGRESS_HOSTS.txt"
 
 _HOST_RE = re.compile(r"https?://([A-Za-z0-9._{}-]+)")
 
@@ -140,7 +140,7 @@ def test_every_egress_host_is_a_declared_destination():
         "shipped code reaches hostnames that are not in the egress census:\n"
         + "\n".join(f"  {u}" for u in undeclared)
         + "\n\nIf this is a legitimate destination, add it to "
-        "docs/architecture/network-egress-hosts.txt with a judgment saying whether it is "
+        "docs/architecture/NETWORK_EGRESS_HOSTS.txt with a judgment saying whether it is "
         "FETCHED and by WHOSE action. If it is telemetry, it does not belong in this "
         "product at all — SECURITY.md promises there is none."
     )

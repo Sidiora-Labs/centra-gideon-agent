@@ -24,7 +24,7 @@ allowlist plus whatever the operator declared in ``sandbox.env_passthrough`` —
 with the four variables this module computes (``PORT``, ``GIDEON_APP_NAME``,
 ``GIDEON_APP_SECRET``, and ``GIDEON_APP_DATA_DIR`` when the app holds the
 ``storage`` capability), plus (APE-10) a read-only ``GIDEON_APP_SHARED_DIR_<SHARER>``
-for every app it holds a ``storageRead`` grant on. See ``docs/architecture/app-platform.md``.
+for every app it holds a ``storageRead`` grant on. See ``docs/architecture/APP_PLATFORM.md``.
 """
 
 from __future__ import annotations

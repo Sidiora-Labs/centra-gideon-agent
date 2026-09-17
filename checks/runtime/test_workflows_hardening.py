@@ -554,14 +554,14 @@ class TestDocumentationAccuracy:
         from pathlib import Path
 
         return (
-            Path(__file__).resolve().parents[2] / "docs/architecture/workflows.md"
+            Path(__file__).resolve().parents[2] / "docs/architecture/WORKFLOWS.md"
         ).read_text(encoding="utf-8")
 
     def _guide(self) -> str:
         from pathlib import Path
 
         return (
-            Path(__file__).resolve().parents[2] / "docs/guides/workflow-templates.md"
+            Path(__file__).resolve().parents[2] / "docs/guides/WORKFLOW_TEMPLATES.md"
         ).read_text(encoding="utf-8")
 
     def test_every_module_the_doc_names_EXISTS(self) -> None:
@@ -674,12 +674,12 @@ class TestDocumentationAccuracy:
         from pathlib import Path
 
         overview = (
-            Path(__file__).resolve().parents[2] / "docs/architecture/overview.md"
+            Path(__file__).resolve().parents[2] / "docs/architecture/OVERVIEW.md"
         ).read_text(encoding="utf-8")
-        assert "workflows.md" in overview
+        assert "WORKFLOWS.md" in overview
 
     def test_the_arch_doc_LINKS_the_template_guide(self) -> None:
-        assert "workflow-templates.md" in self._arch()
+        assert "WORKFLOW_TEMPLATES.md" in self._arch()
 
     def test_the_documented_session_policies_match_the_code(self) -> None:
         from gideon.automation.workflows.context import (

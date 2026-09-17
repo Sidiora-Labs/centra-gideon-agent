@@ -1,0 +1,294 @@
+# Configuration reference
+
+Gideon's core configuration lives in one JSON file: **`~/.gideon/config.json`**
+(the directory can be relocated with the `GIDEON_HOME` environment variable).
+
+Three ways to change it:
+
+1. **Dashboard UI.** Most fields have a control in Settings, and the "Where to set"
+   column below names the panel.
+2. **CLI.** `gideon config get|set <key> [value]` (dot-separated keys, e.g.
+   `gideon config set session.timeout_secs 7200`), or `gideon config edit`
+   to open the file in `$EDITOR`.
+3. **API.** `GET /api/config/gideon` (full config),
+   `PATCH /api/config/gideon {path, value}` (single-field, allowlisted),
+   `GET /api/config/schema` (the machine-readable field registry this document
+   is derived from).
+
+A key like `loops.max_cycles_hard_cap` means `{"loops": {"max_cycles_hard_cap": …}}`
+in the file. Fields marked **backend-only** have no dashboard control: set them via
+CLI or file, and most need a gateway restart. Fields with a UI panel are applied live.
+
+Not everything is in `config.json` by design. Stored elsewhere:
+
+- **Model bindings** (which model serves chat/background/embedding/…): Settings →
+  Models → `~/.gideon/active_models.json`.
+- **Search bindings**: Settings → Search → `~/.gideon/active_search_providers.json`.
+- **Inbox + notification entity settings**: `~/.gideon/entity_settings/*.json`
+  (edited via the Inbox / Notifications settings panels).
+- **Per-app config**: each app's `data/config.json` (edited via the app's Configure form).
+- **Provider credentials**: the `.env` credential store (written by `gideon setup`).
+
+---
+
+## Agent runtime (`agent.*`)
+
+| Key | Type | Default | Where to set | Description |
+|---|---|---|---|---|
+| `agent.approval_mode` | enum: `auto`, `interactive`, `trust_reads` | `auto` | Settings → Agent defaults | Tool approval mode. `trust_reads` auto-approves read-only tools and asks for everything else. |
+| `agent.provider` | string | `native` | backend-only (restart) | Default agent runtime for agents that don't set their own: `native` (in-process loop, models governed by Settings → Models), `acp`, or `acp:<cli>` to pin a connected CLI runtime. Per-agent `provider` overrides this. File-only by design, because switching it mid-flight would strand live sessions. |
+| `agent.sandbox` | enum: `auto`, `off` | `auto` | Settings → Agent defaults | Sandbox mode for the ACP provider. |
+| `agent.yolo` | boolean | `false` | Settings → Agent defaults | Skip every tool-approval confirmation. Only use inside a sandbox or for trusted automation. |
+| `agent.acp_concurrent_sessions` | boolean | `false` | Settings → Agent defaults | Run multiple ACP chat sessions on one backend process (multiplexing) instead of one process per session, for backends that support session interleaving. |
+| `agent.bot_name` | string (≤50 chars) | `""` | Settings → Account | Custom name the assistant identifies as. Sanitized at the write boundary (markdown/braces stripped). Empty = default. |
+| `agent.orchestrator_skill` | boolean | `false` | Settings → Agent defaults | Enable agent delegation: generates and loads the orchestrator skill with the agent roster. |
+| `agent.max_subagents` | integer (0 to 16) | `3` | Settings → Agent defaults | Maximum concurrent subagents. `0` = auto-size from host CPU + memory. |
+| `agent.spawn_min_memory_gb` | number (0 to 64) | `4.0` | Settings → Agent defaults | Minimum available memory (GB) required to spawn a subagent. `0` disables the check. |
+| `agent.subagent_max_turns` | integer (1 to 200) | `100` | Settings → Agent defaults | Default tool-call budget per subagent. |
+| `agent.subagent_timeout_secs` | integer (60 to 7200) | `1800` | Settings → Agent defaults | Wall-clock timeout per subagent execution. |
+| `agent.subagent_cwd_allowed_roots` | list of strings | `["~/workspace", "~/workplace"]` | Settings → Agent defaults | Directory roots under which a subagent's `cwd` override is permitted (`~` expands). Empty list disables cwd overrides. |
+| `agent.log_level` | enum: `DEBUG`, `INFO`, `WARNING`, `ERROR` | `WARNING` | Settings → Agent defaults | Persistent backend log level. Applied at startup; the `--verbose` CLI flag overrides it. |
+| `agent.soft_stop_budget_secs` | number (0.5 to 60) | `10.0` | Settings → Agent defaults | Seconds to wait for a cooperative cancel before hard-killing a session. |
+| `agent.unattended_requires_verified_adapter` | boolean | `false` | Settings → Agent defaults | Refuse an unattended spawn onto an external agent runner whose ACP adapter has no verified provenance: an `npx -y` fetch-at-launch, an adapter that changed since it was provisioned, or a runner with no catalog row. "Unattended" is derived from the session key, so it covers cron fires, loop-cycle workers, subagents, the background/heartbeat session, inbox and side sweeps, channel deliveries and trigger dispatches, and no caller has to opt in. Interactive chat is never gated. Fails closed: an unverifiable runner is refused. |
+| `agent.runner_health_check_secs` | int (60 to 86400) | `3600` | Settings → Agent defaults | How long a runner's measured health evidence counts as current. Past this, its row under Settings → Agents → Runners is marked check overdue instead of presenting an old reading as the present state. Nothing is probed automatically; this only decides when a stored measurement stops counting as an answer. |
+| `agent.runner_idle_release_secs` | int (60 to 86400) | `1800` | Settings → Agent defaults | How long a session may hold an agent runner without using it. Past this the hold is released: the row under Settings → Agents → Runners stops naming that session as the holder and reads as free. Only the record of the hold is released, and the session itself is untouched, so a session that went quiet, or a gateway that was killed mid-turn, cannot leave a runner looking permanently taken. |
+| `agent.durable_sessions` | boolean | `false` | Settings → Agent defaults | Run workers inside a tmux session on Gideon's own tmux socket so their shell outlives the gateway process. On restart the recovery sweep recomputes each session's name from the run's identity, and a run whose worker is still alive is marked resumable instead of aborted. Requires the `tmux` binary: without it the setting has no effect and behaviour is exactly as today. |
+
+The chat **model** is not a config field. Bind models per use case in Settings →
+Models, or per agent on the Agents page.
+
+## Sessions (`session.*`)
+
+| Key | Type | Default | Where to set | Description |
+|---|---|---|---|---|
+| `session.timeout_secs` | integer (0 to 86400) | `3600` | Settings → Chat | Idle session timeout in seconds. |
+| `session.autocompact_pct` | number (5 to 90) | `90.0` | Settings → Chat | Context usage percentage at which auto-compaction triggers. |
+| `session.pool_size` | integer (0 to 10) | `0` | Settings → Chat | Pre-spawned ACP agent processes kept warm for instant session start. `0` disables. Only useful for ACP agents (subprocess spawn is the cost); the native runtime needs no pool. |
+| `session.pool_agent` | string | `""` | Settings → Chat | Agent name for warm-pool processes. Empty uses `default_agent`. |
+| `session.pool_ttl_secs` | integer (0 to 7200) | `1800` | Settings → Chat | Max age for pooled processes; stale ones are discarded at claim time. `0` disables. |
+
+## Goal loops (`loops.*`)
+
+All backend-only operator knobs. Per-loop values (set in the loop creation form)
+override the defaults, and the hard cap binds everything.
+
+| Key | Type | Default | Where to set | Description |
+|---|---|---|---|---|
+| `loops.max_cycles_hard_cap` | integer | `100` | backend-only | Absolute ceiling on any loop's cycle budget, regardless of the per-loop limit. A safety brake against runaway cost. |
+| `loops.default_idle_secs` | integer | `120` | backend-only | Seconds between worker cycles when a loop doesn't specify its own idle timer. |
+| `loops.trust_ttl_secs` | integer | `86400` | backend-only | How long a loop worker keeps auto-approved tool trust before the supervisor expires it and requires re-authorization. |
+| `loops.worktree_sparse` | boolean | `true` | backend-only | When a parallel task's plan names the files it will touch, hydrate only those directories in its git worktree instead of the whole repo, which is most of a worktree's setup cost on a large codebase. A task that writes outside its stated scope widens its own worktree automatically, a task with no usable scope gets a full checkout, and the merged result is identical either way. Set `false` to always hydrate the full repo. |
+
+## Memory (`memory.*`)
+
+Behavior toggles live in Settings → Memory; tuning constants are backend-only.
+
+| Key | Type | Default | Where to set | Description |
+|---|---|---|---|---|
+| `memory.semantic_confidence_threshold` | number | `0.8` | backend-only | Minimum similarity for a semantic-memory hit to be injected. |
+| `memory.episodic_dedup_threshold` | number | `0.88` | backend-only | Cosine similarity above which a new episodic record is treated as a duplicate and skipped. |
+| `memory.episodic_max_results` | integer | `8` | backend-only | Episodic records recalled per query. |
+| `memory.episodic_max_count` | integer | `10000` | backend-only | Episodic store size cap; oldest records are pruned past it. |
+| `memory.semantic_keys` | list of strings | `[]` | backend-only | Extra top-level semantic-record prefixes (namespaces) beyond the built-ins. |
+| `memory.l1_manifest` | boolean | `true` | Settings → Memory | Inject only a small always-on manifest of your most-recalled facts; the agent pulls deeper memory on demand via the `memory_recall` tool. Off = inject full semantic + episodic memory every turn (legacy). |
+| `memory.active_recall` | boolean | `true` | Settings → Memory | On an interactive turn, surface query-relevant memory just before the reply, bounded by a timeout + circuit breaker. Skipped for temporary/incognito/headless turns. |
+| `memory.proactive_commitments` | boolean | `false` | Settings → Memory | Let the agent infer future check-ins from conversation and deliver one natural reminder per window via the heartbeat. Opt-in; high-confidence only; capped per day; one-tap dismiss. |
+| `memory.proactive_commitments_max_per_day` | integer | `3` | backend-only | Hard maximum active proactive check-ins per agent per day. |
+| `memory.active_recall_timeout_ms` | integer | `1500` | backend-only | Hard budget for the pre-reply recall pass; on timeout the turn proceeds without it (circuit breaker trips after repeats). |
+| `memory.auto_promote_enabled` | boolean | `true` | backend-only | Periodically promote repeated episodic memories into durable semantic facts (the self-learning loop), guarded by a per-run cap + min-interval + single-flight. Off = promotion only via the Memory Studio button. |
+| `memory.auto_promote_every_n` | integer | `10` | backend-only | Run promotion after every Nth history consolidation. |
+| `memory.auto_promote_max_per_run` | integer | `5` | backend-only | Cap on clusters promoted in a single autonomous run. |
+| `memory.history_idle_hours` | number (≥0.5) | `3.0` | Settings → Memory | Hours of inactivity before history consolidation. |
+| `memory.history_max_days` | integer (≥7) | `365` | Settings → Memory | Maximum days of history to retain. |
+| `memory.migrated` | boolean | `false` | managed automatically | Whether memory has been migrated to the vector store (set by `gideon memory migrate` / the API). |
+| `memory.vault_mode` | `off` \| `mirror` \| `two_way` | `off` | Settings → Memory | The readable markdown vault (Obsidian-compatible: YAML frontmatter + `[[wikilinks]]` + graph view). `mirror` writes memory out and never reads it back, so hand edits are overwritten. `two_way` also reads hand-edited pages back into memory on the next sync (your edit wins); a page the sync cannot parse confidently is left untouched and reported under Settings → Memory → Health. Back-reads the retired `memory.vault_enabled` bool: `true` loads as `mirror`, never `two_way`. |
+| `memory.vault_path` | string | `memory-vault` | Settings → Memory | Where the markdown vault is written. Relative paths resolve under `~/.gideon`; absolute paths are used as-is. Only the default path is covered by `gideon snapshot`. |
+| `memory.graph_enabled` | boolean | `true` | Settings → Memory | Link each memory to the people, projects and tools it mentions, so "what do I know about X?" follows links instead of relying on similarity search. Matching is exact-name and costs no tokens or LLM calls. Off = every graph surface falls back to today's search behavior; existing links are kept, so re-enabling needs no backfill. |
+| `memory.push_context` | boolean | `false` | Settings → Memory | When a message names something the entity graph knows, volunteer up to 3 linked memories for that turn, even ones sharing no words with what you typed. Opt-in: it puts context in front of the model you did not ask for. Settings → Memory → Health reports how often what it volunteered was actually used. Never injects knowledge items (chips only). |
+| `memory.push_min_confidence` | number (0-1) | `0.7` | Settings → Memory | How sure the entity match must be before memory is volunteered. Higher = declared aliases and exact names only; lower also admits looser matches (more offered, more of it irrelevant). |
+| `memory.graph_topology_in_context` | boolean | `false` | Settings → Memory | At the start of a new session, add a ≤400-char map of the neighbourhoods in your memory graph ("people around project X") so the assistant knows which areas exist before it searches. Off by default: it spends context on every new session and says nothing useful until the graph has distinct communities. |
+| `memory.holder_attribution` | boolean | `false` | Settings → Memory | Record whose claim a memory is (you, the assistant, a named person, an outside source) and render it that way ("Alex believes…"). Second-hand claims are weight-capped lower, and a lower-authority claim can never retire something you said. Off = every memory is stored unattributed; already-attributed rows keep their holder, so flipping it back on needs no backfill. |
+| `memory.slot_size_cap` | integer (200-4000) | `1400` | Settings → Memory | Character budget for the one always-injected Slots block (persona, preferences, pending items, glossary, self notes, self model). A spend paid on every session, so it is clamped at the consumer: a value outside the range cannot widen the block by editing this file. The per-slot caps that decide which individual register is full are fixed in code. |
+
+## Skills (`skills.*`)
+
+Skill management (install/enable/proposals) is the Skills page. These backend-only
+keys tune the automatic skill machinery.
+
+| Key | Type | Default | Where to set | Description |
+|---|---|---|---|---|
+| `skills.max_triggered` | integer (≥1) | `3` | backend-only | Max skills surfaced per message (semantic ∪ keyword match). |
+| `skills.auto_create_from_sessions` | boolean | `false` | backend-only | Analyze completed sessions and synthesize a reusable SKILL.md when a non-trivial procedure is detected (lands under `skills/auto/`). |
+| `skills.auto_refine_on_deviation` | boolean | `false` | backend-only | Update an auto-created skill when the agent succeeds via a different tool sequence (requires `auto_create_from_sessions`). |
+| `skills.auto_min_tool_calls` | integer (≥2) | `5` | backend-only | Minimum tool calls for a session to qualify for skill extraction. |
+| `skills.auto_similarity_threshold` | number (0 to 1) | `0.85` | backend-only | Skip creation when an existing skill's description overlaps ≥ this fraction. |
+| `skills.progressive_disclosure_threshold` | integer | `8` | backend-only | When more skills than this match a turn, inject only their index (name + description) and let the agent pull bodies on demand via `skill_invoke`. `0` = always inline. |
+
+## After-turn learning (`learning.*`)
+
+The continuous self-improvement review that runs after learning-worthy turns
+(separate from session-end consolidation). All backend-only.
+
+| Key | Type | Default | Where to set | Description |
+|---|---|---|---|---|
+| `learning.enabled` | boolean | `true` | backend-only | Kill switch for the after-turn review (always skipped for incognito/temporary sessions). |
+| `learning.min_tool_calls` | integer | `4` | backend-only | A turn with at least this many tool calls qualifies even without a correction signal. |
+| `learning.correction_heuristic` | boolean | `true` | backend-only | Treat a correcting user message ("no, actually, …") as a first-class learning signal. |
+| `learning.surface_chip` | boolean | `true` | backend-only | Show the quiet "Learned: …" chip in chat when something is captured. |
+| `learning.skill_ladder` | boolean | `true` | backend-only | Allow the review to propose reusable skills, which are never auto-installed; proposals land in the Skill-proposals inbox for approval. |
+
+## Workflow surfacing (`workflows.*`)
+
+| Key | Type | Default | Where to set | Description |
+|---|---|---|---|---|
+| `workflows.enabled` | boolean | `true` | backend-only | Kill switch for SOP surfacing (auto-inject the best-matching workflow above threshold). |
+| `workflows.match_threshold` | number (0 to 1) | `0.62` | backend-only | Cosine-similarity gate for a workflow match. The keyword fallback uses a fixed 0.7 word-overlap. |
+
+## Security (`security.*`)
+
+| Key | Type | Default | Where to set | Description |
+|---|---|---|---|---|
+| `security.denied_commands` | list of regexes (≤100) | `[]` | Settings → Security | User-added regexes for shell commands the agent must never run, appended to the always-on built-in denylist. Matched case-insensitively against the full command string. |
+| `security.egress.allow_hosts` | list of strings | `[]` | Settings → Security | Hosts (a bare domain covers subdomains) permitted even when they resolve to a private/LAN address, for homelab webhooks and services. Applies to all egress surfaces. |
+| `security.egress.deny_hosts` | list of strings | `[]` | Settings → Security | Hosts the agent must never reach, even if public. A deny always overrides an allow. |
+| `security.egress.allow_private` | boolean | `false` | Settings → Security | Permit egress to private/LAN addresses globally. Only enable on a fully trusted network, because it removes SSRF protection for the whole LAN. |
+
+## Inbox (`inbox.*`)
+
+Alert keywords, name-mention alerts, and retention live in the Inbox settings panel
+(entity store, not `config.json`). Config-side:
+
+| Key | Type | Default | Where to set | Description |
+|---|---|---|---|---|
+| `inbox.enabled` | boolean | `false` | Inbox → Settings ("Poll sources" toggle) | Gates the poll-based message sources. The UI toggle calls `/api/inbox/restart` after flipping so the service re-attaches. |
+| `inbox.user_id` | string | `""` | channel-app setup | Your user id on the connected channel, used to skip your own messages. |
+| `inbox.watched_channels` | list of strings | `[]` | channel-app setup | Channel ids the poll loop watches. |
+| `inbox.poll_interval_seconds` | integer (min 30) | `60` | backend-only | Poll cadence. |
+| `inbox.style_rules` | list of strings | `[]` | backend-only | Voice/style lines injected into AI reply drafting. |
+| `inbox.test_mode` | boolean | `false` | backend-only | Ingest your own messages too (demo/testing). |
+| `inbox.engagement_ranking_enabled` | boolean | `false` | Inbox → Settings | Rank the inbox by how much you engage with each channel/sender (favorites, opens and replies boost, dismisses lower) on top of recency. |
+| `inbox.engagement_half_life_days` | number (0 to 365) | `0.0` | Inbox → Settings | How fast an engagement boost fades (`0` = the default ~6.6 days). |
+
+## Tool output (`tools.*`)
+
+| Key | Type | Default | Where to set | Description |
+|---|---|---|---|---|
+| `tools.projection_rules` | list of objects | `[]` | Settings → Tool output | User-taught rules mapping a tool-output content marker (regex) to a builtin projection strategy, so a large output keeps its salient slice instead of a generic cut. Consulted before the heuristic sniff; a bad regex is skipped. |
+| `tools.projection_rules[].name` | string | `""` | Settings → Tool output | Short label for the rule. |
+| `tools.projection_rules[].match_regex` | string | `""` | Settings → Tool output | Regex matched against the start of a tool's output. |
+| `tools.projection_rules[].strategy` | enum: `log`, `diff`, `json`, `test`, `csv` | `log` | Settings → Tool output | The builtin projector to apply. |
+
+## Voice (`voice.*`)
+
+Behaviour of dictation and spoken replies. The model for speech-to-text and
+text-to-speech is bound in Settings → Models; these are the provider-agnostic knobs on
+top of it. All of them are comfort settings rather than safety guards, so turning one
+off makes the voice loop noisier, never less safe.
+
+| Key | Type | Default | Where to set | Description |
+|---|---|---|---|---|
+| `voice.push_to_talk_chord` | string | `CommandOrControl+Shift+Space` | Settings → Speech & Transcription | The global shortcut the **desktop app** binds for push-to-talk: press to start capturing the microphone, press again to stop and transcribe into the composer at your cursor. An Electron accelerator string; it needs at least one modifier, since a bare key would be taken from every other app on the machine. The desktop shell binds it and refuses an unusable or already-taken chord with a reason. Ignored in a browser tab (no global shortcuts). See [the desktop guide](../guides/DESKTOP.md). |
+| `voice.confirmation_phrases` | list of strings | `["do it", "go ahead", "send it", "execute"]` | Settings → Speech & Transcription | In hands-free mode a transcript accumulates and is only sent once one of these phrases ends what you just said, so a half-finished thought never becomes an executed instruction. Push-to-talk and typed input ignore this. An empty list falls back to these defaults. |
+| `voice.exit_phrases` | list of strings | `["cancel", "never mind", "forget it"]` | Settings → Speech & Transcription | Saying one of these in hands-free mode discards the accumulated transcript without sending it. |
+| `voice.duplex_mute_enabled` | boolean | `true` | Settings → Speech & Transcription | Suspend the microphone and discard queued audio while a spoken reply plays. This is what stops the assistant hearing itself. |
+| `voice.echo_filter_enabled` | boolean | `true` | Settings → Speech & Transcription | Drop a transcription sharing three consecutive words with what the assistant just spoke, which is the backstop for speaker bleed. Hands-free requests only; the dashboard shows the drop instead of looking deaf. |
+| `voice.clean_for_speech_enabled` | boolean | `true` | Settings → Speech & Transcription | Strip code blocks, reduce URLs to their domain and paths to their filename, and drop CLI flags before synthesis. The chat transcript always keeps the full text; only the audio is cleaned. |
+| `voice.voice_disclaimer_enabled` | boolean | `true` | Settings → Speech & Transcription | Append a one-line note to a dictated message telling the model the text came from speech recognition, so it self-corrects garbled homophones instead of confidently misreading them. |
+
+## Dashboard (`dashboard.*`)
+
+| Key | Type | Default | Where to set | Description |
+|---|---|---|---|---|
+| `dashboard.url` | string | `""` | written by `gideon setup` | Advertised dashboard origin, used in links delivered to external channels and by server bind/origin checks. |
+| `dashboard.restore_sessions` | boolean | `false` | Settings → Chat | Re-open recently active sessions on startup. |
+| `dashboard.restore_window_minutes` | integer (0 to 1440) | `30` | Settings → Chat | Time window for session restoration. `0` = restore all. |
+| `dashboard.user_name` | string | `""` | Settings → Account | How the system addresses the operator. Set during first-run onboarding; instance-level so it follows you across browsers/machines. |
+| `dashboard.merge_queued_messages` | boolean | `false` | Settings → Chat | Concatenate follow-up messages while the agent is busy instead of queueing them separately. |
+| `dashboard.auto_tag_sessions` | boolean | `true` | Settings → Chat | When a chat's title is auto-generated, also propose and assign tags in the same pass. Never touches chats you've tagged, or incognito/temporary chats. |
+| `dashboard.mcp_probe_timeout_secs` | integer (5 to 120) | `15` | backend-only (PATCH-editable) | Per-server timeout for MCP tool-discovery probes; the gateway's MCP status sweep budget derives from it (+15s). |
+| `dashboard.widget_density` | enum: `more`, `less` | `more` | Settings → Chat | How aggressively the agent uses inline widgets. |
+| `dashboard.send_on_enter` | boolean | `true` | Settings → Chat | Enter sends (Shift+Enter for newline). Off: Enter inserts a newline; Cmd/Ctrl+Enter sends. |
+| `dashboard.show_timestamps` | boolean | `false` | Settings → Chat | Display a timestamp on each chat message. |
+| `dashboard.show_thinking_inline` | boolean | `false` | Settings → Chat | Show intermediate reasoning between tool calls instead of collapsing it. |
+| `dashboard.simplified_tool_names` | boolean | `false` | Settings → Chat | Inline tool pills show a simplified purpose instead of the exact command. |
+| `dashboard.screen_share_enabled` | boolean | `false` | Settings → Chat | Master opt-in for the composer's "Share screen" control. Off (the default) hides the control **and** makes the server refuse a frame outright. On, a message can carry one frame of a screen/window you pick in the browser's own share dialog: held in memory for that single turn, never written to disk, dropped as soon as it is used. Pinning a frame (composer "+" → "Pin shared frame") is the only path to disk, and is refused in temporary/incognito chats. |
+| `dashboard.auto_open_browser` | boolean | `true` | backend-only | Open the dashboard in a browser on gateway start (`--no-open` overrides per-run). |
+| `dashboard.terminal` | object | `{"enabled": true}` | `enabled`: backend-only; `persist`: Terminal page | `enabled` is the kill switch for the built-in terminal (PTY) feature, read raw with a 30s cache. `persist` (tmux-backed persistence across gateway restarts) is toggled on the Terminal page. |
+| `dashboard.dashboard_layout` | object | `{}` | Home dashboard (drag/resize widgets) | The home dashboard's customized widget layout. Empty = the curated default. |
+
+## Top-level keys
+
+| Key | Type | Default | Where to set | Description |
+|---|---|---|---|---|
+| `hooks` | object | `{}` | Triggers page / `/api/hooks` | Webhook trigger config by hook id, plus `webhook_token` and `auto_approve_sources`. Managed via the Triggers UI, and documented here because the raw shape is config-visible. |
+| `observe_max_messages` | integer | `200` | backend-only | Channel-observation ring-buffer size (messages kept per channel for context). |
+| `observe_ttl_hours` | number | `168.0` | backend-only | How long observed channel messages stay usable as context. |
+| `agents` | object | `{}` | Agents page | Named agent definitions (see below). |
+| `default_agent` | string | `""` | Settings → Agent defaults | Active agent name from the `agents` section (also `PUT /api/config/default-agent`). |
+| `memory_stores` | object | `{}` | backend-only | Named memory store definitions; `memory_stores.<name>.description` is a human-readable purpose. Stores are referenced by agent profiles. |
+| `auto_update` | boolean | `true` | Settings → Updates | Automatically apply core updates when a new version is found (update checks always run; this gates the unattended pull + rebuild + restart). |
+| `timezone` | string | `""` (system) | set by `gideon setup` | IANA timezone (e.g. `Asia/Tokyo`) for schedules and the clock the LLM sees. Per-job trigger timezones override it. |
+| `snapshot_dir` | string | `""` | backend-only | Where `gideon snapshot` writes/reads portability snapshots. Empty = `~/.gideon/snapshots`. |
+
+## Agent definitions (`agents.<name>.*`)
+
+Managed on the **Agents page** (create/edit forms), and stored under `agents` keyed by
+agent name. Every field is optional, and an empty value inherits the global default.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `agents.*.provider` | string | `""` | Runtime backend: `native` (in-process loop) or `acp:<cli>` (external CLI). Empty inherits the global `agent.provider`. |
+| `agents.*.provider_agent` | string | `""` | ACP provider agent name (modeId for `session/set_mode`). |
+| `agents.*.acp_mode` | string | `""` | ACP permission/operating mode for adapters that expose one (e.g. `default`, `acceptEdits`, `plan`, `bypassPermissions`). Distinct from Approval Mode (the host gate). |
+| `agents.*.default_dir` | string | `""` | Working directory this agent opens in. Empty inherits the workspace root. Overridable per-session. |
+| `agents.*.memory_store` | string | `""` | Memory provider for this agent. Empty uses the filesystem fallback scoped by working directory. |
+| `agents.*.description` | string | `""` | Human-readable agent description. |
+| `agents.*.system_prompt` | string | `""` | System prompt injected at session start. |
+| `agents.*.voice` | string | `""` | who the agent is (tone, opinions, persona), kept separate from the operating rules and injected high-priority so personality survives long prompts. |
+| `agents.*.model` | string | `""` | Default model for this agent. Overridable per-chat. |
+| `agents.*.approval_mode` | string | `""` | `auto`, `interactive`, or empty (inherit global). |
+| `agents.*.skills` | list | `[]` | Skill names loaded for this agent. |
+| `agents.*.tools` | list | `[]` | Allowed tool name patterns for this agent. |
+| `agents.*.triggers` | list | `[]` | Referenced lifecycle-trigger IDs. A lifecycle trigger fires only for agents that list it. |
+| `agents.*.source` | string | `gideon` | Agent origin: `gideon`, `marketplace`, or `builtin`. |
+
+---
+
+## Environment variables
+
+Not config-file fields, but part of the same operator surface:
+
+| Variable | Effect |
+|---|---|
+| `GIDEON_HOME` | Relocate the config/state directory (default `~/.gideon`). |
+| `GIDEON_PORT` | Override the dashboard/API port (default `10000`). Validated at CLI entry. A running gateway **overwrites** this in its own environment with the port it actually bound, so every child it spawns agrees with the live socket even under `--port` / `--port auto`. |
+| `GIDEON_WORKSPACE` | Workspace root for LLM working directories. |
+| `GIDEON_BIND_HOST` | Bind address for the gateway (e.g. `0.0.0.0` for LAN access). |
+| `GIDEON_BYPASS_LOCAL_NETWORKS` | `1` = skip token auth for loopback/RFC1918 clients (dev convenience; public origins still need a token). |
+| `GIDEON_FIRST_PARTY_APPS_DIR` | Point a packaged install at a first-party apps directory. |
+| `GIDEON_SKIP_APP_BACKENDS` | Don't launch app backend subprocesses (test isolation). |
+| `GIDEON_CREDENTIAL_BACKEND` | Where new credentials are stored: `keychain` (OS secret service, needs the `keychain` extra) or `dotenv` (default, `~/.gideon/.env` at mode 0600). A `keychain` request on a machine with no usable secret service falls back to `.env` 0600 and `gideon doctor` says so. Reads always see both stores, so switching back never hides an existing secret. |
+
+### How a child finds its gateway
+
+Tool subprocesses (the `gideon-core` MCP server, sandboxed cron scripts, an ACP CLI's
+MCP children) resolve the gateway's API base through **one** owner, `gideon.gateway_base`,
+which answers from the socket the gateway actually bound, in this order:
+
+1. `GIDEON_PORT`, which the gateway overwrites with its bound port after binding;
+2. `~/.gideon/gateway.runtime.json`, the same value recorded inside the home for a child
+   whose environment was rebuilt from an allowlist (ignored when the pid it names is gone);
+3. an **explicit** port in `dashboard.url`.
+
+If none of the three answers, the call is **refused** with a message naming all three. It is
+never sent to the default port: on a host running more than one instance, `10000` is another
+instance's gateway, with its own home, config and state, so a guess is a cross-instance read
+or write rather than a degraded local call.
+
+- `GET /api/config/gideon`: full config as JSON (owner-only).
+- `PATCH /api/config/gideon {path, value}`: single-field writes, allowlisted; non-editable paths return 400.
+- `GET /api/config/schema`: the full field registry (labels, help, types, defaults, deprecations) auto-derived from the config dataclasses. This document is generated against it.
+- `gideon config get|set <key> [value]`: CLI equivalent; `set` validates through the same loader.
+
+See also: [API overview](API_OVERVIEW.md) · [CLI reference](CLI.md) ·
+[Getting started](../guides/GETTING_STARTED.md)

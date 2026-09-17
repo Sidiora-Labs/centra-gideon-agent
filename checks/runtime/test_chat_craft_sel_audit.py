@@ -711,7 +711,7 @@ class TestTheAuditIsComplete:
         in the one document whose job is the count. So the count, the section numbering and
         every recorded operation are asserted here, beside the audit they describe.
         """
-        guide = (_ROOT / "docs" / "guides" / "chat-surface.md").read_text(
+        guide = (_ROOT / "docs" / "guides" / "CHAT_SURFACE.md").read_text(
             encoding="utf-8"
         )
         numbered = re.findall(r"(?m)^## (\d+)\. ", guide)
@@ -727,7 +727,7 @@ class TestTheAuditIsComplete:
         """The guide's "Where:" line has to match the control a user is hunting for. Both
         new mechanics are reached by a label, so the label is checked against the frontend
         that renders it — a renamed affordance leaves the guide pointing at nothing."""
-        guide = (_ROOT / "docs" / "guides" / "chat-surface.md").read_text(
+        guide = (_ROOT / "docs" / "guides" / "CHAT_SURFACE.md").read_text(
             encoding="utf-8"
         )
         actions = (_WEB / "pages" / "chat" / "MessageActions.tsx").read_text(

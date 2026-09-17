@@ -41,7 +41,7 @@ provider instance it drives the clauses the plan's §C4 names:
    missing ``trigger_source``. Suppress either with ``no_inbox_source_reason=`` /
    ``no_trigger_source_reason=`` when the vendor genuinely has no such semantics. See
    ``_warn_on_incomplete_vendor_seams`` for why an advisory rather than a failure, and
-   ``docs/guides/build-a-channel-app.md`` for the checklist.
+   ``docs/guides/BUILD_A_CHANNEL_APP.md`` for the checklist.
 
 Failures name the violated obligation, not just the expression, because the reader is
 usually an app author who has never seen this file.
@@ -1062,7 +1062,7 @@ def _warn_missing_seam(
         "One vendor app owns EVERY seam that vendor touches (channel + inbox + "
         f"trigger_source + contributed UI), {consequence}. Add {what} to the manifest's "
         f"providers[] array, or pass assert_channel_contract(..., {suppressor}) to record "
-        "the exemption. See docs/guides/build-a-channel-app.md, section 'Vendor "
+        "the exemption. See docs/guides/BUILD_A_CHANNEL_APP.md, section 'Vendor "
         "completeness'.",
         UserWarning,
         stacklevel=4,

@@ -915,12 +915,12 @@ async def _probe_remote_reachability(ctx: DoctorContext) -> ProbeResult:
             ok=False,
             detail=(
                 f"bind {facts['bind_host']} exposes the dashboard beyond loopback with "
-                "auth OFF — set a password (see docs/guides/remote-access.md) or bind loopback"
+                "auth OFF — set a password (see docs/guides/REMOTE_ACCESS.md) or bind loopback"
             ),
             evidence={
                 "bind_host": facts["bind_host"],
                 "auth_off": True,
-                "guide": "docs/guides/remote-access.md",
+                "guide": "docs/guides/REMOTE_ACCESS.md",
             },
         )
 
@@ -942,11 +942,11 @@ async def _probe_remote_reachability(ctx: DoctorContext) -> ProbeResult:
 
     return ProbeResult(
         ok=True,
-        detail="local-only; see docs/guides/remote-access.md to reach it from a phone",
+        detail="local-only; see docs/guides/REMOTE_ACCESS.md to reach it from a phone",
         evidence={
             "bind_host": facts["bind_host"],
             "tailscale_cli": facts["tailscale_cli"],
-            "guide": "docs/guides/remote-access.md",
+            "guide": "docs/guides/REMOTE_ACCESS.md",
         },
     )
 

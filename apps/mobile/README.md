@@ -138,4 +138,4 @@ committed copy is a fork of that template that drifts from the Capacitor version
 To see it working, run a gateway on your LAN (`make serve` binds `0.0.0.0`), read its address off
 `gideon status`, and type that into the bootstrap screen. Store packaging — icons, splash,
 privacy declarations, TestFlight/internal track — is
-[docs/maintainers/mobile-release.md](../../docs/maintainers/mobile-release.md).
+[docs/maintainers/MOBILE_RELEASE.md](../../docs/maintainers/MOBILE_RELEASE.md).

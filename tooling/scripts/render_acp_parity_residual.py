@@ -3,7 +3,7 @@
 
 ``ACP-AGENT-PARITY.md`` §2.2 requires that the residual not-gateable set be
 enumerated in ONE place — :data:`gideon.integrations.acp.permission_authority.NOT_GATEABLE`
-— and that §2.7's parity doc (``docs/agents/acp-parity.md``) **render** that
+— and that §2.7's parity doc (``docs/architecture/ACP_PARITY.md``) **render** that
 registry rather than re-derive it in prose. A hand-written table beside the
 registry is exactly the drift the requirement exists to prevent, and it had
 already happened: the doc's third column carried sweep prose
@@ -51,7 +51,7 @@ _REDUNDANT_FIELDS = frozenset({"provider"})
 
 def doc_path() -> Path:
     """Repo-root location of the §2.7 parity doc."""
-    return Path(__file__).resolve().parents[2] / "docs" / "agents" / "acp-parity.md"
+    return Path(__file__).resolve().parents[2] / "docs" / "architecture" / "ACP_PARITY.md"
 
 
 def _flatten(value: object) -> str:

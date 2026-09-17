@@ -133,7 +133,7 @@ async def test_probe_misconfig_non_loopback_no_auth_warns(monkeypatch):
     assert res.ok is False
     assert "beyond loopback" in res.detail
     assert "auth OFF" in res.detail
-    assert res.evidence["guide"] == "docs/guides/remote-access.md"
+    assert res.evidence["guide"] == "docs/guides/REMOTE_ACCESS.md"
 
 
 @pytest.mark.asyncio

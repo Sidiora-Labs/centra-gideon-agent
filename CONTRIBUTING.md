@@ -1,6 +1,6 @@
 # Contributing to Gideon
 
-Gideon is a personal AI agent that runs on your own machine. The repository is [sidiora-labs/centra-gideon-agent](https://github.com/sidiora-labs/centra-gideon-agent), licensed under Apache 2.0. See [LICENSE](LICENSE).
+Gideon is a personal AI agent that runs on your own machine. The repository is [Sidiora-Labs/centra-gideon-agent](https://github.com/Sidiora-Labs/centra-gideon-agent), licensed under Apache 2.0. See [LICENSE](LICENSE).
 
 Two things decide whether a change lands: it does something real for a user, and you ran the check that covers it.
 
@@ -94,10 +94,10 @@ CI checks this commit by commit on every pull request ([.github/workflows/dco.ym
 ## Where to read more
 
 - [docs/README.md](docs/README.md) for the index of everything else.
-- [docs/architecture/overview.md](docs/architecture/overview.md) for how the gateway is put together.
-- [docs/reference/cli.md](docs/reference/cli.md) for every command and flag, and [docs/reference/CONFIG-REFERENCE.md](docs/reference/CONFIG-REFERENCE.md) for every setting.
-- [docs/security/threat-model.md](docs/security/threat-model.md) for the trust boundaries.
+- [docs/architecture/OVERVIEW.md](docs/architecture/OVERVIEW.md) for how the gateway is put together.
+- [docs/reference/CLI.md](docs/reference/CLI.md) for every command and flag, and [docs/reference/CONFIGURATION_REFERENCE.md](docs/reference/CONFIGURATION_REFERENCE.md) for every setting.
+- [docs/security/THREAT_MODEL.md](docs/security/THREAT_MODEL.md) for the trust boundaries.
 - [.github/workflows/ci.yml](.github/workflows/ci.yml) for the exact checks CI runs.
 - [CHANGELOG.md](CHANGELOG.md) for what shipped in each release.
 
-Bugs and ideas go to [issues](https://github.com/sidiora-labs/centra-gideon-agent/issues), code goes to [pull requests](https://github.com/sidiora-labs/centra-gideon-agent/pulls), and [releases](https://github.com/sidiora-labs/centra-gideon-agent/releases) list what shipped. Read [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) before you post, and report vulnerabilities through [SECURITY.md](SECURITY.md) rather than a public issue.
+Bugs and ideas go to [issues](https://github.com/Sidiora-Labs/centra-gideon-agent/issues), code goes to [pull requests](https://github.com/Sidiora-Labs/centra-gideon-agent/pulls), and [releases](https://github.com/Sidiora-Labs/centra-gideon-agent/releases) list what shipped. Read [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) before you post, and report vulnerabilities through [SECURITY.md](SECURITY.md) rather than a public issue.

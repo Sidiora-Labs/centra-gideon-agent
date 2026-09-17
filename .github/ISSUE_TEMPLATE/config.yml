@@ -3,7 +3,7 @@ blank_issues_enabled: true
 contact_links:
   - name: Security report
     about: Reports go through the security policy, not a public issue.
-    url: https://github.com/sidiora-labs/centra-gideon-agent/blob/main/SECURITY.md
+    url: https://github.com/Sidiora-Labs/centra-gideon-agent/blob/main/SECURITY.md
   - name: Documentation
     about: The docs index is the first place to look for how something works.
-    url: https://github.com/sidiora-labs/centra-gideon-agent/blob/main/docs/README.md
+    url: https://github.com/Sidiora-Labs/centra-gideon-agent/blob/main/docs/README.md

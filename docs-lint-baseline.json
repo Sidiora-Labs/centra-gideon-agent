@@ -1,37 +1,20 @@
 {
   "generated_from": "tooling/scripts/generate_docs_lint_baseline.py",
   "per_file": {
-    "docs/design/motion.md": {
+    "docs/architecture/WINDOWS_NATIVE_AUDIT.md": {
       "findings": [
-        "dead_link:apps/console/src/design/motion.ts"
+        "stale_citation:cli_doctor.py",
+        "stale_citation:cli_server.py"
       ],
-      "total": 1
+      "total": 2
     },
-    "docs/guides/companion-apps.md": {
+    "docs/guides/COMPANION_APPS.md": {
       "findings": [
         "stale_citation:runtime/gideon/dashboard/token_auth.py"
       ],
       "total": 1
     },
-    "docs/maintainers/community-bounty-drafts.md": {
-      "findings": [
-        "dead_link:docs/maintainers/app-bounty-wants-list.md"
-      ],
-      "total": 1
-    },
-    "docs/maintainers/mobile-release.md": {
-      "findings": [
-        "dead_link:docs/maintainers/release-runbook.md"
-      ],
-      "total": 1
-    },
-    "docs/maintainers/usability-kit.md": {
-      "findings": [
-        "dead_link:docs/maintainers/release-runbook.md"
-      ],
-      "total": 1
-    },
-    "docs/research/learning-benchmark-protocol.md": {
+    "docs/reference/LEARNING_BENCHMARK_PROTOCOL.md": {
       "findings": [
         "stale_citation:gideon/config/loader.py",
         "stale_citation:gideon/eval/runner.py",
@@ -39,21 +22,14 @@
         "stale_citation:gideon/skills/surfacing.py"
       ],
       "total": 4
-    },
-    "docs/research/windows-native-audit.md": {
-      "findings": [
-        "stale_citation:cli_doctor.py",
-        "stale_citation:cli_server.py"
-      ],
-      "total": 2
     }
   },
   "totals": {
     "by_kind": {
-      "dead_link": 4,
+      "dead_link": 0,
       "stale_citation": 7,
       "stale_header": 0
     },
-    "total": 11
+    "total": 7
   }
 }

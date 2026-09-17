@@ -137,7 +137,7 @@ def test_extras_are_not_core_so_provider_apps_stay_installable() -> None:
     this goes red — which is the warning that those apps just became uninstallable.
 
     Deliberately no count here: the number of apps is a fact about another repository,
-    and this test cannot see it. `docs/security/limitations.md` carries the measured
+    and this test cannot see it. `docs/security/LIMITATIONS.md` carries the measured
     ratio with the ref it was measured against.
     """
     core = app_manager._core_requirement_pins()

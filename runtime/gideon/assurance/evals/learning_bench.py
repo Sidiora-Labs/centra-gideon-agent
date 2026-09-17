@@ -1,6 +1,6 @@
 """The skill-impact benchmark: the frozen task register, its reports, and V4 reproduction.
 
-`docs/research/learning-benchmark-protocol.md` is PROTOCOL v1 — owner-signed on
+`docs/reference/LEARNING_BENCHMARK_PROTOCOL.md` is PROTOCOL v1 — owner-signed on
 2026-08-16, before any run, including the commitment to publish a modest or negative result.
 This module is the shipped half of executing it: the frozen ten-task register, the preflight
 that says whether a paired run is runnable *before* a model is called, report persistence, and
@@ -70,7 +70,7 @@ def provenance_recorded(report: dict | None) -> bool:
     return schema is not None and schema >= PROVENANCE_SCHEMA
 
 
-PROTOCOL_DOC = "docs/research/learning-benchmark-protocol.md"
+PROTOCOL_DOC = "docs/reference/LEARNING_BENCHMARK_PROTOCOL.md"
 
 
 @dataclass(frozen=True)

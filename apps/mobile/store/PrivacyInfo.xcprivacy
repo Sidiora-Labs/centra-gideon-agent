@@ -7,7 +7,7 @@
   target after every `cap add ios` — the generated project ships without one
   (verified against the @capacitor/cli 8.5 iOS template) and `ios/` is
   gitignored, so this committed copy is the source of truth.
-  See docs/maintainers/mobile-release.md, and mobile/store/play-data-safety.md
+  See docs/maintainers/MOBILE_RELEASE.md, and mobile/store/play-data-safety.md
   for why every declaration below is empty: the app is a WebView shell over the
   user's own self-hosted gateway, collects nothing, and phones home to nobody.
   The linked Capacitor framework carries its own (equally empty) manifest, and
