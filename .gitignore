@@ -75,3 +75,4 @@ playwright-responses/
 /runtime/gideon/static/dist/
 /apps/console/dist/
 /apps/desktop/backend-dist/
+.codegraph/
