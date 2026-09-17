@@ -5,7 +5,7 @@
   "displayName": "Personal CFO",
   "description": "Close each month honestly: statement collection, a budget review that separates measurement from inference, a weekly spending digest, and a two-tier finance roster.",
   "author": "Gideon",
-  "license": "MIT",
+  "license": "Apache License 2.0",
   "gideon_requires": ">=0.1",
   "components": [
     {"kind": "skill", "id": "cfo-statement-fetch", "path": "skills/cfo-statement-fetch/SKILL.md", "depends_on": []},

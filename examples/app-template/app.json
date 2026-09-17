@@ -4,7 +4,7 @@
   "displayName": "App Template",
   "description": "The Gideon app template: clone it, rename it, ship it.",
   "icon": "Blocks",
-  "license": "MIT",
+  "license": "Apache License 2.0",
   "tags": [
     "tool"
   ],

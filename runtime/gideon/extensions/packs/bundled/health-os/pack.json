@@ -5,7 +5,7 @@
   "displayName": "Health OS",
   "description": "An honest health log: daily capture that records rather than advises, a routine-checkup cadence tracker, a weekly assembly template, and a two-tier health roster.",
   "author": "Gideon",
-  "license": "MIT",
+  "license": "Apache License 2.0",
   "gideon_requires": ">=0.1",
   "components": [
     {"kind": "skill", "id": "health-journal", "path": "skills/health-journal/SKILL.md", "depends_on": []},

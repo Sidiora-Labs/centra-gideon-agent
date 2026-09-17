@@ -4,7 +4,7 @@
   "displayName": "Registry Fixture (warning)",
   "description": "A search provider whose setup script downloads a data file.",
   "author": "Gideon contributors",
-  "license": "MIT",
+  "license": "Apache License 2.0",
   "permissions": {
     "network": true,
     "storage": true

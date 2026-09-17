@@ -6,7 +6,7 @@
       "repo": "{{REPO_BASE}}/clean-app",
       "types": ["search"],
       "permissions_declared": ["network"],
-      "license": "MIT",
+      "license": "Apache License 2.0",
       "maintainer": "gideon",
       "added": "2026-08-18"
     }

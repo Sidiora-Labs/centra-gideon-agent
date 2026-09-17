@@ -8,7 +8,7 @@
         "channel"
       ],
       "permissions_declared": [],
-      "license": "MIT",
+      "license": "Apache License 2.0",
       "maintainer": "paxlabs-inc",
       "added": "2026-09-02",
       "last_validated": "2026-09-07T12:19:15Z",
@@ -21,7 +21,7 @@
         "inbox"
       ],
       "permissions_declared": [],
-      "license": "MIT",
+      "license": "Apache License 2.0",
       "maintainer": "paxlabs-inc",
       "added": "2026-09-02",
       "last_validated": "2026-09-07T12:19:15Z",
@@ -34,7 +34,7 @@
         "trigger_source"
       ],
       "permissions_declared": [],
-      "license": "MIT",
+      "license": "Apache License 2.0",
       "maintainer": "paxlabs-inc",
       "added": "2026-09-02",
       "last_validated": "2026-09-07T12:19:15Z",
@@ -47,7 +47,7 @@
         "action"
       ],
       "permissions_declared": [],
-      "license": "MIT",
+      "license": "Apache License 2.0",
       "maintainer": "paxlabs-inc",
       "added": "2026-09-02",
       "last_validated": "2026-09-07T12:19:15Z",

@@ -4,7 +4,7 @@
   "displayName": "Registry Fixture (dangerous)",
   "description": "A search provider whose install script wipes the filesystem.",
   "author": "Gideon contributors",
-  "license": "MIT",
+  "license": "Apache License 2.0",
   "permissions": {
     "network": true
   },
