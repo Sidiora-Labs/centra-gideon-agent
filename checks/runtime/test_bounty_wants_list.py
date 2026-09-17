@@ -73,7 +73,7 @@ from gideon.interfaces.cli.app_new import provider_type_rows, provider_types
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _WANTS_LIST = _REPO_ROOT / "docs" / "maintainers" / "app-bounty-wants-list.md"
-_DRAFTS = _REPO_ROOT / "docs" / "maintainers" / "community-bounty-drafts.md"
+_DRAFTS = _REPO_ROOT / "docs" / "maintainers" / "COMMUNITY_BOUNTY_DRAFTS.md"
 
 _MIN_ROWS = 6
 _FAMILIES = frozenset({"channel", "provider", "source"})
@@ -430,7 +430,7 @@ def test_cited_in_tree_paths_exist(rows: list[Row]) -> None:
     for rel in (
         "runtime/gideon/interfaces/cli/app_new.py",
         "runtime/gideon/assurance/testing/channel_conformance.py",
-        "docs/guides/build-a-channel-app.md",
+        "docs/guides/BUILD_A_CHANNEL_APP.md",
     ):
         assert (_REPO_ROOT / rel).is_file(), f"wants-list cites missing path {rel}"
     text = _WANTS_LIST.read_text(encoding="utf-8")

@@ -40,7 +40,7 @@ export function BenchmarkPanel({ view, error, onRetry }: {
             — it calls no model — then <code className="text-on-surface-var">--run</code>. The full
             paired design is 100 real model calls, so nothing here starts one on a click.
           </p>
-          <MethodologyLink doc="docs/research/learning-benchmark-protocol.md" />
+          <MethodologyLink doc="docs/reference/LEARNING_BENCHMARK_PROTOCOL.md" />
         </section>
       )
     }

@@ -8,7 +8,7 @@ core applies. An app that ingests external text uses this rather than reimplemen
 ``require_proxy_signature`` is the INBOUND authentication an app backend applies to
 every request. An app backend binds on loopback with no auth of its own — the port is
 a *network* boundary, not an *authorization* one (see
-``docs/architecture/app-platform.md`` §2.1). The gateway reverse-proxy signs every
+``docs/architecture/APP_PLATFORM.md`` §2.1). The gateway reverse-proxy signs every
 request it forwards with an HMAC over a per-app secret; this middleware verifies that
 signature **fail-closed** so a local process that finds the port cannot bypass the
 gateway proxy (and therefore session auth + the app-permission middleware). The signer

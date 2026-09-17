@@ -4,7 +4,7 @@ A bundled app (``gideon/apps/native/<name>/``) may own its own provider code:
 ``app.json`` points ``provider.implementation`` at a bundle-relative module and that
 module imports core ONLY through ``gideon.sdk.*`` — the same boundary an installed
 app lives under. See ``gideon/apps/native_contract.py`` and
-``docs/architecture/app-platform.md``.
+``docs/architecture/APP_PLATFORM.md``.
 
 This file is the enforcement half, and it is deliberately built to be non-vacuous.
 ``checks/runtime/test_apps_import_boundary.py`` (the installed-app twin) resolves the workspace

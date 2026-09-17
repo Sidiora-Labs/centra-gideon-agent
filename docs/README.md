@@ -1,104 +1,82 @@
 # Gideon documentation
 
-The docs are split by the question you are asking. `architecture/` is the map of how the system is built, `guides/` is the how-to for getting a task done, `reference/` is the lookup for a command, a setting or a route, and `security/` is where the project states its limits honestly.
+The docs are split by the question you are asking. The architecture documents are the map of how the system is built. The guides are the how-to for getting a task done. The reference is the lookup for a command, a setting or a route. The security documents state the honest limits, including what is not enforced yet.
 
-## Start here
+Every link below points at a file in this tree. Start with the two files at the top of the tree, then open the folder that matches your question: `architecture/`, `guides/`, `reference/`, `security/`, `design/`, `maintainers/` or `brand/`.
 
-- [vision.md](vision.md): what this is trying to be, and the tenets that decisions are reconciled against.
+## Where to start
 
-## architecture/ (the map)
+- [VISION.md](VISION.md): what this project is trying to be, the tenets a decision is reconciled against, and the stated non-goals.
+- [README.md](README.md): this page, the index into every other document.
 
-- [overview.md](architecture/overview.md): the shape of the gateway process and the subsystems inside it.
-- [chat-sessions.md](architecture/chat-sessions.md): how a message becomes a turn, and where sessions are persisted.
-- [loops.md](architecture/loops.md): how an autonomous work unit runs cycles, gets judged, and finishes.
-- [workflows.md](architecture/workflows.md): how a declarative workflow graph is scheduled, resumed, edited and rewound.
-- [tasks-triggers.md](architecture/tasks-triggers.md): how the project, task list and task hierarchy works, and what fires a trigger.
-- [knowledge-memory.md](architecture/knowledge-memory.md): what separates the knowledge library from what the assistant remembers.
-- [inbox-channels.md](architecture/inbox-channels.md): how items arrive for your attention, and how a channel app carries messages both ways.
-- [app-platform.md](architecture/app-platform.md): what an app can be, and how it is installed, scanned and permissioned.
-- [agent-activity-feed.md](architecture/agent-activity-feed.md): what a dashboard agent world is handed, and what it must not assume.
-- [widgets.md](architecture/widgets.md): what an agent-authored widget may send to its host, and what the host accepts back.
-- [tool-name-wire.md](architecture/tool-name-wire.md): whether a tool call still lands on the tool it names after every hop.
-- [provider-boundary.md](architecture/provider-boundary.md): why the core stays provider-agnostic, and where the line was drawn.
-- [provider-boundary-keeps.txt](architecture/provider-boundary-keeps.txt): which vendor-shaped references are deliberate, with the reasoning for each.
-- [security.md](architecture/security.md): how the internal controls layer, from authentication to the audit log.
-- [network-egress-hosts.txt](architecture/network-egress-hosts.txt): every host shipped code can contact, and the condition that triggers it.
+## `architecture/` (the map)
 
-## guides/ (the how-to)
+- [OVERVIEW.md](architecture/OVERVIEW.md): the shape of the gateway process and the subsystems inside it.
+- [CHAT_SESSIONS.md](architecture/CHAT_SESSIONS.md): how a message becomes a turn, and where a session and its history live.
+- [LOOPS.md](architecture/LOOPS.md): how an autonomous goal loop runs its cycles, who judges the result, and what ends it.
+- [WORKFLOWS.md](architecture/WORKFLOWS.md): how a declarative workflow graph is scheduled, resumed, edited and rewound.
+- [TASKS_TRIGGERS.md](architecture/TASKS_TRIGGERS.md): how projects, tasks and task lists work, and what fires a trigger or a schedule.
+- [KNOWLEDGE_MEMORY.md](architecture/KNOWLEDGE_MEMORY.md): what separates the knowledge library from what the assistant remembers, and how each is searched.
+- [INBOX_CHANNELS.md](architecture/INBOX_CHANNELS.md): how items arrive for your attention, and how a channel app carries messages in both directions.
+- [APP_PLATFORM.md](architecture/APP_PLATFORM.md): what an app can be, and how it is installed, permissioned and run as a backend subprocess.
+- [WIDGETS.md](architecture/WIDGETS.md): what an agent-authored widget may send to its host, and what the host accepts back.
+- [AGENT_ACTIVITY_FEED.md](architecture/AGENT_ACTIVITY_FEED.md): what a dashboard agent world is handed as its read contract, and what it must not assume.
+- [TOOL_NAMES.md](architecture/TOOL_NAMES.md): whether a tool call still lands on the tool it names after every hop.
+- [PROVIDER_BOUNDARY.md](architecture/PROVIDER_BOUNDARY.md): why the core stays provider-agnostic, and where the line was drawn.
+- [PROVIDER_BOUNDARY_KEEPS.txt](architecture/PROVIDER_BOUNDARY_KEEPS.txt): which vendor-shaped references are deliberate, with the reasoning for each.
+- [SECURITY.md](architecture/SECURITY.md): how the internal controls layer fits together, from authentication to the audit log.
+- [NETWORK_EGRESS_HOSTS.txt](architecture/NETWORK_EGRESS_HOSTS.txt): every host the shipped code can contact, and the condition that triggers it.
+- [ACP_PARITY.md](architecture/ACP_PARITY.md): what running a turn over the Agent Client Protocol costs against the native runtime, provider by provider.
+- [WINDOWS_NATIVE_AUDIT.md](architecture/WINDOWS_NATIVE_AUDIT.md): what native Windows support would cost, and the go/no-go it feeds.
 
-- [getting-started.md](guides/getting-started.md): how to go from nothing installed to a first chat.
-- [chat-surface.md](guides/chat-surface.md): what a conversation can do beyond sending a message.
-- [desktop.md](guides/desktop.md): what the Electron shell adds over a browser tab, and how each capability is granted.
-- [companion-apps.md](guides/companion-apps.md): how a phone or second computer finds this gateway and is allowed in.
-- [remote-access.md](guides/remote-access.md): how to reach your own dashboard when you are away from home.
-- [platforms.md](guides/platforms.md): which platforms are supported, and on what evidence.
-- [containers.md](guides/containers.md): how to run the gateway with Docker Compose, including ports, volumes, backups and updates.
-- [use-from-your-ide.md](guides/use-from-your-ide.md): how to let your editor's assistant ask this Gideon what it knows.
-- [build-a-channel-app.md](guides/build-a-channel-app.md): how to write an app that carries messages to and from one chat service.
-- [workflow-templates.md](guides/workflow-templates.md): how to write a workflow template that is readable and survives edits.
+## `guides/` (the how-to)
 
-## reference/ (the lookup)
+- [GETTING_STARTED.md](guides/GETTING_STARTED.md): how to go from nothing installed to a first chat.
+- [CHAT_SURFACE.md](guides/CHAT_SURFACE.md): what a conversation can do beyond sending a message.
+- [DESKTOP.md](guides/DESKTOP.md): what the desktop app adds over a browser tab, and how each capability is granted.
+- [COMPANION_APPS.md](guides/COMPANION_APPS.md): how a phone or a second computer finds this gateway and is allowed in.
+- [REMOTE_ACCESS.md](guides/REMOTE_ACCESS.md): how to reach your own dashboard when you are away from home.
+- [PLATFORMS.md](guides/PLATFORMS.md): which platforms are supported, on what evidence, including Windows through WSL2 or Docker Desktop.
+- [CONTAINERS.md](guides/CONTAINERS.md): how to run the gateway with Docker Compose, including ports, volumes, backups and updates.
+- [USE_FROM_YOUR_IDE.md](guides/USE_FROM_YOUR_IDE.md): how to let your editor's assistant ask this Gideon what it knows.
+- [BUILD_A_CHANNEL_APP.md](guides/BUILD_A_CHANNEL_APP.md): how to write an app that carries messages to and from one chat service.
+- [WORKFLOW_TEMPLATES.md](guides/WORKFLOW_TEMPLATES.md): how to write a workflow template that is readable and survives edits.
 
-- [cli.md](reference/cli.md): what every `gideon` command and flag does.
-- [configuration.md](reference/configuration.md): where configuration lives, and which setting to change.
-- [CONFIG-REFERENCE.md](reference/CONFIG-REFERENCE.md): which operator-only knobs have no dashboard control.
-- [api-overview.md](reference/api-overview.md): which REST and WebSocket routes the gateway serves.
-- [skill-format.md](reference/skill-format.md): what the SKILL.md loader accepts, ignores and extends.
+## `reference/` (the lookup)
 
-## design/
+- [CLI.md](reference/CLI.md): what every `gideon` command and flag does.
+- [CONFIGURATION.md](reference/CONFIGURATION.md): where configuration lives, and which setting to change.
+- [CONFIGURATION_REFERENCE.md](reference/CONFIGURATION_REFERENCE.md): which operator-only knobs have no dashboard control.
+- [API_OVERVIEW.md](reference/API_OVERVIEW.md): which REST and WebSocket routes the gateway serves.
+- [SKILL_FORMAT.md](reference/SKILL_FORMAT.md): what the SKILL.md loader accepts, ignores and extends.
+- [LEARNING_BENCHMARK_PROTOCOL.md](reference/LEARNING_BENCHMARK_PROTOCOL.md): how the claim that an approved skill improves the next run is measured, and what must exist before a number is published.
 
-- [patterns.md](design/patterns.md): which shared primitive or interaction pattern belongs here.
-- [motion.md](design/motion.md): which transition preset to pick, and what it is allowed to do.
-- [consistency-audit.md](design/consistency-audit.md): where the shipped design system drifts from its authority, ranked worst first.
+## `security/` (the honest limits)
+
+- [THREAT_MODEL.md](security/THREAT_MODEL.md): the trust boundaries, the control that guards each one, and what is out of scope.
+- [LIMITATIONS.md](security/LIMITATIONS.md): which claimed controls are not enforced yet at the point of execution.
+- [REVIEW_SCOPE.md](security/REVIEW_SCOPE.md): the five paths an external reviewer is asked to attack, and how a finding is recorded.
+- [SCANNER_TESTING.md](security/SCANNER_TESTING.md): the attack classes the community-content scanner refuses, and the tests that prove each rule carries weight.
+- [SIGNING.md](security/SIGNING.md): how an artifact's provenance is decided, and what a signature buys.
+
+## `design/`
+
+- [PATTERNS.md](design/PATTERNS.md): which shared primitive or interaction pattern to use for a new surface.
+- [MOTION.md](design/MOTION.md): which transition preset to pick, and what it is allowed to do.
+- [CONSISTENCY_AUDIT.md](design/CONSISTENCY_AUDIT.md): where the shipped design system drifts from its authority, ranked worst first.
 - [consistency-audit.json](design/consistency-audit.json): the same audit as machine-readable counts, regenerated by `npm run audit:consistency`.
-- [consistency-handoff.md](design/consistency-handoff.md): what remains for the owner or CI before pixel-affecting work can land.
+- [CONSISTENCY_HANDOFF.md](design/CONSISTENCY_HANDOFF.md): what remains for the owner or CI before pixel-affecting work can land.
 
-## security/ (the honest part)
+## `maintainers/`
 
-- [threat-model.md](security/threat-model.md): the trust boundaries, the control that guards each one, and what is out of scope.
-- [limitations.md](security/limitations.md): which claimed controls are not yet enforced at the point of execution.
-- [review-scope.md](security/review-scope.md): the five paths an external reviewer is asked to attack, and how a finding is recorded.
-- [scanner-testing.md](security/scanner-testing.md): the attack classes the community-content scanner refuses, and the tests that prove it.
-- [signing.md](security/signing.md): how an app bundle's provenance is decided, and what a signature buys.
+- [MOBILE_RELEASE.md](maintainers/MOBILE_RELEASE.md): how to take a clean checkout to TestFlight and Play internal-track builds.
+- [USABILITY_KIT.md](maintainers/USABILITY_KIT.md): how to run a stranger-validation session without knowing the codebase.
+- [COMMUNITY_BOUNTY_DRAFTS.md](maintainers/COMMUNITY_BOUNTY_DRAFTS.md): the drafted community channel-app issues, and what is still pending approval.
 
-## maintainers/
+## `brand/`
 
-- [mobile-release.md](maintainers/mobile-release.md): how to take a clean checkout to TestFlight and Play internal-track builds.
-- [usability-kit.md](maintainers/usability-kit.md): how to run a stranger-validation session without knowing the codebase.
-- [community-bounty-drafts.md](maintainers/community-bounty-drafts.md): the drafted community channel-app issues, and what is still pending approval.
-
-## research/
-
-- [learning-benchmark-protocol.md](research/learning-benchmark-protocol.md): how the claim that an approved skill improves the next run is measured.
-- [windows-native-audit.md](research/windows-native-audit.md): what native Windows support would cost, and the go/no-go it feeds.
-- [learnings/README.md](research/learnings/README.md): what the source-agnostic research library is, and how to use it.
-- [learnings/agent-harness-engineering.md](research/learnings/agent-harness-engineering.md): how much of agent behaviour comes from the harness rather than the model.
-- [learnings/automation-and-triggers.md](research/learnings/automation-and-triggers.md): how schedulers, dispatch and observable non-fires are designed.
-- [learnings/ecosystem-and-interop.md](research/learnings/ecosystem-and-interop.md): what drives distribution, packaging and interop reach.
-- [learnings/knowledge-pipelines.md](research/learnings/knowledge-pipelines.md): why compiled knowledge beats query-time retrieval for accumulating domains.
-- [learnings/local-models-and-inference.md](research/learnings/local-models-and-inference.md): what local models already cover, and the operations stack they need.
-- [learnings/memory-architectures.md](research/learnings/memory-architectures.md): how memory should be injected, ranked and pruned.
-- [learnings/multi-agent-orchestration.md](research/learnings/multi-agent-orchestration.md): how agents should hand off typed state instead of transcripts.
-- [learnings/planning-and-decomposition.md](research/learnings/planning-and-decomposition.md): when work belongs in a task, a workflow or an agent.
-- [learnings/product-surfaces-and-ux.md](research/learnings/product-surfaces-and-ux.md): how agent product surfaces handle streaming, approval and progress.
-- [learnings/security-and-guardrails.md](research/learnings/security-and-guardrails.md): why enforcement at the execution path beats prompt guidance.
-- [learnings/self-improvement-loops.md](research/learnings/self-improvement-loops.md): how failures become constraints without brainstorming rules.
-- [learnings/skills-and-prompt-craft.md](research/learnings/skills-and-prompt-craft.md): how to write skills that trigger reliably and stay predictable.
-- [learnings/verification-and-judging.md](research/learnings/verification-and-judging.md): why the evaluator, not the generator, sets the floor.
-- [learnings/workflow-engine-design.md](research/learnings/workflow-engine-design.md): what graph execution, retries, idempotency and rewind require.
-
-## agents/
-
-- [acp-parity.md](agents/acp-parity.md): per provider, what running a turn over the Agent Client Protocol costs compared with the native runtime.
-
-## brand/
-
-- [brand/README.md](brand/README.md): which identity asset is current, and where each one belongs.
+- [README.md](brand/README.md): the identity assets, and where each one is used.
 - [gideon-mark.svg](brand/gideon-mark.svg): the transparent vector mark.
 - [gideon-mark.png](brand/gideon-mark.png): the 512 x 512 application icon on a dark background.
 - [gideon-mark-192.png](brand/gideon-mark-192.png): the 192 x 192 application icon for small slots.
-- [avatar.png](brand/avatar.png): a 512 x 512 copy of the icon for avatar slots.
-
-## evidence/
-
-`evidence/` is empty today. It is a placeholder for captured evidence, such as run outputs and screenshots, and nothing is published there yet.
+- [avatar.png](brand/avatar.png): a 512 x 512 copy of the application icon for an avatar slot.

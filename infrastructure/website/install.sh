@@ -38,7 +38,7 @@ Run Gideon with Docker Compose (self-hosters / Windows):
   docker compose -f infrastructure/compose/compose.yaml -f infrastructure/compose/compose.build.yaml up -d --build
 
 The dashboard comes up on http://127.0.0.1:10000 with a persistent volume.
-Details, backups, and updates: docs/guides/containers.md in this checkout
+Details, backups, and updates: docs/guides/CONTAINERS.md in this checkout
 EOF
 }
 

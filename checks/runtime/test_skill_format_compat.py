@@ -1,4 +1,4 @@
-"""SKILL.md format compatibility — the contract `docs/reference/skill-format.md` states.
+"""SKILL.md format compatibility — the contract `docs/reference/SKILL_FORMAT.md` states.
 
 Why this file exists: Gideon claims a vanilla ecosystem `SKILL.md` imports
 cleanly, and that `triggers:` is a Gideon extension rather than a
@@ -177,7 +177,7 @@ def test_quotes_are_stripped(tmp_path: Path) -> None:
 
 
 def test_documented_yaml_limits_hold() -> None:
-    """Pin the "Not supported" table in docs/reference/skill-format.md.
+    """Pin the "Not supported" table in docs/reference/SKILL_FORMAT.md.
 
     These are limits, not bugs — but they are limits we PUBLISH, so the doc and
     the parser must not drift apart. Each expectation here was measured.

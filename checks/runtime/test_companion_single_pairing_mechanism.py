@@ -9,7 +9,7 @@ COMPANION-APPS Success Criterion 1 and its S4 T4.2/T4.3 rows assert two properti
   adds a `device_token` route, store or claim, every one of those sentences becomes a lie and
   nothing goes red. These censuses are what makes it go red.
 * **no speculative per-platform code shipped** — the future-platform recipe in
-  ``docs/guides/companion-apps.md`` says a new platform wraps the served UI and implements the
+  ``docs/guides/COMPANION_APPS.md`` says a new platform wraps the served UI and implements the
   client contract, gated on PLATFORM-REACH. The failure mode it guards against is a well-meant
   stub: a native SDK import or a reserved branch landing in the surfaces every platform shares,
   ahead of any shell that uses it. That is dead code that reads as a promise.
@@ -190,5 +190,5 @@ def test_no_speculative_per_platform_code() -> None:
             hits[marker] = found
     assert hits == {}, (
         "a platform SDK reached a shared surface; a new platform wraps the served UI and "
-        f"implements the client contract instead (docs/guides/companion-apps.md): {hits}"
+        f"implements the client contract instead (docs/guides/COMPANION_APPS.md): {hits}"
     )

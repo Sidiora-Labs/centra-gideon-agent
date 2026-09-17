@@ -215,7 +215,7 @@ async def test_auto_update_gates_the_apply_not_the_check(monkeypatch) -> None:
     order, applied = await _drive_check_for_updates(monkeypatch, auto_update=False)
     assert order == ["check", "config"], (
         "the update check must run BEFORE auto_update is consulted — got "
-        f"{order}. If the check is now gated, `docs/architecture/network-egress-hosts.txt` "
+        f"{order}. If the check is now gated, `docs/architecture/NETWORK_EGRESS_HOSTS.txt` "
         "no longer describes api.github.com correctly."
     )
     assert applied == []

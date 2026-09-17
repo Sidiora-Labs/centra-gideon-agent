@@ -31,7 +31,7 @@ overwrite a real credential with bullets.
 
 Masking is about not *handing out* secrets; it is not encryption at rest. The store itself
 is a plaintext file under the user's home, which the app-platform threat model addresses
-separately (``docs/architecture/app-platform.md``).
+separately (``docs/architecture/APP_PLATFORM.md``).
 """
 
 from __future__ import annotations

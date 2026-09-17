@@ -47,7 +47,7 @@ const EMPTY_INBOX: LearningInbox = {
 const WEEK: StagingWeek = {
   days: 7, buckets: [], silent_days: [], error_days: [], produced_total: 0, cost_usd: 0,
 }
-const DOC = 'docs/research/learning-benchmark-protocol.md'
+const DOC = 'docs/reference/LEARNING_BENCHMARK_PROTOCOL.md'
 
 const BINDING = {
   use_case: 'chat',
@@ -322,7 +322,7 @@ describe('the skill-impact benchmark is CONSUMED, not merely served', () => {
     )
     const link = screen.getByRole('link', { name: /Methodology/ }) as HTMLAnchorElement
     expect(link.href).toContain('docs/other/protocol-v2.md')
-    expect(link.href).not.toContain('learning-benchmark-protocol.md')
+    expect(link.href).not.toContain('LEARNING_BENCHMARK_PROTOCOL.md')
   })
 
   it('prints the reproduction conditions and cites where the variance is stated', () => {

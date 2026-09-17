@@ -6,15 +6,15 @@ so an answer may take a while. That is the honest state of things.
 
 ## Where to ask
 
-Open an issue at https://github.com/sidiora-labs/centra-gideon-agent/issues
+Open an issue at https://github.com/Sidiora-Labs/centra-gideon-agent/issues
 
 Security reports do not go there. Use the private channel described in
 [SECURITY.md](SECURITY.md).
 
 ## Before you file
 
-1. Read [docs/guides/getting-started.md](docs/guides/getting-started.md).
-2. Check [docs/reference/CONFIG-REFERENCE.md](docs/reference/CONFIG-REFERENCE.md) for the
+1. Read [docs/guides/GETTING_STARTED.md](docs/guides/GETTING_STARTED.md).
+2. Check [docs/reference/CONFIGURATION_REFERENCE.md](docs/reference/CONFIGURATION_REFERENCE.md) for the
    setting you are fighting. Most surprising defaults are documented there.
 3. Run `gideon doctor`. It checks dependencies, configuration, credentials, and
    connectivity, and prints what it found.
@@ -42,5 +42,5 @@ instead of your own.
 ## Commands named here
 
 The commands above, and the flags named on this page, are documented in
-[docs/reference/cli.md](docs/reference/cli.md). That page mirrors the live help text, so
+[docs/reference/CLI.md](docs/reference/CLI.md). That page mirrors the live help text, so
 `gideon <command> --help` is the same information from the command line.

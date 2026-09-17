@@ -22,7 +22,7 @@ deliberately *not* minisign's scrypt-encrypted format: that would mean shipping 
 derivation and passphrase handling for no security gain, when the real protection is
 "the seed lives in a password manager and a CI secret, never on disk in CI". A raw
 base64 seed is what a CI secret holds anyway. Full rationale + rejected alternatives:
-``docs/security/signing.md``.
+``docs/security/SIGNING.md``.
 
 This script never reads the trust store and never installs anything. It is a maintainer
 tool; nothing in the runtime imports it.

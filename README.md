@@ -1,7 +1,12 @@
-<p align="left"><img src="docs/brand/gideon-mark.svg" width="72" height="72" alt="Gideon"></p>
+<p align="left"><img src="assets/gideon.png" alt="Gideon"></p>
 
-# Gideon
-
+<h1 align="center">Gideon Agent</h1>
+<p align="center">
+  <a href="https://github.com/Sidiora-Labs/centra-gideon-agent"><img src="https://img.shields.io/badge/Project-Centra%20AI-0A0A0A?style=flat-square" alt="Centra AI" /></a>
+  <a href="https://github.com/Sidiora-Labs"><img src="https://img.shields.io/badge/Built%20by-Sidiora%20Labs-0A0A0A?style=flat-square" alt="Built by Sidiora Labs" /></a>
+  <a href="LICENSE.md"><img src="https://img.shields.io/badge/LICENSE-2-0A0A0A?style=flat-square" alt="Apache License Version 2.0" /></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/Version-0.1.3-0A0A0A?style=flat-square" alt="Version 0.1.3" /></a>
+</p>
 Gideon is a personal AI agent that runs on your own machine. One process serves a web console and does the work: chat, long-running goal loops, memory, a knowledge base, tasks, schedules, an inbox, and a permission-gated app platform.
 
 It is built for one person who wants an agent with real access to their own computer and their own services, without handing the keys to a hosted product. State lives in a directory you choose. Model providers are pluggable: an Anthropic or OpenAI key, an OpenAI-compatible endpoint, AWS Bedrock credentials, or a model running locally.
@@ -22,7 +27,7 @@ It is built for one person who wants an agent with real access to their own comp
 
 - Python 3.12 or newer.
 - Node.js 22.12 or newer with npm, if you want to build the console from source. CI builds the console with Node 24.
-- macOS or Linux. On Windows, use the Docker Compose path in [docs/guides/containers.md](docs/guides/containers.md).
+- macOS or Linux. On Windows, use the Docker Compose path in [docs/guides/CONTAINERS.md](docs/guides/CONTAINERS.md).
 - A model provider for anything model-backed, configured after first start. A local model works too.
 
 There is no external database and no message broker. Everything runs in the one gateway process.
@@ -44,7 +49,7 @@ Open the console address the gateway prints. `npm run build` writes the console 
 
 `GIDEON_HOME` is the directory holding configuration, credentials, conversations and other runtime state. Without it, Gideon uses `~/.gideon`. Keeping the isolated `.dev-home` value while you experiment is deliberate: it keeps a development instance away from your real one. Stop the foreground gateway with Ctrl-C.
 
-For a packaged install instead, `sh infrastructure/website/install.sh` bootstraps with `uv`. To check those installer bytes before you run them, see [Verify the one-liner](docs/guides/getting-started.md#verify-the-one-liner). The full walkthrough, from nothing installed to a first chat, is in [docs/guides/getting-started.md](docs/guides/getting-started.md).
+For a packaged install instead, `sh infrastructure/website/install.sh` bootstraps with `uv`. To check those installer bytes before you run them, see [Verify the one-liner](docs/guides/GETTING_STARTED.md#verify-the-one-liner). The full walkthrough, from nothing installed to a first chat, is in [docs/guides/GETTING_STARTED.md](docs/guides/GETTING_STARTED.md).
 
 ## Develop
 
@@ -94,11 +99,11 @@ The hook script formats staged Python and signs your commits off, which is what 
 
 [docs/README.md](docs/README.md) is the index. The short path in:
 
-- [docs/vision.md](docs/vision.md) for what this is trying to be.
-- [docs/architecture/overview.md](docs/architecture/overview.md) for how the gateway is put together.
-- [docs/reference/cli.md](docs/reference/cli.md) for every command and flag.
-- [docs/reference/CONFIG-REFERENCE.md](docs/reference/CONFIG-REFERENCE.md) for every setting.
-- [docs/security/threat-model.md](docs/security/threat-model.md) for what the trust boundaries actually are.
+- [docs/VISION.md](docs/VISION.md) for what this is trying to be.
+- [docs/architecture/OVERVIEW.md](docs/architecture/OVERVIEW.md) for how the gateway is put together.
+- [docs/reference/CLI.md](docs/reference/CLI.md) for every command and flag.
+- [docs/reference/CONFIGURATION_REFERENCE.md](docs/reference/CONFIGURATION_REFERENCE.md) for every setting.
+- [docs/security/THREAT_MODEL.md](docs/security/THREAT_MODEL.md) for what the trust boundaries actually are.
 
 ## Status
 
@@ -118,7 +123,7 @@ Gideon sends no telemetry. Nothing about your usage leaves your machine unless y
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for how we treat each other here.
 - [SUPPORT.md](SUPPORT.md) for where to ask, and what to include when you do.
 - [GOVERNANCE.md](GOVERNANCE.md) for who decides what.
-- [Issues](https://github.com/sidiora-labs/centra-gideon-agent/issues) for bugs and ideas, [releases](https://github.com/sidiora-labs/centra-gideon-agent/releases) for what shipped, and the [security policy](https://github.com/sidiora-labs/centra-gideon-agent/security/policy) for how vulnerabilities are handled. The repository itself lives at [sidiora-labs/centra-gideon-agent](https://github.com/sidiora-labs/centra-gideon-agent).
+- [Issues](https://github.com/Sidiora-Labs/centra-gideon-agent/issues) for bugs and ideas, [releases](https://github.com/Sidiora-Labs/centra-gideon-agent/releases) for what shipped, and the [security policy](https://github.com/Sidiora-Labs/centra-gideon-agent/security/policy) for how vulnerabilities are handled. The repository itself lives at [Sidiora-Labs/centra-gideon-agent](https://github.com/Sidiora-Labs/centra-gideon-agent).
 
 ## License
 

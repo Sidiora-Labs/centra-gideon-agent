@@ -144,7 +144,7 @@ def test_chat_with_no_provider_prints_the_fix_not_a_traceback(tmp_path) -> None:
     assert "FIX:" in proc.stderr, proc.stderr
 
 
-_CANONICAL_OWNER = "sidiora-labs"
+_CANONICAL_OWNER = "Sidiora-Labs"
 
 _GH_URL = re.compile(r"github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)")
 
@@ -180,7 +180,7 @@ def _scan_github_urls() -> list[tuple[Path, str, str]]:
 def test_project_github_urls_use_the_canonical_owner_casing() -> None:
     """Our own GitHub owner has one spelling, and the docs have to use it.
 
-    The project lives at ``sidiora-labs/centra-gideon-agent``. GitHub answers the wrong
+    The project lives at ``Sidiora-Labs/centra-gideon-agent``. GitHub answers the wrong
     casing with a 200 and no redirect, so this is legibility rather than a broken link: it
     is still our own name spelled wrong in text written for other people. The owner filter
     below only means anything while every own-URL in the scanned files agrees on one
@@ -213,7 +213,7 @@ def test_the_guide_does_not_promise_setup_collects_a_provider_credential() -> No
     correctly explains. The walkthrough followed § 1, expected a configured provider, and
     had none — so the two sections contradicted each other at the newcomer's expense.
     """
-    guide = (REPO_ROOT / "docs" / "guides" / "getting-started.md").read_text(
+    guide = (REPO_ROOT / "docs" / "guides" / "GETTING_STARTED.md").read_text(
         encoding="utf-8"
     )
     installer = (REPO_ROOT / "infrastructure" / "website" / "install.sh").read_text(

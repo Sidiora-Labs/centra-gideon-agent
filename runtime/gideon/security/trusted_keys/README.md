@@ -22,7 +22,7 @@ whole verification path is exercised without a checked-in secret.
 
 ## Adding the maintainer key
 
-See `docs/security/signing.md` for the full workflow. In short:
+See `docs/security/SIGNING.md` for the full workflow. In short:
 
 ```sh
 python3 scripts/sign_app.py gen-key --signer Gideon --out-dir ~/keys

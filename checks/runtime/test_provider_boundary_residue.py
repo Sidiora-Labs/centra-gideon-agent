@@ -9,7 +9,7 @@ CRED_SLACK_* key names are what existing installs hold). This sweep pins that se
   vendor SDK imports (``import slack_sdk`` / ``from slack ...``) and vendor
   credential/secret literals (``SLACK_*`` env/cred keys, ``xox`` token patterns).
 - Every file with such a hit MUST be listed in
-  ``docs/architecture/provider-boundary-keeps.txt`` (the machine-checked keeps
+  ``docs/architecture/PROVIDER_BOUNDARY_KEEPS.txt`` (the machine-checked keeps
   table). A hit in an unlisted file fails the test (regrowth). A listed file that
   no longer has a hit also fails (stale entry — keep the table honest).
 
@@ -28,7 +28,7 @@ _KEEPS_FILE = (
     Path(__file__).resolve().parents[2]
     / "docs"
     / "architecture"
-    / "provider-boundary-keeps.txt"
+    / "PROVIDER_BOUNDARY_KEEPS.txt"
 )
 
 _RESIDUE_PATTERNS = [
@@ -86,7 +86,7 @@ def test_no_new_vendor_residue_outside_keeps():
         + "\n".join(f"  {o}" for o in sorted(offenders))
         + "\nMove the vendor logic into an app bundle, or — if it is a genuine "
         "secret-detection/credential-key keep — add it to "
-        "docs/architecture/provider-boundary-keeps.txt with a judgment."
+        "docs/architecture/PROVIDER_BOUNDARY_KEEPS.txt with a judgment."
     )
 
 
