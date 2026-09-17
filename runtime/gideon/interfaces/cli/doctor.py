@@ -339,7 +339,7 @@ def _doctor() -> None:
     if not _local and auth_is_off():
         print(
             "  remote:      ❌ bound beyond loopback with auth OFF — set a password"
-            " (see docs/guides/remote-access.md) or bind loopback"
+            " (see docs/guides/REMOTE_ACCESS.md) or bind loopback"
         )
         issues.append("remote access: exposed beyond loopback without auth")
     elif _tnet:
@@ -349,7 +349,7 @@ def _doctor() -> None:
         print(f"  remote:      ✅ tailnet {_tnet} — open {_phone_url} on your phone")
         print("               (run: gideon token, for the signed-in link)")
     else:
-        print("  remote:      local-only — see docs/guides/remote-access.md")
+        print("  remote:      local-only — see docs/guides/REMOTE_ACCESS.md")
 
     print("\nMCP Tools")
     if agent_path.exists():
@@ -482,7 +482,7 @@ def _doctor() -> None:
                     "               Without it, run the gateway in a foreground shell (or via"
                 )
                 print(
-                    "               Windows Task Scheduler). See docs/guides/platforms.md."
+                    "               Windows Task Scheduler). See docs/guides/PLATFORMS.md."
                 )
     except Exception:
         pass

@@ -33,7 +33,7 @@ symbol). If the SDK doesn't expose what the app needs, that is a gap to fill in 
 (a deliberate, reviewed addition) — never a reason to reach past it.
 
 The deliberate in-core exceptions (things that legitimately live in core despite looking
-vendor-ish) are enumerated in `docs/architecture/provider-boundary.md`; do not add to
+vendor-ish) are enumerated in `docs/architecture/PROVIDER_BOUNDARY.md`; do not add to
 them. `checks/runtime/test_apps_import_boundary.py` enforces this per app file; the scanner check
 `app-sdk-boundary` promotes it to a diff-time check so a bad import is caught before the
 test run.

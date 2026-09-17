@@ -64,7 +64,7 @@ const WIRE_CONTRACT = [
 const RESERVED_PARENT_PREFIX = '__edit_mode_'
 
 describe('widget wire contract: doc and validator agree', () => {
-  const doc = readFileSync(join(process.cwd(), "../../docs/architecture/widgets.md"), 'utf8')
+  const doc = readFileSync(join(process.cwd(), "../../docs/architecture/WIDGETS.md"), 'utf8')
 
   it('accepts every message in the fixture', () => {
     const frame = document.createElement('iframe')

@@ -246,7 +246,7 @@ Controls are pill-shaped, tonal, and springy; every interactive component has de
 
 ### Motion (component-level doctrine)
 - **Spatial springs** (stiffness 200–800, visible overshoot) for position/scale; **effects curve** (0.2s, `cubic-bezier(0.2,0,0,1)`, critically damped) for opacity/color.
-- **Four named presets — `physics.snappy` / `smooth` / `fluid` / `playful`** — are the whole spring vocabulary; `playful` marks the ~3–4 sanctioned personality moments (menu open, success bloom). All four interpolate toward calm via the user's bounciness setting and all four collapse to an instant swap under reduced motion. Full author guide, including the budget and the gesture helpers: [`docs/design/motion.md`](../docs/design/motion.md).
+- **Four named presets — `physics.snappy` / `smooth` / `fluid` / `playful`** — are the whole spring vocabulary; `playful` marks the ~3–4 sanctioned personality moments (menu open, success bloom). All four interpolate toward calm via the user's bounciness setting and all four collapse to an instant swap under reduced motion. Full author guide, including the budget and the gesture helpers: [`docs/design/MOTION.md`](../docs/design/MOTION.md).
 
 ## 6. Do's and Don'ts
 

@@ -27,7 +27,7 @@ fixture that is added without being wired to an assertion turns
 The last class, ``TestCorpusRedsOnAWeakenedScanner``, is the meta-test for the atom's
 red-on-weakness clause (plan V3): it weakens one control per class **in process, via
 monkeypatch**, and asserts the corresponding corpus assertion now fails. The shipped
-scanner is never weakened; ``docs/security/scanner-testing.md`` records the equivalent
+scanner is never weakened; ``docs/security/SCANNER_TESTING.md`` records the equivalent
 on-disk mutation for anyone reproducing it by hand.
 """
 
@@ -308,7 +308,7 @@ def assert_warning_blocks_unforced_install(
 
     The forced path is pinned too, honestly: it DOES install (a warning is overridable by
     design) and the lock records ``verdict=warning``, so the residual is auditable rather
-    than invisible. See docs/security/scanner-testing.md §Residual risks."""
+    than invisible. See docs/security/SCANNER_TESTING.md §Residual risks."""
     report = staged_scan(case, tmp_path, TrustTier.COMMUNITY)
     rules = {f.rule for f in report.findings}
     assert "zero_width_chars" in rules, rules
@@ -836,7 +836,7 @@ class TestCorpusIsComplete:
                 ), f"executable corpus file: {path}"
 
     def test_methodology_doc_documents_every_class(self):
-        doc = REPO_ROOT / "docs" / "security" / "scanner-testing.md"
+        doc = REPO_ROOT / "docs" / "security" / "SCANNER_TESTING.md"
         assert doc.is_file(), f"missing published methodology: {doc}"
         text = doc.read_text(encoding="utf-8")
         for cls in ATTACK_CLASSES:

@@ -199,7 +199,7 @@ def test_a_new_finding_reds_the_ratchet():
     and assert the comparison flags it (naming file + finding). This proves the gate would red
     on a genuine new dead link or stale citation without perturbing the actual census.
     """
-    victim = "docs/vision.md"
+    victim = "docs/VISION.md"
     per_file = {victim: {"total": 1, "findings": ["dead_link:docs/already-known.md"]}}
     synthetic = {
         victim: {
@@ -234,7 +234,7 @@ def test_a_new_file_with_a_finding_reds_the_ratchet():
 def test_a_fix_that_shrinks_a_counter_does_not_red_the_ratchet():
     """The other side of the contract: driving a counter DOWN (a real doc fix) is welcome —
     the rise-only comparison must return no regression for a shrink."""
-    victim = "docs/vision.md"
+    victim = "docs/VISION.md"
     per_file = {victim: {"total": 2, "findings": ["dead_link:a.md", "dead_link:b.md"]}}
     shrunk = {victim: {"total": 1, "findings": ["dead_link:a.md"]}}
     assert regressions(per_file, shrunk) == []
@@ -293,7 +293,7 @@ def test_plan_hygiene_is_quiet_on_a_correct_header():
         find_stale_header("docs/roadmap/plans/NOLOG.md", _SEEDED_STALE_HEADER_NO_LOG)
         == []
     )
-    assert find_stale_header("docs/architecture/overview.md", _SEEDED_STALE_PLAN) == []
+    assert find_stale_header("docs/architecture/OVERVIEW.md", _SEEDED_STALE_PLAN) == []
 
 
 def test_forbidden_to_raise_doc_line_is_present():

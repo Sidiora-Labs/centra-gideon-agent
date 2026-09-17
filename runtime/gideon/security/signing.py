@@ -2,7 +2,7 @@
 
 **Scheme (SH-3 decision):** detached **Ed25519 signatures in minisign's on-wire
 format** over a **whole-tree digest manifest**. Rationale, rejected alternatives and
-the maintainer workflow live in ``docs/security/signing.md``; this module is the
+the maintainer workflow live in ``docs/security/SIGNING.md``; this module is the
 verifying half and the format's single source of truth. ``scripts/sign_app.py`` is
 the signing half.
 

@@ -96,12 +96,12 @@ class TestScopeDerivation:
     def test_extracts_path_tokens_from_task_text(self):
         got = wt.scope_candidates(
             "Update runtime/gideon/automation/loop/worktree.py and add checks/runtime/test_x.py; "
-            "see the `docs/reference/configuration.md` table."
+            "see the `docs/reference/CONFIGURATION.md` table."
         )
         assert got == [
             "runtime/gideon/automation/loop/worktree.py",
             "checks/runtime/test_x.py",
-            "docs/reference/configuration.md",
+            "docs/reference/CONFIGURATION.md",
         ]
 
     def test_bare_words_are_never_candidates(self):

@@ -722,7 +722,7 @@ def test_channel_only_app_warns_about_BOTH_missing_seams_SEPARATELY(
     assert len(trigger) == 1, advisories
     for message in advisories:
         assert "fixture-channel" in message
-        assert "docs/guides/build-a-channel-app.md" in message
+        assert "docs/guides/BUILD_A_CHANNEL_APP.md" in message
     assert "no_inbox_source_reason" in inbox[0]
     assert (
         "no_trigger_source_reason" not in inbox[0]

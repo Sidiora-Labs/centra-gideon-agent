@@ -11,7 +11,7 @@ directly (``cli_chat._chat``), which means no gateway, no session store, no safe
 profile, no tool-approval gate and no spend attribution. It is a provider smoke test.
 A scripted/CI caller needs the gated path, and §9.5 says so explicitly ("executes one
 turn against the local gateway"). ``chat -m`` keeps its behaviour; ``run`` is the
-gated sibling, and the two are told apart in ``docs/reference/cli.md``.
+gated sibling, and the two are told apart in ``docs/reference/CLI.md``.
 
 Safety posture (fail-CLOSED, and the reason this module exists at all):
 

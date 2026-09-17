@@ -26,7 +26,7 @@ This module is the contract that removes that asymmetry:
   handler, and is upgraded by the same release, so a separate "native-only" allowlist
   would be a second boundary to keep in step for no gain. What *is* native-specific is
   documented as caveats rather than import bans (see the module list in
-  ``docs/architecture/app-platform.md``): a bundled module runs IN-PROCESS, so it never
+  ``docs/architecture/APP_PLATFORM.md``): a bundled module runs IN-PROCESS, so it never
   receives the per-app backend subprocess environment (``sdk.util.shared_app_data_dir``
   is always ``None`` for it), and it cannot declare its own dependencies (the manifest
   ``dependencies`` block installs into an app venv, which a bundled module does not get).

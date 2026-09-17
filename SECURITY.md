@@ -14,7 +14,7 @@ action happens, not just described to the model.
 Their presence is not a certification. Not every integration goes through every control
 in the same way, and a green test run is not a statement about your deployment. For the
 places we know enforcement is weaker, read
-[limitations](docs/security/limitations.md) for the revision you are running.
+[limitations](docs/security/LIMITATIONS.md) for the revision you are running.
 
 ## What the project collects
 
@@ -22,7 +22,7 @@ Nothing. Gideon sends no usage telemetry. Nothing about your usage leaves your m
 unless you configure an integration that sends it.
 
 Every hostname that shipped code can reach is listed in
-[docs/architecture/network-egress-hosts.txt](docs/architecture/network-egress-hosts.txt),
+[docs/architecture/NETWORK_EGRESS_HOSTS.txt](docs/architecture/NETWORK_EGRESS_HOSTS.txt),
 each with a judgment about whether it is fetched and by whose action. If code ever reaches
 a host that is not declared there, a test fails.
 
@@ -76,12 +76,12 @@ it.
 
 ## Read more
 
-- [Architecture and controls](docs/architecture/security.md)
-- [Threat model](docs/security/threat-model.md)
-- [Limitations](docs/security/limitations.md)
-- [Signing](docs/security/signing.md)
-- [Review scope](docs/security/review-scope.md)
-- [Network egress hosts](docs/architecture/network-egress-hosts.txt)
+- [Architecture and controls](docs/architecture/SECURITY.md)
+- [Threat model](docs/security/THREAT_MODEL.md)
+- [Limitations](docs/security/LIMITATIONS.md)
+- [Signing](docs/security/SIGNING.md)
+- [Review scope](docs/security/REVIEW_SCOPE.md)
+- [Network egress hosts](docs/architecture/NETWORK_EGRESS_HOSTS.txt)
 
 Gideon is licensed under Apache 2.0. See [LICENSE](LICENSE). The source is at
-https://github.com/sidiora-labs/centra-gideon-agent.
+https://github.com/Sidiora-Labs/centra-gideon-agent.

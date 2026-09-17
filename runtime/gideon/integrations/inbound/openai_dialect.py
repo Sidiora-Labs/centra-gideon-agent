@@ -24,7 +24,7 @@ as content, and a run that stops on an approval returns the dashboard-pointer me
 with ``finish_reason: "stop"`` rather than holding the socket open for a human.
 
 **Zero provider names in this path.** The `/v1` shapes are a protocol many vendors
-implement, not one vendor's API (`docs/architecture/provider-boundary.md` says so
+implement, not one vendor's API (`docs/architecture/PROVIDER_BOUNDARY.md` says so
 explicitly for `/v1/audio`). ``tts-1``/``whisper-1``/``gpt-*`` are strings CLIENTS
 send; this module accepts and discards them, and resolution goes through
 ``active_voice_params`` / ``transcribe_audio`` / ``resolve_provider_for_use_case`` so

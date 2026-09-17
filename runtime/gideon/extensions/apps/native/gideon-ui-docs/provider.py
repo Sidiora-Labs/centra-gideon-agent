@@ -1,7 +1,7 @@
 """UI-docs tool provider — ``ui_search`` / ``ui_get`` / ``ui_list`` (Platform-Legibility §5).
 
 This is a BUNDLED app that owns its own provider code (the native capability contract,
-APE-5 — see ``apps/native_contract.py`` and ``docs/architecture/app-platform.md``). It
+APE-5 — see ``apps/native_contract.py`` and ``docs/architecture/APP_PLATFORM.md``). It
 imports core only through ``gideon.sdk.*``, exactly like an installed app, and its
 ``app.json`` points ``provider.implementation`` at ``provider:create_provider`` — a
 bundle-relative module rather than a core dotted path. Growing this capability (the

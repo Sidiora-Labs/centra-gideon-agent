@@ -1044,7 +1044,7 @@ class ProcedureLibrary:
         """Parse YAML frontmatter from a markdown file (simple ``key: value``).
 
         Deliberately a line parser, not a YAML parser — see
-        ``docs/reference/skill-format.md`` for the documented contract and its
+        ``docs/reference/SKILL_FORMAT.md`` for the documented contract and its
         limits. What matters here is that an *unparseable* file must not look
         like a file with no metadata: returning ``{}`` for a skill that plainly
         has a name is the silent-failure mode this function is careful to avoid,

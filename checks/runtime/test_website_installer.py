@@ -89,7 +89,7 @@ _CI = _ROOT / ".github" / "workflows" / "ci.yml"
 _FULL = _ROOT / ".github" / "workflows" / "full.yml"
 _PYPROJECT = _ROOT / "pyproject.toml"
 _CHANGELOG = _ROOT / "CHANGELOG.md"
-_GUIDE = _ROOT / "docs" / "guides" / "getting-started.md"
+_GUIDE = _ROOT / "docs" / "guides" / "GETTING_STARTED.md"
 _DEPLOY_README = _ROOT / "infrastructure" / "website" / "README.md"
 _REPO_README = _ROOT / "README.md"
 

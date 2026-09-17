@@ -1,6 +1,6 @@
 """SM-12 — MCP tool-name wire fidelity (research draft T00).
 
-The wire map lives in docs/architecture/tool-name-wire.md. These tests are its
+The wire map lives in docs/architecture/TOOL_NAMES.md. These tests are its
 rail: the full shipped tool census round-trips across the one transform we do
 not control (the provider's model-safe rewrite, mirrored by
 ``_sanitized_tool_key``), the lossy collision case is loud and kept out of the
@@ -87,7 +87,7 @@ class TestTheCensusRail:
         _, collisions = build_sanitized_index(names)
         assert not collisions, (
             "tool names collide under the model-safe form — rename one of each "
-            f"group (see docs/architecture/tool-name-wire.md): {collisions}"
+            f"group (see docs/architecture/TOOL_NAMES.md): {collisions}"
         )
 
     def test_every_census_name_round_trips(self) -> None:
