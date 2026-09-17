@@ -4,7 +4,7 @@
   "displayName": "Registry Fixture (clean)",
   "description": "A minimal search provider used as the validator's passing fixture.",
   "author": "Gideon contributors",
-  "license": "MIT",
+  "license": "Apache License 2.0",
   "permissions": {
     "network": true
   },

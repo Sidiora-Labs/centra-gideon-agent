@@ -5,7 +5,7 @@
   "displayName": "Infra Ops",
   "description": "Review infrastructure-as-code changes honestly: plan counts before commentary, the destroy/replace list first, and a drift audit that names the attribute behind every divergence.",
   "author": "Gideon",
-  "license": "MIT",
+  "license": "Apache License 2.0",
   "gideon_requires": ">=0.1",
   "components": [
     {"kind": "skill", "id": "infra-plan-review", "path": "skills/infra-plan-review/SKILL.md", "depends_on": []},
