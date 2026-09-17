@@ -12,7 +12,7 @@ the owner's roadmap (not published).
 
 Gideon is an **agentic operating system for one person**: a platform where
 agents accomplish the user's work using a rich, user-assembled set of capabilities.
-It is local-first, provider-agnostic, and MIT-licensed.
+It is local-first, provider-agnostic, and Apache-2.0-licensed.
 
 **Primary experiences:**
 1. **Goal Loops** — the user gives a target; the agent classifies, plans, and loops

@@ -1,0 +1,59 @@
+{
+  "generated_from": "tooling/scripts/generate_docs_lint_baseline.py",
+  "per_file": {
+    "docs/design/motion.md": {
+      "findings": [
+        "dead_link:apps/console/src/design/motion.ts"
+      ],
+      "total": 1
+    },
+    "docs/guides/companion-apps.md": {
+      "findings": [
+        "stale_citation:runtime/gideon/dashboard/token_auth.py"
+      ],
+      "total": 1
+    },
+    "docs/maintainers/community-bounty-drafts.md": {
+      "findings": [
+        "dead_link:docs/maintainers/app-bounty-wants-list.md"
+      ],
+      "total": 1
+    },
+    "docs/maintainers/mobile-release.md": {
+      "findings": [
+        "dead_link:docs/maintainers/release-runbook.md"
+      ],
+      "total": 1
+    },
+    "docs/maintainers/usability-kit.md": {
+      "findings": [
+        "dead_link:docs/maintainers/release-runbook.md"
+      ],
+      "total": 1
+    },
+    "docs/research/learning-benchmark-protocol.md": {
+      "findings": [
+        "stale_citation:gideon/config/loader.py",
+        "stale_citation:gideon/eval/runner.py",
+        "stale_citation:gideon/skills/loader.py",
+        "stale_citation:gideon/skills/surfacing.py"
+      ],
+      "total": 4
+    },
+    "docs/research/windows-native-audit.md": {
+      "findings": [
+        "stale_citation:cli_doctor.py",
+        "stale_citation:cli_server.py"
+      ],
+      "total": 2
+    }
+  },
+  "totals": {
+    "by_kind": {
+      "dead_link": 4,
+      "stale_citation": 7,
+      "stale_header": 0
+    },
+    "total": 11
+  }
+}

@@ -38,13 +38,16 @@ sh infrastructure/website/install.sh
 For a separately supplied wheel or release source, set `GIDEON_PACKAGE_SOURCE`
 to its explicit path, URL, or versioned distribution specification before running
 the installer. This project does not assume that a Gideon package, image, or hosted
-installer has already been published.
+installer has already been published. Release notes are published on the
+[releases page](https://github.com/sidiora-labs/centra-gideon-agent/releases).
 
-`setup` configures the workspace directory and timezone. Provider credentials
-are configured after starting the gateway, as described below. Run setup on an
-interactive terminal so its prompts can collect your choices.
+`setup` configures the workspace directory and timezone.
+It does **not** ask for a model provider credential, because a fresh home has no provider
+app to hold one yet. Provider credentials are configured after starting the gateway, as
+described below. Run setup on an interactive terminal so its prompts can collect your
+choices.
 
-### Verify the installer
+### Verify the one-liner
 
 ```bash
 cd infrastructure/website

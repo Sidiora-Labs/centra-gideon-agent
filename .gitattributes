@@ -1,0 +1,17 @@
+# Text: normalise to LF in the repository and in the working tree.
+* text=auto eol=lf
+*.sh text eol=lf
+*.svg text
+
+# Real binaries: never diffed, merged or newline-converted.
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
+
+# Generated: keep diffs and repository language stats readable.
+package-lock.json linguist-generated=true
+docs-lint-baseline.json linguist-generated=true
+uv.lock linguist-generated=true

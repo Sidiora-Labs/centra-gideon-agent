@@ -2,7 +2,7 @@
   "name": "gideon-desktop",
   "version": "0.1.0",
   "description": "Gideon \u2014 AI agent desktop app",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "desktopName": "gideon-desktop",
   "main": "src/application/main.js",
   "scripts": {

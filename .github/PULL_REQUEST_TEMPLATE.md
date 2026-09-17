@@ -1,7 +1,7 @@
 > [!IMPORTANT]
-> **Run `npm install` once in your clone.** It installs the git hooks, which sign off
-> your commits for DCO and format staged Python with `black`/`isort` before it becomes
-> a commit. That clears the two checks contributors hit most.
+> **Run `sh tooling/scripts/install_git_hooks.sh` once in your clone.** It installs the
+> git hooks, which format staged Python with `black`/`isort` and sign your commits off
+> for DCO before they are written. That clears the two checks contributors hit most.
 >
 > **Before pushing:** `make format && make lint` (Python) and, if you touched `apps/console/`,
 > `npm run typecheck:web && npm run test:web`.
@@ -14,9 +14,9 @@
 > The sign-off name/email must match your commit author. See [CONTRIBUTING.md](../CONTRIBUTING.md#developer-certificate-of-origin-dco).
 
 <!--
-Thanks for the PR. Fill in the four sections below — they mirror the project's
-definition of done (see CONTRIBUTING.md / AGENTS.md). A reviewer checks a PR at a
-glance against these.
+Thanks for the PR. Fill in the four sections below. They mirror how we decide a
+change is done (see CONTRIBUTING.md). A reviewer checks a PR at a glance against
+these.
 -->
 
 ## What changed
@@ -26,20 +26,15 @@ glance against these.
 ## Change class
 
 <!--
-R / B / S per the lifecycle mental model (see CONTRIBUTING.md#breaking-changes):
-- R (reversible): no persisted-state or stable-surface change.
+R / B / S (see ../CONTRIBUTING.md#breaking-changes):
+- R (reversible): nothing persisted and no stable surface changes.
 - B (behavioral): changes a stable surface (API/CLI/config) or persisted state.
-- S (structural/schema): changes a stored schema or a stable contract.
+- S (schema): changes a stored schema or another stable contract.
 
-The migration-backed gate/migration regime is deliberately deferred until the
-architecture stops moving, so there is no gate/migration machinery to use yet.
-- Maintainer, on a roadmap task: class-B/S ships as a clean break under the
-  pre-1.0 banner — say so here, add a CHANGELOG entry, advise `gideon
-  snapshot` in release notes.
-- Contributor: aim for class R. If your change is B/S, describe the break here
-  rather than building compatibility shims or migration helpers — the maintainer
-  decides whether to take it, reshape it additively, or schedule it. See
-  CONTRIBUTING.md#breaking-changes.
+Aim for class R. If your change is B or S, describe the break here and add a
+CHANGELOG entry. Do not build compatibility shims or migration helpers: there is
+no migration machinery yet, and that is deliberate. The maintainer decides
+whether to take the break, reshape it, or schedule it.
 -->
 
 Class: <!-- R | B | S -->
@@ -47,14 +42,15 @@ Class: <!-- R | B | S -->
 ## What you validated as a user
 
 <!--
-Not just what you wrote — what you DROVE. Which flows in the UI/CLI, what you
-checked in logs and persisted state. "Ran the endpoint" is not validation.
+Not just what you wrote, but what you drove. Which flows in the UI or CLI, what
+you checked in logs and persisted state. A passing unit test is not a user path.
+"Ran the endpoint" is not validation.
 -->
 
 ## Docs touched
 
 <!--
-Config fields, routes, CLI flags, or user-visible behavior → docs move in the
-same PR (docs/reference/, guides, the owning plan). Class-B/S → CHANGELOG entry.
-Write "none" only if genuinely none apply.
+Config fields, routes, CLI flags, or user-visible behavior: docs move in the same
+PR (docs/reference/, docs/guides/). A class B or S change also needs a CHANGELOG
+entry. Write "none" only if genuinely none apply.
 -->

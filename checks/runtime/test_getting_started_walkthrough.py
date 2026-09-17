@@ -144,7 +144,7 @@ def test_chat_with_no_provider_prints_the_fix_not_a_traceback(tmp_path) -> None:
     assert "FIX:" in proc.stderr, proc.stderr
 
 
-_CANONICAL_OWNER = "Gideon"
+_CANONICAL_OWNER = "sidiora-labs"
 
 _GH_URL = re.compile(r"github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)")
 
@@ -178,14 +178,13 @@ def _scan_github_urls() -> list[tuple[Path, str, str]]:
 
 
 def test_project_github_urls_use_the_canonical_owner_casing() -> None:
-    """`github.com/gideon/gideon` in shipped code is a consistency defect.
+    """Our own GitHub owner has one spelling, and the docs have to use it.
 
-    Two of them shipped: the knowledge crawler's outbound `User-Agent` (the project's public
-    identity to every site it fetches) and the systemd unit's `Documentation=` field, which
-    `gideon service install` writes onto the user's machine — a command the guide's
-    "Where to go next" recommends. GitHub resolves the lowercase form (200, no redirect), so
-    this is legibility, not a broken link; it is still the project's own name spelled wrong
-    in state we hand to third parties.
+    The project lives at ``sidiora-labs/centra-gideon-agent``. GitHub answers the wrong
+    casing with a 200 and no redirect, so this is legibility rather than a broken link: it
+    is still our own name spelled wrong in text written for other people. The owner filter
+    below only means anything while every own-URL in the scanned files agrees on one
+    spelling, which is why the comparison is single-sourced from `_CANONICAL_OWNER`.
     """
     hits = _scan_github_urls()
 
@@ -194,7 +193,8 @@ def test_project_github_urls_use_the_canonical_owner_casing() -> None:
     ), f"URL scan found only {len(hits)} github.com URLs — rail is inert"
     assert len({p for p, _, _ in hits}) >= 5, "URL scan reached fewer than 5 files"
 
-    ours = [(p, owner, repo) for p, owner, repo in hits if owner.lower() == "gideon"]
+    canonical = _CANONICAL_OWNER.lower()
+    ours = [(p, owner, repo) for p, owner, repo in hits if owner.lower() == canonical]
     assert (
         len(ours) >= 8
     ), f"only {len(ours)} own-org URLs matched — the owner filter is inert"
