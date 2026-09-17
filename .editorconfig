@@ -1,0 +1,29 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.py]
+indent_style = space
+indent_size = 4
+
+[*.toml]
+indent_style = space
+indent_size = 4
+
+[*.{js,jsx,ts,tsx,json,css,html,yml,yaml,md}]
+indent_style = space
+indent_size = 2
+
+[Makefile]
+indent_style = tab
+
+[*.mk]
+indent_style = tab
+
+# Byte-exact formats: trimming whitespace can corrupt the asset.
+[*.{svg,woff2,woff,ttf}]
+trim_trailing_whitespace = false
