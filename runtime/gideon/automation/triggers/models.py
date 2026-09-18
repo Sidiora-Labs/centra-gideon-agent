@@ -253,6 +253,7 @@ class Trigger:
     created_by: str = "user"
     author: str = ""
     origin_harness: str = ""
+    purpose: str = ""
     spec: dict[str, Any] = field(default_factory=dict)
     gates: dict[str, Any] = field(default_factory=dict)
     capabilities: dict[str, Any] = field(default_factory=dict)
@@ -308,13 +309,16 @@ class FireRecord:
     run_id: str = ""
     mutated: bool = False
     counters: dict[str, Any] = field(default_factory=dict)
+    agent_error: dict[str, Any] = field(default_factory=dict)
     incomplete: bool = False
     acted_on: bool = False
     dismissed: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return _record_projection(
-            self, (item.name for item in fields(FireRecord)), {"counters"}
+            self,
+            (item.name for item in fields(FireRecord)),
+            {"counters", "agent_error"},
         )
 
     @classmethod
@@ -342,6 +346,7 @@ class FireRecord:
             RunWeight.LEDGER.value,
         )
         values["counters"] = source.mapping("counters")
+        values["agent_error"] = source.mapping("agent_error")
         values["duration_secs"] = _float(source.data.get("duration_secs"), 0.0)
         return cls(**values)
 
@@ -375,6 +380,7 @@ _TRIGGER_EXPORT_ORDER = (
     "created_by",
     "author",
     "origin_harness",
+    "purpose",
     "spec",
     "gates",
     "capabilities",
@@ -735,6 +741,7 @@ class _TriggerDecoder:
                 "id",
                 "name",
                 "origin_harness",
+                "purpose",
                 "expires_at",
                 "next_fire_at",
                 "last_run_id",

@@ -77,6 +77,23 @@ class TestChatSessionWorkspaceDir:
             assert resp.status == 400
 
     @pytest.mark.asyncio
+    async def test_a_file_is_not_a_workspace(self, tmp_path):
+        """A path that exists but is a FILE is refused — not accepted as a workspace."""
+        session = _ChatSession("test")
+        state = _mock_state(session)
+        target = tmp_path / "notes.txt"
+        target.write_text("not a directory")
+        async with TestClient(TestServer(_make_app(state))) as client:
+            resp = await client.post(
+                "/api/chat/sessions/test/workspace-dir",
+                json={"workspace_dir": str(target)},
+            )
+            assert resp.status == 400
+            body = await resp.json()
+            assert body["error"] == "Not a directory"
+        assert session.workspace_dir == ""
+
+    @pytest.mark.asyncio
     async def test_sensitive_path_returns_403(self, tmp_path):
         session = _ChatSession("test")
         state = _mock_state(session)
@@ -107,12 +124,12 @@ class TestChatSessionWorkspaceDir:
                 assert session.workspace_dir == str(tmp_path)
 
     @pytest.mark.asyncio
-    async def test_session_not_found(self):
+    async def test_session_not_found(self, tmp_path):
         state = _mock_state()
         async with TestClient(TestServer(_make_app(state))) as client:
             resp = await client.post(
                 "/api/chat/sessions/missing/workspace-dir",
-                json={"workspace_dir": "/tmp"},
+                json={"workspace_dir": str(tmp_path)},
             )
             assert resp.status == 404
 

@@ -58,6 +58,30 @@ Run it once. If it fails, fix the cause and run it again. We do not re-run a che
 
 Tests that write state use a temporary directory or an isolated `GIDEON_HOME`, never real credentials, tokens or conversations. See [SECURITY.md](SECURITY.md).
 
+## Read a failed CI run's test report
+
+Every CI job that runs tests writes a machine-readable report and uploads it as an artifact
+with `if: always()`, so a red job's results survive the failure instead of living only in a
+truncated log. Python jobs write JUnit XML (`pytest --junitxml`), the console job writes
+JUnit from vitest and from `node --test`, the Playwright jobs write JUnit per spec, and the
+harness job uploads its captured `validate`/`scan` output.
+
+Artifacts are named `test-report-<workflow>-<job>`, plus the job's matrix coordinates where
+it has them — `test-report-ci-test-shard-3`,
+`test-report-full-matrix-shard-macos-latest-py3.13-2` — so parallel legs never collide and
+the name says which leg produced it.
+
+To get one:
+
+- **In the browser:** open the run's summary page and download the artifact from the
+  *Artifacts* section at the bottom.
+- **With the GitHub CLI:** `gh run download <run-id> -n test-report-ci-test-shard-3`, or
+  `gh run download <run-id>` for all of them. `gh run list` finds the run id.
+
+Each archive contains the `reports/` directory as the job left it. Open the `.junit.xml`
+files in any JUnit viewer, or read the failing `<testcase>` entries directly — they carry
+the test id and the failure message even when the job's log was cut short.
+
 ## The model
 
 The user's requested scope decides what work is authorized. Stay inside it. One task in progress at a time. If you spot an unrelated problem, write it down and leave it alone: no neighbouring refactors, no cleanup, no extra docs.

@@ -9,12 +9,13 @@ export const VAR_TYPES: VarTypeMeta[] = [
 ]
 
 const SOURCE_COLORS: Record<string, string> = { user: 'var(--color-primary)', marketplace: 'var(--color-info)' }
-export function isReadOnly(source?: string): boolean { return !['', 'user'].includes(source ?? '') }
+export function isReadOnly(source?: string): boolean { return !['', 'user', 'bundled'].includes(source ?? '') }
 export function sourceTone(source?: string): string { return SOURCE_COLORS[source || 'user'] ?? 'var(--color-on-surface-low)' }
-export function sourceLabel(source?: string, tags?: string[]): string {
-  const origin = source || 'user'
-  return origin === 'user' && tags?.includes('bundled') ? 'bundled' : origin
+export function promptProvenance(row: { source?: string; tags?: string[] }): string {
+  const origin = row.source || 'user'
+  return origin === 'user' && row.tags?.includes('bundled') ? 'bundled' : origin
 }
+export function sourceLabel(source?: string, tags?: string[]): string { return promptProvenance({ source, tags }) }
 export function promptVars(prompt: { variables?: PromptVariable[] }): PromptVariable[] { return prompt.variables ?? [] }
 function templateTokens(content: string, pattern: RegExp): string[] {
   return [...new Set(Array.from(content.matchAll(pattern), match => match[1]))]

@@ -104,3 +104,84 @@ def test_handler_redacts_secrets_in_preview(tmp_path, monkeypatch):
         "AKIAIOSFODNN7EXAMPLEKEY1234567890abcd" not in r["preview"]
         for r in body["results"]
     )
+
+
+def _hung_rg(tmp_path, monkeypatch):
+    """Put an ``rg`` on PATH that never answers AND forks a grandchild.
+
+    Same shape as ``test_files_git_status``'s ``_slow_git`` and for the same reason: the
+    grandchild inherits the stdout pipe, so a pid-only kill leaves the reap waiting on the
+    pipe rather than on the child's exit — the deadline that is not a deadline.
+    """
+    fake_bin = tmp_path / "rgbin"
+    fake_bin.mkdir()
+    stub = fake_bin / "rg"
+    stub.write_text("#!/bin/sh\n/bin/sleep 8 & wait\n")
+    stub.chmod(0o755)
+    monkeypatch.setenv("PATH", str(fake_bin))
+    return fake_bin
+
+
+def test_a_hung_content_search_is_bounded_and_leaves_nothing_running(
+    search_root, monkeypatch
+):
+    """req 90 ac_3 — the content search's deadline kills AND reaps, group and all.
+
+    The ripgrep path had a timeout and a reap but no session of its own, so the reap fell
+    back to a single-pid signal — the exact half of #432 the git runner was fixed for. This
+    drives a real hung child with a real grandchild: the call must return AT the deadline,
+    answer "no results" rather than raising, and leave the process group empty.
+    """
+    import time
+
+    from test_files_git_status import _group_is_empty, _spy_spawn
+
+    _hung_rg(search_root, monkeypatch)
+    monkeypatch.setattr(F, "_CONTENT_SEARCH_TIMEOUT", 0.3)
+
+    async def run():
+        seen = _spy_spawn(monkeypatch)
+        started = time.monotonic()
+        results, truncated = await F._content_search_rg(str(search_root), "needle", "")
+        elapsed = time.monotonic() - started
+
+        assert (results, truncated) == ([], False)
+        assert seen["procs"], "rg was never spawned — the test proves nothing"
+        assert elapsed >= 0.3, (
+            f"the stub rg returned in {elapsed:.2f}s, inside the injected deadline — no "
+            "timeout was induced"
+        )
+        assert elapsed < 4.0, (
+            f"the 0.3s deadline took {elapsed:.2f}s to return — the post-kill reap waited "
+            "for the grandchild's inherited pipe instead of the child's exit"
+        )
+        proc = seen["procs"][0]
+        assert (
+            proc.returncode is not None
+        ), "the killed search was never reaped (zombie)"
+        assert seen["kwargs"].get("start_new_session") is True, (
+            "the search child no longer leads its own session, so kill_timed_out falls "
+            "back to a single-pid signal and the grandchild survives holding the pipe"
+        )
+        assert _group_is_empty(proc.pid), (
+            f"process group {proc.pid} still has members after the timeout — one leaked "
+            "pair per timed-out search"
+        )
+
+    asyncio.run(run())
+
+
+def test_the_endpoint_answers_200_when_the_search_times_out(search_root, monkeypatch):
+    """req 90 ac_3 at the door: a blown deadline is an empty result set, not a 500.
+
+    The handler reports the engine it used either way, so the caller can tell "ripgrep found
+    nothing" from "we fell back to Python" — which is the only signal it gets when a search
+    is cut short.
+    """
+    _hung_rg(search_root, monkeypatch)
+    monkeypatch.setattr(F, "_CONTENT_SEARCH_TIMEOUT", 0.3)
+    monkeypatch.setattr(F, "_has_rg", lambda: True)
+
+    status, body = _call(str(search_root), "needle_here", force_python=False)
+    assert status == 200
+    assert body == {"results": [], "engine": "rg", "truncated": False}

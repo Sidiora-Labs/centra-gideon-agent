@@ -728,7 +728,11 @@ class TestStatus:
         assert "not running" in out
 
     def test_status_success(self, capsys):
-        """200 OK should display stats."""
+        """200 OK should display the counters the real payload carries.
+
+        The keys are the ones ``handlers_system.api_status`` ships; the end-to-end proof
+        that this IS the real shape lives in ``test_cli_status_counters``.
+        """
         from gideon.interfaces.cli.server import _status
 
         mock_resp = MagicMock()
@@ -736,10 +740,9 @@ class TestStatus:
             {
                 "uptime": "1h 0m",
                 "sessions": 2,
-                "messages": 10,
-                "tool_calls": 5,
                 "subagents": 0,
-                "crons": 1,
+                "cron": {"total": 1, "enabled": 1, "broken": 0},
+                "stats": {"total_turns": 12},
                 "lessons": 3,
             }
         ).encode()
@@ -750,7 +753,11 @@ class TestStatus:
             _status(self._make_args())
         out = capsys.readouterr().out
         assert "1h 0m" in out
-        assert "Sessions" in out or "sessions" in out.lower()
+        assert "Sessions:    2" in out
+        assert "Schedules:   1 (1 enabled)" in out
+        assert "Turns:       12" in out
+        assert "Lessons:     3" in out
+        assert "unknown" not in out
 
     def test_status_unexpected_exception(self, capsys):
         """Non-network exceptions should report gateway as running with unexpected response."""
@@ -1186,7 +1193,7 @@ class TestDoctorMcpCmdFixed:
             _doctor()
         out = capsys.readouterr().out
         assert "fixed stale path" in out
-        assert "Auto-fixed stale binary" in out
+        assert "Auto-fixed 1 stale binary path in gideon.json" in out
         # Verify it did NOT print the tooling/allowedTools message
         assert "Auto-fixed tooling/allowedTools" not in out
 
@@ -1397,3 +1404,172 @@ class TestConfigDirOverride:
 
         with patch("urllib.request.urlopen", return_value=mock_resp):
             _logout(7777)
+
+
+class TestHiddenCommands:
+    """req.29 — internal commands dispatch but appear on no help surface.
+
+    The tree is WALKED rather than sampled: ``mcp-core`` is registered on the top-level
+    subparsers, so a check that only read ``gideon --help`` would pass while the same
+    class of leak in any of the 100+ nested subcommands went unseen. Each assertion
+    below runs against every node the parser can reach.
+    """
+
+    @staticmethod
+    def _walk(parser, path=()):
+        """Yield ``(path, help_text, subparser)`` for EVERY command in the tree."""
+        for action in parser._actions:
+            if not isinstance(action, argparse._SubParsersAction):
+                continue
+            listed = {ca.dest: ca.help for ca in action._choices_actions}
+            for name, sub in action._name_parser_map.items():
+                yield path + (name,), listed.get(name), sub
+                yield from TestHiddenCommands._walk(sub, path + (name,))
+
+    @staticmethod
+    def _rendered(parser):
+        """Every help/usage string a user can reach WITHOUT already knowing the name.
+
+        A hidden command's own ``--help`` names itself, and must: the point is that no
+        surface *leads* a user to it, not that the command becomes unusable once you
+        have been told it exists. So its own subtree is excluded and everything else —
+        the root, and all 100+ visible nodes — is scanned.
+        """
+        from gideon.interfaces.cli.main import HIDDEN_COMMANDS
+
+        surfaces = [(("gideon",), parser.format_help(), parser.format_usage())]
+        for path, _help, sub in TestHiddenCommands._walk(parser):
+            if any(part in HIDDEN_COMMANDS for part in path):
+                continue
+            surfaces.append((path, sub.format_help(), sub.format_usage()))
+        return surfaces
+
+    def test_the_tree_walk_actually_reaches_the_whole_tree(self):
+        """VACUITY floor: every assertion below is only as good as this walk.
+
+        A walker that silently stopped at depth 1 would make the rest of this class
+        pass on a tree it never entered, so the reachable command count and the
+        presence of a known nested leaf are pinned here.
+        """
+        from gideon.interfaces.cli.main import build_parser
+
+        paths = [p for p, _h, _s in self._walk(build_parser())]
+        assert len(paths) > 90, f"only {len(paths)} commands walked"
+        assert ("cron", "add") in paths, "the walk never descended into a subcommand"
+        assert ("spawn", "run") in paths
+        assert max(len(p) for p in paths) >= 2, "no nested command was reached"
+
+    def test_no_help_surface_names_a_hidden_command(self):
+        from gideon.interfaces.cli.main import HIDDEN_COMMANDS, build_parser
+
+        assert HIDDEN_COMMANDS, "the registry must not be empty or this is vacuous"
+        for path, help_text, usage in self._rendered(build_parser()):
+            for hidden in HIDDEN_COMMANDS:
+                assert hidden not in help_text, f"{hidden} leaked into {path} --help"
+                assert hidden not in usage, f"{hidden} leaked into {path} usage"
+
+    def test_the_suppress_sentinel_is_never_rendered_as_text(self):
+        """🔴 ``help=argparse.SUPPRESS`` printed ``mcp-core  ==SUPPRESS==`` verbatim."""
+        from gideon.interfaces.cli.main import build_parser
+
+        for path, help_text, usage in self._rendered(build_parser()):
+            assert argparse.SUPPRESS not in help_text, f"sentinel in {path} --help"
+            assert argparse.SUPPRESS not in usage, f"sentinel in {path} usage"
+
+    def test_a_mistyped_command_is_not_offered_the_hidden_one(self, capsys):
+        """The invalid-choice error is a command listing too."""
+        from gideon.interfaces.cli.main import HIDDEN_COMMANDS, build_parser
+
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(["definitely-not-a-command"])
+        err = capsys.readouterr().err
+        assert "invalid choice" in err
+        assert "'chat'" in err, "the visible commands must still be offered"
+        for hidden in HIDDEN_COMMANDS:
+            assert hidden not in err
+
+    def test_every_visible_command_has_a_non_empty_help_string(self):
+        from gideon.interfaces.cli.main import HIDDEN_COMMANDS, build_parser
+
+        missing = [
+            path
+            for path, help_text, _sub in self._walk(build_parser())
+            if path[-1] not in HIDDEN_COMMANDS and not (help_text or "").strip()
+        ]
+        assert missing == [], f"commands with no help: {missing}"
+
+    def test_the_hidden_commands_own_help_is_excluded_on_purpose(self):
+        """VACUITY for the exclusion above: it must skip exactly one subtree.
+
+        If ``_rendered`` dropped more than the hidden subtree, the leak assertions would
+        be scanning a shrunken tree and passing for the wrong reason.
+        """
+        from gideon.interfaces.cli.main import build_parser
+
+        parser = build_parser()
+        walked = {path for path, _h, _s in self._walk(parser)}
+        scanned = {path for path, _h, _u in self._rendered(parser)}
+        assert scanned - {("gideon",)} == walked - {("mcp-core",)}
+
+    def test_a_hidden_command_still_parses(self):
+        from gideon.interfaces.cli.main import HIDDEN_COMMANDS, build_parser
+
+        parser = build_parser()
+        for hidden in HIDDEN_COMMANDS:
+            assert parser.parse_args([hidden]).command == hidden
+
+    def test_a_hidden_command_still_dispatches(self, monkeypatch):
+        """Parsing is not dispatch — assert the CALL SITE runs."""
+        import sys
+
+        from gideon.interfaces.cli import main as cli
+
+        ran = []
+        monkeypatch.setattr(
+            "gideon.integrations.mcp_core.run_mcp_core_server",
+            lambda: ran.append("mcp-core"),
+        )
+        monkeypatch.setattr(sys, "argv", ["gideon", "mcp-core"])
+        cli.main()
+        assert ran == ["mcp-core"]
+
+    def test_the_hiding_class_reaches_every_depth_of_the_tree(self):
+        """``add_subparsers`` defaults ``parser_class`` to ``type(self)``.
+
+        Pinned so a future nested parser built from a bare ``ArgumentParser`` cannot
+        quietly reopen the invalid-choice leak below the top level.
+        """
+        from gideon.interfaces.cli.main import HiddenCommandParser, build_parser
+
+        parser = build_parser()
+        assert isinstance(parser, HiddenCommandParser)
+        for path, _help, sub in self._walk(parser):
+            assert isinstance(sub, HiddenCommandParser), path
+
+    def test_hiding_is_a_registry_not_a_hard_coded_name(self, capsys):
+        """ac_1's "mechanism" clause: adding a name must be all it takes.
+
+        Driven by adding a second hidden command to a freshly built tree and asserting
+        the same three surfaces close for it — so the mechanism is what hides, not a
+        branch that happens to mention ``mcp-core``.
+        """
+        from gideon.interfaces.cli import main as cli
+
+        monkey = cli.HIDDEN_COMMANDS | {"secret-probe"}
+        parser = cli.HiddenCommandParser(prog="gideon")
+        sub = parser.add_subparsers(dest="command")
+        sub.add_parser("chat", help="Chat with the agent")
+        cli.add_hidden_parser(sub, "secret-probe")
+        original = cli.HIDDEN_COMMANDS
+        cli.HIDDEN_COMMANDS = monkey
+        try:
+            cli.hide_internal_commands(sub)
+            help_text = parser.format_help()
+            assert "secret-probe" not in help_text
+            assert argparse.SUPPRESS not in help_text
+            assert parser.parse_args(["secret-probe"]).command == "secret-probe"
+            with pytest.raises(SystemExit):
+                parser.parse_args(["bogus"])
+            assert "secret-probe" not in capsys.readouterr().err
+        finally:
+            cli.HIDDEN_COMMANDS = original

@@ -17,6 +17,8 @@ _CLIFF_MIN_RESULTS = 1
 
 _VECTOR_MIN_SIMILARITY = 0.25
 
+_KEYWORD_MIN_RELATIVE_SCORE = 0.05
+
 _TITLE_BOOST = 1.0 / 61
 
 _ANN_OVERFETCH = 4
@@ -29,6 +31,9 @@ ARM_KEYWORD = "keyword"
 ARM_GRAPH = "graph"
 ARM_VECTOR = "vector"
 ARMS = (ARM_KEYWORD, ARM_GRAPH, ARM_VECTOR)
+
+GRAPH_MATCH_DIRECT = "direct"
+GRAPH_MATCH_NEIGHBOR = "neighbor"
 
 
 def relevance_cliff_cut(
@@ -61,6 +66,40 @@ def relevance_cliff_cut(
             cut = i
             break
     return max(min(min_results, cap), min(cut, cap))
+
+
+def keyword_score_cut(
+    strengths: list[float], *, floor: float = _KEYWORD_MIN_RELATIVE_SCORE
+) -> int:
+    """Return how many leading FTS rows clear the keyword arm's own quality floor.
+
+    ``strengths`` are BM25 magnitudes (``-rank``, so larger is better) already ordered
+    best-first. A row is kept while its strength is at least ``floor`` × the best row's.
+    The floor is RELATIVE because BM25 is not comparable across queries or corpora: the
+    same absolute score means "excellent" for a rare term and "noise" for a common one,
+    and only the distance from the best match for THIS query carries information.
+
+    It exists because :meth:`HybridRetriever._sanitize_fts5_query` ORs the query's terms —
+    which is what lets a conversational question match a document carrying only some of
+    them, and also what admits a document whose sole overlap is the query's least
+    informative word. SQLite's BM25 clamps a non-discriminating term's IDF to 1e-6, so
+    those rows arrive four to six orders of magnitude below a real match and any floor in
+    this range separates them; a genuine partial match sits within a small factor of the
+    best and survives. A degenerate best score (0 or negative, which happens when EVERY
+    match is clamped) carries no signal to threshold on, so everything is kept.
+
+    Pure + side-effect-free, so the floor is unit-testable apart from the DB.
+    """
+    if not strengths:
+        return 0
+    top = strengths[0]
+    if top <= 0:
+        return len(strengths)
+    threshold = floor * top
+    for index, strength in enumerate(strengths):
+        if strength < threshold:
+            return index
+    return len(strengths)
 
 
 class HybridRetriever:
@@ -100,8 +139,14 @@ class HybridRetriever:
             if ARM_KEYWORD in active
             else []
         )
+        graph_kinds: dict[str, str] = {}
         gr = (
-            self._graph_search(query, limit=over, include_archived=include_archived)
+            self._graph_search(
+                query,
+                limit=over,
+                include_archived=include_archived,
+                match_kinds=graph_kinds,
+            )
             if ARM_GRAPH in active
             else []
         )
@@ -172,6 +217,7 @@ class HybridRetriever:
                     "score": score,
                     "provider": item.get("provider", "native"),
                     "match_type": "+".join(types),
+                    "graph_match": graph_kinds.get(item_id),
                     **_attach_locator(item, q_terms, chunk_locs.get(item_id)),
                 }
             )
@@ -180,7 +226,15 @@ class HybridRetriever:
     def _keyword_search(
         self, query: str, limit: int = 20, *, include_archived: bool = False
     ) -> list[tuple[str, int]]:
-        """FTS5 search. Returns [(item_id, rank)] where rank is position (1=best)."""
+        """FTS5 search. Returns [(item_id, rank)] where rank is position (1=best).
+
+        QUALIFIED BEFORE FUSION. The rows are cut at :func:`keyword_score_cut`'s relative
+        BM25 floor, so a document whose only overlap with the query is a term the corpus
+        cannot discriminate on never reaches ``_rrf_fuse`` at all. Positional rank is still
+        what the arm returns — fusion's contract is unchanged — but the positions are now
+        handed out over the QUALIFIED rows, so a weak tail cannot occupy ranks that RRF
+        would otherwise have scored.
+        """
         safe_query = self._sanitize_fts5_query(query)
         if not safe_query:
             return []
@@ -189,7 +243,7 @@ class HybridRetriever:
         )
         try:
             rows = self.store.db.execute(
-                "SELECT i.id FROM items_fts fts "
+                "SELECT i.id AS id, fts.rank AS fts_rank FROM items_fts fts "
                 "JOIN items i ON i.rowid = fts.rowid "
                 "WHERE items_fts MATCH ? AND i.status = 'active' "
                 f"{archived_clause}ORDER BY fts.rank LIMIT ?",  # noqa: S608,E501 (clause is a fixed literal)
@@ -197,7 +251,9 @@ class HybridRetriever:
             ).fetchall()
         except sqlite3.OperationalError:
             return []
-        return [(row["id"], rank + 1) for rank, row in enumerate(rows)]
+        strengths = [-float(row["fts_rank"] or 0.0) for row in rows]
+        keep = keyword_score_cut(strengths)
+        return [(row["id"], rank + 1) for rank, row in enumerate(rows[:keep])]
 
     @staticmethod
     def _sanitize_fts5_query(query: str) -> str:
@@ -212,9 +268,33 @@ class HybridRetriever:
         return " OR ".join(f'"{t}"*' for t in terms)
 
     def _graph_search(
-        self, query: str, limit: int = 20, *, include_archived: bool = False
+        self,
+        query: str,
+        limit: int = 20,
+        *,
+        include_archived: bool = False,
+        match_kinds: dict[str, str] | None = None,
     ) -> list[tuple[str, int]]:
-        """Find entities matching query terms, traverse graph, rank items by mention count."""
+        """Find entities matching query terms, traverse graph, rank items by mention count.
+
+        DIRECT AND NEIGHBOUR ARE NOT THE SAME EVIDENCE, and this arm no longer pretends they
+        are. An item mentioning an entity the query NAMED is a direct match; an item
+        mentioning something merely reachable within two hops of that entity is a fallback
+        guess. Merging both into one mention tally — what this did — let an item with several
+        depth-2 mentions and no direct mention outrank an item the query actually named,
+        because a count cannot say where its mentions came from.
+
+        So the two are qualified separately, and the neighbour set is a FALLBACK in the literal
+        sense: it contributes only when the direct set is empty. Two hops out is a guess worth
+        making when nothing better exists and noise when something better does, and the items
+        it drops are exactly the ones the keyword and vector arms are better placed to judge —
+        fused recall is theirs to keep, not this arm's to pad.
+
+        ``match_kinds`` is an optional sink, filled with ``item_id -> "direct" | "neighbor"``
+        for every returned item. An out-parameter rather than a third tuple element precisely
+        so the ranked list handed to ``_rrf_fuse`` keeps the exact shape fusion has always
+        consumed (the same reason ``_vector_search`` reports chunk locators this way).
+        """
         words = query.split()
         candidates = list(words)
         for size in (2, 3):
@@ -232,29 +312,48 @@ class HybridRetriever:
         if not entity_ids:
             return []
 
-        all_entity_ids = set(entity_ids)
-        for eid in entity_ids:
-            for neighbor in self.store.get_neighbors(eid, depth=2):
-                all_entity_ids.add(neighbor["id"])
-
-        item_counts: dict[str, int] = defaultdict(int)
-        placeholders = ",".join("?" * len(all_entity_ids))
         archived_clause = (
             "" if include_archived else "AND COALESCE(i.is_archived, 0) = 0 "
         )
+        direct = self._mention_counts(entity_ids, limit, archived_clause)
+        ranked, kind = direct, GRAPH_MATCH_DIRECT
+
+        if not ranked:
+            neighbor_ids = set()
+            for eid in entity_ids:
+                for neighbor in self.store.get_neighbors(eid, depth=2):
+                    if neighbor["id"] not in entity_ids:
+                        neighbor_ids.add(neighbor["id"])
+            if neighbor_ids:
+                ranked, kind = (
+                    self._mention_counts(neighbor_ids, limit, archived_clause),
+                    GRAPH_MATCH_NEIGHBOR,
+                )
+
+        if match_kinds is not None:
+            for item_id, _ in ranked:
+                match_kinds[item_id] = kind
+        return [(item_id, rank + 1) for rank, (item_id, _) in enumerate(ranked)]
+
+    def _mention_counts(
+        self, entity_ids: "set[str] | set[int]", limit: int, archived_clause: str
+    ) -> list[tuple[str, int]]:
+        """Active items mentioning any of *entity_ids*, best-mentioned first."""
+        if not entity_ids:
+            return []
+        item_counts: dict[str, int] = defaultdict(int)
+        placeholders = ",".join("?" * len(entity_ids))
         rows = self.store.db.execute(
             f"SELECT m.item_id, COUNT(*) as cnt FROM mentions m "  # noqa: S608
             f"JOIN items i ON i.id = m.item_id "
             f"WHERE m.entity_id IN ({placeholders}) AND i.status = 'active' "
             f"{archived_clause}"
             f"GROUP BY m.item_id ORDER BY cnt DESC LIMIT ?",
-            (*all_entity_ids, limit),
+            (*entity_ids, limit),
         ).fetchall()
         for row in rows:
             item_counts[row["item_id"]] = row["cnt"]
-
-        sorted_items = sorted(item_counts.items(), key=lambda x: x[1], reverse=True)
-        return [(item_id, rank + 1) for rank, (item_id, _) in enumerate(sorted_items)]
+        return sorted(item_counts.items(), key=lambda x: x[1], reverse=True)
 
     def _vector_search(
         self,

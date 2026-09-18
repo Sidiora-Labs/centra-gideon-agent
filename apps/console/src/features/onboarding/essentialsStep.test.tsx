@@ -12,6 +12,7 @@ const testModelProvider = vi.fn()
 const chatModels = vi.fn()
 const setActiveModel = vi.fn()
 const saveOnboardingState = vi.fn()
+const detectLocalModels = vi.fn()
 
 vi.mock('../../shared/data/api', () => ({
   api: {
@@ -24,6 +25,7 @@ vi.mock('../../shared/data/api', () => ({
     chatModels: () => chatModels(),
     setActiveModel: (...a: unknown[]) => setActiveModel(...a),
     saveOnboardingState: (...a: unknown[]) => saveOnboardingState(...a),
+    detectLocalModels: () => detectLocalModels(),
   },
 }))
 vi.mock('../../app/shell/appSdk', () => ({ launchChat: vi.fn(), notify: vi.fn() }))
@@ -74,9 +76,14 @@ async function openCard(which: keyof typeof CARD) {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  for (const k of ['onboarding:essentials-catalog', 'onboarding:provider-types', 'onboarding:chat-models']) invalidateKeys(k)
+  for (const k of ['onboarding:essentials-catalog', 'onboarding:provider-types', 'onboarding:chat-models', 'onboarding:local-models']) invalidateKeys(k)
   try { sessionStorage.clear() } catch {   }
   appCatalog.mockResolvedValue(CATALOG)
+  detectLocalModels.mockResolvedValue({
+    detected: false, ok: false, endpoint: 'http://127.0.0.1:11434', host: '127.0.0.1', port: 11434,
+    models: [], requires_key: false, provider_type: 'ollama', detail: 'connection refused',
+    scan_limits: { max_targets: 256, max_budget_s: 30, default_budget_s: 5, max_concurrency: 16, ports: [11434] },
+  })
   modelProviderTypes.mockResolvedValue([{
     type: 'openai', label: 'OpenAI', app: 'openai-models', capabilities: ['chat'], multiInstance: true,
     settingsSchema: { properties: { api_key: { type: 'string', default: '', 'x-meta': { label: 'OpenAI API Key', sensitive: true } } }, required: ['api_key'] },

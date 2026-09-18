@@ -839,3 +839,69 @@ async def test_app_token_for_other_user_is_ignored() -> None:
     assert resp.status == 200
     assert req.read_store.get("user") == "alice"
     assert req.read_store.get("app", "") == ""
+
+
+class TestInternalAuthSecurityEvents:
+    """A granted internal-auth decision records its rationale as a reason, not an
+    error; a denied one still records the error (BACKLOG-13)."""
+
+    @staticmethod
+    def _internal_auth_events() -> list[dict]:
+        from gideon.security.sel import sel
+
+        return [
+            e for e in sel().recent(limit=20) if e.get("operation") == "internal_auth"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_loopback_cookie_grant_records_a_reason_not_an_error(self) -> None:
+        token = generate_token("testuser", ttl_seconds=300)
+        bind_token_ip(token, "127.0.0.1")
+        mark_consumed(token)
+        mw = token_auth_middleware(
+            internal_paths=frozenset({"/api/spawn"}), internal_secret="s"
+        )
+        req = _make_request(path="/api/spawn", cookies={"gideon_token_10000": token})
+
+        resp = await mw(req, _ok_handler)
+
+        assert resp.status == 200
+        event = self._internal_auth_events()[0]
+        assert event["outcome"] == "granted"
+        assert event["error"] == ""
+        assert event["metadata"]["reason"] == "cookie auth (no secret header)"
+
+    @pytest.mark.asyncio
+    async def test_mixed_non_loopback_grant_records_a_reason_not_an_error(self) -> None:
+        token = generate_token("dcvuser", ttl_seconds=300)
+        bind_token_ip(token, "10.0.0.1")
+        mark_consumed(token)
+        mw = token_auth_middleware(mixed_internal_paths=frozenset({"/api/spawn"}))
+        req = _make_request(
+            path="/api/spawn", remote="10.0.0.1", cookies={"gideon_token_10000": token}
+        )
+
+        resp = await mw(req, _ok_handler)
+
+        assert resp.status == 200
+        event = self._internal_auth_events()[0]
+        assert event["outcome"] == "granted"
+        assert event["error"] == ""
+        assert event["metadata"]["reason"] == "mixed non-loopback cookie auth"
+
+    @pytest.mark.asyncio
+    async def test_denied_internal_auth_still_records_an_error(self) -> None:
+        mw = token_auth_middleware(
+            internal_paths=frozenset({"/api/spawn"}), internal_secret="real-secret"
+        )
+        req = _make_request(
+            path="/api/spawn", headers={"X-Internal-Secret": "wrong-secret"}
+        )
+
+        resp = await mw(req, _ok_handler)
+
+        assert resp.status == 403
+        event = self._internal_auth_events()[0]
+        assert event["outcome"] == "denied"
+        assert event["error"] == "wrong secret"
+        assert "reason" not in event.get("metadata", {})

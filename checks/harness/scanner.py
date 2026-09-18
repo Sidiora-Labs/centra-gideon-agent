@@ -63,8 +63,12 @@ def _repo_root() -> Path:
 
 
 def _read(path: Path) -> str:
+    """Source text for a check. Undecodable bytes are REPLACED, never raised: a checked-in
+    file holding one stray byte would otherwise abort the whole scan, and every check here
+    reads ASCII structure (imports, call names, list literals) that a U+FFFD elsewhere in
+    the file leaves intact — including the line numbering a finding is attributed by."""
     try:
-        return path.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
 
@@ -542,6 +546,156 @@ def check_no_naive_transcript_cut(files: list[Path], root: Path) -> list[Finding
     return findings
 
 
+_COMMIT_WATCH_TOKENS = (
+    "selfqa-commit-watch",
+    "selfqa_commit_watch",
+    "commit_watch.",
+)
+_PERIODIC_KINDS = frozenset({"interval", "cron", "schedule", "timer", "poll"})
+_PERIODIC_FIELDS = frozenset(
+    {
+        "cron",
+        "cron_expression",
+        "every",
+        "every_minutes",
+        "interval",
+        "interval_minutes",
+        "interval_seconds",
+        "poll_interval",
+        "poll_seconds",
+        "schedule",
+    }
+)
+
+
+def _docstring_constants(tree: ast.AST) -> set[int]:
+    """Node ids of every module/class/function docstring Constant.
+
+    A docstring that narrates the retirement ("the interim cron script retires…") is
+    exactly the text the check below must NOT read as evidence of a periodic watcher —
+    the retirement notes live in the same modules as the watcher itself.
+    """
+    out: set[int] = set()
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if not isinstance(body, list) or not body:
+            continue
+        if not isinstance(
+            node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+        ):
+            continue
+        first = body[0]
+        if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+            if isinstance(first.value.value, str):
+                out.add(id(first.value))
+    return out
+
+
+def _names_the_commit_watch(tree: ast.AST, docstrings: set[int]) -> bool:
+    return any(
+        isinstance(n, ast.Constant)
+        and isinstance(n.value, str)
+        and id(n) not in docstrings
+        and any(tok in n.value for tok in _COMMIT_WATCH_TOKENS)
+        for n in ast.walk(tree)
+    )
+
+
+def _periodic_kind_lines(tree: ast.AST) -> list[tuple[int, str]]:
+    """Every place this module states a periodic cadence, as (line, what was written).
+
+    Three spellings, because a trigger is built three ways in this codebase: a keyword
+    (``Trigger(kind="interval")``), an assignment (``trigger.kind = "cron"``) and a
+    literal (``{"kind": "interval"}``). A scheduling FIELD (``interval_minutes=…``,
+    ``"cron": …``) counts too — naming a cadence at all is the defect, whatever the
+    surrounding key is called.
+    """
+    hits: list[tuple[int, str]] = []
+
+    def periodic_value(node: ast.AST) -> str | None:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if node.value.lower() in _PERIODIC_KINDS:
+                return node.value
+        return None
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.keyword):
+            if node.arg == "kind" and (v := periodic_value(node.value)) is not None:
+                hits.append((getattr(node.value, "lineno", 1), f"kind={v!r}"))
+            elif node.arg in _PERIODIC_FIELDS:
+                hits.append((getattr(node.value, "lineno", 1), f"{node.arg}=..."))
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            names = {
+                t.attr if isinstance(t, ast.Attribute) else t.id
+                for t in targets
+                if isinstance(t, (ast.Attribute, ast.Name))
+            }
+            value = node.value
+            if value is None:
+                continue
+            if "kind" in names and (v := periodic_value(value)) is not None:
+                hits.append((getattr(value, "lineno", 1), f"kind = {v!r}"))
+            elif names & _PERIODIC_FIELDS:
+                hits.append(
+                    (
+                        getattr(value, "lineno", 1),
+                        f"{sorted(names & _PERIODIC_FIELDS)[0]} = ...",
+                    )
+                )
+        elif isinstance(node, ast.Dict):
+            for key, value in zip(node.keys, node.values):
+                if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
+                    continue
+                if key.value == "kind" and (v := periodic_value(value)) is not None:
+                    hits.append((getattr(key, "lineno", 1), f'"kind": {v!r}'))
+                elif key.value in _PERIODIC_FIELDS:
+                    hits.append((getattr(key, "lineno", 1), f'"{key.value}": ...'))
+    return hits
+
+
+def check_no_periodic_commit_watcher(files: list[Path], root: Path) -> list[Finding]:
+    """A module that names the Self-QA commit watch may not also state a periodic cadence.
+
+    The watcher was a cron script on an interval trigger until the ``vcs`` file-watch preset
+    landed and took ownership; the script and its interval are retired. Re-introducing a
+    clock — a trigger ``kind`` of interval/cron/schedule, or a ``schedule``/``interval_*``/
+    ``cron`` field — next to the commit-watch identifier gives the same work two owners and
+    brings back the duplicate-run and token-burn shape the retirement removed. Exactly
+    derivable from the module's own literals → ERROR.
+    """
+    findings: list[Finding] = []
+    for f in files:
+        if f.suffix != ".py" or not _is_under(f, root, "runtime", "gideon"):
+            continue
+        try:
+            tree = ast.parse(_read(f))
+        except (SyntaxError, ValueError):
+            continue
+        docstrings = _docstring_constants(tree)
+        if not _names_the_commit_watch(tree, docstrings):
+            continue
+        for line, wrote in _periodic_kind_lines(tree):
+            findings.append(
+                Finding(
+                    check="no-periodic-commit-watcher",
+                    level=ERROR,
+                    file=f,
+                    line=line,
+                    what=f"this module names the Self-QA commit watch and states a "
+                    f"periodic cadence here ({wrote})",
+                    why="the periodic commit watcher was retired when the vcs (file-watch) "
+                    "trigger took ownership of commit deltas; a clock beside the watcher "
+                    "gives one job two owners, re-fires runs the vcs trigger already "
+                    "started, and re-opens the token burn the retirement closed",
+                    fix="drive the commit watch from the vcs trigger preset "
+                    '(kind="file" over gideon.automation.triggers.file_watch.'
+                    "vcs_patterns) and delete the schedule",
+                )
+            )
+    return findings
+
+
 _CHECKS = {
     "hook-provider-parity": check_hook_provider_parity,
     "sse-event-registered": check_sse_event_registered,
@@ -550,6 +704,7 @@ _CHECKS = {
     "destructive-test-isolation": check_destructive_test_isolation,
     "fence-at-ingestion": check_fence_at_ingestion,
     "no-naive-transcript-cut": check_no_naive_transcript_cut,
+    "no-periodic-commit-watcher": check_no_periodic_commit_watcher,
 }
 
 

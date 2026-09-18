@@ -102,6 +102,15 @@ async def test_bash_decodes_output_and_retains_exit_blocking_contract(code):
 
 @pytest.mark.asyncio
 async def test_bash_timeout_reaps_owned_process(action_home):
+    """The timed-out action's whole tree goes away — POLLED, like its cancellation sibling.
+
+    The pid in the file is a GRANDchild of the action's own process: the owner
+    (``gideon.core.cancellation``) signals the group synchronously, but the descendant's
+    reaping belongs to init, so for a few milliseconds it is a zombie and ``os.kill(pid, 0)``
+    still succeeds. Waiting that out used to be free because the old teardown ended with an
+    UNBOUNDED ``communicate()`` — which is precisely the "deadline that waits for the
+    grandchild" req.3 removed. Polling asserts the same fact without re-introducing it.
+    """
     pidfile = action_home / "timed-process.pid"
     command = python_command(
         f"import os,time,pathlib; pathlib.Path({str(pidfile)!r}).write_text(str(os.getpid())); time.sleep(30)"
@@ -112,8 +121,14 @@ async def test_bash_timeout_reaps_owned_process(action_home):
     assert not result.success and result.error == "Timed out after 1s"
     assert result.duration_ms >= 900
     assert pidfile.exists()
-    with pytest.raises(ProcessLookupError):
-        os.kill(int(pidfile.read_text()), 0)
+    pid = int(pidfile.read_text())
+    async with asyncio.timeout(5):
+        while True:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            await asyncio.sleep(0.01)
 
 
 @pytest.mark.asyncio

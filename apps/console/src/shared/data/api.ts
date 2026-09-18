@@ -2094,6 +2094,7 @@ export interface SelEvent {
   agent?: string; source?: string; operation?: string; tool_kind?: string; outcome?: string
   resources?: string; error?: string; prev_hash?: string; entry_hash?: string
   downstream_service?: string; request_id?: string; integrity_ok?: boolean
+  metadata?: { reason?: string } & Record<string, unknown>
 }
 export interface AuditPage {
   events: SelEvent[]; count: number; next_cursor: string; scanned: number; truncated: boolean
@@ -2130,6 +2131,10 @@ export interface ComputerUseLiveView {
   snapshots: ComputerUseSnapshot[]; trail: ComputerUseTrailPoint[]; feed: ComputerUseFeedRow[]
 }
 
+export interface BrowseKillState { active: boolean; reason: string; started_at: string }
+export interface BrowseExpiredSite { site: string; key_present: boolean }
+export interface BrowseStatus { kill: BrowseKillState; expired: BrowseExpiredSite[] }
+
 export interface SessionArchive { name: string; key: string; stamp: string; size: number; mtime: number }
 
 export interface SessionTemplate {
@@ -2165,7 +2170,9 @@ export interface ProjectImportResult {
   secrets_expected: string[]; ok: boolean; summary?: string; preview?: boolean
   project_id?: string; written?: string[]; error?: string
 }
-export interface UpdateCheck { available: boolean; changes: string; checked: boolean; auto_update: boolean; version?: string; latest?: string; kind?: 'git' | 'pip' | 'container' | 'desktop'; current?: string; update_available?: boolean; commits_behind?: number | null; apply_method?: string; instructions?: string[]; update_dev_mode?: boolean; release_notes?: string }
+export type UpdateMode = 'off' | 'staged'
+export type UpdateChannel = 'stable' | 'beta' | 'nightly'
+export interface UpdateCheck { available: boolean; changes: string; checked: boolean; auto_update: boolean; version?: string; latest?: string; kind?: 'git' | 'pip' | 'container' | 'desktop'; current?: string; update_available?: boolean; commits_behind?: number | null; apply_method?: string; instructions?: string[]; release_notes?: string; update_mode?: UpdateMode; channel?: UpdateChannel; pin?: string; check_enabled?: boolean; check_interval_hours?: number }
 
 export interface NotificationSettings {
   mute_all: boolean; quiet_hours_enabled: boolean; quiet_hours_start: string; quiet_hours_end: string
@@ -2815,6 +2822,19 @@ export interface OnboardingImportReport {
   secrets_skipped: number; redactions: number
   notes: string[]
 }
+export interface LocalModelOffer {
+  endpoint: string; host: string; port: number; ok: boolean
+  models: string[]; requires_key: boolean; provider_type: string; detail?: string
+}
+export interface LocalModelScanLimits {
+  max_targets: number; max_budget_s: number; default_budget_s: number; max_concurrency: number; ports: number[]
+}
+export interface LocalModelDetection extends LocalModelOffer { detected: boolean; scan_limits: LocalModelScanLimits }
+export interface LocalModelScanReport {
+  targets: number; probed: number; offers: LocalModelOffer[]; unreachable: number
+  budget_s: number; elapsed_s: number; exhausted_budget: boolean; notes: string[]
+}
+export interface LocalModelBinding extends LocalModelOffer { ok: boolean; name: string; model: string; bound: boolean }
 export interface ChatModelOption { name: string; model_id: string; provider: string; description?: string }
 export interface SavedAgent {
   name: string; provider: string; provider_agent?: string; acp_mode?: string; model?: string; approval_mode?: string
@@ -3767,6 +3787,11 @@ export const api = {
   onboardingImportScan: () => get<OnboardingImportScan>('/api/onboarding/import'),
   runOnboardingImport: (body: { sources: string[]; categories: string[] }) =>
     post<OnboardingImportReport>('/api/onboarding/import', body),
+  detectLocalModels: () => get<LocalModelDetection>('/api/onboarding/local-models'),
+  scanLocalModels: (body: { targets: string[]; budget_s?: number }) =>
+    post<LocalModelScanReport>('/api/onboarding/local-models/scan', body),
+  bindLocalModel: (body: { endpoint: string; name?: string; model?: string }) =>
+    post<LocalModelBinding>('/api/onboarding/local-models/bind', body),
   chatModels: () => get<ChatModelOption[]>('/api/models/chat'),
   setActiveModel: (useCase: string, models: string[]) => put<{ ok?: boolean }>(`/api/models/active/${encodeURIComponent(useCase)}`, { models }),
   startEmbeddingReindex: () => post<ReindexJob>('/api/models/embedding/reindex'),
@@ -4461,7 +4486,7 @@ export const api = {
     ),
   draftInboxReply: (id: string) => post<InboxItem>(`/api/inbox/${encodeURIComponent(id)}/draft`),
   digestInboxChannel: (channelId: string, hours = 4) =>
-    get<InboxItem>(`/api/inbox/digest?channel_id=${encodeURIComponent(channelId)}&hours=${hours}`),
+    post<InboxItem>('/api/inbox/digest', { channel_id: channelId, hours }),
   sendInboxReply: (id: string, text: string) => post<{ ok: boolean; delivered_to_session?: boolean }>('/api/inbox/send', { id, text }),
   openInboxItem: (id: string) => post<{ ok: boolean }>(`/api/inbox/${encodeURIComponent(id)}/open`),
   favoriteInboxItem: (id: string, favorited: boolean) =>
@@ -4479,6 +4504,9 @@ export const api = {
   },
   auditVerify: (full = false) => get<SelVerify>(`/api/security/audit/verify${full ? '?full=1' : ''}`),
   computerUseLiveView: () => get<ComputerUseLiveView>('/api/computer-use/live-view'),
+  browseStatus: () => get<BrowseStatus>('/api/browse/status'),
+  browseKill: (reason: string) => post<{ kill: BrowseKillState }>('/api/browse/kill', { reason }),
+  browseKillRelease: () => post<{ kill: BrowseKillState }>('/api/browse/kill/release', { confirm: true }),
   selRotate: () => post<{ rotated: boolean; entries_before: number; entries_after: number; archive_path: string }>('/api/sel/rotate'),
   sessionArchives: () => get<{ archives: SessionArchive[] }>('/api/session/archive').then((d) => d.archives),
   sessionArchiveRead: (name: string) =>
@@ -4494,8 +4522,7 @@ export const api = {
   changelog: () => get<{ content: string }>('/api/changelog').then((d) => d.content),
   applyUpdate: () => post<{ ok?: boolean; error?: string }>('/api/update'),
   cancelUpdate: () => post<{ ok?: boolean }>('/api/update/cancel'),
-  setAutoUpdate: (enabled: boolean) => post<{ ok?: boolean }>('/api/update/auto', { enabled }),
-  setUpdateDevMode: (enabled: boolean) => post<{ ok?: boolean }>('/api/update/dev-mode', { enabled }),
+  setAutoUpdate: (mode: UpdateMode) => post<{ ok?: boolean; auto?: UpdateMode }>('/api/update/auto', { mode }),
   restartProbe: () => post<{ ok: boolean; running_agents: number; sessions: number }>('/api/system/restart?probe=1'),
   restartGateway: () => post<{ ok?: boolean; status?: string; error?: string }>('/api/system/restart'),
 

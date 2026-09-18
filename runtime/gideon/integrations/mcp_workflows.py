@@ -528,7 +528,37 @@ def _fmt(body: dict[str, Any], *, summary: str = "") -> str:
     return f"{summary}\n{rendered}" if summary else rendered
 
 
-def _call_tool(name: str, args: dict[str, Any]) -> str:
+def _validate_args(name: str, args: dict[str, Any]) -> dict[str, Any]:
+    """Validate one workflow tool call against its shared schema (MCP_WORKFLOW_SCHEMAS).
+
+    The schemas existed and nothing consulted them: this category dispatched straight from
+    `_call_tool`, so a workflow tool was the one in-process tool surface with no argument
+    validation, no security event and no leaf-orchestration check — while the MCP path next
+    to it had all three. Tools without a schema pass through, same as every other category.
+    """
+    from gideon.assurance.validation import MCP_WORKFLOW_SCHEMAS, validate_tool_args
+
+    schema = MCP_WORKFLOW_SCHEMAS.get(name)
+    if schema:
+        return validate_tool_args(args, schema)
+    return args
+
+
+def _call_tool(name: str, raw_args: dict[str, Any]) -> str:
+    """Category entry point, wrapped in the shared validation/denial/logging seam."""
+    from gideon.integrations.mcp_shared import call_tool_with_logging
+
+    return call_tool_with_logging(
+        name,
+        raw_args or {},
+        _validate_args,
+        _call_tool_inner,
+        session_key="mcp_workflows",
+        downstream_service="gideon-workflows",
+    )
+
+
+def _call_tool_inner(name: str, args: dict[str, Any]) -> str:
     """Dispatch one tool, appending the staged-turn spec echo where it applies.
 
     The echo (WF2-R20f) is the whole reason inspect tools are worth calling before a

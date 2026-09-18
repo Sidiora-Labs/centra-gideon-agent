@@ -21,6 +21,7 @@ export const CACHE_NAMESPACES: Record<string, NamespacePolicy> = {
   apps: COLLECTION,
   artifacts: COLLECTION,
   autonomy: CONFIG,
+  browse: LIVE,
   chat: COLLECTION,
   code: COLLECTION,
   companion: CONFIG,

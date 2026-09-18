@@ -631,6 +631,62 @@ class TestCheckForUpdates:
             await orch._check_for_updates()
 
 
+class _GitScript:
+    """Scripts self_update's single sync git seam for the source-update pipeline."""
+
+    def __init__(
+        self,
+        *,
+        tracked=(),
+        branch="main",
+        head="oldsha",
+        target="newsha",
+        ff=True,
+        fetch_rc=0,
+        merge_rc=0,
+    ):
+        import subprocess as _sp
+
+        self.calls: list[list[str]] = []
+        self._sp = _sp
+        self._tracked = list(tracked)
+        self._branch = branch
+        self._head, self._target = head, target
+        self._ff, self._fetch_rc, self._merge_rc = ff, fetch_rc, merge_rc
+
+    def __call__(self, args, *, cwd, timeout):
+        self.calls.append(list(args))
+        verb = args[0]
+        done = self._sp.CompletedProcess
+        if verb == "status":
+            return done(args, 0, "".join(f"{x}\n" for x in self._tracked), "")
+        if verb == "fetch":
+            return done(args, self._fetch_rc, "", "boom" if self._fetch_rc else "")
+        if verb == "rev-parse" and "--verify" in args:
+            sha = self._head if args[-1].startswith("HEAD") else self._target
+            return done(args, 0, sha + "\n", "")
+        if verb == "rev-parse":
+            return done(args, 0, self._branch + "\n", "")
+        if verb == "merge-base":
+            return done(args, 0 if self._ff else 1, "", "")
+        if verb == "merge":
+            return done(args, self._merge_rc, "", "")
+        return done(args, 0, "", "")
+
+
+def _git_script(**kw):
+    return _GitScript(**kw)
+
+
+def _publish_release(tag: str = "v9.9.9") -> None:
+    """Put a selectable release in the on-disk catalog the resolver reads."""
+    from gideon.operations import self_update as _su
+
+    _su.write_releases_cache(
+        {"releases": [{"tag": tag, "prerelease": False, "name": "", "body": ""}]}
+    )
+
+
 class TestAutoApplyUpdate:
     """Auto-update logic."""
 
@@ -641,48 +697,44 @@ class TestAutoApplyUpdate:
             await orch._auto_apply_update()
 
     @pytest.mark.asyncio
-    async def test_non_main_branch_skips(self):
-        orch = _make_orchestrator()
-        proc = AsyncMock()
-        proc.communicate = AsyncMock(return_value=(b"feat/test\n", b""))
-        proc.returncode = 0
-        with patch.dict("os.environ", {"GIDEON_PROJECT_DIR": "/tmp/proj"}, clear=False):
-            with patch(
-                "asyncio.create_subprocess_exec",
-                new_callable=AsyncMock,
-                return_value=proc,
-            ) as mock_exec:
-                await orch._auto_apply_update()
-        assert mock_exec.await_count == 1
-
-    @pytest.mark.asyncio
-    async def test_detached_head_coerced_to_main(self):
-        """Detached HEAD (e.g. checked out at a release tag) is coerced to
-        'main' and proceeds past the branch gate to the fetch step."""
+    async def test_no_release_for_the_channel_moves_nothing(self):
+        """RUM-59: with nothing selected there is no branch to guess at — the
+        unattended updater reports and leaves the checkout alone."""
         orch = _make_orchestrator()
         ds = _mock_dashboard_state()
         orch.dashboard_state = ds
+        git = _git_script()
+        with patch.dict("os.environ", {"GIDEON_PROJECT_DIR": "/tmp/proj"}, clear=False):
+            with patch("gideon.operations.self_update._run_git", git):
+                with patch(
+                    "asyncio.create_subprocess_exec",
+                    side_effect=AssertionError("spawned a process with no target"),
+                ):
+                    await orch._auto_apply_update()
+        assert [c[0] for c in git.calls] == ["status"]
+        ds.clear_update_progress.assert_called()
 
-        call_count = [0]
-        fetch_args: list[tuple] = []
+    @pytest.mark.asyncio
+    async def test_the_tracked_branch_is_only_reachable_on_nightly(self):
+        """The branch is fetched only when the channel says nightly — every
+        other channel fetches tags."""
+        import json as _json
 
-        async def _fake_exec(*args, **kwargs):
-            call_count[0] += 1
-            proc = AsyncMock()
-            if call_count[0] == 1:
-                proc.communicate = AsyncMock(return_value=(b"HEAD\n", b""))
-                proc.returncode = 0
-            else:
-                fetch_args.append(args)
-                proc.communicate = AsyncMock(return_value=(b"", b"err"))
-                proc.returncode = 1
-            proc.wait = AsyncMock(return_value=proc.returncode)
-            return proc
+        from gideon.core.config import loader as _loader
+        from gideon.operations import self_update as _su
 
+        orch = _make_orchestrator()
+        ds = _mock_dashboard_state()
+        orch.dashboard_state = ds
+        _loader.config_path().write_text(
+            _json.dumps({"updates": {"channel": "nightly"}}), encoding="utf-8"
+        )
+        git = _git_script(branch="main", fetch_rc=1)
         with patch.dict("os.environ", {"GIDEON_PROJECT_DIR": "/tmp/proj"}):
-            with patch("asyncio.create_subprocess_exec", side_effect=_fake_exec):
+            with patch.object(_su, "_run_git", git):
                 await orch._auto_apply_update()
-        assert fetch_args and fetch_args[0][:4] == ("git", "fetch", "origin", "main")
+        assert ["fetch", "origin", "main"] in git.calls
+        assert not any(c[0] in ("pull", "reset") for c in git.calls)
 
 
 class TestCheckMissingDeps:
@@ -1453,53 +1505,30 @@ class TestAutoApplyUpdateGitPath:
         ds.clear_update_progress.assert_called()
 
     @pytest.mark.asyncio
-    async def test_dirty_tree_refuses_reset(self):
-        """RUM-4 data-loss safety: the UNATTENDED auto-update must NOT
-        ``git reset --hard`` over a working tree that carries uncommitted
-        tracked-file edits. It refuses, leaves the tree untouched (no reset is
-        ever spawned), and surfaces an actionable paused state instead of
-        silently discarding the user's work."""
+    async def test_dirty_tree_pauses_and_touches_nothing(self):
+        """RUM-4/RUM-75 data-loss safety: the UNATTENDED auto-update must not
+        move a working tree that carries uncommitted tracked-file edits. It
+        refuses before fetching anything and surfaces an actionable PAUSED
+        state instead of silently discarding the user's work."""
+        from gideon.operations import self_update as _su
+
         orch = _make_orchestrator()
         ds = _mock_dashboard_state()
         orch.dashboard_state = ds
 
-        spawned: list[tuple] = []
-        call_count = [0]
-
-        async def _fake_exec(*args, **kwargs):
-            spawned.append(args)
-            call_count[0] += 1
-            proc = AsyncMock()
-            proc.kill = MagicMock()
-            if call_count[0] == 1:
-                proc.communicate = AsyncMock(return_value=(b"main\n", b""))
-                proc.returncode = 0
-            elif call_count[0] == 2:
-                proc.communicate = AsyncMock(return_value=(b"", b""))
-                proc.returncode = 0
-            elif call_count[0] == 3:
-                proc.returncode = 1
-            else:
-                proc.returncode = 0
-            proc.wait = AsyncMock(return_value=proc.returncode)
-            return proc
-
+        git = _git_script(tracked=[" M runtime/gideon/engine/gateway.py"])
         with (
             patch.dict("os.environ", {"GIDEON_PROJECT_DIR": "/tmp/proj"}),
-            patch(
-                "gideon.operations.self_update.git_tracked_changes",
-                return_value=[" M runtime/gideon/engine/gateway.py"],
-            ),
+            patch.object(_su, "_run_git", git),
         ):
-            with patch("asyncio.create_subprocess_exec", side_effect=_fake_exec):
+            with patch(
+                "asyncio.create_subprocess_exec",
+                side_effect=AssertionError("spawned a process for a paused checkout"),
+            ):
                 await orch._auto_apply_update()
 
-        assert not any(
-            tuple(a[:3]) == ("git", "reset", "--hard") for a in spawned
-        ), f"auto-update spawned a destructive reset over a dirty tree: {spawned}"
-        ds.push_update_progress.assert_any_call(
-            "error", "Update paused — commit or stash your local changes first."
-        )
+        assert [c[0] for c in git.calls] == ["status"], f"it moved anyway: {git.calls}"
+        ds.push_update_progress.assert_any_call("paused", _su.DIRTY_TREE_REASON)
 
 
 class TestRunMethod:
@@ -2006,33 +2035,16 @@ class TestAutoApplyUpdateVenvPath:
 
     @staticmethod
     def _fake_exec_factory(call_count, *, pip_rc: int = 0):
-        """Subprocess fake for the auto-apply pipeline call sequence:
-        1 branch detection → main, 2 fetch, 3 diff --quiet (rc=1: has
-        changes), 4 reset --hard, 5 pip install -e . (``pip_rc``). The
-        dirty-tree guard no longer runs through create_subprocess_exec — it is
-        ``self_update.git_tracked_changes``, which the callers patch clean."""
+        """Subprocess fake for what is left on the async seam: the editable
+        ``pip install -e .``. Every git step now runs through
+        ``self_update._run_git``, which the callers script with `_git_script`."""
 
         async def _fake_exec(*args, **kwargs):
             call_count[0] += 1
             proc = AsyncMock()
             proc.kill = MagicMock()
-            if call_count[0] == 1:
-                proc.communicate = AsyncMock(return_value=(b"main\n", b""))
-                proc.returncode = 0
-            elif call_count[0] == 2:
-                proc.communicate = AsyncMock(return_value=(b"", b""))
-                proc.returncode = 0
-            elif call_count[0] == 3:
-                proc.returncode = 1
-            elif call_count[0] == 4:
-                proc.returncode = 0
-            elif call_count[0] == 5:
-                proc.communicate = AsyncMock(
-                    return_value=(b"", b"boom" if pip_rc else b"")
-                )
-                proc.returncode = pip_rc
-            else:
-                proc.returncode = 0
+            proc.communicate = AsyncMock(return_value=(b"", b"boom" if pip_rc else b""))
+            proc.returncode = pip_rc
             proc.wait = AsyncMock(return_value=proc.returncode)
             return proc
 
@@ -2051,10 +2063,12 @@ class TestAutoApplyUpdateVenvPath:
 
         call_count = [0]
         reexec = AsyncMock()
+        _publish_release()
+        git = _git_script()
 
         with (
             patch.dict("os.environ", {"GIDEON_PROJECT_DIR": "/tmp/proj"}),
-            patch("gideon.operations.self_update.git_tracked_changes", return_value=[]),
+            patch("gideon.operations.self_update._run_git", git),
         ):
             with patch(
                 "asyncio.create_subprocess_exec",
@@ -2072,7 +2086,9 @@ class TestAutoApplyUpdateVenvPath:
                         ):
                             await orch._auto_apply_update()
 
-        ds.push_update_progress.assert_any_call("pulling", "Fetching latest changes…")
+        assert ["merge", "--ff-only", "v9.9.9"] in git.calls
+        assert not any(c[0] in ("pull", "reset") for c in git.calls)
+        ds.push_update_progress.assert_any_call("pulling", "Fetching v9.9.9…")
         ds.push_update_progress.assert_any_call("installing", "Installing package…")
         ds.push_update_progress.assert_any_call("building", "Building frontend…")
         ds.push_update_progress.assert_any_call("restarting", "Restarting server…")
@@ -2089,10 +2105,11 @@ class TestAutoApplyUpdateVenvPath:
 
         call_count = [0]
         reexec = AsyncMock()
+        _publish_release()
 
         with (
             patch.dict("os.environ", {"GIDEON_PROJECT_DIR": "/tmp/proj"}),
-            patch("gideon.operations.self_update.git_tracked_changes", return_value=[]),
+            patch("gideon.operations.self_update._run_git", _git_script()),
         ):
             with patch(
                 "asyncio.create_subprocess_exec",

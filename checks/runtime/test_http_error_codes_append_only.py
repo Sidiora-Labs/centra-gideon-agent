@@ -220,3 +220,38 @@ def test_an_unregistered_code_still_emits_rather_than_raising():
     assert resp.status == 400
     assert resp.body is not None
     assert '"message": "not_a_registered_code"' in resp.body.decode()
+
+
+def test_released_codes_keep_their_released_order():
+    """Append-only means *appended* — a released row is never moved.
+
+    ``test_released_meanings_are_unchanged`` compares a dict, and dict equality is
+    order-blind, so a wholesale re-sort of the registry would pass every check above
+    while changing the file's shipped shape. The relative order of the released codes
+    inside the live registry is the thing pinned here; new codes may appear anywhere
+    between them.
+    """
+    live_order = [c for c in HTTP_ERROR_CODES if c in _RELEASED]
+    assert live_order == list(_RELEASED), (
+        "released wire codes were reordered. Append new codes; never move an existing "
+        "row."
+    )
+
+
+def test_the_invalid_field_type_code_is_registered_where_it_is_emitted():
+    """The already-shipped ``invalid_field_type`` code has a registry row.
+
+    It was emitted by the inbox update route before any registry existed, which is the
+    exact drift this registry is meant to make impossible. Tying the emitter census to
+    the registry for this code keeps the two from separating again.
+    """
+    census = scan()
+    assert len(census.emitter_sites) >= EMITTER_SITE_FLOOR
+    sites = [
+        f"{f}:{ln}"
+        for f, ln, code in census.emitter_literal_codes
+        if code == "invalid_field_type"
+    ]
+    assert sites, "no json_error site emits invalid_field_type any more"
+    assert "invalid_field_type" in HTTP_ERROR_CODES
+    assert HTTP_ERROR_CODES["invalid_field_type"].strip()

@@ -12,14 +12,17 @@ from gideon.security.net.client import EgressBlocked, FetchResponse, fetch
 from gideon.security.net.guard import GuardDecision, IpVerdict, classify_host, evaluate
 from gideon.security.net.policy import (
     CONNECTOR,
+    LOCAL_MODEL_PROBE,
     LOOPBACK_INTERNAL,
     STRICT,
     SYNC,
     WEBHOOK,
     EgressPolicy,
+    LocalModelProbeRefused,
     SyncEndpointRefused,
     egress_policy_for,
     get_policy,
+    local_model_probe_policy,
     sync_egress_policy,
 )
 
@@ -36,9 +39,12 @@ __all__ = [
     "CONNECTOR",
     "WEBHOOK",
     "LOOPBACK_INTERNAL",
+    "LOCAL_MODEL_PROBE",
     "SYNC",
     "get_policy",
     "egress_policy_for",
+    "local_model_probe_policy",
     "sync_egress_policy",
+    "LocalModelProbeRefused",
     "SyncEndpointRefused",
 ]

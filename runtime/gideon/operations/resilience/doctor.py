@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
 
 from gideon.core.config import loader as config_loader
+from gideon.operations.resilience.grammar import count_noun
 from gideon.security.security import redact
 
 
@@ -414,9 +415,9 @@ async def _probe_channels(ctx: DoctorContext) -> ProbeResult:
     return ProbeResult(
         ok=not errored,
         detail=(
-            f"{len(errored)} transport(s) errored"
+            f"{count_noun(len(errored), 'transport')} errored"
             if errored
-            else f"{len(transports)} transport(s) ok"
+            else f"{count_noun(len(transports), 'transport')} ok"
         ),
         evidence={"transports": transports},
     )
@@ -483,11 +484,11 @@ async def _probe_local_models(ctx: DoctorContext) -> ProbeResult:
     ok = not phantom
     detail_parts = []
     if phantom:
-        detail_parts.append(f"{len(phantom)} phantom binding(s)")
+        detail_parts.append(count_noun(len(phantom), "phantom binding"))
     if unavailable:
-        detail_parts.append(f"{len(unavailable)} provider(s) unavailable")
+        detail_parts.append(f"{count_noun(len(unavailable), 'provider')} unavailable")
     if not detail_parts:
-        detail_parts.append(f"{len(reg)} local provider(s) ok")
+        detail_parts.append(f"{count_noun(len(reg), 'local provider')} ok")
     return ProbeResult(
         ok=ok,
         detail="; ".join(detail_parts),
@@ -542,15 +543,15 @@ async def _probe_apps(ctx: DoctorContext) -> ProbeResult:
     dead = [n for n, v in ev["backends"].items() if not v["alive"]]
     problems = []
     if dead:
-        problems.append(f"{len(dead)} backend(s) not running")
+        problems.append(f"{count_noun(len(dead), 'backend')} not running")
     if ev["rollback_leftovers"]:
-        problems.append(f"{len(ev['rollback_leftovers'])} interrupted update(s)")
+        problems.append(count_noun(len(ev["rollback_leftovers"]), "interrupted update"))
     return ProbeResult(
         ok=not problems,
         detail=(
             "; ".join(problems)
             if problems
-            else f"{len(ev['backends'])} app backend(s) ok"
+            else f"{count_noun(len(ev['backends']), 'app backend')} ok"
         ),
         evidence=ev,
     )
@@ -663,9 +664,9 @@ async def _probe_model_providers(ctx: DoctorContext) -> ProbeResult:
     return ProbeResult(
         ok=not open_breakers,
         detail=(
-            f"{len(open_breakers)} provider(s) with an open breaker"
+            f"{count_noun(len(open_breakers), 'provider')} with an open breaker"
             if open_breakers
-            else f"{len(providers)} provider(s), no open breakers"
+            else f"{count_noun(len(providers), 'provider')}, no open breakers"
         ),
         evidence={
             "providers": providers,
@@ -692,7 +693,8 @@ async def _probe_crashes(ctx: DoctorContext) -> ProbeResult:
     return ProbeResult(
         ok=False,
         detail=(
-            f"{len(recent)} recent crash artifact(s); latest: {latest.get('kind')} — "
+            f"{count_noun(len(recent), 'recent crash artifact')}; "
+            f"latest: {latest.get('kind')} — "
             f"{latest.get('exception_type')}"
         ),
         evidence={"crashes": recent},
@@ -781,7 +783,7 @@ async def _probe_memory_pipeline(ctx: DoctorContext) -> ProbeResult:
 
     reasons: list[str] = []
     if ev["errors"]:
-        reasons.append(f"{ev['errors']} flush error(s) in {ev['days']}d")
+        reasons.append(f"{count_noun(ev['errors'], 'flush error')} in {ev['days']}d")
     if (
         ev["all_ok_streak"] >= _MEMORY_OK_STREAK_WARN
         and ev["passes"]
@@ -800,7 +802,8 @@ async def _probe_memory_pipeline(ctx: DoctorContext) -> ProbeResult:
     return ProbeResult(
         ok=True,
         detail=(
-            f"{ev['passes']} pass(es) in {ev['days']}d, {ev['produced']} produced, "
+            f"{count_noun(ev['passes'], 'pass', 'passes')} in {ev['days']}d, "
+            f"{ev['produced']} produced, "
             f"{ev['staging_backlog']} awaiting consolidation, ${ev['cost_usd']}"
         ),
         evidence=ev,
@@ -853,13 +856,16 @@ async def _probe_state_inventory(ctx: DoctorContext) -> ProbeResult:
     gaps = ev["unclaimed_count"] + ev["undeclared_db_count"]
     if not gaps:
         return ProbeResult(
-            ok=True, detail=f"all {ev['claimed']} state paths claimed", evidence=ev
+            ok=True,
+            detail=f"all {count_noun(ev['claimed'], 'state path')} claimed",
+            evidence=ev,
         )
     return ProbeResult(
         ok=False,
         detail=(
-            f"{ev['unclaimed_count']} unclaimed path(s) and {ev['undeclared_db_count']} "
-            "undeclared database(s) — these are in NO snapshot"
+            f"{count_noun(ev['unclaimed_count'], 'unclaimed path')} and "
+            f"{count_noun(ev['undeclared_db_count'], 'undeclared database')} "
+            "— these are in NO snapshot"
         ),
         evidence=ev,
     )
@@ -1023,14 +1029,18 @@ async def _probe_knowledge_vector_index(ctx: DoctorContext) -> ProbeResult:
         return ProbeResult(
             ok=True,
             detail=(
-                f"chunk ANN index active but out of step at {len(stale)} dimension(s) "
+                "chunk ANN index active but out of step at "
+                f"{count_noun(len(stale), 'dimension')} "
                 f"({', '.join(stale)}) — the next search rebuilds it"
             ),
             evidence=ev,
         )
     return ProbeResult(
         ok=True,
-        detail=f"chunk ANN index active ({indexed_total} chunk vector(s) indexed)",
+        detail=(
+            "chunk ANN index active "
+            f"({count_noun(indexed_total, 'chunk vector')} indexed)"
+        ),
         evidence=ev,
     )
 
@@ -1210,7 +1220,8 @@ async def _probe_knowledge_vault(ctx: DoctorContext) -> ProbeResult:
         return ProbeResult(
             ok=True,
             detail=(
-                f"{ev.get('projected')} page(s) projected; {waiting} waiting on you "
+                f"{count_noun(int(ev.get('projected') or 0), 'page')} projected; "
+                f"{waiting} waiting on you "
                 f"({ev.get('conflicts')} changed on both sides, "
                 f"{ev.get('owner_deleted')} deleted here but still in the library)"
             ),
@@ -1218,7 +1229,107 @@ async def _probe_knowledge_vault(ctx: DoctorContext) -> ProbeResult:
         )
     return ProbeResult(
         ok=True,
-        detail=f"{ev.get('projected')} page(s) projected, none in conflict",
+        detail=(
+            f"{count_noun(int(ev.get('projected') or 0), 'page')} projected, "
+            "none in conflict"
+        ),
+        evidence=ev,
+    )
+
+
+async def _probe_knowledge_searchability(ctx: DoctorContext) -> ProbeResult:
+    """knowledge — is anything in the library impossible to find, and why?
+
+    An ingest that finished is not the same fact as an item a search can return, and the
+    difference used to be invisible: an item whose extraction yielded nothing, one that
+    never reached the keyword index, and one on an install with no embedding provider all
+    ended ``done`` and then simply never appeared in results. The user's only evidence was
+    an absence, which reads as "the product cannot find my notes" rather than as a named,
+    fixable condition.
+
+    So the ingest now records ``processing_status='unsearchable'`` with a TYPED reason
+    (``knowledge.searchability``), and this is the surface that counts them per reason —
+    the split matters because the three have three different remedies (re-ingest the
+    source, connect an embedding model, rebuild the index).
+
+    **Reports degraded, not failed.** Unsearchable content is a gap in coverage, not an
+    outage: everything else in the library still searches, and failing the capability
+    would make a handful of empty PDFs look like a broken gateway. Read-only: opens
+    ``knowledge.db`` with ``mode=ro`` and ``create=False``, so a health check on an install
+    that has never used knowledge creates nothing and reports "no library".
+    """
+    from gideon.cognition.knowledge.searchability import (
+        REASON_REMEDY,
+        STATE_UNSEARCHABLE,
+        reason_of,
+    )
+    from gideon.cognition.knowledge.store import knowledge_db_path
+    from gideon.core.sqlite_compat import sqlite3 as store_sqlite3
+
+    db_path = knowledge_db_path(ctx.home, create=False)
+
+    def _read() -> dict[str, Any]:
+        ev: dict[str, Any] = {"db_present": db_path.exists()}
+        if not db_path.exists():
+            return ev
+        conn = store_sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2.0)
+        try:
+            has = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='items'"
+            ).fetchone()
+            if not has:
+                ev["items"] = 0
+                return ev
+            ev["items"] = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM items WHERE status = 'active'"
+                ).fetchone()[0]
+                or 0
+            )
+            reasons: dict[str, int] = {}
+            for row in conn.execute(
+                "SELECT file_metadata FROM items "
+                "WHERE status = 'active' AND processing_status = ?",
+                (STATE_UNSEARCHABLE,),
+            ).fetchall():
+                reason = reason_of({"file_metadata": row[0]}) or "unknown"
+                reasons[reason] = reasons.get(reason, 0) + 1
+            ev["unsearchable"] = sum(reasons.values())
+            ev["reasons"] = reasons
+        finally:
+            conn.close()
+        return ev
+
+    try:
+        ev = await asyncio.to_thread(_read)
+    except Exception as exc:  # noqa: BLE001 — a probe must never raise
+        return ProbeResult(
+            ok=False, detail=f"knowledge searchability probe failed: {exc}", evidence={}
+        )
+
+    if not ev.get("db_present") or not ev.get("items"):
+        return ProbeResult(ok=True, detail="no knowledge library on disk", evidence=ev)
+
+    stuck = int(ev.get("unsearchable") or 0)
+    if not stuck:
+        return ProbeResult(
+            ok=True,
+            detail=f"all {ev['items']} item(s) are searchable",
+            evidence=ev,
+        )
+    ev["degraded"] = True
+    ev["remedy"] = "; ".join(
+        REASON_REMEDY[reason]
+        for reason in sorted(ev.get("reasons") or {})
+        if reason in REASON_REMEDY
+    ) or ("Re-ingest the affected items from the Knowledge library.")
+    split = ", ".join(
+        f"{count} {reason}"
+        for reason, count in sorted((ev.get("reasons") or {}).items())
+    )
+    return ProbeResult(
+        ok=True,
+        detail=f"{stuck} of {ev['items']} item(s) cannot be found ({split})",
         evidence=ev,
     )
 
@@ -1546,6 +1657,15 @@ def _register_builtin_probes() -> None:
             Tier.CAPABILITY,
             _probe_knowledge_vault,
             "Markdown projection: pages waiting on you",
+        )
+    )
+    register_probe(
+        Probe(
+            "knowledge.searchability",
+            "knowledge",
+            Tier.CAPABILITY,
+            _probe_knowledge_searchability,
+            "Library items that cannot be found",
         )
     )
     register_probe(

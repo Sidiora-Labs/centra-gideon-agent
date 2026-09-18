@@ -17,6 +17,8 @@ import json
 from dataclasses import asdict
 
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import TestClient, TestServer
 
 from gideon.automation.triggers import idle_poll as IP
 from gideon.automation.triggers import nudge as N
@@ -506,3 +508,97 @@ def test_render_nudge_message():
     assert result == "halt: create /tmp/.stop-x"
     assert "{{STOP_FILE}}" not in result
     assert render_nudge_message("create {{STOP_FILE}}", None) == "create "
+
+
+class _AuditRecorder:
+    """The real SEL sink swapped for a list — house precedent for auditing a handler."""
+
+    def __init__(self) -> None:
+        self.invocations: list[dict] = []
+
+    def log_tool_invocation(self, **kw):
+        self.invocations.append(kw)
+
+    def log_api_access(self, **kw):
+        pass
+
+
+def _nudge_app() -> web.Application:
+    from gideon.interfaces.dashboard.handlers.autonudge import (
+        api_autonudge_delete,
+        api_autonudge_update,
+    )
+
+    app = web.Application()
+    app.router.add_patch("/api/autonudge/{loop_id}", api_autonudge_update)
+    app.router.add_delete("/api/autonudge/{loop_id}", api_autonudge_delete)
+    return app
+
+
+@pytest.fixture
+def nudge_api(svc, monkeypatch):
+    """The REAL service installed as the process instance, plus a recording audit sink."""
+    from gideon.interfaces.dashboard.handlers import autonudge as handler_mod
+
+    recorder = _AuditRecorder()
+    monkeypatch.setattr(handler_mod, "sel", lambda: recorder)
+    N._INSTANCE = svc
+    return svc, recorder
+
+
+class TestAutonudgeDelete:
+    """DELETE on an unknown loop used to answer `{"ok": true}` and audit a `noop`.
+
+    Nothing was removed, because nothing was there — yet the caller was told the delete
+    succeeded, and the audit trail grew a row for a loop that never existed. `PATCH`
+    on the same id already 404s, so the two verbs disagreed about the same fact.
+    """
+
+    @pytest.mark.asyncio
+    async def test_unknown_loop_is_a_structured_404(self, nudge_api):
+        from gideon.http_errors import HTTP_ERROR_CODES
+
+        async with TestClient(TestServer(_nudge_app())) as c:
+            resp = await c.delete("/api/autonudge/idle:nosuchloop")
+            assert resp.status == 404
+            body = await resp.json()
+        assert body["error"]["code"] == "not_found"
+        assert body["error"]["message"] == HTTP_ERROR_CODES["not_found"]
+        assert "ok" not in body
+
+    @pytest.mark.asyncio
+    async def test_unknown_loop_audits_nothing(self, nudge_api):
+        """ac 35.2: the `noop` outcome and the empty-session_key fallback are gone."""
+        _svc, recorder = nudge_api
+        async with TestClient(TestServer(_nudge_app())) as c:
+            await c.delete("/api/autonudge/idle:nosuchloop")
+        assert recorder.invocations == []
+
+    @pytest.mark.asyncio
+    async def test_delete_and_update_agree_on_an_unknown_loop(self, nudge_api):
+        async with TestClient(TestServer(_nudge_app())) as c:
+            deleted = await c.delete("/api/autonudge/idle:nosuchloop")
+            updated = await c.patch("/api/autonudge/idle:nosuchloop", json={})
+        assert deleted.status == updated.status == 404
+
+    @pytest.mark.asyncio
+    async def test_a_real_loop_is_still_deleted_and_audited(self, nudge_api):
+        """Vacuity: the not-found gate must not have broken the delete it guards."""
+        svc, recorder = nudge_api
+        loop = await svc.add(session_name="chat:1", message="go")
+        async with TestClient(TestServer(_nudge_app())) as c:
+            resp = await c.delete(f"/api/autonudge/{loop.id}")
+            assert resp.status == 200
+            assert (await resp.json()) == {"ok": True}
+        assert svc.list_all() == []
+        assert [i["outcome"] for i in recorder.invocations] == ["success"]
+        assert recorder.invocations[0]["session_key"] == "chat:1"
+        assert recorder.invocations[0]["metadata"]["loop_id"] == loop.id
+
+    @pytest.mark.asyncio
+    async def test_deleting_the_same_loop_twice_404s_the_second_time(self, nudge_api):
+        svc, _recorder = nudge_api
+        loop = await svc.add(session_name="chat:1", message="go")
+        async with TestClient(TestServer(_nudge_app())) as c:
+            assert (await c.delete(f"/api/autonudge/{loop.id}")).status == 200
+            assert (await c.delete(f"/api/autonudge/{loop.id}")).status == 404

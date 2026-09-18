@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from gideon.core.cancellation import kill_timed_out
+from gideon.core.cancellation import run_with_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -66,11 +66,8 @@ async def run_verify_command(
         )
         return None
     try:
-        _out, err = await asyncio.wait_for(
-            proc.communicate(), timeout=VERIFY_TIMEOUT_SECS
-        )
+        _out, err = await run_with_timeout(proc, VERIFY_TIMEOUT_SECS)
     except asyncio.TimeoutError:
-        await kill_timed_out(proc)
         logger.warning("loop gate: %s command timed out — `%s`", label, cmd)
         return None
     rc = proc.returncode

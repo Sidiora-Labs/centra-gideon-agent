@@ -166,6 +166,20 @@ def _iter_skill_files(base: Path) -> list[tuple[str, Path]]:
     return results
 
 
+def bundled_skill_names() -> set[str]:
+    """Names of the skills Gideon SHIPS (bundled + project-level).
+
+    :func:`_ensure_builtin_skills` copies these into the user's skills directory, so their
+    presence there says nothing about the user — which is what a caller asking "did the user
+    add a skill of their own?" has to subtract."""
+    names: set[str] = set()
+    for src_root in (_project_skills_dir(), _BUILTIN_SKILLS_DIR):
+        if src_root is None or not src_root.exists():
+            continue
+        names.update(name for name, _ in _iter_skill_files(src_root))
+    return names
+
+
 def _ensure_builtin_skills(base: Path) -> None:
     """Sync built-in skills: copy new/updated, remove stale.
 

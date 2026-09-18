@@ -622,3 +622,91 @@ def test_git_commit_rejects_non_hex_hash(git_repo, monkeypatch):
     )
     resp = asyncio.run(F.api_file_git_commit(req))
     assert resp.status == 400
+
+
+def test_the_runner_caps_its_output_at_max_bytes(tmp_path, monkeypatch):
+    """req 90 ac_1 — the output cap, measured on the runner rather than on one caller.
+
+    ``api_file_git_original`` is the only caller that passes ``max_bytes`` today, so the
+    endpoint test above is the cap's only coverage — and it would keep passing if the cap
+    moved into the handler, which is the consolidation this requirement is about. Asserted
+    here on ``_git`` itself: the cap is the RUNNER's, and the uncapped read of the same blob
+    is the floor that proves the cap is what shortened it.
+    """
+    repo = _repo_with_commit(tmp_path)
+    (repo / "big.txt").write_text("y" * 50_000)
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@t",
+    }
+    for args in (["add", "-A"], ["commit", "-qm", "big"]):
+        subprocess.run(
+            ["git", *args], cwd=repo, check=True, capture_output=True, env=env
+        )
+
+    async def run():
+        capped = await F._git(
+            ["cat-file", "blob", "HEAD:big.txt"], str(repo), max_bytes=4096
+        )
+        assert capped.ok is True
+        assert capped.truncated is True
+        assert len(capped.out) == 4096
+
+        whole = await F._git(["cat-file", "blob", "HEAD:big.txt"], str(repo))
+        assert whole.ok is True and whole.truncated is False
+        assert len(whole.out) == 50_000, "the uncapped read shrank — the floor is gone"
+
+        exact = await F._git(
+            ["cat-file", "blob", "HEAD:big.txt"], str(repo), max_bytes=50_000
+        )
+        assert exact.truncated is False, "a cap equal to the output is not a truncation"
+
+    asyncio.run(run())
+
+
+def test_the_runner_tells_an_empty_answer_from_a_failure(tmp_path):
+    """req 90 ac_2 — ``ok`` is the one flag that separates "nothing" from "no answer".
+
+    A clean repo's porcelain status is legitimately empty and a read of a path HEAD does not
+    hold produces the same empty stdout. A caller that branched on ``out`` alone would render
+    "no changes" for a repo it could not read at all — which is the shape of #432's tree
+    listing, arrived at from the other side.
+    """
+    repo = _repo_with_commit(tmp_path)
+
+    async def run():
+        clean = await F._git(["status", "--porcelain"], str(repo))
+        assert clean.ok is True and clean.out == ""
+
+        absent = await F._git(
+            ["cat-file", "blob", "HEAD:never-committed.txt"], str(repo)
+        )
+        assert absent.ok is False and absent.out == ""
+
+        listing = await F._git(["ls-files"], str(repo))
+        assert listing.ok is True and "tracked.txt" in listing.out
+
+    asyncio.run(run())
+
+
+def test_the_runner_verifies_the_object_is_a_FILE_not_a_tree(tmp_path):
+    """req 90 ac_2 — the explicit file-object check, at the runner's own layer.
+
+    ``git show HEAD:<dir>`` exits 0 and prints a tree listing; ``cat-file blob`` refuses it.
+    The endpoint test pins the rendered consequence; this pins the mechanism, so a revert to
+    ``show`` reds here even if the handler grew its own directory check.
+    """
+    repo = _repo_with_commit(tmp_path)
+
+    async def run():
+        tree = await F._git(["cat-file", "blob", "HEAD:sub"], str(repo))
+        assert tree.ok is False, "a directory answered as a blob"
+        assert "a.txt" not in tree.out, "a tree listing reached the caller"
+
+        blob = await F._git(["cat-file", "blob", "HEAD:sub/a.txt"], str(repo))
+        assert blob.ok is True and blob.out == "a\n"
+
+    asyncio.run(run())

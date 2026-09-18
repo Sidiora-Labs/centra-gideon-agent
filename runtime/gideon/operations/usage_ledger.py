@@ -37,6 +37,7 @@ class TurnUsage:
     cost_usd: float = 0.0
     priced: bool = True
     duration_ms: int = 0
+    context_pct: float | None = None
 
 
 def _path() -> Path:
@@ -91,6 +92,18 @@ def record_turn(u: TurnUsage) -> None:
         logger.debug("usage ledger append failed", exc_info=True)
 
 
+def _context_pct(event: object) -> float | None:
+    """The turn's context occupancy, or None when nothing measured it.
+
+    Never 0.0 for "unmeasured": a turn nobody measured must not read as an empty
+    context window, the same honesty rule ``priced`` keeps for cost.
+    """
+    raw = getattr(event, "context_usage_pct", None)
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return None
+    return float(raw)
+
+
 @dataclass(frozen=True)
 class EventAccounting:
     event: object
@@ -119,6 +132,7 @@ class EventAccounting:
             cost_usd=cost,
             priced=bool(cost) or has_pricing(self.model),
             duration_ms=int(getattr(self.event, "duration_ms", 0) or 0),
+            context_pct=_context_pct(self.event),
         )
 
 

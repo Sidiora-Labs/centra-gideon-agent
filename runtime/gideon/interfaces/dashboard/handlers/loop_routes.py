@@ -20,7 +20,13 @@ from aiohttp import web
 
 from gideon.automation.loop import files as loop_files
 from gideon.automation.loop import kinds, manager, store, validation
-from gideon.automation.loop.loop import ACTION_SOURCE_STATES, KINDS, Loop, LoopStatus
+from gideon.automation.loop.loop import (
+    ACTION_SOURCE_STATES,
+    KINDS,
+    PRELAUNCH_STATUSES,
+    Loop,
+    LoopStatus,
+)
 from gideon.automation.loop.watchdog import registry_key
 from gideon.core.config.loader import AppConfig
 from gideon.http_errors import json_error
@@ -793,6 +799,41 @@ def _kick_plan_advance(request: web.Request, cid: str) -> web.Response:
     return web.json_response({"ok": True, "planning": True}, status=202)
 
 
+def _plan_lifecycle_refusal(cid: str) -> web.Response | None:
+    """The ONE pre-launch lifecycle guard every planning action runs FIRST.
+
+    A loop's plan is a PRE-LAUNCH artifact: once the loop leaves
+    :data:`PRELAUNCH_STATUSES` the spec is frozen, and a planning action against it
+    would drag a launched run back into planning (re-arming the walkthrough behind a
+    running worker), erase a stop intent, or rewrite the very plan the worker is
+    executing. Only ``plan/start`` checked the phase; retry/approve/comment/edit
+    checked existence alone (or nothing at all), so each of them could do exactly
+    that.
+
+    Returns the refusal to send, or ``None`` when the caller may proceed. Call it
+    BEFORE touching the plan session or the design-error flag: the refusal has to
+    land with the stored loop and its session byte-identical.
+    """
+    loop = store.get(cid)
+    if loop is None:
+        return json_error("not_found", message="Not found", status=404)
+    try:
+        status: LoopStatus | None = LoopStatus(loop.status)
+    except ValueError:
+        status = None
+    if status not in PRELAUNCH_STATUSES:
+        return json_error(
+            "loop_not_prelaunch",
+            message=(
+                f"Loop spec is frozen (already started): planning is closed in "
+                f"'{loop.status}'."
+            ),
+            status=409,
+            error_extra={"status": loop.status},
+        )
+    return None
+
+
 async def api_loop_plan_session(request: web.Request) -> web.Response:
     """GET /api/loops/{id}/plan-session — the stepwise planning walkthrough state."""
     cid = request.match_info["id"]
@@ -809,15 +850,9 @@ async def api_loop_plan_start(request: web.Request) -> web.Response:
     cid = request.match_info["id"]
     if not loop_files.valid_loop_id(cid):
         return web.json_response({"error": "Invalid loop id"}, status=400)
-    loop = store.get(cid)
-    if loop is None:
-        return web.json_response({"error": "Not found"}, status=404)
-    from gideon.automation.loop.loop import PRELAUNCH_STATUSES
-
-    if LoopStatus(loop.status) not in PRELAUNCH_STATUSES:
-        return web.json_response(
-            {"error": "Loop spec is frozen (already started)"}, status=409
-        )
+    refusal = _plan_lifecycle_refusal(cid)
+    if refusal is not None:
+        return refusal
     return _kick_plan_advance(request, cid)
 
 
@@ -827,8 +862,9 @@ async def api_loop_plan_retry(request: web.Request) -> web.Response:
     cid = request.match_info["id"]
     if not loop_files.valid_loop_id(cid):
         return web.json_response({"error": "Invalid loop id"}, status=400)
-    if store.get(cid) is None:
-        return web.json_response({"error": "Not found"}, status=404)
+    refusal = _plan_lifecycle_refusal(cid)
+    if refusal is not None:
+        return refusal
     from gideon.automation.loop import plan_walkthrough as pw
 
     pw.clear_design_error(cid)
@@ -840,6 +876,9 @@ async def api_loop_plan_approve(request: web.Request) -> web.Response:
     cid = request.match_info["id"]
     if not loop_files.valid_loop_id(cid):
         return web.json_response({"error": "Invalid loop id"}, status=400)
+    refusal = _plan_lifecycle_refusal(cid)
+    if refusal is not None:
+        return refusal
     body = await _json_body(request)
     if isinstance(body, web.Response):
         return body
@@ -862,6 +901,9 @@ async def api_loop_plan_comment(request: web.Request) -> web.Response:
     cid = request.match_info["id"]
     if not loop_files.valid_loop_id(cid):
         return web.json_response({"error": "Invalid loop id"}, status=400)
+    refusal = _plan_lifecycle_refusal(cid)
+    if refusal is not None:
+        return refusal
     body = await _json_body(request)
     if isinstance(body, web.Response):
         return body
@@ -890,6 +932,9 @@ async def api_loop_plan_edit(request: web.Request) -> web.Response:
     cid = request.match_info["id"]
     if not loop_files.valid_loop_id(cid):
         return web.json_response({"error": "Invalid loop id"}, status=400)
+    refusal = _plan_lifecycle_refusal(cid)
+    if refusal is not None:
+        return refusal
     body = await _json_body(request)
     if isinstance(body, web.Response):
         return body

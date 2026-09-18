@@ -11,6 +11,7 @@ import tempfile
 from dataclasses import dataclass, field
 from typing import Any
 
+from gideon.core.cancellation import terminate_and_reap
 from gideon.integrations.stt.provider import (
     TranscriptResult,
     TranscriptSegment,
@@ -260,9 +261,8 @@ async def _wait_split(process) -> int:
         return await process.wait()
     except BaseException:
         if process.returncode is None:
-            with contextlib.suppress(ProcessLookupError):
-                process.kill()
-            await process.wait()
+            with contextlib.suppress(BaseException):
+                await terminate_and_reap(process)
         raise
 
 

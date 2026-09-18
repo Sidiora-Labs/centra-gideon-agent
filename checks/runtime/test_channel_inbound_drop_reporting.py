@@ -530,3 +530,30 @@ def test_the_reporter_hands_back_the_verdict_it_was_given(caplog):
     assert returned is original
     assert returned.allowed is False and returned.reason == "untracked_channel"
     assert levels(caplog) == ["WARNING"]
+
+
+def test_a_dm_refusal_names_the_sender_and_ITS_remedy(caplog):
+    """req 93 ac_3 — the remedy half, on the DM axis.
+
+    The untracked-channel test pins the group remedy ("track this channel"); the DM branch
+    has a different one, and it is the branch a stranger's first message takes. Both
+    directions are asserted here: the DM line carries the sender-side remedy and NOT the
+    channel-side one, so a single hard-coded hint string cannot satisfy both tests.
+    """
+    verdict = ct.guard_inbound(
+        None, PROVIDER, "stranger", sender_name="Stranger", is_dm=True, text=SECRET_BODY
+    )
+
+    assert verdict.allowed is False and verdict.reason == "unknown_sender"
+    assert len(lines(caplog)) == 1
+    _, _, msg = lines(caplog)[0]
+    assert "scope=dm" in msg
+    assert (
+        "sender=stranger" in msg
+    ), "the operator cannot act on a line that omits the sender"
+    assert (
+        "policy=" in msg and "policy=-" not in msg
+    ), "the line must name the policy in force"
+    assert "pair or allow this sender" in msg
+    assert "track this channel" not in msg, "the group remedy leaked onto a DM"
+    assert SECRET_BODY not in msg and "sk-live-000111222333" not in msg

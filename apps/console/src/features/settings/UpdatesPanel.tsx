@@ -1,9 +1,9 @@
 import { releasesUrl } from '../../app/shell/config'
 import { useEffect, useState } from 'react'
 import { DownloadCloud, CheckCircle2, RefreshCw } from 'lucide-react'
-import { api, type UpdateCheck } from '../../shared/data/api'
+import { api, type UpdateCheck, type UpdateChannel, type UpdateMode } from '../../shared/data/api'
 import { useQuery, invalidateKeys } from '../../shared/data/data'
-import { PanelHeader, Section, RowGroup, Row, Toggle, SavedToast } from './settingsUI'
+import { PanelHeader, Section, RowGroup, Row, Toggle, SavedToast, SegPills } from './settingsUI'
 import { Button } from '../../shared/ui/Button'
 import { FormSkeleton, LoadError } from '../../shared/ui/ListScaffold'
 import { Markdown } from '../../shared/ui/Markdown'
@@ -61,17 +61,25 @@ export function UpdatesPanel() {
     try { const p = JSON.parse(msg); msg = p.error || msg } catch {   }
     notify(`Couldn't ${what}: ${msg}`, 'error')
   }
+  const markSaved = () => { setSaved(true); window.setTimeout(() => setSaved(false), 1600) }
   const toggleAuto = (v: boolean) => {
-    setInfo((p) => p && { ...p, auto_update: v })
-    api.setAutoUpdate(v)
-      .then(() => { setSaved(true); window.setTimeout(() => setSaved(false), 1600) })
-      .catch(reportSettingFailure(`${v ? 'enable' : 'disable'} automatic updates`))
+    const mode: UpdateMode = v ? 'staged' : 'off'
+    setInfo((p) => p && { ...p, auto_update: v, update_mode: mode })
+    api.setAutoUpdate(mode)
+      .then(markSaved)
+      .catch(reportSettingFailure(`${v ? 'enable' : 'disable'} staged automatic updates`))
   }
-  const toggleDevMode = (v: boolean) => {
-    setInfo((p) => p && { ...p, update_dev_mode: v })
-    api.setUpdateDevMode(v)
-      .then(() => { setSaved(true); window.setTimeout(() => setSaved(false), 1600) })
-      .catch(reportSettingFailure(`${v ? 'enable' : 'disable'} developer update mode`))
+  const setChannel = (v: UpdateChannel) => {
+    setInfo((p) => p && { ...p, channel: v })
+    api.patchConfig('updates.channel', v)
+      .then(markSaved)
+      .catch(reportSettingFailure(`switch the update channel to ${v}`))
+  }
+  const setCheckEnabled = (v: boolean) => {
+    setInfo((p) => p && { ...p, check_enabled: v })
+    api.patchConfig('updates.check_enabled', v)
+      .then(markSaved)
+      .catch(reportSettingFailure(`${v ? 'enable' : 'disable'} update checks`))
   }
 
   if (!info && loadErr) return <LoadError what="update status" error={loadErr} onRetry={refresh} />
@@ -135,15 +143,19 @@ export function UpdatesPanel() {
 
       <Section title="Automatic updates">
         <RowGroup>
-          <Row label="Auto-update" hint="Download and apply updates automatically when available.">
-            <div className="flex items-center gap-2"><SavedToast show={saved} /><Toggle on={info.auto_update} onChange={toggleAuto} label="Auto-update" /></div>
+          <Row label="Staged automatic updates" hint="Off means notify only. On applies the selected release at the next safe point — it waits for active chats and subagents to finish.">
+            <div className="flex items-center gap-2"><SavedToast show={saved} /><Toggle on={info.update_mode === 'staged'} onChange={toggleAuto} label="Staged automatic updates" /></div>
           </Row>
-          { }
-          {isGit && (
-            <Row label="Developer update mode" hint="Track every new commit on your branch instead of only tagged releases (contributors).">
-              <div className="flex items-center gap-2"><Toggle on={!!info.update_dev_mode} onChange={toggleDevMode} label="Developer update mode" /></div>
-            </Row>
-          )}
+          <Row label="Update channel" hint={`Which release line this install follows.${isGit ? " Nightly is git-only and tracks your branch instead of a release tag." : ' Nightly has no package build, so it rides stable here.'}`}>
+            <SegPills<UpdateChannel> ariaLabel="Update channel" value={info.channel ?? 'stable'} onChange={setChannel}
+              options={[{ key: 'stable', label: 'Stable' }, { key: 'beta', label: 'Beta' }, { key: 'nightly', label: 'Nightly' }]} />
+          </Row>
+          <Row label="Check for updates" hint="Off stops every release check — no connection is opened.">
+            <Toggle on={info.check_enabled !== false} onChange={setCheckEnabled} label="Check for updates" />
+          </Row>
+          {info.pin ? <Row label="Version pin" hint="Set in Settings → Config (updates.pin). While pinned, updates install exactly this version.">
+            <span data-type="body-s" className="font-mono text-on-surface">v{info.pin}</span>
+          </Row> : null}
         </RowGroup>
       </Section>
 

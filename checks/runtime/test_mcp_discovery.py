@@ -1064,14 +1064,37 @@ class TestProbeRemote:
 
 
 class TestProbeServerProcessCleanup:
-    """Tests for the finally block that tears down the probed subprocess."""
+    """Tests for the finally block that tears down the probed subprocess.
+
+    The teardown itself is not written here any more: it is
+    ``gideon.core.cancellation.terminate_and_reap``, the one owner of a child's
+    retirement (req.3). What these tests pin is what the probe hands it and what comes
+    back out — a live child is terminated, escalated to kill when it ignores that, reaped,
+    its pipes closed, and every failure swallowed so a wedged MCP server cannot take the
+    probe down with it.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _child_leads_no_group(self, monkeypatch):
+        """The mock's pid leads no process group, so the owner signals the process.
+
+        Patched rather than assumed: with a synthetic pid the group check would ask the
+        kernel about a pid we do not own, and the answer would decide which branch the
+        owner takes. Pinning it keeps these tests about the probe's teardown instead of
+        about the test runner's own process group.
+        """
+        from gideon.core import cancellation
+
+        monkeypatch.setattr(cancellation, "_is_group_leader", lambda pid: False)
 
     def _make_mock_proc(self, *, wait_side_effect=None):
         proc = AsyncMock()
+        proc.pid = 424242
         proc.returncode = None
         proc.stdin = MagicMock()
         proc.stdin.close = MagicMock()
         proc.kill = MagicMock()
+        proc.terminate = MagicMock()
         if wait_side_effect:
             proc.wait = AsyncMock(side_effect=wait_side_effect)
         else:
@@ -1080,7 +1103,7 @@ class TestProbeServerProcessCleanup:
 
     @pytest.mark.asyncio
     async def test_graceful_stdin_close(self) -> None:
-        """Closing stdin causes process to exit within timeout."""
+        """A child that exits on SIGTERM is never escalated, and its pipes still close."""
         proc = self._make_mock_proc()
         server = McpServerInfo(name="test", command="echo")
 
@@ -1098,12 +1121,13 @@ class TestProbeServerProcessCleanup:
             proc.stdout.readline = AsyncMock(return_value=b"")
             await probe_server(server)
 
+        proc.terminate.assert_called_once()
         proc.stdin.close.assert_called_once()
         proc.kill.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_fallback_kill_on_timeout(self) -> None:
-        """When graceful shutdown times out, falls back to proc.kill()."""
+        """A child that ignores SIGTERM is escalated to SIGKILL and still reaped."""
         proc = self._make_mock_proc(
             wait_side_effect=[asyncio.TimeoutError(), AsyncMock(return_value=0)()]
         )
@@ -1123,6 +1147,7 @@ class TestProbeServerProcessCleanup:
             proc.stdout.readline = AsyncMock(return_value=b"")
             await probe_server(server)
 
+        proc.terminate.assert_called_once()
         proc.stdin.close.assert_called_once()
         proc.kill.assert_called_once()
 

@@ -162,6 +162,7 @@ async def _run_cli(
     argv: list[str], *, timeout: float = _VERB_TIMEOUT_SECS, cwd: str = ""
 ) -> BackendResult:
     try:
+        from gideon.core.cancellation import run_with_timeout
         from gideon.security.sandbox import create_subprocess_limited
 
         process = await create_subprocess_limited(
@@ -169,8 +170,9 @@ async def _run_cli(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd or None,
+            start_new_session=True,
         )
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        stdout, stderr = await run_with_timeout(process, timeout)
     except FileNotFoundError:
         failure = f"{argv[0]} is not installed"
     except asyncio.TimeoutError:

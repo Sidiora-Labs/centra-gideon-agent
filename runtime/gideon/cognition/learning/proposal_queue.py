@@ -440,6 +440,7 @@ class HumanDecision(QueueBindings):
 
     def accept(self, identifier, installer, actor):
         from gideon.cognition.learning.inbox import audit_denial, require_human
+        from gideon.cognition.learning.installers import UnsupportedProposal
 
         api = self.api
         proposal = api._load(identifier)
@@ -455,16 +456,40 @@ class HumanDecision(QueueBindings):
                 "Blocked %s accept of %s: %s", actor, identifier, row["reason"]
             )
             raise api.AcceptError(permission.reason)
-        if installer is not None:
-            try:
-                installer(proposal)
-            except Exception as failure:
-                api._audit("learning_proposal_accept", proposal, "failed")
-                raise api.AcceptError(
-                    f"install failed for {identifier!r}: {failure}"
-                ) from failure
+        run = installer if installer is not None else self.default_installer()
+        try:
+            run(proposal)
+        except UnsupportedProposal as unsupported:
+            api._audit("learning_proposal_accept", proposal, "unsupported")
+            api.logger.warning(
+                "Refused accept of %s: %s", identifier, unsupported.reason
+            )
+            raise api.AcceptError(str(unsupported), refusal=unsupported.to_dict())
+        except Exception as failure:
+            api._audit("learning_proposal_accept", proposal, "failed")
+            raise api.AcceptError(
+                f"install failed for {identifier!r}: {failure}",
+                refusal={
+                    "refusal": "install_failed",
+                    "kind": str(getattr(proposal, "kind", "")),
+                    "reason": str(failure),
+                    "retryable": True,
+                },
+            ) from failure
         self.finalize(proposal, identifier, "accepted")
         return proposal
+
+    def default_installer(self):
+        """The registry-resolved installer, for a caller that owns no writer of its own.
+
+        A caller that DOES own one (the knowledge updater builds an installer bound to
+        the item being edited) still passes it. Everything else resolves the same row,
+        so the inbox and an agent tool install the same thing — and a kind with no row
+        refuses here instead of recording an acceptance that installed nothing.
+        """
+        from gideon.cognition.learning.installers import InstallContext, installer_for
+
+        return installer_for(InstallContext())
 
     def defer(self, identifier):
         proposal = self.api._load(identifier)

@@ -11,6 +11,9 @@ from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
 from gideon.automation.loop import files as loop_files
+from gideon.automation.loop import store
+from gideon.automation.loop.loop import LoopStatus
+from gideon.cognition.planning.session import PlanSession, PlanStep, StepStatus
 from gideon.interfaces.dashboard.handlers import loop_routes as H
 
 
@@ -905,6 +908,220 @@ class TestPlanWalkthrough:
             )
         )
         assert r.status == 409
+
+
+class TestPlanLifecycleGuard:
+    """One pre-launch lifecycle guard on every planning action (`req.31`).
+
+    ``plan/start`` was the only action that checked the loop's phase; retry, approve,
+    comment and edit checked existence alone (or nothing at all), so a launched or
+    stopped loop could be dragged back into planning and have its frozen plan
+    rewritten underneath the worker. These drive the real handlers against a real
+    store row and a real on-disk plan session, and assert both halves: the refusal is
+    structured, and nothing on disk moved.
+    """
+
+    _ACTIONS = {
+        "start": (H.api_loop_plan_start, "plan/start", {}),
+        "retry": (H.api_loop_plan_retry, "plan/retry", {}),
+        "approve": (H.api_loop_plan_approve, "plan/approve", {"step_id": "step-0"}),
+        "comment": (
+            H.api_loop_plan_comment,
+            "plan/comment",
+            {"step_id": "step-0", "text": "redo the framing"},
+        ),
+        "edit": (
+            H.api_loop_plan_edit,
+            "plan/edit",
+            {"step_id": "step-0", "markdown": "## rewritten"},
+        ),
+    }
+
+    def _make(self, state):
+        cid = _body(
+            _run(
+                H.api_loop_create(
+                    _req(
+                        "POST",
+                        "/api/loops",
+                        state,
+                        body={
+                            "kind": "goal",
+                            "task": "investigate the latency regression",
+                        },
+                    )
+                )
+            )
+        )["id"]
+        loop_files.write_plan_session(
+            PlanSession(
+                project_id=cid,
+                created_at=1.0,
+                design_error="planner blew up",
+                steps=[
+                    PlanStep(
+                        id="step-0",
+                        kind="problem_framing",
+                        title="Frame the problem",
+                        status=StepStatus.AWAITING_REVIEW.value,
+                        artifact={"markdown": "## the frozen draft"},
+                    )
+                ],
+            )
+        )
+        return cid
+
+    def _launch(self, state, cid, *actions):
+        for action in actions:
+            _run(
+                H.api_loop_action(
+                    _req(
+                        "PATCH",
+                        f"/api/loops/{cid}",
+                        state,
+                        body={"action": action},
+                        match_info={"id": cid},
+                    )
+                )
+            )
+
+    def _snapshot(self, cid):
+        """Everything the loop IS: its store row plus every byte under its dir."""
+        import json
+
+        d = loop_files.safe_loop_dir(cid)
+        files = {}
+        if d is not None and d.exists():
+            for p in sorted(d.rglob("*")):
+                if p.is_file():
+                    files[str(p.relative_to(d))] = p.read_bytes()
+        return json.dumps(store.get_redacted(cid), sort_keys=True), files
+
+    def _call(self, state, cid, name):
+        handler, path, body = self._ACTIONS[name]
+        return _run(
+            handler(
+                _req(
+                    "POST",
+                    f"/api/loops/{cid}/{path}",
+                    state,
+                    body=body,
+                    match_info={"id": cid},
+                )
+            )
+        )
+
+    @pytest.mark.parametrize("action", sorted(_ACTIONS))
+    def test_running_loop_refuses_every_planning_action(self, state, svc, action):
+        cid = self._make(state)
+        self._launch(state, cid, "start")
+        assert store.get(cid).status == "running"
+        before = self._snapshot(cid)
+        resp = self._call(state, cid, action)
+        assert resp.status == 409, action
+        err = _body(resp)["error"]
+        assert err["code"] == "loop_not_prelaunch" and err["status"] == "running"
+        assert self._snapshot(cid) == before, f"{action} mutated a launched loop"
+
+    @pytest.mark.parametrize("action", sorted(_ACTIONS))
+    def test_stopped_loop_refuses_every_planning_action(self, state, svc, action):
+        cid = self._make(state)
+        self._launch(state, cid, "start", "stop")
+        assert store.get(cid).status == "stopped"
+        before = self._snapshot(cid)
+        resp = self._call(state, cid, action)
+        assert resp.status == 409, action
+        err = _body(resp)["error"]
+        assert err["code"] == "loop_not_prelaunch" and err["status"] == "stopped"
+        assert self._snapshot(cid) == before, f"{action} mutated a stopped loop"
+
+    @pytest.fixture
+    def planner(self, monkeypatch):
+        seen = []
+
+        async def _fake_advance(st, sv, lid):
+            seen.append(lid)
+            return "gated"
+
+        monkeypatch.setattr(
+            "gideon.automation.loop.plan_walkthrough.advance_plan", _fake_advance
+        )
+        return seen
+
+    def test_planning_state_loop_still_plans(self, state, svc, planner):
+        cid = self._make(state)
+        store.update_status(cid, LoopStatus.PLANNING)
+        assert self._call(state, cid, "start").status == 202
+        assert self._call(state, cid, "retry").status == 202
+        assert loop_files.read_plan_session(cid).design_error == ""
+        assert self._call(state, cid, "approve").status == 202
+        assert (
+            loop_files.read_plan_session(cid).steps[0].status
+            == StepStatus.APPROVED.value
+        )
+
+    def test_planning_state_loop_still_edits_and_comments(self, state, svc, planner):
+        cid = self._make(state)
+        store.update_status(cid, LoopStatus.PLANNING)
+        assert self._call(state, cid, "edit").status == 200
+        assert (
+            loop_files.read_plan_session(cid).steps[0].artifact["markdown"]
+            == "## rewritten"
+        )
+        assert self._call(state, cid, "comment").status == 202
+        session = loop_files.read_plan_session(cid)
+        assert session.steps[0].comments[0]["text"] == "redo the framing"
+
+    def test_missing_loop_still_404s_on_every_planning_action(self, state, svc):
+        for action in sorted(self._ACTIONS):
+            resp = self._call(state, "deadbeef", action)
+            assert resp.status == 404, action
+            assert _body(resp)["error"]["code"] == "not_found"
+
+    def test_every_plan_mutation_handler_runs_the_guard(self):
+        """The rail: a new planning action cannot ship without the guard.
+
+        Floored against the five handlers that exist, so a matcher that quietly stops
+        finding handlers reads as red rather than clean.
+        """
+        import ast
+        import pathlib
+
+        tree = ast.parse(
+            pathlib.Path(H.__file__).read_text(encoding="utf-8"), H.__file__
+        )
+        handlers = {
+            n.name: n
+            for n in ast.walk(tree)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and n.name.startswith("api_loop_plan_")
+        }
+        mutators = {
+            name: node
+            for name, node in handlers.items()
+            if name != "api_loop_plan_session"
+        }
+        assert set(mutators) >= {
+            "api_loop_plan_start",
+            "api_loop_plan_retry",
+            "api_loop_plan_approve",
+            "api_loop_plan_comment",
+            "api_loop_plan_edit",
+        }, sorted(mutators)
+        missing = [
+            name
+            for name, node in mutators.items()
+            if not any(
+                isinstance(c, ast.Call)
+                and isinstance(c.func, ast.Name)
+                and c.func.id == "_plan_lifecycle_refusal"
+                for c in ast.walk(node)
+            )
+        ]
+        assert not missing, (
+            "planning handlers that skip the pre-launch lifecycle guard: "
+            f"{sorted(missing)}"
+        )
 
 
 class TestQueueAutopilot:

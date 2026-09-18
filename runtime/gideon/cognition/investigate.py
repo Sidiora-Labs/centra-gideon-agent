@@ -886,6 +886,8 @@ def _resolve_audit_event(entity_id: str, state) -> InvestigateContext | None:
         lines.append(f"Downstream service: {entry['downstream_service']}")
     if entry.get("resources"):
         lines.append(f"Resources: {entry['resources']}")
+    if (entry.get("metadata") or {}).get("reason"):
+        lines.append(f"Reason: {entry['metadata']['reason']}")
     if entry.get("error"):
         lines.append(f"Error: {entry['error']}")
     if entry.get("metadata"):

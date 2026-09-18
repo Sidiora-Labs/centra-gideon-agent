@@ -1313,17 +1313,6 @@ class DashboardConfig:
             "Open the dashboard URL in the default browser on gateway startup.",
         ),
     )
-    update_dev_mode: bool = field(
-        default=False,
-        metadata=_meta(
-            "Developer Update Mode",
-            "Git checkouts only: update on every new commit on the current branch "
-            "instead of only when a new release TAG exists. Off (default) means the "
-            "in-app updater rides releases like every other install kind; on is the "
-            "contributor 'track main' behavior. No effect on pip/container/desktop "
-            "installs (they always update per release).",
-        ),
-    )
     screen_share_enabled: bool = field(
         default=False,
         metadata=_meta(
@@ -2702,14 +2691,15 @@ class UpdatesConfig:
     """Release-based update + release-tracking contract (RELEASE-UPDATE-MECHANISM RUM-1).
 
     The single block the CLI, container, desktop and the Settings > Updates screen read.
-    RUM-1 is only the config surface + the legacy backfill; the resolver, the check
-    kill-switch, the retirement of pull-from-main and the per-kind apply are later RUM
-    atoms that CONSUME these fields.
+    It is the whole release policy: the resolver, the check kill-switch, the staged apply
+    and the release-tag source updater all read these fields and nothing else.
 
     Legacy backfill (applied in ``AppConfig.load()``, idempotent — a clean break under the
     pre-1.0 banner, NOT a migration file): a home written before this block existed carries
-    the old ``auto_update`` bool and ``dashboard.update_dev_mode`` bool. On load, when the
-    ``updates`` block does not itself declare a field, ``auto_update=true`` maps to
+    the old ``auto_update`` bool and ``dashboard.update_dev_mode`` bool. Neither is a live
+    setting any more — ``dashboard.update_dev_mode`` was retired with the developer update
+    mode it named, and is read from the stored document only as a backfill source. On load,
+    when the ``updates`` block does not itself declare a field, ``auto_update=true`` maps to
     ``auto="staged"`` with ``channel="stable"`` (an existing auto-updating git user stops
     riding raw ``main`` and starts riding stable release tags), ``auto_update=false`` maps to
     ``auto="off"``, and ``dashboard.update_dev_mode=true`` maps to ``channel="nightly"``. An
@@ -2989,9 +2979,10 @@ class AppConfig:
         default=True,
         metadata=_meta(
             "Auto Update",
-            "Automatically apply updates when a new version is found "
-            "(update checks always run; this gates the unattended "
-            "pull + rebuild + restart).",
+            "Superseded by 'updates.auto'. Kept so a home written before the updates "
+            "block still maps: a stored true becomes 'staged' and a stored false "
+            "becomes 'off' when 'updates.auto' is absent. Nothing reads this field to "
+            "decide whether an update applies.",
         ),
     )
     updates: "UpdatesConfig" = field(

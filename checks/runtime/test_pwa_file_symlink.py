@@ -128,7 +128,7 @@ def test_icons_and_pwa_roots_are_excluded_from_the_spa_fallback() -> None:
     import gideon.interfaces.dashboard.server as server_mod
 
     source = Path(server_mod.__file__).read_text(encoding="utf-8")
-    assert '("/assets/", "/icons/", "/sprites/", "/vendor/")' in source
+    assert '("/assets/", "/fonts/", "/icons/", "/sprites/", "/vendor/")' in source
 
 
 def test_unmatched_api_routes_answer_in_the_wire_envelope() -> None:

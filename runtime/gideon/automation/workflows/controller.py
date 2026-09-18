@@ -159,6 +159,21 @@ _LOOP_MARKER_RE = re.compile(r"@(\d+)")
 
 TICK_WAKE_SECS = 5.0
 
+MIN_WAKE_SECS = 0.05
+
+EXTERNAL_POLL_SECS = max(MIN_WAKE_SECS, min(TICK_WAKE_SECS, 1.0))
+"""Poll cadence for a tick with nothing awaitable and no deadline to wake for.
+
+A stage dispatched to a subagent is EXTERNAL work: it is deliberately not in
+`_inflight` (see `_reconcile_dispatched_stages`), and it carries no `wake_at`, so
+`_next_wake_delay` has nothing to schedule. The loop answered that with
+`asyncio.sleep(0)`, which is not a wait at all — it re-ran the whole tick (a frontier
+walk, a subagent lookup and a state read per instance) as fast as the event loop
+would turn it over, for as long as the external work took. This is the bounded floor
+that replaces it: clamped into the same window `_next_wake_delay` returns from, so a
+tick can never poll faster than `MIN_WAKE_SECS` nor idle longer than `TICK_WAKE_SECS`.
+"""
+
 ESCALATION_ANSWER_HORIZON_SECS = 24 * 3600.0
 
 _ROOT_TO_RUN = {
@@ -442,10 +457,7 @@ class RunController:
                     await self._await_progress()
                 else:
                     delay = self._next_wake_delay()
-                    if delay is None:
-                        await asyncio.sleep(0)
-                    else:
-                        await asyncio.sleep(delay)
+                    await asyncio.sleep(EXTERNAL_POLL_SECS if delay is None else delay)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -3894,7 +3906,7 @@ class RunController:
             deadlines.append(self._admission_wake)
         if not deadlines:
             return None
-        return max(0.05, min(TICK_WAKE_SECS, min(deadlines) - time.time()))
+        return max(MIN_WAKE_SECS, min(TICK_WAKE_SECS, min(deadlines) - time.time()))
 
     def _budget_exceeded(self) -> bool:
         cap = getattr(self.run.budget, "max_tokens", 0) or 0
@@ -3955,6 +3967,7 @@ class RunController:
             if status == RunStatus.COMPLETE:
                 self._revise_project_overview()
             self._capture_run_end()
+            self._propose_tier_change()
         self._publish("workflow_run_update", {"status": status.value, "error": error})
         if status in TERMINAL_RUN_STATUSES:
             await self._drain_overlap_queue()
@@ -4028,6 +4041,29 @@ class RunController:
             run_end.capture(self.run, service, journal=journal_mod)
         except Exception:
             logger.debug("run %s: run-end capture failed", self.run.id, exc_info=True)
+
+    def _propose_tier_change(self) -> None:
+        """Re-read this def's terminal runs and propose a tier move if they justify one.
+
+        Runs HERE because a terminal run is the moment the evidence changed, and it is
+        deterministic: `tier_proposals` projects ledgers already on disk and spends no
+        tokens, so unlike `_capture_run_end` it needs no memory service and no budget.
+
+        Best-effort and fully guarded: `_finish` is the single terminal writer (WF2-R10)
+        and MUST NOT raise, so a failure here costs a proposal, never the run's terminal
+        status. Suppressed for a temporary/incognito run for the same reason the run-end
+        cadence is gated — that run's work must leave nothing behind.
+        """
+        if ownership.run_mode(self.run) in ownership.WRITE_SUPPRESSED:
+            return
+        try:
+            from gideon.automation.workflows import tier_proposals
+
+            tier_proposals.review_workflow(self.run.workflow_name)
+        except Exception:
+            logger.debug(
+                "run %s: tier proposal review failed", self.run.id, exc_info=True
+            )
 
     def _revise_project_overview(self) -> None:
         """Auto-revise the run's project overview on a successful completion (WORK-CONTAINERS §6.1).

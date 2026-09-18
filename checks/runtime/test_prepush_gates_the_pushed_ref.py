@@ -78,6 +78,7 @@ the fallback have no ``origin/main`` for the first rung to win with.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -386,7 +387,7 @@ def rebased(tmp_path: Path) -> Rebased:
     old_tip = _git("rev-parse", "HEAD", cwd=root)
 
     _git(*_IDENT, "checkout", "-q", "main", cwd=root)
-    (root / "apps/console").mkdir()
+    (root / "apps/console").mkdir(parents=True)
     (root / "apps/console" / "Thing.tsx").write_text(
         "export const Thing = () => null\n", encoding="utf-8"
     )
@@ -488,6 +489,232 @@ def test_a_branch_that_really_changes_the_frontend_still_gates(rebased: Rebased)
         f"the scoping is now too narrow: stdout={result.stdout!r} stderr={result.stderr!r}"
     )
     assert REACHED_THE_END not in result.stdout
+
+
+def test_an_unrelated_upstream_frontend_commit_after_the_rebase_does_not_gate(
+    rebased: Rebased,
+):
+    """🔴 req 9.2, the case the merge-base exists to answer: main moves ON without you.
+
+    The leg above rebases the branch ONTO main's frontend commit, so the stranded remote
+    tip is what a naive range would drag in. This is the other half of the same week: the
+    branch is rebased, and then somebody else lands more frontend work upstream while it
+    sits in review. ``origin/main`` is now AHEAD of the branch, and nothing about the branch
+    changed — it must still take the cheap exit.
+
+    That is a different rung of the scoping, not a restatement: ``merge-base(HEAD,
+    origin/main)`` here is the commit the branch is based on, NOT ``origin/main`` itself, so
+    a scoping that reached for the remote ref directly (``git diff origin/main HEAD``, the
+    obvious spelling) would see every upstream file as a difference and gate. The floor
+    below measures exactly that, so this leg cannot be satisfied by the wrong fix.
+    """
+    _git(*_IDENT, "checkout", "-q", "main", cwd=rebased.root)
+    (rebased.root / "apps/console" / "Later.tsx").write_text(
+        "export const Later = () => null\n", encoding="utf-8"
+    )
+    _git("add", "-A", cwd=rebased.root)
+    _git(
+        *_IDENT,
+        "commit",
+        "-q",
+        "--no-gpg-sign",
+        "-m",
+        "more of somebody else's frontend work",
+        cwd=rebased.root,
+    )
+    upstream = _git("rev-parse", "HEAD", cwd=rebased.root)
+    _git("update-ref", "refs/remotes/origin/main", upstream, cwd=rebased.root)
+    _git(*_IDENT, "checkout", "-q", "feature", cwd=rebased.root)
+
+    assert (
+        _git("rev-parse", "HEAD", cwd=rebased.root) == rebased.head
+    ), "the branch moved; this leg is no longer about an upstream-only change"
+    assert (
+        _git("merge-base", rebased.head, "refs/remotes/origin/main", cwd=rebased.root)
+        == rebased.new_main
+    ), "origin/main is not ahead of the branch — the fixture is not modelling this case"
+    assert _git(
+        "diff",
+        "--name-only",
+        upstream,
+        rebased.head,
+        "--",
+        "apps/console",
+        cwd=rebased.root,
+    ), (
+        "the upstream commit is invisible even to a naive two-endpoint diff, so this leg "
+        "would pass against any scoping at all"
+    )
+
+    result = _run(
+        f"refs/heads/feature {rebased.head} refs/heads/feature {rebased.old_tip}\n",
+        cwd=rebased.root,
+    )
+    assert result.returncode == 0, (
+        "upstream frontend work the branch does not contain forced the render-smoke gate: "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert REACHED_THE_END in result.stdout, f"stdout={result.stdout!r}"
+    assert GATING not in result.stdout
+
+
+LINT_TREES = ("runtime/gideon", "checks/runtime", "checks/harness")
+
+NO_JS = "node/npm not found"
+LINT_GREEN = "pre-push: python lint green."
+
+
+class Degraded:
+    """A sandbox branch that owes BOTH halves, plus a PATH that carries neither node nor npm."""
+
+    def __init__(self, root: Path, head: str, base: str, path: str) -> None:
+        self.root = root
+        self.head = head
+        self.base = base
+        self.path = path
+
+
+@pytest.fixture
+def degraded(tmp_path: Path) -> Degraded:
+    """A branch touching a Python path AND a frontend path, with the real linters lent to it.
+
+    Both halves have to be genuinely owed, or "the Python half still ran" is unfalsifiable:
+    a branch that owes no lint prints nothing either way. So the commit adds a file under
+    each of the three trees ``run_prepush.sh`` lints and one under ``apps/console/``.
+
+    The linters are the SHIPPED ones, symlinked into the sandbox's ``.venv/bin`` — the first
+    rung of the script's own tool detection, and the same binaries a developer's checkout
+    resolves. They are lent rather than reproduced so "lint green" means black, isort and
+    flake8 actually read these files and agreed.
+
+    ``PATH`` is rebuilt from nothing but ``git``: that is the condition under test, and
+    emptying it is what a machine without Node looks like to ``command -v``. The linters are
+    unaffected because their shebangs name an interpreter by absolute path.
+    """
+    root = _sandbox_repo(tmp_path, "degraded")
+    base = _git("rev-parse", "HEAD", cwd=root)
+
+    _git(*_IDENT, "checkout", "-q", "-b", "feature", cwd=root)
+    for tree in LINT_TREES:
+        d = root / tree
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "mod.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (root / "apps/console").mkdir(parents=True)
+    (root / "apps/console" / "Thing.tsx").write_text(
+        "export const Thing = () => null\n", encoding="utf-8"
+    )
+    _git("add", "-A", cwd=root)
+    _git(*_IDENT, "commit", "-q", "--no-gpg-sign", "-m", "both halves", cwd=root)
+    head = _git("rev-parse", "HEAD", cwd=root)
+
+    venv_bin = root / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    for tool in ("black", "isort", "flake8"):
+        shipped = REPO_ROOT / ".venv" / "bin" / tool
+        if not shipped.is_file():
+            pytest.skip(f"{tool} is not installed in .venv; the lint half cannot run")
+        (venv_bin / tool).symlink_to(shipped)
+
+    bare = tmp_path / "bare-bin"
+    bare.mkdir()
+    for tool in ("git", "sh"):
+        found = shutil.which(tool)
+        assert found, f"{tool} is not on PATH"
+        (bare / tool).symlink_to(found)
+    return Degraded(root, head, base, str(bare))
+
+
+def _run_with_path(stdin: str, *, sandbox: Degraded, path: str):
+    env = dict(os.environ, PATH=path)
+    return subprocess.run(
+        ["sh", str(sandbox.root / "tooling/scripts" / "run_prepush.sh")],
+        cwd=sandbox.root,
+        input=stdin,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env=env,
+    )
+
+
+def test_the_bare_path_really_has_no_js_toolchain(degraded: Degraded):
+    """Vacuity floor for the leg below: the PATH under test must actually lack node/npm,
+    or "it skipped" is just the ambient machine being measured."""
+    assert shutil.which("node", path=degraded.path) is None
+    assert shutil.which("npm", path=degraded.path) is None
+
+
+def test_a_missing_js_toolchain_skips_only_the_frontend_half(degraded: Degraded):
+    """🔴 req 33.1. No node, no npm — the render-smoke gate is skipped with a message that
+    says so, and the Python half still runs to a verdict.
+
+    The exit is 0 on purpose: a contributor with no Node installed is not pushing something
+    broken, and blocking their backend push on a toolchain their change cannot reach is the
+    defect. What they must not get is silence — hence the message, and hence `LINT_GREEN`,
+    which is black/isort/flake8 having really read the committed files.
+    """
+    result = _run_with_path(
+        f"refs/heads/feature {degraded.head} refs/heads/feature {degraded.base}\n",
+        sandbox=degraded,
+        path=degraded.path,
+    )
+    assert result.returncode == 0, (
+        "a missing JavaScript toolchain blocked the push: "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert NO_JS in result.stdout, f"the skip was silent: stdout={result.stdout!r}"
+    assert "CI" in result.stdout, "the message does not say CI still runs the check"
+    assert LINT_GREEN in result.stdout, (
+        "the Python half did not run to a verdict — the skip took more than the frontend "
+        f"check with it: stdout={result.stdout!r}"
+    )
+    assert GATING not in result.stdout
+    assert "render-smoke gate green" not in result.stdout
+
+
+def test_with_the_toolchain_present_the_same_branch_still_gates(degraded: Degraded):
+    """🪤 The falsification. The degradation must be about the toolchain, not about this
+    branch quietly having stopped owing the gate.
+
+    Asserted on the announcement rather than the exit code, for the reason its sibling leg
+    states: `npm ci` in a sandbox with no `package.json` fails for its own reasons, and that
+    failure looks like a gate either way.
+    """
+    result = _run_with_path(
+        f"refs/heads/feature {degraded.head} refs/heads/feature {degraded.base}\n",
+        sandbox=degraded,
+        path=os.environ.get("PATH", ""),
+    )
+    assert GATING in result.stdout, (
+        "the branch does not owe the frontend gate even with node present, so the skip "
+        f"leg proves nothing: stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert NO_JS not in result.stdout
+
+
+def test_ci_runs_the_frontend_chain_unconditionally(degraded: Degraded):
+    """🔴 req 33.2. The local gate degrades; CI does not.
+
+    The workflow's web job has no `command -v node` anywhere and no `if:` on its test steps
+    — it installs Node with `actions/setup-node` and then runs the chain, so the complete
+    frontend check stays mandatory exactly where it is the merge criterion. Read from the
+    shipped workflow rather than asserted in prose, so relaxing CI reds this.
+    """
+    workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8"
+    )
+    web = workflow.split("\n  web:\n", 1)[1].split("\n  e2e-pwa:", 1)[0]
+    assert "actions/setup-node" in web, "the web job no longer installs Node"
+    for step in (
+        "npm ci",
+        "npm run typecheck:web",
+        "npm run test:web",
+        "npm run build",
+    ):
+        assert step in web, f"the web job no longer runs `{step}`"
+    assert (
+        "command -v node" not in web and "command -v npm" not in web
+    ), "the local skip leaked into CI; the frontend check must stay unconditional there"
 
 
 def test_no_shared_history_with_main_gates_unconditionally(tmp_path: Path):

@@ -24,7 +24,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from gideon.interfaces.dashboard.request_boundary import request_boundary_middleware
 from gideon.interfaces.dashboard.server import spa_fallback
 
-SRC = Path(__file__).resolve().parents[2] / "runtime" / "gideon"
+SRC = Path(__file__).resolve().parents[2] / "runtime" / "gideon" / "interfaces"
 
 
 async def _reads_body_as_object(request: web.Request) -> web.Response:

@@ -41,6 +41,42 @@ _STALE_REMEDY = (
 )
 
 
+def _drifted_against(root: Path, rendered: dict[str, str]) -> list[str]:
+    """Compare one rendering to the copy shipped under ``root``."""
+    mismatches: list[str] = []
+    for filename, expected in rendered.items():
+        path = root / filename
+        if not path.is_file():
+            mismatches.append(f"{filename}: missing from the shipped reference dir")
+        elif path.read_text(encoding="utf-8") != expected:
+            mismatches.append(f"{filename}: differs from a fresh render")
+    return mismatches
+
+
+def _mismatches_once_the_render_is_stable(render, drifted, attempts=5, delay=0.3):
+    """Render repeatedly until two consecutive renderings AGREE, then report the drift.
+
+    Two consecutive byte-identical renderings are the evidence that the source tree was
+    quiescent for the span of the measurement; only then is a disagreement with the
+    shipped copy attributable to the copy rather than to a sibling worker perturbing the
+    tree mid-scan. A stable, reproducible drift renders the same bytes every time, so the
+    first two renderings already agree and it reds immediately — the absorbed case is
+    exactly the non-reproducing one.
+    """
+    previous = render()
+    mismatches = drifted(previous)
+    for _ in range(attempts):
+        if not mismatches:
+            return mismatches
+        time.sleep(delay)
+        current = render()
+        mismatches = drifted(current)
+        if current == previous:
+            return mismatches
+        previous = current
+    return mismatches
+
+
 def test_checked_in_reference_matches_a_fresh_render():
     """Every shipped reference file byte-matches a fresh render — no manual drift.
 
@@ -63,23 +99,9 @@ def test_checked_in_reference_matches_a_fresh_render():
     prints when it fires is unchanged.
     """
     root = reference_dir()
-
-    def _drifted() -> list[str]:
-        mismatches: list[str] = []
-        for filename, expected in render_reference().items():
-            path = root / filename
-            if not path.is_file():
-                mismatches.append(f"{filename}: missing from the shipped reference dir")
-            elif path.read_text(encoding="utf-8") != expected:
-                mismatches.append(f"{filename}: differs from a fresh render")
-        return mismatches
-
-    mismatches = _drifted()
-    for _ in range(5):
-        if not mismatches:
-            break
-        time.sleep(0.3)
-        mismatches = _drifted()
+    mismatches = _mismatches_once_the_render_is_stable(
+        render_reference, lambda rendered: _drifted_against(root, rendered)
+    )
     assert not mismatches, _STALE_REMEDY + "\n" + "\n".join(mismatches)
 
 
@@ -186,3 +208,51 @@ def test_the_stale_remedy_stays_actionable():
         "the remedy no longer says the drift may be main's from a merge-train union, "
         "which is what sends people hunting through their own diff for an hour"
     )
+
+
+class TestTheDriftGuardStabilizesBeforeItAccuses:
+    """§73 — the retry is a quiescence measurement, not a softened assertion.
+
+    Both legs drive the real comparison (:func:`_drifted_against`) against real files on
+    disk; only the RENDERING is supplied, because a transient perturbation of the source
+    tree by a sibling ``-n auto`` worker cannot be produced on demand.
+    """
+
+    @staticmethod
+    def _shipped(tmp_path: Path, body: str) -> Path:
+        (tmp_path / "index.md").write_text(body, encoding="utf-8")
+        return tmp_path
+
+    def test_a_one_off_perturbation_is_absorbed(self, tmp_path):
+        """One odd rendering that does not reproduce must not red an unrelated PR."""
+        root = self._shipped(tmp_path, "shipped\n")
+        renders = iter([{"index.md": "perturbed\n"}, {"index.md": "shipped\n"}])
+        mismatches = _mismatches_once_the_render_is_stable(
+            lambda: next(renders),
+            lambda rendered: _drifted_against(root, rendered),
+            delay=0,
+        )
+        assert mismatches == []
+
+    def test_stable_reproducible_drift_still_fails(self, tmp_path):
+        """A genuine drift renders identically every time, so it is never absorbed."""
+        root = self._shipped(tmp_path, "shipped\n")
+        calls = []
+
+        def render() -> dict[str, str]:
+            calls.append(1)
+            return {"index.md": "regenerated\n"}
+
+        mismatches = _mismatches_once_the_render_is_stable(
+            render, lambda rendered: _drifted_against(root, rendered), delay=0
+        )
+        assert mismatches == ["index.md: differs from a fresh render"]
+        assert len(calls) == 2, "two agreeing renders are enough to accuse"
+
+    def test_a_missing_shipped_file_is_reported_not_absorbed(self, tmp_path):
+        mismatches = _mismatches_once_the_render_is_stable(
+            lambda: {"index.md": "regenerated\n"},
+            lambda rendered: _drifted_against(tmp_path, rendered),
+            delay=0,
+        )
+        assert mismatches == ["index.md: missing from the shipped reference dir"]

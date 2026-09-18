@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from gideon.automation.triggers.models import Outcome
+from gideon.core.errors import AgentError, redacted_envelope
 
 _REFUSAL_STATUSES = ("blocked_injection", Outcome.SKIPPED_GATE.value)
 
@@ -158,7 +159,13 @@ class TriggerPublication:
             )
             return False
 
-    def outcome(self, trigger: Any, ok: bool, error: str) -> None:
+    def outcome(
+        self,
+        trigger: Any,
+        ok: bool,
+        error: str,
+        agent_error: AgentError | None = None,
+    ) -> None:
         try:
             from gideon.automation.triggers import delivery
 
@@ -176,6 +183,7 @@ class TriggerPublication:
                 summary=error[:200],
                 attempt_key=self.runtime._next_delivery_attempt(),
                 destination=delivery.route_for(trigger, ok=ok),
+                agent_error=None if ok else agent_error,
             )
             delivery.deliver(
                 state, notice, delivered_ids=self.runtime._delivered_event_ids
@@ -191,9 +199,15 @@ class FireResult:
     exit_type: str
     exception_text: str
     detail: str
+    agent_error: AgentError | None = None
 
     @classmethod
-    def read(cls, result: Any, error: BaseException | None) -> FireResult:
+    def read(
+        cls,
+        result: Any,
+        error: BaseException | None,
+        agent_error: AgentError | None = None,
+    ) -> FireResult:
         from gideon.automation.triggers import autopause
 
         exception_text = f"{type(error).__name__}: {error}" if error is not None else ""
@@ -206,7 +220,29 @@ class FireResult:
         detail = exception_text or (
             str(getattr(result, "error", "") or "") if result is not None else ""
         )
-        return cls(exit_type, exception_text, detail)
+        envelope = agent_error
+        if envelope is None and result is not None:
+            envelope = getattr(result, "agent_error", None)
+        failed = exit_type != autopause.ExitType.OK.value
+        carried = (
+            redacted_envelope(envelope)
+            if failed and isinstance(envelope, AgentError)
+            else None
+        )
+        return cls(exit_type, exception_text, detail, carried)
+
+    @property
+    def failed(self) -> bool:
+        from gideon.automation.triggers import autopause
+
+        return self.exit_type != autopause.ExitType.OK.value
+
+    @property
+    def explanation(self) -> str:
+        """What the run-history row records: the whole envelope, or the bounded prose."""
+        if self.agent_error is not None:
+            return self.agent_error.render()
+        return self.detail[:200] if self.failed else ""
 
     def update(self, trigger: Any, decision: Any) -> None:
         from gideon.automation.triggers import autopause
@@ -233,7 +269,11 @@ class FireLedger:
         self.runtime, self.journal_type, self.logger = runtime, journal_type, logger
 
     async def record(
-        self, trigger: Any, result: Any, error: BaseException | None
+        self,
+        trigger: Any,
+        result: Any,
+        error: BaseException | None,
+        agent_error: AgentError | None = None,
     ) -> None:
         try:
             from gideon.automation.schedule_history import ExecutionRecord
@@ -245,7 +285,7 @@ class FireLedger:
             identity = trigger_id(trigger)
             if not identity:
                 return
-            outcome = FireResult.read(result, error)
+            outcome = FireResult.read(result, error, agent_error)
             journal = self.journal_type(config_dir())
             now = time.time()
             await journal.append(
@@ -260,7 +300,12 @@ class FireLedger:
                         if outcome.exit_type == autopause.ExitType.OK.value
                         else "failure"
                     ),
-                    error=outcome.exception_text[:200],
+                    error=outcome.explanation,
+                    agent_error=(
+                        {}
+                        if outcome.agent_error is None
+                        else outcome.agent_error.to_dict()
+                    ),
                 )
             )
             rows, _ = await journal.list_for_job(identity, 0, 20)

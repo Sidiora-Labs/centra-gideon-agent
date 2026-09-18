@@ -20,6 +20,7 @@ dist-client/
 .mypy_cache/
 .hypothesis/
 htmlcov/
+reports/
 
 venv/
 .venv/

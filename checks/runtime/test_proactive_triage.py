@@ -799,6 +799,85 @@ class TestTheCallSites:
         assert seen[1]["meta"]["eventId"] == seen[0]["meta"]["eventId"]
         assert seen[2]["meta"]["eventId"] != seen[0]["meta"]["eventId"]
 
+    async def test_the_provider_forwards_this_runs_ids_to_the_pipeline(
+        self, monkeypatch: Any
+    ) -> None:
+        """The run the digest will deep-link to comes from the ActionContext, not a default.
+
+        Half of "the delivered result links to the CORRECT run": the ids the substrate
+        handed this execution have to reach `run_triage`, which is what builds the
+        default delivery. The other half is
+        `test_the_delivered_digest_deep_links_to_this_run` below.
+        """
+        import gideon.cognition.proactive.pipeline as pipeline_mod
+        from gideon.cognition.proactive.pipeline import TriageResult
+        from gideon.integrations.action_providers.base import ActionContext
+        from gideon.integrations.action_providers.triage_digest_provider import (
+            TriageDigestActionProvider,
+        )
+
+        called: list[dict] = []
+
+        async def fake_run_triage(items: Any, **kwargs: Any) -> TriageResult:
+            called.append(dict(kwargs))
+            return TriageResult(manifest=build_manifest(_items()))
+
+        monkeypatch.setattr(pipeline_mod, "run_triage", fake_run_triage)
+        monkeypatch.setattr(
+            "gideon.integrations.action_providers.triage_digest_provider._proactive_config",
+            lambda: type(
+                "C", (), {"triage_enabled": True, "classifier_gate_enabled": True}
+            )(),
+        )
+
+        result = await TriageDigestActionProvider().execute(
+            {},
+            ActionContext(
+                event="clock", payload={"run_id": "r-55", "trigger_id": "t-7"}
+            ),
+        )
+        assert result.success is True
+        assert (called[0]["run_id"], called[0]["trigger_id"]) == ("r-55", "t-7")
+
+    async def test_the_delivered_digest_deep_links_to_this_run(
+        self, monkeypatch: Any
+    ) -> None:
+        """The DEFAULT delivery — the one a real run uses — carries this run's journal link.
+
+        `run_triage` is called without a `deliver`, so `make_notify_deliver` is built from
+        the run id the caller passed and everything downstream is the shipped path: the
+        real `Delivery` contract, the real `notify` gate, one delivery for the run.
+        """
+        seen: list[dict] = []
+
+        class _State:
+            def notify(
+                self, kind: str, title: str, body: str, *, meta: Any = None
+            ) -> None:
+                seen.append({"kind": kind, "title": title, "meta": meta or {}})
+
+        class _Services:
+            state = _State()
+
+        monkeypatch.setattr(
+            "gideon.integrations.action_providers.services.get_action_services",
+            lambda: _Services(),
+        )
+        completion = _Completion(propose={"proposals": []})
+        result = await run_triage(
+            _items(),
+            rules=[],
+            completion=completion,
+            run_id="run-42",
+            trigger_id="trig-9",
+        )
+
+        assert len(seen) == 1, "a run delivers its digest exactly once"
+        assert seen[0]["meta"]["statusUrl"] == "#/workflows/runs/run-42"
+        assert seen[0]["kind"] == DIGEST_NOTIFY_KIND
+        assert result.digest is not None
+        assert seen[0]["title"] == result.digest.title
+
     async def test_the_provider_records_the_silences_in_the_run_ledger(
         self, monkeypatch: Any
     ) -> None:

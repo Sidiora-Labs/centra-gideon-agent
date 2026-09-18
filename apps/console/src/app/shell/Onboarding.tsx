@@ -122,13 +122,14 @@ function ReadyScreen({ name, model, tried, showEverything, setDisclosure, finish
     let active = true
     void api.gideonConfig().then((config) => {
       const apps = (config.apps ?? {}) as { registry_source_enabled?: boolean }
-      if (active) setAutonomy({ autoUpdate: config.auto_update !== false, registryEnabled: apps.registry_source_enabled !== false })
+      const updates = (config.updates ?? {}) as { auto?: string }
+      if (active) setAutonomy({ autoUpdate: updates.auto === 'staged', registryEnabled: apps.registry_source_enabled !== false })
     }).catch(() => { if (active) setAutonomy('failed') })
     return () => { active = false }
   }, [])
   const updateAutomatically = (value: boolean) => {
     setAutonomy((current) => current && current !== 'failed' ? { ...current, autoUpdate: value } : current)
-    void api.setAutoUpdate(value).catch(reportActionFailure(`${value ? 'enable' : 'disable'} automatic updates`))
+    void api.setAutoUpdate(value ? 'staged' : 'off').catch(reportActionFailure(`${value ? 'enable' : 'disable'} automatic updates`))
   }
   const chatReady = Boolean(model && model !== 'Set up later'), trialDone = Boolean(tried && tried !== 'Skipped')
   const recap = [
@@ -142,9 +143,9 @@ function ReadyScreen({ name, model, tried, showEverything, setDisclosure, finish
     { icon: Waves, title: 'How much the interface moves is a dial', body: 'Every animation scales with it — all the way down to none. This is the real control from Settings → Design.', control: BOUNCINESS && <ScalarControl token={BOUNCINESS} /> },
     { icon: PanelLeft, title: 'The sidebar starts short and grows', body: showEverything ? 'It will list every destination from the start. You can shorten it again in Settings → Design.' : 'Five essentials now; any other surface joins it the first time you open one. Nothing is locked away.',
       control: <SettingToggle value={showEverything} change={setDisclosure} label="Show every surface" /> },
-    { icon: RefreshCw, title: 'It keeps itself current on its own', body: 'When a new version ships, it installs and restarts unattended. This is the real switch from Settings → Updates.',
+    { icon: RefreshCw, title: 'It can keep itself current', body: 'Off, a new release only raises a notification. On, it stages the update: it waits for your chats and subagents to finish, then installs the selected release and restarts. This is the real switch from Settings → Updates.',
       control: <div className="flex flex-col gap-s">
-        {autonomy === 'failed' ? <TextLink size="sm" ink="emphasis" onClick={() => exitTo('settings/updates')}>Manage updates in Settings</TextLink> : autonomy ? <SettingToggle value={autonomy.autoUpdate} change={updateAutomatically} label="Update automatically" /> : null}
+        {autonomy === 'failed' ? <TextLink size="sm" ink="emphasis" onClick={() => exitTo('settings/updates')}>Manage updates in Settings</TextLink> : autonomy ? <SettingToggle value={autonomy.autoUpdate} change={updateAutomatically} label="Update automatically (staged)" /> : null}
         {autonomy && autonomy !== 'failed' && autonomy.registryEnabled && <p className="text-on-surface-low text-[0.8125rem]">App discovery uses the sources configured for this gateway; installing anything still runs the security scanner. <TextLink size="sm" ink="emphasis" onClick={() => exitTo('apps')}>Review Store sources</TextLink></p>}
       </div> },
   ]

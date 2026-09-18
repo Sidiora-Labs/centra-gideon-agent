@@ -1782,6 +1782,48 @@ def _aggregated_list_tools() -> list[dict[str, Any]]:
     return tools
 
 
+_PROBE_FIELD = "__schema_probe__"
+
+
+def validated_tool_names() -> set[str]:
+    """Every tool whose dispatch REALLY runs schema validation.
+
+    Counted by PROBING the wiring, not by listing schema constants: each dispatch module is
+    handed an argument no schema declares, and only a module that actually resolves a
+    :class:`ToolSchema` for that tool rejects it. A schema that exists but is never looked
+    up (``MCP_WORKFLOW_SCHEMAS`` was exactly that), and a category whose ``_validate_args``
+    is a pass-through, both answer "not validated" here — which is the whole point: the
+    Security panel reports enforcement, and the old ``dir(validation)`` count reported
+    intent, so it went UP when someone added a constant nothing consulted.
+
+    The probe never reaches a handler: :func:`validate_tool_args` raises on the unknown
+    field before any dispatch, and the tool listings are constant in every category.
+    """
+    import importlib
+
+    from gideon.assurance.validation import ValidationError
+
+    names: set[str] = set()
+    for mod_path in ("gideon.integrations.mcp_core", *_AGGREGATED_CATEGORY_MODULES):
+        try:
+            mod = importlib.import_module(mod_path)
+            validate = mod._validate_args  # type: ignore[attr-defined]
+            listed = mod._list_tools()  # type: ignore[attr-defined]
+        except (ImportError, AttributeError):
+            continue
+        for tool in listed or ():
+            tool_name = str(tool.get("name", ""))
+            if not tool_name or tool_name in names:
+                continue
+            try:
+                validate(tool_name, {_PROBE_FIELD: "probe"})
+            except ValidationError:
+                names.add(tool_name)
+            except Exception:
+                continue
+    return names
+
+
 def _aggregated_call_tool(name: str, raw_args: dict[str, Any]) -> str:
     """Route a tool call to the owning category module, else core's own dispatch."""
     import importlib

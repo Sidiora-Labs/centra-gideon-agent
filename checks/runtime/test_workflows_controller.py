@@ -20,13 +20,22 @@ The load-bearing assertions:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
+from types import SimpleNamespace
 
 import pytest
 
+from gideon.automation.workflows import controller as controller_mod
 from gideon.automation.workflows import journal as J
 from gideon.automation.workflows import store
-from gideon.automation.workflows.controller import EngineServices, RunController
+from gideon.automation.workflows.controller import (
+    EXTERNAL_POLL_SECS,
+    MIN_WAKE_SECS,
+    TICK_WAKE_SECS,
+    EngineServices,
+    RunController,
+)
 from gideon.automation.workflows.journal import (
     CacheKey,
     Journal,
@@ -1686,3 +1695,99 @@ class TestEngineInstallFaultDiscriminator:
         assert not _is_engine_install_fault(
             ModuleNotFoundError("No module named 'gideonx'", name="gideonx")
         )
+
+
+class TestExternalPollCadence:
+    """A tick with nothing awaitable must WAIT, not spin (`req.50` ac_1).
+
+    A dispatched `stage` is external work: it is deliberately outside `_inflight`
+    (`_reconcile_dispatched_stages`) and carries no `wake_at`, so `_next_wake_delay`
+    has nothing to schedule. The loop answered that with `asyncio.sleep(0)` — a
+    zero-delay re-entry that re-walked the frontier and re-read the subagent as fast
+    as the event loop turned over, for the whole life of the external work.
+
+    Scope note (`req.50` ac_3): the mixed gate-and-live-stage lifecycle case — a run
+    holding an open human gate WHILE an external stage is still live — is tracked as
+    separate work and is deliberately not addressed here. These cover the poll cadence
+    only.
+    """
+
+    class _Spawner:
+        """The subagent seam `EngineServices` declares. Spawns, and reports the child
+        still running — the state the controller polls in."""
+
+        def __init__(self) -> None:
+            self.spawned: list[dict] = []
+            self.lookups = 0
+
+        def spawn(self, **kw):
+            self.spawned.append(kw)
+            return SimpleNamespace(id="ag1", error="")
+
+        def get(self, agent_id: str):
+            self.lookups += 1
+            return SimpleNamespace(id=agent_id, done=False, error="", result="")
+
+    class _RecordingClock:
+        """Stands in for the controller module's `asyncio`, recording what the tick loop
+        asks to sleep for and returning immediately so the test does not wait for it.
+        Every other asyncio name passes straight through."""
+
+        def __init__(self) -> None:
+            self.delays: list[float] = []
+
+        def __getattr__(self, name: str):
+            return getattr(asyncio, name)
+
+        async def sleep(self, delay, result=None):
+            self.delays.append(delay)
+            return await asyncio.sleep(0, result)
+
+    STAGE_SPEC = {
+        "name": "ext",
+        "root": {"kind": "stage", "id": "work", "config": {"prompt": "do the thing"}},
+    }
+
+    async def _delays(self, monkeypatch, spawner, *, want: int = 3) -> list[float]:
+        run = _make_run(self.STAGE_SPEC)
+        c = RunController(
+            run, self.STAGE_SPEC, services=EngineServices(subagents=spawner)
+        )
+        clock = self._RecordingClock()
+        monkeypatch.setattr(controller_mod, "asyncio", clock)
+        task = asyncio.create_task(c._tick_loop())
+        for _ in range(2000):
+            if len(clock.delays) >= want:
+                break
+            await asyncio.sleep(0)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        return clock.delays
+
+    async def test_a_dispatched_stage_is_polled_on_a_bounded_cadence(
+        self, monkeypatch
+    ) -> None:
+        spawner = self._Spawner()
+        delays = await self._delays(monkeypatch, spawner)
+        assert spawner.spawned, "the stage never dispatched, so nothing was polled"
+        assert spawner.lookups, "the controller never re-read the external stage"
+        assert len(delays) >= 3, delays
+        assert set(delays) == {EXTERNAL_POLL_SECS}, delays
+        assert 0 not in delays, "the zero-delay spin is back"
+
+    def test_the_cadence_is_clamped_into_the_wake_window(self) -> None:
+        assert MIN_WAKE_SECS <= EXTERNAL_POLL_SECS <= TICK_WAKE_SECS
+        assert EXTERNAL_POLL_SECS > 0
+
+    async def test_a_scheduled_wake_still_wins_over_the_poll_floor(self) -> None:
+        """The floor is the fallback, not an override: a node with a real deadline keeps
+        being woken by `_next_wake_delay`, which is what `test_a_wait_resolves_at_its_
+        deadline` measures end to end."""
+        run = _make_run(self.STAGE_SPEC)
+        c = RunController(run, self.STAGE_SPEC, services=EngineServices())
+        c.instances["root"] = NodeInstance(
+            "root", state=InstanceState.WAITING, wake_at=time.time() + 0.25
+        )
+        delay = c._next_wake_delay()
+        assert delay is not None and MIN_WAKE_SECS <= delay <= TICK_WAKE_SECS

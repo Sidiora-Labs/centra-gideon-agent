@@ -10,6 +10,7 @@ from pathlib import Path
 import pycache_guard
 import pytest
 import real_home_guard
+import short_ids
 from hypothesis import HealthCheck, settings
 
 PYCACHE_PREFIX = pycache_guard.activate()
@@ -703,6 +704,18 @@ def _restore_knowledge_provider_registry() -> object:
     yield
     _kp_registry._providers.clear()
     _kp_registry._providers.update(before)
+
+
+def pytest_make_parametrize_id(config, val, argname):
+    """Shorter ids for long parameter values, for the unsharded coverage job only.
+
+    Off unless ``GIDEON_SHORT_TEST_IDS`` says otherwise (see ``checks/runtime/short_ids.py``
+    for the rules and for why the sharded jobs must not get this): returning ``None`` is how
+    a hook declines, so every other run keeps the ids pytest has always produced.
+    """
+    if not short_ids.enabled():
+        return None
+    return short_ids.shorten(val)
 
 
 _real_home_since_ns: int | None = None

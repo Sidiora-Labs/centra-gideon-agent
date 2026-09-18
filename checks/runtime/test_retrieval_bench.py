@@ -1117,3 +1117,90 @@ def test_the_retrieval_latest_is_scoped_to_the_store_asked_for(
     assert rb.latest_bench_id(rb.STORE_MEMORY) == ""
     with pytest.raises(rb.RetrievalBenchError):
         rb.latest_bench_id("both")
+
+
+class TestArmQualificationHoldsTheBenchmark:
+    """Per-arm qualification before fusion (RRF untouched), measured on this file's fixtures.
+
+    The claim being tested is a TRADE — precision up, relevant recall unchanged — and a
+    trade cannot be proven by one number. So both halves are measured with the bench's own
+    ``precision_at_k`` / ``recall_at_k`` against the seeded qrels, before and after the
+    corpus is given the exact shape that used to defeat the graph arm.
+    """
+
+    def _satellites(self, knowledge_store) -> str:
+        """Three entities two hops from Orion, all mentioned by one irrelevant item.
+
+        Three, not one: the merged mention tally the graph arm used to compute gave this
+        item a count of 3 against each relevant item's 1, so it took rank 1 and pushed both
+        judged answers down. ``add_mention`` is INSERT OR IGNORE per (item, entity), which is
+        why the noise has to come from distinct entities rather than repeated mentions.
+        """
+        orion = knowledge_store.find_entity("Orion")["id"]
+        noisy = knowledge_store.db.execute(
+            "SELECT id FROM items WHERE title = 'Sourdough hydration log'"
+        ).fetchone()["id"]
+        for name in ("Orion-Alpha", "Orion-Beta", "Orion-Gamma"):
+            entity = knowledge_store.add_entity(name, "concept")
+            knowledge_store.add_entity_relation(orion, entity, "relates_to")
+            knowledge_store.add_mention(noisy, entity)
+        knowledge_store.db.commit()
+        return noisy
+
+    def test_the_seeded_qrels_keep_full_precision_and_recall(self, knowledge_store):
+        """The baseline the trade must not spend. Every judged query still returns exactly
+        its relevant ids once the keyword floor and the graph's direct/neighbour split are
+        in force."""
+        retriever = knowledge_retrieval.HybridRetriever(knowledge_store)
+        for query in _seeded_benchmark(knowledge_store).queries:
+            hits = [h["id"] for h in retriever.search(query.query, limit=5)]
+            assert rb.recall_at_k(hits, query.relevant_ids, 5) == 1.0, query.query
+            assert rb.precision_at_k(hits, query.relevant_ids, 5) == 1.0, query.query
+
+    def test_a_noisy_neighbour_costs_no_precision_and_no_recall(self, knowledge_store):
+        noisy = self._satellites(knowledge_store)
+        judged = next(
+            q for q in _seeded_benchmark(knowledge_store).queries if q.query == "Orion"
+        )
+        counts = {
+            row["item_id"]: row["cnt"]
+            for row in knowledge_store.db.execute(
+                "SELECT item_id, COUNT(*) AS cnt FROM mentions GROUP BY item_id"
+            )
+        }
+        assert (
+            counts[noisy] == 3
+        ), "the premise: the neighbour out-counts every direct hit"
+        assert all(counts[item_id] == 1 for item_id in judged.relevant_ids)
+
+        retriever = knowledge_retrieval.HybridRetriever(knowledge_store)
+        hits = [h["id"] for h in retriever.search("Orion", limit=5)]
+
+        assert noisy not in hits
+        assert rb.precision_at_k(hits, judged.relevant_ids, 5) == 1.0
+        assert rb.recall_at_k(hits, judged.relevant_ids, 5) == 1.0
+        assert all(h["graph_match"] == "direct" for h in retriever.search("Orion", 5))
+
+    def test_the_neighbour_tier_still_answers_a_query_nothing_directly_matches(
+        self, knowledge_store
+    ):
+        """Neighbours are demoted, not deleted — otherwise "precision improved" is just an
+        arm that returns less. An entity nothing mentions has only its neighbourhood to
+        answer with, and that is exactly when the two-hop guess is the best evidence there
+        is."""
+        noisy = self._satellites(knowledge_store)
+        judged = next(
+            q for q in _seeded_benchmark(knowledge_store).queries if q.query == "Orion"
+        )
+        orion = knowledge_store.find_entity("Orion")["id"]
+        umbrella = knowledge_store.add_entity("Orion-Program", "project")
+        knowledge_store.add_entity_relation(umbrella, orion, "contains")
+        knowledge_store.db.commit()
+        retriever = knowledge_retrieval.HybridRetriever(knowledge_store)
+
+        hits = retriever.search("Orion-Program", limit=5)
+        found = {h["id"] for h in hits}
+
+        assert set(judged.relevant_ids) <= found
+        assert noisy in found
+        assert all(h["graph_match"] == "neighbor" for h in hits)

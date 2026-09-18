@@ -189,7 +189,9 @@ class TestWsNormalUserExperience:
         state.register_ws(alive)
         state.register_ws(dead)
 
-        state._send_ws_all(json.dumps({"type": "notification", "data": {"text": "hi"}}))
+        state._send_ws_all(
+            "notification", json.dumps({"type": "notification", "data": {"text": "hi"}})
+        )
 
         alive.send_str.assert_called_once()
         dead.send_str.assert_not_called()

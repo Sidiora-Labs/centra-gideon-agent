@@ -9,6 +9,8 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 
+from gideon.core.cancellation import run_with_timeout, wait_with_timeout
+
 logger = logging.getLogger(__name__)
 TMUX_SOCKET = "gideon"
 PROBE_TIMEOUT_S = 5.0
@@ -48,7 +50,7 @@ class TmuxCommand:
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )
-            return await asyncio.wait_for(process.wait(), timeout=PROBE_TIMEOUT_S) == 0
+            return await wait_with_timeout(process, PROBE_TIMEOUT_S) == 0
         except (FileNotFoundError, asyncio.TimeoutError, OSError):
             return False
         except Exception:
@@ -62,9 +64,7 @@ class TmuxCommand:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
-            output, _ = await asyncio.wait_for(
-                process.communicate(), timeout=PROBE_TIMEOUT_S
-            )
+            output, _ = await run_with_timeout(process, PROBE_TIMEOUT_S)
             return [
                 line.strip()
                 for line in output.decode("utf-8", "replace").splitlines()

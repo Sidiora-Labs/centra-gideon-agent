@@ -10,6 +10,7 @@ from gideon.core.atomic_write import atomic_write
 from gideon.core.config.loader import AppConfig
 from gideon.engine.agent import AGENTS_DIR
 from gideon.engine.task_modes import VALID_TASK_MODES
+from gideon.interfaces.dashboard.chat_index import build_chat_index, load_chat_index
 from gideon.interfaces.dashboard.chat_utils import (
     _normalize_model,
     _sync_dashboard_sessions,
@@ -262,6 +263,39 @@ def _attach_rewound(session: _ChatSession, m: dict) -> None:
         session.messages[-1]["rewound"] = out
 
 
+def _restore_project_context_root(session: _ChatSession, project_id: str) -> None:
+    """Re-grant the project's context directory as a tool root, if the project still exists.
+
+    The binding is granted at session-create time (``api_chat_session_create``) and lives on
+    the in-memory session, so nothing brought it back: a restored project chat carried the id
+    and none of the workspace access the id stands for.
+
+    The existence check is the validating half, and it is not cosmetic —
+    :meth:`HierarchyStore.context_dir` CREATES the directory it names, so re-granting a stale
+    id would mint a context folder for a project that was deleted while the gateway was down.
+    A binding that no longer resolves keeps its recorded id (it is the user's own history, and
+    a store that cannot be read must not silently unbind every chat) and grants nothing.
+    """
+    try:
+        from gideon.engine.tasks.hierarchy import HierarchyStore
+
+        store = HierarchyStore()
+        if store.get_project(project_id) is None:
+            logger.debug(
+                "restore: project %s is gone; granting no context root", project_id
+            )
+            return
+        context = str(store.context_dir(project_id))
+        if context and context not in (session._extra_tool_roots or []):
+            session._extra_tool_roots = [*(session._extra_tool_roots or []), context]
+    except Exception:
+        logger.debug(
+            "restore: project context-dir grant failed for %s",
+            project_id,
+            exc_info=True,
+        )
+
+
 def _restore_runtime_binding(
     state: ConsoleState, session: _ChatSession, meta: dict
 ) -> None:
@@ -293,6 +327,7 @@ def _restore_runtime_binding(
     _pid = meta.get("project_id")
     if isinstance(_pid, str) and _pid:
         session.project_id = _pid
+        _restore_project_context_root(session, _pid)
     if meta.get("mode"):
         session.mode = meta["mode"]
     _tm = meta.get("task_mode")
@@ -403,6 +438,7 @@ def _rehydrate_session_from_history(
         state._restricted_keys.add(f"dashboard:{session_name}")
     if meta.get("forked_from") is not None:
         session.forked_from = meta["forked_from"]
+    session.chat_index = load_chat_index(meta.get("chat_index"))
     _side_meta = meta.get("side")
     if isinstance(_side_meta, dict) and _side_meta.get("messages"):
         from gideon.interfaces.dashboard.side_state import SideState
@@ -591,6 +627,7 @@ def restore_recent_sessions(
             state._restricted_keys.add(f"dashboard:{session_name}")
         if meta.get("forked_from") is not None:
             session.forked_from = meta["forked_from"]
+        session.chat_index = load_chat_index(meta.get("chat_index"))
         _side_meta = meta.get("side")
         if isinstance(_side_meta, dict) and _side_meta.get("messages"):
             from gideon.interfaces.dashboard.side_state import SideState
@@ -647,6 +684,7 @@ def save_session_to_history(
         return
     history_key = persisted_history_key(state.conversation_log, session.key)
     outgoing = _persistable(msgs)
+    chat_index = build_chat_index(msgs)
     if not force:
         _persisted = _persisted_message_count(state, history_key)
         if _persisted and len(outgoing) <= _persisted:
@@ -720,6 +758,9 @@ def save_session_to_history(
             meta_line["never_archive"] = True
         if session.forked_from is not None:
             meta_line["forked_from"] = session.forked_from
+        if chat_index:
+            meta_line["chat_index"] = chat_index
+        session.chat_index = chat_index
         _side = getattr(session, "_side", None)
         if _side is not None and _side.messages:
             meta_line["side"] = _side.to_dict()

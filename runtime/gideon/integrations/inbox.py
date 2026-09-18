@@ -9,10 +9,10 @@ import json
 import logging
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import MISSING, asdict, dataclass, field, fields
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, get_origin, get_type_hints
 
 from gideon.core.atomic_write import atomic_write
 from gideon.core.config import loader as config_loader
@@ -236,26 +236,59 @@ class InboxItem:
         entirely — permanently, because the poison was on disk. Dropping the value falls the
         field back to its dataclass default and the inbox loads again.
 
-        Only fields in :data:`_UPDATABLE_FIELD_TYPES` are dropped, and every one of those has
-        a default. A required field is left alone so a genuinely unreadable record still
-        fails loudly at construction instead of being silently invented.
+        A value is dropped exactly when the field HAS a default to fall back to
+        (:data:`_REPAIRABLE_FIELD_TYPES`) — that is the whole safety argument, so the set is
+        derived from the dataclass rather than hand-listed. A required field is left alone so
+        a genuinely unreadable record still fails loudly at construction instead of being
+        silently invented, and the repair reaches every poisonable field rather than only the
+        five the HTTP boundary can write: `context_summary` and `thread_context` are read by
+        `redact_item` and `created_at` by the list handler's sort, so a wrong type in any of
+        them was the same permanent 500 as the reported `draft`.
         """
         clean: dict[str, Any] = {}
         for key, value in d.items():
             if key not in cls.__dataclass_fields__:
                 continue
-            expected = _UPDATABLE_FIELD_TYPES.get(key)
+            expected = _REPAIRABLE_FIELD_TYPES.get(key)
             if expected is not None and not isinstance(value, expected):
                 logger.warning(
                     "inbox item %s: stored %s is a %s, not a %s — falling back to the default",
                     d.get("id", "<no id>"),
                     key,
                     _wire_type_name(type(value)),
-                    _wire_type_name(expected),
+                    _wire_type_name(expected[0]),
                 )
                 continue
             clean[key] = value
         return cls(**clean)
+
+
+def _repairable_field_types(cls: type) -> dict[str, tuple[type, ...]]:
+    """Every field of *cls* that has a default, with the runtime types its stored value may
+    hold — what :meth:`InboxItem.from_dict` is allowed to repair.
+
+    The read-side twin of :data:`_UPDATABLE_FIELD_TYPES`, which is the WRITE contract for the
+    five HTTP-updatable fields only. Derived from the dataclass, not hand-listed: the pair
+    that has to stay in step is a default and its type, and both live on the field itself, so
+    a field added later cannot arrive without its repair. Absence is the safety property — a
+    field with no default is skipped because there is nothing safe to fall back to.
+    """
+    hints = get_type_hints(cls)
+    out: dict[str, tuple[type, ...]] = {}
+    for f in fields(cls):  # type: ignore[arg-type]
+        if f.default is MISSING and f.default_factory is MISSING:
+            continue
+        origin = get_origin(hints[f.name]) or hints[f.name]
+        if origin is float:
+            out[f.name] = (int, float)
+        elif isinstance(origin, type):
+            out[f.name] = (origin,)
+    return out
+
+
+_REPAIRABLE_FIELD_TYPES: dict[str, tuple[type, ...]] = _repairable_field_types(
+    InboxItem
+)
 
 
 class UserResolver:
@@ -326,8 +359,10 @@ class InboxState:
         except OSError:
             logger.warning("Failed to save inbox state")
 
-    def prune_dismissed(self, retention_hours: float = 168.0) -> int:
-        """Remove dismissed IDs older than retention_hours."""
+    def stale_dismissed(self, retention_hours: float = 168.0) -> set[str]:
+        """Dismissed IDs older than retention_hours — the read-only half of
+        :meth:`prune_dismissed`, so the maintenance backlog can be counted without
+        pruning anything."""
         cutoff = time.time() - (retention_hours * 3600)
         stale = set()
         for did in self.dismissed:
@@ -337,6 +372,11 @@ class InboxState:
                     stale.add(did)
             except (ValueError, IndexError):
                 stale.add(did)
+        return stale
+
+    def prune_dismissed(self, retention_hours: float = 168.0) -> int:
+        """Remove dismissed IDs older than retention_hours."""
+        stale = self.stale_dismissed(retention_hours)
         self.dismissed -= stale
         return len(stale)
 

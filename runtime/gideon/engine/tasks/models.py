@@ -21,7 +21,22 @@ class TaskStatus(enum.Enum):
     SKIPPED = "skipped"
 
 
+STARTABLE_STATUSES = (TaskStatus.OPEN, TaskStatus.IN_PROGRESS)
+"""Work a scheduler may offer: nobody is holding it and it still owes work."""
+
+HELD_STATUSES = (TaskStatus.BLOCKED, TaskStatus.SKIPPED)
+"""Work that is unfinished but withheld — a blocker (automatic or manual) or a pass.
+Held work is NOT terminal: it still owes a result, so a prerequisite in one of these
+states keeps its dependents waiting. It is simply not startable right now."""
+
 TERMINAL_STATUSES = (TaskStatus.DONE, TaskStatus.CANCELLED)
+"""Work that owes nobody anything, so it satisfies a dependency. `SKIPPED` is
+deliberately absent — see `HELD_STATUSES` and `workflows.materialize.is_resolved`."""
+
+STATUS_PARTITION = (STARTABLE_STATUSES, HELD_STATUSES, TERMINAL_STATUSES)
+"""The three-way partition of `TaskStatus`: exhaustive and disjoint by construction,
+asserted in `checks/runtime/test_task_dependency_state.py`. A new status must land in
+exactly one of the three, which is what stops a scheduler from silently inheriting it."""
 
 
 class TaskPriority(str, enum.Enum):

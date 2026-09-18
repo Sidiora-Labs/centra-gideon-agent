@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -187,3 +188,69 @@ async def test_runs_list_mine_filter_excludes_foreign_and_reports_the_owner() ->
 
     assert body_all["total"] == 2
     assert FOREIGN in {r["owner_username"] for r in body_all["runs"]}
+
+
+class TestTheProductionStampersStayWired:
+    """Would deleting the caller be caught?
+
+    The two tests above prove the journal row and the history record CAN carry
+    attribution — they pass it in by hand. What they cannot see is the engine dropping
+    it: `RunController` is the only production writer of both, and a run whose opening
+    row and spec-history rows lost their owner would still pass every assertion above
+    while the ledger quietly went back to single-user. So this reads the real call sites
+    out of the module's AST and requires each to forward the RUN's own attribution.
+    """
+
+    @staticmethod
+    def _calls(attr: str) -> list[Any]:
+        import ast
+        import inspect
+
+        from gideon.automation.workflows import controller
+
+        tree = ast.parse(inspect.getsource(controller))
+        return [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == attr
+        ]
+
+    @staticmethod
+    def _run_field_kwargs(call: Any) -> dict[str, str]:
+        import ast
+
+        found: dict[str, str] = {}
+        for kw in call.keywords:
+            if kw.arg is None:
+                continue
+            value = kw.value
+            if (
+                isinstance(value, ast.Attribute)
+                and isinstance(value.value, ast.Attribute)
+                and value.value.attr == "run"
+            ):
+                found[kw.arg] = value.attr
+        return found
+
+    def test_the_opening_journal_row_is_stamped_from_the_run(self) -> None:
+        calls = self._calls("run_started")
+        assert len(calls) == 1, "run_started moved or gained a second caller"
+        kwargs = self._run_field_kwargs(calls[0])
+        assert kwargs.get("owner_username") == "owner_username"
+        assert kwargs.get("origin_harness") == "origin_harness"
+
+    def test_every_spec_history_record_is_stamped_from_the_run(self) -> None:
+        calls = self._calls("history_record")
+        assert calls, "the engine no longer records spec history"
+        for call in calls:
+            kwargs = self._run_field_kwargs(call)
+            assert kwargs.get("owner_username") == "owner_username", ast_dump(call)
+            assert kwargs.get("origin_harness") == "origin_harness", ast_dump(call)
+
+
+def ast_dump(node: Any) -> str:
+    import ast
+
+    return ast.dump(node)[:200]

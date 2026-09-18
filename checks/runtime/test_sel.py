@@ -747,6 +747,68 @@ class TestCallerScopeAttribution:
             log.log(_make_event(event_id="explicit", caller_scope="inbox_triage"))
         assert log.recent()[0]["caller_scope"] == "inbox_triage"
 
+    def test_every_convenience_emitter_stamps_the_active_subsystem(self, tmp_path):
+        """EVERY event carries the field, not just the tool-call one.
+
+        ``log()`` is the single chokepoint, so the way this stays true is that no
+        emitter builds its row around it. Walking the public ``log_*`` helpers is what
+        would catch a new emitter that acquired its own write path.
+        """
+        from gideon.security.guardrails.audit import caller_scope
+
+        log = SecurityEventLog(base_dir=tmp_path)
+        helpers = sorted(
+            name
+            for name in dir(SecurityEventLog)
+            if name.startswith("log_") and callable(getattr(SecurityEventLog, name))
+        )
+        assert helpers == ["log_api_access", "log_tool_invocation"], (
+            "a SEL emitter was added or removed — extend this rail so the new one is "
+            "held to the same attribution contract"
+        )
+        with caller_scope("inbox_triage"):
+            log.log_tool_invocation(
+                session_key="_bg", tool_name="read_file", outcome="completed"
+            )
+            log.log_api_access(
+                caller="dashboard", operation="read_audit", outcome="allowed"
+            )
+        rows = log.recent(limit=2)
+        assert len(rows) == 2
+        assert sorted(r["event_type"] for r in rows) == [
+            "api_access",
+            "tool_invocation",
+        ]
+        for row in rows:
+            assert row["caller_scope"] == "inbox_triage", row["event_type"]
+
+    def test_a_caller_supplied_field_cannot_forge_the_subsystem(self, tmp_path):
+        """The value is the emitting PASS's, never anything the caller handed in.
+
+        No emitter takes ``caller_scope`` as an argument: the only way a value reaches
+        the field is the ambient scope the running subsystem opened. Metadata is the
+        one caller-controlled bag that reaches a row, so a ``caller_scope`` key in it
+        must stay where it was put — nested, inert, and not the attribution the audit
+        reads.
+        """
+        from gideon.security.guardrails.audit import caller_scope
+
+        log = SecurityEventLog(base_dir=tmp_path)
+        with caller_scope("skill_ladder"):
+            log.log_tool_invocation(
+                session_key="dashboard:abc",
+                tool_name="execute_bash",
+                outcome="completed",
+                metadata={"caller_scope": "inbox_triage"},
+            )
+        row = log.recent()[0]
+        assert row["caller_scope"] == "skill_ladder"
+        assert row["metadata"]["caller_scope"] == "inbox_triage"
+        assert row["caller_identity"] == "dashboard:abc"
+        assert row["caller_scope"] != row["caller_identity"]
+        assert row["caller_scope"] != row["agent"]
+        assert log.verify_integrity() == (1, 1)
+
     def test_caller_scope_is_covered_by_the_hmac(self, tmp_path):
         from gideon.security.guardrails.audit import caller_scope
 
@@ -808,3 +870,127 @@ class TestRotate:
         assert not (sel_dir / "security_events.jsonl").exists()
         assert (sel_dir / "sel_hmac.key").read_bytes() == key_before
         assert log.verify_integrity() == (0, 0)
+
+
+class TestOutcomeReason:
+    """``error`` belongs to denied/failed outcomes; a success carries its rationale
+    as ``metadata['reason']`` (BACKLOG-13)."""
+
+    def test_granted_event_moves_rationale_out_of_error(self, log):
+        log.log_api_access(
+            caller="127.0.0.1",
+            operation="internal_auth",
+            outcome="granted",
+            source="token_auth",
+            resources="/api/spawn",
+            error="cookie auth (no secret header)",
+        )
+        event = log.recent()[0]
+        assert event["error"] == ""
+        assert event["metadata"]["reason"] == "cookie auth (no secret header)"
+
+    def test_granted_event_keeps_explicit_reason_metadata(self, log):
+        log.log_api_access(
+            caller="127.0.0.1",
+            operation="internal_auth",
+            outcome="granted",
+            source="token_auth",
+            metadata={"reason": "cookie auth (no secret header)"},
+        )
+        event = log.recent()[0]
+        assert event["error"] == ""
+        assert event["metadata"] == {"reason": "cookie auth (no secret header)"}
+
+    def test_explicit_reason_wins_over_a_stray_error(self, log):
+        log.log_api_access(
+            caller="127.0.0.1",
+            operation="internal_auth",
+            outcome="granted",
+            error="stray",
+            metadata={"reason": "cookie auth"},
+        )
+        event = log.recent()[0]
+        assert event["error"] == ""
+        assert event["metadata"]["reason"] == "cookie auth"
+
+    def test_denied_event_keeps_its_error(self, log):
+        log.log_api_access(
+            caller="127.0.0.1",
+            operation="internal_auth",
+            outcome="denied",
+            source="token_auth",
+            error="wrong secret",
+        )
+        event = log.recent()[0]
+        assert event["error"] == "wrong secret"
+        assert "reason" not in event["metadata"]
+
+    @pytest.mark.parametrize("outcome", ["failure", "failed", "error", "not_found"])
+    def test_failed_outcomes_keep_their_error(self, log, outcome):
+        log.log_tool_invocation(
+            session_key="cli_chat",
+            tool_name="t",
+            outcome=outcome,
+            error="boom",
+        )
+        event = log.recent()[0]
+        assert event["error"] == "boom"
+
+    def test_success_tool_invocation_rationale_becomes_a_reason(self, log):
+        log.log_tool_invocation(
+            session_key="cli_chat",
+            tool_name="t",
+            outcome="approved",
+            error="auto-approved by policy",
+            metadata={"k": "v"},
+        )
+        event = log.recent()[0]
+        assert event["error"] == ""
+        assert event["metadata"] == {"k": "v", "reason": "auto-approved by policy"}
+
+    def test_normalized_record_still_verifies(self, log):
+        log.log_api_access(
+            caller="127.0.0.1",
+            operation="internal_auth",
+            outcome="granted",
+            error="cookie auth (no secret header)",
+        )
+        assert log.verify_integrity() == (1, 1)
+
+    def test_no_success_emitter_passes_a_literal_error(self):
+        """The rail: no call site hands a success outcome a literal ``error=``."""
+        import ast
+
+        from gideon.security.sel import AUDIT_OUTCOME_SUCCESS
+
+        root = Path(__file__).resolve().parents[2] / "runtime" / "gideon"
+        offenders: list[str] = []
+        for path in root.rglob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                func = node.func
+                name = (
+                    func.attr
+                    if isinstance(func, ast.Attribute)
+                    else getattr(func, "id", "")
+                )
+                if name not in (
+                    "log_api_access",
+                    "log_tool_invocation",
+                    "SecurityEvent",
+                ):
+                    continue
+                kwargs = {k.arg: k.value for k in node.keywords if k.arg}
+                outcome, error = kwargs.get("outcome"), kwargs.get("error")
+                if not isinstance(outcome, ast.Constant) or not isinstance(
+                    error, ast.Constant
+                ):
+                    continue
+                if outcome.value in AUDIT_OUTCOME_SUCCESS and error.value:
+                    offenders.append(f"{path}:{node.lineno} outcome={outcome.value!r}")
+        assert not offenders, (
+            "a successful outcome must carry its rationale as metadata['reason'], "
+            "never as error=:\n" + "\n".join(offenders)
+        )

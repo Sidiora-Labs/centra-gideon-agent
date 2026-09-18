@@ -1,5 +1,5 @@
 import './shell.css'
-import { lazy, Suspense, useEffect, useRef, useState, type ComponentType } from 'react'
+import { Suspense, useEffect, useRef, useState, type ComponentType } from 'react'
 import { useApplicationEvents, useShellNavigation, useTerminalShell } from './shellControllers'
 import { MotionConfig, motion } from 'framer-motion'
 import { ease, duration } from '../../shared/theme/motion'
@@ -15,6 +15,7 @@ import { Onboarding } from './Onboarding'
 import { peekOnboardingExit, clearOnboardingExit } from '../../features/onboarding/exitTo'
 import { ProductTour } from '../../features/onboarding/ProductTour'
 import { useHashRoute } from './useHashRoute'
+import { installRoutePreload, lazyRoute } from './routePreload'
 import { useIsMobile } from './useIsMobile'
 import type { RouteProps } from './useQueryState'
 import { ErrorBoundary } from './ErrorBoundary'
@@ -38,31 +39,33 @@ import { getNavApps, onNavAppsChange } from '../../features/apps/navApps'
 import { isDisclosed, undisclosedCount, useNavDisclosure } from './navDisclosure'
 import type { AppSummary } from '../../shared/data/api'
 
-const LoopsSection = lazy(() => import('../../features/loops/LoopsSection').then((m) => ({ default: m.LoopsSection })))
-const CodeSection = lazy(() => import('../../features/code/CodeSection').then((m) => ({ default: m.CodeSection })))
-const SettingsPage = lazy(() => import('../../features/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })))
-const AgentsSection = lazy(() => import('../../features/agents/AgentsSection').then((m) => ({ default: m.AgentsSection })))
-const NotificationsPage = lazy(() => import('../../features/notifications/NotificationsPage').then((m) => ({ default: m.NotificationsPage })))
-const TriggersSection = lazy(() => import('../../features/triggers/TriggersSection').then((m) => ({ default: m.TriggersSection })))
-const LearningPage = lazy(() => import('../../features/learning/LearningPage').then((m) => ({ default: m.LearningPage })))
-const TasksSection = lazy(() => import('../../features/tasks/TasksSection').then((m) => ({ default: m.TasksSection })))
-const ProjectsSection = lazy(() => import('../../features/projects/ProjectsSection').then((m) => ({ default: m.ProjectsSection })))
-const PromptsSection = lazy(() => import('../../features/prompts/PromptsSection').then((m) => ({ default: m.PromptsSection })))
-const WorkflowsSection = lazy(() => import('../../features/workflows/WorkflowsSection').then((m) => ({ default: m.WorkflowsSection })))
-const SkillsPage = lazy(() => import('../../features/skills/SkillsPage').then((m) => ({ default: m.SkillsPage })))
-const ToolsPage = lazy(() => import('../../features/tools/ToolsPage').then((m) => ({ default: m.ToolsPage })))
-const KnowledgeSection = lazy(() => import('../../features/knowledge/KnowledgeSection').then((m) => ({ default: m.KnowledgeSection })))
-const LoopSection = lazy(() => import('../../features/loop/LoopSection').then((m) => ({ default: m.LoopSection })))
-const InboxPage = lazy(() => import('../../features/inbox/InboxPage').then((m) => ({ default: m.InboxPage })))
-const FilesSection = lazy(() => import('../../features/files/FilesSection').then((m) => ({ default: m.FilesSection })))
-const ArtifactsSection = lazy(() => import('../../features/artifacts/ArtifactsSection').then((m) => ({ default: m.ArtifactsSection })))
-const AppsSection = lazy(() => import('../../features/apps/AppsSection').then((m) => ({ default: m.AppsSection })))
-const AppHostPage = lazy(() => import('../../features/apps/AppHostPage').then((m) => ({ default: m.AppHostPage })))
-const TerminalPage = lazy(() => import('../../features/terminal/TerminalPage').then((m) => ({ default: m.TerminalPage })))
-const DashboardPage = lazy(() => import('../../features/dashboard/DashboardPage').then((m) => ({ default: m.DashboardPage })))
-const MissionControl = lazy(() => import('../../features/dashboard/MissionControl').then((m) => ({ default: m.MissionControl })))
-const DiscoverPage = lazy(() => import('../../features/discover/DiscoverPage').then((m) => ({ default: m.DiscoverPage })))
-const CompanionPage = lazy(() => import('../../features/companion/CompanionPage').then((m) => ({ default: m.CompanionPage })))
+const LoopsSection = lazyRoute('loops', () => import('../../features/loops/LoopsSection').then((m) => ({ default: m.LoopsSection })))
+const CodeSection = lazyRoute('code', () => import('../../features/code/CodeSection').then((m) => ({ default: m.CodeSection })))
+const SettingsPage = lazyRoute('settings', () => import('../../features/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })))
+const AgentsSection = lazyRoute('agents', () => import('../../features/agents/AgentsSection').then((m) => ({ default: m.AgentsSection })))
+const NotificationsPage = lazyRoute('notifications', () => import('../../features/notifications/NotificationsPage').then((m) => ({ default: m.NotificationsPage })))
+const TriggersSection = lazyRoute('triggers', () => import('../../features/triggers/TriggersSection').then((m) => ({ default: m.TriggersSection })))
+const LearningPage = lazyRoute('learning', () => import('../../features/learning/LearningPage').then((m) => ({ default: m.LearningPage })))
+const TasksSection = lazyRoute('tasks', () => import('../../features/tasks/TasksSection').then((m) => ({ default: m.TasksSection })))
+const ProjectsSection = lazyRoute('projects', () => import('../../features/projects/ProjectsSection').then((m) => ({ default: m.ProjectsSection })))
+const PromptsSection = lazyRoute('prompts', () => import('../../features/prompts/PromptsSection').then((m) => ({ default: m.PromptsSection })))
+const WorkflowsSection = lazyRoute('workflows', () => import('../../features/workflows/WorkflowsSection').then((m) => ({ default: m.WorkflowsSection })))
+const SkillsPage = lazyRoute('skills', () => import('../../features/skills/SkillsPage').then((m) => ({ default: m.SkillsPage })))
+const ToolsPage = lazyRoute('tools', () => import('../../features/tools/ToolsPage').then((m) => ({ default: m.ToolsPage })))
+const KnowledgeSection = lazyRoute('knowledge', () => import('../../features/knowledge/KnowledgeSection').then((m) => ({ default: m.KnowledgeSection })))
+const LoopSection = lazyRoute('loop', () => import('../../features/loop/LoopSection').then((m) => ({ default: m.LoopSection })))
+const InboxPage = lazyRoute('inbox', () => import('../../features/inbox/InboxPage').then((m) => ({ default: m.InboxPage })))
+const FilesSection = lazyRoute('files', () => import('../../features/files/FilesSection').then((m) => ({ default: m.FilesSection })))
+const ArtifactsSection = lazyRoute('artifacts', () => import('../../features/artifacts/ArtifactsSection').then((m) => ({ default: m.ArtifactsSection })))
+const AppsSection = lazyRoute('apps', () => import('../../features/apps/AppsSection').then((m) => ({ default: m.AppsSection })))
+const AppHostPage = lazyRoute('app', () => import('../../features/apps/AppHostPage').then((m) => ({ default: m.AppHostPage })))
+const TerminalPage = lazyRoute('terminal', () => import('../../features/terminal/TerminalPage').then((m) => ({ default: m.TerminalPage })))
+const DashboardPage = lazyRoute('dashboard', () => import('../../features/dashboard/DashboardPage').then((m) => ({ default: m.DashboardPage })))
+const MissionControl = lazyRoute('mission-control', () => import('../../features/dashboard/MissionControl').then((m) => ({ default: m.MissionControl })))
+const DiscoverPage = lazyRoute('discover', () => import('../../features/discover/DiscoverPage').then((m) => ({ default: m.DiscoverPage })))
+const CompanionPage = lazyRoute('companion', () => import('../../features/companion/CompanionPage').then((m) => ({ default: m.CompanionPage })))
+
+installRoutePreload()
 
 const NAV: NavItem[] = [
   { id: 'dashboard', label: 'Home', icon: LayoutDashboard },

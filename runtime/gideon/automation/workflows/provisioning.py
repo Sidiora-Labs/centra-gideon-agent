@@ -347,6 +347,7 @@ class _StepExecution:
     async def subprocess(self):
         import asyncio
 
+        from gideon.core.cancellation import run_with_timeout
         from gideon.security.sandbox import PROFILE_TOOL, create_subprocess_limited
 
         try:
@@ -357,13 +358,11 @@ class _StepExecution:
                 env=self.environment,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,
             )
             try:
-                streams = await asyncio.wait_for(
-                    process.communicate(), timeout=self.timeout
-                )
+                streams = await run_with_timeout(process, self.timeout)
             except asyncio.TimeoutError:
-                process.kill()
                 return False, f"timed out after {self.timeout}s"
         except FileNotFoundError:
             return False, f"command not found: {self.argv[0]}"

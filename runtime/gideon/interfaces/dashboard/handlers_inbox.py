@@ -646,13 +646,33 @@ async def api_inbox_status(request: web.Request) -> web.Response:
 
 
 async def api_inbox_digest(request: web.Request) -> web.Response:
-    """GET /api/inbox/digest?channel_id=X&hours=4 — on-demand channel digest."""
+    """POST /api/inbox/digest {channel_id, hours} — create an on-demand channel digest.
+
+    A creation, not a read: each call runs a summarization job and ADDS a new item to the
+    store, broadcasts it, and answers 201 with the created row. It was registered as a GET,
+    which made a cacheable, prefetchable, retry-on-idle-safe verb mint LLM-backed rows as a
+    side effect — and left it outside the CSRF and SEL-audit middlewares, both of which key
+    on the method (``server.py``'s ``_safe_methods`` / ``_sel_log_methods``).
+
+    The parameters moved to the JSON body with the verb, like every other POST on this
+    surface. A missing body is an empty one, so the shape of the refusal for a call with no
+    ``channel_id`` is unchanged.
+    """
     state: "ConsoleState" = request.app["state"]
-    channel_id = request.query.get("channel_id", "")
-    if not channel_id:
-        return web.json_response({"error": "channel_id required"}, status=400)
     try:
-        hours = float(request.query.get("hours", "4"))
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        return web.json_response({"error": "body must be an object"}, status=400)
+    channel_id = body.get("channel_id") or ""
+    if not isinstance(channel_id, str) or not channel_id:
+        return web.json_response({"error": "channel_id required"}, status=400)
+    raw_hours = body.get("hours", 4.0)
+    if isinstance(raw_hours, bool):
+        return web.json_response({"error": "hours must be a number"}, status=400)
+    try:
+        hours = float(raw_hours)
     except (TypeError, ValueError):
         return web.json_response({"error": "hours must be a number"}, status=400)
     if hours <= 0:
@@ -665,7 +685,7 @@ async def api_inbox_digest(request: web.Request) -> web.Response:
         if not item:
             return web.json_response({"error": "no messages found"}, status=404)
         state.broadcast_ws("inbox_new_item", _redact_item(item.to_dict()))
-        return web.json_response(_redact_item(item.to_dict()))
+        return web.json_response(_redact_item(item.to_dict()), status=201)
     except Exception:
         logger.exception("Digest generation failed")
         return web.json_response({"error": "digest generation failed"}, status=500)

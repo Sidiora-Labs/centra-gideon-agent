@@ -159,7 +159,7 @@ class _PreparedWrite:
         )
         return cls(config, context, title, citations, claims, validation)
 
-    def execute(self, store: Any, started: float) -> ActionResult:
+    async def execute(self, store: Any, started: float, judge=None) -> ActionResult:
         identity, fingerprint, previous = _lookup(store, self.validation.logical_key)
         decision = decide_write(
             logical_key=self.validation.logical_key,
@@ -197,12 +197,13 @@ class _PreparedWrite:
         conflicts = []
         if self.claims:
             arriving = [claim for claim in self.claims if isinstance(claim, dict)]
-            conflicts = _detect_conflicts(
+            conflicts = await _detect_conflicts(
                 store,
                 arriving,
                 item_id=decision.item_id,
                 source_ref=source,
                 edge_source=decision.item_id or "",
+                judge=judge,
             )
             metadata["claims"], receipt["mentions_appended"] = _merge_claims(
                 existing=metadata.get("claims") or [],
@@ -512,12 +513,141 @@ def _neighbour_claims(store, incoming: list, *, exclude: str) -> list:
     return _ClaimNeighborhood(store, exclude).claims(incoming)
 
 
-def _detect_conflicts(
-    store, incoming: list[dict], *, item_id: str, source_ref: str, edge_source: str = ""
-) -> list[dict]:
-    try:
+CONFLICT_JUDGE_USE_CASE = "background"
+
+MAX_VERDICT_MEMO = 256
+
+_VERDICT_MEMO: dict[str, Any] = {}
+
+
+def reset_conflict_memo() -> None:
+    """Forget every memoized verdict. The seam a test uses to pin CALL COUNT."""
+    _VERDICT_MEMO.clear()
+
+
+async def _default_conflict_judge(prompt: str, *, use_case: str) -> Any:
+    """The one background-tier inference this path is allowed to make.
+
+    Rides ``one_shot_completion`` rather than a provider of its own: that is the seam where
+    the model-call guard applies the circuit breaker, the hard timeout and — the reason this
+    matters here — the SPEND METER. A judging pass that resolved its own provider would be
+    an unmetered inference running unattended on every write, which is exactly the shape of
+    cost nobody notices until the bill arrives.
+
+    ``use_case`` is the FAST background axis, not ``reasoning``: this is a yes/no question
+    over a bounded shortlist on the write path, and routing it to the reasoning chain would
+    put the most expensive model in the install behind every knowledge write.
+    """
+    from gideon.integrations.llm_helpers import one_shot_completion
+
+    return await one_shot_completion(prompt, use_case=use_case, output_type=dict)
+
+
+def _coerce_verdict(answer: Any) -> Any:
+    if isinstance(answer, dict):
+        return answer
+    if isinstance(answer, str):
+        from gideon.integrations.llm_helpers import parse_llm_json
+
+        return parse_llm_json(answer) or {}
+    return {}
+
+
+@dataclass(frozen=True)
+class _ConflictJudgement:
+    """The single question the fast tier is asked, and the shortlist that bounds it.
+
+    One subject claim and one candidate list, chosen deterministically BEFORE any model is
+    reached, is what makes the marginal cost of a write independent of store size: the
+    shortlist is capped at ``MAX_CONFLICT_CANDIDATES``, so the prompt has a ceiling no
+    amount of stored knowledge can raise.
+    """
+
+    subject: Any
+    candidates: list
+
+    @classmethod
+    def for_write(cls, arriving: list, existing: list, settled: set) -> Any:
+        """The one claim worth asking about, or ``None`` when there is nothing to ask.
+
+        Skips every claim the deterministic tier already ruled on — paying a model to
+        re-derive a proof is the one call with no possible upside — and takes the first
+        remaining claim whose shortlist is non-empty. First, not all: the tier is budgeted
+        at ONE inference per persist, and a write carrying twenty claims must cost the same
+        as a write carrying one.
+        """
         from gideon.cognition.knowledge import contradiction
 
+        for claim in arriving:
+            if not claim.statement or claim.statement in settled:
+                continue
+            candidates = contradiction.shortlist(claim, existing)
+            if candidates:
+                return cls(claim, candidates)
+        return None
+
+    async def run(self, judge) -> list:
+        from gideon.cognition.knowledge import contradiction
+
+        key = contradiction.memo_key(self.subject, self.candidates)
+        if key not in _VERDICT_MEMO:
+            prompt = contradiction.conflict_prompt(self.subject, self.candidates)
+            answer = await judge(prompt, use_case=CONFLICT_JUDGE_USE_CASE)
+            if len(_VERDICT_MEMO) >= MAX_VERDICT_MEMO:
+                _VERDICT_MEMO.clear()
+            _VERDICT_MEMO[key] = _coerce_verdict(answer)
+        return contradiction.parse_model_verdict(
+            _VERDICT_MEMO[key], self.subject, self.candidates
+        )
+
+
+async def _judge_conflicts(
+    arriving: list, existing: list, settled: list, judge
+) -> list:
+    """The model tier's findings, or ``[]`` when it cannot run.
+
+    Every failure mode collapses to ``[]`` — no provider configured, a dead chain, a
+    response that will not parse — because this tier exists to catch what the deterministic
+    one cannot PROVE. Its absence must cost exactly the findings it would have added and
+    nothing else: the deterministic conflicts and their edges are computed and persisted
+    before this is ever awaited, so an unreachable model degrades the pass rather than
+    failing the write.
+    """
+    try:
+        question = _ConflictJudgement.for_write(
+            arriving, existing, {conflict.left_claim for conflict in settled}
+        )
+        if question is None:
+            return []
+        return await question.run(judge or _default_conflict_judge)
+    except Exception:
+        logger.debug(
+            "contradiction judging unavailable — the deterministic findings stand",
+            exc_info=True,
+        )
+        return []
+
+
+async def _detect_conflicts(
+    store,
+    incoming: list[dict],
+    *,
+    item_id: str,
+    source_ref: str,
+    edge_source: str = "",
+    judge=None,
+) -> list[dict]:
+    """Deterministic conflicts first and persisted, then ONE fast-tier opinion on the rest.
+
+    The ORDER is the contract. ``find_conflicts`` runs and its edges are written before the
+    model is reached, so the relationship graph never depends on an inference: the model
+    contributes additional VERDICTS, and the edges for those verdicts are then built by the
+    same deterministic ``edges_from_conflicts`` + ``_write_edges`` pair, carrying
+    ``provenance='inferred'`` so a reader can still tell a proof from an opinion.
+    """
+    from gideon.cognition.knowledge import contradiction
+
+    try:
         arriving = [
             contradiction.Claim.from_dict(
                 {**claim, "source_ref": claim.get("source_ref") or source_ref}
@@ -534,10 +664,18 @@ def _detect_conflicts(
                 contradiction.edges_from_conflicts(conflicts),
                 source_item=edge_source,
             )
-        return [conflict.to_dict() for conflict in conflicts]
     except Exception:
         logger.warning("conflict detection failed — the write proceeds", exc_info=True)
         return []
+
+    judged = await _judge_conflicts(arriving, candidates, conflicts, judge)
+    if edge_source and judged:
+        _write_edges(
+            store,
+            contradiction.edges_from_conflicts(judged),
+            source_item=edge_source,
+        )
+    return [conflict.to_dict() for conflict in [*conflicts, *judged]]
 
 
 def _claim_bearing_ids(store, *, exclude: str, limit: int = 40) -> list[str]:
@@ -753,8 +891,18 @@ class KnowledgePersistActionProvider(ActionProvider):
         return "Persist Knowledge"
 
     async def execute(
-        self, action_config: dict[str, Any], ctx: ActionContext, timeout: int = 30
+        self,
+        action_config: dict[str, Any],
+        ctx: ActionContext,
+        timeout: int = 30,
+        *,
+        judge=None,
     ) -> ActionResult:
+        """``judge`` overrides the contradiction tier's model seam (default:
+        :func:`_default_conflict_judge`, one metered background-tier call). It exists so a
+        test can drive the real persist path with a controlled model instead of reaching a
+        provider, and so a caller with no model plumbing can pass a judge that declines.
+        """
         started = time.monotonic()
         config = action_config or {}
         if config.get("content") is None:
@@ -770,7 +918,7 @@ class KnowledgePersistActionProvider(ActionProvider):
         except Exception as exc:
             return ActionResult(False, error=f"knowledge store unavailable: {exc}")
         try:
-            return prepared.execute(store, started)
+            return await prepared.execute(store, started, judge)
         finally:
             try:
                 store.close()

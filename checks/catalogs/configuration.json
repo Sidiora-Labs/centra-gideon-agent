@@ -341,11 +341,6 @@
         "sensitive": false,
         "type": "list[str]"
       },
-      "dashboard.update_dev_mode": {
-        "default": false,
-        "sensitive": false,
-        "type": "bool"
-      },
       "dashboard.url": {
         "default": "",
         "sensitive": false,

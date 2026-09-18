@@ -235,6 +235,94 @@ def test_a_refused_accept_leaves_the_proposal_pending(store):
     assert store.get("p1").status == "pending"
 
 
+def test_a_kind_with_no_installer_is_refused_rather_than_recorded(store):
+    """The route reports an INSTALL refusal as 409 with the structured reason.
+
+    Collapsing it into the gate's 403 would tell a reviewer they lack permission for a
+    proposal nobody can install yet; returning 200 — what the implicit fall-through did
+    — told them it was installed. The row stays pending either way, so the same accept
+    works once a writer is declared for the kind.
+    """
+    _filed(store, "p1", kind="tier_migration")
+    resp = _run(
+        L.api_learning_proposal_accept(
+            _req(
+                "POST",
+                "/api/learning/proposals/p1/accept",
+                match={"id": "p1"},
+                user="me",
+            )
+        )
+    )
+    assert resp.status == 409
+    body = _body(resp)
+    assert body["refusal"]["refusal"] == "unsupported_kind"
+    assert body["refusal"]["kind"] == "tier_migration"
+    assert body["refusal"]["retryable"] is True
+    assert store.get("p1") is not None
+    assert store.get("p1").status == "pending"
+
+
+def test_a_writer_that_fails_leaves_the_row_pending(store, monkeypatch):
+    """Same contract for a declared writer that raises: nothing installed, nothing
+    recorded, the row still there to retry."""
+    from gideon.cognition.learning import installers
+
+    def _boom(data, ctx):
+        raise RuntimeError("the store is read-only")
+
+    monkeypatch.setitem(
+        installers.REGISTRY,
+        installers.Kind.RETIREMENT,
+        installers.Binding(note="pretends to retire", install=_boom),
+    )
+    _filed(store, "p1", kind="retirement")
+
+    resp = _run(
+        L.api_learning_proposal_accept(
+            _req(
+                "POST",
+                "/api/learning/proposals/p1/accept",
+                match={"id": "p1"},
+                user="me",
+            )
+        )
+    )
+
+    assert resp.status == 409
+    assert _body(resp)["refusal"]["refusal"] == "install_failed"
+    assert "read-only" in _body(resp)["refusal"]["reason"]
+    assert store.get("p1") is not None
+    assert store.get("p1").status == "pending"
+
+
+def test_a_template_diff_with_nothing_to_apply_is_not_recorded_as_accepted(store):
+    """The refiner's diff is applied INSIDE the accept now, not after it.
+
+    A diff carrying no typed ops used to be accepted and then reported
+    ``{"applied": false}`` — the row deleted, the decision remembered, the template
+    unchanged. It is a refusal.
+    """
+    _filed(store, "p1", kind="template_diff", target="nightly-report")
+
+    resp = _run(
+        L.api_learning_proposal_accept(
+            _req(
+                "POST",
+                "/api/learning/proposals/p1/accept",
+                match={"id": "p1"},
+                user="me",
+            )
+        )
+    )
+
+    assert resp.status == 409
+    assert _body(resp)["refusal"]["refusal"] == "install_failed"
+    assert "no typed ops" in _body(resp)["refusal"]["reason"]
+    assert store.get("p1") is not None
+    assert store.get("p1").status == "pending"
+
+
 def test_a_missing_row_is_404_and_a_refused_actor_is_403(store):
     """Collapsing them would report a permission decision as a typo and vice versa."""
     missing = _run(

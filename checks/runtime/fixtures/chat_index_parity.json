@@ -1,0 +1,26 @@
+{
+  "note": "Shared vector: the console derivation (apps/console/src/features/chat/sessionMarkers.ts) and the durable index (runtime/gideon/interfaces/dashboard/chat_index.py) must agree marker for marker, including the fork coordinate.",
+  "messages": [
+    { "role": "user", "content": "fix the build" },
+    { "role": "tool", "content": "Terminal", "meta": { "tool_call_id": "t1" } },
+    { "role": "user", "content": "fix the build" },
+    { "role": "tool", "content": "🔧 Terminal", "meta": { "tool_call_id": "t1", "done": true, "ok": false } },
+    { "role": "tool", "content": "Task", "meta": { "tool_call_id": "t2", "tool": "Task", "done": true } },
+    { "role": "permission", "content": "Terminal", "meta": { "approval_id": "a1", "tool": "Terminal" } },
+    { "role": "assistant", "content": "step one" },
+    { "role": "assistant", "content": "step two" },
+    { "role": "error", "content": "boom" },
+    { "role": "user", "content": "thanks" },
+    { "role": "assistant", "content": "welcome" }
+  ],
+  "expected": [
+    { "id": "t0", "kind": "turn", "label": "fix the build", "role": "user", "turn_index": 0, "jump_index": 0, "failed_tool": false },
+    { "id": "t1", "kind": "turn", "label": "step one step two", "role": "assistant", "turn_index": 1, "jump_index": 3, "failed_tool": true },
+    { "id": "t1s0", "kind": "tool", "label": "Terminal", "role": "assistant", "turn_index": 1, "jump_index": 3, "failed_tool": true },
+    { "id": "t1s1", "kind": "subagent", "label": "Task", "role": "assistant", "turn_index": 1, "jump_index": 3, "failed_tool": true },
+    { "id": "t1s2", "kind": "approval", "label": "Terminal", "role": "assistant", "turn_index": 1, "jump_index": 3, "failed_tool": true },
+    { "id": "t1s5", "kind": "error", "label": "boom", "role": "assistant", "turn_index": 1, "jump_index": 3, "failed_tool": true },
+    { "id": "t2", "kind": "turn", "label": "thanks", "role": "user", "turn_index": 2, "jump_index": 4, "failed_tool": false },
+    { "id": "t3", "kind": "turn", "label": "welcome", "role": "assistant", "turn_index": 3, "jump_index": 5, "failed_tool": false }
+  ]
+}

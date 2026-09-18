@@ -259,12 +259,15 @@ async def test_real_constraint_failure_is_returned_without_losing_borrowed_conne
     assert store.db.execute("SELECT 1").fetchone()[0] == 1
 
 
-def test_missing_index_is_a_real_best_effort_failure_after_durable_item_write(store):
+@pytest.mark.asyncio
+async def test_missing_index_is_a_real_best_effort_failure_after_durable_item_write(
+    store,
+):
     prepared = persist._PreparedWrite.prepare(
         {"title": "No index", "content": "durable text"}, context()
     )
     store.db.execute("DROP TABLE items_fts")
-    result = prepared.execute(store, time.monotonic())
+    result = await prepared.execute(store, time.monotonic())
     assert result.success, result.error
     output = json.loads(result.stdout)
     assert row(store, output["item_id"])["content"] == "durable text"

@@ -413,7 +413,6 @@ RECORDS = {
             "offer_check_work": Value(("dashboard", "offer_check_work"), True, bool),
             "stream_reveal": Value(("dashboard", "stream_reveal"), "smooth"),
             "auto_open_browser": Value(("dashboard", "auto_open_browser"), True),
-            "update_dev_mode": Value(("dashboard", "update_dev_mode"), False),
             "screen_share_enabled": Value(
                 ("dashboard", "screen_share_enabled"), False, bool
             ),

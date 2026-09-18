@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from gideon.core.cancellation import run_with_timeout, terminate_and_reap
 from gideon.integrations.tts.provider import TtsProvider
 from gideon.security.security import redact_credentials, redact_exfiltration_urls
 
@@ -202,9 +203,7 @@ class _StitchTarget:
 
 async def _stop_codec(process) -> None:
     if process is not None and process.returncode is None:
-        with contextlib.suppress(ProcessLookupError):
-            process.kill()
-        await process.wait()
+        await terminate_and_reap(process)
 
 
 @contextlib.contextmanager
@@ -251,7 +250,7 @@ async def stitch_wavs(paths: list[str], output: str | None = None) -> str | None
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                await asyncio.wait_for(process.communicate(), timeout=30)
+                await run_with_timeout(process, 30)
                 return target.finish(process.returncode)
             finally:
                 await _stop_codec(process)

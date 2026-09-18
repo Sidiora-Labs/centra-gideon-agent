@@ -18,6 +18,8 @@ REQUEST_NO_TURN = "no_turn"
 REQUEST_FIRST = "first"
 REQUEST_REPEAT = "repeat"
 REAP_GRACE_SECS = 2.0
+TIMEOUT_GRACE_SECS = 0.5
+_PIPE_FDS = (0, 1, 2)
 
 
 @dataclass
@@ -159,6 +161,42 @@ def _signal_child(proc: Any, sig: int) -> None:
         action()
 
 
+def _pipe_transports(proc: Any) -> list[Any]:
+    transport = getattr(proc, "_transport", None)
+    getter = getattr(transport, "get_pipe_transport", None)
+    if getter is None:
+        return []
+    pipes = []
+    for descriptor in _PIPE_FDS:
+        with contextlib.suppress(Exception):
+            pipe = getter(descriptor)
+            if pipe is not None:
+                pipes.append(pipe)
+    return pipes
+
+
+def close_child_pipes(proc: Any) -> None:
+    """Close the child's stdin/stdout/stderr so no descendant keeps our ends alive.
+
+    A killed child does not close the pipes its own children inherited, and
+    ``Process.wait()`` resolves on pipe disconnect rather than on reaping — so a
+    grandchild that still holds the inherited stdout turns a deadline into the
+    grandchild's full runtime. Retiring a child therefore has to drop OUR ends too.
+    """
+    writer = getattr(proc, "stdin", None)
+    if writer is not None:
+        with contextlib.suppress(Exception):
+            writer.close()
+    for pipe in _pipe_transports(proc):
+        with contextlib.suppress(Exception):
+            pipe.close()
+
+
+def open_pipe_count(proc: Any) -> int:
+    """How many of *proc*'s pipe transports are still open. Diagnostics and rails."""
+    return sum(1 for pipe in _pipe_transports(proc) if not pipe.is_closing())
+
+
 class _ChildRetirement:
     def __init__(self, process: Any, allowance: float):
         self.process = process
@@ -172,40 +210,79 @@ class _ChildRetirement:
             return False
         return True
 
-    async def graceful(self) -> bool:
+    async def retire(self) -> bool:
+        """SIGTERM the group when it is ours, escalate to SIGKILL, reap, close pipes."""
         if getattr(self.process, "pid", None) is None:
+            close_child_pipes(self.process)
             return False
-        if self.process.returncode is not None:
-            with contextlib.suppress(Exception):
-                await self.process.wait()
-            return True
-        for signal_number in (signal.SIGTERM, signal.SIGKILL):
-            if await self.attempt(signal_number):
+        try:
+            if self.process.returncode is not None:
+                with contextlib.suppress(Exception):
+                    await self.process.wait()
                 return True
-        logger.warning(
-            "cancel: child %s survived SIGKILL", getattr(self.process, "pid", "?")
-        )
-        return False
-
-    async def expired(self) -> bool:
-        if getattr(self.process, "pid", None) is None:
-            return False
-        complete = await self.attempt(signal.SIGKILL)
-        if not complete:
+            for signal_number in (signal.SIGTERM, signal.SIGKILL):
+                if await self.attempt(signal_number):
+                    return True
             logger.warning(
-                "cancel: timed-out child %s not reaped within %ss",
+                "cancel: child %s not reaped within %ss of SIGKILL",
                 getattr(self.process, "pid", "?"),
                 self.allowance,
             )
-        return complete
+            return False
+        finally:
+            close_child_pipes(self.process)
 
 
 async def terminate_and_reap(proc: Any, *, grace: float = REAP_GRACE_SECS) -> bool:
-    return await _ChildRetirement(proc, grace).graceful()
+    """Retire a child we own: terminate, escalate, reap within ``2 * grace``."""
+    return await _ChildRetirement(proc, grace).retire()
 
 
-async def kill_timed_out(proc: Any, *, grace: float = REAP_GRACE_SECS) -> bool:
-    return await _ChildRetirement(proc, grace).expired()
+async def kill_timed_out(proc: Any, *, grace: float = TIMEOUT_GRACE_SECS) -> bool:
+    """Retire a child that blew its deadline. The same owner, a tighter allowance."""
+    return await _ChildRetirement(proc, grace).retire()
+
+
+async def _under_deadline(
+    proc: Any, awaited: Any, timeout: float | None, grace: float
+) -> Any:
+    try:
+        return await asyncio.wait_for(awaited, timeout=timeout)
+    except BaseException:
+        with contextlib.suppress(BaseException):
+            await kill_timed_out(proc, grace=grace)
+        raise
+
+
+async def run_with_timeout(
+    proc: Any,
+    timeout: float | None,
+    *,
+    payload: bytes | None = None,
+    grace: float = TIMEOUT_GRACE_SECS,
+) -> tuple[bytes, bytes]:
+    """``proc.communicate(payload)`` under *timeout*. THE owner of a blown deadline.
+
+    On expiry (or on cancellation, or on a broken pipe) the child is retired here and
+    only here: its group is signalled when the child leads one, the signal escalates to
+    SIGKILL after *grace*, the reap is bounded, and the child's pipes are closed so no
+    descendant keeps them open. The original exception is then re-raised, so a caller
+    keeps whatever it already does with ``asyncio.TimeoutError``.
+
+    *payload* is forwarded only when there is one: a caller with no stdin pipe gets the
+    bare ``communicate()`` it was already making, so routing a site through here never
+    changes the call the child sees, and the return type is ``communicate()``'s own.
+    """
+    awaited = proc.communicate() if payload is None else proc.communicate(payload)
+    return await _under_deadline(proc, awaited, timeout, grace)
+
+
+async def wait_with_timeout(
+    proc: Any, timeout: float | None, *, grace: float = TIMEOUT_GRACE_SECS
+) -> int | None:
+    """``proc.wait()`` under *timeout*, retired through :func:`run_with_timeout`'s owner."""
+    await _under_deadline(proc, proc.wait(), timeout, grace)
+    return proc.returncode
 
 
 _CURRENT_SCOPE: contextvars.ContextVar[CancelScope | None] = contextvars.ContextVar(

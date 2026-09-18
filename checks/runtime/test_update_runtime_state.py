@@ -94,7 +94,13 @@ async def test_actual_checkout_fetch_branch_selection_changes_and_update(
     (clone / "tracked").write_text("local")
     (clone / "untracked").write_text("keep")
     assert update.git_tracked_changes(str(clone)) == [" M tracked"]
-    assert update.git_reset_hard(str(clone), "main").returncode == 0
+    plan = update.SourcePlan("branch", "origin/main")
+    assert (await update.plan_source_update(str(clone), "nightly")).paused
+    assert update.git_merge_ff_only(str(clone), plan.ref).returncode != 0
+    assert (clone / "tracked").read_text() == "local"
+    git(clone, "checkout", "--", "tracked")
+    assert update.git_is_fast_forward(str(clone), plan.ref)
+    assert update.git_merge_ff_only(str(clone), plan.ref).returncode == 0
     assert (clone / "tracked").read_text() == "second"
     assert (clone / "untracked").read_text() == "keep"
     assert await update.commits_behind_upstream(str(clone)) == 0

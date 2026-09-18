@@ -67,6 +67,8 @@ import { confirm, promptInput } from '../shared/ui/dialog'
 import { type ChatTurn, type Segment, type ToolSegment, type ApprovalSegment, type ActivitySegment, type ThinkingSegment, appendThinking, type SubagentCard, type HistMsg, type MemoryCitation, type SkillUsed, userTurn, assistantTurn, hydrateTurns, turnText, deriveActivity, skillsUsedLabel, skillsUsedTitle, stampActivityOrigin } from './chat/chatTypes'
 import { ThinkingBlock } from './chat/ThinkingBlock'
 import { branchIndexOf, branchParentKey } from './chat/branchLineage'
+import { deriveSessionMarkers } from './chat/sessionMarkers'
+import { SessionMarkerRail } from './chat/SessionMarkerRail'
 import { buildOptimizerContext } from './chat/optimizerContext'
 import { useIdentity, firstNameOf } from '../app/shell/identity'
 import { usePlatform } from '../app/shell/usePlatform'
@@ -1464,6 +1466,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   }
 
   const activity = useMemo(() => deriveActivity(turns), [turns])
+  const sessionMarkers = useMemo(() => deriveSessionMarkers(turns), [turns])
   function jumpToTurn(turnIndex: number) {
     const node = turnNodes.current.get(turnIndex)
     node?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -2131,6 +2134,9 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
                   </div>
                 </div>
               </div>
+              <SessionMarkerRail markers={sessionMarkers} currentTurn={turns.length - 1}
+                onJump={(m) => jumpToTurn(m.turnIndex)}
+                className="absolute right-2 top-1/2 z-10 -translate-y-1/2" />
               <div className="relative shrink-0 px-l pb-l">
                 {
 }
