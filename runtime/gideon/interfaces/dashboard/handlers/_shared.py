@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from gideon.core.cancellation import run_with_timeout
 from gideon.interfaces.dashboard.state import ConsoleState
 
 logger = logging.getLogger(__name__)
@@ -83,17 +84,12 @@ async def _list_marketplace_skills() -> list[dict[str, Any]]:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
+        stdout, _ = await run_with_timeout(proc, 15)
         if proc.returncode != 0:
             return []
     except FileNotFoundError:
         return []
     except asyncio.TimeoutError:
-        try:
-            proc.kill()
-        except ProcessLookupError:
-            pass
-        await proc.communicate()
         return []
 
     result: list[dict[str, Any]] = []

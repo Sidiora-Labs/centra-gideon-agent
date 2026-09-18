@@ -93,8 +93,8 @@ async def api_ws(request: web.Request) -> web.WebSocketResponse:
 
     try:
         sessions_data = [s.to_dict() for s in state._sessions.values()]
-        await ws.send_json(
-            {"type": "sessions", "data": sessions_data, "yolo": state.is_yolo_active()}
+        await state.send_ws_event(
+            ws, "sessions", sessions_data, extra={"yolo": state.is_yolo_active()}
         )
     except Exception:
         pass
@@ -110,7 +110,7 @@ async def api_ws(request: web.Request) -> web.WebSocketResponse:
                         for entry in list(_log_ring):
                             try:
                                 parsed = json.loads(entry)
-                                await ws.send_json({"type": "log", "data": parsed})
+                                await state.send_ws_event(ws, "log", parsed)
                             except Exception:
                                 pass
                     elif msg_type == "unsubscribe_logs":
@@ -129,19 +129,18 @@ async def api_ws(request: web.Request) -> web.WebSocketResponse:
                                     session = a.parent_session_key.removeprefix(
                                         "dashboard:"
                                     )
-                                    await ws.send_json(
+                                    await state.send_ws_event(
+                                        ws,
+                                        "subagent_snapshot",
                                         {
-                                            "type": "subagent_snapshot",
-                                            "data": {
-                                                "id": a.id,
-                                                "session": session,
-                                                "task": _r(a.task),
-                                                "agent": _r(a.agent),
-                                                "streaming": _r(a.streaming_text),
-                                                "last_tool": _r(a.last_tool),
-                                                "started": a.started,
-                                            },
-                                        }
+                                            "id": a.id,
+                                            "session": session,
+                                            "task": _r(a.task),
+                                            "agent": _r(a.agent),
+                                            "streaming": _r(a.streaming_text),
+                                            "last_tool": _r(a.last_tool),
+                                            "started": a.started,
+                                        },
                                     )
                                 except Exception:
                                     pass
@@ -152,20 +151,17 @@ async def api_ws(request: web.Request) -> web.WebSocketResponse:
                                     "dashboard:"
                                 )
                                 try:
-                                    await ws.send_json(
+                                    await state.send_ws_event(
+                                        ws,
+                                        "subagent_done",
                                         {
-                                            "type": "subagent_done",
-                                            "data": {
-                                                "id": a.id,
-                                                "session": session,
-                                                "elapsed": a.elapsed,
-                                                "error": (
-                                                    _r(a.error) if a.error else None
-                                                ),
-                                                "task": _r(a.task),
-                                                "agent": _r(a.agent),
-                                            },
-                                        }
+                                            "id": a.id,
+                                            "session": session,
+                                            "elapsed": a.elapsed,
+                                            "error": (_r(a.error) if a.error else None),
+                                            "task": _r(a.task),
+                                            "agent": _r(a.agent),
+                                        },
                                     )
                                 except Exception:
                                     pass

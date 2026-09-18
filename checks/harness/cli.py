@@ -40,6 +40,7 @@ from checks.harness.diff import (
     commit_subjects_since,
     compute_diff,
     has_fix_shaped_commit,
+    run_git,
     touches_specs,
 )
 from checks.harness.profiles import get_profile, resolve_commands
@@ -313,11 +314,10 @@ def _print_findings(findings: list[scanner.Finding], root: Path) -> int:
 
 
 def _tracked_files(root: Path) -> list[Path]:
-    try:
-        out = subprocess.run(
-            ["git", "ls-files"], cwd=root, capture_output=True, text=True, check=False
-        ).stdout
-    except OSError:
+    """Every tracked path, through the shared git reader so an undecodable byte or a
+    non-ASCII name yields a usable path instead of killing the scan."""
+    rc, out, _ = run_git(["ls-files"], root)
+    if rc != 0:
         return []
     return [root / ln.strip() for ln in out.splitlines() if ln.strip()]
 

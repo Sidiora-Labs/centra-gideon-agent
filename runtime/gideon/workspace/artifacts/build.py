@@ -54,12 +54,12 @@ import json
 import logging
 import os
 import shutil
-import signal
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from gideon.core.atomic_write import atomic_write, atomic_write_bytes
+from gideon.core.cancellation import run_with_timeout
 from gideon.core.config import loader as config_loader
 from gideon.core.layout import package_path
 from gideon.security.sandbox import PROFILE_BUILD, build_child_env
@@ -372,24 +372,6 @@ def _escape(text: str) -> str:
     )
 
 
-def _kill_tree(proc: "asyncio.subprocess.Process") -> None:
-    """SIGKILL the build's whole session, falling back to the leader alone.
-
-    The group kill is the point: see :func:`_run_esbuild`'s note — killing only the
-    leader leaves a grandchild holding the stdout pipe and the "timeout" becomes as
-    long as the runaway build.
-    """
-    try:
-        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        return
-    except (ProcessLookupError, PermissionError, OSError):
-        pass
-    try:
-        proc.kill()
-    except ProcessLookupError:  # pragma: no cover - it exited as we killed it
-        pass
-
-
 async def _run_esbuild(
     argv: list[str],
     *,
@@ -410,7 +392,11 @@ async def _run_esbuild(
     bundler killed by pid leaves its own children holding the inherited stdout
     pipe, and ``Process.wait()`` does not return until that pipe closes — a 1s
     timeout over a ``sleep 30`` took 30s to raise. Its own session makes the whole
-    tree killable in one :func:`os.killpg`, which took 1.06s for the same case.
+    tree killable in one :func:`os.killpg`, which took 1.06s for the same case. The
+    killing itself is NOT done here: it belongs to
+    :func:`gideon.core.cancellation.run_with_timeout`, the one owner of a blown
+    process deadline, which signals the group, escalates, reaps within a bound and
+    closes the pipes the grandchild would otherwise keep.
     """
     from gideon.security.sandbox import create_subprocess_limited
 
@@ -431,10 +417,8 @@ async def _run_esbuild(
         ),
     )
     try:
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        out, _ = await run_with_timeout(proc, timeout)
     except asyncio.TimeoutError:
-        _kill_tree(proc)
-        await proc.wait()
         raise ArtifactBuildError(
             "the React build timed out",
             f"the bundler was still running after {timeout:.0f}s and was stopped, so no "

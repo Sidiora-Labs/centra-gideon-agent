@@ -438,7 +438,18 @@ def defer(pid: str) -> bool:
 
 
 class AcceptError(Exception):
-    """Raised when a proposal cannot be accepted."""
+    """Raised when a proposal cannot be accepted.
+
+    ``refusal`` carries the structured reason when the accept was refused by the
+    install step — ``{"refusal", "kind", "reason", "retryable"}`` — so a surface can
+    tell "this kind has no installer yet" from "the installer failed" from "you may
+    not accept", and say which. Empty for the gate refusals, whose reason is the
+    message itself.
+    """
+
+    def __init__(self, message: str, *, refusal: dict | None = None) -> None:
+        super().__init__(message)
+        self.refusal = dict(refusal or {})
 
 
 def accept(pid: str, *, installer=None, actor: str = "user") -> Proposal:

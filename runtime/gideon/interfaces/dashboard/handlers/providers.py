@@ -474,7 +474,15 @@ async def api_provider_models(request: web.Request) -> web.Response:
     not loaded, or a provider that exposes no discovery) returns an empty list — NOT
     an error — so a keyless/non-HTTP provider (e.g. Bedrock) can never 500 here (the
     old code assumed every non-ollama provider served an OpenAI ``/v1/models`` and
-    fell back to ``localhost:11434``)."""
+    fell back to ``localhost:11434``).
+
+    A discovery that FAILED is a different answer from an empty catalog, and it is
+    reported as one: a :class:`~gideon.integrations.llm.catalog.ModelDiscoveryError`
+    becomes ``error`` (the sentence the console already renders above the list) plus
+    ``discovery_error`` — its ``kind``/``detail``/``remedy``/``address``, for a caller
+    that wants to branch on the class rather than parse the sentence. Both are
+    secret-free by construction."""
+    from gideon.integrations.llm.catalog import ModelDiscoveryError
     from gideon.integrations.llm.registry import (
         ProviderResolutionError,
         get_default_registry,
@@ -494,6 +502,20 @@ async def api_provider_models(request: web.Request) -> web.Response:
         return web.json_response({"models": []})
     try:
         models = await catalog.list_models()
+    except ModelDiscoveryError as failure:
+        logger.warning(
+            "model discovery failed for provider %r: %s (%s)",
+            name,
+            failure.detail,
+            failure.kind,
+        )
+        return web.json_response(
+            {
+                "models": [],
+                "error": str(failure),
+                "discovery_error": failure.to_dict(),
+            }
+        )
     except Exception as exc:  # noqa: BLE001 — discovery failure is not a server error
         logger.warning("model discovery failed for provider %r", name, exc_info=True)
         return web.json_response({"models": [], "error": relayed_failure_copy(exc)})

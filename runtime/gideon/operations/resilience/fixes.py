@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
+from gideon.operations.resilience.grammar import count_noun
+
 logger = logging.getLogger(__name__)
 
 
@@ -174,9 +176,9 @@ def _orphan_prune_preview() -> str:
     rollbacks = _rollback_dirs()
     parts = []
     if locks:
-        parts.append(f"{len(locks)} stale lock file(s) (>24h old)")
+        parts.append(f"{count_noun(len(locks), 'stale lock file')} (>24h old)")
     if rollbacks:
-        parts.append(f"{len(rollbacks)} interrupted-update rollback dir(s)")
+        parts.append(count_noun(len(rollbacks), "interrupted-update rollback dir"))
     if not parts:
         return "No orphaned locks or rollback leftovers found."
     return (
@@ -203,7 +205,10 @@ def _orphan_prune_apply() -> str:
         logger.debug(
             "recover_interrupted_updates failed during orphan prune", exc_info=True
         )
-    return f"Removed {removed} stale lock(s); reconciled {len(recovered)} rollback leftover(s)."
+    return (
+        f"Removed {count_noun(removed, 'stale lock')}; "
+        f"reconciled {count_noun(len(recovered), 'rollback leftover')}."
+    )
 
 
 def _active_models_prune_preview() -> str:
@@ -225,7 +230,10 @@ def _active_models_prune_preview() -> str:
         stale = raw_refs - pruned_refs
         if stale <= 0:
             return "No active-model bindings reference removed providers."
-        return f"Would drop {stale} model binding(s) that reference removed providers."
+        return (
+            f"Would drop {count_noun(stale, 'model binding')} that reference "
+            "removed providers."
+        )
     except Exception:
         return "Could not evaluate active-model bindings."
 

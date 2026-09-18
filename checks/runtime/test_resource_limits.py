@@ -200,3 +200,53 @@ def test_gateway_boot_has_no_unguarded_import_resource():
         and node.func.id == "raise_fd_limit"
         for node in ast.walk(lifecycle)
     ), "Runtime startup no longer calls the guarded raise_fd_limit helper"
+
+
+@pytest.mark.asyncio
+async def test_the_row_states_the_platform_fact_without_claiming_windows_support(
+    monkeypatch,
+):
+    """req 94 ac_2 — the capability is EXPOSED, and the exposure never reads as support.
+
+    The row is ``ok=True`` on both sides (absence is a platform fact, not a gateway
+    failure), which is exactly the shape that could quietly read as "Windows is fine": a
+    green row whose text says nothing. So the degraded detail is asserted for the three
+    things an operator needs — the platform it is talking about, that the facility is NOT
+    there, and the two consequences — and against the affirmative sentence from the other
+    branch, which is what a row claiming support would carry.
+    """
+    monkeypatch.setattr(rl, "_resource", None)
+    monkeypatch.setattr(sys, "platform", "win32")
+    probe = {p.id: p for p in doctor.all_probes()}[PROBE_ID]
+
+    res = await probe.run(DoctorContext())
+
+    assert res.evidence == {"platform": "win32", "available": False}
+    assert "win32" in res.detail, "the row does not say which platform it measured"
+    assert "NOT available" in res.detail
+    assert "not raised at boot" in res.detail
+    assert "does not apply" in res.detail
+    assert (
+        "(rlimit) available" not in res.detail
+    ), "the degraded row carries the available branch's claim"
+    assert "windows" not in probe.title.lower(), (
+        "the capability row must not name a platform it cannot measure support for — it "
+        "reports the POSIX facility's presence, nothing more"
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_available_row_claims_only_what_the_boot_path_does(monkeypatch):
+    """The floor for the test above: the POSIX branch is not a blanket claim either — it
+    names the two consumers that actually consult the helper, so the two branches stay
+    readable as one sentence about this host."""
+    fake = _FakeResource(soft=256, hard=1_000_000)
+    monkeypatch.setattr(rl, "_resource", fake)
+    probe = {p.id: p for p in doctor.all_probes()}[PROBE_ID]
+
+    res = await probe.run(DoctorContext())
+
+    assert res.evidence["available"] is True
+    assert "available" in res.detail and "NOT available" not in res.detail
+    assert "NOFILE" in res.detail and "sandbox" in res.detail
+    assert fake.set_calls == [], "the doctor probe must not mutate the host's limits"

@@ -5,7 +5,12 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field, fields
 
-from gideon.engine.tasks.models import TERMINAL_STATUSES, Task, TaskStatus
+from gideon.engine.tasks.models import (
+    STARTABLE_STATUSES,
+    TERMINAL_STATUSES,
+    Task,
+    TaskStatus,
+)
 
 
 class DependencyCycleError(ValueError):
@@ -137,10 +142,15 @@ def classify_manual_block(task: Task, tasks: dict[str, Task]) -> None:
 
 
 def ready_task_ids(tasks: dict[str, Task]) -> list[str]:
+    """The ids a scheduler may hand out: STARTABLE work whose prerequisites are all
+    satisfied. Not-terminal is a weaker test than startable — it offered every BLOCKED
+    (held) and SKIPPED task whose dependencies happened to be complete, so a manually
+    held task came straight back as ready work. Dependency satisfaction is unchanged:
+    `_unfinished` still reads TERMINAL_STATUSES, so a held prerequisite still waits."""
     return [
         key
         for key, task in tasks.items()
-        if task.status not in TERMINAL_STATUSES and not _unfinished(task, tasks)
+        if task.status in STARTABLE_STATUSES and not _unfinished(task, tasks)
     ]
 
 

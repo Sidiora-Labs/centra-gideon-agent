@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 
+from gideon.cognition.knowledge import searchability
 from gideon.cognition.knowledge.pipeline import ensure_nodes_registered, graph_for
 from gideon.cognition.knowledge.pipeline.executor import PipelineExecutor
 from gideon.cognition.knowledge.pipeline.types import NodeContext
@@ -67,8 +68,13 @@ async def ingest_item(
     publish=None,
 ) -> str:
     """Run the full ingestion graph for *item_id*. Returns the final status
-    (``done`` | ``partial`` | ``failed``). Never raises — a failure is recorded on
-    the item as ``processing_status='failed'`` + ``processing_error``.
+    (``done`` | ``partial`` | ``failed`` | ``unsearchable``). Never raises — a failure is
+    recorded on the item as ``processing_status='failed'`` + ``processing_error``.
+
+    ``unsearchable`` is the terminal state for an ingest that completed but left the item
+    with no retrieval reach at all (``knowledge.searchability``); the typed reason lands in
+    ``file_metadata['unsearchable_reason']`` and is cleared by any later ingest that leaves
+    the item findable. It never masks ``failed`` or ``unreachable``, which already say why.
 
     *publish* (optional) is a ``(event: str, data: dict) -> None`` SSE emitter for
     live progress; *params_for* layers user node-execution-param config.
@@ -258,7 +264,17 @@ async def ingest_item(
     node_phases["entities"] = entities_phase
     node_phases["intents"] = intents_phase
     node_phases["embed"] = embed_phase
-    _merge_file_metadata(store, item_id, {"node_phases": node_phases})
+    merged_metadata: dict = {"node_phases": node_phases}
+
+    ingest_status = status
+    unsearchable_reason = _assess_searchability(store, item_id, embedder)
+    merged_metadata[searchability.METADATA_KEY] = unsearchable_reason or None
+    if unsearchable_reason and status in ("done", "partial"):
+        status = searchability.STATE_UNSEARCHABLE
+        detail = searchability.REASON_DETAIL[unsearchable_reason]
+        proc_error = f"{detail}; {proc_error}" if proc_error else detail
+
+    _merge_file_metadata(store, item_id, merged_metadata)
 
     store.update_item(
         item_id, processing_status=status, processing_error=proc_error, touch=False
@@ -274,7 +290,7 @@ async def ingest_item(
     from gideon.extensions.apps.app_events import KNOWLEDGE_INGESTED
     from gideon.extensions.apps.app_events import emit as emit_platform_event
 
-    if status in ("done", "partial"):
+    if ingest_status in ("done", "partial"):
         emit_platform_event(KNOWLEDGE_INGESTED, {"item_id": item_id, "status": status})
     return status
 
@@ -328,12 +344,38 @@ def _cleanup_orphaned_artifacts(item_id: str) -> None:
 
 def _merge_file_metadata(store, item_id: str, new_keys: dict) -> None:
     """Merge keys into the item's file_metadata, re-reading current state first so a
-    prior merge (structural metadata) in the same run isn't clobbered."""
+    prior merge (structural metadata) in the same run isn't clobbered.
+
+    A key whose new value is ``None`` is REMOVED rather than written as null — that is how
+    a re-ingest clears a state a previous run recorded (``unsearchable_reason``), and a
+    lingering null would leave every reader having to tell "absent" from "present and
+    empty" for a key that only ever means one thing when it is there."""
     fresh = store.get_item(item_id) or {}
     merged = dict(fresh.get("file_metadata") or {})
-    merged.update(new_keys)
+    for key, value in new_keys.items():
+        if value is None:
+            merged.pop(key, None)
+        else:
+            merged[key] = value
     store.update_item(item_id, file_metadata=merged, touch=False)
     store.db.commit()
+
+
+def _assess_searchability(store, item_id: str, embedder) -> str:
+    """The typed unsearchable reason for the just-ingested item, or ``""``.
+
+    Runs AFTER embed + dedup so it measures the item's FINAL reach: the vector the embed
+    stage wrote and the keyword index the store synced. A fault here is not the ingest's
+    fault, so it degrades to "searchable" — reporting a phantom unsearchable state would
+    send a user after content that is perfectly findable."""
+    try:
+        available = bool(embedder) and bool(
+            getattr(embedder, "is_available", lambda: True)()
+        )
+        return searchability.assess(store, item_id, embedding_provider=available)
+    except Exception:  # noqa: BLE001 — a diagnosis must never fail an ingest
+        logger.debug("searchability assessment failed for %s", item_id, exc_info=True)
+        return ""
 
 
 def _persist_structural_metadata(store, item_id: str, item, result) -> None:

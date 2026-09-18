@@ -24,7 +24,7 @@ from gideon.assurance.validation import (
     ValidationError,
     validate_tool_args,
 )
-from gideon.core.cancellation import kill_timed_out
+from gideon.core.cancellation import run_with_timeout, wait_with_timeout
 from gideon.core.config.loader import AppConfig
 from gideon.extensions.providers.failure_copy import relayed_failure_copy
 from gideon.http_errors import json_error
@@ -626,13 +626,8 @@ async def api_upload(request: web.Request) -> web.Response:
         stderr=asyncio.subprocess.DEVNULL,
     )
     try:
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
+        stdout, _ = await run_with_timeout(proc, 120)
     except asyncio.TimeoutError:
-        try:
-            proc.kill()
-        except ProcessLookupError:
-            pass
-        await proc.communicate()
         return web.json_response({"error": "Finder dialog timed out"}, status=504)
     paths = [
         ln for ln in stdout.decode("utf-8", errors="replace").strip().splitlines() if ln
@@ -888,13 +883,8 @@ async def api_screenshot(request: web.Request) -> web.Response:
         stderr=asyncio.subprocess.DEVNULL,
     )
     try:
-        await asyncio.wait_for(proc.wait(), timeout=120)
+        await wait_with_timeout(proc, 120)
     except asyncio.TimeoutError:
-        try:
-            proc.kill()
-        except ProcessLookupError:
-            pass
-        await proc.wait()
         return web.json_response({"error": "screenshot timed out"}, status=504)
     if not dest.exists():
         return web.json_response({"path": ""})
@@ -1727,9 +1717,9 @@ async def _git(
     ``test_files_git_status.py::test_files_has_exactly_one_git_invoker`` — it walks this
     module's AST, so a new git spawn cannot be added quietly.
 
-    The timeout path goes through :func:`gideon.core.cancellation.kill_timed_out`
-    rather than ``proc.kill()`` + ``await proc.wait()``, and the child leads its own
-    session so that helper's GROUP branch can fire. Both halves were measured, not
+    The deadline is owned by :func:`gideon.core.cancellation.run_with_timeout`
+    rather than a local ``proc.kill()`` + ``await proc.wait()``, and the child leads its
+    own session so that owner's GROUP branch can fire. Both halves were measured, not
     reasoned: with a forking ``git`` (an fsmonitor hook, an LFS filter — git plumbing
     does fork) the pid-only kill left the grandchild holding the inherited stdout pipe,
     and ``wait()`` resolves on pipe disconnect rather than on reaping, so **one
@@ -1753,9 +1743,8 @@ async def _git(
     except (OSError, ValueError):
         return _GitResult(False, "")
     try:
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        out, _ = await run_with_timeout(proc, timeout)
     except (asyncio.TimeoutError, OSError, ValueError):
-        await kill_timed_out(proc)
         return _GitResult(False, "")
     truncated = max_bytes is not None and len(out) > max_bytes
     if max_bytes is not None:
@@ -1968,7 +1957,14 @@ def _has_rg() -> bool:
 async def _content_search_rg(
     root: str, query: str, include: str
 ) -> tuple[list[dict], bool]:
-    """Content search via ripgrep --json. Returns (results, truncated)."""
+    """Content search via ripgrep --json. Returns (results, truncated).
+
+    Bounded like :func:`_git`, and for the same measured reason: the deadline goes through
+    :func:`~gideon.core.cancellation.kill_timed_out` and the child leads its OWN session, so
+    the reap signals the whole group. Without the session a forking child leaves a grandchild
+    holding the inherited stdout pipe, and ``wait()`` resolves on pipe disconnect rather than
+    on reaping — a deadline that waits out the process it killed.
+    """
     import asyncio  # noqa: F811
     import json as _json  # noqa: F811
 
@@ -1980,15 +1976,13 @@ async def _content_search_rg(
             *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
+            start_new_session=True,
         )
     except (OSError, ValueError):
         return [], False
     try:
-        out, _ = await asyncio.wait_for(
-            proc.communicate(), timeout=_CONTENT_SEARCH_TIMEOUT
-        )
+        out, _ = await run_with_timeout(proc, _CONTENT_SEARCH_TIMEOUT)
     except (asyncio.TimeoutError, OSError, ValueError):
-        await kill_timed_out(proc)
         return [], False
     results: list[dict] = []
     for line in out.decode("utf-8", "replace").splitlines():

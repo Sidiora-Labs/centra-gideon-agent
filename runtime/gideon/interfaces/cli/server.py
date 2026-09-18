@@ -404,82 +404,67 @@ def _refresh_agent_config(cwd: str) -> None:
         print("  ⚠️  Agent config refresh failed — run: gideon setup --agent-only")
 
 
-def _confirm_discarding(tracked: list[str]) -> bool:
-    """Ask before `git reset --hard` destroys tracked edits. False ⇒ do not reset.
-
-    Non-interactive stdin (cron, a pipe, `< /dev/null`) does NOT prompt. Reading a
-    piped "y" — or letting `input()` raise EOFError into a traceback — would let an
-    unattended caller destroy uncommitted work that nobody agreed to lose. Refusing
-    is recoverable (stash or commit, then re-run); a wrong "yes" is not. The caller
-    turns this refusal into a NON-ZERO exit, because the update the user asked for
-    did not happen; an interactive "n" exits 0, because declining is a choice.
-    """
-    print("  ⚠️  Local tracked-file changes would be discarded:")
-    for line in tracked[:10]:
-        print(f"      {line}")
-    if not sys.stdin.isatty():
-        print(
-            "  ❌ Refusing to discard them without confirmation (stdin is not a terminal)."
-        )
-        print(
-            "     Commit or `git stash` them, or re-run `gideon update` in a terminal."
-        )
-        return False
-    try:
-        resp = input("  Continue? [y/N] ").strip().lower()
-    except EOFError:
-        resp = ""
-    return resp == "y"
-
-
 def _update_git(proj: str) -> None:
-    """Advance a git checkout: fetch → (confirm) reset --hard → build → install.
+    """Advance a git checkout: fetch → fast-forward onto the selected ref → install.
 
-    Respects ``dashboard.update_dev_mode`` exactly as the dashboard's apply does:
-    OFF (default) the checkout rides release TAGS like every other install kind, so
-    being on the latest tag is "up to date" even when `main` has newer commits; ON is
-    the contributor "track every commit" behavior.
+    The ref comes from release policy — the newest stable release, the newest
+    including prereleases on beta, or an exact pin — exactly as every other
+    install kind. ``nightly`` is the one channel that tracks the checked-out
+    branch instead of a tag.
+
+    The move is always ``git merge --ff-only``: no ``git pull`` (which merges
+    whatever the branch's upstream happens to be) and no ``git reset --hard``
+    (which discards commits and uncommitted edits). Uncommitted tracked changes
+    PAUSE the update with the same reason the dashboard and the unattended
+    updater report — one safeguard, in ``self_update.plan_source_update``.
     """
+    import asyncio
+
     git_dir = self_update.git_root(proj)
     if not git_dir:
         print(f"❌ No git repo at {proj}")
         sys.exit(1)
     print(f"  📂 {git_dir}")
 
-    if not AppConfig.load().dashboard.update_dev_mode:
-        latest = _latest_release_version()
-        if _is_current(latest):
-            print(f"\n✅ Already on the latest release (v{latest}).")
-            print(
-                "   Enable Developer update mode (Settings → Updates) to track every commit."
-            )
-            return
+    policy = AppConfig.load().updates
+    plan = asyncio.run(
+        self_update.plan_source_update(
+            git_dir, policy.channel, policy.pin, offline=not policy.check_enabled
+        )
+    )
+    if plan.paused:
+        print(f"  ⏸  Update paused — {plan.reason}")
+        for line in plan.paths[:10]:
+            print(f"      {line}")
+        sys.exit(1)
+    if not plan.ok:
+        print(f"\n✅ {plan.reason}")
+        return
 
-    branch = self_update.resolve_default_branch(git_dir)
-    print("  ⬇️  git fetch…")
-    fetched = self_update.git_fetch(git_dir, branch)
+    print(f"  ⬇️  git fetch ({plan.ref})…")
+    fetched = self_update.fetch_for_plan(git_dir, plan)
     if fetched.returncode != 0:
+        print(f"  ❌ git fetch failed:\n{(fetched.stderr or '').strip()}")
+        sys.exit(1)
+
+    target = self_update.git_commit_for(git_dir, plan.ref)
+    if not target:
+        print(f"  ❌ {plan.ref} is not available in this checkout.")
+        sys.exit(1)
+    if target == self_update.git_commit_for(git_dir, "HEAD"):
+        print("\n✅ Already up to date!")
+        return
+    if not self_update.git_is_fast_forward(git_dir, plan.ref):
         print(
-            f"  ❌ git fetch origin {branch} failed:\n{(fetched.stderr or '').strip()}"
+            f"  ❌ Cannot fast-forward to {plan.ref} — this checkout has commits "
+            "that are not in it."
         )
         sys.exit(1)
 
-    if self_update.git_is_up_to_date(git_dir, branch):
-        print("\n✅ Already up to date!")
-        return
-
-    tracked = self_update.git_tracked_changes(git_dir)
-    if tracked:
-        interactive = sys.stdin.isatty()
-        if not _confirm_discarding(tracked):
-            if interactive:
-                print("  Aborted.")
-            sys.exit(0 if interactive else 1)
-
-    print(f"  🔄 git reset --hard origin/{branch}…")
-    reset = self_update.git_reset_hard(git_dir, branch)
-    if reset.returncode != 0:
-        print(f"  ❌ git reset failed:\n{(reset.stderr or '').strip()}")
+    print(f"  🔄 git merge --ff-only {plan.ref}…")
+    merged = self_update.git_merge_ff_only(git_dir, plan.ref)
+    if merged.returncode != 0:
+        print(f"  ❌ Fast-forward failed:\n{(merged.stderr or '').strip()}")
         sys.exit(1)
 
     pkg_root = self_update.package_root(git_dir)
@@ -494,17 +479,30 @@ def _update_git(proj: str) -> None:
 def _update_pip() -> None:
     """Upgrade a wheel install (pip / pipx / uv tool) in the running environment.
 
+    The version is the one release policy selects (channel or exact pin), and a
+    pin naming no published release is refused rather than silently replaced.
     No source tree is required — that requirement is exactly the dead end this
     replaced. The installer is RESOLVED (uv or pip): a uv-created venv, and a
     `uv tool install`, ship no pip module. Unlike the dashboard's apply there is no
     re-exec: this process is a short-lived CLI, not the gateway, so it prints the
     restart command instead of bouncing a running server nobody asked it to touch.
     """
-    latest = _latest_release_version()
+    import asyncio
+
+    policy = AppConfig.load().updates
+    target = asyncio.run(
+        self_update.resolve_package_target(
+            policy.channel, policy.pin, offline=not policy.check_enabled
+        )
+    )
+    if not target.ok:
+        print(f"  ❌ {target.error}")
+        sys.exit(1)
+    latest = target.version
     if _is_current(latest):
         print(f"\n✅ Already on the latest release (v{latest}).")
         return
-    spec = self_update.upgrade_spec(latest)
+    spec = target.spec
     if latest:
         print(f"  ⬆️  v{__version__} → v{latest}")
     _install(["-U", spec, "--quiet"], cwd="", label=f"install -U {spec}")
@@ -561,24 +559,6 @@ def _is_current(latest: str) -> bool:
     ) <= self_update.version_tuple(__version__)
 
 
-def _latest_release_version() -> str:
-    """The latest published release version (no leading ``v``), or "".
-
-    Offline-tolerant by construction: `fetch_latest_release` degrades to its cache
-    and never raises, and an unknown latest means "don't claim to know", not "fail".
-    """
-    import asyncio
-
-    try:
-        status = asyncio.run(self_update.build_update_status(__version__))
-    except Exception:
-        logging.getLogger(__name__).debug(
-            "release probe failed; continuing without a latest version", exc_info=True
-        )
-        return ""
-    return str(status.get("latest") or "")
-
-
 def _install(args: list[str], *, cwd: str, label: str) -> None:
     """Run the resolved installer with *args*, or exit 1 with a readable reason."""
     from gideon.operations._installer import (
@@ -606,8 +586,9 @@ def _update() -> None:
 
     | kind | what happens | exit |
     |---|---|---|
-    | git | fetch + reset --hard + SPA build + editable install; | 0; 1 on failure or an |
-    |  | dev_mode picks commits vs release tags | unconfirmed destructive reset |
+    | git | fetch + `merge --ff-only` onto the release | 0; 1 on failure, a |
+    |  | tag (or the branch on nightly) + SPA build | non-fast-forward, or a |
+    |  | + editable install | paused dirty tree |
     | pip | resolved installer `-U gideon==<latest>`, then | 0; 1 on install failure |
     |  | "restart the gateway" (pip / pipx / uv tool) |  |
     | container | prints `docker compose pull` + `up -d` | 0 |
@@ -646,6 +627,42 @@ def _update() -> None:
         _update_desktop()
 
 
+STATUS_UNKNOWN = "unknown"
+
+
+def _status_count(data: dict, key: str) -> str:
+    """One counter from the real ``/api/status`` body, or ``unknown``.
+
+    🔴 Never a fallback 0. ``_status`` used to read ``messages``, ``tool_calls`` and
+    ``crons`` — three keys ``api_status`` has never produced — through ``.get(key, 0)``,
+    so a busy gateway reported a confident "0 messages, 0 tool calls, 0 cron jobs". An
+    absent value and a measured zero are different facts and must not render the same.
+    """
+    value = data.get(key)
+    return STATUS_UNKNOWN if value is None else str(value)
+
+
+def _status_schedules(data: dict) -> str:
+    """The schedule-store totals ``ConsoleState.trigger_counts()`` ships under ``cron``."""
+    counts = data.get("cron")
+    if not isinstance(counts, dict) or counts.get("total") is None:
+        return STATUS_UNKNOWN
+    line = str(counts["total"])
+    if counts.get("enabled") is not None:
+        line += f" ({counts['enabled']} enabled)"
+    if counts.get("broken"):
+        line += f", {counts['broken']} broken"
+    return line
+
+
+def _status_turns(data: dict) -> str:
+    """Turns billed this process, from the ``stats`` block ``Stats().snapshot()`` ships."""
+    stats = data.get("stats")
+    if not isinstance(stats, dict) or stats.get("total_turns") is None:
+        return STATUS_UNKNOWN
+    return str(stats["total_turns"])
+
+
 def _status(args: argparse.Namespace) -> None:
     """Query the running gateway for stats, or print offline message."""
     port = resolve_client_port(getattr(args, "port", None))
@@ -669,13 +686,12 @@ def _status(args: argparse.Namespace) -> None:
         return
 
     print(f"Gideon v{__version__}\n")
-    print(f"  Uptime:      {data.get('uptime', '—')}")
-    print(f"  Sessions:    {data.get('sessions', 0)}")
-    print(f"  Messages:    {data.get('messages', 0)}")
-    print(f"  Tool calls:  {data.get('tool_calls', 0)}")
-    print(f"  Subagents:   {data.get('subagents', 0)}")
-    print(f"  Cron jobs:   {data.get('crons', 0)}")
-    print(f"  Lessons:     {data.get('lessons', 0)}")
+    print(f"  Uptime:      {_status_count(data, 'uptime')}")
+    print(f"  Sessions:    {_status_count(data, 'sessions')}")
+    print(f"  Subagents:   {_status_count(data, 'subagents')}")
+    print(f"  Schedules:   {_status_schedules(data)}")
+    print(f"  Turns:       {_status_turns(data)}")
+    print(f"  Lessons:     {_status_count(data, 'lessons')}")
 
 
 def _boot_config() -> AppConfig:

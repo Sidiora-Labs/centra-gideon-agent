@@ -887,7 +887,7 @@ def token_auth_middleware(
                 outcome="granted",
                 source="token_auth",
                 resources=path,
-                error="cookie auth (no secret header)",
+                metadata={"reason": "cookie auth (no secret header)"},
             )
             _log_auth(request, "internal", "granted", f"cookie auth for {_uid}")
             return await handler(request)  # type: ignore[operator]
@@ -938,7 +938,7 @@ def token_auth_middleware(
                     outcome="granted",
                     source="token_auth",
                     resources=path,
-                    error="mixed non-loopback cookie auth",
+                    metadata={"reason": "mixed non-loopback cookie auth"},
                 )
                 _log_auth(
                     request,

@@ -27,7 +27,7 @@ New failure paths add a code; they never repurpose one.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 ERROR_CODES: dict[str, str] = {
@@ -181,6 +181,11 @@ ERROR_CODES: dict[str, str] = {
 }
 
 
+ENVELOPE_FIELD_CAP = 200
+
+_ENVELOPE_LINES: tuple[str, ...] = ("what", "why", "fix")
+
+
 @dataclass(frozen=True)
 class AgentError:
     """One machine-readable failure an agent can recover from.
@@ -208,3 +213,64 @@ class AgentError:
     def to_dict(self) -> dict[str, Any]:
         values = {name: getattr(self, name) for name in ("code", "what", "why", "fix")}
         return {**values, "suggestions": list(self.suggestions)}
+
+    @classmethod
+    def from_dict(cls, record: dict[str, Any]) -> "AgentError":
+        source = record if isinstance(record, dict) else {}
+        values = {
+            name: str(source.get(name, "") or "")
+            for name in ("code", "what", "why", "fix")
+        }
+        suggestions = source.get("suggestions")
+        candidates = suggestions if isinstance(suggestions, (list, tuple)) else ()
+        return cls(**values, suggestions=tuple(str(item) for item in candidates))
+
+    def bounded(self, limit: int = ENVELOPE_FIELD_CAP) -> "AgentError":
+        """The same envelope with each line trimmed to *limit* characters.
+
+        Bounded PER FIELD on purpose: capping the rendered envelope instead would cut
+        it mid-line, and the line that goes first is FIX — the one an operator reading
+        an unattended failure actually needs. A trimmed line ends in an ellipsis so a
+        reader can tell a short explanation from a shortened one.
+        """
+        cap = max(1, int(limit))
+        trimmed = {name: _clip(getattr(self, name), cap) for name in _ENVELOPE_LINES}
+        return replace(self, **trimmed)
+
+
+def _clip(text: str, limit: int) -> str:
+    value = text or ""
+    return value if len(value) <= limit else value[: max(1, limit - 1)] + "…"
+
+
+def redacted_envelope(
+    envelope: AgentError, *, limit: int = ENVELOPE_FIELD_CAP
+) -> AgentError:
+    """*envelope* with credentials/exfiltration URLs scrubbed, then bounded per field.
+
+    Redaction runs BEFORE the bound so a replacement marker cannot push a line back
+    over the cap, which is what lets every carrier of this envelope — a run-history
+    row, a notification body — state one size guarantee.
+    """
+    try:
+        from gideon.security.security import (
+            redact_credentials,
+            redact_exfiltration_urls,
+        )
+    except Exception:
+        return envelope.bounded(limit)
+
+    def scrub(text: str) -> str:
+        current = text or ""
+        for redact in (redact_exfiltration_urls, redact_credentials):
+            current = redact(current)[0]
+        return current
+
+    try:
+        cleaned = replace(
+            envelope,
+            **{name: scrub(getattr(envelope, name)) for name in _ENVELOPE_LINES},
+        )
+    except Exception:
+        return envelope.bounded(limit)
+    return cleaned.bounded(limit)

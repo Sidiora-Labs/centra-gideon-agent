@@ -313,3 +313,51 @@ class TestTheGuardMeetsARealHome:
             entry = next(e for e in inv.INVENTORY if e.id == derived_id)
             assert entry.derived is True
             assert derived_id not in backed_up
+
+
+class TestUsageSummaryIsDerivedState:
+    """#36 — the daily usage fold is REBUILDABLE state, not an unclaimed file.
+
+    `engine/routing/usage.py` writes `usage_stats.json` at the home root, nothing declared it,
+    and so `audit_home` reported a fresh install as unhealthy the first time a model was
+    called. It is a fold over `model_calls.jsonl` + `usage/turns.jsonl` that `GET /api/usage`
+    re-derives on every read, so it is declared `derived` — claimed by the audit, absent from
+    a backup, never a restore that would overwrite a newer fold with an older cache.
+    """
+
+    def _home(self, tmp_path):
+        home = tmp_path / "home"
+        home.mkdir(parents=True)
+        (home / "config.json").write_text("{}", encoding="utf-8")
+        return home
+
+    def test_the_fold_is_declared_rebuildable(self):
+        entry = next(e for e in inv.INVENTORY if e.path == "usage_stats.json")
+        assert entry.derived is True
+        assert entry.kind == inv.KIND_JSON_FILE
+        assert entry.id not in {e.id for e in inv.backup_entries()}
+        assert entry.id in {e.id for e in inv.backup_entries(include_derived=True)}
+
+    def test_a_fresh_install_that_wrote_the_fold_audits_clean(self, tmp_path):
+        """Written by the REAL writer, so the audit is asserted against the path that
+        actually appears in a user's home rather than a hand-typed name."""
+        from gideon.engine.routing.usage import empty_fold, save_usage
+
+        home = self._home(tmp_path)
+        save_usage(home, empty_fold())
+        assert (home / "usage_stats.json").is_file()
+        result = inv.audit_home(home)
+        assert result.ok, f"unclaimed={result.unclaimed}"
+        claim = inv.claim_for("usage_stats.json")
+        assert claim is not None and claim.id == "usage_summary"
+
+    def test_genuinely_unknown_state_still_fails(self, tmp_path):
+        """Vacuity pair: declaring the fold must not be a blanket amnesty for loose files."""
+        from gideon.engine.routing.usage import empty_fold, save_usage
+
+        home = self._home(tmp_path)
+        save_usage(home, empty_fold())
+        (home / "usage_stats_v2.json").write_text("{}", encoding="utf-8")
+        result = inv.audit_home(home)
+        assert not result.ok
+        assert result.unclaimed == ["usage_stats_v2.json"]

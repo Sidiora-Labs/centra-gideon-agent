@@ -195,6 +195,7 @@ class TestUpdateEndpoints:
         assert resp.status == 409
         data = json.loads(resp.body)
         assert "uncommitted" in data["error"]
+        assert data["status"] == "paused"
 
     @pytest.mark.asyncio
     async def test_cancel_clears_progress(self, monkeypatch, tmp_path) -> None:
@@ -285,49 +286,90 @@ class TestUpdateEndpoints:
         assert reexec_called == [True]
 
     @pytest.mark.asyncio
-    async def test_update_apply_rejects_dirty_tree(self, monkeypatch, tmp_path) -> None:
-        """Update apply returns 409 when the tree is dirty AND there are new
-        commits to pull (the dirty gate only guards a REAL pull — a
-        nothing-to-pull apply degrades to restart instead, tested below)."""
+    async def test_update_apply_pauses_on_a_dirty_tree(self, monkeypatch, tmp_path):
+        """RUM-75: tracked edits PAUSE the apply — 409, an actionable reason and
+        an exposed paused state — before any release lookup or git move."""
         monkeypatch.setattr(
             "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
         )
         monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
         (tmp_path / ".git").mkdir(exist_ok=True)
 
-        from gideon.interfaces.dashboard.handlers import api_update_apply
+        import gideon.interfaces.dashboard.handlers.updates as upd
 
+        monkeypatch.setattr(upd, "_apply_in_flight", False)
+        _catalog()
+        calls = _git_script(monkeypatch, tracked=[" M some_file.py"])
         state = _make_state(monkeypatch, tmp_path)
         app = web.Application()
         app["state"] = state
         request = MagicMock()
         request.app = app
 
-        async def fake_exec(*args, **kwargs):  # type: ignore[no-untyped-def]
-            proc = MagicMock()
-            proc.returncode = 0
-            if "rev-list" in args:
-                proc.communicate = AsyncMock(return_value=(b"3\n", b""))
-            elif "status" in args:
-                proc.communicate = AsyncMock(return_value=(b" M some_file.py\n", b""))
-            else:
-                proc.communicate = AsyncMock(return_value=(b"", b""))
-            return proc
+        async def _unreachable(*a, **kw):  # pragma: no cover
+            raise AssertionError("spawned a process for a paused checkout")
 
-        monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
+        monkeypatch.setattr("asyncio.create_subprocess_exec", _unreachable)
 
-        resp = await api_update_apply(request)
-        assert resp.status == 409
+        resp = await upd.api_update_apply(request)
         data = json.loads(resp.body)
-        assert "uncommitted" in data["error"]
-        import gideon.interfaces.dashboard.handlers.updates as upd
-
+        assert resp.status == 409
+        assert data["status"] == "paused"
+        assert "commit or stash" in data["error"].lower()
+        assert data["paths"] == [" M some_file.py"]
+        assert state._update_progress == {"step": "paused", "detail": data["error"]}
+        assert [c[0] for c in calls] == ["status"], f"it touched git anyway: {calls}"
         assert upd._apply_in_flight is False
 
 
+def _catalog(tag: str = "v9.9.9") -> None:
+    """Publish a release the resolver can select, through the real cache file."""
+    su.write_releases_cache(
+        {"releases": [{"tag": tag, "prerelease": False, "name": "", "body": ""}]}
+    )
+
+
+def _git_script(
+    monkeypatch,
+    *,
+    tracked=(),
+    head="aaaaaaa",
+    target="bbbbbbb",
+    ff=True,
+    fetch_rc=0,
+    merge_rc=0,
+):
+    """Script self_update's ONE sync git seam and record every invocation."""
+    import subprocess as _sp
+
+    calls: list[list[str]] = []
+
+    def _run(args, *, cwd, timeout):
+        calls.append(list(args))
+        verb = args[0]
+        if verb == "fetch":
+            return _sp.CompletedProcess(args, fetch_rc, "", "boom" if fetch_rc else "")
+        if verb == "rev-parse":
+            ref = args[-1]
+            sha = head if ref.startswith("HEAD") else target
+            return _sp.CompletedProcess(args, 0, sha + "\n", "")
+        if verb == "merge-base":
+            return _sp.CompletedProcess(args, 0 if ff else 1, "", "")
+        if verb == "merge":
+            return _sp.CompletedProcess(args, merge_rc, "", "")
+        if verb == "status":
+            out = "".join(f"{line}\n" for line in tracked)
+            return _sp.CompletedProcess(args, 0, out, "")
+        return _sp.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(su, "_run_git", _run)
+    return calls
+
+
 class TestUpdateApplyPipeline:
-    """The public manual-apply pipeline: git pull → pip install -e . →
-    frontend rebuild → graceful re-exec, with the in-flight guard."""
+    """The public manual-apply pipeline: fetch → `merge --ff-only` onto the
+    selected release → pip install -e . → frontend rebuild → graceful re-exec,
+    with the in-flight guard."""
 
     def _make_request(self, state):
         app = web.Application()
@@ -351,6 +393,8 @@ class TestUpdateApplyPipeline:
         import gideon.interfaces.dashboard.handlers.updates as upd
 
         monkeypatch.setattr(upd, "_apply_in_flight", False)
+        _catalog()
+        git_calls = _git_script(monkeypatch)
 
         state = _make_state(monkeypatch, tmp_path)
         steps_seen: list[str] = []
@@ -368,10 +412,7 @@ class TestUpdateApplyPipeline:
             commands.append(args)
             proc = MagicMock()
             proc.returncode = 0
-            if "rev-list" in args:
-                proc.communicate = AsyncMock(return_value=(b"5\n", b""))
-            else:
-                proc.communicate = AsyncMock(return_value=(b"", b""))
+            proc.communicate = AsyncMock(return_value=(b"", b""))
             return proc
 
         monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
@@ -405,6 +446,9 @@ class TestUpdateApplyPipeline:
         assert fe_built == [str(tmp_path)]
         assert len(reexec_calls) == 1
         assert upd._apply_in_flight is False
+        assert ["fetch", "--tags", "origin"] in git_calls
+        assert ["merge", "--ff-only", "v9.9.9"] in git_calls
+        assert not any(c[0] in ("pull", "reset") for c in git_calls)
 
     @pytest.mark.asyncio
     async def test_pip_failure_stops_before_restart(
@@ -420,6 +464,8 @@ class TestUpdateApplyPipeline:
         import gideon.interfaces.dashboard.handlers.updates as upd
 
         monkeypatch.setattr(upd, "_apply_in_flight", False)
+        _catalog()
+        _git_script(monkeypatch)
         state = _make_state(monkeypatch, tmp_path)
 
         calls = [0]
@@ -430,9 +476,6 @@ class TestUpdateApplyPipeline:
             if any("pip" in str(a) for a in args):
                 proc.communicate = AsyncMock(return_value=(b"", b"resolver exploded"))
                 proc.returncode = 1
-            elif "rev-list" in args:
-                proc.communicate = AsyncMock(return_value=(b"2\n", b""))
-                proc.returncode = 0
             else:
                 proc.communicate = AsyncMock(return_value=(b"", b""))
                 proc.returncode = 0
@@ -458,25 +501,21 @@ class TestUpdateApplyPipeline:
         assert upd._apply_in_flight is False
 
     @pytest.mark.asyncio
-    async def test_dev_mode_off_on_latest_tag_restarts_only(
+    async def test_already_on_the_selected_release_restarts_without_installing(
         self, monkeypatch, tmp_path
     ) -> None:
-        """Git checkout, commits ahead upstream, but on the latest release TAG
-        and update_dev_mode OFF → ride tags, not commits: degrade to restart-only
-        (no git pull), even though the upstream has new commits (plan 34 T4.3)."""
+        """The checkout already sits on the resolved tag ⇒ no move, no install,
+        no rebuild — just the restart the user asked for."""
         monkeypatch.setattr(
             "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
         )
         monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
         (tmp_path / ".git").mkdir(exist_ok=True)
         import gideon.interfaces.dashboard.handlers.updates as upd
-        from gideon import __version__ as _ver
 
         monkeypatch.setattr(upd, "_apply_in_flight", False)
-        monkeypatch.setattr(su, "commits_behind_upstream", AsyncMock(return_value=3))
-        import gideon.operations.self_update as uk
-
-        monkeypatch.setattr(uk, "read_release_cache", lambda: {"tag": f"v{_ver}"})
+        _catalog()
+        git_calls = _git_script(monkeypatch, head="same", target="same")
         state = _make_state(monkeypatch, tmp_path)
         steps_seen: list[str] = []
         orig = state.push_update_progress
@@ -485,10 +524,10 @@ class TestUpdateApplyPipeline:
             "push_update_progress",
             lambda step, detail="": (steps_seen.append(step), orig(step, detail))[1],
         )
-        pulled: list = []
+        spawned: list = []
 
         async def fake_exec(*args, **kwargs):  # type: ignore[no-untyped-def]
-            pulled.append(args)
+            spawned.append(args)
             proc = MagicMock()
             proc.returncode = 0
             proc.communicate = AsyncMock(return_value=(b"", b""))
@@ -496,6 +535,7 @@ class TestUpdateApplyPipeline:
 
         monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
         monkeypatch.setattr(upd, "_graceful_reexec", AsyncMock())
+        monkeypatch.setattr(upd, "build_frontend_async", AsyncMock())
 
         app = web.Application()
         app["state"] = state
@@ -506,16 +546,18 @@ class TestUpdateApplyPipeline:
         resp = await upd.api_update_apply(request)
         assert resp.status == 200
         await asyncio.sleep(0.05)
-        assert "restarting" in steps_seen
-        assert "pulling" not in steps_seen
-        assert not any("pull" in a for a in pulled)
+        assert steps_seen == ["pulling", "restarting"]
+        assert "installing" not in steps_seen
+        assert not any(c[0] == "merge" for c in git_calls)
+        assert spawned == []
         assert upd._apply_in_flight is False
 
-    async def _run_nothing_to_pull(self, monkeypatch, tmp_path, *, rev_list):
-        """Drive api_update_apply with a mocked git where `rev-list HEAD..@{u}`
-        behaves per `rev_list` (a (returncode, stdout) tuple) and the tree is
-        DIRTY — proving dirtiness doesn't matter when nothing will be pulled.
-        Returns (resp_data, steps_seen, reexec_calls, commands)."""
+    @pytest.mark.asyncio
+    async def test_no_release_for_the_channel_degrades_to_restart(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        """Nothing to move to (no published release) ⇒ restart only, with the
+        reason — and it never reaches fetch/install/build, even on a CLEAN tree."""
         monkeypatch.setattr(
             "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
         )
@@ -524,90 +566,86 @@ class TestUpdateApplyPipeline:
         import gideon.interfaces.dashboard.handlers.updates as upd
 
         monkeypatch.setattr(upd, "_apply_in_flight", False)
+        git_calls = _git_script(monkeypatch)
         state = _make_state(monkeypatch, tmp_path)
-
         steps_seen: list[tuple[str, str]] = []
-        original_push = state.push_update_progress
-
-        def track_push(step: str, detail: str = "") -> None:
-            steps_seen.append((step, detail))
-            original_push(step, detail)
-
-        monkeypatch.setattr(state, "push_update_progress", track_push)
-
-        commands: list[tuple] = []
-        rc, out = rev_list
+        orig = state.push_update_progress
+        monkeypatch.setattr(
+            state,
+            "push_update_progress",
+            lambda step, detail="": (
+                steps_seen.append((step, detail)),
+                orig(step, detail),
+            )[1],
+        )
+        spawned: list = []
 
         async def fake_exec(*args, **kwargs):  # type: ignore[no-untyped-def]
-            commands.append(args)
+            spawned.append(args)
             proc = MagicMock()
-            if "rev-list" in args:
-                proc.returncode = rc
-                proc.communicate = AsyncMock(return_value=(out, b""))
-            elif "status" in args:
-                proc.returncode = 0
-                proc.communicate = AsyncMock(return_value=(b" M dirty.py\n", b""))
-            else:
-                proc.returncode = 0
-                proc.communicate = AsyncMock(return_value=(b"", b""))
+            proc.returncode = 0
+            proc.communicate = AsyncMock(return_value=(b"", b""))
             return proc
 
         monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
-
+        reexec = AsyncMock()
+        monkeypatch.setattr(upd, "_graceful_reexec", reexec)
         fe_build = AsyncMock()
         monkeypatch.setattr(upd, "build_frontend_async", fe_build)
 
-        reexec_calls: list[dict] = []
+        app = web.Application()
+        app["state"] = state
+        app["auth_cfg"] = None
+        request = MagicMock()
+        request.app = app
 
-        async def fake_reexec(state, *, auth_mode=""):  # type: ignore[no-untyped-def]
-            reexec_calls.append({"auth_mode": auth_mode})
-
-        monkeypatch.setattr(upd, "_graceful_reexec", fake_reexec)
-
-        resp = await upd.api_update_apply(self._make_request(state))
-        assert resp.status == 200
+        resp = await upd.api_update_apply(request)
         data = json.loads(resp.body)
         await asyncio.sleep(0.05)
+        assert data["status"] == "restarting"
+        assert "No published release" in data["detail"]
+        assert [s for s, _ in steps_seen] == ["restarting"]
+        assert reexec.await_count == 1
+        fe_build.assert_not_awaited()
+        assert spawned == []
+        assert not any(c[0] in ("fetch", "merge") for c in git_calls)
+        assert upd._apply_in_flight is False
+
+    @pytest.mark.asyncio
+    async def test_a_non_fast_forward_is_refused_instead_of_forced(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        """RUM-59: divergence is an error the operator can read, never a reset."""
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
+        (tmp_path / ".git").mkdir(exist_ok=True)
+        import gideon.interfaces.dashboard.handlers.updates as upd
+
+        monkeypatch.setattr(upd, "_apply_in_flight", False)
+        _catalog()
+        git_calls = _git_script(monkeypatch, ff=False)
+        state = _make_state(monkeypatch, tmp_path)
+        reexec = AsyncMock()
+        monkeypatch.setattr(upd, "_graceful_reexec", reexec)
+        fe_build = AsyncMock()
+        monkeypatch.setattr(upd, "build_frontend_async", fe_build)
+
+        app = web.Application()
+        app["state"] = state
+        app["auth_cfg"] = None
+        request = MagicMock()
+        request.app = app
+
+        assert (await upd.api_update_apply(request)).status == 200
+        await asyncio.sleep(0.05)
+        assert state._update_progress["step"] == "error"
+        assert "fast-forward" in state._update_progress["detail"]
+        assert not any(c[0] == "merge" for c in git_calls)
+        reexec.assert_not_awaited()
         fe_build.assert_not_awaited()
         assert upd._apply_in_flight is False
-        return data, steps_seen, reexec_calls, commands
-
-    @pytest.mark.asyncio
-    async def test_no_upstream_degrades_to_restart(self, monkeypatch, tmp_path) -> None:
-        """No upstream configured (rev-list @{u} fails) → skip pull/install/
-        build entirely, push ONLY the restarting step, and reach the re-exec —
-        even on a DIRTY tree (nothing will be pulled, dirtiness is moot)."""
-        data, steps, reexec, commands = await self._run_nothing_to_pull(
-            monkeypatch,
-            tmp_path,
-            rev_list=(128, b""),
-        )
-        assert data["status"] == "restarting"
-        assert "No upstream" in data["detail"]
-        assert [s for s, _ in steps] == ["restarting"]
-        assert "No upstream" in steps[0][1]
-        assert len(reexec) == 1
-        flat = [str(a) for cmd in commands for a in cmd]
-        assert "pull" not in flat
-        assert "pip" not in flat
-
-    @pytest.mark.asyncio
-    async def test_up_to_date_degrades_to_restart(self, monkeypatch, tmp_path) -> None:
-        """Upstream configured but zero new commits → same short-circuit:
-        restarting step + re-exec, with an 'Already up to date' note."""
-        data, steps, reexec, commands = await self._run_nothing_to_pull(
-            monkeypatch,
-            tmp_path,
-            rev_list=(0, b"0\n"),
-        )
-        assert data["status"] == "restarting"
-        assert "Already up to date" in data["detail"]
-        assert [s for s, _ in steps] == ["restarting"]
-        assert "Already up to date" in steps[0][1]
-        assert len(reexec) == 1
-        flat = [str(a) for cmd in commands for a in cmd]
-        assert "pull" not in flat
-        assert "pip" not in flat
 
     @pytest.mark.asyncio
     async def test_concurrent_apply_returns_409(self, monkeypatch, tmp_path) -> None:
@@ -787,7 +825,7 @@ class TestGitCheckReadsRemoteVersion:
         monkeypatch.setattr(U, "_local_version", "0.1.3")
         saved = dict(U._update_info)
         try:
-            asyncio.run(U._do_update_check())
+            asyncio.run(U._do_update_check(force=True))
             assert U._update_info["latest"] == "0.1.4", U._update_info
             assert U._update_info["available"] is True
             assert U._update_info["checked"] is True
@@ -804,30 +842,32 @@ class TestGitCheckReadsRemoteVersion:
         monkeypatch.setattr(U, "_local_version", "0.1.4")
         saved = dict(U._update_info)
         try:
-            asyncio.run(U._do_update_check())
+            asyncio.run(U._do_update_check(force=True))
             assert U._update_info["available"] is False
         finally:
             U._update_info.clear()
             U._update_info.update(saved)
 
 
-class TestCheckAgreesWithApplyUnderDevMode:
-    """PUBL-8: in commit-tracking mode, "behind" IS an available update.
+class TestCheckAgreesWithApplyOnNightly:
+    """PUBL-8: on the branch-tracking channel, "behind" IS an available update.
 
-    The drive measured the disagreement: ``update_dev_mode`` on, ``commits_behind``
+    The drive measured the disagreement: commit tracking on, ``commits_behind``
     1, and the check still reported ``available: false`` while POST /api/update
-    happily pulled.
+    happily moved. The commit-tracking mode is now the ``nightly`` channel —
+    the retired ``dashboard.update_dev_mode`` bool said the same thing with a
+    second setting.
     """
 
     @staticmethod
     def _run(monkeypatch, *, dev_mode: bool, behind, kind: str = "git") -> dict:
         import types
 
+        from gideon.core.config.loader import UpdatesConfig
         from gideon.interfaces.dashboard.handlers import updates as U
 
         cfg = types.SimpleNamespace(
-            auto_update=True,
-            dashboard=types.SimpleNamespace(update_dev_mode=dev_mode),
+            updates=UpdatesConfig(channel="nightly" if dev_mode else "stable")
         )
         monkeypatch.setattr(U.AppConfig, "load", staticmethod(lambda: cfg))
         monkeypatch.setattr(U, "_do_update_check", AsyncMock())
@@ -849,15 +889,15 @@ class TestCheckAgreesWithApplyUnderDevMode:
         resp = asyncio.run(U.api_update_check(MagicMock()))
         return json.loads(resp.body)
 
-    def test_dev_mode_behind_is_available(self, monkeypatch) -> None:
+    def test_nightly_behind_is_available(self, monkeypatch) -> None:
         assert self._run(monkeypatch, dev_mode=True, behind=1)["available"] is True
 
-    def test_dev_mode_up_to_date_is_not_available(self, monkeypatch) -> None:
-        """Vacuity guard — the clause must not turn every dev-mode check green."""
+    def test_nightly_up_to_date_is_not_available(self, monkeypatch) -> None:
+        """Vacuity guard — the clause must not turn every nightly check green."""
         assert self._run(monkeypatch, dev_mode=True, behind=0)["available"] is False
 
-    def test_tag_mode_behind_is_not_available(self, monkeypatch) -> None:
-        """Dev mode OFF rides release TAGS: commits behind is deliberately not news."""
+    def test_a_tag_channel_behind_is_not_available(self, monkeypatch) -> None:
+        """Stable rides release TAGS: commits behind is deliberately not news."""
         assert self._run(monkeypatch, dev_mode=False, behind=1)["available"] is False
 
     def test_non_git_kind_ignores_commits_behind(self, monkeypatch) -> None:

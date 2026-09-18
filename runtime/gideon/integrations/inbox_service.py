@@ -19,12 +19,18 @@ The service is channel-independent: draft/classify/digest operate on the stored 
 (populated by the native push source + any configured poll providers), so they work
 even with no external provider connected.
 
-It also owns the inbox **background loop** (:meth:`start` / :meth:`stop`): each tick
-polls the wired message-source provider for new messages (ingesting them with
-alert evaluation + live WS broadcast) and runs periodic maintenance — retention
-cleanup honoring the entity settings (``auto_cleanup_enabled`` / ``retention_days``)
-plus dismissed-set pruning. Polling no-ops when no provider is wired; maintenance
-always runs so native/push items age out too.
+It also owns the inbox **poll loop** (:meth:`start` / :meth:`stop`): each tick polls
+the wired message-source provider for new messages (ingesting them with alert
+evaluation + live WS broadcast). The loop no-ops when no provider is wired.
+
+Maintenance — retention cleanup honoring the entity settings (``auto_cleanup_enabled``
+/ ``retention_days``) plus dismissed-set pruning — is NOT on that loop and has no
+private timer here. It is the ``inbox.maintenance`` job of the remediation engine
+(:mod:`gideon.operations.resilience.remediation`), measured through
+:func:`maintenance_backlog` and executed through :func:`run_live_maintenance`, both of
+which act on the LIVE service bound to the dashboard state. Maintenance is therefore
+scored, visible in the Doctor panel, runnable on demand, and bound by the global
+remediation switch like every other absorbed maintenance pass.
 """
 
 from __future__ import annotations
@@ -46,6 +52,7 @@ from gideon.integrations.inbox import (
     ItemKind,
     ItemStatus,
     evaluate_alert,
+    make_item_id,
     notify_inbox_alert,
 )
 from gideon.security.guardrails.audit import caller_scope
@@ -58,8 +65,6 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
-
-_MAINTENANCE_EVERY_SECS = 6 * 3600
 
 
 def _dashboard_state():
@@ -149,7 +154,6 @@ class InboxService:
         self._last_poll_ok = True
         self._last_error = ""
         self._poll_count = 0
-        self._last_maintenance_at = 0.0
         self._task: asyncio.Task | None = None  # type: ignore[type-arg]
 
     def health(self) -> dict:
@@ -164,13 +168,17 @@ class InboxService:
         }
 
     def start(self) -> None:
-        """Start the background loop. Idempotent."""
+        """Start the poll loop. Idempotent.
+
+        Starts NO private task when no provider is wired, and no maintenance timer in
+        any case: polling is the loop's only remaining reason to exist, and maintenance
+        belongs to the remediation engine (see the module docstring)."""
+        if self._provider is None:
+            logger.info("Inbox: no message-source provider wired — no poll loop")
+            return
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._loop())
-            logger.info(
-                "Inbox loop started (provider=%s)",
-                self._provider.source_name if self._provider else "none",
-            )
+            logger.info("Inbox loop started (provider=%s)", self._provider.source_name)
 
     def stop(self) -> None:
         if self._task is not None:
@@ -194,13 +202,6 @@ class InboxService:
                 return
             except asyncio.TimeoutError:
                 pass
-            now = time.time()
-            if now - self._last_maintenance_at >= _MAINTENANCE_EVERY_SECS:
-                try:
-                    self.run_maintenance()
-                except Exception:
-                    logger.warning("Inbox maintenance failed", exc_info=True)
-                self._last_maintenance_at = now
             if self._provider is not None:
                 try:
                     await self._poll_once()
@@ -318,6 +319,28 @@ class InboxService:
         if count:
             self.inbox.flush()
         return count
+
+    def maintenance_backlog(self) -> int:
+        """How much maintenance work is waiting: items past the retention window (only
+        when auto-cleanup is enabled — nothing is due otherwise) plus dismissed ids old
+        enough to prune.
+
+        The remediation engine's deficit probe, so it is CHEAP: two passes over data
+        already in memory, no disk read, no model call, no mutation."""
+        from gideon.extensions.providers.entity_routes import load_inbox_settings
+
+        pending = len(self.state.stale_dismissed())
+        settings = load_inbox_settings()
+        if settings.get("auto_cleanup_enabled"):
+            try:
+                days = max(1, int(settings.get("retention_days") or 90))
+            except (TypeError, ValueError):
+                days = 90
+            cutoff = time.time() - (days * 86400)
+            pending += sum(
+                1 for item in self.inbox.items.values() if item.created_at < cutoff
+            )
+        return pending
 
     def run_maintenance(self) -> int:
         """Retention cleanup honoring the inbox entity settings + state pruning.
@@ -442,7 +465,14 @@ class InboxService:
 
         Pulls the window from the configured provider's channel history when one is
         wired; otherwise falls back to the stored items for that channel. Returns the
-        created digest item, or None when there's nothing in the window."""
+        created digest item, or None when there's nothing in the window.
+
+        The id comes from :func:`~gideon.integrations.inbox.make_item_id`, like every
+        other minted item: ``{channel}_digest_{uuid8}_{ts}``. The old
+        ``{channel}_digest_{int(ts)}`` collided — two digests for one channel inside the
+        same second were the same id, so the second one REPLACED the first in the store.
+        The uuid8 sits in the middle because the trailing timestamp is what ``InboxItem.ts``
+        (and therefore sorting and retention) reads."""
         messages = await self._recent_messages(channel_id, hours)
         if not messages:
             return None
@@ -477,7 +507,7 @@ class InboxService:
             return None
         ts = time.time()
         item = InboxItem(
-            id=f"{channel_id}_digest_{int(ts)}",
+            id=make_item_id(f"{channel_id}_digest", now=ts),
             channel=channel_id,
             channel_name=channel_name,
             thread_ts=None,
@@ -546,3 +576,29 @@ def _parse_classification(raw: str) -> tuple[str, str]:
         cls if cls in valid_cls else Classification.NEEDS_REPLY.value,
         conf if conf in valid_conf else Confidence.NEEDS_REVIEW.value,
     )
+
+
+def live_service() -> "InboxService | None":
+    """The InboxService this process is actually running, or None (headless, or the
+    gateway has not bound one yet).
+
+    The gateway binds it onto the dashboard state at startup; maintenance MUST go
+    through it rather than constructing a second InboxService, which would hold its own
+    copy of the store and prune a snapshot the live service would later overwrite."""
+    svc = getattr(_dashboard_state(), "_inbox_svc", None)
+    return svc if isinstance(svc, InboxService) else None
+
+
+def maintenance_backlog() -> int:
+    """The live service's maintenance backlog, 0 when no service is running."""
+    svc = live_service()
+    return svc.maintenance_backlog() if svc is not None else 0
+
+
+def run_live_maintenance() -> str:
+    """Run inbox maintenance on the live service — the ``inbox.maintenance``
+    remediation job."""
+    svc = live_service()
+    if svc is None:
+        return "no live inbox service — nothing to maintain"
+    return f"pruned {svc.run_maintenance()} expired inbox item(s)"

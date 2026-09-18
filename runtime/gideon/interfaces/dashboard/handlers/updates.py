@@ -17,7 +17,7 @@ from aiohttp.client_exceptions import ClientConnectionResetError
 from gideon import __version__ as _local_version
 from gideon import shutdown_event
 from gideon.core.atomic_write import atomic_write
-from gideon.core.cancellation import kill_timed_out
+from gideon.core.cancellation import run_with_timeout
 from gideon.core.config import loader as config_loader
 from gideon.core.config.loader import AppConfig
 from gideon.interfaces.dashboard.state import ConsoleState
@@ -47,33 +47,78 @@ def get_update_info() -> dict[str, object]:
     return dict(_update_info)
 
 
+def update_policy():
+    """The ``updates`` config block, or its defaults when config cannot be read.
+
+    Every release-check decision reads this — an unreadable config must not turn
+    the kill switch into "check anyway", so the fallback is the shipped default
+    block, not a hardcoded "enabled".
+    """
+    from gideon.core.config.loader import UpdatesConfig
+
+    try:
+        return AppConfig.load().updates
+    except Exception:
+        logger.debug("could not read updates config; using defaults", exc_info=True)
+        return UpdatesConfig()
+
+
+def update_check_interval_seconds(policy=None) -> float:
+    """The configured gap between scheduled release checks, in seconds."""
+    hours = getattr(policy or update_policy(), "check_interval_hours", 0)
+    try:
+        hours = int(hours)
+    except (TypeError, ValueError):
+        hours = 0
+    return float(hours * 3600) if hours > 0 else float(_UPDATE_CHECK_INTERVAL)
+
+
+def update_check_due(policy=None) -> bool:
+    """Whether a SCHEDULED release check may run right now.
+
+    False while ``updates.check_enabled`` is off — the kill switch is consulted
+    here, before any caller reaches code that could open a connection.
+    """
+    policy = policy or update_policy()
+    if not getattr(policy, "check_enabled", True):
+        return False
+    return time.time() - _last_update_check >= update_check_interval_seconds(policy)
+
+
 async def api_update_check(request: web.Request) -> web.Response:
     """GET /api/update/check — kind-aware update check (contract C2).
 
     Returns the tag-driven cross-kind status ({kind, current, latest,
     update_available, commits_behind, apply_method, instructions}) merged with
     the legacy git changelog-diff fields (available/changes) for backward
-    compatibility with the existing panel. The git kind still runs the
-    commits-behind probe; every kind gets the release-tag comparison. In git
-    developer update mode a non-zero ``commits_behind`` also sets ``available``,
-    so the check agrees with what the apply would actually do.
+    compatibility with the existing panel, plus the live release policy
+    (channel/pin/auto mode/check switch and interval).
+
+    With ``updates.check_enabled`` off this answers entirely from the cached
+    release view: no request is made, not even for an explicitly requested
+    check. The switch is an egress kill switch, not a scheduling preference.
     """
-    await _do_update_check()
-    cfg = AppConfig.load()
+    policy = update_policy()
+    await _do_update_check(force=True)
+    offline = not policy.check_enabled
     try:
-        status = await self_update.build_update_status(_local_version)
+        status = await self_update.build_update_status(_local_version, offline=offline)
     except Exception:
         logger.debug("build_update_status failed; returning legacy view", exc_info=True)
         status = {}
     merged: dict[str, object] = {**_update_info, **status}
     if status.get("latest"):
         merged["available"] = bool(status.get("update_available"))
-    if cfg.dashboard.update_dev_mode and status.get("kind") == "git":
+    if policy.channel == "nightly" and status.get("kind") == "git":
         _behind = status.get("commits_behind")
         if isinstance(_behind, int) and _behind > 0:
             merged["available"] = True
-    merged["auto_update"] = cfg.auto_update
-    merged["update_dev_mode"] = cfg.dashboard.update_dev_mode
+    merged["auto_update"] = policy.auto == "staged"
+    merged["update_mode"] = policy.auto
+    merged["channel"] = policy.channel
+    merged["pin"] = policy.pin
+    merged["check_enabled"] = policy.check_enabled
+    merged["check_interval_hours"] = policy.check_interval_hours
     merged["version"] = _local_version
     return web.json_response(merged)
 
@@ -87,10 +132,22 @@ def _redact_log_text(text: str) -> str:
     return text
 
 
-async def _do_update_check() -> None:
-    """Run git fetch and compare HEAD with remote."""
+async def _do_update_check(*, force: bool = False) -> None:
+    """Run git fetch and compare HEAD with remote.
+
+    Two gates, both BEFORE the first subprocess/connection: ``check_enabled``
+    (the egress kill switch — off means this function opens nothing, ever) and
+    ``check_interval_hours`` (the scheduled cadence). ``force=True`` is a
+    user-initiated check: it skips the interval, never the kill switch.
+    """
     global _last_update_check
 
+    policy = update_policy()
+    if not policy.check_enabled:
+        logger.debug("release check skipped: updates.check_enabled is off")
+        return
+    if not force and not update_check_due(policy):
+        return
     proj = os.environ.get("GIDEON_PROJECT_DIR", "")
     if not proj:
         return
@@ -105,9 +162,8 @@ async def _do_update_check() -> None:
             start_new_session=True,
         )
         try:
-            _, fetch_err = await asyncio.wait_for(proc.communicate(), timeout=30)
+            _, fetch_err = await run_with_timeout(proc, 30)
         except asyncio.TimeoutError:
-            await kill_timed_out(proc)
             logger.warning("git fetch timed out")
             return
         if proc.returncode != 0:
@@ -127,13 +183,8 @@ async def _do_update_check() -> None:
             stderr=asyncio.subprocess.DEVNULL,
         )
         try:
-            local_out, _ = await asyncio.wait_for(local.communicate(), timeout=10)
+            local_out, _ = await run_with_timeout(local, 10)
         except asyncio.TimeoutError:
-            try:
-                local.kill()
-            except ProcessLookupError:
-                pass
-            await local.communicate()
             return
         remote = await asyncio.create_subprocess_exec(
             "git",
@@ -144,13 +195,8 @@ async def _do_update_check() -> None:
             stderr=asyncio.subprocess.DEVNULL,
         )
         try:
-            remote_out, _ = await asyncio.wait_for(remote.communicate(), timeout=10)
+            remote_out, _ = await run_with_timeout(remote, 10)
         except asyncio.TimeoutError:
-            try:
-                remote.kill()
-            except ProcessLookupError:
-                pass
-            await remote.communicate()
             return
 
         local_sha = local_out.decode(errors="replace").strip()
@@ -169,13 +215,8 @@ async def _do_update_check() -> None:
                 stderr=asyncio.subprocess.DEVNULL,
             )
             try:
-                show_out, _ = await asyncio.wait_for(show.communicate(), timeout=10)
+                show_out, _ = await run_with_timeout(show, 10)
             except asyncio.TimeoutError:
-                try:
-                    show.kill()
-                except ProcessLookupError:
-                    pass
-                await show.communicate()
                 return
             m = re.search(
                 r'^version\s*=\s*"(.+?)"',
@@ -205,13 +246,8 @@ async def _do_update_check() -> None:
                 stderr=asyncio.subprocess.DEVNULL,
             )
             try:
-                diff_out, _ = await asyncio.wait_for(diff.communicate(), timeout=10)
+                diff_out, _ = await run_with_timeout(diff, 10)
             except asyncio.TimeoutError:
-                try:
-                    diff.kill()
-                except ProcessLookupError:
-                    pass
-                await diff.communicate()
                 return
             lines: list[str] = []
             for line in diff_out.decode(errors="replace").splitlines():
@@ -228,34 +264,17 @@ async def _do_update_check() -> None:
         logger.debug("Update check failed", exc_info=True)
 
 
+AUTO_MODES = ("off", "staged")
+
+
 async def api_update_auto(request: web.Request) -> web.Response:
-    """POST /api/update/auto — toggle auto-update on/off."""
-    try:
-        body = await request.json()
-    except Exception:
-        return web.json_response({"error": "invalid JSON"}, status=400)
-    if not isinstance(body, dict):
-        return web.json_response({"error": "JSON body must be an object"}, status=400)
-    enabled = body.get("enabled", True)
-    if not isinstance(enabled, bool):
-        return web.json_response({"error": "enabled must be a boolean"}, status=400)
-    path = config_path()
-    try:
-        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    except Exception:
-        data = {}
-    data["auto_update"] = enabled
-    atomic_write(path, json.dumps(data, indent=2) + "\n", fsync=True)
-    return web.json_response({"ok": True, "auto_update": enabled})
+    """POST /api/update/auto — set the automatic-update mode.
 
-
-async def api_update_dev_mode(request: web.Request) -> web.Response:
-    """POST /api/update/dev-mode — toggle git dev-mode (track commits vs tags).
-
-    Persists ``dashboard.update_dev_mode`` (plan 34 T4.5). Only meaningful for a
-    git checkout — for pip/container/desktop the updater always rides releases —
-    but the flag is stored uniformly (the frontend only surfaces the control for
-    the git kind).
+    Writes ``updates.auto``: ``off`` (notify only, the default) or ``staged``
+    (apply at the next safe point, on the resolved channel/pin release). The
+    older ``{"enabled": bool}`` body is still accepted and maps to the same two
+    modes, so a client that has not been updated keeps working; once
+    ``updates.auto`` exists in the file the legacy ``auto_update`` bool is inert.
     """
     try:
         body = await request.json()
@@ -263,21 +282,31 @@ async def api_update_dev_mode(request: web.Request) -> web.Response:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
         return web.json_response({"error": "JSON body must be an object"}, status=400)
-    enabled = body.get("enabled", False)
-    if not isinstance(enabled, bool):
-        return web.json_response({"error": "enabled must be a boolean"}, status=400)
+    if "mode" in body:
+        mode = body.get("mode")
+        if mode not in AUTO_MODES:
+            return web.json_response(
+                {"error": f"mode must be one of: {', '.join(AUTO_MODES)}"}, status=400
+            )
+    else:
+        enabled = body.get("enabled", True)
+        if not isinstance(enabled, bool):
+            return web.json_response({"error": "enabled must be a boolean"}, status=400)
+        mode = "staged" if enabled else "off"
     path = config_path()
     try:
         data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     except Exception:
         data = {}
-    dash = data.get("dashboard")
-    if not isinstance(dash, dict):
-        dash = {}
-    dash["update_dev_mode"] = enabled
-    data["dashboard"] = dash
+    updates = data.get("updates")
+    if not isinstance(updates, dict):
+        updates = {}
+    updates["auto"] = mode
+    data["updates"] = updates
     atomic_write(path, json.dumps(data, indent=2) + "\n", fsync=True)
-    return web.json_response({"ok": True, "update_dev_mode": enabled})
+    return web.json_response(
+        {"ok": True, "auto": mode, "auto_update": mode == "staged"}
+    )
 
 
 async def api_changelog(request: web.Request) -> web.Response:
@@ -299,10 +328,14 @@ _apply_in_flight = False
 async def _apply_pip_update(request: web.Request, state: ConsoleState) -> web.Response:
     """Upgrade a pip/uv/pipx install in place, then graceful re-exec (T4.3).
 
-    Runs ``<installer> install -U gideon==<tag>`` (pinned to the latest
-    release tag when known; unpinned ``-U`` otherwise) targeting the SAME
-    interpreter/prefix the gateway runs from — mirrors the git path's editable
-    install step. The installer is RESOLVED (uv or pip), not assumed: a uv-created
+    Runs ``<installer> install -U gideon==<tag>`` where the TAG is the release
+    the configured policy selects — the newest stable, the newest including
+    prereleases on beta, or an exact pin — targeting the SAME interpreter/prefix
+    the gateway runs from. ``nightly`` has no wheel, so a package install on that
+    channel rides stable. A pin naming no published release is REFUSED with an
+    actionable message instead of quietly installing something else; an
+    unresolvable channel (offline, cold cache) still performs the unpinned
+    upgrade. The installer is RESOLVED (uv or pip), not assumed: a uv-created
     venv ships no pip module (issue #51). No web build: the wheel already carries
     the SPA. The 409 concurrent-apply guard is shared with the git path.
     """
@@ -313,13 +346,23 @@ async def _apply_pip_update(request: web.Request, state: ConsoleState) -> web.Re
             {"error": "An update is already in progress"}, status=409
         )
     _apply_in_flight = True
-    state.push_refresh("updating")
 
+    policy = update_policy()
     try:
-        status = await self_update.build_update_status(_local_version)
+        target = await self_update.resolve_package_target(
+            policy.channel, policy.pin, offline=not policy.check_enabled
+        )
     except Exception:
-        status = {}
-    spec = self_update.upgrade_spec(str(status.get("latest") or ""))
+        logger.debug("package target resolution failed", exc_info=True)
+        target = self_update.PackageTarget(spec=self_update.upgrade_spec(""))
+    if not target.ok:
+        _apply_in_flight = False
+        logger.warning("self-update refused: %s", target.error)
+        state.push_update_progress("error", target.error)
+        return web.json_response({"error": target.error}, status=409)
+
+    state.push_refresh("updating")
+    spec = target.spec
     auth_mode = _live_auth_mode(request)
 
     async def _apply() -> None:
@@ -342,9 +385,8 @@ async def _apply_pip_update(request: web.Request, state: ConsoleState) -> web.Re
                 start_new_session=True,
             )
             try:
-                _, pip_err = await asyncio.wait_for(pip_up.communicate(), timeout=400)
+                _, pip_err = await run_with_timeout(pip_up, 400)
             except asyncio.TimeoutError:
-                await kill_timed_out(pip_up)
                 state.push_update_progress("error", "pip upgrade timed out")
                 return
             if pip_up.returncode != 0:
@@ -373,22 +415,56 @@ async def _apply_pip_update(request: web.Request, state: ConsoleState) -> web.Re
     return web.json_response({"ok": True, "status": "updating", "kind": "pip"})
 
 
+def _start_background(state: ConsoleState, coro) -> asyncio.Task:
+    task = asyncio.create_task(coro)
+    state._background_tasks.add(task)
+    task.add_done_callback(state._background_tasks.discard)
+    return task
+
+
+def _restart_only(state: ConsoleState, note: str, auth_mode: str) -> web.Response:
+    """Nothing to move to — honor "Update & Restart" by just restarting."""
+    logger.info("Update apply: nothing to apply (%s) — restarting only", note)
+
+    async def _run() -> None:
+        global _apply_in_flight
+        try:
+            state.push_update_progress("restarting", note)
+            await _graceful_reexec(state, auth_mode=auth_mode)
+        except Exception:
+            logger.exception("Restart (nothing-to-apply update) failed")
+            state.push_update_progress("error", "Restart failed — check logs")
+        finally:
+            _apply_in_flight = False
+
+    _start_background(state, _run())
+    return web.json_response({"ok": True, "status": "restarting", "detail": note})
+
+
 async def api_update_apply(request: web.Request) -> web.Response:
-    """POST /api/update — git pull, reinstall, rebuild, restart gateway.
+    """POST /api/update — move a source checkout onto the selected release, restart.
 
-    Public pipeline: ``git pull`` → ``pip install -e .`` (same interpreter)
-    → frontend rebuild (``npm ci && npm run build`` in ``web/``) → graceful
-    re-exec. Progress is broadcast as ``update_progress`` WS events with steps
-    ``pulling`` → ``installing`` → ``building`` → ``restarting``
-    (→ ``error``/``failed`` on failure).
+    Source pipeline: fetch the release tags (or, on nightly ONLY, the tracked
+    branch) → fast-forward → ``pip install -e .`` (same interpreter) → frontend
+    rebuild (``npm ci && npm run build``) → graceful re-exec. Progress is
+    broadcast as ``update_progress`` WS events with steps ``pulling`` →
+    ``installing`` → ``building`` → ``restarting`` (→ ``paused``/``error``/
+    ``failed``).
 
-    Graceful degradation: when there is NOTHING to pull (no upstream
-    configured, or the upstream has zero new commits) the pipeline
-    short-circuits straight to the ``restarting`` step — the user asked for
-    "Update & Restart", and a restart is still meaningful (applies committed
-    local changes). The dirty-tree gate only guards a REAL pull (pulling onto
-    a dirty tree is dangerous); if nothing will be pulled, dirtiness doesn't
-    matter, so the upstream probe runs BEFORE the dirty check.
+    There is no ``git pull`` and no ``git reset --hard``. The ref comes from
+    release policy (channel or exact pin), and the checkout only ever moves by a
+    pure fast-forward, so an update can neither merge something nobody selected
+    nor discard committed work.
+
+    Uncommitted tracked edits PAUSE the update: 409 with ``status: "paused"``
+    and an actionable reason. That refusal lives in
+    :func:`self_update.plan_source_update` — one safeguard shared with the
+    unattended updater and ``gideon update``, not a second parallel gate here.
+
+    Graceful degradation: with nothing to move to (no release for the channel,
+    or already on the selected ref) the pipeline short-circuits to
+    ``restarting`` — the user asked for "Update & Restart", and a restart still
+    applies committed local changes.
     """
     global _apply_in_flight
     state: ConsoleState = request.app["state"]
@@ -424,25 +500,6 @@ async def api_update_apply(request: web.Request) -> web.Response:
     if not proj:
         return web.json_response({"error": "GIDEON_PROJECT_DIR not set"}, status=400)
 
-    _dev_mode = AppConfig.load().dashboard.update_dev_mode
-    _on_latest_tag = False
-    if not _dev_mode:
-        try:
-            _cached_tag = self_update.normalize_version(
-                str(self_update.read_release_cache().get("tag") or "")
-            )
-            if _cached_tag and self_update.version_tuple(
-                _cached_tag
-            ) <= self_update.version_tuple(_local_version):
-                _on_latest_tag = True
-        except Exception:
-            _on_latest_tag = False
-    logger.debug(
-        "git update apply: update_dev_mode=%s on_latest_tag=%s",
-        _dev_mode,
-        _on_latest_tag,
-    )
-
     if _apply_in_flight:
         return web.json_response(
             {"error": "An update is already in progress"},
@@ -450,87 +507,77 @@ async def api_update_apply(request: web.Request) -> web.Response:
         )
     _apply_in_flight = True
 
-    state.push_refresh("updating")
-
-    behind = await self_update.commits_behind_upstream(proj)
-    if behind is None or behind == 0 or _on_latest_tag:
-        if _on_latest_tag and behind:
-            note = (
-                "On the latest release — restarting… "
-                "(enable Developer update mode to track commits)"
-            )
-        elif behind is None:
-            note = "No upstream configured — restarting…"
-        else:
-            note = "Already up to date — restarting…"
-        logger.info("Update apply: nothing to pull (%s) — restarting only", note)
-        _auth_mode = _live_auth_mode(request)
-
-        async def _restart_only() -> None:
-            global _apply_in_flight
-            try:
-                state.push_update_progress("restarting", note)
-                await _graceful_reexec(state, auth_mode=_auth_mode)
-            except Exception:
-                logger.exception("Restart (nothing-to-pull update) failed")
-                state.push_update_progress("error", "Restart failed — check logs")
-            finally:
-                _apply_in_flight = False
-
-        task = asyncio.create_task(_restart_only())
-        state._background_tasks.add(task)
-        task.add_done_callback(state._background_tasks.discard)
-        return web.json_response({"ok": True, "status": "restarting", "detail": note})
-
-    dirty = await asyncio.create_subprocess_exec(
-        "git",
-        "status",
-        "--porcelain",
-        cwd=proj,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL,
-    )
+    policy = update_policy()
     try:
-        dirty_out, _ = await asyncio.wait_for(dirty.communicate(), timeout=10)
-    except asyncio.TimeoutError:
-        try:
-            dirty.kill()
-        except ProcessLookupError:
-            pass
-        await dirty.communicate()
-        _apply_in_flight = False
-        return web.json_response(
-            {"error": "Timed out checking working tree status"},
-            status=500,
+        plan = await self_update.plan_source_update(
+            proj, policy.channel, policy.pin, offline=not policy.check_enabled
         )
-    if dirty_out and dirty_out.strip():
-        logger.warning("Update skipped: working tree has uncommitted changes")
+    except Exception:
+        logger.exception("Could not plan the source update")
         _apply_in_flight = False
         return web.json_response(
-            {"error": "Working tree has uncommitted changes — commit or stash first"},
+            {"error": "Could not read the checkout state"}, status=500
+        )
+
+    if plan.paused:
+        _apply_in_flight = False
+        logger.warning("Update paused: %s", plan.reason)
+        state.push_update_progress("paused", plan.reason)
+        return web.json_response(
+            {"error": plan.reason, "status": "paused", "paths": list(plan.paths)},
             status=409,
         )
+
+    auth_mode = _live_auth_mode(request)
+    if not plan.ok:
+        return _restart_only(state, f"{plan.reason} Restarting…", auth_mode)
+
+    state.push_refresh("updating")
 
     async def _apply() -> None:
         global _apply_in_flight
         try:
-            state.push_update_progress("pulling", "Pulling latest changes…")
-            pull = await asyncio.create_subprocess_exec(
-                "git",
-                "pull",
-                cwd=proj,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                start_new_session=True,
-            )
-            try:
-                await asyncio.wait_for(pull.communicate(), timeout=60)
-            except asyncio.TimeoutError:
-                await kill_timed_out(pull)
-                state.push_update_progress("error", "git pull timed out")
+            state.push_update_progress("pulling", f"Fetching {plan.ref}…")
+            fetched = await asyncio.to_thread(self_update.fetch_for_plan, proj, plan)
+            if fetched.returncode != 0:
+                detail = (fetched.stderr or "").strip()[:200]
+                logger.error("Update: git fetch failed: %s", detail)
+                state.push_update_progress("error", "git fetch failed")
                 return
-            if pull.returncode != 0:
-                state.push_update_progress("error", "git pull failed")
+            target = await asyncio.to_thread(self_update.git_commit_for, proj, plan.ref)
+            if not target:
+                state.push_update_progress(
+                    "error", f"{plan.ref} is not available in this checkout"
+                )
+                return
+            head = await asyncio.to_thread(self_update.git_commit_for, proj, "HEAD")
+            if head == target:
+                state.push_update_progress(
+                    "restarting", f"Already on {plan.ref} — restarting…"
+                )
+                await _graceful_reexec(state, auth_mode=auth_mode)
+                return
+            if not await asyncio.to_thread(
+                self_update.git_is_fast_forward, proj, plan.ref
+            ):
+                state.push_update_progress(
+                    "error",
+                    f"Cannot fast-forward to {plan.ref} — this checkout has "
+                    "commits that are not in it.",
+                )
+                return
+            merged = await asyncio.to_thread(
+                self_update.git_merge_ff_only, proj, plan.ref
+            )
+            if merged.returncode != 0:
+                logger.error(
+                    "Update: fast-forward to %s failed: %s",
+                    plan.ref,
+                    (merged.stderr or "").strip()[:200],
+                )
+                state.push_update_progress(
+                    "error", f"Fast-forward to {plan.ref} failed"
+                )
                 return
 
             pkg_root = self_update.package_root(proj)
@@ -549,11 +596,8 @@ async def api_update_apply(request: web.Request) -> web.Response:
                 start_new_session=True,
             )
             try:
-                _, pip_err = await asyncio.wait_for(
-                    pip_install.communicate(), timeout=400
-                )
+                _, pip_err = await run_with_timeout(pip_install, 400)
             except asyncio.TimeoutError:
-                await kill_timed_out(pip_install)
                 state.push_update_progress("error", "pip install timed out")
                 return
             if pip_install.returncode != 0:
@@ -574,7 +618,7 @@ async def api_update_apply(request: web.Request) -> web.Response:
             logger.info(
                 "Update complete — saving history and cleaning up before restart"
             )
-            await _graceful_reexec(state, auth_mode=_live_auth_mode(request))
+            await _graceful_reexec(state, auth_mode=auth_mode)
         except Exception:
             logger.exception("Update failed")
             state.push_update_progress("failed", "Update failed — check logs")
@@ -582,10 +626,10 @@ async def api_update_apply(request: web.Request) -> web.Response:
         finally:
             _apply_in_flight = False
 
-    task = asyncio.create_task(_apply())
-    state._background_tasks.add(task)
-    task.add_done_callback(state._background_tasks.discard)
-    return web.json_response({"ok": True, "status": "updating"})
+    _start_background(state, _apply())
+    return web.json_response(
+        {"ok": True, "status": "updating", "ref": plan.ref, "mode": plan.mode}
+    )
 
 
 def _live_auth_mode(request: web.Request) -> str:
@@ -643,6 +687,10 @@ async def _graceful_reexec(state: ConsoleState, *, auth_mode: str = "") -> None:
     os.execve(exe, [exe, "-m", "gideon"] + sys.argv[1:], child_env)
 
 
+QUIESCENCE_POLL_S = 2.0
+QUIESCENCE_TIMEOUT_S = 900.0
+
+
 def _active_work_snapshot(state: ConsoleState) -> dict[str, int]:
     """Count in-flight work a restart would interrupt, for the confirm gate:
     running (not-done) background subagents + live chat sessions."""
@@ -658,6 +706,39 @@ def _active_work_snapshot(state: ConsoleState) -> dict[str, int]:
     except Exception:
         sessions = 0
     return {"running_agents": running_agents, "sessions": sessions}
+
+
+def is_quiescent(state: ConsoleState) -> bool:
+    """True when no chat session and no background subagent is in flight."""
+    snapshot = _active_work_snapshot(state)
+    return not snapshot["running_agents"] and not snapshot["sessions"]
+
+
+async def await_quiescence(
+    state: ConsoleState,
+    *,
+    timeout: float | None = None,
+    poll: float | None = None,
+) -> bool:
+    """Wait for chats and subagents to finish, up to *timeout* seconds.
+
+    This is what makes an automatic update STAGED rather than unattended-now: a
+    live chat or a running subagent holds the restart off until it finishes.
+    False means the wait timed out and the caller must not apply — the update is
+    deferred to the next check, never forced onto work in progress.
+    """
+    if state is None:
+        return True
+    timeout = QUIESCENCE_TIMEOUT_S if timeout is None else timeout
+    poll = QUIESCENCE_POLL_S if poll is None else poll
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        if is_quiescent(state):
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        await asyncio.sleep(min(poll, remaining))
 
 
 async def api_restart(request: web.Request) -> web.Response:
@@ -713,11 +794,8 @@ async def api_update_simulate(request: web.Request) -> web.Response:
         body = {}
 
     if body.get("reject"):
-        msg = body.get(
-            "reject_message",
-            "Working tree has uncommitted changes — commit or stash first",
-        )
-        return web.json_response({"error": msg}, status=409)
+        msg = body.get("reject_message", self_update.DIRTY_TREE_REASON)
+        return web.json_response({"error": msg, "status": "paused"}, status=409)
 
     delay = body.get("delay", 2)
     fail_at = body.get("fail_at", "")
@@ -838,13 +916,17 @@ _log_ring_handler: "_RingLogHandler | None" = None
 
 
 async def _safe_ws_send(
-    ws: web.WebSocketResponse, msg: str, state: ConsoleState
+    ws: web.WebSocketResponse, data: dict[str, object], state: ConsoleState
 ) -> None:
-    """Send to WS, removing dead subscribers on failure."""
-    try:
-        await ws.send_str(msg)
-    except Exception:
-        state._ws_log_subscribers.discard(ws)
+    """Push one live log frame to ONE subscriber, removing it on failure.
+
+    Goes through ``state.send_ws_event`` rather than writing the socket directly: that is
+    the single deny-by-default event gate, and a log subscriber can be an app-scoped socket
+    that never declared ``log``. Writing here directly is exactly how live logs bypassed the
+    app permission the broadcast fan-out enforces."""
+    if not await state.send_ws_event(ws, "log", data):
+        if ws.closed:
+            state._ws_log_subscribers.discard(ws)
 
 
 class _RingLogHandler(logging.Handler):
@@ -878,14 +960,12 @@ class _RingLogHandler(logging.Handler):
             data = json.dumps({"level": record.levelname, "msg": msg})
             self._ring.append(data)
             if self._state and self._loop and self._state._ws_log_subscribers:
-                ws_msg = json.dumps(
-                    {"type": "log", "data": {"level": record.levelname, "msg": msg}}
-                )
+                frame = {"level": record.levelname, "msg": msg}
                 for ws in list(self._state._ws_log_subscribers):
                     try:
                         self._loop.call_soon_threadsafe(
                             self._loop.create_task,
-                            _safe_ws_send(ws, ws_msg, self._state),
+                            _safe_ws_send(ws, frame, self._state),
                         )
                     except RuntimeError:
                         pass

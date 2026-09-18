@@ -78,10 +78,20 @@ jobs:
     - name: pytest (shard ${{ matrix.shard }} of 4)
       run: |
         if [ "$RUNNER_OS" = "macOS" ]; then
-          uv run pytest --no-cov -n 2 -q --splits 4 --group ${{ matrix.shard }} --splitting-algorithm least_duration
+          uv run pytest --no-cov -n 2 -q --splits 4 --group ${{ matrix.shard }} --splitting-algorithm least_duration \
+            --junitxml=reports/full-matrix-shard-${{ matrix.os }}-py${{ matrix.python }}-${{ matrix.shard }}.junit.xml
         else
-          uv run pytest --no-cov -q --splits 4 --group ${{ matrix.shard }} --splitting-algorithm least_duration
+          uv run pytest --no-cov -q --splits 4 --group ${{ matrix.shard }} --splitting-algorithm least_duration \
+            --junitxml=reports/full-matrix-shard-${{ matrix.os }}-py${{ matrix.python }}-${{ matrix.shard }}.junit.xml
         fi
+    - name: Upload the matrix shard test report
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: test-report-full-matrix-shard-${{ matrix.os }}-py${{ matrix.python }}-${{ matrix.shard }}
+        path: reports/
+        if-no-files-found: ignore
+        retention-days: 7
   matrix:
     needs:
     - matrix-shard
@@ -135,11 +145,21 @@ jobs:
       run: uv sync --locked --extra dev
     - name: pytest (adversarial scanner corpus)
       run: |
-        uv run pytest -n 0 --no-cov checks/runtime/security checks/runtime/test_supply_chain_scanner.py checks/runtime/test_supply_chain_gates.py
+        uv run pytest -n 0 --no-cov checks/runtime/security checks/runtime/test_supply_chain_scanner.py checks/runtime/test_supply_chain_gates.py \
+          --junitxml=reports/full-security-corpus.junit.xml
+    - name: Upload the security corpus test report
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: test-report-full-security-corpus
+        path: reports/
+        if-no-files-found: ignore
+        retention-days: 7
   coverage:
     runs-on: ubuntu-latest
     env:
       GIDEON_SKIP_APP_BACKENDS: '1'
+      GIDEON_SHORT_TEST_IDS: '1'
     steps:
     - uses: actions/checkout@v7
     - name: Install uv
@@ -151,7 +171,7 @@ jobs:
     - name: Install (locked)
       run: uv sync --locked --extra dev
     - name: pytest with coverage XML
-      run: uv run pytest --cov=gideon --cov-report=xml
+      run: uv run pytest --cov=gideon --cov-report=xml --junitxml=reports/full-coverage.junit.xml
     - name: "Coverage badge (self-owned shields JSON \u2014 no third-party service)"
       run: |
         uv run python - <<'PY'
@@ -173,6 +193,14 @@ jobs:
           coverage.xml
           coverage-badge.json
         if-no-files-found: warn
+    - name: Upload the coverage test report
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: test-report-full-coverage
+        path: reports/
+        if-no-files-found: ignore
+        retention-days: 7
   install-smoke:
     runs-on: ubuntu-latest
     container: ubuntu:latest

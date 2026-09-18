@@ -44,6 +44,7 @@ from gideon.cognition.review_triage import (
     TriageDecision,
     TriageOutcome,
 )
+from gideon.core.cancellation import run_with_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -69,13 +70,8 @@ async def _git(args: list[str], cwd: str, timeout: float = 10.0) -> str:
     except (OSError, ValueError):
         return ""
     try:
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        out, _ = await run_with_timeout(proc, timeout)
     except asyncio.TimeoutError:
-        try:
-            proc.kill()
-        except ProcessLookupError:
-            pass
-        await asyncio.gather(proc.wait(), return_exceptions=True)
         return ""
     return out.decode("utf-8", "replace")
 

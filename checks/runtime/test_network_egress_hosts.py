@@ -211,14 +211,26 @@ def test_the_release_check_is_the_only_unprompted_destination():
     """The one host the product contacts without the user asking for that thing.
 
     Pinned deliberately: this is the sentence the privacy posture rests on, and it should
-    take a failing test to change it. This docstring used to claim an
-    ``updates.check_enabled`` opt-out existed "precisely because this request happens on a
-    schedule" — no such field exists anywhere in ``src/``, and the check is unconditional
-    (``test_self_update.py::test_auto_update_gates_the_apply_not_the_check``). The schedule
-    is real; the opt-out was not.
+    take a failing test to change it. The schedule is real AND the opt-out is now real:
+    ``updates.check_enabled`` stops the traffic before any connection opens
+    (``test_self_update.py::TestReleaseCheckControls``), and
+    ``updates.check_interval_hours`` sets the cadence while it is on. This docstring
+    previously recorded that no such field existed; it does now, and the census line for
+    api.github.com says so.
     """
     unprompted = sorted(h for h, j in _table().items() if "FETCHED, unprompted" in j)
     assert unprompted == ["api.github.com"], (
         "the set of unprompted destinations changed. Adding one is a product decision about "
         f"the privacy claim, not an implementation detail: {unprompted}"
     )
+    judgment = _table()["api.github.com"]
+    assert "updates.check_enabled" in judgment, (
+        "the census must name the switch that turns the release check off — a privacy "
+        "claim with no named control is not checkable"
+    )
+
+    from gideon.core.config.loader import UpdatesConfig
+
+    assert hasattr(
+        UpdatesConfig(), "check_enabled"
+    ), "the census promises an opt-out that no config field provides"

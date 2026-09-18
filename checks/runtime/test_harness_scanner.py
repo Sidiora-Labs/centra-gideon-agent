@@ -164,6 +164,116 @@ def test_app_sdk_boundary_allows_sdk_import(tmp_path: Path) -> None:
     assert findings == []
 
 
+def _selfqa_module(root: Path, name: str, body: str) -> Path:
+    """A synthetic module under the path the check scopes to, carrying `body`."""
+    f = root / "runtime" / "gideon" / "assurance" / "selfqa" / name
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(textwrap.dedent(body), encoding="utf-8")
+    return f
+
+
+def _watcher_findings(files: list[Path], root: Path) -> list[scanner.Finding]:
+    return [
+        f for f in scanner.scan(files, root) if f.check == "no-periodic-commit-watcher"
+    ]
+
+
+def test_no_periodic_commit_watcher_fires_on_a_returning_interval(
+    tmp_path: Path,
+) -> None:
+    """🔴 The retirement, enforced: a clock put back beside the commit watch is an ERROR."""
+    f = _selfqa_module(
+        tmp_path,
+        "relapse.py",
+        """
+        def reconcile(store, trigger):
+            trigger.kind = "interval"
+            trigger.spec = {"interval_minutes": 5}
+            trigger.workflow = {"inline": {"provider": "selfqa-commit-watch"}}
+            store.upsert(trigger)
+        """,
+    )
+    findings = _watcher_findings([f], tmp_path)
+    assert findings, "the retired periodic watcher came back unflagged"
+    assert all(hit.level == scanner.ERROR for hit in findings)
+    lines = f.read_text(encoding="utf-8").splitlines()
+    assert any(
+        "interval" in lines[hit.line - 1] for hit in findings
+    ), f"the finding does not point at the cadence: {[hit.line for hit in findings]}"
+
+
+def test_no_periodic_commit_watcher_allows_the_vcs_trigger(tmp_path: Path) -> None:
+    """🪤 The vacuity floor. The compliant binding — the one the repo actually ships —
+    must stay silent, or the check is just "mentions the commit watch"."""
+    f = _selfqa_module(
+        tmp_path,
+        "compliant.py",
+        """
+        def reconcile(store, trigger, repo):
+            trigger.kind = "file"
+            trigger.spec = {"paths": vcs_patterns(repo), "dedup": "content"}
+            trigger.workflow = {"inline": {"provider": "selfqa-commit-watch"}}
+            store.upsert(trigger)
+        """,
+    )
+    assert _watcher_findings([f], tmp_path) == []
+
+
+def test_no_periodic_commit_watcher_ignores_a_schedule_elsewhere(
+    tmp_path: Path,
+) -> None:
+    """A module that schedules something ELSE is not the commit watcher returning."""
+    f = _selfqa_module(
+        tmp_path,
+        "unrelated.py",
+        """
+        def arm(store, trigger):
+            trigger.kind = "interval"
+            trigger.spec = {"interval_minutes": 30}
+            store.upsert(trigger)
+        """,
+    )
+    assert _watcher_findings([f], tmp_path) == []
+
+
+def test_no_periodic_commit_watcher_reads_prose_as_prose(tmp_path: Path) -> None:
+    """The retirement is NARRATED in these modules — a docstring about the removed cron
+    script must not read as the cron script."""
+    f = _selfqa_module(
+        tmp_path,
+        "narrated.py",
+        "\n".join(
+            [
+                '"""The interim cron script (crons/selfqa_commit_watch.py) ran on an',
+                'interval schedule; the vcs preset owns this now."""',
+                "",
+                'WATCH_TRIGGER_ID = "system:selfqa-commit-watch"',
+                "",
+            ]
+        ),
+    )
+    assert _watcher_findings([f], tmp_path) == []
+
+
+def test_no_periodic_commit_watcher_is_clean_on_the_shipped_watcher() -> None:
+    """The real modules, not a synthetic one: the tree as it stands has no periodic watcher.
+
+    `test_scanner_clean_on_current_tree` covers this in aggregate; this names the files so a
+    relapse reds a test whose name says what broke.
+    """
+    root = _repo_root()
+    watcher_files = [
+        root / "runtime/gideon/assurance/selfqa/watch.py",
+        root / "runtime/gideon/assurance/selfqa/install.py",
+        root / "runtime/gideon/integrations/action_providers/selfqa_watch_provider.py",
+    ]
+    assert all(
+        f.is_file() for f in watcher_files
+    ), f"the watcher moved: {watcher_files}"
+    findings = _watcher_findings(watcher_files, root)
+    assert findings == [], "\n".join(f.format(root) for f in findings)
+
+
 def test_chat_touch_forces_replay_and_web() -> None:
     forced = {
         f.profile

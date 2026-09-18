@@ -23,6 +23,7 @@ from gideon.core.config.loader import (
     resolve_session_workspace,
 )
 from gideon.http_errors import json_error
+from gideon.interfaces.dashboard.chat_index import load_chat_index
 from gideon.interfaces.dashboard.chat_persistence import (
     _attach_variants,
     _redact_meta,
@@ -818,6 +819,7 @@ async def api_chat_session_detail(request: web.Request) -> web.Response:
             **_natural_voice_payload(session),
             "forked_from": forked_from,
             "forked_from_title": forked_from_title,
+            "chat_index": list(getattr(session, "chat_index", []) or []),
             "pending_approval": any(
                 not f.done() for f in session._approval_futures.values()
             ),
@@ -2167,6 +2169,7 @@ async def api_chat_session_resume(request: web.Request) -> web.Response:
         state._restricted_keys.discard(f"dashboard:{name}")
     if meta.get("forked_from") is not None:
         session.forked_from = meta["forked_from"]
+    session.chat_index = load_chat_index(meta.get("chat_index"))
     if meta.get("closed"):
         try:
             path = state.conversation_log._path(resolved_key)

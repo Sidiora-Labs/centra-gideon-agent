@@ -724,9 +724,16 @@ class TestPlan:
         assert ("verify" in ids) is expect_verify
         assert ("review" in ids) is expect_review
 
-    def test_an_unknown_rigor_falls_back_to_standard(self) -> None:
+    def test_an_unknown_rigor_is_refused_with_the_allowed_values(self) -> None:
+        """The schema declares the rigor enum and the category now enforces it, so an
+        unknown value comes back nameable instead of being silently coerced."""
         out = T._call_tool("workflow_plan", {"goal": "x", "rigor": "extreme"})
-        assert '"rigor": "standard"' in out
+        assert out.startswith("Error") and "rigor" in out
+        assert "standard" in out and "deep" in out
+
+    def test_a_declared_rigor_is_honoured(self) -> None:
+        out = T._call_tool("workflow_plan", {"goal": "x", "rigor": "deep"})
+        assert '"rigor": "deep"' in out
 
 
 class TestErrorContract:
@@ -737,12 +744,21 @@ class TestErrorContract:
 
     def test_a_failure_keeps_its_payload(self) -> None:
         """The issue list is the actionable half — dropping it leaves the model guessing."""
+        out = T._call_tool(
+            "workflow_author", {"name": "ok-name", "root": {"kind": "nope", "id": "x"}}
+        )
+        assert "Error [WF_DEF_INVALID]" in out
+        assert "WF_UNKNOWN_NODE_KIND" in out
+
+    def test_a_malformed_name_is_refused_at_the_schema(self) -> None:
+        """Since the category runs the shared schema boundary, a name that cannot be a
+        definition name is refused BEFORE dispatch — readably, still never raised."""
         out = T._call_tool("workflow_author", {"name": "x y", "root": SPEC_ROOT})
-        assert "Error [WF_DEF_NAME_INVALID]" in out
+        assert out.startswith("Error") and "name" in out
 
     def test_a_missing_root_is_reported_not_raised(self) -> None:
         out = T._call_tool("workflow_author", {"name": "ok-name"})
-        assert "WF_DEF_ROOT_REQUIRED" in out
+        assert out.startswith("Error") and "root" in out
 
     def test_empty_ops_are_reported(self) -> None:
         out = T._call_tool("workflow_edit", {"run_id": "a1b2c3d4", "ops": []})
@@ -945,3 +961,148 @@ class TestMemoryModeInheritance:
         assert body["status"] == RunStatus.NEEDS_INPUT.value
         assert "announcement" not in body
         assert body["needs_input"]
+
+
+class TestSecurityBoundary:
+    """BACKLOG-4 — the workflow category shares ONE security boundary with the MCP path.
+
+    The schemas in ``MCP_WORKFLOW_SCHEMAS`` existed from the start and nothing consulted
+    them: ``_call_tool`` dispatched straight into the service, so a workflow tool was the
+    one in-process tool surface with no argument validation, no security event, and no
+    leaf-orchestration restriction — the three things ``call_tool_with_logging`` gives every
+    other category. These drive the real tool boundary and read the real SEL.
+    """
+
+    @staticmethod
+    def _events(tool: str) -> list[dict]:
+        from gideon.security.sel import sel
+
+        return [
+            e
+            for e in sel().recent(limit=50)
+            if e.get("operation") == tool and e.get("event_type") == "tool_invocation"
+        ]
+
+    def test_an_invalid_payload_is_rejected_and_logged(self) -> None:
+        out = T._call_tool("workflow_status", {"run_id": "not-a-run-id"})
+
+        assert out.startswith("Error") and "run_id" in out
+        events = self._events("workflow_status")
+        assert len(events) == 1, events
+        assert events[0]["outcome"] == "failed"
+        assert "run_id" in events[0]["error"]
+        assert events[0]["downstream_service"] == "gideon-workflows"
+
+    def test_an_unknown_argument_is_rejected(self) -> None:
+        out = T._call_tool("workflow_manifest", {"surprise": 1})
+        assert out.startswith("Error") and "surprise" in out
+
+    def test_a_valid_call_is_logged_as_completed(self) -> None:
+        out = T._call_tool("workflow_manifest", {})
+
+        assert not out.startswith("Error")
+        events = self._events("workflow_manifest")
+        assert len(events) == 1, events
+        assert events[0]["outcome"] == "completed"
+        assert events[0]["error"] == ""
+
+    def test_a_leaf_orchestration_violation_is_refused(self, monkeypatch) -> None:
+        """A batch leaf may not start or author a workflow at any depth — a leaf that can
+        fan out again spawns without a budget."""
+        from gideon.automation.workflows.engine import WF_DEPTH_KEY
+
+        monkeypatch.setenv(WF_DEPTH_KEY, "1")
+
+        out = T._call_tool("workflow_start", {"name": "anything"})
+
+        assert "orchestration tool" in out and "denied to a batch leaf" in out
+        events = self._events("workflow_start")
+        assert len(events) == 1, events
+        assert events[0]["outcome"] == "denied"
+        assert "orchestration tool" in events[0]["error"]
+
+    def test_a_research_leaf_may_not_run_a_write_tool(self, monkeypatch) -> None:
+        from gideon.automation.workflows.engine import WF_DEPTH_KEY
+        from gideon.integrations.mcp_shared import LEAF_READ_ONLY_KEY
+
+        monkeypatch.setenv(WF_DEPTH_KEY, "1")
+        monkeypatch.setenv(LEAF_READ_ONLY_KEY, "1")
+
+        out = T._call_tool("workflow_delete_def", {"name": "anything"})
+
+        assert "write tool" in out and "capability=research" in out
+
+    def test_a_leaf_may_still_read(self, monkeypatch) -> None:
+        """Vacuity: the denial must be the orchestration/write rule, not 'a leaf runs nothing'."""
+        from gideon.automation.workflows.engine import WF_DEPTH_KEY
+
+        monkeypatch.setenv(WF_DEPTH_KEY, "1")
+
+        out = T._call_tool("workflow_manifest", {})
+
+        assert not out.startswith("Error")
+
+    async def test_the_in_process_provider_takes_the_same_boundary(
+        self, monkeypatch
+    ) -> None:
+        """The in-process path is the one that had no gate: this is the provider the native
+        agent actually invokes, not the stdio MCP server."""
+        from gideon.automation.workflows.engine import WF_DEPTH_KEY
+        from gideon.integrations.tool_providers.registry import (
+            create_workflows_provider,
+        )
+
+        monkeypatch.setenv(WF_DEPTH_KEY, "1")
+        provider = create_workflows_provider()
+
+        result = await provider.invoke("workflow_start", {"name": "anything"})
+
+        assert "denied to a batch leaf" in (result.output or "")
+        assert self._events("workflow_start")[0]["outcome"] == "denied"
+
+
+class TestValidatedToolCensus:
+    """BACKLOG-4 ac_2 — the Security panel counts enforcement, not intent.
+
+    ``api_security_stats`` counted every ``*_SCHEMA`` constant in the validation module, so
+    the number went UP for a schema nothing consulted — which is exactly what the workflow
+    schemas were. The count now comes from probing the real dispatch.
+    """
+
+    async def _stats(self) -> dict:
+        from aiohttp import web
+        from aiohttp.test_utils import TestClient, TestServer
+
+        from gideon.interfaces.dashboard.handlers.core import api_security_stats
+
+        app = web.Application()
+        app.router.add_get("/api/security/stats", api_security_stats)
+        async with TestClient(TestServer(app)) as client:
+            response = await client.get("/api/security/stats")
+            assert response.status == 200
+            return await response.json()
+
+    async def test_the_count_is_the_number_of_validated_tools(self) -> None:
+        from gideon.integrations.mcp_core import validated_tool_names
+
+        names = validated_tool_names()
+        assert {"workflow_start", "workflow_status"} <= names
+        assert (await self._stats())["tool_schemas"] == len(names)
+
+    async def test_an_unvalidated_category_is_not_counted(self) -> None:
+        """``prompt_render`` HAS a schema constant and its category never consults it."""
+        from gideon.integrations import mcp_prompts
+        from gideon.integrations.mcp_core import validated_tool_names
+
+        assert "prompt_render" in {t["name"] for t in mcp_prompts._list_tools()}
+        assert "prompt_render" not in validated_tool_names()
+
+    async def test_the_count_drops_when_a_tool_is_unwired(self, monkeypatch) -> None:
+        from gideon.assurance.validation import MCP_WORKFLOW_SCHEMAS
+
+        before = (await self._stats())["tool_schemas"]
+        monkeypatch.delitem(MCP_WORKFLOW_SCHEMAS, "workflow_start")
+
+        after = (await self._stats())["tool_schemas"]
+
+        assert after == before - 1

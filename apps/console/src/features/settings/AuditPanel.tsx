@@ -240,6 +240,7 @@ function EventRow({ ev }: { ev: SelEvent }) {
             <Kv k="source" v={ev.source} /><Kv k="tool kind" v={ev.tool_kind} />
             <Kv k="downstream" v={ev.downstream_service} />
             {ev.resources && <Kv k="resources" v={ev.resources} span />}
+            {ev.metadata?.reason && <Kv k="reason" v={String(ev.metadata.reason)} span />}
             {ev.error && <Kv k="error" v={ev.error} span />}
           </div>
           {

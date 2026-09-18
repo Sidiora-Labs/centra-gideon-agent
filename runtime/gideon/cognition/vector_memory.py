@@ -1018,6 +1018,23 @@ class SemanticArchive(MemoryProvider):
             query_embedding, query_text, cap, citations_out
         )
 
+    def curated_count(self) -> int:
+        """Active semantic rows and journal events a HUMAN authored.
+
+        The curation signal, as opposed to memory the consolidator formed on its own:
+        :data:`_HUMAN_AUTHORED_SOURCES` is this archive's existing mark for "a person wrote
+        this" — a dashboard edit or delete, a ``forget``, a vault edit. One query, two
+        counted subselects, so an advisory caller can ask on every read."""
+        marks = tuple(sorted(_HUMAN_AUTHORED_SOURCES))
+        slots = ",".join("?" * len(marks))
+        row = self.db.execute(
+            f"SELECT (SELECT COUNT(*) FROM semantic_memory "
+            f"WHERE is_deleted = 0 AND source IN ({slots})) + "
+            f"(SELECT COUNT(*) FROM memory_events WHERE source IN ({slots}))",
+            marks + marks,
+        ).fetchone()
+        return int(row[0]) if row else 0
+
     def memory_stats(self) -> dict:
         measures = (
             ("semantic_active", "semantic_memory", "is_deleted=0"),

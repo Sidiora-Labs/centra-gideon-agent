@@ -150,10 +150,21 @@ class TestKillSession:
 
     @pytest.mark.asyncio
     async def test_sends_sigterm_to_process_group(self):
+        """The PTY child leads its own session, so its whole GROUP gets the SIGTERM.
+
+        ``os.getpgid`` is pinned because that is what the owner
+        (``gideon.core.cancellation.terminate_and_reap``) asks before it dares signal a
+        group: it group-signals ONLY a child that leads one. Without pinning it, the
+        answer for a synthetic pid would come from whatever really holds 12345.
+        """
         import signal
 
         sess = _make_session(alive=True)
-        with patch("os.close"), patch("os.killpg") as mock_killpg:
+        with (
+            patch("os.close"),
+            patch("os.getpgid", return_value=12345),
+            patch("os.killpg") as mock_killpg,
+        ):
             await terminal._kill_session(sess)
         mock_killpg.assert_any_call(12345, signal.SIGTERM)
 
@@ -175,17 +186,16 @@ class TestKillSession:
         """os.killpg can raise EPERM (observed on macOS CI runners) when the group is
         no longer ours to signal. Teardown must not propagate it — it falls back to
         signalling the child process directly."""
-        import signal
-
         sess = _make_session(alive=True)
         with (
             patch("os.close"),
+            patch("os.getpgid", return_value=12345),
             patch(
                 "os.killpg", side_effect=PermissionError(1, "Operation not permitted")
             ),
         ):
             await terminal._kill_session(sess)
-        sess.proc.send_signal.assert_any_call(signal.SIGTERM)
+        sess.proc.terminate.assert_called()
 
     @pytest.mark.asyncio
     async def test_sigkill_on_timeout(self):
@@ -193,7 +203,11 @@ class TestKillSession:
 
         sess = _make_session(alive=True)
         sess.proc.wait = AsyncMock(side_effect=[asyncio.TimeoutError, None])
-        with patch("os.close"), patch("os.killpg") as mock_killpg:
+        with (
+            patch("os.close"),
+            patch("os.getpgid", return_value=12345),
+            patch("os.killpg") as mock_killpg,
+        ):
             await terminal._kill_session(sess)
         calls = [c.args for c in mock_killpg.call_args_list]
         assert (12345, signal.SIGTERM) in calls
@@ -327,6 +341,25 @@ class TestApiTerminalDelete:
             mock_sel.return_value.log_api_access = MagicMock()
             resp = await terminal.api_terminal_delete(req)
         assert resp.status == 404
+
+    @pytest.mark.asyncio
+    async def test_the_404_is_the_shared_structured_envelope(self):
+        """It answered `text="Session not found"`: a 404 with no code and no JSON at all.
+
+        A client branching on API failures had to special-case this one route by prose.
+        The shared `json_error("not_found")` is what every other API failure emits.
+        """
+        from gideon.http_errors import HTTP_ERROR_CODES
+
+        req = _make_request(session_id="nonexistent")
+        with patch.object(terminal, "_sel") as mock_sel:
+            mock_sel.return_value.log_api_access = MagicMock()
+            resp = await terminal.api_terminal_delete(req)
+        assert resp.status == 404
+        assert resp.content_type == "application/json"
+        body = json.loads(resp.body)
+        assert body["error"]["code"] == "not_found"
+        assert body["error"]["message"] == HTTP_ERROR_CODES["not_found"]
 
     @pytest.mark.asyncio
     async def test_deletes_existing_session(self):

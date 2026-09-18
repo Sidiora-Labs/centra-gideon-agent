@@ -22,7 +22,6 @@ from gideon.interfaces.dashboard.state import (
     CRON_NOTIFY_END,
     CRON_NOTIFY_PREFIX,
     ConsoleState,
-    _rewrite_notifications,
 )
 from gideon.security.security import (
     is_sensitive_path,
@@ -328,10 +327,7 @@ async def api_notification_unack(request: web.Request) -> web.Response:
 async def api_notifications_ack_all(request: web.Request) -> web.Response:
     """POST /api/notifications/ack-all — mark all notifications as read."""
     state: ConsoleState = request.app["state"]
-    for n in state._notification_log:
-        n["acked"] = True
-    _rewrite_notifications(state._notification_log)
-    state.broadcast_ws("notification_ack", {"ts": "*"})
+    state.ack_all_notifications()
     return web.json_response({"ok": True})
 
 

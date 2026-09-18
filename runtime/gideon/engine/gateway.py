@@ -567,17 +567,31 @@ class RuntimeCoordinator:
 
         return TriggerPublication(self, logger).repeated_failure(trigger, error)
 
-    def _deliver_fire_outcome(self, trigger: Any, *, ok: bool, error: str = "") -> None:
+    def _deliver_fire_outcome(
+        self,
+        trigger: Any,
+        *,
+        ok: bool,
+        error: str = "",
+        agent_error: Any = None,
+    ) -> None:
         from gideon.engine.trigger_outcomes import TriggerPublication
 
-        TriggerPublication(self, logger).outcome(trigger, ok, error)
+        TriggerPublication(self, logger).outcome(trigger, ok, error, agent_error)
 
     async def _record_fire_outcome(
-        self, trigger: Any, *, result: Any = None, exc: BaseException | None = None
+        self,
+        trigger: Any,
+        *,
+        result: Any = None,
+        exc: BaseException | None = None,
+        agent_error: Any = None,
     ) -> None:
         from gideon.engine.trigger_outcomes import FireLedger
 
-        await FireLedger(self, ExecutionJournal, logger).record(trigger, result, exc)
+        await FireLedger(self, ExecutionJournal, logger).record(
+            trigger, result, exc, agent_error
+        )
 
     async def _record_blocked_fire(self, trigger: Any, groups: str) -> None:
         message = "payload blocked by the injection screen ({}); never retried".format(

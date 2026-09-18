@@ -392,6 +392,7 @@ async def _run_driver(op: str, payload: dict[str, Any], *, tool: str) -> dict[st
     reach the model as WHAT/WHY/FIX. §3 floor 6 is explicit that an unsupported platform
     reports a typed refusal and *"never a silent no-op or a simulated success"*.
     """
+    from gideon.core.cancellation import run_with_timeout
     from gideon.security.sandbox import PROFILE_TOOL, create_subprocess_limited
 
     request = json.dumps({"op": op, **payload}).encode()
@@ -402,9 +403,10 @@ async def _run_driver(op: str, payload: dict[str, Any], *, tool: str) -> dict[st
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(request), timeout=DRIVER_TIMEOUT_SECS
+        stdout, stderr = await run_with_timeout(
+            proc, DRIVER_TIMEOUT_SECS, payload=request
         )
     except asyncio.TimeoutError:
         _refuse(

@@ -146,6 +146,19 @@ if [ "$needs_gate" -eq 0 ]; then
   exit 0
 fi
 
+if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+  JS_BIN=""
+else
+  JS_BIN="MISSING"
+fi
+
+if [ "$JS_BIN" = "MISSING" ]; then
+  echo "pre-push: frontend changes outgoing but node/npm not found — skipping the"
+  echo "          render-smoke gate. Install Node.js 22.12+ with npm to run it here."
+  echo "          (CI's web job still runs the whole chain.)"
+  exit 0
+fi
+
 echo "pre-push: frontend changes outgoing — running the render-smoke gate"
 echo "          (clean npm ci -> typecheck -> vitest -> build -> headless render)."
 

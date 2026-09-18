@@ -293,7 +293,7 @@ describe('the route is mounted in the shell', () => {
   })
 
   it('lazy-imports the page', () => {
-    expect(app).toMatch(/const MissionControl = lazy\(/)
+    expect(app).toMatch(/const MissionControl = lazyRoute\('mission-control', \(\) => import\(/)
   })
 
   it(`dispatches '${MISSION_CONTROL_VIEW_ID}' to it, not to the coming-soon fallback`, () => {

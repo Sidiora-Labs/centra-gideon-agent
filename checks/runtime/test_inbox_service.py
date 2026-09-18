@@ -314,3 +314,96 @@ def test_run_maintenance_honors_settings(tmp_path, monkeypatch):
     svc2.inbox.items[old2.id] = old2
     assert svc2.run_maintenance() == 0
     assert old2.id in svc2.inbox.items
+
+
+class TestMaintenanceIsNotOnAPrivateTimer:
+    """#37 — the inbox's private periodic maintenance timer is gone.
+
+    Retention/dismissed pruning is the remediation engine's ``inbox.maintenance`` job now
+    (measured, listed on the Doctor panel, runnable on demand, switch-bound). What stays
+    here is the probe it measures and the pass it calls."""
+
+    def test_the_maintenance_cadence_symbols_are_gone(self):
+        """Named so a re-introduced private cadence is a conversation, not a second
+        mechanism running the same prune on its own clock."""
+        import inspect
+
+        from gideon.integrations import inbox_service as mod
+
+        assert not hasattr(mod, "_MAINTENANCE_EVERY_SECS")
+        loop_src = inspect.getsource(mod.InboxService._loop)
+        assert "run_maintenance" not in loop_src
+        assert not hasattr(mod.InboxService(), "_last_maintenance_at")
+
+    async def test_start_creates_no_task_when_there_is_nothing_to_poll(self, tmp_path):
+        """The loop existed for two reasons; maintenance was one of them. With no provider
+        wired, start() must now create no private task at all."""
+        import asyncio
+
+        svc = InboxService(
+            state=InboxState(tmp_path / "state.json"),
+            store=InboxStore(tmp_path / "inbox.json"),
+        )
+        before = set(asyncio.all_tasks())
+        svc.start()
+        assert svc._task is None
+        assert set(asyncio.all_tasks()) - before == set()
+        assert svc.health()["running"] is False
+
+    def test_backlog_probe_counts_expired_items_and_stale_dismissals(
+        self, tmp_path, monkeypatch
+    ):
+        svc = _ingest_svc(tmp_path, monkeypatch, settings={"retention_days": 30})
+        assert svc.maintenance_backlog() == 0
+        svc.inbox.items["C1_old"] = _item(
+            id="C1_old", created_at=time.time() - 31 * 86400
+        )
+        svc.inbox.items["C1_new"] = _item(id="C1_new", created_at=time.time())
+        svc.state.dismissed.add("C1_1")
+        svc.state.dismissed.add("C1_" + str(time.time()))
+        assert svc.maintenance_backlog() == 2
+
+    def test_backlog_probe_reads_only_and_respects_auto_cleanup(
+        self, tmp_path, monkeypatch
+    ):
+        """A probe that pruned would make the deficit vanish before the job could fix it."""
+        svc = _ingest_svc(
+            tmp_path,
+            monkeypatch,
+            settings={"auto_cleanup_enabled": False, "retention_days": 30},
+        )
+        svc.inbox.items["C1_old"] = _item(
+            id="C1_old", created_at=time.time() - 31 * 86400
+        )
+        svc.state.dismissed.add("C1_1")
+        assert svc.maintenance_backlog() == 1
+        assert "C1_old" in svc.inbox.items and svc.state.dismissed == {"C1_1"}
+
+    def test_the_engine_entry_points_bind_to_the_live_service(
+        self, tmp_path, monkeypatch
+    ):
+        """``maintenance_backlog``/``run_live_maintenance`` are what the engine calls; they
+        must resolve the RUNNING service rather than build a second one over the same files.
+        """
+        from types import SimpleNamespace
+
+        from gideon.integrations import inbox_service as mod
+
+        svc = _ingest_svc(tmp_path, monkeypatch, settings={"retention_days": 30})
+        svc.inbox.items["C1_old"] = _item(
+            id="C1_old", created_at=time.time() - 31 * 86400
+        )
+        monkeypatch.setattr(mod, "_dashboard_state", lambda: None)
+        assert mod.live_service() is None
+        assert mod.maintenance_backlog() == 0
+        assert (
+            mod.run_live_maintenance() == "no live inbox service — nothing to maintain"
+        )
+
+        monkeypatch.setattr(
+            mod, "_dashboard_state", lambda: SimpleNamespace(_inbox_svc=svc)
+        )
+        assert mod.live_service() is svc
+        assert mod.maintenance_backlog() == 1
+        assert mod.run_live_maintenance() == "pruned 1 expired inbox item(s)"
+        assert "C1_old" not in svc.inbox.items

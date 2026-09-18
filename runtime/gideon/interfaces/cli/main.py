@@ -163,35 +163,63 @@ _PROVIDER_BOOTSTRAP_COMMANDS = frozenset(
 )
 
 
-def main() -> None:
-    """Entry point — parse args and dispatch to the appropriate subcommand."""
-    from dotenv import load_dotenv as _load_dotenv
+HIDDEN_COMMANDS = frozenset({"mcp-core"})
 
-    _cwd_env = Path.cwd() / ".env"
-    if _cwd_env.is_file():
-        _load_dotenv(_cwd_env, override=False)
-    _home_env = config_dir() / ".env"
-    if _home_env.is_file() and _home_env != _cwd_env:
-        _load_dotenv(_home_env, override=False)
 
-    _raw_port = os.environ.get("GIDEON_PORT")
-    if _raw_port is not None:
-        try:
-            int(_raw_port)
-        except ValueError:
-            print(
-                f"❌ GIDEON_PORT={_raw_port!r} is not a valid integer.\n"
-                f"   Unset it or provide a numeric port (e.g. GIDEON_PORT=6777).",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+class HiddenCommandParser(argparse.ArgumentParser):
+    """An ``ArgumentParser`` that never names a :data:`HIDDEN_COMMANDS` entry back.
 
-    if not os.environ.get("GIDEON_PROJECT_DIR"):
-        detected = _detect_project_dir()
-        if detected:
-            os.environ["GIDEON_PROJECT_DIR"] = detected
+    ``help=argparse.SUPPRESS`` on a subparser closes none of the three leaks it was
+    written for, because the ``SUPPRESS`` check in ``HelpFormatter.add_argument`` guards
+    *options*, not the pseudo-action a subparser registers:
 
-    parser = argparse.ArgumentParser(
+    1. the command listing rendered ``mcp-core  ==SUPPRESS==`` — the sentinel verbatim,
+       as user-facing text;
+    2. the name still rode the ``{chat,run,…}`` choices metavar, in both the usage line
+       and the listing header;
+    3. a mistyped command answered ``invalid choice: 'x' (choose from …, 'mcp-core')``.
+
+    ``add_subparsers`` defaults ``parser_class`` to ``type(self)``, so every nested
+    subparser inherits this class and the rule holds at every depth of the tree.
+    """
+
+    def _check_value(self, action: argparse.Action, value: object) -> None:
+        choices = getattr(action, "choices", None)
+        if choices is None or value in choices:
+            return
+        offered = [c for c in choices if c not in HIDDEN_COMMANDS]
+        raise argparse.ArgumentError(
+            action,
+            "invalid choice: %r (choose from %s)"
+            % (value, ", ".join(map(repr, offered))),
+        )
+
+
+def add_hidden_parser(sub, name: str, **kwargs) -> argparse.ArgumentParser:
+    """Register ``name`` so it DISPATCHES but appears on no help surface.
+
+    Passing no ``help`` at all is what keeps the command out of the listing: argparse
+    appends a ``_ChoicesPseudoAction`` only when ``help`` is in the kwargs, so there is
+    no row to render and no sentinel to leak.
+    """
+    kwargs.pop("help", None)
+    return sub.add_parser(name, **kwargs)
+
+
+def hide_internal_commands(sub) -> None:
+    """Rebuild ``sub``'s rendered choices from the visible commands only.
+
+    Called once the tree is registered: ``metavar`` is read at format time, and setting
+    it stops argparse enumerating ``action.choices`` — which still holds every hidden
+    name, because dispatch reads that same mapping.
+    """
+    visible = [name for name in sub.choices if name not in HIDDEN_COMMANDS]
+    sub.metavar = "{%s}" % ",".join(visible)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """The whole ``gideon`` command tree, built once and shared with its parser tests."""
+    parser = HiddenCommandParser(
         prog="gideon",
         description="Gideon — personal AI agent",
     )
@@ -1180,7 +1208,7 @@ per-arm marginal contribution is the leave-one-out delta with an enable/hold ver
     incident_sub.add_parser("off", help="Resume — re-enable unattended work")
     incident_sub.add_parser("status", help="Show incident state")
 
-    sub.add_parser("mcp-core", help=argparse.SUPPRESS)
+    add_hidden_parser(sub, "mcp-core")
 
     learn_parser = sub.add_parser(
         "learn",
@@ -1333,6 +1361,39 @@ Examples:
         help="Check installed skills' file hashes against their install baseline "
         "(.gideon-lock.json) — detects a skill mutated/tampered after install",
     )
+    hide_internal_commands(sub)
+    return parser
+
+
+def main() -> None:
+    """Entry point — parse args and dispatch to the appropriate subcommand."""
+    from dotenv import load_dotenv as _load_dotenv
+
+    _cwd_env = Path.cwd() / ".env"
+    if _cwd_env.is_file():
+        _load_dotenv(_cwd_env, override=False)
+    _home_env = config_dir() / ".env"
+    if _home_env.is_file() and _home_env != _cwd_env:
+        _load_dotenv(_home_env, override=False)
+
+    _raw_port = os.environ.get("GIDEON_PORT")
+    if _raw_port is not None:
+        try:
+            int(_raw_port)
+        except ValueError:
+            print(
+                f"❌ GIDEON_PORT={_raw_port!r} is not a valid integer.\n"
+                f"   Unset it or provide a numeric port (e.g. GIDEON_PORT=6777).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    if not os.environ.get("GIDEON_PROJECT_DIR"):
+        detected = _detect_project_dir()
+        if detected:
+            os.environ["GIDEON_PROJECT_DIR"] = detected
+
+    parser = build_parser()
 
     args = parser.parse_args()
 

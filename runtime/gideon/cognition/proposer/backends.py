@@ -28,6 +28,7 @@ from gideon.cognition.proposer.contract import (
 )
 from gideon.cognition.proposer.dialects import one_shot
 from gideon.cognition.proposer.verify import DiskBaseline, rediff, snapshot_workspace
+from gideon.core.cancellation import run_with_timeout
 from gideon.engine.agents.runners import RunnerDefinition, resolve_runner_command
 
 SUBAGENT_BACKEND = "subagent"
@@ -195,16 +196,10 @@ class RunnerProposerBackend:
             )
         timed_out = False
         try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=ref.prepared.timeout_secs
-            )
+            stdout, stderr = await run_with_timeout(proc, ref.prepared.timeout_secs)
         except asyncio.TimeoutError:
             timed_out = True
             stdout, stderr = b"", b""
-            with contextlib.suppress(ProcessLookupError):
-                proc.kill()
-            with contextlib.suppress(Exception):
-                await proc.wait()
         finally:
             if handle is not None:
                 with contextlib.suppress(Exception):

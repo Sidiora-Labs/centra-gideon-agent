@@ -525,3 +525,112 @@ def test_every_apps_field_is_patchable_or_has_a_write_path():
     ]
     assert not missing, f"apps config fields with no PATCH write path: {missing}"
     assert _EDITABLE_CONFIG["apps.registry_source_enabled"]["type"] == "bool"
+
+
+def test_every_updates_field_survives_a_save_load_roundtrip(cfg_file):
+    """RUM-1 ac_1: the ONE updates block round-trips — channel, exact pin,
+    automatic-update mode, check enablement, check interval and last-seen
+    version all come back byte-for-byte after save() → load().
+
+    The rails above prove the field SET is complete; this proves the VALUES
+    survive, which is the half a to_dict()-only check cannot see (a field that
+    writes but decodes back to its default reads green there and loses the
+    user's choice here).
+    """
+    cfg = AppConfig()
+    cfg.updates.channel = "beta"
+    cfg.updates.pin = "0.2.1"
+    cfg.updates.auto = "staged"
+    cfg.updates.check_enabled = False
+    cfg.updates.check_interval_hours = 48
+    cfg.updates.last_version = "0.1.9"
+    cfg.save()
+
+    stored = json.loads(cfg_file.read_text())["updates"]
+    assert stored == {
+        "channel": "beta",
+        "pin": "0.2.1",
+        "auto": "staged",
+        "check_enabled": False,
+        "check_interval_hours": 48,
+        "last_version": "0.1.9",
+    }
+
+    loaded = AppConfig.load().updates
+    assert loaded.channel == "beta"
+    assert loaded.pin == "0.2.1"
+    assert loaded.auto == "staged"
+    assert loaded.check_enabled is False
+    assert loaded.check_interval_hours == 48
+    assert loaded.last_version == "0.1.9"
+
+
+def test_updates_values_survive_a_second_roundtrip(cfg_file):
+    """Idempotence: reload → save → reload must not drift the stored block."""
+    cfg_file.write_text(
+        json.dumps({"updates": {"channel": "nightly", "check_interval_hours": 1}}),
+        encoding="utf-8",
+    )
+    first = AppConfig.load()
+    first.save()
+    second = AppConfig.load().updates
+    assert second.channel == "nightly"
+    assert second.check_interval_hours == 1
+    assert second == first.updates
+
+
+def test_an_out_of_range_check_interval_is_clamped_not_rejected(cfg_file):
+    """The interval is a bounded 1-168 hours; junk lands on the shipped default."""
+    for stored, expected in ((0, 1), (9999, 168), ("nope", 12), (7, 7)):
+        cfg_file.write_text(
+            json.dumps({"updates": {"check_interval_hours": stored}}), encoding="utf-8"
+        )
+        assert AppConfig.load().updates.check_interval_hours == expected
+
+
+def test_the_legacy_map_is_per_field_not_all_or_nothing(cfg_file):
+    """RUM-1 ac_2: an older setting maps only where the NEW value is absent.
+
+    The block here declares `channel` and nothing else, so the channel is the
+    user's and `auto` still backfills from the legacy `auto_update` — a mapping
+    keyed on the whole block being missing would leave auto at "off" and quietly
+    turn an existing auto-updating install into a notify-only one.
+    """
+    cfg_file.write_text(
+        json.dumps(
+            {
+                "auto_update": True,
+                "dashboard": {"update_dev_mode": True},
+                "updates": {"channel": "beta"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    u = AppConfig.load().updates
+    assert u.channel == "beta"
+    assert u.auto == "staged"
+
+
+def test_an_explicit_off_beats_a_legacy_true(cfg_file):
+    """The known-false direction: declaring the new value wins even when it
+    happens to equal the default, so the backfill can never resurrect it."""
+    cfg_file.write_text(
+        json.dumps({"auto_update": True, "updates": {"auto": "off"}}),
+        encoding="utf-8",
+    )
+    assert AppConfig.load().updates.auto == "off"
+
+
+def test_the_retired_developer_mode_key_is_no_longer_a_setting(cfg_file):
+    """RUM-59 ac_3: `dashboard.update_dev_mode` is retired — it is not a field on
+    DashboardConfig any more, and a home that still carries it reads as the
+    nightly channel rather than as a live developer-mode toggle."""
+    from gideon.core.config.loader import DashboardConfig
+
+    assert "update_dev_mode" not in {f.name for f in fields(DashboardConfig)}
+    cfg_file.write_text(
+        json.dumps({"dashboard": {"update_dev_mode": True}}), encoding="utf-8"
+    )
+    cfg = AppConfig.load()
+    assert cfg.updates.channel == "nightly"
+    assert not hasattr(cfg.dashboard, "update_dev_mode")

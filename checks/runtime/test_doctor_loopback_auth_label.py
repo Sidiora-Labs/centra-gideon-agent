@@ -115,3 +115,42 @@ def test_doctor_genuine_bypass_says_no_token_required(env, monkeypatch, capsys):
     out = _doctor_output(capsys)
     assert _NO_TOKEN in out, out
     assert _TOKEN_REQUIRED not in out, out
+
+
+def _probe_app():
+    """The real token-auth middleware over one trivial /api route."""
+    from aiohttp import web
+
+    from gideon.interfaces.dashboard.token_auth import token_auth_middleware
+
+    async def _ok(_request):
+        return web.json_response({"ok": True})
+
+    app = web.Application(middlewares=[token_auth_middleware()])
+    app.router.add_get("/api/probe", _ok)
+    return app
+
+
+@pytest.mark.asyncio
+async def test_the_predicate_agrees_with_what_the_middleware_actually_does(monkeypatch):
+    """The claim doctor now prints has to be TRUE, not merely self-consistent.
+
+    `loopback_requires_token` is a second statement of the middleware's short-circuits, and
+    a second statement drifts. Driven against the real `token_auth_middleware` over a real
+    loopback request: a tokenless call is refused under the default posture and served
+    under the opt-in local-network bypass, and the predicate says so both times.
+    """
+    from aiohttp.test_utils import TestClient, TestServer
+
+    _clear_auth_env(monkeypatch)
+    async with TestClient(TestServer(_probe_app())) as client:
+        denied = await client.get("/api/probe")
+        assert denied.status == 403
+        assert (await denied.json())["error"] == "Token required"
+        assert loopback_requires_token() is True
+
+    monkeypatch.setenv("GIDEON_BYPASS_LOCAL_NETWORKS", "1")
+    async with TestClient(TestServer(_probe_app())) as client:
+        allowed = await client.get("/api/probe")
+        assert allowed.status == 200, await allowed.text()
+        assert loopback_requires_token() is False

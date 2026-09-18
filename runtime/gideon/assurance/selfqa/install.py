@@ -76,10 +76,12 @@ def reconcile(store: Any, *, crons_dir: Path | None = None) -> None:
     than an empty list that looks like their setting did not save.
     """
     from gideon.automation.triggers import screen as _screen
+    from gideon.automation.triggers import singletons
     from gideon.automation.triggers.file_watch import vcs_patterns
     from gideon.automation.triggers.models import Trigger
     from gideon.core.config.loader import AppConfig
 
+    singletons.converge(store, singletons.SELFQA_COMMIT_WATCH)
     try:
         cfg = AppConfig.load().agent.self_qa
     except Exception:
@@ -114,6 +116,7 @@ def reconcile(store: Any, *, crons_dir: Path | None = None) -> None:
                 delivery="none",
             )
         )
+        trigger.purpose = singletons.SELFQA_COMMIT_WATCH
         trigger.enabled = active
         trigger.kind = "file"
         trigger.spec = {"paths": vcs_patterns(repo or "."), "dedup": "content"}

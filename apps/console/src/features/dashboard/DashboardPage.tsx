@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import {
   MessageSquare, History, type LucideIcon,
   MessageSquarePlus, ListTodo, BookOpen, FolderKanban, FileCode2, TerminalSquare, Sparkles, Compass,
-  Package, HardDrive, Orbit, Monitor,
+  Package, HardDrive, Orbit, Monitor, Globe,
 } from 'lucide-react'
 import { DashboardLiveProvider } from './DashboardLive'
 import { PinnedTiles } from './PinnedTiles'
@@ -18,6 +18,7 @@ import { Discover } from './widgets/Discover'
 import { PinnedArtifacts } from './widgets/PinnedArtifacts'
 import { OnThisMachine } from './widgets/OnThisMachine'
 import { DesktopLiveView } from './widgets/DesktopLiveView'
+import { BrowseMirrorPanel } from './widgets/BrowseMirrorPanel'
 import { ScheduleWidget } from './widgets/ScheduleWidget'
 import { SystemHealth } from './widgets/SystemHealth'
 import { TopBar } from '../../shared/ui/TopBar'
@@ -135,6 +136,12 @@ export function DashboardPage(route: RouteProps) {
             <EntranceRegion className="min-w-0">
               <Section label="Desktop live view" icon={Monitor}>
                 <DesktopLiveView />
+              </Section>
+            </EntranceRegion>
+
+            <EntranceRegion className="min-w-0">
+              <Section label="Browser automation" icon={Globe}>
+                <BrowseMirrorPanel />
               </Section>
             </EntranceRegion>
 

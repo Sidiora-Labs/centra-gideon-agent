@@ -28,6 +28,7 @@ from gideon.cognition.knowledge.embedder import (
 from gideon.cognition.knowledge.llm_pool import LLMPool
 from gideon.cognition.knowledge.media import classify, guess_mime, make_image_thumbnail
 from gideon.cognition.knowledge.retrieval import HybridRetriever, _bytes_to_floats
+from gideon.cognition.knowledge.searchability import summary as unsearchable_summary
 from gideon.cognition.knowledge.semantics import DEFAULT_LIST_EXCLUDED_KINDS
 from gideon.cognition.knowledge.staleness import is_synthesized, staleness_for
 from gideon.http_errors import json_error
@@ -180,7 +181,13 @@ async def list_items(request: web.Request) -> web.Response:
         offset = (page - 1) * limit
         items = filtered[offset : offset + limit]
         return web.json_response(
-            {"items": items, "total": total, "page": page, "limit": limit}
+            {
+                "items": items,
+                "total": total,
+                "page": page,
+                "limit": limit,
+                "unsearchable": unsearchable_summary(store),
+            }
         )
     else:
         where, params = ["1=1"], []  # type: list[str], list[object]

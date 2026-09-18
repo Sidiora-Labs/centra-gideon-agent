@@ -128,6 +128,10 @@ function CommentDeck({ comments, activeDocId, onSubmit }: {
   const ordered = [...comments].reverse()
   const PEEK = 7
   const peekCount = Math.min(ordered.length - 1, 3)
+  const docCount = new Set(comments.map((c) => c.docId)).size
+  const lead = ordered.find((c) => c.docId === activeDocId) ?? ordered[0]
+  const leadMuted = lead.docId !== activeDocId
+  const spread = docCount > 1 || leadMuted
 
   return (
     <div className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-end px-l">
@@ -167,7 +171,12 @@ function CommentDeck({ comments, activeDocId, onSubmit }: {
               <div className="flex items-center gap-2 px-l pt-2.5">
                 <MessagesSquare size={14} className="text-primary" />
                 <span className="text-on-surface text-[0.75rem]" style={fvs(500)}>{comments.length} comment{comments.length === 1 ? '' : 's'}</span>
-                <span className="min-w-0 flex-1 truncate text-on-surface-low text-[0.75rem]" title={ordered[0].docLabel}>· {ordered[0].docLabel}</span>
+                <span className={`min-w-0 flex-1 truncate text-on-surface-low text-[0.75rem] ${leadMuted ? 'opacity-65' : ''}`} title={lead.docLabel}>· {lead.docLabel}</span>
+                {spread && (
+                  <span data-testid="comment-deck-spread" className="shrink-0 rounded-pill bg-surface-high px-2 text-on-surface-low text-[0.6875rem]" style={fvs(500)}>
+                    {docCount > 1 ? `${docCount} documents` : 'another document'}
+                  </span>
+                )}
                 {
 }
                 <span role="button" tabIndex={0}
@@ -179,9 +188,9 @@ function CommentDeck({ comments, activeDocId, onSubmit }: {
                 </span>
                 <ChevronUp size={14} className="text-on-surface-low" />
               </div>
-              <div className="px-l pb-2.5 pt-1">
-                <div className="mb-1 truncate text-on-surface-var text-[0.75rem] italic">“{ordered[0].quote}”</div>
-                <div className="line-clamp-1 text-on-surface text-[0.8125rem]">{ordered[0].comment}</div>
+              <div data-testid="comment-deck-lead" className={`px-l pb-2.5 pt-1 ${leadMuted ? 'opacity-65' : ''}`}>
+                <div className="mb-1 truncate text-on-surface-var text-[0.75rem] italic">“{lead.quote}”</div>
+                <div className="line-clamp-1 text-on-surface text-[0.8125rem]">{lead.comment}</div>
               </div>
             </div>
           </motion.button>

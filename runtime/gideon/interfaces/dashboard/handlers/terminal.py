@@ -7,7 +7,6 @@ import logging
 import os
 import pty as _pty
 import shutil
-import signal
 import struct
 import termios
 import time
@@ -17,8 +16,14 @@ from typing import TYPE_CHECKING
 
 from aiohttp import web
 
+from gideon.core.cancellation import (
+    run_with_timeout,
+    terminate_and_reap,
+    wait_with_timeout,
+)
 from gideon.core.config import loader as config_loader
 from gideon.engine import tmux_substrate
+from gideon.http_errors import json_error
 
 
 def config_path():
@@ -155,34 +160,7 @@ async def _kill_session(sess: _TerminalSession) -> None:
         except (asyncio.CancelledError, Exception):
             pass
     if sess.proc is not None and sess.proc.returncode is None:
-        _signal_session(sess, signal.SIGTERM)
-        try:
-            await asyncio.wait_for(sess.proc.wait(), timeout=5)
-        except asyncio.TimeoutError:
-            _signal_session(sess, signal.SIGKILL)
-            await sess.proc.wait()
-
-
-def _signal_session(sess: _TerminalSession, sig: int) -> None:
-    """Signal the PTY child's whole process group, falling back to the process.
-
-    The child is spawned with ``start_new_session=True`` so it leads its own group
-    and ``killpg`` reaps the shell plus anything it launched. But ``killpg`` can raise
-    beyond ``ProcessLookupError``: on some hosts (observed on macOS CI runners) it
-    returns ``EPERM`` (``PermissionError``) when the group is no longer ours to signal.
-    A teardown must never propagate that — swallow the not-found/not-permitted cases
-    and fall back to signalling the process directly so the child is still stopped."""
-    if sess.proc is None:
-        return
-    try:
-        os.killpg(sess.proc.pid, sig)
-        return
-    except (ProcessLookupError, PermissionError, OSError):
-        pass
-    try:
-        sess.proc.send_signal(sig)
-    except (ProcessLookupError, PermissionError, OSError):
-        pass
+        await terminate_and_reap(sess.proc, grace=5)
 
 
 async def api_terminal_ws(request: web.Request) -> web.WebSocketResponse | web.Response:
@@ -643,7 +621,7 @@ async def api_terminal_delete(request: web.Request) -> web.Response:
                 resources=f"session={session_id},detached",
             )
             return web.json_response({"deleted": session_id})
-        return web.Response(status=404, text="Session not found")
+        return json_error("not_found", status=404)
 
     if sess.ws and not sess.ws.closed:
         await sess.ws.close()
@@ -672,7 +650,7 @@ async def _kill_tmux_session(session_id: str) -> None:
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )
-        await asyncio.wait_for(proc.wait(), timeout=5)
+        await wait_with_timeout(proc, 5)
     except (FileNotFoundError, asyncio.TimeoutError, OSError):
         pass
 
@@ -763,7 +741,7 @@ async def _list_tmux_sessions() -> list[str]:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+        out, _ = await run_with_timeout(proc, 5)
         return [
             ln.strip()
             for ln in out.decode("utf-8", "replace").splitlines()

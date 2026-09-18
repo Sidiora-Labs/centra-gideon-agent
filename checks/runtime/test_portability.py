@@ -943,6 +943,9 @@ _SNAPSHOT_COVERAGE_GAPS: frozenset[str] = frozenset(
         "session_search_db",
         "codegraph",
         "sampling_outcomes",
+        "usage_summary",
+        "release_cache",
+        "release_catalog_cache",
         "turn_checkpoints",
         "inbound_audit",
     }

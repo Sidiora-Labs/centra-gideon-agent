@@ -586,3 +586,150 @@ class TestYoloAppliesLive:
             assert resp.status == 200
         saved = json.loads(tmp_config.read_text(encoding="utf-8"))
         assert saved["agent"]["yolo"] is True
+
+
+class TestSelectorErrors:
+    """A malformed `path` is its own fault, distinct from an unknown field.
+
+    All four used to collapse into one 400 reading `field not editable: <path>` — and a
+    JSON list or object in `path` never even got that far: `_EDITABLE_CONFIG.get(<list>)`
+    raised an unhandled `TypeError: unhashable type` and the route answered 500. So a
+    caller that forgot the key, sent an empty one, or sent the wrong shape was told its
+    field was not editable, which is advice for a different mistake.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_missing_path_says_the_request_names_no_field(
+        self, tmp_config
+    ) -> None:
+        async with TestClient(TestServer(_make_app())) as c:
+            resp = await c.patch("/api/config/gideon", json={"value": True})
+            assert resp.status == 400
+            err = (await resp.json())["error"]
+            assert err["code"] == "config_path_required"
+            assert "path" in err["message"]
+
+    @pytest.mark.asyncio
+    async def test_a_blank_path_is_its_own_code(self, tmp_config) -> None:
+        async with TestClient(TestServer(_make_app())) as c:
+            resp = await _patch(c, "", True)
+            assert resp.status == 400
+            assert (await resp.json())["error"]["code"] == "config_path_blank"
+
+    @pytest.mark.asyncio
+    async def test_a_whitespace_only_path_is_blank_too(self, tmp_config) -> None:
+        async with TestClient(TestServer(_make_app())) as c:
+            resp = await _patch(c, "   ", True)
+            assert resp.status == 400
+            assert (await resp.json())["error"]["code"] == "config_path_blank"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "bad_path", [["agent", "yolo"], {"path": "agent.yolo"}, 7, True, None]
+    )
+    async def test_a_wrong_typed_path_is_a_400_not_a_500(
+        self, tmp_config, bad_path
+    ) -> None:
+        """The list and dict cases are the ones that used to reach `dict.get` unhashable."""
+        async with TestClient(TestServer(_make_app())) as c:
+            resp = await _patch(c, bad_path, True)
+            assert resp.status == 400
+            err = (await resp.json())["error"]
+            assert err["code"] == "config_path_type_invalid"
+            assert type(bad_path).__name__ in err["message"]
+
+    @pytest.mark.asyncio
+    async def test_the_three_selector_codes_are_distinct(self, tmp_config) -> None:
+        async with TestClient(TestServer(_make_app())) as c:
+            missing = await c.patch("/api/config/gideon", json={"value": True})
+            blank = await _patch(c, "", True)
+            wrong = await _patch(c, ["agent.yolo"], True)
+            codes = {(await r.json())["error"]["code"] for r in (missing, blank, wrong)}
+        assert len(codes) == 3, f"selector faults collapsed into {codes}"
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_field_keeps_the_existing_rejection(
+        self, tmp_config
+    ) -> None:
+        """ac 21.2: a genuinely unknown field is still refused, and still by prose."""
+        async with TestClient(TestServer(_make_app())) as c:
+            resp = await _patch(c, "nonexistent.field", "x")
+            assert resp.status == 400
+            assert (await resp.json())[
+                "error"
+            ] == "field not editable: nonexistent.field"
+
+    @pytest.mark.asyncio
+    async def test_a_valid_patch_still_writes(self, tmp_config) -> None:
+        """Vacuity: the selector gate must not have turned PATCH into a refusal machine."""
+        async with TestClient(TestServer(_make_app())) as c:
+            resp = await _patch(c, "agent.approval_mode", "interactive")
+            assert resp.status == 200
+        saved = json.loads(tmp_config.read_text(encoding="utf-8"))
+        assert saved["agent"]["approval_mode"] == "interactive"
+
+    @pytest.mark.asyncio
+    async def test_no_selector_fault_writes_anything(self, tmp_config) -> None:
+        before = tmp_config.read_text(encoding="utf-8")
+        async with TestClient(TestServer(_make_app())) as c:
+            await c.patch("/api/config/gideon", json={"value": True})
+            await _patch(c, "", True)
+            await _patch(c, ["agent.yolo"], True)
+        assert tmp_config.read_text(encoding="utf-8") == before
+
+    @pytest.mark.asyncio
+    async def test_every_selector_code_is_registered(self, tmp_config) -> None:
+        """The wire codes are a contract, so they carry a registry row."""
+        from gideon.http_errors import HTTP_ERROR_CODES
+
+        for code in (
+            "config_path_required",
+            "config_path_blank",
+            "config_path_type_invalid",
+        ):
+            assert HTTP_ERROR_CODES[code].strip()
+
+
+class TestCliSharesTheSelectorBoundary:
+    """`gideon config set` reaches the SAME `_EDITABLE_CONFIG` allowlist.
+
+    It cannot reproduce the wrong-typed fault (argparse hands it a string), and it
+    already refuses an absent or blank key before any write — but it looks the key up in
+    the dashboard's allowlist, so that lookup is exercised here with the shapes the API
+    now rejects, to prove the shared table cannot raise on the CLI side either.
+    """
+
+    def _set(self, key, value):
+        import argparse
+
+        from gideon.interfaces.cli.config import _config_cmd
+
+        return _config_cmd(
+            argparse.Namespace(config_action="set", key=key, value=value, file=None)
+        )
+
+    def test_a_blank_key_is_refused_before_any_write(self, tmp_config) -> None:
+        before = tmp_config.read_text(encoding="utf-8")
+        with pytest.raises(SystemExit) as exc:
+            self._set("", "true")
+        assert exc.value.code == 1
+        assert tmp_config.read_text(encoding="utf-8") == before
+
+    def test_a_missing_value_is_refused_before_any_write(self, tmp_config) -> None:
+        before = tmp_config.read_text(encoding="utf-8")
+        with pytest.raises(SystemExit) as exc:
+            self._set("agent.approval_mode", None)
+        assert exc.value.code == 1
+        assert tmp_config.read_text(encoding="utf-8") == before
+
+    def test_the_shared_allowlist_lookup_never_raises_on_a_bad_key(self) -> None:
+        from gideon.interfaces.cli.config import _editable_spec
+
+        assert _editable_spec("agent.approval_mode") is not None
+        for bad in ("", "   ", ["agent.yolo"], {"a": 1}, 7, None):
+            assert _editable_spec(bad) is None  # type: ignore[arg-type]
+
+    def test_an_unknown_key_still_exits_nonzero(self, tmp_config) -> None:
+        with pytest.raises(SystemExit) as exc:
+            self._set("nonexistent.field", "x")
+        assert exc.value.code == 1

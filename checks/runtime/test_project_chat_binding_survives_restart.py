@@ -216,3 +216,170 @@ def test_every_field_the_restore_reads_is_a_field_the_save_writes():
         f"_restore_runtime_binding reads {missing} but the save path never writes them — those "
         "fields restore as empty on every gateway restart"
     )
+
+
+def test_the_restore_regrants_the_projects_context_directory(tmp_path, monkeypatch):
+    """🔑 req 96 ac_2 — the workspace context the binding GRANTS comes back too.
+
+    ``api_chat_session_create`` adds the project's context dir to the session's tool roots,
+    and that grant lives only in memory. Persisting the id alone brings back a chat that is
+    listed under the project and cannot read the project's own context directory — the second
+    half of the issue's complaint ("a restored project chat also lost the context-directory
+    access the binding grants"), which the id-only assertions above cannot see.
+    """
+    from gideon.engine.tasks import hierarchy as hierarchy_mod
+
+    monkeypatch.setattr(hierarchy_mod, "config_dir", lambda: tmp_path)
+    store = hierarchy_mod.HierarchyStore()
+    project = store.find_or_create_project("Bell Times")
+    context = str(store.context_dir(project.id))
+
+    state = _state(tmp_path)
+    save_session_to_history(state, _project_chat(state, project_id=project.id))
+
+    fresh = _state(tmp_path)
+    restore_recent_sessions(fresh)
+    restored = fresh._sessions.get(SESSION)
+
+    assert restored is not None
+    assert restored.project_id == project.id
+    assert context in (
+        restored._extra_tool_roots or []
+    ), "the restored chat carries the project id but none of the access it stands for"
+
+
+def test_a_stale_project_id_grants_nothing_and_invents_no_directory(
+    tmp_path, monkeypatch
+):
+    """🪤 req 96 ac_2 — the validating half, at the one place it can do damage.
+
+    ``HierarchyStore.context_dir`` CREATES the directory it names. A restore that re-granted
+    without checking would mint a context folder for a project deleted while the gateway was
+    down, and hand a chat tool access to a directory no project owns. The recorded id itself
+    is kept — it is the user's own history, and a store that cannot be read must never
+    silently unbind every chat — but it grants nothing.
+    """
+    from gideon.engine.tasks import hierarchy as hierarchy_mod
+
+    monkeypatch.setattr(hierarchy_mod, "config_dir", lambda: tmp_path)
+    state = _state(tmp_path)
+    save_session_to_history(state, _project_chat(state, project_id="p-deleted"))
+
+    fresh = _state(tmp_path)
+    restore_recent_sessions(fresh)
+    restored = fresh._sessions.get(SESSION)
+
+    assert restored is not None
+    assert restored.project_id == "p-deleted"
+    assert restored._extra_tool_roots in (None, [])
+    invented = [p for p in tmp_path.rglob("*") if p.is_dir() and "p-deleted" in str(p)]
+    assert (
+        invented == []
+    ), f"a context directory was created for a dead project: {invented}"
+
+
+def test_the_projects_linked_scan_uses_the_REAL_predicate_after_a_restart(tmp_path):
+    """req 96 ac_1 — asserted through ``/api/projects/<id>/linked``'s own helper.
+
+    The scan above re-implements the predicate inline, which cannot notice the helper adding
+    a condition (it already has one: app-scoped sessions do not count as linked chats). This
+    drives ``hierarchy_handlers._bound_chat_sessions`` — the function the endpoint calls — so
+    the claim "the project's Chats list is not empty after a restart" is measured on the code
+    that builds that list.
+    """
+    from gideon.engine.tasks.hierarchy_handlers import _bound_chat_sessions
+
+    state = _state(tmp_path)
+    save_session_to_history(state, _project_chat(state))
+
+    fresh = _state(tmp_path)
+    restore_recent_sessions(fresh)
+
+    linked = _bound_chat_sessions(fresh, PROJECT)
+    assert [s.key for s in linked] == [SESSION]
+    assert _bound_chat_sessions(fresh, "p-other") == []
+
+
+def test_the_resume_path_restores_the_binding(tmp_path):
+    """req 96 ac_1 — ``resolve_session`` is the loading route the org/resume callers use.
+
+    A session addressed after a restart (a tag edit, a cron→origin injection, the detail
+    endpoint) comes back through here, not through the bulk restore. It delegates to the same
+    rehydrate, and this asserts the property at the entry point those callers actually hold.
+    """
+    from gideon.interfaces.dashboard.chat_persistence import resolve_session
+
+    state = _state(tmp_path)
+    save_session_to_history(state, _project_chat(state))
+
+    fresh = _state(tmp_path)
+    assert fresh._sessions.get(SESSION) is None
+    resumed = resolve_session(fresh, SESSION)
+    assert resumed is not None
+    assert resumed.project_id == PROJECT
+
+
+def test_the_bound_project_endpoint_answers_after_a_restart(tmp_path):
+    """req 96 ac_1 at the wire: ``GET /api/chat/sessions/bound-project`` is what an ACP
+    tool asks in another process to stamp its artifacts with the project. Before the
+    binding was persisted this answered ``""`` for every restored chat, so saves from a
+    restored project chat filed under nothing."""
+    import asyncio
+
+    from aiohttp.test_utils import make_mocked_request
+
+    from gideon.interfaces.dashboard.chat_handlers import api_chat_session_bound_project
+
+    state = _state(tmp_path)
+    save_session_to_history(state, _project_chat(state))
+
+    fresh = _state(tmp_path)
+    restore_recent_sessions(fresh)
+    app = {"state": fresh}
+    request = make_mocked_request(
+        "GET",
+        "/api/chat/sessions/bound-project",
+        headers={"X-Session-Key": f"dashboard:{SESSION}"},
+        app=app,  # type: ignore[arg-type]
+    )
+    resp = asyncio.run(api_chat_session_bound_project(request))
+    assert json.loads(resp.body.decode()) == {"project_id": PROJECT}
+
+
+def test_a_forked_project_chat_stays_in_the_project(tmp_path):
+    """req 96 ac_1 — fork is the one loading route that builds a session from another
+    session rather than from the meta line.
+
+    It already copies the project's WORKSPACE (``workspace_dir=session.workspace_dir``), so a
+    fork that dropped the project id produced a chat sitting in the project's directory,
+    absent from the project's Chats list, and — once saved — restored that way forever. The
+    granted context roots ride along for the same reason they do on the parent.
+    """
+    import asyncio
+
+    from aiohttp.test_utils import make_mocked_request
+
+    from gideon.interfaces.dashboard.chat_fork import api_chat_session_fork
+
+    state = _state(tmp_path)
+    parent = _project_chat(state)
+    parent._extra_tool_roots = ["/tmp/proj-ws/context"]
+    save_session_to_history(state, parent)
+
+    request = make_mocked_request(
+        "POST",
+        f"/api/chat/sessions/{SESSION}/fork",
+        app={"state": state},  # type: ignore[arg-type]
+        match_info={"session": SESSION},
+    )
+    resp = asyncio.run(api_chat_session_fork(request))
+    assert resp.status == 200
+    forked = state._sessions[json.loads(resp.body.decode())["key"]]
+
+    assert forked.key != SESSION
+    assert forked.project_id == PROJECT, "the fork left the project"
+    assert forked._extra_tool_roots == ["/tmp/proj-ws/context"]
+
+    reloaded = _state(tmp_path)
+    restore_recent_sessions(reloaded)
+    assert reloaded._sessions[forked.key].project_id == PROJECT

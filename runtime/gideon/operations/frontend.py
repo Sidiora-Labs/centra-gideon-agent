@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable
 
+from gideon.core.cancellation import wait_with_timeout
 from gideon.core.layout import package_root
 
 logger = logging.getLogger(__name__)
@@ -95,17 +96,9 @@ async def build_frontend_async(
                 cwd=str(project),
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
+                start_new_session=True,
             )
-            try:
-                await asyncio.wait_for(process.wait(), timeout)
-            except (TimeoutError, asyncio.CancelledError):
-                if process.returncode is None:
-                    try:
-                        process.kill()
-                    except ProcessLookupError:
-                        pass
-                await process.wait()
-                raise
+            await wait_with_timeout(process, timeout)
             if process.returncode:
                 report("Frontend build failed — dashboard may be stale")
                 return

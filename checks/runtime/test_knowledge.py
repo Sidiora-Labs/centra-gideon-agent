@@ -1261,6 +1261,7 @@ _PINNED_TOKEN_RANKING = [("B", 0.048916), ("A", 0.048660), ("C", 0.048395)]
 _PINNED_RESULT_KEYS = {
     "content",
     "deep_link",
+    "graph_match",
     "id",
     "line_range",
     "match_type",
@@ -1931,7 +1932,7 @@ class TestDoctorVectorIndexLine:
         _collapsing_corpus(s, items=3, per_item=4)
         s.close()
         res = self._run(tmp_path)
-        assert res.ok and "12 chunk vector(s) indexed" in res.detail
+        assert res.ok and "12 chunk vectors indexed" in res.detail
         assert res.evidence["extension_available"] is True
         assert res.evidence["dimensions"] == {"4": {"indexed": 12, "live": 12}}
         assert "degraded" not in res.evidence

@@ -23,6 +23,15 @@ Two independent things are pinned here:
 The census rail below is likewise bidirectional: the leaf spawns must NOT acquire the
 flag, so a future blanket sweep reds this file. Signalling a group you do not lead takes
 the gateway down with the child, which is worse than signalling one pid.
+
+**Where the kill lives changed (req.3).** Every deadline now goes through
+``gideon.core.cancellation.run_with_timeout`` / ``wait_with_timeout``, the ONE owner of a
+blown process deadline — it group-signals only when the child leads a group, escalates
+SIGTERM→SIGKILL, reaps within a bound and closes the pipes. So the kill-style census
+below asks "is this deadline OWNER-routed?", not "does this except-handler call kill?",
+and a bare ``proc.kill()`` in a timeout handler is now the drift it reports. The
+``start_new_session`` census is unchanged and still does the group-vs-leaf work:
+owner-routing a leaf is safe, giving a leaf its own session is the blanket sweep.
 """
 
 from __future__ import annotations
@@ -46,6 +55,8 @@ FORKING_CMD = (
 )
 
 _SRC = Path(gates.__file__).resolve().parents[1]
+_RUNTIME = _SRC.parent
+_HANDLERS = _RUNTIME / "interfaces" / "dashboard" / "handlers"
 
 
 def _group_is_empty(pgid: int, *, deadline: float = 2.0) -> bool:
@@ -153,7 +164,6 @@ async def test_control_the_replaced_shape_blows_the_same_bound():
 _UPDATES_GROUP_LED = {
     "proc",
     "pip_up",
-    "pull",
     "pip_install",
 }
 _UPDATES_LEAF = {
@@ -161,7 +171,6 @@ _UPDATES_LEAF = {
     "remote",
     "show",
     "diff",
-    "dirty",
 }
 
 
@@ -187,7 +196,7 @@ def _spawns_by_target(source: str, callee: str) -> dict[str, set[str]]:
 
 def test_only_the_censused_spawns_lead_their_own_group():
     """Both directions: the four forking spawns opt in, the five leaves stay out."""
-    src = (_SRC / "dashboard" / "handlers" / "updates.py").read_text()
+    src = (_HANDLERS / "updates.py").read_text()
     spawns = _spawns_by_target(src, "create_subprocess_exec")
 
     missing = {
@@ -206,13 +215,27 @@ def test_only_the_censused_spawns_lead_their_own_group():
     )
 
 
+_OWNER_CALLS = {
+    "run_with_timeout",
+    "wait_with_timeout",
+    "kill_timed_out",
+    "terminate_and_reap",
+}
+
+
 def _timeout_kill_style(source: str) -> dict[str, str]:
-    """Map killed-variable name -> ``"pid"`` or ``"group"``, per timeout handler.
+    """Map spawned-variable name -> ``"owner"`` or ``"pid"``, per timed-out child.
+
+    ``owner`` means the deadline is handed to :mod:`gideon.core.cancellation` — the one
+    place that decides between a group signal and a pid signal, escalates, reaps within a
+    bound and closes the pipes. ``pid`` means a bare ``kill``/``terminate`` in the
+    module's own timeout handler, which is the shape req.3 removed.
 
     Keyed by NAME, not line, so ordinary edits above a handler don't churn the rail.
     """
     style: dict[str, str] = {}
-    for node in ast.walk(ast.parse(source)):
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
         if not isinstance(node, ast.ExceptHandler):
             continue
         if "TimeoutError" not in (ast.dump(node.type) if node.type else ""):
@@ -221,39 +244,47 @@ def _timeout_kill_style(source: str) -> dict[str, str]:
             if not isinstance(inner, ast.Call):
                 continue
             fn = inner.func
-            if isinstance(fn, ast.Attribute) and fn.attr == "kill":
+            if isinstance(fn, ast.Attribute) and fn.attr in {"kill", "terminate"}:
                 if isinstance(fn.value, ast.Name):
                     style[fn.value.id] = "pid"
-            elif isinstance(fn, ast.Name) and fn.id == "kill_timed_out":
-                if inner.args and isinstance(inner.args[0], ast.Name):
-                    style[inner.args[0].id] = "group"
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not node.args:
+            continue
+        fn = node.func
+        name = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
+        if name in _OWNER_CALLS and isinstance(node.args[0], ast.Name):
+            style[node.args[0].id] = "owner"
     return style
 
 
-def test_updates_timeout_handlers_match_the_census_exactly():
-    """The four forking spawns kill their GROUP; the five leaves still kill by pid.
+def test_every_updates_spawn_hands_its_deadline_to_the_owner():
+    """All nine spawns — forking and leaf — route their timeout through the owner.
 
-    Bidirectional on purpose. A leaf drifting to ``group`` means someone blanket-swept
-    and gave a non-forking child a session it doesn't need; a forking spawn drifting to
-    ``pid`` means the grandchild is holding the pipe again.
+    The group-vs-leaf distinction lives in the ``start_new_session`` census above, not
+    here: the owner group-signals only a child that LEADS a group, so routing a leaf
+    through it costs nothing and still buys the escalation, the bounded reap and the pipe
+    close. A name drifting back to ``pid`` means someone re-opened that hole locally.
     """
-    src = (_SRC / "dashboard" / "handlers" / "updates.py").read_text()
+    src = (_HANDLERS / "updates.py").read_text()
     style = _timeout_kill_style(src)
 
-    assert {n for n, s in style.items() if s == "group"} == _UPDATES_GROUP_LED, (
-        "the set of group-killed spawns in updates.py drifted from the census; "
-        f"found {sorted(n for n, s in style.items() if s == 'group')}"
+    assert {n for n, s in style.items() if s == "owner"} == (
+        _UPDATES_GROUP_LED | _UPDATES_LEAF
+    ), (
+        "the set of owner-routed spawns in updates.py drifted from the census; "
+        f"found {sorted(n for n, s in style.items() if s == 'owner')}"
     )
-    assert {n for n, s in style.items() if s == "pid"} == _UPDATES_LEAF, (
-        "the set of pid-killed spawns in updates.py drifted from the census; "
-        f"found {sorted(n for n, s in style.items() if s == 'pid')}"
+    assert not [n for n, s in style.items() if s == "pid"], (
+        f"{sorted(n for n, s in style.items() if s == 'pid')} in updates.py kill their "
+        "timed-out child locally again. Route the deadline through run_with_timeout — a "
+        "local kill signals one pid, never escalates and leaves the pipes open."
     )
 
 
 def test_the_loop_gate_kills_its_shells_group():
     """gates.py has ONE spawn — an arbitrary ``/bin/sh -c``, so it always forks."""
     src = (_SRC / "loop" / "gates.py").read_text()
-    assert _timeout_kill_style(src) == {"proc": "group"}
+    assert _timeout_kill_style(src) == {"proc": "owner"}
     spawns = _spawns_by_target(src, "create_subprocess_limited")
     assert "start_new_session" in spawns["proc"], (
         "the loop gate's shell no longer leads its own session, so kill_timed_out "
@@ -261,15 +292,13 @@ def test_the_loop_gate_kills_its_shells_group():
     )
 
 
-_FILES_REAPED = {
+_FILES_SPAWNS = {
     "_git",
     "_content_search_rg",
-}
-_FILES_PID_KILL = {
     "api_upload",
     "api_screenshot",
 }
-_FILES_GROUP_LED = {"_git"}
+_FILES_GROUP_LED = {"_git", "_content_search_rg"}
 
 
 def _spawn_functions(source: str) -> dict[str, dict[str, object]]:
@@ -283,21 +312,20 @@ def _spawn_functions(source: str) -> dict[str, dict[str, object]]:
             continue
         kill: str | None = None
         for node in ast.walk(fn):
-            if not isinstance(node, ast.ExceptHandler):
-                continue
-            if "TimeoutError" not in (ast.dump(node.type) if node.type else ""):
-                continue
-            for inner in ast.walk(node):
-                if not isinstance(inner, ast.Call):
+            if isinstance(node, ast.ExceptHandler):
+                if "TimeoutError" not in (ast.dump(node.type) if node.type else ""):
                     continue
-                f = inner.func
-                if isinstance(f, ast.Attribute) and f.attr in {"kill", "terminate"}:
-                    kill = "pid"
-                elif isinstance(f, ast.Name) and f.id in {
-                    "kill_timed_out",
-                    "terminate_and_reap",
-                }:
-                    kill = "group"
+                for inner in ast.walk(node):
+                    if not isinstance(inner, ast.Call):
+                        continue
+                    f = inner.func
+                    if isinstance(f, ast.Attribute) and f.attr in {"kill", "terminate"}:
+                        kill = "pid"
+            elif isinstance(node, ast.Call):
+                f = node.func
+                name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
+                if name in _OWNER_CALLS:
+                    kill = "owner"
         out[fn.name] = {"kill": kill, "own_session": "start_new_session" in dumped}
     return out
 
@@ -307,33 +335,29 @@ def test_every_file_browser_spawn_reaps_its_timeout():
 
     Three directions, because each is a way the module drifted or could drift again:
     an unclassified spawn (a NEW endpoint shelling out) reds naming itself; a censused
-    reaper that stops reaping reds; and a leaf that acquires a session it doesn't need
-    reds too.
+    spawn that stops routing its deadline through the owner reds; and a leaf that
+    acquires a session it doesn't need reds too.
     """
-    src = (_SRC / "dashboard" / "handlers" / "files.py").read_text()
+    src = (_HANDLERS / "files.py").read_text()
     sites = _spawn_functions(src)
 
-    unclassified = set(sites) - _FILES_REAPED - _FILES_PID_KILL
+    unclassified = set(sites) - _FILES_SPAWNS
     assert not unclassified, (
         f"{sorted(unclassified)} in files.py spawn a process but are not in this census. "
-        "Classify each: route the timeout through kill_timed_out (the default — it "
+        "Route the timeout through gideon.core.cancellation.run_with_timeout — it "
         "group-signals when the child leads a group and falls back to the pid when it "
-        "does not, and its reap is BOUNDED), or justify a bare pid kill here. #432 was "
-        "exactly this: a spawn nobody had classified, whose timeout killed nothing."
+        "does not, escalates, and its reap is BOUNDED. #432 was exactly this: a spawn "
+        "nobody had classified, whose timeout killed nothing."
     )
-    stale = (_FILES_REAPED | _FILES_PID_KILL) - set(sites)
+    stale = _FILES_SPAWNS - set(sites)
     assert not stale, f"census names {sorted(stale)}, which no longer spawn anything"
 
-    not_reaping = {n for n in _FILES_REAPED if sites[n]["kill"] != "group"}
-    assert not not_reaping, (
-        f"{sorted(not_reaping)} no longer reap through kill_timed_out. A killed-but-"
+    not_owned = {n for n in _FILES_SPAWNS if sites[n]["kill"] != "owner"}
+    assert not not_owned, (
+        f"{sorted(not_owned)} no longer hand their deadline to the owner. A killed-but-"
         "unreaped child is a zombie holding its end of the pipe; an unkilled one is an "
         "orphan that outlives the request (#432 leaked one per timed-out read)."
     )
-    drifted = {n for n in _FILES_PID_KILL if sites[n]["kill"] != "pid"}
-    assert (
-        not drifted
-    ), f"{sorted(drifted)} changed kill style without moving in the census"
 
     assert {n for n, s in sites.items() if s["own_session"]} == _FILES_GROUP_LED, (
         "the set of files.py spawns leading their own session drifted from the census: "
@@ -357,9 +381,10 @@ def test_the_by_function_matcher_sees_an_unreaped_timeout():
     }
 
     fixed = unreaped.replace(
-        "        return None\n", "        await kill_timed_out(proc)\n"
+        "        out, _ = await asyncio.wait_for(proc.communicate(), timeout=30.0)\n",
+        "        out, _ = await run_with_timeout(proc, 30.0)\n",
     )
-    assert _spawn_functions(fixed)["api_leaky"]["kill"] == "group"
+    assert _spawn_functions(fixed)["api_leaky"]["kill"] == "owner"
 
 
 def test_the_matcher_tells_the_two_shapes_apart():
@@ -372,9 +397,15 @@ def test_the_matcher_tells_the_two_shapes_apart():
         "    except asyncio.TimeoutError:\n"
     )
     assert _timeout_kill_style(header + "        proc.kill()\n") == {"proc": "pid"}
-    assert _timeout_kill_style(header + "        await kill_timed_out(proc)\n") == {
-        "proc": "group"
-    }
+    owned = (
+        "import asyncio\n"
+        "async def f(proc):\n"
+        "    try:\n"
+        "        await run_with_timeout(proc, 30)\n"
+        "    except asyncio.TimeoutError:\n"
+        "        return None\n"
+    )
+    assert _timeout_kill_style(owned) == {"proc": "owner"}
     assert _timeout_kill_style("def g(proc):\n    proc.kill()\n") == {}
 
 

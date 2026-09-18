@@ -19,6 +19,7 @@ when one ships):**
   3. ``POST /api/knowledge/items``                            — regression guard (OU-3 runner fix)
   4. ``POST /api/knowledge/items/{id}/generate-intelligence`` — regression guard (OU-3 runner fix)
   5. ``POST /api/loops/classify``                     — MUST-FAIL-ON-MAIN anchor (this atom)
+  6. ``POST /api/workflows/runs``                             — regression guard (run preflight)
 
 **Ground truth (measured on a live no-provider gateway, ``origin/main`` @ ``df5f59b56``,
 2026-09-16).** 1+2 already surface the calm signal (their point-fixes merged). 3+4 ingest
@@ -64,6 +65,7 @@ COVERED_SURFACES: frozenset[str] = frozenset(
         "POST /api/knowledge/items",
         "POST /api/knowledge/items/{id}/generate-intelligence",
         "POST /api/loops/classify",
+        "POST /api/workflows/runs",
     }
 )
 
@@ -327,11 +329,70 @@ async def test_knowledge_ingest_with_provider_bound_reaches_done(tmp_path):
     ), f"insights should be populated when the model works: {item!r}"
 
 
+@pytest.mark.asyncio
+async def test_workflow_run_no_provider_refuses_with_a_named_use_case():
+    """Surface 6. Starting a workflow is a first-run action — the bundled templates are
+    there on install — and every stage in one needs a model.
+
+    ``service.start_run`` admits a run only after ``preflight``, so the no-provider
+    outcome has to be an explicit refusal that NAMES the missing use case and where to
+    fix it. A silent admission would start the run and fail somewhere inside it, which is
+    the shape this rail exists to keep out.
+    """
+    from gideon.automation.workflows.preflight import preflight
+
+    spec = {
+        "name": "first-run-demo",
+        "root": {
+            "kind": "stage",
+            "id": "work",
+            "config": {"prompt": "do the thing", "model_tier": "fast"},
+        },
+    }
+    with patch(
+        "gideon.extensions.providers.provider_bridge.can_resolve_use_case",
+        return_value=False,
+    ):
+        result = preflight(spec)
+
+    assert not result.ok, f"a no-provider home admitted the run: {result.to_dict()}"
+    models = [f for f in result.errors if f.kind == "models"]
+    assert models, f"no model finding: {result.to_dict()}"
+    finding = models[0]
+    assert finding.code == "WF_PRE_MODEL_UNRESOLVED"
+    assert "no model resolves for the" in finding.message
+    assert "Settings" in finding.remediation
+    assert not _looks_like_traceback(finding.message)
+    assert result.checked.get("models"), "the rail cannot tell whether it looked"
+
+
+@pytest.mark.asyncio
+async def test_workflow_run_with_a_provider_bound_is_admitted():
+    """The honest half: the SAME spec passes preflight's model check once one resolves."""
+    from gideon.automation.workflows.preflight import preflight
+
+    spec = {
+        "name": "first-run-demo",
+        "root": {
+            "kind": "stage",
+            "id": "work",
+            "config": {"prompt": "do the thing", "model_tier": "fast"},
+        },
+    }
+    with patch(
+        "gideon.extensions.providers.provider_bridge.can_resolve_use_case",
+        return_value=True,
+    ):
+        result = preflight(spec)
+
+    assert [f for f in result.findings if f.kind == "models"] == []
+
+
 class TestRailIsNotVacuous:
     def test_covered_surfaces_match_the_documented_enumeration(self):
         """The enumeration is the whole rail; its size is pinned so a surface cannot be
         dropped silently, and adding one is a deliberate edit here."""
-        assert len(COVERED_SURFACES) == 5, COVERED_SURFACES
+        assert len(COVERED_SURFACES) == 6, COVERED_SURFACES
         assert "POST /api/loops/classify" in COVERED_SURFACES
         assert "POST /api/chat" in COVERED_SURFACES
 

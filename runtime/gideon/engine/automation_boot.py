@@ -61,7 +61,25 @@ class AutomationBoot:
         except Exception:
             self.logger.warning("trigger-store migration failed at boot", exc_info=True)
 
+    def converge(self, store: Any) -> None:
+        """Collapse duplicate copies of every built-in singleton before the seeders run.
+
+        The seeding sites converge their own purpose, but not all of them run at boot — the
+        triage digest is installed from the dashboard — so a home holding twins of one of
+        those would keep firing both until someone opened the page. One pass here covers the
+        whole registry; it is idempotent, so the per-site calls stay the authority.
+        """
+        try:
+            from gideon.automation.triggers.singletons import converge_all
+
+            converge_all(store)
+        except Exception:
+            self.logger.warning(
+                "built-in singleton convergence failed at boot", exc_info=True
+            )
+
     def reconcile(self, store: Any) -> None:
+        self.converge(store)
         for module, entry, failure in RECONCILERS:
             try:
                 getattr(import_module(module), entry)(store)

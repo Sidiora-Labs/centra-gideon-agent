@@ -998,6 +998,12 @@ class MemoryService:
             return {}
         return archive.memory_stats()
 
+    def curated_count(self) -> int:
+        archive = self._vs
+        if not archive:
+            return 0
+        return archive.curated_count()
+
     def get_records(
         self, kinds: "set[str] | None" = None, include_deleted: bool = False
     ) -> "list[MemoryRecord]":

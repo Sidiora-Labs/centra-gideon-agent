@@ -293,7 +293,7 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `GET /api/healthz` — Liveness probe — auth-exempt, returns 200 once gateway is serving HTTP.
 - `POST /api/hooks/agent` — run an agent turn from an external webhook.
 - `GET /api/inbox` — list all inbox items (recency, optionally engagement-weighted).
-- `GET /api/inbox/digest` — on-demand channel digest.
+- `POST /api/inbox/digest` — {channel_id, hours} — create an on-demand channel digest.
 - `POST /api/inbox/dismiss-all` — dismiss every OPEN item (pending or seen).
 - `GET /api/inbox/kinds` — item kinds present, with open counts, for the filter chips.
 - `POST /api/inbox/notes` — the USER writes their own inbox item (INU-9).
@@ -455,18 +455,12 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `POST /api/mcp/toggle` — enable or disable an MCP server globally.
 - `POST /api/mcp/toggle-all` — enable or disable all MCP servers.
 - `POST /api/mcp/toggle-tool` — enable or disable a specific tool in an MCP server.
-- `POST /api/memory/activate-model` — switch the active embedding model.
 - `GET /api/memory/approval-rules` — the triage approval rules, with provenance.
 - `POST /api/memory/approval-rules` — teach one approve/deny rule.
 - `DELETE /api/memory/approval-rules/{key}` — revoke one rule.
 - `POST /api/memory/consolidate` — trigger immediate consolidation for testing.
 - `GET /api/memory/context-preview` — preview what gets injected into prompts.
 - `GET /api/memory/daily-digests` — the per-day rollup nodes (mem-tree),
-- `POST /api/memory/delete-model` — delete a downloaded embedding model.
-- `POST /api/memory/disable-embeddings` — clear the active embedding selection.
-- `GET /api/memory/embedding-models` — list local embedding models + download status.
-- `GET /api/memory/embedding-status` — embedding system status + setup progress.
-- `POST /api/memory/enable-embeddings` — build the FAISS vector store for the active native model.
 - `GET /api/memory/entities` — the entity set with inbound-link counts.
 - `POST /api/memory/entities` — declare an entity, then re-link the store.
 - `GET /api/memory/entities/proposals` — the accept queue (§7.1).
@@ -747,11 +741,10 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `POST /api/triggers/{id}/test` — execute a lifecycle or event trigger's action once.
 - `POST /api/triggers/{id}/to-chat` — open a schedule trigger as a chat session.
 - `POST /api/triggers/{id}/toggle` — enable/disable.
-- `POST /api/update` — git pull, reinstall, rebuild, restart gateway.
-- `POST /api/update/auto` — toggle auto-update on/off.
+- `POST /api/update` — move a source checkout onto the selected release, restart.
+- `POST /api/update/auto` — set the automatic-update mode.
 - `POST /api/update/cancel` — dismiss a stuck/failed update overlay.
 - `GET /api/update/check` — kind-aware update check (contract C2).
-- `POST /api/update/dev-mode` — toggle git dev-mode (track commits vs tags).
 - `POST /api/update/simulate` — walk through update steps with delays.
 - `POST /api/upload` — open native file picker and return selected paths.
 - `POST /api/upload/file` — cross-platform multipart file upload.

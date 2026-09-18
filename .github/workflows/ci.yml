@@ -213,7 +213,16 @@ jobs:
           dash -n infrastructure/website/install.sh
           shellcheck -s sh infrastructure/website/install.sh
           # -n0: the truncation sweep is ~170 tiny `sh` invocations; xdist buys nothing.
-          uv run pytest checks/runtime/test_website_installer.py -n0 --no-cov
+          uv run pytest checks/runtime/test_website_installer.py -n0 --no-cov \
+            --junitxml=reports/ci-lint-website-installer.junit.xml
+      - name: Upload the lint test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-report-ci-lint
+          path: reports/
+          if-no-files-found: ignore
+          retention-days: 7
 
   test-shard:
 
@@ -285,6 +294,15 @@ jobs:
 
 
         run: uv run pytest --no-cov -q --splits 4 --group ${{ matrix.shard }} --splitting-algorithm least_duration
+          --junitxml=reports/ci-test-shard-${{ matrix.shard }}.junit.xml
+      - name: Upload the shard test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-report-ci-test-shard-${{ matrix.shard }}
+          path: reports/
+          if-no-files-found: ignore
+          retention-days: 7
 
   test:
 
@@ -319,9 +337,13 @@ jobs:
 
       - name: npm ci (root)
         run: npm ci
+      - name: prepare the report directory
+        run: mkdir -p reports
       - name: typecheck
         run: npm run typecheck:web
       - name: test (vitest)
+        env:
+          VITEST_JUNIT_OUTPUT_FILE: ${{ github.workspace }}/reports/ci-web-vitest.junit.xml
 
 
 
@@ -366,6 +388,14 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: render smoke (built SPA mounts in a real browser)
         run: npm run smoke:render
+      - name: Upload the web test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-report-ci-web
+          path: reports/
+          if-no-files-found: ignore
+          retention-days: 7
 
   e2e-pwa:
 
@@ -408,6 +438,8 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: service worker never caches /api (apps/console/e2e/pwa.spec.ts)
         working-directory: apps/console
+        env:
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: ${{ github.workspace }}/reports/ci-e2e-pwa.junit.xml
         run: npx playwright test e2e/pwa.spec.ts --project=chromium
       - name: upload the traces
         if: always()
@@ -416,6 +448,14 @@ jobs:
           name: pwa-traces
           path: apps/console/test-results/
           if-no-files-found: ignore
+      - name: Upload the e2e-pwa test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-report-ci-e2e-pwa
+          path: reports/
+          if-no-files-found: ignore
+          retention-days: 7
 
   e2e-a11y:
 
@@ -459,7 +499,8 @@ jobs:
         working-directory: apps/console
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: a11y-report.json
-        run: npx playwright test e2e/a11y.spec.ts --project=chromium --reporter=github,json
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: ${{ github.workspace }}/reports/ci-e2e-a11y-axe.junit.xml
+        run: npx playwright test e2e/a11y.spec.ts --project=chromium --reporter=github,json,junit
 
 
 
@@ -476,6 +517,8 @@ jobs:
 
       - name: non-axe a11y detectors still recognise their defects (apps/console/e2e/nonAxeA11yChecks.spec.ts)
         working-directory: apps/console
+        env:
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: ${{ github.workspace }}/reports/ci-e2e-a11y-nonaxe.junit.xml
         run: npx playwright test e2e/nonAxeA11yChecks.spec.ts --project=chromium
 
 
@@ -484,6 +527,8 @@ jobs:
 
       - name: app-authored DOM is really mounted and swept (apps/console/e2e/appSurface.spec.ts)
         working-directory: apps/console
+        env:
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: ${{ github.workspace }}/reports/ci-e2e-a11y-appsurface.junit.xml
         run: npx playwright test e2e/appSurface.spec.ts --project=chromium
 
 
@@ -491,6 +536,8 @@ jobs:
 
       - name: V3 walkthrough — keyboard / reduced-motion / phone (apps/console/e2e/walkthrough.spec.ts)
         working-directory: apps/console
+        env:
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: ${{ github.workspace }}/reports/ci-e2e-a11y-walkthrough.junit.xml
         run: npx playwright test e2e/walkthrough.spec.ts --project=chromium
 
 
@@ -501,6 +548,8 @@ jobs:
 
       - name: offline scripted chat turn (apps/console/e2e/chat.spec.ts)
         working-directory: apps/console
+        env:
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: ${{ github.workspace }}/reports/ci-e2e-a11y-chat.junit.xml
         run: npx playwright test e2e/chat.spec.ts --project=chromium
       - name: upload the axe reports
         if: always()
@@ -508,6 +557,14 @@ jobs:
         with:
           name: axe-violations
           path: apps/console/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Upload the e2e-a11y test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-report-ci-e2e-a11y
+          path: reports/
           if-no-files-found: ignore
           retention-days: 7
 
@@ -581,6 +638,15 @@ jobs:
 
       - name: BA-2 behavioural proof in a REAL browser (safety script · redirect re-eval)
         run: uv run pytest checks/runtime/test_browse_safety_script.py checks/runtime/test_browse_cdp_live.py checks/runtime/test_browse_behavioural_proof_is_reachable.py -n0
+          --junitxml=reports/ci-browse-live.junit.xml
+      - name: Upload the browse-live test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-report-ci-browse-live
+          path: reports/
+          if-no-files-found: ignore
+          retention-days: 7
 
   rails:
 
@@ -601,6 +667,7 @@ jobs:
 
       - name: provider-boundary residue sweep (plan 32)
         run: uv run pytest checks/runtime/test_provider_boundary_residue.py -n0
+          --junitxml=reports/ci-rails.junit.xml
 
       # `make gates` (tooling/scripts/gate_report.py) is the one surface that reports all six ratchets
 
@@ -614,6 +681,14 @@ jobs:
       # GIDEON_HOME — consistent with this job's no-global-home contract.
       - name: gate aggregate (make gates)
         run: uv run python tooling/scripts/gate_report.py
+      - name: Upload the rails test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-report-ci-rails
+          path: reports/
+          if-no-files-found: ignore
+          retention-days: 7
 
   harness:
     # Self-verification gate (SELF-VERIFICATION SV-7): the repo-inner checks/harness/ package
@@ -638,9 +713,23 @@ jobs:
       - name: Install (locked)
         run: uv sync --locked --extra dev
       - name: harness validate (spec shape + reference resolution)
-        run: uv run python -m checks.harness validate
+        run: |
+          set -o pipefail
+          mkdir -p reports
+          uv run python -m checks.harness validate 2>&1 | tee reports/ci-harness-validate.log
       - name: harness scan (static boundary scanner over the diff)
-        run: uv run python -m checks.harness scan --diff
+        run: |
+          set -o pipefail
+          mkdir -p reports
+          uv run python -m checks.harness scan --diff 2>&1 | tee reports/ci-harness-scan.log
+      - name: Upload the harness test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-report-ci-harness
+          path: reports/
+          if-no-files-found: ignore
+          retention-days: 7
 
   client:
     # gideon-client (packages/python-client) is versioned + published
@@ -666,7 +755,16 @@ jobs:
         run: |
           uv venv .venv-client
           uv pip install --python .venv-client "packages/python-client[dev]"
-          .venv-client/bin/python -m pytest packages/python-client/tests
+          .venv-client/bin/python -m pytest packages/python-client/tests \
+            --junitxml=reports/ci-client.junit.xml
+      - name: Upload the client test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-report-ci-client
+          path: reports/
+          if-no-files-found: ignore
+          retention-days: 7
 
 
 

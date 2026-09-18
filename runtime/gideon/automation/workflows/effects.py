@@ -204,6 +204,7 @@ class _TeardownInvocation:
         return cls(arguments, environment), ""
 
     async def run(self, timeout: float) -> tuple[bool, str]:
+        from gideon.core.cancellation import run_with_timeout
         from gideon.security.sandbox import PROFILE_TOOL, create_subprocess_limited
 
         try:
@@ -213,13 +214,11 @@ class _TeardownInvocation:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=self.environment,
+                start_new_session=True,
             )
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(), timeout=timeout
-                )
+                stdout, stderr = await run_with_timeout(process, timeout)
             except asyncio.TimeoutError:
-                process.kill()
                 return False, f"teardown timed out after {timeout}s"
         except FileNotFoundError:
             return False, f"teardown command not found: {self.argv[0]}"

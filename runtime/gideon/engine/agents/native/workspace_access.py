@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ast
-import asyncio
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -233,11 +232,5 @@ class ShellCapture:
     @classmethod
     async def collect(cls, process, timeout: float) -> ShellCapture:
         with cancellation.track_child(process):
-            try:
-                output, _ = await asyncio.wait_for(
-                    process.communicate(), timeout=timeout
-                )
-            except (asyncio.TimeoutError, asyncio.CancelledError):
-                await cancellation.terminate_and_reap(process)
-                raise
+            output, _ = await cancellation.run_with_timeout(process, timeout)
         return cls((output or b"").decode("utf-8", "replace"), process.returncode)

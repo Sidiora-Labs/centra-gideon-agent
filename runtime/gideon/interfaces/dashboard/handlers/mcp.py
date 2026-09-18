@@ -12,6 +12,7 @@ from typing import Any
 
 from aiohttp import web
 
+from gideon.core.cancellation import run_with_timeout
 from gideon.extensions.providers.failure_copy import relayed_failure_copy
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.security.security import redact_credentials, redact_exfiltration_urls
@@ -809,7 +810,7 @@ async def api_mcp_remove(request: web.Request) -> web.Response:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+        stdout, stderr = await run_with_timeout(proc, 30)
         rc = proc.returncode
         out = (stdout or b"").decode(errors="replace").strip()
         err = (stderr or b"").decode(errors="replace").strip()
@@ -822,11 +823,6 @@ async def api_mcp_remove(request: web.Request) -> web.Response:
     except FileNotFoundError:
         logger.debug("gideon CLI not in PATH")
     except asyncio.TimeoutError:
-        try:
-            proc.kill()
-        except ProcessLookupError:
-            pass
-        await proc.communicate()
         logger.warning("marketplace mcp uninstall timed out for %s", name)
     except Exception as exc:
         logger.warning("marketplace mcp uninstall failed for %s: %s", name, exc)

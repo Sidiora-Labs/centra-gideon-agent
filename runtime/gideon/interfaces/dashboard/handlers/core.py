@@ -10,11 +10,11 @@ from pathlib import Path
 from aiohttp import web
 from aiohttp.client_exceptions import ClientConnectionResetError
 
-import gideon.assurance.validation as _validation_mod
 from gideon.core.atomic_write import atomic_write
 from gideon.core.config.edit_spec import ConfigValueError, coerce_edit_value
 from gideon.core.config.loader import MEMORY_VAULT_MODES, PUSH_BACKENDS, AppConfig
 from gideon.core.layout import package_path
+from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.interfaces.dashboard.token_auth import (
     MAX_SESSION_TTL_SECS,
@@ -179,6 +179,64 @@ async def service_worker(request: web.Request) -> web.StreamResponse:
     return _dist_root_file("sw.js", "text/javascript")
 
 
+_FONT_CONTENT_TYPES = {
+    ".woff2": "font/woff2",
+    ".woff": "font/woff",
+    ".ttf": "font/ttf",
+    ".otf": "font/otf",
+    ".eot": "application/vnd.ms-fontobject",
+}
+
+
+def _font_not_found() -> web.Response:
+    """The 404 a missing font gets: a RETURNED status, never a raise.
+
+    Matches what ``/assets`` does — ``spa_fallback`` excludes both prefixes, so
+    neither can answer a missing file with the application's HTML.
+    """
+    return web.Response(status=404, text="font not found", content_type="text/plain")
+
+
+async def dist_font(request: web.Request) -> web.StreamResponse:
+    """Serve ``/fonts/<name>`` from the dist ``fonts/`` tree with a stated media type.
+
+    The same two rails as :func:`_dist_root_file`, for the same reasons, plus a
+    containment check:
+
+    * **The type is stated, never guessed.** None of the font extensions are in
+      Python's built-in ``mimetypes`` table — they arrive only from an
+      ``/etc/mime.types`` that a stock container or a mac does not ship — so a static
+      mount serves ``dm-sans.woff2`` as ``application/octet-stream`` on exactly the
+      machines nobody develops on. An extension this table does not name is not a
+      font and is not served.
+    * **A missing font returns 404, it does not raise.** A raise would come back out
+      of ``spa_fallback`` as index.html, and a browser parsing HTML as a font just
+      falls back to a system face — a silent, un-diagnosable substitution.
+    * **One URL per font.** An empty or slash-terminated tail is 404 rather than a
+      second address for the same bytes (``/fonts/x.woff2/`` — ``Path`` would drop the
+      trailing slash and serve the file) or a directory listing.
+    * **The target must resolve inside the fonts dir.** ``..`` (encoded or not), an
+      absolute tail, and a symlink pointing out of the tree are all 404. The ROOT is
+      resolved too, because in dev ``static/dist`` is itself a symlink into
+      ``apps/console/dist`` — comparing a resolved target against an unresolved root
+      would reject every real font there.
+    """
+    tail = request.match_info.get("tail", "")
+    if not tail or tail.endswith("/"):
+        return _font_not_found()
+    root = (_DIST_DIR / "fonts").resolve()
+    try:
+        target = (root / tail).resolve()
+    except (OSError, ValueError, RuntimeError):
+        return _font_not_found()
+    if not target.is_relative_to(root) or not target.is_file():
+        return _font_not_found()
+    ctype = _FONT_CONTENT_TYPES.get(target.suffix.lower())
+    if ctype is None:
+        return _font_not_found()
+    return web.FileResponse(target, headers={"Content-Type": ctype})
+
+
 async def api_stt_transcribe(request: web.Request) -> web.Response:
     """POST /api/stt/transcribe — transcribe uploaded audio via the active STT model.
 
@@ -301,16 +359,18 @@ async def api_sel_rotate(request: web.Request) -> web.Response:
 
 
 async def api_security_stats(_request: web.Request) -> web.Response:
-    """GET /api/security/stats — live security feature counts."""
+    """GET /api/security/stats — live security feature counts.
+
+    ``tool_schemas`` is the number of tools whose dispatch actually enforces a schema
+    (:func:`gideon.integrations.mcp_core.validated_tool_names`). It used to count the
+    ``*_SCHEMA`` constants in the validation module, which is a count of schemas WRITTEN —
+    it rose for a constant nothing consulted (the workflow schemas were unwired for their
+    whole existence) and would not fall if a dispatch stopped validating."""
+    from gideon.integrations.mcp_core import validated_tool_names
     from gideon.security.security import denied_command_patterns
 
     denied = len(denied_command_patterns())
-
-    schemas = sum(
-        1
-        for name in dir(_validation_mod)
-        if name.endswith("_SCHEMA") and name.isupper()
-    )
+    schemas = len(validated_tool_names())
 
     return web.json_response(
         {
@@ -894,8 +954,34 @@ async def api_gideon_config_patch(request: web.Request) -> web.Response:
     if not isinstance(body, dict):
         return _deny("JSON body must be an object", "non-dict body")
 
-    path_key = body.get("path", "")
     value = body.get("value")
+
+    if "path" not in body:
+        _log_sel("denied", "path=<absent>")
+        return json_error(
+            "config_path_required",
+            message='no config field named: send {"path": "<section.field>", '
+            '"value": ...}',
+            status=400,
+        )
+    path_key = body["path"]
+    if not isinstance(path_key, str):
+        _log_sel("denied", f"path=<{type(path_key).__name__}>")
+        return json_error(
+            "config_path_type_invalid",
+            message="path must be a dotted string naming one config field, not "
+            f"{type(path_key).__name__}",
+            status=400,
+        )
+    if not path_key.strip():
+        _log_sel("denied", "path=<blank>")
+        return json_error(
+            "config_path_blank",
+            message="path is empty: name the dotted config field to change, "
+            "such as agent.approval_mode",
+            status=400,
+        )
+
     spec = _EDITABLE_CONFIG.get(path_key)
     if not spec:
         return _deny(f"field not editable: {path_key}", f"{path_key}={value}")

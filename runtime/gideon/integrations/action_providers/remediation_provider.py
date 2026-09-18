@@ -159,10 +159,12 @@ def _rearm(*, healthy: bool, cfg: Any, now: float) -> str:
 
 
 def reconcile_remediation_trigger(store: Any) -> None:
+    from gideon.automation.triggers import singletons
     from gideon.automation.triggers.models import Trigger
     from gideon.automation.triggers.screen import capabilities_for_action
     from gideon.core.config.loader import AppConfig
 
+    singletons.converge(store, singletons.SELF_REMEDIATION)
     try:
         config = AppConfig.load().resilience.remediation
     except Exception:
@@ -186,6 +188,7 @@ def reconcile_remediation_trigger(store: Any) -> None:
             )
         else:
             trigger = row.trigger
+        trigger.purpose = singletons.SELF_REMEDIATION
         cadence = _AdaptiveCadence.configured(config)
         cadence.update(trigger)
         trigger.enabled = bool(config.enabled)

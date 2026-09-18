@@ -20,8 +20,31 @@ export async function assertShellMounted(page: Page): Promise<void> {
   ).toBeVisible({ timeout: 10_000 })
 }
 
+export async function preloadRoute(page: Page, route: string): Promise<void> {
+  await page
+    .waitForFunction(
+      () =>
+        typeof (window as unknown as { __gideon_preload_route?: unknown }).__gideon_preload_route ===
+        'function',
+      undefined,
+      { timeout: 5_000 },
+    )
+    .catch(() => {
+    })
+  await page
+    .evaluate(
+      (target) =>
+        (window as unknown as { __gideon_preload_route?: (path: string) => Promise<boolean> })
+          .__gideon_preload_route?.(target),
+      route,
+    )
+    .catch(() => {
+    })
+}
+
 export async function gotoRoute(page: Page, route: string): Promise<void> {
   await page.goto(`/#/${route}`)
+  await preloadRoute(page, route)
   await page.evaluate(() => (document as unknown as { fonts?: { ready: Promise<unknown> } }).fonts?.ready)
   await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {   })
   await page.waitForTimeout(400)

@@ -27,48 +27,117 @@ from gideon.security.security import (
 )
 from gideon.security.sel import sel
 
+SPAWN_UNAVAILABLE = (
+    "Error: gateway not running (cannot reach dashboard on port %d)\n"
+    "  Start it with: gideon gateway"
+)
+
+SPAWN_AUTH_FAILED = (
+    "Error: authentication failed — the gateway on port %d rejected this CLI's "
+    "credential (%s)\n"
+    "  The local credential is `$GIDEON_HOME/.local_secret`, which only the home that "
+    "gateway is running from holds.\n"
+    "  Point GIDEON_HOME at that gateway's home, or restart the gateway from this one."
+)
+
+
+def _spawn_unavailable(port: int) -> None:
+    """Report an unreachable gateway and exit 1."""
+    print(SPAWN_UNAVAILABLE % port, file=sys.stderr)
+    sys.exit(1)
+
+
+def _spawn_auth_failed(port: int, reason: str) -> None:
+    """Report a rejected credential — NOT an absent gateway — and exit 1."""
+    print(SPAWN_AUTH_FAILED % (port, reason), file=sys.stderr)
+    sys.exit(1)
+
+
+def _spawn_credential(port: int) -> str:
+    """Probe the gateway, then mint the local credential every spawn request carries.
+
+    ``/api/spawn`` is a ``mixed_internal_paths`` route: on loopback without an internal
+    secret header it authenticates from the owner token, so the unauthenticated calls
+    this module used to make were answered 403 and then reported — wrongly — as "gateway
+    not running". The probe runs FIRST so the two conditions are told apart at the point
+    where they are still distinguishable: a refused connection is an absent gateway, and
+    anything the running gateway then refuses is a credential problem.
+    """
+    from gideon.interfaces.cli.run import RunError, mint_local_token, probe_gateway
+
+    if not probe_gateway(port):
+        _spawn_unavailable(port)
+    try:
+        return mint_local_token(port)
+    except RunError as exc:
+        _spawn_auth_failed(port, str(exc))
+    raise AssertionError  # pragma: no cover — both branches above exit
+
+
+def _spawn_request(
+    port: int, path: str, token: str, body: dict | None = None, *, timeout: float = 5.0
+) -> dict:
+    """One authenticated spawn-API call against the local gateway.
+
+    The token rides the query string because that (or the cookie) is what
+    ``token_auth`` reads for owner auth — see :func:`gideon.interfaces.cli.run._authed`
+    — and it rides the ``Authorization`` header too, so no spawn request leaves this
+    process unauthenticated on either channel.
+    """
+    from gideon.interfaces.cli.run import _authed
+
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}{_authed(path, token)}",
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        return json.loads(resp.read())
+
 
 def _spawn(args: argparse.Namespace) -> None:
     """Dispatch spawn subcommands: run, list."""
-    base = f"http://localhost:{args.port}"
     action = getattr(args, "spawn_action", None)
-
-    if action == "list":
-        try:
-            with urllib.request.urlopen(f"{base}/api/spawn", timeout=5) as resp:
-                data = json.loads(resp.read())
-        except (urllib.error.URLError, OSError):
-            print(
-                "Error: gateway not running (cannot reach dashboard on port %d)"
-                % args.port
-            )
-            sys.exit(1)
-        agents = data.get("agents", [])
-        if not agents:
-            print("No subagents.")
-            return
-        for a in agents:
-            status = "✅" if a.get("done") else "⏳"
-            print(f"  {status} {a['id']}  {a.get('task', '')[:60]}")
+    if action not in ("list", "run"):
+        print("Usage: gideon spawn {run|list}")
         return
+
+    port = int(args.port)
+    token = _spawn_credential(port)
 
     if action == "run":
-        _spawn_run(args, base)
+        _spawn_run(args, port, token)
         return
 
-    print("Usage: gideon spawn {run|list}")
-
-
-def _spawn_run(args: argparse.Namespace, base: str) -> None:
-    """Spawn a subagent via the dashboard API."""
-    data = json.dumps({"task": args.task}).encode()
-    req = urllib.request.Request(
-        f"{base}/api/spawn", data=data, headers={"Content-Type": "application/json"}
-    )
     try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            result = json.loads(resp.read())
+        data = _spawn_request(port, "/api/spawn", token)
     except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            _spawn_auth_failed(port, f"HTTP {e.code}")
+        print(f"Error: gateway returned HTTP {e.code} {e.reason}", file=sys.stderr)
+        sys.exit(1)
+    except (urllib.error.URLError, OSError):
+        _spawn_unavailable(port)
+    agents = data.get("agents", [])
+    if not agents:
+        print("No subagents.")
+        return
+    for a in agents:
+        status = "✅" if a.get("done") else "⏳"
+        print(f"  {status} {a['id']}  {a.get('task', '')[:60]}")
+
+
+def _spawn_run(args: argparse.Namespace, port: int, token: str) -> None:
+    """Spawn a subagent via the dashboard API."""
+    try:
+        result = _spawn_request(port, "/api/spawn", token, {"task": args.task})
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            _spawn_auth_failed(port, f"HTTP {e.code}")
         try:
             body = json.loads(e.read())
             print(f"Error: {body.get('error', e.reason)}")
@@ -76,10 +145,7 @@ def _spawn_run(args: argparse.Namespace, base: str) -> None:
             print(f"Error: {e.code} {e.reason}")
         sys.exit(1)
     except (urllib.error.URLError, OSError):
-        print(
-            "Error: gateway not running (cannot reach dashboard on port %d)" % args.port
-        )
-        sys.exit(1)
+        _spawn_unavailable(port)
 
     agent_id = result["id"]
 
@@ -88,12 +154,10 @@ def _spawn_run(args: argparse.Namespace, base: str) -> None:
         return
 
     print(f"Spawned subagent {agent_id}, waiting for result...", file=sys.stderr)
-    poll_url = f"{base}/api/spawn/{agent_id}"
     while True:
         _time.sleep(2)
         try:
-            with urllib.request.urlopen(poll_url, timeout=5) as resp:
-                status = json.loads(resp.read())
+            status = _spawn_request(port, f"/api/spawn/{agent_id}", token)
         except Exception:
             print("Error: lost connection to gateway", file=sys.stderr)
             sys.exit(1)
@@ -528,6 +592,9 @@ def _security(args: argparse.Namespace) -> None:
             src = e.get("source", "?")
             caller = e.get("caller_identity", "?")
             print(f"  {ts}  [{src}] {etype}: {op} → {outcome}  (caller: {caller})")
+            reason = (e.get("metadata") or {}).get("reason")
+            if reason:
+                print(f"    reason: {str(reason)[:120]}")
             if e.get("error"):
                 print(f"    error: {e['error'][:120]}")
             if e.get("downstream_service"):

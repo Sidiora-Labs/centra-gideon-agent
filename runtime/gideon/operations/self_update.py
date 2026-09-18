@@ -226,8 +226,11 @@ class ReleaseRequest:
             return self.cache
 
 
-async def fetch_latest_release() -> dict[str, object]:
-    return await ReleaseRequest(_RELEASES_LATEST_URL, read_release_cache()).refresh(
+async def fetch_latest_release(*, offline: bool = False) -> dict[str, object]:
+    cache = read_release_cache()
+    if offline:
+        return cache
+    return await ReleaseRequest(_RELEASES_LATEST_URL, cache).refresh(
         _release_text, write_release_cache
     )
 
@@ -238,9 +241,10 @@ def _release_list(payload):
     }
 
 
-async def fetch_releases() -> list[dict[str, object]]:
+async def fetch_releases(*, offline: bool = False) -> list[dict[str, object]]:
     cache = read_releases_cache()
-    _releases_from_cache(cache)
+    if offline:
+        return _releases_from_cache(cache)
     refreshed = await ReleaseRequest(_RELEASES_LIST_URL, cache).refresh(
         _release_list, write_releases_cache
     )
@@ -293,8 +297,55 @@ def select_target(
     return ReleaseSelection(releases, channel, pin).choose()
 
 
-async def resolve_target(channel: str, pin: str = "") -> str:
-    return select_target(await fetch_releases(), channel, pin)
+async def resolve_target(channel: str, pin: str = "", *, offline: bool = False) -> str:
+    return select_target(await fetch_releases(offline=offline), channel, pin)
+
+
+def package_channel(channel: str) -> str:
+    """The channel a PACKAGE install can actually install.
+
+    There is no nightly wheel — nightly is a git-checkout-only branch-tracking
+    channel — so a package install on ``nightly`` rides ``stable`` rather than
+    refusing or silently doing nothing.
+    """
+    return "stable" if channel == "nightly" else channel
+
+
+@dataclass(frozen=True)
+class PackageTarget:
+    """What a package upgrade should install, or why it cannot be chosen."""
+
+    spec: str = ""
+    version: str = ""
+    error: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return not self.error
+
+
+def missing_pin_error(pin: str) -> str:
+    return (
+        f"Version pin {normalize_version(pin)!r} is not a published release — "
+        "clear the pin or set it to a released version in Settings > Updates."
+    )
+
+
+async def resolve_package_target(
+    channel: str, pin: str = "", *, offline: bool = False
+) -> PackageTarget:
+    """Pick the release a package install should upgrade to.
+
+    An exact pin that names no published release is REFUSED with an actionable
+    message rather than silently upgrading to something else. With no pin an
+    unresolvable channel (offline with a cold cache, or no release published
+    yet) degrades to the unpinned upgrade the installer already performs — that
+    is the offline story, and it is deliberately not an error.
+    """
+    tag = await resolve_target(package_channel(channel), pin, offline=offline)
+    if pin and not tag:
+        return PackageTarget(error=missing_pin_error(pin))
+    return PackageTarget(spec=upgrade_spec(tag), version=normalize_version(tag))
 
 
 @dataclass(frozen=True)
@@ -322,11 +373,13 @@ class UpdateStatus:
         }
 
 
-async def build_update_status(current: str) -> dict[str, object]:
+async def build_update_status(
+    current: str, *, offline: bool = False
+) -> dict[str, object]:
     kind = detect_install_kind()
-    release = await fetch_latest_release()
+    release = await fetch_latest_release(offline=offline)
     behind = None
-    if kind == "git":
+    if kind == "git" and not offline:
         project = project_dir()
         if project:
             try:
@@ -432,12 +485,123 @@ def git_tracked_changes(proj: str) -> list[str]:
     return GitCheckout(proj).tracked()
 
 
-def git_reset_hard(proj: str, branch: str) -> subprocess.CompletedProcess[str]:
-    return GitCheckout(proj).run("reset", "--hard", f"origin/{branch}")
+def git_fetch_tags(proj: str) -> subprocess.CompletedProcess[str]:
+    return GitCheckout(proj).run("fetch", "--tags", "origin", timeout=60)
+
+
+def git_commit_for(proj: str, ref: str) -> str:
+    """The commit *ref* names locally, or "" when the ref is unknown here."""
+    result = GitCheckout(proj).run(
+        "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"
+    )
+    return (result.stdout or "").strip() if result.returncode == 0 else ""
+
+
+def git_is_fast_forward(proj: str, ref: str) -> bool:
+    """True when HEAD is an ancestor of *ref*, i.e. moving there loses nothing."""
+    return (
+        GitCheckout(proj).run("merge-base", "--is-ancestor", "HEAD", ref).returncode
+        == 0
+    )
+
+
+def git_merge_ff_only(proj: str, ref: str) -> subprocess.CompletedProcess[str]:
+    """Advance the checked-out branch to *ref*, or fail — never rewrite history.
+
+    ``--ff-only`` is the whole safety property: it moves the branch pointer when
+    the move is a pure fast-forward and refuses otherwise. It replaced a blind
+    ``git pull`` (which merges, and pulls whatever the branch's upstream happens
+    to be) and a ``git reset --hard`` (which discards commits and edits).
+    """
+    return GitCheckout(proj).run("merge", "--ff-only", ref, timeout=60)
+
+
+DIRTY_TREE_REASON = (
+    "Working tree has uncommitted changes to tracked files — commit or stash "
+    "them and the update applies on the next check."
+)
+
+SOURCE_MODE_TAG = "tag"
+SOURCE_MODE_BRANCH = "branch"
+SOURCE_MODE_PAUSED = "paused"
+SOURCE_MODE_NONE = "none"
+
+
+@dataclass(frozen=True)
+class SourcePlan:
+    """What a source (git) checkout should move to, or why it must not move.
+
+    ``paused`` is the ONE dirty-tree safeguard for every source update surface:
+    the unattended gateway apply, the dashboard apply and ``gideon update`` all
+    read this plan instead of running their own ``git status`` gate, so an
+    operator sees the same actionable reason and the same paused state wherever
+    the refusal happens.
+    """
+
+    mode: str
+    ref: str = ""
+    reason: str = ""
+    paths: tuple[str, ...] = ()
+
+    @property
+    def ok(self) -> bool:
+        return self.mode in (SOURCE_MODE_TAG, SOURCE_MODE_BRANCH)
+
+    @property
+    def paused(self) -> bool:
+        return self.mode == SOURCE_MODE_PAUSED
+
+
+async def plan_source_update(
+    proj: str, channel: str, pin: str = "", *, offline: bool = False
+) -> SourcePlan:
+    """Choose the ref a source install updates to, per release policy.
+
+    Normal source installs ride release TAGS chosen by channel or exact pin, the
+    same selection every other install kind uses. ``nightly`` is the only channel
+    that tracks a branch, and only when no pin overrides it.
+    """
+    tracked = git_tracked_changes(proj)
+    if tracked:
+        return SourcePlan(
+            SOURCE_MODE_PAUSED, reason=DIRTY_TREE_REASON, paths=tuple(tracked)
+        )
+    pin = (pin or "").strip()
+    if channel == "nightly" and not pin:
+        branch = current_branch(proj)
+        if not branch:
+            return SourcePlan(
+                SOURCE_MODE_NONE,
+                reason=(
+                    "Nightly tracks the checked-out branch, but this checkout has a "
+                    "detached HEAD — check out a branch first."
+                ),
+            )
+        return SourcePlan(SOURCE_MODE_BRANCH, f"origin/{branch}")
+    tag = await resolve_target(channel, pin, offline=offline)
+    if not tag:
+        return SourcePlan(
+            SOURCE_MODE_NONE,
+            reason=(
+                missing_pin_error(pin)
+                if pin
+                else f"No published release found for the {channel!r} channel."
+            ),
+        )
+    return SourcePlan(SOURCE_MODE_TAG, tag)
+
+
+def fetch_for_plan(proj: str, plan: SourcePlan) -> subprocess.CompletedProcess[str]:
+    """Fetch exactly what *plan* needs: the tag set, or the tracked branch."""
+    if plan.mode == SOURCE_MODE_BRANCH:
+        return git_fetch(proj, plan.ref.removeprefix("origin/"))
+    return git_fetch_tags(proj)
 
 
 async def _git_output(project, arguments, timeout, capture):
     import asyncio
+
+    from gideon.core.cancellation import run_with_timeout
 
     process = await asyncio.create_subprocess_exec(
         "git",
@@ -446,17 +610,8 @@ async def _git_output(project, arguments, timeout, capture):
         stdout=asyncio.subprocess.PIPE if capture else asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
     )
-    try:
-        output, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
-        return process.returncode, output
-    except (asyncio.TimeoutError, asyncio.CancelledError):
-        if process.returncode is None:
-            try:
-                process.kill()
-            except ProcessLookupError:
-                pass
-        await process.communicate()
-        raise
+    output, _ = await run_with_timeout(process, timeout)
+    return process.returncode, output
 
 
 async def commits_behind_upstream(proj: str) -> int | None:

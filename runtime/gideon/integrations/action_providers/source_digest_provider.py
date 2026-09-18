@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from gideon.automation.triggers import singletons
 from gideon.integrations.action_providers.base import (
     ActionContext,
     ActionProvider,
@@ -17,7 +18,12 @@ from gideon.integrations.action_providers.services import get_action_services
 logger = logging.getLogger(__name__)
 SOURCE_DIGEST_JOB_NAME = "system:source-digest"
 SOURCE_DIGEST_SCHEDULE = "0 7 * * *"
-_CLOCK = ReportClock(SOURCE_DIGEST_JOB_NAME, SOURCE_DIGEST_JOB_NAME, "source-digest")
+_CLOCK = ReportClock(
+    SOURCE_DIGEST_JOB_NAME,
+    SOURCE_DIGEST_JOB_NAME,
+    "source-digest",
+    singletons.SOURCE_DIGEST,
+)
 
 
 def _source_result(result: Any) -> ActionResult:
@@ -88,6 +94,7 @@ def create_provider(config: dict[str, Any] | None = None) -> SourceDigestActionP
 def reconcile_source_digest_cron(store: Any) -> None:
     from gideon.automation.triggers.screen import capabilities_for_action
 
+    _CLOCK.converge(store)
     try:
         row = store.get(SOURCE_DIGEST_JOB_NAME)
     except Exception:

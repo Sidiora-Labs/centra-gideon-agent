@@ -9,6 +9,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from gideon.core.errors import AgentError, redacted_envelope
+
 logger = logging.getLogger(__name__)
 
 EVENT_SUCCEEDED = "automation.run.succeeded"
@@ -185,6 +187,7 @@ def build_delivery(
     destination: str = "",
     attempt_key: str = "",
     duration_secs: float = 0.0,
+    agent_error: AgentError | None = None,
 ) -> Delivery:
     from gideon.workspace import notification_kinds
 
@@ -197,13 +200,19 @@ def build_delivery(
     metadata = (
         {"duration_secs": round(float(duration_secs), 3)} if duration_secs else {}
     )
+    envelope = None if agent_error is None else redacted_envelope(agent_error)
+    if envelope is not None:
+        metadata["agent_error"] = envelope.to_dict()
+    body = (
+        envelope.render() if envelope is not None else _redact(summary or "")[:BODY_CAP]
+    )
     return Delivery(
         event=event,
         event_id=event_id(
             trigger_id=trigger_id, run_id=run_id, attempt_key=attempt_key
         ),
         title=_redact(f"{label} {verb}"),
-        body=_redact(summary or "")[:BODY_CAP],
+        body=body,
         status_url=status_url(run_id=run_id, trigger_id=trigger_id),
         trigger_id=trigger_id,
         run_id=run_id,

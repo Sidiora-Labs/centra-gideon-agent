@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from gideon.automation.triggers import singletons
 from gideon.integrations.action_providers.base import (
     ActionContext,
     ActionProvider,
@@ -15,7 +16,9 @@ from gideon.integrations.action_providers.services import get_action_services
 
 logger = logging.getLogger(__name__)
 DIGEST_JOB_NAME = "system:notification-digest"
-_CLOCK = ReportClock(DIGEST_JOB_NAME, DIGEST_JOB_NAME, "notification-digest")
+_CLOCK = ReportClock(
+    DIGEST_JOB_NAME, DIGEST_JOB_NAME, "notification-digest", singletons.DIGEST
+)
 
 
 class NotificationDigestActionProvider(ActionProvider):
@@ -51,6 +54,7 @@ def reconcile_digest_cron(store: Any) -> None:
     from gideon.automation.triggers.screen import capabilities_for_action
     from gideon.workspace.notification_rules import digest_settings
 
+    _CLOCK.converge(store)
     try:
         expression = digest_settings()["schedule"]
     except Exception:

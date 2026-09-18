@@ -20,6 +20,7 @@ from typing import Any
 
 import aiohttp
 
+from gideon.core.cancellation import terminate_and_reap
 from gideon.core.env import augmented_path
 from gideon.core.layout import package_path
 from gideon.engine.hooks import safe_read_file
@@ -643,16 +644,7 @@ async def probe_server(server: McpServerInfo) -> McpServerInfo:
         logger.warning("MCP probe failed [%s]: %s", server.name, server.error)
     finally:
         if proc is not None and proc.returncode is None:
-            try:
-                if proc.stdin:
-                    proc.stdin.close()
-                await asyncio.wait_for(proc.wait(), timeout=5)
-            except (asyncio.TimeoutError, Exception):
-                try:
-                    proc.kill()
-                    await asyncio.wait_for(proc.wait(), timeout=5)
-                except Exception:
-                    pass
+            await terminate_and_reap(proc, grace=5)
 
     _cache_probe(server)
     return server

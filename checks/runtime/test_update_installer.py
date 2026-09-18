@@ -14,6 +14,7 @@ a pip venv and a uv venv alike.
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 
 import pytest
@@ -66,15 +67,37 @@ def spawn(monkeypatch):
     return _install
 
 
-async def _run_apply(state, monkeypatch, *, latest="0.1.2"):
-    """Drive _apply_pip_update's inner coroutine with a stubbed status + re-exec."""
+_CATALOG = {
+    "releases": [
+        {"tag": "v0.3.0-rc.1", "prerelease": True, "name": "rc", "body": ""},
+        {"tag": "v0.2.1", "prerelease": False, "name": "stable", "body": ""},
+        {"tag": "v0.1.2", "prerelease": False, "name": "older", "body": ""},
+    ]
+}
 
-    async def _fake_status(_cur):
-        return {"latest": latest}
 
-    monkeypatch.setattr(
-        "gideon.operations.self_update.build_update_status", _fake_status
+def _policy(monkeypatch, tmp_path, **updates):
+    """Write a REAL config + release catalog and let the real resolver read them.
+
+    Nothing is faked here: ``_RELEASES_LIST_URL`` is empty without
+    ``GIDEON_RELEASE_REPOSITORY``, so ``fetch_releases`` answers from the cache
+    file on disk — the same code path a real offline install takes.
+    """
+    import json
+
+    from gideon.core.config import loader as config_loader
+
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    monkeypatch.setenv("GIDEON_HOME", str(home))
+    config_loader.config_path().write_text(
+        json.dumps({"updates": updates}), encoding="utf-8"
     )
+    su.write_releases_cache(_CATALOG)
+
+
+async def _run_apply(state, monkeypatch):
+    """Drive _apply_pip_update, returning (response, progress)."""
 
     async def _fake_reexec(_state, **kw):
         state.progress.append(("reexec", ""))
@@ -92,20 +115,21 @@ async def _run_apply(state, monkeypatch, *, latest="0.1.2"):
 
     req = make_mocked_request("POST", "/api/update")
     req.app["state"] = state
-    await upd._apply_pip_update(req, state)
+    resp = await upd._apply_pip_update(req, state)
     for _ in range(50):
         await asyncio.sleep(0)
         if state.progress:
             break
     await asyncio.sleep(0.05)
-    return state.progress
+    return resp, state.progress
 
 
 @pytest.mark.asyncio
-async def test_uses_uv_when_the_venv_has_no_pip(monkeypatch, spawn):
+async def test_uses_uv_when_the_venv_has_no_pip(monkeypatch, spawn, tmp_path):
     """The #51 repro: self-update must work on a uv venv."""
     monkeypatch.setattr(_installer, "_have_uv", lambda: True)
     monkeypatch.setattr(_installer, "_have_pip", lambda: False)
+    _policy(monkeypatch, tmp_path, channel="stable", pin="0.1.2")
     seen = spawn(_Proc(0))
     state = _StateStub()
 
@@ -121,15 +145,16 @@ async def test_uses_uv_when_the_venv_has_no_pip(monkeypatch, spawn):
 
 
 @pytest.mark.asyncio
-async def test_failure_detail_reaches_the_ui(monkeypatch, spawn):
+async def test_failure_detail_reaches_the_ui(monkeypatch, spawn, tmp_path):
     """Before the fix the panel showed the static "pip upgrade failed" while the
     real cause sat in gateway.log. The user must be able to SEE the cause."""
     monkeypatch.setattr(_installer, "_have_uv", lambda: False)
     monkeypatch.setattr(_installer, "_have_pip", lambda: True)
+    _policy(monkeypatch, tmp_path, channel="stable")
     spawn(_Proc(1, b"ERROR: Could not find a version that satisfies gideon==9.9.9\n"))
     state = _StateStub()
 
-    await _run_apply(state, monkeypatch, latest="9.9.9")
+    await _run_apply(state, monkeypatch)
 
     errors = [d for s, d in state.progress if s == "error"]
     assert errors, f"no error progress pushed: {state.progress}"
@@ -175,10 +200,13 @@ def test_summary_is_bounded_and_empty_safe():
 
 
 @pytest.mark.asyncio
-async def test_no_installer_reports_the_real_reason_without_spawning(monkeypatch):
+async def test_no_installer_reports_the_real_reason_without_spawning(
+    monkeypatch, tmp_path
+):
     """With neither installer, don't spawn anything — say what's missing."""
     monkeypatch.setattr(_installer, "_have_uv", lambda: False)
     monkeypatch.setattr(_installer, "_have_pip", lambda: False)
+    _policy(monkeypatch, tmp_path, channel="stable")
 
     async def _unreachable(*a, **kw):  # pragma: no cover
         raise AssertionError("spawned a subprocess with no installer available")
@@ -191,3 +219,93 @@ async def test_no_installer_reports_the_real_reason_without_spawning(monkeypatch
     errors = [d for s, d in state.progress if s == "error"]
     assert errors, f"no error pushed: {state.progress}"
     assert "uv" in errors[0]
+
+
+def _spec_of(argv: list[str]) -> str:
+    return next(a for a in argv if a.startswith("gideon-agent-harness"))
+
+
+class TestPackageUpdateSelection:
+    """RUM-57: the package updater installs the release POLICY selects.
+
+    It used to install whatever ``/releases/latest`` returned, so a beta channel
+    and an exact pin were both wired to nothing.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _installer_present(self, monkeypatch):
+        monkeypatch.setattr(_installer, "_have_uv", lambda: False)
+        monkeypatch.setattr(_installer, "_have_pip", lambda: True)
+
+    @pytest.mark.asyncio
+    async def test_stable_installs_the_newest_non_prerelease(
+        self, monkeypatch, spawn, tmp_path
+    ) -> None:
+        _policy(monkeypatch, tmp_path, channel="stable")
+        seen = spawn(_Proc(0))
+        await _run_apply(_StateStub(), monkeypatch)
+        assert _spec_of(seen[0]) == "gideon-agent-harness==0.2.1"
+
+    @pytest.mark.asyncio
+    async def test_beta_installs_the_prerelease(
+        self, monkeypatch, spawn, tmp_path
+    ) -> None:
+        _policy(monkeypatch, tmp_path, channel="beta")
+        seen = spawn(_Proc(0))
+        await _run_apply(_StateStub(), monkeypatch)
+        assert _spec_of(seen[0]) == "gideon-agent-harness==0.3.0-rc.1"
+
+    @pytest.mark.asyncio
+    async def test_an_exact_pin_overrides_the_channel(
+        self, monkeypatch, spawn, tmp_path
+    ) -> None:
+        _policy(monkeypatch, tmp_path, channel="beta", pin="0.1.2")
+        seen = spawn(_Proc(0))
+        await _run_apply(_StateStub(), monkeypatch)
+        assert _spec_of(seen[0]) == "gideon-agent-harness==0.1.2"
+
+    @pytest.mark.asyncio
+    async def test_nightly_installs_the_stable_release(
+        self, monkeypatch, spawn, tmp_path
+    ) -> None:
+        """There is no nightly wheel, so a package install rides stable there."""
+        _policy(monkeypatch, tmp_path, channel="nightly")
+        seen = spawn(_Proc(0))
+        await _run_apply(_StateStub(), monkeypatch)
+        assert _spec_of(seen[0]) == "gideon-agent-harness==0.2.1"
+
+    @pytest.mark.asyncio
+    async def test_a_pin_naming_no_release_refuses_without_installing_anything(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        _policy(monkeypatch, tmp_path, channel="stable", pin="9.9.9")
+
+        async def _unreachable(*a, **kw):  # pragma: no cover
+            raise AssertionError("installed something for an unresolvable pin")
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", _unreachable)
+        state = _StateStub()
+        resp, progress = await _run_apply(state, monkeypatch)
+
+        assert resp.status == 409
+        body = json.loads(resp.body.decode())
+        assert "9.9.9" in body["error"] and "clear the pin" in body["error"].lower()
+        assert ("error", body["error"]) in progress
+        assert upd._apply_in_flight is False
+
+    @pytest.mark.asyncio
+    async def test_offline_unpinned_still_upgrades_unpinned(
+        self, monkeypatch, spawn, tmp_path
+    ) -> None:
+        """No catalog at all (a cold offline install) still runs the plain `-U`."""
+        from gideon.core.config import loader as config_loader
+
+        home = tmp_path / "home"
+        home.mkdir(exist_ok=True)
+        monkeypatch.setenv("GIDEON_HOME", str(home))
+        config_loader.config_path().write_text(
+            json.dumps({"updates": {"channel": "stable"}}), encoding="utf-8"
+        )
+        seen = spawn(_Proc(0))
+        await _run_apply(_StateStub(), monkeypatch)
+        assert _spec_of(seen[0]) == "gideon-agent-harness"

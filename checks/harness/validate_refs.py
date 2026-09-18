@@ -62,7 +62,9 @@ def _file_defines(file_part: str, func_name: str) -> bool:
     if not path.is_file():
         return False
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        tree = ast.parse(
+            path.read_text(encoding="utf-8", errors="replace"), filename=str(path)
+        )
     except (OSError, SyntaxError):
         return False
     for node in ast.walk(tree):
@@ -110,6 +112,7 @@ def collect_test_ids(*, timeout: int = 180) -> tuple[set[str], int, str]:
             cwd=_repo_root(),
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=timeout,
             check=False,
         )

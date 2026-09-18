@@ -6442,3 +6442,107 @@ class TestAcpProcessDiedRecovery:
             await run_chat(state, session, "test message")
 
         assert (0, "test message") in calls
+
+
+class TestVisibleMessageCounts:
+    """The session-summary `messages` number is a VISIBLE count (#83).
+
+    It once read `len(session.messages)` — the raw buffer, which carries the stream's own
+    bookkeeping: one `chunk` row per token fragment and a `done` completion sentinel per
+    turn. A four-message conversation therefore advertised dozens of messages on the
+    sessions list while the open conversation showed four. The count now comes from
+    `_prepare_messages`, the one representation the open conversation is rendered from.
+    """
+
+    def _settled_session(self, state):
+        """A finished turn as the runtime leaves it: transcript rows plus the turn's
+        `done` sentinel (the streamed `chunk` rows are dropped when the segment flushes).
+        """
+        session = state.get_or_create_session("counts")
+        session.append("user", "run ls")
+        session.append("assistant", "listing")
+        session.append("tool", "✅ bash")
+        session.append("assistant", "all done")
+        session.append("done", "")
+        session.drain()
+        return session
+
+    @pytest.mark.asyncio
+    async def test_the_summary_count_is_the_open_conversations_count(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        state = _make_state(tmp_path)
+        session = self._settled_session(state)
+
+        async with TestClient(TestServer(_make_app(state))) as client:
+            listed = await (await client.get("/api/chat/sessions")).json()
+            detail = await (await client.get("/api/chat/sessions/counts")).json()
+
+        row = next(s for s in listed if s["key"] == "counts")
+        assert row["messages"] == len(detail["messages"]), (
+            "the sessions list and the open conversation disagree on how many messages "
+            f"this session has: {row['messages']} vs {len(detail['messages'])}"
+        )
+        assert row["messages"] == 4
+        assert (
+            len(session.messages) == 5
+        ), "the raw buffer still holds the done sentinel"
+
+    @pytest.mark.asyncio
+    async def test_the_summary_count_equals_the_persisted_transcripts_count(
+        self, tmp_path, monkeypatch
+    ):
+        """The third surface: what a restart would show. A settled session's visible count
+        must equal the number of rows `save_session_to_history` actually wrote."""
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        from gideon.interfaces.dashboard.chat import save_session_to_history
+
+        state = _make_state(tmp_path)
+        session = self._settled_session(state)
+        save_session_to_history(state, session, force=True)
+
+        persisted = state.conversation_log.read_messages("dashboard:counts")
+        assert [m["role"] for m in persisted] == [
+            "user",
+            "assistant",
+            "tool",
+            "assistant",
+        ]
+        assert session.to_dict()["messages"] == len(persisted)
+
+    def test_completion_sentinels_and_chunk_fragments_do_not_inflate_the_count(self):
+        """Neither kind of stream bookkeeping may move the number.
+
+        `done` is dropped outright; a run of `chunk` fragments is ONE streaming message
+        however many fragments arrived — so a long answer mid-stream counts once, not once
+        per token.
+        """
+        from gideon.interfaces.dashboard.state import _ChatSession
+
+        session = _ChatSession("counts")
+        session.append("user", "hello")
+        session.append("assistant", "hi")
+        baseline = session.to_dict()["messages"]
+        assert baseline == 2
+
+        for _ in range(5):
+            session.append("done", "")
+        assert (
+            session.to_dict()["messages"] == baseline
+        ), "a completion sentinel was counted as a message"
+
+        for i in range(40):
+            session.append("chunk", f"frag{i} ")
+        mid_stream = session.to_dict()["messages"]
+        assert mid_stream == baseline + 1, (
+            "40 chunk fragments must render as ONE streaming message, not "
+            f"{mid_stream - baseline}"
+        )
+        assert (
+            len(session.messages) == 47
+        ), "the raw buffer really does hold all of them"

@@ -202,9 +202,7 @@ async def test_accepting_a_template_diff_records_a_new_refiner_version() -> None
     through the writable provider, which appends an immutable v2 (source=refiner) and pins it.
     """
     from gideon.automation.workflows.native_defs import NativeWorkflowDefProvider
-    from gideon.interfaces.dashboard.handlers.learning import (
-        _apply_accepted_template_diff,
-    )
+    from gideon.cognition.learning.template_diff import apply_accepted_template_diff
 
     provider = NativeWorkflowDefProvider()
     defs_mod.register_provider(provider)
@@ -232,7 +230,7 @@ async def test_accepting_a_template_diff_records_a_new_refiner_version() -> None
                 ]
             },
         )
-        result = await _apply_accepted_template_diff(prop)
+        result = await apply_accepted_template_diff(prop)
 
         assert result["applied"] is True and result["version"] == 2
         assert versions.pinned_version("refine-me") == 2
