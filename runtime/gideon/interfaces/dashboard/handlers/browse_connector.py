@@ -217,6 +217,49 @@ async def api_browse_connector_status(request: web.Request) -> web.Response:
     )
 
 
+async def api_browse_grants(request: web.Request) -> web.Response:
+    """GET /api/browse/grants — pending per-task grants a human can answer.
+
+    This is an owner-dashboard surface, not a connector announcement, so ordinary dashboard
+    authentication is the boundary.  In particular it does not require paired-device provenance:
+    the owner tab that can see the prompt must also be able to answer it.
+    """
+    from gideon.integrations.browse.grant import pending_grants
+    from gideon.integrations.browse.plans import reachable_scope
+
+    effective_scope = reachable_scope()
+    grants = [
+        {**pending, "reachable_scope": effective_scope} for pending in pending_grants()
+    ]
+    return web.json_response({"grants": grants})
+
+
+async def api_browse_grant_answer(request: web.Request) -> web.Response:
+    """POST /api/browse/grants/{request_id} — approve or reject exactly one task."""
+    from gideon.integrations.browse.grant import approve_grant, reject_grant
+
+    request_id = str(request.match_info.get("request_id") or "").strip()
+    body = await _body(request)
+    decision = str(body.get("decision") or "").strip().lower()
+    if decision not in {"approve", "reject"}:
+        return json_error(
+            "browse_grant_decision_invalid",
+            status=400,
+            message="decision must be 'approve' or 'reject'",
+        )
+
+    resolve = approve_grant if decision == "approve" else reject_grant
+    if not request_id or not resolve(request_id):
+        return json_error(
+            "browse_grant_not_pending",
+            status=409,
+            message="this browser grant is no longer waiting for an answer",
+        )
+    return web.json_response(
+        {"ok": True, "request_id": request_id, "decision": decision}
+    )
+
+
 def register_browse_connector_routes(app: web.Application) -> None:
     """Wire the connector routes onto the EXISTING dashboard server — no new listener.
 
@@ -227,3 +270,5 @@ def register_browse_connector_routes(app: web.Application) -> None:
     app.router.add_post("/api/browse/connector", api_browse_connector_attach)
     app.router.add_delete("/api/browse/connector", api_browse_connector_detach)
     app.router.add_get("/api/browse/connector", api_browse_connector_status)
+    app.router.add_get("/api/browse/grants", api_browse_grants)
+    app.router.add_post("/api/browse/grants/{request_id}", api_browse_grant_answer)

@@ -14,7 +14,8 @@ def get_message_providers() -> dict[str, type]:
     with _discovery_lock:
         if _cache is None:
             discovered = discover_providers(
-                "gideon.message_source_providers", MessageSourceProvider
+                "gideon.message_source_providers",
+                MessageSourceProvider,  # type: ignore[type-abstract]
             )
             _cache = discovered
         return _cache

@@ -6,21 +6,24 @@ class SecretTree:
     def project(cls, api, value):
         if not isinstance(value, (dict, list)):
             return value, 0
-        mapping = isinstance(value, dict)
-        clean = {} if mapping else []
-        entries = value.items() if mapping else enumerate(value)
-        removed = 0
-        for key, child in entries:
-            if mapping and isinstance(key, str) and api._SECRET_KEY_RE.search(key):
-                removed += 1
-            else:
+        if isinstance(value, dict):
+            clean: dict = {}
+            removed = 0
+            for key, child in value.items():
+                if isinstance(key, str) and api._SECRET_KEY_RE.search(key):
+                    removed += 1
+                    continue
                 filtered, count = cls.project(api, child)
                 removed += count
-                if mapping:
-                    clean[key] = filtered
-                else:
-                    clean.append(filtered)
-        return clean, removed
+                clean[key] = filtered
+            return clean, removed
+        clean_list = []
+        removed = 0
+        for child in value:
+            filtered, count = cls.project(api, child)
+            removed += count
+            clean_list.append(filtered)
+        return clean_list, removed
 
     @staticmethod
     def text(api, text):

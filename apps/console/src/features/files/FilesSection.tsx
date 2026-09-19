@@ -210,6 +210,7 @@ export function FilesSection({ sub, navigate, query: routeQuery, setQuery }: Rou
 
   const tabOptions = roots.map((r) => ({ key: r.path, label: r.label }))
   const showResults = grep.trim().length >= 2
+  const activeFile = fileTabs.active
 
   return (
     <div className="flex h-full flex-col">
@@ -263,18 +264,17 @@ export function FilesSection({ sub, navigate, query: routeQuery, setQuery }: Rou
                 </div>
               )}
               <div className="relative min-h-0 flex-1">
-                {fileTabs.tabs.length === 0 ? (
+                {!activeFile ? (
                   <EmptyState icon={FilesIcon} title="No file open" hint="Pick a file from the explorer to view or edit it. Type in the search box to grep contents (⌘F)." />
                 ) : (
-                  fileTabs.tabs.map((t) => (
-                    <div key={t.path} className="absolute inset-0" style={{ display: t.path === fileTabs.activePath ? 'block' : 'none' }}>
-                      <FileViewer ref={(h) => { if (h) viewerRefs.current.set(t.path, h); else viewerRefs.current.delete(t.path) }}
-                        entry={{ name: t.name, path: t.path, is_dir: false }} onSaved={refresh} onSaveAsArtifact={saveAsArtifact}
-                        onDirtyChange={(d) => fileTabs.markDirty(t.path, d)} onMissing={(p) => { draftStore.delete(p); fileTabs.closeNow(p) }}
+                  <div className="absolute inset-0">
+                      <FileViewer key={activeFile.path}
+                        ref={(h) => { if (h) viewerRefs.current.set(activeFile.path, h); else viewerRefs.current.delete(activeFile.path) }}
+                        entry={{ name: activeFile.name, path: activeFile.path, is_dir: false }} onSaved={refresh} onSaveAsArtifact={saveAsArtifact}
+                        onDirtyChange={(d) => fileTabs.markDirty(activeFile.path, d)} onMissing={(p) => { draftStore.delete(p); fileTabs.closeNow(p) }}
                         draftStore={draftStore}
-                        commentTarget={navigate ? newSessionTarget(navigate, { name: `Comments: ${t.name}` }) : undefined} />
-                    </div>
-                  ))
+                        commentTarget={navigate ? newSessionTarget(navigate, { name: `Comments: ${activeFile.name}` }) : undefined} />
+                  </div>
                 )}
               </div>
             </div>

@@ -58,30 +58,6 @@ Run it once. If it fails, fix the cause and run it again. We do not re-run a che
 
 Tests that write state use a temporary directory or an isolated `GIDEON_HOME`, never real credentials, tokens or conversations. See [SECURITY.md](SECURITY.md).
 
-## Read a failed CI run's test report
-
-Every CI job that runs tests writes a machine-readable report and uploads it as an artifact
-with `if: always()`, so a red job's results survive the failure instead of living only in a
-truncated log. Python jobs write JUnit XML (`pytest --junitxml`), the console job writes
-JUnit from vitest and from `node --test`, the Playwright jobs write JUnit per spec, and the
-harness job uploads its captured `validate`/`scan` output.
-
-Artifacts are named `test-report-<workflow>-<job>`, plus the job's matrix coordinates where
-it has them — `test-report-ci-test-shard-3`,
-`test-report-full-matrix-shard-macos-latest-py3.13-2` — so parallel legs never collide and
-the name says which leg produced it.
-
-To get one:
-
-- **In the browser:** open the run's summary page and download the artifact from the
-  *Artifacts* section at the bottom.
-- **With the GitHub CLI:** `gh run download <run-id> -n test-report-ci-test-shard-3`, or
-  `gh run download <run-id>` for all of them. `gh run list` finds the run id.
-
-Each archive contains the `reports/` directory as the job left it. Open the `.junit.xml`
-files in any JUnit viewer, or read the failing `<testcase>` entries directly — they carry
-the test id and the failure message even when the job's log was cut short.
-
 ## The model
 
 The user's requested scope decides what work is authorized. Stay inside it. One task in progress at a time. If you spot an unrelated problem, write it down and leave it alone: no neighbouring refactors, no cleanup, no extra docs.
@@ -99,14 +75,6 @@ Gideon is pre-1.0, so we can still change things. Class your change before you o
 Aim for R. If your change is B or S, describe the break in the pull request and add a CHANGELOG entry. Do not build compatibility shims or migration helpers: we have no migration machinery yet, and that is deliberate. The maintainer decides whether to take the break, reshape it, or schedule it.
 
 ## Developer Certificate of Origin (DCO)
-
-Every commit needs a trailer whose name and email match the commit author:
-
-```text
-Signed-off-by: Your Name <your@email>
-```
-
-Commit with `git commit -s`, and Git adds it. If you already pushed commits without one, fix them and push again:
 
 ```sh
 git rebase --signoff main

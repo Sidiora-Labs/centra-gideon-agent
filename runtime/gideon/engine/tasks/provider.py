@@ -5,6 +5,19 @@ from typing import Any
 
 from gideon.engine.tasks.models import Task, TaskComment
 
+DEFAULT_TASK_PAGE_LIMIT = 50
+MAX_TASK_PAGE_LIMIT = 500
+
+
+def task_page_window(
+    limit: int | str = DEFAULT_TASK_PAGE_LIMIT, offset: int | str = 0
+) -> tuple[int, int]:
+    """Return the bounded pagination window shared by task API and tool callers."""
+    try:
+        return max(1, min(MAX_TASK_PAGE_LIMIT, int(limit))), max(0, int(offset))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("limit and offset must be integers") from exc
+
 
 class TaskProvider(ABC):
     """Provider interface for task backends.
@@ -29,7 +42,7 @@ class TaskProvider(ABC):
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[Task], int]:
-        """Return (tasks, total_count) with optional filters."""
+        """Return (tasks, total_count) for an already bounded page window."""
         ...
 
     @abstractmethod

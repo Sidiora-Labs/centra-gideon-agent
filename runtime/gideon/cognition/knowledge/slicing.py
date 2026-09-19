@@ -405,7 +405,7 @@ def structure_from_text(text: str) -> PdfStructure:
 
 def flatten(structure: PdfStructure) -> DocumentText:
     pages = [str(page or "") for page in structure.pages]
-    spans = []
+    spans: list = []
     for page in pages:
         start = spans[-1][1] + 1 if spans else 0
         spans.append((start, start + len(page)))
@@ -413,7 +413,7 @@ def flatten(structure: PdfStructure) -> DocumentText:
 
 
 def body_font_size(lines: tuple[PdfLine, ...]) -> float:
-    weights = {}
+    weights: dict = {}
     for line in lines:
         if line.size > 0:
             weights.setdefault(line.size, 0)
@@ -500,7 +500,7 @@ def detect_sections(structure: PdfStructure) -> tuple[Section, ...]:
     )
     if not proposals:
         proposals = _header_candidates(structure, document)
-    by_position = {}
+    by_position: dict = {}
     for hit in sorted(
         proposals, key=lambda hit: (hit[0], _STRATEGY_RANK.get(hit[2], 99), hit[1])
     ):

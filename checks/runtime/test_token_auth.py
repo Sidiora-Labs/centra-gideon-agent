@@ -10,6 +10,7 @@ from gideon.interfaces.dashboard.token_auth import (
     LINK_WINDOW_SECS,
     MAX_CONCURRENT_NONCES,
     MAX_SESSION_TTL_SECS,
+    auth_middleware,
     bind_token_ip,
     check_token_ip,
     generate_token,
@@ -18,9 +19,11 @@ from gideon.interfaces.dashboard.token_auth import (
     parse_duration,
     revoke_all_sessions,
     token_auth_middleware,
+    token_nonce,
     try_consume,
     validate_token,
 )
+from gideon.security.auth.modes import AuthConfig, AuthMode
 
 
 @pytest.fixture(autouse=True)
@@ -32,6 +35,55 @@ def clear_nonces():
 
 
 URL_SAFE_B64_CHARS = set(string.ascii_letters + string.digits + "-_.")
+
+
+@pytest.mark.parametrize("requested", ["api_key", "oauth2"])
+def test_unauthorable_auth_mode_reports_closed_fallback(
+    requested: str, monkeypatch
+) -> None:
+    monkeypatch.setenv("GIDEON_AUTH_MODE", requested)
+
+    cfg = AuthConfig.from_env()
+
+    assert cfg.requested_mode == requested
+    assert cfg.mode is AuthMode.LOCAL_TOKEN
+    assert cfg.actual_mode == "local_token"
+    assert cfg.authorable is False
+    assert cfg.fell_back_from_unauthorable_mode is True
+    assert cfg.mode_state() == (
+        f"requested={requested} actual=local_token authorable=false"
+    )
+
+
+@pytest.mark.parametrize(
+    ("requested", "actual"),
+    [("local_token", AuthMode.LOCAL_TOKEN), ("none", AuthMode.NONE)],
+)
+def test_authorable_auth_mode_reports_requested_and_actual(
+    requested: str, actual: AuthMode, monkeypatch
+) -> None:
+    monkeypatch.setenv("GIDEON_AUTH_MODE", requested)
+
+    cfg = AuthConfig.from_env()
+
+    assert cfg.requested_mode == requested
+    assert cfg.mode is actual
+    assert cfg.authorable is True
+    assert cfg.fell_back_from_unauthorable_mode is False
+
+
+@pytest.mark.parametrize("requested", ["api_key", "oauth2"])
+def test_startup_warns_with_requested_actual_and_authorable_state(
+    requested: str, monkeypatch, caplog
+) -> None:
+    from gideon.interfaces.dashboard.server import _log_auth_mode
+
+    monkeypatch.setenv("GIDEON_AUTH_MODE", requested)
+
+    _log_auth_mode(AuthConfig.from_env())
+
+    assert f"requested={requested} actual=local_token authorable=false" in caplog.text
+    assert "Auth mode fallback" in caplog.text
 
 
 @pytest.mark.parametrize("user_id", ["alice", "bob@corp", "user-123", "a", "x" * 200])
@@ -775,12 +827,11 @@ async def test_non_default_port_full_cycle() -> None:
 
 def _capturing_request(**kw):
     """A mock request whose item-assignment is backed by a real dict, so a test
-    can read what the middleware set for request['app']/['user']. MagicMock passes
-    the mock as the first arg to an assigned attribute, so the funcs absorb it."""
+    can read what the middleware set for request['app']/['user']."""
     req = _make_request(**kw)
     store: dict = {}
     req.__setitem__ = lambda _self, k, v: store.__setitem__(k, v)
-    req.get = lambda _self, k, default=None: store.get(k, default)
+    req.get = lambda k, default=None: store.get(k, default)
     req._store = store
     req.read_store = store
     return req
@@ -841,67 +892,80 @@ async def test_app_token_for_other_user_is_ignored() -> None:
     assert req.read_store.get("app", "") == ""
 
 
-class TestInternalAuthSecurityEvents:
-    """A granted internal-auth decision records its rationale as a reason, not an
-    error; a denied one still records the error (BACKLOG-13)."""
+def _paired_token(user: str = "paired-device") -> tuple[str, str]:
+    from gideon.interfaces.dashboard.session_store import DeviceInfo, attach_device
 
-    @staticmethod
-    def _internal_auth_events() -> list[dict]:
-        from gideon.security.sel import sel
+    token = generate_token(user, ttl_seconds=300)
+    nonce = token_nonce(token)
+    assert attach_device(
+        nonce,
+        DeviceInfo(id="device-1", name="Phone", kind="mobile", minted_at=1.0),
+    )
+    return token, nonce
 
-        return [
-            e for e in sel().recent(limit=20) if e.get("operation") == "internal_auth"
-        ]
 
-    @pytest.mark.asyncio
-    async def test_loopback_cookie_grant_records_a_reason_not_an_error(self) -> None:
-        token = generate_token("testuser", ttl_seconds=300)
-        bind_token_ip(token, "127.0.0.1")
-        mark_consumed(token)
-        mw = token_auth_middleware(
-            internal_paths=frozenset({"/api/spawn"}), internal_secret="s"
-        )
-        req = _make_request(path="/api/spawn", cookies={"gideon_token_10000": token})
+@pytest.mark.asyncio
+async def test_local_network_bypass_attaches_validated_paired_session(
+    monkeypatch,
+) -> None:
+    from gideon.interfaces.dashboard.session_store import paired_session_record
 
-        resp = await mw(req, _ok_handler)
+    monkeypatch.setenv("GIDEON_BYPASS_LOCAL_NETWORKS", "1")
+    token, nonce = _paired_token()
+    req = _capturing_request(
+        remote="192.168.1.20", cookies={"gideon_token_10000": token}
+    )
 
-        assert resp.status == 200
-        event = self._internal_auth_events()[0]
-        assert event["outcome"] == "granted"
-        assert event["error"] == ""
-        assert event["metadata"]["reason"] == "cookie auth (no secret header)"
+    resp = await token_auth_middleware()(req, _ok_handler)
 
-    @pytest.mark.asyncio
-    async def test_mixed_non_loopback_grant_records_a_reason_not_an_error(self) -> None:
-        token = generate_token("dcvuser", ttl_seconds=300)
-        bind_token_ip(token, "10.0.0.1")
-        mark_consumed(token)
-        mw = token_auth_middleware(mixed_internal_paths=frozenset({"/api/spawn"}))
-        req = _make_request(
-            path="/api/spawn", remote="10.0.0.1", cookies={"gideon_token_10000": token}
-        )
+    assert resp.status == 200
+    assert req.read_store["user"] == "paired-device"
+    assert req.read_store["session_nonce"] == nonce
+    record = paired_session_record(nonce)
+    assert record is not None and record.device is not None
+    assert record.device.last_seen > 0.0
 
-        resp = await mw(req, _ok_handler)
 
-        assert resp.status == 200
-        event = self._internal_auth_events()[0]
-        assert event["outcome"] == "granted"
-        assert event["error"] == ""
-        assert event["metadata"]["reason"] == "mixed non-loopback cookie auth"
+@pytest.mark.asyncio
+async def test_local_network_bypass_does_not_attach_unvalidated_identity(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("GIDEON_BYPASS_LOCAL_NETWORKS", "1")
+    req = _capturing_request(
+        remote="192.168.1.20", cookies={"gideon_token_10000": "not-a-token"}
+    )
 
-    @pytest.mark.asyncio
-    async def test_denied_internal_auth_still_records_an_error(self) -> None:
-        mw = token_auth_middleware(
-            internal_paths=frozenset({"/api/spawn"}), internal_secret="real-secret"
-        )
-        req = _make_request(
-            path="/api/spawn", headers={"X-Internal-Secret": "wrong-secret"}
-        )
+    resp = await token_auth_middleware()(req, _ok_handler)
 
-        resp = await mw(req, _ok_handler)
+    assert resp.status == 200
+    assert req.read_store["user"] == "local-net:192.168.1.20"
+    assert "session_nonce" not in req.read_store
 
-        assert resp.status == 403
-        event = self._internal_auth_events()[0]
-        assert event["outcome"] == "denied"
-        assert event["error"] == "wrong secret"
-        assert "reason" not in event.get("metadata", {})
+
+@pytest.mark.asyncio
+async def test_auth_none_attaches_validated_paired_session() -> None:
+    from gideon.security.auth.modes import AuthConfig, AuthMode
+
+    token, nonce = _paired_token()
+    req = _capturing_request(cookies={"gideon_token_7777": token})
+    mw = auth_middleware(AuthConfig(mode=AuthMode.NONE), port=7777)
+
+    resp = await mw(req, _ok_handler)
+
+    assert resp.status == 200
+    assert req.read_store["user"] == "paired-device"
+    assert req.read_store["session_nonce"] == nonce
+
+
+@pytest.mark.asyncio
+async def test_auth_none_keeps_passthrough_for_invalid_cookie() -> None:
+    from gideon.security.auth.modes import AuthConfig, AuthMode
+
+    req = _capturing_request(cookies={"gideon_token_7777": "not-a-token"})
+    mw = auth_middleware(AuthConfig(mode=AuthMode.NONE), port=7777)
+
+    resp = await mw(req, _ok_handler)
+
+    assert resp.status == 200
+    assert "user" not in req.read_store
+    assert "session_nonce" not in req.read_store

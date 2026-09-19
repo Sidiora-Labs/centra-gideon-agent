@@ -220,9 +220,9 @@ class CodeKind(LoopKindStrategy):
         return None
 
     def phase_key(self, phase: dict) -> str:
-        return (
-            str(phase.get("stage", "")).strip() or str(phase.get("title", "")).strip()
-        )
+        from gideon.automation.loop.sdlc_meta import phase_id
+
+        return phase_id(phase)
 
     def active_stage_index(self, loop: Loop) -> int:
         """Index of the stage the UPCOMING cycle belongs to — the first not-done

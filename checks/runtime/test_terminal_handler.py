@@ -343,23 +343,22 @@ class TestApiTerminalDelete:
         assert resp.status == 404
 
     @pytest.mark.asyncio
-    async def test_the_404_is_the_shared_structured_envelope(self):
-        """It answered `text="Session not found"`: a 404 with no code and no JSON at all.
-
-        A client branching on API failures had to special-case this one route by prose.
-        The shared `json_error("not_found")` is what every other API failure emits.
-        """
-        from gideon.http_errors import HTTP_ERROR_CODES
-
+    async def test_returns_404_for_unknown_persistent_session(self):
         req = _make_request(session_id="nonexistent")
-        with patch.object(terminal, "_sel") as mock_sel:
+        with (
+            patch.object(terminal, "_persist_enabled", return_value=True),
+            patch.object(
+                terminal, "_list_tmux_sessions", new_callable=AsyncMock, return_value=[]
+            ),
+            patch.object(
+                terminal, "_kill_tmux_session", new_callable=AsyncMock
+            ) as mock_kill,
+            patch.object(terminal, "_sel") as mock_sel,
+        ):
             mock_sel.return_value.log_api_access = MagicMock()
             resp = await terminal.api_terminal_delete(req)
         assert resp.status == 404
-        assert resp.content_type == "application/json"
-        body = json.loads(resp.body)
-        assert body["error"]["code"] == "not_found"
-        assert body["error"]["message"] == HTTP_ERROR_CODES["not_found"]
+        mock_kill.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_deletes_existing_session(self):

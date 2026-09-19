@@ -186,7 +186,7 @@ def _is_managed_agent_process(pid: int) -> bool:
 
 
 def _collect_active_pids(sessions: "dict") -> tuple[set[int], bool]:
-    active = set()
+    active: set = set()
     for session in sessions.values():
         provider = session.provider
         client = getattr(provider, "client", None)

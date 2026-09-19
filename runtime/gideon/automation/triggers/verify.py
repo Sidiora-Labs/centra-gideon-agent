@@ -176,7 +176,7 @@ class MigrationDisplay:
     report: VerifyReport
 
     def sections(self) -> list[str]:
-        lines = []
+        lines: list = []
         report = self.report
         missing, paused, drifted, broken = (
             report.missing,

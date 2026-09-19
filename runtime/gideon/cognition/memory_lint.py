@@ -143,7 +143,7 @@ class _MemorySweep:
     def contradictions(self) -> None:
         if self.judge is None:
             return
-        values = {}
+        values: dict = {}
         for fact in self.facts:
             values.setdefault(fact["key"], str(fact["value_json"]))
         for first, second in self.related:

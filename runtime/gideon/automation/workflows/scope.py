@@ -70,7 +70,7 @@ class ScopeReport:
         return sorted({*self.created, *self.modified, *self.deleted})
 
     def to_dict(self) -> dict[str, Any]:
-        data = {
+        data: dict = {
             name: list(getattr(self, name))
             for name in ("created", "modified", "deleted", "violations")
         }
@@ -109,7 +109,7 @@ def snapshot(roots: list[str]) -> Snapshot:
 
 
 def diff(before: Snapshot, after: Snapshot, allowed: list[str]) -> ScopeReport:
-    changes = {"created": [], "modified": [], "deleted": []}
+    changes: dict = {"created": [], "modified": [], "deleted": []}
     for path, current in after.entries.items():
         previous = before.entries.get(path)
         category = (

@@ -228,7 +228,7 @@ class _CatalogLayers:
                 )
 
     def merged(self):
-        result = {}
+        result: dict = {}
         for layer in (self.shipped, self.local):
             result.update((row.id, row) for row in layer())
         return result
@@ -551,6 +551,7 @@ def record_provenance(npm_pkg: str, *, pin: AdapterPin | None = None) -> bool:
     if receipt.accepts(pin):
         receipt.write()
         return True
+    assert pin is not None
     logger.warning(
         "acp adapter %s: install does not match the declared pin "
         "(installed %s/%s, pinned %s/%s) — provenance NOT recorded",

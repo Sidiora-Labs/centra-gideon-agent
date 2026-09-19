@@ -22,7 +22,9 @@ class _DashboardBinding:
 
     def publish(self, message: OutboundMessage) -> bool:
         state = self.state
-        session = state._sessions.get(message.channel_id) if state is not None else None
+        if state is None:
+            return False
+        session = state._sessions.get(message.channel_id)
         if session is None:
             return False
         session.append("assistant", message.text, "msg msg-assistant")

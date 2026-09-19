@@ -13,7 +13,7 @@ const DEFAULT_EXIT_PHRASES = ['cancel', 'never mind', 'forget it']
 import { fvs, withWeight } from '../shared/theme/fontWeight'
 import { playCue } from '../shared/theme/soundCues'
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
-import { Edit3, History, Search, MessageSquare, Trash2, Activity, ChevronRight, ChevronDown, Quote, PanelRight, Clipboard, X, Pin, FileText, BookText, AlertTriangle, Pencil, Sparkles, Link2, Check, Repeat, Rewind, PlayCircle, GitBranch, Folder, FolderPlus, Tag as TagIcon, Columns3, List as ListIcon, ListChecks, Filter, EyeOff, Clock, Loader2, Wrench, Target, Code2 as CodeIcon, Paperclip, ExternalLink, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, FolderKanban, GripVertical, MessageCircleQuestion, Bot, ShieldCheck, Shield, Eye, Zap, ClipboardList, Hammer, Camera, NotebookPen, FolderCog, Archive, ArchiveRestore, Boxes, CornerDownLeft, Download, Share2, Coins } from 'lucide-react'
+import { Edit3, History, Search, MessageSquare, Trash2, Activity, ChevronRight, ChevronDown, Quote, PanelRight, Clipboard, X, Pin, FileText, BookText, AlertTriangle, Pencil, Sparkles, Link2, Check, Repeat, Rewind, PlayCircle, GitBranch, Folder, FolderPlus, Tag as TagIcon, Columns3, List as ListIcon, ListChecks, Filter, EyeOff, Clock, Loader2, Wrench, Target, Code2 as CodeIcon, Paperclip, ExternalLink, ArrowLeft, ArrowRight, ArrowUp, FolderKanban, GripVertical, MessageCircleQuestion, Bot, ShieldCheck, Shield, Eye, Zap, ClipboardList, Hammer, Camera, NotebookPen, FolderCog, Archive, ArchiveRestore, Boxes, CornerDownLeft, Download, Share2, Coins } from 'lucide-react'
 import { IconButton } from '../shared/ui/IconButton'
 import { SquareIconButton } from '../shared/ui/SquareIconButton'
 import { SearchField } from '../shared/ui/SearchField'
@@ -67,8 +67,6 @@ import { confirm, promptInput } from '../shared/ui/dialog'
 import { type ChatTurn, type Segment, type ToolSegment, type ApprovalSegment, type ActivitySegment, type ThinkingSegment, appendThinking, type SubagentCard, type HistMsg, type MemoryCitation, type SkillUsed, userTurn, assistantTurn, hydrateTurns, turnText, deriveActivity, skillsUsedLabel, skillsUsedTitle, stampActivityOrigin } from './chat/chatTypes'
 import { ThinkingBlock } from './chat/ThinkingBlock'
 import { branchIndexOf, branchParentKey } from './chat/branchLineage'
-import { deriveSessionMarkers } from './chat/sessionMarkers'
-import { SessionMarkerRail } from './chat/SessionMarkerRail'
 import { buildOptimizerContext } from './chat/optimizerContext'
 import { useIdentity, firstNameOf } from '../app/shell/identity'
 import { usePlatform } from '../app/shell/usePlatform'
@@ -83,6 +81,7 @@ import { FindBar } from '../shared/ui/FindBar'
 import { findSegments } from './chat/findSegments'
 import { FollowupChips, followupAnnouncement } from './chat/FollowupChips'
 import { CheckWorkChip } from './chat/CheckWorkChip'
+import { SessionMarkerRail } from './chat/SessionMarkerRail'
 import { applyCoalescedFlush, insertActivity } from './chat/coalesceReducers'
 import { useQuery, invalidateKeys, peekQuery, writeQuery } from '../shared/data/data'
 import { sessionRecencyMs, sessionActivitySeconds, epochSeconds } from '../shared/data/epoch'
@@ -385,7 +384,8 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   const [sessionCost, setSessionCost] = useState<{ cost: number; tokens: number; priced: boolean } | null>(null)
   const refreshSessionCost = useCallback((key: string | null) => {
     if (!key) { setSessionCost(null); return }
-    api.usageTotals({ session: key }).then((d) => {
+    const ledgerSessionKey = key.includes(':') ? key : `dashboard:${key}`
+    api.usageTotals({ session: ledgerSessionKey }).then((d) => {
       const t = d.totals
       const tokens = (t.input_tokens || 0) + (t.output_tokens || 0)
       setSessionCost(t.turns > 0 && tokens > 0 ? { cost: t.cost_usd, tokens, priced: t.priced } : null)
@@ -608,6 +608,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     lastWsActivityRef.current = Date.now()
     switch (m.type) {
       case 'chat_chunk': {
+        if (d.session !== sessionRef.current) break
         setStatusText('')
         const chunk = String(d.content ?? '')
         if (breakText.current) { coalescer.reset(); coalescing.current = false; breakText.current = false }
@@ -946,8 +947,14 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       : action === 'yolo' ? 'yolo'
       : null
     api.approve(s, action, id)
-      .then(() => {
-        if (raised) setSelection((sel) => (sel.approval === raised ? sel : { ...sel, approval: raised }))
+      .then((result) => {
+        const screening = result.approval_screening
+        if (screening?.verdict === 'denied') {
+          if (result.mode) setSelection((sel) => ({ ...sel, approval: result.mode! }))
+          notify(screening.reason, 'warning')
+        } else if (raised) {
+          setSelection((sel) => (sel.approval === raised ? sel : { ...sel, approval: raised }))
+        }
       })
       .catch(reportActionFailure('record your decision'))
   }, [])
@@ -1015,7 +1022,13 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       }
       navigate(`chat/${created.key}`, { replace: true })
       if (acp) await persistSelection('this agent', api.setSessionAcpAgent(created.key, { provider: acp.providerId, provider_agent: acp.agent.provider_agent, model: selection.model && selection.model !== 'Auto' ? selection.model : undefined }))
-      if (selection.approval !== 'normal') await persistSelection('this approval mode', api.setApprovalMode(selection.approval, created.key))
+      if (selection.approval !== 'normal') {
+        const result = await persistSelection('this approval mode', api.setApprovalMode(selection.approval, created.key))
+        if (result) {
+          setSelection((sel) => ({ ...sel, approval: result.mode }))
+          if (result.approval_screening.verdict === 'denied') notify(result.approval_screening.reason, 'warning')
+        }
+      }
       if (selection.taskMode !== 'agent') await persistSelection('this task mode', api.setTaskMode(selection.taskMode, created.key))
       if (selection.reasoning) await persistSelection('this reasoning effort', api.setReasoningEffort(created.key, selection.reasoning))
       if (naturalVoice.choice) await persistSelection('this natural-voice setting', api.setSessionNaturalVoice(created.key, naturalVoice.choice))
@@ -1466,11 +1479,11 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   }
 
   const activity = useMemo(() => deriveActivity(turns), [turns])
-  const sessionMarkers = useMemo(() => deriveSessionMarkers(turns), [turns])
-  function jumpToTurn(turnIndex: number) {
+  const jumpToTurn = useCallback((turnIndex: number) => {
     const node = turnNodes.current.get(turnIndex)
     node?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  }
+  }, [])
+  const nodeForTurn = useCallback((turnIndex: number) => turnNodes.current.get(turnIndex), [])
 
   async function killFanout() {
     const s = sessionRef.current
@@ -1538,7 +1551,12 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       if (acp) persistSelection('this model', api.setSessionAcpAgent(s, { provider: acp.providerId, provider_agent: acp.agent.provider_agent, model: patch.model === 'Auto' ? undefined : patch.model }))
       else persistSelection('this model', api.setSessionModel(s, patch.model === 'Auto' ? '' : patch.model))
     }
-    if (patch.approval) persistSelection('this approval mode', api.setApprovalMode(patch.approval as ApprovalMode, s))
+    if (patch.approval) {
+      api.setApprovalMode(patch.approval as ApprovalMode, s).then((result) => {
+        setSelection((sel) => ({ ...sel, approval: result.mode }))
+        if (result.approval_screening.verdict === 'denied') notify(result.approval_screening.reason, 'warning')
+      }).catch(reportActionFailure('apply this approval mode'))
+    }
     if (patch.taskMode) persistSelection('this task mode', api.setTaskMode(patch.taskMode as TaskMode, s))
     if (patch.reasoning !== undefined) persistSelection('this reasoning effort', api.setReasoningEffort(s, patch.reasoning as ReasoningEffort))
   }
@@ -2057,17 +2075,18 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
             </div>
           ) : (
             <>
-              <div ref={scrollRef} className="relative flex-1 overflow-y-auto">
-                <AnimatePresence>
+              <div className="relative min-h-0 flex-1">
+                <div ref={scrollRef} className="absolute inset-0 overflow-y-auto">
+                  <AnimatePresence>
                   {
 }
                   {findOpen && (
                     <FindBar items={turns} segmentsOf={findSegments} nodeOf={(_t, i) => turnNodes.current.get(i)}
                       scrollRef={scrollRef} label="Find in conversation" onClose={() => setFindOpen(false)} />
                   )}
-                </AnimatePresence>
-                <SelectionQuote scrollRef={scrollRef} onQuote={quoteToComposer} attributionFor={attributionForNode} />
-                <div className="mx-auto flex flex-col gap-2xl px-l py-2xl" style={{ maxWidth: 'var(--content-width)' }}>
+                  </AnimatePresence>
+                  <SelectionQuote scrollRef={scrollRef} onQuote={quoteToComposer} attributionFor={attributionForNode} />
+                  <div className="mx-auto flex flex-col gap-2xl px-l py-2xl" style={{ maxWidth: 'var(--content-width)' }}>
                   {turns.map((turn, i) => {
                     const isLast = i === turns.length - 1
                     const turnTextOf = (t: ChatTurn) => t.segments.map((s) => (s.kind === 'text' ? s.text : '')).join('')
@@ -2132,11 +2151,12 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
                   <div role="status" aria-live="polite" className="sr-only">
                     {followupAnnouncement(streaming ? 0 : followups.length)}
                   </div>
+                  </div>
                 </div>
+                <SessionMarkerRail turns={turns} scrollRef={scrollRef} nodeOf={nodeForTurn}
+                  showReturnToNewest={scrolledUp}
+                  onReturnToNewest={() => endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })} />
               </div>
-              <SessionMarkerRail markers={sessionMarkers} currentTurn={turns.length - 1}
-                onJump={(m) => jumpToTurn(m.turnIndex)}
-                className="absolute right-2 top-1/2 z-10 -translate-y-1/2" />
               <div className="relative shrink-0 px-l pb-l">
                 {
 }
@@ -2148,18 +2168,6 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
                       style={{ color: 'var(--color-warn)', borderColor: 'color-mix(in srgb, var(--color-warn) 40%, transparent)' }}>
                       <Loader2 size={13} className="animate-spin" /> Reconnecting…
                     </motion.div>
-                  )}
-                </AnimatePresence>
-                {
-}
-                <AnimatePresence>
-                  {scrolledUp && (
-                    <motion.button type="button" onClick={() => endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })}
-                      aria-label="Jump to latest message"
-                      initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 6 }} transition={spring.spatialFast}
-                      className="absolute left-1/2 -top-2 z-20 -translate-x-1/2 inline-flex items-center gap-1.5 rounded-pill border border-outline-variant/50 bg-surface/95 px-3 h-8 text-on-surface-var text-[0.75rem] shadow-md backdrop-blur-md transition-colors hover:bg-surface-high hover:text-on-surface">
-                      <ArrowDown size={13} /> Jump to latest
-                    </motion.button>
                   )}
                 </AnimatePresence>
                 <div className="mx-auto flex flex-col items-center" style={{ maxWidth: 'var(--content-width)' }}>
@@ -2852,13 +2860,15 @@ function ActivityLine({ seg }: { seg: ActivitySegment }) {
 
 
 function SkillsUsedChip({ skills }: { skills: SkillUsed[] }) {
-  const reduced = skills.filter((s) => s.state === 'reduced').length
+  const used = skills.filter((s) => s.state === 'admitted' || s.state === 'reduced')
+  if (!used.length) return null
+  const reduced = used.filter((s) => s.state === 'reduced').length
   return (
     <div className="mt-2 mb-1 flex items-center gap-1.5 text-on-surface-low/80 text-[0.75rem]"
-      title={skillsUsedTitle(skills)}>
+      title={skillsUsedTitle(used)}>
       <Sparkles size={11} className="shrink-0 opacity-70" />
       <span>
-        {skillsUsedLabel(skills)}
+        {skillsUsedLabel(used)}
         {reduced > 0 && <span className="opacity-80"> · {reduced} summarized</span>}
       </span>
     </div>
@@ -3573,4 +3583,3 @@ function AutoNudgeMenuItem({ session, onOpen }: { session: string; onOpen: () =>
     </>
   )
 }
-

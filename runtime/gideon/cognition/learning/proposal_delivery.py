@@ -72,6 +72,7 @@ class ProposalSignals(QueueBindings):
         if not live:
             target = InboxStore()
             target.load()
+        assert target is not None
         updates = 0
         for item in target.items.values():
             if item.refs.get("learning_proposal") != identifier:

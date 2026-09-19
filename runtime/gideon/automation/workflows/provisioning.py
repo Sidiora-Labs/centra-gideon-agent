@@ -289,6 +289,7 @@ class _DurableSetupJob:
                     return None
                 phase = "observe"
                 continue
+            assert status_path is not None and output_path is not None
             if status_path.exists():
                 return await self.read_result(status_path, output_path)
             if not await tmux_substrate.has_session(self.name):
@@ -884,7 +885,7 @@ def _conflicts(
     )
     if status == 0:
         return []
-    unique = {}
+    unique: dict = {}
     for line in (output or "").splitlines():
         header, separator, path = line.partition("\t")
         if separator and line[:1].isdigit():

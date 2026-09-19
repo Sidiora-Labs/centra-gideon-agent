@@ -108,8 +108,8 @@ async def test_pip_kind_routes_to_pip_update(monkeypatch) -> None:
     assert body["kind"] == "pip"
 
 
-def _post_auto(body: object):
-    req = make_mocked_request("POST", "/api/update/auto")
+def _post_devmode(body: object):
+    req = make_mocked_request("POST", "/api/update/dev-mode")
 
     async def _j():
         return body
@@ -118,101 +118,35 @@ def _post_auto(body: object):
     return req
 
 
-class TestAutomaticUpdateMode:
-    """RUM-58: the staged mode is the control, and it REPLACED the legacy one.
+@pytest.mark.asyncio
+async def test_dev_mode_persists_nested(monkeypatch, tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    monkeypatch.setattr(upd, "config_path", lambda: cfg, raising=False)
+    resp = await upd.api_update_dev_mode(_post_devmode({"enabled": True}))
+    body = json.loads(resp.body.decode())
+    assert body == {"ok": True, "update_dev_mode": True}
+    saved = json.loads(cfg.read_text())
+    assert saved["dashboard"]["update_dev_mode"] is True
+    monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
+    from gideon.core.config.loader import AppConfig
 
-    The old surface was a pair of booleans — ``auto_update`` plus a git-only
-    ``dashboard.update_dev_mode`` — and neither said when an update would land.
-    """
+    assert AppConfig.load().dashboard.update_dev_mode is True
 
-    @pytest.mark.asyncio
-    async def test_the_mode_persists_into_the_updates_block(
-        self, monkeypatch, tmp_path
-    ) -> None:
-        cfg = tmp_path / "config.json"
-        monkeypatch.setattr(upd, "config_path", lambda: cfg, raising=False)
-        resp = await upd.api_update_auto(_post_auto({"mode": "staged"}))
-        assert json.loads(resp.body.decode()) == {
-            "ok": True,
-            "auto": "staged",
-            "auto_update": True,
-        }
-        assert json.loads(cfg.read_text())["updates"]["auto"] == "staged"
-        monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        from gideon.core.config.loader import AppConfig
 
-        assert AppConfig.load().updates.auto == "staged"
+@pytest.mark.asyncio
+async def test_dev_mode_rejects_non_bool(monkeypatch, tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    monkeypatch.setattr(upd, "config_path", lambda: cfg, raising=False)
+    resp = await upd.api_update_dev_mode(_post_devmode({"enabled": "yes"}))
+    assert resp.status == 400
 
-    @pytest.mark.asyncio
-    async def test_off_is_written_explicitly_so_the_legacy_flag_cannot_resurrect_it(
-        self, monkeypatch, tmp_path
-    ) -> None:
-        cfg = tmp_path / "config.json"
-        cfg.write_text(json.dumps({"auto_update": True}))
-        monkeypatch.setattr(upd, "config_path", lambda: cfg, raising=False)
-        await upd.api_update_auto(_post_auto({"mode": "off"}))
-        assert json.loads(cfg.read_text())["updates"]["auto"] == "off"
-        monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        from gideon.core.config.loader import AppConfig
 
-        assert AppConfig.load().updates.auto == "off"
-
-    @pytest.mark.asyncio
-    async def test_a_legacy_enabled_body_still_maps_to_a_mode(
-        self, monkeypatch, tmp_path
-    ) -> None:
-        cfg = tmp_path / "config.json"
-        monkeypatch.setattr(upd, "config_path", lambda: cfg, raising=False)
-        await upd.api_update_auto(_post_auto({"enabled": True}))
-        assert json.loads(cfg.read_text())["updates"]["auto"] == "staged"
-        await upd.api_update_auto(_post_auto({"enabled": False}))
-        assert json.loads(cfg.read_text())["updates"]["auto"] == "off"
-
-    @pytest.mark.asyncio
-    async def test_an_unknown_mode_is_refused(self, monkeypatch, tmp_path) -> None:
-        cfg = tmp_path / "config.json"
-        monkeypatch.setattr(upd, "config_path", lambda: cfg, raising=False)
-        resp = await upd.api_update_auto(_post_auto({"mode": "yolo"}))
-        assert resp.status == 400
-        assert not cfg.exists()
-
-    @pytest.mark.asyncio
-    async def test_a_non_bool_enabled_is_still_refused(
-        self, monkeypatch, tmp_path
-    ) -> None:
-        cfg = tmp_path / "config.json"
-        monkeypatch.setattr(upd, "config_path", lambda: cfg, raising=False)
-        assert (await upd.api_update_auto(_post_auto({"enabled": "yes"}))).status == 400
-
-    @pytest.mark.asyncio
-    async def test_other_config_keys_survive_the_write(
-        self, monkeypatch, tmp_path
-    ) -> None:
-        cfg = tmp_path / "config.json"
-        cfg.write_text(
-            json.dumps(
-                {
-                    "dashboard": {"user_name": "Keyur"},
-                    "updates": {"channel": "beta", "pin": "0.2.0"},
-                }
-            )
-        )
-        monkeypatch.setattr(upd, "config_path", lambda: cfg, raising=False)
-        await upd.api_update_auto(_post_auto({"mode": "staged"}))
-        saved = json.loads(cfg.read_text())
-        assert saved["dashboard"]["user_name"] == "Keyur"
-        assert saved["updates"] == {
-            "channel": "beta",
-            "pin": "0.2.0",
-            "auto": "staged",
-        }
-
-    def test_the_developer_mode_endpoint_is_retired(self) -> None:
-        """RUM-59 ac_3: the superseded control is gone from the handler AND the
-        router — a route left registered is a control that still exists."""
-        import inspect
-
-        from gideon.interfaces.dashboard import server as dash_server
-
-        assert not hasattr(upd, "api_update_dev_mode")
-        assert "/api/update/dev-mode" not in inspect.getsource(dash_server)
+@pytest.mark.asyncio
+async def test_dev_mode_preserves_other_dashboard_keys(monkeypatch, tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"dashboard": {"user_name": "Keyur"}}))
+    monkeypatch.setattr(upd, "config_path", lambda: cfg, raising=False)
+    await upd.api_update_dev_mode(_post_devmode({"enabled": True}))
+    saved = json.loads(cfg.read_text())
+    assert saved["dashboard"]["user_name"] == "Keyur"
+    assert saved["dashboard"]["update_dev_mode"] is True

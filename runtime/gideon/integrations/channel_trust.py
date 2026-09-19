@@ -136,7 +136,7 @@ def _emit_sel(operation: str, outcome: str, provider: str, sender_id: str = "") 
         from gideon.security.sel import SecurityEvent, sel
 
         identity = ":".join((provider, sender_id)) if sender_id else provider
-        event = {
+        event: dict = {
             "event_id": uuid.uuid4().hex[:16],
             "timestamp": _iso(_now()),
             "event_type": "channel_trust",

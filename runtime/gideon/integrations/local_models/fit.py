@@ -24,6 +24,7 @@ different answers and only one of them should hide models from the user.
 
 from __future__ import annotations
 
+import functools
 import logging
 import shutil
 import subprocess
@@ -47,9 +48,6 @@ GREEN_HEADROOM = 0.7
 KV_BYTES_PER_TOKEN_PER_GB = 20_000
 
 Verdict = Literal["green", "yellow", "red", "unknown"]
-
-_GPU_PROBED: bool = False
-_GPU_FACTS: dict[str, Any] = {}
 
 
 @dataclass(frozen=True)
@@ -99,6 +97,7 @@ class DiskPrecheck:
     warning: str = ""
 
 
+@functools.lru_cache(maxsize=1)
 def _probe_gpu() -> dict[str, Any]:
     """``{unified, vram_bytes, vendor, model}`` — the ONE GPU probe.
 
@@ -107,10 +106,6 @@ def _probe_gpu() -> dict[str, Any]:
     not positively identified as a discrete GPU contributes no second memory pool, because
     inflating the budget is the failure mode that OOMs.
     """
-    global _GPU_PROBED, _GPU_FACTS
-    if _GPU_PROBED:
-        return _GPU_FACTS
-
     facts: dict[str, Any] = {
         "unified": False,
         "vram_bytes": 0,
@@ -141,7 +136,6 @@ def _probe_gpu() -> dict[str, Any]:
                     "vendor": "nvidia",
                     "model": parts[0],
                 }
-                _GPU_PROBED, _GPU_FACTS = True, facts
                 return facts
         except (
             Exception
@@ -170,7 +164,6 @@ def _probe_gpu() -> dict[str, Any]:
         ):  # noqa: BLE001 — a host-fact probe must never break the surface
             logger.debug("system_profiler probe failed", exc_info=True)
 
-    _GPU_PROBED, _GPU_FACTS = True, facts
     return facts
 
 
@@ -202,8 +195,7 @@ def hide_unrunnable_default() -> bool:
 
 def reset_gpu_probe_cache() -> None:
     """Drop the cached GPU facts (tests; a probe result must not leak across cases)."""
-    global _GPU_PROBED, _GPU_FACTS
-    _GPU_PROBED, _GPU_FACTS = False, {}
+    _probe_gpu.cache_clear()
 
 
 def host_capacity(target_dir: str | Path | None = None) -> HostCapacity:

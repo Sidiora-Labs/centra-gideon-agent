@@ -102,11 +102,11 @@ export function foldEvent(
       break
 
     case 'workflow_node_started':
-      next = patchNode(next, env, 'running')
+      next = patchNode(next, env, 'running', false)
       break
 
     case 'workflow_node_done':
-      next = patchNode(next, env, typeof env.status === 'string' ? env.status : 'done')
+      next = patchNode(next, env, typeof env.status === 'string' ? env.status : 'done', env.cached === true)
       break
 
     case 'workflow_attention':
@@ -163,6 +163,7 @@ function patchNode(
   vm: WorkflowViewModel,
   env: WorkflowEventEnvelope,
   state: string,
+  cached?: boolean,
 ): WorkflowViewModel {
   const path = env.instance_path
   if (!path) return vm
@@ -179,6 +180,7 @@ function patchNode(
     instance_path: path,
     node_id: (env.node_id as string) || existing?.node_id || '',
     state,
+    cached: cached ?? existing?.cached,
     attempt: existing?.attempt,
     degraded_reason: (env.degraded_reason as string) || '',
     failure: existing?.failure ?? null,
@@ -198,7 +200,9 @@ function applyProgress(vm: WorkflowViewModel, incoming: WorkflowNodeState[]): Wo
   const byPath = new Map(vm.nodes.map((n) => [n.instance_path, n]))
   for (const n of incoming) {
     const prior = byPath.get(n.instance_path)
-    byPath.set(n.instance_path, prior ? { ...prior, state: n.state } : { ...n, node_id: n.node_id ?? '' })
+    byPath.set(n.instance_path, prior
+      ? { ...prior, state: n.state, cached: n.cached ?? prior.cached }
+      : { ...n, node_id: n.node_id ?? '' })
   }
   return {
     ...vm,

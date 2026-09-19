@@ -27,7 +27,7 @@ per-route contract.
 | `POST /api/system/restart` | Restart the gateway process. |
 | `GET /api/suggestions` | Precomputed dashboard suggestion cards. |
 | `GET /api/changelog` | Changelog for the update panel. |
-| `GET /api/update/check` · `POST /api/update` · `POST /api/update/auto` · `POST /api/update/cancel` · `POST /api/update/simulate` | Core self-update: check, apply, toggle unattended mode, cancel, dry-run. |
+| `GET /api/update/check` · `POST /api/update` · `POST /api/update/auto` · `POST /api/update/cancel` · `POST /api/update/simulate` | Core self-update: check, apply or roll back, toggle unattended mode, cancel, dry-run. |
 | `GET /api/design/tokens/default` | Default design-token set. |
 
 ## Chat & sessions
@@ -319,6 +319,24 @@ per-route contract.
 
 All four portability routes refuse an app-scoped token: exporting or overwriting the whole
 home is the owner's operation, never an installed app's.
+
+## Core update state
+
+`GET /api/update/check` includes a durable update-state rail in addition to release
+availability. `update_state` is one of `idle`, `applying`, `applied`, `failed`,
+`rolling_back`, or `rolled_back`; `update_from_version`, `update_target`,
+`update_started_at`, `update_updated_at`, and `update_error` describe the last
+transition. `rollback_available` and `rollback_version` are authoritative for the
+Settings → Updates rollback control. The journal is written before an in-process
+git or package update changes the installation, so an interrupted update retains
+its recovery point.
+
+`POST /api/update` applies the selected update when the body is absent. Posting
+`{"action":"rollback"}` restores the saved git commit or reinstalls the saved
+package version, then rebuilds as needed and restarts the gateway. Rollback is
+available only for git and pip installs; container and desktop updates remain
+deployment-managed. A missing recovery point returns `409` and never reports a
+successful rollback.
 
 ---
 

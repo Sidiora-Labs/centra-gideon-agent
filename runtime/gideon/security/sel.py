@@ -144,28 +144,6 @@ def redact_event(record: dict) -> dict:
     return {k: (v if k in _UNREDACTED_FIELDS else _deep(v)) for k, v in record.items()}
 
 
-def _normalize_outcome_reason(event: "SecurityEvent") -> None:
-    """Keep ``error`` reserved for denied/failed outcomes, in place, before hashing.
-
-    A successful decision still has a rationale — *why* the gateway granted a request
-    without an internal secret, say — and that rationale used to be written into
-    ``error`` because it was the only free-text field on the record. The audit surface
-    then showed a red "error" line on an event whose outcome was ``granted``, and an
-    ``outcome=granted error=*`` query could not tell a real failure from an explanation.
-
-    So the rationale for a SUCCESS outcome (:data:`AUDIT_OUTCOME_SUCCESS`) moves to
-    ``metadata["reason"]`` and ``error`` is cleared. This lives in :meth:`SecurityEventLog.log`
-    — the one place every emitter passes through — so a caller that has not been updated
-    cannot reintroduce the confusion, and the on-disk record, the HMAC it signs, and the
-    rendering all agree. Denied/failed outcomes are untouched: ``error`` is theirs.
-    """
-    if not event.error or event.outcome not in AUDIT_OUTCOME_SUCCESS:
-        return
-    if not event.metadata.get("reason"):
-        event.metadata = {**event.metadata, "reason": event.error}
-    event.error = ""
-
-
 def _audit_matches(data: dict, filters: dict[str, str], since: str, until: str) -> bool:
     """Whether one record satisfies every active filter (AND across fields).
 
@@ -321,7 +299,6 @@ class SecurityEventLog:
             from gideon.security.guardrails.audit import current_caller
 
             event.caller_scope = current_caller()
-        _normalize_outcome_reason(event)
         with self._lock:
             event.prev_hash = self._last_hash
             event.entry_hash = self._compute_hash(event)
@@ -380,14 +357,8 @@ class SecurityEventLog:
         source: str = "dashboard",
         resources: str = "",
         error: str = "",
-        metadata: dict | None = None,
     ) -> None:
-        """Convenience: log a dashboard/API access event.
-
-        ``error`` carries the failure for a denied/failed outcome; the rationale behind a
-        SUCCESSFUL decision belongs in ``metadata["reason"]`` (see
-        :func:`_normalize_outcome_reason`, which enforces that split for every emitter).
-        """
+        """Convenience: log a dashboard/API access event."""
         self.log(
             SecurityEvent(
                 event_id=uuid.uuid4().hex[:16],
@@ -400,7 +371,6 @@ class SecurityEventLog:
                 outcome=outcome,
                 resources=resources[:_MAX_ARG_LEN] if resources else "",
                 error=error[:_MAX_ARG_LEN] if error else "",
-                metadata=metadata or {},
             )
         )
 

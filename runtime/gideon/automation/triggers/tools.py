@@ -261,14 +261,15 @@ class CreationPlan:
         return None
 
     def check_provider(self) -> ToolResult | None:
-        inline = self.workflow.get("inline")
+        workflow = self.workflow or {}
+        inline = workflow.get("inline")
         raw = (
             (inline or {}).get("provider")
             if isinstance(inline, dict)
-            else self.workflow.get("provider") or ""
+            else workflow.get("provider") or ""
         )
         name = str(raw).strip()
-        if not name or "resume" in self.workflow:
+        if not name or "resume" in workflow:
             return None
         from gideon.integrations.action_providers.registry import (
             _ensure_default_providers_registered,
@@ -543,7 +544,7 @@ def delete_all(
 def manual_gate_plan(dry_run: bool = False) -> dict[str, Any]:
     from gideon.automation.triggers.firepath import GATE_ORDER
 
-    plan = {
+    plan: dict[str, Any] = {
         "bypassed": [],
         "enforced": [],
         "dry_run": bool(dry_run),

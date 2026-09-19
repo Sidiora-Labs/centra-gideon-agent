@@ -75,6 +75,13 @@ describe('the treatment map is closed, complete, and non-vacuous', () => {
     }
   })
 
+  it('treatment-owned classes never borrow the ignored deprecated Lucide alias', () => {
+    for (const t of Object.values(ERROR_TREATMENTS)) {
+      expect(t.surfaceClass.split(/\s+/), `${t.id}.surfaceClass`).not.toContain('lucide-alert-triangle')
+      expect(t.iconClass.split(/\s+/), `${t.id}.iconClass`).not.toContain('lucide-alert-triangle')
+    }
+  })
+
   it('paints with design tokens, never colour literals', () => {
     for (const t of Object.values(ERROR_TREATMENTS)) {
       for (const [slot, token] of Object.entries(t.paint)) {

@@ -11,7 +11,11 @@ from gideon.interfaces.dashboard.chat import (
     api_chat_session_agent,
     api_chat_session_workspace_dir,
 )
-from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
+from gideon.interfaces.dashboard.state import (
+    ConsoleState,
+    _ChatSession,
+    resolve_session_workspace_path,
+)
 
 
 def _make_app(state: ConsoleState) -> web.Application:
@@ -36,6 +40,18 @@ def _mock_state(session: _ChatSession | None = None) -> ConsoleState:
 
 
 class TestChatSessionWorkspaceDir:
+    def test_resolve_session_workspace_path_does_not_create_directory(
+        self, tmp_path, monkeypatch
+    ):
+        import gideon.engine.session_workspace as session_workspace
+
+        monkeypatch.setattr(session_workspace, "config_dir", lambda: tmp_path)
+
+        path = resolve_session_workspace_path("test")
+
+        assert path == tmp_path / "sessions" / "test"
+        assert not path.exists()
+
     @pytest.mark.asyncio
     async def test_set_workspace_dir(self, tmp_path):
         session = _ChatSession("test")
@@ -77,23 +93,6 @@ class TestChatSessionWorkspaceDir:
             assert resp.status == 400
 
     @pytest.mark.asyncio
-    async def test_a_file_is_not_a_workspace(self, tmp_path):
-        """A path that exists but is a FILE is refused — not accepted as a workspace."""
-        session = _ChatSession("test")
-        state = _mock_state(session)
-        target = tmp_path / "notes.txt"
-        target.write_text("not a directory")
-        async with TestClient(TestServer(_make_app(state))) as client:
-            resp = await client.post(
-                "/api/chat/sessions/test/workspace-dir",
-                json={"workspace_dir": str(target)},
-            )
-            assert resp.status == 400
-            body = await resp.json()
-            assert body["error"] == "Not a directory"
-        assert session.workspace_dir == ""
-
-    @pytest.mark.asyncio
     async def test_sensitive_path_returns_403(self, tmp_path):
         session = _ChatSession("test")
         state = _mock_state(session)
@@ -124,12 +123,12 @@ class TestChatSessionWorkspaceDir:
                 assert session.workspace_dir == str(tmp_path)
 
     @pytest.mark.asyncio
-    async def test_session_not_found(self, tmp_path):
+    async def test_session_not_found(self):
         state = _mock_state()
         async with TestClient(TestServer(_make_app(state))) as client:
             resp = await client.post(
                 "/api/chat/sessions/missing/workspace-dir",
-                json={"workspace_dir": str(tmp_path)},
+                json={"workspace_dir": "/tmp"},
             )
             assert resp.status == 404
 

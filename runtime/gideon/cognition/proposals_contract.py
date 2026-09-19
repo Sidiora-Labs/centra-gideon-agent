@@ -107,6 +107,32 @@ async def _handle_skill_promotion(args: dict[str, Any], ctx: Any) -> dict[str, A
     if not pid:
         raise ProposalError("apply.skill_promotion needs a `pid`")
     install_fn = ctx.installer
+    if install_fn is None:
+        from gideon.cognition.learning import project_context_review
+        from gideon.cognition.learning import skill_promotion as skill_promotion_mod
+        from gideon.extensions.packs import prompt_cards
+
+        def install_fn(prop) -> None:  # noqa: F811
+            data = prop.to_dict()
+            routes = (
+                (
+                    prompt_cards.is_prompt_card_proposal,
+                    prompt_cards.install_accepted_prompt_card,
+                ),
+                (
+                    project_context_review.is_project_context_proposal,
+                    project_context_review.install_accepted_project_context,
+                ),
+                (
+                    skill_promotion_mod.is_skill_promotion_proposal,
+                    skill_promotion_mod.install_accepted_skill,
+                ),
+            )
+            for accepts, install in routes:
+                if accepts(data):
+                    install(data)
+                    break
+
     accepted = learning_proposals.accept(pid, installer=install_fn, actor=ctx.actor)
     return {"pid": pid, "status": getattr(accepted, "status", "")}
 

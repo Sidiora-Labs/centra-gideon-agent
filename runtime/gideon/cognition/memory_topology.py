@@ -190,7 +190,7 @@ def community_members(db) -> dict[int, list[tuple[str, str, int]]]:
         "WHERE e.is_deleted = 0 AND s.community IS NOT NULL "
         "ORDER BY s.community, s.inbound_count DESC, e.name"
     ).fetchall()
-    grouped = {}
+    grouped: dict = {}
     for row in rows:
         entry = (row["id"], row["name"], int(row["inbound_count"]))
         grouped.setdefault(int(row["community"]), []).append(entry)

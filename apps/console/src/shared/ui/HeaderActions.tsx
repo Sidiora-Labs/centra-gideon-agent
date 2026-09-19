@@ -12,14 +12,12 @@ import { Segmented, type SegOption } from './Segmented'
 export type Tier = 'full' | 'text' | 'icon' | 'overflow'
 export type Priority = 'primary' | 'default' | 'low'
 
-export interface ChildModes { options: SegOption[]; value: string; onChange: (key: string) => void }
-
 interface ChildReg {
   id: number
   priority: Priority
   canIcon: boolean
   neverOverflow?: boolean
-  menu: { label: string; icon?: LucideIcon; hint?: string; danger?: boolean; onSelect?: () => void; modes?: ChildModes }
+  menu: { label: string; icon?: LucideIcon; hint?: string; danger?: boolean; onSelect?: () => void }
 }
 
 interface ClusterCtx {
@@ -50,7 +48,7 @@ export function useHeaderChild(reg: Omit<ChildReg, 'id'>): { visible: boolean; t
     if (!ctx) return
     ctx.register({ id, ...regRef.current })
     return () => ctx.unregister(id)
-  }, [ctx, id, reg.priority, reg.canIcon, reg.menu.label, reg.menu.danger, reg.menu.hint, reg.menu.modes?.value])
+  }, [ctx, id, reg.priority, reg.canIcon, reg.menu.label, reg.menu.danger, reg.menu.hint])
   if (!ctx) return { visible: true, tier: 'full' }
   const visible = ctx.tier !== 'overflow' || !ctx.visibleIds || ctx.visibleIds.has(id)
   return { visible, tier: ctx.tier }
@@ -253,7 +251,7 @@ function sameSet(a: Set<number> | null, b: Set<number>): boolean {
   return true
 }
 
-function HeaderOverflow({ actions }: { actions: { id: number; label: string; icon?: LucideIcon; hint?: string; danger?: boolean; onSelect?: () => void; modes?: ChildModes }[] }) {
+function HeaderOverflow({ actions }: { actions: { id: number; label: string; icon?: LucideIcon; hint?: string; danger?: boolean; onSelect?: () => void }[] }) {
   return (
     <Popover align="right" width={220} placement="bottom"
       trigger={(open, toggle) => (
@@ -265,21 +263,12 @@ function HeaderOverflow({ actions }: { actions: { id: number; label: string; ico
       )}>
       {(close) => (
         <div className="flex flex-col gap-0.5">
-          {actions.map((a) => (a.modes ? (
-            <div key={a.id} role="group" aria-label={a.label} className="flex flex-col gap-0.5">
-              <span data-type="caption" className="px-m pt-1 text-on-surface-low">{a.label}</span>
-              {a.modes.options.map((o) => (
-                <MenuRow key={o.key} role="menuitemradio" selected={o.key === a.modes!.value}
-                  icon={o.icon ? <o.icon size={16} /> : undefined} label={o.label ?? o.key} hint={o.title}
-                  onClick={() => { a.modes!.onChange(o.key); close() }} />
-              ))}
-            </div>
-          ) : (
+          {actions.map((a) => (
             <div key={a.id} className={a.danger ? '[&_button]:text-danger' : ''}>
               <MenuRow icon={a.icon ? <a.icon size={16} /> : undefined} label={a.label} hint={a.hint}
                 onClick={() => { a.onSelect?.(); close() }} />
             </div>
-          )))}
+          ))}
         </div>
       )}
     </Popover>
@@ -374,13 +363,11 @@ export function HeaderModePill({ options, value, onChange, ariaLabel, disabled }
   const wrapRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const closeTimer = useRef<number | undefined>(undefined)
-  const changeRef = useRef(onChange)
-  changeRef.current = onChange
-  const emit = useCallback((key: string) => changeRef.current(key), [])
-  const { visible, tier } = useHeaderChild({
+  const { tier } = useHeaderChild({
     priority: 'primary',
     canIcon: true,
-    menu: { label: ariaLabel ?? 'Options', modes: { options, value, onChange: emit } },
+    neverOverflow: true,
+    menu: { label: ariaLabel ?? 'Options' },
   })
   const iconOnly = tier === 'icon' || tier === 'overflow'
   const active = options.find((o) => o.key === value) ?? options[0]
@@ -440,7 +427,7 @@ export function HeaderModePill({ options, value, onChange, ariaLabel, disabled }
   }, [open, measure, closeNow, move, dismiss])
   useEffect(() => () => window.clearTimeout(closeTimer.current), [])
 
-  if (!active || !visible) return null
+  if (!active) return null
   const ActiveIcon = active.icon
   const label = active.label ?? active.key
 

@@ -8,6 +8,7 @@ import re
 import sqlite3
 from contextlib import closing
 from pathlib import Path
+from typing import Any
 
 from gideon.cognition.memory_graph import ENTITY_TYPES, AliasIndex, MemoryGraph, Mention
 
@@ -39,7 +40,9 @@ class _RecordLinkPass:
         self.graph, self.index = graph, index
         self.kind, self.reference = kind, reference
         self.text, self.key, self.batch, self.replace = text, key, batch, replace
-        self.report = dict(mentions=0, links=0, proposals=0, entities=[])
+        self.report: dict[str, Any] = dict(
+            mentions=0, links=0, proposals=0, entities=[]
+        )
 
     def mentions(self, haystack: str) -> None:
         kinds = {entity.id: entity.entity_type for entity in self.graph.entities()}

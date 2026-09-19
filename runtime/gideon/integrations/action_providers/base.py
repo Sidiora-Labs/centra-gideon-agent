@@ -49,7 +49,7 @@ def provider_failure(provider_name: str, exc: BaseException) -> AgentError:
     — including ones that never heard of the envelope — surfaces the same coded,
     actionable failure instead of a bare ``str(exc)``.
     """
-    envelope = {
+    envelope: dict = {
         "code": "ERR_ACTION_PROVIDER_FAILED",
         "why": "the provider raised an exception instead of returning a result",
         "fix": (

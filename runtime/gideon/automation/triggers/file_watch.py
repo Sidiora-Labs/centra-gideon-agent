@@ -48,7 +48,7 @@ class WatchState:
     def from_dict(cls, raw: dict[str, Any] | None) -> WatchState:
         data = raw if isinstance(raw, dict) else {}
         values = data.get("hashes")
-        hashes = {}
+        hashes: dict = {}
         if isinstance(values, dict):
             hashes.update((str(key), str(value)) for key, value in values.items())
         return cls(hashes, bool(data.get("seeded")))
@@ -71,7 +71,7 @@ class Delta:
         return any((self.added, self.modified, self.removed))
 
     def to_dict(self) -> dict[str, Any]:
-        record = {
+        record: dict = {
             key: list(getattr(self, key)) for key in ("added", "modified", "removed")
         }
         record.update(

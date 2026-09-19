@@ -1,6 +1,7 @@
 """Task source routing, aggregated queries and admission-backed ready views."""
 
 import asyncio
+import inspect
 import logging
 import time
 from collections import Counter
@@ -9,7 +10,11 @@ from typing import Any
 
 from gideon.engine.tasks import reconcile
 from gideon.engine.tasks.models import Task, TaskComment, TaskPriority
-from gideon.engine.tasks.provider import TaskProvider
+from gideon.engine.tasks.provider import (
+    MAX_TASK_PAGE_LIMIT,
+    TaskProvider,
+    task_page_window,
+)
 
 logger = logging.getLogger(__name__)
 _providers: dict[str, TaskProvider] = {}
@@ -38,6 +43,14 @@ def _ensure_native() -> None:
         register_provider(NativeTaskProvider())
 
 
+def validate_provider(name: str | None) -> None:
+    if name is None:
+        return
+    _ensure_native()
+    if not isinstance(name, str) or not name or name not in _providers:
+        raise ValueError(f"Unknown task provider: {name}")
+
+
 @dataclass(frozen=True)
 class TaskDirectory:
     providers: dict[str, TaskProvider]
@@ -61,10 +74,22 @@ class TaskDirectory:
     async def collect(self, name, fields):
         selected = self.selected(name)
         sources = [selected] if selected is not None else self.providers.values()
-        records = []
+        records: list = []
         for provider in sources:
             try:
-                rows, _ = await provider.list_tasks(**fields, limit=500, offset=0)
+                parameters = inspect.signature(provider.list_tasks).parameters
+                provider_fields = {
+                    key: value
+                    for key, value in fields.items()
+                    if key in parameters
+                    or any(
+                        parameter.kind is inspect.Parameter.VAR_KEYWORD
+                        for parameter in parameters.values()
+                    )
+                }
+                rows, _ = await provider.list_tasks(
+                    **provider_fields, limit=MAX_TASK_PAGE_LIMIT, offset=0
+                )
                 records.extend(rows)
             except Exception:
                 logger.warning(
@@ -84,6 +109,45 @@ def _directory():
     return TaskDirectory(_providers)
 
 
+def _task_write_fields(provider, fields, *, resolve):
+    prepared = dict(fields)
+    if provider.name != "native" or not {
+        "task_list_id",
+        "project_id",
+    }.intersection(prepared):
+        return prepared
+    from gideon.engine.tasks.hierarchy import HierarchyStore
+
+    has_task_list = "task_list_id" in prepared
+    task_list_id = prepared.get("task_list_id", "")
+    project_id = prepared.pop("project_id", "")
+    destination = HierarchyStore().task_destination(
+        task_list_id=task_list_id, project_id=project_id
+    )
+    destination.validate()
+    if resolve and (has_task_list or destination.project_id):
+        prepared["task_list_id"] = destination.resolve()
+    return prepared
+
+
+async def validate_task_write(
+    task_id: str | None = None,
+    provider_name: str | None = None,
+    **fields: Any,
+) -> None:
+    sources = _directory()
+    if task_id is None:
+        selected_name = provider_name or "native"
+        provider = sources.selected(selected_name)
+        if provider is None:
+            raise ValueError(f"Unknown task provider: {selected_name}")
+    else:
+        provider = await sources.owner(task_id, provider_name)
+        if provider is None:
+            return
+    _task_write_fields(sources.writable(provider), fields, resolve=False)
+
+
 async def list_all_tasks(
     status: str | None = None,
     assignee: str | None = None,
@@ -93,8 +157,15 @@ async def list_all_tasks(
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[Task], int]:
+    limit, offset = task_page_window(limit, offset)
     rows = await _directory().collect(
-        provider_filter, {"status": status, "assignee": assignee, "project": project}
+        provider_filter,
+        {
+            "status": status,
+            "assignee": assignee,
+            "project": project,
+            "task_list_id": task_list_id,
+        },
     )
     selected = [
         row for row in rows if not task_list_id or row.task_list_id == task_list_id
@@ -118,7 +189,10 @@ async def create_task(provider_name: str = "native", **fields: Any) -> Task:
     provider = sources.selected(provider_name)
     if provider is None:
         raise ValueError(f"Unknown task provider: {provider_name}")
-    return await sources.writable(provider).create_task(**fields)
+    provider = sources.writable(provider)
+    return await provider.create_task(
+        **_task_write_fields(provider, fields, resolve=True)
+    )
 
 
 async def update_task(
@@ -129,7 +203,9 @@ async def update_task(
     return (
         None
         if provider is None
-        else await sources.writable(provider).update_task(task_id, **fields)
+        else await sources.writable(provider).update_task(
+            task_id, **_task_write_fields(provider, fields, resolve=True)
+        )
     )
 
 
@@ -141,6 +217,18 @@ async def delete_task(task_id: str, provider_name: str | None = None) -> bool:
         if provider is None
         else await sources.writable(provider).delete_task(task_id)
     )
+
+
+async def delete_tasks(*, task_list_id: str) -> int:
+    removed = 0
+    while True:
+        tasks, _ = await list_all_tasks(task_list_id=task_list_id, limit=500)
+        if not tasks:
+            return removed
+        for task in tasks:
+            if not await delete_task(task.id, provider_name=task.provider or None):
+                raise RuntimeError(f"failed to delete task '{task.id}'")
+            removed += 1
 
 
 async def get_comments(
@@ -244,7 +332,7 @@ async def ready_tasks(
     mine_only: bool = True,
 ) -> list[Task]:
     records, _ = await list_all_tasks(
-        project=project, task_list_id=task_list_id, limit=10_000
+        project=project, task_list_id=task_list_id, limit=MAX_TASK_PAGE_LIMIT
     )
     graph = {row.id: row for row in records}
     ready_ids = set(reconcile.ready_task_ids(graph))
@@ -291,13 +379,25 @@ class TaskSearch:
             TaskPriority.TRIVIAL: 1,
         }
         if sort_by == "relevance" and self.text:
-            key = lambda pair: (pair[0], pair[1].created_at)
+
+            def key(pair):
+                return (pair[0], pair[1].created_at)
+
         elif sort_by == "priority":
-            key = lambda pair: (weights.get(pair[1].priority, 3), pair[1].created_at)
+
+            def key(pair):
+                return (weights.get(pair[1].priority, 3), pair[1].created_at)
+
         elif sort_by == "created_at":
-            key = lambda pair: pair[1].created_at
+
+            def key(pair):
+                return pair[1].created_at
+
         else:
-            key = lambda pair: pair[1].updated_at or pair[1].created_at
+
+            def key(pair):
+                return pair[1].updated_at or pair[1].created_at
+
         matches.sort(key=key, reverse=True)
         return [task for _, task in matches]
 
@@ -313,8 +413,9 @@ async def search_tasks(
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[Task], int]:
+    limit, offset = task_page_window(limit, offset)
     rows, _ = await list_all_tasks(
-        project=project, task_list_id=task_list_id, limit=10_000
+        project=project, task_list_id=task_list_id, limit=MAX_TASK_PAGE_LIMIT
     )
     search = TaskSearch(
         (query or "").strip().lower(),

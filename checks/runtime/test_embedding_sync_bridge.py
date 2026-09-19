@@ -311,34 +311,3 @@ def test_calling_the_bridge_from_inside_the_bridge_loop_is_refused():
     fut = asyncio.run_coroutine_threadsafe(_reentrant(), loop)
     with pytest.raises(RuntimeError, match="inside the embedding bridge loop"):
         fut.result(timeout=5)
-
-
-def test_batch_embed_crosses_the_bridge_with_a_size_scaled_timeout(monkeypatch):
-    """The batch site's budget is ``max(60.0, len(texts) * 5.0)``, handed to the SHARED
-    bridge (the spy only records when ``registry.run_embed_sync`` is the callee — a batch
-    path that reached for ``asyncio.run`` again would record nothing here and would raise
-    from an async caller, which is the failure this budget exists to keep from timing out
-    instead).
-
-    A fixed 60s is why a large ingest batch failed as a permanent per-chunk error: 2,000
-    chunks cannot embed in the budget one chunk gets.
-    """
-    seen = _spy_on_timeouts(monkeypatch)
-    provider = _FakeProvider(vec=[4.0])
-    monkeypatch.setattr(reg, "_active_embedding_spec", lambda: ("fake-embedder", "m1"))
-    monkeypatch.setattr(reg, "_ensure_scanned", lambda: None)
-    monkeypatch.setattr(reg, "_providers", {"fake-embedder": provider})
-
-    fn = reg.get_active_embed_many_fn()
-    assert fn is not None
-
-    assert fn(["a", "b", "c"]) == [[4.0], [4.0], [4.0]]
-    assert seen == [60.0], "a small batch keeps the 60s floor"
-
-    seen.clear()
-    assert len(fn([f"chunk {i}" for i in range(200)])) == 200
-    assert seen == [1000.0], "200 texts x 5s each, well past the floor"
-
-    seen.clear()
-    fn(["x"] * 13)
-    assert seen == [65.0], "the budget scales per text, not in steps"

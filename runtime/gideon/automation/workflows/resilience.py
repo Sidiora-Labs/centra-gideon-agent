@@ -258,7 +258,9 @@ def escalation_artifact(
     detail: str = "",
     attempts: list[Attempt] | None = None,
 ) -> dict[str, Any]:
-    payload = dict(kind="escalation", node_id=node_id, reason=reason, detail=detail)
+    payload: dict = dict(
+        kind="escalation", node_id=node_id, reason=reason, detail=detail
+    )
     payload.update(
         options=list(ESCALATION_OPTIONS),
         attempts=[item.to_dict() for item in (attempts or [])],

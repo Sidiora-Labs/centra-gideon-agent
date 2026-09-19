@@ -55,7 +55,7 @@ class RecordProjection:
 
     @staticmethod
     def tally(records, attribute, vocabulary):
-        counts = {}
+        counts: dict = {}
         for record in records:
             name = getattr(record, attribute).value
             counts[name] = counts.get(name, 0) + 1
@@ -136,7 +136,7 @@ class SelectionPlan:
     @staticmethod
     def existing(api, results):
         known = api.imported_fingerprints()
-        found = set()
+        found: set = set()
         for scan in results:
             found.update(item.fingerprint for item in scan.items)
         return found.intersection(known)

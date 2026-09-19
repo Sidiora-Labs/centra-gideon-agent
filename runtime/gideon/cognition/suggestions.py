@@ -204,7 +204,10 @@ class _SuggestionTurn:
         return True
 
     async def consume(self):
-        async for event in self.client.stream(self.prompt):
+        client = self.client
+        if client is None:
+            raise RuntimeError("suggestion provider was not acquired")
+        async for event in client.stream(self.prompt):
             kind = event.kind
             if kind == EVENT_COMPLETE:
                 return self.text
@@ -218,7 +221,7 @@ class _SuggestionTurn:
                     source="suggestions",
                 )
                 sel().log_tool_invocation(**record)
-                await self.client.reject_tool(event.request_id)
+                await client.reject_tool(event.request_id)
         return self.text
 
     async def execute(self):
@@ -330,12 +333,12 @@ async def maybe_refresh(state: "ConsoleState", cache: SuggestionsCache) -> None:
 
 
 def get_suggestions_cache(state: "ConsoleState") -> SuggestionsCache:
-    try:
-        return state._suggestions_cache
-    except AttributeError:
-        cache = SuggestionsCache()
-        state._suggestions_cache = cache
+    cache = getattr(state, "_suggestions_cache", None)
+    if isinstance(cache, SuggestionsCache):
         return cache
+    cache = SuggestionsCache()
+    setattr(state, "_suggestions_cache", cache)
+    return cache
 
 
 async def api_suggestions(request: web.Request) -> web.Response:

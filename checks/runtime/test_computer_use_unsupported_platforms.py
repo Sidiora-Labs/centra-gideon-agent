@@ -57,10 +57,7 @@ from gideon.integrations.computer_use import (
     service,
 )
 from gideon.integrations.computer_use import tools as ct
-from gideon.integrations.computer_use import (
-    unsupported_platform,
-    windows_driver,
-)
+from gideon.integrations.computer_use import unsupported_platform, windows_driver
 
 ARMED_APP = "TextEdit"
 CODE = unsupported_platform.ERR_PLATFORM_UNSUPPORTED

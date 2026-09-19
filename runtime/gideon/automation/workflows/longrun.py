@@ -281,7 +281,7 @@ class BufferState:
         if not isinstance(data, dict):
             return cls()
         raw_items = data.get("items")
-        values = {"items": list(raw_items) if isinstance(raw_items, list) else []}
+        values: dict = {"items": list(raw_items) if isinstance(raw_items, list) else []}
         for name, default in (
             ("seal_threshold", 20),
             ("seal_tokens", 0),
@@ -489,11 +489,11 @@ class _ContinuityFold:
         if outcome.strip():
             summary[0:0] = [outcome.strip()[:CONTINUITY_LINE_CHARS]]
         record = {"summary": summary[:CONTINUITY_SUMMARY_LINES]}
-        for field, fresh, cap in (
+        for field_name, fresh, cap in (
             ("recent_topics", topics, CONTINUITY_TOPIC_CAP),
             ("recent_refs", refs, CONTINUITY_REF_CAP),
         ):
-            record[field] = _dedup_capped(fresh, self.prior.get(field), cap)
+            record[field_name] = _dedup_capped(fresh, self.prior.get(field_name), cap)
         return record
 
     def header(self) -> str:

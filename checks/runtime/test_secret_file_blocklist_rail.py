@@ -47,6 +47,7 @@ from gideon.interfaces.dashboard.handlers.files import (
     api_file_read,
     api_reveal_path,
 )
+from gideon.operations.durability.state_history import SECRET_EXCLUDE
 from gideon.security.security import (
     HOME_SECRET_DIRS,
     HOME_SECRET_FILE_BASENAMES,
@@ -203,6 +204,16 @@ class TestAuthLayerFilesAreProtected:
             if not is_sensitive_path(str(target))
         ]
         assert not leaked, f"auth-layer files unknown to is_sensitive_path: {leaked}"
+
+    def test_the_entire_auth_tree_is_excluded_from_state_history(self, secret_home):
+        """A future auth file is secret because of its parent, not because its basename was known."""
+        auth_paths = [
+            target
+            for target in _auth_layer_paths().values()
+            if target.parent == secret_home / "auth"
+        ]
+        assert auth_paths, "auth-layer discovery found no files under auth/"
+        assert "auth/" in SECRET_EXCLUDE
 
 
 class TestDeclarationIsTheOnlySource:

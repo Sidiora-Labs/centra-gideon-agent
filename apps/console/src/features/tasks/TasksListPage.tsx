@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
-import { Plus, List, LayoutGrid, GitFork, Columns3, MessageSquare, FolderKanban, X, RotateCcw, ListChecks, Target, Code2, Check, CheckCircle2, Trash2, Users, UserRound, Search, Filter } from 'lucide-react'
+import { Plus, List, LayoutGrid, GitFork, Columns3, MessageSquare, FolderKanban, X, RotateCcw, ListChecks, Target, Code2, Check, CheckCircle2, Trash2, Users, UserRound, Search, Filter, Tag, GripVertical } from 'lucide-react'
 import { TopBar } from '../../shared/ui/TopBar'
 import { HeaderActions, HeaderControl, HeaderSegmented } from '../../shared/ui/HeaderActions'
 import { FilterMenu, type FilterSectionDef } from '../../shared/ui/FilterMenu'
@@ -14,7 +14,7 @@ import { TextLink } from '../../shared/ui/TextLink'
 import { confirm, confirmDelete } from '../../shared/ui/dialog'
 import { SidePanel } from '../../shared/ui/SidePanel'
 import { WorkbenchLayout } from '../../shared/ui/WorkbenchLayout'
-import { ContextMenu, type ContextMenuItem } from '../../shared/ui/motion'
+import { ContextMenu, Reorderable, type ContextMenuItem } from '../../shared/ui/motion'
 import { spring, expr } from '../../shared/theme/motion'
 import { api, type TaskItem, type TaskListItem } from '../../shared/data/api'
 import { statusMeta, signalPriority, dueMeta, TERMINAL, ListChecksLike, exitDoneCount } from './taskMeta'
@@ -26,10 +26,11 @@ import { RowHitTarget } from '../../shared/ui/RowHitTarget'
 import { accentChip } from '../../shared/theme/accent'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
 import { ASSIGNED_EVERYONE, ASSIGNED_MINE, FULL_WIDTH, GOAL_LOOPS_PROJECT, SCOPE_CODING, SCOPE_GOALS, belongsToOwner, filterTaskCollection, scopeContains, useTaskCollection, useTaskPreference, type TaskView } from './taskCollectionState'
+import { filterTasksByTag, orderTaskRows, preserveLockedTaskRows, taskNoMatchCause, taskRowLocked, taskTagOptions, type TaskNoMatchCause } from './taskGraphState'
 
 const viewOptions = [{ key: 'list', label: 'List view', icon: List }, { key: 'cards', label: 'Cards view', icon: LayoutGrid }, { key: 'board', label: 'Kanban board', icon: Columns3 }, { key: 'dag', label: 'Dependency graph', icon: GitFork }]
 const statusOptions = [{ key: 'all', label: 'All' }, { key: 'ready', label: 'Ready' }, ...['open', 'in_progress', 'blocked', 'done'].map(key => ({ key, label: statusMeta(key).label }))]
-const sortOptions = [{ key: 'recent', label: 'Recently updated' }, { key: 'due', label: 'Due date' }, { key: 'priority', label: 'Priority' }]
+const sortOptions = [{ key: 'recent', label: 'Recently updated' }, { key: 'due', label: 'Due date' }, { key: 'priority', label: 'Priority' }, { key: 'order', label: 'Manual order' }]
 
 export function TasksListPage({ onCreate, view: viewProp, filter, openId, setView: changeView, setFilter, setOpenId, editing, setEditing,
   q: query, sort: sortProp, scope: scopeProp, list: listProp, setQ, setSort, setScope: changeScope, setList }: {
@@ -46,14 +47,20 @@ export function TasksListPage({ onCreate, view: viewProp, filter, openId, setVie
   const [sortBy, setSortBy] = useTaskPreference(sortProp, 'tasks-sort', 'recent', setSort)
   const [scope, setScope] = useTaskPreference(scopeProp, 'tasks-scope', '', changeScope)
   const [assigned, setAssigned] = useState(ASSIGNED_EVERYONE)
+  const [tag, setTag] = useState('')
+  const [manualTaskIds, setManualTaskIds] = useState<string[] | null>(null)
+  const [savingOrder, setSavingOrder] = useState(false)
   const isProjectScope = !!scope && scope !== SCOPE_GOALS && scope !== SCOPE_CODING
   const scopedProject = isProjectScope ? projects.find(project => project.name === scope) : undefined
   const projectLists = lists.filter(list => list.project_id === scopedProject?.id)
   const listFilter = listProp ? { id: listProp, name: lists.find(list => list.id === listProp)?.name ?? listProp } : null
   const setListFilter = (list: { id: string; name: string } | null) => setList(list?.id ?? '')
   useEffect(() => { if (!isProjectScope && listProp) setList('') }, [isProjectScope, listProp, setList])
-  const scopedTasks = useMemo(() => (tasks ?? []).filter(task => scopeContains(task, scope, coding)), [tasks, scope, coding])
-  const filtered = useMemo(() => filterTaskCollection({ tasks, ready, results, query: q, status: filter, scope, coding, list: listProp, owner, assigned, sort: sortBy }), [tasks, ready, results, q, filter, scope, coding, listProp, owner, assigned, sortBy])
+  const tags = useMemo(() => taskTagOptions(tasks ?? []), [tasks])
+  const scopedTasks = useMemo(() => filterTasksByTag((tasks ?? []).filter(task => scopeContains(task, scope, coding)), tag), [tasks, scope, coding, tag])
+  const filteredWithoutTag = useMemo(() => filterTaskCollection({ tasks, ready, results, query: q, status: filter, scope, coding, list: listProp, owner, assigned, sort: sortBy }), [tasks, ready, results, q, filter, scope, coding, listProp, owner, assigned, sortBy])
+  const filtered = useMemo(() => filteredWithoutTag && filterTasksByTag(filteredWithoutTag, tag), [filteredWithoutTag, tag])
+  const displayed = useMemo(() => filtered && (sortBy === 'order' ? orderTaskRows(filtered, manualTaskIds) : filtered), [filtered, sortBy, manualTaskIds])
   const sections: FilterSectionDef[] = useMemo(() => {
     const counts = new Map<string, number>()
     let goals = 0, codeTasks = 0, foreign = 0
@@ -68,11 +75,12 @@ export function TasksListPage({ onCreate, view: viewProp, filter, openId, setVie
       ...(coding.size ? [{ key: SCOPE_CODING, label: 'Coding projects', icon: Code2, count: codeTasks }] : []),
       ...projects.filter(project => project.name !== GOAL_LOOPS_PROJECT).sort((left, right) => left.name.localeCompare(right.name)).map((project, index) => ({ key: project.name, label: project.name, icon: FolderKanban, count: counts.get(project.name), groupLabel: index === 0 ? 'Projects' : undefined })),
     ] }]
+    if (tags.length) available.push({ title: 'Tag', value: tag, defaultKey: '', onChange: setTag, options: [{ key: '', label: 'All tags', icon: Tag, count: tasks?.length }, ...tags.map(option => ({ ...option, icon: Tag }))] })
     if (!FULL_WIDTH.includes(view) && !q) available.push({ title: 'Status', value: filter, defaultKey: 'all', onChange: setFilter, options: statusOptions.map(option => ({ ...option, count: option.key === 'all' ? tasks?.length : option.key === 'ready' ? ready?.length : tasks?.filter(task => option.key === 'done' ? TERMINAL.has(task.status) : task.status === option.key).length })) })
     if (owner && foreign) available.push({ title: 'Assigned', value: assigned, defaultKey: ASSIGNED_EVERYONE, onChange: setAssigned, options: [{ key: ASSIGNED_EVERYONE, label: 'Everyone', icon: Users, count: tasks?.length }, { key: ASSIGNED_MINE, label: 'Mine', icon: UserRound, count: (tasks?.length ?? 0) - foreign }] })
     if (!FULL_WIDTH.includes(view)) available.push({ title: 'Sort by', value: sortBy, defaultKey: 'recent', onChange: setSortBy, options: sortOptions })
     return available
-  }, [tasks, ready, projects, coding, owner, scope, view, q, filter, assigned, sortBy, setScope, setFilter, setSortBy])
+  }, [tasks, ready, projects, coding, owner, scope, tags, tag, view, q, filter, assigned, sortBy, setScope, setFilter, setSortBy])
   async function resetList(list: TaskListItem) {
     if (!(await confirm({
       title: `Reset “${list.name}”?`,
@@ -86,25 +94,51 @@ export function TasksListPage({ onCreate, view: viewProp, filter, openId, setVie
     catch (error) { collection.showError(`Reset “${list.name}”: ${error instanceof Error ? error.message : 'Could not reset the list.'}`) }
   }
   async function moveTask(id: string, status: string) { await collection.moveTask(id, status) }
+  async function reorderTasks(proposal: TaskItem[]) {
+    if (!displayed || savingOrder) return
+    const before = displayed
+    const next = preserveLockedTaskRows(before, proposal)
+    if (next.every((task, index) => task.id === before[index]?.id)) return
+    setManualTaskIds(next.map(task => task.id))
+    setSavingOrder(true)
+    collection.showError('')
+    try {
+      const updated = await Promise.all(next.flatMap((task, order) => taskRowLocked(task) ? [] : [api.updateTask(task.id, { order })]))
+      updated.forEach(collection.patchLocal)
+    } catch (error) {
+      setManualTaskIds(before.map(task => task.id))
+      collection.showError(`Reorder tasks: ${error instanceof Error ? error.message : 'Could not save the task order.'}`)
+    } finally { setSavingOrder(false) }
+  }
   const open = tasks?.find(task => task.id === openId)
   const openStatus = open ? statusMeta(open.status) : null
+  const clearNarrowing = () => { setQ(''); setFilter('all'); setScope(''); setTag(''); setListFilter(null); setAssigned(ASSIGNED_EVERYONE) }
+  const noMatch = (cause: TaskNoMatchCause) => {
+    if (cause === 'search') return <EmptyState icon={Search} title={`No tasks match “${q}”`} hint={`You have ${tasks?.length ?? 0} task${tasks?.length === 1 ? '' : 's'} — just none matching the search.`} action={{ label: 'Clear search', onClick: () => setQ('') }} />
+    if (cause === 'tag') return <EmptyState icon={Tag} title={`No tasks tagged “${tag}”`} hint="No tasks in the current collection have this tag." action={{ label: 'Clear tag', onClick: () => setTag('') }} />
+    if (cause === 'scope') return <EmptyState icon={ListChecksLike} title="Nothing here" hint="No tasks match this scope." action={{ label: 'Clear scope', onClick: () => setScope('') }} />
+    return <EmptyState icon={Filter} title="No tasks match these filters" hint={`You have ${tasks?.length ?? 0} task${tasks?.length === 1 ? '' : 's'} — just none matching the active filters.`} action={{ label: 'View all tasks', onClick: clearNarrowing }} />
+  }
   let body: ReactNode
   if (q && collection.searchError) body = <LoadError what="search results" error={collection.searchError} onRetry={collection.retrySearch} />
   else if (filter === 'ready' && !q && collection.readyError) body = <LoadError what="ready tasks" error={collection.readyError} onRetry={collection.retryReady} />
   else if (tasks === null && collection.loadError) body = <LoadError what="tasks" error={collection.loadError} onRetry={collection.load} />
-  else if (filtered === null) body = <ListSkeleton rows={6} what="tasks" />
+  else if (displayed === null) body = <ListSkeleton rows={6} what="tasks" />
   else if (!tasks?.length) body = <EmptyState icon={ListChecksLike} title="No tasks" hint="Break a goal into tracked work. Create a task, or let an agent plan from a chat." action={{ label: 'New task', onClick: onCreate, icon: Plus }} />
-  else if (FULL_WIDTH.includes(view)) body = !scopedTasks.length ? <EmptyState icon={ListChecksLike} title="Nothing here" hint="No tasks match this scope." /> : view === 'board' ? <TaskBoard tasks={scopedTasks} onOpen={setOpenId} onMove={moveTask} /> : <TaskGraph tasks={scopedTasks} onOpen={setOpenId} />
-  else if (!filtered.length) {
-    if (q) body = <EmptyState icon={Search} title={`No tasks match “${q}”`} hint={`You have ${tasks?.length ?? 0} task${tasks.length === 1 ? '' : 's'} — just none matching the search.`} action={{ label: 'Clear search', onClick: () => setQ('') }} />
-    else if (filter !== 'all' || listFilter || (owner && assigned === ASSIGNED_MINE)) body = <EmptyState icon={Filter} title="No tasks in this view" hint={`You have ${tasks?.length ?? 0} task${tasks.length === 1 ? '' : 's'} — just none in this view.`} action={{ label: 'View all tasks', onClick: () => { setFilter('all'); setListFilter(null); setAssigned(ASSIGNED_EVERYONE) } }} />
-    else body = <EmptyState icon={ListChecksLike} title="Nothing here" hint="No tasks match this scope." />
-  } else body = view === 'list' ? <div className="grid gap-s pb-16">{filtered.map((t, index) => <TaskRow key={t.id} t={t} index={index} onOpen={() => setOpenId(t.id)} onProject={setScope} selected={selected.has(t.id)} selecting={selected.size > 0} onToggleSelect={() => toggleSelect(t.id)} onComplete={() => moveTask(t.id, 'done')} />)}</div> : <div className="grid grid-cols-1 gap-m sm:grid-cols-2">{filtered.map((t, index) => <TaskCard key={t.id} t={t} index={index} onOpen={() => setOpenId(t.id)} onProject={setScope} />)}</div>
+  else if (FULL_WIDTH.includes(view)) body = !scopedTasks.length ? noMatch(taskNoMatchCause({ query: '', searchMatches: null, scope, tag, status: 'all', list: '', mine: false })) : view === 'board' ? <TaskBoard tasks={scopedTasks} onOpen={setOpenId} onMove={moveTask} /> : <TaskGraph tasks={scopedTasks} onOpen={setOpenId} />
+  else if (!displayed.length) {
+    body = noMatch(taskNoMatchCause({ query: q, searchMatches: q ? results?.length ?? null : null, scope, tag, status: filter, list: listProp, mine: !!owner && assigned === ASSIGNED_MINE }))
+  } else if (view === 'list') {
+    const row = (t: TaskItem, index: number) => <TaskRow t={t} index={index} onOpen={() => setOpenId(t.id)} onProject={setScope} onTag={setTag} selected={selected.has(t.id)} selecting={selected.size > 0} onToggleSelect={() => toggleSelect(t.id)} onComplete={() => moveTask(t.id, 'done')} reorderable={sortBy === 'order'} />
+    body = sortBy === 'order'
+      ? <Reorderable items={displayed} onReorder={reorderTasks} getKey={task => task.id} canDrag={task => !savingOrder && !taskRowLocked(task)} renderItem={task => row(task, displayed.indexOf(task))} className="grid gap-s pb-16" />
+      : <div className="grid gap-s pb-16">{displayed.map((task, index) => <div key={task.id}>{row(task, index)}</div>)}</div>
+  } else body = <div className="grid grid-cols-1 gap-m sm:grid-cols-2">{displayed.map((t, index) => <TaskCard key={t.id} t={t} index={index} onOpen={() => setOpenId(t.id)} onProject={setScope} onTag={setTag} />)}</div>
   return <WorkbenchLayout scroll={false}
     topBar={<TopBar keepCornerPadding left={<PageTitle>Tasks</PageTitle>} right={<HeaderActions><HeaderSegmented ariaLabel="View" value={view} onChange={setView} options={viewOptions} /><HeaderControl icon={Plus} label="New task" variant="primary" priority="primary" onClick={onCreate} /></HeaderActions>} />}
     controls={<div className="shrink-0 border-b border-outline-variant/30 bg-surface-container/20"><div className="mx-auto flex w-full items-center gap-s px-l py-m" style={{ maxWidth: 'var(--content-width)' }}>
       {!FULL_WIDTH.includes(view) && <div className="min-w-0 flex-1"><SearchField value={query} onChange={setQ} placeholder="Search tasks" ariaLabel="Search tasks" /></div>}
-      <FilterMenu sections={sections} /><ResultAnnouncement count={filtered?.length ?? 0} noun="tasks" active={q.length > 0} />
+      <FilterMenu sections={sections} /><ResultAnnouncement count={displayed?.length ?? 0} noun="tasks" active={q.length > 0} />
     </div></div>}
     panel={open && openStatus && <SidePanel key={open.id} fillHeight storeKey="task-panel-w" icon={<openStatus.icon size={18} style={{ color: openStatus.tone }} />} title={open.title} onClose={() => setOpenId(null)}><TaskDetail task={open} editing={editing} onEditingChange={setEditing} allTasks={tasks ?? []} onOpenTask={setOpenId} onSaved={collection.patchLocal} onDeleted={() => { setOpenId(null); collection.load() }} /></SidePanel>}>
     <div className={view === 'board' ? 'flex min-h-0 flex-1 flex-col px-l py-l' : 'min-h-0 flex-1 overflow-y-auto'} tabIndex={view === 'dag' ? 0 : undefined} role={view === 'dag' ? 'group' : undefined} aria-label={view === 'dag' ? 'Dependency graph' : undefined}>
@@ -148,8 +182,8 @@ function MetaLine({ t, onProject }: { t: TaskItem; onProject?: (project: string)
   // Gaps keep metadata readable at 320px (WCAG 1.4.10 Reflow).
   return <div data-type="body-s" className="mt-1 flex flex-wrap items-center gap-x-m gap-y-0.5 text-on-surface-low">{lead}{tail}{comments}</div>
 }
-function TaskRow({ t, index, onOpen, onProject, selected, selecting, onToggleSelect, onComplete }: {
-  t: TaskItem; index: number; onOpen: () => void; onProject?: (project: string) => void; selected?: boolean; selecting?: boolean; onToggleSelect?: () => void; onComplete?: () => void
+function TaskRow({ t, index, onOpen, onProject, onTag, selected, selecting, onToggleSelect, onComplete, reorderable }: {
+  t: TaskItem; index: number; onOpen: () => void; onProject?: (project: string) => void; onTag?: (tag: string) => void; selected?: boolean; selecting?: boolean; onToggleSelect?: () => void; onComplete?: () => void; reorderable?: boolean
 }) {
   const sm = statusMeta(t.status), done = TERMINAL.has(t.status)
   const reduced = useReducedMotion()
@@ -159,12 +193,13 @@ function TaskRow({ t, index, onOpen, onProject, selected, selecting, onToggleSel
   return <ContextMenu items={actions}><motion.div initial={reduced ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring.spatialDefault, delay: reduced ? 0 : Math.min(index * 0.03, 0.3) }} onClick={onOpen} tabIndex={-1}
     className="group relative flex cursor-pointer items-center gap-m rounded-lg border border-outline-variant/25 bg-surface-container/60 px-l py-m transition-colors hover:bg-surface-high has-[>button:focus-visible]:ring-2 has-[>button:focus-visible]:ring-inset has-[>button:focus-visible]:ring-primary" style={selected ? { outline: '1.5px solid var(--color-primary)', outlineOffset: -1.5 } : undefined}>
     <RowHitTarget label={`${t.title} — ${sm.label}`} />
+    {reorderable && <span title={taskRowLocked(t) ? 'Project tasks keep their place' : 'Drag to reorder'}><GripVertical size={16} className={`shrink-0 text-on-surface-low ${taskRowLocked(t) ? 'cursor-not-allowed opacity-40' : 'cursor-grab active:cursor-grabbing'}`} /></span>}
     <button type="button" aria-label={`${selected ? 'Deselect' : 'Select'}: ${t.title}`} onClick={event => { event.stopPropagation(); onToggleSelect?.() }} className="-m-0.5 grid size-6 shrink-0 place-items-center"><span className={`grid size-5 place-items-center rounded-md border ${selected ? 'border-primary bg-primary text-on-primary' : `border-outline-variant text-transparent ${selecting ? '' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'}`}`}><Check size={13} /></span></button>
     <sm.icon size={20} className="shrink-0" style={{ color: sm.tone }} /><div className="min-w-0 flex-1"><span className={`block truncate text-[0.9375rem] font-medium ${done ? 'text-on-surface-low line-through' : 'text-on-surface'}`} title={t.title}>{t.title}</span><MetaLine t={t} onProject={onProject} /></div>
-    {!!t.labels?.length && <div className="hidden shrink-0 gap-1 md:flex">{t.labels.slice(0, 2).map(label => <span key={label} data-type="caption" className="rounded-md bg-surface-high px-2 py-1 text-on-surface-var">{label}</span>)}</div>}
+    {!!t.labels?.length && <div className="hidden shrink-0 gap-1 md:flex">{t.labels.slice(0, 2).map(label => <button key={label} type="button" data-type="caption" aria-label={`Filter by tag “${label}”`} onClick={event => { event.stopPropagation(); onTag?.(label) }} className="rounded-md bg-surface-high px-2 py-1 text-on-surface-var hover:text-primary">{label}</button>)}</div>}
   </motion.div></ContextMenu>
 }
-function TaskCard({ t, index, onOpen, onProject }: { t: TaskItem; index: number; onOpen: () => void; onProject?: (project: string) => void }) {
+function TaskCard({ t, index, onOpen, onProject, onTag }: { t: TaskItem; index: number; onOpen: () => void; onProject?: (project: string) => void; onTag?: (tag: string) => void }) {
   const sm = statusMeta(t.status), pm = signalPriority(t.priority), due = dueMeta(t.due)
   const reduced = useReducedMotion()
   const exit = t.exit_criteria ?? [], exitDone = exitDoneCount(exit)
@@ -174,7 +209,7 @@ function TaskCard({ t, index, onOpen, onProject }: { t: TaskItem; index: number;
     <RowHitTarget label={t.title} /><div className="flex items-start gap-s"><sm.icon size={18} style={{ color: sm.tone }} className="mt-0.5 shrink-0" /><span data-type="label-m" className={`min-w-0 flex-1 font-medium leading-snug ${TERMINAL.has(t.status) ? 'text-on-surface-low line-through' : 'text-on-surface'}`}>{t.title}</span>{t.assignee && <span data-type="caption" title={`Assigned to ${t.assignee}`} className="rounded-md bg-surface-high px-2 py-1 text-on-surface-var">@{t.assignee}</span>}</div>
     <div className="flex flex-wrap items-center gap-1.5">{badges.map((badge, position) => <span key={position} data-type="caption" className="rounded-md px-2 py-1" style={{ color: badge.tone, background: `color-mix(in srgb, ${badge.tone} 16%, transparent)` }}>{badge.label}</span>)}
       {t.project && <button type="button" onClick={event => { event.stopPropagation(); onProject?.(t.project!) }} title={`Filter by project “${t.project}”`} data-type="caption" className="inline-flex min-h-6 items-center gap-1 rounded-md px-2 hover:brightness-125" style={accentChip}><FolderKanban size={10} />{t.project}</button>}
-      {(t.labels ?? []).slice(0, 2).map(label => <span key={label} data-type="caption" className="rounded-md bg-surface-high px-2 py-1 text-on-surface-var">{label}</span>)}
+      {(t.labels ?? []).slice(0, 2).map(label => <button key={label} type="button" data-type="caption" aria-label={`Filter by tag “${label}”`} onClick={event => { event.stopPropagation(); onTag?.(label) }} className="rounded-md bg-surface-high px-2 py-1 text-on-surface-var hover:text-primary">{label}</button>)}
     </div>
     {exit.length > 0 && <div className="flex items-center gap-s"><Meter size="thin" className="flex-1" tone="var(--color-ok)" label={`Exit criteria: ${exitDone} of ${exit.length} met`} pct={exitDone / exit.length * 100} /><span data-type="caption" className="text-on-surface-low tabular-nums">{exitDone}/{exit.length}</span></div>}
   </motion.div>

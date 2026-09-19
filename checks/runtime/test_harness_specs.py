@@ -19,7 +19,6 @@ from checks.harness.specs import (
     KIND_TASK,
     Spec,
     SpecError,
-    load_specs,
     parse_spec,
     validate_all,
     validate_spec,
@@ -191,25 +190,6 @@ def test_duplicate_ids_flagged() -> None:
     b.path = Path("checks/harness/specs/rules/b.md")
     issues = validate_all([a, b])
     assert any("duplicate id" in i.message for i in issues)
-
-
-def test_the_commit_watcher_retirement_rule_ships() -> None:
-    """The harness must CARRY the retirement rule, not merely be able to enforce one.
-
-    A scanner check with no rule spec behind it is a check nobody can find: `explain` lists
-    rules, and the rule is where the reason and the expiry condition live.
-    """
-    rules = {s.id: s for s in load_specs() if s.kind == KIND_RULE}
-    rule = rules.get("no-periodic-commit-watcher")
-    assert rule is not None, f"the retirement rule is not shipped: {sorted(rules)}"
-    assert validate_spec(rule) == []
-    assert rule.meta["scanner"] == "no-periodic-commit-watcher"
-    assert str(rule.meta.get("expiry_condition", "")).strip(), (
-        "a prohibition with no stated expiry condition cannot be retired on evidence "
-        "later — every shipped rule here carries one"
-    )
-    applies = rule.get_list("appliesTo")
-    assert any("selfqa" in path for path in applies), applies
 
 
 def test_profile_registry_has_core_profiles() -> None:

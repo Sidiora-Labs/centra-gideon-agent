@@ -371,6 +371,46 @@ def build_allowed_origins(
     return origins
 
 
+def allowed_cors_origin(request: web.Request) -> str:
+    """Return an explicitly allowed browser ``Origin``, or ``""``.
+
+    This is deliberately narrower than :func:`check_origin`.  CSRF and WebSocket
+    admission accept loopback aliases on any port so SSH tunnels keep working, but
+    reflecting an origin into ``Access-Control-Allow-Origin`` is a capability grant.
+    Only origins declared in ``app["allowed_origins"]`` may receive that grant.
+    """
+    raw = (request.headers.get("Origin") or "").strip()
+    if not raw or raw == "null":
+        return ""
+    try:
+        parsed = urlparse(raw)
+        port = parsed.port
+    except ValueError:
+        return ""
+    if (
+        parsed.scheme not in ("http", "https")
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
+        return ""
+    host = parsed.hostname
+    if ":" in host:
+        host = f"[{host}]"
+    default_port = 80 if parsed.scheme == "http" else 443
+    origin = (
+        f"{parsed.scheme}://{host}:{port}"
+        if port is not None and port != default_port
+        else f"{parsed.scheme}://{host}"
+    )
+    allowed: set[str] = request.app["allowed_origins"]
+    return origin if origin in allowed else ""
+
+
 def check_origin(
     request: web.Request,
     *,

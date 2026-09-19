@@ -13,6 +13,7 @@ legacy loops/code managers it unifies.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from gideon.automation.loop import files as loop_files
@@ -21,6 +22,27 @@ from gideon.automation.loop.loop import Loop, LoopStatus, LoopStopReason
 from gideon.core.config.loader import AppConfig
 
 logger = logging.getLogger(__name__)
+
+_FIRST_CYCLE_IDLE_SECS = 5
+
+
+def dashboard_boundary_lock(state, loop_id: str) -> asyncio.Lock:
+    """Serialize one loop's dashboard lifecycle validation and mutation.
+
+    Git's repository lock protects the on-disk worktree registry. This per-loop
+    lock protects the state transition that decides whether registration or
+    teardown should happen, so concurrent HTTP actions cannot both proceed from
+    the same stale loop state.
+    """
+    locks = getattr(state, "_loop_boundary_locks", None)
+    if locks is None:
+        locks = {}
+        state._loop_boundary_locks = locks
+    lock = locks.get(loop_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        locks[loop_id] = lock
+    return lock
 
 
 def session_key(loop_id: str) -> str:
@@ -192,6 +214,7 @@ async def start(state, svc, loop_id: str) -> Loop:
         idle_secs=loop.idle_secs or cfg.default_idle_secs,
         max_cycles=loop.max_cycles,
         stop_sentinel_path=str(d / loop_files.STOP_SENTINEL) if d else "",
+        first_idle_secs=_FIRST_CYCLE_IDLE_SECS,
     )
     logger.info(
         "loop: started %s (kind=%s) on session %s", loop_id, loop.kind, session.key
@@ -360,9 +383,6 @@ def loop_spend(loop_id: str) -> dict:
             "turns": int(planning["turns"]),
         },
     }
-
-
-_FIRST_CYCLE_IDLE_SECS = 5
 
 
 def _task_cycle_nudge(loop: Loop, task, worktree_dir: str, loop_dir: str) -> str:

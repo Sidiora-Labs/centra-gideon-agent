@@ -461,7 +461,10 @@ class MonthlyRecap:
             return
         yield f"{self.label}: ~{_usd(total['dollars_est'])} across {total['calls']} turns."
         yield f"{round(100 * total['local_calls'] / total['calls'])}% of those turns ran locally at $0."
-        rank = lambda pair: (-float(pair[1]["dollars_est"]), pair[0])
+
+        def rank(pair):
+            return (-float(pair[1]["dollars_est"]), pair[0])
+
         if self.view.purposes:
             parts = (
                 f"{name} ~{_usd(aggregate['dollars_est'])}"

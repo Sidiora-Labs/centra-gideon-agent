@@ -8,7 +8,7 @@ import { verifiedScope } from './AuditPanel'
 import type { LucideIcon } from 'lucide-react'
 import { notify } from '../../app/shell/appSdk'
 import {
-  api, type SecurityStats, type SecretsVaultState, type MemoryStats, type AgentRuntime, type DashboardConfig,
+  api, requireWriteAccepted, type SecurityStats, type SecretsVaultState, type MemoryStats, type AgentRuntime, type DashboardConfig,
   type SettingsProvider, type NotificationSettings, type UpdateCheck,
   type PromptBindings, type SelVerify, type SavedAgent,
   type SearchProviderInfo,
@@ -115,11 +115,14 @@ const useCompanionDiscovery = () => useQuery('settings:companion:discovery', () 
 
 async function mutate(fn: () => Promise<unknown>, ...affects: CacheKeySpec[]) {
   try {
-    await fn()
+    requireWriteAccepted(await fn())
   } catch (e) {
     notify(`Couldn't save that change: ${String((e as Error)?.message || e)}`, 'error')
+    return false
+  } finally {
+    invalidateSpecs(affects)
   }
-  invalidateSpecs(affects)
+  return true
 }
 
 export const SETTINGS_WIDGETS: SettingsWidget[] = [
@@ -176,7 +179,7 @@ export const SETTINGS_WIDGETS: SettingsWidget[] = [
     render(query, go) {
       const { data: c, refresh, stale: cStale } = useDashCfg()
       const save = (patch: Record<string, unknown>) => mutate(
-        () => api.saveDashboardConfig(patch).then(refresh),
+        () => api.saveDashboardConfig(patch).then(requireWriteAccepted).then(refresh),
         'settings:dashboard-config', 'chat:show-timestamps', 'chat:send-on-enter',
       )
       return (
@@ -326,7 +329,7 @@ export const SETTINGS_WIDGETS: SettingsWidget[] = [
     render(query, go) {
       const { data: e, error: evalErr, refresh, stale: eStale } = useEvals()
       const save = (value: boolean) => mutate(
-        () => api.patchConfig('evals.enabled', value).then(refresh), 'settings:evals',
+        () => api.patchConfig('evals.enabled', value).then(requireWriteAccepted).then(refresh), 'settings:evals',
       )
       return (
         <BentoCard icon={FlaskConical} title="Evaluations" query={query} onClick={() => go('evals')} loading={e === undefined && !evalErr} stale={eStale}>
@@ -372,7 +375,7 @@ export const SETTINGS_WIDGETS: SettingsWidget[] = [
       const c = (data?.cfg ?? {}) as Record<string, unknown>
       const approval = String(c.approval_mode ?? 'auto')
       const setCfg = (key: string, value: unknown) => mutate(
-        () => api.patchConfig(`agent.${key}`, value).then(refresh), 'settings:agent-defaults',
+        () => api.patchConfig(`agent.${key}`, value).then(requireWriteAccepted).then(refresh), 'settings:agent-defaults',
       )
       return (
         <BentoCard icon={Bot} title="Agent defaults" query={query} onClick={() => go('agent')} loading={data === undefined && !agentErr} rows={3} stale={isStalePaint}>
@@ -394,7 +397,7 @@ export const SETTINGS_WIDGETS: SettingsWidget[] = [
     render(query, go) {
       const { data, refresh, stale: isStalePaint } = useVoice()
       const toggle = (uc: 'stt' | 'tts', settings: Record<string, unknown>, next: boolean) => mutate(
-        () => api.saveUseCaseSettings(uc, { ...settings, enabled: next }).then(refresh), 'settings:voice',
+        () => api.saveUseCaseSettings(uc, { ...settings, enabled: next }).then(requireWriteAccepted).then(refresh), 'settings:voice',
       )
       const sttBound = !!(data?.active?.['stt'] ?? [])[0]
       const ttsBound = !!(data?.active?.['tts'] ?? [])[0]
@@ -433,7 +436,7 @@ export const SETTINGS_WIDGETS: SettingsWidget[] = [
             <div className="mt-2 flex items-center justify-between gap-2">
               <span data-type="caption" className="text-on-surface-low">Auto-cleanup</span>
               <Switch on={s.auto_cleanup_enabled} label="Auto-cleanup"
-                onToggle={(v) => mutate(() => api.saveInboxSettings({ auto_cleanup_enabled: v }).then(refresh), 'settings:inbox')} />
+                onToggle={(v) => mutate(() => api.saveInboxSettings({ auto_cleanup_enabled: v }).then(requireWriteAccepted).then(refresh), 'settings:inbox')} />
             </div>
           </>}
         </BentoCard>
@@ -447,7 +450,7 @@ export const SETTINGS_WIDGETS: SettingsWidget[] = [
     render(query, go) {
       const { data: s, refresh, stale: sStale } = useNotif()
       const save = (patch: Record<string, unknown>) => mutate(
-        () => api.saveNotificationSettings(patch).then(refresh), 'settings:notification-settings',
+        () => api.saveNotificationSettings(patch).then(requireWriteAccepted).then(refresh), 'settings:notification-settings',
       )
       return (
         <BentoCard icon={Bell} title="Notifications" query={query} onClick={() => go('notifications')} loading={s === undefined} rows={3} stale={sStale}>
@@ -815,7 +818,7 @@ export const SETTINGS_WIDGETS: SettingsWidget[] = [
     render(query, go) {
       const { data: c, error: legErr, refresh, stale: cStale } = useLegibility()
       const save = (key: string, value: boolean) => mutate(
-        () => api.patchConfig(`legibility.${key}`, value).then(refresh), 'settings:legibility',
+        () => api.patchConfig(`legibility.${key}`, value).then(requireWriteAccepted).then(refresh), 'settings:legibility',
       )
       return (
         <BentoCard icon={Compass} title="Legibility" query={query} onClick={() => go('legibility')} loading={c === undefined && !legErr} rows={2} stale={cStale}>
@@ -969,7 +972,7 @@ export const SETTINGS_WIDGETS: SettingsWidget[] = [
   {
     id: 'updates', group: 'System', label: 'Updates', icon: DownloadCloud, size: 'sm',
     description: 'Version, changelog, and update controls.',
-    useSearchText() { const { data: u } = useUpdates(); return `updates version changelog upgrade channel ${u ? `${u.version ?? ''} ${u.channel ?? ''} ${u.available ? `update available ${u.latest ?? ''}` : 'up to date'} ${u.update_mode === 'staged' ? 'staged automatic updates' : 'notify only'}` : ''}` },
+    useSearchText() { const { data: u } = useUpdates(); return `updates version changelog upgrade ${u ? `${u.version ?? ''} ${u.available ? `update available ${u.latest ?? ''}` : 'up to date'} ${u.auto_update ? 'auto-update' : ''}` : ''}` },
     render(query, go) {
       const { data: u, refresh, stale: uStale } = useUpdates()
       return (
@@ -982,9 +985,9 @@ export const SETTINGS_WIDGETS: SettingsWidget[] = [
                 : <StatusPill label="Up to date" tone="ok" />}
             </div>
             <div className="mt-2.5 flex items-center justify-between gap-2">
-              <span data-type="caption" className="text-on-surface-low">Staged auto-update</span>
-              <Switch on={u.update_mode === 'staged'} label="Staged auto-update"
-                onToggle={(v) => mutate(() => api.setAutoUpdate(v ? 'staged' : 'off').then(refresh), 'settings:update-check')} />
+              <span data-type="caption" className="text-on-surface-low">Auto-update</span>
+              <Switch on={u.auto_update} label="Auto-update"
+                onToggle={(v) => mutate(() => api.setAutoUpdate(v).then(requireWriteAccepted).then(refresh), 'settings:update-check')} />
             </div>
           </>}
         </BentoCard>

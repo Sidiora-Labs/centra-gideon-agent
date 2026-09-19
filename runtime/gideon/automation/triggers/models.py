@@ -58,6 +58,8 @@ class Outcome(str, Enum):
 
 FIRE_OUTCOMES: tuple[str, ...] = tuple(o.value for o in Outcome)
 
+OUTCOME_ROUTES: tuple[str, ...] = ("", "none", "inbox", "notify")
+
 TRUE_FAILURE_OUTCOMES: frozenset[str] = frozenset({Outcome.FAILED.value})
 
 INERT_OUTCOMES: frozenset[str] = frozenset(
@@ -253,7 +255,6 @@ class Trigger:
     created_by: str = "user"
     author: str = ""
     origin_harness: str = ""
-    purpose: str = ""
     spec: dict[str, Any] = field(default_factory=dict)
     gates: dict[str, Any] = field(default_factory=dict)
     capabilities: dict[str, Any] = field(default_factory=dict)
@@ -272,6 +273,7 @@ class Trigger:
     expires_at: str = ""
     next_fire_at: str = ""
     last_run_id: str = ""
+    run_owner_pid: int = 0
     run_count: int = 0
     last_success_at: str = ""
     last_failure_at: str = ""
@@ -295,6 +297,14 @@ class Trigger:
         return self.enabled
 
 
+def next_fire_projection(trigger: Any, *, now: float = 0.0) -> float:
+    from gideon.automation.triggers.arm import cadence_next_fire
+    from gideon.automation.triggers.service import to_epoch
+
+    persisted = to_epoch(getattr(trigger, "next_fire_at", ""))
+    return persisted if persisted > 0 else cadence_next_fire(trigger, now=now)
+
+
 @dataclass
 class FireRecord:
     id: str
@@ -309,16 +319,13 @@ class FireRecord:
     run_id: str = ""
     mutated: bool = False
     counters: dict[str, Any] = field(default_factory=dict)
-    agent_error: dict[str, Any] = field(default_factory=dict)
     incomplete: bool = False
     acted_on: bool = False
     dismissed: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return _record_projection(
-            self,
-            (item.name for item in fields(FireRecord)),
-            {"counters", "agent_error"},
+            self, (item.name for item in fields(FireRecord)), {"counters"}
         )
 
     @classmethod
@@ -346,7 +353,6 @@ class FireRecord:
             RunWeight.LEDGER.value,
         )
         values["counters"] = source.mapping("counters")
-        values["agent_error"] = source.mapping("agent_error")
         values["duration_secs"] = _float(source.data.get("duration_secs"), 0.0)
         return cls(**values)
 
@@ -380,7 +386,6 @@ _TRIGGER_EXPORT_ORDER = (
     "created_by",
     "author",
     "origin_harness",
-    "purpose",
     "spec",
     "gates",
     "capabilities",
@@ -399,6 +404,7 @@ _TRIGGER_EXPORT_ORDER = (
     "expires_at",
     "next_fire_at",
     "last_run_id",
+    "run_owner_pid",
     "run_count",
     "last_success_at",
     "last_failure_at",
@@ -428,8 +434,11 @@ class _RecordInput:
     def __init__(self, data):
         self.data = data
 
-    def text(self, name, fallback=""):
-        return str(self.data.get(name, fallback) or fallback)
+    def text(self, name, fallback="", *, preserve_empty=False):
+        value = self.data.get(name, fallback)
+        if preserve_empty and name in self.data and value == "":
+            return ""
+        return str(value or fallback)
 
     def strings(self, names):
         return {name: self.text(name) for name in names}
@@ -605,6 +614,47 @@ def validate_gates(gates: dict[str, Any]) -> list[Issue]:
     return report.items
 
 
+def validate_outcome_route(route: Any, path: str = "delivery") -> list[Issue]:
+    report = _Diagnostics()
+    if not isinstance(route, str):
+        report.add(path, "an outcome route must be text", "error")
+        return report.items
+    value = route.strip()
+    channel = value.removeprefix("channel:") if value.startswith("channel:") else ""
+    if value in OUTCOME_ROUTES or (
+        channel and not any(char.isspace() for char in channel)
+    ):
+        return report.items
+    report.add(
+        path,
+        "an outcome route must be none, inbox, notify, or channel:<id>",
+        "error",
+    )
+    return report.items
+
+
+def validate_failure_policy(policy: Any) -> list[Issue]:
+    report = _Diagnostics()
+    if not isinstance(policy, dict):
+        report.add("failure_policy", "failure_policy must be an object", "error")
+        return report.items
+    if "dedupe_hash" in policy and not isinstance(policy["dedupe_hash"], bool):
+        report.add(
+            "failure_policy.dedupe_hash",
+            "dedupe_hash must be a boolean",
+            "error",
+        )
+    if "autopause_after" in policy:
+        value = policy["autopause_after"]
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            report.add(
+                "failure_policy.autopause_after",
+                "autopause_after must be a positive integer",
+                "error",
+            )
+    return report.items
+
+
 def _known_fields() -> frozenset[str]:
     return frozenset(Trigger.__dataclass_fields__)
 
@@ -709,6 +759,15 @@ class _TriggerDecoder:
         )
         report.extend(validate_spec(self.kind, self.spec))
         report.extend(validate_gates(self.gates))
+        report.extend(
+            validate_outcome_route(source.data.get("delivery", "none"), "delivery")
+        )
+        report.extend(
+            validate_outcome_route(
+                source.data.get("failure_delivery", "inbox"), "failure_delivery"
+            )
+        )
+        report.extend(validate_failure_policy(source.data.get("failure_policy", {})))
         report.extend(_inline_credential_issues(source.data.get("workflow")))
         report.extend(_resume_target_issues(source.data.get("workflow")))
         report.extend(_token_ref_issues(source.data.get("spec")))
@@ -741,7 +800,6 @@ class _TriggerDecoder:
                 "id",
                 "name",
                 "origin_harness",
-                "purpose",
                 "expires_at",
                 "next_fire_at",
                 "last_run_id",
@@ -756,13 +814,21 @@ class _TriggerDecoder:
             "created_by": "user",
             "session": "fresh",
             "model_tier": "background",
-            "delivery": "none",
             "failure_delivery": "inbox",
             "health_status": TriggerHealth.OK.value,
         }
         values.update(
             {name: source.text(name, fallback) for name, fallback in defaults.items()}
         )
+        values["delivery"] = (
+            str(source.data.get("delivery") or "")
+            if "delivery" in source.data
+            else "none"
+        )
+        values["failure_delivery"] = source.text(
+            "failure_delivery", "inbox", preserve_empty=True
+        )
+        values["delivery"] = values["delivery"].strip()
         values.update({name: source.mapping(name) for name in _TRIGGER_MAPPING_FIELDS})
         values.update(source.flags(("yield_to_user", "catch_up")))
         values.update(
@@ -775,6 +841,7 @@ class _TriggerDecoder:
             enabled=bool(source.data.get("enabled", True)) and not self.report.fatal,
             resource_slots=list(map(str, source.data.get("resource_slots") or [])),
             run_count=_int(source.data.get("run_count"), 0),
+            run_owner_pid=_int(source.data.get("run_owner_pid"), 0),
             park_retry_after=_float(source.data.get("park_retry_after"), 0.0),
             last_alert_at=_float(source.data.get("last_alert_at"), 0.0),
         )

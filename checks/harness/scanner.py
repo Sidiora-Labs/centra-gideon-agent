@@ -174,18 +174,28 @@ def check_sse_event_registered(files: list[Path], root: Path) -> list[Finding]:
     """
     changed = set(files)
     py_changed = [
-        f for f in changed if f.suffix == ".py" and _is_under(f, root, "src", "gideon")
+        f for f in changed if f.suffix == ".py" and _is_loop_sse_backend(f, root)
     ]
-    lifecycle = _read(
-        root / "apps/console" / "src" / "pages" / "loops" / "useRunStream.ts"
+    lifecycle_path = (
+        root / "apps" / "console" / "src" / "features" / "loops" / "useRunStream.ts"
     )
+    if not lifecycle_path.exists():
+        lifecycle_path = (
+            root / "apps" / "console" / "src" / "pages" / "loops" / "useRunStream.ts"
+        )
+    lifecycle = _read(lifecycle_path)
     union = _extract_ts_run_lifecycle(lifecycle)
     if union is None:
         return []
 
+    if lifecycle_path in changed:
+        py_changed = _loop_sse_backend_files(root)
+
     findings: list[Finding] = []
+    published: set[str] = set()
     for f in py_changed:
         for event, lineno in _loop_publish_events(_read(f)):
+            published.add(event)
             if event not in union:
                 findings.append(
                     Finding(
@@ -197,10 +207,61 @@ def check_sse_event_registered(files: list[Path], root: Path) -> list[Finding]:
                         why="EventSource registers one listener per event name; an event not "
                         "in the FE union is silently dropped — no error, no UI update",
                         fix=f"add {event!r} to RUN_LIFECYCLE in "
-                        "apps/console/src/pages/loops/useRunStream.ts (and handle it)",
+                        "apps/console/src/features/loops/useRunStream.ts (and handle it)",
                     )
                 )
+    if lifecycle_path in changed:
+        for event in sorted(union - published):
+            findings.append(
+                Finding(
+                    check="sse-event-registered",
+                    level=ERROR,
+                    file=lifecycle_path,
+                    line=1,
+                    what=(
+                        f"RUN_LIFECYCLE registers {event!r} but no loop SSE backend "
+                        "publishes it"
+                    ),
+                    why="the listener union is the live loop-stream contract; unbacked ledger or "
+                    "workflow names falsely promise realtime loop updates",
+                    fix=(
+                        f"remove {event!r} from RUN_LIFECYCLE or add its real loop "
+                        "SSE publisher"
+                    ),
+                )
+            )
     return findings
+
+
+def _is_loop_sse_backend(path: Path, root: Path) -> bool:
+    return (
+        _is_under(path, root, "runtime", "gideon", "automation", "loop", "kinds")
+        or path == root / "runtime" / "gideon" / "automation" / "loop" / "watchdog.py"
+        or path
+        == root
+        / "runtime"
+        / "gideon"
+        / "interfaces"
+        / "dashboard"
+        / "handlers"
+        / "loop_routes.py"
+    )
+
+
+def _loop_sse_backend_files(root: Path) -> list[Path]:
+    files = [
+        root / "runtime" / "gideon" / "automation" / "loop" / "watchdog.py",
+        root
+        / "runtime"
+        / "gideon"
+        / "interfaces"
+        / "dashboard"
+        / "handlers"
+        / "loop_routes.py",
+    ]
+    kinds = root / "runtime" / "gideon" / "automation" / "loop" / "kinds"
+    files.extend(sorted(kinds.glob("*.py")) if kinds.is_dir() else [])
+    return [f for f in files if f.is_file()]
 
 
 def _extract_ts_run_lifecycle(source: str) -> set[str] | None:
@@ -221,6 +282,13 @@ def _loop_publish_events(source: str) -> list[tuple[str, int]]:
     out: list[tuple[str, int]] = []
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            continue
+        if node.func.attr == "_publish" and isinstance(node.func.value, ast.Name):
+            if node.func.value.id == "self":
+                if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant):
+                    val = node.args[1].value
+                    if isinstance(val, str):
+                        out.append((val, node.lineno))
             continue
         if node.func.attr != "publish":
             continue

@@ -213,7 +213,7 @@ class _NativeProfileTemplate:
     tools: list[str] | None = None
 
     def create(self, profile_cls):
-        values = dict(
+        values: dict = dict(
             provider="native",
             description=self.description,
             system_prompt=self.prompt,

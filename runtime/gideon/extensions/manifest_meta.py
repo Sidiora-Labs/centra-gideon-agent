@@ -36,10 +36,7 @@ MANIFEST_EXCLUDE: dict[str, str] = {
     "/gideon.svg": "favicon asset — UI transport",
     "/assets": "static mount for the built React bundle — UI transport",
     "/sprites": "static mount for sprite assets — UI transport",
-    "/fonts/{tail}": (
-        "web-font serving with stated media types (a mount guesses them, and the "
-        "font types are not in Python's built-in table) — UI transport"
-    ),
+    "/fonts": "static mount for web fonts — UI transport",
     "/vendor": "static mount for the import-map vendor shims — UI transport",
     "/icons": "static mount for the PWA app icons the manifest declares — UI transport",
     "/manifest.webmanifest": (

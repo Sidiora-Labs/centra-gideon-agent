@@ -9,10 +9,10 @@ import json
 import logging
 import time
 import uuid
-from dataclasses import MISSING, asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, get_origin, get_type_hints
+from typing import Any
 
 from gideon.core.atomic_write import atomic_write
 from gideon.core.config import loader as config_loader
@@ -38,6 +38,7 @@ __all__ = [
     "InboxStore",
     "InboxItem",
     "InboxState",
+    "owner_username",
     "UserResolver",
     "ItemKind",
     "NON_CHANNEL_KINDS",
@@ -52,6 +53,17 @@ __all__ = [
 _STATE_FILE = "inbox_state.json"
 _ITEMS_FILE = "inbox.json"
 _USER_CACHE_TTL = 86400
+
+
+def owner_username() -> str:
+    """The configured attribution handle, or ``""`` on a single-owner install."""
+    try:
+        from gideon.cognition.identity import current_username
+
+        return current_username()
+    except Exception:
+        logger.debug("inbox owner identity unavailable", exc_info=True)
+        return ""
 
 
 class ItemStatus(str, Enum):
@@ -147,6 +159,11 @@ _UPDATABLE_FIELD_TYPES: dict[str, type] = {
     "favorited": bool,
 }
 
+_SHARED_FIELD_TYPES: dict[str, type] = {
+    "owner": str,
+    "owner_states": dict,
+}
+
 _WIRE_TYPE_NAMES: dict[type, str] = {
     str: "string",
     bool: "boolean",
@@ -214,11 +231,46 @@ class InboxItem:
     favorited: bool = False
     item_kind: str = ItemKind.MESSAGE.value
     refs: dict = field(default_factory=dict)
+    owner: str = ""
+    owner_states: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         d = asdict(self)
         d["ts"] = self.ts
         return d
+
+    def belongs_to(self, username: str) -> bool:
+        """Whether this row belongs to *username*.
+
+        An unattributed legacy row belongs to the local owner, and without a configured
+        username every row remains local. Those two rules keep the additive owner field a
+        no-op for existing single-owner installations.
+        """
+        viewer = str(username or "").strip().lower()
+        attributed = str(self.owner or "").strip().lower()
+        return not viewer or not attributed or attributed == viewer
+
+    def status_for(self, username: str) -> str:
+        """This reader's state for a shared row, falling back to its legacy state."""
+        viewer = str(username or "").strip().lower()
+        if not viewer:
+            return self.status
+        value = self.owner_states.get(viewer)
+        return value if isinstance(value, str) else self.status
+
+    def set_status_for(self, username: str, status: str) -> None:
+        """Set one reader's state without changing another reader's shared-inbox view."""
+        viewer = str(username or "").strip().lower()
+        if viewer:
+            self.owner_states[viewer] = status
+        else:
+            self.status = status
+
+    def to_owner_dict(self, username: str) -> dict:
+        """Wire projection with ``status`` resolved for the requesting owner."""
+        data = self.to_dict()
+        data["status"] = self.status_for(username)
+        return data
 
     @property
     def ts(self) -> str:
@@ -236,59 +288,26 @@ class InboxItem:
         entirely — permanently, because the poison was on disk. Dropping the value falls the
         field back to its dataclass default and the inbox loads again.
 
-        A value is dropped exactly when the field HAS a default to fall back to
-        (:data:`_REPAIRABLE_FIELD_TYPES`) — that is the whole safety argument, so the set is
-        derived from the dataclass rather than hand-listed. A required field is left alone so
-        a genuinely unreadable record still fails loudly at construction instead of being
-        silently invented, and the repair reaches every poisonable field rather than only the
-        five the HTTP boundary can write: `context_summary` and `thread_context` are read by
-        `redact_item` and `created_at` by the list handler's sort, so a wrong type in any of
-        them was the same permanent 500 as the reported `draft`.
+        Only fields in :data:`_UPDATABLE_FIELD_TYPES` are dropped, and every one of those has
+        a default. A required field is left alone so a genuinely unreadable record still
+        fails loudly at construction instead of being silently invented.
         """
         clean: dict[str, Any] = {}
         for key, value in d.items():
             if key not in cls.__dataclass_fields__:
                 continue
-            expected = _REPAIRABLE_FIELD_TYPES.get(key)
+            expected = _UPDATABLE_FIELD_TYPES.get(key) or _SHARED_FIELD_TYPES.get(key)
             if expected is not None and not isinstance(value, expected):
                 logger.warning(
                     "inbox item %s: stored %s is a %s, not a %s — falling back to the default",
                     d.get("id", "<no id>"),
                     key,
                     _wire_type_name(type(value)),
-                    _wire_type_name(expected[0]),
+                    _wire_type_name(expected),
                 )
                 continue
             clean[key] = value
         return cls(**clean)
-
-
-def _repairable_field_types(cls: type) -> dict[str, tuple[type, ...]]:
-    """Every field of *cls* that has a default, with the runtime types its stored value may
-    hold — what :meth:`InboxItem.from_dict` is allowed to repair.
-
-    The read-side twin of :data:`_UPDATABLE_FIELD_TYPES`, which is the WRITE contract for the
-    five HTTP-updatable fields only. Derived from the dataclass, not hand-listed: the pair
-    that has to stay in step is a default and its type, and both live on the field itself, so
-    a field added later cannot arrive without its repair. Absence is the safety property — a
-    field with no default is skipped because there is nothing safe to fall back to.
-    """
-    hints = get_type_hints(cls)
-    out: dict[str, tuple[type, ...]] = {}
-    for f in fields(cls):  # type: ignore[arg-type]
-        if f.default is MISSING and f.default_factory is MISSING:
-            continue
-        origin = get_origin(hints[f.name]) or hints[f.name]
-        if origin is float:
-            out[f.name] = (int, float)
-        elif isinstance(origin, type):
-            out[f.name] = (origin,)
-    return out
-
-
-_REPAIRABLE_FIELD_TYPES: dict[str, tuple[type, ...]] = _repairable_field_types(
-    InboxItem
-)
 
 
 class UserResolver:
@@ -359,10 +378,8 @@ class InboxState:
         except OSError:
             logger.warning("Failed to save inbox state")
 
-    def stale_dismissed(self, retention_hours: float = 168.0) -> set[str]:
-        """Dismissed IDs older than retention_hours — the read-only half of
-        :meth:`prune_dismissed`, so the maintenance backlog can be counted without
-        pruning anything."""
+    def prune_dismissed(self, retention_hours: float = 168.0) -> int:
+        """Remove dismissed IDs older than retention_hours."""
         cutoff = time.time() - (retention_hours * 3600)
         stale = set()
         for did in self.dismissed:
@@ -372,11 +389,6 @@ class InboxState:
                     stale.add(did)
             except (ValueError, IndexError):
                 stale.add(did)
-        return stale
-
-    def prune_dismissed(self, retention_hours: float = 168.0) -> int:
-        """Remove dismissed IDs older than retention_hours."""
-        stale = self.stale_dismissed(retention_hours)
         self.dismissed -= stale
         return len(stale)
 
@@ -410,6 +422,8 @@ class InboxStore:
             logger.warning("Failed to save inbox items")
 
     def add(self, item: InboxItem) -> None:
+        if not item.owner:
+            item.owner = owner_username()
         self.items[item.id] = item
         self._dirty = True
 
@@ -431,15 +445,22 @@ class InboxStore:
             return None
         validate_updatable_fields(kwargs)
         for k, v in kwargs.items():
+            if k == "status":
+                item.set_status_for(owner_username(), v)
+                continue
             if hasattr(item, k):
                 setattr(item, k, v)
         self.save()
         return item
 
-    def pending(self) -> list[InboxItem]:
-        return [i for i in self.items.values() if i.status == ItemStatus.PENDING]
+    def pending(self, owner: str = "") -> list[InboxItem]:
+        return [
+            i
+            for i in self.items.values()
+            if i.belongs_to(owner) and i.status_for(owner) == ItemStatus.PENDING
+        ]
 
-    def open_items(self) -> list[InboxItem]:
+    def open_items(self, owner: str = "") -> list[InboxItem]:
         """Every item still awaiting a decision — PENDING **or** SEEN.
 
         Distinct from :meth:`pending`, and both are needed. "How many are waiting for me" is a
@@ -457,8 +478,20 @@ class InboxStore:
         return [
             i
             for i in self.items.values()
-            if i.status in (ItemStatus.PENDING, ItemStatus.SEEN)
+            if i.belongs_to(owner)
+            and i.status_for(owner) in (ItemStatus.PENDING, ItemStatus.SEEN)
         ]
+
+    def update_status(
+        self, item_id: str, status: str, *, owner: str = ""
+    ) -> InboxItem | None:
+        """Persist a status transition in the requesting owner's shared-inbox state."""
+        item = self.items.get(item_id)
+        if item is None:
+            return None
+        item.set_status_for(owner, status)
+        self.save()
+        return item
 
     def cleanup_by_retention(self, retention_days: int = 90) -> int:
         """Delete items older than *retention_days*, regardless of status.
@@ -754,11 +787,11 @@ def resolve_attention_items(
             target.load()
         closed = 0
         for item in list(target.items.values()):
-            if item.status not in OPEN_STATUSES:
+            if item.status_for(item.owner) not in OPEN_STATUSES:
                 continue
             if any(item.refs.get(key) != value for key, value in refs.items()):
                 continue
-            item.status = ItemStatus.HANDLED.value
+            item.set_status_for(item.owner, ItemStatus.HANDLED.value)
             closed += 1
         if closed:
             target.save()
@@ -777,7 +810,8 @@ def _find_open_by_dedup(store: "InboxStore", dedup_key: str) -> "InboxItem | Non
     matches = [
         i
         for i in store.items.values()
-        if i.refs.get("dedup_key") == dedup_key and i.status in OPEN_STATUSES
+        if i.refs.get("dedup_key") == dedup_key
+        and i.status_for(i.owner) in OPEN_STATUSES
     ]
     if not matches:
         return None

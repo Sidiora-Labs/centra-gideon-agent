@@ -57,7 +57,7 @@ class _TaskCreation:
         cls, config: dict[str, Any], ctx: ActionContext, title: str
     ) -> _TaskCreation:
         provider = (config.get("provider") or "native").strip() or "native"
-        fields = {"title": title}
+        fields: dict = {"title": title}
         body = render_template(config.get("body_template", ""), ctx)
         if body:
             fields.update(description=body)

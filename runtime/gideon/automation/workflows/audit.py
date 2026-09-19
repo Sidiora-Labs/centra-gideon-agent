@@ -74,7 +74,7 @@ class AuditReport:
         return dict(Counter(finding.kind for finding in self.findings))
 
     def to_dict(self) -> dict[str, Any]:
-        projection = dict(
+        projection: dict = dict(
             healthy=self.healthy, dry_run=self.dry_run, runs_scanned=self.runs_scanned
         )
         projection.update(
@@ -127,7 +127,7 @@ def _mark_protocol_violation(inst: Any) -> None:
 
     inst.state = InstanceState.BLOCKED
     inst.completed_at = _now()
-    attributes = dict(
+    attributes: dict = dict(
         failure_class=FailureClass.PROTOCOL,
         cause_plain="node stopped without reporting a structured completion",
         remediation="the backing subagent or command vanished; re-run this node, or inspect the gateway log for why it died",

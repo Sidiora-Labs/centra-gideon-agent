@@ -29,7 +29,7 @@ class _SpoolDrain:
     directory: Path
 
     def read(self) -> list[IncomingMessage]:
-        result = []
+        result: list = []
         with _spool_lock:
             archive = self.directory / "processed"
             archive.mkdir(parents=True, exist_ok=True)
@@ -47,7 +47,7 @@ class _SpoolDrain:
 
     @staticmethod
     def decode(record: dict[str, Any], stem: str, index: int) -> IncomingMessage:
-        values = {
+        values: dict = {
             "id": f"{stem}_{index}",
             "channel_id": "filesystem",
             "channel_name": "local",

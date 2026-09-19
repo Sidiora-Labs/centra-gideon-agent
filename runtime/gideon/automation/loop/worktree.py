@@ -509,7 +509,18 @@ def add_worktree(
     args = ["worktree", "add", "-f", "-B", branch]
     if scope:
         args.append("--no-checkout")
-    rc, out = _git(workspace, *args, path, "HEAD")
+    from gideon.automation.workflows.workspace import worktree_registration_lock
+
+    with worktree_registration_lock(workspace):
+        # Another process may have created this task's worktree while this call
+        # waited for the shared git registry. Preserve add_worktree's idempotent
+        # contract instead of asking git to register the same path twice.
+        if os.path.isdir(path):
+            _log_creation(
+                workspace, task_id, time.perf_counter() - started, OUTCOME_REUSED
+            )
+            return path
+        rc, out = _git(workspace, *args, path, "HEAD")
     if rc == 0 and scope:
         set_sparse_scope(path, scope)
         rc, out = _git(path, "checkout")
@@ -642,9 +653,12 @@ def remove_worktree(workspace: str, task_id: str, project_id: str = "") -> None:
     """Remove a task's worktree + delete its branch (best-effort cleanup)."""
     if not _safe_task_id(task_id):
         return
+    from gideon.automation.workflows.workspace import worktree_registration_lock
+
     path = worktree_path(workspace, task_id, project_id)
-    _git(workspace, "worktree", "remove", "--force", path)
-    _git(workspace, "branch", "-D", branch_name(task_id))
+    with worktree_registration_lock(workspace):
+        _git(workspace, "worktree", "remove", "--force", path)
+        _git(workspace, "branch", "-D", branch_name(task_id))
     if os.path.isdir(path):
         shutil.rmtree(path, ignore_errors=True)
 
@@ -658,22 +672,31 @@ def cleanup_all(workspace: str, project_id: str = "") -> None:
     shared repo) but only removes branches whose worktree we just dropped."""
     if not workspace:
         return
-    # Explicitly remove each registered worktree under our (Gideon-owned) dir first —
+    from gideon.automation.workflows.workspace import worktree_registration_lock
+
     root = _worktrees_root(workspace, project_id)
-    if os.path.isdir(root):
-        for name in os.listdir(root):
-            _git(workspace, "worktree", "remove", "--force", os.path.join(root, name))
-            _git(workspace, "branch", "-D", branch_name(name))
-    _git(workspace, "worktree", "prune")
-    if not project_id:
-        rc, out = _git(
-            workspace,
-            "for-each-ref",
-            "--format=%(refname:short)",
-            f"refs/heads/{_BRANCH_PREFIX}*",
-        )
-        if rc == 0:
-            for ref in (ln.strip() for ln in out.splitlines() if ln.strip()):
-                _git(workspace, "branch", "-D", ref)
+    with worktree_registration_lock(workspace):
+        # Explicitly remove each registered worktree under our (Gideon-owned) dir first —
+        if os.path.isdir(root):
+            for name in os.listdir(root):
+                _git(
+                    workspace,
+                    "worktree",
+                    "remove",
+                    "--force",
+                    os.path.join(root, name),
+                )
+                _git(workspace, "branch", "-D", branch_name(name))
+        _git(workspace, "worktree", "prune")
+        if not project_id:
+            rc, out = _git(
+                workspace,
+                "for-each-ref",
+                "--format=%(refname:short)",
+                f"refs/heads/{_BRANCH_PREFIX}*",
+            )
+            if rc == 0:
+                for ref in (ln.strip() for ln in out.splitlines() if ln.strip()):
+                    _git(workspace, "branch", "-D", ref)
     if os.path.isdir(root):
         shutil.rmtree(root, ignore_errors=True)

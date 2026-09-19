@@ -104,7 +104,7 @@ class _DraftRules:
         self.nodes = nodes
 
     def ids(self):
-        occurrences = {}
+        occurrences: dict = {}
         for node in self.nodes:
             name = str(node.get("id", "") or "")
             if name:

@@ -403,9 +403,10 @@ def test_every_spawn_site_is_classified():
     allow = set(_CEILING_WRAPPED) | set(_OPERATOR_EXEMPT)
 
     unmapped = sorted(set(census) - allow)
-    lines_for = lambda k: ", ".join(
-        f"{k.split('::')[0]}:{ln}" for ln in census[k]
-    )  # noqa: E731
+
+    def lines_for(k):
+        return ", ".join(f"{k.split('::')[0]}:{ln}" for ln in census[k])  # noqa: E731
+
     assert not unmapped, (
         "Unmapped spawn site(s) — classify each in checks/runtime/test_spawn_ceiling_audit.py as "
         "ceiling-wrapped (agent-influenced → route through create_subprocess_limited/"

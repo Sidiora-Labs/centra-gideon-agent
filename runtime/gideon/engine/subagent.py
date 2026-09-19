@@ -559,7 +559,7 @@ class DelegationSupervisor:
             subagent_spawn_payload,
         )
 
-        identity = dict(
+        identity: dict = dict(
             subagent_id=info.id,
             parent_session_key=info.parent_session_key,
             agent_role=info.agent or "",

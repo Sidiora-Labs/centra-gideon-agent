@@ -439,7 +439,7 @@ class _FacetPopulation:
         return untouched
 
     def render(self, limit):
-        groups = {}
+        groups: dict = {}
         for entry in self.entries:
             if entry.facet in SNAPSHOT_FACETS:
                 groups.setdefault(entry.facet, []).append(entry)

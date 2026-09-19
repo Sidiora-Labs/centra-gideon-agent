@@ -84,7 +84,7 @@ def raise_gate_item(
             resume_token=resume_token,
         )
         references.update(needs_input.card_refs(card))
-        message = dict(
+        message: dict = dict(
             source=SOURCE,
             kind=KIND,
             item_kind=ItemKind.NEEDS_INPUT.value,

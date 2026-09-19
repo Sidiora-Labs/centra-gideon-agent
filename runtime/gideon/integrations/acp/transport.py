@@ -295,7 +295,7 @@ class AcpProcess:
         handle = resolve_provider(self._sandbox).wrap(spec, self._command.copy())
         self._sandbox_handle = handle
         try:
-            options = {
+            options: dict = {
                 name: asyncio.subprocess.PIPE for name in ("stdin", "stdout", "stderr")
             }
             options.update(
@@ -358,8 +358,11 @@ class AcpProcess:
                     pass
 
     async def _wait_exit(self, seconds: float) -> bool:
+        process = self._process
+        if process is None:
+            return True
         try:
-            await asyncio.wait_for(self._process.wait(), timeout=seconds)
+            await asyncio.wait_for(process.wait(), timeout=seconds)
             return True
         except asyncio.TimeoutError:
             return False

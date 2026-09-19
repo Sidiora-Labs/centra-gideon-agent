@@ -37,7 +37,6 @@ from gideon.integrations.llm.capabilities import Capability
 from gideon.integrations.llm.catalog import (
     ConnectionResult,
     ModelCatalog,
-    ModelDiscoveryError,
     ModelInfo,
     infer_capabilities,
     openai_compatible_list_models,
@@ -63,16 +62,7 @@ class BrandedCatalog(ModelCatalog):
     ``/v1/models`` endpoint, fall back to the spec's curated list so the picker is
     never empty when the key is set but the endpoint has no models route (some
     providers don't expose one). Anthropic-compatible providers have no models
-    endpoint, so they always use the fallback list.
-
-    The fallback covers exactly that — discovery being UNSUPPORTED, which
-    :func:`openai_compatible_list_models` reports as an empty list. A discovery that
-    FAILED (:class:`ModelDiscoveryError`: the policy refused it, the endpoint is
-    down, the key was rejected, the body was not a model list) is propagated instead,
-    because answering a failed probe with the curated list renders a picker full of
-    models the user cannot actually reach and hides the one fact they need.
-    :meth:`test_connection` is the exception: its whole job is to REPORT the failure,
-    so it turns the error into a failed :class:`ConnectionResult`."""
+    endpoint, so they always use the fallback list."""
 
     def __init__(
         self,
@@ -158,10 +148,7 @@ class BrandedCatalog(ModelCatalog):
             )
         if self._spec.protocol == "anthropic":
             return await self._probe_completion(api_key)
-        try:
-            models = await self.list_models()
-        except ModelDiscoveryError as failure:
-            return ConnectionResult(ok=False, detail=str(failure))
+        models = await self.list_models()
         if not models:
             return ConnectionResult(
                 ok=False, detail="No models available (check key/endpoint)"

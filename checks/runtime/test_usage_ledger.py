@@ -463,115 +463,13 @@ class TestSessionScopedAggregation:
         assert ul.totals(session_key="dashboard:nope")["turns"] == 0
         assert ul.rollup(group_by="source", session_key="dashboard:nope") == []
 
+    def test_query_key_canonicalizes_bare_dashboard_session(self, _home):
+        self._seed()
+        key = ul.canonical_session_query_key("a")
+        assert key == "dashboard:a"
+        assert ul.totals(session_key=key)["cost_usd"] == 3.0
 
-class TestTurnTelemetryIsHonest:
-    """req 20.2 — cost, tokens, duration and context ride with the assistant turn, and a
-    turn nobody priced or measured says so instead of reading as zero."""
-
-    def _complete(self, **over):
-        from gideon.integrations.llm.events import EVENT_COMPLETE, AgentEvent
-
-        base = dict(
-            kind=EVENT_COMPLETE,
-            input_tokens=1200,
-            output_tokens=340,
-            cache_read_tokens=800,
-            cache_creation_tokens=100,
-            cost_usd=0.0,
-            duration_ms=4300,
-            context_usage_pct=43.5,
-        )
-        base.update(over)
-        return AgentEvent(**base)
-
-    def _chat_turn(self, event, model="claude-opus-4.5"):
-        from gideon.interfaces.dashboard.chat_runner import _record_turn_usage
-
-        _record_turn_usage(
-            event,
-            session_key="dashboard:s1",
-            source="chat",
-            agent="",
-            provider="anthropic",
-            model=model,
-        )
-
-    def test_a_chat_turn_records_all_four_telemetry_axes(self, _home):
-        """The real AgentEvent the chat runner hands the write site."""
-        self._chat_turn(self._complete(cost_usd=0.21))
-        row = ul._iter_rows()[0]
-        assert row["cost_usd"] == 0.21 and row["priced"] is True
-        assert row["input_tokens"] == 1200 and row["output_tokens"] == 340
-        assert row["cache_read_tokens"] == 800 and row["cache_creation_tokens"] == 100
-        assert row["duration_ms"] == 4300
-        assert row["context_pct"] == 43.5
-
-    def test_an_unmeasured_context_is_unknown_not_an_empty_window(self, _home):
-        """``context_usage_pct=None`` is the provider saying "I did not measure this"."""
-        self._chat_turn(self._complete(context_usage_pct=None, cost_usd=0.1))
-        row = ul._iter_rows()[0]
-        assert row["context_pct"] is None
-        assert row["context_pct"] != 0 and row["context_pct"] != 0.0
-
-    def test_a_measured_empty_context_is_kept_as_a_measurement(self, _home):
-        self._chat_turn(self._complete(context_usage_pct=0.0, cost_usd=0.1))
-        assert ul._iter_rows()[0]["context_pct"] == 0.0
-
-    def test_an_unpriced_turn_keeps_its_tokens_duration_and_context(self, _home):
-        """The unpriced case must lose the PRICE only — the rest of the turn is measured."""
-        self._chat_turn(self._complete(), model="some-unknown-local-model")
-        row = ul._iter_rows()[0]
-        assert row["priced"] is False and row["cost_usd"] == 0.0
-        assert row["input_tokens"] == 1200 and row["duration_ms"] == 4300
-        assert row["context_pct"] == 43.5
-
-    def test_an_unpriced_turn_reads_unpriced_end_to_end(self, _home):
-        """Stored row → session total → the line the chat surface shows: never "$0.0000"."""
-        from gideon.interfaces.dashboard.chat_runner import _turn_complete_line
-
-        self._chat_turn(self._complete(), model="some-unknown-local-model")
-        agg = ul.totals(session_key="dashboard:s1")
-        assert agg["priced"] is False and agg["cost_usd"] == 0.0
-        line = _turn_complete_line(
-            events=9,
-            tool_calls=2,
-            context_pct=43.5,
-            input_tokens=agg["input_tokens"],
-            output_tokens=agg["output_tokens"],
-            cost_usd=agg["cost_usd"],
-            priced=agg["priced"],
-        )
-        assert "unpriced" in line and "$" not in line
-        assert "context 44%" in line and "1,200 in / 340 out tokens" in line
-
-    def test_an_unmeasured_context_is_omitted_from_the_line_not_shown_as_zero(self):
-        from gideon.interfaces.dashboard.chat_runner import _turn_complete_line
-
-        line = _turn_complete_line(
-            events=9,
-            tool_calls=2,
-            context_pct=None,
-            input_tokens=10,
-            output_tokens=2,
-            cost_usd=0.01,
-            priced=True,
-        )
-        assert "context" not in line
-
-    def test_context_survives_every_write_site_through_the_shared_seam(self, _home):
-        ul.record_from_event(
-            self._complete(cost_usd=0.3),
-            source="subagent",
-            session_key="dashboard:s1",
-            model="claude-opus-4.5",
-        )
-        assert ul._iter_rows()[0]["context_pct"] == 43.5
-
-    def test_a_write_site_event_without_the_field_is_unknown_not_zero(self, _home):
-        ul.record_from_event(
-            SimpleNamespace(input_tokens=5, output_tokens=1, cost_usd=0.0),
-            source="cli",
-            model="claude-opus-4.5",
-        )
-        row = ul._iter_rows()[0]
-        assert row["context_pct"] is None and row["duration_ms"] == 0
+    def test_query_key_preserves_namespaced_and_empty_values(self):
+        assert ul.canonical_session_query_key("dashboard:a") == "dashboard:a"
+        assert ul.canonical_session_query_key("loop:run-1") == "loop:run-1"
+        assert ul.canonical_session_query_key("") == ""

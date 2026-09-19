@@ -164,6 +164,7 @@ async def test_control_the_replaced_shape_blows_the_same_bound():
 _UPDATES_GROUP_LED = {
     "proc",
     "pip_up",
+    "pull",
     "pip_install",
 }
 _UPDATES_LEAF = {
@@ -171,6 +172,7 @@ _UPDATES_LEAF = {
     "remote",
     "show",
     "diff",
+    "dirty",
 }
 
 
@@ -298,7 +300,7 @@ _FILES_SPAWNS = {
     "api_upload",
     "api_screenshot",
 }
-_FILES_GROUP_LED = {"_git", "_content_search_rg"}
+_FILES_GROUP_LED = {"_git"}
 
 
 def _spawn_functions(source: str) -> dict[str, dict[str, object]]:

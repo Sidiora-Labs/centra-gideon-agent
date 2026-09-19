@@ -85,6 +85,7 @@ from gideon.security.guardrails.loop_breaker import (
 )
 
 if TYPE_CHECKING:
+    from gideon.engine.agents.native.tool_retrieval import ToolRetriever
     from gideon.engine.agents.provider import AgentRuntimeDefinition
     from gideon.integrations.llm.base import ModelProvider
     from gideon.integrations.tool_providers.base import ToolProvider
@@ -484,7 +485,7 @@ class NativeAgentRuntime(AgentProvider):
         self._tool_schema: list[dict] = []
         self._tool_index: dict[str, ToolProvider] = {}
         self._tool_sanitized_index: dict[str, str] = {}
-        self._tool_retriever = None
+        self._tool_retriever: ToolRetriever | None = None
         self._tool_search_def = self._tool_schema_def = self._reset_tools_def = None
 
     @property
@@ -770,10 +771,13 @@ class NativeAgentRuntime(AgentProvider):
                 definitions.append(self._reset_tools_def)
             schema = tool_definitions_to_openai_schema(definitions) or None
             if reduced:
+                retriever = self._tool_retriever
+                if retriever is None:
+                    raise RuntimeError("tool retrieval index is unavailable")
                 exclude = {getattr(entry, "name", "") for entry in definitions}
                 if grouped:
                     exclude.update(set(self._group_of_name) - (restrict or set()))
-                catalog = self._tool_retriever.catalog(exclude=exclude)
+                catalog = retriever.catalog(exclude=exclude)
                 notes.append(
                     "[tool catalog] Full schemas are provided for the most relevant tools. "
                     "The remaining available tools are listed below with descriptions. "
@@ -1095,8 +1099,11 @@ class NativeAgentRuntime(AgentProvider):
         )
 
     def _search_tools(self, args: dict) -> str:
-        self._tool_retriever.mark_used("tool_search")
-        matches = self._tool_retriever.search(
+        retriever = self._tool_retriever
+        if retriever is None:
+            return "Tool search is unavailable because the tool catalog is not initialized."
+        retriever.mark_used("tool_search")
+        matches = retriever.search(
             str(args.get("query", "")), int(args.get("limit", 20) or 20)
         )
         if not matches:

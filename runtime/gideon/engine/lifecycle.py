@@ -92,17 +92,19 @@ async def bind_surface(runtime: RuntimeCoordinator, *, api_only: bool) -> None:
         port = 0 if override == "auto" else int(override)
     runtime._configured_host = host
     runtime._local_only = is_local_bind(resolve_bind_host())
-    options = dict(
-        sessions=runtime.sessions,
-        port=port,
-        subagents=runtime.subagent_mgr,
-        owner_id=runtime.owner_id,
-    )
     if api_only:
-        serving = start_api_server
+        runner, surface = await start_api_server(
+            sessions=runtime.sessions,
+            port=port,
+            subagents=runtime.subagent_mgr,
+            owner_id=runtime.owner_id,
+        )
     else:
-        serving = gateway.start_dashboard
-        options.update(
+        runner, surface = await gateway.start_dashboard(
+            sessions=runtime.sessions,
+            port=port,
+            subagents=runtime.subagent_mgr,
+            owner_id=runtime.owner_id,
             context_builder=runtime.ctx_builder,
             conversation_log=runtime.conv_log,
             consolidator=runtime.consolidator,
@@ -110,7 +112,6 @@ async def bind_surface(runtime: RuntimeCoordinator, *, api_only: bool) -> None:
             configured_host=host,
             dashboard_url=runtime.config.dashboard.url,
         )
-    runner, surface = await serving(**options)
     runtime._dashboard_runner = runner
     runtime.dashboard_state = surface
     addresses = runner.addresses if runner is not None else ()

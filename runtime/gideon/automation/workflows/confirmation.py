@@ -186,7 +186,7 @@ def build_request(
     identity = request_id(run_id, gate_id, epoch)
     description = title or f"{gate_id} needs your decision"
     preview = redact_preview(payload)
-    fields = dict(
+    fields: dict = dict(
         id=identity,
         run_id=run_id,
         gate_id=gate_id,
@@ -303,7 +303,7 @@ def profile(name: str) -> tuple[dict[str, Any] | None, str]:
 def audit_fields(
     request: ConfirmationRequest, resolution: Resolution
 ) -> dict[str, Any]:
-    fields = dict(
+    fields: dict = dict(
         operation=f"confirmation.{resolution.verb}", confirmation_id=request.id
     )
     for name in ("run_id", "gate_id", "type", "risk_category", "resolved_by"):
@@ -342,7 +342,7 @@ class DagViewCard:
 
 def dag_card(request: ConfirmationRequest) -> DagViewCard:
     live = request.status is Status.PENDING
-    state = dict(
+    state: dict = dict(
         confirmation_id=request.id,
         node_id=request.gate_id,
         title=request.title,

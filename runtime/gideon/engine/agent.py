@@ -251,7 +251,7 @@ def _hook_audit(
     operation: str, outcome: str, resources: str, error: str | None = None
 ) -> None:
     try:
-        fields = {
+        fields: dict = {
             "event_id": uuid.uuid4().hex[:16],
             "timestamp": datetime.now(tz=timezone.utc).isoformat(),
             "event_type": "config_hooks_merge",

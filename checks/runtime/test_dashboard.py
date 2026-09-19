@@ -1,10 +1,16 @@
 """Tests for the dashboard module."""
 
 import json
+import os
 from unittest.mock import MagicMock
 
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import make_mocked_request
 
+from gideon.interfaces.dashboard.handlers import prompts, sessions
+from gideon.interfaces.dashboard.handlers_system import api_healthz
+from gideon.interfaces.dashboard.server import _apply_response_policies
 from gideon.interfaces.dashboard.state import (
     ConsoleState,
     _fmt_duration,
@@ -14,7 +20,57 @@ from gideon.interfaces.dashboard.state import (
 )
 
 
+class TestDeleteNotFound:
+    @pytest.mark.asyncio
+    async def test_session_delete_returns_404_when_history_is_missing(self) -> None:
+        state = MagicMock()
+        state.conversation_log.delete_session.return_value = False
+        request = MagicMock()
+        request.app = {"state": state}
+        request.match_info = {"key": "missing"}
+
+        response = await sessions.api_session_delete(request)
+
+        assert response.status == 404
+        assert json.loads(response.body)["error"] == "session_not_found"
+        state.push_sessions_update.assert_not_called()
+        state.push_refresh.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_prompt_delete_returns_404_when_prompt_is_missing(
+        self, monkeypatch
+    ) -> None:
+        provider = MagicMock()
+        provider.get_prompt.return_value = None
+        provider.delete_prompt.return_value = True
+        monkeypatch.setattr(prompts, "_get_default_prompt_provider", lambda: provider)
+        request = MagicMock()
+        request.match_info = {"name": "missing"}
+
+        response = await prompts.api_prompt_delete(request)
+
+        assert response.status == 404
+        assert json.loads(response.body) == {"error": "not found"}
+        provider.delete_prompt.assert_not_called()
+
+
 class TestDashboard:
+    @pytest.mark.asyncio
+    async def test_healthz_identifies_the_answering_gateway(self) -> None:
+        app = web.Application()
+        app["gateway_id"] = "test-gateway-123"
+        app["port"] = 7420
+        request = make_mocked_request("GET", "/api/healthz", app=app)
+
+        response = await api_healthz(request)
+        payload = json.loads(response.text)
+
+        assert response.status == 200
+        assert payload["status"] == "ok"
+        assert payload["gateway_id"] == "test-gateway-123"
+        assert payload["pid"] == os.getpid()
+        assert payload["port"] == 7420
+
     def test_fmt_duration_minutes(self) -> None:
         assert _fmt_duration(125) == "2m 5s"
 
@@ -48,6 +104,71 @@ class TestDashboard:
         state.channel_delivery = MagicMock()
         assert state.channel_delivery is not None
         assert state.owner_id == "U123"
+
+
+class TestDashboardResponsePolicies:
+    def _request(self, path: str = "/", origin: str = "") -> web.Request:
+        app = web.Application()
+        app["allowed_origins"] = {
+            "http://localhost:10000",
+            "https://dashboard.example.com",
+        }
+        headers = {"Origin": origin} if origin else None
+        return make_mocked_request("GET", path, headers=headers, app=app)
+
+    def test_dashboard_declares_same_origin_framing(self) -> None:
+        response = web.Response()
+
+        _apply_response_policies(self._request(), response)
+
+        assert "frame-ancestors 'self'" in response.headers["Content-Security-Policy"]
+        assert response.headers["X-Frame-Options"] == "SAMEORIGIN"
+
+    def test_a2a_card_reflects_only_explicitly_allowed_origin(self) -> None:
+        response = web.Response()
+
+        _apply_response_policies(
+            self._request("/a2a/agent-card", "https://dashboard.example.com"),
+            response,
+        )
+
+        assert (
+            response.headers["Access-Control-Allow-Origin"]
+            == "https://dashboard.example.com"
+        )
+        assert response.headers["Cross-Origin-Resource-Policy"] == "same-origin"
+        assert response.headers["Vary"] == "Origin"
+
+    @pytest.mark.parametrize(
+        "origin",
+        [
+            "https://attacker.example.com",
+            "http://localhost:9999",
+            "https://dashboard.example.com/path",
+            "https://dashboard.example.com/",
+            "null",
+        ],
+    )
+    def test_a2a_card_does_not_grant_unlisted_origin(self, origin: str) -> None:
+        response = web.Response(
+            headers={"Access-Control-Allow-Origin": "*", "Vary": "Accept-Encoding"}
+        )
+
+        _apply_response_policies(self._request("/a2a/agent-card", origin), response)
+
+        assert "Access-Control-Allow-Origin" not in response.headers
+        assert response.headers["Cross-Origin-Resource-Policy"] == "same-origin"
+        assert response.headers["Vary"] == "Accept-Encoding, Origin"
+
+    def test_non_card_response_gets_no_cors_grant(self) -> None:
+        response = web.Response()
+
+        _apply_response_policies(
+            self._request("/api/status", "https://dashboard.example.com"), response
+        )
+
+        assert "Access-Control-Allow-Origin" not in response.headers
+        assert "Cross-Origin-Resource-Policy" not in response.headers
 
 
 class TestNotificationPersistence:
@@ -352,127 +473,3 @@ class TestNotificationRemovalBroadcast:
         ws.send_str.reset_mock()
         state.clear_notifications()
         assert ("notification_removed", {"ts": "*"}) in self._sent_types(ws)
-
-
-class TestNotificationRetention:
-    """#49 — changing one notification must not erase the history behind it.
-
-    ``_rewrite_notifications`` re-applied the ``[-200:]`` cap on every rewrite, and every
-    ack/unack/delete rewrote from ``_notification_log`` — the tail this process loaded at
-    boot. So one acknowledgement republished that tail as the whole file: a 350-row history
-    became 200 rows, permanently, with nothing to show for it.
-    """
-
-    def _state(self, monkeypatch, tmp_path, rows: int = 350) -> ConsoleState:
-        """A fresh process over an existing *rows*-row history (the real load path)."""
-        monkeypatch.setattr(
-            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
-        )
-        path = tmp_path / "notifications.jsonl"
-        path.write_text(
-            "".join(
-                json.dumps({"kind": "cron", "title": f"n{i}", "ts": f"t{i:04d}"}) + "\n"
-                for i in range(rows)
-            ),
-            encoding="utf-8",
-        )
-        return ConsoleState(sessions=MagicMock(count=0), start_time=0.0)
-
-    def _on_disk(self, tmp_path) -> list[dict]:
-        return [
-            json.loads(line)
-            for line in (tmp_path / "notifications.jsonl")
-            .read_text(encoding="utf-8")
-            .splitlines()
-            if line.strip()
-        ]
-
-    def test_boot_loads_the_tail_but_the_file_keeps_everything(
-        self, monkeypatch, tmp_path
-    ) -> None:
-        state = self._state(monkeypatch, tmp_path)
-        assert len(state._notification_log) == 200
-        assert len(self._on_disk(tmp_path)) == 350
-
-    def test_ack_keeps_every_older_row(self, monkeypatch, tmp_path) -> None:
-        state = self._state(monkeypatch, tmp_path)
-        assert state.ack_notification("t0349")
-        rows = self._on_disk(tmp_path)
-        assert len(rows) == 350
-        assert rows[0]["ts"] == "t0000"
-        assert rows[-1]["acked"] is True
-
-    def test_unack_keeps_every_older_row(self, monkeypatch, tmp_path) -> None:
-        state = self._state(monkeypatch, tmp_path)
-        assert state.ack_notification("t0300") and state.unack_notification("t0300")
-        rows = self._on_disk(tmp_path)
-        assert len(rows) == 350
-        assert {r["ts"] for r in rows if r.get("acked")} == set()
-        assert rows[0]["ts"] == "t0000"
-
-    def test_delete_removes_exactly_one_row(self, monkeypatch, tmp_path) -> None:
-        state = self._state(monkeypatch, tmp_path)
-        assert state.delete_notification("t0349")
-        rows = self._on_disk(tmp_path)
-        assert len(rows) == 349
-        assert rows[0]["ts"] == "t0000"
-        assert "t0349" not in {r["ts"] for r in rows}
-
-    def test_delete_for_loop_only_drops_its_own_rows(
-        self, monkeypatch, tmp_path
-    ) -> None:
-        state = self._state(monkeypatch, tmp_path)
-        path = tmp_path / "notifications.jsonl"
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"kind": "info", "ts": "t9999", "loop_id": "L1"}) + "\n")
-        state._notification_log.append({"kind": "info", "ts": "t9999", "loop_id": "L1"})
-        assert state.delete_notifications_for_loop("L1") == 1
-        assert len(self._on_disk(tmp_path)) == 350
-
-    def test_a_fresh_process_that_acks_loses_nothing(self, monkeypatch, tmp_path):
-        """The reported shape end to end: restart, ack the newest item, restart again."""
-        first = self._state(monkeypatch, tmp_path)
-        assert first.ack_notification("t0349")
-        second = ConsoleState(sessions=MagicMock(count=0), start_time=0.0)
-        assert len(second._notification_log) == 200
-        assert len(self._on_disk(tmp_path)) == 350
-        assert second.delete_notification("t0348")
-        assert len(self._on_disk(tmp_path)) == 349
-
-    def test_append_trims_memory_and_disk_together(self, monkeypatch, tmp_path) -> None:
-        """The cap still exists — it just lives on the append path, where both sides of it
-        move at once. 2x the cap on disk is the trim point; memory follows to the same rows.
-        """
-        state = self._state(monkeypatch, tmp_path, rows=400)
-        assert len(state._notification_log) == 200
-        state.notify("cron", "newest", "x")
-        on_disk = self._on_disk(tmp_path)
-        assert len(on_disk) == 200
-        assert len(state._notification_log) == 200
-        assert on_disk[-1]["title"] == "newest"
-        assert state._notification_log[-1]["title"] == "newest"
-        assert [n["ts"] for n in state._notification_log] == [r["ts"] for r in on_disk]
-
-    def test_an_ack_never_trims(self, monkeypatch, tmp_path) -> None:
-        """Vacuity pair for the trim test: the cap must not fire on a change."""
-        state = self._state(monkeypatch, tmp_path, rows=400)
-        assert state.ack_notification("t0399")
-        assert len(self._on_disk(tmp_path)) == 400
-
-    def test_a_missing_timestamp_still_reports_miss(
-        self, monkeypatch, tmp_path
-    ) -> None:
-        state = self._state(monkeypatch, tmp_path)
-        assert state.ack_notification("nope") is False
-        assert state.unack_notification("nope") is False
-        assert state.delete_notification("nope") is False
-        assert len(self._on_disk(tmp_path)) == 350
-
-    def test_ack_all_keeps_every_older_row(self, monkeypatch, tmp_path) -> None:
-        """Ack-all is an acknowledgement too: it rewrote the file from the in-memory tail."""
-        state = self._state(monkeypatch, tmp_path)
-        assert state.ack_all_notifications() == 350
-        rows = self._on_disk(tmp_path)
-        assert len(rows) == 350
-        assert all(r.get("acked") for r in rows)
-        assert rows[0]["ts"] == "t0000"

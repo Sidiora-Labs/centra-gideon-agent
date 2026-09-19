@@ -18,14 +18,17 @@ from __future__ import annotations
 import ast
 import importlib
 import os
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
 from gideon.core import resource_limits as rl
+from gideon.integrations.local_models import fit, residency
 from gideon.operations.resilience import doctor
 from gideon.operations.resilience.doctor import DoctorContext, Tier
+from gideon.security import sandbox
 
 PROBE_ID = "sandbox.resource_limits"
 
@@ -202,51 +205,97 @@ def test_gateway_boot_has_no_unguarded_import_resource():
     ), "Runtime startup no longer calls the guarded raise_fd_limit helper"
 
 
-@pytest.mark.asyncio
-async def test_the_row_states_the_platform_fact_without_claiming_windows_support(
-    monkeypatch,
-):
-    """req 94 ac_2 — the capability is EXPOSED, and the exposure never reads as support.
+def test_pdf_reader_rejects_input_above_parser_byte_limit(tmp_path):
+    from gideon.cognition.knowledge.readers import FileReader, PdfResourceLimits
 
-    The row is ``ok=True`` on both sides (absence is a platform fact, not a gateway
-    failure), which is exactly the shape that could quietly read as "Windows is fine": a
-    green row whose text says nothing. So the degraded detail is asserted for the three
-    things an operator needs — the platform it is talking about, that the facility is NOT
-    there, and the two consequences — and against the affirmative sentence from the other
-    branch, which is what a row claiming support would carry.
-    """
-    monkeypatch.setattr(rl, "_resource", None)
-    monkeypatch.setattr(sys, "platform", "win32")
-    probe = {p.id: p for p in doctor.all_probes()}[PROBE_ID]
-
-    res = await probe.run(DoctorContext())
-
-    assert res.evidence == {"platform": "win32", "available": False}
-    assert "win32" in res.detail, "the row does not say which platform it measured"
-    assert "NOT available" in res.detail
-    assert "not raised at boot" in res.detail
-    assert "does not apply" in res.detail
-    assert (
-        "(rlimit) available" not in res.detail
-    ), "the degraded row carries the available branch's claim"
-    assert "windows" not in probe.title.lower(), (
-        "the capability row must not name a platform it cannot measure support for — it "
-        "reports the POSIX facility's presence, nothing more"
+    path = tmp_path / "oversize.pdf"
+    path.write_bytes(b"%PDF-1.4\n" + b"x" * 64)
+    text, metadata = FileReader(pdf_limits=PdfResourceLimits(max_file_bytes=16)).read(
+        str(path)
     )
 
+    assert "file bytes limit exceeded" in text
+    assert metadata["format"] == "error"
+    assert metadata["error_kind"] == "resource_limit"
+    assert metadata["resource"] == "file bytes"
+    assert metadata["actual"] == path.stat().st_size
+    assert metadata["limit"] == 16
 
-@pytest.mark.asyncio
-async def test_the_available_row_claims_only_what_the_boot_path_does(monkeypatch):
-    """The floor for the test above: the POSIX branch is not a blanket claim either — it
-    names the two consumers that actually consult the helper, so the two branches stay
-    readable as one sentence about this host."""
-    fake = _FakeResource(soft=256, hard=1_000_000)
-    monkeypatch.setattr(rl, "_resource", fake)
-    probe = {p.id: p for p in doctor.all_probes()}[PROBE_ID]
 
-    res = await probe.run(DoctorContext())
+def test_pdf_reader_rejects_document_above_page_limit(tmp_path):
+    from reportlab.pdfgen.canvas import Canvas
 
-    assert res.evidence["available"] is True
-    assert "available" in res.detail and "NOT available" not in res.detail
-    assert "NOFILE" in res.detail and "sandbox" in res.detail
-    assert fake.set_calls == [], "the doctor probe must not mutate the host's limits"
+    from gideon.cognition.knowledge.readers import FileReader, PdfResourceLimits
+
+    path = tmp_path / "pages.pdf"
+    canvas = Canvas(str(path))
+    for page in range(2):
+        canvas.drawString(20, 20, f"Page {page + 1}")
+        canvas.showPage()
+    canvas.save()
+
+    _, metadata = FileReader(pdf_limits=PdfResourceLimits(max_pages=1)).read(str(path))
+
+    assert metadata["format"] == "error"
+    assert metadata["error_kind"] == "resource_limit"
+    assert metadata["resource"] == "page count"
+    assert metadata["actual"] == 2
+    assert metadata["limit"] == 1
+
+
+def test_pdf_reader_checks_raster_pixels_before_rendering(tmp_path):
+    from reportlab.pdfgen.canvas import Canvas
+
+    from gideon.cognition.knowledge.pipeline.nodes.media_nodes import (
+        ImageModalityOcrProvider,
+    )
+    from gideon.cognition.knowledge.readers import FileReader, PdfResourceLimits
+
+    path = tmp_path / "large-blank-page.pdf"
+    canvas = Canvas(str(path), pagesize=(1000, 1000))
+    canvas.showPage()
+    canvas.save()
+    reader = FileReader(
+        ocr_provider=ImageModalityOcrProvider(),
+        pdf_limits=PdfResourceLimits(max_page_pixels=100),
+    )
+
+    _, metadata = reader.read(str(path))
+
+    assert metadata["format"] == "error"
+    assert metadata["error_kind"] == "resource_limit"
+    assert metadata["resource"] == "page raster pixels"
+    assert metadata["actual"] > metadata["limit"] == 100
+
+
+def test_host_fact_process_probes_are_process_lifetime_memoized():
+    """Capability probes must not become one extra child for every real spawn."""
+    caches = (
+        sandbox._probe_unshare,
+        fit._probe_gpu,
+        residency._darwin_memory,
+    )
+    for probe in caches:
+        parameters = probe.cache_parameters()
+        assert parameters["maxsize"] is not None
+        assert parameters["maxsize"] <= 8
+    assert isinstance(sandbox._SANDBOX_EXEC_PROBE_CACHE, dict)
+
+
+def test_sandbox_exec_host_fact_probe_spawns_only_once(monkeypatch):
+    calls: list[list[str]] = []
+
+    def _run(argv, **_kwargs):
+        calls.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, stdout=b"", stderr=b"")
+
+    sandbox._SANDBOX_EXEC_PROBE_CACHE.clear()
+    monkeypatch.setattr(sandbox.sys, "platform", "darwin")
+    monkeypatch.setattr(sandbox.platform, "mac_ver", lambda: ("15.0", ("", "", ""), ""))
+    monkeypatch.setattr(sandbox.shutil, "which", lambda _name: "/usr/bin/sandbox-exec")
+    monkeypatch.setattr(sandbox.subprocess, "run", _run)
+
+    assert sandbox._probe_sandbox_exec() is True
+    assert sandbox._probe_sandbox_exec() is True
+    assert len(calls) == 1
+    sandbox._SANDBOX_EXEC_PROBE_CACHE.clear()

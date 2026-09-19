@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Capacitor shell that wraps the gateway's served companion route. Contains no copy of the companion UI.",
   "scripts": {
-    "test": "mkdir -p ../../reports && node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=../../reports/ci-web-mobile.junit.xml test/*.test.mjs",
+    "test": "node --test test/*.test.mjs",
     "cap": "cap",
     "add:ios": "cap add ios",
     "add:android": "cap add android",

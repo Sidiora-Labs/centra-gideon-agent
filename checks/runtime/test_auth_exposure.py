@@ -102,6 +102,64 @@ def test_an_http_public_url_does_not_get_a_secure_cookie(_isolated) -> None:
     assert token_auth.secure_cookies() is False
 
 
+def test_public_proxy_bypass_is_named_and_warned(_isolated, monkeypatch) -> None:
+    _write_config(_isolated, public_url="https://pc.example.com")
+    monkeypatch.setenv("GIDEON_BYPASS_LOCAL_NETWORKS", "1")
+
+    warning = exposure.public_proxy_bypass_warning()
+
+    assert "GIDEON_BYPASS_LOCAL_NETWORKS=1" in warning
+    assert "public internet" in warning
+    assert "reverse proxy" in warning
+    assert "bypass authentication" in warning
+
+
+def test_local_network_bypass_is_not_a_public_proxy_warning_without_exposure(
+    _isolated, monkeypatch
+) -> None:
+    _write_config(_isolated)
+    monkeypatch.setenv("GIDEON_BYPASS_LOCAL_NETWORKS", "1")
+    assert exposure.public_proxy_bypass_warning() == ""
+
+
+def test_public_exposure_is_not_a_proxy_bypass_warning_when_bypass_is_off(
+    _isolated, monkeypatch
+) -> None:
+    _write_config(_isolated, public_url="https://pc.example.com")
+    monkeypatch.delenv("GIDEON_BYPASS_LOCAL_NETWORKS", raising=False)
+    assert exposure.public_proxy_bypass_warning() == ""
+
+
+def test_token_auth_warns_when_public_proxy_bypass_is_enabled(
+    _isolated, monkeypatch, caplog
+) -> None:
+    _write_config(_isolated, public_url="https://pc.example.com")
+    monkeypatch.setenv("GIDEON_BYPASS_LOCAL_NETWORKS", "1")
+
+    with caplog.at_level("WARNING"):
+        token_auth.token_auth_middleware(port=PORT)
+
+    assert "public proxy auth bypass" in caplog.text
+    assert "public internet" in caplog.text
+
+
+def test_doctor_reports_public_proxy_bypass_as_an_issue(
+    _isolated, monkeypatch, capsys
+) -> None:
+    from gideon.interfaces.cli.doctor import _doctor_proxy_bypass
+
+    _write_config(_isolated, public_url="https://pc.example.com")
+    monkeypatch.setenv("GIDEON_BYPASS_LOCAL_NETWORKS", "1")
+
+    issues = _doctor_proxy_bypass(AppConfig.load())
+    output = capsys.readouterr().out
+
+    assert "proxy bypass" in output
+    assert "admits public internet without authentication" in output
+    assert "GIDEON_BYPASS_LOCAL_NETWORKS=1" in output
+    assert issues == ["proxy bypass: public internet may skip authentication"]
+
+
 def test_a_corrupt_config_reports_not_exposed(_isolated) -> None:
     (_isolated / "config.json").write_text("{ not json", encoding="utf-8")
     assert exposure.is_exposed() is False

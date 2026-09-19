@@ -341,6 +341,11 @@
         "sensitive": false,
         "type": "list[str]"
       },
+      "dashboard.update_dev_mode": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
       "dashboard.url": {
         "default": "",
         "sensitive": false,
@@ -861,6 +866,11 @@
         "sensitive": false,
         "type": "bool"
       },
+      "local_models.hf_whoami_ttl_secs": {
+        "default": 300,
+        "sensitive": false,
+        "type": "int"
+      },
       "local_models.hide_unrunnable_models": {
         "default": true,
         "sensitive": false,
@@ -873,6 +883,11 @@
       },
       "local_models.pressure_warn_pct": {
         "default": 85,
+        "sensitive": false,
+        "type": "int"
+      },
+      "local_models.selftest_timeout_secs": {
+        "default": 60,
         "sensitive": false,
         "type": "int"
       },

@@ -4,21 +4,9 @@ import asyncio
 import time
 from typing import Any
 
-from gideon.automation.workflows.ownership import OWNED_PREFIX
 from gideon.integrations.acp.errors import AcpError, AcpProcessDied
 from gideon.integrations.llm_helpers import PromptBusyExhaustedError
 from gideon.workspace import notification_kinds
-
-NON_CHANNEL_PARENTS = ("cron:", "subagent:", OWNED_PREFIX)
-"""Parent session keys that a completion must NEVER be routed to a channel under.
-
-`cron:` and `subagent:` were always here. `workflow:` (`ownership.OWNED_PREFIX`) is the
-identity a workflow stage spawns under (``workflows/engine.py``'s `dispatch_stage`), and
-its completion is OWNED by the run: the controller reconciles it off the supervisor
-(`_reconcile_dispatched_stages`) and threads the output into the next node. Routing it as
-a channel message would open an ACP session on a key no channel is bound to and post one
-run's internal stage output into the owner's DM.
-"""
 
 
 class DelegationHost:
@@ -514,7 +502,7 @@ class CompletionDelivery:
         self.prepare()
         if self.parent.startswith("dashboard:") and self.runtime.dashboard_state:
             await self.dashboard()
-        elif self.parent and not self.parent.startswith(NON_CHANNEL_PARENTS):
+        elif self.parent and not self.parent.startswith(("cron:", "subagent:")):
             await self.channel()
         else:
             if self.parent.startswith("cron:"):

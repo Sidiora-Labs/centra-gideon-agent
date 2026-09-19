@@ -96,13 +96,6 @@ class RuntimeUpdates:
             self.runtime.dashboard_state.clear_update_progress()
 
     async def check(self) -> None:
-        """The boot-path release check, then the staged apply if it is opted in.
-
-        ``updates.check_enabled`` is read BEFORE anything that could open a
-        connection, and ``updates.auto`` decides what happens with a result:
-        ``off`` (the default) only raises the notification; ``staged`` hands off
-        to the apply, which waits for active work before touching anything.
-        """
         try:
             from gideon.core.config import AppConfig
             from gideon.interfaces.dashboard.handlers import (
@@ -110,123 +103,72 @@ class RuntimeUpdates:
                 _update_info,
             )
 
-            policy = AppConfig.load().updates
-            if not policy.check_enabled:
-                self.logger.debug("Release check skipped: updates.check_enabled is off")
-                return
             await _do_update_check()
             if not _update_info.get("available"):
                 print("Already on latest version")
                 return
             self.logger.info("Updates available from remote")
-            if policy.auto == "staged":
-                self.logger.info("Automatic updates are staged — applying")
+            if AppConfig.load().auto_update:
+                self.logger.info("Auto-update enabled — applying update")
                 await self.runtime._auto_apply_update()
             elif self.runtime.dashboard_state:
                 self.runtime.dashboard_state.push_refresh("update_available")
         except Exception:
             self.logger.debug("Update check failed", exc_info=True)
 
-    async def stage(self) -> bool:
-        """Hold the apply until chats and subagents finish. False ⇒ do not apply.
-
-        This is what "staged" means: an opted-in automatic update never lands on
-        top of running work. A wait that runs out defers to the next check
-        rather than interrupting anything.
-        """
-        state = self.runtime.dashboard_state
-        if state is None:
-            return True
-        from gideon.interfaces.dashboard.handlers.updates import (
-            await_quiescence,
-            is_quiescent,
+    async def branch(self, project: str) -> str | None:
+        result = await run_command(
+            ("git", "rev-parse", "--abbrev-ref", "HEAD"),
+            project,
+            10,
+            silence_errors=True,
         )
+        if result.code:
+            self.logger.error("Auto-update: could not determine current branch")
+            return None
+        name = result.out.strip().decode() if result.out else ""
+        name = "main" if name in ("", "HEAD") else name
+        if name == "main":
+            return name
+        self.logger.debug("Auto-update: skipping — on branch %s, not main", name)
+        return None
 
-        if is_quiescent(state):
-            return True
-        self.logger.info(
-            "Auto-update staged — waiting for active chats and subagents to finish"
-        )
-        self.progress("staged", "Update staged — waiting for active work to finish…")
-        if await await_quiescence(state):
-            return True
-        self.logger.info(
-            "Auto-update: work still in flight after the staging window — "
-            "deferring to the next check"
-        )
-        self.progress("staged", "Update deferred — active work is still running.")
-        return False
-
-    async def plan(self, project: str, policy: Any) -> Any:
-        """The ref this checkout should move to, or None with the reason reported."""
+    async def refresh_source(self, project: str, branch: str) -> bool:
         from gideon.operations import self_update
 
-        plan = await self_update.plan_source_update(
-            project, policy.channel, policy.pin, offline=not policy.check_enabled
+        self.progress("pulling", "Fetching latest changes…")
+        fetched = await run_command(("git", "fetch", "origin", branch), project, 60)
+        if fetched.code:
+            self.clear()
+            return False
+        reference = f"origin/{branch}"
+        delta = await run_command(
+            ("git", "diff", "HEAD", reference, "--quiet"), project, 10, quiet=True
         )
-        if plan.paused:
+        if delta.code == 0:
+            self.clear()
+            return False
+        changed = await asyncio.to_thread(self_update.git_tracked_changes, project)
+        if changed:
             self.logger.warning(
-                "Auto-update paused: %s (%d tracked change(s) in %s)",
-                plan.reason,
-                len(plan.paths),
-                project,
-            )
-            self.progress("paused", plan.reason)
-            return None
-        if not plan.ok:
-            self.logger.info("Auto-update: %s", plan.reason)
-            self.clear()
-            return None
-        return plan
-
-    async def refresh_source(self, project: str, plan: Any) -> bool:
-        """Fast-forward the checkout onto the planned ref. Never resets, never pulls."""
-        from gideon.operations import self_update
-
-        self.progress("pulling", f"Fetching {plan.ref}…")
-        fetched = await asyncio.to_thread(self_update.fetch_for_plan, project, plan)
-        if fetched.returncode:
-            self.logger.error(
-                "Auto-update: git fetch failed (rc=%d)", fetched.returncode
-            )
-            self.clear()
-            return False
-        target = await asyncio.to_thread(self_update.git_commit_for, project, plan.ref)
-        if not target:
-            self.logger.info(
-                "Auto-update: %s is not available in %s", plan.ref, project
-            )
-            self.clear()
-            return False
-        head = await asyncio.to_thread(self_update.git_commit_for, project, "HEAD")
-        if head == target:
-            self.clear()
-            return False
-        if not await asyncio.to_thread(
-            self_update.git_is_fast_forward, project, plan.ref
-        ):
-            self.logger.warning(
-                "Auto-update: refusing — %s is not a fast-forward from HEAD in %s",
-                plan.ref,
+                "Auto-update: refusing to apply — %d uncommitted tracked-file change(s) in %s would be discarded by a hard reset. Commit or `git stash` them; the update applies on the next check.",
+                len(changed),
                 project,
             )
             self.progress(
-                "error",
-                f"Update paused — {plan.ref} is not a fast-forward from this checkout.",
+                "error", "Update paused — commit or stash your local changes first."
             )
             return False
-        merged = await asyncio.to_thread(
-            self_update.git_merge_ff_only, project, plan.ref
+        reset = await run_command(
+            ("git", "reset", "--hard", reference), project, 10, quiet=True
         )
-        if merged.returncode:
+        if reset.code:
             self.logger.error(
-                "Auto-update: fast-forward to %s failed (rc=%d)",
-                plan.ref,
-                merged.returncode,
+                "Auto-update: git reset --hard failed (rc=%d)", reset.code
             )
             self.clear()
             return False
-        self.logger.info("Auto-update: fast-forwarded to %s, rebuilding", plan.ref)
+        self.logger.info("Auto-update: reset to origin/%s, rebuilding", branch)
         return True
 
     async def rebuild(self, project: str) -> bool:
@@ -270,15 +212,8 @@ class RuntimeUpdates:
         if not project:
             return
         try:
-            from gideon.core.config import AppConfig
-
-            policy = AppConfig.load().updates
-            plan = await self.plan(project, policy)
-            if plan is None:
-                return
-            if not await self.stage():
-                return
-            if not await self.refresh_source(project, plan):
+            branch = await self.branch(project)
+            if branch is None or not await self.refresh_source(project, branch):
                 return
             if await self.rebuild(project):
                 await self.restart()

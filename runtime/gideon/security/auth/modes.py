@@ -28,6 +28,10 @@ class AuthMode(str, Enum):
     OAUTH2 = "oauth2"
 
 
+AUTHORABLE_AUTH_MODES = frozenset({AuthMode.NONE, AuthMode.LOCAL_TOKEN})
+_UNAUTHORABLE_REQUESTS = frozenset({AuthMode.API_KEY.value, AuthMode.OAUTH2.value})
+
+
 @dataclass(frozen=True)
 class AuthConfig:
     """Runtime auth configuration consumed by ``auth_middleware``.
@@ -45,6 +49,36 @@ class AuthConfig:
     oauth2_audience: str | None = None
     api_key_env: str | None = None
     csrf_required: bool = True
+    requested_mode: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.requested_mode:
+            object.__setattr__(self, "requested_mode", self.mode.value)
+
+    @property
+    def actual_mode(self) -> str:
+        """The mode the admission middleware actually enforces."""
+        return self.mode.value
+
+    @property
+    def authorable(self) -> bool:
+        """Whether the requested mode can currently be selected from configuration."""
+        return self.requested_mode in {mode.value for mode in AUTHORABLE_AUTH_MODES}
+
+    @property
+    def fell_back_from_unauthorable_mode(self) -> bool:
+        """Whether a recognized but unselectable mode fell back to local tokens."""
+        return (
+            self.requested_mode in _UNAUTHORABLE_REQUESTS
+            and self.mode == AuthMode.LOCAL_TOKEN
+        )
+
+    def mode_state(self) -> str:
+        """Return a stable diagnostic summary of requested and effective auth."""
+        return (
+            f"requested={self.requested_mode} actual={self.actual_mode} "
+            f"authorable={str(self.authorable).lower()}"
+        )
 
     @classmethod
     def from_env(cls) -> "AuthConfig":
@@ -57,9 +91,10 @@ class AuthConfig:
         import os
 
         raw = (os.environ.get("GIDEON_AUTH_MODE") or "").strip().lower()
+        requested_mode = raw or AuthMode.LOCAL_TOKEN.value
         if raw == "none":
-            return cls(mode=AuthMode.NONE)
-        return cls()
+            return cls(mode=AuthMode.NONE, requested_mode=requested_mode)
+        return cls(requested_mode=requested_mode)
 
 
 def effective_bind(auth_cfg: AuthConfig) -> str:

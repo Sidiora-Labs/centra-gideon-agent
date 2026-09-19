@@ -28,6 +28,7 @@ import { api, type ProjectItem, type TaskListItem, type LoopKind, type TaskItem,
 import { useQuery, invalidateKeys } from '../../shared/data/data'
 import { setActiveProject } from '../../shared/data/activeProject'
 import { PageTitle } from '../../shared/ui/PageTitle'
+import { ProjectHub, ProjectHubPane } from './ProjectHub'
 
 export function ProjectsSection({ sub, navigate, query, setQuery }: RouteProps) {
   const route = sub || ''
@@ -397,15 +398,14 @@ function ProjectDetailPage({ id, onBack, navigate, query, setQuery }: { id: stri
           </div>
         </div>
 
-        <div className="grid min-h-0 flex-1 gap-px overflow-hidden bg-outline-variant/20"
-          style={{ gridTemplateColumns: 'minmax(0, 2fr) minmax(280px, 1fr)' }}>
+        <ProjectHub>
 
-          <HubColumn title={`Work · ${workCount}`}>
+          <ProjectHubPane title={`Work · ${workCount}`}>
             <WorkBoardColumn work={work} loading={workLoading}
               onResume={(runId) => navigate(`loop/${runId}`)} />
-          </HubColumn>
+          </ProjectHubPane>
 
-          <HubColumn title={`Tasks · ${lists?.length ?? 0} list${(lists?.length ?? 0) === 1 ? '' : 's'}`}>
+          <ProjectHubPane title={`Tasks · ${lists?.length ?? 0} list${(lists?.length ?? 0) === 1 ? '' : 's'}`}>
             {(lists ?? []).length === 0 ? (
               <p className="text-on-surface-low text-[0.8125rem]">No task lists yet — Goal Loop and Code attach their work here when scoped to this project.</p>
             ) : (
@@ -416,8 +416,8 @@ function ProjectDetailPage({ id, onBack, navigate, query, setQuery }: { id: stri
                 ))}
               </div>
             )}
-          </HubColumn>
-        </div>
+          </ProjectHubPane>
+        </ProjectHub>
       </div>
 
       {pickWs && (
@@ -428,12 +428,6 @@ function ProjectDetailPage({ id, onBack, navigate, query, setQuery }: { id: stri
   )
 }
 
-function HubColumn({ title, children }: { title: string; children: React.ReactNode }) {
-  return <section className="flex min-h-0 flex-col bg-surface">
-    <h2 className="shrink-0 px-l pb-s pt-m text-[0.75rem] uppercase tracking-wide text-on-surface-low">{title}</h2>
-    <div className="min-h-0 flex-1 overflow-y-auto px-l pb-l">{children}</div>
-  </section>
-}
 function WorkGroupLabel({ text, count, tone }: { text: string; count: number; tone: 'ok' | 'muted' }) {
   return <header className="flex items-center gap-s text-[0.75rem] uppercase tracking-wide text-on-surface-low">
     {tone === 'ok' && <span className="size-1.5 rounded-full bg-ok" />}<span>{text}</span><span>· {count}</span>

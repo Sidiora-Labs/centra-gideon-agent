@@ -17,10 +17,10 @@ describe('week-grid empty-state copy (#686)', () => {
     expect(s).not.toContain('Only enabled interval schedules are plotted')
   })
 
-  it('names only the true causes: enabled-with-a-fire, disabled, and the one-shot omission (#561)', () => {
+  it('names all projected clock kinds and only the true empty-state causes (#561)', () => {
     const s = src()
-    expect(s).toContain('interval and cron alike')
+    expect(s).toContain('one-shot, interval, and cron alike')
     expect(s).toContain('A disabled trigger has no fires')
-    expect(s).toContain('a one-shot is not projected here yet')
+    expect(s).not.toContain('a one-shot is not projected here yet')
   })
 })

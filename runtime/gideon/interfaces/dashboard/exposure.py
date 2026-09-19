@@ -21,10 +21,18 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import os
 from typing import Any
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+LOCAL_NETWORK_BYPASS_ENV = "GIDEON_BYPASS_LOCAL_NETWORKS"
+PUBLIC_PROXY_BYPASS_WARNING = (
+    "GIDEON_BYPASS_LOCAL_NETWORKS=1 is unsafe with a public URL: public internet "
+    "requests relayed by a private-address reverse proxy can bypass authentication. "
+    "Unset GIDEON_BYPASS_LOCAL_NETWORKS on internet-exposed instances."
+)
 
 
 def _cfg() -> Any:
@@ -57,6 +65,25 @@ def public_url(cfg: Any | None = None) -> str:
 def is_exposed(cfg: Any | None = None) -> bool:
     """Whether the operator has declared this instance internet-exposed."""
     return bool(public_url(cfg))
+
+
+def local_network_bypass_enabled() -> bool:
+    """Whether private-address clients are configured to bypass authentication."""
+    return os.environ.get(LOCAL_NETWORK_BYPASS_ENV) == "1"
+
+
+def public_proxy_bypass_warning(cfg: Any | None = None) -> str:
+    """Name the unsafe public-proxy/local-network-bypass combination.
+
+    A reverse proxy normally opens its upstream connection from a private container or LAN
+    address. The local-network bypass cannot prove that such a connection originated on the
+    LAN: it may represent any client the public proxy accepted. Trusted forwarded headers do
+    not make the configuration safe because a missing header still leaves the private proxy
+    address as the client identity.
+    """
+    if local_network_bypass_enabled() and is_exposed(cfg):
+        return PUBLIC_PROXY_BYPASS_WARNING
+    return ""
 
 
 def public_host(cfg: Any | None = None) -> str:

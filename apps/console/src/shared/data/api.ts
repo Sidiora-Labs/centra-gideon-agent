@@ -8,6 +8,20 @@ const put = <T>(path: string, body?: unknown) => requestJson<T>(path, 'PUT', bod
 const patch = <T>(path: string, body?: unknown) => requestJson<T>(path, 'PATCH', body)
 const del = requestDelete
 
+type WriteReceipt = {
+  ok?: boolean
+  message?: string
+  reason?: string
+  error?: string | { message?: string }
+}
+
+export function requireWriteAccepted<T>(result: T): T {
+  if (!result || typeof result !== 'object' || (result as WriteReceipt).ok !== false) return result
+  const receipt = result as WriteReceipt
+  const detail = typeof receipt.error === 'string' ? receipt.error : receipt.error?.message
+  throw new Error(detail || receipt.message || receipt.reason || 'The server refused this change.')
+}
+
 async function _installReq(path: string, body: unknown): Promise<AppInstallResult> {
   const failure = (error: string): AppInstallResult => ({ ok: false, name: '', error, needs_consent: false, scan: null })
   try {
@@ -434,6 +448,34 @@ export interface KnowledgeContextCard {
   source_type?: string | null; section?: string | null; line_range?: [number, number] | null; deep_link?: string | null
 }
 export interface KnowledgeContextResult { query: string; results: KnowledgeContextCard[]; total_tokens: number; max_tokens: number }
+export interface RecallRankingScore {
+  label: string
+  kind: 'relative_ordering_signal'
+  value: number | null
+  shown: boolean
+  is_probability: false
+  comparable_across_queries: false
+  explanation: string
+}
+export interface RecallRankingSignal {
+  id: string
+  label: string
+  active: boolean
+  applies_to: string[]
+  detail: string
+}
+export interface RecallRankingDisclosure {
+  method: string
+  summary: string
+  score: RecallRankingScore
+  signals: RecallRankingSignal[]
+}
+export interface MemoryRecallResult {
+  result: string
+  query: string
+  deep: boolean
+  ranking: RecallRankingDisclosure
+}
 
 export interface LexiconTerm { id: string; canonical: string; aliases: string[]; entity_type: string; weight: number; source: 'graph' | 'manual' | 'learned' | string; enabled: boolean }
 export interface LexiconCorrection { id: string; heard: string; meant: string; count: number; auto_apply: boolean; last_seen: string }
@@ -604,6 +646,14 @@ export interface ChatSessionSummary {
   last_activity_at?: number
   never_archive?: boolean
 }
+export interface AutoArchiveSessionsResult {
+  ok: boolean
+  enabled: boolean
+  dry_run?: boolean
+  days: number
+  keys: string[]
+  count: number
+}
 export type KnowledgeConflict = {
   item_id: string
   item_title: string
@@ -652,6 +702,10 @@ export interface KnowledgeLibraryHome {
 }
 export interface KnowledgeAnnotation {
   id: string; item_id: string; quote: string; occurrence: number; note: string; created_at: string
+}
+export interface KnowledgeReadingItem {
+  item: KnowledgeItem
+  annotations: KnowledgeAnnotation[]
 }
 export interface KnowledgeDuplicate {
   id: string; title: string; item_type: string; created_at: string; word_count: number; reason: string
@@ -743,6 +797,23 @@ export interface ScheduleRun {
   reason?: string
   weight?: string
   incomplete?: boolean
+}
+export interface PartitionedRunHistory<T> {
+  visible: T[]
+  suppressed: T[]
+}
+export function partitionRunHistory<T>(
+  rows: readonly T[],
+  statusOf: (row: T) => string | null | undefined,
+): PartitionedRunHistory<T> {
+  const visible: T[] = []
+  const suppressed: T[] = []
+  for (const row of rows) {
+    const status = statusOf(row) ?? ''
+    if (status === 'skipped' || status.startsWith('skipped_')) suppressed.push(row)
+    else visible.push(row)
+  }
+  return { visible, suppressed }
 }
 export type TaskStatus = 'open' | 'in_progress' | 'blocked' | 'done' | 'cancelled' | 'skipped'
 export type TaskPriority = 'critical' | 'high' | 'medium' | 'low' | 'trivial'
@@ -903,6 +974,7 @@ export type WorkflowRunStatus =
   'draft' | 'running' | 'paused' | 'needs_input' | 'complete' | 'failed' | 'cancelled' | 'escalated'
 export interface WorkflowNodeState {
   instance_path: string; node_id: string; state: string; attempt?: number
+  cached?: boolean
   degraded_reason?: string
   failure?: { class?: string; cause_plain?: string; remediation?: string; terminal_reason?: string } | null
   item_index?: number; item_total?: number; item_label?: string
@@ -1280,7 +1352,7 @@ export interface SkillFile { path: string; size: number }
 export interface SkillMarketplace { name: string; type: string }
 export interface SkillSearchResult { id: string; name: string; description: string; source: string; url?: string; installs?: number }
 export interface SkillMarketplaceDetail { id: string; name: string; audit_status?: string; files: Array<{ path: string; binary?: boolean }>; frontmatter?: Record<string, unknown>; body?: string; marketplace?: string }
-export interface ToolItem { name: string; description: string; provider: string; parameters?: Record<string, unknown>; requires_approval?: boolean; risk_level?: 'safe' | 'caution' | 'destructive'; disabled?: boolean; locked?: boolean; providerDisabled?: boolean; group?: string; tier?: string }
+export interface ToolItem { name: string; description: string; provider: string; parameters?: Record<string, unknown>; requires_approval?: boolean; risk_level?: 'safe' | 'caution' | 'destructive'; disabled: boolean; locked?: boolean; providerDisabled: boolean; group?: string; tier?: string }
 export interface ToolLoadFailure { provider: string; error: string }
 export interface ManifestToolExample { summary: string; args: Record<string, unknown> }
 export interface ManifestTool { name: string; provider: string; description: string; parameters?: Record<string, unknown>; requires_approval: boolean; risk_level: string; response_type: string; error_codes: string[]; examples: ManifestToolExample[] }
@@ -1328,9 +1400,15 @@ export type EventPattern =
   | 'InboxMessage' | 'InboxSender' | 'InboxAddress'
   | 'AppEvent'
 export interface TriggerAction { provider: string; config: Record<string, unknown> }
+export function isOutcomeRoute(value: string): boolean {
+  const route = value.trim()
+  return route === '' || route === 'none' || route === 'inbox' || route === 'notify'
+    || (route.startsWith('channel:') && route.slice('channel:'.length).length > 0 && !/\s/.test(route))
+}
 export interface Trigger {
   kind: 'schedule' | 'lifecycle' | 'event' | 'store'; id: string; raw_id: string; name: string; enabled: boolean
   action: TriggerAction
+  delivery?: string; failure_delivery?: string; failure_policy?: Record<string, unknown>
   pattern?: string; sender_glob?: string; address_glob?: string; key_glob?: string; content_re?: string
   event_glob?: string; fire_count?: number; max_fires?: number
   store_kind?: string; created_by?: string; spec?: Record<string, unknown>
@@ -1340,10 +1418,11 @@ export interface Trigger {
   agent?: string | null; model?: string | null; channel?: string | null; approval_mode?: string | null
   silent?: boolean; strict_schedule?: boolean; timezone?: string | null; skip_dates?: string[]
   script?: string | null; command?: string | null
-  last_run_ts?: number | null; next_run_ts?: number | null; last_status?: string | null
+  last_run_ts?: number | null; next_run_ts?: number | null; last_status?: string | null; last_run_status?: string | null
   has_result?: boolean; last_result?: string | null; last_error?: string | null
   is_running?: boolean; running_since?: number | null; has_session?: boolean; created_ts?: number | null
   event?: string; matcher?: string; timeout?: number; last_run?: number; run_count?: number; used_by?: string[]
+  last_fired_at?: number | null
   blocking?: boolean; enforcement?: HookEnforcement
 }
 function _scheduleBodyToWire(body: Record<string, unknown>): Record<string, unknown> {
@@ -1526,6 +1605,13 @@ export interface AblationArmAggregate {
   scored_count: number
   mean_score: number | null
 }
+export interface EvaluationArmExecution {
+  arm: string
+  executed: boolean
+  cells: number
+  scored_cells: number
+  verifier_absent: number
+}
 export interface AblationReportView {
   component_id: string
   kind: string
@@ -1540,6 +1626,17 @@ export interface AblationReportView {
   trials: number
   created_at: string
   live_state: Record<string, string>
+}
+export function evaluationArmExecutions(
+  report: Pick<AblationReportView, 'arms'>,
+): EvaluationArmExecution[] {
+  return Object.entries(report.arms).map(([arm, aggregate]) => ({
+    arm,
+    executed: arm.length > 0 && aggregate.total > 0,
+    cells: aggregate.total,
+    scored_cells: aggregate.scored_count,
+    verifier_absent: aggregate.counts.verifier_absent ?? 0,
+  }))
 }
 export interface AblationRegistryRow {
   component_id: string
@@ -1896,7 +1993,7 @@ export interface KnowledgeItem {
   is_pinned?: boolean; is_archived?: boolean
   read_state?: 'unread' | 'reading' | 'read'; favorited?: boolean
   created_at?: string; updated_at?: string
-  _score?: number; _match_type?: string
+  _score?: number; _match_type?: string; ranking?: RecallRankingDisclosure
   kind?: string | null
   type?: KnowledgeType; gist_language?: string; url?: string; url_title?: string
   mime_type?: string; file_size?: number; thumbnail_path?: string; file_path?: string; word_count?: number
@@ -2057,6 +2154,8 @@ export interface InboxItem {
   feedback_producers?: Record<'classification' | 'draft' | 'digest', FeedbackProducer | undefined>
   item_kind?: InboxItemKind
   refs?: Record<string, any>
+  owner?: string
+  owner_states?: Record<string, InboxItemStatus>
 }
 export interface InboxProposal {
   title: string
@@ -2084,6 +2183,9 @@ export interface InboxStatus {
   watched_channels?: Array<{ id: string; name: string }>
   pending_count: number; total_count: number; health: InboxHealth
   poll_interval_seconds?: number
+  owner?: string
+  shared?: boolean
+  mine_count?: number
 }
 export interface InboxSettings {
   auto_cleanup_enabled: boolean
@@ -2131,10 +2233,6 @@ export interface ComputerUseLiveView {
   snapshots: ComputerUseSnapshot[]; trail: ComputerUseTrailPoint[]; feed: ComputerUseFeedRow[]
 }
 
-export interface BrowseKillState { active: boolean; reason: string; started_at: string }
-export interface BrowseExpiredSite { site: string; key_present: boolean }
-export interface BrowseStatus { kill: BrowseKillState; expired: BrowseExpiredSite[] }
-
 export interface SessionArchive { name: string; key: string; stamp: string; size: number; mtime: number }
 
 export interface SessionTemplate {
@@ -2170,9 +2268,9 @@ export interface ProjectImportResult {
   secrets_expected: string[]; ok: boolean; summary?: string; preview?: boolean
   project_id?: string; written?: string[]; error?: string
 }
-export type UpdateMode = 'off' | 'staged'
-export type UpdateChannel = 'stable' | 'beta' | 'nightly'
-export interface UpdateCheck { available: boolean; changes: string; checked: boolean; auto_update: boolean; version?: string; latest?: string; kind?: 'git' | 'pip' | 'container' | 'desktop'; current?: string; update_available?: boolean; commits_behind?: number | null; apply_method?: string; instructions?: string[]; release_notes?: string; update_mode?: UpdateMode; channel?: UpdateChannel; pin?: string; check_enabled?: boolean; check_interval_hours?: number }
+export type UpdateState = 'idle' | 'applying' | 'applied' | 'failed' | 'rolling_back' | 'rolled_back'
+export interface UpdateCheck { available: boolean; changes: string; checked: boolean; auto_update: boolean; version?: string; latest?: string; kind?: 'git' | 'pip' | 'container' | 'desktop'; current?: string; update_available?: boolean; commits_behind?: number | null; apply_method?: string; instructions?: string[]; update_dev_mode?: boolean; release_notes?: string; update_state?: UpdateState; update_from_version?: string; update_target?: string; update_started_at?: number | null; update_updated_at?: number | null; update_error?: string; rollback_available?: boolean; rollback_version?: string }
+export interface UpdateActionResult { ok?: boolean; status?: string; kind?: string; detail?: string; error?: string }
 
 export interface NotificationSettings {
   mute_all: boolean; quiet_hours_enabled: boolean; quiet_hours_start: string; quiet_hours_end: string
@@ -2732,6 +2830,37 @@ export interface ProviderModels {
 }
 export interface AvailableModelsResponse { providers: ProviderModels[]; fit?: HostModelFit }
 export interface ProviderTestResult { ok: boolean; status?: string; message: string }
+export interface LocalModelTokenStatus {
+  configured: boolean
+  source: 'credential_store' | 'environment' | 'huggingface_cache' | 'none' | string
+  masked_token: string
+  state: 'valid' | 'invalid' | 'unavailable' | 'unconfigured' | string
+  valid: boolean | null
+  username: string
+  error: string
+  cached: boolean
+  checked_at: number
+  expires_at: number
+}
+export interface LocalModelTestFailure {
+  code: string
+  message: string
+  retryable: boolean
+}
+export interface LocalModelCapabilityTest {
+  capability: string
+  ok: boolean
+  detail: string
+  elapsed_ms: number
+  failure?: LocalModelTestFailure | null
+}
+export interface LocalModelSelfTestResult {
+  provider: string
+  display_name?: string
+  ok: boolean
+  tests: LocalModelCapabilityTest[]
+  failure: LocalModelTestFailure | null
+}
 export interface LocalModel { name: string; id: string; size_mb: number; size: number; description: string; downloaded: boolean; capabilities: string[]; gated: boolean; source: string }
 export interface DownloadJob {
   id: string; provider: string; model: string
@@ -2822,19 +2951,6 @@ export interface OnboardingImportReport {
   secrets_skipped: number; redactions: number
   notes: string[]
 }
-export interface LocalModelOffer {
-  endpoint: string; host: string; port: number; ok: boolean
-  models: string[]; requires_key: boolean; provider_type: string; detail?: string
-}
-export interface LocalModelScanLimits {
-  max_targets: number; max_budget_s: number; default_budget_s: number; max_concurrency: number; ports: number[]
-}
-export interface LocalModelDetection extends LocalModelOffer { detected: boolean; scan_limits: LocalModelScanLimits }
-export interface LocalModelScanReport {
-  targets: number; probed: number; offers: LocalModelOffer[]; unreachable: number
-  budget_s: number; elapsed_s: number; exhausted_budget: boolean; notes: string[]
-}
-export interface LocalModelBinding extends LocalModelOffer { ok: boolean; name: string; model: string; bound: boolean }
 export interface ChatModelOption { name: string; model_id: string; provider: string; description?: string }
 export interface SavedAgent {
   name: string; provider: string; provider_agent?: string; acp_mode?: string; model?: string; approval_mode?: string
@@ -3057,6 +3173,19 @@ export interface PlanSession {
   project_id: string; created_at: number; steps: PlanStep[]
   design_error?: string
 }
+export interface LoopPlannerStatus {
+  active: boolean
+  stalled: boolean
+  retryable: boolean
+  started_at: number | null
+  last_activity_at: number | null
+  server_time: number
+  stall_after_seconds: number
+}
+export interface LoopPlanState {
+  session: PlanSession | null
+  planner: LoopPlannerStatus
+}
 export interface ChatPlanWire {
   session: PlanSession | null
   binding: { resume_task_mode?: string; parked?: boolean; parked_messages?: number }
@@ -3065,6 +3194,18 @@ export interface ChatPlanWire {
 }
 
 export type ApprovalMode = 'normal' | 'trust' | 'trust_reads' | 'yolo'
+export interface ApprovalScreeningVerdict {
+  requested_mode: ApprovalMode
+  requested_approval: 'ask' | 'hook_based' | 'auto' | string
+  ceiling: 'open' | 'ask' | 'hook_based' | 'auto' | string
+  verdict: 'allowed' | 'denied'
+  reason: string
+}
+export interface ApprovalModeResult {
+  ok: boolean
+  mode: ApprovalMode
+  approval_screening: ApprovalScreeningVerdict
+}
 export type TaskMode = 'agent' | 'ask' | 'plan' | 'build'
 export type ReasoningEffort = '' | 'low' | 'medium' | 'high' | 'max'
 export type MemoryMode = 'persistent' | 'incognito' | 'temporary'
@@ -3115,6 +3256,31 @@ export interface Artifact {
   source_path: string; live_dirty?: boolean; project_id?: string
   collection?: string
   readonly: boolean
+}
+
+export interface ArtifactUpdate {
+  content?: string
+  snapshot?: boolean
+  event_type?: ArtifactEventType
+  from_version?: number
+  name?: string
+  description?: string
+  tags?: string[]
+  collection?: string
+}
+
+export const ARTIFACT_MODEL_SAVED_EVENT = 'ne:artifact-model-saved'
+
+function publishArtifactModelSaved<T extends { version: number }>(slug: string, previousVersion: number, result: T): T {
+  if (!Number.isSafeInteger(result?.version) || result.version <= previousVersion) {
+    throw new Error('The server did not confirm the saved version. Your edits are still marked unsaved.')
+  }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(ARTIFACT_MODEL_SAVED_EVENT, {
+      detail: { slug, version: result.version },
+    }))
+  }
+  return result
 }
 
 export interface DocumentRun { text: string; bold: boolean; italic: boolean; code: boolean; link: string }
@@ -3272,12 +3438,16 @@ export interface RoutingProposal {
   }
 }
 
+function _usageSessionKey(session: string): string {
+  return session.includes(':') ? session : `dashboard:${session}`
+}
+
 function _usageQuery(opts?: { since?: string; until?: string; session?: string; group_by?: string }): string {
   const p = new URLSearchParams()
   if (opts?.group_by) p.set('group_by', opts.group_by)
   if (opts?.since) p.set('since', opts.since)
   if (opts?.until) p.set('until', opts.until)
-  if (opts?.session) p.set('session', opts.session)
+  if (opts?.session) p.set('session', _usageSessionKey(opts.session))
   const q = p.toString()
   return q ? `?${q}` : ''
 }
@@ -3568,7 +3738,7 @@ export const api = {
   memoryGraph: () => get<MemoryGraphData>('/api/memory/graph'),
   memoryLint: () => get<MemoryLint>('/api/memory/lint'),
   memoryObservability: () => get<MemoryObservability>('/api/memory/observability'),
-  memoryRecall: (q: string) => get<{ result: string; query: string; deep: boolean }>(`/api/memory/recall?q=${encodeURIComponent(q)}`),
+  memoryRecall: (q: string) => get<MemoryRecallResult>(`/api/memory/recall?q=${encodeURIComponent(q)}`),
   memoryPromote: () => post<{ ok: boolean; promoted: number }>('/api/memory/promote'),
   memoryEntities: () => get<MemoryEntitiesResponse>('/api/memory/entities'),
   memoryEntityCreate: (body: { name: string; entity_type: MemoryEntityType; aliases?: string[] }) =>
@@ -3697,6 +3867,18 @@ export const api = {
     put<{ ok: boolean }>(`/api/model-providers/${encodeURIComponent(name)}`, body),
   deleteModelProvider: (name: string) => del(`/api/model-providers/${encodeURIComponent(name)}`),
   testModelProvider: (name: string) => post<ProviderTestResult>(`/api/model-providers/${encodeURIComponent(name)}/test`),
+  localModelTokenStatus: () => get<LocalModelTokenStatus>('/api/models/huggingface/auth'),
+  saveLocalModelToken: (token: string) => put<LocalModelTokenStatus>('/api/models/huggingface/auth', { token }),
+  deleteLocalModelToken: () => del('/api/models/huggingface/auth'),
+  testLocalModelToken: () => post<LocalModelTokenStatus>('/api/models/huggingface/auth/test'),
+  testLocalModelProvider: async (provider: string) => {
+    const response = await gatewayRequest(`/api/models/local/${encodeURIComponent(provider)}/selftest`, 'POST')
+    const errorResponse = response.clone()
+    const result = await response.json().catch(() => null) as LocalModelSelfTestResult | null
+    if (result && typeof result === 'object' && Array.isArray(result.tests)) return result
+    if (!response.ok) throw await apiError(errorResponse)
+    throw new Error('Local model self-test returned an invalid response')
+  },
   modelsAvailable: () => get<AvailableModelsResponse>('/api/models/available').then((d) => {
     const hostFit = d.fit
     if (!hostFit) return d.providers
@@ -3787,11 +3969,6 @@ export const api = {
   onboardingImportScan: () => get<OnboardingImportScan>('/api/onboarding/import'),
   runOnboardingImport: (body: { sources: string[]; categories: string[] }) =>
     post<OnboardingImportReport>('/api/onboarding/import', body),
-  detectLocalModels: () => get<LocalModelDetection>('/api/onboarding/local-models'),
-  scanLocalModels: (body: { targets: string[]; budget_s?: number }) =>
-    post<LocalModelScanReport>('/api/onboarding/local-models/scan', body),
-  bindLocalModel: (body: { endpoint: string; name?: string; model?: string }) =>
-    post<LocalModelBinding>('/api/onboarding/local-models/bind', body),
   chatModels: () => get<ChatModelOption[]>('/api/models/chat'),
   setActiveModel: (useCase: string, models: string[]) => put<{ ok?: boolean }>(`/api/models/active/${encodeURIComponent(useCase)}`, { models }),
   startEmbeddingReindex: () => post<ReindexJob>('/api/models/embedding/reindex'),
@@ -3839,7 +4016,7 @@ export const api = {
   bulkSessions: (op: 'archive' | 'restore' | 'tag' | 'untag' | 'folder' | 'never_archive', keys: string[], args: { tag_id?: string; folder_id?: string; value?: boolean } = {}) =>
     post<{ ok: boolean; op: string; changed: string[]; unchanged: string[]; missing: string[] }>('/api/chat/sessions/bulk', { op, keys, ...args }),
   autoArchiveSessions: (opts: { dry_run?: boolean; active_session?: string } = {}) =>
-    post<{ ok: boolean; enabled: boolean; days: number; keys: string[]; count: number }>('/api/chat/sessions/auto-archive', opts),
+    post<AutoArchiveSessionsResult>('/api/chat/sessions/auto-archive', opts),
   sessionTemplates: () =>
     get<{ templates: SessionTemplate[] }>('/api/chat/sessions/templates').then((d) => d.templates),
   createSessionTemplate: (body: SessionTemplateInput) =>
@@ -3861,7 +4038,8 @@ export const api = {
   setSessionModel: (session: string, model: string) => post(`/api/chat/sessions/${session}/model`, { model }),
   setReasoningEffort: (session: string, reasoning_effort: ReasoningEffort) =>
     post(`/api/chat/sessions/${session}/reasoning-effort`, { reasoning_effort }),
-  setApprovalMode: (mode: ApprovalMode, session = '') => post('/api/chat/mode', { mode, session }),
+  setApprovalMode: (mode: ApprovalMode, session = '') =>
+    post<ApprovalModeResult>('/api/chat/mode', { mode, session }),
   setTaskMode: (mode: TaskMode, session = '') => post('/api/chat/task-mode', { mode, session }),
 
   chatPlanSession: (session: string) =>
@@ -3906,7 +4084,8 @@ export const api = {
   cancelQueued: (session: string, queueId: string) => del(`/api/chat/sessions/${encodeURIComponent(session)}/queue/${encodeURIComponent(queueId)}`),
   stopChat: (session: string, force = false) => post(`/api/chat/sessions/${session}/stop${force ? '?force=true' : ''}`),
   approve: (session: string, action: string, request_id?: string) =>
-    post(`/api/chat/sessions/${session}/approve`, { action, request_id }),
+    post<{ ok: boolean; mode?: ApprovalMode; approval_screening?: ApprovalScreeningVerdict }>(
+      `/api/chat/sessions/${session}/approve`, { action, request_id }),
 
   sideOpen: (session: string) => post<{ ok: boolean }>(`/api/chat/sessions/${session}/side/open`, {}),
   sideTurn: (session: string, question: string) => post<{ ok: boolean; run_id: string }>(`/api/chat/sessions/${session}/side/turn`, { question }),
@@ -3989,7 +4168,8 @@ export const api = {
     post<{ ok: boolean; queued_task_ids: string[] }>(`/api/loops/${encodeURIComponent(id)}/queue`, { task_ids: taskIds, action }),
   uLoopAutopilot: (id: string, on: boolean) =>
     post<{ ok: boolean; autopilot: boolean }>(`/api/loops/${encodeURIComponent(id)}/autopilot`, { on }),
-  uLoopPlanSession: (id: string) => get<{ session: PlanSession | null }>(`/api/loops/${encodeURIComponent(id)}/plan-session`).then((d) => d.session),
+  uLoopPlanState: (id: string) => get<LoopPlanState>(`/api/loops/${encodeURIComponent(id)}/plan-session`),
+  uLoopPlanSession: (id: string) => get<LoopPlanState>(`/api/loops/${encodeURIComponent(id)}/plan-session`).then((d) => d.session),
   uLoopPlanStart: (id: string) => post<{ ok: boolean; planning: boolean }>(`/api/loops/${encodeURIComponent(id)}/plan/start`, {}),
   uLoopPlanRetry: (id: string) => post<{ ok: boolean; planning: boolean }>(`/api/loops/${encodeURIComponent(id)}/plan/retry`, {}),
   uLoopPlanApprove: (id: string, stepId: string) => post<{ ok: boolean; planning: boolean }>(`/api/loops/${encodeURIComponent(id)}/plan/approve`, { step_id: stepId }),
@@ -4195,6 +4375,8 @@ export const api = {
   evalStudy: (studyId: string) =>
     get<StudyView>(`/api/evals/studies/${encodeURIComponent(studyId)}`),
   evalFieldMetrics: () => get<{ subjects: FieldMetricsRow[] }>('/api/evals/field-metrics'),
+  pendingSkillProposalCount: () =>
+    get<SkillProposalFeed>('/api/skills/proposals').then((feed) => feed.proposals.length),
   skillProposals: () => get<SkillProposalFeed>('/api/skills/proposals'),
   skillProposalDetail: (id: string) => get<SkillProposalDetail>(`/api/skills/proposals/${encodeURIComponent(id)}`),
   acceptSkillProposal: (id: string, edits?: { description?: string; procedure_md?: string }) =>
@@ -4259,9 +4441,9 @@ export const api = {
   saveUseCaseSettings: (useCase: string, settings: Record<string, unknown>) =>
     put<{ ok: boolean; settings: Record<string, unknown> }>(`/api/models/use-cases/${encodeURIComponent(useCase)}/settings`, settings),
 
-  createTerminal: (cwd?: string, sandbox?: string) => post<{ session_id: string; shell?: string; cwd?: string; sandbox?: string }>('/api/terminal/sessions', { ...(cwd ? { cwd } : {}), ...(sandbox ? { sandbox } : {}) }),
+  createTerminal: (cwd?: string, sandbox?: string) => post<{ session_id: string; shell: string; cwd: string; sandbox: string }>('/api/terminal/sessions', { ...(cwd ? { cwd } : {}), ...(sandbox ? { sandbox } : {}) }),
   sandboxProviders: () => get<{ providers: Array<{ name: string; display_name: string; available: boolean }> }>('/api/sandbox/providers'),
-  terminalSessions: () => get<{ enabled?: boolean; sessions: Array<{ session_id: string; pid?: number; alive?: boolean; cols?: number; rows?: number; connected?: boolean; cwd?: string; shell?: string; label?: string }> }>('/api/terminal/sessions'),
+  terminalSessions: () => get<{ enabled?: boolean; sessions: Array<{ session_id: string; pid?: number; alive?: boolean; cols?: number; rows?: number; connected?: boolean; cwd: string; shell: string; label?: string }> }>('/api/terminal/sessions'),
   deleteTerminal: (id: string) => del(`/api/terminal/sessions/${encodeURIComponent(id)}`),
 
   hooks: () => get<{ triggers: Trigger[] }>('/api/triggers?type=lifecycle').then((d) => d.triggers.map(_triggerToHook)),
@@ -4284,6 +4466,9 @@ export const api = {
   storeTriggers: () => get<{ triggers: Trigger[] }>('/api/triggers?type=store').then((d) => d.triggers),
   toggleStoreTrigger: (rawId: string, enabled: boolean) =>
     post(`/api/triggers/store:${encodeURIComponent(rawId)}/toggle`, { enabled }),
+  updateStoreTrigger: (rawId: string, body: {
+    delivery?: string; failure_delivery?: string; failure_policy?: Record<string, unknown>
+  }) => put<{ ok: boolean; trigger: Trigger }>(`/api/triggers/store:${encodeURIComponent(rawId)}`, body),
   deleteStoreTrigger: (rawId: string) => del(`/api/triggers/store:${encodeURIComponent(rawId)}`),
   runStoreTrigger: (rawId: string, dryRun = false) =>
     post<TriggerRunResult>(`/api/triggers/store:${encodeURIComponent(rawId)}/run`, dryRun ? { dry_run: true } : {}),
@@ -4317,6 +4502,14 @@ export const api = {
   lexiconReset: () => post<{ ok: boolean }>('/api/lexicon/reset'),
 
   knowledgeItem: (id: string) => get<KnowledgeItem>(`/api/knowledge/items/${encodeURIComponent(id)}`),
+  knowledgeReadingItem: (id: string) => {
+    const encoded = encodeURIComponent(id)
+    return Promise.all([
+      get<KnowledgeItem>(`/api/knowledge/items/${encoded}`),
+      get<{ annotations: KnowledgeAnnotation[] }>(`/api/knowledge/items/${encoded}/annotations`)
+        .catch(() => ({ annotations: [] })),
+    ]).then(([item, result]): KnowledgeReadingItem => ({ item, annotations: result.annotations }))
+  },
   knowledgeGraph: () => get<{
     nodes: { id: string; name?: string; type?: string; x?: number; y?: number; placed?: boolean; degree?: number; cluster?: number | null }[]
     edges: { source: string; target: string; type?: string; weight?: number }[]
@@ -4468,8 +4661,12 @@ export const api = {
     return r.json()
   },
 
-  inbox: (kind?: string) =>
-    get<InboxItem[]>(kind ? `/api/inbox?kind=${encodeURIComponent(kind)}` : '/api/inbox'),
+  inbox: (kind?: string, mine = false) => {
+    const query = new URLSearchParams()
+    if (kind) query.set('kind', kind)
+    if (mine) query.set('mine', '1')
+    return get<InboxItem[]>(`/api/inbox${query.size ? `?${query}` : ''}`)
+  },
   inboxKinds: () => get<{ kinds: InboxKindCount[] }>('/api/inbox/kinds').then((d) => d.kinds),
   markInboxSeen: (body: { ids?: string[]; kind?: string } = {}) =>
     post<{ ok: boolean; seen: number }>('/api/inbox/seen', body),
@@ -4486,7 +4683,7 @@ export const api = {
     ),
   draftInboxReply: (id: string) => post<InboxItem>(`/api/inbox/${encodeURIComponent(id)}/draft`),
   digestInboxChannel: (channelId: string, hours = 4) =>
-    post<InboxItem>('/api/inbox/digest', { channel_id: channelId, hours }),
+    get<InboxItem>(`/api/inbox/digest?channel_id=${encodeURIComponent(channelId)}&hours=${hours}`),
   sendInboxReply: (id: string, text: string) => post<{ ok: boolean; delivered_to_session?: boolean }>('/api/inbox/send', { id, text }),
   openInboxItem: (id: string) => post<{ ok: boolean }>(`/api/inbox/${encodeURIComponent(id)}/open`),
   favoriteInboxItem: (id: string, favorited: boolean) =>
@@ -4504,9 +4701,6 @@ export const api = {
   },
   auditVerify: (full = false) => get<SelVerify>(`/api/security/audit/verify${full ? '?full=1' : ''}`),
   computerUseLiveView: () => get<ComputerUseLiveView>('/api/computer-use/live-view'),
-  browseStatus: () => get<BrowseStatus>('/api/browse/status'),
-  browseKill: (reason: string) => post<{ kill: BrowseKillState }>('/api/browse/kill', { reason }),
-  browseKillRelease: () => post<{ kill: BrowseKillState }>('/api/browse/kill/release', { confirm: true }),
   selRotate: () => post<{ rotated: boolean; entries_before: number; entries_after: number; archive_path: string }>('/api/sel/rotate'),
   sessionArchives: () => get<{ archives: SessionArchive[] }>('/api/session/archive').then((d) => d.archives),
   sessionArchiveRead: (name: string) =>
@@ -4520,9 +4714,11 @@ export const api = {
   },
   updateCheck: () => get<UpdateCheck>('/api/update/check'),
   changelog: () => get<{ content: string }>('/api/changelog').then((d) => d.content),
-  applyUpdate: () => post<{ ok?: boolean; error?: string }>('/api/update'),
+  applyUpdate: () => post<UpdateActionResult>('/api/update'),
+  rollbackUpdate: () => post<UpdateActionResult>('/api/update', { action: 'rollback' }),
   cancelUpdate: () => post<{ ok?: boolean }>('/api/update/cancel'),
-  setAutoUpdate: (mode: UpdateMode) => post<{ ok?: boolean; auto?: UpdateMode }>('/api/update/auto', { mode }),
+  setAutoUpdate: (enabled: boolean) => post<{ ok?: boolean }>('/api/update/auto', { enabled }),
+  setUpdateDevMode: (enabled: boolean) => post<{ ok?: boolean }>('/api/update/dev-mode', { enabled }),
   restartProbe: () => post<{ ok: boolean; running_agents: number; sessions: number }>('/api/system/restart?probe=1'),
   restartGateway: () => post<{ ok?: boolean; status?: string; error?: string }>('/api/system/restart'),
 
@@ -4834,7 +5030,7 @@ export const api = {
     get<{ exists: boolean }>(`/api/artifacts/${encodeURIComponent(slug)}?probe=1`).then((d) => d.exists),
   createArtifact: (body: { name: string; content: string; kind?: string; source?: string; source_path?: string; description?: string; tags?: string[]; slug?: string; project_id?: string }) =>
     post<Artifact>('/api/artifacts', body),
-  updateArtifact: (slug: string, body: Record<string, unknown>) => patch<Artifact>(`/api/artifacts/${encodeURIComponent(slug)}`, body),
+  updateArtifact: (slug: string, body: ArtifactUpdate) => patch<Artifact>(`/api/artifacts/${encodeURIComponent(slug)}`, body),
   deleteArtifact: (slug: string) => del(`/api/artifacts/${encodeURIComponent(slug)}`),
   regenerateArtifactImage: (slug: string, body: { session?: string; prompt?: string }) =>
     post<{ ok: boolean; slug: string }>(`/api/artifacts/${encodeURIComponent(slug)}/regenerate`, body),
@@ -4848,21 +5044,21 @@ export const api = {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'If-Match': String(version), ...SK },
       body: JSON.stringify({ model }),
-    }).then(j<{ slug: string; version: number; mime: string }>),
+    }).then(j<{ slug: string; version: number; mime: string }>).then((result) => publishArtifactModelSaved(slug, version, result)),
   artifactSheetModel: (slug: string) => get<SheetModelResponse>(`/api/artifacts/${encodeURIComponent(slug)}/model`),
   saveArtifactSheetModel: (slug: string, version: number, model: SheetModelJson) =>
     fetch(`/api/artifacts/${encodeURIComponent(slug)}/model`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'If-Match': String(version), ...SK },
       body: JSON.stringify({ model }),
-    }).then(j<{ slug: string; version: number; mime: string }>),
+    }).then(j<{ slug: string; version: number; mime: string }>).then((result) => publishArtifactModelSaved(slug, version, result)),
   artifactDeckModel: (slug: string) => get<DeckModelResponse>(`/api/artifacts/${encodeURIComponent(slug)}/model`),
   saveArtifactDeckModel: (slug: string, version: number, model: DeckModelJson) =>
     fetch(`/api/artifacts/${encodeURIComponent(slug)}/model`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'If-Match': String(version), ...SK },
       body: JSON.stringify({ model }),
-    }).then(j<{ slug: string; version: number; mime: string }>),
+    }).then(j<{ slug: string; version: number; mime: string }>).then((result) => publishArtifactModelSaved(slug, version, result)),
 
   deployedArtifacts: () => get<{ deployments: ArtifactDeployment[] }>('/api/artifacts/deployed').then((d) => d.deployments),
   deployArtifact: (slug: string, body?: { entry?: string }) =>

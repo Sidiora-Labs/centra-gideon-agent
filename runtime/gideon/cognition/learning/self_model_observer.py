@@ -285,7 +285,7 @@ class _SelfModelRows:
         for item in stored.get("observations") or []:
             if not isinstance(item, dict):
                 continue
-            arguments = {
+            arguments: dict = {
                 "pattern": str(item.get("pattern") or pattern),
                 "route": str(item.get("route") or ""),
                 "tools": tuple(item.get("tools") or ()),
@@ -408,7 +408,7 @@ class _PrincipleInstaller:
         if not body:
             return False
         pattern = str(proposal.get("title") or body)
-        fields = dict(
+        fields: dict = dict(
             facet=Facet.PRINCIPLE.value,
             key=_principle_slug(pattern),
             body=body,

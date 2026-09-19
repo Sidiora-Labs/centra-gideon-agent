@@ -104,7 +104,6 @@ from gideon.interfaces.dashboard.handlers.core import (
     api_session_agents_list,
     api_stt_transcribe,
     api_token_local,
-    dist_font,
     favicon,
     index,
     manifest_webmanifest,
@@ -355,10 +354,10 @@ from gideon.interfaces.dashboard.handlers.updates import (
     api_update_auto,
     api_update_cancel,
     api_update_check,
+    api_update_dev_mode,
     api_update_simulate,
     get_update_info,
     install_log_ring_handler,
-    update_check_due,
 )
 
 

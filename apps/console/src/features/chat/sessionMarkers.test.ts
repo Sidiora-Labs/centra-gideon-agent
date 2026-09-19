@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { branchIndexOf } from './branchLineage'
-import { deriveSessionMarkers, LABEL_MAX } from './sessionMarkers'
+import { deriveSessionMarkers, EXCERPT_MAX, LABEL_MAX } from './sessionMarkers'
 import { assistantTurn, hydrateTurns, userTurn, type ChatTurn, type HistMsg } from './chatTypes'
 
 const kinds = (turns: ChatTurn[]) => deriveSessionMarkers(turns).map((m) => m.kind)
@@ -39,6 +39,70 @@ describe('deriveSessionMarkers — one marker per turn', () => {
 
   it('is empty for an empty session', () => {
     expect(deriveSessionMarkers([])).toEqual([])
+  })
+})
+
+describe('deriveSessionMarkers — preview context', () => {
+  it('carries the role, timestamp, request, and response excerpts for both sides of a turn pair', () => {
+    const turns = hydrateTurns([
+      { role: 'user', content: 'Please   inspect\nthis repository', ts: '2026-09-07T14:32:05Z' },
+      { role: 'assistant', content: 'The repository is healthy.' },
+    ])
+    turns[1].ts = '2026-09-07T14:33:06Z'
+    const markers = deriveSessionMarkers(turns)
+    expect(markers.map((m) => ({
+      role: m.role,
+      timestamp: m.timestamp,
+      request: m.requestExcerpt,
+      response: m.responseExcerpt,
+    }))).toEqual([
+      {
+        role: 'user',
+        timestamp: '2026-09-07T14:32:05Z',
+        request: 'Please inspect this repository',
+        response: 'The repository is healthy.',
+      },
+      {
+        role: 'assistant',
+        timestamp: '2026-09-07T14:33:06Z',
+        request: 'Please inspect this repository',
+        response: 'The repository is healthy.',
+      },
+    ])
+  })
+
+  it('gives every event mark its owning turn context without creating another mark', () => {
+    const turns = hydrateTurns([
+      { role: 'user', content: 'Read the file' },
+      { role: 'tool', content: 'Read', meta: { tool_call_id: 'read-1', done: true } },
+      { role: 'assistant', content: 'The file says hello.' },
+    ])
+    const markers = deriveSessionMarkers(turns)
+    expect(markers).toHaveLength(3)
+    expect(markers[2]).toMatchObject({
+      kind: 'tool',
+      role: 'assistant',
+      requestExcerpt: 'Read the file',
+      responseExcerpt: 'The file says hello.',
+    })
+  })
+
+  it('bounds excerpts independently from the shorter navigation label', () => {
+    const request = `request ${'x'.repeat(EXCERPT_MAX * 2)}`
+    const response = `response ${'y'.repeat(EXCERPT_MAX * 2)}`
+    const markers = deriveSessionMarkers([userTurn(request), assistantTurn(response)])
+    expect(markers[0].label).toHaveLength(LABEL_MAX)
+    expect(markers[0].requestExcerpt).toHaveLength(EXCERPT_MAX)
+    expect(markers[0].responseExcerpt).toHaveLength(EXCERPT_MAX)
+  })
+
+  it('does not borrow a response past the next request or invent missing text', () => {
+    const markers = deriveSessionMarkers([userTurn('first'), userTurn('second'), assistantTurn('second answer')])
+    expect(markers.map((m) => [m.requestExcerpt, m.responseExcerpt])).toEqual([
+      ['first', ''],
+      ['second', 'second answer'],
+      ['second', 'second answer'],
+    ])
   })
 })
 

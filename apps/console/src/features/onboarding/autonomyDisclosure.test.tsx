@@ -60,7 +60,7 @@ beforeEach(() => {
   clearOnboardingExit()
   saveOnboardingState.mockResolvedValue({ ok: true, state: {} })
   onboarding.mockResolvedValue({ needs_model: true, has_model_provider: false, has_chat_binding: false })
-  gideonConfig.mockResolvedValue({ updates: { auto: 'staged' }, apps: { registry_source_enabled: true } })
+  gideonConfig.mockResolvedValue({ auto_update: true, apps: { registry_source_enabled: true } })
   setAutoUpdate.mockResolvedValue({ ok: true })
 })
 
@@ -80,22 +80,13 @@ async function reachDoneScreen() {
 }
 
 describe('the done screen tells what the product does on its own', () => {
-  it('hands over the real staged-update switch, reflecting the config', async () => {
+  it('hands over the real auto-update switch, reflecting the config', async () => {
     await reachDoneScreen()
-    const sw = await screen.findByRole('switch', { name: 'Update automatically (staged)' })
+    const sw = await screen.findByRole('switch', { name: 'Update automatically' })
     expect(sw).toHaveAttribute('aria-checked', 'true')
     fireEvent.click(sw)
-    expect(setAutoUpdate).toHaveBeenCalledWith('off')
+    expect(setAutoUpdate).toHaveBeenCalledWith(false)
     expect(sw).toHaveAttribute('aria-checked', 'false')
-  })
-
-  it('an install that never opted in shows the switch off — staged is opt-in', async () => {
-    gideonConfig.mockResolvedValue({ auto_update: true, apps: { registry_source_enabled: true } })
-    await reachDoneScreen()
-    const sw = await screen.findByRole('switch', { name: 'Update automatically (staged)' })
-    expect(sw).toHaveAttribute('aria-checked', 'false')
-    fireEvent.click(sw)
-    expect(setAutoUpdate).toHaveBeenCalledWith('staged')
   })
 
   it('a refused write tells through the app toast and does not fight the switch', async () => {
@@ -105,9 +96,9 @@ describe('the done screen tells what the product does on its own', () => {
     window.addEventListener('ne:toast', onToast)
     try {
       await reachDoneScreen()
-      fireEvent.click(await screen.findByRole('switch', { name: 'Update automatically (staged)' }))
+      fireEvent.click(await screen.findByRole('switch', { name: 'Update automatically' }))
       await waitFor(() => expect(toasts.some((m) => m.includes("Couldn't disable automatic updates"))).toBe(true))
-      expect(screen.getByRole('switch', { name: 'Update automatically (staged)' })).toHaveAttribute('aria-checked', 'false')
+      expect(screen.getByRole('switch', { name: 'Update automatically' })).toHaveAttribute('aria-checked', 'false')
     } finally {
       window.removeEventListener('ne:toast', onToast)
     }
@@ -121,9 +112,9 @@ describe('the done screen tells what the product does on its own', () => {
   })
 
   it('stays quiet about a source a pre-provisioned opt-out never got', async () => {
-    gideonConfig.mockResolvedValue({ updates: { auto: 'staged' }, apps: { registry_source_enabled: false } })
+    gideonConfig.mockResolvedValue({ auto_update: true, apps: { registry_source_enabled: false } })
     await reachDoneScreen()
-    await screen.findByRole('switch', { name: 'Update automatically (staged)' })
+    await screen.findByRole('switch', { name: 'Update automatically' })
     expect(screen.queryByText(/sources configured for this gateway/)).toBeNull()
   })
 
@@ -131,7 +122,7 @@ describe('the done screen tells what the product does on its own', () => {
     gideonConfig.mockRejectedValue(new Error('boom'))
     await reachDoneScreen()
     const link = await screen.findByRole('button', { name: 'Manage updates in Settings' })
-    expect(screen.queryByRole('switch', { name: 'Update automatically (staged)' })).toBeNull()
+    expect(screen.queryByRole('switch', { name: 'Update automatically' })).toBeNull()
     fireEvent.click(link)
     expect(peekOnboardingExit()).toBe('settings/updates')
   })

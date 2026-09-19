@@ -104,7 +104,7 @@ class AliasIndex:
             return []
         tokens = _tokenize(text)
         words = tuple(token[0] for token in tokens)
-        mentions = []
+        mentions: list = []
         cursor = 0
         while cursor < len(tokens):
             candidates = self._phrases.get(words[cursor], {})
@@ -490,7 +490,7 @@ class _GraphRecall:
 
     def evidence(self, text, index) -> dict:
         names = {entity.id: entity.name for entity in self.graph.entities()}
-        evidence = {}
+        evidence: dict = {}
         for entity in self.graph.resolve_query(text, index):
             label = names.get(entity, entity)
             for link in self.graph.backlinks(entity, limit=60):
@@ -500,7 +500,7 @@ class _GraphRecall:
         return evidence
 
     def boosts(self, text, index, limit) -> dict:
-        weights = {}
+        weights: dict = {}
         for entity in self.graph.resolve_query(text, index):
             degree = int(self.graph.stats(entity).get("inbound_count", 0) or 0)
             weight = max(GRAPH_BOOST_FLOOR, GRAPH_BOOST_BETA * math.log1p(degree))
@@ -574,7 +574,7 @@ class _EntityProjection(_GraphTable):
                         float(1.0 if row["confidence"] is None else row["confidence"]),
                     )
                 )
-        edges = {}
+        edges: dict = {}
         for record in sorted(records):
             for left, right in combinations(records[record], 2):
                 if left[0] == right[0]:

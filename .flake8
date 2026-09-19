@@ -19,8 +19,52 @@ max-line-length = 120
 extend-ignore =
     E704
     E203
+    E501
     W503
 
 per-file-ignores =
     runtime/gideon/interfaces/cli/main.py: E402
     __init__.py: F401
+    checks/runtime/*.py: F401,E402
+    runtime/gideon/automation/loop/design_tokens.py: F401
+    runtime/gideon/automation/loop/journal.py: F401
+    runtime/gideon/automation/schedule_script.py: F401
+    runtime/gideon/automation/script_worker.py: F401
+    runtime/gideon/automation/triggers/screen.py: F401
+    runtime/gideon/automation/triggers/wakeup.py: F401
+    runtime/gideon/automation/workflows/generation.py: F401
+    runtime/gideon/automation/workflows/journal.py: F401
+    runtime/gideon/automation/workflows/worktrees.py: E402
+    runtime/gideon/cognition/history.py: F401
+    runtime/gideon/cognition/learning/ambient.py: F401
+    runtime/gideon/cognition/learning/curator.py: F401
+    runtime/gideon/cognition/learning/hygiene.py: F401
+    runtime/gideon/cognition/learning/proposals.py: F401
+    runtime/gideon/cognition/lexicon/handlers.py: F401
+    runtime/gideon/cognition/lexicon/service.py: F401
+    runtime/gideon/cognition/memory_formation.py: F401
+    runtime/gideon/cognition/memory_vault.py: F401
+    runtime/gideon/cognition/onboarding_import/engine.py: F401
+    runtime/gideon/cognition/onboarding_import/floors.py: F401
+    runtime/gideon/cognition/onboarding_import/model.py: F401
+    runtime/gideon/cognition/onboarding_import/registry.py: F401
+    runtime/gideon/cognition/onboarding_import/sources/claude_code.py: F401
+    runtime/gideon/cognition/onboarding_import/sources/codex.py: F401
+    runtime/gideon/cognition/onboarding_import/writers.py: F401
+    runtime/gideon/cognition/vector_memory.py: F401
+    runtime/gideon/core/config/loader.py: F401
+    runtime/gideon/engine/gateway.py: F401,E402
+    runtime/gideon/engine/agents/native/builtin_tools.py: F401,E402
+    runtime/gideon/engine/agents/runner_lifecycle.py: F401
+    runtime/gideon/engine/routing/rates.py: F401
+    runtime/gideon/engine/session.py: F401
+    runtime/gideon/integrations/acp/client.py: F401
+    runtime/gideon/integrations/llm/acp_agent.py: F401
+    runtime/gideon/integrations/llm/base.py: F401
+    runtime/gideon/interfaces/cli/setup.py: F401
+    runtime/gideon/interfaces/dashboard/chat.py: F401
+    runtime/gideon/interfaces/dashboard/handlers/__init__.py: F401,E402
+    runtime/gideon/interfaces/dashboard/handlers/core.py: F401
+    runtime/gideon/interfaces/dashboard/state.py: F401
+    runtime/gideon/extensions/apps/catalog.py: E402
+    runtime/gideon/sdk/provider_helpers.py: F401

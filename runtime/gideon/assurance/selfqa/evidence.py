@@ -41,6 +41,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import shutil
 import subprocess
 import time
@@ -101,6 +102,7 @@ def classify_kind(relpath: str) -> str:
 
 
 FFMPEG_BIN = "ffmpeg"
+FFPROBE_BIN = "ffprobe"
 _PROBE_TTL_SECS = 30.0
 _probe_cache: tuple[float, bool] | None = None
 _FFMPEG_PROBE_TIMEOUT = 5
@@ -189,17 +191,24 @@ GIF_FPS = 5
 GIF_WIDTH = 640
 
 
-def _run_ffmpeg(argv: list[str]) -> tuple[bool, str]:
-    """Run one ffmpeg command as a local subprocess. Returns ``(ok, stderr_tail)``.
+def _run_ffmpeg(argv: list[str], *, probe: bool = False) -> tuple[bool, str]:
+    """Run one ffmpeg-suite command. Returns ``(ok, output_or_stderr_tail)``.
 
     The caller composes a FIXED filter argv; the only caller-derived values are input/output
     paths inside the bundle dir. A failure returns ``(False, <stderr>)`` rather than raising, so
-    the derivation degrades to a recorded reason instead of taking the node down.
+    the derivation degrades to a recorded reason instead of taking the node down. ``probe`` uses
+    ffprobe and returns its stdout on success so callers can derive media dimensions such as the
+    contact-sheet row count.
     """
+    command = (
+        [FFPROBE_BIN, *argv]
+        if probe
+        else [FFMPEG_BIN, "-y", "-hide_banner", "-loglevel", "error", *argv]
+    )
     try:
         proc = (
             subprocess.run(  # noqa: S603 - fixed filter argv, no shell, host media tool
-                [FFMPEG_BIN, "-y", "-hide_banner", "-loglevel", "error", *argv],
+                command,
                 capture_output=True,
                 text=True,
                 timeout=_FFMPEG_RUN_TIMEOUT,
@@ -210,7 +219,41 @@ def _run_ffmpeg(argv: list[str]) -> tuple[bool, str]:
         return False, str(exc)[:300]
     if proc.returncode != 0:
         return False, (proc.stderr or "").strip()[:300]
-    return True, ""
+    return True, (proc.stdout or "").strip()[:300] if probe else ""
+
+
+def _recording_duration_secs(recording: Path) -> tuple[float | None, str]:
+    """Return the recording's measured duration, or a reason it could not be measured."""
+    if not shutil.which(FFPROBE_BIN):
+        return None, "ffprobe is not available on this host"
+    ok, output = _run_ffmpeg(
+        [
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(recording),
+        ],
+        probe=True,
+    )
+    if not ok:
+        return None, output or "ffprobe could not read the recording"
+    try:
+        duration = float(output)
+    except ValueError:
+        return None, "ffprobe returned an invalid recording duration"
+    if not math.isfinite(duration) or duration <= 0:
+        return None, "ffprobe returned a non-positive recording duration"
+    return duration, ""
+
+
+def _contact_sheet_rows(duration_secs: float) -> int:
+    sampled_frames = max(
+        1, math.ceil(duration_secs / CONTACT_SHEET_FRAME_INTERVAL_SECS)
+    )
+    return math.ceil(sampled_frames / CONTACT_SHEET_COLUMNS)
 
 
 def derive_contact_sheet(
@@ -232,8 +275,19 @@ def derive_contact_sheet(
     if not ffmpeg_available():
         return Derivation(kind=KIND_CONTACT_SHEET, degraded_reason=_REASON_NO_FFMPEG)
 
+    duration_secs, duration_error = _recording_duration_secs(recording)
+    if duration_secs is None:
+        return Derivation(
+            kind=KIND_CONTACT_SHEET,
+            degraded_reason=f"could not derive contact-sheet rows: {duration_error}",
+        )
+
     out = root / out_name
-    vf = f"fps=1/{CONTACT_SHEET_FRAME_INTERVAL_SECS},tile={CONTACT_SHEET_COLUMNS}x0"
+    rows = _contact_sheet_rows(duration_secs)
+    vf = (
+        f"fps=1/{CONTACT_SHEET_FRAME_INTERVAL_SECS},"
+        f"tile={CONTACT_SHEET_COLUMNS}x{rows}"
+    )
     ok, err = _run_ffmpeg(["-i", str(recording), "-vf", vf, "-frames:v", "1", str(out)])
     if not ok:
         return Derivation(

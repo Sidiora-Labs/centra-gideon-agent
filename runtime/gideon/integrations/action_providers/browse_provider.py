@@ -429,7 +429,7 @@ class BrowseActionProvider(ActionProvider):
                 handoff.record_login(start_url)
             except Exception:
                 logger.debug("browse: could not record the login", exc_info=True)
-        fields = dict(stdout=json.dumps(result.to_payload()))
+        fields: dict = dict(stdout=json.dumps(result.to_payload()))
         if not result.ok:
             detail = result.error or result.park_detail
             fields.update(

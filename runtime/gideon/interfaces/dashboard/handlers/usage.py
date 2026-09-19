@@ -51,7 +51,7 @@ async def api_usage_rollup(request: web.Request) -> web.Response:
         )
     since = request.query.get("since", "")
     until = request.query.get("until", "")
-    session = request.query.get("session", "")
+    session = ul.canonical_session_query_key(request.query.get("session", ""))
     try:
         rows = ul.rollup(
             since=since, until=until, group_by=group_by, session_key=session
@@ -85,7 +85,7 @@ async def api_usage_totals(request: web.Request) -> web.Response:
     """
     since = request.query.get("since", "")
     until = request.query.get("until", "")
-    session = request.query.get("session", "")
+    session = ul.canonical_session_query_key(request.query.get("session", ""))
     try:
         totals = ul.totals(since=since, until=until, session_key=session)
     except Exception:  # noqa: BLE001

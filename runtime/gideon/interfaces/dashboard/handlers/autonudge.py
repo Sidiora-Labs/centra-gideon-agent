@@ -10,7 +10,6 @@ from aiohttp import web
 from gideon.automation.triggers.nudge import get_instance as _autonudge_get
 from gideon.core.config import loader as config_loader
 from gideon.core.config.loader import workspace_root
-from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.security.security import is_sensitive_path
 from gideon.security.sel import sel
@@ -183,14 +182,12 @@ async def api_autonudge_delete(request: web.Request) -> web.Response:
         return web.json_response({"error": "auto-nudge disabled"}, status=503)
     loop_id = request.match_info["loop_id"]
     existing = next((lp for lp in svc.list_all() if lp.id == loop_id), None)
-    if existing is None:
-        return json_error("not_found", status=404)
     await svc.remove(loop_id)
     sel().log_tool_invocation(
-        session_key=existing.session_name,
+        session_key=existing.session_name if existing else "",
         source="dashboard",
         tool_name="autonudge_delete",
-        outcome="success",
+        outcome="success" if existing else "noop",
         metadata={"loop_id": loop_id, "caller": request.remote or ""},
     )
     return web.json_response({"ok": True})

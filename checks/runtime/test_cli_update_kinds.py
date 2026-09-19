@@ -14,8 +14,8 @@ A test that actually ran `git reset --hard` or `pip -U` would be a wrecking ball
 
 from __future__ import annotations
 
-import json
 import subprocess
+import types
 
 import pytest
 
@@ -24,7 +24,7 @@ from gideon.operations import self_update as su
 
 
 class _Git:
-    """Records every git invocation and answers from a per-prefix script."""
+    """Records every git invocation and answers from a per-subcommand script."""
 
     def __init__(self, **replies: tuple[int, str, str]) -> None:
         self.calls: list[list[str]] = []
@@ -32,10 +32,7 @@ class _Git:
 
     def __call__(self, args: list[str], *, cwd: str, timeout: float):
         self.calls.append(list(args))
-        key = args[0]
-        if key == "rev-parse" and "--verify" in args:
-            key = "rev_parse_head" if args[-1].startswith("HEAD") else "rev_parse_ref"
-        rc, out, err = self._replies.get(key, (0, "", ""))
+        rc, out, err = self._replies.get(args[0], (0, "", ""))
         return subprocess.CompletedProcess(["git", *args], rc, out, err)
 
     def ran(self, *prefix: str) -> bool:
@@ -65,42 +62,25 @@ def spawns(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
 
 
 @pytest.fixture(autouse=True)
-def _no_build(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No frontend build in any of these tests. The release probe needs no stub:
-    without ``GIDEON_RELEASE_REPOSITORY`` the resolver reads the on-disk cache
-    (redirected to a per-test home), so it is offline by construction."""
+def _no_network_and_no_build(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No release probe (network) and no frontend build in any of these tests."""
+    monkeypatch.setattr(cli_server, "_latest_release_version", lambda: "")
     monkeypatch.setattr(cli_server, "build_frontend_sync", lambda path: None)
     monkeypatch.delenv("GIDEON_INSTALL_KIND", raising=False)
     monkeypatch.delenv("GIDEON_PROJECT_DIR", raising=False)
 
 
-def _policy(monkeypatch, tmp_path, *, releases=(), **updates) -> None:
-    """Write the REAL config + release catalog this install should read."""
-    from gideon.core.config import loader as config_loader
-
-    home = tmp_path / "home"
-    home.mkdir(exist_ok=True)
-    monkeypatch.setenv("GIDEON_HOME", str(home))
-    config_loader.config_path().write_text(
-        json.dumps({"updates": updates}), encoding="utf-8"
-    )
-    su.write_releases_cache(
-        {
-            "releases": [
-                {"tag": tag, "prerelease": "-" in tag, "name": "", "body": ""}
-                for tag in releases
-            ]
-        }
-    )
+def _dev_mode(monkeypatch: pytest.MonkeyPatch, on: bool) -> None:
+    """Pin dashboard.update_dev_mode without writing a config file."""
+    cfg = types.SimpleNamespace(dashboard=types.SimpleNamespace(update_dev_mode=on))
+    monkeypatch.setattr(cli_server.AppConfig, "load", classmethod(lambda cls: cfg))
 
 
 def _as_git_checkout(monkeypatch: pytest.MonkeyPatch, tmp_path) -> str:
-    proj = tmp_path / "proj"
-    proj.mkdir(exist_ok=True)
-    (proj / ".git").mkdir(exist_ok=True)
-    (proj / "pyproject.toml").write_text("[project]\n")
-    monkeypatch.setenv("GIDEON_PROJECT_DIR", str(proj))
-    return str(proj)
+    (tmp_path / ".git").mkdir(exist_ok=True)
+    (tmp_path / "pyproject.toml").write_text("[project]\n")
+    monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
+    return str(tmp_path)
 
 
 def test_every_install_kind_has_a_cli_branch() -> None:
@@ -131,47 +111,16 @@ def test_unmapped_kind_refuses_and_names_what_it_detected(
     assert not git.calls and not spawns
 
 
-def test_git_kind_fast_forwards_onto_the_resolved_release_tag(
+def test_git_kind_fetches_and_resets_the_resolved_branch(
     monkeypatch: pytest.MonkeyPatch, tmp_path, capsys, spawns
 ) -> None:
-    """RUM-59: a normal source install rides the release TAG, by fast-forward."""
     proj = _as_git_checkout(monkeypatch, tmp_path)
-    _policy(monkeypatch, tmp_path, channel="stable", releases=["v0.2.1"])
+    _dev_mode(monkeypatch, True)
     git = _Git(
         **{
-            "status": (0, "", ""),
-            "rev_parse_ref": (0, "newsha\n", ""),
-            "rev_parse_head": (0, "oldsha\n", ""),
-            "merge-base": (0, "", ""),
-            "merge": (0, "", ""),
-        }
-    )
-    monkeypatch.setattr(su, "_run_git", git)
-
-    cli_server._update()
-
-    assert git.ran("fetch", "--tags", "origin")
-    assert git.ran("merge", "--ff-only", "v0.2.1")
-    assert not git.ran("reset")
-    assert not git.ran("pull")
-    assert any("install" in " ".join(a) for a in spawns)
-    assert any(a[-2:] == ["setup", "--agent-only"] for a in spawns)
-    assert proj in capsys.readouterr().out
-
-
-def test_git_kind_nightly_is_the_only_channel_that_tracks_the_branch(
-    monkeypatch: pytest.MonkeyPatch, tmp_path, capsys, spawns
-) -> None:
-    _as_git_checkout(monkeypatch, tmp_path)
-    _policy(monkeypatch, tmp_path, channel="nightly", releases=["v0.2.1"])
-    git = _Git(
-        **{
-            "status": (0, "", ""),
             "rev-parse": (0, "main\n", ""),
-            "rev_parse_ref": (0, "newsha\n", ""),
-            "rev_parse_head": (0, "oldsha\n", ""),
-            "merge-base": (0, "", ""),
-            "merge": (0, "", ""),
+            "diff": (1, "", ""),
+            "status": (0, "", ""),
         }
     )
     monkeypatch.setattr(su, "_run_git", git)
@@ -179,89 +128,57 @@ def test_git_kind_nightly_is_the_only_channel_that_tracks_the_branch(
     cli_server._update()
 
     assert git.ran("fetch", "origin", "main")
-    assert git.ran("merge", "--ff-only", "origin/main")
-    assert not git.ran("reset")
+    assert git.ran("reset", "--hard", "origin/main")
+    assert any("install" in " ".join(a) for a in spawns)
+    assert any(a[-2:] == ["setup", "--agent-only"] for a in spawns)
+    assert proj in capsys.readouterr().out
 
 
-def test_git_kind_already_on_the_tag_does_not_merge(
+def test_git_kind_already_up_to_date_does_not_reset(
     monkeypatch: pytest.MonkeyPatch, tmp_path, capsys, spawns
 ) -> None:
     _as_git_checkout(monkeypatch, tmp_path)
-    _policy(monkeypatch, tmp_path, channel="stable", releases=["v0.2.1"])
-    git = _Git(
-        **{
-            "status": (0, "", ""),
-            "rev_parse_ref": (0, "same\n", ""),
-            "rev_parse_head": (0, "same\n", ""),
-        }
-    )
+    _dev_mode(monkeypatch, True)
+    git = _Git(**{"rev-parse": (0, "main\n", ""), "diff": (0, "", "")})
     monkeypatch.setattr(su, "_run_git", git)
 
     cli_server._update()
 
     assert "Already up to date" in capsys.readouterr().out
-    assert not git.ran("merge")
+    assert not git.ran("reset")
     assert not spawns
 
 
-def test_git_kind_with_no_published_release_is_not_an_update(
+def test_git_kind_dev_mode_off_on_latest_tag_rides_tags_not_commits(
     monkeypatch: pytest.MonkeyPatch, tmp_path, capsys, spawns
 ) -> None:
+    """dev_mode OFF + already on the latest release ⇒ don't pull arbitrary commits.
+
+    Same rule the dashboard's apply enforces, so the two surfaces cannot disagree
+    about what "up to date" means for a checkout.
+    """
     _as_git_checkout(monkeypatch, tmp_path)
-    _policy(monkeypatch, tmp_path, channel="stable")
-    git = _Git(**{"status": (0, "", "")})
-    monkeypatch.setattr(su, "_run_git", git)
-
-    cli_server._update()
-
-    assert "No published release" in capsys.readouterr().out
-    assert not git.ran("fetch") and not spawns
-
-
-def test_git_kind_missing_pin_refuses_with_the_way_out(
-    monkeypatch: pytest.MonkeyPatch, tmp_path, capsys, spawns
-) -> None:
-    _as_git_checkout(monkeypatch, tmp_path)
-    _policy(monkeypatch, tmp_path, channel="stable", pin="9.9.9", releases=["v0.2.1"])
-    git = _Git(**{"status": (0, "", "")})
+    _dev_mode(monkeypatch, False)
+    monkeypatch.setattr(cli_server, "_latest_release_version", lambda: "0.0.1")
+    monkeypatch.setattr(cli_server, "__version__", "9.9.9")
+    git = _Git()
     monkeypatch.setattr(su, "_run_git", git)
 
     cli_server._update()
 
     out = capsys.readouterr().out
-    assert "9.9.9" in out and "clear the pin" in out.lower()
-    assert not git.ran("fetch") and not spawns
+    assert "Already on the latest release" in out
+    assert "Developer update mode" in out
+    assert not git.calls and not spawns
 
 
 def test_git_kind_fetch_failure_exits_nonzero_before_touching_the_tree(
     monkeypatch: pytest.MonkeyPatch, tmp_path, capsys, spawns
 ) -> None:
     _as_git_checkout(monkeypatch, tmp_path)
-    _policy(monkeypatch, tmp_path, channel="stable", releases=["v0.2.1"])
-    git = _Git(**{"status": (0, "", ""), "fetch": (128, "", "fatal: no such ref")})
-    monkeypatch.setattr(su, "_run_git", git)
-
-    with pytest.raises(SystemExit) as exc:
-        cli_server._update()
-
-    assert exc.value.code == 1
-    assert "git fetch failed" in capsys.readouterr().out
-    assert not git.ran("merge")
-
-
-def test_git_kind_non_fast_forward_is_refused(
-    monkeypatch: pytest.MonkeyPatch, tmp_path, capsys, spawns
-) -> None:
-    """RUM-59: divergence stops the update; it never becomes a reset."""
-    _as_git_checkout(monkeypatch, tmp_path)
-    _policy(monkeypatch, tmp_path, channel="stable", releases=["v0.2.1"])
+    _dev_mode(monkeypatch, True)
     git = _Git(
-        **{
-            "status": (0, "", ""),
-            "rev_parse_ref": (0, "newsha\n", ""),
-            "rev_parse_head": (0, "oldsha\n", ""),
-            "merge-base": (1, "", ""),
-        }
+        **{"rev-parse": (0, "main\n", ""), "fetch": (128, "", "fatal: no such ref")}
     )
     monkeypatch.setattr(su, "_run_git", git)
 
@@ -269,30 +186,95 @@ def test_git_kind_non_fast_forward_is_refused(
         cli_server._update()
 
     assert exc.value.code == 1
-    assert "Cannot fast-forward" in capsys.readouterr().out
-    assert not git.ran("merge") and not git.ran("reset") and not spawns
+    assert "git fetch origin main failed" in capsys.readouterr().out
+    assert not git.ran("reset")
 
 
-def test_tracked_changes_pause_the_update_without_a_prompt(
-    monkeypatch: pytest.MonkeyPatch, tmp_path, capsys, spawns
-) -> None:
-    """RUM-75: the interim confirm-then-destroy prompt is gone. Tracked edits
-    pause the update with the reason — there is nothing left to say yes to."""
-    _as_git_checkout(monkeypatch, tmp_path)
-    _policy(monkeypatch, tmp_path, channel="stable", releases=["v0.2.1"])
+def _dirty_git(monkeypatch: pytest.MonkeyPatch) -> _Git:
     git = _Git(
         **{
+            "rev-parse": (0, "main\n", ""),
+            "diff": (1, "", ""),
             "status": (
                 0,
                 " M runtime/gideon/interfaces/cli/main.py\n?? scratch.txt\n",
                 "",
-            )
+            ),
         }
     )
     monkeypatch.setattr(su, "_run_git", git)
+    return git
+
+
+def test_tracked_changes_confirmed_at_a_tty_proceeds(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, capsys, spawns
+) -> None:
+    _as_git_checkout(monkeypatch, tmp_path)
+    _dev_mode(monkeypatch, True)
+    git = _dirty_git(monkeypatch)
+    monkeypatch.setattr(cli_server.sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+
+    cli_server._update()
+
+    assert git.ran("reset", "--hard", "origin/main")
+    out = capsys.readouterr().out
+    assert "runtime/gideon/interfaces/cli/main.py" in out
+    assert "scratch.txt" not in out
+
+
+def test_tracked_changes_declined_at_a_tty_aborts_with_zero(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, capsys, spawns
+) -> None:
+    _as_git_checkout(monkeypatch, tmp_path)
+    _dev_mode(monkeypatch, True)
+    git = _dirty_git(monkeypatch)
+    monkeypatch.setattr(cli_server.sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+
+    with pytest.raises(SystemExit) as exc:
+        cli_server._update()
+
+    assert exc.value.code == 0
+    assert "Aborted." in capsys.readouterr().out
+    assert not git.ran("reset")
+    assert not spawns
+
+
+def test_eof_at_the_prompt_is_not_a_yes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, spawns
+) -> None:
+    _as_git_checkout(monkeypatch, tmp_path)
+    _dev_mode(monkeypatch, True)
+    git = _dirty_git(monkeypatch)
+    monkeypatch.setattr(cli_server.sys.stdin, "isatty", lambda: True, raising=False)
+
+    def _eof(prompt: str = "") -> str:
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", _eof)
+
+    with pytest.raises(SystemExit):
+        cli_server._update()
+
+    assert not git.ran("reset")
+
+
+def test_non_interactive_stdin_refuses_the_reset_without_prompting(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, capsys, spawns
+) -> None:
+    """No TTY ⇒ never prompt, never guess "yes", and exit non-zero.
+
+    A piped "y" (or an EOFError traceback) would let cron discard uncommitted work
+    nobody agreed to lose. Refusing is recoverable; a wrong yes is not.
+    """
+    _as_git_checkout(monkeypatch, tmp_path)
+    _dev_mode(monkeypatch, True)
+    git = _dirty_git(monkeypatch)
+    monkeypatch.setattr(cli_server.sys.stdin, "isatty", lambda: False, raising=False)
 
     def _boom(prompt: str = "") -> str:
-        raise AssertionError("input() must never gate a destructive update")
+        raise AssertionError("input() must not be called without a TTY")
 
     monkeypatch.setattr("builtins.input", _boom)
 
@@ -301,18 +283,17 @@ def test_tracked_changes_pause_the_update_without_a_prompt(
 
     assert exc.value.code == 1
     out = capsys.readouterr().out
-    assert "Update paused" in out
-    assert "commit or stash" in out.lower()
-    assert "runtime/gideon/interfaces/cli/main.py" in out
-    assert "scratch.txt" not in out
-    assert not git.ran("fetch") and not git.ran("merge") and not spawns
+    assert "stdin is not a terminal" in out
+    assert "git stash" in out
+    assert not git.ran("reset")
+    assert not spawns
 
 
 def test_pip_kind_upgrades_without_a_source_tree(
-    monkeypatch: pytest.MonkeyPatch, tmp_path, capsys, spawns
+    monkeypatch: pytest.MonkeyPatch, capsys, spawns
 ) -> None:
     """The regression this atom exists for: no PROJECT_DIR, and it still updates."""
-    _policy(monkeypatch, tmp_path, channel="stable", releases=["v9.9.9"])
+    monkeypatch.setattr(cli_server, "_latest_release_version", lambda: "9.9.9")
     git = _Git()
     monkeypatch.setattr(su, "_run_git", git)
     _fake_installer(monkeypatch)
@@ -333,9 +314,9 @@ def test_pip_kind_upgrades_without_a_source_tree(
 
 
 def test_pip_kind_already_current_skips_the_installer(
-    monkeypatch: pytest.MonkeyPatch, tmp_path, capsys, spawns
+    monkeypatch: pytest.MonkeyPatch, capsys, spawns
 ) -> None:
-    _policy(monkeypatch, tmp_path, channel="stable", releases=["v0.0.1"])
+    monkeypatch.setattr(cli_server, "_latest_release_version", lambda: "0.0.1")
     monkeypatch.setattr(cli_server, "__version__", "9.9.9")
 
     cli_server._update()
@@ -345,10 +326,10 @@ def test_pip_kind_already_current_skips_the_installer(
 
 
 def test_pip_kind_unknown_latest_upgrades_unpinned(
-    monkeypatch: pytest.MonkeyPatch, tmp_path, spawns
+    monkeypatch: pytest.MonkeyPatch, spawns
 ) -> None:
-    """Offline (no catalog) still tries: `-U gideon`, not a refusal."""
-    _policy(monkeypatch, tmp_path, channel="stable")
+    """Offline (no latest tag) still tries: `-U gideon`, not a refusal."""
+    monkeypatch.setattr(cli_server, "_latest_release_version", lambda: "")
     _fake_installer(monkeypatch)
 
     cli_server._update()
@@ -362,38 +343,11 @@ def test_pip_kind_unknown_latest_upgrades_unpinned(
     ] in spawns
 
 
-def test_pip_kind_selects_the_channel_release_not_just_the_newest(
-    monkeypatch: pytest.MonkeyPatch, tmp_path, spawns
-) -> None:
-    """RUM-57: beta installs the prerelease; stable skips it."""
-    _policy(monkeypatch, tmp_path, channel="beta", releases=["v9.9.9-rc.1", "v9.9.8"])
-    _fake_installer(monkeypatch)
-
-    cli_server._update()
-
-    assert any("gideon-agent-harness==9.9.9-rc.1" in a for a in spawns)
-
-
-def test_pip_kind_refuses_a_pin_that_names_no_release(
-    monkeypatch: pytest.MonkeyPatch, tmp_path, capsys, spawns
-) -> None:
-    _policy(monkeypatch, tmp_path, channel="stable", pin="1.2.3", releases=["v9.9.9"])
-    _fake_installer(monkeypatch)
-
-    with pytest.raises(SystemExit) as exc:
-        cli_server._update()
-
-    assert exc.value.code == 1
-    out = capsys.readouterr().out
-    assert "1.2.3" in out and "clear the pin" in out.lower()
-    assert not spawns
-
-
 def test_pip_kind_install_failure_reports_one_clean_line(
-    monkeypatch: pytest.MonkeyPatch, tmp_path, capsys
+    monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
     """uv's stderr is ANSI-colored and leads with the headline — say that, not raw bytes."""
-    _policy(monkeypatch, tmp_path, channel="stable", releases=["v9.9.9"])
+    monkeypatch.setattr(cli_server, "_latest_release_version", lambda: "9.9.9")
     _fake_installer(monkeypatch)
     raw = "\x1b[31m×\x1b[0m No solution found when resolving dependencies:\n  ╰─▶ unsatisfiable."
 
@@ -412,11 +366,11 @@ def test_pip_kind_install_failure_reports_one_clean_line(
 
 
 def test_pip_kind_no_installer_available_exits_one(
-    monkeypatch: pytest.MonkeyPatch, tmp_path, capsys, spawns
+    monkeypatch: pytest.MonkeyPatch, capsys, spawns
 ) -> None:
     from gideon.operations._installer import NoInstallerError
 
-    _policy(monkeypatch, tmp_path, channel="stable", releases=["v9.9.9"])
+    monkeypatch.setattr(cli_server, "_latest_release_version", lambda: "9.9.9")
 
     def _none(args):  # type: ignore[no-untyped-def]
         raise NoInstallerError("no pip, no uv")

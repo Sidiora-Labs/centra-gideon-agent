@@ -9,13 +9,15 @@ export interface ErrorTreatment {
   paint: { bg: string; ink: string; icon: string }
 }
 
+const DANGER_TOKEN = '--color-danger'
+
 export const ERROR_TREATMENTS: Record<ErrorTreatmentId, ErrorTreatment> = {
   'terminal-frame': {
     id: 'terminal-frame',
     label: 'Terminal frame',
     surfaceClass: 'font-mono tracking-wide rounded-none border border-danger',
     iconClass: 'text-danger',
-    paint: { bg: '--color-surface-container', ink: '--color-on-surface', icon: '--color-danger' },
+    paint: { bg: '--color-surface-container', ink: '--color-on-surface', icon: DANGER_TOKEN },
   },
   // Gideon Arcade: a dashed cabinet panel with a heavier frame — playful, still
   // unmistakably an error (the frame and glyph stay on the danger token).
@@ -24,7 +26,7 @@ export const ERROR_TREATMENTS: Record<ErrorTreatmentId, ErrorTreatment> = {
     label: 'Arcade panel',
     surfaceClass: 'rounded-xl border-2 border-dashed border-danger',
     iconClass: 'text-danger',
-    paint: { bg: '--color-surface-high', ink: '--color-on-surface', icon: '--color-danger' },
+    paint: { bg: '--color-surface-high', ink: '--color-on-surface', icon: DANGER_TOKEN },
   },
 }
 

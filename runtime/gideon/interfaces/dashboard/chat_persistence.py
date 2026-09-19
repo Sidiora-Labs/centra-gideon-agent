@@ -3,14 +3,15 @@
 import json
 import logging
 import re
+import shutil
 import time
 import uuid
+from pathlib import Path
 
 from gideon.core.atomic_write import atomic_write
 from gideon.core.config.loader import AppConfig
 from gideon.engine.agent import AGENTS_DIR
 from gideon.engine.task_modes import VALID_TASK_MODES
-from gideon.interfaces.dashboard.chat_index import build_chat_index, load_chat_index
 from gideon.interfaces.dashboard.chat_utils import (
     _normalize_model,
     _sync_dashboard_sessions,
@@ -19,7 +20,11 @@ from gideon.interfaces.dashboard.chat_utils import (
     persisted_history_key,
     resolve_history_key,
 )
-from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
+from gideon.interfaces.dashboard.state import (
+    ConsoleState,
+    _ChatSession,
+    resolve_session_workspace_path,
+)
 from gideon.security.security import redact_credentials, redact_exfiltration_urls
 
 
@@ -125,6 +130,33 @@ _MAX_HISTORY_CHARS = 8000
 _REASONING_EFFORT_RE = re.compile(r"^[a-z][a-z0-9_-]{0,23}$")
 
 
+def resolve_tool_result_path(session_id: str, result_id: str) -> Path | None:
+    """Resolve a tool-result record without creating its session workspace."""
+    if not result_id or "/" in result_id or ".." in result_id:
+        return None
+    try:
+        return (
+            resolve_session_workspace_path(session_id)
+            / "tool_results"
+            / f"{result_id}.json"
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def purge_session_workspace(session_id: str) -> bool:
+    """Remove an existing session workspace without materializing an absent one."""
+    try:
+        path = resolve_session_workspace_path(session_id)
+        if not path.is_dir():
+            return False
+        shutil.rmtree(path)
+    except (OSError, TypeError, ValueError):
+        logger.debug("session workspace purge failed for %s", session_id, exc_info=True)
+        return False
+    return not path.exists()
+
+
 def _validate_reasoning_effort(raw: object) -> str:
     """Return *raw* if it's a safe reasoning_effort token, else "".
 
@@ -180,6 +212,8 @@ def _persisted_message_count(state: ConsoleState, history_key: str) -> int:
 def save_all_sessions_to_history(state: ConsoleState) -> None:
     """Save all active sessions to history. Called on gateway shutdown."""
     for session in list(state._sessions.values()):
+        if not _persistable(session.messages):
+            continue
         try:
             save_session_to_history(state, session, force=True)
         except Exception:
@@ -263,39 +297,6 @@ def _attach_rewound(session: _ChatSession, m: dict) -> None:
         session.messages[-1]["rewound"] = out
 
 
-def _restore_project_context_root(session: _ChatSession, project_id: str) -> None:
-    """Re-grant the project's context directory as a tool root, if the project still exists.
-
-    The binding is granted at session-create time (``api_chat_session_create``) and lives on
-    the in-memory session, so nothing brought it back: a restored project chat carried the id
-    and none of the workspace access the id stands for.
-
-    The existence check is the validating half, and it is not cosmetic —
-    :meth:`HierarchyStore.context_dir` CREATES the directory it names, so re-granting a stale
-    id would mint a context folder for a project that was deleted while the gateway was down.
-    A binding that no longer resolves keeps its recorded id (it is the user's own history, and
-    a store that cannot be read must not silently unbind every chat) and grants nothing.
-    """
-    try:
-        from gideon.engine.tasks.hierarchy import HierarchyStore
-
-        store = HierarchyStore()
-        if store.get_project(project_id) is None:
-            logger.debug(
-                "restore: project %s is gone; granting no context root", project_id
-            )
-            return
-        context = str(store.context_dir(project_id))
-        if context and context not in (session._extra_tool_roots or []):
-            session._extra_tool_roots = [*(session._extra_tool_roots or []), context]
-    except Exception:
-        logger.debug(
-            "restore: project context-dir grant failed for %s",
-            project_id,
-            exc_info=True,
-        )
-
-
 def _restore_runtime_binding(
     state: ConsoleState, session: _ChatSession, meta: dict
 ) -> None:
@@ -327,7 +328,6 @@ def _restore_runtime_binding(
     _pid = meta.get("project_id")
     if isinstance(_pid, str) and _pid:
         session.project_id = _pid
-        _restore_project_context_root(session, _pid)
     if meta.get("mode"):
         session.mode = meta["mode"]
     _tm = meta.get("task_mode")
@@ -421,6 +421,10 @@ def _rehydrate_session_from_history(
         session.pinned = True
     if meta.get("color_index") is not None:
         session.color_index = meta["color_index"]
+    if meta.get("natural_voice"):
+        from gideon.integrations.natural_voice import normalize_conversation_choice
+
+        session.natural_voice = normalize_conversation_choice(meta["natural_voice"])
     raw_tags = meta.get("tags")
     if isinstance(raw_tags, list):
         session.tags = [str(t) for t in raw_tags if isinstance(t, str) and t]
@@ -438,7 +442,6 @@ def _rehydrate_session_from_history(
         state._restricted_keys.add(f"dashboard:{session_name}")
     if meta.get("forked_from") is not None:
         session.forked_from = meta["forked_from"]
-    session.chat_index = load_chat_index(meta.get("chat_index"))
     _side_meta = meta.get("side")
     if isinstance(_side_meta, dict) and _side_meta.get("messages"):
         from gideon.interfaces.dashboard.side_state import SideState
@@ -627,7 +630,6 @@ def restore_recent_sessions(
             state._restricted_keys.add(f"dashboard:{session_name}")
         if meta.get("forked_from") is not None:
             session.forked_from = meta["forked_from"]
-        session.chat_index = load_chat_index(meta.get("chat_index"))
         _side_meta = meta.get("side")
         if isinstance(_side_meta, dict) and _side_meta.get("messages"):
             from gideon.interfaces.dashboard.side_state import SideState
@@ -672,20 +674,25 @@ def save_session_to_history(
     *,
     closed: bool = False,
     force: bool = False,
+    metadata_only: bool = False,
 ) -> None:
     """Persist session messages to JSONL history.
 
     Public because it is re-exported as `gideon.sdk.channel.save_session_to_history`:
     a channel app that mutates a linked session out-of-band (an interactive option pick,
     a link/unlink) has to flush it, or the thread it just changed is lost on restart.
+
+    ``metadata_only`` preserves an existing transcript byte-for-byte while replacing
+    its metadata header. If no history exists yet, the current transcript seeds it.
     """
     msgs = messages if messages is not None else session.messages
-    if not state.conversation_log or not msgs:
+    if not state.conversation_log:
         return
     history_key = persisted_history_key(state.conversation_log, session.key)
     outgoing = _persistable(msgs)
-    chat_index = build_chat_index(msgs)
-    if not force:
+    if not outgoing and not (force or metadata_only):
+        return
+    if not force and not metadata_only:
         _persisted = _persisted_message_count(state, history_key)
         if _persisted and len(outgoing) <= _persisted:
             if closed:
@@ -709,6 +716,23 @@ def save_session_to_history(
         existing_meta = state.conversation_log.get_metadata(history_key)
 
         path = state.conversation_log._path(history_key)
+        preserved_lines: list[str] | None = None
+        if path.exists() and (metadata_only or not outgoing):
+            persisted_lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+            if persisted_lines:
+                try:
+                    persisted_header = json.loads(persisted_lines[0])
+                except json.JSONDecodeError as exc:
+                    raise ValueError(
+                        f"cannot safely update metadata for {history_key}: invalid header"
+                    ) from exc
+                if persisted_header.get("_type") != "metadata":
+                    raise ValueError(
+                        f"cannot safely update metadata for {history_key}: missing header"
+                    )
+                preserved_lines = persisted_lines[1:]
+            else:
+                preserved_lines = []
         path.parent.mkdir(parents=True, exist_ok=True)
         meta_line: dict = {
             "_type": "metadata",
@@ -758,9 +782,6 @@ def save_session_to_history(
             meta_line["never_archive"] = True
         if session.forked_from is not None:
             meta_line["forked_from"] = session.forked_from
-        if chat_index:
-            meta_line["chat_index"] = chat_index
-        session.chat_index = chat_index
         _side = getattr(session, "_side", None)
         if _side is not None and _side.messages:
             meta_line["side"] = _side.to_dict()
@@ -773,7 +794,8 @@ def save_session_to_history(
         if _app:
             meta_line["app"] = _app
         lines = [json.dumps(meta_line) + "\n"]
-        for m in outgoing:
+        messages_to_write = outgoing if preserved_lines is None else []
+        for m in messages_to_write:
             role = m.get("role", "assistant")
             content = m.get("content", "")
             if role not in ("user", "system"):
@@ -807,6 +829,8 @@ def save_session_to_history(
             if m.get("meta"):
                 entry["meta"] = _redact_meta(m["meta"])
             lines.append(json.dumps(entry) + "\n")
+        if preserved_lines is not None:
+            lines.extend(preserved_lines)
 
         atomic_write(path, "".join(lines), fsync=True)
         state.conversation_log._invalidate_cache(history_key)

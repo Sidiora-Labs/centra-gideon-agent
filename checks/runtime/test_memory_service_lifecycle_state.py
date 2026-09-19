@@ -82,7 +82,9 @@ def _episode_on(service, text, day, *, tags=None):
 
 
 def test_identifiers_preserve_original_bytes_and_raw_whitespace():
-    digest = lambda value: hashlib.md5(value.encode("utf-8")).hexdigest()[:12]
+    def digest(value):
+        return hashlib.md5(value.encode("utf-8")).hexdigest()[:12]
+
     assert MemoryService._working_key("session:ä") == "user.working." + digest(
         "session:ä"
     )

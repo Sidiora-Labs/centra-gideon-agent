@@ -101,6 +101,49 @@ def test_missing_recording_degrades_typed(bundle: Path, monkeypatch) -> None:
     assert "recording" in deriv.degraded_reason.lower()
 
 
+@pytest.mark.parametrize(
+    ("duration_secs", "expected_rows"),
+    ((0.1, 1), (20.0, 1), (20.1, 2), (40.0, 2), (40.1, 3)),
+)
+def test_contact_sheet_rows_are_derived_from_sample_count(
+    duration_secs: float, expected_rows: int
+) -> None:
+    assert ev._contact_sheet_rows(duration_secs) == expected_rows
+
+
+def test_contact_sheet_uses_derived_nonzero_tile_rows(
+    bundle: Path, monkeypatch
+) -> None:
+    commands: list[list[str]] = []
+    monkeypatch.setattr(ev, "ffmpeg_available", lambda **_: True)
+    monkeypatch.setattr(ev, "_recording_duration_secs", lambda _path: (20.1, ""))
+
+    def run(argv: list[str], **_kwargs) -> tuple[bool, str]:
+        commands.append(argv)
+        return True, ""
+
+    monkeypatch.setattr(ev, "_run_ffmpeg", run)
+    deriv = ev.derive_contact_sheet(bundle)
+
+    assert deriv.produced is True
+    filter_arg = commands[0][commands[0].index("-vf") + 1]
+    assert filter_arg == "fps=1/5,tile=4x2"
+
+
+def test_contact_sheet_degrades_when_duration_cannot_be_measured(
+    bundle: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(ev, "ffmpeg_available", lambda **_: True)
+    monkeypatch.setattr(
+        ev,
+        "_recording_duration_secs",
+        lambda _path: (None, "ffprobe returned an invalid recording duration"),
+    )
+    deriv = ev.derive_contact_sheet(bundle)
+    assert deriv.produced is False
+    assert "contact-sheet rows" in deriv.degraded_reason
+
+
 def test_degradation_reasons_are_recorded_in_the_manifest(
     bundle: Path, monkeypatch
 ) -> None:

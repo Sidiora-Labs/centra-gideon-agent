@@ -18,6 +18,8 @@ Two facts make the surface honest rather than decorative:
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import logging
 import subprocess
 import sys
@@ -28,6 +30,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_PAGE_SIZE = 16384
 
 _PROBE_TIMEOUT = 2
+_HEALTH_TIMEOUT_SECONDS = 5.0
 
 
 def _warn_pct_default() -> int:
@@ -41,6 +44,7 @@ def _warn_pct_default() -> int:
         return 85
 
 
+@functools.lru_cache(maxsize=1)
 def _darwin_memory() -> tuple[int, int]:
     """``(total_mb, available_mb)`` on macOS via ``sysctl`` + ``vm_stat``."""
     total = int(
@@ -311,5 +315,103 @@ async def residency_snapshot() -> dict[str, Any]:
     return {
         "loaded": loaded_occupants(),
         "providers": states,
+        "pressure": memory_pressure(),
+    }
+
+
+async def local_model_health_snapshot() -> dict[str, Any]:
+    """Bounded readiness, residency and sidecar health for every local provider."""
+    from gideon.integrations.local_models.provider import (
+        LocalModelFailure,
+        LocalModelFailureCode,
+    )
+    from gideon.integrations.local_models.registry import capabilities_for, registered
+    from gideon.integrations.local_models.sidecar import get_runner
+
+    occupants = loaded_occupants()
+    by_provider: dict[str, list[dict[str, Any]]] = {}
+    for occupant in occupants:
+        by_provider.setdefault(str(occupant.get("provider") or ""), []).append(occupant)
+
+    async def _row(key: str, provider: Any) -> dict[str, Any]:
+        failure: LocalModelFailure | None = None
+        try:
+            ok, state = await asyncio.wait_for(
+                provider.ensure_ready(), timeout=_HEALTH_TIMEOUT_SECONDS
+            )
+            ok = bool(ok)
+            state = str(state or "unavailable")
+            if state not in {"ready", "loading", "unavailable"}:
+                ok = False
+                failure = LocalModelFailure(
+                    LocalModelFailureCode.INVALID_RESULT,
+                    f"provider returned unknown readiness state {state!r}",
+                )
+                state = "unavailable"
+            elif state == "loading":
+                ok = False
+            elif state == "unavailable":
+                ok = False
+                failure = LocalModelFailure(
+                    LocalModelFailureCode.UNAVAILABLE,
+                    f"{getattr(provider, 'display_name', key)} is unavailable",
+                    retryable=True,
+                )
+            elif not ok:
+                failure = LocalModelFailure(
+                    LocalModelFailureCode.INVALID_RESULT,
+                    "provider reported ready with ok=false",
+                )
+                state = "unavailable"
+        except asyncio.TimeoutError:
+            ok, state = False, "unavailable"
+            failure = LocalModelFailure(
+                LocalModelFailureCode.TIMEOUT,
+                f"health probe exceeded {_HEALTH_TIMEOUT_SECONDS:g}s",
+                retryable=True,
+            )
+        except Exception as exc:  # noqa: BLE001 — one provider cannot blank health
+            ok, state = False, "unavailable"
+            typed_reason = str(getattr(exc, "typed_reason", "") or "")
+            code = (
+                LocalModelFailureCode.SIDECAR_CRASHED
+                if typed_reason.startswith("sidecar_crashed")
+                else LocalModelFailureCode.PROVIDER_ERROR
+            )
+            failure = LocalModelFailure(
+                code,
+                (typed_reason or str(exc) or type(exc).__name__)[:200],
+                retryable=code == LocalModelFailureCode.SIDECAR_CRASHED,
+            )
+
+        runner = get_runner(key)
+        sidecar = runner.health() if runner is not None else None
+        if sidecar is not None and sidecar.get("budget_exhausted"):
+            ok, state = False, "unavailable"
+            failure = LocalModelFailure(
+                LocalModelFailureCode.SIDECAR_CRASHED,
+                str(sidecar.get("last_reason") or "sidecar restart budget exhausted")[
+                    :200
+                ],
+                retryable=False,
+            )
+        return {
+            "provider": key,
+            "display_name": str(getattr(provider, "display_name", "") or key),
+            "capabilities": capabilities_for(key),
+            "ok": ok,
+            "state": state,
+            "kind": "sidecar" if runner is not None else "in-process",
+            "loaded": by_provider.get(key, []),
+            "sidecar": sidecar,
+            "failure": failure.to_dict() if failure is not None else None,
+        }
+
+    rows = await asyncio.gather(
+        *(_row(key, provider) for key, provider in registered())
+    )
+    return {
+        "ok": all(row["ok"] for row in rows),
+        "providers": rows,
         "pressure": memory_pressure(),
     }

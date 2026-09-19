@@ -72,7 +72,7 @@ class FireDecision:
     violations: list[tuple[str, str, str]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        fields = {
+        fields: dict = {
             name: getattr(self, name)
             for name in ("allowed", "outcome", "gate", "reason")
         }
@@ -84,7 +84,7 @@ class FireDecision:
 
 
 def _refuse(gate: str, reason: str, passed: list[str], **extra: Any) -> FireDecision:
-    fields = dict(
+    fields: dict = dict(
         allowed=False,
         outcome=GATE_OUTCOMES[gate],
         gate=gate,

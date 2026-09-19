@@ -23,13 +23,14 @@ from gideon.core.config.loader import (
     resolve_session_workspace,
 )
 from gideon.http_errors import json_error
-from gideon.interfaces.dashboard.chat_index import load_chat_index
 from gideon.interfaces.dashboard.chat_persistence import (
     _attach_variants,
     _redact_meta,
     _rehydrate_session_from_history,
     _validate_reasoning_effort,
+    purge_session_workspace,
     resolve_session,
+    resolve_tool_result_path,
     save_session_to_history,
     session_key_exists,
 )
@@ -72,7 +73,11 @@ logger = logging.getLogger(__name__)
 
 
 async def _run_chat_scoped(
-    state: ConsoleState, session: _ChatSession, message: str
+    state: ConsoleState,
+    session: _ChatSession,
+    message: str,
+    *,
+    persona_snippet: str = "",
 ) -> None:
     """Run one turn with an inbound turn's SPEND SCOPE bound (EXTERNAL-ACCESS §9.5).
 
@@ -96,7 +101,10 @@ async def _run_chat_scoped(
 
     key = session.key or ""
     if not key.startswith(INBOUND_PREFIX):
-        await run_chat(state, session, message)
+        if persona_snippet:
+            await run_chat(state, session, message, persona_snippet=persona_snippet)
+        else:
+            await run_chat(state, session, message)
         return
 
     from gideon.interfaces.cli.run import CLI_RUN_KEY, CLI_SESSION_PREFIX
@@ -115,7 +123,10 @@ async def _run_chat_scoped(
     set_current_run_key(run_key)
     set_current_run_budget(safety_budget_for_inbound())
     try:
-        await run_chat(state, session, message)
+        if persona_snippet:
+            await run_chat(state, session, message, persona_snippet=persona_snippet)
+        else:
+            await run_chat(state, session, message)
     finally:
         try:
             get_meter().end_run(run_key)
@@ -302,7 +313,10 @@ async def api_chat(request: web.Request) -> web.StreamResponse:
     except Exception:
         logger.debug("idle re-arm on user input failed", exc_info=True)
 
-    task = asyncio.create_task(_run_chat_scoped(state, session, message))
+    persona_snippet = f"persona-{session.color_theme}" if session.color_theme else ""
+    task = asyncio.create_task(
+        _run_chat_scoped(state, session, message, persona_snippet=persona_snippet)
+    )
     session.task = task
     session._recovery_retrigger_count = 0
     state._background_tasks.add(task)
@@ -630,6 +644,11 @@ async def api_chat_tool_result(request: web.Request) -> web.Response:
 
     name = _history_key_for(request.match_info["session"])
     rid = request.match_info["rid"]
+    result_path = resolve_tool_result_path(name, rid)
+    if result_path is None or not result_path.is_file():
+        return web.json_response(
+            {"error": f"no stored result {rid!r} (it may have expired)"}, status=404
+        )
     grep = request.query.get("grep") or None
     try:
         start = int(request.query.get("start") or 0)
@@ -819,7 +838,6 @@ async def api_chat_session_detail(request: web.Request) -> web.Response:
             **_natural_voice_payload(session),
             "forked_from": forked_from,
             "forked_from_title": forked_from_title,
-            "chat_index": list(getattr(session, "chat_index", []) or []),
             "pending_approval": any(
                 not f.done() for f in session._approval_futures.values()
             ),
@@ -1536,15 +1554,9 @@ async def api_chat_session_delete(request: web.Request) -> web.Response:
         logger.warning(
             "hard-delete: history file removal failed for %s", name, exc_info=True
         )
-    try:
-        from gideon.integrations.tool_providers import result_store
-
-        for _sid in {history_key, name}:
-            result_store.purge_session(_sid)
-    except Exception:
-        logger.warning(
-            "hard-delete: workspace purge failed for %s", name, exc_info=True
-        )
+    for _sid in {history_key, name}:
+        if not purge_session_workspace(_sid):
+            logger.debug("hard-delete: no workspace removed for %s", _sid)
     try:
         from gideon.engine import turn_checkpoints
 
@@ -1729,9 +1741,11 @@ async def api_chat_session_agent(request: web.Request) -> web.Response:
     await state.sessions.reset(_history_key_for(name))
     if state.conversation_log:
         try:
-            state.conversation_log.update_metadata(
-                persisted_history_key(state.conversation_log, name),
-                {"agent": agent_name, "acp_provider": "", "acp_provider_agent": ""},
+            save_session_to_history(
+                state,
+                session,
+                force=True,
+                metadata_only=True,
             )
         except Exception:
             logger.warning(
@@ -1841,14 +1855,11 @@ async def api_chat_session_acp_agent(request: web.Request) -> web.Response:
     await state.sessions.reset(_history_key_for(name))
     if state.conversation_log:
         try:
-            state.conversation_log.update_metadata(
-                persisted_history_key(state.conversation_log, name),
-                {
-                    "acp_provider": provider,
-                    "acp_provider_agent": session.acp_provider_agent,
-                    "reasoning_effort": effort,
-                    "model": session.model,
-                },
+            save_session_to_history(
+                state,
+                session,
+                force=True,
+                metadata_only=True,
             )
         except Exception:
             logger.warning(
@@ -2169,7 +2180,6 @@ async def api_chat_session_resume(request: web.Request) -> web.Response:
         state._restricted_keys.discard(f"dashboard:{name}")
     if meta.get("forked_from") is not None:
         session.forked_from = meta["forked_from"]
-    session.chat_index = load_chat_index(meta.get("chat_index"))
     if meta.get("closed"):
         try:
             path = state.conversation_log._path(resolved_key)
@@ -2226,6 +2236,18 @@ async def api_chat_session_resume(request: web.Request) -> web.Response:
 VALID_APPROVAL_MODES = ("normal", "trust", "trust_reads", "yolo")
 
 
+def _session_approval_mode(state: ConsoleState, session: _ChatSession | None) -> str:
+    if state.is_yolo_active():
+        return "yolo"
+    if session is None:
+        return "normal"
+    if session._trust:
+        return "trust"
+    if session._trust_reads:
+        return "trust_reads"
+    return "normal"
+
+
 async def api_chat_mode(request: web.Request) -> web.Response:
     """POST /api/chat/mode — set the tool APPROVAL mode (whether tools auto-approve).
 
@@ -2257,6 +2279,23 @@ async def api_chat_mode(request: web.Request) -> web.Response:
             status=400,
         )
     session_name = body.get("session") or None
+    if session_name is not None and session_name not in state._sessions:
+        return web.json_response({"ok": False, "error": "unknown session"}, status=400)
+
+    from gideon.security.guardrails.ladder import approval_screening_verdict
+
+    screening = approval_screening_verdict(mode)
+    if not screening.allowed:
+        current = _session_approval_mode(
+            state, state._sessions.get(session_name) if session_name else None
+        )
+        return web.json_response(
+            {
+                "ok": False,
+                "mode": current,
+                "approval_screening": screening.to_dict(),
+            }
+        )
 
     if mode == "yolo":
         state.enable_yolo()
@@ -2272,10 +2311,6 @@ async def api_chat_mode(request: web.Request) -> web.Response:
     elif mode == "trust_reads":
         state.disable_yolo()
         if session_name is not None:
-            if session_name not in state._sessions:
-                return web.json_response(
-                    {"ok": False, "error": "unknown session"}, status=400
-                )
             state._sessions[session_name]._trust = False
             state._sessions[session_name]._trust_reads = True
         else:
@@ -2297,10 +2332,6 @@ async def api_chat_mode(request: web.Request) -> web.Response:
     elif mode == "trust":
         state.disable_yolo()
         if session_name is not None:
-            if session_name not in state._sessions:
-                return web.json_response(
-                    {"ok": False, "error": "unknown session"}, status=400
-                )
             state._sessions[session_name]._trust = True
         else:
             for session in state._sessions.values():
@@ -2318,10 +2349,6 @@ async def api_chat_mode(request: web.Request) -> web.Response:
     else:
         state.disable_yolo()
         if session_name is not None:
-            if session_name not in state._sessions:
-                return web.json_response(
-                    {"ok": False, "error": "unknown session"}, status=400
-                )
             state._sessions[session_name]._trust = False
             state._sessions[session_name]._trust_reads = False
         else:
@@ -2379,7 +2406,13 @@ async def api_chat_mode(request: web.Request) -> web.Response:
         state.sessions.set_approval_policy(f"dashboard:{session.key}", policy)
 
     state.push_sessions_update()
-    return web.json_response({"ok": True, "mode": mode})
+    return web.json_response(
+        {
+            "ok": True,
+            "mode": mode,
+            "approval_screening": screening.to_dict(),
+        }
+    )
 
 
 VALID_TASK_MODES = ("agent", "ask", "plan", "build")
@@ -2486,11 +2519,23 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
             status=400,
         )
     original_action = action
-    if action == "trust":
+    screening = None
+    requested_mode = {
+        "trust": "trust",
+        "trust_agent": "trust",
+        "trust_reads": "trust_reads",
+        "yolo": "yolo",
+    }.get(original_action)
+    if requested_mode:
+        from gideon.security.guardrails.ladder import approval_screening_verdict
+
+        screening = approval_screening_verdict(requested_mode)
+    grant_allowed = screening is None or screening.allowed
+    if action == "trust" and grant_allowed:
         session._trust = True
         state.sessions.set_approval_policy(f"dashboard:{name}", "auto")
         action = "approved"
-    elif action == "trust_agent":
+    elif action == "trust_agent" and grant_allowed:
         session._trust = True
         state.sessions.set_approval_policy(f"dashboard:{name}", "auto")
         action = "approved"
@@ -2521,12 +2566,14 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
                 )
         except Exception:
             logger.warning("Failed to persist always-for-agent grant", exc_info=True)
-    elif action == "trust_reads":
+    elif action == "trust_reads" and grant_allowed:
         action = "approved_trust_reads"
-    elif action == "yolo":
+    elif action == "yolo" and grant_allowed:
         state.enable_yolo()
         for s in state._sessions.values():
             state.sessions.set_approval_policy(f"dashboard:{s.key}", "auto")
+        action = "approved"
+    elif not grant_allowed:
         action = "approved"
     request_id = body.get("request_id", "")
     if not request_id:
@@ -2559,7 +2606,7 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
             request_id,
             (
                 original_action
-                if original_action in ("trust", "trust_reads")
+                if grant_allowed and original_action in ("trust", "trust_reads")
                 else resolved
             ),
         )
@@ -2577,14 +2624,22 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
         )
     except Exception:
         logger.warning("SEL audit failed for approval %s", request_id, exc_info=True)
-    return web.json_response({"ok": True})
+    payload: dict[str, object] = {"ok": True}
+    if screening is not None:
+        payload["approval_screening"] = screening.to_dict()
+        payload["mode"] = _session_approval_mode(state, session)
+    return web.json_response(payload)
 
 
 MAX_COLOR_INDEX = 20
 
 
 async def api_chat_session_color(request: web.Request) -> web.Response:
-    """PATCH /api/chat/sessions/{session}/color — set session color."""
+    """PATCH /api/chat/sessions/{session}/color — set session color.
+
+    Clearing is an explicit ``{"color_index": null}``; an omitted or misspelled
+    field is rejected rather than interpreted as a clear.
+    """
     state: ConsoleState = request.app["state"]
     name = request.match_info["session"]
     session = resolve_session(state, name)
@@ -2596,7 +2651,11 @@ async def api_chat_session_color(request: web.Request) -> web.Response:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
         return web.json_response({"error": "JSON body must be an object"}, status=400)
-    ci = body.get("color_index")
+    if "color_index" not in body:
+        return web.json_response(
+            {"error": "color_index is required (send null to clear it)"}, status=400
+        )
+    ci = body["color_index"]
     if ci is not None and (
         isinstance(ci, bool)
         or not isinstance(ci, int)
@@ -2640,9 +2699,10 @@ async def api_chat_session_natural_voice(request: web.Request) -> web.Response:
     """PATCH /api/chat/sessions/{session}/natural-voice — set the per-conversation scope.
 
     Body ``{"natural_voice": "" | "on" | "off"}``. ``""`` clears the override so
-    the conversation inherits the bound agent's preference again. Responds with
-    the re-resolved state so the composer shows what actually takes effect
-    instead of assuming its own click won.
+    the conversation inherits the bound agent's preference again. The field must
+    be present: an omitted or misspelled field is not an instruction to clear.
+    Responds with the re-resolved state so the composer shows what actually takes
+    effect instead of assuming its own click won.
     """
     state: ConsoleState = request.app["state"]
     name = request.match_info["session"]
@@ -2655,9 +2715,15 @@ async def api_chat_session_natural_voice(request: web.Request) -> web.Response:
         return json_error("invalid_json", status=400)
     if not isinstance(body, dict):
         return json_error("invalid_body", status=400)
+    if "natural_voice" not in body:
+        return json_error(
+            "bad_request",
+            message='natural_voice is required (send "" to clear it)',
+            status=400,
+        )
     from gideon.integrations.natural_voice import normalize_conversation_choice
 
-    raw = body.get("natural_voice", "")
+    raw = body["natural_voice"]
     choice = normalize_conversation_choice(raw)
     if choice == "" and str(raw or "").strip() != "":
         return json_error(

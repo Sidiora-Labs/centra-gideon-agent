@@ -268,7 +268,7 @@ def attention_count(rows: list[BoardRow]) -> int:
 
 
 def group_board(rows: list[BoardRow]) -> list[dict[str, Any]]:
-    groups = {state: [] for state in BOARD_ORDER}
+    groups: dict = {state: [] for state in BOARD_ORDER}
     for row in rows:
         if row.state in groups:
             groups[row.state].append(row)

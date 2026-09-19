@@ -209,7 +209,7 @@ class CalendarDecision:
         return GateOutcome.ALLOWED.value == self.outcome
 
     def to_dict(self) -> dict[str, Any]:
-        result = dict(outcome=self.outcome, reason=self.reason)
+        result: dict = dict(outcome=self.outcome, reason=self.reason)
         if self.catch_up_at:
             result.update(catch_up_at=self.catch_up_at)
         if self.window is not None:
@@ -398,7 +398,7 @@ class OccurrenceProjection:
     def collect(
         self, at: float, end: float, cap: int, advance: Callable[[float], float]
     ) -> tuple[list[Occurrence], bool]:
-        rows = []
+        rows: list = []
         while at < end:
             if len(rows) >= max(1, cap):
                 return rows, True
@@ -447,13 +447,19 @@ def project_occurrences(
         at = float(next_after(lower - 1))
         if at <= 0:
             return [], False
-        advance = lambda value: float(next_after(value))
+
+        def advance(value):
+            return float(next_after(value))
+
     else:
         at = first_fire_at
         if at < lower:
             at += int((lower - at) // interval_secs) * interval_secs
             at += interval_secs if at < lower else 0
-        advance = lambda value: value + interval_secs
+
+        def advance(value):
+            return value + interval_secs
+
     return projection.collect(at, upper, cap, advance)
 
 

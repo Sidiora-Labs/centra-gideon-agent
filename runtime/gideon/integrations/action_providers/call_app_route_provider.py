@@ -44,7 +44,7 @@ class _RouteAction:
                 False, error=error.agent_error.what, agent_error=error.agent_error
             )
         receipt = await call_app_route(target)
-        details = dict(stdout=receipt.output)
+        details: dict = dict(stdout=receipt.output)
         if not receipt.success:
             details["agent_error"] = receipt.agent_error
             details["error"] = receipt.error or (

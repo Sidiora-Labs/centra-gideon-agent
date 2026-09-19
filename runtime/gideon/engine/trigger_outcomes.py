@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from gideon.automation.triggers.models import Outcome
-from gideon.core.errors import AgentError, redacted_envelope
 
 _REFUSAL_STATUSES = ("blocked_injection", Outcome.SKIPPED_GATE.value)
 
@@ -122,24 +121,27 @@ class TriggerPublication:
 
     def repeated_failure(self, trigger: Any, error: str) -> bool:
         try:
-            from gideon.automation.triggers.delivery import suppress_repeat_failure
+            from gideon.automation.triggers.delivery import (
+                dedupe_hash_enabled,
+                suppress_repeat_failure,
+            )
             from gideon.automation.triggers.store import TriggerStore
             from gideon.core.config.loader import config_dir
 
-            policy = getattr(trigger, "failure_policy", None)
-            if not isinstance(policy, dict) or not policy.get("dedupe_hash"):
-                return False
             identity = trigger_id(trigger)
             if not identity:
                 return False
             store = TriggerStore(base_dir=config_dir())
             record = store.get(identity)
             current = record.trigger if record is not None else trigger
+            if not dedupe_hash_enabled(current):
+                return False
+            now = time.time()
             suppress, digest = suppress_repeat_failure(
                 error=error,
                 last_hash=str(getattr(current, "last_alert_hash", "") or ""),
                 last_at=float(getattr(current, "last_alert_at", 0.0) or 0.0),
-                now=time.time(),
+                now=now,
             )
             if not digest:
                 return False
@@ -150,7 +152,7 @@ class TriggerPublication:
                 )
                 return True
             if record is not None:
-                current.last_alert_hash, current.last_alert_at = digest, time.time()
+                current.last_alert_hash, current.last_alert_at = digest, now
                 store.upsert(current)
             return False
         except Exception:
@@ -159,13 +161,7 @@ class TriggerPublication:
             )
             return False
 
-    def outcome(
-        self,
-        trigger: Any,
-        ok: bool,
-        error: str,
-        agent_error: AgentError | None = None,
-    ) -> None:
+    def outcome(self, trigger: Any, ok: bool, error: str) -> None:
         try:
             from gideon.automation.triggers import delivery
 
@@ -183,7 +179,6 @@ class TriggerPublication:
                 summary=error[:200],
                 attempt_key=self.runtime._next_delivery_attempt(),
                 destination=delivery.route_for(trigger, ok=ok),
-                agent_error=None if ok else agent_error,
             )
             delivery.deliver(
                 state, notice, delivered_ids=self.runtime._delivered_event_ids
@@ -199,15 +194,9 @@ class FireResult:
     exit_type: str
     exception_text: str
     detail: str
-    agent_error: AgentError | None = None
 
     @classmethod
-    def read(
-        cls,
-        result: Any,
-        error: BaseException | None,
-        agent_error: AgentError | None = None,
-    ) -> FireResult:
+    def read(cls, result: Any, error: BaseException | None) -> FireResult:
         from gideon.automation.triggers import autopause
 
         exception_text = f"{type(error).__name__}: {error}" if error is not None else ""
@@ -220,29 +209,7 @@ class FireResult:
         detail = exception_text or (
             str(getattr(result, "error", "") or "") if result is not None else ""
         )
-        envelope = agent_error
-        if envelope is None and result is not None:
-            envelope = getattr(result, "agent_error", None)
-        failed = exit_type != autopause.ExitType.OK.value
-        carried = (
-            redacted_envelope(envelope)
-            if failed and isinstance(envelope, AgentError)
-            else None
-        )
-        return cls(exit_type, exception_text, detail, carried)
-
-    @property
-    def failed(self) -> bool:
-        from gideon.automation.triggers import autopause
-
-        return self.exit_type != autopause.ExitType.OK.value
-
-    @property
-    def explanation(self) -> str:
-        """What the run-history row records: the whole envelope, or the bounded prose."""
-        if self.agent_error is not None:
-            return self.agent_error.render()
-        return self.detail[:200] if self.failed else ""
+        return cls(exit_type, exception_text, detail)
 
     def update(self, trigger: Any, decision: Any) -> None:
         from gideon.automation.triggers import autopause
@@ -269,11 +236,7 @@ class FireLedger:
         self.runtime, self.journal_type, self.logger = runtime, journal_type, logger
 
     async def record(
-        self,
-        trigger: Any,
-        result: Any,
-        error: BaseException | None,
-        agent_error: AgentError | None = None,
+        self, trigger: Any, result: Any, error: BaseException | None
     ) -> None:
         try:
             from gideon.automation.schedule_history import ExecutionRecord
@@ -285,7 +248,7 @@ class FireLedger:
             identity = trigger_id(trigger)
             if not identity:
                 return
-            outcome = FireResult.read(result, error, agent_error)
+            outcome = FireResult.read(result, error)
             journal = self.journal_type(config_dir())
             now = time.time()
             await journal.append(
@@ -300,12 +263,7 @@ class FireLedger:
                         if outcome.exit_type == autopause.ExitType.OK.value
                         else "failure"
                     ),
-                    error=outcome.explanation,
-                    agent_error=(
-                        {}
-                        if outcome.agent_error is None
-                        else outcome.agent_error.to_dict()
-                    ),
+                    error=outcome.exception_text[:200],
                 )
             )
             rows, _ = await journal.list_for_job(identity, 0, 20)

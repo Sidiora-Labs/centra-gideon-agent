@@ -2,9 +2,15 @@
 
 Endpoints:
     GET    /api/models/available           — discover models from all configured providers
+    GET    /api/models/local/availability  — bounded local-provider availability probes
+    GET    /api/models/local/health        — local readiness, residency, and sidecar health
+    POST   /api/models/local/{provider}/selftest — serialized real inference probes
     GET    /api/models/active              — active models per use-case
     PUT    /api/models/active/{use_case}   — set active model(s) for a use-case
     GET    /api/models/chat                — active chat models (for dropdown use)
+    GET    /api/models/huggingface/auth    — masked Hugging Face auth status
+    PUT    /api/models/huggingface/auth    — validate and store a Hugging Face token
+    DELETE /api/models/huggingface/auth    — remove Gideon's stored Hugging Face token
 
 Local-model download / delete / search is served generically by the local-model routes
 (``/api/models/downloads`` + ``/api/models/local/{provider}/…``), driven by the one
@@ -27,6 +33,9 @@ from gideon.extensions.providers.use_cases import (
 
 logger = logging.getLogger(__name__)
 
+_CATALOG_BUILD_CONCURRENCY = 4
+_CATALOG_BUILD_TIMEOUT_SECS = 30.0
+
 
 def _sel_log(
     op: str, outcome: str, resources: str, request: "web.Request", error: str = ""
@@ -47,6 +56,164 @@ def _sel_log(
         )
     except Exception:
         pass
+
+
+def _huggingface_owner_only(request: "web.Request") -> web.Response | None:
+    app_name = request.get("app", "")
+    if not app_name:
+        return None
+    _sel_log(
+        "models.huggingface_auth",
+        "denied",
+        "huggingface",
+        request,
+        error="Hugging Face credentials are owner-only",
+    )
+    return web.json_response(
+        {"error": "Hugging Face credentials are owner-only"}, status=403
+    )
+
+
+async def api_huggingface_auth_status(request: web.Request) -> web.Response:
+    """GET /api/models/huggingface/auth — masked token presence and validation state."""
+    denied = _huggingface_owner_only(request)
+    if denied is not None:
+        return denied
+    from gideon.integrations.local_models.huggingface_auth import auth_status
+
+    refresh = str(request.query.get("refresh") or "").lower() in ("1", "true", "yes")
+    return web.json_response(await auth_status(force=refresh))
+
+
+async def api_huggingface_auth_put(request: web.Request) -> web.Response:
+    """PUT /api/models/huggingface/auth — validate, then store one token."""
+    denied = _huggingface_owner_only(request)
+    if denied is not None:
+        return denied
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+    if not isinstance(body, dict) or not isinstance(body.get("token"), str):
+        return web.json_response(
+            {"error": "token must be a non-empty string"}, status=400
+        )
+
+    from gideon.integrations.local_models.huggingface_auth import (
+        mask_token,
+        save_token,
+        validate_token,
+    )
+
+    token = body["token"].strip()
+    if not token:
+        return web.json_response(
+            {"error": "token must be a non-empty string"}, status=400
+        )
+    validation = await validate_token(token, force=True)
+    if validation.state != "valid":
+        status = 400 if validation.state in ("invalid", "unconfigured") else 503
+        _sel_log(
+            "models.huggingface_auth_set",
+            "error",
+            "huggingface",
+            request,
+            error=(
+                "token rejected by Hugging Face"
+                if validation.state == "invalid"
+                else "Hugging Face validation unavailable"
+            ),
+        )
+        return web.json_response(
+            {
+                "configured": False,
+                "state": validation.state,
+                "valid": validation.valid,
+                "error": validation.error,
+            },
+            status=status,
+        )
+
+    masked = mask_token(token)
+    try:
+        save_token(token)
+    except Exception:
+        _sel_log(
+            "models.huggingface_auth_set",
+            "error",
+            "huggingface:credential_store",
+            request,
+            error="credential store write failed",
+        )
+        del token
+        logger.warning("Hugging Face token write failed", exc_info=True)
+        return web.json_response(
+            {"error": "Could not store the Hugging Face token"}, status=500
+        )
+    _sel_log(
+        "models.huggingface_auth_set",
+        "ok",
+        "huggingface:credential_store",
+        request,
+    )
+    return web.json_response(
+        {
+            "configured": True,
+            "source": "credential_store",
+            "masked_token": masked,
+            "state": "valid",
+            "valid": True,
+            "username": validation.username,
+            "error": "",
+            "cached": False,
+            "checked_at": validation.checked_at,
+            "expires_at": validation.expires_at,
+        }
+    )
+
+
+async def api_huggingface_auth_delete(request: web.Request) -> web.Response:
+    """DELETE /api/models/huggingface/auth — remove Gideon's stored token only."""
+    denied = _huggingface_owner_only(request)
+    if denied is not None:
+        return denied
+    from gideon.integrations.local_models.huggingface_auth import (
+        auth_status,
+        delete_stored_token,
+    )
+
+    if not delete_stored_token():
+        _sel_log(
+            "models.huggingface_auth_delete",
+            "error",
+            "huggingface:credential_store",
+            request,
+            error="no stored token",
+        )
+        return web.json_response({"error": "No stored Hugging Face token"}, status=404)
+    _sel_log(
+        "models.huggingface_auth_delete",
+        "ok",
+        "huggingface:credential_store",
+        request,
+    )
+    return web.json_response({"deleted": True, **(await auth_status())})
+
+
+async def api_huggingface_auth_test(request: web.Request) -> web.Response:
+    """POST /api/models/huggingface/auth/test — force a fresh guarded whoami check."""
+    denied = _huggingface_owner_only(request)
+    if denied is not None:
+        return denied
+    from gideon.integrations.local_models.huggingface_auth import auth_status
+
+    status = await auth_status(force=True)
+    http_status = 200
+    if status["state"] == "invalid":
+        http_status = 400
+    elif status["state"] == "unavailable":
+        http_status = 503
+    return web.json_response(status, status=http_status)
 
 
 def _get_providers_from_config() -> list[dict[str, Any]]:
@@ -202,6 +369,10 @@ def _step_down_name(
     return None
 
 
+async def _bounded_catalog_build(build) -> Any:
+    return await asyncio.wait_for(build(), timeout=_CATALOG_BUILD_TIMEOUT_SECS)
+
+
 async def api_models_available(request: web.Request) -> web.Response:
     """GET /api/models/available — discover models from all configured providers.
 
@@ -229,10 +400,18 @@ async def api_models_available(request: web.Request) -> web.Response:
         if catalog is None:
             result.append({"name": pname, "type": ptype, "models": []})
             continue
-        tasks.append((pname, ptype, catalog.list_models()))
+        tasks.append((pname, ptype, catalog.list_models))
 
     if tasks:
-        results = await asyncio.gather(*(t[2] for t in tasks), return_exceptions=True)
+        semaphore = asyncio.Semaphore(_CATALOG_BUILD_CONCURRENCY)
+
+        async def _build_config_catalog(build):
+            async with semaphore:
+                return await _bounded_catalog_build(build)
+
+        results = await asyncio.gather(
+            *(_build_config_catalog(t[2]) for t in tasks), return_exceptions=True
+        )
         for (pname, ptype, _), models_or_exc in zip(tasks, results):
             if isinstance(models_or_exc, BaseException):
                 result.append(
@@ -260,8 +439,23 @@ async def api_models_available(request: web.Request) -> web.Response:
 
     host, budget_bytes, hide_unrunnable = await asyncio.to_thread(_fit_probe)
 
-    for pkey, prov in _local_registered():
-        rows = [lm.to_dict() for lm in await _local_catalog(prov)]
+    local_providers = _local_registered()
+    local_semaphore = asyncio.Semaphore(_CATALOG_BUILD_CONCURRENCY)
+
+    async def _build_local_catalog(prov):
+        async with local_semaphore:
+            return await _bounded_catalog_build(lambda: _local_catalog(prov))
+
+    local_results = await asyncio.gather(
+        *(_build_local_catalog(prov) for _, prov in local_providers),
+        return_exceptions=True,
+    )
+    for (pkey, prov), models_or_exc in zip(local_providers, local_results):
+        if isinstance(models_or_exc, BaseException):
+            logger.debug("local model catalog failed for %s: %s", pkey, models_or_exc)
+            rows = []
+        else:
+            rows = [lm.to_dict() for lm in models_or_exc]
         sizes_by_family: dict[str, list[float]] = {}
         for d in rows:
             sizes_by_family.setdefault(
@@ -331,6 +525,108 @@ async def api_models_available(request: web.Request) -> web.Response:
             },
         }
     )
+
+
+async def api_local_models_availability(request: web.Request) -> web.Response:
+    """GET /api/models/local/availability — bounded, typed provider availability."""
+    from gideon.integrations.local_models.registry import availability_snapshot
+
+    return web.json_response(await availability_snapshot())
+
+
+async def api_local_models_health(request: web.Request) -> web.Response:
+    """GET /api/models/local/health — readiness, loaded models, and sidecar state."""
+    from gideon.integrations.local_models.residency import local_model_health_snapshot
+
+    return web.json_response(await local_model_health_snapshot())
+
+
+async def api_local_model_selftest(request: web.Request) -> web.Response:
+    """POST /api/models/local/{provider}/selftest — run real capability probes.
+
+    An omitted body tests every declared capability. ``capability`` selects one;
+    ``capabilities`` selects an ordered subset. The registry owns serialization and the
+    per-capability timeout, so two clicks cannot run concurrent inference or wait forever.
+    """
+    from gideon.integrations.local_models.registry import run_provider_self_tests
+
+    body: Any = {}
+    if request.can_read_body:
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response(
+                {
+                    "error": {
+                        "code": "invalid_request",
+                        "message": "Request body must be valid JSON",
+                    }
+                },
+                status=400,
+            )
+    if not isinstance(body, dict):
+        return web.json_response(
+            {
+                "error": {
+                    "code": "invalid_request",
+                    "message": "Request body must be an object",
+                }
+            },
+            status=400,
+        )
+
+    requested: list[str] | None = None
+    if "capability" in body and "capabilities" in body:
+        return web.json_response(
+            {
+                "error": {
+                    "code": "invalid_request",
+                    "message": "Send capability or capabilities, not both",
+                }
+            },
+            status=400,
+        )
+    if "capability" in body:
+        capability = body.get("capability")
+        if not isinstance(capability, str) or not capability.strip():
+            return web.json_response(
+                {
+                    "error": {
+                        "code": "invalid_request",
+                        "message": "capability must be a non-empty string",
+                    }
+                },
+                status=400,
+            )
+        requested = [capability]
+    elif "capabilities" in body:
+        capabilities = body.get("capabilities")
+        if (
+            not isinstance(capabilities, list)
+            or len(capabilities) > 20
+            or any(not isinstance(value, str) for value in capabilities)
+        ):
+            return web.json_response(
+                {
+                    "error": {
+                        "code": "invalid_request",
+                        "message": "capabilities must be a list of at most 20 strings",
+                    }
+                },
+                status=400,
+            )
+        requested = capabilities
+
+    provider = request.match_info.get("provider", "") or request.match_info.get(
+        "name", ""
+    )
+    result = await run_provider_self_tests(provider, requested)
+    failure = result.get("failure") or {}
+    status = {
+        "unknown_provider": 404,
+        "busy": 409,
+    }.get(str(failure.get("code") or ""), 200)
+    return web.json_response(result, status=status)
 
 
 async def api_models_active(request: web.Request) -> web.Response:
@@ -498,10 +794,18 @@ async def api_models_chat(request: web.Request) -> web.Response:
             if p.get("model"):
                 _add(pname, p["model"])
             continue
-        tasks.append((pname, p.get("model", ""), catalog.list_models()))
+        tasks.append((pname, p.get("model", ""), catalog.list_models))
 
     if tasks:
-        results = await asyncio.gather(*(t[2] for t in tasks), return_exceptions=True)
+        semaphore = asyncio.Semaphore(_CATALOG_BUILD_CONCURRENCY)
+
+        async def _build_chat_catalog(build):
+            async with semaphore:
+                return await _bounded_catalog_build(build)
+
+        results = await asyncio.gather(
+            *(_build_chat_catalog(t[2]) for t in tasks), return_exceptions=True
+        )
         for (pname, pinned, _), models_or_exc in zip(tasks, results):
             if isinstance(models_or_exc, BaseException) or not models_or_exc:
                 if pinned:
@@ -521,6 +825,18 @@ def register_model_registry_routes(app: web.Application) -> None:
     routes (``/api/models/downloads`` + ``/api/models/local/{provider}/…``); no
     per-kind catalog/delete routes live here anymore."""
     app.router.add_get("/api/models/available", api_models_available)
+    app.router.add_get("/api/models/local/availability", api_local_models_availability)
+    app.router.add_get("/api/models/local/health", api_local_models_health)
+    app.router.add_post(
+        "/api/models/local/{provider}/selftest", api_local_model_selftest
+    )
+    app.router.add_post(
+        "/api/model-providers/{name}/selftest", api_local_model_selftest
+    )
     app.router.add_get("/api/models/active", api_models_active)
     app.router.add_put("/api/models/active/{use_case}", api_models_active_set)
     app.router.add_get("/api/models/chat", api_models_chat)
+    app.router.add_get("/api/models/huggingface/auth", api_huggingface_auth_status)
+    app.router.add_put("/api/models/huggingface/auth", api_huggingface_auth_put)
+    app.router.add_delete("/api/models/huggingface/auth", api_huggingface_auth_delete)
+    app.router.add_post("/api/models/huggingface/auth/test", api_huggingface_auth_test)

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { fvs } from '../../shared/theme/fontWeight'
-import { Plus, Zap, Clock, Pencil, CalendarDays, Users, ShieldOff, Trash2 } from 'lucide-react'
+import { Plus, Zap, Clock, Pencil, CalendarDays, ChevronDown, ChevronRight, Users, ShieldOff, Trash2 } from 'lucide-react'
 import { TopBar } from '../../shared/ui/TopBar'
 import { WorkbenchLayout } from '../../shared/ui/WorkbenchLayout'
 import { HeaderActions, HeaderControl } from '../../shared/ui/HeaderActions'
@@ -18,7 +18,7 @@ import { confirmDelete } from '../../shared/ui/dialog'
 import { reportingWrite } from '../../app/shell/reportingWrite'
 import { useQueryParam, useEditFlag, type RouteProps } from '../../app/shell/useQueryState'
 import { useQuery, invalidateKeys } from '../../shared/data/data'
-import { api, type ActionProvider } from '../../shared/data/api'
+import { api, partitionRunHistory, type ActionProvider } from '../../shared/data/api'
 import { ScheduleDetail } from '../schedule/ScheduleDetail'
 import { LifecycleDetail } from './LifecycleDetail'
 import { StoreTriggerDetail } from './StoreTriggerDetail'
@@ -47,6 +47,8 @@ export function TriggersListPage({ onCreate, query, setQuery }: {
   const openId = openIdRaw || null
   const [editing, setEditing] = useEditFlag(query, setQuery)
   const [view, setView] = useQueryParam(query, setQuery, 'view', 'list', { replace: true })
+  const [showSuppressed, setShowSuppressed] = useState(false)
+  const runHistoryId = useId()
 
   const { data: schedules, error: schedulesErr, refresh: refreshSchedules } = useQuery('triggers:schedules', () => api.schedules().then((d) => d.jobs), { persist: false })
   const { data: hooks, error: hooksErr, refresh: refreshHooks } = useQuery('triggers:hooks', () => api.hooks(), { persist: true })
@@ -68,7 +70,19 @@ export function TriggersListPage({ onCreate, query, setQuery }: {
 
   const triggers = useMemo<Trigger[] | null>(() => {
     if (schedules === undefined || hooks === undefined || stores === undefined || events === undefined) return null
-    const all = [...schedules.map(scheduleToTrigger), ...hooks.map(hookToTrigger), ...stores.map(storeToTrigger), ...events.map(eventToTrigger)]
+    const all = [
+      ...schedules.map(scheduleToTrigger),
+      ...hooks.map(hookToTrigger),
+      ...stores.map((row) => ({
+        ...storeToTrigger(row),
+        lastRunTs: row.last_run_ts ?? null,
+      })),
+      ...events.map((row) => ({
+        ...eventToTrigger(row),
+        lastRunTs: row.last_run_ts ?? row.last_fired_at ?? null,
+        lastStatus: row.last_run_status || (row.last_run_ts || row.last_fired_at ? 'ran' : null),
+      })),
+    ]
     const n = q.trim().toLowerCase()
     return all
       .filter((t) => filter === 'all' || t.kind === filter)
@@ -76,6 +90,14 @@ export function TriggersListPage({ onCreate, query, setQuery }: {
   }, [schedules, hooks, stores, events, filter, q])
 
   const open = useMemo(() => triggers?.find((t) => t.id === openId) ?? null, [triggers, openId])
+
+  const partitionedTriggers = useMemo(
+    () => partitionRunHistory(triggers ?? [], (trigger) => trigger.lastStatus),
+    [triggers],
+  )
+  const listedTriggers = showSuppressed
+    ? [...partitionedTriggers.visible, ...partitionedTriggers.suppressed]
+    : partitionedTriggers.visible
 
   const counts = useMemo(() => {
     const s = schedules?.length ?? 0, h = hooks?.length ?? 0, st = stores?.length ?? 0, e = events?.length ?? 0
@@ -98,7 +120,7 @@ export function TriggersListPage({ onCreate, query, setQuery }: {
       }
       controls={(triggers === null || counts.all > 0)
         ? <ListControls
-            results={{ count: (triggers ?? []).length, noun: 'triggers', active: !!q.trim() || filter !== 'all' }}
+            results={{ count: listedTriggers.length, noun: 'triggers', active: !!q.trim() || filter !== 'all' }}
             search={view === 'list' ? { value: q, onChange: setQ, placeholder: 'Search triggers', label: 'Search triggers' } : undefined}
           >
             <Segmented
@@ -166,12 +188,19 @@ export function TriggersListPage({ onCreate, query, setQuery }: {
               )
             ) : (
               <div className="flex flex-col gap-s">
-                {triggers.map((t, i) => {
+                <div id={runHistoryId} className="flex flex-col gap-s">
+                {listedTriggers.map((t, i) => {
                   const sd = t.kind === 'store'
                     ? triggerHealthMeta(t.lastStatus, t.state)
                     : t.schedule
                       ? lastRunMeta(t.schedule.last_run_status, t.schedule.last_status)
                       : statusMeta(t.lastStatus)
+                  const runStatus = t.kind === 'store'
+                    ? t.store?.last_run_status
+                    : t.kind === 'event'
+                      ? t.event?.last_run_status
+                      : t.lastStatus
+                  const runLabel = statusMeta(runStatus).label
                   const menuItems: ContextMenuItem[] = [
                     { icon: <Zap size={15} />, label: 'Open', onSelect: () => setQuery({ open: t.id, edit: null }) },
                     ...(t.readOnly || t.kind === 'event' ? [] : [{ icon: <Pencil size={15} />, label: 'Edit', onSelect: () => setQuery({ open: t.id, edit: '1' }) }]),
@@ -216,12 +245,28 @@ export function TriggersListPage({ onCreate, query, setQuery }: {
                       </div>
                       <div className="hidden sm:flex shrink-0 items-center gap-1.5 text-on-surface-low text-[0.75rem]">
                         <sd.icon size={13} style={{ color: sd.tone }} />
-                        <span>{t.lastRunTs ? relPast(t.lastRunTs) : 'never'}</span>
+                        <span>{t.lastRunTs ? `${runLabel} · ${relPast(t.lastRunTs)}` : 'never'}</span>
                       </div>
                     </ListRow>
                     </ContextMenu>
                   )
                 })}
+                </div>
+                {partitionedTriggers.suppressed.length > 0 && (
+                  <button
+                    type="button"
+                    aria-controls={runHistoryId}
+                    aria-expanded={showSuppressed}
+                    onClick={() => setShowSuppressed((value) => !value)}
+                    className="inline-flex h-7 self-start items-center gap-xs rounded-md px-s text-on-surface-low transition-colors hover:bg-surface-high hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                    data-type="caption"
+                  >
+                    {showSuppressed ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    {showSuppressed
+                      ? `Hide ${partitionedTriggers.suppressed.length} suppressed trigger${partitionedTriggers.suppressed.length === 1 ? '' : 's'}`
+                      : `Show ${partitionedTriggers.suppressed.length} suppressed trigger${partitionedTriggers.suppressed.length === 1 ? '' : 's'}`}
+                  </button>
+                )}
               </div>
             )}
       </div>
@@ -274,4 +319,3 @@ export function EventTriggerSummary({ t, onDeleted }: { t: Trigger; onDeleted: (
     </div>
   )
 }
-

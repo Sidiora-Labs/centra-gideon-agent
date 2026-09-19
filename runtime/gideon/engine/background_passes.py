@@ -12,9 +12,13 @@ class WatchPoll:
 
         self.runtime, self.web, self.logger = runtime, web, logger
         if web:
-            from gideon.automation.triggers import web_poll as source
+            from gideon.automation.triggers import web_poll
+
+            source = web_poll
         else:
-            from gideon.automation.triggers import file_poll as source
+            from gideon.automation.triggers import file_poll
+
+            source = file_poll
         self.source = source
         self.store = TriggerStore(base_dir=config_dir())
 

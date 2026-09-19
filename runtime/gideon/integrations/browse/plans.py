@@ -62,6 +62,42 @@ def _clamp_steps(value: Any) -> int:
     return max(1, int(value or DEFAULT_MAX_STEPS_PER_TICK))
 
 
+def reachable_scope() -> dict[str, object]:
+    """Describe the hosts a browse session can actually reach under the live policy.
+
+    A grant's requested ``scope`` names the site where the task starts, but CDP also judges
+    redirects and model-requested navigations against the operator-layered BROWSE policy.  The
+    approval surface must show that effective boundary rather than imply the start host is an
+    enforced allow-list.
+    """
+    from gideon.security.net.policy import BROWSE, egress_policy_for
+
+    policy = egress_policy_for(BROWSE)
+    if policy.loopback_only:
+        summary = "Loopback web hosts only"
+    elif policy.allow_only:
+        summary = "Only the explicitly allowed web hosts"
+    elif policy.allow_private:
+        summary = "Public and private-network web hosts"
+    else:
+        summary = "Public web hosts"
+
+    if policy.allow_hosts and not policy.allow_only:
+        summary += ", plus explicitly allowed hosts"
+    if policy.deny_hosts:
+        summary += ", except explicitly denied hosts"
+
+    return {
+        "summary": summary,
+        "schemes": list(policy.allow_schemes),
+        "allow_hosts": list(policy.allow_hosts),
+        "deny_hosts": list(policy.deny_hosts),
+        "allow_private": policy.allow_private,
+        "allow_only": policy.allow_only,
+        "loopback_only": policy.loopback_only,
+    }
+
+
 @dataclass(frozen=True)
 class BrowsePlan:
     """A persisted scheduled-actuator plan. The ``cursor`` is the whole of its progress.

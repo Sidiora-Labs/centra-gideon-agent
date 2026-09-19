@@ -435,7 +435,7 @@ class BootPass:
             [trigger.to_dict() for trigger in triggers], now=self.now
         )
         catch_up = catch_up_at_boot(triggers, now=self.now)
-        by_id = {}
+        by_id: dict = {}
         for trigger in triggers:
             by_id.setdefault(trigger.id, trigger)
         rearmed = []

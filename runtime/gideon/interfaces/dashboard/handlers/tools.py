@@ -549,12 +549,10 @@ async def api_tool_groups(request: web.Request) -> web.Response:
     except Exception:
         logger.warning("Failed to enumerate platform tools for groups", exc_info=True)
 
+    configured_defaults = groups_mod.configured_group_defaults()
     surfaces = {
-        key: sorted(value)
-        for key, value in (
-            (surface, groups_mod.resolve_default_groups(surface) or set())
-            for surface in ("chat", "background", "loops", "orchestration")
-        )
+        surface: list(configured_defaults.get(surface, []))
+        for surface in ("chat", "background", "loops", "orchestration")
     }
     out = []
     for group in groups_mod.partition(defs):

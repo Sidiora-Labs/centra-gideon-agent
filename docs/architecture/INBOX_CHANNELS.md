@@ -12,9 +12,8 @@ protocols). Paths are relative to `Gideon/src/gideon/`.
   (muted threads are dropped at ingestion), and evaluates **alerts at ingestion
   time** for both the push and the poll path (`evaluate_alert` →
   `notify_inbox_alert`), so an alerting item notifies immediately instead of on
-  the next page view. Maintenance (retention cleanup + dismissed-set pruning) is
-  not on that loop: it is the `inbox.maintenance` remediation job, measured from
-  the live service's backlog and run by the remediation engine.
+  the next page view. Maintenance (retention cleanup) runs every 6 hours
+  (`_MAINTENANCE_EVERY_SECS`).
 - **AI drafts** write on behalf of the operator (the `dashboard.user_name`
   identity), not the bot.
 - **Sources**: `inbox_providers/` ships native push and filesystem sources; the

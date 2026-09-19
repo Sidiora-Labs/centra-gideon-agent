@@ -412,7 +412,7 @@ class _UsageEvidence:
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            fields = {}
+            fields: dict = {}
             for name in ("kind", "entity"):
                 fields[name] = str(row.get(name, "") or "")
             for name in ("surfaced", "used", "mutes"):
@@ -471,7 +471,7 @@ class _ThresholdCalibration:
 
 class _HealthComposite:
     def __init__(self, readings):
-        self.readings = readings
+        self.items = readings
 
     @staticmethod
     def readings(precision, capture_passes, capture_errors, utilization, judge_rate):
@@ -516,7 +516,7 @@ class _HealthComposite:
     def payload(self):
         components = []
         measured = []
-        for name, value, detail in self.readings:
+        for name, value, detail in self.items:
             score = None
             if value is not None:
                 score = round(max(0.0, min(1.0, value)) * 100, 1)

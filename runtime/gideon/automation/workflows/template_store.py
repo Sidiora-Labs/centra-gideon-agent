@@ -57,7 +57,7 @@ def load_nudge(shape: str) -> NudgeState:
     record = _read(_NUDGES_FILE).get(shape)
     if not isinstance(record, dict):
         return NudgeState(shape=shape)
-    values = {key: bool(record.get(key)) for key in ("declined", "accepted")}
+    values: dict = {key: bool(record.get(key)) for key in ("declined", "accepted")}
     values.update(
         occurrences=int(record.get("occurrences") or 0),
         last_offered_turn=int(record.get("last_offered_turn", -1)),

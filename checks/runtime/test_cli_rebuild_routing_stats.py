@@ -119,7 +119,7 @@ class TestItRecovers:
         )
         assert "chat" in folded["use_cases"]
         out = capsys.readouterr().out
-        assert "3 attempt rows" in out
+        assert "3 attempt row(s)" in out
         assert "routing_stats.json" in out
 
     def test_an_empty_audit_log_says_so_rather_than_claiming_success(
@@ -131,7 +131,7 @@ class TestItRecovers:
         )
         cli_doctor._doctor_rebuild_routing_stats()
         out = capsys.readouterr().out
-        assert "refolded 0 attempt rows" in out
+        assert "refolded 0 attempt row(s)" in out
         assert "the fold is empty, not broken" in out
         assert stats.load_stats(home)["use_cases"] == {}
 
@@ -145,5 +145,5 @@ class TestItRecovers:
 
         cli_doctor._doctor_rebuild_routing_stats()
 
-        assert "refolded 1 attempt row" in capsys.readouterr().out
+        assert "refolded 1 attempt row(s)" in capsys.readouterr().out
         assert stats.load_stats(home)["use_cases"]["reasoning"]["summarize"]

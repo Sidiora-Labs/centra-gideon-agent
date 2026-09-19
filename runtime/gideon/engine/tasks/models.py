@@ -21,22 +21,7 @@ class TaskStatus(enum.Enum):
     SKIPPED = "skipped"
 
 
-STARTABLE_STATUSES = (TaskStatus.OPEN, TaskStatus.IN_PROGRESS)
-"""Work a scheduler may offer: nobody is holding it and it still owes work."""
-
-HELD_STATUSES = (TaskStatus.BLOCKED, TaskStatus.SKIPPED)
-"""Work that is unfinished but withheld — a blocker (automatic or manual) or a pass.
-Held work is NOT terminal: it still owes a result, so a prerequisite in one of these
-states keeps its dependents waiting. It is simply not startable right now."""
-
 TERMINAL_STATUSES = (TaskStatus.DONE, TaskStatus.CANCELLED)
-"""Work that owes nobody anything, so it satisfies a dependency. `SKIPPED` is
-deliberately absent — see `HELD_STATUSES` and `workflows.materialize.is_resolved`."""
-
-STATUS_PARTITION = (STARTABLE_STATUSES, HELD_STATUSES, TERMINAL_STATUSES)
-"""The three-way partition of `TaskStatus`: exhaustive and disjoint by construction,
-asserted in `checks/runtime/test_task_dependency_state.py`. A new status must land in
-exactly one of the three, which is what stops a scheduler from silently inheriting it."""
 
 
 class TaskPriority(str, enum.Enum):
@@ -231,6 +216,31 @@ class Task:
     def incomplete_exit_criteria(self) -> list[str]:
         normalized = map(normalize_exit_criterion, self.exit_criteria)
         return [row["description"] for row in normalized if not row["met"]]
+
+    def reset_for_repeat(self) -> None:
+        self.status = TaskStatus.OPEN
+        self.exit_criteria = [
+            {
+                **normalize_exit_criterion(value),
+                "status": ExitCriteriaStatus.INCOMPLETE.value,
+                "comment": "",
+                "met": False,
+            }
+            for value in self.exit_criteria
+        ]
+        self.action_plan = [
+            {
+                **normalize_action_plan_item(value, index),
+                "completed": False,
+            }
+            for index, value in enumerate(self.action_plan)
+        ]
+        self.execution_notes = []
+        self.blocked_reason_kind = ""
+        self.blocked_kind = ""
+        self.preview = ""
+        self.evidence = []
+        self.attempts = []
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "Task":

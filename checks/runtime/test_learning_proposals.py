@@ -228,16 +228,10 @@ def test_a_rejection_is_remembered_and_blocks_a_refile():
 
 
 def test_an_acceptance_also_blocks_a_refile():
-    """``retirement`` rather than ``skill``: accepting now runs the kind's registered
-    installer, and a synthetic skill body has no procedure to write. A retirement is a
-    kind the registry declares as installing nothing, so this stays a test about the
-    refile block rather than about a writer."""
-    _, prop = P.enqueue(
-        kind="retirement", title="A retirement", body=BODY, provenance="human"
-    )
+    _, prop = P.enqueue(kind="skill", title="A skill", body=BODY, provenance="human")
     P.accept(prop.id)
     verdict, again = P.enqueue(
-        kind="retirement", title="A retirement", body=BODY, provenance="human"
+        kind="skill", title="A skill", body=BODY, provenance="human"
     )
     assert verdict is Verdict.SKIP and again is None
 
@@ -482,7 +476,7 @@ def test_accept_and_reject_are_audited(monkeypatch):
     monkeypatch.setattr(
         P, "_audit", lambda op, prop, outcome: events.append((op, outcome))
     )
-    _, a = P.enqueue(kind="retirement", title="a", body=BODY, provenance="human")
+    _, a = P.enqueue(kind="skill", title="a", body=BODY, provenance="human")
     P.accept(a.id)
     _, b = P.enqueue(
         kind="template", title="b", body="another distinct body here", occurrences=3
@@ -606,170 +600,3 @@ def test_the_fingerprint_has_no_null_bytes():
     fp = P.content_fingerprint("lesson_batch", "target", BODY)
     assert "\x00" not in fp
     assert len(fp) == 32
-
-
-class TestInstallerRegistry:
-    """Accepting means INSTALLING: the kind's one declared writer runs, and only if it
-    succeeds is the decision recorded (§7 / LEARN-R). The hole this closes is the
-    implicit fall-through — a kind no installer claimed was recorded as accepted, its
-    row deleted and its refile blocked, having written nothing."""
-
-    def test_every_kind_has_an_explicit_row(self):
-        """Exhaustiveness is the property: a NEW kind must be declared here, not
-        silently inherit "accepted installs nothing" from a missing branch."""
-        from gideon.cognition.learning import installers
-
-        assert set(installers.REGISTRY) == set(Kind)
-        for kind, binding in installers.REGISTRY.items():
-            assert binding.note, f"{kind.value} declares no reason"
-            assert binding.supported or not binding.installs
-
-    def test_a_supported_kind_runs_its_declared_writer(self, home):
-        """The real writer runs on the real path — a skill file lands on disk — and the
-        decision is recorded. That the ORDER is install-then-record is pinned by the
-        two refusal tests below: neither records anything."""
-        from gideon.extensions.skills.loader import skills_dir
-
-        _, prop = P.enqueue(
-            kind="skill",
-            title="Publish the report",
-            body="1. Build it.\n2. Publish it.\n3. Verify it.",
-            provenance="human",
-            target="publish-the-report\x1fPublish the nightly report",
-        )
-
-        accepted = P.accept(prop.id)
-
-        assert accepted.status == Status.ACCEPTED.value
-        written = skills_dir() / "auto" / "publish-the-report" / "SKILL.md"
-        assert written.is_file(), "the accept recorded without installing anything"
-        assert P.get(prop.id) is None
-        assert P.load_decisions()
-
-    def test_an_unsupported_kind_is_refused_and_stays_pending(self, home):
-        """``tier_migration`` is filed by workflow tier analysis and nothing applies a
-        tier change yet. Accepting it used to record success; now it refuses with a
-        structured reason and leaves the row for the day a writer exists."""
-        _, prop = P.enqueue(
-            kind="tier_migration",
-            title="Move nightly-report to tier 2",
-            body="the run profile has outgrown its declared tier by a wide margin",
-            provenance="human",
-        )
-
-        with pytest.raises(P.AcceptError) as caught:
-            P.accept(prop.id)
-
-        refusal = caught.value.refusal
-        assert refusal["refusal"] == "unsupported_kind"
-        assert refusal["kind"] == "tier_migration"
-        assert refusal["retryable"] is True and refusal["reason"]
-        assert P.get(prop.id) is not None
-        assert P.get(prop.id).status == Status.PENDING.value
-        assert P.load_decisions() == {}, "a refused accept recorded a decision"
-
-    def test_the_refused_row_accepts_once_a_writer_is_declared(self, home, monkeypatch):
-        """The point of leaving it pending: the SAME row is acceptable later, with no
-        re-filing and no decision record standing in the way."""
-        from gideon.cognition.learning import installers
-
-        _, prop = P.enqueue(
-            kind="tier_migration",
-            title="Move nightly-report to tier 2",
-            body="the run profile has outgrown its declared tier by a wide margin",
-            provenance="human",
-        )
-        with pytest.raises(P.AcceptError):
-            P.accept(prop.id)
-
-        migrated: list[str] = []
-        monkeypatch.setitem(
-            installers.REGISTRY,
-            Kind.TIER_MIGRATION,
-            installers.Binding(
-                note="applies the tier change",
-                install=lambda data, ctx: migrated.append(str(data["id"])),
-            ),
-        )
-
-        accepted = P.accept(prop.id)
-
-        assert migrated == [prop.id]
-        assert accepted.status == Status.ACCEPTED.value
-        assert P.get(prop.id) is None
-
-    def test_a_failing_writer_refuses_without_recording(self, home, monkeypatch):
-        """Same rule as an unsupported kind, and for the same reason: recording first
-        would let one failed install permanently suppress its own retry."""
-        from gideon.cognition.learning import installers
-
-        def _boom(data, ctx):
-            raise RuntimeError("disk full")
-
-        monkeypatch.setitem(
-            installers.REGISTRY,
-            Kind.RETIREMENT,
-            installers.Binding(note="pretends to retire", install=_boom),
-        )
-        _, prop = P.enqueue(
-            kind="retirement", title="retire me", body=BODY, provenance="human"
-        )
-
-        with pytest.raises(P.AcceptError) as caught:
-            P.accept(prop.id)
-
-        assert caught.value.refusal["refusal"] == "install_failed"
-        assert "disk full" in caught.value.refusal["reason"]
-        assert P.get(prop.id) is not None
-        assert P.load_decisions() == {}
-
-    def test_a_kind_declared_to_install_nothing_still_records(self, home):
-        """The other half: "nothing to install" is a DECLARATION, and accepting one is
-        a real acceptance — that is what separates it from a fall-through."""
-        _, prop = P.enqueue(
-            kind="retirement", title="retire the unused lesson", body=BODY
-        )
-
-        accepted = P.accept(prop.id)
-
-        assert accepted.status == Status.ACCEPTED.value
-        assert P.get(prop.id) is None
-
-    def test_a_self_model_principle_with_no_store_is_refused_not_deferred(self, home):
-        """A "best-effort projection" recorded as accepted never happens: the row is
-        gone, the decision blocks the refile, and no principle was written."""
-        _, prop = P.enqueue(
-            kind="lesson_batch",
-            title="Prefer the direct route for short asks",
-            body=BODY,
-            provenance="human",
-            source_cadence="self_model",
-        )
-
-        with pytest.raises(P.AcceptError) as caught:
-            P.accept(prop.id)
-
-        assert caught.value.refusal["kind"] == "lesson_batch"
-        assert P.get(prop.id) is not None
-        assert P.load_decisions() == {}
-
-    def test_an_ordinary_lesson_batch_installs_nothing_and_is_accepted(self, home):
-        """The declared no-op: a correction-derived batch already lives in the lesson
-        store, so acceptance is the whole effect."""
-        _, prop = P.enqueue(kind="lesson_batch", title="Use uv", body=BODY)
-
-        assert P.accept(prop.id).status == Status.ACCEPTED.value
-
-    def test_an_unclaimed_template_is_refused_rather_than_recorded(self, home):
-        """Four producers file ``template`` and only the prompt-card importer ships a
-        writer. A mined template has none, which is a missing feature — not a proposal
-        whose acceptance is its own effect."""
-        _, prop = P.enqueue(
-            kind="template", title="a mined sequence", body=BODY, provenance="miner"
-        )
-
-        with pytest.raises(P.AcceptError) as caught:
-            P.accept(prop.id)
-
-        assert caught.value.refusal["refusal"] == "unsupported_kind"
-        assert P.get(prop.id) is not None

@@ -65,7 +65,7 @@ class _NativeMessage:
         classification, replyable = _KIND_MAP.get(self.kind, _KIND_MAP["notification"])
         created = time.time()
         identity = "agent_" + format(created, ".6f") + "-" + uuid.uuid4().hex[:6]
-        attributes = dict(
+        attributes: dict = dict(
             id=identity,
             channel="agent",
             channel_name="agent",

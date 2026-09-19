@@ -292,12 +292,10 @@ async def api_proactive_install(request: web.Request) -> web.Response:
 
     def ensure() -> tuple[dict[str, Any], bool]:
         from gideon.automation.triggers import screen as _screen
-        from gideon.automation.triggers import singletons
         from gideon.automation.triggers.arm import arm
         from gideon.automation.triggers.models import Trigger
 
         store = _trigger_store()
-        singletons.converge(store, singletons.TRIAGE_DIGEST)
         trigger = _find_schedule(store)
         created = trigger is None
         if trigger is None:
@@ -318,7 +316,6 @@ async def api_proactive_install(request: web.Request) -> web.Response:
         spec["kind"] = "cron"
         spec["expr"] = resolved
         trigger.spec = spec
-        trigger.purpose = singletons.TRIAGE_DIGEST
         trigger.workflow = {
             "inline": {
                 "provider": "run-workflow",

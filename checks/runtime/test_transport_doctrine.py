@@ -26,6 +26,29 @@ def _read(rel: str) -> str:
     return (_ROOT / rel).read_text()
 
 
+def _published_loop_events() -> set[str]:
+    handler = _read("runtime/gideon/interfaces/dashboard/handlers/loop_routes.py")
+    watchdog = _read("runtime/gideon/automation/loop/watchdog.py")
+    published = set(
+        re.findall(
+            r'loop_sse\(\)\.publish\(\s*registry_key\([^)]*\),\s*"([a-z_]+)"',
+            handler,
+        )
+    )
+    published |= set(
+        re.findall(r'self\._publish\(\s*[a-zA-Z_.]+,\s*"([a-z_]+)"', watchdog)
+    )
+    kinds_dir = _ROOT / "runtime/gideon/automation/loop/kinds"
+    for module in kinds_dir.glob("*.py"):
+        published |= set(
+            re.findall(
+                r'ctx\.publish\(\s*[a-zA-Z_.]+,\s*"([a-z_]+)"',
+                module.read_text(),
+            )
+        )
+    return published
+
+
 def test_state_has_no_global_sse_hub():
     """The dead global SSE hub + accessor must stay gone (M3)."""
     assert not hasattr(
@@ -73,41 +96,15 @@ def test_per_resource_sse_substrate_present():
     assert hasattr(sse, "stream_response")
 
 
-def test_unified_loop_sse_events_are_all_registered_in_the_frontend():
-    """Every event the unified Loop backend publishes on loop_sse() MUST be listed in
-    the FE useRunStream RUN_LIFECYCLE union — EventSource silently DROPS event types with
-    no registered listener, so an unlisted publish is a missed refetch (the C326/C367/
-    C369 plan_step/deleted/ratchet_regression drift). The one loop_routes handler +
-    loop/watchdog serve EVERY kind (goal/code/general/design); the cockpit subscribes
-    via useRunStream (P16 collapsed the per-cockpit LIFECYCLE arrays into the ONE shared
-    RUN_LIFECYCLE union in useRunStream.ts). Pin the contract so a new publish without the
-    matching FE listener fails CI instead of silently never reaching an open cockpit.
-    """
-    handler = _read("runtime/gideon/interfaces/dashboard/handlers/loop_routes.py")
-    watchdog = _read("runtime/gideon/automation/loop/watchdog.py")
-    design = _read("runtime/gideon/automation/loop/kinds/design.py")
-    fe = _read("apps/console/src/pages/loops/useRunStream.ts")
-
-    published = set(
-        re.findall(
-            r'loop_sse\(\)\.publish\(\s*registry_key\([^)]*\),\s*"([a-z_]+)"', handler
-        )
-    )
-    published |= set(
-        re.findall(r'self\._publish\(\s*[a-zA-Z_.]+,\s*"([a-z_]+)"', watchdog)
-    )
-    published |= set(re.findall(r'ctx\.publish\(\s*[a-zA-Z_.]+,\s*"([a-z_]+)"', design))
-
+def test_unified_loop_sse_events_match_the_frontend_union_exactly():
+    """The listener union is the exact loop-stream contract across routes, watchdog and
+    every kind module: missing names are silently dropped by EventSource, while extra names
+    pretend that a ledger/workflow event is live when no loop SSE publisher backs it."""
+    fe = _read("apps/console/src/features/loops/useRunStream.ts")
     m = re.search(r"const RUN_LIFECYCLE = \[([^\]]*)\]", fe)
     assert m, "couldn't find the RUN_LIFECYCLE union in useRunStream.ts"
     registered = set(re.findall(r"'([a-z_]+)'", m.group(1)))
-
-    missing = published - registered
-    assert not missing, (
-        f"Unified Loop backend publishes SSE events the FE useRunStream never listens "
-        f"for: {sorted(missing)} — add them to RUN_LIFECYCLE or they'll silently never reach "
-        f"the cockpit."
-    )
+    assert registered == _published_loop_events()
 
 
 def test_workflow_engine_sse_events_are_all_registered_in_the_frontend():
@@ -120,7 +117,7 @@ def test_workflow_engine_sse_events_are_all_registered_in_the_frontend():
     """
     controller = _read("runtime/gideon/automation/workflows/controller.py")
     service = _read("runtime/gideon/automation/workflows/service.py")
-    fe = _read("apps/console/src/pages/workflows/useWorkflowStream.ts")
+    fe = _read("apps/console/src/features/workflows/useWorkflowStream.ts")
 
     published = set(re.findall(r'self\._publish\(\s*"(workflow_[a-z_]+)"', controller))
     published |= set(re.findall(r'_publish\(\s*"(workflow_[a-z_]+)"', service))
@@ -150,7 +147,7 @@ def test_the_coalesced_batch_frame_is_registered_and_its_members_are_foldable():
     Both are pinned here because neither surfaces in a test that does not read both files.
     """
     coalescer = _read("runtime/gideon/automation/workflows/coalescer.py")
-    fe = _read("apps/console/src/pages/workflows/useWorkflowStream.ts")
+    fe = _read("apps/console/src/features/workflows/useWorkflowStream.ts")
 
     batch_event = re.search(r'BATCH_EVENT = "([a-z_]+)"', coalescer)
     assert batch_event, "couldn't find BATCH_EVENT in coalescer.py"
@@ -174,41 +171,4 @@ def test_the_coalesced_batch_frame_is_registered_and_its_members_are_foldable():
     assert not missing, (
         f"events the backend coalesces but the FE union does not list: {sorted(missing)} — "
         f"they'd be batched and then discarded by unwrapBatch as unknown."
-    )
-
-
-def test_code_cockpit_sse_events_are_all_registered_in_the_frontend():
-    """The Code cockpit subscribes to the SAME unified per-loop feed (P16 pointed it at
-    the shared useRunStream), but a code loop ALSO publishes code-specific events from the
-    sdlc kind's on_new_cycle orchestration (stage_advance / gate_check / task_started /
-    task_done / stage_stalled / blocked) via ctx.publish(...). Those plus the shared
-    watchdog + handler events MUST all be in the shared RUN_LIFECYCLE union, or EventSource
-    drops them and the cockpit's stage rail / gate banner / task buckets only update on the
-    slow fallback poll (the regression this guards — the FE list was narrowed to the goal
-    watchdog's events at the cutover, dropping every code-specific one)."""
-    handler = _read("runtime/gideon/interfaces/dashboard/handlers/loop_routes.py")
-    watchdog = _read("runtime/gideon/automation/loop/watchdog.py")
-    sdlc = _read("runtime/gideon/automation/loop/kinds/sdlc.py")
-    fe = _read("apps/console/src/pages/loops/useRunStream.ts")
-
-    published = set(
-        re.findall(
-            r'loop_sse\(\)\.publish\(\s*registry_key\([^)]*\),\s*"([a-z_]+)"', handler
-        )
-    )
-    published |= set(
-        re.findall(r'self\._publish\(\s*[a-zA-Z_.]+,\s*"([a-z_]+)"', watchdog)
-    )
-    published |= set(re.findall(r'ctx\.publish\(\s*[a-zA-Z_.]+,\s*"([a-z_]+)"', sdlc))
-
-    m = re.search(r"const RUN_LIFECYCLE = \[([^\]]*)\]", fe)
-    assert m, "couldn't find the RUN_LIFECYCLE union in useRunStream.ts"
-    registered = set(re.findall(r"'([a-z_]+)'", m.group(1)))
-
-    missing = published - registered
-    assert not missing, (
-        f"A code loop publishes SSE events the shared RUN_LIFECYCLE never listens for: "
-        f"{sorted(missing)} — add them to RUN_LIFECYCLE or they'll silently never reach the "
-        f"cockpit (stage advances / gate failures / task transitions would only land on "
-        f"the slow poll)."
     )

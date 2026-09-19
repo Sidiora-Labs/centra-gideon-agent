@@ -81,6 +81,12 @@ def _config_cmd(args: argparse.Namespace) -> None:
                 print("Usage: gideon config set <key> <value>", file=sys.stderr)
                 print("       gideon config set --file <path.json>", file=sys.stderr)
                 sys.exit(1)
+            p = config_path()
+            try:
+                raw = _read_config_for_update(p)
+            except (OSError, ValueError) as exc:
+                print(f"❌ Could not read config: {exc}", file=sys.stderr)
+                sys.exit(1)
             cfg = AppConfig.load()
             d = cfg.to_dict()
             parsed = _parse_value(value)
@@ -106,7 +112,7 @@ def _config_cmd(args: argparse.Namespace) -> None:
             if not _dict_set(d, key, parsed):
                 print(f"❌ Unknown key: {key}", file=sys.stderr)
                 sys.exit(1)
-            atomic_write(config_path(), json.dumps(d, indent=2) + "\n")
+            atomic_write(p, json.dumps({**raw, **d}, indent=2) + "\n")
             sel().log_api_access(
                 caller="cli",
                 operation="config_set",
@@ -153,6 +159,18 @@ def _editable_spec(key: str) -> dict | None:
         Exception
     ):  # noqa: BLE001 — no spec available is the same as no spec declared
         return None
+
+
+def _read_config_for_update(path: Path) -> dict:
+    """Read the complete document before a keyed update can replace it."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {}
+    data = json.loads(text)
+    if not isinstance(data, dict):
+        raise ValueError(f"{path} contains {type(data).__name__}, not a JSON object")
+    return data
 
 
 def _dict_get(d: dict, key: str) -> object:

@@ -34,7 +34,7 @@ class _InsightDocument:
     payload: dict
 
     def normalized(self) -> dict:
-        fields = {}
+        fields: dict = {}
         title = _redact(str(self.payload.get("title") or "")).strip().rstrip(".")
         summary = _redact(str(self.payload.get("summary") or "")).strip()
         if title:

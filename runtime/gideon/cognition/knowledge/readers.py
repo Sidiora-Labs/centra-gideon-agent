@@ -2,8 +2,10 @@
 
 import os
 import re
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 from gideon.security.security import is_sensitive_path
 
@@ -52,7 +54,7 @@ def _table_lines(rows, *, escape=False, pad=False):
 def _render_docx_table(table) -> list[str]:
     rows = []
     for row in table.rows:
-        cells = []
+        cells: list = []
         for cell in row.cells:
             value = " ".join(cell.text.split()).replace("|", "\\|")
             if not (value and cells and value == cells[-1]):
@@ -74,6 +76,33 @@ def _missing_reader(format_name, package):
 def _text_file(path, encoding):
     with open(path, "r", encoding=encoding) as stream:
         return stream.read()
+
+
+@runtime_checkable
+class OcrProvider(Protocol):
+    """Text extraction boundary shared by image and scanned-PDF ingestion."""
+
+    def ocr(self, image_path: str, *, page_number: int = 1) -> str: ...
+
+
+@dataclass(frozen=True)
+class PdfResourceLimits:
+    max_file_bytes: int = 100 * 1024 * 1024
+    max_pages: int = 500
+    max_raster_pages: int = 50
+    max_page_pixels: int = 20_000_000
+    max_raster_pixels: int = 100_000_000
+    max_raster_bytes: int = 100 * 1024 * 1024
+    max_text_chars: int = 10_000_000
+    raster_dpi: int = 150
+
+
+class PdfResourceLimitError(ValueError):
+    def __init__(self, resource: str, actual: int, limit: int):
+        self.resource = resource
+        self.actual = actual
+        self.limit = limit
+        super().__init__(f"PDF {resource} limit exceeded ({actual} > {limit})")
 
 
 class FileReader:
@@ -119,6 +148,15 @@ class FileReader:
     }
     _CSV_MAX_TABLE_ROWS = 500
 
+    def __init__(
+        self,
+        *,
+        ocr_provider: OcrProvider | None = None,
+        pdf_limits: PdfResourceLimits | None = None,
+    ) -> None:
+        self.ocr_provider = ocr_provider
+        self.pdf_limits = pdf_limits or PdfResourceLimits()
+
     def read(self, path: str) -> tuple[str, dict]:
         if is_sensitive_path(path):
             raise PermissionError(f"Refusing to read sensitive path: {path}")
@@ -154,9 +192,67 @@ class FileReader:
         if pdfplumber is None:
             return _missing_reader("PDF", "pdfplumber")
         try:
+            file_size = os.path.getsize(path)
+            self._check_pdf_limit(
+                "file bytes", file_size, self.pdf_limits.max_file_bytes
+            )
             with pdfplumber.open(path) as document:
-                pages = [page.extract_text() or "" for page in document.pages]
-            return "\n".join(pages), {"format": "pdf", "page_count": len(pages)}
+                page_count = len(document.pages)
+                self._check_pdf_limit(
+                    "page count", page_count, self.pdf_limits.max_pages
+                )
+                pages = []
+                text_chars = 0
+                for page in document.pages:
+                    text = page.extract_text() or ""
+                    text_chars += len(text)
+                    self._check_pdf_limit(
+                        "text characters", text_chars, self.pdf_limits.max_text_chars
+                    )
+                    pages.append(text)
+
+                scanned = [
+                    index for index, text in enumerate(pages) if not text.strip()
+                ]
+                metadata = {
+                    "format": "pdf",
+                    "page_count": page_count,
+                    "scanned_page_count": len(scanned),
+                }
+                if not scanned:
+                    return "\n".join(pages), metadata
+                if self.ocr_provider is None:
+                    metadata.update(ocr_required=True, ocr_available=False)
+                    if not any(text.strip() for text in pages):
+                        message = "scanned PDF requires an available OCR provider"
+                        metadata.update(
+                            format="error", error=message, error_kind="ocr_unavailable"
+                        )
+                        return f"Error reading PDF: {message}", metadata
+                    return "\n".join(pages), metadata
+
+                self._check_pdf_limit(
+                    "raster page count",
+                    len(scanned),
+                    self.pdf_limits.max_raster_pages,
+                )
+                self._ocr_scanned_pages(document.pages, pages, scanned)
+                metadata.update(
+                    ocr_required=True,
+                    ocr_available=True,
+                    ocr_used=True,
+                    ocr_page_count=len(scanned),
+                )
+            return "\n".join(pages), metadata
+        except PdfResourceLimitError as error:
+            return f"Error reading PDF: {error}", {
+                "format": "error",
+                "error": str(error),
+                "error_kind": "resource_limit",
+                "resource": error.resource,
+                "actual": error.actual,
+                "limit": error.limit,
+            }
         except Exception as error:
             text = self._salvage_as_text(path)
             return (
@@ -164,6 +260,52 @@ class FileReader:
                 if text is not None
                 else _read_error(error)
             )
+
+    def _ocr_scanned_pages(
+        self, pdf_pages, pages: list[str], scanned: list[int]
+    ) -> None:
+        limits = self.pdf_limits
+        provider = self.ocr_provider
+        if provider is None:
+            raise RuntimeError("OCR provider is unavailable")
+        raster_pixels = 0
+        raster_bytes = 0
+        text_chars = sum(len(text) for text in pages)
+        with tempfile.TemporaryDirectory(prefix="gideon-pdf-ocr-") as directory:
+            for index in scanned:
+                page = pdf_pages[index]
+                width = max(1, round(float(page.width) * limits.raster_dpi / 72))
+                height = max(1, round(float(page.height) * limits.raster_dpi / 72))
+                page_pixels = width * height
+                self._check_pdf_limit(
+                    "page raster pixels", page_pixels, limits.max_page_pixels
+                )
+                raster_pixels += page_pixels
+                self._check_pdf_limit(
+                    "total raster pixels", raster_pixels, limits.max_raster_pixels
+                )
+
+                image_path = os.path.join(directory, f"page-{index + 1}.png")
+                page.to_image(resolution=limits.raster_dpi).save(
+                    image_path, format="PNG"
+                )
+                raster_bytes += os.path.getsize(image_path)
+                self._check_pdf_limit(
+                    "raster bytes", raster_bytes, limits.max_raster_bytes
+                )
+                text = provider.ocr(image_path, page_number=index + 1)
+                if not isinstance(text, str):
+                    raise TypeError("OCR provider must return text")
+                text_chars += len(text)
+                self._check_pdf_limit(
+                    "text characters", text_chars, limits.max_text_chars
+                )
+                pages[index] = text.strip()
+
+    @staticmethod
+    def _check_pdf_limit(resource: str, actual: int, limit: int) -> None:
+        if actual > limit:
+            raise PdfResourceLimitError(resource, actual, limit)
 
     @staticmethod
     def _salvage_as_text(path: str) -> str | None:

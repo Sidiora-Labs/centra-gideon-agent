@@ -198,6 +198,7 @@ function DigestSetup({ view, digest }: { view: TriageDigestView; digest: ReturnT
 
 function PendingRow({ row, busy, onReply }: { row: TriagePending; busy: string; onReply: (text: string) => void }) {
   const n = row.ordinal
+  const subject = row.title ? `#${n} ${row.title}` : `item #${n}`
 
   return (
     <li className="flex flex-col gap-s rounded-xl border border-outline/20 bg-surface-high px-m py-m sm:flex-row sm:items-center">
@@ -211,7 +212,7 @@ function PendingRow({ row, busy, onReply }: { row: TriagePending; busy: string; 
           {row.source && <span className="text-on-surface-low">{row.source}</span>}
 
           {row.item_permalink && (
-            <a href={row.item_permalink} className="text-primary-emphasis underline">the item</a>
+            <a href={row.item_permalink} aria-label={`Open item: ${subject}`} className="text-primary-emphasis underline">the item</a>
           )}
         </p>
       </div>
@@ -228,7 +229,7 @@ function PendingRow({ row, busy, onReply }: { row: TriagePending; busy: string; 
               { text: 'Always', command: `always yes ${n}`, variant: 'ghost' as const, title: `Always allow ${row.pattern_key}` },
               { text: 'Never', command: `always no ${n}`, variant: 'ghost' as const, title: `Never allow ${row.pattern_key}` },
             ] : []),
-          ].map(action => <Button key={action.command} size="xs" variant={action.variant} title={action.title}
+          ].map(action => <Button key={action.command} size="xs" variant={action.variant} title={action.title} ariaLabel={`${action.text}: ${subject}`}
             loading={busy === action.command} onClick={() => onReply(action.command)}>{action.text}</Button>)}
           {!row.pattern_key && <span data-type="caption" className="self-center text-on-surface-low">no pattern to remember</span>}
         </div>

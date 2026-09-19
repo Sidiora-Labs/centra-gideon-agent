@@ -104,7 +104,7 @@ class _DefinitionCodec:
 
     @classmethod
     def decode(cls, document, constructor):
-        values = {key: str(document.get(key, "")) for key in cls.text_fields}
+        values: dict = {key: str(document.get(key, "")) for key in cls.text_fields}
         values.update(
             natural_voice=bool(document.get("natural_voice", False)),
             skills=list(document.get("skills") or []),

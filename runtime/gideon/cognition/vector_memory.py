@@ -370,7 +370,7 @@ def _now_iso() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
 
 
-def _row_value(row: object, column: str, default: object) -> object:
+def _row_value(row: Any, column: str, default: object) -> object:
     try:
         result = row[column]
     except (IndexError, KeyError, TypeError):
@@ -403,6 +403,7 @@ def _contributor_label(contributor: object, owner: str) -> str:
 
 
 def _linkable_text(value: object) -> str:
+    leaves: list[Any]
     if isinstance(value, str):
         return value
     if isinstance(value, dict):
@@ -412,9 +413,9 @@ def _linkable_text(value: object) -> str:
         for candidate in candidates:
             if isinstance(candidate, str) and candidate.strip():
                 return candidate
-        leaves = value.values()
+        leaves = list(value.values())
     elif isinstance(value, (list, tuple)):
-        leaves = value
+        leaves = list(value)
     else:
         return str(value) if value is not None else ""
     return " ".join(item for item in leaves if isinstance(item, str))
@@ -486,6 +487,11 @@ class SemanticArchive(MemoryProvider):
         )
         self._episodic_max, self._episodic_limit = episodic_max, episodic_limit
         self._embedding_dim = embedding_dim
+        self._db: Any | None = None
+        self._faiss_id_map: list[Any] = []
+        self._alias_generation: int = 0
+        self.embed_fn: Callable[[str], Any] | None = None
+        self.contradiction_judge: Any | None = None
         self._prefixes = list(_BUILTIN_PREFIXES)
         if extra_prefixes:
             self._prefixes.extend(extra_prefixes)
@@ -565,14 +571,15 @@ class SemanticArchive(MemoryProvider):
             try:
                 from gideon.cognition.memory_linker import link_record
 
-                arguments = dict(
+                link_record(
+                    self.graph,
+                    self.alias_index,
                     from_kind=from_kind,
                     from_ref=from_ref,
                     text=text,
                     key=key,
                     batch_ref=batch_ref,
                 )
-                link_record(self.graph, self.alias_index, **arguments)
             except Exception:
                 logger.debug(
                     "write-time linking failed for %s/%s",
@@ -1018,23 +1025,6 @@ class SemanticArchive(MemoryProvider):
             query_embedding, query_text, cap, citations_out
         )
 
-    def curated_count(self) -> int:
-        """Active semantic rows and journal events a HUMAN authored.
-
-        The curation signal, as opposed to memory the consolidator formed on its own:
-        :data:`_HUMAN_AUTHORED_SOURCES` is this archive's existing mark for "a person wrote
-        this" — a dashboard edit or delete, a ``forget``, a vault edit. One query, two
-        counted subselects, so an advisory caller can ask on every read."""
-        marks = tuple(sorted(_HUMAN_AUTHORED_SOURCES))
-        slots = ",".join("?" * len(marks))
-        row = self.db.execute(
-            f"SELECT (SELECT COUNT(*) FROM semantic_memory "
-            f"WHERE is_deleted = 0 AND source IN ({slots})) + "
-            f"(SELECT COUNT(*) FROM memory_events WHERE source IN ({slots}))",
-            marks + marks,
-        ).fetchone()
-        return int(row[0]) if row else 0
-
     def memory_stats(self) -> dict:
         measures = (
             ("semantic_active", "semantic_memory", "is_deleted=0"),
@@ -1320,7 +1310,9 @@ class SemanticArchive(MemoryProvider):
             self.get_lessons_context(),
         )
         names = ("semantic", "episodic", "lessons")
-        result = {f"{name}_chars": len(block) for name, block in zip(names, blocks)}
+        result: dict[str, Any] = {
+            f"{name}_chars": len(block) for name, block in zip(names, blocks)
+        }
         result["total_chars"] = sum(len(block) for block in blocks)
         result.update(
             semantic_preview=blocks[0][:500],

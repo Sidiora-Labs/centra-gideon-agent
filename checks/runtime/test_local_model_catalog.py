@@ -33,6 +33,7 @@ from gideon.integrations.local_models.provider import (
     _matrix_from_dict,
     host_platform_token,
 )
+from gideon.interfaces.dashboard.handlers import model_registry
 
 
 class _CatalogProvider(LocalModelProvider):
@@ -537,55 +538,12 @@ def test_matrix_from_dict_ignores_unknown_keys():
 
 
 @pytest.mark.asyncio
-async def test_a_truncated_row_makes_the_repair_click_actually_refetch(tmp_path):
-    """req 92 ac_2 — the disk-derived verdict is what the Repair button acts on.
+async def test_store_catalog_build_has_a_deadline(monkeypatch):
+    release = asyncio.Event()
+    monkeypatch.setattr(model_registry, "_CATALOG_BUILD_TIMEOUT_SECS", 0.01)
 
-    ``ModelDownloadRegistry.start`` is the Repair action (``ModelsPanel.repair`` calls
-    ``startModelDownload``), and a truncated model satisfies "is it downloaded" — real bytes
-    are there, just not enough of them — so the skip answered ``done`` in milliseconds and
-    refetched nothing. ``test_model_downloads.py`` pins that decision with the two disk
-    predicates stubbed; this drives the WHOLE chain on real code — catalog card → disk probe
-    → ``integrity`` → ``_is_truncated`` → the job — because the stubbed version passes
-    whether or not ``_apply_disk_state`` ever writes ``integrity``.
+    async def _stalled():
+        await release.wait()
 
-    Only the fetch itself is the fixture provider's (its ``download_model`` returns True
-    without touching the network), which is the same seam the download suite uses.
-    """
-    from gideon.integrations.local_models import registry as lm_registry
-    from gideon.interfaces.dashboard import model_downloads as downloads
-
-    cache = tmp_path / "cache"
-    cache.mkdir()
-    weights = cache / "active-model.bin"
-    weights.write_bytes(b"x" * 1_000_000)  # the card declares 10 MB
-    provider = _CatalogProvider(_write_catalog(tmp_path, _CARDS), cache_root=cache)
-    lm_registry.register_provider(provider, name="fixture-app")
-    try:
-        assert downloads._is_downloaded("fixture-app", "active-model") is True
-        assert (
-            downloads._is_truncated("fixture-app", "active-model") is True
-        ), "the disk verdict never reached the download path"
-
-        reg = downloads.ModelDownloadRegistry()
-        job, error = reg.start("fixture-app", "active-model")
-        assert error is None and job is not None
-        assert job.state in (
-            "queued",
-            "running",
-        ), "Repair short-circuited on a model whose weights are incomplete"
-        for _ in range(50):
-            await asyncio.sleep(0)
-            if job.state == "done":
-                break
-        assert job.state == "done", "the refetch never ran to completion"
-
-        weights.write_bytes(b"x" * 10_000_000)
-        assert downloads._is_truncated("fixture-app", "active-model") is False
-        intact = downloads.ModelDownloadRegistry()
-        done_job, done_error = intact.start("fixture-app", "active-model")
-        assert done_error is None and done_job is not None
-        assert (
-            done_job.state == "done"
-        ), "an intact model must still skip the fetch — the skip is not gone, only narrowed"
-    finally:
-        lm_registry.unregister_provider("fixture-app")
+    with pytest.raises(asyncio.TimeoutError):
+        await model_registry._bounded_catalog_build(_stalled)

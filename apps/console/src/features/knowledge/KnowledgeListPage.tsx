@@ -28,6 +28,7 @@ import { confirm, confirmDelete, promptInput } from '../../shared/ui/dialog'
 import { PageTitle } from '../../shared/ui/PageTitle'
 import { notify } from '../../app/shell/appSdk'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
+import { readingTimeLabel } from './readingTime'
 
 type View = 'home' | 'library' | 'graph' | 'intents' | 'tags' | 'conflicts' | 'decisions'
 
@@ -557,10 +558,12 @@ export function KnowledgeListPage({ onCreate, onOpenItem, onOpenReader, onOpenSo
                   >
                     {(it, i, listCtx) => {
                       const tm = resolveType(it)
+                      const readTime = readingTimeLabel(it)
                       const manualShelves = collections.filter((c) => c.kind === 'manual')
                       const menuItems: ContextMenuItem[] = [
                         { icon: <FileText size={15} />, label: 'Peek', onSelect: () => setItemTok(it.id) },
                         { icon: <Library size={15} />, label: 'Open full page', onSelect: () => onOpenItem(it.id) },
+                        ...(readTime ? [{ icon: <BookOpen size={15} />, label: `Read · ${readTime}`, onSelect: () => (onOpenReader ?? onOpenItem)(it.id) }] : []),
                         {
                           icon: <BookOpen size={15} />,
                           label: it.read_state === 'reading' ? 'Mark as read'
@@ -648,6 +651,13 @@ export function KnowledgeListPage({ onCreate, onOpenItem, onOpenReader, onOpenSo
                                 </a>
                               )}
                               {it.file_size != null && it.file_size > 0 && <span>· {fmtBytes(it.file_size)}</span>}
+                              {readTime && (
+                                <button type="button" onClick={(e) => { e.stopPropagation(); (onOpenReader ?? onOpenItem)(it.id) }}
+                                  aria-label={`Read ${it.title || it.url_title || 'untitled item'}, ${readTime}`}
+                                  className="inline-flex items-center gap-1 text-primary-emphasis transition-colors hover:text-primary">
+                                  <BookOpen size={11} aria-hidden /> {readTime}
+                                </button>
+                              )}
                               {
 }
                               {(it.summary || it.content) && <span className="truncate">{it.summary || it.content}</span>}

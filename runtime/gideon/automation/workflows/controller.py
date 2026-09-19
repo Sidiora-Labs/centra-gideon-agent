@@ -35,6 +35,7 @@ import asyncio
 import calendar
 import contextlib
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass, field, replace
@@ -49,10 +50,7 @@ from gideon.automation.workflows import (
     conditions,
 )
 from gideon.automation.workflows import context as context_mod
-from gideon.automation.workflows import (
-    execution_hints,
-    gate_policy,
-)
+from gideon.automation.workflows import execution_hints, gate_policy
 from gideon.automation.workflows import journal as journal_mod
 from gideon.automation.workflows import (
     judge_calibration,
@@ -63,6 +61,7 @@ from gideon.automation.workflows import (
     revision,
     store,
     supervisor_policy,
+    template_lint,
 )
 from gideon.automation.workflows.admission import (
     AdmissionRequest,
@@ -158,21 +157,6 @@ _INSTANCE_MARKER_RE = re.compile(r"[@#]\d+")
 _LOOP_MARKER_RE = re.compile(r"@(\d+)")
 
 TICK_WAKE_SECS = 5.0
-
-MIN_WAKE_SECS = 0.05
-
-EXTERNAL_POLL_SECS = max(MIN_WAKE_SECS, min(TICK_WAKE_SECS, 1.0))
-"""Poll cadence for a tick with nothing awaitable and no deadline to wake for.
-
-A stage dispatched to a subagent is EXTERNAL work: it is deliberately not in
-`_inflight` (see `_reconcile_dispatched_stages`), and it carries no `wake_at`, so
-`_next_wake_delay` has nothing to schedule. The loop answered that with
-`asyncio.sleep(0)`, which is not a wait at all — it re-ran the whole tick (a frontier
-walk, a subagent lookup and a state read per instance) as fast as the event loop
-would turn it over, for as long as the external work took. This is the bounded floor
-that replaces it: clamped into the same window `_next_wake_delay` returns from, so a
-tick can never poll faster than `MIN_WAKE_SECS` nor idle longer than `TICK_WAKE_SECS`.
-"""
 
 ESCALATION_ANSWER_HORIZON_SECS = 24 * 3600.0
 
@@ -457,7 +441,10 @@ class RunController:
                     await self._await_progress()
                 else:
                     delay = self._next_wake_delay()
-                    await asyncio.sleep(EXTERNAL_POLL_SECS if delay is None else delay)
+                    if delay is None:
+                        await asyncio.sleep(0)
+                    else:
+                        await asyncio.sleep(delay)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -493,6 +480,7 @@ class RunController:
         async with self._lock:
             if not self.run.started_at:
                 self.run.started_at = _now()
+            self.run.extra["owner_pid"] = os.getpid()
             self.run.status = RunStatus.RUNNING
             self._save_run()
         self.journal.run_started(
@@ -3669,6 +3657,8 @@ class RunController:
     def _context_for(self, item: ReadyNode) -> BindingContext:
         watcher_path = self._enclosing_watcher(item.path)
         seen = self._seen.get(watcher_path) if watcher_path else None
+        last_output, has_last = self._loop_last_output(item.path)
+        previous_output = self._previous_output(item.path)
         return BindingContext(
             inputs=dict(self.run.inputs),
             node_outputs=dict(self._outputs),
@@ -3676,13 +3666,47 @@ class RunController:
             item=item.item,
             has_item=item.has_item,
             iter_index=item.iter_index,
+            last_output=last_output,
+            has_last=has_last,
             sibling_outputs=self._sibling_outputs(item.path),
-            previous_output=self._previous_output(item.path),
-            has_previous=self._previous_output(item.path) is not None,
+            previous_output=previous_output,
+            has_previous=previous_output is not None,
             seen_filter=seen.unseen if seen else None,
             brief=self._session_brief(),
             secret_resolver=_secret_resolver,
         )
+
+    def _loop_last_output(self, path: str) -> tuple[Any, bool]:
+        """The previous iteration record, including a typed record for iteration zero.
+
+        A sequence-bodied loop produces one persisted output per leaf. ``last`` is their
+        iteration record rather than whichever leaf happened to settle last: workers often
+        need their own prior summary and the following judge's verdict together. Starting
+        from schema-derived defaults also gives the first iteration that same resolvable
+        shape instead of failing every ``last.output.field`` binding before any work runs.
+        """
+        parent_path, iteration = _loop_parent(path)
+        if parent_path is None:
+            return None, False
+        loop = dict(_walk(self.root)).get(_base_path(parent_path))
+        if loop is None or loop.kind != NodeKind.LOOP:
+            return None, False
+
+        defaults = template_lint.loop_first_iteration_defaults(loop.to_dict())
+        if iteration <= 0:
+            return defaults, True
+
+        outputs = self._accumulated_outputs(f"{parent_path}.body@{iteration - 1}")
+        if not outputs:
+            return defaults, True
+
+        record = dict(defaults)
+        saw_record = False
+        for output in outputs:
+            if isinstance(output, dict):
+                record.update(output)
+                saw_record = True
+        return (record if saw_record else outputs[-1]), True
 
     def _node_artifacts(self) -> dict[str, str] | None:
         """node id → artifact ref, for outputs the journal OFFLOADED (WV-11).
@@ -3906,7 +3930,7 @@ class RunController:
             deadlines.append(self._admission_wake)
         if not deadlines:
             return None
-        return max(MIN_WAKE_SECS, min(TICK_WAKE_SECS, min(deadlines) - time.time()))
+        return max(0.05, min(TICK_WAKE_SECS, min(deadlines) - time.time()))
 
     def _budget_exceeded(self) -> bool:
         cap = getattr(self.run.budget, "max_tokens", 0) or 0
@@ -3967,7 +3991,6 @@ class RunController:
             if status == RunStatus.COMPLETE:
                 self._revise_project_overview()
             self._capture_run_end()
-            self._propose_tier_change()
         self._publish("workflow_run_update", {"status": status.value, "error": error})
         if status in TERMINAL_RUN_STATUSES:
             await self._drain_overlap_queue()
@@ -4041,29 +4064,6 @@ class RunController:
             run_end.capture(self.run, service, journal=journal_mod)
         except Exception:
             logger.debug("run %s: run-end capture failed", self.run.id, exc_info=True)
-
-    def _propose_tier_change(self) -> None:
-        """Re-read this def's terminal runs and propose a tier move if they justify one.
-
-        Runs HERE because a terminal run is the moment the evidence changed, and it is
-        deterministic: `tier_proposals` projects ledgers already on disk and spends no
-        tokens, so unlike `_capture_run_end` it needs no memory service and no budget.
-
-        Best-effort and fully guarded: `_finish` is the single terminal writer (WF2-R10)
-        and MUST NOT raise, so a failure here costs a proposal, never the run's terminal
-        status. Suppressed for a temporary/incognito run for the same reason the run-end
-        cadence is gated — that run's work must leave nothing behind.
-        """
-        if ownership.run_mode(self.run) in ownership.WRITE_SUPPRESSED:
-            return
-        try:
-            from gideon.automation.workflows import tier_proposals
-
-            tier_proposals.review_workflow(self.run.workflow_name)
-        except Exception:
-            logger.debug(
-                "run %s: tier proposal review failed", self.run.id, exc_info=True
-            )
 
     def _revise_project_overview(self) -> None:
         """Auto-revise the run's project overview on a successful completion (WORK-CONTAINERS §6.1).

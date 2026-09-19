@@ -111,7 +111,7 @@ class ForkResult:
     cached_prefix: int = 0
 
     def to_dict(self) -> dict[str, Any]:
-        details = dict(
+        details: dict = dict(
             child_run_id=self.child.id,
             checkpoint_id=self.checkpoint_id,
             fork_axis=self.fork_axis,

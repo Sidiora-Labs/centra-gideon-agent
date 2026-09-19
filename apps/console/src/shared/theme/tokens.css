@@ -81,6 +81,8 @@
   --color-success: var(--color-ok);
   --color-warning: var(--color-warn);
   --color-error: var(--color-danger);
+  --color-error-container: color-mix(in srgb, var(--color-danger) 12%, var(--color-surface-container));
+  --color-on-error-container: var(--color-danger);
                                                                                
                                                                                            
                                                                                                 
@@ -758,7 +760,12 @@
   pointer-events: auto;
 }
 
-                                                                                    
+input[type="checkbox"] {
+  min-width: 16px;
+  min-height: 16px;
+}
+
+                                                                                     
                                                                                    
                                                                                      
                                                                                  

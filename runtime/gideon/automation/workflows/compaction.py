@@ -182,9 +182,7 @@ def is_context_overflow(exc: BaseException) -> bool:
     from gideon.automation.workflows.loop_middleware import (
         FailureClass as MiddlewareFailureClass,
     )
-    from gideon.automation.workflows.loop_middleware import (
-        classify_failure,
-    )
+    from gideon.automation.workflows.loop_middleware import classify_failure
 
     return classify_failure(str(exc)) is MiddlewareFailureClass.CONTEXT_OVERFLOW
 

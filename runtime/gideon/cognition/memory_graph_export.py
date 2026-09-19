@@ -34,7 +34,7 @@ def _ring_segments(count: int):
 
 
 def _positions(count: int) -> list[tuple[float, float]]:
-    points = []
+    points: list = []
     for occupancy, radius in _ring_segments(count):
         angles = (
             offset / max(1, occupancy) * math.tau - math.pi / 2

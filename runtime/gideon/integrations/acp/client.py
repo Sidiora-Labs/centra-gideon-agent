@@ -333,13 +333,16 @@ class AcpClient:
         return {"cwd": str(self._work_dir), "mcpServers": self._core_mcp_servers()}
 
     async def _try_resume(self, session_id: str) -> bool:
+        connection = self._connection
+        if connection is None:
+            raise AcpError("ACP connection is not open")
         params = {**self._session_parameters(), "sessionId": session_id}
         if self._session_files_dir is not None:
             hint = self._session_files_dir / (session_id + ".json")
             if hint.exists():
                 params["_meta"] = {"_vendor.dev/session_file": str(hint)}
         try:
-            session = await self._connection.load_session(
+            session = await connection.load_session(
                 params,
                 session_id=session_id,
                 timeout=_INIT_TIMEOUT,
@@ -354,18 +357,23 @@ class AcpClient:
         return True
 
     async def _new_session(self) -> None:
-        session = await self._connection.new_session(
+        connection = self._connection
+        if connection is None:
+            raise AcpError("ACP connection is not open")
+        session = await connection.new_session(
             self._session_parameters(),
             timeout=_INIT_TIMEOUT,
             session_files_dir=self._session_files_dir,
         )
         self._session, self._session_id = session, session.session_id
-        self._session_new_snapshot = dict(
-            self._connection.last_session_new_snapshot or {}
-        )
+        self._session_new_snapshot = dict(connection.last_session_new_snapshot or {})
 
     async def _configure_session(self) -> None:
-        dialect, sid = self._dialect, self._session_id
+        connection = self._connection
+        sid = self._session_id
+        if connection is None or sid is None:
+            raise AcpError("ACP session is not initialized")
+        dialect = self._dialect
         operations = (
             (dialect.activate_agent_request, {"agent": self._agent}),
             (
@@ -377,7 +385,7 @@ class AcpClient:
         )
         for builder, values in operations:
             await self._send_dialect_request(builder(session_id=sid, **values))
-        await self._connection.drain_init_notifications(duration=_DRAIN_DURATION)
+        await connection.drain_init_notifications(duration=_DRAIN_DURATION)
 
     async def _initialize_session(self) -> None:
         assert self._connection is not None

@@ -31,7 +31,7 @@ def _safe_choice(value: object, allowed: tuple[str, ...], default: str) -> str:
 
 
 def _meta(label: str, help: str, **kwargs: object) -> dict:
-    metadata = {"label": label, "help": help}
+    metadata: dict = {"label": label, "help": help}
     metadata.update(kwargs)
     return metadata
 

@@ -403,9 +403,7 @@ SUGGEST_TEMPLATE_SCHEMA = ToolSchema(
 )
 
 
-from gideon.workspace.artifacts.models import (  # noqa: E402
-    ALLOWED_KINDS as _ALLOWED_KINDS,
-)
+from gideon.workspace.artifacts.models import ALLOWED_KINDS as _ALLOWED_KINDS  # noqa: E402
 
 _ARTIFACT_KINDS = frozenset(_ALLOWED_KINDS)
 

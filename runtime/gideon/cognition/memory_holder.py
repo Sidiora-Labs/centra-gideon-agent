@@ -25,7 +25,7 @@ Two rules carry the safety here:
 
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Any, Iterable
 
 CLAIM_PREFIX = "claim."
 
@@ -153,7 +153,7 @@ def render_fact_line(
     return result
 
 
-def entity_names_for(holders: Iterable[str], graph: object) -> dict[str, str]:
+def entity_names_for(holders: Iterable[str], graph: Any) -> dict[str, str]:
     requested = set(filter(is_person, holders))
     if not requested:
         return {}

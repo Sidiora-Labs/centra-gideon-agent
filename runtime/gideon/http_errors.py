@@ -278,16 +278,6 @@ HTTP_ERROR_CODES: dict[str, str] = {
     "trigger_id_required": "A trigger id is required to describe what an automation would do.",
     "unknown_trigger": "No automation exists with that id.",
     "onboarding_import_failed": "Scanning for or importing from another agent tool failed.",
-    "local_model_scan_refused": (
-        "The private-network scan was refused before anything was probed — a target is "
-        "not a loopback/private address or CIDR, names too wide a range, or the request "
-        "asks for more addresses than one scan may touch."
-    ),
-    "local_model_probe_failed": (
-        "The endpoint did not answer as a live local model service, so no binding was "
-        "offered or created."
-    ),
-    "local_model_bind_failed": "Writing the key-less local-model provider row failed.",
     "tool_disabled": "The tool is disabled on the Tools page and will not be executed.",
     "tts_disabled": (
         "Text-to-speech is switched off. Fix: turn on “Speak replies aloud” in "
@@ -329,25 +319,9 @@ HTTP_ERROR_CODES: dict[str, str] = {
     "run_not_prelaunch": (
         "The run has launched, so its policy overrides are frozen; edit them before launch."
     ),
-    "loop_not_prelaunch": (
-        "The loop has launched, so its plan is frozen; planning actions only apply "
-        "before launch."
-    ),
     "unknown_policy_key": (
         "A policy override key is not in the overridable set; the detail names the "
         "offending keys and the keys a run may override."
-    ),
-    "config_path_required": (
-        "The config write names no field: the request body carries no `path`. Fix: send "
-        '{"path": "<section.field>", "value": <new value>}.'
-    ),
-    "config_path_blank": (
-        "The config write's `path` is present but empty, so it selects no field. Fix: name "
-        "the dotted field to change, such as `agent.approval_mode`."
-    ),
-    "config_path_type_invalid": (
-        "The config write's `path` is not a string, so it cannot select a field. Fix: send "
-        "`path` as a dotted string, not a list, object, number or boolean."
     ),
 }
 

@@ -1,11 +1,11 @@
-"""Pure-python text/document nodes (#30 Task A) — no model needed.
+"""Text/document nodes (#30 Task A), with optional OCR for scanned PDFs.
 
 These cover the text-backed types that ship usable without any extraction
 model-provider:
 - ``passthrough`` — note/gist/bookmark/journal/fleeting: the raw content IS the
   extracted text.
 - ``document_read`` — pdf/docx/sheet/slides/document: extract text via the existing
-  ``readers.FileReader`` (pdfplumber/python-docx/python-pptx/html2text).
+  reader stack, using the configured image-modality provider for scanned PDF pages.
 - ``consolidate`` — fan-in: merge multiple upstream text outputs into one (header-
   concat; no LLM in Task A — the reasoning-LLM consolidation is Task B/#47).
 """
@@ -13,9 +13,14 @@ model-provider:
 from __future__ import annotations
 
 import logging
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 from gideon.cognition.knowledge.pipeline.registry import register_node
 from gideon.cognition.knowledge.pipeline.types import NodeContext, NodeOutput, PoolRow
+
+if TYPE_CHECKING:
+    from gideon.cognition.knowledge.readers import OcrProvider
 
 logger = logging.getLogger(__name__)
 
@@ -38,11 +43,14 @@ class PassthroughNode:
 
 
 class DocumentReadNode:
-    """Extract text from a file via the existing reader stack (no model)."""
+    """Extract text through the reader stack, with bounded OCR for scanned PDFs."""
 
     node_type = "document_read"
     backend = "native"
     uses_use_case = None
+
+    def __init__(self, ocr_provider: OcrProvider | None = None) -> None:
+        self.ocr_provider = ocr_provider
 
     async def run(self, inputs: dict[str, NodeOutput], ctx: NodeContext) -> NodeOutput:
         if not ctx.file_path:
@@ -53,7 +61,10 @@ class DocumentReadNode:
 
         from gideon.cognition.knowledge.readers import FileReader
 
-        reader = FileReader()
+        ocr_provider = self.ocr_provider
+        if ocr_provider is None and Path(ctx.file_path).suffix.lower() == ".pdf":
+            ocr_provider = _model_ocr_provider()
+        reader = FileReader(ocr_provider=ocr_provider)
         loop = asyncio.get_running_loop()
         text, meta = await loop.run_in_executor(None, reader.read, ctx.file_path)
         if meta.get("format") == "error":
@@ -62,6 +73,15 @@ class DocumentReadNode:
                 backend=self.backend,
                 success=False,
                 error=str(meta.get("error", "read failed")),
+                metadata=meta,
+            )
+        if meta.get("ocr_required") and not text.strip():
+            return NodeOutput(
+                node_type=self.node_type,
+                backend=self.backend,
+                success=False,
+                error="scanned PDF requires an available OCR provider",
+                metadata=meta,
             )
         meta.pop("title", None)
         return NodeOutput(
@@ -161,6 +181,9 @@ class BookmarkScrapeNode:
     backend = "web"
     uses_use_case = None
 
+    def __init__(self, ocr_provider: OcrProvider | None = None) -> None:
+        self.ocr_provider = ocr_provider
+
     async def run(self, inputs: dict[str, NodeOutput], ctx: NodeContext) -> NodeOutput:
         if (ctx.content or "").strip():
             return NodeOutput(
@@ -246,16 +269,23 @@ class BookmarkScrapeNode:
         from gideon.cognition.knowledge.readers import FileReader
 
         loop = asyncio.get_running_loop()
-        text, meta = await loop.run_in_executor(
-            None, FileReader().read, str(fetched.path)
-        )
+        reader = FileReader(ocr_provider=self.ocr_provider or _model_ocr_provider())
+        text, meta = await loop.run_in_executor(None, reader.read, str(fetched.path))
         if meta.get("format") == "error":
             return NodeOutput(
                 node_type=self.node_type,
                 backend=self.backend,
                 success=False,
                 error=str(meta.get("error", "read failed")),
-                metadata={"error_kind": "error"},
+                metadata={"error_kind": meta.get("error_kind") or "error"},
+            )
+        if meta.get("ocr_required") and not text.strip():
+            return NodeOutput(
+                node_type=self.node_type,
+                backend=self.backend,
+                success=False,
+                error="scanned PDF requires an available OCR provider",
+                metadata={"error_kind": "error", **meta},
             )
         out_meta: dict = {
             "url": ctx.url,
@@ -277,6 +307,18 @@ class BookmarkScrapeNode:
             text=text or "",
             metadata=out_meta,
         )
+
+
+def _model_ocr_provider() -> OcrProvider | None:
+    from gideon.cognition.knowledge.pipeline.registry import can_resolve_use_case
+
+    if not can_resolve_use_case("image_modality"):
+        return None
+    from gideon.cognition.knowledge.pipeline.nodes.media_nodes import (
+        ImageModalityOcrProvider,
+    )
+
+    return ImageModalityOcrProvider()
 
 
 class ConsolidateNode:

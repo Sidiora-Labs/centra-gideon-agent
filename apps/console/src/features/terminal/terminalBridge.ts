@@ -7,10 +7,13 @@ const senders = new Map<string, Sender>()
 let activeId: string | null = null
 const listeners = new Set<() => void>()
 
-export function registerTerminal(id: string, send: Sender): void {
+export function registerTerminal(id: string, send: Sender): () => void {
   senders.set(id, send)
   activeId = id
   listeners.forEach((l) => l())
+  return () => {
+    if (senders.get(id) === send) unregisterTerminal(id)
+  }
 }
 
 export function unregisterTerminal(id: string): void {

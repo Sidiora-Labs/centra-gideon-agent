@@ -23,7 +23,11 @@ from gideon.automation.workflows.judge_contract import (
     hints_from_dict,
     judge_instruction,
 )
-from gideon.automation.workflows.template_lint import lint_template
+from gideon.automation.workflows.template_lint import (
+    lint_template,
+    loop_first_iteration_defaults,
+    loop_last_fields,
+)
 from gideon.automation.workflows.validator import validate_spec
 
 LOOP_TEMPLATES = (
@@ -401,6 +405,41 @@ def test_every_declared_progress_field_can_be_emitted_by_its_body():
     assert (
         checked >= 2
     ), "the two shipped until_dry templates that declare a field must be swept"
+
+
+def test_every_loop_last_reference_has_a_first_iteration_default():
+    """A loop reads `last` before it has run once, so fields need typed empties."""
+    checked = 0
+    for name in template_names():
+        loops = (n for n in _nodes(_spec(name)["root"]) if n.get("kind") == "loop")
+        for loop in loops:
+            fields = loop_last_fields(loop)
+            if not fields:
+                continue
+            checked += len(fields)
+            missing = fields - set(loop_first_iteration_defaults(loop))
+            assert (
+                not missing
+            ), f"{name}:{loop.get('id')} has no defaults for {sorted(missing)}"
+    assert checked, "no bundled loop exercises last.output defaults"
+
+
+def test_lint_rejects_a_loop_last_field_without_a_declared_shape():
+    spec = {
+        "name": "missing-last-shape",
+        "root": {
+            "kind": "loop",
+            "id": "work",
+            "config": {"mode": "counted", "n": 2, "max_iterations": 2},
+            "body": {
+                "kind": "infer",
+                "id": "step",
+                "config": {"prompt": "previous {{last.output.missing}}"},
+            },
+        },
+    }
+    findings = lint_template(spec).findings
+    assert any(f.code == "WFL_UNDEFAULTED_LAST" for f in findings)
 
 
 @pytest.mark.parametrize("name", LOOP_TEMPLATES)

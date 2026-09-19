@@ -56,6 +56,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def resolve_session_workspace_path(session_id: str) -> Path:
+    """Resolve a session workspace path without creating it."""
+    from gideon.engine.session_workspace import _SessionFiles
+
+    return _SessionFiles.locate(session_id).root
+
+
 def _knowledge_embedder_factory():
     """Build a knowledge embedder from Gideon config (or None if disabled).
 
@@ -249,7 +256,6 @@ class _ChatSession:
         "_pending_variants",
         "_lock",
         "forked_from",
-        "chat_index",
         "_fork_lock",
         "_tab_id",
         "_disk_older_count",
@@ -358,7 +364,6 @@ class _ChatSession:
         self._pending_variants: list[dict] = []
         self._lock = asyncio.Lock()
         self.forked_from: str | None = None
-        self.chat_index: list[dict] = []
         self._fork_lock: asyncio.Lock = asyncio.Lock()
         self._tab_id: str = (
             ""  # permanent tab identity for cross-restart session chaining
@@ -1235,7 +1240,7 @@ class ConsoleState:
         if mode == "badge":
             note["badge_only"] = True
             self._notification_log.append(note)
-            self._persist_and_trim(note)
+            _persist_notification(note)
             return
 
         try:
@@ -1252,7 +1257,7 @@ class ConsoleState:
 
         self._notification_log.append(note)
         self._broadcast(note)
-        self._persist_and_trim(note)
+        _persist_notification(note)
         if rule is not None and "push" in rule.targets:
             self._push_target(kind, note)
 
@@ -1418,38 +1423,17 @@ class ConsoleState:
             self._embedding_reindex = ReindexRegistry()
         return self._embedding_reindex
 
-    def _notification_window(self) -> list[dict[str, Any]]:
-        """The COMPLETE persisted notification window, plus any in-memory row the file
-        does not carry (an append whose write failed).
-
-        The rewrite source for every single-row change. ``_notification_log`` is only the
-        tail this process loaded at boot, so rewriting the file from it publishes that tail
-        AS the file — one acknowledgement silently discarding every older row."""
-        window = _load_notifications(limit=0)
-        seen = {n.get("ts") for n in window}
-        window.extend(n for n in self._notification_log if n.get("ts") not in seen)
-        return window
-
-    def _persist_and_trim(self, note: dict[str, Any]) -> None:
-        """Append-time persistence: write *note*, then trim memory and storage TOGETHER.
-
-        The one place either side is trimmed. Changing a row never trims (see
-        :func:`_rewrite_notifications`), so history only ever ages out by arriving."""
-        if _persist_notification(note):
-            del self._notification_log[:-_MAX_PERSISTED_NOTIFICATIONS]
-
     def delete_notification(self, ts: str) -> bool:
         """Remove a single notification by timestamp and persist to disk."""
-        window = self._notification_window()
-        kept = [n for n in window if n.get("ts") != ts]
-        if len(kept) == len(window):
-            return False
+        before = len(self._notification_log)
         self._notification_log = [
             n for n in self._notification_log if n.get("ts") != ts
         ]
-        _rewrite_notifications(kept)
-        self.broadcast_ws("notification_removed", {"ts": ts})
-        return True
+        removed = len(self._notification_log) < before
+        if removed:
+            _rewrite_notifications(self._notification_log)
+            self.broadcast_ws("notification_removed", {"ts": ts})
+        return removed
 
     def delete_notifications_for_loop(self, loop_id: str) -> int:
         """Remove all notifications tagged with ``loop_id`` and persist. Called
@@ -1458,53 +1442,40 @@ class ConsoleState:
         count removed."""
         if not loop_id:
             return 0
-        window = self._notification_window()
-        removed_ts = [n.get("ts", "") for n in window if n.get("loop_id") == loop_id]
-        if not removed_ts:
-            return 0
+        before = len(self._notification_log)
+        removed_ts = [
+            n.get("ts", "")
+            for n in self._notification_log
+            if n.get("loop_id") == loop_id
+        ]
         self._notification_log = [
             n for n in self._notification_log if n.get("loop_id") != loop_id
         ]
-        _rewrite_notifications([n for n in window if n.get("loop_id") != loop_id])
-        self.broadcast_ws("notification_removed", {"ts": removed_ts})
-        return len(removed_ts)
+        removed = before - len(self._notification_log)
+        if removed:
+            _rewrite_notifications(self._notification_log)
+            self.broadcast_ws("notification_removed", {"ts": removed_ts})
+        return removed
 
     def ack_notification(self, ts: str) -> bool:
         """Mark a notification as acknowledged and persist."""
-        return self._set_acked(ts, True, "notification_ack")
+        for n in self._notification_log:
+            if n.get("ts") == ts:
+                n["acked"] = True
+                _rewrite_notifications(self._notification_log)
+                self.broadcast_ws("notification_ack", {"ts": ts})
+                return True
+        return False
 
     def unack_notification(self, ts: str) -> bool:
         """Mark a notification as unread and persist."""
-        return self._set_acked(ts, False, "notification_unack")
-
-    def ack_all_notifications(self) -> int:
-        """Mark every notification read, in memory AND across the persisted window.
-
-        Same rule as :meth:`ack_notification`: the rewrite starts from the whole file, so
-        reading everything does not delete the history behind it."""
-        window = self._notification_window()
-        for row in window:
-            row["acked"] = True
-        for row in self._notification_log:
-            row["acked"] = True
-        _rewrite_notifications(window)
-        self.broadcast_ws("notification_ack", {"ts": "*"})
-        return len(window)
-
-    def _set_acked(self, ts: str, acked: bool, event: str) -> bool:
-        """Flip one row's ack flag in memory AND across the whole persisted window."""
-        window = self._notification_window()
-        hits = [n for n in window if n.get("ts") == ts]
-        if not hits:
-            return False
-        for n in hits:
-            n["acked"] = acked
         for n in self._notification_log:
             if n.get("ts") == ts:
-                n["acked"] = acked
-        _rewrite_notifications(window)
-        self.broadcast_ws(event, {"ts": ts})
-        return True
+                n["acked"] = False
+                _rewrite_notifications(self._notification_log)
+                self.broadcast_ws("notification_unack", {"ts": ts})
+                return True
+        return False
 
     def clear_notifications(self) -> None:
         """Remove all notifications from memory and disk."""
@@ -1893,22 +1864,27 @@ class ConsoleState:
             return
         self.broadcast_ws(msg_type, data, extra=extra)
 
-    def _send_ws_all(self, msg_type: str, msg: str) -> None:
-        """Send a pre-serialized JSON frame of ``msg_type`` to all WS clients.
+    def _send_ws_all(self, msg: str) -> None:
+        """Send a pre-serialized JSON string to all WS clients.
 
         Safe to call from ANY thread. On the gateway loop each send is scheduled
         with ensure_future; off-loop (MCP tool subprocess callbacks, subagent/cron
         announce paths) it's submitted to the captured gateway loop via
         run_coroutine_threadsafe. The old code called ensure_future directly, which
         raised off-loop → the send coroutine was dropped unawaited (a RuntimeWarning
-        + a silently-lost frame, e.g. subagent lifecycle cards not updating live).
-
-        ``msg_type`` is carried alongside the serialized frame because every per-socket
-        write goes through :meth:`deliver_ws`, and the app-permission gate there reads the
-        event type. A fan-out that could not name its own type would have to skip the gate.
-        """
+        + a silently-lost frame, e.g. subagent lifecycle cards not updating live)."""
+        dead: list[web.WebSocketResponse] = []
         for ws in list(self._ws_clients):
-            self.deliver_ws(ws, msg_type, msg)
+            if ws.closed:
+                dead.append(ws)
+                continue
+            try:
+                if not self._schedule_ws_send(ws.send_str(msg), ws):
+                    dead.append(ws)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self._remove_ws(ws)
 
     def _schedule_ws_send(  # type: ignore[no-untyped-def]
         self, coro, ws: "web.WebSocketResponse | None" = None
@@ -1985,7 +1961,25 @@ class ConsoleState:
             envelope.update(
                 {k: v for k, v in extra.items() if k not in ("type", "data")}
             )
-        self._send_ws_all(msg_type, json.dumps(envelope))
+        msg = json.dumps(envelope)
+        if not self._ws_app:
+            self._send_ws_all(msg)
+            return
+        dead: list[web.WebSocketResponse] = []
+        for ws in list(self._ws_clients):
+            if ws.closed:
+                dead.append(ws)
+                continue
+            app = self._ws_app.get(ws, "")
+            if app and not self._app_may_see_event(app, msg_type):
+                continue
+            try:
+                if not self._schedule_ws_send(ws.send_str(msg), ws):
+                    dead.append(ws)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self._remove_ws(ws)
 
     def _app_may_see_event(self, app: str, event_type: str) -> bool:
         """Whether an app-scoped WS may receive ``event_type`` per its manifest."""
@@ -1995,70 +1989,6 @@ class ConsoleState:
             checker = checker_for(app)
             return checker is not None and checker.can_use_event(event_type)
         except Exception:
-            return False
-
-    def _ws_delivery_allowed(self, ws: web.WebSocketResponse, msg_type: str) -> bool:
-        """THE deny-by-default event-permission check for ONE socket (sandbox P1).
-
-        An app-scoped connection receives ``msg_type`` only if the app's manifest declared
-        it; an unscoped (owner/dashboard) connection receives everything. Every delivery to
-        an app-scoped socket — the broadcast fan-out, the subagent-subscriber fan-out, the
-        live-log push, and the per-connection replays the socket handler writes itself
-        (session details, log replay, subagent snapshots) — asks THIS function, because a
-        second gate is a second place for it to be missing from: the replays had no gate at
-        all and shipped an app every session and every log line on subscribe."""
-        app = self._ws_app.get(ws, "")
-        if not app:
-            return True
-        return self._app_may_see_event(app, msg_type)
-
-    def deliver_ws(self, ws: web.WebSocketResponse, msg_type: str, msg: str) -> bool:
-        """Schedule ONE pre-serialized frame to ONE socket. THE per-socket write.
-
-        Returns whether the frame was scheduled — False when the gate withheld it or the
-        socket is gone. A socket that is closed or unschedulable is reaped here, so every
-        caller is a plain loop with no dead-list bookkeeping of its own. Thread-safe: the
-        actual send is handed to :meth:`_schedule_ws_send`."""
-        if ws.closed:
-            self._remove_ws(ws)
-            return False
-        if not self._ws_delivery_allowed(ws, msg_type):
-            return False
-        try:
-            if self._schedule_ws_send(ws.send_str(msg), ws):
-                return True
-        except Exception:
-            pass
-        self._remove_ws(ws)
-        return False
-
-    async def send_ws_event(
-        self,
-        ws: web.WebSocketResponse,
-        msg_type: str,
-        data: object,
-        *,
-        extra: dict[str, Any] | None = None,
-    ) -> bool:
-        """Await ONE typed frame to ONE socket, through the same gate as every fan-out.
-
-        The awaited twin of :meth:`deliver_ws`, for the socket handler's own per-connection
-        replays: those run INSIDE the connection's coroutine, where scheduling a task would
-        reorder frames relative to the live stream. Same envelope, same
-        :meth:`_ws_delivery_allowed` check — the point of the pair is that neither one can
-        deliver an event the app did not declare."""
-        if ws.closed or not self._ws_delivery_allowed(ws, msg_type):
-            return False
-        envelope: dict[str, Any] = {"type": msg_type, "data": data}
-        if extra:
-            envelope.update(
-                {k: v for k, v in extra.items() if k not in ("type", "data")}
-            )
-        try:
-            await ws.send_str(json.dumps(envelope))
-            return True
-        except Exception as exc:
-            logger.debug("WS send failed (client gone?): %s", exc)
             return False
 
     def register_ws(self, ws: web.WebSocketResponse, *, app: str = "") -> None:
@@ -2112,8 +2042,18 @@ class ConsoleState:
         if not self._ws_subagent_subscribers:
             return
         msg = json.dumps({"type": msg_type, "data": data})
+        dead: list[web.WebSocketResponse] = []
         for ws in list(self._ws_subagent_subscribers):
-            self.deliver_ws(ws, msg_type, msg)
+            if ws.closed:
+                dead.append(ws)
+                continue
+            try:
+                if not self._schedule_ws_send(ws.send_str(msg), ws):
+                    dead.append(ws)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self._remove_ws(ws)
 
     async def close_all_ws(self) -> None:
         """Close all WebSocket connections (called on shutdown)."""
@@ -2135,14 +2075,8 @@ def _notifications_path() -> Path:
     return config_dir() / _NOTIFICATIONS_FILE
 
 
-def _load_notifications(
-    limit: int = _MAX_PERSISTED_NOTIFICATIONS,
-) -> list[dict[str, Any]]:
-    """Load persisted notifications from disk (newest last).
-
-    *limit* caps what the caller takes — the boot load takes the tail the UI renders.
-    ``limit=0`` returns the COMPLETE persisted window, which is what a rewrite has to
-    start from: rewriting from the tail would publish that tail as the whole file."""
+def _load_notifications() -> list[dict[str, Any]]:
+    """Load persisted notifications from disk (newest last)."""
     path = _notifications_path()
     if not path.exists():
         return []
@@ -2156,55 +2090,47 @@ def _load_notifications(
                 entries.append(json.loads(line))
             except json.JSONDecodeError:
                 continue
-        return entries[-limit:] if limit > 0 else entries
+        return entries[-_MAX_PERSISTED_NOTIFICATIONS:]
     except Exception:
         logger.debug("Failed to load notifications", exc_info=True)
         return []
 
 
-def _persist_notification(note: dict[str, str]) -> bool:
-    """Append a single notification to the JSONL file on disk.
-
-    Returns True when the append also TRIMMED the file, so the caller can trim memory to
-    the same window — storage and memory move together or not at all."""
+def _persist_notification(note: dict[str, str]) -> None:
+    """Append a single notification to the JSONL file on disk."""
     path = _notifications_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(note) + "\n")
-        return _maybe_trim_notifications(path)
+        _maybe_trim_notifications(path)
     except Exception:
         logger.debug("Failed to persist notification", exc_info=True)
-        return False
 
 
 def _rewrite_notifications(notifications: list[dict[str, str]]) -> None:
-    """Rewrite the notifications file from *notifications*, UNTRIMMED.
-
-    Re-applying the cap here is what collapsed history: ack/unack/delete rewrite the file
-    on every change, so a ``[-200:]`` slice in this function discarded every older row the
-    moment a user acknowledged one item. The cap belongs to the append path alone
-    (:func:`_maybe_trim_notifications`), which trims memory and storage together."""
+    """Rewrite the entire notifications file from the in-memory list."""
     path = _notifications_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        lines = [json.dumps(n) + "\n" for n in notifications]
+        lines = [
+            json.dumps(n) + "\n" for n in notifications[-_MAX_PERSISTED_NOTIFICATIONS:]
+        ]
         path.write_text("".join(lines), encoding="utf-8")
     except Exception:
         logger.debug("Failed to rewrite notifications file", exc_info=True)
 
 
-def _maybe_trim_notifications(path: Path) -> bool:
-    """Trim the notifications file if it exceeds 2x the max. True when it trimmed."""
+def _maybe_trim_notifications(path: Path) -> None:
+    """Trim the notifications file if it exceeds 2x the max."""
     try:
         lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
         if len(lines) <= _MAX_PERSISTED_NOTIFICATIONS * 2:
-            return False
+            return
         kept = lines[-_MAX_PERSISTED_NOTIFICATIONS:]
         path.write_text("".join(kept), encoding="utf-8")
-        return True
     except Exception:
-        return False
+        pass
 
 
 def _fmt_duration(secs: int) -> str:

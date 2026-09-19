@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { capableModels, modelChips } from './ModelsPanel'
+import { capableModels, localModelTokenReady, localModelTokenSummary, modelChips } from './ModelsPanel'
 import type { AvailableModel } from '../../shared/data/api'
 
 const M = (provider: string, id: string, caps: string[], downloaded?: boolean): AvailableModel =>
@@ -80,5 +80,34 @@ describe('modelChips', () => {
   it('stacks every applicable chip', () => {
     const chips = modelChips(MC({ status: 'deprecated', non_commercial: true, integrity: 'truncated' }))
     expect(chips).toEqual(['status', 'non-commercial', 'truncated'])
+  })
+})
+
+describe('local-model token status', () => {
+  it('requires the backend readiness verdict rather than treating mere presence as valid', () => {
+    expect(localModelTokenReady({
+      configured: true, valid: false, source: 'credential_store', masked_token: 'hf_…1234', state: 'invalid',
+      username: '', error: '', cached: false, checked_at: 0, expires_at: 0,
+    })).toBe(false)
+    expect(localModelTokenReady({
+      configured: true, valid: true, source: 'credential_store', masked_token: 'hf_…1234', state: 'valid',
+      username: '', error: '', cached: false, checked_at: 0, expires_at: 0,
+    })).toBe(true)
+  })
+
+  it('describes only the masked identity and source', () => {
+    const summary = localModelTokenSummary({
+      configured: true, valid: true, source: 'environment', masked_token: 'hf_…1234', state: 'valid', username: 'octo',
+      error: '', cached: false, checked_at: 0, expires_at: 0,
+    })
+    expect(summary).toBe('From the environment for octo · hf_…1234')
+    expect(summary).not.toContain('hf_this-is-the-secret')
+  })
+
+  it('uses the validated failure detail when a configured token is not usable', () => {
+    expect(localModelTokenSummary({
+      configured: true, valid: false, source: 'credential_store', masked_token: 'hf_…1234', state: 'invalid', username: '',
+      error: 'Token was rejected by Hugging Face.', cached: false, checked_at: 0, expires_at: 0,
+    })).toBe('Token was rejected by Hugging Face.')
   })
 })

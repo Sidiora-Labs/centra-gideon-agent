@@ -17,7 +17,7 @@ export function CommentLayer({ scrollRef, docId, docLabel, docPath, content, onS
   docLabel: string
   docPath?: string
   content?: string
-  onSubmit: (message: string, docPaths: string[]) => void
+  onSubmit: (message: string, docPaths: string[]) => void | Promise<void>
 }) {
   const all = useComments()
   const [sel, setSel] = useState<{ x: number; y: number; text: string } | null>(null)
@@ -120,18 +120,16 @@ function DeckPortal({ scrollRef, children }: { scrollRef: React.RefObject<HTMLEl
 
 function CommentDeck({ comments, activeDocId, onSubmit }: {
   comments: DocComment[]; activeDocId: string
-  onSubmit: (message: string, docPaths: string[]) => void
+  onSubmit: (message: string, docPaths: string[]) => void | Promise<void>
 }) {
   const [expanded, setExpanded] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [sending, setSending] = useState(false)
+  const [submitError, setSubmitError] = useState('')
   const [instructions, setInstructions] = useState('')
   const ordered = [...comments].reverse()
   const PEEK = 7
   const peekCount = Math.min(ordered.length - 1, 3)
-  const docCount = new Set(comments.map((c) => c.docId)).size
-  const lead = ordered.find((c) => c.docId === activeDocId) ?? ordered[0]
-  const leadMuted = lead.docId !== activeDocId
-  const spread = docCount > 1 || leadMuted
 
   return (
     <div className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-end px-l">
@@ -171,12 +169,7 @@ function CommentDeck({ comments, activeDocId, onSubmit }: {
               <div className="flex items-center gap-2 px-l pt-2.5">
                 <MessagesSquare size={14} className="text-primary" />
                 <span className="text-on-surface text-[0.75rem]" style={fvs(500)}>{comments.length} comment{comments.length === 1 ? '' : 's'}</span>
-                <span className={`min-w-0 flex-1 truncate text-on-surface-low text-[0.75rem] ${leadMuted ? 'opacity-65' : ''}`} title={lead.docLabel}>· {lead.docLabel}</span>
-                {spread && (
-                  <span data-testid="comment-deck-spread" className="shrink-0 rounded-pill bg-surface-high px-2 text-on-surface-low text-[0.6875rem]" style={fvs(500)}>
-                    {docCount > 1 ? `${docCount} documents` : 'another document'}
-                  </span>
-                )}
+                <span className="min-w-0 flex-1 truncate text-on-surface-low text-[0.75rem]" title={ordered[0].docLabel}>· {ordered[0].docLabel}</span>
                 {
 }
                 <span role="button" tabIndex={0}
@@ -188,9 +181,9 @@ function CommentDeck({ comments, activeDocId, onSubmit }: {
                 </span>
                 <ChevronUp size={14} className="text-on-surface-low" />
               </div>
-              <div data-testid="comment-deck-lead" className={`px-l pb-2.5 pt-1 ${leadMuted ? 'opacity-65' : ''}`}>
-                <div className="mb-1 truncate text-on-surface-var text-[0.75rem] italic">“{lead.quote}”</div>
-                <div className="line-clamp-1 text-on-surface text-[0.8125rem]">{lead.comment}</div>
+              <div className="px-l pb-2.5 pt-1">
+                <div className="mb-1 truncate text-on-surface-var text-[0.75rem] italic">“{ordered[0].quote}”</div>
+                <div className="line-clamp-1 text-on-surface text-[0.8125rem]">{ordered[0].comment}</div>
               </div>
             </div>
           </motion.button>
@@ -198,15 +191,22 @@ function CommentDeck({ comments, activeDocId, onSubmit }: {
       </AnimatePresence>
 
       {submitting && (
-        <SubmitModal count={comments.length}
+        <SubmitModal count={comments.length} busy={sending} error={submitError}
           instructions={instructions} setInstructions={setInstructions}
-          onCancel={() => setSubmitting(false)}
-          onConfirm={() => {
+          onCancel={() => { if (!sending) { setSubmitting(false); setSubmitError('') } }}
+          onConfirm={async () => {
             const message = formatCommentsMessage(comments, instructions.trim())
             const docPaths = [...new Set(comments.map((c) => c.docPath).filter((p): p is string => !!p))]
-            onSubmit(message, docPaths)
-            commentStore.removeMany(comments.map((c) => c.id))
-            setSubmitting(false); setInstructions(''); setExpanded(false)
+            setSending(true); setSubmitError('')
+            try {
+              await onSubmit(message, docPaths)
+              commentStore.removeMany(comments.map((c) => c.id))
+              setSubmitting(false); setInstructions(''); setExpanded(false)
+            } catch (error) {
+              setSubmitError(error instanceof Error ? error.message : 'The comments could not be submitted.')
+            } finally {
+              setSending(false)
+            }
           }} />
       )}
     </div>
@@ -241,9 +241,9 @@ function CommentCard({ c, muted }: { c: DocComment; muted: boolean }) {
   )
 }
 
-function SubmitModal({ count, instructions, setInstructions, onCancel, onConfirm }: {
+function SubmitModal({ count, instructions, setInstructions, busy, error, onCancel, onConfirm }: {
   count: number; instructions: string; setInstructions: (v: string) => void
-  onCancel: () => void; onConfirm: () => void
+  busy: boolean; error: string; onCancel: () => void; onConfirm: () => void | Promise<void>
 }) {
   return (
     <Modal title="Submit comments to AI" icon={<Send size={18} className="text-primary" />} onClose={onCancel}>
@@ -257,9 +257,12 @@ function SubmitModal({ count, instructions, setInstructions, onCancel, onConfirm
             ariaLabel="Additional instructions (optional)"
             placeholder="e.g. Apply these edits directly, or just propose changes for me to review first…" />
         </div>
+        {error && <p role="alert" className="text-danger text-[0.8125rem]">Couldn't submit the comments: {error}</p>}
         <div className="flex justify-end gap-s">
-          <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
-          <Button size="sm" onClick={onConfirm}><Send size={14} /> Submit to AI</Button>
+          <Button variant="ghost" size="sm" onClick={onCancel} disabled={busy}>Cancel</Button>
+          <Button size="sm" onClick={onConfirm} disabled={busy} disabledReason={busy ? 'Submitting comments' : undefined}>
+            <Send size={14} /> {busy ? 'Submitting…' : 'Submit to AI'}
+          </Button>
         </div>
       </div>
     </Modal>

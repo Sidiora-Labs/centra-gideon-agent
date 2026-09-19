@@ -97,7 +97,7 @@ class KnowledgePatch:
 
     @classmethod
     def parse(cls, arguments: dict) -> KnowledgePatch:
-        fields = {
+        fields: dict = {
             key: str(arguments[key])
             for key in ("title", "content", "url")
             if key in arguments

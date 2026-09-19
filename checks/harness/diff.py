@@ -21,30 +21,10 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent.parent
 
 
-def run_git(args: list[str], root: Path) -> tuple[int, str, str]:
-    """One read-only git command, decoded so undecodable bytes cannot abort a check.
-
-    ``errors="replace"`` because the two things git hands back here — a patch body and a
-    path list — are both attacker/author-controlled byte strings: a source file holding one
-    stray latin-1 byte makes ``text=True``'s strict decode raise ``UnicodeDecodeError``
-    inside ``subprocess.run``, and the whole scan dies on a file it was only going to skim.
-    A U+FFFD in a diff body costs nothing (the parser reads the leading ``+``/``@@`` markers,
-    which are ASCII) and the line numbering is unaffected, since only the undecodable bytes
-    are replaced and never the newlines around them.
-
-    ``core.quotePath=false`` for the other half of the same promise: with git's default
-    quoting a non-ASCII path comes back as the C-escaped literal ``"caf\\303\\251.py"``,
-    which is not a path any caller can open or relate to the repo root. Off, the path
-    arrives as its real (decoded) bytes and stays usable.
-    """
+def _git(args: list[str], root: Path) -> tuple[int, str, str]:
     try:
         p = subprocess.run(
-            ["git", "-c", "core.quotePath=false", *args],
-            cwd=root,
-            capture_output=True,
-            text=True,
-            errors="replace",
-            check=False,
+            ["git", *args], cwd=root, capture_output=True, text=True, check=False
         )
         return p.returncode, p.stdout, p.stderr
     except OSError as exc:
@@ -55,7 +35,7 @@ def merge_base(root: Path, base_ref: str = "origin/main") -> str:
     """The merge-base sha between HEAD and ``base_ref`` (falls back to ``base_ref`` itself,
     then to ``HEAD~1``) so ``--diff`` works whether or not the remote ref is present."""
     for ref in (base_ref, "main", "HEAD~1"):
-        rc, out, _ = run_git(["merge-base", "HEAD", ref], root)
+        rc, out, _ = _git(["merge-base", "HEAD", ref], root)
         if rc == 0 and out.strip():
             return out.strip()
     return "HEAD"
@@ -86,13 +66,13 @@ def compute_diff(root: Path | None = None, base_ref: str = "origin/main") -> Dif
     r = root if root is not None else _repo_root()
     base = merge_base(r, base_ref)
 
-    rc, name_out, _ = run_git(["diff", "--name-only", base], r)
+    rc, name_out, _ = _git(["diff", "--name-only", base], r)
     files = (
         [ln.strip() for ln in name_out.splitlines() if ln.strip()] if rc == 0 else []
     )
 
     changed_lines: dict[str, set[int]] = {}
-    rc, patch, _ = run_git(["diff", "--unified=0", base], r)
+    rc, patch, _ = _git(["diff", "--unified=0", base], r)
     if rc == 0:
         changed_lines = _parse_added_lines(patch)
 
@@ -103,7 +83,7 @@ def commit_subjects_since(root: Path, base: str) -> list[str]:
     """Commit subjects from ``base`` to HEAD (exclusive of base). Empty when base==HEAD."""
     if base == "HEAD":
         return []
-    rc, out, _ = run_git(["log", "--format=%s", f"{base}..HEAD"], root)
+    rc, out, _ = _git(["log", "--format=%s", f"{base}..HEAD"], root)
     return [ln.strip() for ln in out.splitlines() if ln.strip()] if rc == 0 else []
 
 

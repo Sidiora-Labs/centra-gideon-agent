@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ResultAnnouncement } from '../../shared/ui/ListControls'
-import { Download, Trash2, Check, HardDrive, AlertTriangle, X, Lock } from 'lucide-react'
-import { api, type AvailableModel } from '../../shared/data/api'
+import { Download, Trash2, Check, HardDrive, AlertTriangle, X, Lock, Wifi, CheckCircle2 } from 'lucide-react'
+import { api, type AvailableModel, type LocalModelSelfTestResult, type LocalModelTokenStatus } from '../../shared/data/api'
 import { SearchField } from '../../shared/ui/SearchField'
 import { SquareIconButton } from '../../shared/ui/SquareIconButton'
 import { confirmDelete } from '../../shared/ui/dialog'
@@ -10,6 +10,7 @@ import { Toggle } from '../../shared/ui/Toggle'
 import { Button } from '../../shared/ui/Button'
 import { useModelDownloads } from './useModelDownloads'
 import { StatusPill } from '../../shared/ui/StatusPill'
+import { useQuery } from '../../shared/data/data'
 import {
   FIT_LABEL, FIT_TONE, budgetKnown, filterByFit, fitDescription, hostFitOf, statedSizeMb, unrunnable,
 } from './modelFit'
@@ -17,6 +18,24 @@ import {
 const MB = (bytes: number) => (bytes / 1024 / 1024).toFixed(0)
 
 const HIDE_LABEL = "Hide models this device can't run"
+
+export type GatedModelAccess = 'open' | 'token-checking' | 'token-required' | 'license-required'
+
+export function gatedModelAccess(model: AvailableModel, tokenReady?: boolean): GatedModelAccess {
+  if (!model.gated || model.downloaded) return 'open'
+  if (tokenReady === undefined) return 'token-checking'
+  return tokenReady ? 'license-required' : 'token-required'
+}
+
+export function localModelTestDetail(result: LocalModelSelfTestResult): string[] {
+  const rows = (result.tests ?? []).map((test) => {
+    const detail = test.failure?.message || test.detail || (test.ok ? 'passed' : 'failed')
+    const code = test.failure?.code ? ` (${test.failure.code})` : ''
+    return `${test.capability}: ${detail}${code}`
+  })
+  if (rows.length > 0) return rows
+  return [result.failure?.message || (result.ok ? 'All checks passed.' : 'No capability checks completed.')]
+}
 
 function FitChip({ model }: { model: AvailableModel }) {
   const verdict = model.fit
@@ -37,7 +56,14 @@ export function LocalModelManager({
   const [query, setQuery] = useState('')
   const [searchResults, setSearchResults] = useState<AvailableModel[] | null>(null)
   const [searching, setSearching] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<LocalModelSelfTestResult | null>(null)
   const searchSeq = useRef(0)
+  const { data: tokenStatus } = useQuery('settings:local-model-token', () =>
+    api.localModelTokenStatus?.().catch(() => null) ?? Promise.resolve(null as LocalModelTokenStatus | null), { persist: false })
+  const tokenReady = tokenStatus === undefined
+    ? undefined
+    : !!tokenStatus?.configured && tokenStatus.state === 'valid' && tokenStatus.valid === true
 
   const { jobs, start, cancel } = useModelDownloads(provider, onChanged)
 
@@ -67,6 +93,16 @@ export function LocalModelManager({
     setErr(name, null)
     try { await api.deleteLocalModel(provider, name); onChanged() }
     catch (e) { setErr(name, e instanceof Error ? e.message : 'Delete failed') }
+  }
+  const runTest = async () => {
+    setTesting(true); setTestResult(null)
+    try { setTestResult(await api.testLocalModelProvider(provider)) }
+    catch (e) {
+      setTestResult({
+        provider, ok: false, tests: [],
+        failure: { code: 'request_failed', message: e instanceof Error ? e.message : 'Test failed', retryable: true },
+      })
+    } finally { setTesting(false) }
   }
 
   useEffect(() => {
@@ -107,7 +143,10 @@ export function LocalModelManager({
     const stated = statedSizeMb(m)
     // about this machine, not a licence to block a download the user may want anyway.
     const stepDown = m.fit === 'red' ? m.fit_step_down : null
-    const gatedUndownloaded = m.gated && !m.downloaded
+    const gatedAccess = gatedModelAccess(m, tokenReady)
+    const gatedUndownloaded = gatedAccess !== 'open'
+    const tokenMissing = gatedAccess === 'token-required'
+    const tokenChecking = gatedAccess === 'token-checking'
     return (
       <div key={m.name} className="rounded-md px-2.5 py-1.5"
         style={m.downloaded
@@ -118,7 +157,7 @@ export function LocalModelManager({
             <div className="flex items-center gap-1.5">
               <span data-type="caption" className="truncate text-on-surface font-mono">{m.name}</span>
               {m.downloaded && <Check size={11} style={{ color: 'var(--color-success)' }} />}
-              {gatedUndownloaded && <Lock size={10} className="shrink-0 text-on-surface-low" aria-label="Requires a token / license" />}
+              {gatedUndownloaded && <Lock size={10} className="shrink-0 text-on-surface-low" aria-label={tokenChecking ? 'Checking Hugging Face token readiness' : tokenMissing ? 'Requires a Hugging Face token' : 'Requires accepted model access'} />}
               <FitChip model={m} />
             </div>
             <div data-type="caption" className="truncate text-on-surface-low">
@@ -131,6 +170,16 @@ export function LocalModelManager({
                 onClick={() => download(stepDown)}>
                 Download {stepDown} instead — it fits
               </Button>
+            )}
+            {gatedUndownloaded && !downloading && (
+              <div data-type="caption" className="mt-0.5 flex items-start gap-1" style={{ color: 'var(--color-warning)' }}>
+                <AlertTriangle size={10} className="mt-0.5 shrink-0" />
+                <span>{tokenChecking
+                  ? 'Checking Hugging Face token readiness…'
+                  : tokenMissing
+                  ? 'Add a valid Hugging Face token in Models before downloading.'
+                  : 'Gated model: accept its access terms on Hugging Face before downloading.'}</span>
+              </div>
             )}
             {
 }
@@ -148,8 +197,8 @@ export function LocalModelManager({
           ) : (
             <SquareIconButton icon={m.downloaded ? Trash2 : Download} iconSize={13}
               label={m.downloaded ? `Delete ${m.name}` : `Download ${m.name}`}
-              title={gatedUndownloaded ? 'Requires a token / license (see provider settings)' : m.downloaded ? 'Delete' : 'Download'}
-              disabled={gatedUndownloaded}
+              title={tokenChecking ? 'Checking Hugging Face token readiness' : tokenMissing ? 'Add a valid Hugging Face token in Models first' : gatedAccess === 'license-required' ? 'Download after accepting the model access terms' : m.downloaded ? 'Delete' : 'Download'}
+              disabled={tokenChecking || tokenMissing}
               onClick={() => (m.downloaded ? remove(m.name) : download(m.name))} className="shrink-0" />
           )}
         </div>
@@ -164,9 +213,27 @@ export function LocalModelManager({
 
   return (
     <div>
-      <div data-type="caption" className="mb-1.5 flex items-center gap-1 text-on-surface-low uppercase tracking-wide">
-        <HardDrive size={11} /> Models ({downloaded}/{models.length} downloaded)
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <div data-type="caption" className="flex items-center gap-1 text-on-surface-low uppercase tracking-wide">
+          <HardDrive size={11} /> Models ({downloaded}/{models.length} downloaded)
+        </div>
+        <Button variant="tonal" size="xs" onClick={runTest} loading={testing} loadingLabel="Testing…">
+          <Wifi size={12} /> Test
+        </Button>
       </div>
+
+      {testResult && (
+        <div data-type="caption" role="status" className="mb-1.5 rounded-md px-2 py-1.5"
+          style={{ background: 'var(--color-surface-high)', color: testResult.ok ? 'var(--color-success)' : 'var(--color-danger)' }}>
+          <div className="flex items-center gap-1.5">
+            {testResult.ok ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />}
+            <span>{testResult.ok ? 'Provider test passed' : 'Provider test found a problem'}</span>
+          </div>
+          <ul className="mt-0.5 pl-4 text-on-surface-low">
+            {localModelTestDetail(testResult).map((line) => <li key={line}>{line}</li>)}
+          </ul>
+        </div>
+      )}
 
       {
 }

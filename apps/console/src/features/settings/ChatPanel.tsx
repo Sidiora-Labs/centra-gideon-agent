@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, type DashboardConfig, type SessionTemplate } from '../../shared/data/api'
 import { notify } from '../../app/shell/appSdk'
 import { useAgentCatalog, ensureBindableAgentName } from '../../shared/data/agents'
@@ -297,12 +297,16 @@ function LifecycleSection({ session, setSession, agentOptions, discovered }: {
   agentOptions: import('../../shared/data/agents').AgentOption[]; discovered: Record<string, import('../../shared/data/api').DiscoveredAgent[]>
 }) {
   const [saved, flash] = useSavedFlash()
-  const patch = (key: string, value: unknown, _cb?: () => void, label?: string) => {
+  const patch = (key: string, value: unknown, _cb?: () => void, label?: string): Promise<boolean> => {
     const prev = session[key]
     setSession({ ...session, [key]: value })
-    api.patchConfig(`session.${key}`, value).then(flash).catch((e) => {
+    return api.patchConfig(`session.${key}`, value).then(() => {
+      flash()
+      return true
+    }).catch((e) => {
       setSession({ ...session, [key]: prev })
       notify(`Couldn't save ${label ?? key}: ${String((e as Error)?.message || e)}`, 'error')
+      return false
     })
   }
   const poolSize = Number(session.pool_size ?? 0)
@@ -336,23 +340,38 @@ function LifecycleSection({ session, setSession, agentOptions, discovered }: {
   )
 }
 
-function AutoArchiveRow({ days, onCommit, saved }: {
+export function AutoArchiveRow({ days, onCommit, saved }: {
   days: number;
 
-  onCommit: (n: number, label?: string) => void; saved: boolean
+  onCommit: (n: number, label?: string) => Promise<boolean>; saved: boolean
 }) {
   const [pending, setPending] = useState<number | null>(null)
-  const [preview, setPreview] = useState<{ count: number; enabled: boolean } | null>(null)
+  const [preview, setPreview] = useState<{ count: number; days: number } | null>(null)
+  const commitId = useRef(0)
   const shown = pending ?? days
 
   useEffect(() => {
-    if (shown <= 0) { setPreview(null); return }
+    if (pending !== null || days <= 0) { setPreview(null); return }
     let live = true
+    setPreview(null)
     api.autoArchiveSessions({ dry_run: true })
-      .then((r) => { if (live) setPreview({ count: r.count, enabled: r.enabled }) })
+      .then((r) => {
+        if (live) setPreview(r.enabled && r.days === days ? { count: r.count, days: r.days } : null)
+      })
       .catch(() => { if (live) setPreview(null) })
     return () => { live = false }
-  }, [shown])
+  }, [days, pending])
+
+  const commit = async (n: number) => {
+    const id = ++commitId.current
+    setPending(n)
+    setPreview(null)
+    try {
+      await onCommit(n, 'Auto-archive after (days)')
+    } finally {
+      if (commitId.current === id) setPending(null)
+    }
+  }
 
   return (
     <Row
@@ -361,14 +380,14 @@ function AutoArchiveRow({ days, onCommit, saved }: {
     >
       <div className="flex items-center gap-2">
         <SavedToast show={saved} />
-        {shown > 0 && preview?.enabled && (
+        {shown > 0 && preview?.days === shown && (
           <span data-type="caption" className="text-on-surface-variant tabular-nums">
             {preview.count === 0 ? 'none stale now' : `${preview.count} stale now`}
           </span>
         )}
         <NumberField
           value={shown} min={0} max={3650} step={1} ariaLabel="Auto-archive after (days)"
-          onChange={(n) => { setPending(n); onCommit(n, 'Auto-archive after (days)') }}
+          onChange={commit}
         />
         <span data-type="caption" className="text-on-surface-variant">{shown > 0 ? 'days' : 'off'}</span>
       </div>

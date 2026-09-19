@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, ChevronDown, ChevronRight, FolderGit2, GitBranch, MessageSquarePlus, MessageSquareCode, Package, Pause, Pencil, RotateCcw, ScanSearch, Scale, SkipForward, X } from 'lucide-react'
 import { TopBar } from '../../shared/ui/TopBar'
 import { Segmented } from '../../shared/ui/Segmented'
 import { Loading } from '../../shared/ui/ListScaffold'
 import { QuietButton } from '../../shared/ui/QuietButton'
 import { SidePanel } from '../../shared/ui/SidePanel'
-import { api, type WorkflowContinuation, type WorkflowRunDetailData } from '../../shared/data/api'
+import { InlineError } from '../../shared/ui/InlineError'
+import { api, partitionRunHistory, requireWriteAccepted, type WorkflowContinuation, type WorkflowNodeState, type WorkflowRunDetailData } from '../../shared/data/api'
 import { notify } from '../../app/shell/appSdk'
 import { confirm, promptForm } from '../../shared/ui/dialog'
 import { PageTitle } from '../../shared/ui/PageTitle'
@@ -13,7 +14,7 @@ import { fmtElapsed, isNodeTerminal, isPrelaunch, isTerminal, itemProgress, node
 import { PolicyOverridesPanel } from './PolicyOverridesPanel'
 import { byInstancePath } from './instancePathOrder'
 import { buildTree, initialCollapsed, summarize, summaryLabel, visibleRows } from './nodeTree'
-import { useWorkflowStream } from './useWorkflowStream'
+import { useWorkflowStream, type WorkflowLifecycleEvent } from './useWorkflowStream'
 import { DagView } from '../tasks/DagView'
 import { layoutRunDag } from './runDag'
 import { tokenForNode } from './surfacingMeta'
@@ -27,12 +28,75 @@ import { IntrospectPanel } from './IntrospectPanel'
 import { LedgerRailsPanel } from './LedgerRailsPanel'
 import { DeliverablePanel } from './DeliverablePanel'
 import { ReviewTriagePanel } from './ReviewTriagePanel'
+import { foldEvent, foldSnapshot } from './workflowFold'
+
+function mergeCachedNodes(next: WorkflowRunDetailData, previous: WorkflowRunDetailData | null): WorkflowRunDetailData {
+  if (!previous) return next
+  const cached = new Map(previous.nodes
+    .filter((node) => typeof node.cached === 'boolean')
+    .map((node) => [node.instance_path, node.cached] as const))
+  return {
+    ...next,
+    nodes: next.nodes.map((node) => node.cached === undefined && cached.has(node.instance_path)
+      ? { ...node, cached: cached.get(node.instance_path) }
+      : node),
+  }
+}
+
+function foldRunEvent(run: WorkflowRunDetailData, event: WorkflowLifecycleEvent, data: unknown): WorkflowRunDetailData {
+  const folded = foldEvent(foldSnapshot(run), event, data)
+  return {
+    ...run,
+    status: folded.status as WorkflowRunDetailData['status'],
+    spec_version: folded.specVersion,
+    error: folded.error,
+    attention: folded.attention,
+    tokens: folded.tokens,
+    elapsed_secs: folded.elapsedSecs,
+    nodes: folded.nodes,
+  }
+}
+
+function fanoutGraphPath(path: string): string {
+  return path
+    .replace(/#(\d+)/g, '.fanout[$1]')
+    .replace(/@(\d+)/g, '.iteration[$1]')
+}
+
+function layoutWorkflowRunDag(nodes: WorkflowNodeState[], continuations: WorkflowContinuation[]) {
+  const originalPath = new Map<string, string>()
+  const graphNodes = nodes.map((node) => {
+    const instance_path = fanoutGraphPath(node.instance_path)
+    originalPath.set(instance_path, node.instance_path)
+    return { ...node, instance_path }
+  })
+  const graphContinuations = continuations.map((continuation) => ({
+    ...continuation,
+    instance_path: fanoutGraphPath(continuation.instance_path),
+  }))
+  const dag = layoutRunDag(graphNodes, {
+    continuations: graphContinuations,
+    label: (n) => `${n.item_label ? `${n.node_id} · ${n.item_label}` : n.node_id}${n.cached ? ' · cached' : ''}`,
+  })
+  const restore = (path: string | undefined) => path ? (originalPath.get(path) ?? path) : undefined
+  return {
+    ...dag,
+    nodes: dag.nodes.map((node) => ({ ...node, id: restore(node.id) as string })),
+    edges: dag.edges.map((edge) => {
+      const from = restore(edge.from)
+      const to = restore(edge.to)
+      return { ...edge, id: `${from ?? ''}->${to ?? ''}`, from, to }
+    }),
+  }
+}
 
 export function WorkflowRunDetail({ runId, onBack }: { runId: string; onBack: () => void }) {
   const [run, setRun] = useState<WorkflowRunDetailData | null>(null)
   const [conts, setConts] = useState<WorkflowContinuation[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+  const [actionError, setActionError] = useState('')
+  const [loadError, setLoadError] = useState('')
   const [inspectNodeId, setInspectNodeId] = useState<string | null>(null)
   const [steerOpen, setSteerOpen] = useState(false)
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
@@ -40,20 +104,22 @@ export function WorkflowRunDetail({ runId, onBack }: { runId: string; onBack: ()
   const [reviewOpen, setReviewOpen] = useState(false)
   const [introspectOpen, setIntrospectOpen] = useState(false)
   const [railsOpen, setRailsOpen] = useState(false)
+  const [showSuppressed, setShowSuppressed] = useState(false)
+  const runHistoryId = useId()
   const pending = useRef<number | null>(null)
 
   const refetch = useCallback(async () => {
-    try {
-      const [status, continuations] = await Promise.all([
-        api.workflowRun(runId),
-        api.workflowContinuations(runId).catch(() => ({ continuations: [] })),
-      ])
-      setRun(status)
-      setConts(continuations.continuations)
-    } catch {
-    } finally {
-      setLoading(false)
-    }
+    const [status, continuations] = await Promise.allSettled([
+      api.workflowRun(runId),
+      api.workflowContinuations(runId),
+    ])
+    const failures: string[] = []
+    if (status.status === 'fulfilled') setRun((previous) => mergeCachedNodes(status.value, previous))
+    else failures.push(status.reason instanceof Error ? status.reason.message : 'Could not read this run.')
+    if (continuations.status === 'fulfilled') setConts(continuations.value.continuations)
+    else failures.push(continuations.reason instanceof Error ? continuations.reason.message : 'Could not read pending questions.')
+    setLoadError(failures.join(' '))
+    setLoading(false)
   }, [runId])
 
   useEffect(() => { refetch() }, [refetch])
@@ -67,17 +133,25 @@ export function WorkflowRunDetail({ runId, onBack }: { runId: string; onBack: ()
 
   const live = !!run && !isTerminal(run.status)
   const { connected } = useWorkflowStream(runId, live, {
-    onSnapshot: (snap) => { setRun(snap); setLoading(false) },
-    onLifecycle: () => scheduleRefetch(),
+    onSnapshot: (snap) => { setRun((previous) => mergeCachedNodes(snap, previous)); setLoading(false) },
+    onLifecycle: (event, data) => {
+      setRun((current) => current ? foldRunEvent(current, event, data) : current)
+      scheduleRefetch()
+    },
   })
 
   const act = useCallback(async (label: string, fn: () => Promise<unknown>) => {
     setBusy(true)
+    setActionError('')
     try {
-      await fn()
+      requireWriteAccepted(await fn())
       await refetch()
+      return true
     } catch (e) {
-      notify(e instanceof Error ? e.message : `${label} failed`, 'error')
+      const message = e instanceof Error ? e.message : `${label} failed`
+      setActionError(message)
+      notify(message, 'error')
+      return false
     } finally {
       setBusy(false)
     }
@@ -121,10 +195,10 @@ export function WorkflowRunDetail({ runId, onBack }: { runId: string; onBack: ()
         ops: [{ kind: 'update_node', node_id: nodeId, fields: { prompt: answers.prompt } }],
       })
       if (res.ok === false || (res.issues?.length ?? 0) > 0) {
-        notify(res.issues?.[0]?.message ?? 'The edit was rejected.', 'error')
-        return
+        throw new Error(res.issues?.[0]?.message ?? 'The edit was rejected.')
       }
       notify(revalidateSummary(res.preview))
+      return res
     })
   }, [act, runId])
 
@@ -142,6 +216,7 @@ export function WorkflowRunDetail({ runId, onBack }: { runId: string; onBack: ()
     await act('Fork', async () => {
       const res = await api.forkWorkflowRun(runId, { note: 'branched from the run view' })
       notify(`Forked to ${res.child_run_id}. Not isolated: ${res.shared_axes.length} shared axes.`)
+      return res
     })
   }, [act, runId])
 
@@ -155,10 +230,7 @@ export function WorkflowRunDetail({ runId, onBack }: { runId: string; onBack: ()
   const [view, setView] = useState<'list' | 'graph'>('list')
 
   const dag = useMemo(
-    () => layoutRunDag(nodes, {
-      continuations: conts,
-      label: (n) => (n.item_label ? `${n.node_id} · ${n.item_label}` : n.node_id),
-    }),
+    () => layoutWorkflowRunDag(nodes, conts),
     [nodes, conts],
   )
 
@@ -174,8 +246,9 @@ export function WorkflowRunDetail({ runId, onBack }: { runId: string; onBack: ()
           verb: approved ? 'approve' : 'reject',
           resume_token: token,
         })
-        if (res.ok === false) notify(res.message ?? 'Could not resolve the gate.', 'error')
-        else notify(`Gate ${res.verb}d.`)
+        requireWriteAccepted(res)
+        notify(`Gate ${res.verb}d.`)
+        return res
       })
     },
     [act, conts, runId],
@@ -195,7 +268,27 @@ export function WorkflowRunDetail({ runId, onBack }: { runId: string; onBack: ()
       return next
     })
   }, [])
-  const shownRows = useMemo(() => visibleRows(rows, collapsed), [rows, collapsed])
+  const partitionedRows = useMemo(
+    () => partitionRunHistory(rows, (row) => row.node.state),
+    [rows],
+  )
+  const visibleCollapsed = useMemo(() => {
+    const visiblePaths = new Set(partitionedRows.visible.map((row) => row.node.instance_path))
+    return new Set([...collapsed].filter((path) => visiblePaths.has(path)))
+  }, [collapsed, partitionedRows.visible])
+  const visibleRunRows = useMemo(
+    () => visibleRows(partitionedRows.visible, visibleCollapsed),
+    [partitionedRows.visible, visibleCollapsed],
+  )
+  const visibleSuppressedRows = useMemo(
+    () => visibleRows(partitionedRows.suppressed, collapsed),
+    [partitionedRows.suppressed, collapsed],
+  )
+  const listedRows = showSuppressed
+    ? [...visibleRunRows, ...visibleSuppressedRows]
+    : visibleRunRows
+
+  useEffect(() => { setShowSuppressed(false) }, [runId])
 
   return (
     <div className="flex h-full flex-col">
@@ -270,13 +363,17 @@ export function WorkflowRunDetail({ runId, onBack }: { runId: string; onBack: ()
       <div className="flex min-h-0 flex-1">
       <div className="min-h-0 flex-1 overflow-y-auto p-l">
         {loading && !run ? <Loading what="this run" /> : !run ? (
-          <p data-type="body-s" className="text-on-surface-low">This run could not be loaded.</p>
+          <InlineError icon multiline onRetry={refetch}>Couldn&rsquo;t load this run{loadError ? `: ${loadError}` : '.'}</InlineError>
         ) : (
           <div className="mx-auto flex max-w-[var(--content-width)] flex-col gap-l">
             { }
             {conts.map((c) => (
               <WorkflowAsk key={c.resume_token} continuation={c} runId={runId} busy={busy} onAnswer={answer} />
             ))}
+
+            {actionError && <InlineError icon multiline onDismiss={() => setActionError('')}>{actionError}</InlineError>}
+
+            {loadError && <InlineError icon multiline onRetry={refetch}>Couldn&rsquo;t refresh this run: {loadError}</InlineError>}
 
             {run.error && (
               <p data-type="body-s" className="text-danger">{run.error}</p>
@@ -286,7 +383,7 @@ export function WorkflowRunDetail({ runId, onBack }: { runId: string; onBack: ()
               <span>run <span className="font-mono">{run.run_id}</span></span>
               <span>spec v{run.spec_version}</span>
               {run.tokens ? <span className="tabular-nums">{run.tokens.toLocaleString()} tokens</span> : null}
-              {run.elapsed_secs ? <span className="tabular-nums">{fmtElapsed(run.elapsed_secs)}</span> : null}
+              {run.elapsed_secs ? <span className="tabular-nums">{fmtElapsed(run.elapsed_secs)} {isTerminal(run.status) ? 'duration' : 'elapsed'}</span> : null}
             </div>
 
             {
@@ -318,20 +415,23 @@ export function WorkflowRunDetail({ runId, onBack }: { runId: string; onBack: ()
 
             {view === 'graph' && dag.nodes.length > 0 ? (
               <div className="overflow-auto rounded-lg bg-surface-high p-s">
-                <DagView
-                  nodes={dag.nodes}
-                  edges={dag.edges}
-                  width={dag.width}
-                  height={dag.height}
-                  onNodeClick={(id) => toggle(id)}
-                  onApprove={isTerminal(run.status) ? undefined : (id) => resolveGate(id, true)}
-                  onDeny={isTerminal(run.status) ? undefined : (id) => resolveGate(id, false)}
-                />
+                <div style={{ width: dag.width, minWidth: '100%' }}>
+                  <DagView
+                    nodes={dag.nodes}
+                    edges={dag.edges}
+                    width={dag.width}
+                    height={dag.height}
+                    onNodeClick={(id) => toggle(id)}
+                    onApprove={isTerminal(run.status) ? undefined : (id) => resolveGate(id, true)}
+                    onDeny={isTerminal(run.status) ? undefined : (id) => resolveGate(id, false)}
+                  />
+                </div>
               </div>
             ) : null}
 
             <div className={`flex flex-col gap-xs${view === 'graph' ? ' hidden' : ''}`}>
-              {shownRows.map(({ node: n, depth, descendants, collapsible }) => {
+              <div id={runHistoryId} className="flex flex-col gap-xs">
+              {listedRows.map(({ node: n, depth, descendants, collapsible }) => {
                 const nl = nodeLook(n.state)
                 const NIcon = nl.icon
                 const canReenter = !isTerminal(run.status) && !!n.node_id
@@ -418,6 +518,22 @@ export function WorkflowRunDetail({ runId, onBack }: { runId: string; onBack: ()
                   </div>
                 )
               })}
+              </div>
+              {partitionedRows.suppressed.length > 0 && (
+                <button
+                  type="button"
+                  aria-controls={runHistoryId}
+                  aria-expanded={showSuppressed}
+                  onClick={() => setShowSuppressed((value) => !value)}
+                  className="inline-flex h-7 self-start items-center gap-xs rounded-md px-s text-on-surface-low transition-colors hover:bg-surface-high hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  data-type="caption"
+                >
+                  {showSuppressed ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                  {showSuppressed
+                    ? `Hide ${partitionedRows.suppressed.length} suppressed step${partitionedRows.suppressed.length === 1 ? '' : 's'}`
+                    : `Show ${partitionedRows.suppressed.length} suppressed step${partitionedRows.suppressed.length === 1 ? '' : 's'}`}
+                </button>
+              )}
             </div>
 
             {

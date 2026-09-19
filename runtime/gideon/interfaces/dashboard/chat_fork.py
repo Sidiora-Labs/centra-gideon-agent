@@ -156,8 +156,6 @@ async def api_chat_session_fork(request: web.Request) -> web.Response:
     new_session.forked_from = _history_key_for(session.key)
     new_session.reasoning_effort = session.reasoning_effort
     new_session.folder_id = session.folder_id
-    new_session.project_id = session.project_id
-    new_session._extra_tool_roots = list(session._extra_tool_roots or [])
     parent_title = session.title if session._titled else "Untitled"
     parent_title, _ = redact_exfiltration_urls(parent_title)
     parent_title, _ = redact_credentials(parent_title)

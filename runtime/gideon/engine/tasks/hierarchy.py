@@ -60,7 +60,7 @@ def _entity_identity(prefix):
 
 @dataclass(frozen=True)
 class ProjectMigration:
-    store: object
+    store: HierarchyStore
 
     def apply(self):
         import shutil
@@ -93,7 +93,7 @@ class ProjectMigration:
 
 @dataclass(frozen=True)
 class DeletionLineage:
-    store: object
+    store: HierarchyStore
 
     def project(self, identifier):
         try:
@@ -134,7 +134,7 @@ class DeletionLineage:
 
 @dataclass(frozen=True)
 class ProjectPatch:
-    store: object
+    store: HierarchyStore
     project: Project
     fields: dict
 
@@ -173,7 +173,7 @@ class ProjectPatch:
 
 @dataclass(frozen=True)
 class ListDestination:
-    store: object
+    store: HierarchyStore
     project_id: str
     project_name: str
     repeatable: bool
@@ -187,6 +187,52 @@ class ListDestination:
         if project is None:
             raise ValueError(f"no project with id '{self.project_id}'")
         return project
+
+
+@dataclass(frozen=True)
+class TaskDestination:
+    store: HierarchyStore
+    task_list_id: str
+    project_id: str
+
+    def validate(self):
+        project = None
+        if self.project_id:
+            project = self.store.get_project(self.project_id)
+            if project is None:
+                raise ValueError(f"no project with id '{self.project_id}'")
+        task_list = None
+        if self.task_list_id:
+            task_list = self.store.get_task_list(self.task_list_id)
+            if task_list is None:
+                raise ValueError(f"no task list with id '{self.task_list_id}'")
+            parent = self.store.get_project(task_list.project_id)
+            if parent is None:
+                raise ValueError(
+                    f"task list '{self.task_list_id}' has no existing parent project"
+                )
+            if project is not None and task_list.project_id != project.id:
+                raise ValueError(
+                    f"task list '{self.task_list_id}' does not belong to project "
+                    f"'{self.project_id}'"
+                )
+        return task_list, project
+
+    def resolve(self):
+        task_list, project = self.validate()
+        if task_list is not None or project is None:
+            return self.task_list_id
+        candidates = sorted(
+            (
+                row
+                for row in self.store.list_task_lists(project.id)
+                if row.name == "General"
+            ),
+            key=lambda row: row.created_at or "",
+        )
+        if candidates:
+            return candidates[0].id
+        return self.store.create_task_list(name="General", project_id=project.id).id
 
 
 class HierarchyStore:
@@ -325,9 +371,9 @@ class HierarchyStore:
             return False
         if project.name in BUILTIN_PROJECTS:
             raise ValueError(f"the built-in project '{project.name}' cannot be deleted")
-        for row in self.list_task_lists(project_id=project_id):
-            self._list_path(row.id).unlink(missing_ok=True)
-            self._record_list_tombstone(row.id)
+        self.delete_task_lists(
+            row.id for row in self.list_task_lists(project_id=project_id)
+        )
         self._record_project_subtree_tombstones(project_id)
         shutil.rmtree(self._project_dir(project_id), ignore_errors=True)
         return True
@@ -363,6 +409,15 @@ class HierarchyStore:
 
     def get_task_list(self, list_id: str) -> TaskList | None:
         return self._read_list(self._list_path(list_id))
+
+    def task_destination(
+        self, *, task_list_id: object = "", project_id: object = ""
+    ) -> TaskDestination:
+        return TaskDestination(
+            self,
+            str(task_list_id or "").strip(),
+            str(project_id or "").strip(),
+        )
 
     def create_task_list(
         self,
@@ -419,6 +474,11 @@ class HierarchyStore:
         path.unlink(missing_ok=True)
         self._record_list_tombstone(list_id)
         return True
+
+    def delete_task_lists(self, list_ids) -> int:
+        return sum(
+            self.delete_task_list(list_id) for list_id in dict.fromkeys(list_ids)
+        )
 
     def _record_list_tombstone(self, list_id: str) -> None:
         DeletionLineage(self).task_list(list_id)

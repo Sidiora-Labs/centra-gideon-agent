@@ -59,6 +59,26 @@ async def test_append_and_roundtrip(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_sync_job_page_reports_the_latest_persisted_outcome(
+    tmp_path: Path,
+) -> None:
+    store = ExecutionJournal(base_dir=tmp_path)
+    await store.append(
+        ExecutionRecord(job_id="clock:nightly", status="success", started_at=100.0)
+    )
+    await store.append(
+        ExecutionRecord(job_id="clock:nightly", status="launched", started_at=200.0)
+    )
+
+    rows, total = store.list_for_job_sync("clock:nightly", 0, 1)
+
+    assert total == 2
+    assert rows[0]["status"] == "launched"
+    assert rows[0]["started_at"] == 200.0
+    assert "trace" not in rows[0]
+
+
+@pytest.mark.asyncio
 async def test_caps_summary_and_trace(tmp_path: Path) -> None:
     store = ExecutionJournal(base_dir=tmp_path)
     run = ExecutionRecord(job_id="j1", summary="x" * 9999, trace="y" * 99_999)

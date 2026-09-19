@@ -23,7 +23,6 @@ from gideon.core.cancellation import (
 )
 from gideon.core.config import loader as config_loader
 from gideon.engine import tmux_substrate
-from gideon.http_errors import json_error
 
 
 def config_path():
@@ -608,20 +607,25 @@ async def api_terminal_delete(request: web.Request) -> web.Response:
     sess = registry.pop(session_id, None)  # type: ignore[arg-type]
 
     persistent = sess.persistent if sess else _persist_enabled(request)
+    detached = False
+    if sess is None and persistent:
+        detached = _tmux_session_name(session_id) in await _list_tmux_sessions()
+
+    if sess is None and not detached:
+        return web.Response(status=404, text="Session not found")
+
     if persistent:
         await _kill_tmux_session(session_id)
 
     if sess is None:
-        if persistent:
-            _sel().log_api_access(
-                caller=caller,
-                operation="terminal.session.delete",
-                outcome="ok",
-                source="dashboard",
-                resources=f"session={session_id},detached",
-            )
-            return web.json_response({"deleted": session_id})
-        return json_error("not_found", status=404)
+        _sel().log_api_access(
+            caller=caller,
+            operation="terminal.session.delete",
+            outcome="ok",
+            source="dashboard",
+            resources=f"session={session_id},detached",
+        )
+        return web.json_response({"deleted": session_id})
 
     if sess.ws and not sess.ws.closed:
         await sess.ws.close()

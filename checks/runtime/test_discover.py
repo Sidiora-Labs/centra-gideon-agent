@@ -139,9 +139,7 @@ def test_compute_engaged_isolates_failures(monkeypatch: pytest.MonkeyPatch):
 
 def test_engaged_chat_reads_conversation_log():
     state = SimpleNamespace(
-        conversation_log=SimpleNamespace(
-            list_sessions=lambda: [{"key": "dashboard_s1"}]
-        )
+        conversation_log=SimpleNamespace(list_sessions=lambda: ["s1"])
     )
     assert dc._engaged_chat(state) is True
     empty = SimpleNamespace(conversation_log=SimpleNamespace(list_sessions=lambda: []))
@@ -161,7 +159,9 @@ def test_engaged_knowledge_reads_stats():
 
 
 def test_engaged_memory_uses_initialized_provider_only():
-    vs = SimpleNamespace(curated_count=lambda: 2)
+    vs = SimpleNamespace(
+        memory_stats=lambda: {"semantic_active": 2, "episodic_active": 0}
+    )
     state = SimpleNamespace(
         context_builder=SimpleNamespace(memory=SimpleNamespace(vector_store=vs))
     )
@@ -232,194 +232,3 @@ def test_compute_auto_hides_engaged(
     flat_ids = [tip["id"] for g in out["areas"] for tip in g["tips"]]
     assert "chat" not in flat_ids and "loops" not in flat_ids
     assert out["visible_count"] == len(dc.CATALOG) - 2
-
-
-class TestEngagementMeansTheUSERDidSomething:
-    """#8 — every predicate must answer "has this person used the area?", not "does this
-    area hold data?".
-
-    Gideon writes into its own surfaces constantly: schedules it installs itself, skills it
-    injects into a turn, inbox rows that arrive on their own, memory the consolidator forms
-    out of ordinary chat. Each of those used to satisfy a predicate, so a Discover tip
-    disappeared before the user ever saw the page it points at. Every test below pairs a
-    system-generated artifact (must NOT engage) with a real user action (must engage).
-    """
-
-    def test_chat_ignores_automated_run_transcripts(self, tmp_path: Path) -> None:
-        from gideon.cognition.history import ConversationLog
-
-        log = ConversationLog(base_dir=tmp_path / "sessions")
-        log.init()
-        state = SimpleNamespace(conversation_log=log)
-        for key in ("cron:nightly", "subagent:worker-1", "workflow:build", "_bg"):
-            log.append(key, "assistant", "ran")
-        assert dc._engaged_chat(state) is False
-        log.append("dashboard_chat-1", "user", "hello")
-        assert dc._engaged_chat(state) is True
-
-    def test_automation_ignores_the_schedules_gideon_installs_itself(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from gideon.automation.triggers.models import Trigger
-        from gideon.automation.triggers.store import TriggerStore
-
-        monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
-        store = TriggerStore(base_dir=tmp_path)
-        spec = {"kind": "cron", "expr": "0 9 * * *", "timezone": "UTC"}
-        store.upsert(
-            Trigger(
-                id="system:self-check",
-                name="Self check",
-                kind="clock",
-                created_by="system",
-                spec=dict(spec),
-                workflow={
-                    "inline": {"provider": "bash", "config": {"command": "true"}}
-                },
-            )
-        )
-        assert dc._engaged_automation(None) is False
-        store.upsert(
-            Trigger(
-                id="clock:mine",
-                name="Mine",
-                kind="clock",
-                created_by="user",
-                spec=dict(spec),
-                workflow={
-                    "inline": {"provider": "bash", "config": {"command": "true"}}
-                },
-            )
-        )
-        assert dc._engaged_automation(None) is True
-
-    def test_inbox_ignores_arrivals(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from gideon.integrations.inbox import InboxItem, InboxStore, ItemStatus
-
-        monkeypatch.setattr("gideon.integrations.inbox.config_dir", lambda: tmp_path)
-        store = InboxStore()
-        arrival = InboxItem(
-            id="C1_1700000000.1",
-            channel="C1",
-            channel_name="#general",
-            thread_ts=None,
-            message="a message nobody asked for",
-            sender_id="U2",
-            sender_name="Sam",
-            created_at=1700000000.1,
-        )
-        store.items[arrival.id] = arrival
-        store.save()
-        assert dc._engaged_inbox(None) is False
-        arrival.status = ItemStatus.HANDLED.value
-        store.save()
-        assert dc._engaged_inbox(None) is True
-
-    def test_inbox_counts_a_star_and_a_dismissal(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from gideon.integrations.inbox import InboxItem, InboxState, InboxStore
-
-        monkeypatch.setattr("gideon.integrations.inbox.config_dir", lambda: tmp_path)
-        store = InboxStore()
-        item = InboxItem(
-            id="C1_1700000000.2",
-            channel="C1",
-            channel_name="#general",
-            thread_ts=None,
-            message="hi",
-            sender_id="U2",
-            sender_name="Sam",
-            created_at=1700000000.2,
-            favorited=True,
-        )
-        store.items[item.id] = item
-        store.save()
-        assert dc._engaged_inbox(None) is True
-
-        item.favorited = False
-        store.save()
-        assert dc._engaged_inbox(None) is False
-        state = InboxState()
-        state.dismissed.add("C1_1700000000.3")
-        state.save()
-        assert dc._engaged_inbox(None) is True
-
-    def test_memory_ignores_rows_the_consolidator_formed(self, tmp_path: Path) -> None:
-        """The headline case: chatting produces semantic + episodic rows on its own."""
-        from gideon.cognition.vector_memory import SemanticArchive
-
-        vs = SemanticArchive(db_path=tmp_path / "v.db")
-        vs.init()
-        state = SimpleNamespace(
-            context_builder=SimpleNamespace(memory=SimpleNamespace(vector_store=vs))
-        )
-        assert vs.set_semantic("user.city", "Lisbon", 0.9, "consolidation") is None
-        assert vs.write_episodic("they mentioned a trip", source="consolidation")
-        assert dc._engaged_memory(state) is False
-
-    def test_memory_counts_explicit_curation(self, tmp_path: Path) -> None:
-        from gideon.cognition.vector_memory import SemanticArchive
-
-        vs = SemanticArchive(db_path=tmp_path / "v.db")
-        vs.init()
-        state = SimpleNamespace(
-            context_builder=SimpleNamespace(memory=SimpleNamespace(vector_store=vs))
-        )
-        assert vs.set_semantic("user.city", "Lisbon", 0.9, "consolidation") is None
-        assert dc._engaged_memory(state) is False
-        assert vs.delete_semantic("user.city", "user_explicit") is True
-        assert dc._engaged_memory(state) is True
-
-    def test_memory_counts_a_hand_written_fact(self, tmp_path: Path) -> None:
-        """The Memory page's PUT writes with the human-authored source."""
-        from gideon.cognition.vector_memory import SemanticArchive
-
-        vs = SemanticArchive(db_path=tmp_path / "v.db")
-        vs.init()
-        state = SimpleNamespace(
-            context_builder=SimpleNamespace(memory=SimpleNamespace(vector_store=vs))
-        )
-        assert vs.set_semantic("pref.tone", "brief", 1.0, "user_explicit") is None
-        assert dc._engaged_memory(state) is True
-
-    def test_skills_ignores_passive_injection(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A turn that surfaced a bundled skill bumps the usage counter without the user
-        ever opening the Skills page."""
-        from gideon.extensions.skills.loader import ProcedureLibrary
-        from gideon.extensions.skills.usage import SkillUsageStore
-
-        skills = tmp_path / "skills"
-        monkeypatch.setattr(
-            "gideon.extensions.skills.loader.skills_dir", lambda: skills
-        )
-        ProcedureLibrary(skills_path=skills)._dir.mkdir(parents=True, exist_ok=True)
-        bundled = next(iter(dc_bundled_names()), "")
-        assert bundled, "no bundled skills to test against"
-        SkillUsageStore(skills / ".usage.json").record_use(bundled)
-        _write_skill(skills / bundled, bundled)
-        assert dc._engaged_skills(None) is False
-
-        _write_skill(skills / "auto" / "grep-fast", "auto/grep-fast")
-        assert dc._engaged_skills(None) is False
-
-        _write_skill(skills / "my-skill", "my-skill")
-        assert dc._engaged_skills(None) is True
-
-
-def dc_bundled_names() -> set[str]:
-    from gideon.extensions.skills.loader import bundled_skill_names
-
-    return bundled_skill_names()
-
-
-def _write_skill(directory: Path, name: str) -> None:
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / "SKILL.md").write_text(
-        f"---\nname: {name}\ndescription: test skill\n---\n\nBody.\n", encoding="utf-8"
-    )

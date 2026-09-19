@@ -45,7 +45,7 @@ class FileBaseline:
     def replace(self, observations: list[tuple[str, tuple[float, int]]]) -> list[str]:
         before = self.signatures
         after = dict(observations)
-        changes = []
+        changes: list = []
         if before is not None:
             changes.extend(
                 path

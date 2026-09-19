@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 import pytest
 
 from gideon.core.config.loader import AppConfig
-from gideon.integrations.browse import cdp
+from gideon.integrations.browse import cdp, plans
 from gideon.security.net import policy as net_policy
 from gideon.security.net.policy import egress_policy_for
 
@@ -165,13 +165,38 @@ def _frame(url: str) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_denied_host_sends_zero_page_navigate():
+async def test_denied_host_sends_zero_page_navigate(monkeypatch):
     """THE clause: the block happens BEFORE ``Page.navigate`` reaches the wire."""
+    layered: list[tuple[object, object]] = []
+    guarded: list[tuple[str, object, object]] = []
+    real_layer = cdp.egress_policy_for
+    real_evaluate = cdp.evaluate
+
+    def _layer(base):
+        policy = real_layer(base)
+        layered.append((base, policy))
+        return policy
+
+    def _guard(url, policy, **kwargs):
+        decision = real_evaluate(url, policy, **kwargs)
+        guarded.append((url, policy, decision))
+        return decision
+
+    monkeypatch.setattr(cdp, "egress_policy_for", _layer)
+    monkeypatch.setattr(cdp, "evaluate", _guard)
     transport = FakeTransport()
     session = await _started(transport)
 
     outcome = await session.navigate("https://denied.example/secret")
 
+    assert len(layered) == 2, "start and navigation must resolve the production posture"
+    assert all(base is net_policy.BROWSE for base, _policy in layered)
+    assert all(policy.deny_hosts == ("denied.example",) for _base, policy in layered)
+    assert len(guarded) == 1
+    guarded_url, guarded_policy, decision = guarded[0]
+    assert guarded_url == "https://denied.example/secret"
+    assert guarded_policy is layered[-1][1]
+    assert decision.allow is False and decision.host == "denied.example"
     assert transport.count(cdp.NAVIGATE) == 0, (
         "a denied host must not produce a Page.navigate message; "
         f"wire was {transport.methods}"
@@ -259,6 +284,27 @@ async def test_the_guard_is_called_with_the_real_browse_profile(monkeypatch):
     assert (
         policy.pin_resolved_ip is False
     ), "BROWSE cannot pin; True would be another profile"
+
+
+def test_the_human_facing_reachable_scope_is_the_live_cdp_policy(operator_egress):
+    """The grant prompt must describe what CDP can reach, not imply its start host is a fence."""
+    operator_egress.allow_hosts = ["lan.example"]
+    operator_egress.deny_hosts = ["denied.example"]
+    policy = egress_policy_for(net_policy.BROWSE)
+
+    scope = plans.reachable_scope()
+
+    assert scope == {
+        "summary": "Public web hosts, plus explicitly allowed hosts, except explicitly denied hosts",
+        "schemes": list(policy.allow_schemes),
+        "allow_hosts": list(policy.allow_hosts),
+        "deny_hosts": list(policy.deny_hosts),
+        "allow_private": policy.allow_private,
+        "allow_only": policy.allow_only,
+        "loopback_only": policy.loopback_only,
+    }
+    assert scope["allow_hosts"] == ["lan.example"]
+    assert scope["deny_hosts"] == ["denied.example"]
 
 
 @pytest.mark.asyncio

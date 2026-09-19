@@ -187,32 +187,9 @@ class UnknownTipError(ValueError):
     """
 
 
-_AUTOMATED_SESSION_PREFIXES = (
-    "cron:",
-    "cron_",
-    "subagent:",
-    "subagent_",
-    "workflow:",
-    "workflow_",
-    "loop:",
-    "loop_",
-    "campaign",
-)
-
-
 def _engaged_chat(state: Any) -> bool:
-    """A session the USER held. Every automated run journals a session of its own
-    (``cron``, ``subagent``, ``workflow``, ``loop``, the ``_bg`` scratch key — the journal
-    stores ``:`` as ``_``, so both spellings are subtracted), so counting sessions marked a
-    user engaged with Chat after one scheduled job."""
     cl = getattr(state, "conversation_log", None)
-    if not cl:
-        return False
-    return any(
-        not str(row.get("key", "")).startswith(_AUTOMATED_SESSION_PREFIXES)
-        and str(row.get("key", "")) != "_bg"
-        for row in cl.list_sessions()
-    )
+    return bool(cl and len(cl.list_sessions()) > 0)
 
 
 def _engaged_loops(_state: Any) -> bool:
@@ -236,10 +213,9 @@ def _engaged_automation(state: Any) -> bool:
     if EventTriggerStore(config_dir() / "event_triggers.json").load():
         return True
     try:
-        rows = TriggerStore(base_dir=config_dir()).load()
+        return bool(TriggerStore(base_dir=config_dir()).load())
     except Exception:  # noqa: BLE001 - a legibility probe must never raise
         return False
-    return any(r.trigger.created_by != "system" for r in rows)
 
 
 def _engaged_tasks(_state: Any) -> bool:
@@ -260,26 +236,11 @@ def _engaged_projects(_state: Any) -> bool:
 
 
 def _engaged_inbox(_state: Any) -> bool:
-    """Whether the user has ACTED on the inbox — not whether mail arrived.
+    from gideon.integrations.inbox import InboxStore
 
-    Items arrive on their own (push sources, poll providers, the agent's own notices), so
-    "the store is non-empty" made the Inbox tip disappear for a user who never opened the
-    page. ``PENDING`` is arrival and ``FILTERED`` is the verification pass withholding a
-    row; every other state, a star, a dismissal and a muted thread are things a person did.
-    """
-    from gideon.integrations.inbox import InboxState, InboxStore, ItemStatus
-
-    arrival = {ItemStatus.PENDING.value, ItemStatus.FILTERED.value}
-    state = InboxState()
-    state.load()
-    if state.dismissed or state.muted_threads:
-        return True
     store = InboxStore()
     store.load()
-    return any(
-        item.favorited or str(item.status) not in arrival
-        for item in store.items.values()
-    )
+    return bool(store.items)
 
 
 def _engaged_knowledge(state: Any) -> bool:
@@ -288,40 +249,19 @@ def _engaged_knowledge(state: Any) -> bool:
 
 
 def _engaged_memory(state: Any) -> bool:
-    """Whether the user has CURATED memory — not whether memory exists.
-
-    Any active row was the wrong question: consolidation forms semantic and episodic rows
-    by itself out of ordinary conversation, so the Memory tip vanished for a user who had
-    never opened the page. Curation is what engagement means here — an edit, a delete, a
-    vault edit — and the archive already marks those with a human-authored source
-    (``curated_count``)."""
     cb = getattr(state, "context_builder", None)
     mem = getattr(cb, "memory", None) if cb else None
     vs = getattr(mem, "vector_store", None) if mem else None
     if not vs:
         return False
-    return int(vs.curated_count()) > 0
+    stats = vs.memory_stats()
+    return (stats.get("semantic_active", 0) + stats.get("episodic_active", 0)) > 0
 
 
 def _engaged_skills(_state: Any) -> bool:
-    """A skill the user PUT there — installed from a marketplace, or hand-authored.
+    from gideon.extensions.skills.usage import SkillUsageStore
 
-    Not the usage counter: that records turn-time INJECTION, which the context builder does
-    on its own for every skill it surfaces, so one ordinary turn marked a user engaged with
-    Skills. Bundled skills are copied into the same directory without being asked for, and
-    the ``auto/`` namespace is written by the curator, so both are subtracted."""
-    from gideon.extensions.skills.loader import (
-        AUTO_SKILL_NAMESPACE,
-        ProcedureLibrary,
-        bundled_skill_names,
-    )
-
-    shipped = bundled_skill_names()
-    prefix = f"{AUTO_SKILL_NAMESPACE}/"
-    return any(
-        row["key"] not in shipped and not str(row["key"]).startswith(prefix)
-        for row in ProcedureLibrary(install_builtins=False).list_skills()
-    )
+    return bool(SkillUsageStore().all_usage())
 
 
 def _engaged_apps(_state: Any) -> bool:

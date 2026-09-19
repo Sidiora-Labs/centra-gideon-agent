@@ -106,6 +106,8 @@ def execute(configuration: dict) -> dict:
         definition = importlib.util.spec_from_file_location(
             "_gideon_cron_script", configuration["script_path"]
         )
+        if definition is None or definition.loader is None:
+            raise ImportError(f"cannot load script {configuration['script_path']!r}")
         module = importlib.util.module_from_spec(definition)
         definition.loader.exec_module(module)
         entry = getattr(module, configuration["func"], None)

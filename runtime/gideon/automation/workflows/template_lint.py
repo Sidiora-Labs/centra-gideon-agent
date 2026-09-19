@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from gideon.automation.workflows import blocks
+from gideon.automation.workflows.bindings import refs_in
 
 SEVERITY_ERROR = "error"
 SEVERITY_WARNING = "warning"
@@ -45,6 +46,19 @@ _DUPLICATED_CONVENTIONS: tuple[tuple[str, re.Pattern[str], str], ...] = (
         "finding-record",
     ),
 )
+
+_SCHEMA_DEFAULTS: dict[str, Any] = {
+    "array": [],
+    "boolean": False,
+    "integer": 0,
+    "number": 0,
+    "object": {},
+    "string": "",
+}
+
+_JUDGE_CONTRACT_DEFAULTS: dict[str, Any] = {
+    "shortfalls": [],
+}
 
 
 @dataclass
@@ -256,7 +270,45 @@ def _all_nodes(node: Any) -> list[dict[str, Any]]:
         elif isinstance(case, list):
             for item in case:
                 out.extend(_all_nodes(item))
+    if node.get("default"):
+        out.extend(_all_nodes(node["default"]))
     return out
+
+
+def loop_last_fields(loop: dict[str, Any]) -> set[str]:
+    """Top-level fields a loop body reads from the previous iteration."""
+    fields: set[str] = set()
+    for expression in refs_in(loop.get("body") or {}):
+        path = expression.split("|", 1)[0].strip().split(".")
+        if len(path) >= 3 and path[:2] == ["last", "output"] and path[2]:
+            fields.add(path[2])
+    return fields
+
+
+def loop_first_iteration_defaults(loop: dict[str, Any]) -> dict[str, Any]:
+    """Typed empty values for ``last.output`` before a loop has an output.
+
+    Loop bodies commonly carry several leaf outputs forward as one iteration record. The
+    schemas already declare the safe empty value for each field, so deriving the initial
+    record from those declarations keeps the first iteration on the same shape as every
+    later one. Judge-contract enrichment adds ``shortfalls`` after schema validation, so
+    that engine-owned field is included when the body opts into the contract.
+    """
+    defaults: dict[str, Any] = {}
+    for node in _all_nodes(loop.get("body") or {}):
+        cfg = node.get("config") or {}
+        for field_name, declared in (cfg.get("schema") or {}).items():
+            kind = str(declared or "").lower()
+            value = _SCHEMA_DEFAULTS.get(kind)
+            if isinstance(value, (dict, list)):
+                value = value.copy()
+            defaults.setdefault(str(field_name), value)
+        if cfg.get("judge_contract") is True:
+            for field_name, value in _JUDGE_CONTRACT_DEFAULTS.items():
+                defaults.setdefault(
+                    field_name, value.copy() if isinstance(value, list) else value
+                )
+    return defaults
 
 
 _VERIFIER_STEMS = (
@@ -357,6 +409,18 @@ def _check_anti_patterns(res: LintResult, spec: dict[str, Any]) -> None:
                     f"loop {loop.get('id')!r} never binds `last` or `iter`: each iteration "
                     "starts blind, so it will repeat its first step indefinitely",
                     severity=SEVERITY_WARNING,
+                )
+            )
+        missing_defaults = loop_last_fields(loop) - set(
+            loop_first_iteration_defaults(loop)
+        )
+        for field_name in sorted(missing_defaults):
+            res.findings.append(
+                LintFinding(
+                    "WFL_UNDEFAULTED_LAST",
+                    f"loop {loop.get('id')!r} reads `last.output.{field_name}` but no body "
+                    "schema declares that field, so its first iteration cannot bind it",
+                    severity=SEVERITY_ERROR,
                 )
             )
 

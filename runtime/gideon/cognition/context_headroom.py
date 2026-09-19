@@ -176,7 +176,7 @@ class Headroom:
         )
 
     def to_dict(self) -> dict[str, object]:
-        result = {"state": self.state.value, "window": self.window.to_dict()}
+        result: dict = {"state": self.state.value, "window": self.window.to_dict()}
         result.update(
             _fields(
                 self,
@@ -319,7 +319,7 @@ def _name_culprits(
     working: list[tuple[Component, int]], *, over: int, compressed_names: set[str]
 ) -> tuple[Oversized, ...]:
     remaining = over
-    findings = []
+    findings: list = []
     for component, tokens in sorted(working, key=lambda item: item[1], reverse=True):
         if findings and remaining <= 0:
             break

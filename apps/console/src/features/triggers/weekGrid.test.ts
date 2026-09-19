@@ -81,6 +81,15 @@ describe('buildWeekGrid', () => {
     expect(cell?.liveCount).toBe(1)
   })
 
+  it('plots a future one-shot from the shared next-fire projection', () => {
+    const grid = buildWeekGrid([
+      occ('2026-08-08T16:45:00', { trigger_id: 'schedule:once', trigger_name: 'send reminder' }),
+    ], MONDAY)
+    const cell = grid.cells.find((c) => c.count > 0)
+    expect(cell).toMatchObject({ day: 5, hour: 16, state: 'fires', triggerIds: ['schedule:once'] })
+    expect(cell?.triggers).toEqual(['send reminder'])
+  })
+
   it('COLLAPSES many fires in one hour into one counted cell', () => {
     const rows = Array.from({ length: 60 }, (_, i) =>
       occ(`2026-08-05T09:${String(i).padStart(2, '0')}:00`))

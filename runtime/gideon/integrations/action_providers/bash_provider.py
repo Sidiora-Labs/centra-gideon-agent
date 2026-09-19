@@ -75,7 +75,7 @@ def _sel_refusal(command: str, reason: str, ctx: ActionContext) -> None:
 
         from gideon.security.sel import SecurityEvent, SecurityEventLog
 
-        fields = dict(
+        fields: dict = dict(
             event_id=uuid.uuid4().hex[:16],
             timestamp=datetime.now(timezone.utc).isoformat(),
             event_type="action_refused",

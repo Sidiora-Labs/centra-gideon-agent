@@ -1,128 +1,81 @@
-import { describe, it, expect, vi } from 'vitest'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { render, screen, fireEvent } from '@testing-library/react'
-import { RAIL_MIN_MARKERS, SessionMarkerRail } from './SessionMarkerRail'
-import { deriveSessionMarkers, type SessionMarker } from './sessionMarkers'
-import { hydrateTurns, type HistMsg } from './chatTypes'
+import { createRef } from 'react'
+import { fireEvent, render, within } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { SessionMarkerRail } from './SessionMarkerRail'
+import type { ChatTurn } from './chatTypes'
 
-const marker = (over: Partial<SessionMarker> = {}): SessionMarker => ({
-  id: 't0', kind: 'turn', label: 'hello', role: 'user', turnIndex: 0, jumpIndex: 0, failedTool: false, ...over,
-})
+const turns: Pick<ChatTurn, 'role'>[] = [
+  { role: 'user' },
+  { role: 'assistant' },
+  { role: 'user' },
+]
 
-const many = (n: number): SessionMarker[] =>
-  Array.from({ length: n }, (_, i) => marker({ id: `t${i}`, label: `turn ${i}`, turnIndex: i, jumpIndex: i }))
+function setup(showReturnToNewest = true) {
+  const scroller = document.createElement('div')
+  Object.defineProperties(scroller, {
+    clientHeight: { configurable: true, value: 200 },
+    scrollHeight: { configurable: true, value: 800 },
+    scrollTop: { configurable: true, writable: true, value: 200 },
+  })
+  document.body.appendChild(scroller)
+  const scrollRef = createRef<HTMLDivElement>() as React.MutableRefObject<HTMLDivElement | null>
+  scrollRef.current = scroller
+  const nodes = turns.map((_, index) => {
+    const node = document.createElement('div')
+    Object.defineProperty(node, 'offsetTop', { configurable: true, value: index * 300 })
+    node.scrollIntoView = vi.fn()
+    return node
+  })
+  const onReturnToNewest = vi.fn()
+  const result = render(<SessionMarkerRail turns={turns} scrollRef={scrollRef}
+    nodeOf={(index) => nodes[index]} showReturnToNewest={showReturnToNewest}
+    onReturnToNewest={onReturnToNewest} />)
+  return { ...result, scroller, nodes, onReturnToNewest }
+}
 
-const rail = () => screen.queryByRole('navigation', { name: 'Session index' })
-const railButtons = () => screen.queryAllByRole('button')
+describe('SessionMarkerRail', () => {
+  afterEach(() => { document.body.innerHTML = '' })
 
-describe('SessionMarkerRail — one marker per derived event', () => {
-  it('renders a button per marker inside a labelled vertical index', () => {
-    render(<SessionMarkerRail markers={many(6)} currentTurn={5} onJump={() => {}} />)
-    expect(rail()).not.toBeNull()
-    expect(railButtons()).toHaveLength(6)
-    expect(screen.getByRole('button', { name: 'You: turn 3' })).toBeTruthy()
+  it('exposes a named Session map region and visualizes the viewport', () => {
+    const { container } = setup()
+    expect(within(container).getByRole('region', { name: 'Session map messages' })).toBeTruthy()
+    const viewport = within(container).getByTestId('session-map-viewport')
+    expect(viewport.style.top).toBe('25%')
+    expect(viewport.style.height).toBe('25%')
   })
 
-  it('renders one marker per event of a real transcript, in order', () => {
-    const msgs: HistMsg[] = [
-      { role: 'user', content: 'delegate this' },
-      { role: 'tool', content: 'Task', meta: { tool_call_id: 't1', tool: 'Task', done: true } },
-      { role: 'permission', content: 'Terminal', meta: { approval_id: 'a1', tool: 'Terminal' } },
-      { role: 'assistant', content: 'done' },
-    ]
-    const markers = deriveSessionMarkers(hydrateTurns(msgs))
-    render(<SessionMarkerRail markers={markers} currentTurn={1} onJump={() => {}} />)
-    const names = railButtons().map((b) => b.getAttribute('aria-label'))
-    expect(names).toEqual(['You: delegate this', 'Assistant: done', 'Subagent: Task', 'Approval: Terminal'])
-    expect(railButtons().map((b) => b.getAttribute('data-kind'))).toEqual(['turn', 'turn', 'subagent', 'approval'])
+  it('gives each marker a larger target and an accessible jump name', () => {
+    const { container } = setup()
+    const markers = container.querySelectorAll<HTMLButtonElement>('[data-session-marker]')
+    expect(markers).toHaveLength(3)
+    expect(markers[0].className).toContain('size-8')
+    expect(within(container).getByRole('button', { name: 'Jump to message 2, Assistant' })).toBeTruthy()
   })
 
-  it('names a failed tool in its accessible label', () => {
-    render(<SessionMarkerRail markers={[...many(3), marker({ id: 'x', kind: 'tool', label: 'Terminal', role: 'assistant', turnIndex: 3, failedTool: true })]}
-      currentTurn={0} onJump={() => {}} />)
-    expect(screen.getByRole('button', { name: 'Tool: Terminal (failed tool)' })).toBeTruthy()
-  })
-})
+  it('jumps with click and arrow-key navigation', () => {
+    const { container, nodes } = setup()
+    const first = within(container).getByRole('button', { name: 'Jump to message 1, You' })
+    const second = within(container).getByRole('button', { name: 'Jump to message 2, Assistant' })
 
-describe('SessionMarkerRail — suppressed when there is nothing to navigate', () => {
-  it('renders nothing below the threshold', () => {
-    for (let n = 0; n < RAIL_MIN_MARKERS; n++) {
-      const { unmount } = render(<SessionMarkerRail markers={many(n)} currentTurn={0} onJump={() => {}} />)
-      expect(rail()).toBeNull()
-      expect(railButtons()).toHaveLength(0)
-      unmount()
-    }
+    fireEvent.click(first)
+    expect(nodes[0].scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' })
+
+    first.focus()
+    fireEvent.keyDown(first, { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(second)
+    expect(nodes[1].scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' })
   })
 
-  it('appears as soon as the threshold is reached', () => {
-    render(<SessionMarkerRail markers={many(RAIL_MIN_MARKERS)} currentTurn={0} onJump={() => {}} />)
-    expect(rail()).not.toBeNull()
-    expect(railButtons()).toHaveLength(RAIL_MIN_MARKERS)
-  })
-})
+  it('renders one accessible return-to-newest control only when needed', () => {
+    const { container, onReturnToNewest, rerender } = setup()
+    const control = within(container).getByRole('button', { name: 'Return to newest message' })
+    expect(within(container).getAllByRole('button', { name: /newest message/i })).toHaveLength(1)
+    fireEvent.click(control)
+    expect(onReturnToNewest).toHaveBeenCalledTimes(1)
 
-describe('SessionMarkerRail — current vs historical', () => {
-  it('marks only the current turn’s markers, by aria-current and by class', () => {
-    const markers = [...many(4), marker({ id: 't3s0', kind: 'tool', label: 'Read', role: 'assistant', turnIndex: 3, jumpIndex: 3 })]
-    render(<SessionMarkerRail markers={markers} currentTurn={3} onJump={() => {}} />)
-    const buttons = railButtons()
-    expect(buttons.map((b) => b.getAttribute('data-state')))
-      .toEqual(['historical', 'historical', 'historical', 'current', 'current'])
-    expect(buttons.filter((b) => b.getAttribute('aria-current') === 'true')).toHaveLength(2)
-    const [historical, current] = [buttons[0], buttons[3]]
-    expect(current.className).not.toBe(historical.className)
-    expect(current.className).toContain('bg-primary')
-    expect(historical.className).not.toContain('bg-primary')
-  })
-
-  it('styles a historical failed-tool marker apart from a plain historical one', () => {
-    const markers = [...many(3), marker({ id: 'f', kind: 'tool', label: 'Terminal', role: 'assistant', turnIndex: 9, jumpIndex: 9, failedTool: true })]
-    render(<SessionMarkerRail markers={markers} currentTurn={0} onJump={() => {}} />)
-    const buttons = railButtons()
-    expect(buttons[3].className).toContain('bg-danger')
-    expect(buttons[1].className).not.toContain('bg-danger')
-  })
-})
-
-describe('SessionMarkerRail — clicking jumps to the turn', () => {
-  it('reports the clicked marker, carrying its turn and fork coordinate', () => {
-    const onJump = vi.fn()
-    const markers = deriveSessionMarkers(hydrateTurns([
-      { role: 'user', content: 'q one' },
-      { role: 'assistant', content: 'part one' },
-      { role: 'assistant', content: 'part two' },
-      { role: 'user', content: 'q two' },
-      { role: 'assistant', content: 'a two' },
-    ]))
-    render(<SessionMarkerRail markers={markers} currentTurn={3} onJump={onJump} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Assistant: part one part two' }))
-    expect(onJump).toHaveBeenCalledTimes(1)
-    expect(onJump.mock.calls[0][0]).toMatchObject({ turnIndex: 1, jumpIndex: 2 })
-  })
-
-  it('jumps from any marker of a turn, event markers included', () => {
-    const onJump = vi.fn()
-    const markers = deriveSessionMarkers(hydrateTurns([
-      { role: 'user', content: 'go' },
-      { role: 'tool', content: 'Read', meta: { tool_call_id: 't1', done: true } },
-      { role: 'assistant', content: 'read it' },
-      { role: 'user', content: 'again' },
-      { role: 'assistant', content: 'ok' },
-    ]))
-    render(<SessionMarkerRail markers={markers} currentTurn={3} onJump={onJump} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Tool: Read' }))
-    expect(onJump.mock.calls[0][0]).toMatchObject({ kind: 'tool', turnIndex: 1, jumpIndex: 1 })
-  })
-})
-
-describe('SessionMarkerRail — mounted in the chat surface', () => {
-  const page = readFileSync(join(process.cwd(), 'src/features/ChatPage.tsx'), 'utf8')
-
-  it('is rendered from the derived markers and jumps through the page’s turn scroller', () => {
-    expect(page).toContain("import { deriveSessionMarkers } from './chat/sessionMarkers'")
-    expect(page).toContain('const sessionMarkers = useMemo(() => deriveSessionMarkers(turns), [turns])')
-    expect(page).toMatch(/<SessionMarkerRail markers=\{sessionMarkers\} currentTurn=\{turns\.length - 1\}/)
-    expect(page).toContain('onJump={(m) => jumpToTurn(m.turnIndex)}')
+    const scrollRef = createRef<HTMLDivElement>()
+    rerender(<SessionMarkerRail turns={turns} scrollRef={scrollRef} nodeOf={() => null}
+      showReturnToNewest={false} onReturnToNewest={onReturnToNewest} />)
+    expect(within(container).queryByRole('button', { name: /newest message/i })).toBeNull()
   })
 })

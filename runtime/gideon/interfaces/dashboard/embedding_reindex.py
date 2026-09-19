@@ -5,8 +5,8 @@ from a different model and live in a different space (often a different
 dimension). This module re-indexes both embedding stores as a background job
 with SSE progress, mirroring :mod:`gideon.interfaces.dashboard.model_downloads`:
 
-  * **Knowledge** — ``KnowledgeStore`` items (clear ``embedding`` → re-embed each
-    from preserved title/summary/content).
+  * **Knowledge** — ``KnowledgeStore`` items and chunks (clear vectors → re-embed
+    each from preserved title/summary/content and chunk text).
   * **Episodic memory** — ``SemanticArchive`` episodic rows (clear → re-embed
     from preserved text → rebuild FAISS). Semantic memory embeds lazily at query
     time, so clearing is enough there.
@@ -49,7 +49,9 @@ class ReindexJob:
     done: int = 0
     total: int = 0
     knowledge: int = 0
+    knowledge_chunks: int = 0
     memory: int = 0
+    stale_index_reasons: list[dict[str, Any]] | None = None
     error: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -61,7 +63,9 @@ class ReindexJob:
             "done": self.done,
             "total": self.total,
             "knowledge": self.knowledge,
+            "knowledge_chunks": self.knowledge_chunks,
             "memory": self.memory,
+            "stale_index_reasons": self.stale_index_reasons or [],
             "error": self.error,
         }
 
@@ -193,13 +197,27 @@ class ReindexRegistry:
 
         k_done = 0
         if knowledge_store and embedder is not None:
-            job.phase = "reindexing knowledge"
+            from gideon.cognition.knowledge.pipeline.runner import (
+                embedding_space_fingerprint,
+            )
+
+            provider, model = embedding_space_fingerprint(embedder)
+            dim_fn = getattr(embedder, "dim", None)
+            try:
+                active_dim = dim_fn() if callable(dim_fn) else None
+            except Exception:
+                active_dim = None
+            before = knowledge_store.chunk_embedding_status(provider, model, active_dim)
+            job.stale_index_reasons = list(before.get("reasons") or [])
+            job.phase = "reindexing knowledge items and chunks"
             self._publish(job, "progress")
             knowledge_store.clear_embeddings()
             res = knowledge_store.reembed_all(
                 embedder, on_progress=lambda d, _t: _progress(d, 0)
             )
             job.knowledge = res.get("reembedded", 0)
+            after = knowledge_store.chunk_embedding_status(provider, model, active_dim)
+            job.knowledge_chunks = int(after.get("compatible", 0))
             k_done = res.get("total", 0)
 
         if vector_store is not None:

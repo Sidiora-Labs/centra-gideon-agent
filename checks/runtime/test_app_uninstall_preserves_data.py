@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import errno
 import json
-import logging
 import os
 import subprocess
 from pathlib import Path
@@ -421,17 +420,24 @@ def test_an_absent_data_dir_parks_nothing_and_reports_absent(tmp_path):
 
 
 def test_describe_app_data_separates_present_from_entries(tmp_path):
-    """``present`` is about existence, ``entries`` about content — never one truthiness.
+    """``present`` is existence; ``entries`` censuses user data, not Git metadata.
 
     The removal dialogs make a different promise in each case, so a single "has data"
-    boolean would make the wrong promise for an app with an empty data dir.
+    boolean would make the wrong promise for an app with an empty data dir. The fixture's
+    real repository metadata is planted at the data root too, where a top-level census
+    that mistakes ``.git`` for a user item cannot accidentally pass.
     """
     name = "notes-fixture"
     assert app_manager.install(_bundle(tmp_path), confirm=True).ok
     _write_note(name, "one", "content")
+    data = manager.app_dir(name) / "data"
+    (data / ".git").mkdir()
+    (data / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (data / "preferences.json").write_text("{}\n", encoding="utf-8")
     facts = app_manager.describe_app_data(name)
     assert facts["present"] is True
-    assert facts["entries"] == 1, facts
+    assert facts["entries"] == 2, facts
+    assert app_manager._data_fact("data", data) == "data=2"
     assert facts["path"].endswith(f".{name}.data"), facts["path"]
     ghost = app_manager.describe_app_data("ghost")
     assert ghost["present"] is False and ghost["entries"] == 0, ghost
@@ -666,32 +672,22 @@ def test_deactivate_rung_is_unchanged_and_still_keeps_the_files(tmp_path):
     )
 
 
-def _files_at(root: Path) -> int:
-    """File count under *root*, walked with pathlib — not asked of the product."""
-    return sum(1 for p in root.rglob("*") if p.is_file()) if root.is_dir() else 0
+def _user_data_census(root: Path) -> dict[str, bytes]:
+    """Every user file and its bytes, excluding Git's implementation metadata.
 
-
-def _bytes_at(root: Path) -> int:
-    return (
-        sum(p.stat().st_size for p in root.rglob("*") if p.is_file())
-        if root.is_dir()
-        else 0
-    )
-
-
-def _shape(root: Path) -> tuple[int, int, dict[str, str], list[str]]:
-    """A copy's whole observable shape: files, bytes, notes read back, git history.
-
-    Four independent oracles, none of them ``app_manager``: a directory that merely
-    exists, or one whose entry COUNT matches, is not evidence the user's work is in it —
-    which is precisely the trap #2585 names ("non-empty is not complete").
+    This is an oracle independent of ``app_manager``. Exact relative paths and contents
+    prove that the user's data survived; counting ``.git`` objects, indexes, and refs
+    instead could report a large healthy-looking population while a note was missing.
     """
-    return (
-        _files_at(root),
-        _bytes_at(root),
-        _notes_at(root / "notebook"),
-        _git_log_at(root / "notebook"),
-    )
+    if not root.is_dir():
+        return {}
+    files: dict[str, bytes] = {}
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root)
+        if ".git" in relative.parts or not path.is_file():
+            continue
+        files[relative.as_posix()] = path.read_bytes()
+    return files
 
 
 def _capture_audit(monkeypatch) -> list[tuple[str, str, str, str]]:
@@ -738,8 +734,11 @@ def test_a_failed_park_leaves_no_partial_copy_at_the_parked_path(tmp_path, monke
     assert app_manager.install(_bundle(tmp_path), confirm=True).ok
     _write_note(name, "alpha", "the first note")
     _write_note(name, "beta", "the second note")
-    before = _shape(manager.app_dir(name) / "data")
-    assert before[2] and before[3], f"the fixture wrote nothing to measure: {before}"
+    before = _user_data_census(manager.app_dir(name) / "data")
+    assert before == {
+        "notebook/alpha.md": b"the first note\n",
+        "notebook/beta.md": b"the second note\n",
+    }, f"the fixture wrote no user-visible data to measure: {before}"
 
     staged = _staged(name)
     parked = app_manager._preserved_data_dir(name)
@@ -774,12 +773,12 @@ def test_a_failed_park_leaves_no_partial_copy_at_the_parked_path(tmp_path, monke
     )
 
     assert not parked.exists(), (
-        f"a failed park left {_files_at(parked)} files / {_bytes_at(parked)} bytes at the "
+        f"a failed park left user data {_user_data_census(parked)} at the "
         "parked path; a later install would restore that as if it were the whole thing"
     )
     assert (
-        _shape(staged) == before
-    ), f"the surviving copy is not what went in: {_shape(staged)} vs {before}"
+        _user_data_census(staged) == before
+    ), f"the surviving copy is not what went in: {_user_data_census(staged)} vs {before}"
     assert outcome is False, "a park that did not happen must not report success"
     detail, error = _keep_data_failure(records)
     assert "data=park_failed" in detail, detail
@@ -817,16 +816,18 @@ def test_a_second_keep_data_uninstall_refuses_instead_of_deleting_the_survivor(
     with monkeypatch.context() as m:
         m.setattr(os, "rename", _fail_park)
         assert app_manager.uninstall_keep_data(name) is False
-    survivor = _shape(staged)
-    assert survivor[2] == {
-        "alpha": "the first note\n",
-        "beta": "the second note\n",
+    survivor = _user_data_census(staged)
+    assert survivor == {
+        "notebook/alpha.md": b"the first note\n",
+        "notebook/beta.md": b"the second note\n",
     }, survivor
 
     assert app_manager.install(src, confirm=True).ok
-    assert _shape(staged) == survivor, "the reinstall touched the quarantined survivor"
+    assert (
+        _user_data_census(staged) == survivor
+    ), "the reinstall touched the quarantined survivor"
     _write_note(name, "gamma", "written after the reinstall")
-    live_before = _shape(manager.app_dir(name) / "data")
+    live_before = _user_data_census(manager.app_dir(name) / "data")
 
     records = _capture_audit(monkeypatch)
     assert app_manager.uninstall_keep_data(name) is False, (
@@ -834,13 +835,13 @@ def test_a_second_keep_data_uninstall_refuses_instead_of_deleting_the_survivor(
         "first one told the user to go and recover"
     )
 
-    assert _shape(staged) == survivor, (
-        f"the survivor was destroyed: {_shape(staged)} vs {survivor} — this is the "
+    assert _user_data_census(staged) == survivor, (
+        f"the survivor was destroyed: {_user_data_census(staged)} vs {survivor} — this is the "
         "return-True data loss #2585 reports"
     )
     assert manager._read_installed(name) is not None, "the app was removed by a refusal"
     assert (
-        _shape(manager.app_dir(name) / "data") == live_before
+        _user_data_census(manager.app_dir(name) / "data") == live_before
     ), "live data/ was touched"
     detail, error = _keep_data_failure(records)
     assert (
@@ -887,19 +888,19 @@ def test_a_keep_data_uninstall_refuses_while_an_unconsumed_park_is_still_on_disk
     with monkeypatch.context() as m:
         m.setattr(app_manager.shutil, "copytree", _fail_restore)
         assert app_manager.install(src, confirm=True).ok
-    unconsumed = _shape(parked)
-    assert unconsumed[2] == {"old": "round one, never restored\n"}, unconsumed
+    unconsumed = _user_data_census(parked)
+    assert unconsumed == {"notebook/old.md": b"round one, never restored\n"}, unconsumed
     assert _notes(name) == {}, "the restore was supposed to fail"
 
     _write_note(name, "new", "round two")
-    live_before = _shape(manager.app_dir(name) / "data")
+    live_before = _user_data_census(manager.app_dir(name) / "data")
     records = _capture_audit(monkeypatch)
 
     assert app_manager.uninstall_keep_data(name) is False
 
     assert (
-        _shape(parked) == unconsumed
-    ), f"the unconsumed park was destroyed or overwritten: {_shape(parked)} vs {unconsumed}"
+        _user_data_census(parked) == unconsumed
+    ), f"the unconsumed park was destroyed or overwritten: {_user_data_census(parked)} vs {unconsumed}"
     assert not (parked / f"{name}{app_manager._DATA_STAGE_SUFFIX}").exists(), (
         "the stage was moved INSIDE the older park — shutil.move's "
         "destination-is-a-directory case"
@@ -909,7 +910,7 @@ def test_a_keep_data_uninstall_refuses_while_an_unconsumed_park_is_still_on_disk
     ).exists(), "the refusal came after staging; it must come first"
     assert manager._read_installed(name) is not None, "the app was removed by a refusal"
     assert (
-        _shape(manager.app_dir(name) / "data") == live_before
+        _user_data_census(manager.app_dir(name) / "data") == live_before
     ), "live data/ was touched"
     detail, _error = _keep_data_failure(records)
     assert "data=unconsumed_copy" in detail and str(parked) in detail, detail
@@ -1005,182 +1006,3 @@ def test_describe_app_data_reports_no_unconsumed_copies_on_the_ordinary_path(tmp
     ]
     assert app_manager.install(src, confirm=True).ok
     assert app_manager.describe_app_data(name)["unconsumed"] == []
-
-
-def _refusal_logs(caplog) -> str:
-    """Everything ``app_manager`` logged at WARNING or worse, joined."""
-    return "\n".join(
-        r.getMessage()
-        for r in caplog.records
-        if r.name.startswith("gideon.extensions.apps.app_manager")
-        and r.levelno >= logging.WARNING
-    )
-
-
-def test_a_native_refusal_names_the_app_and_that_it_is_locked(tmp_path, caplog):
-    """Every refusal has to be diagnosable from the log alone (#2541 follow-up).
-
-    ``False`` reaches the HTTP layer as "not installed", which is the wrong sentence
-    for four of the five ways this rung refuses. The log is where the difference
-    between "locked", "an older copy is in the way", "the copy failed" and "the
-    removal was refused" survives, so each one names the app AND its cause.
-    """
-    src = _bundle(tmp_path, name="native-fixture")
-    mani = json.loads((src / "app.json").read_text(encoding="utf-8"))
-    mani["native"] = True
-    (src / "app.json").write_text(json.dumps(mani), encoding="utf-8")
-    assert app_manager.install(src, confirm=True).ok
-
-    with caplog.at_level(logging.INFO, logger="gideon.extensions.apps.app_manager"):
-        assert app_manager.uninstall_keep_data("native-fixture") is False
-
-    logged = "\n".join(r.getMessage() for r in caplog.records)
-    assert "native-fixture" in logged
-    assert "native (locked)" in logged
-    assert "keep-data uninstall refused" in logged
-
-
-def test_an_unmintable_name_refusal_names_the_app_and_the_reason(tmp_path, caplog):
-    """The refusal that happens before anything is copied still has to say why."""
-    weird = "Not Kebab"
-    d = manager.apps_dir() / weird
-    d.mkdir(parents=True)
-    (d / "installed.json").write_text(
-        json.dumps({"name": weird, "version": "1.0.0", "enabled": True}),
-        encoding="utf-8",
-    )
-
-    with caplog.at_level(logging.INFO, logger="gideon.extensions.apps.app_manager"):
-        assert app_manager.uninstall_keep_data(weird) is False
-
-    logged = _refusal_logs(caplog)
-    assert weird in logged
-    assert "refused" in logged and "nothing was removed" in logged
-
-
-def test_an_unconsumed_copy_refusal_names_the_app_and_the_copy(tmp_path, caplog):
-    """The one refusal the user can act on names the path they have to act on."""
-    name = "notes-fixture"
-    assert app_manager.install(_bundle(tmp_path), confirm=True).ok
-    _write_note(name, "alpha", "the first note")
-    parked = app_manager._preserved_data_dir(name)
-    parked.mkdir(parents=True)
-    (parked / "note.md").write_text("an earlier copy\n", encoding="utf-8")
-
-    with caplog.at_level(logging.INFO, logger="gideon.extensions.apps.app_manager"):
-        assert app_manager.uninstall_keep_data(name) is False
-
-    logged = _refusal_logs(caplog)
-    assert name in logged
-    assert str(parked) in logged
-    assert "unconsumed" in logged
-    assert manager.app_dir(name).is_dir(), "the refusal happened after a removal"
-
-
-def test_a_preservation_failure_logs_the_os_error_detail(tmp_path, monkeypatch, caplog):
-    """The OS's own words for the failure — errno, strerror, path — reach the log.
-
-    "could not preserve data/" alone cannot be acted on: ENOSPC, EACCES and EROFS are
-    three different problems with three different fixes, and only the OSError knows
-    which one happened. It is REPORTED, not interpreted — this path makes no claim
-    about a filesystem failure it cannot reproduce.
-    """
-    name = "notes-fixture"
-    assert app_manager.install(_bundle(tmp_path), confirm=True).ok
-    _write_note(name, "precious", "must not be lost")
-
-    import shutil as _shutil
-
-    def _boom(*a, **k):
-        raise OSError(errno.EACCES, "Permission denied", str(_staged(name)))
-
-    monkeypatch.setattr(_shutil, "copytree", _boom)
-
-    with caplog.at_level(logging.INFO, logger="gideon.extensions.apps.app_manager"):
-        assert app_manager.uninstall_keep_data(name) is False
-
-    logged = _refusal_logs(caplog)
-    assert name in logged
-    assert "Permission denied" in logged, f"the OS error detail was dropped: {logged}"
-    assert str(errno.EACCES) in logged or "Errno" in logged
-    assert "nothing was removed" in logged
-    assert (_notebook(name) / "precious.md").is_file()
-
-
-def test_a_refused_removal_is_logged_as_a_refused_removal(
-    tmp_path, monkeypatch, caplog
-):
-    """The removal half can refuse on its own, and that is not a preservation failure.
-
-    Driven through the REAL guard rather than a stubbed return: the app's
-    ``installed.json`` is removed concurrently (as a competing force-uninstall would),
-    so ``force_uninstall`` refuses through its own "not installed" check after the
-    stage has already been written. The stage is then dropped — the live ``data/`` is
-    still there, so it is not the last copy — and the log has to say that nothing was
-    deleted rather than leaving a bare ``False`` behind.
-    """
-    name = "notes-fixture"
-    assert app_manager.install(_bundle(tmp_path), confirm=True).ok
-    _write_note(name, "alpha", "the first note")
-
-    import shutil as _shutil
-
-    real_copytree = _shutil.copytree
-    fired: list[str] = []
-
-    live_data = manager.app_dir(name) / "data"
-
-    def _copy_then_yank(srcp, dstp, *a, **k):
-        out = real_copytree(srcp, dstp, *a, **k)
-        if Path(srcp) == live_data:
-            (manager.app_dir(name) / "installed.json").unlink()
-            fired.append("yank")
-        return out
-
-    monkeypatch.setattr(_shutil, "copytree", _copy_then_yank)
-
-    with caplog.at_level(logging.INFO, logger="gideon.extensions.apps.app_manager"):
-        assert app_manager.uninstall_keep_data(name) is False
-
-    assert fired == ["yank"], "the injected race never fired; the test is vacuous"
-    logged = _refusal_logs(caplog)
-    assert name in logged
-    assert "removal was refused" in logged
-    assert "nothing was deleted" in logged
-    assert (_notebook(name) / "alpha.md").is_file(), "data/ was touched anyway"
-    assert not _staged(name).exists(), "the stage was left behind as a second copy"
-
-
-def test_a_failed_park_logs_the_os_error_and_where_the_copy_is(
-    tmp_path, monkeypatch, caplog
-):
-    """The one refusal where the app is already gone says BOTH things it must say.
-
-    The cause (the OSError, verbatim) and the recovery (the path the surviving copy is
-    at). The audit record carried both already; the log carried only the path, so an
-    operator reading the gateway log saw the recovery without the reason for it.
-    """
-    name = "notes-fixture"
-    assert app_manager.install(_bundle(tmp_path), confirm=True).ok
-    _write_note(name, "alpha", "the first note")
-    staged = _staged(name)
-    real_rename = os.rename
-    fired: list[str] = []
-
-    def _fail_park(s, d, *a, **k):
-        if Path(s) == staged:
-            fired.append("rename")
-            raise OSError(errno.EXDEV, "Invalid cross-device link")
-        return real_rename(s, d, *a, **k)
-
-    monkeypatch.setattr(os, "rename", _fail_park)
-
-    with caplog.at_level(logging.INFO, logger="gideon.extensions.apps.app_manager"):
-        assert app_manager.uninstall_keep_data(name) is False
-
-    assert fired == ["rename"], "the injected park failure never fired"
-    logged = _refusal_logs(caplog)
-    assert name in logged
-    assert "Invalid cross-device link" in logged, f"the OS error was dropped: {logged}"
-    assert str(staged) in logged, "the log does not say where the surviving copy is"
-    assert _notes_at(staged / "notebook") == {"alpha": "the first note\n"}

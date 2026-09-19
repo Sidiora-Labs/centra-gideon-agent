@@ -78,6 +78,7 @@ class ProjectRetirement:
         self.project_id = request.match_info["project_id"]
         self.state = request.app.get("state")
         self.force = request.query.get("force") in ("1", "true", "yes")
+        self.store = _store()
 
     async def detach(self):
         if self.force:
@@ -94,28 +95,12 @@ class ProjectRetirement:
         return None
 
     async def remove_tasks(self):
-        project = _store().get_project(self.project_id)
+        project = self.store.get_project(self.project_id)
         if project is None:
             return
-        try:
-            from gideon.engine.tasks import registry
-
-            tasks, _ = await registry.list_all_tasks(project=project.name, limit=10_000)
-            for task in tasks:
-                try:
-                    await registry.delete_task(task.id)
-                except Exception:
-                    logger.debug(
-                        "delete-project: task %s cascade delete failed",
-                        task.id,
-                        exc_info=True,
-                    )
-        except Exception:
-            logger.debug(
-                "delete-project: task cascade sweep failed for %s",
-                self.project_id,
-                exc_info=True,
-            )
+        await _remove_task_list_tasks(
+            row.id for row in self.store.list_task_lists(project_id=self.project_id)
+        )
 
     async def respond(self):
         refusal = await self.detach()
@@ -123,8 +108,29 @@ class ProjectRetirement:
             return refusal
         await self.remove_tasks()
         return HierarchyRequest.write(
-            lambda: _store().delete_project(self.project_id), lambda _: {"ok": True}
+            lambda: self.store.delete_project(self.project_id), lambda _: {"ok": True}
         )
+
+
+class TaskListRetirement:
+    def __init__(self, request):
+        self.list_id = request.match_info["list_id"]
+        self.store = _store()
+
+    async def respond(self):
+        if self.store.get_task_list(self.list_id) is None:
+            return web.json_response({"error": "not found"}, status=404)
+        await _remove_task_list_tasks((self.list_id,))
+        return HierarchyRequest.record(
+            self.store.delete_task_list(self.list_id), lambda _: {"ok": True}
+        )
+
+
+async def _remove_task_list_tasks(list_ids):
+    from gideon.engine.tasks import registry
+
+    for list_id in dict.fromkeys(list_ids):
+        await registry.delete_tasks(task_list_id=list_id)
 
 
 class RepeatableListReset:
@@ -133,7 +139,7 @@ class RepeatableListReset:
 
     async def respond(self):
         from gideon.engine.tasks import registry
-        from gideon.engine.tasks.models import TaskStatus
+        from gideon.engine.tasks.models import TERMINAL_STATUSES
 
         store = _store()
         record = store.get_task_list(self.list_id)
@@ -148,21 +154,25 @@ class RepeatableListReset:
         tasks, _ = await registry.list_all_tasks(
             task_list_id=self.list_id, limit=10_000
         )
-        if any(
-            task.status not in (TaskStatus.DONE, TaskStatus.CANCELLED) for task in tasks
-        ):
+        if any(task.status not in TERMINAL_STATUSES for task in tasks):
             return web.json_response(
                 {"error": "all tasks must be complete before the list can be reset"},
                 status=400,
             )
         reset_ids = []
         for task in tasks:
-            criteria = [
-                {**criterion, "status": "incomplete", "met": False}
-                for criterion in task.exit_criteria
-            ]
+            task.reset_for_repeat()
             await registry.update_task(
-                task.id, status="open", exit_criteria=criteria, execution_notes=[]
+                task.id,
+                status=task.status.value,
+                exit_criteria=task.exit_criteria,
+                action_plan=task.action_plan,
+                execution_notes=[],
+                blocked_reason_kind="",
+                blocked_kind="",
+                preview="",
+                evidence=[],
+                attempts=[],
             )
             reset_ids.append(task.id)
         return web.json_response({"ok": True, "reset_task_ids": reset_ids})
@@ -519,8 +529,7 @@ async def api_task_lists_update(request: web.Request) -> web.Response:
 
 
 async def api_task_lists_delete(request: web.Request) -> web.Response:
-    removed = _store().delete_task_list(request.match_info["list_id"])
-    return HierarchyRequest.record(removed, lambda _: {"ok": True})
+    return await TaskListRetirement(request).respond()
 
 
 async def api_task_lists_reset(request: web.Request) -> web.Response:

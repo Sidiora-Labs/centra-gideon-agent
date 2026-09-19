@@ -8,6 +8,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from gideon.core.sqlite_compat import FTS5_REMEDY, probe, sqlite3
 
@@ -118,7 +119,7 @@ def is_restricted(session_key: str, *, memory_mode: str = "") -> bool:
 
 @dataclass
 class _IndexMutation:
-    connection: object
+    connection: Any
     key: str
     replacement: tuple | None = None
 

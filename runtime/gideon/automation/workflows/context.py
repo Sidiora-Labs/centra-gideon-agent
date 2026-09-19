@@ -90,7 +90,7 @@ class Carryover:
     @classmethod
     def from_dict(cls, d: dict[str, Any] | None) -> Carryover:
         document = d or {}
-        fields = {
+        fields: dict = {
             name: list(map(str, document.get(name) or []))
             for name in ("verified", "spawned")
         }
@@ -106,7 +106,7 @@ class Carryover:
         return all(not getattr(self, name) for name in _CARRYOVER_FIELDS)
 
     def merge(self, other: Carryover) -> Carryover:
-        combined = {}
+        combined: dict = {}
         for name in _CARRYOVER_FIELDS:
             entries = getattr(self, name) + getattr(other, name)
             unique = (
@@ -154,20 +154,22 @@ class Decision:
     constraints: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        result = {name: _clip(getattr(self, name)) for name in ("choice", "reason")}
-        for field, key in (
+        result: dict = {
+            name: _clip(getattr(self, name)) for name in ("choice", "reason")
+        }
+        for field_name, key in (
             ("rejected", "rejected_alternatives"),
             ("constraints", "constraints"),
         ):
             result[key] = [
-                _clip(str(value), 300) for value in getattr(self, field)[:12]
+                _clip(str(value), 300) for value in getattr(self, field_name)[:12]
             ]
         return result
 
     @classmethod
     def from_dict(cls, d: dict[str, Any] | None) -> Decision:
         document = d or {}
-        fields = {
+        fields: dict = {
             name: str(document.get(name, "") or "") for name in ("choice", "reason")
         }
         fields.update(

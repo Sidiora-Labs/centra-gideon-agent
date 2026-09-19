@@ -253,7 +253,10 @@ def get_active_embedding_dim() -> int | None:
     provider = native_provider() if selection.native else None
     if provider is not None:
         try:
-            models = run_embed_sync(lambda: provider.list_models(), timeout=30)
+            list_models = getattr(provider, "list_models", None)
+            if not callable(list_models):
+                raise TypeError("native embedding provider cannot list models")
+            models = run_embed_sync(list_models, timeout=30)
             for model in models:
                 if model.name == selection.model_id:
                     return model.dimension

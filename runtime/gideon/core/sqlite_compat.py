@@ -6,6 +6,7 @@ import importlib
 from contextlib import closing
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import Any
 
 
 def _select_driver():
@@ -37,7 +38,7 @@ def driver_name() -> str:
     return str(_DRIVER)
 
 
-def _has_module(conn: sqlite3.Connection, create_sql: str) -> bool:
+def _has_module(conn: Any, create_sql: str) -> bool:
     try:
         conn.execute(create_sql)
     except sqlite3.Error:

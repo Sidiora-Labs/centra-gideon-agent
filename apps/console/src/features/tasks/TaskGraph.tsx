@@ -36,10 +36,10 @@ export function TaskGraph({ tasks, onOpen }: { tasks: TaskItem[]; onOpen: (id: s
   const nodes: DagNode[] = placement.nodes.map(({ task: t, x, y }) => {
     const sm = statusMeta(t.status), pm = signalPriority(t.priority)
     const done = TERMINAL.has(t.status)
-    return { id: t.id, x, y, w: GRAPH_BOX.width, h: GRAPH_BOX.height, radius: GRAPH_BOX.radius, accent: sm.tone, ringed: critical.has(t.id), state: graphState(t, placement.cyclic.has(t.id)), content: <div className="flex h-full flex-col justify-center">
+    return { id: t.id, x, y, w: GRAPH_BOX.width, h: GRAPH_BOX.height, radius: GRAPH_BOX.radius, accent: sm.tone, ringed: critical.has(t.id), state: graphState(t, placement.cyclic.has(t.id)), content: <button type="button" aria-label={`Open task: ${t.title}`} onClick={() => onOpen(t.id)} className="flex h-full w-full cursor-pointer flex-col justify-center rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
       <div className={`truncate text-[0.8125rem] leading-tight font-medium text-on-surface ${done ? 'line-through opacity-60' : ''}`} title={t.title}>{t.title}</div>
       <div data-type="caption" className="mt-1 flex items-center gap-s text-on-surface-low"><span style={{ color: sm.tone }}>{sm.label}</span>{pm && <span style={{ color: pm.tone }}>{pm.label}</span>}</div>
-    </div> }
+    </button> }
   })
   return <div ref={viewport} className="rounded-lg border border-outline-variant/30 bg-surface-container/20 p-s">
     {tasks.length === 0 ? <EmptyState icon={GitFork} title="No tasks to graph" hint="Add tasks and link prerequisites to see the dependency DAG." /> : <>
@@ -50,7 +50,7 @@ export function TaskGraph({ tasks, onOpen }: { tasks: TaskItem[]; onOpen: (id: s
         {!!analysis.cycles?.length && <span className="inline-flex items-center gap-1.5 text-danger"><TriangleAlert size={13} />{analysis.cycles.length} cycle{analysis.cycles.length === 1 ? '' : 's'} detected</span>}
         {critical.size > 0 && <span className="text-on-surface-low">— critical-path tasks are ringed below</span>}
       </div>}
-      <DagView width={Math.max(GRAPH_BOX.width + GRAPH_BOX.padding * 2, width)} height={placement.height} className="block" nodes={nodes} edges={placement.edges} onNodeClick={onOpen} />
+      <DagView width={Math.max(GRAPH_BOX.width + GRAPH_BOX.padding * 2, width)} height={placement.height} className="block" nodes={nodes} edges={placement.edges} />
     </>}
   </div>
 }

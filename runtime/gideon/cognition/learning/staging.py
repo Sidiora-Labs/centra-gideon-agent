@@ -101,7 +101,7 @@ class StagingStore:
             except BaseException:
                 raise
             else:
-                self._conn.commit()
+                connection.commit()
             finally:
                 cursor.close()
 
@@ -480,7 +480,7 @@ def _row_to_entry(row: sqlite3.Row) -> StagingEntry:
         metadata = json.loads(row["meta"] or "{}")
     except Exception:
         metadata = {}
-    fields = {"id": int(row["id"])}
+    fields: dict = {"id": int(row["id"])}
     fields.update(
         (key, str(row[key]))
         for key in ("day", "cadence", "kind", "content", "content_hash")

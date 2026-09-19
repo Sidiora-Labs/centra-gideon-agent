@@ -54,7 +54,7 @@ class BrandedProviderSpec:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BrandedProviderSpec:
         defaults = cls(type="")
-        arguments = {}
+        arguments: dict = {}
         for item in fields(cls):
             baseline = getattr(defaults, item.name)
             value = data.get(item.name, baseline)

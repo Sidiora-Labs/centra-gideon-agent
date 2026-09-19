@@ -75,7 +75,7 @@ class _DraftSubmission:
 
     def file(self, drafts: list[dict[str, Any]]) -> dict[str, Any]:
         config = self.config
-        shared = dict(
+        shared: dict = dict(
             run_id=str((self.context.payload or {}).get("run_id") or ""),
             source_cadence=str(config.get("source_cadence") or "knowledge-synthesis"),
             provenance=str(config.get("provenance") or "inferred"),

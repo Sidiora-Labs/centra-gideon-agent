@@ -24,7 +24,7 @@ import { thinkingGlow } from '../../shared/theme/gradients'
 import { spring, physics, messageEnter } from '../../shared/theme/motion'
 import { ContentSurface } from '../../shared/ui/content/ContentSurface'
 import { resolveContentType } from '../../shared/ui/content/contentTypes'
-import { api, type GoalLoop, type LoopFinding, type LoopNudge, type LoopVerdict, type Artifact, type TaskItem, type LoopSpend } from '../../shared/data/api'
+import { api, ApiError, type GoalLoop, type LoopFinding, type LoopNudge, type LoopVerdict, type Artifact, type TaskItem, type LoopSpend } from '../../shared/data/api'
 import { loopSpendPill, loopSpendTitle } from '../../shared/data/runCost'
 import { peekQuery, writeQuery } from '../../shared/data/data'
 import { downloadText, safeFilename } from '../../shared/data/download'
@@ -210,7 +210,18 @@ export function LoopCockpitPage({ id, onBack, onDeleted, onOpenArtifact, onOpenT
     let t = 0
     const TERMINAL = ['complete', 'stopped', 'failed']
     const load = async () => {
-      const raw = await api.uLoop(id).catch(() => null)
+      let raw
+      try {
+        raw = await api.uLoop(id)
+      } catch (error) {
+        if (!alive) return
+        if (error instanceof ApiError && error.status === 404) {
+          setC(null)
+          setNotFound(true)
+          if (t) { clearInterval(t); t = 0 }
+        }
+        return
+      }
       const gl = raw ? loopToGoalLoop(raw) : null
       if (!alive) return
       if (gl) {
@@ -237,8 +248,13 @@ export function LoopCockpitPage({ id, onBack, onDeleted, onOpenArtifact, onOpenT
   }, [id, c])
 
   const { connected } = useRunStream(id, !notFound, {
-    onSnapshot: (l) => setC(loopToGoalLoop(l)),
+    onSnapshot: (l) => { setC(loopToGoalLoop(l)); setNotFound(false) },
     onLifecycle: (event, data) => {
+      if (event === 'deleted') {
+        setC(null)
+        setNotFound(true)
+        return
+      }
       setRunFlags((f) => foldReducer(f, event, data))
       loadReport.current()
     },
@@ -376,7 +392,7 @@ export function LoopCockpitPage({ id, onBack, onDeleted, onOpenArtifact, onOpenT
   const activePhase = execPlan.length ? activePhaseIndex(c.total_cycles, execPlan) : -1
 
   const statusLine = (
-    <span data-type="body-s" className="inline-flex items-center gap-s text-on-surface-var truncate">
+    <span role="status" aria-live="polite" aria-atomic="true" data-type="body-s" className="inline-flex items-center gap-s text-on-surface-var truncate">
       {running ? (
         <span className="relative inline-flex items-center justify-center size-4">
           <motion.span aria-hidden className="absolute inset-[-7px] rounded-pill" style={{ background: thinkingGlow() }}
@@ -545,7 +561,7 @@ export function LoopCockpitPage({ id, onBack, onDeleted, onOpenArtifact, onOpenT
             const tone = info ? 'var(--color-on-surface-low)' : 'var(--color-danger)'
             const Icon = info ? FileText : AlertTriangle
             return (
-            <motion.div variants={messageEnter} initial="initial" animate="animate" data-type="body-s" className="rounded-md px-m py-2.5" style={{ background: `color-mix(in srgb, ${tone} 12%, transparent)`, color: tone }}>
+            <motion.div role={info ? 'status' : 'alert'} aria-live={info ? 'polite' : 'assertive'} aria-atomic="true" variants={messageEnter} initial="initial" animate="animate" data-type="body-s" className="rounded-md px-m py-2.5" style={{ background: `color-mix(in srgb, ${tone} 12%, transparent)`, color: tone }}>
               <div className="flex items-center gap-1.5 mb-1" style={fvs(500)}>
                 <Icon size={14} className="shrink-0" /> {c.status === 'failed' ? 'This loop stopped on an error' : info ? 'Completed on its cycle budget' : 'Last cycle hit an error'}
               </div>
@@ -556,12 +572,12 @@ export function LoopCockpitPage({ id, onBack, onDeleted, onOpenArtifact, onOpenT
             </motion.div>
           )})()}
           {judgeDegraded && running && (
-            <div data-type="body-s" className="rounded-md px-m py-2 flex items-center gap-2" style={{ background: 'color-mix(in srgb, var(--color-warning) 12%, transparent)', color: 'var(--color-warning)' }}>
+            <div role="status" aria-live="polite" aria-atomic="true" data-type="body-s" className="rounded-md px-m py-2 flex items-center gap-2" style={{ background: 'color-mix(in srgb, var(--color-warning) 12%, transparent)', color: 'var(--color-warning)' }}>
               <AlertTriangle size={14} className="shrink-0" /> Done-ness check was unavailable on a recent cycle — the loop keeps running on its cycle budget. It’ll resume quality assessment automatically.
             </div>
           )}
           {c.status === 'needs_input' && c.pending_question && (
-            <div data-type="body-s" className="rounded-md px-m py-2.5" style={{ background: 'color-mix(in srgb, var(--color-info) 12%, transparent)' }}>
+            <div role="alert" aria-live="assertive" aria-atomic="true" data-type="body-s" className="rounded-md px-m py-2.5" style={{ background: 'color-mix(in srgb, var(--color-info) 12%, transparent)' }}>
               <div className="flex items-center gap-1.5 text-info mb-1" style={fvs(500)}><HelpCircle size={14} /> The agent needs your input</div>
               <div className="text-on-surface">{c.pending_question}</div>
               {
