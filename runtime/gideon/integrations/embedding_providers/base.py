@@ -44,7 +44,12 @@ class _BridgeWorker:
                 and self._loop.is_running()
                 and not self._loop.is_closed()
             )
-            if usable and self._worker is not None and self._worker.is_alive():
+            if (
+                usable
+                and self._loop is not None
+                and self._worker is not None
+                and self._worker.is_alive()
+            ):
                 return self._loop
             ready: Future[asyncio.AbstractEventLoop] = Future()
             self._worker = threading.Thread(

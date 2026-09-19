@@ -108,10 +108,12 @@ class TaskBatch:
             if self.operation != "delete" and _supplies_author(item):
                 errors.append({"index": index, "error": _SUPPLIED_AUTHOR_ERROR})
             if self.operation == "create":
-                valid = isinstance(item, dict) and str(item.get("title", "")).strip()
+                valid = bool(
+                    isinstance(item, dict) and str(item.get("title", "")).strip()
+                )
                 reason = "title required"
             else:
-                valid = item.get("id") if isinstance(item, dict) else item
+                valid = bool(item.get("id") if isinstance(item, dict) else item)
                 reason = "id required"
             if not valid:
                 errors.append({"index": index, "error": reason})
@@ -157,7 +159,7 @@ class TaskBatch:
             )
             return {"task_id": task.id, "status": "created"}
         if self.operation == "update":
-            task = await registry.update_task(
+            updated = await registry.update_task(
                 item["id"],
                 provider_name=item.get("provider"),
                 **{
@@ -166,7 +168,10 @@ class TaskBatch:
                     if key not in ("id", "provider")
                 },
             )
-            return {"task_id": item["id"], "status": "updated" if task else "not_found"}
+            return {
+                "task_id": item["id"],
+                "status": "updated" if updated else "not_found",
+            }
         identifier = item.get("id") if isinstance(item, dict) else item
         provider = item.get("provider") if isinstance(item, dict) else None
         removed = (
@@ -220,14 +225,20 @@ class TaskWrite:
             if not isinstance(title, str) or not title.strip():
                 return _error("title required")
         provider = body.pop("provider", "native" if create else None)
+        created_task = None
+        updated_task = None
         try:
             registry.validate_provider(provider)
             if not create or provider == "native":
                 _attach_project_general_list(body)
             if create:
-                task = await registry.create_task(provider_name=provider, **body)
+                created_task = await registry.create_task(
+                    provider_name=provider, **body
+                )
             else:
-                task = await registry.update_task(
+                if task_id is None:
+                    return _error("task id required")
+                updated_task = await registry.update_task(
                     task_id, provider_name=provider, **body
                 )
         except reconcile.DependencyCycleError as exc:
@@ -235,14 +246,16 @@ class TaskWrite:
         except ValueError as exc:
             return _error(str(exc))
         if create:
-            return web.json_response(task.to_dict(), status=201)
-        if not task:
+            if created_task is None:
+                return _error("task creation failed", status=500)
+            return web.json_response(created_task.to_dict(), status=201)
+        if not updated_task:
             return _error("not found", 404)
-        changed = getattr(task, "_reconciled", [task])
+        changed = getattr(updated_task, "_reconciled", [updated_task])
         siblings = {row.id: row for row in changed}
         return web.json_response(
             {
-                **_with_block_reason(task, siblings),
+                **_with_block_reason(updated_task, siblings),
                 "reconciled": [_with_block_reason(row, siblings) for row in changed],
             }
         )

@@ -216,8 +216,6 @@ function Launcher({ navigate }: RouteProps) {
 
   return (
     <div className="flex flex-col gap-l">
-      {
-}
       <ComposerStage value={text} onChange={setText} onSend={launch}
         placeholder="Ask anything, or start a task…"
         controls={LAUNCHER_CONTROLS} data={data}
@@ -228,11 +226,10 @@ function Launcher({ navigate }: RouteProps) {
         }}
       />
 
-      {sessionsError && (
+      {Boolean(sessionsError) && (
         <InlineError icon onRetry={refreshSessions}>{sessions === undefined ? 'Couldn’t load recent chats.' : 'Couldn’t refresh recent chats.'}</InlineError>
       )}
 
-      { }
       <div className="flex flex-wrap items-center gap-xs">
         {JUMPS.map((j, i) => (
           <motion.button

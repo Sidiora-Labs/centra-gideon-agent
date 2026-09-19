@@ -244,6 +244,8 @@ class SemanticMutation:
         return None
 
     def retire_previous(self):
+        if self.previous is None:
+            return
         old_value = self.previous["value_json"]
         try:
             readable = (

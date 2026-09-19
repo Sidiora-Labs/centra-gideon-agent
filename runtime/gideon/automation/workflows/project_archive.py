@@ -68,7 +68,8 @@ class ProjectSource:
                 yield from sorted(directory.rglob("*"))
 
     def read(self):
-        files, seen = {}, set()
+        files: dict[str, bytes] = {}
+        seen: set[str] = set()
         if not self.root.is_dir():
             return files
         for path in self.candidates():

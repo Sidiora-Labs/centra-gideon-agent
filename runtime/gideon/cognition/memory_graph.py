@@ -594,7 +594,7 @@ class _VolunteerEvents(_GraphTable):
     @staticmethod
     def query(columns, window_days, suffix=""):
         sql = f"SELECT {columns} {_VOLUNTEER_FROM_WHERE}"
-        parameters = ()
+        parameters: tuple[str, ...] = ()
         if window_days:
             sql += " AND v.created_at >= ?"
             parameters = (_iso_days_ago(int(window_days)),)

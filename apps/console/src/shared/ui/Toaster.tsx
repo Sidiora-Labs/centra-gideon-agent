@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 import { AnimatePresence, motion, type Transition } from 'framer-motion'
-import { Info, CheckCircle2, AlertCircle, X } from 'lucide-react'
+import { Info, CheckCircle2, AlertCircle, AlertTriangle, X } from 'lucide-react'
 import { dragElastic, spring, swipeDismiss } from '../theme/motion'
 import { playCue } from '../theme/soundCues'
 
-interface Toast { id: number; message: string; level: 'info' | 'success' | 'error' }
+interface Toast { id: number; message: string; level: 'info' | 'success' | 'warning' | 'error' }
 
-const ICONS = { info: Info, success: CheckCircle2, error: AlertCircle }
-const TONES = { info: 'text-on-surface-var', success: 'text-ok', error: 'text-danger' }
+const ICONS = { info: Info, success: CheckCircle2, warning: AlertTriangle, error: AlertCircle }
+const TONES = { info: 'text-on-surface-var', success: 'text-ok', warning: 'text-warning', error: 'text-danger' }
 
 /** Global toast host. Renders transient messages dispatched via the `ne:toast`
  *  CustomEvent — the surface contributed apps reach through the SDK's useNotify,
@@ -32,7 +32,7 @@ export function Toaster() {
       const d = (e as CustomEvent).detail || {}
       const message = String(d.message ?? '').trim()
       if (!message) return
-      const level: Toast['level'] = ['info', 'success', 'error'].includes(d.level) ? d.level : 'info'
+      const level: Toast['level'] = ['info', 'success', 'warning', 'error'].includes(d.level) ? d.level : 'info'
       if (level === 'error') playCue('error')
       const id = ++seq
       setToasts((prev) => [...prev, { id, message, level }])

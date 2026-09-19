@@ -5,11 +5,15 @@ from __future__ import annotations
 import json
 import os
 import sys
+from types import ModuleType
 
+_resource: ModuleType | None
 try:
-    import resource as _resource
+    import resource
 except ImportError:
     _resource = None
+else:
+    _resource = resource
 
 
 def _resolve_limit(value: object, cur_hard: int, cap: int) -> int:

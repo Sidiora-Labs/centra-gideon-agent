@@ -14,12 +14,11 @@ class WatchPoll:
         if web:
             from gideon.automation.triggers import web_poll
 
-            source = web_poll
+            self.interval = web_poll.POLL_INTERVAL_SECS
         else:
             from gideon.automation.triggers import file_poll
 
-            source = file_poll
-        self.source = source
+            self.interval = file_poll.POLL_INTERVAL_SECS
         self.store = TriggerStore(base_dir=config_dir())
 
     async def cycle(self) -> None:
@@ -28,15 +27,19 @@ class WatchPoll:
         if incident_active():
             return
         if self.web:
+            from gideon.automation.triggers import web_poll
+
             payloads, skipped = await asyncio.to_thread(
-                self.source.poll_all, self.store, now=time.time()
+                web_poll.poll_all, self.store, now=time.time()
             )
             for row in skipped:
                 self.logger.info(
                     "web_watch %s did not fire: %s", row["trigger_id"], row["reason"]
                 )
         else:
-            payloads = self.source.poll_all(self.store)
+            from gideon.automation.triggers import file_poll
+
+            payloads = file_poll.poll_all(self.store)
         for payload in payloads:
             await self.runtime._fire_file_trigger(payload)
         if not self.web:
@@ -49,7 +52,7 @@ class WatchPoll:
     async def run(self) -> None:
         while True:
             try:
-                await asyncio.sleep(self.source.POLL_INTERVAL_SECS)
+                await asyncio.sleep(self.interval)
                 await self.cycle()
             except asyncio.CancelledError:
                 raise

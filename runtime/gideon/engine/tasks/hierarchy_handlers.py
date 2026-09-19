@@ -359,11 +359,10 @@ async def _claim_body(request: web.Request) -> tuple[str, str] | web.Response:
         return json_error("invalid_json", status=400)
     if not isinstance(body, dict):
         return web.json_response({"error": "body must be a JSON object"}, status=400)
-    fields = tuple(
-        str(body.get(key, "") or "").strip() for key in ("target_id", "holder")
-    )
-    if all(fields):
-        return fields
+    target_id = str(body.get("target_id", "") or "").strip()
+    holder = str(body.get("holder", "") or "").strip()
+    if target_id and holder:
+        return target_id, holder
     return web.json_response({"error": "target_id and holder are required"}, status=400)
 
 

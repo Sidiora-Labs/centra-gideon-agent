@@ -43,8 +43,8 @@ def _opinion(row: Any, *, min_samples: int) -> float | None:
                     ("feedback_n", 0),
                 )
             )
-            if all(value is not None for value in values):
-                success, feedback, samples = values
+            success, feedback, samples = values
+            if success is not None and feedback is not None and samples is not None:
                 return _stats._score(success, feedback, int(samples))
     return None
 

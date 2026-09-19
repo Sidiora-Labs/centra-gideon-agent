@@ -423,7 +423,9 @@ def _sanitize_hook(event: str, entry: Any) -> dict[str, str] | None:
     if reason is not None:
         _reject_hook(event, entry["command"], reason)
         return None
-    accepted = {"command": command}
+    if command is None:
+        return None
+    accepted: dict[str, str] = {"command": command}
     if isinstance(matcher, str):
         accepted["matcher"] = matcher
     return accepted
@@ -571,12 +573,21 @@ def _install_runtime_fields(config: dict, *, replace_managed: bool) -> None:
         if replace_managed:
             servers[name] = {}
         target = servers.setdefault(name, {})
+        command_fn = specification.get("command_fn")
+        command = specification.get("command")
+        if not command and callable(command_fn):
+            command = command_fn()
+        raw_args = specification.get("args")
+        args = raw_args if isinstance(raw_args, (list, tuple)) else ()
         target.update(
-            command=specification.get("command") or specification["command_fn"](),
-            args=list(specification["args"]),
+            command=command,
+            args=list(args),
         )
         if created and "autoApprove" in specification:
-            target["autoApprove"] = list(specification["autoApprove"])
+            auto_approve = specification["autoApprove"]
+            target["autoApprove"] = (
+                list(auto_approve) if isinstance(auto_approve, (list, tuple)) else []
+            )
 
 
 def _install_security_hooks(config: dict, *, phase: str) -> None:

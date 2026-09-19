@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, tzinfo
 from pathlib import Path
+from typing import TypeGuard
 from uuid import uuid4
 
 from croniter import croniter
@@ -73,7 +74,7 @@ def _as_bool(raw: object, default: bool) -> bool:
     return default if not isinstance(raw, bool) else raw
 
 
-def _number(raw: object) -> bool:
+def _number(raw: object) -> TypeGuard[int | float]:
     return not isinstance(raw, bool) and isinstance(raw, (int, float))
 
 
@@ -268,10 +269,11 @@ def _schedule_change(operation: str, value: ReportDefinition | str) -> str:
     try:
         from gideon.cognition.knowledge import report_schedules
 
-        target = (
-            report_schedules.sync if operation == "sync" else report_schedules.remove
-        )
-        return target(value)
+        if operation == "sync" and isinstance(value, ReportDefinition):
+            return report_schedules.sync(value)
+        if operation != "sync" and isinstance(value, str):
+            return report_schedules.remove(value)
+        raise TypeError(f"invalid schedule {operation} value")
     except Exception as exc:
         label = "sync" if operation == "sync" else "removal"
         identifier = value.id if isinstance(value, ReportDefinition) else value

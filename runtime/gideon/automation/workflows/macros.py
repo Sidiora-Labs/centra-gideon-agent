@@ -88,7 +88,8 @@ def has_macros(spec: dict[str, Any]) -> bool:
 
 def _need(node: dict[str, Any], key: str, macro: str) -> Any:
     candidate = (node.get("config") or {}).get(key)
-    for absent in (None, "", [], {}):
+    absent_values: tuple[Any, ...] = (None, "", [], {})
+    for absent in absent_values:
         if candidate == absent:
             raise MacroError(f"macro {macro!r} needs `config.{key}`")
     return candidate

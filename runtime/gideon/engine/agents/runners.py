@@ -369,7 +369,7 @@ def record_capabilities(
     definition = definition_for_runtime(runtime_id)
     if definition is not None:
         try:
-            values = dict(source="initialize", recorded_at=_now_iso())
+            values: dict[str, Any] = dict(source="initialize", recorded_at=_now_iso())
             values.update(
                 (name, list(items or []))
                 for name, items in (

@@ -121,7 +121,7 @@ def secret_basenames() -> frozenset[str]:
     try:
         from gideon.workspace.portability import EXPORT_EXCLUDE
 
-        names = EXPORT_EXCLUDE
+        names = tuple(EXPORT_EXCLUDE)
     except Exception:
         names = (
             ".env",

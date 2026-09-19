@@ -267,8 +267,9 @@ _RESET_FIELDS = (
 
 
 def _checkpoint_values(record: dict[str, Any]) -> dict[str, Any]:
-    result = {}
+    result: dict[str, Any] = {}
     for name in _CHECKPOINT_FIELDS:
+        value: Any
         if name == "spec_version":
             value = int(record.get(name, 1) or 1)
         elif name == "instances":

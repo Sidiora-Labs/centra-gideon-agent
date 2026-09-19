@@ -186,7 +186,11 @@ class StagingStore:
 
     @contextmanager
     def flush(self, cadence: str) -> Iterator[dict[str, Any]]:
-        receipt = {"staged": 0, "proposals": [], "cost_usd": 0.0}
+        receipt: dict[str, Any] = {
+            "staged": 0,
+            "proposals": [],
+            "cost_usd": 0.0,
+        }
         try:
             yield receipt
         except Exception as failure:
@@ -213,7 +217,8 @@ class StagingStore:
             )
 
     def pending(self, *, limit: int = 500, cadence: str = "") -> list[StagingEntry]:
-        filters, arguments = ["consumed_by IS NULL"], []
+        filters = ["consumed_by IS NULL"]
+        arguments: list[Any] = []
         if cadence:
             filters.append("cadence = ?")
             arguments.append(cadence)

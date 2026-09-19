@@ -4,15 +4,20 @@ import logging
 import os
 import shutil
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
+from importlib.resources.abc import Traversable
 from pathlib import Path
 
+from gideon.security.sel import sel
+
+_resource_files: Callable[[str], Traversable] | None
 try:
-    from importlib.resources import files as _resource_files
+    from importlib.resources import files
 except ImportError:
     _resource_files = None
-
-from gideon.security.sel import sel
+else:
+    _resource_files = files
 
 EXIT_OK, EXIT_IO_ERROR, EXIT_RAIL = 0, 1, 2
 _FIXTURES_PKG = "tests_fixtures"

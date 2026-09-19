@@ -8,9 +8,10 @@ import os
 import re
 import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, get_args
+from typing import Literal, cast, get_args
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +105,7 @@ def git_root(proj: str) -> str:
 def detect_install_kind() -> InstallKind:
     selected = (os.environ.get("GIDEON_INSTALL_KIND") or "").strip().lower()
     if selected in _ENV_KINDS:
-        return selected
+        return cast(InstallKind, selected)
     return "git" if git_root(project_dir()) else "pip"
 
 
@@ -151,7 +152,7 @@ def _update_state_path() -> Path:
 
 @dataclass(frozen=True)
 class ReleaseCache:
-    locate: object
+    locate: Callable[[], Path]
 
     def read(self):
         try:

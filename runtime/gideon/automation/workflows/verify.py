@@ -174,7 +174,9 @@ async def run_verify_block(
 
 class _LadderPass:
     def __init__(self, criteria: list[dict[str, Any]]):
-        self.rungs = {rung: [] for rung in LADDER_ORDER}
+        self.rungs: dict[str, list[dict[str, Any]]] = {
+            rung: [] for rung in LADDER_ORDER
+        }
         for criterion in criteria:
             declared = str(criterion.get("rung", "static") or "static")
             destination = declared if declared in self.rungs else "static"

@@ -250,7 +250,8 @@ class HistoryFeed:
                 self.records.append(record)
 
     def latest(self, limit: int) -> list[FireRecord]:
-        timed, undated = [], []
+        timed: list[FireRecord] = []
+        undated: list[FireRecord] = []
         for record in self.records:
             (timed if record.started_at else undated).append(record)
         timed.sort(key=lambda row: (row.started_at, row.id), reverse=True)

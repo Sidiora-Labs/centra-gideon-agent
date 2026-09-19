@@ -147,6 +147,7 @@ def forget_profile(profile_id: str) -> dict[str, str]:
 
 
 def resolve_profile_id(*, surface: str = "", explicit: str = "") -> tuple[str, str]:
+    candidates: tuple[_Candidate, ...]
     if explicit:
         candidates = (_Candidate(validate_id(explicit), LEVEL_EXPLICIT),)
     else:

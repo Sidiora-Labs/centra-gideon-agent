@@ -188,15 +188,21 @@ def fold_turn_row(
 
 
 def audit_census(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    summary = dict(calls=0, dollars_est=0.0, by_use_case={}, days={})
+    calls = 0
+    dollars_est = 0.0
+    by_use_case: dict[str, int] = {}
+    days: dict[str, int] = {}
     for row in rows:
-        summary["calls"] += 1
-        summary["dollars_est"] = round(
-            float(summary["dollars_est"]) + float(row.get("dollars_est", 0.0) or 0.0), 6
-        )
-        _count(summary["by_use_case"], str(row.get("use_case", "") or "(blank)"))
-        _count(summary["days"], _day_from_epoch(row.get("ts")))
-    return summary
+        calls += 1
+        dollars_est = round(dollars_est + float(row.get("dollars_est", 0.0) or 0.0), 6)
+        _count(by_use_case, str(row.get("use_case", "") or "(blank)"))
+        _count(days, _day_from_epoch(row.get("ts")))
+    return dict(
+        calls=calls,
+        dollars_est=dollars_est,
+        by_use_case=by_use_case,
+        days=days,
+    )
 
 
 def _iter_json_lines(path: Path | None) -> list[dict[str, Any]]:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from typing import Any
 
 logger = logging.getLogger("gideon.cognition.history")
 
@@ -232,7 +233,7 @@ class ConsolidationRound:
             owner._maybe_promote_episodic(self.memory)
         except Exception:
             logger.warning("Episodic promotion failed for %s", key, exc_info=True)
-        operations = (
+        operations: tuple[tuple[str, dict[str, Any], str, str], ...] = (
             (
                 "expire_by_category",
                 {},

@@ -26,6 +26,7 @@ from gideon.security.security import redact_credentials, redact_exfiltration_url
 
 if TYPE_CHECKING:
     from gideon.cognition.history import ConversationLog
+    from gideon.cognition.memory_slots import _SlotStore
     from gideon.engine.session import ConversationDirectory
     from gideon.extensions.skills.allocation import SkillDecision
     from gideon.integrations.channel_history import ChannelHistory
@@ -275,16 +276,13 @@ def _memory_caps(context_window: int | None) -> _MemoryCaps:
         _MAX_BUDGET_MULTIPLE,
         max(1.0, (context_window or _BASELINE_WINDOW) / _BASELINE_WINDOW),
     )
-    return {
-        key: int(value * factor)
-        for key, value in (
-            ("prefs_cap", _MEMORY_PREFS_CAP),
-            ("projects_cap", _MEMORY_PROJECTS_CAP),
-            ("history_cap", _MEMORY_HISTORY_CAP),
-            ("semantic_cap", _SEMANTIC_MEMORY_CAP),
-            ("episodic_cap", _EPISODIC_MEMORY_CAP),
-        )
-    }
+    return _MemoryCaps(
+        prefs_cap=int(_MEMORY_PREFS_CAP * factor),
+        projects_cap=int(_MEMORY_PROJECTS_CAP * factor),
+        history_cap=int(_MEMORY_HISTORY_CAP * factor),
+        semantic_cap=int(_SEMANTIC_MEMORY_CAP * factor),
+        episodic_cap=int(_EPISODIC_MEMORY_CAP * factor),
+    )
 
 
 def _stop_record(message: dict) -> dict | None:
@@ -701,7 +699,7 @@ class PromptAssembler:
                 continue
         return ""
 
-    def _slots_block(self, vector_store: object | None) -> str:
+    def _slots_block(self, vector_store: _SlotStore | None) -> str:
         if vector_store is not None:
             try:
                 from gideon.cognition import memory_slots

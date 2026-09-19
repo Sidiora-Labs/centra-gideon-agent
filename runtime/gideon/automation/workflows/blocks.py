@@ -85,25 +85,13 @@ def resolve_text(text: str) -> str:
 
 
 def resolve(value: Any) -> Any:
-    result: list[Any] = [None]
-    frames = [(result, 0, value)]
-    while frames:
-        parent, key, item = frames.pop()
-        if isinstance(item, str):
-            replacement = resolve_text(item) if "{{block:" in item else item
-        elif isinstance(item, dict):
-            replacement = {}
-            frames.extend((replacement, k, v) for k, v in reversed(list(item.items())))
-        elif isinstance(item, list):
-            replacement = [None] * len(item)
-            frames.extend(
-                (replacement, index, item[index])
-                for index in range(len(item) - 1, -1, -1)
-            )
-        else:
-            replacement = item
-        parent[key] = replacement
-    return result[0]
+    if isinstance(value, str):
+        return resolve_text(value) if "{{block:" in value else value
+    if isinstance(value, dict):
+        return {key: resolve(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [resolve(item) for item in value]
+    return value
 
 
 def resolve_spec(spec: dict[str, Any]) -> dict[str, Any]:

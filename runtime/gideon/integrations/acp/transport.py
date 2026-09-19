@@ -16,6 +16,7 @@ from pathlib import Path
 
 from gideon.core.env import augmented_path
 from gideon.integrations.acp.errors import AcpError, AcpProcessDied
+from gideon.integrations.sandbox_providers.base import SandboxHandle
 
 logger = logging.getLogger(__name__)
 _ACP_TRACE = os.environ.get("GIDEON_ACP_TRACE") == "1"
@@ -205,7 +206,7 @@ class AcpProcess:
         self._pgid: int | None = None
         self._start_time: int | None = None
         self._child_pids: dict[int, int | None] = {}
-        self._sandbox_handle = None
+        self._sandbox_handle: SandboxHandle | None = None
         self._stderr_lines: deque[str] = deque(maxlen=20)
         self._stderr_task: asyncio.Task | None = None
         self._last_activity = time.monotonic()
@@ -348,8 +349,11 @@ class AcpProcess:
         self._remember_descendants(descendants)
 
     def _signal(self, sig: int, *, fallback: bool = False) -> None:
+        pid = self._pid
+        if pid is None:
+            return
         try:
-            os.killpg(self._pgid or os.getpgid(self._pid), sig)
+            os.killpg(self._pgid or os.getpgid(pid), sig)
         except OSError:
             if fallback and self._process is not None:
                 try:

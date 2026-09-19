@@ -805,7 +805,7 @@ class DelegationSupervisor:
         return policy
 
     def _runner_arguments(self, info: SubagentInfo, policy: str) -> dict[str, Any]:
-        options = (
+        options: dict[str, Any] = (
             {"model": info.model} if info.model else {"model_axis": "orchestration"}
         )
         if info.cwd:

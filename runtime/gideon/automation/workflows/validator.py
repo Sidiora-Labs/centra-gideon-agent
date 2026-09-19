@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections import deque
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -501,6 +502,7 @@ def _validate_supervisor(res: ValidationResult, path: str, raw: Any) -> None:
     )
     for name, vocabulary, code, message, collection in entries:
         value = raw.get(name)
+        values: Iterable[Any]
         if collection is None:
             values = () if value is None else (value,)
         else:

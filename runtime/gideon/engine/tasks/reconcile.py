@@ -168,13 +168,14 @@ class TaskGraphView:
     dependents: dict[str, list[str]]
 
     def critical(self, order):
-        lengths, predecessor = {}, {}
+        lengths: dict[str, int] = {}
+        predecessor: dict[str, str | None] = {}
         for key in order:
             options = self.prerequisites.get(key, [])
             best = max(options, key=lengths.__getitem__) if options else None
             lengths[key] = 1 + (lengths[best] if best is not None else 0)
             predecessor[key] = best
-        current = max(self.tasks, key=lengths.__getitem__)
+        current: str | None = max(self.tasks, key=lengths.__getitem__)
         path = []
         while current is not None:
             path.append(current)

@@ -244,8 +244,8 @@ def infer_capabilities(model_id: str, families: list[str] | None = None) -> list
         if any(marker in searchable for marker in markers):
             return [tag]
     tags = ["chat"]
-    for tag, markers in _UNDERSTANDING_TAGS:
-        matched = any(marker in searchable for marker in markers)
+    for tag, capability_markers in _UNDERSTANDING_TAGS:
+        matched = any(marker in searchable for marker in capability_markers)
         if matched or (tag == "image_modality" and "clip" in family_text):
             tags.append(tag)
     return tags

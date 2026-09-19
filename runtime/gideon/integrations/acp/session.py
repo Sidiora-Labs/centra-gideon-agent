@@ -50,6 +50,8 @@ _ACTIONS = {
 def classify_frame(msg: JsonRpcMessage, req_id: int) -> str:
     if msg.method is None and msg.id == req_id:
         return "error" if msg.error else "complete"
+    if msg.method is None:
+        return "skip"
     return _ACTIONS.get(msg.method, "skip")
 
 

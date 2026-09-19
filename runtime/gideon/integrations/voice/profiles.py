@@ -86,6 +86,7 @@ class VoiceProfile:
             name = item.name
             default = getattr(profile, name)
             value = raw.get(name, default)
+            decoded: Any
             if name == "design_params":
                 decoded = dict(value) if isinstance(value, dict) else {}
             elif name == "history":

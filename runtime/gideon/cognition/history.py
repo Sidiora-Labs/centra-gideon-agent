@@ -8,7 +8,7 @@ import re
 import time as _time
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from gideon.cognition.journal_pages import (
     JournalDocument,
@@ -26,6 +26,7 @@ from gideon.security.sel import sel
 
 if TYPE_CHECKING:
     from gideon.cognition.memory import MemoryJournal
+    from gideon.cognition.memory_service import MemoryService
     from gideon.cognition.vector_memory import SemanticArchive
     from gideon.engine.session import ConversationDirectory
     from gideon.extensions.skills import ProcedureLibrary
@@ -354,7 +355,7 @@ class ConversationLog:
         path = self._path(key)
         if not path.exists():
             self.init()
-            header = dict(
+            header: dict[str, Any] = dict(
                 _type="metadata",
                 created_at=datetime.now().isoformat(),
                 last_consolidated=0,
@@ -365,7 +366,9 @@ class ConversationLog:
                 if value
             )
             path.write_text(json.dumps(header) + "\n", encoding="utf-8")
-        entry = dict(role=role, content=content, ts=datetime.now().isoformat())
+        entry: dict[str, Any] = dict(
+            role=role, content=content, ts=datetime.now().isoformat()
+        )
         entry.update(
             (name, value)
             for name, value in (
@@ -673,7 +676,8 @@ class HistoryConsolidator:
 
         self._log, self._memory, self._sessions = log, memory, sessions
         self._history_idle_secs = history_idle_secs
-        self._vector_store, self._memory_service = vector_store, None
+        self._vector_store = vector_store
+        self._memory_service: MemoryService | None = None
         self._migrated, self._skills_loader = migrated, skills_loader
         self._auto_skills_enabled, self._auto_refine_enabled = (
             auto_skills_enabled,

@@ -122,8 +122,9 @@ _CONFIG_TYPE_MAP: dict[str, str] = {}
 
 
 def get_default_registry() -> ProviderRegistry:
+    global _default_registry
     if _default_registry is None:
-        set_default_registry(ProviderRegistry())
+        _default_registry = ProviderRegistry()
     return _default_registry
 
 

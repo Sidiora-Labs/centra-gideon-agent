@@ -31,13 +31,16 @@ def core_mcp_servers(*, session_key: str | None = None) -> list[dict[str, Any]]:
         return []
     executable = definition.get("command")
     if not executable:
-        executable = definition["command_fn"]()
+        command_fn = definition.get("command_fn")
+        executable = command_fn() if callable(command_fn) else None
     if not executable:
         return []
+    raw_args = definition.get("args")
+    args = raw_args if isinstance(raw_args, (list, tuple)) else ()
     server = dict(
         name=CORE_SERVER_NAME,
         command=str(executable),
-        args=list(map(str, definition.get("args") or ())),
+        args=list(map(str, args)),
         env=_session_environment(session_key),
     )
     return [server]

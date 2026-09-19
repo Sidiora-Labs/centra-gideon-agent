@@ -5,6 +5,7 @@ import logging
 import re
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -96,14 +97,14 @@ class _DefinitionCodec:
         "route_hints",
     )
     writable = frozenset(text_fields) - {"name"}
-    conversions = {
+    conversions: dict[str, Callable[[Any], Any]] = {
         "skills": lambda value: [str(item) for item in (value or [])],
         "mcp_servers": lambda value: dict(value or {}),
         "natural_voice": bool,
     }
 
     @classmethod
-    def decode(cls, document, constructor):
+    def decode(cls, document, constructor: Callable[..., Any]):
         values: dict = {key: str(document.get(key, "")) for key in cls.text_fields}
         values.update(
             natural_voice=bool(document.get("natural_voice", False)),

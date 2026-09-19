@@ -40,9 +40,13 @@ async def run_command(
     )
     if quiet:
         await wait_with_timeout(process, timeout)
-        return CommandReply(process.returncode)
+        return CommandReply(
+            process.returncode if process.returncode is not None else -1
+        )
     output, error = await run_with_timeout(process, timeout)
-    return CommandReply(process.returncode, output, error)
+    return CommandReply(
+        process.returncode if process.returncode is not None else -1, output, error
+    )
 
 
 class DependencyRepair:

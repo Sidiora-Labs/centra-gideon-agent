@@ -444,6 +444,8 @@ class _Cursor:
     ) -> _Cursor:
         spec = self.spec + ".body"
         path = f"{self.path}.body{marker}{index}"
+        if self.node.body is None:
+            raise ValueError(f"{self.path} has no loop body")
         return _Cursor(
             self.node.body,
             path,

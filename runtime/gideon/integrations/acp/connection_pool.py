@@ -431,12 +431,13 @@ async def init_acp_pool(start_sem: asyncio.Semaphore) -> AcpConnectionPool:
     return pool
 
 
-def _alive(provider: ModelProvider) -> bool:
+def _alive(provider: object) -> bool:
     try:
         probe = getattr(provider, "is_process_alive", None)
-        if not callable(probe):
-            probe = getattr(provider, "is_alive", lambda: True)
-        return bool(probe())
+        if callable(probe):
+            return bool(probe())
+        fallback = getattr(provider, "is_alive", None)
+        return bool(fallback()) if callable(fallback) else True
     except Exception:
         return False
 

@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from itertools import chain
+from typing import Any
 
 
 class TermSync:
@@ -239,8 +240,9 @@ class KnowledgeVocabulary:
         from gideon.cognition.knowledge import get_knowledge_store
 
         store = get_knowledge_store()
-        columns = ("id", "name", "entity_type", "aliases")
-        relation, bindings = "entities", ()
+        columns: tuple[str, ...] = ("id", "name", "entity_type", "aliases")
+        relation = "entities"
+        bindings: tuple[Any, ...] = ()
         if context_item_id is not _ALL_ENTITIES:
             columns = ("e.name",)
             relation = "entities e JOIN mentions m ON m.entity_id = e.id WHERE m.item_id = ? LIMIT 100"

@@ -253,7 +253,7 @@ class RefusalLedger:
             return {}
         allowed = {value.value for value in api.detectors.Skip}
         prefix = api.LEDGER_PREFIX + ":"
-        found = Counter()
+        found: Counter[str] = Counter()
         for row in rows:
             message = str(row[0] or "")
             if message.startswith(prefix):

@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NoReturn
 from urllib.parse import urlparse
 
 __all__ = ["ConfigValueError", "coerce_edit_value"]
@@ -24,7 +24,9 @@ class EditCandidate:
     value: Any
     spec: dict
 
-    def deny(self, message: str, resource: str | None = None, status: int = 400):
+    def deny(
+        self, message: str, resource: str | None = None, status: int = 400
+    ) -> NoReturn:
         raise ConfigValueError(
             message,
             f"{self.path}={self.value}" if resource is None else resource,

@@ -118,11 +118,10 @@ async function mutate(fn: () => Promise<unknown>, ...affects: CacheKeySpec[]) {
     requireWriteAccepted(await fn())
   } catch (e) {
     notify(`Couldn't save that change: ${String((e as Error)?.message || e)}`, 'error')
-    return false
+    return
   } finally {
     invalidateSpecs(affects)
   }
-  return true
 }
 
 export const SETTINGS_WIDGETS: SettingsWidget[] = [

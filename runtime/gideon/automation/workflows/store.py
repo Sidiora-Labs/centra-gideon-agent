@@ -153,7 +153,9 @@ class RunRowCodec:
         value = row[name]
         if name not in _JSON_COLUMNS:
             return bool(value) if name == "pinned" else value
-        fallback = None if name in ("forked_from", "attention") else {}
+        fallback: dict[str, Any] | None = (
+            None if name in ("forked_from", "attention") else {}
+        )
         if value in (None, ""):
             return fallback
         try:

@@ -131,7 +131,8 @@ class _CommunityHierarchy:
         }
         folded: dict[tuple[str, str], float] = {}
         for (left, right), weight in sorted(self.edges.items()):
-            pair = tuple(sorted((labels[left], labels[right])))
+            first, second = sorted((labels[left], labels[right]))
+            pair = (first, second)
             folded[pair] = folded.get(pair, 0.0) + weight
         self.nodes, self.edges = sorted(groups), folded
         return bool(folded)

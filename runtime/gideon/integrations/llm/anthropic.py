@@ -154,7 +154,7 @@ class _MessageEnvelope:
                 for item in blocks
             )
         )
-        if can_extend:
+        if can_extend and isinstance(blocks, list):
             self.messages[-1] = dict(previous, content=[*blocks, block])
         else:
             self.messages.append({"role": "user", "content": [block]})
@@ -171,7 +171,9 @@ class _MessageEnvelope:
 
     def add(self, message: dict) -> None:
         dispatch = {"system": self._system, "tool": self._tool}
-        dispatch.get(message.get("role"), self._ordinary)(message)
+        role = message.get("role")
+        handler = dispatch.get(role) if isinstance(role, str) else None
+        (handler or self._ordinary)(message)
 
     def result(self) -> tuple[str | list[dict], list[dict]]:
         system = "\n\n".join(self.system_parts)

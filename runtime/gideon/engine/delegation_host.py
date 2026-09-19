@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from gideon.integrations.acp.errors import AcpError, AcpProcessDied
@@ -12,7 +13,7 @@ from gideon.workspace import notification_kinds
 class DelegationHost:
     def __init__(self, runtime: Any, api: Any) -> None:
         self.runtime, self.api, self.logger = runtime, api, api.logger
-        self.approval = None
+        self.approval: Callable[[Any, str], Awaitable[bool]] | None = None
 
     def redact(self, text: str) -> str:
         filtered, _ = self.api.redact_exfiltration_urls(text)
@@ -70,7 +71,11 @@ class DelegationHost:
         event = self.api.LLMEvent(
             kind="permission_request", request_id=request_id, title=description
         )
-        return await self.approval(event, parent_session_key)
+        return (
+            await self.approval(event, parent_session_key)
+            if self.approval is not None
+            else False
+        )
 
     async def status(self, agent: Any, event: str) -> None:
         runtime, state = self.runtime, self.runtime.dashboard_state

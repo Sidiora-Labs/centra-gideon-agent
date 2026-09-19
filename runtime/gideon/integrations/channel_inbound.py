@@ -29,6 +29,7 @@ _ADMISSION_LOCK = RLock()
 
 
 def _message_key(provider: str, msg: ChannelMessage) -> str:
+    identity: tuple[str, ...]
     if msg.message_id:
         identity = (provider, "id", msg.message_id)
     else:

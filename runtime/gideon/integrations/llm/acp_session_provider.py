@@ -15,7 +15,7 @@ from gideon.integrations.llm.acp_provider_runtime import (
     pooled_permission_mode,
     relay_events,
 )
-from gideon.integrations.llm.base import CancelOutcome, LLMEvent
+from gideon.integrations.llm.base import CancelOutcome, LLMEvent, ModelProvider
 
 if TYPE_CHECKING:
     from gideon.integrations.acp.session import AcpConnection, AcpSession
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class AcpSessionProvider(AcpToolOutcomesMixin, AgentProvider):
+class AcpSessionProvider(AcpToolOutcomesMixin, AgentProvider, ModelProvider):
     supports_tools = True
 
     def __init__(

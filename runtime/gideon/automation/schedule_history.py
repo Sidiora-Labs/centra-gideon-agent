@@ -58,20 +58,19 @@ class ExecutionRecord:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> ExecutionRecord:
-        record = cls()
-        for name in (*_LIST_FIELDS, "trace"):
-            fallback = getattr(record, name)
-            value = d.get(name, fallback)
-            if name == "duration_ms":
-                converted = int(value or 0)
-            elif name in {"started_at", "finished_at"}:
-                converted = float(value or 0.0)
-            else:
-                converted = str(value)
-            if name == "run_id" and not converted:
-                converted = fallback
-            setattr(record, name, converted)
-        return record
+        generated_id = uuid.uuid4().hex[:12]
+        return cls(
+            run_id=str(d.get("run_id") or generated_id),
+            job_id=str(d.get("job_id") or ""),
+            trigger=str(d.get("trigger") or "scheduled"),
+            started_at=float(d.get("started_at") or 0.0),
+            finished_at=float(d.get("finished_at") or 0.0),
+            duration_ms=int(d.get("duration_ms") or 0),
+            status=str(d.get("status") or "success"),
+            summary=str(d.get("summary") or ""),
+            trace=str(d.get("trace") or ""),
+            error=str(d.get("error") or ""),
+        )
 
 
 def _redact_stored(text: str | None) -> str:

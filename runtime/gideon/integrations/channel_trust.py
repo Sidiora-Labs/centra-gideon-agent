@@ -41,7 +41,7 @@ def _iso(dt: datetime) -> str:
 
 
 def _default_provider() -> dict[str, Any]:
-    record = {
+    record: dict[str, Any] = {
         key: {}
         for key in (
             "allowed_senders",

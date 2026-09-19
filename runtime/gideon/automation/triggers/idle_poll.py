@@ -75,15 +75,12 @@ class IdleJournal:
             return IdleState()
         if not isinstance(record, dict):
             return IdleState()
-        converters = (
-            ("armed_at", float),
-            ("cycle_count", int),
-            ("last_fire", float),
-            ("error_count", int),
-            ("created_ts", float),
-        )
         return IdleState(
-            **{name: convert(record.get(name, 0) or 0) for name, convert in converters}
+            armed_at=float(record.get("armed_at") or 0.0),
+            cycle_count=int(record.get("cycle_count") or 0),
+            last_fire=float(record.get("last_fire") or 0.0),
+            error_count=int(record.get("error_count") or 0),
+            created_ts=float(record.get("created_ts") or 0.0),
         )
 
     def write(self, state: IdleState) -> None:

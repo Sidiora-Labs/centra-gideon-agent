@@ -44,7 +44,7 @@ def run_budget_for(gates: dict[str, Any] | None) -> Any:
         amount = float(raw or 0.0)
     except (TypeError, ValueError):
         amount = 0.0
-    return Budget(**({"max_dollars": amount} if amount > 0 else {}))
+    return Budget(max_dollars=amount if amount > 0 else 0.0)
 
 
 def parse_hhmm(value: str) -> int | None:
@@ -86,7 +86,10 @@ class MinuteBand:
         bounds = (parse_hhmm(window.start), parse_hhmm(window.end))
         if None in bounds or bounds[0] == bounds[1]:
             return None
-        return cls(bounds[0], bounds[1], window.days)
+        start, end = bounds
+        if start is None or end is None:
+            return None
+        return cls(start, end, window.days)
 
     def includes(self, weekday: int, minute: int) -> bool:
         if self.start < self.end:

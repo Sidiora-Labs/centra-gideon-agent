@@ -53,7 +53,6 @@ export function TasksListPage({ onCreate, view: viewProp, filter, openId, setVie
   const isProjectScope = !!scope && scope !== SCOPE_GOALS && scope !== SCOPE_CODING
   const scopedProject = isProjectScope ? projects.find(project => project.name === scope) : undefined
   const projectLists = lists.filter(list => list.project_id === scopedProject?.id)
-  const listFilter = listProp ? { id: listProp, name: lists.find(list => list.id === listProp)?.name ?? listProp } : null
   const setListFilter = (list: { id: string; name: string } | null) => setList(list?.id ?? '')
   useEffect(() => { if (!isProjectScope && listProp) setList('') }, [isProjectScope, listProp, setList])
   const tags = useMemo(() => taskTagOptions(tasks ?? []), [tasks])

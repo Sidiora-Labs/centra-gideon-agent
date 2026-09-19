@@ -40,7 +40,8 @@ def _solid_png(rgb: tuple[int, int, int], size: int = 64) -> bytes:
 
 
 def _color_for(text: str) -> tuple[int, int, int]:
-    return tuple(hashlib.sha256(text.encode()).digest()[:3])
+    digest = hashlib.sha256(text.encode()).digest()
+    return digest[0], digest[1], digest[2]
 
 
 def _preview(prompt: str, revised: str = "") -> list[ImageResult]:

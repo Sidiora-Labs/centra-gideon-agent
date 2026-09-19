@@ -300,10 +300,9 @@ class _HitProjection:
                 exact=exact, rank=self.rank, evidence=evidence
             ),
             "freshness": freshness(
-                **{
-                    name: str(hit.get(name) or "")
-                    for name in ("updated_at", "last_verified", "expires_at")
-                }
+                updated_at=str(hit.get("updated_at") or ""),
+                last_verified=str(hit.get("last_verified") or ""),
+                expires_at=str(hit.get("expires_at") or ""),
             ).to_dict(),
             "support_count": support,
             "read_when": metadata.get("read_when") or [],

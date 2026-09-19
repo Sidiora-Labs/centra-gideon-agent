@@ -88,7 +88,7 @@ if TYPE_CHECKING:
     from gideon.engine.agents.native.tool_retrieval import ToolRetriever
     from gideon.engine.agents.provider import AgentRuntimeDefinition
     from gideon.integrations.llm.base import ModelProvider
-    from gideon.integrations.tool_providers.base import ToolProvider
+    from gideon.integrations.tool_providers.base import ToolDefinition, ToolProvider
 
 logger = logging.getLogger(__name__)
 
@@ -170,13 +170,12 @@ class _PreparedCall:
     def result_event(
         self, observation: str, metadata: dict | None = None
     ) -> AgentEvent:
-        fields = {} if metadata is None else {"tool_meta": metadata or {}}
         return AgentEvent(
             kind=EVENT_TOOL_RESULT,
             tool_call_id=self.call.tool_call_id,
             title=self.tool_name,
             tool_output=observation,
-            **fields,
+            tool_meta=metadata or {},
         )
 
 
@@ -232,7 +231,7 @@ class _ToolInventory:
         return inventory
 
 
-def _discovery_tools() -> tuple[Any, Any, Any]:
+def _discovery_tools() -> tuple[ToolDefinition, ...]:
     from gideon.integrations.tool_providers.base import ToolDefinition
 
     specifications = (
@@ -486,7 +485,9 @@ class NativeAgentRuntime(AgentProvider):
         self._tool_index: dict[str, ToolProvider] = {}
         self._tool_sanitized_index: dict[str, str] = {}
         self._tool_retriever: ToolRetriever | None = None
-        self._tool_search_def = self._tool_schema_def = self._reset_tools_def = None
+        self._tool_search_def: ToolDefinition | None = None
+        self._tool_schema_def: ToolDefinition | None = None
+        self._reset_tools_def: ToolDefinition | None = None
 
     @property
     def provider_id(self) -> str:
@@ -1289,7 +1290,7 @@ class NativeAgentRuntime(AgentProvider):
                 entry["extra_content"] = extra
             return entry
 
-        message = dict(role="assistant", content=text or "")
+        message: dict[str, Any] = dict(role="assistant", content=text or "")
         if tool_calls:
             message["tool_calls"] = [wire_call(call) for call in tool_calls]
         return message

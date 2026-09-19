@@ -663,7 +663,9 @@ def slice_document(*, file_path: str = "", text: str = "") -> SliceResult:
     readable = structure is not None and any(
         (page or "").strip() for page in structure.pages
     )
-    return slice_structure(structure if readable else structure_from_text(text))
+    if readable and structure is not None:
+        return slice_structure(structure)
+    return slice_structure(structure_from_text(text))
 
 
 def slice_structure(structure: PdfStructure) -> SliceResult:
@@ -776,7 +778,9 @@ def extract_references(
     text = str(full_text or "")
     if bibliography_start >= len(text):
         return (), 0
-    accepted, known, unkeyed = [], set(), 0
+    accepted: list[Reference] = []
+    known: set[str] = set()
+    unkeyed = 0
     for entry in _split_entries(text[bibliography_start:])[:MAX_REFERENCES]:
         reference = _key_entry(entry, accepted)
         if reference is None:

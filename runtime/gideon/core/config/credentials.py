@@ -117,9 +117,10 @@ def keychain_available() -> bool:
 
 def requested_credential_backend() -> CredentialBackend:
     requested = (os.environ.get(CREDENTIAL_BACKEND_ENV) or "").strip().lower()
-    explicit = {"keychain": "keychain", "dotenv": "dotenv"}
-    if requested in explicit:
-        return explicit[requested]
+    if requested == "keychain":
+        return "keychain"
+    if requested == "dotenv":
+        return "dotenv"
     if requested:
         logger.warning(
             "%s=%r is not a credential backend (keychain|dotenv); falling back to the security.credential_keychain config gate",

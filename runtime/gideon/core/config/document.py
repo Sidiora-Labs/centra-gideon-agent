@@ -29,7 +29,7 @@ def configuration_values(configuration: Any) -> dict[str, Any]:
     result = {}
     for item in fields(configuration):
         value = getattr(configuration, item.name)
-        if is_dataclass(value):
+        if is_dataclass(value) and not isinstance(value, type):
             result[item.name] = asdict(value)
         elif item.name in ("agents", "memory_stores"):
             result[item.name] = {key: asdict(record) for key, record in value.items()}

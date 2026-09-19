@@ -9,6 +9,7 @@ import logging
 import re
 from dataclasses import dataclass, field, fields
 from pathlib import Path
+from typing import Any
 
 from gideon.core.atomic_write import atomic_write
 
@@ -291,7 +292,7 @@ class EventActionAttempt:
             source_type=f"event:{occurrence.source}:{occurrence.event_type}",
             source_id=occurrence.key,
         )
-        payload = dict(
+        payload: dict[str, Any] = dict(
             source=occurrence.source,
             event_type=occurrence.event_type,
             key=occurrence.key,
@@ -412,7 +413,8 @@ def get_engine() -> EventTriggerEngine:
 
 class EventTriggerEngine:
     def __init__(self, store: EventTriggerStore | None = None):
-        self._store, self._fire_times = store, []
+        self._store = store
+        self._fire_times: list[float] = []
 
     def _get_store(self) -> EventTriggerStore:
         if self._store is not None:

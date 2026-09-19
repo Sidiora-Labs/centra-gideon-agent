@@ -68,7 +68,7 @@ class ModelRate:
         if isinstance(obj, dict) and any(name in obj for name in fields):
             try:
                 values = [float(obj.get(name, 0.0) or 0.0) for name in fields]
-                return cls(*values, source=source)
+                return cls(values[0], values[1], source=source)
             except (ValueError, TypeError):
                 pass
         return None
@@ -212,7 +212,7 @@ def _builtin_rate(model: str) -> ModelRate | None:
                 float(estimate_cost(model, **{key: 1_000_000}))
                 for key in ("input_tokens", "output_tokens")
             ]
-            return ModelRate(*amounts, source="builtin")
+            return ModelRate(amounts[0], amounts[1], source="builtin")
     except Exception:
         logger.warning(
             "builtin pricing lookup failed for model %r", model, exc_info=True

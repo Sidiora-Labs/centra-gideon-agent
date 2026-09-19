@@ -3,6 +3,7 @@
 import json
 import re
 import time
+from typing import Any
 
 
 def contract():
@@ -195,7 +196,8 @@ class PatternPromotion:
                 stale,
                 self.store._embedding_dim,
             )
-        representatives, groups = [], []
+        representatives: list[Any] = []
+        groups: list[list[dict[str, Any]]] = []
         for row, vector in usable:
             destination = None
             for index, representative in enumerate(representatives):

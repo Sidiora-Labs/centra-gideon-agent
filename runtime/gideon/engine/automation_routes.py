@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from gideon.automation.triggers.store import TriggerStore
 
 
 class AutomationRoutes:
     def __init__(self, runtime: Any, logger: logging.Logger) -> None:
         self.runtime, self.logger = runtime, logger
-        self._store = None
+        self._store: TriggerStore | None = None
 
     @property
     def store(self):

@@ -5,7 +5,7 @@ import re
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from gideon.security.security import is_sensitive_path
 
@@ -254,10 +254,10 @@ class FileReader:
                 "limit": error.limit,
             }
         except Exception as error:
-            text = self._salvage_as_text(path)
+            salvaged = self._salvage_as_text(path)
             return (
-                (text, {"format": "text", "recovered_from": "pdf"})
-                if text is not None
+                (salvaged, {"format": "text", "recovered_from": "pdf"})
+                if salvaged is not None
                 else _read_error(error)
             )
 
@@ -513,7 +513,9 @@ def _lines_for_page(page, index: int) -> list[PdfLine]:
             float(char.get("x0") or 0.0),
         ),
     )
-    groups, current, baseline = [], [], None
+    groups: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    baseline: float | None = None
     for char in chars:
         top = float(char.get("top") or 0.0)
         if baseline is None or abs(top - baseline) > _LINE_TOLERANCE_PT:

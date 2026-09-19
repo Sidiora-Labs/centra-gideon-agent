@@ -28,7 +28,7 @@ export function sourceLabel(source?: string, tags?: string[]): string {
 }
 export function variableTypeLabel(type: PromptVarType): string { return VAR_TYPES.find(meta => meta.key === type)?.label ?? type }
 
-function parseTypeDeclaration(suffix: string): Pick<PromptVariable, 'type' | 'options'> {
+function parseTypeDeclaration(suffix: string): { type: PromptVarType; options: string[] } {
   const source = suffix.trim()
   const bracket = /\[(.*)\]/.exec(source)
   const options = bracket ? bracket[1].split(',').map(option => option.trim()).filter(Boolean) : []

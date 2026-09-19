@@ -101,7 +101,7 @@ def _active_embedding_spec() -> tuple[str, str] | None:
     from gideon.extensions.providers.use_cases import active_model_refs, split_ref
 
     first = next(iter(active_model_refs("embedding")), _NO_SELECTION)
-    return None if first is _NO_SELECTION else split_ref(first)
+    return split_ref(first) if isinstance(first, str) else None
 
 
 @dataclass(frozen=True)
@@ -239,6 +239,8 @@ def get_active_embed_many_fn() -> (
         return None
     selection = _Selection(*specification)
     provider = selection.direct_provider()
+    if provider is None:
+        return None
     operation = getattr(provider, "embed_batch", None)
     if not callable(operation):
         return None

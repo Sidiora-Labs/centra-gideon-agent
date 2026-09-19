@@ -51,8 +51,11 @@ class _CommitBatch:
 
 def _scenario_limit(config: dict[str, Any]) -> int:
     supplied = config.get("max_scenarios")
-    numeric = isinstance(supplied, (int, float, str)) and str(supplied).isdigit()
-    explicit = int(supplied) if numeric else 0
+    explicit = (
+        int(supplied)
+        if isinstance(supplied, (int, float, str)) and str(supplied).isdigit()
+        else 0
+    )
     return max(1, explicit or _configured_cap())
 
 
@@ -77,7 +80,9 @@ class _TriageBatch:
         return recorded
 
     def result(self, limit: int, recorded: int) -> ActionResult:
-        all_rows, selected, skipped = [], [], []
+        all_rows: list[dict[str, Any]] = []
+        selected: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
         for verdict in self.verdicts:
             row = verdict.to_dict()
             all_rows.append(row)

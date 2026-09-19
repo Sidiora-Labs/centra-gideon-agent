@@ -14,6 +14,8 @@ def _workflows_config() -> object | None:
 
 def _integer_setting(name: str, fallback: int) -> int:
     raw = getattr(_workflows_config(), name, None)
+    if raw is None:
+        return fallback
     try:
         return int(raw)
     except (TypeError, ValueError):
