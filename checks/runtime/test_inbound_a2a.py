@@ -37,8 +37,12 @@ from gideon.automation.workflows.models import DefMetadata, RunStatus
 from gideon.integrations.inbound import (
     a2a,
 )
-from gideon.integrations.inbound import audit as audit_mod  # noqa: F401 — imported for parity
-from gideon.integrations.inbound import auth
+from gideon.integrations.inbound import (  # noqa: F401 — imported for parity
+    audit as audit_mod,
+)
+from gideon.integrations.inbound import (
+    auth,
+)
 from gideon.integrations.inbound import caps as caps_mod
 
 _SURFACE_ENVS = ("OPENAI", "MCP", "A2A", "CAPTURE", "BRIDGE")

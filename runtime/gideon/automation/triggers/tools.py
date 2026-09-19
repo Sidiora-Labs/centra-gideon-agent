@@ -75,7 +75,7 @@ def _agent_expiry_iso(resolved_spec: dict, ttl_secs: float, *, now: float = 0.0)
     from datetime import datetime, timezone
 
     base = float(now) if now else time.time()
-    lifetime = (
+    lifetime = float(
         AGENT_ONETIME_TTL_SECS if resolved_spec.get("at") else AGENT_RECURRING_TTL_SECS
     )
     if ttl_secs and ttl_secs > 0:
@@ -299,7 +299,7 @@ class CreationPlan:
             created_by=self.created_by,
             origin_harness=_origin_harness_for(self.store),
             spec=self.spec,
-            workflow=dict(self.workflow),
+            workflow=dict(self.workflow or {}),
         )
         trigger.capabilities = capabilities_for_action(trigger)
         if self.created_by == "agent" and not trigger.expires_at:

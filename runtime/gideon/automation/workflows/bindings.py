@@ -333,7 +333,8 @@ def resolve(template: Any, ctx: BindingContext) -> Any:
 
 
 def refs_in(template: Any) -> list[str]:
-    pending, expressions = [template], []
+    pending: list[Any] = [template]
+    expressions: list[str] = []
     while pending:
         value = pending.pop()
         if isinstance(value, dict):
@@ -564,7 +565,8 @@ class BindingTemplate:
         complete = _WHOLE_RE.match(template)
         if complete is not None:
             return resolve_expr(complete.group(1).strip(), self.context)
-        segments, start = [], 0
+        segments: list[str] = []
+        start = 0
         for match in _REF_RE.finditer(template):
             segments.extend(
                 (

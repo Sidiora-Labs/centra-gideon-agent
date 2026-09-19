@@ -230,19 +230,16 @@ class _SelfModelRows:
         facet, fallback = segments[2:]
         if facet not in FACETS or not isinstance(value, dict):
             return None
-        fields = {"facet": facet}
-        conversions = (
-            ("key", str, fallback),
-            ("body", str, ""),
-            ("seen_count", int, 0),
-            ("confidence", float, 0.0),
-            ("evidence", list, []),
-            ("created_at", str, ""),
-            ("last_seen_at", str, ""),
+        return Entry(
+            facet=facet,
+            key=str(value.get("key") or fallback),
+            body=str(value.get("body") or ""),
+            seen_count=int(value.get("seen_count") or 0),
+            confidence=float(value.get("confidence") or 0.0),
+            evidence=list(value.get("evidence") or []),
+            created_at=str(value.get("created_at") or ""),
+            last_seen_at=str(value.get("last_seen_at") or ""),
         )
-        for name, convert, default in conversions:
-            fields[name] = convert(value.get(name) or default)
-        return Entry(**fields)
 
     @staticmethod
     def retrospection(observation):

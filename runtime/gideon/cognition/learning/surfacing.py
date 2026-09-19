@@ -111,7 +111,7 @@ class Candidate:
     arm: str = ""
 
     def text(self, tier: Tier) -> str:
-        choices = (self.l0,)
+        choices: tuple[str, ...] = (self.l0,)
         if tier is Tier.L2:
             choices = (self.l2, self.l1, self.l0)
         elif tier is Tier.L1:

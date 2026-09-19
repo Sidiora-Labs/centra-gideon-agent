@@ -113,9 +113,10 @@ def weight_cap(holder: str) -> float:
 
 def normalize_weight(holder: str, weight: object) -> float:
     import math
+    from typing import Any, cast
 
     try:
-        numeric = float(weight)
+        numeric = float(cast(Any, weight))
     except (TypeError, ValueError):
         numeric = weight_cap(holder)
     if not math.isfinite(numeric):

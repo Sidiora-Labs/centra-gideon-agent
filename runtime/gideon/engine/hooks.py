@@ -371,8 +371,10 @@ class _ToolAdmission:
             proposal = detect(self.normalized)
             if proposal is not None:
                 return proposal.observation
-        return is_denied(self.normalized, self.config.auto_deny_tools) or is_denied(
-            self.original, self.config.auto_deny_tools
+        return (
+            is_denied(self.normalized, self.config.auto_deny_tools)
+            or is_denied(self.original, self.config.auto_deny_tools)
+            or ""
         )
 
     def evaluate(self) -> ToolHookResult:

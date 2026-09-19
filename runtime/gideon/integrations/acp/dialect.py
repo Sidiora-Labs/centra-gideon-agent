@@ -80,8 +80,8 @@ class ACPDialect:
     supports_concurrent_sessions: bool = False
     supports_mid_turn_prompt: bool = False
     _protocol: object = "2025-08-22"
-    _option_id_keys = ("id",)
-    _option_label_keys = ("label",)
+    _option_id_keys: tuple[str, ...] = ("id",)
+    _option_label_keys: tuple[str, ...] = ("label",)
 
     def protocol_version(self) -> object:
         return self._protocol

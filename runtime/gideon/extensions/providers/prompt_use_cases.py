@@ -27,7 +27,9 @@ from gideon.core.atomic_write import atomic_write
 logger = logging.getLogger(__name__)
 
 
-from gideon.integrations.prompt_providers.catalog import BUNDLED_PROMPTS as _CATALOG  # noqa: E402
+from gideon.integrations.prompt_providers.catalog import (  # noqa: E402
+    BUNDLED_PROMPTS as _CATALOG,
+)
 
 PROMPT_USE_CASES: tuple[str, ...] = tuple(p.use_case for p in _CATALOG)
 

@@ -451,7 +451,8 @@ class EpisodeRecall:
         rows = self.store.search_episodic(
             query_embedding=embedding, query_text=text, limit=self.store._episodic_limit
         )
-        used, lines = 0, []
+        used = 0
+        lines: list[str] = []
         for ordinal, row in enumerate(rows, 1):
             if "cosine_sim" in row:
                 floor = (

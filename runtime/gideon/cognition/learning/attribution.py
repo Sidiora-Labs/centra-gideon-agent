@@ -160,7 +160,7 @@ class _FailureTally:
     def __init__(self, journal, terminal_failures, classify, excluded):
         self.journal, self.terminal_failures = journal, terminal_failures
         self.classify, self.excluded = classify, excluded
-        self.counts = Counter()
+        self.counts: Counter[str] = Counter()
 
     def read(self, run):
         try:
@@ -361,7 +361,7 @@ def _file_revert(rec: AcceptedChange, attr: Any, run_ids: list[str]) -> str:
     )
     if revert is None:
         return ""
-    fields = dict(
+    _verdict, proposal = proposals.enqueue(
         kind=proposals.Kind.RETIREMENT.value,
         title=revert.title,
         body=revert.body,
@@ -374,7 +374,6 @@ def _file_revert(rec: AcceptedChange, attr: Any, run_ids: list[str]) -> str:
         occurrences=1,
         min_evidence=1,
     )
-    _verdict, proposal = proposals.enqueue(**fields)
     return "" if proposal is None else proposal.id
 
 

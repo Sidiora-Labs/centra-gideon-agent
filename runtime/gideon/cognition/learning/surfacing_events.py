@@ -77,17 +77,16 @@ class SurfacingEvent:
             if kind:
                 confidence = _historical_number(data, "confidence")
                 stamp = _historical_number(data, "created_ts")
-                values = (
-                    kind,
-                    str(data.get("entity", "") or ""),
-                    str(data.get("arm", "") or ""),
-                    confidence,
-                    bool(data.get("used")),
-                    str(data.get("query", "") or ""),
-                    str(data.get("session", "") or ""),
-                    stamp,
+                return cls(
+                    kind=kind,
+                    entity=str(data.get("entity", "") or ""),
+                    arm=str(data.get("arm", "") or ""),
+                    confidence=confidence,
+                    used=bool(data.get("used")),
+                    query=str(data.get("query", "") or ""),
+                    session=str(data.get("session", "") or ""),
+                    created_ts=stamp,
                 )
-                return cls(**dict(zip(_COLUMNS, values)))
         return None
 
 

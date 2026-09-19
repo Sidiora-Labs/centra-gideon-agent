@@ -446,8 +446,11 @@ class _IndexRevision:
             return None
         if row is None:
             return None
-        return int(row["rowid"]), *(
-            str(row[name] or "") for name in ("title", "content", "tags")
+        return (
+            int(row["rowid"]),
+            str(row["title"] or ""),
+            str(row["content"] or ""),
+            str(row["tags"] or ""),
         )
 
     def replace(

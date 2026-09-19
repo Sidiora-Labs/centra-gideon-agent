@@ -51,14 +51,9 @@ class ClaimFile:
         try:
             return Claim(
                 holder=str(payload.get("holder", "") or ""),
-                **{
-                    key: convert(payload.get(key, fallback) or fallback)
-                    for key, convert, fallback in (
-                        ("expires_at", float, 0.0),
-                        ("taken_at", float, 0.0),
-                        ("renewals", int, 0),
-                    )
-                },
+                expires_at=float(payload.get("expires_at") or 0.0),
+                taken_at=float(payload.get("taken_at") or 0.0),
+                renewals=int(payload.get("renewals") or 0),
             )
         except (TypeError, ValueError):
             return None

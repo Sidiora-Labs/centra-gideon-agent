@@ -382,8 +382,8 @@ class _UsageEvidence:
     def arm_rows(self):
         from collections import Counter
 
-        surfaced = Counter()
-        used = Counter()
+        surfaced: Counter[tuple[str, str]] = Counter()
+        used: Counter[tuple[str, str]] = Counter()
         for event in self.events or []:
             if isinstance(event, dict):
                 identity = (
@@ -424,7 +424,7 @@ class _UsageEvidence:
 class _ThresholdCalibration:
     def __init__(self, baseline, rows):
         self.baseline = baseline
-        self.members = {}
+        self.members: dict[str, list[ArmStats]] = {}
         for row in rows:
             self.members.setdefault(row.kind, []).append(row)
 

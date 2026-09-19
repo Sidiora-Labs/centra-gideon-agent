@@ -99,7 +99,8 @@ def extract_file_refs(messages: list[dict], limit: int = 25) -> list[str]:
 
 
 def _structured_digest(middle: list[dict], files: list[str]) -> str:
-    requests, tools = [], Counter()
+    requests: list[str] = []
+    tools: Counter[str] = Counter()
     for message in middle:
         if message.get("role") == "user":
             requests.append(str(message.get("content", "")))

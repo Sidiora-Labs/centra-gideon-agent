@@ -1,5 +1,7 @@
 """Project inventory and work-board response assembly."""
 
+from typing import Any
+
 from gideon.automation.workflows import containers
 
 
@@ -7,7 +9,7 @@ class LinkedProjectInventory:
     def __init__(self, project_id, app):
         self.project_id = project_id
         self.app = app
-        self.sections = {
+        self.sections: dict[str, list[Any]] = {
             name: [] for name in ("loops", "code", "artifacts", "chats", "knowledge")
         }
 
@@ -94,28 +96,22 @@ class BoardProjection:
         if isinstance(claim_data, dict):
             claim = containers.Claim(
                 holder=str(claim_data.get("holder", "") or ""),
-                **{
-                    key: convert(claim_data.get(key, default) or default)
-                    for key, convert, default in (
-                        ("expires_at", float, 0.0),
-                        ("taken_at", float, 0.0),
-                        ("renewals", int, 0),
-                    )
-                },
+                expires_at=float(claim_data.get("expires_at") or 0.0),
+                taken_at=float(claim_data.get("taken_at") or 0.0),
+                renewals=int(claim_data.get("renewals") or 0),
             )
         try:
             state = containers.BoardState(str(payload.get("state", "") or ""))
         except ValueError:
             state = containers.BoardState.WORKING
         return containers.BoardRow(
-            **{
-                key: str(payload.get(key, "") or "")
-                for key in ("run_id", "title", "origin", "project_id")
-            },
-            **{
-                key: bool(payload.get(key, False))
-                for key in ("collapsed", "attention", "resumable")
-            },
+            run_id=str(payload.get("run_id") or ""),
+            title=str(payload.get("title") or ""),
+            origin=str(payload.get("origin") or ""),
+            project_id=str(payload.get("project_id") or ""),
+            collapsed=bool(payload.get("collapsed", False)),
+            attention=bool(payload.get("attention", False)),
+            resumable=bool(payload.get("resumable", False)),
             state=state,
             claim=claim,
         )

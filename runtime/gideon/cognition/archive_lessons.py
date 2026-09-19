@@ -3,6 +3,7 @@
 import hashlib
 import json
 import struct
+from typing import Any
 
 
 def contract():
@@ -239,7 +240,8 @@ class LessonCatalogue:
 
     def visible(self, workspace, limit):
         reach = self.store._LESSON_SCOPE
-        predicate, arguments = f"AND {reach} = 'global' ", ()
+        predicate = f"AND {reach} = 'global' "
+        arguments: tuple[Any, ...] = ()
         if workspace:
             predicate = f"AND ({reach} = 'global' OR ({reach} = 'workspace' AND scope_ref = ?)) "
             arguments = (workspace,)

@@ -190,6 +190,8 @@ def _unpack_apply(raw: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         )
     case_key = keys[0]
     case_args = raw.get(case_key)
+    if not isinstance(case_args, dict):
+        raise ProposalError(f"proposal.apply.{case_key} must be an object")
     return case_key, case_args
 
 
@@ -209,7 +211,7 @@ def _parse_timestamp_iso(value: str, *, now: float | None) -> bool:
 
 # Declarative schema for from_dict: (field_name, default_factory, coerce)
 # coerce receives the raw value and returns the coerced value.
-_FIELD_SCHEMA = (
+_FIELD_SCHEMA: tuple[tuple[str, Callable[[], Any], Callable[[Any], Any]], ...] = (
     ("title", lambda: "", lambda v: str(v or "")),
     ("preview", lambda: "", lambda v: str(v or "")),
     (

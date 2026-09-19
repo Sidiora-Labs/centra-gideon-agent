@@ -289,7 +289,8 @@ _BACKLINKS_HEADING = "## Backlinks"
 
 
 def timeline_lines(body: str) -> list[str]:
-    timeline, entered = [], False
+    timeline: list[str] = []
+    entered = False
     for line in body.splitlines():
         if line.strip() == _TIMELINE_HEADING:
             entered = True

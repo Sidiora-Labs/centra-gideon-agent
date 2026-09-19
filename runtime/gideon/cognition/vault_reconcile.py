@@ -3,6 +3,7 @@
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
 
 def contract():
@@ -37,7 +38,8 @@ class GraphProjection:
                         source=str(item.get("source") or "user"),
                     )
                 )
-        by_record, inbound = {}, {}
+        by_record: dict[tuple[str, str], list[Any]] = {}
+        inbound: dict[str, list[dict[str, Any]]] = {}
         for entity in entities:
             try:
                 edges = self.service.graph_backlinks(
@@ -208,7 +210,7 @@ class VaultCycle:
         self.vault, self.api = vault, contract()
 
     def run(self, knowledge, enqueue):
-        edits = (
+        edits: dict[str, Any] = (
             self.vault.absorb_edits()
             if self.vault.two_way
             else dict(absorbed=0, conflicts={}, rejected=0)
@@ -246,7 +248,7 @@ class VaultEdits:
         self.vault, self.api = vault, contract()
 
     def absorb(self):
-        result = dict(absorbed=0, rejected=0, conflicts={})
+        result: dict[str, Any] = dict(absorbed=0, rejected=0, conflicts={})
         if not self.vault.two_way:
             return result
         for relative in sorted(self.vault._load_manifest()):
@@ -437,7 +439,8 @@ class VaultInspection:
         owned, seeds = set(self.vault._load_manifest()), set(
             self.api.starter_seeds(self.vault._mode)
         )
-        flags, incoming = [], {}
+        flags: list[tuple[str, str, str]] = []
+        incoming: dict[str, set[str]] = {}
         for relative, (metadata, body) in pages.items():
             conflict = str(metadata.get(self.api.CONFLICT_KEY) or "")
             if conflict:

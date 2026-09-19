@@ -173,7 +173,8 @@ class GateWalk:
     def check_quiet(self) -> FireDecision | None:
         from gideon.automation.triggers.calendar import evaluate_quiet
 
-        result, _ = evaluate_quiet(self.context.gates, self.moment)
+        moment = self.moment or datetime.now()
+        result, _ = evaluate_quiet(self.context.gates, moment)
         return (
             None
             if result.allowed
@@ -183,7 +184,8 @@ class GateWalk:
     async def check_duty(self) -> FireDecision | None:
         from gideon.automation.triggers.calendar import evaluate_duty
 
-        result = await evaluate_duty(self.context.gates, self.moment)
+        moment = self.moment or datetime.now()
+        result = await evaluate_duty(self.context.gates, moment)
         return (
             None
             if result.allowed

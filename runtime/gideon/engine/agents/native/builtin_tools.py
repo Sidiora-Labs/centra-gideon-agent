@@ -75,13 +75,12 @@ def bind_tool_context(
 ):
     from gideon.integrations.tool_providers import projection
 
-    assignments = (
-        (_CURRENT_CWD, str(cwd) if cwd else ""),
-        (_CURRENT_AGENT, agent or ""),
-        (_CURRENT_EXTRA_ROOTS, tuple(map(str, extra_roots or ()))),
-        (_CURRENT_PROJECT_ID, project_id or ""),
-    )
-    bound = [variable.set(value) for variable, value in assignments]
+    bound = [
+        _CURRENT_CWD.set(str(cwd) if cwd else ""),
+        _CURRENT_AGENT.set(agent or ""),
+        _CURRENT_EXTRA_ROOTS.set(tuple(map(str, extra_roots or ()))),
+        _CURRENT_PROJECT_ID.set(project_id or ""),
+    ]
     bound.append(projection.bind_project_dir(cwd))
     return bound
 

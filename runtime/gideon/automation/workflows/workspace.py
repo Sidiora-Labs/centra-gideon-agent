@@ -477,7 +477,7 @@ class _EnvironmentField:
         self.binding = declaration is not None and declaration.startswith("{{secret:")
         self.key = (
             declaration[len("{{secret:") :].rstrip("}").strip()
-            if self.binding
+            if declaration is not None and self.binding
             else name
         )
 
@@ -498,7 +498,7 @@ class _EnvironmentField:
 
     def resolve(self, grants: dict[str, str], host: dict[str, str]) -> tuple[bool, str]:
         if not self.inherited and not self.binding:
-            return True, self.declaration
+            return True, self.declaration or ""
         if self.key in grants:
             return True, grants[self.key]
         if self.inherited and self.name in host and not looks_secret(self.name):

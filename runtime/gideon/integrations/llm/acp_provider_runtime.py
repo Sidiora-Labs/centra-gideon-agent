@@ -12,6 +12,7 @@ from typing import Any
 
 from gideon.integrations.acp.errors import AcpError
 from gideon.integrations.acp.types import STOP_REASON_CANCELLED, STOP_REASON_END_TURN
+from gideon.integrations.llm.base import CancelOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ async def relay_events(
 
 async def cancel_turn(
     endpoint, send_method: str, timeout: float, *, tolerate_wait_errors: bool = False
-) -> str:
+) -> CancelOutcome:
     if not endpoint.has_active_turn():
         return "no_turn"
     try:

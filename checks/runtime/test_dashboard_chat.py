@@ -6655,7 +6655,9 @@ class TestStopHistoryBanner:
         assert self._last_stop_soft(session) is False
 
 
-from gideon.interfaces.dashboard.chat_runner import run_chat as _REAL_RUN_CHAT  # noqa: E402
+from gideon.interfaces.dashboard.chat_runner import (  # noqa: E402
+    run_chat as _REAL_RUN_CHAT,
+)
 
 
 class TestAcpProcessDiedRecovery:

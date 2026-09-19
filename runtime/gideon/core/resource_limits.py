@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from types import ModuleType
 
+_resource: ModuleType | None
 try:
-    import resource as _resource
+    import resource
 except ImportError:
     _resource = None
+else:
+    _resource = resource
 
 logger = logging.getLogger(__name__)
 DEFAULT_FD_TARGET = 10240

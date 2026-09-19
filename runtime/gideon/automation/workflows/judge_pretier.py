@@ -172,7 +172,7 @@ async def run_fallback_check(
         ),
         FallbackCheck.DIFF_NONEMPTY: lambda: diff_lines > 0,
     }
-    evaluate = decisions.get(kind)
+    evaluate = decisions.get(kind) if kind is not None else None
     return evaluate() if evaluate is not None else None
 
 

@@ -50,7 +50,10 @@ from gideon.automation.workflows import (
     conditions,
 )
 from gideon.automation.workflows import context as context_mod
-from gideon.automation.workflows import execution_hints, gate_policy
+from gideon.automation.workflows import (
+    execution_hints,
+    gate_policy,
+)
 from gideon.automation.workflows import journal as journal_mod
 from gideon.automation.workflows import (
     judge_calibration,

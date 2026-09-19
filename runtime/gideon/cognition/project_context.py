@@ -167,7 +167,7 @@ def _context_dir(project_id: str) -> Path | None:
 
 
 def inlined_context_files(project_id: str) -> frozenset[str]:
-    candidates = [(OVERVIEW_FILE, read_overview(project_id))]
+    candidates: list[tuple[str, object]] = [(OVERVIEW_FILE, read_overview(project_id))]
     candidates.extend(
         (filename, read_ledger(project_id, kind))
         for kind, filename in LEDGER_FILES.items()

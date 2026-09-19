@@ -3,6 +3,7 @@
 import dataclasses
 import typing
 from dataclasses import dataclass, fields
+from typing import Any
 
 from gideon.core.config.loader import AppConfig
 
@@ -115,7 +116,7 @@ class SchemaCompiler:
         if _is_dataclass_type(annotation):
             return self.object(annotation)
         shape = _python_type_to_json(annotation)
-        node = {"type": shape}
+        node: dict[str, Any] = {"type": shape}
         containers = {
             "array": ("items", _extract_item_type, {}),
             "object": ("additionalProperties", _extract_value_type, True),
@@ -125,7 +126,7 @@ class SchemaCompiler:
             child = argument(annotation)
             node[key] = (
                 self.object(child)
-                if _is_dataclass_type(child)
+                if isinstance(child, type) and _is_dataclass_type(child)
                 else {"type": _json_type_for_value(child)} if child else unspecified
             )
         return node

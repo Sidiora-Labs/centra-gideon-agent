@@ -7,7 +7,10 @@ import re
 import time
 from datetime import date, datetime, timedelta, timezone
 from itertools import pairwise
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from gideon.automation.triggers.models import Issue
 
 logger = logging.getLogger(__name__)
 MAX_SKIP_ADVANCE = 400
@@ -232,7 +235,7 @@ def _cron_fires_on_date(expr: str, day: date, tz_name: str) -> bool:
 class ClockDiagnostics:
     def __init__(self, specification: dict[str, Any]):
         self.spec = specification
-        self.issues = []
+        self.issues: list[Issue] = []
         self.expression = str(specification.get("expr", "") or "").strip()
 
     def add(self, path: str, message: str, severity: str = "warning") -> None:

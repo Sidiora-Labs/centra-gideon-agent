@@ -115,7 +115,8 @@ def read_claim(
 
 
 def write_claim(claim: Any, *, base_dir: Path | str | None = None) -> None:
-    if claim is not None and getattr(claim, "trigger_id", ""):
+    trigger_id = getattr(claim, "trigger_id", None)
+    if isinstance(trigger_id, str) and trigger_id:
         ClaimJournal(base_dir).publish(claim)
 
 

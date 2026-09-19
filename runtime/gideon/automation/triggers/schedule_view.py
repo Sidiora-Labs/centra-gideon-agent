@@ -230,9 +230,13 @@ def _describe_adaptive(spec: dict[str, Any]) -> str:
     }
     if not all(intervals.values()):
         return "adaptive"
+    healthy = intervals["healthy"]
+    degraded = intervals["degraded"]
+    if healthy is None or degraded is None:
+        return "adaptive"
     state = str(spec.get("health_state") or "").strip().lower()
     current = "degraded" if state == "degraded" else "healthy"
-    return f"adaptive — every {_mins(intervals['healthy'])} healthy, {_mins(intervals['degraded'])} degraded (now: {current})"
+    return f"adaptive — every {_mins(healthy)} healthy, {_mins(degraded)} degraded (now: {current})"
 
 
 def _mins(secs: int) -> str:

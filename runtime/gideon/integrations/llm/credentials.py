@@ -7,7 +7,7 @@ import tempfile
 import threading
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 logger = logging.getLogger(__name__)
 CredentialKind = Literal["none", "api_key", "static_token", "oauth2"]
@@ -59,9 +59,10 @@ class CredentialStore:
             if kind not in _SECRET_BEARING_KINDS:
                 if kind != "none":
                     logger.warning("Credential %r has unsupported kind %r", name, kind)
-                return Credential(name, kind)
+                return Credential(name, "none")
+            credential_kind = cast(CredentialKind, kind)
             reference = descriptor.get("value_env")
-            candidates = (
+            candidates: tuple[tuple[CredentialSource, object], ...] = (
                 (
                     "env",
                     (
@@ -75,8 +76,8 @@ class CredentialStore:
             )
             for origin, value in candidates:
                 if isinstance(value, str) and value:
-                    return Credential(name, kind, value, origin)
-            return Credential(name, kind)
+                    return Credential(name, credential_kind, value, origin)
+            return Credential(name, credential_kind)
 
     def save(self, descriptors: dict[str, dict[str, object]]) -> None:
         snapshot = {name: dict(row) for name, row in descriptors.items()}

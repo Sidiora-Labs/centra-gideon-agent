@@ -214,13 +214,12 @@ class _SuggestionTurn:
             if kind == EVENT_TEXT_CHUNK:
                 self.text += event.text
             elif kind == EVENT_PERMISSION_REQUEST:
-                record = dict(
+                sel().log_tool_invocation(
                     session_key="_bg",
                     tool_name=getattr(event, "title", "unknown"),
                     outcome="denied",
                     source="suggestions",
                 )
-                sel().log_tool_invocation(**record)
                 await client.reject_tool(event.request_id)
         return self.text
 

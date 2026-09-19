@@ -283,7 +283,7 @@ export function useTheme(): AppTheme {
   return theme
 }
 
-export function notify(message: string, level: 'info' | 'success' | 'error' = 'info'): void {
+export function notify(message: string, level: 'info' | 'success' | 'warning' | 'error' = 'info'): void {
   try { window.dispatchEvent(new CustomEvent('ne:toast', { detail: { message, level } })) }
   catch {   }
 }

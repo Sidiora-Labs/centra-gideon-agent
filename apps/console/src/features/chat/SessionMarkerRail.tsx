@@ -8,8 +8,10 @@ type ViewportPosition = {
   height: number
 }
 
+type MarkerTurn = Pick<ChatTurn, 'role'> & Partial<Pick<ChatTurn, 'segments' | 'ts'>>
+
 export interface SessionMarkerRailProps {
-  turns: readonly Pick<ChatTurn, 'role'>[]
+  turns: readonly MarkerTurn[]
   scrollRef: RefObject<HTMLDivElement | null>
   nodeOf: (index: number) => HTMLElement | null | undefined
   showReturnToNewest: boolean
@@ -98,7 +100,9 @@ export function SessionMarkerRail({
           {turns.map((turn, index) => {
             const speaker = turn.role === 'user' ? 'You' : 'Assistant'
             const previewId = `session-marker-preview-${index}`
-            const excerpt = turnText(turn).slice(0, 240)
+            const excerpt = turn.segments
+              ? turnText({ role: turn.role, segments: turn.segments, ts: turn.ts }).slice(0, 240)
+              : ''
             return (
               <button key={index} type="button" data-session-marker
                 aria-label={`Jump to message ${index + 1}, ${speaker}`}

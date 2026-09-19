@@ -2,11 +2,15 @@
 
 import mimetypes
 from pathlib import Path
+from types import ModuleType
 
+Image: ModuleType | None
 try:
-    from PIL import Image
+    from PIL import Image as _PillowImage
 except ImportError:
     Image = None
+else:
+    Image = _PillowImage
 
 _EXT_TYPE: dict[str, str] = {
     ".png": "image",
@@ -136,11 +140,11 @@ def guess_mime(filename: str) -> str:
 
 
 def make_image_thumbnail(src_path: str, dest_path: str) -> bool:
-    available = Image is not None and _MediaName(src_path).extension != ".svg"
-    if not available:
+    image = Image
+    if image is None or _MediaName(src_path).extension == ".svg":
         return False
     try:
-        with Image.open(src_path) as source:
+        with image.open(src_path) as source:
             preview = source.convert("RGB")
             try:
                 preview.thumbnail(_THUMBNAIL_MAX)

@@ -7,8 +7,10 @@ import difflib
 import json
 import logging
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from gideon.integrations.acp.types import (
     EVENT_PERMISSION_REQUEST,
@@ -117,7 +119,8 @@ def coerce_tool_content(content: object) -> str:
         if isinstance(block, str):
             text = block
         elif isinstance(block, dict):
-            text = _mapping(block.get("content")).get("text") or block.get("text")
+            raw_text = _mapping(block.get("content")).get("text") or block.get("text")
+            text = str(raw_text) if raw_text is not None else ""
         else:
             continue
         if text:
@@ -226,7 +229,7 @@ def _declares_failure(node: object, depth: int = 0) -> bool:
                     key in _EXIT_STATUS_KEYS and _declares_nonzero_exit(item)
                 ):
                     return True
-            children = value.values()
+            children: Iterable[Any] = value.values()
         elif isinstance(value, list):
             children = value
         else:

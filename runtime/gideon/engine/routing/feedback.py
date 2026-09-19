@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-from collections import Counter
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -59,10 +58,9 @@ def _read_records(path: Path) -> Iterator[dict[str, Any]]:
 
 
 def _cell_of(event: dict[str, Any]) -> Cell | None:
-    coordinates = tuple(
-        str(event.get(key) or "") for key in ("use_case", "query_class")
-    )
-    if not all(coordinates):
+    use_case = str(event.get("use_case") or "")
+    query_class = str(event.get("query_class") or "")
+    if not (use_case and query_class):
         return None
     ref = str(event.get("ref") or "")
     if not ref:
@@ -70,14 +68,14 @@ def _cell_of(event: dict[str, Any]) -> Cell | None:
         if not (provider and model):
             return None
         ref = ref_of(provider, model)
-    return *coordinates, ref
+    return use_case, query_class, ref
 
 
 class FeedbackCensus:
     def __init__(self):
         self.seen = set()
-        self.counts = Counter()
-        self.totals = Counter()
+        self.counts: dict[Cell, int] = {}
+        self.totals: dict[Cell, float] = {}
         self.dropped = dict.fromkeys(
             (
                 "unattributed",
@@ -106,8 +104,10 @@ class FeedbackCensus:
                 if verdict in _QUALITY_FEEDBACK:
                     if identifier:
                         self.seen.add(identifier)
-                    self.counts[cell] += 1
-                    self.totals[cell] += _QUALITY_FEEDBACK[verdict]
+                    self.counts[cell] = self.counts.get(cell, 0) + 1
+                    self.totals[cell] = (
+                        self.totals.get(cell, 0.0) + _QUALITY_FEEDBACK[verdict]
+                    )
                     return
                 reason = (
                     "control_flow" if verdict in _KNOWN_VERDICTS else "unknown_verdict"

@@ -39,7 +39,8 @@ class LegacySchedule:
     def convert(self) -> tuple[dict[str, Any], list[str]]:
         source = self.schedule or {}
         kind = str(source.get("kind", "") or "")
-        notes = []
+        notes: list[str] = []
+        spec: dict[str, Any]
         match kind:
             case "cron":
                 spec = {"kind": "cron", "expr": str(source.get("cron_expr", "") or "")}
@@ -59,7 +60,7 @@ class LegacySchedule:
                     "legacy `every` has no trigger clock kind; converted to an explicit interval rather than `at`, which would turn a recurring job into a one-shot"
                 )
             case _:
-                spec: dict = {"kind": ""}
+                spec = {"kind": ""}
                 notes.append(
                     f"unknown legacy schedule kind {kind!r}; the trigger loads disabled for review"
                 )

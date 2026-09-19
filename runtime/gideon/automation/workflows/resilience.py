@@ -97,10 +97,17 @@ class Attempt:
     def from_dict(cls, d: dict[str, Any]) -> Attempt:
         raw = d or {}
         return cls(
-            **{
-                name: convert(raw.get(name, default), default)
-                for name, convert, default in _ATTEMPT_FIELDS
-            }
+            attempt=_coerce_int(raw.get("attempt")),
+            failure_class=_coerce_str(raw.get("failure_class")),
+            error=_coerce_str(raw.get("error")),
+            expected=_coerce_str(raw.get("expected")),
+            actual=_coerce_str(raw.get("actual")),
+            evidence=_coerce_str(raw.get("evidence")),
+            fix_instruction=_coerce_str(raw.get("fix_instruction")),
+            severity=_coerce_str(raw.get("severity"), "error"),
+            error_signature=_coerce_str(raw.get("error_signature")),
+            tokens=_coerce_int(raw.get("tokens")),
+            duration_secs=_coerce_float(raw.get("duration_secs")),
         )
 
 

@@ -2932,7 +2932,7 @@ class KnowledgeStore:
         chunk_rows = self.db.execute(
             "SELECT id, item_id FROM chunks WHERE embedding IS NOT NULL"
         ).fetchall()
-        by_item: dict[str, list[tuple[str, None]]] = defaultdict(list)
+        by_item: dict[str, list[tuple[str, bytes | None]]] = defaultdict(list)
         for row in chunk_rows:
             by_item[row["item_id"]].append((row["id"], None))
         for item_id, rows in by_item.items():

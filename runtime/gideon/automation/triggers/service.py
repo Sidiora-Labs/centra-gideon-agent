@@ -435,17 +435,17 @@ class BootPass:
             [trigger.to_dict() for trigger in triggers], now=self.now
         )
         catch_up = catch_up_at_boot(triggers, now=self.now)
-        by_id: dict = {}
+        by_id: dict[str, Trigger] = {}
         for trigger in triggers:
             by_id.setdefault(trigger.id, trigger)
         rearmed = []
         for identity, new_at, reason in plan_boot(triggers, now=self.now):
-            trigger = by_id.get(identity)
-            if trigger is None or new_at == to_epoch(trigger.next_fire_at):
+            selected = by_id.get(identity)
+            if selected is None or new_at == to_epoch(selected.next_fire_at):
                 continue
-            trigger.next_fire_at = to_iso(new_at)
+            selected.next_fire_at = to_iso(new_at)
             if self.persist:
-                self.store.upsert(trigger)
+                self.store.upsert(selected)
             rearmed.append(dict(id=identity, next_fire_at=new_at, reason=reason))
         return dict(
             rearmed=rearmed,

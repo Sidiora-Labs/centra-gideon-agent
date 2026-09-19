@@ -374,9 +374,12 @@ class _ProviderProcess:
     def _terminate_group(self) -> None:
         import time
 
+        group = self.group
+        if group is None:
+            return
         for signum in (signal.SIGTERM, signal.SIGKILL):
             try:
-                os.killpg(self.group, signum)
+                os.killpg(group, signum)
             except OSError:
                 break
             if signum == signal.SIGTERM:

@@ -826,16 +826,17 @@ def inspect_run(run: Any) -> worktrees.WorktreeState:
     identity = str(getattr(run, "id", "") or "")
     recorded = workspace_state(run)
     directory = str(recorded.get("path", "") or "")
-    options = {}
+    porcelain = ""
+    preserved: list[str] | None = None
     if directory and Path(directory).is_dir():
         from gideon.automation.loop import worktree as loop_worktree
 
         status, text = loop_worktree._git(directory, "status", "--porcelain")
-        options = dict(
-            porcelain=text if status == 0 else "",
-            preserved=list(recorded.get("preserved") or []),
-        )
-    return worktrees.inspect_worktree(identity, directory or "", **options)
+        porcelain = text if status == 0 else ""
+        preserved = list(map(str, recorded.get("preserved") or []))
+    return worktrees.inspect_worktree(
+        identity, directory or "", porcelain=porcelain, preserved=preserved
+    )
 
 
 def stamp_preserved_path(run: Any, state: worktrees.WorktreeState) -> bool:

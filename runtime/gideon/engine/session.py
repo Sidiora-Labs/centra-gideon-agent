@@ -7,7 +7,7 @@ import os
 import signal
 import time
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -36,6 +36,7 @@ from gideon.integrations.llm.base import CancelOutcome, ModelProvider
 from gideon.operations.stats import Stats
 
 logger = logging.getLogger(__name__)
+_PROVIDER_RESOLUTION_ERRORS: tuple[type[Exception], ...]
 try:
     from gideon.extensions.providers.provider_bridge import (
         ProviderResolutionError as _BridgeResolutionError,
@@ -239,8 +240,8 @@ class ConversationDirectory:
             )
         return max(0, min(requested, _MAX_POOL))
 
-    def _launch(self, operation: Awaitable[Any]) -> asyncio.Task:
-        task = asyncio.create_task(operation)
+    def _launch(self, operation: Coroutine[Any, Any, Any]) -> asyncio.Task[Any]:
+        task: asyncio.Task[Any] = asyncio.create_task(operation)
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
         return task
@@ -595,7 +596,7 @@ class ConversationDirectory:
     def context_info(self) -> list[dict[str, object]]:
         from gideon.engine.agents.provider import AgentProvider
 
-        report = []
+        report: list[dict[str, object]] = []
         for key, entry in self._sessions.items():
             provider = entry.provider
             usage = provider.context_usage_pct()
@@ -776,6 +777,8 @@ class ConversationDirectory:
             entry, initial = reuse
             await entry.semaphore.acquire()
             return entry.provider, initial, False
+        if factory is None:
+            raise RuntimeError("No provider factory configured")
         provider = await self._acquire_runner(
             factory, key, agent, channel_id, model, cwd, extra_env, extra_factory_kwargs
         )
@@ -1138,6 +1141,7 @@ class ConversationDirectory:
         )
         if outcome == "no_turn":
             return "idle"
+        result: Literal["soft", "hard"]
         if outcome == "acked":
             entry.prev_turn_cancelled = True
             result, callback = "soft", on_soft

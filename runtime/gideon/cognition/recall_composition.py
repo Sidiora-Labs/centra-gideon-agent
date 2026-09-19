@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 
 class ContextAssembly:
     def __init__(self, service):
@@ -151,7 +153,8 @@ class VolunteerSelection:
     def deliver(self, session_key, log_events):
         from gideon.cognition.memory_push import render_block
 
-        entries, decisions = [], []
+        entries: list[tuple[str, str]] = []
+        decisions: list[dict[str, Any]] = []
         selected = iter(self.records())
         while not len(entries) >= self.cap:
             try:
