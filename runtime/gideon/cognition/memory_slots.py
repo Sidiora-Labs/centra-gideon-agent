@@ -175,7 +175,7 @@ class SlotLine:
     def from_dict(cls, raw: Any) -> "SlotLine":
         if not isinstance(raw, dict):
             return cls(text=raw if isinstance(raw, str) else str(raw))
-        values = {name: str(raw.get(name, "")) for name in ("text", "added_at")}
+        values: dict = {name: str(raw.get(name, "")) for name in ("text", "added_at")}
         values["tombstoned"] = bool(raw.get("tombstoned", False))
         values["tombstoned_by"] = str(raw.get("tombstoned_by", ""))
         values["reinforcements"] = int(raw.get("reinforcements", 1) or 1)

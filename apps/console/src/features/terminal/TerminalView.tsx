@@ -1,13 +1,13 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { fvs } from '../../shared/theme/fontWeight'
-import { RotateCw, Plug } from 'lucide-react'
+import { Folder, RotateCw, Plug } from 'lucide-react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { useMode } from '../../app/shell/theme'
 import { api } from '../../shared/data/api'
-import { registerTerminal, unregisterTerminal } from './terminalBridge'
+import { registerTerminal } from './terminalBridge'
 import { escapeGate } from './escapeGate'
 import type { TermTab } from './TerminalPage'
 
@@ -27,6 +27,7 @@ export function TerminalView({ tab, onExited, onClose, onSession }: { tab: TermT
   const [status, setStatus] = useState<Status>('connecting')
   const [exitCode, setExitCode] = useState<number | null>(null)
   const [restartKey, setRestartKey] = useState(0)
+  const [cwd, setCwd] = useState(tab.cwd ?? '')
   const sessionIdRef = useRef(tab.id)
 
   useEffect(() => {
@@ -43,6 +44,21 @@ export function TerminalView({ tab, onExited, onClose, onSession }: { tab: TermT
     const fit = new FitAddon(); term.loadAddon(fit); term.loadAddon(new WebLinksAddon())
     term.open(host); try { fit.fit() } catch {   }
     termRef.current = term
+    const cwdHandlers = [
+      term.parser.registerOscHandler(7, (data) => {
+        try {
+          const next = new URL(data).pathname
+          if (next) setCwd(decodeURIComponent(next))
+        } catch {   }
+        return true
+      }),
+      term.parser.registerOscHandler(1337, (data) => {
+        if (!data.startsWith('CurrentDir=')) return false
+        const next = data.slice('CurrentDir='.length)
+        if (next) setCwd(next)
+        return true
+      }),
+    ]
 
     let lastEsc = 0
     term.attachCustomKeyEventHandler((e) => {
@@ -59,6 +75,7 @@ export function TerminalView({ tab, onExited, onClose, onSession }: { tab: TermT
     let disposed = false
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined
     let attempts = 0
+    let unregisterBridge = () => {}
 
     const connect = () => {
       if (disposed) return
@@ -77,8 +94,9 @@ export function TerminalView({ tab, onExited, onClose, onSession }: { tab: TermT
         if (typeof e.data === 'string') {
           try {
             const m = JSON.parse(e.data)
-            if (m.type === 'exited') { setExitCode(typeof m.code === 'number' ? m.code : null); setStatus('exited'); onExited() }
+            if (m.type === 'exited') { unregisterBridge(); setExitCode(typeof m.code === 'number' ? m.code : null); setStatus('exited'); onExited() }
             else if (m.type === 'error') setStatus('error')
+            else if (m.type === 'cwd' && typeof m.cwd === 'string' && m.cwd) setCwd(m.cwd)
           } catch {   }
           return
         }
@@ -108,7 +126,7 @@ export function TerminalView({ tab, onExited, onClose, onSession }: { tab: TermT
     ro.observe(host)
 
     const boundSession = sessionIdRef.current
-    registerTerminal(boundSession, (text: string) => {
+    unregisterBridge = registerTerminal(boundSession, (text: string) => {
       const ws = wsRef.current
       if (ws && ws.readyState === WebSocket.OPEN) { ws.send(new TextEncoder().encode(text)); return true }
       return false
@@ -117,9 +135,10 @@ export function TerminalView({ tab, onExited, onClose, onSession }: { tab: TermT
     return () => {
       disposed = true
       clearTimeout(reconnectTimer)
-      unregisterTerminal(boundSession)
+      unregisterBridge()
       const ws = wsRef.current
       try { (ws as any)?._onData?.dispose?.() } catch {   }
+      cwdHandlers.forEach((handler) => handler.dispose())
       ro.disconnect(); ws?.close(); term.dispose()
     }
   }, [restartKey]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -145,6 +164,7 @@ export function TerminalView({ tab, onExited, onClose, onSession }: { tab: TermT
     try {
       const r = await api.createTerminal(tab.cwd, tab.sandbox)
       sessionIdRef.current = r.session_id
+      setCwd(r.cwd)
       onSession?.(r.session_id)
     } catch {   }
     termRef.current?.clear()
@@ -157,14 +177,19 @@ export function TerminalView({ tab, onExited, onClose, onSession }: { tab: TermT
       onKeyDown={(e) => {
         if (e.key === 'Enter' && e.target === e.currentTarget) { e.preventDefault(); termRef.current?.focus() }
       }}
-      className="group relative h-full overflow-hidden rounded-lg border border-outline/30 outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
+      className="group relative flex h-full flex-col overflow-hidden rounded-lg border border-outline/30 outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
       style={{ background: mode === 'light' ? '#ffffff' : '#0d0d12' }}>
-      <div ref={hostRef} className="h-full w-full" />
+      <div className="flex h-7 shrink-0 items-center gap-1.5 border-b border-outline/20 px-2 text-[0.6875rem] text-on-surface-low"
+        aria-label={`Current directory: ${cwd || 'unavailable'}`} title={cwd || 'Current directory unavailable'}>
+        <Folder size={11} className="shrink-0" />
+        <span className="truncate font-mono">{cwd || 'Current directory unavailable'}</span>
+      </div>
+      <div ref={hostRef} className="min-h-0 w-full flex-1" />
 
       {
 }
       <div id={hintId}
-        className={`pointer-events-none absolute right-2 top-1.5 rounded-pill bg-surface-high/90 px-2 py-0.5 text-on-surface-low text-[0.6875rem] transition-opacity ${hintRead ? 'opacity-0' : 'opacity-0 group-focus-within:opacity-100'}`}>
+        className={`pointer-events-none absolute right-2 top-8 rounded-pill bg-surface-high/90 px-2 py-0.5 text-on-surface-low text-[0.6875rem] transition-opacity ${hintRead ? 'opacity-0' : 'opacity-0 group-focus-within:opacity-100'}`}>
         Enter to type here · Esc Esc to leave
       </div>
 

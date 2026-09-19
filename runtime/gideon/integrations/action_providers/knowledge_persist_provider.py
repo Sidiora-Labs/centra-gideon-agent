@@ -39,8 +39,15 @@ class _CitationWiring:
     content: str
     summary: str
     stored: list[str] = field(default_factory=list)
-    records: list[Any] | None = None
+    records: list[Any] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class _ConflictReview:
+    conflicts: list[dict[str, Any]] = field(default_factory=list)
+    candidates: list[dict[str, Any]] = field(default_factory=list)
+    prompts: list[str] = field(default_factory=list)
 
 
 def _resolve_citations(
@@ -144,7 +151,7 @@ class _PreparedWrite:
             body=content if isinstance(content, str) else _stringify(content),
             summary=str(config.get("summary") or ""),
         )
-        claims = config.get("claims") or []
+        claims = _bound_claims(config, citations.content)
         validation = check_persist(
             kind=str(config.get("kind") or "fact"),
             title=title,
@@ -159,7 +166,7 @@ class _PreparedWrite:
         )
         return cls(config, context, title, citations, claims, validation)
 
-    async def execute(self, store: Any, started: float, judge=None) -> ActionResult:
+    def execute(self, store: Any, started: float) -> ActionResult:
         identity, fingerprint, previous = _lookup(store, self.validation.logical_key)
         decision = decide_write(
             logical_key=self.validation.logical_key,
@@ -175,6 +182,9 @@ class _PreparedWrite:
             mentions_appended=0,
             citation_warnings=self.citations.warnings,
             reason=decision.reason,
+            conflicts=[],
+            conflict_candidates=[],
+            conflict_prompts=[],
         )
 
         def finish() -> ActionResult:
@@ -187,32 +197,40 @@ class _PreparedWrite:
         if decision.action == "noop":
             return finish()
         source = str(self.config.get("source_ref") or _run_source_ref(self.context))
+        identifier = decision.item_id or uuid.uuid4().hex[:12]
         metadata = {
             **previous,
             **_scope_metadata(self.config, self.context, existing=previous),
         }
+        metadata.pop("conflicts", None)
+        metadata.pop("conflict_candidates", None)
         scope_tags = project_scope.scope_tags(
             str(metadata.get(project_scope.PROJECT_ID_KEY, ""))
         )
-        conflicts = []
+        review = _ConflictReview()
         if self.claims:
             arriving = [claim for claim in self.claims if isinstance(claim, dict)]
-            conflicts = await _detect_conflicts(
+            review = _detect_conflicts(
                 store,
                 arriving,
                 item_id=decision.item_id,
-                source_ref=source,
+                source_ref=identifier,
                 edge_source=decision.item_id or "",
-                judge=judge,
             )
             metadata["claims"], receipt["mentions_appended"] = _merge_claims(
                 existing=metadata.get("claims") or [],
                 incoming=arriving,
                 source_ref=source,
             )
-            if conflicts:
-                metadata["conflicts"] = conflicts
-        receipt["conflicts"] = conflicts
+            if review.conflicts:
+                metadata["conflicts"] = review.conflicts
+            if review.candidates:
+                metadata["conflict_candidates"] = review.candidates
+        receipt["conflicts"] = review.conflicts
+        receipt["conflict_candidates"] = review.candidates
+        receipt["conflict_prompts"] = review.prompts
+        if len(review.prompts) == 1:
+            receipt["conflict_prompt"] = review.prompts[0]
         if decision.action == "reinforce":
             _write_metadata(store, decision.item_id, metadata, source_ref=source)
             _write_tags(store, decision.item_id, scope_tags)
@@ -231,7 +249,6 @@ class _PreparedWrite:
         )
         if self.citations.records is not None:
             metadata["citations"] = list(self.citations.stored)
-        identifier = decision.item_id or uuid.uuid4().hex[:12]
         try:
             _upsert_item(
                 store,
@@ -252,8 +269,8 @@ class _PreparedWrite:
             )
         except Exception as exc:
             return ActionResult(False, error=f"knowledge write failed: {exc}")
-        if conflicts:
-            _write_conflict_edges(store, conflicts, source_item=identifier)
+        if review.conflicts:
+            _write_conflict_edges(store, review.conflicts, source_item=identifier)
         _write_item_citations(store, identifier, self.citations.records or [])
         _enqueue_enrichment(identifier)
         receipt.update(item_id=identifier, created=decision.action == "create")
@@ -335,6 +352,27 @@ def _open_store():
     from gideon.cognition.knowledge.store import KnowledgeStore, knowledge_db_path
 
     return KnowledgeStore(db_path=str(knowledge_db_path()))
+
+
+def _bound_claims(config: dict[str, Any], content: str) -> list[dict[str, Any]]:
+    """Claims explicitly supplied by a caller, or the assertion carried by a fact write.
+
+    ``contradiction-review`` persists its statement as the body of a ``fact``.  Treating the
+    body as mere prose meant that write never entered the claim index, so both the deterministic
+    pass and the following model leg received an empty review.  An explicit ``claims`` key keeps
+    full control, including the deliberate opt-out ``claims: []``.
+    """
+    if "claims" in config:
+        raw = config.get("claims")
+        return (
+            [claim for claim in raw if isinstance(claim, dict)]
+            if isinstance(raw, list)
+            else []
+        )
+    if str(config.get("kind") or "fact").strip().lower() != "fact":
+        return []
+    statement = " ".join((content or "").split())
+    return [{"statement": statement}] if statement else []
 
 
 def _lookup(store, logical_key: str) -> tuple[str, str, dict[str, Any]]:
@@ -482,7 +520,7 @@ class _ClaimNeighborhood:
     excluded: str
 
     def identifiers(self, statements: list[str]) -> list[str]:
-        order = {}
+        order: dict = {}
         for statement in statements[:3]:
             for row in _search_rows(self.store, statement):
                 identifier = str(row.get("id") or "")
@@ -498,6 +536,17 @@ class _ClaimNeighborhood:
         statements = [claim.statement for claim in incoming if claim.statement]
         if not statements:
             return []
+        load = getattr(self.store, "claim_neighbours", None)
+        if callable(load):
+            return [
+                contradiction.Claim.from_dict(raw)
+                for raw in load(
+                    statements,
+                    exclude=self.excluded,
+                    limit=contradiction.MAX_CONFLICT_CANDIDATES,
+                )
+                if isinstance(raw, dict) and raw.get("statement")
+            ]
         result = []
         for identifier in self.identifiers(statements):
             for raw in _stored_claims(self.store, identifier):
@@ -513,141 +562,12 @@ def _neighbour_claims(store, incoming: list, *, exclude: str) -> list:
     return _ClaimNeighborhood(store, exclude).claims(incoming)
 
 
-CONFLICT_JUDGE_USE_CASE = "background"
-
-MAX_VERDICT_MEMO = 256
-
-_VERDICT_MEMO: dict[str, Any] = {}
-
-
-def reset_conflict_memo() -> None:
-    """Forget every memoized verdict. The seam a test uses to pin CALL COUNT."""
-    _VERDICT_MEMO.clear()
-
-
-async def _default_conflict_judge(prompt: str, *, use_case: str) -> Any:
-    """The one background-tier inference this path is allowed to make.
-
-    Rides ``one_shot_completion`` rather than a provider of its own: that is the seam where
-    the model-call guard applies the circuit breaker, the hard timeout and — the reason this
-    matters here — the SPEND METER. A judging pass that resolved its own provider would be
-    an unmetered inference running unattended on every write, which is exactly the shape of
-    cost nobody notices until the bill arrives.
-
-    ``use_case`` is the FAST background axis, not ``reasoning``: this is a yes/no question
-    over a bounded shortlist on the write path, and routing it to the reasoning chain would
-    put the most expensive model in the install behind every knowledge write.
-    """
-    from gideon.integrations.llm_helpers import one_shot_completion
-
-    return await one_shot_completion(prompt, use_case=use_case, output_type=dict)
-
-
-def _coerce_verdict(answer: Any) -> Any:
-    if isinstance(answer, dict):
-        return answer
-    if isinstance(answer, str):
-        from gideon.integrations.llm_helpers import parse_llm_json
-
-        return parse_llm_json(answer) or {}
-    return {}
-
-
-@dataclass(frozen=True)
-class _ConflictJudgement:
-    """The single question the fast tier is asked, and the shortlist that bounds it.
-
-    One subject claim and one candidate list, chosen deterministically BEFORE any model is
-    reached, is what makes the marginal cost of a write independent of store size: the
-    shortlist is capped at ``MAX_CONFLICT_CANDIDATES``, so the prompt has a ceiling no
-    amount of stored knowledge can raise.
-    """
-
-    subject: Any
-    candidates: list
-
-    @classmethod
-    def for_write(cls, arriving: list, existing: list, settled: set) -> Any:
-        """The one claim worth asking about, or ``None`` when there is nothing to ask.
-
-        Skips every claim the deterministic tier already ruled on — paying a model to
-        re-derive a proof is the one call with no possible upside — and takes the first
-        remaining claim whose shortlist is non-empty. First, not all: the tier is budgeted
-        at ONE inference per persist, and a write carrying twenty claims must cost the same
-        as a write carrying one.
-        """
+def _detect_conflicts(
+    store, incoming: list[dict], *, item_id: str, source_ref: str, edge_source: str = ""
+) -> _ConflictReview:
+    try:
         from gideon.cognition.knowledge import contradiction
 
-        for claim in arriving:
-            if not claim.statement or claim.statement in settled:
-                continue
-            candidates = contradiction.shortlist(claim, existing)
-            if candidates:
-                return cls(claim, candidates)
-        return None
-
-    async def run(self, judge) -> list:
-        from gideon.cognition.knowledge import contradiction
-
-        key = contradiction.memo_key(self.subject, self.candidates)
-        if key not in _VERDICT_MEMO:
-            prompt = contradiction.conflict_prompt(self.subject, self.candidates)
-            answer = await judge(prompt, use_case=CONFLICT_JUDGE_USE_CASE)
-            if len(_VERDICT_MEMO) >= MAX_VERDICT_MEMO:
-                _VERDICT_MEMO.clear()
-            _VERDICT_MEMO[key] = _coerce_verdict(answer)
-        return contradiction.parse_model_verdict(
-            _VERDICT_MEMO[key], self.subject, self.candidates
-        )
-
-
-async def _judge_conflicts(
-    arriving: list, existing: list, settled: list, judge
-) -> list:
-    """The model tier's findings, or ``[]`` when it cannot run.
-
-    Every failure mode collapses to ``[]`` — no provider configured, a dead chain, a
-    response that will not parse — because this tier exists to catch what the deterministic
-    one cannot PROVE. Its absence must cost exactly the findings it would have added and
-    nothing else: the deterministic conflicts and their edges are computed and persisted
-    before this is ever awaited, so an unreachable model degrades the pass rather than
-    failing the write.
-    """
-    try:
-        question = _ConflictJudgement.for_write(
-            arriving, existing, {conflict.left_claim for conflict in settled}
-        )
-        if question is None:
-            return []
-        return await question.run(judge or _default_conflict_judge)
-    except Exception:
-        logger.debug(
-            "contradiction judging unavailable — the deterministic findings stand",
-            exc_info=True,
-        )
-        return []
-
-
-async def _detect_conflicts(
-    store,
-    incoming: list[dict],
-    *,
-    item_id: str,
-    source_ref: str,
-    edge_source: str = "",
-    judge=None,
-) -> list[dict]:
-    """Deterministic conflicts first and persisted, then ONE fast-tier opinion on the rest.
-
-    The ORDER is the contract. ``find_conflicts`` runs and its edges are written before the
-    model is reached, so the relationship graph never depends on an inference: the model
-    contributes additional VERDICTS, and the edges for those verdicts are then built by the
-    same deterministic ``edges_from_conflicts`` + ``_write_edges`` pair, carrying
-    ``provenance='inferred'`` so a reader can still tell a proof from an opinion.
-    """
-    from gideon.cognition.knowledge import contradiction
-
-    try:
         arriving = [
             contradiction.Claim.from_dict(
                 {**claim, "source_ref": claim.get("source_ref") or source_ref}
@@ -656,26 +576,41 @@ async def _detect_conflicts(
         ]
         candidates = _neighbour_claims(store, arriving, exclude=item_id)
         if not candidates:
-            return []
+            return _ConflictReview()
         conflicts = contradiction.find_conflicts(arriving, candidates)
+        unsettled = contradiction.unsettled_candidates(arriving, candidates)
+        pending = {
+            (
+                candidate.left_claim,
+                candidate.right_claim,
+                candidate.right_item,
+            )
+            for candidate in unsettled
+        }
+        prompts = []
+        for claim in arriving:
+            neighbours = [
+                candidate
+                for candidate in contradiction.shortlist(claim, candidates)
+                if (claim.statement, candidate.statement, candidate.source_ref)
+                in pending
+            ]
+            if neighbours:
+                prompts.append(contradiction.conflict_prompt(claim, neighbours))
         if edge_source and conflicts:
             _write_edges(
                 store,
                 contradiction.edges_from_conflicts(conflicts),
                 source_item=edge_source,
             )
+        return _ConflictReview(
+            conflicts=[conflict.to_dict() for conflict in conflicts],
+            candidates=[candidate.to_dict() for candidate in unsettled],
+            prompts=prompts,
+        )
     except Exception:
         logger.warning("conflict detection failed — the write proceeds", exc_info=True)
-        return []
-
-    judged = await _judge_conflicts(arriving, candidates, conflicts, judge)
-    if edge_source and judged:
-        _write_edges(
-            store,
-            contradiction.edges_from_conflicts(judged),
-            source_item=edge_source,
-        )
-    return [conflict.to_dict() for conflict in [*conflicts, *judged]]
+        return _ConflictReview()
 
 
 def _claim_bearing_ids(store, *, exclude: str, limit: int = 40) -> list[str]:
@@ -891,18 +826,8 @@ class KnowledgePersistActionProvider(ActionProvider):
         return "Persist Knowledge"
 
     async def execute(
-        self,
-        action_config: dict[str, Any],
-        ctx: ActionContext,
-        timeout: int = 30,
-        *,
-        judge=None,
+        self, action_config: dict[str, Any], ctx: ActionContext, timeout: int = 30
     ) -> ActionResult:
-        """``judge`` overrides the contradiction tier's model seam (default:
-        :func:`_default_conflict_judge`, one metered background-tier call). It exists so a
-        test can drive the real persist path with a controlled model instead of reaching a
-        provider, and so a caller with no model plumbing can pass a judge that declines.
-        """
         started = time.monotonic()
         config = action_config or {}
         if config.get("content") is None:
@@ -918,7 +843,7 @@ class KnowledgePersistActionProvider(ActionProvider):
         except Exception as exc:
             return ActionResult(False, error=f"knowledge store unavailable: {exc}")
         try:
-            return await prepared.execute(store, started, judge)
+            return prepared.execute(store, started)
         finally:
             try:
                 store.close()

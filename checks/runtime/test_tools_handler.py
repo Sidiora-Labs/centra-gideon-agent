@@ -223,6 +223,31 @@ async def test_groups_endpoint_reports_the_partition(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_groups_endpoint_reports_configured_defaults_not_runtime_resolution(
+    monkeypatch,
+):
+    """Configured defaults stay visible while grouping is off and are not expanded
+    with runtime-required groups."""
+    import json
+
+    class _Cfg:
+        class tools:  # noqa: N801
+            groups_enabled = False
+            group_defaults = {"background": ["schedule"], "chat": ["*"]}
+
+    monkeypatch.setattr(
+        "gideon.core.config.loader.AppConfig.load", classmethod(lambda cls: _Cfg())
+    )
+
+    resp = await tools_mod.api_tool_groups(_DummyRequest())
+    payload = json.loads(resp.body.decode())
+
+    assert payload["enabled"] is False
+    assert payload["surfaceDefaults"]["background"] == ["schedule"]
+    assert payload["surfaceDefaults"]["chat"] == ["*"]
+
+
+@pytest.mark.asyncio
 async def test_groups_endpoint_survives_a_broken_registry(monkeypatch):
     """A provider that explodes must not 500 the page — the endpoint degrades."""
     import json

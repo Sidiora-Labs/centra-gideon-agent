@@ -139,8 +139,6 @@ function AutonomyLadderSection() {
                       <span data-type="caption" className="text-on-surface-low" title="Its effect is visible outside this machine, so a track record can never propose full autonomy for it.">leaves this machine</span>
                     )}
                   </div>
-                  {
-}
                   <div data-type="body-s" className="mt-0.5 text-on-surface-low">{t.authority}</div>
                   <div data-type="caption" className="mt-0.5 text-on-surface-low">{t.record}</div>
                   {t.demotions.length > 0 && (
@@ -151,8 +149,6 @@ function AutonomyLadderSection() {
                   )}
                 </div>
                 <div className="shrink-0 flex items-center gap-2">
-                  {
-}
                   {t.eligible && t.next_rung && (
                     <Button size="xs" variant="secondary" loading={busy === t.key} onClick={() => promote(t)}>
                       Promote so it {rungMeta(t.next_rung, ladder).label}
@@ -288,8 +284,6 @@ export function CallerRow({ c }: { c: CallerHealth }) {
           {c.pass_rate === null ? '—' : `${Math.round(c.pass_rate * 100)}% ok`}
         </span>
         {c.p90_ms > 0 && ` · p90 ${Math.round(c.p90_ms)}ms`}
-        {
-}
         {dead && worstMode && ` · ${worstMode[0].replace(/_/g, ' ')}`}
       </span>
     </div>
@@ -315,13 +309,9 @@ export function HealthRow({ p }: { p: ProviderHealth }) {
         <div data-type="caption" className="mt-0.5 text-on-surface-low">
           {p.calls} calls · {p.pass_rate === null ? '—' : `${Math.round(p.pass_rate * 100)}% ok`}
           {p.p90_ms > 0 && ` · p90 ${Math.round(p.p90_ms)}ms`}
-          {
-}
           {p.p99_ms > 0 && p.p99_ms >= p.p90_ms * 1.5 && ` (p99 ${Math.round(p.p99_ms)}ms)`}
           {p.failed > 0 && ` · ${p.failed} failed`}
         </div>
-        {
-}
         {failureModes.length > 0 && (
           <div className="mt-0.5 flex flex-wrap gap-1">
             {failureModes.map(([mode, n]) => (

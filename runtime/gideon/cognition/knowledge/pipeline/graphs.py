@@ -22,6 +22,8 @@ _TEXT_TYPES = {"note", "gist", "journal", "fleeting", "decision"}
 _DOC_TYPES = {"pdf", "document", "sheet", "slides"}
 _MEDIA_TYPES = {"image", "audio", "video"}
 
+TERMINAL_STAGES = ("insights", "entities", "intents", "embed", "dedup")
+
 
 class PassthroughGraph(PipelineGraph):
     """note/gist/journal/fleeting → the content IS the extracted text."""

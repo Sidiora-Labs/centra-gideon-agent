@@ -113,7 +113,7 @@ class LessonRepository:
         self.owner._ensure()
         timestamp = api._now()
         counters = ("observations", "contradictions", "reversals", "voided")
-        values = {name: getattr(evidence, name) for name in counters}
+        values: dict = {name: getattr(evidence, name) for name in counters}
         values.update(
             human_authored=1 if evidence.human_authored else 0,
             first_observed_at=evidence.first_observed_at or timestamp,
@@ -167,7 +167,7 @@ class LessonRepository:
 
     @staticmethod
     def decode(api, row):
-        values = {}
+        values: dict = {}
         for name in (
             "observations",
             "contradictions",

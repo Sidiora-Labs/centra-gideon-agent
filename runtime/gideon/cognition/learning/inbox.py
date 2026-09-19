@@ -333,7 +333,7 @@ class _InboxProjection:
         from gideon.assurance.evals import gate as gate_lib
         from gideon.cognition.learning import replay as replay_lib
 
-        values = {}
+        values: dict = {}
         for name in (
             "id",
             "kind",

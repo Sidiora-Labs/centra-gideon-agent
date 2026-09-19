@@ -31,7 +31,7 @@ class _LoopRunView:
             if timestamp
             else ""
         )
-        values = {
+        values: dict = {
             "id": str(getattr(loop, "id", "") or ""),
             "intent": str(getattr(loop, "task", "") or "").strip(),
             "workflow_name": f"loop:{getattr(loop, 'kind', '') or 'loop'}",

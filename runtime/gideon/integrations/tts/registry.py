@@ -240,7 +240,7 @@ def _synthesis_arguments(params: Mapping[str, Any]) -> dict[str, Any]:
         ("seed", int, 0),
         ("instruct", str, ""),
     )
-    values = {
+    values: dict = {
         name: convert(params.get(name, default) or default)
         for name, convert, default in fields
     }

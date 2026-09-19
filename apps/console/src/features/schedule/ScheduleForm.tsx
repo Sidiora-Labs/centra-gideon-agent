@@ -186,7 +186,7 @@ function Advanced({ draft, set, triggerOnly }: { draft: ScheduleDraft; set: <K e
             <ChipInput values={draft.skip_dates} onChange={(v) => set('skip_dates', v)} placeholder="2026-12-25, Enter" />
           </Field>
           <div className="flex flex-col gap-s">
-            <CheckRow label="Silent" hint="Suppress auto-delivery; the agent decides when to send." checked={draft.silent} onChange={(v) => set('silent', v)} />
+            <CheckRow label="Silent" hint="Suppress auto-delivery while on; turn it off to resume delivery." checked={draft.silent} onChange={(v) => set('silent', v)} />
             <CheckRow label="Strict schedule" hint="Fire exactly on schedule with no jitter." checked={draft.strict_schedule} onChange={(v) => set('strict_schedule', v)} />
             {
 }

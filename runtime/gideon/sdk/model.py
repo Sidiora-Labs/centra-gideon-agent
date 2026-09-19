@@ -29,10 +29,8 @@ from gideon.integrations.llm.branded_specs import BrandedProviderSpec  # noqa: F
 from gideon.integrations.llm.capabilities import ProviderCapability  # noqa: F401
 from gideon.integrations.llm.capabilities import Capability
 from gideon.integrations.llm.catalog import (
-    DISCOVERY_ERROR_KINDS,
     ConnectionResult,
     ModelCatalog,
-    ModelDiscoveryError,
     ModelInfo,
     ModelManager,
     PullProgress,
@@ -88,8 +86,6 @@ __all__ = [
     "PullProgress",
     "infer_capabilities",
     "openai_compatible_list_models",
-    "ModelDiscoveryError",
-    "DISCOVERY_ERROR_KINDS",
     "BrandedProviderSpec",
     "register_branded_app",
     "MediaCatalog",

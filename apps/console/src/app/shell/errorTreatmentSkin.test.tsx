@@ -48,8 +48,19 @@ const IB_BEFORE = {
     'suspended · disk full. Chat still works.Resume',
 }
 
+const DEPRECATED_LUCIDE_ALIAS_CLASSES = new Set(['lucide-alert-triangle'])
+
+function normaliseClassName(className: string): string {
+  return className
+    .split(/\s+/)
+    .filter((token) => !DEPRECATED_LUCIDE_ALIAS_CLASSES.has(token))
+    .join(' ')
+}
+
 function normalise(html: string): string {
-  return html.replace(/(<svg[^>]*>)[\s\S]*?<\/svg>/g, '$1</svg>')
+  return html
+    .replace(/(<svg[^>]*>)[\s\S]*?<\/svg>/g, '$1</svg>')
+    .replace(/class="([^"]*)"/g, (_match, className: string) => `class="${normaliseClassName(className)}"`)
 }
 
 function activate(id: string) {
@@ -94,6 +105,12 @@ afterEach(() => {
 })
 
 describe('under a standard scheme both surfaces are identical to before PT-4', () => {
+  it('ignores only the deprecated Lucide alias while keeping canonical and authored classes', () => {
+    expect(
+      normaliseClassName('lucide lucide-triangle-alert lucide-alert-triangle text-danger'),
+    ).toBe('lucide lucide-triangle-alert text-danger')
+  })
+
   it('the ErrorBoundary fallback renders the exact pre-change markup', () => {
     activate(DEFAULT_PERSONALITY)
     const { container } = renderBoundary()
@@ -111,7 +128,9 @@ describe('under a standard scheme both surfaces are identical to before PT-4', (
     expect(alert.getAttribute('role')).toBe(IB_BEFORE.role)
     expect(alert.getAttribute('class')).toBe(IB_BEFORE.class)
     expect(alert.getAttribute('style')).toBe(IB_BEFORE.style)
-    expect(alert.querySelector('svg')?.getAttribute('class')).toBe(IB_BEFORE.iconClass)
+    expect(normaliseClassName(alert.querySelector('svg')?.getAttribute('class') ?? '')).toBe(
+      IB_BEFORE.iconClass,
+    )
     expect(alert.textContent).toBe(IB_BEFORE.text)
   })
 })

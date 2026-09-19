@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
-import { AlertTriangle, Check, CheckCircle2, DownloadCloud, Loader2, PauseCircle, RefreshCw } from 'lucide-react'
+import { AlertTriangle, Check, CheckCircle2, DownloadCloud, Loader2, RefreshCw } from 'lucide-react'
 import { spring, physics } from '../theme/motion'
 import { useChatSocket } from '../data/useChatSocket'
 import { api } from '../data/api'
@@ -17,7 +17,7 @@ const STEPS = [
 ] as const
 
 type StepId = (typeof STEPS)[number]['id']
-type Phase = StepId | 'done' | 'error' | 'paused'
+type Phase = StepId | 'done' | 'error'
 const STEP_IDS = new Set<string>(STEPS.map((s) => s.id))
 const PRE_RESTART_STEPS = new Set(['pulling', 'installing', 'building'])
 
@@ -39,9 +39,6 @@ export function useUpdateProgress() {
       setState({ phase: 'done', detail: detail || 'Update complete', restartOnly: false })
     } else if (step === 'error' || step === 'failed') {
       setState((prev) => ({ phase: 'error', detail: detail || 'Update failed', restartOnly: prev?.restartOnly ?? false }))
-    }
-    else if (step === 'paused' || step === 'staged') {
-      setState((prev) => ({ phase: 'paused', detail: detail || 'Update paused', restartOnly: prev?.restartOnly ?? false }))
     }
     else if (step === 'warning') setState((p) => (p ? { ...p, detail } : p))
     else if (STEP_IDS.has(step)) {
@@ -130,18 +127,15 @@ function UpdateSheet({ progress, cancel }: { progress: UpdateProgress; cancel: (
   const stepIdx = STEPS.findIndex((s) => s.id === progress.phase)
   const isError = progress?.phase === 'error'
   const isDone = progress?.phase === 'done'
-  const isPaused = progress?.phase === 'paused'
   const isRestartOnly = progress?.restartOnly ?? false
 
   const title = isError
     ? (isRestartOnly ? 'Restart failed' : 'Update failed')
     : isDone
       ? (isRestartOnly ? 'Restart complete' : 'Update complete')
-      : isPaused
-        ? 'Update paused'
-        : isRestartOnly
-          ? 'Restarting gateway'
-          : 'Updating Gideon'
+      : isRestartOnly
+        ? 'Restarting gateway'
+        : 'Updating Gideon'
 
   return (
     <motion.div key="update-overlay" className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-2xl"
@@ -155,7 +149,6 @@ function UpdateSheet({ progress, cancel }: { progress: UpdateProgress; cancel: (
               <span className="mt-0.5 shrink-0" style={{ color: isError ? 'var(--color-danger)' : isDone ? 'var(--color-success)' : 'var(--color-primary)' }}>
                 {isError ? <AlertTriangle size={18} />
                   : isDone ? <CheckCircle2 size={18} />
-                  : isPaused ? <PauseCircle size={18} />
                   : isRestartOnly ? <RefreshCw size={18} className="animate-spin" />
                   : <DownloadCloud size={18} />}
               </span>
@@ -170,7 +163,7 @@ function UpdateSheet({ progress, cancel }: { progress: UpdateProgress; cancel: (
             </div>
 
             { }
-            {!isError && !isPaused && !isRestartOnly && (
+            {!isError && !isRestartOnly && (
               <div className="mt-4 flex flex-col gap-2.5 px-l">
                 {STEPS.map((s, i) => (
                   <StepRow key={s.id} label={s.label}
@@ -183,7 +176,7 @@ function UpdateSheet({ progress, cancel }: { progress: UpdateProgress; cancel: (
               {!isDone && (
                 <button type="button" onClick={cancel} data-type="body-s"
                   className="rounded-pill px-4 h-9 text-on-surface-var bg-surface-high hover:bg-surface-highest transition-colors">
-                  {isError || isPaused ? 'Dismiss' : 'Cancel'}
+                  {isError ? 'Dismiss' : 'Cancel'}
                 </button>
               )}
             </div>

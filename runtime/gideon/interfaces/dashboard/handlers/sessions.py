@@ -201,14 +201,15 @@ async def api_session_delete(request: web.Request) -> web.Response:
     if not state.conversation_log:
         return web.json_response({"error": "no conversation log"}, status=400)
     ok = state.conversation_log.delete_session(key)
-    if ok:
-        try:
-            await _remove_session_for_history_key(state, key)
-        except Exception:
-            logger.warning("cleanup failed for session %s", key, exc_info=True)
-        state.push_sessions_update()
-        state.push_refresh("history")
-    return web.json_response({"ok": ok})
+    if not ok:
+        return json_error("session_not_found", status=404)
+    try:
+        await _remove_session_for_history_key(state, key)
+    except Exception:
+        logger.warning("cleanup failed for session %s", key, exc_info=True)
+    state.push_sessions_update()
+    state.push_refresh("history")
+    return web.json_response({"ok": True})
 
 
 def _live_session_key(state: ConsoleState, key: str) -> str | None:

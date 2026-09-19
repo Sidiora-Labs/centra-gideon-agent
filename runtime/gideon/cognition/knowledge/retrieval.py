@@ -4,7 +4,10 @@ import logging
 import math
 import re
 import struct
+import threading
 from collections import defaultdict
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from gideon.cognition.knowledge.embedder import floats_to_bytes
 from gideon.cognition.knowledge.store import KnowledgeStore
@@ -17,8 +20,6 @@ _CLIFF_MIN_RESULTS = 1
 
 _VECTOR_MIN_SIMILARITY = 0.25
 
-_KEYWORD_MIN_RELATIVE_SCORE = 0.05
-
 _TITLE_BOOST = 1.0 / 61
 
 _ANN_OVERFETCH = 4
@@ -27,13 +28,338 @@ _ANN_MAX_ATTEMPTS = 4
 
 _ID_BATCH = 400
 
+_DEFAULT_RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+_DEFAULT_RERANKER_MAX_CANDIDATES = 32
+_RERANK_QUERY_MAX_CHARS = 2_000
+_RERANK_TEXT_MAX_CHARS = 12_000
+
 ARM_KEYWORD = "keyword"
 ARM_GRAPH = "graph"
 ARM_VECTOR = "vector"
 ARMS = (ARM_KEYWORD, ARM_GRAPH, ARM_VECTOR)
 
-GRAPH_MATCH_DIRECT = "direct"
-GRAPH_MATCH_NEIGHBOR = "neighbor"
+RANKING_SCORE_LABEL = "Ranking score"
+RANKING_SCORE_KIND = "relative_ordering_signal"
+RANKING_SCORE_EXPLANATION = (
+    "A relative ordering signal for this query, not confidence, probability, or a "
+    "percentage. Scores from different queries or ranking methods are not comparable."
+)
+
+_RANKING_SIGNAL_LABELS = {
+    "keyword": "Keyword match",
+    "vector": "Meaning match",
+    "graph": "Entity links",
+    "title": "Title match",
+    "recency": "Recency",
+    "importance": "Importance",
+    "prior_use": "Prior use",
+    "diversity": "Diversity",
+    "contributor": "Contributor ownership",
+}
+
+
+def ranking_signal(
+    signal_id: str,
+    detail: str,
+    *,
+    active: bool = True,
+    applies_to: tuple[str, ...] = (),
+) -> dict:
+    """Describe one ranking input using the API/UI recall vocabulary."""
+    return {
+        "id": signal_id,
+        "label": _RANKING_SIGNAL_LABELS[signal_id],
+        "active": active,
+        "applies_to": list(applies_to),
+        "detail": detail,
+    }
+
+
+def ranking_disclosure(
+    method: str,
+    summary: str,
+    signals: list[dict],
+    *,
+    score: float | None = None,
+) -> dict:
+    """Return machine-readable semantics for an otherwise opaque ranking score."""
+    return {
+        "method": method,
+        "summary": summary,
+        "score": {
+            "label": RANKING_SCORE_LABEL,
+            "kind": RANKING_SCORE_KIND,
+            "value": score,
+            "shown": score is not None,
+            "is_probability": False,
+            "comparable_across_queries": False,
+            "explanation": RANKING_SCORE_EXPLANATION,
+        },
+        "signals": signals,
+    }
+
+
+RerankerState = Literal["disabled", "ready", "unavailable", "failed"]
+
+
+@dataclass(frozen=True)
+class RerankerHealth:
+    """Typed truth about the optional relevance stage.
+
+    ``available`` is true only after the configured model has loaded successfully. A
+    configured-but-missing model is therefore never reported as healthy merely because
+    the feature flag is on. ``reason`` is a stable machine value; ``detail`` is diagnostic
+    text for an operator surface.
+    """
+
+    state: RerankerState
+    enabled: bool
+    available: bool
+    model: str
+    reason: str = ""
+    detail: str = ""
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "state": self.state,
+            "enabled": self.enabled,
+            "available": self.available,
+            "model": self.model,
+            "reason": self.reason,
+            "detail": self.detail,
+        }
+
+
+@dataclass(frozen=True)
+class RerankedCandidate:
+    item_id: str
+    score: float
+
+
+@dataclass(frozen=True)
+class RerankResult:
+    """One attempted rerank, including the candidates and its actual health outcome."""
+
+    candidates: tuple[RerankedCandidate, ...]
+    health: RerankerHealth
+    applied: bool
+
+
+class RelevanceReranker:
+    """Lazy, local-only cross-encoder reranker.
+
+    Loading is delayed until an enabled search has candidates. ``local_files_only`` is
+    load-bearing: turning on retrieval must not silently download model weights. The model
+    is loaded and invoked under one lock because concurrent first searches must not create
+    duplicate heavyweight models, and common torch-backed cross encoders do not promise
+    concurrent ``predict`` safety.
+    """
+
+    def __init__(
+        self,
+        *,
+        enabled: bool = False,
+        model_name: str = _DEFAULT_RERANKER_MODEL,
+        max_candidates: int = _DEFAULT_RERANKER_MAX_CANDIDATES,
+        model: Any = None,
+    ) -> None:
+        self.enabled = bool(enabled)
+        self.model_name = (
+            str(model_name or _DEFAULT_RERANKER_MODEL).strip()
+            or _DEFAULT_RERANKER_MODEL
+        )
+        self.max_candidates = min(128, max(1, int(max_candidates)))
+        self._model = model
+        self._load_attempted = model is not None
+        self._load_reason = ""
+        self._load_detail = ""
+        self._last_health: RerankerHealth | None = None
+        self._lock = threading.Lock()
+
+    @classmethod
+    def from_config(cls) -> "RelevanceReranker":
+        try:
+            from gideon.core.config.loader import AppConfig
+
+            config = AppConfig.load().knowledge
+            return cls(
+                enabled=config.reranker_enabled,
+                model_name=config.reranker_model,
+                max_candidates=config.reranker_max_candidates,
+            )
+        except Exception as exc:  # a retrieval constructor must remain fail-soft
+            reranker = cls(enabled=False)
+            reranker._load_reason = "config_unavailable"
+            reranker._load_detail = f"{type(exc).__name__}: {exc}"
+            return reranker
+
+    def _load(self) -> Any:
+        from sentence_transformers import CrossEncoder
+
+        return CrossEncoder(self.model_name, local_files_only=True)
+
+    def _ensure_model(self) -> Any:
+        if not self.enabled:
+            return None
+        with self._lock:
+            if self._model is not None:
+                return self._model
+            if self._load_attempted:
+                return None
+            self._load_attempted = True
+            try:
+                self._model = self._load()
+            except (ImportError, ModuleNotFoundError) as exc:
+                self._load_reason = "dependency_unavailable"
+                self._load_detail = f"{type(exc).__name__}: {exc}"
+            except (
+                Exception
+            ) as exc:  # noqa: BLE001 — availability must be typed, not raised
+                self._load_reason = "model_unavailable"
+                self._load_detail = f"{type(exc).__name__}: {exc}"
+            return self._model
+
+    def availability(self) -> RerankerHealth:
+        if not self.enabled:
+            return RerankerHealth(
+                state="disabled",
+                enabled=False,
+                available=False,
+                model=self.model_name,
+                reason=self._load_reason or "disabled",
+                detail=self._load_detail,
+            )
+        model = self._ensure_model()
+        if model is None:
+            return RerankerHealth(
+                state="unavailable",
+                enabled=True,
+                available=False,
+                model=self.model_name,
+                reason=self._load_reason or "model_unavailable",
+                detail=self._load_detail,
+            )
+        return RerankerHealth(
+            state="ready",
+            enabled=True,
+            available=True,
+            model=self.model_name,
+        )
+
+    def health(self) -> RerankerHealth:
+        """Return the last inference failure, otherwise current availability."""
+        return self._last_health or self.availability()
+
+    def passive_health(self) -> RerankerHealth:
+        """Describe the configured state without importing or loading a model."""
+        if not self.enabled:
+            return RerankerHealth(
+                state="disabled",
+                enabled=False,
+                available=False,
+                model=self.model_name,
+                reason=self._load_reason or "disabled",
+                detail=self._load_detail,
+            )
+        if self._model is not None:
+            return self._last_health or RerankerHealth(
+                state="ready",
+                enabled=True,
+                available=True,
+                model=self.model_name,
+            )
+        if self._load_attempted:
+            return RerankerHealth(
+                state="unavailable",
+                enabled=True,
+                available=False,
+                model=self.model_name,
+                reason=self._load_reason or "model_unavailable",
+                detail=self._load_detail,
+            )
+        return RerankerHealth(
+            state="unavailable",
+            enabled=True,
+            available=False,
+            model=self.model_name,
+            reason="not_checked",
+        )
+
+    def rerank(self, query: str, candidates: list[dict]) -> RerankResult:
+        """Rank candidates by cross-encoder relevance, or return a typed no-op.
+
+        The returned scores are sigmoid-normalized logits. The transform is monotonic, so
+        it cannot change model ordering, while giving callers a finite, comparable [0, 1]
+        value instead of backend-specific logits.
+        """
+        bounded = candidates[: self.max_candidates]
+        if not bounded:
+            return RerankResult(
+                candidates=(), health=self.passive_health(), applied=False
+            )
+        health = self.availability()
+        if not health.available:
+            return RerankResult(candidates=(), health=health, applied=False)
+
+        pairs = [
+            (
+                query[:_RERANK_QUERY_MAX_CHARS],
+                "\n".join(
+                    str(part or "")
+                    for part in (
+                        item.get("title"),
+                        item.get("summary"),
+                        item.get("content"),
+                    )
+                    if part
+                )[:_RERANK_TEXT_MAX_CHARS],
+            )
+            for item in bounded
+        ]
+        try:
+            with self._lock:
+                raw_scores = self._model.predict(pairs)
+            ranked = _rank_scored_candidates(bounded, raw_scores)
+        except Exception as exc:  # noqa: BLE001 — retrieval degrades to RRF
+            failed = RerankerHealth(
+                state="failed",
+                enabled=True,
+                available=True,
+                model=self.model_name,
+                reason="inference_failed",
+                detail=f"{type(exc).__name__}: {exc}",
+            )
+            self._last_health = failed
+            return RerankResult(candidates=(), health=failed, applied=False)
+
+        self._last_health = None
+        return RerankResult(candidates=ranked, health=health, applied=True)
+
+
+def _sigmoid(value: float) -> float:
+    if value >= 0:
+        z = math.exp(-value)
+        return 1.0 / (1.0 + z)
+    z = math.exp(value)
+    return z / (1.0 + z)
+
+
+def _rank_scored_candidates(
+    candidates: list[dict], raw_scores
+) -> tuple[RerankedCandidate, ...]:
+    scores = [float(score) for score in raw_scores]
+    if len(scores) != len(candidates) or not all(math.isfinite(s) for s in scores):
+        raise ValueError("reranker returned invalid scores")
+    return tuple(
+        sorted(
+            (
+                RerankedCandidate(item_id=str(item["id"]), score=_sigmoid(score))
+                for item, score in zip(candidates, scores)
+            ),
+            key=lambda candidate: candidate.score,
+            reverse=True,
+        )
+    )
 
 
 def relevance_cliff_cut(
@@ -68,47 +394,28 @@ def relevance_cliff_cut(
     return max(min(min_results, cap), min(cut, cap))
 
 
-def keyword_score_cut(
-    strengths: list[float], *, floor: float = _KEYWORD_MIN_RELATIVE_SCORE
-) -> int:
-    """Return how many leading FTS rows clear the keyword arm's own quality floor.
-
-    ``strengths`` are BM25 magnitudes (``-rank``, so larger is better) already ordered
-    best-first. A row is kept while its strength is at least ``floor`` × the best row's.
-    The floor is RELATIVE because BM25 is not comparable across queries or corpora: the
-    same absolute score means "excellent" for a rare term and "noise" for a common one,
-    and only the distance from the best match for THIS query carries information.
-
-    It exists because :meth:`HybridRetriever._sanitize_fts5_query` ORs the query's terms —
-    which is what lets a conversational question match a document carrying only some of
-    them, and also what admits a document whose sole overlap is the query's least
-    informative word. SQLite's BM25 clamps a non-discriminating term's IDF to 1e-6, so
-    those rows arrive four to six orders of magnitude below a real match and any floor in
-    this range separates them; a genuine partial match sits within a small factor of the
-    best and survives. A degenerate best score (0 or negative, which happens when EVERY
-    match is clamped) carries no signal to threshold on, so everything is kept.
-
-    Pure + side-effect-free, so the floor is unit-testable apart from the DB.
-    """
-    if not strengths:
-        return 0
-    top = strengths[0]
-    if top <= 0:
-        return len(strengths)
-    threshold = floor * top
-    for index, strength in enumerate(strengths):
-        if strength < threshold:
-            return index
-    return len(strengths)
-
-
 class HybridRetriever:
     """FTS5 keyword + graph traversal + optional vector search, fused with RRF."""
 
-    def __init__(self, store: KnowledgeStore, embedder=None):
-        """store: KnowledgeStore instance. embedder: optional callable(str) -> list[float]."""
+    def __init__(self, store: KnowledgeStore, embedder=None, reranker=None):
+        """Construct retrieval with optional embedding and relevance providers.
+
+        ``reranker`` is an explicit injection seam for a configured provider. When omitted,
+        the knowledge config constructs the shipped local-only cross encoder, which remains
+        disabled by default.
+        """
         self.store = store
         self.embedder = embedder
+        self.vector_index_status: dict = {}
+        self.stale_index_reasons: list[dict] = []
+        self.reranker = reranker or RelevanceReranker.from_config()
+        self.last_reranker_result = RerankResult(
+            candidates=(), health=self.reranker.passive_health(), applied=False
+        )
+
+    def reranker_health(self) -> RerankerHealth:
+        """Return typed health, probing model availability when not yet known."""
+        return self.reranker.health()
 
     def search(
         self,
@@ -139,14 +446,8 @@ class HybridRetriever:
             if ARM_KEYWORD in active
             else []
         )
-        graph_kinds: dict[str, str] = {}
         gr = (
-            self._graph_search(
-                query,
-                limit=over,
-                include_archived=include_archived,
-                match_kinds=graph_kinds,
-            )
+            self._graph_search(query, limit=over, include_archived=include_archived)
             if ARM_GRAPH in active
             else []
         )
@@ -192,6 +493,30 @@ class HybridRetriever:
 
         keep = relevance_cliff_cut([score for _, score in fused], max_results=limit)
 
+        rerank_input = [
+            {"id": item_id, **items_cache[item_id]}
+            for item_id, _ in fused
+            if item_id in items_cache
+        ]
+        self.last_reranker_result = self.reranker.rerank(query, rerank_input)
+        reranker_scores: dict[str, float] = {}
+        if self.last_reranker_result.applied:
+            reranker_scores = {
+                candidate.item_id: candidate.score
+                for candidate in self.last_reranker_result.candidates
+            }
+            original_scores = dict(fused)
+            reranked_ids = [
+                candidate.item_id
+                for candidate in self.last_reranker_result.candidates
+                if candidate.item_id in original_scores
+            ]
+            reranked = set(reranked_ids)
+            reranked_ids.extend(
+                item_id for item_id, _ in fused if item_id not in reranked
+            )
+            fused = [(item_id, original_scores[item_id]) for item_id in reranked_ids]
+
         kw_ids = {i for i, _ in kw}
         gr_ids = {i for i, _ in gr}
         vec_ids = {i for i, _ in (vec or [])}
@@ -208,33 +533,57 @@ class HybridRetriever:
                 types.append("graph")
             if item_id in vec_ids:
                 types.append("vector")
-            results.append(
-                {
-                    "id": item_id,
-                    "title": item["title"],
-                    "summary": item.get("summary"),
-                    "content": item["content"],
-                    "score": score,
-                    "provider": item.get("provider", "native"),
-                    "match_type": "+".join(types),
-                    "graph_match": graph_kinds.get(item_id),
-                    **_attach_locator(item, q_terms, chunk_locs.get(item_id)),
-                }
+            result = {
+                "id": item_id,
+                "title": item["title"],
+                "summary": item.get("summary"),
+                "content": item["content"],
+                "score": score,
+                "provider": item.get("provider", "native"),
+                "match_type": "+".join(types),
+                **_attach_locator(item, q_terms, chunk_locs.get(item_id)),
+            }
+            result["ranking"] = ranking_disclosure(
+                "reciprocal_rank_fusion",
+                "Keyword, entity-link, and meaning-match result positions are combined; "
+                "title matches can add a small ordering boost, a relevance cliff can remove "
+                "the weak tail, and an enabled reranker may reorder candidates.",
+                [
+                    ranking_signal(
+                        ARM_KEYWORD,
+                        "Ranks literal word and prefix matches.",
+                        active=ARM_KEYWORD in active,
+                    ),
+                    ranking_signal(
+                        ARM_GRAPH,
+                        "Ranks documents connected to entities named in the query.",
+                        active=ARM_GRAPH in active,
+                    ),
+                    ranking_signal(
+                        ARM_VECTOR,
+                        "Ranks embedding similarity when an embedder is available.",
+                        active=ARM_VECTOR in active and self.embedder is not None,
+                    ),
+                    ranking_signal(
+                        "title",
+                        "Adds a small boost for query words found in the title.",
+                        active=bool(q_terms),
+                    ),
+                ],
+                score=score,
             )
+            if item_id in reranker_scores:
+                result["fusion_score"] = score
+                result["reranker_score"] = reranker_scores[item_id]
+                result["score"] = reranker_scores[item_id]
+                result["match_type"] += "+reranker"
+            results.append(result)
         return results
 
     def _keyword_search(
         self, query: str, limit: int = 20, *, include_archived: bool = False
     ) -> list[tuple[str, int]]:
-        """FTS5 search. Returns [(item_id, rank)] where rank is position (1=best).
-
-        QUALIFIED BEFORE FUSION. The rows are cut at :func:`keyword_score_cut`'s relative
-        BM25 floor, so a document whose only overlap with the query is a term the corpus
-        cannot discriminate on never reaches ``_rrf_fuse`` at all. Positional rank is still
-        what the arm returns — fusion's contract is unchanged — but the positions are now
-        handed out over the QUALIFIED rows, so a weak tail cannot occupy ranks that RRF
-        would otherwise have scored.
-        """
+        """FTS5 search. Returns [(item_id, rank)] where rank is position (1=best)."""
         safe_query = self._sanitize_fts5_query(query)
         if not safe_query:
             return []
@@ -243,7 +592,7 @@ class HybridRetriever:
         )
         try:
             rows = self.store.db.execute(
-                "SELECT i.id AS id, fts.rank AS fts_rank FROM items_fts fts "
+                "SELECT i.id FROM items_fts fts "
                 "JOIN items i ON i.rowid = fts.rowid "
                 "WHERE items_fts MATCH ? AND i.status = 'active' "
                 f"{archived_clause}ORDER BY fts.rank LIMIT ?",  # noqa: S608,E501 (clause is a fixed literal)
@@ -251,9 +600,7 @@ class HybridRetriever:
             ).fetchall()
         except sqlite3.OperationalError:
             return []
-        strengths = [-float(row["fts_rank"] or 0.0) for row in rows]
-        keep = keyword_score_cut(strengths)
-        return [(row["id"], rank + 1) for rank, row in enumerate(rows[:keep])]
+        return [(row["id"], rank + 1) for rank, row in enumerate(rows)]
 
     @staticmethod
     def _sanitize_fts5_query(query: str) -> str:
@@ -268,33 +615,9 @@ class HybridRetriever:
         return " OR ".join(f'"{t}"*' for t in terms)
 
     def _graph_search(
-        self,
-        query: str,
-        limit: int = 20,
-        *,
-        include_archived: bool = False,
-        match_kinds: dict[str, str] | None = None,
+        self, query: str, limit: int = 20, *, include_archived: bool = False
     ) -> list[tuple[str, int]]:
-        """Find entities matching query terms, traverse graph, rank items by mention count.
-
-        DIRECT AND NEIGHBOUR ARE NOT THE SAME EVIDENCE, and this arm no longer pretends they
-        are. An item mentioning an entity the query NAMED is a direct match; an item
-        mentioning something merely reachable within two hops of that entity is a fallback
-        guess. Merging both into one mention tally — what this did — let an item with several
-        depth-2 mentions and no direct mention outrank an item the query actually named,
-        because a count cannot say where its mentions came from.
-
-        So the two are qualified separately, and the neighbour set is a FALLBACK in the literal
-        sense: it contributes only when the direct set is empty. Two hops out is a guess worth
-        making when nothing better exists and noise when something better does, and the items
-        it drops are exactly the ones the keyword and vector arms are better placed to judge —
-        fused recall is theirs to keep, not this arm's to pad.
-
-        ``match_kinds`` is an optional sink, filled with ``item_id -> "direct" | "neighbor"``
-        for every returned item. An out-parameter rather than a third tuple element precisely
-        so the ranked list handed to ``_rrf_fuse`` keeps the exact shape fusion has always
-        consumed (the same reason ``_vector_search`` reports chunk locators this way).
-        """
+        """Find entities matching query terms, traverse graph, rank items by mention count."""
         words = query.split()
         candidates = list(words)
         for size in (2, 3):
@@ -312,48 +635,29 @@ class HybridRetriever:
         if not entity_ids:
             return []
 
+        all_entity_ids = set(entity_ids)
+        for eid in entity_ids:
+            for neighbor in self.store.get_neighbors(eid, depth=2):
+                all_entity_ids.add(neighbor["id"])
+
+        item_counts: dict[str, int] = defaultdict(int)
+        placeholders = ",".join("?" * len(all_entity_ids))
         archived_clause = (
             "" if include_archived else "AND COALESCE(i.is_archived, 0) = 0 "
         )
-        direct = self._mention_counts(entity_ids, limit, archived_clause)
-        ranked, kind = direct, GRAPH_MATCH_DIRECT
-
-        if not ranked:
-            neighbor_ids = set()
-            for eid in entity_ids:
-                for neighbor in self.store.get_neighbors(eid, depth=2):
-                    if neighbor["id"] not in entity_ids:
-                        neighbor_ids.add(neighbor["id"])
-            if neighbor_ids:
-                ranked, kind = (
-                    self._mention_counts(neighbor_ids, limit, archived_clause),
-                    GRAPH_MATCH_NEIGHBOR,
-                )
-
-        if match_kinds is not None:
-            for item_id, _ in ranked:
-                match_kinds[item_id] = kind
-        return [(item_id, rank + 1) for rank, (item_id, _) in enumerate(ranked)]
-
-    def _mention_counts(
-        self, entity_ids: "set[str] | set[int]", limit: int, archived_clause: str
-    ) -> list[tuple[str, int]]:
-        """Active items mentioning any of *entity_ids*, best-mentioned first."""
-        if not entity_ids:
-            return []
-        item_counts: dict[str, int] = defaultdict(int)
-        placeholders = ",".join("?" * len(entity_ids))
         rows = self.store.db.execute(
             f"SELECT m.item_id, COUNT(*) as cnt FROM mentions m "  # noqa: S608
             f"JOIN items i ON i.id = m.item_id "
             f"WHERE m.entity_id IN ({placeholders}) AND i.status = 'active' "
             f"{archived_clause}"
             f"GROUP BY m.item_id ORDER BY cnt DESC LIMIT ?",
-            (*entity_ids, limit),
+            (*all_entity_ids, limit),
         ).fetchall()
         for row in rows:
             item_counts[row["item_id"]] = row["cnt"]
-        return sorted(item_counts.items(), key=lambda x: x[1], reverse=True)
+
+        sorted_items = sorted(item_counts.items(), key=lambda x: x[1], reverse=True)
+        return [(item_id, rank + 1) for rank, (item_id, _) in enumerate(sorted_items)]
 
     def _vector_search(
         self,
@@ -407,6 +711,8 @@ class HybridRetriever:
         an out-parameter rather than part of the return value precisely so the ranked list
         handed to fusion cannot drift.
         """
+        self.vector_index_status = {}
+        self.stale_index_reasons = []
         if self.embedder is None:
             return None
 
@@ -414,6 +720,15 @@ class HybridRetriever:
         if not query_vec:
             return None
         q_dim = len(query_vec)
+        from gideon.cognition.knowledge.pipeline.runner import (
+            embedding_space_fingerprint,
+        )
+
+        embedding_provider, embedding_model = embedding_space_fingerprint(self.embedder)
+        self.vector_index_status = self.store.chunk_embedding_status(
+            embedding_provider, embedding_model, q_dim
+        )
+        self.stale_index_reasons = list(self.vector_index_status.get("reasons") or [])
 
         best: dict[str, float] = {}
         best_loc: dict[str, dict] = {}
@@ -441,6 +756,7 @@ class HybridRetriever:
         if index is not None and not index.enabled:
             index = None
         q_blob = floats_to_bytes(query_vec) if index is not None else b""
+        chunk_index = index if not self.vector_index_status.get("stale") else None
 
         chunk_archived = (
             "" if include_archived else "AND COALESCE(i.is_archived, 0) = 0"
@@ -459,11 +775,11 @@ class HybridRetriever:
             )
 
         ann_served = False
-        if index is not None:
+        if chunk_index is not None:
             k = max(1, limit) * _ANN_OVERFETCH
             seen: set[str] = set()
             for _ in range(_ANN_MAX_ATTEMPTS):
-                cand = index.candidate_chunk_ids(q_blob, q_dim, k)
+                cand = chunk_index.candidate_chunk_ids(q_blob, q_dim, k)
                 if cand is None:
                     break
                 ann_served = True
@@ -480,8 +796,10 @@ class HybridRetriever:
                             + "FROM chunks c JOIN items i ON i.id = c.item_id "
                             f"WHERE c.id IN ({placeholders}) "  # noqa: S608 (placeholders only)
                             "AND c.embedding IS NOT NULL AND i.status = 'active' "
+                            "AND COALESCE(c.embedding_provider, '') = ? "
+                            "AND COALESCE(c.embedding_model, '') = ? "
                             f"{chunk_archived}",
-                            batch,
+                            (*batch, embedding_provider, embedding_model),
                         )
                     }
                     for chunk_id in batch:
@@ -502,7 +820,10 @@ class HybridRetriever:
             for row in self.store.db.execute(
                 chunk_cols + "FROM chunks c JOIN items i ON i.id = c.item_id "
                 "WHERE c.embedding IS NOT NULL AND i.status = 'active' "
-                f"{chunk_archived}"  # noqa: S608 (clause is a fixed literal)
+                "AND COALESCE(c.embedding_provider, '') = ? "
+                "AND COALESCE(c.embedding_model, '') = ? "
+                f"{chunk_archived}",  # noqa: S608 (clause is a fixed literal)
+                (embedding_provider, embedding_model),
             ):
                 _consider_chunk_row(row)
 

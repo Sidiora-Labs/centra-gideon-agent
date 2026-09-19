@@ -67,7 +67,7 @@ def test_the_registry_and_the_hook_allowlist_agree_about_this_name() -> None:
     registered = get_action_provider(_NAME) is not None
     allowed = _NAME in ALLOWED_HOOK_PROVIDERS
     assert (
-        registered == allowed == True
+        registered == allowed is True
     )  # noqa: E712 — the point is the pair, not the value
 
 

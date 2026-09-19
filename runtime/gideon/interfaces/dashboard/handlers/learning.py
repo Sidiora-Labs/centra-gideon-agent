@@ -73,45 +73,118 @@ def _actor(request: web.Request) -> str:
     return ""
 
 
-def _memory_service(request: web.Request):
-    """The self-model store, or ``None`` when none is reachable."""
+def _installer_for(request: web.Request):
+    """The accept-time installer, or None when no memory store is reachable.
+
+    `proposals.accept` runs the installer AFTER `require_human` — so this is the human installing,
+    the one path §2.6 permits to write a self-model principle or a project-context change live. It
+    dispatches per proposal shape:
+
+    * a self-model principle (`source_cadence == "self_model"`) → `install_accepted_principle`;
+    * a project-context change (kind in `PROJECT_KINDS`, E1.4) → `install_accepted_project_context`,
+      which writes EXACTLY the accepted item (one instruction append, one context file, or one
+      skill) and nothing pending or rejected beside it;
+    * a promoted run/conversation (kind `skill`, E1.3) → `install_accepted_skill`, which writes the
+      `auto/` skill through the existing auto-skill rail. This is the ONLY path that installs a
+      promotion: the agent files the proposal, the human here writes it;
+    * a pasted prompt card (AGENT-PACKS §4.3 — tagged `prompt-card`) →
+      `install_accepted_prompt_card`, which writes the ONE typed entity the card mapped onto
+      (prompt / template / agent). The importer itself never writes a store, so this is the only
+      path a pasted card can reach one;
+    * an ordinary `lesson_batch` from a correction already lives in the lesson store, so there is
+      nothing further to install for it.
+
+    A missing store means accept still records the decision — the self-model projection is deferred
+    (best-effort), while a project-context or skill install needs no memory service and runs
+    regardless.
+    """
+    from gideon.cognition.learning import (
+        project_context_review,
+        self_model_observer,
+        skill_promotion,
+    )
+    from gideon.extensions.packs import prompt_cards
+
     try:
         from gideon.interfaces.dashboard.handlers.memory import _get_service
 
-        return _get_service(request.app["state"])
+        svc = _get_service(request.app["state"])
     except Exception:
         logger.debug("accept installer: no memory service", exc_info=True)
-        return None
+        svc = None
+
+    def _install(prop) -> None:
+        data = prop.to_dict()
+        if prompt_cards.is_prompt_card_proposal(data):
+            prompt_cards.install_accepted_prompt_card(data)
+        elif project_context_review.is_project_context_proposal(data):
+            project_context_review.install_accepted_project_context(data)
+        elif skill_promotion.is_skill_promotion_proposal(data):
+            skill_promotion.install_accepted_skill(data)
+        elif svc is not None and self_model_observer.is_self_model_proposal(data):
+            self_model_observer.install_accepted_principle(svc, data)
+
+    return _install
 
 
-def _install_context(request: web.Request):
-    """The context the registry's installers run against, for ONE accept.
+async def _apply_accepted_template_diff(prop) -> dict:
+    """Apply an accepted ``template_diff`` to its target and save it as a NEW version.
 
-    Carries the memory service (the ``lesson_batch`` row projects a self-model
-    principle into it) and collects what each installer wrote, which is how this route
-    still reports an applied ``template_diff`` version now that the apply runs INSIDE
-    the accept instead of after it.
+    The refiner FILES typed ops and never applies them; accepting is the human installing, so
+    THIS is where the diff lands (§3.1 "Accept → new template VERSION"). The ops ride the change
+    manifest's ``targeted_fix`` (the same field the inbox reads to stamp a risk tier); they are
+    applied to a deep copy via ``mutations.apply_batch`` and, only if the batch is clean, saved
+    through the writable def provider — which appends an immutable version snapshot and pins it
+    (``versions.record_version`` inside ``save_def``). Best-effort: the proposal is already
+    accepted, so a failed apply is reported, never a 500 that would strand it.
     """
-    from gideon.cognition.learning.installers import InstallContext
+    manifest = getattr(prop, "change_manifest", None)
+    ops_raw = manifest.get("targeted_fix") if isinstance(manifest, dict) else None
+    name = str(getattr(prop, "target", "") or "")
+    if not name or not isinstance(ops_raw, list) or not ops_raw:
+        return {"applied": False, "reason": "no typed ops on the proposal"}
 
-    return InstallContext(memory_service=_memory_service(request))
+    from gideon.automation.workflows import defs as defs_mod
+    from gideon.automation.workflows import mutations
+    from gideon.automation.workflows.native_defs import NativeWorkflowDefProvider
 
+    spec = None
+    for pname in defs_mod.list_providers():
+        provider = defs_mod.get_provider(pname)
+        if provider is None:
+            continue
+        try:
+            found = await provider.get_def(name)
+        except Exception:
+            continue
+        if found is not None:
+            spec = (
+                found
+                if isinstance(found, dict)
+                else getattr(found, "to_dict", lambda: None)()
+            )
+            break
+    if not isinstance(spec, dict):
+        return {"applied": False, "reason": f"no definition named {name!r}"}
 
-def _installer_for(request: web.Request, context=None):
-    """The accept-time installer: the ONE registry row for the proposal's kind.
+    try:
+        ops = [mutations.Op.from_dict(o) for o in ops_raw if isinstance(o, dict)]
+    except ValueError as exc:
+        return {"applied": False, "reason": f"unparseable op: {exc}"}
+    candidate, issues = mutations.apply_batch(ops, spec, {})
+    if issues:
+        return {"applied": False, "reason": "; ".join(i.code for i in issues)}
 
-    `proposals.accept` runs it AFTER `require_human` — so this is the human
-    installing, the one path §2.6 permits to write a self-model principle or a
-    project-context change live. What runs for each kind is declared in
-    :mod:`gideon.cognition.learning.installers`, not dispatched here: this module used
-    to hold an ``elif`` chain whose final fall-through installed NOTHING and still let
-    the queue record ``accepted``, so a kind no branch claimed (``tier_migration``)
-    looked accepted from every surface while nothing happened. A kind the registry
-    declares unsupported now refuses, and the row stays pending and retryable.
-    """
-    from gideon.cognition.learning.installers import installer_for
-
-    return installer_for(context if context is not None else _install_context(request))
+    writable = [
+        p
+        for p in (defs_mod.get_provider(n) for n in defs_mod.list_providers())
+        if p is not None and not p.readonly
+    ]
+    target_provider = writable[0] if writable else NativeWorkflowDefProvider()
+    saved = await target_provider.save_def(
+        **candidate, _version_source="refiner", _version_ops=ops_raw
+    )
+    return {"applied": True, "version": int(getattr(saved, "version", 0) or 0)}
 
 
 def _tier_for(prop) -> str:
@@ -189,11 +262,6 @@ async def api_learning_proposal_accept(request: web.Request) -> web.Response:
     looking for a bug.
 
     There is deliberately no `?force=` or trust override. §7: "under ANY trust mode".
-
-    An accept the INSTALL step refuses — a kind the installer registry declares
-    unsupported, or a writer that failed — is **409 with the structured `refusal`**,
-    and the row stays pending: nothing was installed, so nothing is recorded, and the
-    reviewer can accept it again once the writer exists or the failure is fixed.
     """
     if not _enabled():
         return web.json_response({"error": "learning is disabled"}, status=404)
@@ -202,21 +270,22 @@ async def api_learning_proposal_accept(request: web.Request) -> web.Response:
 
     pid = request.match_info.get("id", "")
     actor = _actor(request)
-    context = _install_context(request)
     try:
-        prop = store.accept(
-            pid, actor=actor, installer=_installer_for(request, context)
-        )
+        prop = store.accept(pid, actor=actor, installer=_installer_for(request))
     except store.AcceptError as exc:
         message = str(exc)
-        refusal = dict(getattr(exc, "refusal", {}) or {})
-        status = 409 if refusal else (404 if message.startswith("no proposal") else 403)
+        status = 404 if message.startswith("no proposal") else 403
         _audit(request, "learning.proposal_accept", "rejected", f"{pid}:{message}")
-        body: dict[str, object] = {"error": message}
-        if refusal:
-            body["refusal"] = refusal
-        return web.json_response(body, status=status)
-    applied = context.result.get("applied")
+        return web.json_response({"error": message}, status=status)
+    applied: dict | None = None
+    if str(getattr(prop, "kind", "")) == "template_diff":
+        try:
+            applied = await _apply_accepted_template_diff(prop)
+        except Exception:
+            logger.warning(
+                "template_diff %s accepted but not applied", pid, exc_info=True
+            )
+            applied = {"applied": False, "reason": "apply failed"}
     _audit(request, "learning.proposal_accept", "ok", f"{pid}:{prop.kind}")
     return web.json_response(
         {"ok": True, "proposal": prop.to_dict(), "applied": applied}

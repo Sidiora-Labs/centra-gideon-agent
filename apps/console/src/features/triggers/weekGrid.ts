@@ -68,7 +68,7 @@ function cellState(count: number, live: number, suppressedKinds: Set<string>): C
   return 'fires'
 }
 
-export function buildWeekGrid(occurrences: WeekOccurrence[], start: Date): WeekGrid {
+export function buildWeekGrid(occurrences: readonly WeekOccurrence[], start: Date): WeekGrid {
   const days = weekDays(start)
   const cells: WeekCell[] = []
   const index = new Map<string, WeekCell>()

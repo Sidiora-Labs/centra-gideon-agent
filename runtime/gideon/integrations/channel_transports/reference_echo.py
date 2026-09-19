@@ -53,7 +53,9 @@ class ReferenceEchoTransport(ChannelTransportProvider):
         return "Reference (Echo)"
 
     def capabilities(self) -> ChannelCapabilities:
-        flags = dict(inbound=True, threads=True, rich_text=True, max_text_len=4000)
+        flags: dict = dict(
+            inbound=True, threads=True, rich_text=True, max_text_len=4000
+        )
         return ChannelCapabilities(**flags)
 
     async def connect(self) -> bool:

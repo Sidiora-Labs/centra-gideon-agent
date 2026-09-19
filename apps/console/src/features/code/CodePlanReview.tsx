@@ -12,6 +12,7 @@ import { spring } from '../../shared/theme/motion'
 import { api, SDLC_STAGES, sdlcStageLabel, type Loop, type CodeStage, type PlanStep, type SkillItem, type SkillSearchResult, type WorkflowDefStub } from '../../shared/data/api'
 import type { CodeDraft } from './codeDraft'
 import { WorkspacePicker } from './WorkspacePicker'
+import { PlannerRecoveryNotice } from './CodePlanningView'
 
 const kc = (p: Loop) => (p.kind_config || {}) as Record<string, unknown>
 
@@ -27,6 +28,9 @@ export function CodePlanReview({ draft, onBack, onLaunched }: {
   const [pickWs, setPickWs] = useState(false)
   const [autopilot, setAutopilot] = useState(true)
   const [artifacts, setArtifacts] = useState<PlanStep[]>([])
+  const [plannerStopped, setPlannerStopped] = useState(false)
+  const [retryingPlanner, setRetryingPlanner] = useState(false)
+  const [plannerError, setPlannerError] = useState<string | null>(null)
   const [installedSkills, setInstalledSkills] = useState<SkillItem[]>([])
   const installedWorkflows: WorkflowDefStub[] = []
 
@@ -61,10 +65,23 @@ export function CodePlanReview({ draft, onBack, onLaunched }: {
       setWorkflowIds(new Set(p.workflow_ids ?? []))
     }).catch(() => setError('Could not load the project.'))
     api.skills().then(setInstalledSkills).catch(() => {})
-    api.uLoopPlanSession(draft.projectId).then((s) => {
-      if (s) setArtifacts(s.steps.filter((st) => st.kind !== 'decomposition' && st.artifact && Object.keys(st.artifact).length > 0))
+    api.uLoopPlanState(draft.projectId).then(({ session, planner }) => {
+      if (session) setArtifacts(session.steps.filter((st) => st.kind !== 'decomposition' && st.artifact && Object.keys(st.artifact).length > 0))
+      setPlannerStopped(planner.retryable)
     }).catch(() => {})
   }, [draft.projectId])
+
+  async function retryPlanning() {
+    if (retryingPlanner) return
+    setRetryingPlanner(true); setPlannerError(null)
+    try {
+      await api.uLoopPlanRetry(draft.projectId)
+      const state = await api.uLoopPlanState(draft.projectId)
+      setPlannerStopped(state.planner.retryable)
+    } catch (e) {
+      setPlannerError(`Couldn't restart planning: ${(e as Error).message || 'unknown error'}`)
+    } finally { setRetryingPlanner(false) }
+  }
 
   const dupStages = (() => {
     const seen = new Set<string>(); const dups = new Set<string>()
@@ -137,6 +154,7 @@ export function CodePlanReview({ draft, onBack, onLaunched }: {
             <div className="flex h-40 items-center justify-center"><Loader2 size={22} className="animate-spin text-on-surface-low" /></div>
           ) : (
             <>
+              {plannerStopped && <PlannerRecoveryNotice retrying={retryingPlanner} error={plannerError} onRetry={retryPlanning} />}
               { }
               <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={spring.spatialFast}
                 className="rounded-xl border border-outline-variant/50 bg-surface-container/60 p-4">

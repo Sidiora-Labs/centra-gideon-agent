@@ -239,6 +239,7 @@ def build_child_env(
     return env
 
 
+@functools.lru_cache(maxsize=1)
 def _probe_unshare() -> bool:
     """Return True if user + mount namespaces work (Linux).
 
@@ -277,6 +278,9 @@ def _probe_unshare() -> bool:
         return False
 
 
+_SANDBOX_EXEC_PROBE_CACHE: dict[tuple[object, ...], bool] = {}
+
+
 def _probe_sandbox_exec() -> bool:
     """Return True if macOS ``sandbox-exec`` actually works.
 
@@ -284,11 +288,24 @@ def _probe_sandbox_exec() -> bool:
     fallback) to match the real sandbox_exec_argv() invocation.  macOS ≥ 26
     refuses sandbox_apply() for third-party binaries, so probing with just
     ``true`` gives false positives.
+
+    The dependency values form the cache key so tests that replace the platform helpers do
+    not inherit a result produced under a different simulated host. In production they are
+    process constants, making the external probe a one-time spawn.
     """
-    if sys.platform != "darwin":
+    platform_name = sys.platform
+    if platform_name != "darwin":
+        _SANDBOX_EXEC_PROBE_CACHE.setdefault(
+            (platform_name, "", None, subprocess.run), False
+        )
         return False
+    mac_ver = platform.mac_ver()[0]
+    sandbox_exec = shutil.which("sandbox-exec")
+    cache_key = (platform_name, mac_ver, sandbox_exec, subprocess.run)
+    if cache_key in _SANDBOX_EXEC_PROBE_CACHE:
+        return _SANDBOX_EXEC_PROBE_CACHE[cache_key]
+    available = False
     try:
-        mac_ver = platform.mac_ver()[0]
         if mac_ver:
             major = int(mac_ver.split(".")[0])
             if major >= 26:
@@ -296,11 +313,12 @@ def _probe_sandbox_exec() -> bool:
                     "sandbox-exec unavailable: macOS %s denies sandbox_apply for third-party binaries",  # noqa: E501
                     mac_ver,
                 )
+                _SANDBOX_EXEC_PROBE_CACHE[cache_key] = False
                 return False
     except (ValueError, IndexError):
         pass
-    sb = shutil.which("sandbox-exec")
-    if sb is None:
+    if sandbox_exec is None:
+        _SANDBOX_EXEC_PROBE_CACHE[cache_key] = False
         return False
     target = "/usr/bin/true"
     target_arg: list[str] = []
@@ -308,26 +326,27 @@ def _probe_sandbox_exec() -> bool:
     try:
         os.write(fd, b"(version 1)(allow default)")
         os.close(fd)
-        r = subprocess.run(
-            [sb, "-f", profile_path, target, *target_arg],
+        result = subprocess.run(
+            [sandbox_exec, "-f", profile_path, target, *target_arg],
             capture_output=True,
             timeout=5,
         )
-        if r.returncode != 0:
+        if result.returncode != 0:
             logger.warning(
                 "sandbox-exec probe failed (exit %d): %s",
-                r.returncode,
-                r.stderr.decode(errors="replace").strip(),
+                result.returncode,
+                result.stderr.decode(errors="replace").strip(),
             )
-        return r.returncode == 0
+        available = result.returncode == 0
     except Exception as exc:
         logger.debug("sandbox-exec probe failed: %s", exc)
-        return False
     finally:
         try:
             os.unlink(profile_path)
         except OSError:
             pass
+    _SANDBOX_EXEC_PROBE_CACHE[cache_key] = available
+    return available
 
 
 @functools.lru_cache(maxsize=1)

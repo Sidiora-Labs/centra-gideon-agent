@@ -131,7 +131,7 @@ class CredentialTransfer:
         if not source:
             return self.result(True)
         _write_snapshot()
-        outcomes = {"moved": [], "already": [], "failed": []}
+        outcomes: dict = {"moved": [], "already": [], "failed": []}
         for name in sorted(source):
             outcomes[self.store(name, source[name])].append(name)
         verified = outcomes["moved"] + outcomes["already"]

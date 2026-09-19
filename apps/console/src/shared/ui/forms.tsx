@@ -119,8 +119,9 @@ export function Select({ value, onChange, options, disabled, name, ariaLabel, di
 
 export { Segmented, type SegOption } from './Segmented'
 
-export function ChipInput({ values, onChange, placeholder, max, suggestions, ariaLabel }: {
+export function ChipInput({ values, onChange, placeholder, max, suggestions, ariaLabel, disabled, disabledReason }: {
   values: string[]; onChange: (values: string[]) => void; placeholder?: string; max?: number; suggestions?: string[]; ariaLabel?: string
+  disabled?: boolean; disabledReason?: string
 }) {
   const label = useFieldLabelId()
   const hint = useFieldHintId()
@@ -128,26 +129,32 @@ export function ChipInput({ values, onChange, placeholder, max, suggestions, ari
   const input = useRef<HTMLInputElement>(null)
   const [draft, setDraft] = useState('')
   const commit = () => {
+    if (disabled) return
     const next = addChip(values, draft, max)
     setDraft('')
     if (next) onChange(next)
   }
-  const remove = (value: string) => { onChange(values.filter((item) => item !== value)); input.current?.focus() }
+  const remove = (value: string) => {
+    if (disabled) return
+    onChange(values.filter((item) => item !== value)); input.current?.focus()
+  }
   const remaining = suggestions?.filter((suggestion) => !values.includes(suggestion)) ?? []
   return <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-md border border-outline-variant/30 bg-surface-container px-2 py-2 focus-within:ring-2 focus-within:ring-inset focus-within:ring-primary"
-    onMouseDown={(event) => { if (event.target === event.currentTarget) { event.preventDefault(); input.current?.focus() } }}>
+    aria-disabled={disabled || undefined} title={disabled ? disabledReason : undefined}
+    onMouseDown={(event) => { if (!disabled && event.target === event.currentTarget) { event.preventDefault(); input.current?.focus() } }}>
     {values.map((value) => <span key={value} data-type="body-s" className="inline-flex h-7 items-center rounded-lg bg-surface-high pl-2 pr-0 text-on-surface-var">
-      {value}<button type="button" aria-label={`Remove ${value}`} onClick={() => remove(value)}
-        className="inline-flex size-6 shrink-0 items-center justify-center rounded-r-lg text-on-surface-low hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><X size={12} /></button>
+      {value}<button type="button" aria-label={`Remove ${value}`} onClick={() => remove(value)} disabled={disabled}
+        className="inline-flex size-6 shrink-0 items-center justify-center rounded-r-lg text-on-surface-low hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"><X size={12} /></button>
     </span>)}
     <input ref={input} value={draft} name={`chip-${listId}`} list={remaining.length ? listId : undefined}
       {...fieldNaming(label, ariaLabel ?? 'Add a tag', undefined, true)} aria-describedby={hint} placeholder={values.length ? '' : placeholder}
-      onChange={(event) => setDraft(event.target.value)} onBlur={commit}
+      disabled={disabled} onChange={(event) => setDraft(event.target.value)} onBlur={commit}
       onKeyDown={(event) => {
+        if (disabled) return
         if (event.nativeEvent.isComposing) return
         if (event.key === 'Enter' || event.key === ',') { event.preventDefault(); commit() }
         else if (event.key === 'Backspace' && draft === '' && values.length) onChange(values.slice(0, -1))
-      }} data-type="body-s" className="min-h-6 min-w-[80px] flex-1 bg-transparent text-on-surface outline-none placeholder:text-on-surface-low" />
+      }} data-type="body-s" className="min-h-6 min-w-[80px] flex-1 bg-transparent text-on-surface outline-none placeholder:text-on-surface-low disabled:opacity-50" />
     {remaining.length > 0 && <datalist id={listId}>{remaining.map((suggestion) => <option key={suggestion} value={suggestion} />)}</datalist>}
   </div>
 }
@@ -157,5 +164,5 @@ export function Checkbox({ checked, onChange, ariaLabel, className }: {
 }) {
   return <input type="checkbox" checked={checked} aria-label={ariaLabel} onClick={(event) => event.stopPropagation()}
     onChange={(event) => { event.stopPropagation(); onChange(event.target.checked) }}
-    className={cx('size-4 shrink-0 cursor-pointer rounded border-outline-variant accent-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary', className)} />
+    className={cx('size-4 min-h-4 min-w-4 shrink-0 cursor-pointer rounded border-outline-variant accent-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary', className)} />
 }

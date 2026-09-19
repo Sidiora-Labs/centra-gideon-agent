@@ -8,6 +8,8 @@ const GATEWAY_PORT = Number(process.env.PW_GATEWAY_PORT || 10437)
 
 const STORAGE_STATE = process.env.STORAGE_STATE || 'e2e/.auth/state.json'
 
+export const VISUAL_BASELINE_PLATFORMS = ['darwin'] as const
+
 export const SCRIPTED = {
   type: 'scripted',
   scriptEnvVar: 'GIDEON_SCRIPTED_MODEL_SCRIPT',
@@ -40,7 +42,7 @@ export default defineConfig({
     ? [['github'], ['html', { open: 'never' }], ['junit', { outputFile: 'test-results/junit.xml' }]]
     : [['list']],
   expect: {
-    toHaveScreenshot: { maxDiffPixelRatio: 0.01, animations: 'disabled' },
+    toHaveScreenshot: { maxDiffPixelRatio: 0.01, animations: 'disabled', caret: 'hide', scale: 'css' },
   },
   use: {
     baseURL: BASE_URL,

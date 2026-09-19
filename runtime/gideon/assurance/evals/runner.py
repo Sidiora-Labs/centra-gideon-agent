@@ -100,6 +100,29 @@ def _parse_child_stdout(stdout: str) -> dict | None:
     return None
 
 
+def _coords_from_run_output(coords: dict, output: dict | None) -> dict:
+    attributed = dict(coords or {})
+    if overlay_lib.ARM_AXIS not in attributed:
+        return attributed
+
+    attributed.pop(overlay_lib.ARM_AXIS, None)
+    if not isinstance(output, dict) or not output.get("ok"):
+        return attributed
+    overlay_output = output.get("overlay")
+    if not isinstance(overlay_output, dict):
+        return attributed
+    arm = str(overlay_output.get("arm") or "")
+    if arm not in overlay_lib.ARMS:
+        return attributed
+    applied = overlay_output.get("applied")
+    if arm != overlay_lib.ARM_ON and not (
+        isinstance(applied, list) and len(applied) > 0
+    ):
+        return attributed
+    attributed[overlay_lib.ARM_AXIS] = arm
+    return attributed
+
+
 def _cell_overlay(
     spec: MatrixSpec, coords: dict
 ) -> "overlay_lib.ComponentOverlay | None":
@@ -233,7 +256,9 @@ def _spawn_cell(
                 cell_dir, {"outcome": VERIFIER_ABSENT, "reason": "timeout"}
             )
             return CellResult(
-                coords=coords, outcome=VERIFIER_ABSENT, artifact_ref=artifact_ref
+                coords=_coords_from_run_output(coords, None),
+                outcome=VERIFIER_ABSENT,
+                artifact_ref=artifact_ref,
             )
         except Exception as exc:  # noqa: BLE001 - a spawn fault is one absent cell
             logger.warning(
@@ -243,7 +268,9 @@ def _spawn_cell(
                 cell_dir, {"outcome": VERIFIER_ABSENT, "reason": f"spawn_error: {exc}"}
             )
             return CellResult(
-                coords=coords, outcome=VERIFIER_ABSENT, artifact_ref=artifact_ref
+                coords=_coords_from_run_output(coords, None),
+                outcome=VERIFIER_ABSENT,
+                artifact_ref=artifact_ref,
             )
 
         parsed = _parse_child_stdout(proc.stdout)
@@ -259,14 +286,19 @@ def _spawn_cell(
 
         if proc.returncode != 0 or parsed is None or not parsed.get("ok"):
             return CellResult(
-                coords=coords, outcome=VERIFIER_ABSENT, artifact_ref=artifact_ref
+                coords=_coords_from_run_output(coords, parsed),
+                outcome=VERIFIER_ABSENT,
+                artifact_ref=artifact_ref,
             )
 
         outcome = PASSED if parsed.get("passed") else FAILED
         raw_score = parsed.get("score")
         score = None if raw_score is None else float(raw_score)
         return CellResult(
-            coords=coords, outcome=outcome, score=score, artifact_ref=artifact_ref
+            coords=_coords_from_run_output(coords, parsed),
+            outcome=outcome,
+            score=score,
+            artifact_ref=artifact_ref,
         )
 
 
@@ -341,7 +373,12 @@ def run_matrix(
     for cell_index, combo in enumerate(combos):
         coords = {k: v for k, v in combo.items() if k != TRIAL_KEY}
         if _budget_blocks_cell(spec):
-            cells.append(CellResult(coords=coords, outcome=VERIFIER_ABSENT))
+            cells.append(
+                CellResult(
+                    coords=_coords_from_run_output(coords, None),
+                    outcome=VERIFIER_ABSENT,
+                )
+            )
             continue
         cells.append(
             _spawn_cell(

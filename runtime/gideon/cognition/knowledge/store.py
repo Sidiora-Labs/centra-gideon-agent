@@ -586,6 +586,8 @@ class KnowledgeStore:
                 chunk_index INTEGER NOT NULL,
                 text TEXT NOT NULL,
                 embedding BLOB,
+                embedding_provider TEXT NOT NULL DEFAULT '',
+                embedding_model TEXT NOT NULL DEFAULT '',
                 section TEXT,
                 line_start INTEGER,
                 line_end INTEGER
@@ -777,6 +779,11 @@ class KnowledgeStore:
         ("favorited", "INTEGER DEFAULT 0"),
     )
 
+    _NEW_CHUNK_COLUMNS = (
+        ("embedding_provider", "TEXT NOT NULL DEFAULT ''"),
+        ("embedding_model", "TEXT NOT NULL DEFAULT ''"),
+    )
+
     def _migrate(self):
         """Add columns missing in older DBs, and drop the legacy source/chunk model
         (one item = one logical doc; sourcing is per-item attribution)."""
@@ -790,6 +797,12 @@ class KnowledgeStore:
         for col, decl in self._NEW_ITEM_COLUMNS:
             if col not in cols:
                 self.db.execute(f"ALTER TABLE items ADD COLUMN {col} {decl}")
+        chunk_cols = {
+            r[1] for r in self.db.execute("PRAGMA table_info(chunks)").fetchall()
+        }
+        for col, decl in self._NEW_CHUNK_COLUMNS:
+            if col not in chunk_cols:
+                self.db.execute(f"ALTER TABLE chunks ADD COLUMN {col} {decl}")
         self.db.execute(
             "CREATE INDEX IF NOT EXISTS idx_items_logical_key ON items(logical_key)"
         )
@@ -1537,6 +1550,72 @@ class KnowledgeStore:
     def get_item(self, item_id):
         row = self.db.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
         return self._serialize_item(row) if row else None
+
+    def claim_neighbours(
+        self, statements: list[str], *, exclude: str = "", limit: int = 30
+    ) -> list[dict[str, Any]]:
+        """Stored claims near ``statements``, bounded and carrying their owning item id.
+
+        FTS supplies the relevant-first prefix and the recent claim-bearing scan supplies the
+        no-index fallback.  The latter matters for a freshly written or migrated database whose
+        metadata has claims but whose prose does not repeat the claim verbatim.  Returned rows are
+        claims, not items, because contradiction review needs the exact stored assertion; each is
+        annotated with ``source_ref`` so a model verdict can name a real relation target.
+        """
+        cap = max(1, min(100, int(limit)))
+        identifiers: dict[str, None] = {}
+        for statement in statements[:3]:
+            terms = re.findall(r"[A-Za-z0-9]{3,}", statement or "")[:12]
+            if not terms:
+                continue
+            try:
+                rows = self.db.execute(
+                    "SELECT i.id FROM items_fts f JOIN items i ON i.rowid = f.rowid "
+                    "WHERE items_fts MATCH ? AND COALESCE(i.is_archived, 0) = 0 "
+                    "AND i.id != ? LIMIT 10",
+                    (" OR ".join(terms), exclude or ""),
+                ).fetchall()
+            except Exception:
+                logger.debug("claim neighbour search failed", exc_info=True)
+                rows = []
+            for row in rows:
+                identifiers.setdefault(str(row["id"]), None)
+
+        try:
+            rows = self.db.execute(
+                "SELECT id FROM items WHERE COALESCE(is_archived, 0) = 0 AND id != ? "
+                "AND file_metadata LIKE '%\"claims\"%' ORDER BY updated_at DESC LIMIT 40",
+                (exclude or "",),
+            ).fetchall()
+        except Exception:
+            logger.debug("claim-bearing fallback scan failed", exc_info=True)
+            rows = []
+        for row in rows:
+            identifiers.setdefault(str(row["id"]), None)
+
+        result: list[dict[str, Any]] = []
+        for identifier in identifiers:
+            row = self.db.execute(
+                "SELECT file_metadata FROM items WHERE id = ?", (identifier,)
+            ).fetchone()
+            if row is None:
+                continue
+            try:
+                metadata = json.loads(row["file_metadata"] or "{}")
+            except (TypeError, ValueError):
+                continue
+            claims = metadata.get("claims") if isinstance(metadata, dict) else None
+            if not isinstance(claims, list):
+                continue
+            for raw in claims:
+                if not isinstance(raw, dict):
+                    continue
+                claim = {**raw, "source_ref": identifier}
+                if str(claim.get("statement") or "").strip():
+                    result.append(claim)
+                if len(result) >= cap:
+                    return result
+        return result
 
     def find_active_by_url(self, url: str):
         """Return an existing active item whose canonical URL matches, or None. Used to
@@ -2320,6 +2399,8 @@ class KnowledgeStore:
                 c.chunk_index,
                 c.text,
                 c.embedding,
+                getattr(c, "embedding_provider", "") if c.embedding else "",
+                getattr(c, "embedding_model", "") if c.embedding else "",
                 c.section,
                 c.line_start,
                 c.line_end,
@@ -2329,8 +2410,9 @@ class KnowledgeStore:
         if rows:
             self.db.executemany(
                 "INSERT INTO chunks "
-                "(id, item_id, chunk_index, text, embedding, section, line_start, line_end) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "(id, item_id, chunk_index, text, embedding, embedding_provider, "
+                "embedding_model, section, line_start, line_end) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
         self.vec_index.sync_item(item_id, [(r[0], r[4]) for r in rows])
@@ -2343,7 +2425,8 @@ class KnowledgeStore:
         is decoded to a float list only when *with_embedding* is set (the retrieval path);
         otherwise a lightweight ``has_embedding`` flag is returned instead."""
         cols = (
-            "id, item_id, chunk_index, text, section, line_start, line_end, embedding"
+            "id, item_id, chunk_index, text, section, line_start, line_end, "
+            "embedding_provider, embedding_model, embedding"
         )
         rows = self.db.execute(
             f"SELECT {cols} FROM chunks WHERE item_id = ? ORDER BY chunk_index",
@@ -2836,11 +2919,27 @@ class KnowledgeStore:
         self._load_graph()
 
     def clear_embeddings(self) -> int:
-        """Null every item embedding. Used on an embedding-model switch — vectors
-        from different models are incompatible. Item text/title/summary is
-        preserved so they can be re-embedded. Returns the count cleared."""
+        """Null every item and chunk embedding for an embedding-model switch.
+
+        Chunk text and locators are preserved, but their vectors and space fingerprints are
+        cleared together. This prevents a same-dimension old-model vector from remaining in
+        the ANN index while the item vectors are being rebuilt. Returns the item count, which
+        is the re-index job's progress unit.
+        """
         cur = self.db.execute(
             "UPDATE items SET embedding = NULL WHERE embedding IS NOT NULL"
+        )
+        chunk_rows = self.db.execute(
+            "SELECT id, item_id FROM chunks WHERE embedding IS NOT NULL"
+        ).fetchall()
+        by_item: dict[str, list[tuple[str, None]]] = defaultdict(list)
+        for row in chunk_rows:
+            by_item[row["item_id"]].append((row["id"], None))
+        for item_id, rows in by_item.items():
+            self.vec_index.sync_item(item_id, rows)
+        self.db.execute(
+            "UPDATE chunks SET embedding = NULL, embedding_provider = '', "
+            "embedding_model = '' WHERE embedding IS NOT NULL"
         )
         self.db.commit()
         return cur.rowcount
@@ -2882,6 +2981,89 @@ class KnowledgeStore:
             (active_dim * 4,),
         ).fetchone()
         return int(row["n"]) if row else 0
+
+    def chunk_embedding_status(
+        self,
+        embedding_provider: str,
+        embedding_model: str,
+        active_dim: int | None = None,
+    ) -> dict[str, Any]:
+        """Describe which active chunk vectors are safe to score in the active space.
+
+        The fingerprint comparison catches model/provider changes whose dimensions happen to
+        match. Legacy vectors and custom embedders use the empty/empty compatibility space;
+        once an active provider/model is known, those unlabelled rows are stale until reindex.
+        Each stale vector has one primary reason so reason counts sum to ``stale``.
+        """
+        provider = str(embedding_provider or "")
+        model = str(embedding_model or "")
+        rows = self.db.execute(
+            "SELECT COALESCE(c.embedding_provider, '') AS provider, "
+            "COALESCE(c.embedding_model, '') AS model, LENGTH(c.embedding) AS bytes, "
+            "COUNT(*) AS n FROM chunks c JOIN items i ON i.id = c.item_id "
+            "WHERE c.embedding IS NOT NULL AND i.status = 'active' "
+            "AND COALESCE(i.is_archived, 0) = 0 "
+            "GROUP BY provider, model, bytes"
+        ).fetchall()
+        counts: dict[str, int] = defaultdict(int)
+        compatible = 0
+        total = 0
+        for row in rows:
+            count = int(row["n"] or 0)
+            total += count
+            stored_provider = str(row["provider"] or "")
+            stored_model = str(row["model"] or "")
+            if (provider and not stored_provider) or (model and not stored_model):
+                reason = "untracked_space"
+            elif stored_provider != provider:
+                reason = "provider_changed"
+            elif stored_model != model:
+                reason = "model_changed"
+            elif active_dim and int(row["bytes"] or 0) != int(active_dim) * 4:
+                reason = "dimension_changed"
+            else:
+                compatible += count
+                continue
+            counts[reason] += count
+
+        remedy = {
+            "method": "POST",
+            "path": "/api/models/embedding/reindex",
+            "label": "Re-index embeddings",
+        }
+        messages = {
+            "untracked_space": "Chunk vectors predate embedding-space tracking.",
+            "provider_changed": "Chunk vectors were produced by another provider.",
+            "model_changed": "Chunk vectors were produced by another model.",
+            "dimension_changed": "Chunk vectors have another dimension.",
+        }
+        reasons = [
+            {
+                "code": code,
+                "count": counts[code],
+                "detail": messages[code],
+                "remedy": remedy,
+            }
+            for code in (
+                "untracked_space",
+                "provider_changed",
+                "model_changed",
+                "dimension_changed",
+            )
+            if counts.get(code)
+        ]
+        return {
+            "active_space": {
+                "provider": provider,
+                "model": model,
+                "dimension": active_dim,
+            },
+            "indexed": total,
+            "compatible": compatible,
+            "stale": total - compatible,
+            "reasons": reasons,
+            "remedy": remedy if total != compatible else None,
+        }
 
     _CHUNKABLE_WHITESPACE = " \t\n\r\v\f"
 
@@ -3634,7 +3816,10 @@ class KnowledgeStore:
             compose_item_text,
             floats_to_bytes,
         )
-        from gideon.cognition.knowledge.pipeline.runner import active_batch_embed_fn
+        from gideon.cognition.knowledge.pipeline.runner import (
+            active_batch_embed_fn,
+            embed_item_chunks,
+        )
 
         embed_many = active_batch_embed_fn(embedder)
         embed_one = self._item_embed_one(embedder)
@@ -3669,6 +3854,7 @@ class KnowledgeStore:
                     reembedded += 1
                 else:
                     failed += 1
+                embed_item_chunks(self, r["id"], r["content"] or "", embedder)
                 done += 1
                 if on_progress is not None:
                     on_progress(done, total)

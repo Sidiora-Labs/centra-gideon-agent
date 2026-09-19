@@ -20,7 +20,7 @@ def _percentile(sorted_vals: list[float], pct: float) -> float:
 def _latencies_by_ref(
     audit_rows: list[dict], use_case: str, query_class: str
 ) -> dict[str, list[float]]:
-    samples = {}
+    samples: dict = {}
     matching = (
         row
         for row in audit_rows

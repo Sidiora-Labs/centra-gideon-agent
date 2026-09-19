@@ -6,7 +6,6 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from gideon.automation.triggers import singletons
 from gideon.integrations.action_providers.base import (
     ActionContext,
     ActionProvider,
@@ -19,12 +18,7 @@ logger = logging.getLogger(__name__)
 IDENTITY_REPORT_TRIGGER_ID = "system:learning-identity-report"
 PROVIDER_NAME = "identity-report"
 _CADENCE_CRON: dict[str, str] = {"monthly": "0 9 1 * *", "weekly": "0 9 * * 1"}
-_CLOCK = ReportClock(
-    IDENTITY_REPORT_TRIGGER_ID,
-    "Identity report",
-    PROVIDER_NAME,
-    singletons.IDENTITY_REPORT,
-)
+_CLOCK = ReportClock(IDENTITY_REPORT_TRIGGER_ID, "Identity report", PROVIDER_NAME)
 
 
 @dataclass(frozen=True)
@@ -127,7 +121,6 @@ def reconcile_identity_report_trigger(store: Any) -> None:
     if not cadence:
         logger.debug("identity-report trigger: cadence unreadable")
         return
-    _CLOCK.converge(store)
     try:
         existing = store.get(IDENTITY_REPORT_TRIGGER_ID)
     except Exception:
@@ -140,6 +133,8 @@ def reconcile_identity_report_trigger(store: Any) -> None:
         revision = _CLOCK.plan(
             existing, expression, policy="cadence", enabled=cadence != CADENCE_OFF
         )
+        if revision is None:
+            return
         revision.persist(store, capabilities_for_action)
         if revision.created:
             logger.info("registered the identity-report trigger (%s)", cadence)

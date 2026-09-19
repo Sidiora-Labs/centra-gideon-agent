@@ -703,7 +703,8 @@ class LocalModelsConfig:
     every verdict more conservative, and it is never a limit that blocks a download or a
     load. ``hide_unrunnable_models`` is the browse filter's default: on a small machine a
     catalog is mostly models it cannot run, so the filter starts ON and stays one click
-    away.
+    away. ``hf_whoami_ttl_secs`` bounds reuse of a successful or failed
+    Hugging Face whoami check, avoiding a network request on every status render.
     """
 
     pressure_warn_pct: int = field(
@@ -737,6 +738,22 @@ class LocalModelsConfig:
             "Hide models this device cannot run",
             "Keeps models that do not fit this machine's memory out of the browse list. "
             "On by default; turn it off to see the whole catalog.",
+        ),
+    )
+    hf_whoami_ttl_secs: int = field(
+        default=300,
+        metadata=_meta(
+            "Hugging Face token check TTL",
+            "How long a successful Hugging Face whoami token check is reused, in seconds. "
+            "Set to 0 to validate on every check.",
+        ),
+    )
+    selftest_timeout_secs: int = field(
+        default=60,
+        metadata=_meta(
+            "Local model self-test timeout",
+            "Maximum time, in seconds, a single provider capability self-test may run "
+            "before it reports a timeout.",
         ),
     )
 
@@ -1064,7 +1081,11 @@ class MemoryConfig:
     )
     migrated: bool = field(
         default=False,
-        metadata=_meta("Migrated", "Whether memory has been migrated to vector store."),
+        metadata=_meta(
+            "Migrated",
+            "Whether a legacy memory migration imported records into the vector store. "
+            "Managed by the migration operation.",
+        ),
     )
     vault_mode: str = field(
         default="off",
@@ -1311,6 +1332,17 @@ class DashboardConfig:
         metadata=_meta(
             "Auto Open Browser",
             "Open the dashboard URL in the default browser on gateway startup.",
+        ),
+    )
+    update_dev_mode: bool = field(
+        default=False,
+        metadata=_meta(
+            "Developer Update Mode",
+            "Git checkouts only: update on every new commit on the current branch "
+            "instead of only when a new release TAG exists. Off (default) means the "
+            "in-app updater rides releases like every other install kind; on is the "
+            "contributor 'track main' behavior. No effect on pip/container/desktop "
+            "installs (they always update per release).",
         ),
     )
     screen_share_enabled: bool = field(
@@ -1709,6 +1741,31 @@ class KnowledgeConfig:
             "ends up adjacent to the whole store and every traversal through it is a fan-out. "
             "The weakest edges are dropped first when an item reaches the cap. Set it at or "
             "above the top-K, or the cap immediately discards edges the pass just chose.",
+        ),
+    )
+    reranker_enabled: bool = field(
+        default=False,
+        metadata=_meta(
+            "Relevance Reranker",
+            "Reorder hybrid knowledge-search candidates with a local cross-encoder. Off by "
+            "default because loading the model consumes memory and adds latency; when its "
+            "dependency or weights are unavailable, search keeps the existing RRF order.",
+        ),
+    )
+    reranker_model: str = field(
+        default="cross-encoder/ms-marco-MiniLM-L-6-v2",
+        metadata=_meta(
+            "Relevance Reranker Model",
+            "Local Hugging Face model name or path used for knowledge-result reranking. "
+            "Weights must already be present locally; search never downloads them.",
+        ),
+    )
+    reranker_max_candidates: int = field(
+        default=32,
+        metadata=_meta(
+            "Relevance Reranker Candidate Limit",
+            "Maximum fused candidates scored for one search. Bounds local-model latency "
+            "and memory without changing keyword, graph, vector, or RRF candidate generation.",
         ),
     )
     consolidate_min_cluster: int = field(
@@ -2691,15 +2748,14 @@ class UpdatesConfig:
     """Release-based update + release-tracking contract (RELEASE-UPDATE-MECHANISM RUM-1).
 
     The single block the CLI, container, desktop and the Settings > Updates screen read.
-    It is the whole release policy: the resolver, the check kill-switch, the staged apply
-    and the release-tag source updater all read these fields and nothing else.
+    RUM-1 is only the config surface + the legacy backfill; the resolver, the check
+    kill-switch, the retirement of pull-from-main and the per-kind apply are later RUM
+    atoms that CONSUME these fields.
 
     Legacy backfill (applied in ``AppConfig.load()``, idempotent — a clean break under the
     pre-1.0 banner, NOT a migration file): a home written before this block existed carries
-    the old ``auto_update`` bool and ``dashboard.update_dev_mode`` bool. Neither is a live
-    setting any more — ``dashboard.update_dev_mode`` was retired with the developer update
-    mode it named, and is read from the stored document only as a backfill source. On load,
-    when the ``updates`` block does not itself declare a field, ``auto_update=true`` maps to
+    the old ``auto_update`` bool and ``dashboard.update_dev_mode`` bool. On load, when the
+    ``updates`` block does not itself declare a field, ``auto_update=true`` maps to
     ``auto="staged"`` with ``channel="stable"`` (an existing auto-updating git user stops
     riding raw ``main`` and starts riding stable release tags), ``auto_update=false`` maps to
     ``auto="off"``, and ``dashboard.update_dev_mode=true`` maps to ``channel="nightly"``. An
@@ -2926,7 +2982,7 @@ class AppConfig:
         default_factory=LocalModelsConfig,
         metadata=_meta(
             "Local models",
-            "Memory-pressure warning threshold + sidecar restart budget.",
+            "Memory pressure, sidecar restart, model fit, and Hugging Face authentication.",
         ),
     )
     sources: SourcesConfig = field(
@@ -2979,10 +3035,9 @@ class AppConfig:
         default=True,
         metadata=_meta(
             "Auto Update",
-            "Superseded by 'updates.auto'. Kept so a home written before the updates "
-            "block still maps: a stored true becomes 'staged' and a stored false "
-            "becomes 'off' when 'updates.auto' is absent. Nothing reads this field to "
-            "decide whether an update applies.",
+            "Automatically apply updates when a new version is found "
+            "(update checks always run; this gates the unattended "
+            "pull + rebuild + restart).",
         ),
     )
     updates: "UpdatesConfig" = field(

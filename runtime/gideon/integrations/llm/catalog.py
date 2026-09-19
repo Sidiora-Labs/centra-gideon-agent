@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
 
 logger = logging.getLogger(__name__)
 
@@ -195,13 +193,6 @@ __all__ = [
     "ModelManager",
     "infer_capabilities",
     "openai_compatible_list_models",
-    "ModelDiscoveryError",
-    "DISCOVERY_ERROR_KINDS",
-    "DISCOVERY_POLICY_BLOCKED",
-    "DISCOVERY_CONNECTION_FAILED",
-    "DISCOVERY_UNAUTHORIZED",
-    "DISCOVERY_MALFORMED_RESPONSE",
-    "DISCOVERY_SERVER_ERROR",
 ]
 
 _EXCLUSIVE_TAGS = (
@@ -282,142 +273,19 @@ def _decode_model_rows(document: object) -> list[ModelInfo]:
     return models
 
 
-DISCOVERY_POLICY_BLOCKED = "policy_blocked"
-DISCOVERY_CONNECTION_FAILED = "connection_failed"
-DISCOVERY_UNAUTHORIZED = "unauthorized"
-DISCOVERY_MALFORMED_RESPONSE = "malformed_response"
-DISCOVERY_SERVER_ERROR = "server_error"
-
-DISCOVERY_ERROR_KINDS: frozenset[str] = frozenset(
-    {
-        DISCOVERY_POLICY_BLOCKED,
-        DISCOVERY_CONNECTION_FAILED,
-        DISCOVERY_UNAUTHORIZED,
-        DISCOVERY_MALFORMED_RESPONSE,
-        DISCOVERY_SERVER_ERROR,
-    }
-)
-
-
-class ModelDiscoveryError(Exception):
-    """A discovery attempt that failed in a way the operator can act on.
-
-    Raised instead of the old bare ``return []``, which made five different problems
-    — an egress policy that refuses the host, an endpoint that is not running, a key
-    the endpoint rejected, a body that is not a model list, and a provider having a
-    bad day — indistinguishable from "this provider has no models", the one state the
-    empty list legitimately means. A provider setup screen cannot be honest about a
-    failure it was never told about.
-
-    ``kind`` is one of :data:`DISCOVERY_ERROR_KINDS` (what class of thing went wrong),
-    ``detail`` says what was observed, and ``remedy`` says what to do about it. All
-    three are SAFE to render: the API key is never part of any of them, and the
-    address is carried in its credential-free form (:func:`_safe_address`).
-    """
-
-    def __init__(
-        self, kind: str, detail: str, remedy: str, *, address: str = ""
-    ) -> None:
-        super().__init__(f"{detail} {remedy}".strip())
-        self.kind = kind
-        self.detail = detail
-        self.remedy = remedy
-        self.address = address
-
-    def to_dict(self) -> dict[str, str]:
-        return {
-            "kind": self.kind,
-            "detail": self.detail,
-            "remedy": self.remedy,
-            "address": self.address,
-        }
-
-
-_API_VERSION_SEGMENT = re.compile(r"^v\d+[a-z0-9]*$", re.IGNORECASE)
-
-_DISCOVERY_UNSUPPORTED_STATUSES = frozenset({404, 405, 501})
-
-
-def _models_address(base: str) -> str:
-    """``base`` + the OpenAI-compatible models route, without doubling the version.
-
-    An address whose LAST path segment is an API version — ``/v1``, but equally
-    ``/v1beta`` (Gemini's OpenAI shim), ``/v2``, or a versioned sub-path like
-    ``/openai/v1`` — already names the API root, so only ``/models`` is appended.
-    Matching the literal string ``"/v1"`` (the old rule) sent every other versioned
-    endpoint to ``…/v1beta/v1/models``, a 404 that discovery then reported as "no
-    models" — the provider looked empty rather than misconfigured.
-    """
-    address = (base or "").rstrip("/")
-    last = urlsplit(address).path.rsplit("/", 1)[-1]
-    return (
-        f"{address}/models"
-        if _API_VERSION_SEGMENT.match(last)
-        else f"{address}/v1/models"
-    )
-
-
-def _safe_address(url: str) -> str:
-    """*url* with anything credential-shaped removed — userinfo and query string.
-
-    A discovery address is operator-supplied and can legitimately carry a secret
-    (``https://user:token@host/v1``, ``…?api-key=…``). Every field of a
-    :class:`ModelDiscoveryError` is rendered in the UI and written to the log, so the
-    address is reduced to scheme/host/path before it goes anywhere.
-    """
-    try:
-        split = urlsplit(url)
-    except ValueError:
-        return ""
-    host = split.hostname or ""
-    if split.port:
-        host = f"{host}:{split.port}"
-    return urlunsplit((split.scheme, host, split.path, "", ""))
-
-
-def _scrub(text: str, *, api_key: str = "", address: str = "", safe: str = "") -> str:
-    """Strip the api key and the raw (possibly credentialed) address out of *text*.
-
-    Belt and braces for the one string a discovery error does not author itself: the
-    egress guard's refusal reason, and an exception's own words, can quote the URL
-    they were given.
-    """
-    out = text or ""
-    if address and safe and address != safe:
-        out = out.replace(address, safe)
-    if api_key:
-        out = out.replace(api_key, "***")
-    return out
-
-
 async def openai_compatible_list_models(
     endpoint: str | None,
     api_key: str | None,
     *,
     default_base: str = "https://api.openai.com/v1",
 ) -> list[ModelInfo]:
-    """Live models from an OpenAI-compatible ``/models`` route.
-
-    Returns the discovered models, or an EMPTY list for the two states that honestly
-    mean "nothing to discover here" and that the caller's static catalog is the right
-    answer for: the endpoint serves no models route at all (404/405/501 — several
-    hosted providers don't), and a well-formed response listing no models.
-
-    Every other failure raises :class:`ModelDiscoveryError` rather than collapsing
-    into that same empty list.
-    """
     if not (endpoint or api_key):
         return []
-    from gideon.sdk.net import CONNECTOR, EgressBlocked, egress_policy_for, fetch
+    from gideon.sdk.net import CONNECTOR, egress_policy_for, fetch
 
-    address = _models_address(endpoint or default_base)
-    safe = _safe_address(address)
-    key = api_key or ""
-
-    def clean(text: str) -> str:
-        return _scrub(text, api_key=key, address=address, safe=safe)
-
-    authorization = {"Authorization": f"Bearer {key}"} if key else {}
+    address = (endpoint or default_base).rstrip("/")
+    address += "/models" if address.endswith("/v1") else "/v1/models"
+    authorization = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     try:
         response = await fetch(
             address,
@@ -425,95 +293,13 @@ async def openai_compatible_list_models(
             method="GET",
             headers=authorization,
         )
-    except EgressBlocked as blocked:
-        hints = list(getattr(blocked, "recovery_hints", []) or [])
-        raise ModelDiscoveryError(
-            DISCOVERY_POLICY_BLOCKED,
-            f"The egress policy refused {safe}: {clean(str(blocked))}.",
-            clean(
-                " ".join(
-                    [
-                        "Allow the endpoint's host under security.egress.allow_hosts "
-                        "(or allow_private for a LAN/loopback endpoint), then retry.",
-                        *hints,
-                    ]
-                )
-            ),
-            address=safe,
-        ) from blocked
-    except Exception as exc:
-        raise ModelDiscoveryError(
-            DISCOVERY_CONNECTION_FAILED,
-            f"{safe} could not be reached ({type(exc).__name__}: {clean(str(exc))}).",
-            "Check that the endpoint is running and that its address is right, then "
-            "retry.",
-            address=safe,
-        ) from exc
-
-    status = response.status
-    if status in (401, 403):
-        raise ModelDiscoveryError(
-            DISCOVERY_UNAUTHORIZED,
-            f"{safe} rejected the credential (HTTP {status}).",
-            "Check the API key configured for this provider — it is missing, expired "
-            "or not authorized for model discovery.",
-            address=safe,
+        return (
+            _decode_model_rows(json.loads(response.text))
+            if response.status == 200
+            else []
         )
-    if status in _DISCOVERY_UNSUPPORTED_STATUSES:
-        logger.debug("%s serves no models route (HTTP %s)", safe, status)
+    except Exception:
         return []
-    if status >= 500:
-        raise ModelDiscoveryError(
-            DISCOVERY_SERVER_ERROR,
-            f"{safe} reported a server error (HTTP {status}).",
-            "The endpoint is failing on its own side; retry once it recovers, or "
-            "check its logs.",
-            address=safe,
-        )
-    if status != 200:
-        raise ModelDiscoveryError(
-            DISCOVERY_SERVER_ERROR,
-            f"{safe} answered HTTP {status}, which is not a model list.",
-            "Check the endpoint's base path and that model discovery is enabled for "
-            "this credential.",
-            address=safe,
-        )
-
-    try:
-        document = json.loads(response.text)
-    except ValueError:
-        content_type = (
-            getattr(response, "headers", {}).get("Content-Type", "") or "unknown"
-        )
-        raise ModelDiscoveryError(
-            DISCOVERY_MALFORMED_RESPONSE,
-            f"{safe} answered HTTP 200 with a body that is not JSON "
-            f"(content-type {content_type.split(';')[0]}).",
-            "Point the provider at the API root of an OpenAI-compatible server (the "
-            "path that serves /models), not at a page or a proxy.",
-            address=safe,
-        ) from None
-    rows = document.get("data") if isinstance(document, dict) else None
-    if not isinstance(rows, list):
-        raise ModelDiscoveryError(
-            DISCOVERY_MALFORMED_RESPONSE,
-            f"{safe} answered HTTP 200 with JSON that carries no 'data' list of "
-            "models.",
-            "Point the provider at the API root of an OpenAI-compatible server (the "
-            "path that serves /models), not at a page or a proxy.",
-            address=safe,
-        )
-    models = _decode_model_rows(document)
-    if rows and not models:
-        raise ModelDiscoveryError(
-            DISCOVERY_MALFORMED_RESPONSE,
-            f"{safe} answered with {len(rows)} model row(s), none of them carrying a "
-            "usable id.",
-            "The endpoint is not speaking the OpenAI model-list shape; check that it "
-            "is an OpenAI-compatible API root.",
-            address=safe,
-        )
-    return models
 
 
 class ModelCatalog(ABC):
@@ -558,11 +344,4 @@ __all__ = [
     "ModelManager",
     "infer_capabilities",
     "openai_compatible_list_models",
-    "ModelDiscoveryError",
-    "DISCOVERY_ERROR_KINDS",
-    "DISCOVERY_POLICY_BLOCKED",
-    "DISCOVERY_CONNECTION_FAILED",
-    "DISCOVERY_UNAUTHORIZED",
-    "DISCOVERY_MALFORMED_RESPONSE",
-    "DISCOVERY_SERVER_ERROR",
 ]

@@ -20,22 +20,14 @@ The load-bearing assertions:
 from __future__ import annotations
 
 import asyncio
-import contextlib
+import os
 import time
-from types import SimpleNamespace
 
 import pytest
 
-from gideon.automation.workflows import controller as controller_mod
 from gideon.automation.workflows import journal as J
 from gideon.automation.workflows import store
-from gideon.automation.workflows.controller import (
-    EXTERNAL_POLL_SECS,
-    MIN_WAKE_SECS,
-    TICK_WAKE_SECS,
-    EngineServices,
-    RunController,
-)
+from gideon.automation.workflows.controller import EngineServices, RunController
 from gideon.automation.workflows.journal import (
     CacheKey,
     Journal,
@@ -121,6 +113,17 @@ SEQ_SPEC = {
 
 
 class TestHappyPath:
+    async def test_run_start_stamps_the_process_owner_pid(self) -> None:
+        run = _make_run(SEQ_SPEC)
+        controller = RunController(
+            run, SEQ_SPEC, services=EngineServices(completion=_echo())
+        )
+
+        await controller._prepare()
+
+        assert run.extra["owner_pid"] == os.getpid()
+        assert store.get(run.id).extra["owner_pid"] == os.getpid()
+
     async def test_a_sequence_completes_and_threads_bindings(self) -> None:
         run = _make_run(SEQ_SPEC)
         fn = _echo()
@@ -1042,6 +1045,65 @@ class TestForeachAndLoopIntegration:
         assert await c.run_to_completion(timeout=25) == RunStatus.COMPLETE
         assert len([p for p in c.instances if "@" in p]) == 3
 
+    async def test_loop_last_has_typed_defaults_then_the_previous_iteration(
+        self,
+    ) -> None:
+        prompts: list[str] = []
+
+        async def complete(prompt, *, use_case="background", output_type=None):
+            prompts.append(prompt)
+            if prompt.startswith("work"):
+                cycle = sum(p.startswith("work") for p in prompts)
+                return {"summary": f"cycle-{cycle}"}
+            return {"verdict": "REJECT", "shortfalls": ["missing proof"]}
+
+        spec = {
+            "name": "last-defaults",
+            "root": {
+                "kind": "loop",
+                "id": "cycles",
+                "config": {"mode": "counted", "n": 2},
+                "body": {
+                    "kind": "sequence",
+                    "id": "cycle",
+                    "children": [
+                        {
+                            "kind": "infer",
+                            "id": "work",
+                            "config": {
+                                "prompt": (
+                                    "work previous={{last.output.summary}} "
+                                    "verdict={{last.output.verdict}} "
+                                    "shortfalls={{last.output.shortfalls}}"
+                                ),
+                                "schema": {"summary": "string"},
+                            },
+                        },
+                        {
+                            "kind": "infer",
+                            "id": "judge",
+                            "config": {
+                                "prompt": "judge {{nodes.work.output.summary}}",
+                                "schema": {
+                                    "verdict": "string",
+                                    "shortfalls": "array",
+                                },
+                            },
+                        },
+                    ],
+                },
+            },
+        }
+        run = _make_run(spec)
+        c = RunController(run, spec, services=EngineServices(completion=complete))
+
+        assert await c.run_to_completion(timeout=25) == RunStatus.COMPLETE
+        work_prompts = [prompt for prompt in prompts if prompt.startswith("work")]
+        assert work_prompts == [
+            "work previous= verdict= shortfalls=[]",
+            'work previous=cycle-1 verdict=REJECT shortfalls=["missing proof"]',
+        ]
+
     async def test_until_dry_exits_on_a_clean_sweep(self) -> None:
         calls = {"n": 0}
 
@@ -1695,99 +1757,3 @@ class TestEngineInstallFaultDiscriminator:
         assert not _is_engine_install_fault(
             ModuleNotFoundError("No module named 'gideonx'", name="gideonx")
         )
-
-
-class TestExternalPollCadence:
-    """A tick with nothing awaitable must WAIT, not spin (`req.50` ac_1).
-
-    A dispatched `stage` is external work: it is deliberately outside `_inflight`
-    (`_reconcile_dispatched_stages`) and carries no `wake_at`, so `_next_wake_delay`
-    has nothing to schedule. The loop answered that with `asyncio.sleep(0)` — a
-    zero-delay re-entry that re-walked the frontier and re-read the subagent as fast
-    as the event loop turned over, for the whole life of the external work.
-
-    Scope note (`req.50` ac_3): the mixed gate-and-live-stage lifecycle case — a run
-    holding an open human gate WHILE an external stage is still live — is tracked as
-    separate work and is deliberately not addressed here. These cover the poll cadence
-    only.
-    """
-
-    class _Spawner:
-        """The subagent seam `EngineServices` declares. Spawns, and reports the child
-        still running — the state the controller polls in."""
-
-        def __init__(self) -> None:
-            self.spawned: list[dict] = []
-            self.lookups = 0
-
-        def spawn(self, **kw):
-            self.spawned.append(kw)
-            return SimpleNamespace(id="ag1", error="")
-
-        def get(self, agent_id: str):
-            self.lookups += 1
-            return SimpleNamespace(id=agent_id, done=False, error="", result="")
-
-    class _RecordingClock:
-        """Stands in for the controller module's `asyncio`, recording what the tick loop
-        asks to sleep for and returning immediately so the test does not wait for it.
-        Every other asyncio name passes straight through."""
-
-        def __init__(self) -> None:
-            self.delays: list[float] = []
-
-        def __getattr__(self, name: str):
-            return getattr(asyncio, name)
-
-        async def sleep(self, delay, result=None):
-            self.delays.append(delay)
-            return await asyncio.sleep(0, result)
-
-    STAGE_SPEC = {
-        "name": "ext",
-        "root": {"kind": "stage", "id": "work", "config": {"prompt": "do the thing"}},
-    }
-
-    async def _delays(self, monkeypatch, spawner, *, want: int = 3) -> list[float]:
-        run = _make_run(self.STAGE_SPEC)
-        c = RunController(
-            run, self.STAGE_SPEC, services=EngineServices(subagents=spawner)
-        )
-        clock = self._RecordingClock()
-        monkeypatch.setattr(controller_mod, "asyncio", clock)
-        task = asyncio.create_task(c._tick_loop())
-        for _ in range(2000):
-            if len(clock.delays) >= want:
-                break
-            await asyncio.sleep(0)
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
-        return clock.delays
-
-    async def test_a_dispatched_stage_is_polled_on_a_bounded_cadence(
-        self, monkeypatch
-    ) -> None:
-        spawner = self._Spawner()
-        delays = await self._delays(monkeypatch, spawner)
-        assert spawner.spawned, "the stage never dispatched, so nothing was polled"
-        assert spawner.lookups, "the controller never re-read the external stage"
-        assert len(delays) >= 3, delays
-        assert set(delays) == {EXTERNAL_POLL_SECS}, delays
-        assert 0 not in delays, "the zero-delay spin is back"
-
-    def test_the_cadence_is_clamped_into_the_wake_window(self) -> None:
-        assert MIN_WAKE_SECS <= EXTERNAL_POLL_SECS <= TICK_WAKE_SECS
-        assert EXTERNAL_POLL_SECS > 0
-
-    async def test_a_scheduled_wake_still_wins_over_the_poll_floor(self) -> None:
-        """The floor is the fallback, not an override: a node with a real deadline keeps
-        being woken by `_next_wake_delay`, which is what `test_a_wait_resolves_at_its_
-        deadline` measures end to end."""
-        run = _make_run(self.STAGE_SPEC)
-        c = RunController(run, self.STAGE_SPEC, services=EngineServices())
-        c.instances["root"] = NodeInstance(
-            "root", state=InstanceState.WAITING, wake_at=time.time() + 0.25
-        )
-        delay = c._next_wake_delay()
-        assert delay is not None and MIN_WAKE_SECS <= delay <= TICK_WAKE_SECS

@@ -290,10 +290,8 @@ class ConversationDirectory:
 
     def get_pid(self, key: str) -> int | None:
         provider = self.get_provider(key)
-        try:
-            return provider.client._pid
-        except AttributeError:
-            return None
+        client = getattr(provider, "client", None)
+        return getattr(client, "_pid", None)
 
     async def reload_provider_factory(self) -> None:
         replacement = AppConfig.load()

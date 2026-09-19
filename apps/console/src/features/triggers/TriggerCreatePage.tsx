@@ -4,7 +4,7 @@ import { Info, ArrowLeft, Check, Zap, Settings2, AlertTriangle } from 'lucide-re
 import { TopBar } from '../../shared/ui/TopBar'
 import { IconButton } from '../../shared/ui/IconButton'
 import { Button } from '../../shared/ui/Button'
-import { api, type EventPattern } from '../../shared/data/api'
+import { api, isOutcomeRoute, type EventPattern } from '../../shared/data/api'
 import { useQuery } from '../../shared/data/data'
 import { qget, useQueryParam, type RouteProps } from '../../app/shell/useQueryState'
 import { Field, TextInput, Segmented } from '../../shared/ui/forms'
@@ -15,6 +15,7 @@ import { intervalToSecs } from '../schedule/scheduleMeta'
 import { ActionConfig, coerceActionConfig, seedActionConfig } from './ActionConfig'
 import { findTriggerPreset, prefillDraft } from './triggerPresets'
 import { schemaProps } from '../tools/schema'
+import { Toggle } from '../../shared/ui/Toggle'
 import {
   TRIGGER_KINDS, type TriggerKind, useTriggerVariables, lifecycleEventMeta, eventTakesToolMatcher,
   eventDormancyReason, eventIsDormant, eventIsAgentScoped, EVENT_PATTERN_META, eventPatternMeta, eventSourceIcon,
@@ -39,6 +40,8 @@ export function TriggerCreatePage({ onBack, onCreated, query, setQuery }: {
   const [name, setName] = useState(() => seed?.name ?? '')
   const [provider, setProvider] = useState('')
   const [config, setConfig] = useState<Record<string, unknown>>({})
+  const [failureDelivery, setFailureDelivery] = useState('inbox')
+  const [dedupeFailures, setDedupeFailures] = useState(true)
 
   const [sched, setSched] = useState<ScheduleDraft>(() => (seed ? prefillDraft(seed) : emptySchedule()))
   const [event, setEvent] = useState('UserPromptSubmit')
@@ -88,7 +91,8 @@ export function TriggerCreatePage({ onBack, onCreated, query, setQuery }: {
   }, [provider, providers, config])
 
   const eventMatcherMet = kind !== 'event' || !pm.matcherRequired || !!eventMatcher.trim()
-  const canSave = !!name.trim() && !!provider && requiredConfigMet && eventMatcherMet
+  const outcomeControlsMet = kind !== 'schedule' || isOutcomeRoute(failureDelivery)
+  const canSave = !!name.trim() && !!provider && requiredConfigMet && eventMatcherMet && outcomeControlsMet
 
   async function create() {
     if (!canSave) { setErr('Fill in the trigger name, action, and any required action fields'); return }
@@ -101,6 +105,8 @@ export function TriggerCreatePage({ onBack, onCreated, query, setQuery }: {
           name: name.trim(),
           timezone: sched.timezone || '', silent: sched.silent, strict_schedule: sched.strict_schedule,
           channel: sched.channel.trim(), skip_dates: sched.skip_dates,
+          failure_delivery: failureDelivery.trim(),
+          failure_policy: { dedupe_hash: dedupeFailures },
         }
         if (sched.kind === 'cron') body.cron = sched.cron.trim()
         else if (sched.kind === 'every') body.every = intervalToSecs(sched.intervalValue, sched.intervalUnit)
@@ -228,6 +234,22 @@ export function TriggerCreatePage({ onBack, onCreated, query, setQuery }: {
             </div>
           )}
 
+          {kind === 'schedule' && (
+            <>
+              <SectionHeader icon={AlertTriangle} title="Outcome notifications" subtitle="How failures reach you" />
+              <Field label="Failure outcome route" hint="Use inbox, notify, none, or channel:&lt;id&gt;.">
+                <TextInput value={failureDelivery} onChange={setFailureDelivery} placeholder="inbox" mono />
+              </Field>
+              <div className="flex items-center justify-between gap-m rounded-lg bg-surface-container px-m py-3">
+                <div>
+                  <div className="text-on-surface text-[0.875rem]" style={fvs(500)}>Deduplicate repeated failures</div>
+                  <div className="text-on-surface-low text-[0.75rem]">Suppress the same failure notification for one hour.</div>
+                </div>
+                <Toggle on={dedupeFailures} onChange={setDedupeFailures} label="Deduplicate repeated failures" />
+              </div>
+            </>
+          )}
+
           {err && <p ref={errRef} role="alert" className="text-danger text-[0.8125rem]">{err}</p>}
         </div>
       </div>
@@ -242,7 +264,8 @@ export function TriggerCreatePage({ onBack, onCreated, query, setQuery }: {
                 : providersErr && providers.length === 0 ? "Couldn't load the action providers — retry above"
                   : !provider ? 'Pick a provider'
                     : !requiredConfigMet ? 'Complete the required settings'
-                      : 'Set the event to match'}><Check size={16} /> Create trigger</Button>
+                      : !outcomeControlsMet ? 'Use a valid failure outcome route'
+                        : 'Set the event to match'}><Check size={16} /> Create trigger</Button>
         </div>
       </div>
     </div>

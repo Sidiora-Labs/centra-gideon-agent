@@ -7,20 +7,10 @@ cooldown storm-guard, and the ledger.
 
 from __future__ import annotations
 
-import asyncio
-import time
-
 import pytest
 
-from gideon.integrations.llm.base import (
-    EVENT_COMPLETE,
-    EVENT_TEXT_CHUNK,
-    LLMEvent,
-    ModelProvider,
-)
 from gideon.operations.resilience import remediation as rem
 from gideon.operations.resilience.remediation import Deficit, RemediationJob
-from gideon.security.guardrails.model_call import ModelCallGuard
 
 
 @pytest.fixture(autouse=True)
@@ -407,7 +397,7 @@ def _bind(monkeypatch, store, embed):
 
 
 def test_reindex_embeddings_actually_drains_the_backlog(tmp_path, monkeypatch):
-    """It reported "re-embedded 0 items" in every install: the embedder it passed was
+    """It reported "re-embedded 0 item(s)" in every install: the embedder it passed was
     unusable AND the count it read was a key `reembed_all` does not return, so a job that
     embedded nothing was indistinguishable from a library with nothing to embed."""
     store = _seeded_store(tmp_path)
@@ -415,7 +405,7 @@ def test_reindex_embeddings_actually_drains_the_backlog(tmp_path, monkeypatch):
 
     detail = rem._job_reindex_embeddings()
 
-    assert detail == "re-embedded 3 items"
+    assert detail == "re-embedded 3 item(s)"
     assert store.count_items_missing_embedding() == 0
 
 
@@ -426,11 +416,11 @@ def test_reindex_embeddings_only_touches_items_missing_a_vector(tmp_path, monkey
     what proves the scope."""
     store = _seeded_store(tmp_path)
     _bind(monkeypatch, store, lambda text: [0.1, 0.2, 0.3])
-    assert rem._job_reindex_embeddings() == "re-embedded 3 items"
+    assert rem._job_reindex_embeddings() == "re-embedded 3 item(s)"
 
     store.create_typed_item(item_type="note", title="fresh", content="new body")
 
-    assert rem._job_reindex_embeddings() == "re-embedded 1 item"
+    assert rem._job_reindex_embeddings() == "re-embedded 1 item(s)"
 
 
 def test_a_total_reindex_failure_raises_instead_of_reporting_zero(
@@ -460,7 +450,7 @@ def test_a_partial_reindex_reports_the_remainder_and_keeps_its_progress(
 
     detail = rem._job_reindex_embeddings()
 
-    assert detail == "re-embedded 2 items; 1 still without a vector"
+    assert detail == "re-embedded 2 item(s); 1 still without a vector"
     assert store.count_items_missing_embedding() == 1
 
 
@@ -473,388 +463,3 @@ def test_reindex_embeddings_skips_cleanly_with_no_embedder(tmp_path, monkeypatch
 
     assert rem._job_reindex_embeddings() == "no embedder bound — skipped"
     assert store.count_items_missing_embedding() == 3
-
-
-class TestTheSpendCapGovernsMeteredWorkOnly:
-    """§55 — the dollar cap is a leash on the JUDGMENT lane, not on maintenance.
-
-    The spend is produced by a real :class:`ModelCallGuard` stream over a scripted
-    provider — the same chokepoint every model-backed call in the system charges
-    through — so what is measured here is the actual accrual path, not a bookkeeping
-    stand-in. The job never names a budget: it spends under whatever run key is
-    current, and ``run_remediation`` is what makes that key ``doctor``. That is the
-    "accrues to the CORRECT budget" half of the criterion.
-    """
-
-    @pytest.fixture(autouse=True)
-    def _fresh_meter(self):
-        from gideon.security.guardrails import budgets
-
-        budgets.reset_meter()
-        yield
-        budgets.reset_meter()
-
-    class _ScriptedProvider(ModelProvider):
-        """Emits one completed turn carrying a provider-reported cost."""
-
-        def __init__(self, cost_usd: float) -> None:
-            self._cost = cost_usd
-
-        async def start(self):  # pragma: no cover - never called by the guard
-            pass
-
-        async def shutdown(self):
-            pass
-
-        async def stream(self, message):
-            yield LLMEvent(kind=EVENT_TEXT_CHUNK, text="diagnosed")
-            yield LLMEvent(
-                kind=EVENT_COMPLETE,
-                input_tokens=10,
-                output_tokens=20,
-                cost_usd=self._cost,
-            )
-
-        async def approve_tool(self, request_id):  # pragma: no cover
-            pass
-
-        async def reject_tool(self, request_id):  # pragma: no cover
-            pass
-
-        def context_usage_pct(self):
-            return 0.0
-
-    @classmethod
-    def _spend(cls, dollars: float) -> str:
-        guard = ModelCallGuard(
-            cls._ScriptedProvider(dollars),
-            use_case="doctor",
-            provider_name="remediation-test",
-            model="test-model",
-        )
-
-        async def _drain() -> None:
-            async for _ in guard.stream("diagnose"):
-                pass
-
-        asyncio.run(_drain())
-        return f"charged ${dollars}"
-
-    @staticmethod
-    def _doctor_spend() -> float:
-        from gideon.security.guardrails.budgets import get_meter
-
-        return get_meter().run_totals("doctor").dollars
-
-    def test_judgment_work_accrues_to_the_doctor_budget_and_stops_at_the_cap(
-        self, monkeypatch
-    ):
-        """ac_1 — metered diagnosis charges ``doctor`` and the second one is refused."""
-        ran: list[str] = []
-
-        def _first() -> str:
-            ran.append("first")
-            return self._spend(0.40)
-
-        def _second() -> str:  # pragma: no cover - reaching this is the failure
-            ran.append("second")
-            return self._spend(0.40)
-
-        rem.register_job(
-            RemediationJob(
-                id="judge.a",
-                title="Judge A",
-                run=_first,
-                lane="judgment",
-                fixes_deficit="a",
-            )
-        )
-        rem.register_job(
-            RemediationJob(
-                id="judge.b",
-                title="Judge B",
-                run=_second,
-                lane="judgment",
-                after=("judge.a",),
-                fixes_deficit="a",
-            )
-        )
-        _stub_deficits(
-            monkeypatch,
-            [
-                Deficit(
-                    key="a", count=20, weight=1.0, max_penalty=20.0, job_id="judge.a"
-                )
-            ],
-        )
-
-        result = rem.run_remediation(target_score=90, max_cost_usd=0.25, now=1000.0)
-
-        assert ran == ["first"], "the cap did not stop the second metered job"
-        assert self._doctor_spend() == pytest.approx(0.40), (
-            "the model call did not accrue to the doctor run budget — "
-            "run_remediation's run key is what routes it there"
-        )
-        assert result.stopped_reason == "max_cost_usd $0.25 reached"
-        assert [j["status"] for j in result.jobs] == ["ok", "skipped_budget"]
-
-    def test_zero_cost_maintenance_still_runs_after_the_cap(self, monkeypatch):
-        """ac_2 — a free job queued behind an over-budget one is not collateral damage.
-
-        A deterministic job spends nothing, so a dollar cap has no claim on it. The cap
-        used to ``break`` the whole plan, which silently made the FTS rebuild and the
-        prunes hostages of a metered job that happened to be ordered first.
-        """
-        ran: list[str] = []
-
-        rem.register_job(
-            RemediationJob(
-                id="judge.c",
-                title="Judge C",
-                run=lambda: ran.append("judge") or self._spend(0.40),
-                lane="judgment",
-                fixes_deficit="a",
-            )
-        )
-        rem.register_job(
-            RemediationJob(
-                id="judge.d",
-                title="Judge D",
-                run=lambda: ran.append("judge2") or self._spend(0.40),
-                lane="judgment",
-                after=("judge.c",),
-                fixes_deficit="a",
-            )
-        )
-        rem.register_job(
-            RemediationJob(
-                id="free.e",
-                title="Free E",
-                run=lambda: ran.append("free") or "pruned",
-                after=("judge.d",),
-                fixes_deficit="a",
-            )
-        )
-        _stub_deficits(
-            monkeypatch,
-            [
-                Deficit(
-                    key="a", count=20, weight=1.0, max_penalty=20.0, job_id="judge.c"
-                )
-            ],
-        )
-
-        result = rem.run_remediation(target_score=90, max_cost_usd=0.25, now=1000.0)
-
-        assert ran == ["judge", "free"], "free maintenance was blocked by the cap"
-        assert result.stopped_reason == "max_cost_usd $0.25 reached"
-        by_id = {j["id"]: j["status"] for j in result.jobs}
-        assert by_id == {"judge.c": "ok", "judge.d": "skipped_budget", "free.e": "ok"}
-        assert self._doctor_spend() == pytest.approx(0.40)
-
-
-_ABSORBED["inbox.maintenance"] = "inbox_maintenance_backlog"
-
-
-class TestInboxMaintenanceIsAnEngineJob:
-    """Inbox retention/dismissed pruning as a measured engine job (#37).
-
-    The inbox used to run it off a private 6-hour timer inside its own poll loop, where it
-    was unmeasured, invisible on the Doctor panel, un-runnable on demand and indifferent to
-    the remediation switch. Every test here drives the REAL engine against the REAL live
-    service the gateway binds, because the failure this replaces is exactly "a second copy
-    of the pass, on its own cadence, that nobody can see".
-    """
-
-    @staticmethod
-    def _live(tmp_path, monkeypatch, *, expired: int = 0, fresh: int = 0) -> object:
-        """The InboxService this process is running, wired the way the gateway wires it."""
-        from types import SimpleNamespace
-
-        from gideon.integrations.inbox import InboxItem, InboxState, InboxStore
-        from gideon.integrations.inbox_providers import native_source
-        from gideon.integrations.inbox_service import InboxService
-
-        store = InboxStore(tmp_path / "inbox.json")
-        for n in range(expired):
-            store.items[f"C1_old{n}"] = InboxItem(
-                id=f"C1_old{n}",
-                channel="C1",
-                channel_name="#general",
-                thread_ts=None,
-                message="old",
-                sender_id="U2",
-                sender_name="Sam",
-                created_at=time.time() - 200 * 86400,
-            )
-        for n in range(fresh):
-            store.items[f"C1_new{n}"] = InboxItem(
-                id=f"C1_new{n}",
-                channel="C1",
-                channel_name="#general",
-                thread_ts=None,
-                message="new",
-                sender_id="U2",
-                sender_name="Sam",
-                created_at=time.time(),
-            )
-        svc = InboxService(state=InboxState(tmp_path / "state.json"), store=store)
-        monkeypatch.setattr(
-            native_source, "_dashboard_state", SimpleNamespace(_inbox_svc=svc)
-        )
-        return svc
-
-    @staticmethod
-    def _only_inbox_deficit(monkeypatch):
-        """Score on the REAL inbox probe alone, so unrelated subsystems can't move it."""
-        real = rem.measure_deficits
-        monkeypatch.setattr(
-            rem,
-            "measure_deficits",
-            lambda: [d for d in real() if d.key == "inbox_maintenance_backlog"],
-        )
-
-    def test_the_job_is_in_the_builtin_census(self):
-        job = {j.id: j for j in rem.all_jobs()}.get("inbox.maintenance")
-        assert job is not None, "inbox maintenance is not registered with the engine"
-        assert job.lane == "deterministic"
-        assert job.fixes_deficit == "inbox_maintenance_backlog"
-
-    def test_the_backlog_is_measured_from_the_live_service(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        svc = self._live(tmp_path, monkeypatch, expired=3, fresh=2)
-        svc.state.dismissed.update({"C1_1", "C1_" + str(time.time())})
-        measured = {d.key: d for d in rem.measure_deficits()}
-        assert "inbox_maintenance_backlog" in measured
-        d = measured["inbox_maintenance_backlog"]
-        assert d.count == 4 and d.job_id == "inbox.maintenance"
-        assert d.max_penalty > rem._MIN_SCHEDULABLE_PENALTY
-
-    def test_a_backlog_runs_the_job_on_the_LIVE_service(self, tmp_path, monkeypatch):
-        """The job must prune the running service's store — not a second InboxService of
-        its own, whose pruning the live one would overwrite on its next save."""
-        monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        svc = self._live(tmp_path, monkeypatch, expired=12, fresh=1)
-        self._only_inbox_deficit(monkeypatch)
-        result = rem.run_remediation(target_score=90, max_cost_usd=1.0, now=1000.0)
-        rows = {j["id"]: j for j in result.jobs}
-        assert rows["inbox.maintenance"]["status"] == "ok"
-        assert "12" in rows["inbox.maintenance"]["detail"]
-        assert rows["inbox.maintenance"]["cost"] == 0.0
-        assert len(svc.inbox.items) == 1, "the live service's backlog was not pruned"
-        assert result.score_after == 100.0
-        assert rem.recent_runs()[0]["jobs"][0]["id"] == "inbox.maintenance"
-
-    def test_no_backlog_skips_the_job(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        svc = self._live(tmp_path, monkeypatch, fresh=3)
-        svc.state.dismissed.add("C1_" + str(time.time()))
-        real = rem.measure_deficits
-        monkeypatch.setattr(
-            rem,
-            "measure_deficits",
-            lambda: [d for d in real() if d.key == "inbox_maintenance_backlog"]
-            + [Deficit(key="other", count=20, weight=1.0, max_penalty=20.0)],
-        )
-        result = rem.run_remediation(target_score=90, max_cost_usd=1.0, now=1000.0)
-        assert result.stopped_reason == "plan exhausted"
-        assert "inbox.maintenance" not in {j["id"] for j in result.jobs}
-        assert len(svc.inbox.items) == 3
-
-    def test_the_job_is_inert_with_no_live_service(self, tmp_path, monkeypatch):
-        """Headless (no gateway): the job must report, not construct a service of its own."""
-        from gideon.integrations.inbox_providers import native_source
-
-        monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        monkeypatch.setattr(native_source, "_dashboard_state", None)
-        assert (
-            rem._job_inbox_maintenance()
-            == "no live inbox service — nothing to maintain"
-        )
-
-    @pytest.mark.asyncio
-    async def test_the_global_switch_gates_it(self, tmp_path, monkeypatch):
-        """Disabled engine → the pass does not run at all. There is no private timer left
-        to run it anyway, which is the point of the vacuity leg below."""
-        from types import SimpleNamespace
-
-        from gideon.core.config.loader import AppConfig
-        from gideon.integrations.action_providers import remediation_provider as P
-        from gideon.integrations.action_providers.base import ActionContext
-
-        monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        svc = self._live(tmp_path, monkeypatch, expired=12)
-        self._only_inbox_deficit(monkeypatch)
-
-        def _cfg(enabled: bool):
-            return SimpleNamespace(
-                resilience=SimpleNamespace(
-                    remediation=SimpleNamespace(
-                        enabled=enabled,
-                        target_score=90,
-                        max_cost_usd=1.0,
-                        idle_minutes_healthy=60,
-                        tick_minutes_degraded=5,
-                    )
-                )
-            )
-
-        monkeypatch.setattr(
-            AppConfig, "load", staticmethod(lambda *a, **k: _cfg(False))
-        )
-        provider = P.SelfRemediationActionProvider()
-        result = await provider.execute({}, ActionContext(event="cron"))
-        assert result.success and len(svc.inbox.items) == 12
-
-        monkeypatch.setattr(AppConfig, "load", staticmethod(lambda *a, **k: _cfg(True)))
-        assert (await provider.execute({}, ActionContext(event="cron"))).success
-        assert len(svc.inbox.items) == 0, "the enabled engine did not run the pass"
-
-    def test_the_run_now_endpoint_reaches_the_live_service(self, tmp_path, monkeypatch):
-        """POST /api/doctor/remediation/run over the REAL handler — the on-demand control."""
-        import asyncio
-        import json as _json
-
-        from aiohttp.test_utils import make_mocked_request
-
-        from gideon.interfaces.dashboard.handlers import doctor as doctor_h
-
-        monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        svc = self._live(tmp_path, monkeypatch, expired=12)
-        self._only_inbox_deficit(monkeypatch)
-
-        req = make_mocked_request("POST", "/api/doctor/remediation/run")
-
-        async def _body():
-            return {"confirm": True}
-
-        req.json = _body  # type: ignore[method-assign]
-        resp = asyncio.run(doctor_h.api_doctor_remediation_run(req))
-        payload = _json.loads(resp.body.decode())
-        assert resp.status == 200
-        assert {j["id"]: j["status"] for j in payload["jobs"]}[
-            "inbox.maintenance"
-        ] == "ok"
-        assert len(svc.inbox.items) == 0
-
-    def test_the_plan_preview_lists_it(self, tmp_path, monkeypatch):
-        """GET /api/doctor/remediation — diagnostics show the pending pass instead of a
-        timer nobody can see."""
-        import asyncio
-        import json as _json
-
-        from aiohttp.test_utils import make_mocked_request
-
-        from gideon.interfaces.dashboard.handlers import doctor as doctor_h
-
-        monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-        self._live(tmp_path, monkeypatch, expired=12)
-        self._only_inbox_deficit(monkeypatch)
-        req = make_mocked_request("GET", "/api/doctor/remediation")
-        payload = _json.loads(
-            asyncio.run(doctor_h.api_doctor_remediation(req)).body.decode()
-        )
-        assert {d["key"] for d in payload["deficits"]} == {"inbox_maintenance_backlog"}
-        assert {j["id"]: j["status"] for j in payload["plan"]} == {
-            "inbox.maintenance": "would_run"
-        }

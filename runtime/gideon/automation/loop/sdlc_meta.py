@@ -5,6 +5,20 @@ making ``loop/`` self-contained before the legacy engines are deleted)."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
+PHASE_ID_FIELDS: tuple[str, ...] = ("stage", "step", "title")
+
+
+def phase_id(phase: Mapping[str, Any]) -> str:
+    for field in PHASE_ID_FIELDS:
+        value = str(phase.get(field, "")).strip()
+        if value:
+            return value
+    return ""
+
+
 SDLC_STAGES: tuple[str, ...] = (
     "ideation",
     "requirements",

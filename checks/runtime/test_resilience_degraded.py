@@ -388,7 +388,7 @@ def test_the_recovery_notification_reports_what_was_REENRICHED(home, monkeypatch
         ),
     )
 
-    assert "7 items re-enriched" in _recovered_body(state, "t_summary")
+    assert "7 item(s) re-enriched" in _recovered_body(state, "t_summary")
 
 
 def test_a_drain_that_moved_nothing_still_reports_the_STANDING_backlog(
@@ -413,7 +413,7 @@ def test_a_drain_that_moved_nothing_still_reports_the_STANDING_backlog(
     )
 
     body = _recovered_body(state, "t_stuck")
-    assert "5 items awaiting re-enrichment" in body and "re-enriched" not in body
+    assert "5 item(s) awaiting re-enrichment" in body and "re-enriched" not in body
 
 
 def _stage(home, contents):

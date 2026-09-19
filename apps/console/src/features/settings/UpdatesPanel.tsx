@@ -1,9 +1,9 @@
 import { releasesUrl } from '../../app/shell/config'
 import { useEffect, useState } from 'react'
-import { DownloadCloud, CheckCircle2, RefreshCw } from 'lucide-react'
-import { api, type UpdateCheck, type UpdateChannel, type UpdateMode } from '../../shared/data/api'
+import { DownloadCloud, CheckCircle2, RefreshCw, RotateCcw } from 'lucide-react'
+import { api, type UpdateCheck } from '../../shared/data/api'
 import { useQuery, invalidateKeys } from '../../shared/data/data'
-import { PanelHeader, Section, RowGroup, Row, Toggle, SavedToast, SegPills } from './settingsUI'
+import { PanelHeader, Section, RowGroup, Row, Toggle, SavedToast } from './settingsUI'
 import { Button } from '../../shared/ui/Button'
 import { FormSkeleton, LoadError } from '../../shared/ui/ListScaffold'
 import { Markdown } from '../../shared/ui/Markdown'
@@ -25,6 +25,7 @@ export function changelogBody(md: string): string {
 
 export function UpdatesPanel() {
   const [applying, setApplying] = useState(false)
+  const [rollingBack, setRollingBack] = useState(false)
   const [msg, setMsg] = useState('')
   const [saved, setSaved] = useState(false)
 
@@ -51,35 +52,40 @@ export function UpdatesPanel() {
         setMsg((r as { detail?: string }).detail || 'This install updates out-of-band — see the commands below.')
       } else {
         setMsg(r.error || 'Update started — the backend may restart.')
+        setInfo((p) => p && { ...p, update_state: 'applying' })
       }
     }
     catch (e) { setMsg(e instanceof Error ? e.message : 'Update failed') }
     setApplying(false)
+  }
+  const rollback = async () => {
+    const version = info?.rollback_version ? ` v${info.rollback_version}` : ' the previous version'
+    if (!(await confirm({ title: `Roll back to${version}?`, body: 'The backend will restore the saved core version and restart. Changes made after a Git update must be committed or stashed first.', confirmLabel: 'Roll back' }))) return
+    setRollingBack(true); setMsg('')
+    try {
+      const r = await api.rollbackUpdate()
+      setMsg(r.error || 'Rollback started — the backend will restart.')
+      setInfo((p) => p && { ...p, update_state: 'rolling_back', rollback_available: false })
+    }
+    catch (e) { setMsg(e instanceof Error ? e.message : 'Rollback failed') }
+    setRollingBack(false)
   }
   const reportSettingFailure = (what: string) => (e: unknown) => {
     let msg = e instanceof Error ? e.message : 'the request failed'
     try { const p = JSON.parse(msg); msg = p.error || msg } catch {   }
     notify(`Couldn't ${what}: ${msg}`, 'error')
   }
-  const markSaved = () => { setSaved(true); window.setTimeout(() => setSaved(false), 1600) }
   const toggleAuto = (v: boolean) => {
-    const mode: UpdateMode = v ? 'staged' : 'off'
-    setInfo((p) => p && { ...p, auto_update: v, update_mode: mode })
-    api.setAutoUpdate(mode)
-      .then(markSaved)
-      .catch(reportSettingFailure(`${v ? 'enable' : 'disable'} staged automatic updates`))
+    setInfo((p) => p && { ...p, auto_update: v })
+    api.setAutoUpdate(v)
+      .then(() => { setSaved(true); window.setTimeout(() => setSaved(false), 1600) })
+      .catch(reportSettingFailure(`${v ? 'enable' : 'disable'} automatic updates`))
   }
-  const setChannel = (v: UpdateChannel) => {
-    setInfo((p) => p && { ...p, channel: v })
-    api.patchConfig('updates.channel', v)
-      .then(markSaved)
-      .catch(reportSettingFailure(`switch the update channel to ${v}`))
-  }
-  const setCheckEnabled = (v: boolean) => {
-    setInfo((p) => p && { ...p, check_enabled: v })
-    api.patchConfig('updates.check_enabled', v)
-      .then(markSaved)
-      .catch(reportSettingFailure(`${v ? 'enable' : 'disable'} update checks`))
+  const toggleDevMode = (v: boolean) => {
+    setInfo((p) => p && { ...p, update_dev_mode: v })
+    api.setUpdateDevMode(v)
+      .then(() => { setSaved(true); window.setTimeout(() => setSaved(false), 1600) })
+      .catch(reportSettingFailure(`${v ? 'enable' : 'disable'} developer update mode`))
   }
 
   if (!info && loadErr) return <LoadError what="update status" error={loadErr} onRetry={refresh} />
@@ -89,6 +95,10 @@ export function UpdatesPanel() {
   const isDesktop = kind === 'desktop'
   const isGit = kind === 'git'
   const canApplyInApp = isGit || kind === 'pip'
+  const updateStateLabel = {
+    applying: 'Applying update', applied: 'Last update applied', failed: 'Last update failed',
+    rolling_back: 'Rolling back', rolled_back: 'Last update rolled back', idle: '',
+  }[info.update_state ?? 'idle']
   const kindLabel = { git: 'Git checkout', pip: 'pip / uv install', container: 'Container', desktop: 'Desktop app' }[kind] ?? kind
   return (
     <div>
@@ -108,7 +118,7 @@ export function UpdatesPanel() {
                   </div>
                 </>
               ) : (
-                <div data-type="body-m" className="flex items-center gap-1.5" style={{ color: 'var(--color-success)' }}>
+                <div data-type="body-m" className="flex items-center gap-1.5" style={{ color: 'var(--color-ok)' }}>
                   <CheckCircle2 size={15} /> <span className="text-on-surface">{info.checked ? 'Up to date' : 'No update check yet'}</span>
                 </div>
               )}
@@ -116,10 +126,19 @@ export function UpdatesPanel() {
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <Button variant="secondary" size="sm" loading={checking} onClick={check}><RefreshCw size={14} /> Check</Button>
-              {info.available && canApplyInApp && <Button size="sm" loading={applying} onClick={apply}><DownloadCloud size={14} /> Update</Button>}
+              {info.rollback_available && canApplyInApp && <Button variant="secondary" size="sm" loading={rollingBack} disabled={applying} onClick={rollback}><RotateCcw size={14} /> Roll back</Button>}
+              {info.available && canApplyInApp && <Button size="sm" loading={applying} disabled={rollingBack} onClick={apply}><DownloadCloud size={14} /> Update</Button>}
             </div>
           </div>
           {msg && <div data-type="caption" className="mt-2 text-on-surface-low">{msg}</div>}
+          {updateStateLabel && (
+            <div data-type="caption" className="mt-2 rounded-md bg-surface-high px-3 py-2 text-on-surface-low" role="status">
+              <span className="text-on-surface">{updateStateLabel}</span>
+              {info.update_target ? ` · target v${info.update_target}` : ''}
+              {info.update_error ? ` · ${info.update_error}` : ''}
+              {info.rollback_available && info.rollback_version ? ` · rollback available to v${info.rollback_version}` : ''}
+            </div>
+          )}
 
           { }
           {isContainer && info.available && (
@@ -143,19 +162,15 @@ export function UpdatesPanel() {
 
       <Section title="Automatic updates">
         <RowGroup>
-          <Row label="Staged automatic updates" hint="Off means notify only. On applies the selected release at the next safe point — it waits for active chats and subagents to finish.">
-            <div className="flex items-center gap-2"><SavedToast show={saved} /><Toggle on={info.update_mode === 'staged'} onChange={toggleAuto} label="Staged automatic updates" /></div>
+          <Row label="Auto-update" hint="Download and apply updates automatically when available.">
+            <div className="flex items-center gap-2"><SavedToast show={saved} /><Toggle on={info.auto_update} onChange={toggleAuto} label="Auto-update" /></div>
           </Row>
-          <Row label="Update channel" hint={`Which release line this install follows.${isGit ? " Nightly is git-only and tracks your branch instead of a release tag." : ' Nightly has no package build, so it rides stable here.'}`}>
-            <SegPills<UpdateChannel> ariaLabel="Update channel" value={info.channel ?? 'stable'} onChange={setChannel}
-              options={[{ key: 'stable', label: 'Stable' }, { key: 'beta', label: 'Beta' }, { key: 'nightly', label: 'Nightly' }]} />
-          </Row>
-          <Row label="Check for updates" hint="Off stops every release check — no connection is opened.">
-            <Toggle on={info.check_enabled !== false} onChange={setCheckEnabled} label="Check for updates" />
-          </Row>
-          {info.pin ? <Row label="Version pin" hint="Set in Settings → Config (updates.pin). While pinned, updates install exactly this version.">
-            <span data-type="body-s" className="font-mono text-on-surface">v{info.pin}</span>
-          </Row> : null}
+          { }
+          {isGit && (
+            <Row label="Developer update mode" hint="Track every new commit on your branch instead of only tagged releases (contributors).">
+              <div className="flex items-center gap-2"><Toggle on={!!info.update_dev_mode} onChange={toggleDevMode} label="Developer update mode" /></div>
+            </Row>
+          )}
         </RowGroup>
       </Section>
 

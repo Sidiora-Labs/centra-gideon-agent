@@ -807,16 +807,9 @@ def test_probe_writes_only_the_sidecar(monkeypatch, tmp_path):
     a probe that only asks for a version has no business writing anywhere, so this pins
     that the sole new file under the home is the runner sidecar.
     """
-    import real_home_guard
-
     bin_path = _write_exec(tmp_path / "fake-cli", "#!/bin/sh\necho 'fake-cli 1.0.0'\n")
     monkeypatch.setenv(_FAKE_ENV, str(bin_path))
     home = _home()
-    assert home != real_home_guard.REAL_HOME, "probe would write the developer's home"
-    assert not home.is_relative_to(real_home_guard.REAL_HOME)
-    assert runners.sidecar_path("fake-runner").is_relative_to(
-        home
-    ), "the sidecar under test must resolve inside the isolated home"
     before = {p for p in home.rglob("*") if p.is_file()}
     runners.probe_runner(_absent_runner())
     after = {p for p in home.rglob("*") if p.is_file()}

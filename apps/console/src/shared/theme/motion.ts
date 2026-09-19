@@ -1,6 +1,7 @@
 
 import type { Transition, Variants } from 'framer-motion'
 
+import { motionRegistry } from './motionRegistry'
 import { runtime } from './runtime'
 
 export function prefersReducedMotion(): boolean {
@@ -14,17 +15,21 @@ function gated(t: Transition): Transition {
   return prefersReducedMotion() ? instant : t
 }
 
-const SPATIAL_DEFAULT: Transition = { type: 'spring', stiffness: 380, damping: 30, mass: 1 }
-const SPATIAL_FAST: Transition = { type: 'spring', stiffness: 800, damping: 34, mass: 1 }
-const SPATIAL_SLOW: Transition = { type: 'spring', stiffness: 200, damping: 26, mass: 1 }
-const EFFECTS: Transition = { duration: 0.2, ease: [0.2, 0, 0, 1] }
-
-export const spring = {
-  get spatialDefault(): Transition { return gated(SPATIAL_DEFAULT) },
-  get spatialFast(): Transition { return gated(SPATIAL_FAST) },
-  get spatialSlow(): Transition { return gated(SPATIAL_SLOW) },
-  get effects(): Transition { return gated(EFFECTS) },
+function family<T extends Record<string, unknown>>(
+  definitions: T,
+  resolve: (definition: T[keyof T]) => Transition,
+): { [K in keyof T]: Transition } {
+  const result = {} as { [K in keyof T]: Transition }
+  for (const name of Object.keys(definitions) as (keyof T)[]) {
+    Object.defineProperty(result, name, {
+      enumerable: true,
+      get: () => resolve(definitions[name]),
+    })
+  }
+  return result
 }
+
+export const spring = family(motionRegistry.spring, (definition) => gated({ ...definition }))
 
 function bouncy(stiffness: number, dampingAtPlayful: number, calmDamping: number): Transition {
   const b = Math.max(0, Math.min(1, runtime.bounciness))
@@ -32,38 +37,37 @@ function bouncy(stiffness: number, dampingAtPlayful: number, calmDamping: number
   return gated({ type: 'spring', stiffness, damping, mass: 1 })
 }
 
-export const physics = {
-  get snappy(): Transition { return bouncy(520, 30, 40) },
-  get smooth(): Transition { return bouncy(320, 34, 38) },
-  get fluid(): Transition { return bouncy(180, 26, 34) },
-  get playful(): Transition { return bouncy(420, 14, 34) },
-}
+export const physics = family(motionRegistry.physics, (definition) => bouncy(
+  definition.stiffness,
+  definition.dampingAtPlayful,
+  definition.calmDamping,
+))
 
-export const ease = {
-  emphasized: [0.22, 0.61, 0.13, 1] as [number, number, number, number],
-  emphasizedDecel: [0.08, 0.7, 0.12, 1] as [number, number, number, number],
-  emphasizedAccel: [0.34, 0, 0.75, 0.12] as [number, number, number, number],
-}
+export const ease = motionRegistry.ease
 
-export const duration = { short: 0.1, medium: 0.3, long: 0.5 }
+export const duration = motionRegistry.duration
 
 export const messageEnter: Variants = {
-  initial: { opacity: 0, y: 8 },
-  animate: { opacity: 1, y: 0, transition: { duration: duration.medium, ease: ease.emphasizedDecel } },
+  initial: motionRegistry.variants.messageEnter.initial,
+  animate: {
+    ...motionRegistry.variants.messageEnter.animate,
+    transition: { duration: duration.medium, ease: ease.emphasizedDecel },
+  },
 }
 
 export const overlayEnter: Variants = {
-  initial: { opacity: 0, scale: 0.96, y: 4 },
-  animate: () => ({ opacity: 1, scale: 1, y: 0, transition: physics.playful }),
-  exit: () => ({ opacity: 0, scale: 0.98, transition: spring.effects }),
+  initial: motionRegistry.variants.overlayEnter.initial,
+  animate: () => ({ ...motionRegistry.variants.overlayEnter.animate, transition: physics.playful }),
+  exit: () => ({ ...motionRegistry.variants.overlayEnter.exit, transition: spring.effects }),
 }
 
 export const thinkingPulse: Variants = {
-  animate: {
-    opacity: [0.45, 0.85, 0.45],
-    scale: [1, 1.04, 1],
-    transition: { duration: 3.2, ease: 'easeInOut', repeat: Infinity },
-  },
+  animate: () => prefersReducedMotion()
+    ? { ...motionRegistry.variants.thinkingPulse.reduced, transition: instant }
+    : {
+        ...motionRegistry.variants.thinkingPulse.animate,
+        transition: { ...motionRegistry.variants.thinkingPulse.transition },
+      },
 }
 
 export function stagger(step = 0.04, delayChildren = 0): Transition {
@@ -71,8 +75,8 @@ export function stagger(step = 0.04, delayChildren = 0): Transition {
 }
 
 export const listItemEnter: Variants = {
-  initial: { opacity: 0, y: 8 },
-  animate: () => ({ opacity: 1, y: 0, transition: physics.smooth }),
+  initial: motionRegistry.variants.listItemEnter.initial,
+  animate: () => ({ ...motionRegistry.variants.listItemEnter.animate, transition: physics.smooth }),
 }
 
 const REGION_STEP = 0.05

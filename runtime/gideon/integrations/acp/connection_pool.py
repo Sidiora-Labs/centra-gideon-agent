@@ -294,7 +294,7 @@ class AcpConnectionPool:
                 for runtime_id in tuple(self._runtimes):
                     slot = self._slots.get(runtime_id)
                     now = time.monotonic()
-                    if self.is_warmed(runtime_id):
+                    if slot is not None and self.is_warmed(runtime_id):
                         if now - slot.warmed_at >= self._ttl:
                             await self._refresh(runtime_id)
                     elif slot is None or now >= slot.next_retry_at:
@@ -395,7 +395,7 @@ def _build_acp_provider(runtime_id: str) -> ModelProvider:
     from gideon.integrations.llm.registry import get_default_registry
 
     registry = get_default_registry()
-    options = {**(registry.get_entry(runtime_id).options or {}), "model": "auto"}
+    options: dict = {**(registry.get_entry(runtime_id).options or {}), "model": "auto"}
     return registry.build(runtime_id, **options)
 
 

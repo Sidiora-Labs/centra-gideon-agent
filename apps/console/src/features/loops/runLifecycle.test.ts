@@ -1,11 +1,14 @@
 import { describe, it, expect } from 'vitest'
-import { RUN_LIFECYCLE, unwrapRunBatch } from './useRunStream'
+import { RUN_LIFECYCLE, normalizeRunSnapshot, runPhaseId } from './useRunStream'
 
-describe('RUN_LIFECYCLE union membership', () => {
-  it('carries the UNIVERSAL-PLANNING plan-review events (WF2UNI-10)', () => {
-    for (const ev of ['plan_streaming', 'revision', 'confirmation', 'demotion'] as const) {
-      expect(RUN_LIFECYCLE).toContain(ev)
-    }
+describe('RUN_LIFECYCLE loop-stream contract', () => {
+  it('contains exactly the events backed by a loop SSE publisher', () => {
+    expect(new Set(RUN_LIFECYCLE)).toEqual(new Set([
+      'new_finding', 'cycle_verdict', 'judge_error', 'complete', 'stagnant',
+      'needs_input', 'failed', 'ratchet_regression', 'plan_step', 'phase_advance', 'rolled_back',
+      'queued', 'autopilot', 'deleted', 'judge_blind', 'ship_blocked',
+      'stage_advance', 'stage_stalled', 'gate_check', 'task_started', 'task_done', 'blocked',
+    ]))
   })
 
   it('has no duplicate members (a dup double-registers a listener)', () => {
@@ -13,47 +16,23 @@ describe('RUN_LIFECYCLE union membership', () => {
   })
 })
 
-describe('the mirrored workflow-run events are registered', () => {
-  it('carries every event the workflow engine publishes', () => {
-    for (const ev of [
-      'workflow_run_update', 'workflow_node_started', 'workflow_node_done', 'workflow_attention',
-      'workflow_needs_input', 'workflow_gate_resolved', 'workflow_gate_revised',
-      'workflow_spec_updated', 'workflow_mutation_rejected', 'workflow_forked',
-      'workflow_progress', 'workflow_task_materialized', 'workflow_confirmation_pending',
-      'workflow_confirmation_resolved', 'workflow_task_verified', 'workflow_cascade_blocked',
-      'workflow_steering_consumed',
-      'workflow_loop_converged',
-    ] as const) {
-      expect(RUN_LIFECYCLE).toContain(ev)
-    }
+describe('run snapshot phase IDs', () => {
+  it('uses stage, then step, then title as the one phase-ID vocabulary', () => {
+    expect(runPhaseId({ stage: 'verification', step: 'ignored', title: 'Ignored' })).toBe('verification')
+    expect(runPhaseId({ stage: ' ', step: 'foundations', title: 'Foundations' })).toBe('foundations')
+    expect(runPhaseId({ step: '', title: 'Fallback title' })).toBe('Fallback title')
   })
 
-  it('stays in step with the workflow hook it mirrors', async () => {
-    const { WORKFLOW_LIFECYCLE } = await import('../workflows/useWorkflowStream')
-    const missing = WORKFLOW_LIFECYCLE.filter((e) => !RUN_LIFECYCLE.includes(e as never))
-    expect(missing).toEqual([])
-  })
-})
-
-describe('the coalesced batch frame is unwrapped on this hook too', () => {
-  it('replays members in order, so a fold is identical batched or not', () => {
-    const out = unwrapRunBatch({
-      events: [
-        { event: 'workflow_node_started', payload: { n: 1 } },
-        { event: 'workflow_node_done', payload: { n: 2 } },
-      ],
+  it('projects design step IDs into the stage vocabulary used by run folds', () => {
+    const loop = normalizeRunSnapshot({
+      id: 'd1', kind: 'design', name: 'Design', task: 'Build it', execution: 'solo',
+      agent: 'gideon-loop', model: '', attended: false, max_cycles: 30, idle_secs: 60,
+      success_criteria: null, status: 'running', total_cycles: 1, error_message: null,
+      created_at: 1, started_at: 1, completed_at: null, kind_config: {},
+      plan: [{ step: 'foundations', title: 'Foundations & audit' }],
+      phase_status: { foundations: 'active' },
     })
-    expect(out.map((m) => m.event)).toEqual(['workflow_node_started', 'workflow_node_done'])
-    expect(out[1].data).toEqual({ n: 2 })
-  })
-
-  it('drops an unrecognized member rather than casting it', () => {
-    const out = unwrapRunBatch({ events: [{ event: 'not_a_real_event', payload: {} }] })
-    expect(out).toEqual([])
-  })
-
-  it('survives a malformed frame instead of throwing into the listener', () => {
-    expect(unwrapRunBatch(null)).toEqual([])
-    expect(unwrapRunBatch({ events: 'nope' })).toEqual([])
+    expect(loop.plan?.[0].stage).toBe('foundations')
+    expect(loop.phase_status?.[String(loop.plan?.[0].stage)]).toBe('active')
   })
 })

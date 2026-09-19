@@ -36,9 +36,13 @@ Pure functions over declarations. Provisioning I/O stays with the caller; this m
 
 from __future__ import annotations
 
+import fcntl
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 RESERVED_ENV_VARS = frozenset(
@@ -58,6 +62,26 @@ RESERVED_ENV_VARS = frozenset(
 )
 
 RESERVED_ENV_PREFIXES = ("XDG_", "GIDEON_", "DYLD_", "LD_")
+
+
+@contextmanager
+def worktree_registration_lock(workspace: str) -> Iterator[None]:
+    """Serialize git worktree registration for one repository.
+
+    ``git worktree add`` mutates the repository's shared worktree registry, so
+    independent task workers cannot safely run that command concurrently.  A
+    blocking file lock queues both threads and processes while leaving checkout
+    and hydration outside the critical section.
+    """
+    from gideon.core.concurrency import lock_path
+
+    repository = str(Path(workspace).expanduser().resolve())
+    with lock_path(f"git-worktree-registration:{repository}").open("a+") as lease:
+        fcntl.flock(lease, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lease, fcntl.LOCK_UN)
 
 
 class Lifecycle(str, Enum):

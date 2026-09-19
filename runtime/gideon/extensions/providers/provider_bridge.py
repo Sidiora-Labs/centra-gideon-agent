@@ -450,9 +450,7 @@ def _build_native_runtime(
     hook_fire = None
     if hook_ids:
 
-        async def hook_fire(
-            tool_name: str, args_json: str | None
-        ) -> list[str]:  # noqa: F811
+        async def _hook_fire(tool_name: str, args_json: str | None) -> list[str]:
             from gideon.engine.hooks import (
                 HOOK_EVENT_PRE_TOOL_USE,
                 get_global_hook_store,
@@ -480,6 +478,8 @@ def _build_native_runtime(
                 elif r.exit_code == 0 and r.stdout:
                     out.append(r.stdout)
             return out
+
+        hook_fire = _hook_fire
 
     from gideon.integrations.tool_providers.registry import (
         list_providers as _list_tool_providers,

@@ -18,9 +18,44 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
-from gideon.integrations.prompt_providers.base import PromptSnippet
+from gideon.integrations.prompt_providers.base import (
+    PromptSnippet,
+    PromptTemplate,
+    PromptVariable,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _variables_with_inline(
+    content: str, declared: list[PromptVariable]
+) -> list[PromptVariable]:
+    from gideon.integrations.prompt_providers.engine import extract_inline_variables
+
+    seen = {variable.name for variable in declared}
+    return [
+        *declared,
+        *(
+            variable
+            for variable in extract_inline_variables(content)
+            if variable.name not in seen
+        ),
+    ]
+
+
+def _render_with_inline(
+    template: PromptTemplate | PromptSnippet,
+    values: dict[str, Any],
+    resolver: Callable[[str], "PromptSnippet | None"],
+) -> str:
+    from gideon.integrations.prompt_providers.engine import render
+
+    return render(
+        template.content,
+        _variables_with_inline(template.content, template.variables),
+        values,
+        resolver=resolver,
+    )
 
 
 def snippet_resolver() -> Callable[[str], "PromptSnippet | None"]:
@@ -58,7 +93,6 @@ def render_use_case_prompt(
         active_prompt_ref,
         split_ref,
     )
-    from gideon.integrations.prompt_providers.engine import render_template
 
     try:
         from gideon.integrations.prompt_providers.registry import (
@@ -81,7 +115,7 @@ def render_use_case_prompt(
             template = fallback.get_prompt(DEFAULT_PROMPT_NAME) if fallback else None
             if template is None:
                 return None
-        return render_template(
+        return _render_with_inline(
             template, values or {}, resolver=(lambda n: provider.get_snippet(n))
         )
     except Exception:
@@ -97,10 +131,6 @@ def render_snippet_block(name: str, values: dict[str, Any] | None = None) -> str
     to a use-case. Returns ``""`` when the snippet can't be resolved so a missing
     fragment degrades to nothing instead of breaking context assembly.
     """
-    from gideon.integrations.prompt_providers.engine import (
-        render_snippet as _render_snippet,
-    )
-
     try:
         from gideon.integrations.prompt_providers.registry import (
             _ensure_default_providers_registered,
@@ -114,9 +144,41 @@ def render_snippet_block(name: str, values: dict[str, Any] | None = None) -> str
         snip = provider.get_snippet(name)
         if snip is None:
             return ""
-        return _render_snippet(
+        return _render_with_inline(
             snip, values or {}, resolver=(lambda n: provider.get_snippet(n))
         )
     except Exception:
         logger.debug("render_snippet_block failed for %r", name, exc_info=True)
+        return ""
+
+
+def render_persona_configuration(name: str) -> str:
+    """Render a configured bundled persona snippet.
+
+    Persona names cross the dashboard request boundary, so they are restricted to
+    the shipped ``persona-*`` catalog entries before reaching the general snippet
+    renderer. The provider still supplies the content, preserving edits made in
+    Settings → Prompts while preventing an arbitrary snippet name from becoming a
+    model instruction through chat configuration.
+    """
+    configured = str(name or "").strip()
+    if not configured:
+        return ""
+
+    try:
+        from gideon.integrations.prompt_providers.catalog import BUNDLED_SNIPPETS
+
+        persona_names = {
+            entry.name
+            for entry in BUNDLED_SNIPPETS
+            if entry.name.startswith("persona-")
+        }
+        if configured not in persona_names:
+            logger.warning("Ignoring unknown persona configuration %r", configured)
+            return ""
+        return render_snippet_block(configured)
+    except Exception:
+        logger.debug(
+            "render_persona_configuration failed for %r", configured, exc_info=True
+        )
         return ""

@@ -236,11 +236,29 @@ async def test_a_pinned_upstream_off_the_allowlist_never_reaches_the_network(
     upstream, seen = await _stub_upstream()
     client = await _proxy_client()
     try:
-        _enable(monkeypatch, allowlist=("allowed.example",))
-        _register_provider(f"http://127.0.0.1:{upstream.server.port}/v1")
+        cfg = _enable(monkeypatch, allowlist=("allowed.example",))
+        base = f"http://127.0.0.1:{upstream.server.port}/v1"
+        _register_provider(base)
         auth.create_surface_token(proxy.CAPTURE_SURFACE)
         bearer = _pinned_client(_PROVIDER_NAME)
         entered = _never_forward(monkeypatch)
+        resolved: list[tuple[object, str]] = []
+        guarded: list[tuple[str, object, object]] = []
+        real_resolve = proxy._resolve_upstream
+        real_evaluate = proxy.evaluate
+
+        def _resolve(*args, **kwargs):
+            result = real_resolve(*args, **kwargs)
+            resolved.append(result)
+            return result
+
+        def _guard(url, policy, **kwargs):
+            decision = real_evaluate(url, policy, **kwargs)
+            guarded.append((url, policy, decision))
+            return decision
+
+        monkeypatch.setattr(proxy, "_resolve_upstream", _resolve)
+        monkeypatch.setattr(proxy, "evaluate", _guard)
 
         resp = await client.post(
             proxy.ROUTE_OPENAI,
@@ -250,6 +268,18 @@ async def test_a_pinned_upstream_off_the_allowlist_never_reaches_the_network(
 
         assert resp.status == 502
         assert (await resp.json())["error"]["code"] == "upstream_denied"
+        assert len(resolved) == 1
+        resolved_upstream, refusal = resolved[0]
+        assert refusal == "" and resolved_upstream is not None
+        assert resolved_upstream.url == f"{base}/chat/completions"
+        assert resolved_upstream.mode == "provider"
+        assert resolved_upstream.provider == _PROVIDER_NAME
+        assert len(guarded) == 1
+        guarded_url, guarded_policy, decision = guarded[0]
+        assert guarded_url == resolved_upstream.url
+        assert guarded_policy == proxy.capture_policy(cfg)
+        assert guarded_policy.allow_hosts == ("allowed.example",)
+        assert decision.allow is False and decision.host == "127.0.0.1"
         assert entered == [], "the guard must decide BEFORE the sole egress point"
         assert seen == {}, "a denied host must never be contacted"
     finally:

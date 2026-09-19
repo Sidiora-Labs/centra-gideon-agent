@@ -70,8 +70,7 @@ describe('an optimistic settings write reports its failure', () => {
     const upd = readFileSync(join(SETTINGS, 'UpdatesPanel.tsx'), 'utf8')
     expect(upd, 'the optimistic toggles must report').toMatch(/\.catch\(reportSettingFailure\(/)
     expect(upd).toMatch(/notify\(`Couldn't \$\{what\}: \$\{msg\}`, 'error'\)/)
-    expect(upd, 'and still confirm on success — the `.then` was correct').toMatch(/\.then\(markSaved\)/)
-    expect(upd, 'and `markSaved` is what actually shows the toast').toContain('const markSaved = () => { setSaved(true)')
+    expect(upd, 'and still confirm on success — the `.then` was correct').toContain('.then(() => { setSaved(true)')
   })
 })
 

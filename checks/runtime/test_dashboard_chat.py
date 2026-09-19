@@ -791,6 +791,61 @@ class TestHistorySaveOnClose:
         assert "permission" not in roles
         assert roles == ["user", "tool", "assistant"]
 
+    def test_force_persists_metadata_for_empty_transcript(self, tmp_path, monkeypatch):
+        from gideon.interfaces.dashboard.chat import save_session_to_history
+
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        state = _make_state(tmp_path)
+        session = state.get_or_create_session("empty-organized")
+        session.folder_id = "folder-1"
+
+        save_session_to_history(state, session, force=True)
+
+        key = "dashboard:empty-organized"
+        assert state.conversation_log.has_log(key)
+        assert state.conversation_log.get_metadata(key)["folder_id"] == "folder-1"
+        assert state.conversation_log.read_messages(key) == []
+
+    def test_empty_force_save_preserves_existing_transcript(
+        self, tmp_path, monkeypatch
+    ):
+        from gideon.interfaces.dashboard.chat import save_session_to_history
+
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        state = _make_state(tmp_path)
+        key = "dashboard:disk-backed"
+        state.conversation_log.append(key, "user", "keep question")
+        state.conversation_log.append(key, "assistant", "keep answer")
+        session = state.get_or_create_session("disk-backed")
+        session.pinned = True
+
+        save_session_to_history(state, session, force=True)
+
+        assert state.conversation_log.get_metadata(key)["pinned"] is True
+        assert [m["content"] for m in state.conversation_log.read_messages(key)] == [
+            "keep question",
+            "keep answer",
+        ]
+
+    def test_shutdown_does_not_mint_transient_only_session(self, tmp_path, monkeypatch):
+        from gideon.interfaces.dashboard.chat import save_all_sessions_to_history
+
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        state = _make_state(tmp_path)
+        session = state.get_or_create_session("pristine")
+        session.append("done", "")
+        session.drain()
+
+        save_all_sessions_to_history(state)
+
+        assert not state.conversation_log.has_log("dashboard:pristine")
+
     def test_close_saves_mode_to_history(self, tmp_path, monkeypatch):
         """Session mode is persisted in session metadata on close."""
         from gideon.interfaces.dashboard.chat import save_session_to_history
@@ -825,6 +880,56 @@ class TestHistorySaveOnClose:
         meta = state.conversation_log._read_metadata("dashboard:t1")
         assert meta.get("trust") is None
         assert meta.get("trust_reads") is None
+
+
+class TestSessionWorkspacePathResolution:
+    @pytest.mark.asyncio
+    async def test_missing_tool_result_read_does_not_create_workspace(
+        self, tmp_path, monkeypatch
+    ):
+        import gideon.engine.session_workspace as session_workspace
+        from gideon.interfaces.dashboard.chat import api_chat_tool_result
+
+        monkeypatch.setattr(session_workspace, "config_dir", lambda: tmp_path)
+        state = _make_state(tmp_path)
+        app = web.Application()
+        app["state"] = state
+        app.router.add_get(
+            "/api/chat/sessions/{session}/tool-result/{rid}", api_chat_tool_result
+        )
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/chat/sessions/absent/tool-result/r_missing")
+
+        assert resp.status == 404
+        assert not (tmp_path / "sessions" / "dashboard:absent").exists()
+
+    @pytest.mark.asyncio
+    async def test_delete_without_workspace_does_not_create_one(
+        self, tmp_path, monkeypatch
+    ):
+        import gideon.engine.session_workspace as session_workspace
+
+        monkeypatch.setattr(session_workspace, "config_dir", lambda: tmp_path)
+        state = _make_state(tmp_path)
+        state.get_or_create_session("s1")
+
+        async with TestClient(TestServer(_make_app(state))) as client:
+            resp = await client.delete("/api/chat/sessions/s1")
+
+        assert resp.status == 200
+        assert not (tmp_path / "sessions").exists()
+
+    def test_purge_absent_workspace_reports_false(self, tmp_path, monkeypatch):
+        import gideon.engine.session_workspace as session_workspace
+        from gideon.interfaces.dashboard.chat_persistence import (
+            purge_session_workspace,
+        )
+
+        monkeypatch.setattr(session_workspace, "config_dir", lambda: tmp_path)
+
+        assert purge_session_workspace("absent") is False
+        assert not (tmp_path / "sessions").exists()
 
 
 class TestResumeDedupe:
@@ -1152,6 +1257,24 @@ class TestSessionColor:
             assert session.color_index is None
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("body", [{}, {"colour_index": None}])
+    async def test_set_color_requires_explicit_field(self, tmp_path, monkeypatch, body):
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        state = _make_state(tmp_path)
+        session = state.get_or_create_session("s1")
+        session.color_index = 5
+
+        async with TestClient(TestServer(_make_app(state))) as client:
+            resp = await client.patch("/api/chat/sessions/s1/color", json=body)
+            data = await resp.json()
+
+        assert resp.status == 400
+        assert "color_index is required" in data["error"]
+        assert session.color_index == 5
+
+    @pytest.mark.asyncio
     async def test_set_color_not_found(self, tmp_path, monkeypatch):
         monkeypatch.setattr(
             "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
@@ -1291,6 +1414,53 @@ class TestSessionColor:
         assert "color_index" not in meta
 
 
+class TestSessionNaturalVoice:
+    @pytest.mark.asyncio
+    async def test_explicit_empty_value_clears_override(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        state = _make_state(tmp_path)
+        session = state.get_or_create_session("s1")
+        session.natural_voice = "on"
+
+        async with TestClient(TestServer(_make_app(state))) as client:
+            resp = await client.patch(
+                "/api/chat/sessions/s1/natural-voice", json={"natural_voice": ""}
+            )
+            data = await resp.json()
+
+        assert resp.status == 200
+        assert data["natural_voice"] == ""
+        assert session.natural_voice == ""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("body", [{}, {"natural_voices": "off"}])
+    async def test_update_requires_explicit_field_without_clearing_persisted_state(
+        self, tmp_path, monkeypatch, body
+    ):
+        from gideon.interfaces.dashboard.chat import save_session_to_history
+
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        state = _make_state(tmp_path)
+        session = state.get_or_create_session("s1")
+        session.natural_voice = "on"
+        session.append("user", "hello")
+        session.drain()
+        save_session_to_history(state, session, force=True)
+        state._sessions.clear()
+
+        async with TestClient(TestServer(_make_app(state))) as client:
+            resp = await client.patch("/api/chat/sessions/s1/natural-voice", json=body)
+            data = await resp.json()
+
+        assert resp.status == 400
+        assert "natural_voice is required" in data["error"]["message"]
+        assert state._sessions["s1"].natural_voice == "on"
+
+
 class TestBlockedSlashCommands:
     """Tests for _BLOCKED_SLASH_COMMANDS blocking dangerous commands."""
 
@@ -1377,7 +1547,7 @@ class TestTitleGenerationSessionLeak:
 
         async def _exploding_stream(prompt):
             raise RuntimeError("throttle / ACP error")
-            yield  # noqa: unreachable — makes this an async generator
+            yield  # Unreachable; makes this an async generator.
 
         mock_client.stream = _exploding_stream
         state.sessions.get_or_create = AsyncMock(
@@ -2089,6 +2259,33 @@ class TestRuntimeWiring:
         ), f"expected new-agent in metadata, got {meta.get('agent')!r}"
 
     @pytest.mark.asyncio
+    async def test_api_chat_session_agent_seeds_empty_metadata(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        state = _make_state(tmp_path)
+        state.get_or_create_session("empty-agent")
+        state.sessions.reset = AsyncMock()
+
+        mock_cfg = MagicMock()
+        mock_cfg.agents = {}
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.chat_handlers.AppConfig.load", lambda: mock_cfg
+        )
+
+        async with TestClient(TestServer(_make_app_with_agent_routes(state))) as client:
+            resp = await client.post(
+                "/api/chat/sessions/empty-agent/agent", json={"agent": "research"}
+            )
+            assert resp.status == 200
+
+        key = "dashboard:empty-agent"
+        assert state.conversation_log.get_metadata(key)["agent"] == "research"
+        assert state.conversation_log.read_messages(key) == []
+
+    @pytest.mark.asyncio
     async def test_api_chat_session_create_response_includes_workspace_dir(
         self, tmp_path, monkeypatch
     ):
@@ -2381,6 +2578,100 @@ class TestApiChatModePropagation:
             assert data["ok"] is True
 
         state.sessions.set_approval_policy.assert_called_with("dashboard:s1", "")
+
+    @pytest.mark.asyncio
+    async def test_mode_response_surfaces_allowed_screening_verdict(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        from gideon.security.guardrails import ceiling
+
+        monkeypatch.setattr(ceiling, "_ACTIVE", ceiling.OPEN_CEILING)
+        state = _make_state(tmp_path)
+        state.get_or_create_session("s1")
+
+        async with TestClient(TestServer(_make_app(state))) as client:
+            resp = await client.post(
+                "/api/chat/mode", json={"mode": "trust", "session": "s1"}
+            )
+            data = await resp.json()
+
+        assert resp.status == 200
+        assert data["ok"] is True
+        assert data["mode"] == "trust"
+        assert data["approval_screening"] == {
+            "requested_mode": "trust",
+            "requested_approval": "auto",
+            "ceiling": "open",
+            "verdict": "allowed",
+            "reason": "",
+        }
+
+    @pytest.mark.asyncio
+    async def test_approval_ceiling_denies_trust_without_false_success(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        from gideon.security.guardrails import ceiling
+
+        bound = ceiling.parse_ceiling(
+            {"version": 1, "scopes": {"approval": {"value": "ask"}}}
+        )
+        monkeypatch.setattr(ceiling, "_ACTIVE", bound)
+        state = _make_state(tmp_path)
+        session = state.get_or_create_session("s1")
+
+        async with TestClient(TestServer(_make_app(state))) as client:
+            resp = await client.post(
+                "/api/chat/mode", json={"mode": "trust", "session": "s1"}
+            )
+            data = await resp.json()
+
+        assert resp.status == 200
+        assert data["ok"] is False
+        assert data["mode"] == "normal"
+        assert data["approval_screening"]["verdict"] == "denied"
+        assert data["approval_screening"]["ceiling"] == "ask"
+        assert "operator approval ceiling" in data["approval_screening"]["reason"]
+        assert session._trust is False
+        state.sessions.set_approval_policy.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_screened_trust_action_approves_once_without_granting_trust(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        from gideon.security.guardrails import ceiling
+
+        bound = ceiling.parse_ceiling(
+            {"version": 1, "scopes": {"approval": {"value": "ask"}}}
+        )
+        monkeypatch.setattr(ceiling, "_ACTIVE", bound)
+        state = _make_state(tmp_path)
+        session = state.get_or_create_session("s1")
+        fut: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+        session._approval_futures["req-1"] = fut
+
+        async with TestClient(TestServer(_make_app(state))) as client:
+            resp = await client.post(
+                "/api/chat/sessions/s1/approve",
+                json={"action": "trust", "request_id": "req-1"},
+            )
+            data = await resp.json()
+
+        assert resp.status == 200
+        assert data["ok"] is True
+        assert data["mode"] == "normal"
+        assert data["approval_screening"]["verdict"] == "denied"
+        assert fut.result() == "approved"
+        assert session._trust is False
+        state.sessions.set_approval_policy.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_plan_task_mode_sets_field(self, tmp_path, monkeypatch):
@@ -3159,6 +3450,48 @@ class TestPromptBusyRecovery:
         assert not any(
             "already in progress" in m.get("content", "") for m in error_msgs
         )
+
+    @pytest.mark.asyncio
+    async def test_nested_prompt_busy_preserves_top_level_retry_budget(
+        self, tmp_path: Path
+    ) -> None:
+        from gideon.integrations.llm_helpers import PromptBusyExhaustedError
+        from gideon.interfaces.dashboard.chat import run_chat
+
+        state = _make_state(tmp_path)
+        state.sessions.get_or_create = AsyncMock(
+            return_value=(MagicMock(), False, False)
+        )
+        state.sessions.release = MagicMock()
+        state.sessions.reset = AsyncMock()
+        state.sessions.set_approval_policy = MagicMock()
+        state.sessions.check_context_usage = MagicMock()
+        state.sessions.get_channel_link = MagicMock(return_value=(None, None))
+        state.broadcast_ws = MagicMock()
+        state.push_sessions_update = MagicMock()
+        state.is_yolo_active = MagicMock(return_value=False)
+        state._background_tasks = set()
+
+        session = state.get_or_create_session("nested-busy-session")
+        session._prompt_busy_retries = 2
+        session._acp_pipe_death_retries = 1
+        session._empty_response_retries = 1
+
+        async def _raise_busy(msg):
+            raise PromptBusyExhaustedError("exhausted")
+            yield  # make it an async generator  # noqa: E501
+
+        mock_client = state.sessions.get_or_create.return_value[0]
+        mock_client.stream = _raise_busy
+        mock_client.stream_command = _raise_busy
+        mock_client.shutdown = AsyncMock()
+
+        await run_chat(state, session, "expanded prompt", _prompt_depth=1)
+
+        state.sessions.reset.assert_awaited_once()
+        assert session._prompt_busy_retries == 2
+        assert session._acp_pipe_death_retries == 1
+        assert session._empty_response_retries == 1
 
     @pytest.mark.asyncio
     async def test_process_exited_resets_session_and_requeues(
@@ -5710,9 +6043,8 @@ class TestColorTheme:
         )
         state = _make_state(tmp_path)
         state.get_or_create_session("theme-session")
-        with patch(
-            "gideon.interfaces.dashboard.chat_handlers.run_chat", new=AsyncMock()
-        ):
+        run_chat = AsyncMock()
+        with patch("gideon.interfaces.dashboard.chat_handlers.run_chat", new=run_chat):
             async with TestClient(TestServer(_make_app(state))) as client:
                 resp = await client.post(
                     "/api/chat?ws=1",
@@ -5724,6 +6056,9 @@ class TestColorTheme:
                 )
                 assert resp.status == 200
                 assert state._sessions["theme-session"].color_theme == "lumon"
+                await asyncio.sleep(0)
+
+        assert run_chat.await_args.kwargs["persona_snippet"] == "persona-lumon"
 
     @pytest.mark.asyncio
     async def test_color_theme_cleared_to_empty(self, tmp_path, monkeypatch):
@@ -5865,6 +6200,54 @@ class TestLumonPersonaInjection:
         ):
             result = _maybe_inject_persona("hello", "lumon", True)
         assert result == "hello"
+
+    @pytest.mark.asyncio
+    async def test_configured_persona_reaches_model_input(self, tmp_path, monkeypatch):
+        from gideon.integrations.llm.base import (
+            EVENT_COMPLETE,
+            EVENT_TEXT_CHUNK,
+            LLMEvent,
+        )
+        from gideon.interfaces.dashboard.chat import run_chat
+
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        monkeypatch.setattr(
+            "gideon.integrations.prompt_providers.runtime.render_persona_configuration",
+            lambda name: (
+                "Speak like the configured terminal operator."
+                if name == "persona-retro-terminal"
+                else ""
+            ),
+        )
+        state = _make_state(tmp_path)
+        state.context_builder = None
+        state._hook_store = None
+        session = state.get_or_create_session("persona-model")
+        model_inputs: list[str] = []
+
+        client = AsyncMock()
+        client.context_usage_pct = MagicMock(return_value=0.0)
+
+        async def _stream(message):
+            model_inputs.append(message)
+            yield LLMEvent(kind=EVENT_TEXT_CHUNK, text="Ready.")
+            yield LLMEvent(kind=EVENT_COMPLETE)
+
+        client.stream = _stream
+        state.sessions.get_or_create = AsyncMock(return_value=(client, True, False))
+
+        await run_chat(
+            state,
+            session,
+            "hello",
+            persona_snippet="persona-retro-terminal",
+        )
+
+        assert len(model_inputs) == 1
+        assert "Speak like the configured terminal operator." in model_inputs[0]
+        assert "[RETRO TERMINAL PERSONA]" in model_inputs[0]
 
 
 class TestStopReasonCancelled:
@@ -6272,9 +6655,7 @@ class TestStopHistoryBanner:
         assert self._last_stop_soft(session) is False
 
 
-from gideon.interfaces.dashboard.chat_runner import (  # noqa: E402
-    run_chat as _REAL_RUN_CHAT,
-)
+from gideon.interfaces.dashboard.chat_runner import run_chat as _REAL_RUN_CHAT  # noqa: E402
 
 
 class TestAcpProcessDiedRecovery:
@@ -6344,7 +6725,7 @@ class TestAcpProcessDiedRecovery:
 
     @pytest.mark.asyncio
     async def test_nested_depth_shows_please_retry(self, tmp_path: Path) -> None:
-        """Pipe death at depth > 0 → 'please retry' shown, no re-queue."""
+        """Nested pipe death asks for retry without spending the outer budget."""
         from gideon.integrations.acp.client import AcpProcessDied
 
         state, session, client, run_chat = self._make_state_and_session(tmp_path)
@@ -6352,7 +6733,7 @@ class TestAcpProcessDiedRecovery:
 
         await run_chat(state, session, "test message", _prompt_depth=1)
 
-        assert session._acp_pipe_death_retries == 1
+        assert session._acp_pipe_death_retries == 0
         error_msgs = [m for m in session.messages if m.get("role") == "error"]
         assert any("please retry" in m.get("content", "").lower() for m in error_msgs)
 
@@ -6442,107 +6823,3 @@ class TestAcpProcessDiedRecovery:
             await run_chat(state, session, "test message")
 
         assert (0, "test message") in calls
-
-
-class TestVisibleMessageCounts:
-    """The session-summary `messages` number is a VISIBLE count (#83).
-
-    It once read `len(session.messages)` — the raw buffer, which carries the stream's own
-    bookkeeping: one `chunk` row per token fragment and a `done` completion sentinel per
-    turn. A four-message conversation therefore advertised dozens of messages on the
-    sessions list while the open conversation showed four. The count now comes from
-    `_prepare_messages`, the one representation the open conversation is rendered from.
-    """
-
-    def _settled_session(self, state):
-        """A finished turn as the runtime leaves it: transcript rows plus the turn's
-        `done` sentinel (the streamed `chunk` rows are dropped when the segment flushes).
-        """
-        session = state.get_or_create_session("counts")
-        session.append("user", "run ls")
-        session.append("assistant", "listing")
-        session.append("tool", "✅ bash")
-        session.append("assistant", "all done")
-        session.append("done", "")
-        session.drain()
-        return session
-
-    @pytest.mark.asyncio
-    async def test_the_summary_count_is_the_open_conversations_count(
-        self, tmp_path, monkeypatch
-    ):
-        monkeypatch.setattr(
-            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
-        )
-        state = _make_state(tmp_path)
-        session = self._settled_session(state)
-
-        async with TestClient(TestServer(_make_app(state))) as client:
-            listed = await (await client.get("/api/chat/sessions")).json()
-            detail = await (await client.get("/api/chat/sessions/counts")).json()
-
-        row = next(s for s in listed if s["key"] == "counts")
-        assert row["messages"] == len(detail["messages"]), (
-            "the sessions list and the open conversation disagree on how many messages "
-            f"this session has: {row['messages']} vs {len(detail['messages'])}"
-        )
-        assert row["messages"] == 4
-        assert (
-            len(session.messages) == 5
-        ), "the raw buffer still holds the done sentinel"
-
-    @pytest.mark.asyncio
-    async def test_the_summary_count_equals_the_persisted_transcripts_count(
-        self, tmp_path, monkeypatch
-    ):
-        """The third surface: what a restart would show. A settled session's visible count
-        must equal the number of rows `save_session_to_history` actually wrote."""
-        monkeypatch.setattr(
-            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
-        )
-        from gideon.interfaces.dashboard.chat import save_session_to_history
-
-        state = _make_state(tmp_path)
-        session = self._settled_session(state)
-        save_session_to_history(state, session, force=True)
-
-        persisted = state.conversation_log.read_messages("dashboard:counts")
-        assert [m["role"] for m in persisted] == [
-            "user",
-            "assistant",
-            "tool",
-            "assistant",
-        ]
-        assert session.to_dict()["messages"] == len(persisted)
-
-    def test_completion_sentinels_and_chunk_fragments_do_not_inflate_the_count(self):
-        """Neither kind of stream bookkeeping may move the number.
-
-        `done` is dropped outright; a run of `chunk` fragments is ONE streaming message
-        however many fragments arrived — so a long answer mid-stream counts once, not once
-        per token.
-        """
-        from gideon.interfaces.dashboard.state import _ChatSession
-
-        session = _ChatSession("counts")
-        session.append("user", "hello")
-        session.append("assistant", "hi")
-        baseline = session.to_dict()["messages"]
-        assert baseline == 2
-
-        for _ in range(5):
-            session.append("done", "")
-        assert (
-            session.to_dict()["messages"] == baseline
-        ), "a completion sentinel was counted as a message"
-
-        for i in range(40):
-            session.append("chunk", f"frag{i} ")
-        mid_stream = session.to_dict()["messages"]
-        assert mid_stream == baseline + 1, (
-            "40 chunk fragments must render as ONE streaming message, not "
-            f"{mid_stream - baseline}"
-        )
-        assert (
-            len(session.messages) == 47
-        ), "the raw buffer really does hold all of them"

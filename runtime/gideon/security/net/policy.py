@@ -129,17 +129,6 @@ FETCH_ACTION = EgressPolicy(
     timeout_s=20.0,
 )
 
-LOCAL_MODEL_PROBE = EgressPolicy(
-    name="local_model_probe",
-    allow_private=True,
-    allow_only=True,
-    allow_hosts=(),
-    deny_hosts=METADATA_SERVICE_HOSTS,
-    max_redirects=0,
-    max_bytes=1_000_000,
-    timeout_s=2.0,
-)
-
 _PROFILES: dict[str, EgressPolicy] = {
     p.name: p
     for p in (
@@ -153,7 +142,6 @@ _PROFILES: dict[str, EgressPolicy] = {
         SYNC,
         BROWSE,
         FETCH_ACTION,
-        LOCAL_MODEL_PROBE,
     )
 }
 
@@ -346,90 +334,4 @@ def sync_egress_policy(endpoint: str) -> EgressPolicy:
         )
     return layered.with_overrides(
         allow_only=True, allow_hosts=(host,), deny_hosts=denies
-    )
-
-
-class LocalModelProbeRefused(ValueError):
-    """A local-model endpoint that cannot be pinned to one private address.
-
-    Raised instead of returning a policy, for the reason
-    :class:`SyncEndpointRefused` is: "I could not work out which private host you
-    meant" must never resolve to "reach any host". The caller surfaces it as a
-    refusal and nothing egresses.
-    """
-
-
-_LOCAL_PROBE_NAMED_HOSTS: frozenset[str] = frozenset({"localhost"})
-
-
-def local_model_probe_policy(endpoint: str) -> EgressPolicy:
-    """The posture ONE zero-key local-model probe runs under, pinned to its host.
-
-    Derived, never hand-written — :data:`LOCAL_MODEL_PROBE` supplies the stance and the
-    tightened caps, :func:`egress_policy_for` layers the operator's ``security.egress``
-    config on top, and only then is the endpoint's host pinned as the sole reachable
-    host (AFTER the layering, for the reason :func:`sync_egress_policy` documents: the
-    operator's ``allow_hosts`` are for other surfaces and have no business widening a
-    LAN probe's reach).
-
-    Three properties make this safe to point at a user-named address:
-
-    1. The host must be a loopback/RFC-1918-class address (or the literal name
-       ``localhost``). A public IP, a link-local/metadata address, and any other
-       hostname are all refused HERE, before a policy exists — so this seam can never
-       become a general-purpose internet prober.
-    2. ``allow_only`` with exactly one allow-list entry means one probe reaches one
-       host. ``allow_private`` is what lets that host be an RFC-1918 one at all; it is
-       the explicit, feature-scoped opt-in this surface is allowed to make, and it
-       still cannot widen reach past the single pinned host.
-    3. ``deny_hosts`` keeps :data:`METADATA_SERVICE_HOSTS` and the operator's own
-       denies, and a deny outranks the pin — so an operator who has banned a host has
-       banned it here too.
-
-    ``max_redirects=0`` on the base is deliberate: a service that answers a model-catalog
-    probe with a redirect is not the local service we are identifying, and following it
-    would be a second host.
-    """
-    from urllib.parse import urlparse
-
-    raw = (endpoint or "").strip()
-    if not raw:
-        raise LocalModelProbeRefused("no endpoint given — nothing to probe")
-    parsed = urlparse(raw if "://" in raw else f"http://{raw}")
-    host = (parsed.hostname or "").strip().lower()
-    if not host:
-        raise LocalModelProbeRefused(f"cannot parse a host out of endpoint {raw!r}")
-    if parsed.scheme not in LOCAL_MODEL_PROBE.allow_schemes:
-        raise LocalModelProbeRefused(
-            f"endpoint scheme {parsed.scheme!r} is not one of "
-            f"{LOCAL_MODEL_PROBE.allow_schemes}"
-        )
-    if host not in _LOCAL_PROBE_NAMED_HOSTS:
-        from gideon.security.net.guard import classify_host
-
-        verdict = classify_host(host)
-        if verdict.category == "invalid":
-            raise LocalModelProbeRefused(
-                f"{host!r} is not a literal address — a local-model probe only ever "
-                "reaches an address the caller named, never a resolved name"
-            )
-        if verdict.category not in ("loopback", "private"):
-            raise LocalModelProbeRefused(
-                f"{host!r} is a {verdict.category} address; a local-model probe only "
-                "reaches loopback and private-network addresses"
-            )
-    layered = egress_policy_for(LOCAL_MODEL_PROBE)
-    denies = tuple(dict.fromkeys([*METADATA_SERVICE_HOSTS, *layered.deny_hosts]))
-    from gideon.security.net.guard import host_matches
-
-    if host_matches(host, denies):
-        raise LocalModelProbeRefused(
-            f"host {host!r} is on the egress deny list and cannot be probed"
-        )
-    return layered.with_overrides(
-        allow_only=True,
-        allow_hosts=(host,),
-        deny_hosts=denies,
-        max_redirects=LOCAL_MODEL_PROBE.max_redirects,
-        max_bytes=LOCAL_MODEL_PROBE.max_bytes,
     )

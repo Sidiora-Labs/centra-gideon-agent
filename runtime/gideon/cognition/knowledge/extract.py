@@ -22,7 +22,7 @@ class _AttachmentResult:
         return body.strip() or self.description()
 
     def description(self) -> str:
-        metadata = {}
+        metadata: dict = {}
         for output in self.result.outputs.values():
             metadata.update(output.metadata or {})
         details = []

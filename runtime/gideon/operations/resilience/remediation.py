@@ -13,7 +13,7 @@ cooldown".
 
 **SOLE ownership of periodic maintenance (§4.4, PR2-11 then PR2-8).** This engine owns the
 maintenance it absorbed — memory FTS reconciliation, the daily history and SEL prunes,
-skill-library aging, inbox retention — and it is the only implementation of each: the heartbeat's duplicate
+skill-library aging — and it is the only implementation of each: the heartbeat's duplicate
 per-tick copies were deleted with the engine's re-homing, so there is no second cadence to
 fall back to and none to drift from. ``resilience.remediation.enabled=false`` therefore means
 what "disabled" means for every other automation: the pass does not run, and every job stays
@@ -47,7 +47,6 @@ from typing import Callable
 
 from gideon.core.atomic_write import atomic_write
 from gideon.core.config import loader as config_loader
-from gideon.operations.resilience.grammar import count_noun
 
 
 def config_dir() -> Path:
@@ -187,21 +186,6 @@ def measure_deficits() -> list[Deficit]:
         )
     except Exception:
         logger.debug("deficit: history retention measure failed", exc_info=True)
-
-    try:
-        from gideon.integrations.inbox_service import maintenance_backlog
-
-        out.append(
-            Deficit(
-                key="inbox_maintenance_backlog",
-                count=int(maintenance_backlog()),
-                weight=1.0,
-                max_penalty=12.0,
-                job_id="inbox.maintenance",
-            )
-        )
-    except Exception:
-        logger.debug("deficit: inbox maintenance measure failed", exc_info=True)
 
     try:
         from gideon.security.sel import sel
@@ -402,10 +386,7 @@ def run_remediation(
             spent = meter.run_totals("doctor").dollars
             if spent >= max_cost_usd:
                 result.stopped_reason = f"max_cost_usd ${max_cost_usd} reached"
-                result.jobs.append(
-                    {"id": job.id, "status": "skipped_budget", "cost": 0.0}
-                )
-                continue
+                break
         if _in_cooldown(job, state, now=now):
             result.jobs.append(
                 {"id": job.id, "status": "skipped_cooldown", "cost": 0.0}
@@ -516,22 +497,16 @@ def _job_reindex_embeddings() -> str:
     reembedded = int(report.get("reembedded") or 0)
     failed = int(report.get("failed") or 0)
     if failed and not reembedded:
-        raise RuntimeError(
-            f"embedded none of the {count_noun(failed, 'item')} missing a vector"
-        )
+        raise RuntimeError(f"embedded none of {failed} item(s) missing a vector")
     if failed:
-        return (
-            f"re-embedded {count_noun(reembedded, 'item')}; "
-            f"{failed} still without a vector"
-        )
-    return f"re-embedded {count_noun(reembedded, 'item')}"
+        return f"re-embedded {reembedded} item(s); {failed} still without a vector"
+    return f"re-embedded {reembedded} item(s)"
 
 
 def _job_rebuild_memory_fts() -> str:
     from gideon.cognition.memory import MemoryJournal
 
-    rebuilt = MemoryJournal().rebuild_index()
-    return f"FTS index rebuilt: {count_noun(rebuilt, 'file')}"
+    return f"FTS index rebuilt: {MemoryJournal().rebuild_index()} file(s)"
 
 
 def _job_prune_history() -> str:
@@ -539,20 +514,15 @@ def _job_prune_history() -> str:
     from gideon.core.config.loader import AppConfig
 
     keep_days = int(AppConfig.load().memory.history_max_days)
-    pruned = MemoryJournal().prune_history(keep_days=keep_days)
-    return f"pruned {count_noun(pruned, 'history file')}"
-
-
-def _job_inbox_maintenance() -> str:
-    from gideon.integrations.inbox_service import run_live_maintenance
-
-    return run_live_maintenance()
+    return (
+        f"pruned {MemoryJournal().prune_history(keep_days=keep_days)} history file(s)"
+    )
 
 
 def _job_prune_sel() -> str:
     from gideon.security.sel import sel
 
-    return f"pruned {count_noun(sel().prune(), 'security-event entry', 'security-event entries')}"
+    return f"pruned {sel().prune()} security-event entr(ies)"
 
 
 def _register_builtin_jobs() -> None:
@@ -606,16 +576,6 @@ def _register_builtin_jobs() -> None:
             after=("memory.prune-history",),
             cooldown_hours=0.25,
             fixes_deficit="memory_fts_desync",
-        )
-    )
-    register_job(
-        RemediationJob(
-            id="inbox.maintenance",
-            title="Prune the inbox (retention + dismissed set)",
-            run=_job_inbox_maintenance,
-            lane="deterministic",
-            cooldown_hours=6.0,
-            fixes_deficit="inbox_maintenance_backlog",
         )
     )
     register_job(

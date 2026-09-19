@@ -82,7 +82,7 @@ class Attribution:
         return len(matched) / len(self.predicted)
 
     def to_dict(self) -> dict[str, Any]:
-        values = dict(verdict=self.verdict)
+        values: dict = dict(verdict=self.verdict)
         for name in (
             "predicted",
             "fixed",
@@ -255,7 +255,9 @@ class ProposerTrust:
         return self._rate(Verdict.EFFECTIVE.value, Verdict.PARTIALLY_EFFECTIVE.value)
 
     def to_dict(self) -> dict[str, Any]:
-        result = dict(source=self.source, counts=dict(sorted(self.counts.items())))
+        result: dict = dict(
+            source=self.source, counts=dict(sorted(self.counts.items()))
+        )
         result.update(
             total=self.total,
             decided=self.decided,
@@ -266,7 +268,7 @@ class ProposerTrust:
 
 
 def proposer_trust(records: list[tuple[str, str]]) -> list[ProposerTrust]:
-    populations = {}
+    populations: dict = {}
     for source, verdict in records or []:
         name = str(source)
         populations.setdefault(name, Counter())[str(verdict)] += 1

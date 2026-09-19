@@ -34,7 +34,7 @@ class SkillSections:
     def bodies(block):
         lines = (block or "").split("\n")
         opening = None
-        retained = []
+        retained: list = []
         for offset, line in enumerate(lines):
             if line.startswith("### Skill: "):
                 if opening is None:

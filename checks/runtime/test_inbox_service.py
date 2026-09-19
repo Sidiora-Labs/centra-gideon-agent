@@ -316,94 +316,49 @@ def test_run_maintenance_honors_settings(tmp_path, monkeypatch):
     assert old2.id in svc2.inbox.items
 
 
-class TestMaintenanceIsNotOnAPrivateTimer:
-    """#37 — the inbox's private periodic maintenance timer is gone.
+def test_store_stamps_new_items_with_owner_but_preserves_explicit_owner(monkeypatch):
+    monkeypatch.setattr("gideon.integrations.inbox.owner_username", lambda: "keyur")
+    store = InboxStore()
+    mine = _item(id="C1_mine")
+    theirs = _item(id="C1_theirs", owner="dana")
+    store.add(mine)
+    store.add(theirs)
+    assert mine.owner == "keyur"
+    assert theirs.owner == "dana"
 
-    Retention/dismissed pruning is the remediation engine's ``inbox.maintenance`` job now
-    (measured, listed on the Doctor panel, runnable on demand, switch-bound). What stays
-    here is the probe it measures and the pass it calls."""
 
-    def test_the_maintenance_cadence_symbols_are_gone(self):
-        """Named so a re-introduced private cadence is a conversation, not a second
-        mechanism running the same prune on its own clock."""
-        import inspect
+def test_legacy_unattributed_item_belongs_to_owner():
+    item = _item()
+    assert item.belongs_to("keyur") is True
+    assert item.owner == ""
 
-        from gideon.integrations import inbox_service as mod
 
-        assert not hasattr(mod, "_MAINTENANCE_EVERY_SECS")
-        loop_src = inspect.getsource(mod.InboxService._loop)
-        assert "run_maintenance" not in loop_src
-        assert not hasattr(mod.InboxService(), "_last_maintenance_at")
+def test_shared_item_status_is_independent_per_owner():
+    item = _item()
+    item.set_status_for("keyur", "seen")
+    item.set_status_for("dana", "dismissed")
+    assert item.status_for("keyur") == "seen"
+    assert item.status_for("dana") == "dismissed"
+    assert item.status == "pending"
+    assert item.to_owner_dict("keyur")["status"] == "seen"
 
-    async def test_start_creates_no_task_when_there_is_nothing_to_poll(self, tmp_path):
-        """The loop existed for two reasons; maintenance was one of them. With no provider
-        wired, start() must now create no private task at all."""
-        import asyncio
 
-        svc = InboxService(
-            state=InboxState(tmp_path / "state.json"),
-            store=InboxStore(tmp_path / "inbox.json"),
-        )
-        before = set(asyncio.all_tasks())
-        svc.start()
-        assert svc._task is None
-        assert set(asyncio.all_tasks()) - before == set()
-        assert svc.health()["running"] is False
+def test_store_pending_and_open_views_are_owner_scoped():
+    store = InboxStore()
+    mine = _item(id="mine", owner="keyur")
+    theirs = _item(id="theirs", owner="dana")
+    legacy = _item(id="legacy")
+    store.items = {item.id: item for item in (mine, theirs, legacy)}
+    assert {item.id for item in store.pending("keyur")} == {"mine", "legacy"}
+    store.update_status("mine", "seen", owner="keyur")
+    assert {item.id for item in store.pending("keyur")} == {"legacy"}
+    assert {item.id for item in store.open_items("keyur")} == {"mine", "legacy"}
 
-    def test_backlog_probe_counts_expired_items_and_stale_dismissals(
-        self, tmp_path, monkeypatch
-    ):
-        svc = _ingest_svc(tmp_path, monkeypatch, settings={"retention_days": 30})
-        assert svc.maintenance_backlog() == 0
-        svc.inbox.items["C1_old"] = _item(
-            id="C1_old", created_at=time.time() - 31 * 86400
-        )
-        svc.inbox.items["C1_new"] = _item(id="C1_new", created_at=time.time())
-        svc.state.dismissed.add("C1_1")
-        svc.state.dismissed.add("C1_" + str(time.time()))
-        assert svc.maintenance_backlog() == 2
 
-    def test_backlog_probe_reads_only_and_respects_auto_cleanup(
-        self, tmp_path, monkeypatch
-    ):
-        """A probe that pruned would make the deficit vanish before the job could fix it."""
-        svc = _ingest_svc(
-            tmp_path,
-            monkeypatch,
-            settings={"auto_cleanup_enabled": False, "retention_days": 30},
-        )
-        svc.inbox.items["C1_old"] = _item(
-            id="C1_old", created_at=time.time() - 31 * 86400
-        )
-        svc.state.dismissed.add("C1_1")
-        assert svc.maintenance_backlog() == 1
-        assert "C1_old" in svc.inbox.items and svc.state.dismissed == {"C1_1"}
-
-    def test_the_engine_entry_points_bind_to_the_live_service(
-        self, tmp_path, monkeypatch
-    ):
-        """``maintenance_backlog``/``run_live_maintenance`` are what the engine calls; they
-        must resolve the RUNNING service rather than build a second one over the same files.
-        """
-        from types import SimpleNamespace
-
-        from gideon.integrations import inbox_service as mod
-
-        svc = _ingest_svc(tmp_path, monkeypatch, settings={"retention_days": 30})
-        svc.inbox.items["C1_old"] = _item(
-            id="C1_old", created_at=time.time() - 31 * 86400
-        )
-        monkeypatch.setattr(mod, "_dashboard_state", lambda: None)
-        assert mod.live_service() is None
-        assert mod.maintenance_backlog() == 0
-        assert (
-            mod.run_live_maintenance() == "no live inbox service — nothing to maintain"
-        )
-
-        monkeypatch.setattr(
-            mod, "_dashboard_state", lambda: SimpleNamespace(_inbox_svc=svc)
-        )
-        assert mod.live_service() is svc
-        assert mod.maintenance_backlog() == 1
-        assert mod.run_live_maintenance() == "pruned 1 expired inbox item(s)"
-        assert "C1_old" not in svc.inbox.items
+def test_ingest_attributes_item_to_current_owner(tmp_path, monkeypatch):
+    svc = _ingest_svc(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "gideon.integrations.inbox_service.owner_username", lambda: "keyur"
+    )
+    assert svc._ingest([_incoming()]) == 1
+    assert svc.inbox.items["C9_1700000000.5"].owner == "keyur"

@@ -491,6 +491,94 @@ def test_runner_document_reads_file(store, tmp_path):
     assert item["word_count"] == len("file-extracted content here".split())
 
 
+def _write_scanned_pdf(path: Path) -> None:
+    from PIL import Image, ImageDraw
+    from reportlab.pdfgen.canvas import Canvas
+
+    scan = path.with_suffix(".png")
+    image = Image.new("RGB", (600, 240), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((30, 30, 570, 210), outline="black", width=4)
+    draw.text((60, 100), "raster-only source", fill="black")
+    image.save(scan)
+    canvas = Canvas(str(path), pagesize=(300, 120))
+    canvas.drawImage(str(scan), 0, 0, width=300, height=120)
+    canvas.save()
+
+
+class _PngOcrProvider:
+    def __init__(self) -> None:
+        self.pages: list[tuple[int, tuple[int, int]]] = []
+
+    def ocr(self, image_path: str, *, page_number: int = 1) -> str:
+        from PIL import Image
+
+        with Image.open(image_path) as image:
+            assert image.format == "PNG"
+            self.pages.append((page_number, image.size))
+        return "Recovered text from scanned page"
+
+
+def test_document_read_rasterizes_scanned_pdf_through_ocr_provider(tmp_path):
+    from gideon.cognition.knowledge.pipeline.nodes.text_nodes import DocumentReadNode
+    from gideon.cognition.knowledge.readers import OcrProvider
+
+    pdf = tmp_path / "scan.pdf"
+    _write_scanned_pdf(pdf)
+    provider = _PngOcrProvider()
+    assert isinstance(provider, OcrProvider)
+
+    output = _run(
+        DocumentReadNode(ocr_provider=provider).run(
+            {}, NodeContext(item_id="scan", item_type="pdf", file_path=str(pdf))
+        )
+    )
+
+    assert output.success is True
+    assert output.text == "Recovered text from scanned page"
+    assert provider.pages == [(1, (625, 250))]
+    assert output.metadata["ocr_used"] is True
+    assert output.metadata["ocr_page_count"] == 1
+    assert output.metadata["scanned_page_count"] == 1
+
+
+def test_scanned_pdf_without_ocr_provider_is_not_false_success(tmp_path, monkeypatch):
+    from gideon.cognition.knowledge.pipeline.nodes import text_nodes
+
+    pdf = tmp_path / "scan.pdf"
+    _write_scanned_pdf(pdf)
+    monkeypatch.setattr(text_nodes, "_model_ocr_provider", lambda: None)
+
+    output = _run(
+        text_nodes.DocumentReadNode().run(
+            {}, NodeContext(item_id="scan", item_type="pdf", file_path=str(pdf))
+        )
+    )
+
+    assert output.success is False
+    assert "requires an available OCR provider" in output.error
+    assert output.metadata["ocr_required"] is True
+    assert output.metadata["ocr_available"] is False
+
+
+def test_image_ocr_node_uses_the_same_provider_seam(tmp_path):
+    from PIL import Image
+
+    from gideon.cognition.knowledge.pipeline.nodes.media_nodes import OcrNode
+
+    image = tmp_path / "page.png"
+    Image.new("RGB", (80, 40), "white").save(image)
+    provider = _PngOcrProvider()
+    output = _run(
+        OcrNode(ocr_provider=provider).run(
+            {}, NodeContext(item_id="image", item_type="image", file_path=str(image))
+        )
+    )
+
+    assert output.text == "Recovered text from scanned page"
+    assert provider.pages == [(1, (80, 40))]
+
+
 def test_reingest_preserves_updated_at(store):
     """Background enrichment must not bump updated_at — it tracks USER activity, so a
     re-ingest (status, insights, tags, embedding) shouldn't make an item look freshly

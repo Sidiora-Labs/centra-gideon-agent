@@ -58,7 +58,7 @@ class VersionRecord:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "VersionRecord":
-        fields = {
+        fields: dict = {
             "version": int(d.get("version", 0) or 0),
             "spec": dict(d.get("spec") or {}),
         }

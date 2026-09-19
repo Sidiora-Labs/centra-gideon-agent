@@ -151,8 +151,7 @@ async def _fetch_native(url: str, options: dict[str, Any]) -> FetchResult:
 
 async def fetch_with_fallback(url: str, **kw: Any) -> tuple[FetchResult, bool]:
     selected = await resolve_search_provider_for_use_case("fetch-article")
-    supports_fetch = selected is not None and selected.capabilities().supports_fetch
-    if supports_fetch:
+    if selected is not None and selected.capabilities().supports_fetch:
         try:
             result = await selected.fetch(url, **kw)
         except Exception as error:

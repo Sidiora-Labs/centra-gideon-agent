@@ -21,35 +21,27 @@ export async function assertShellMounted(page: Page): Promise<void> {
 }
 
 export async function preloadRoute(page: Page, route: string): Promise<void> {
-  await page
-    .waitForFunction(
-      () =>
-        typeof (window as unknown as { __gideon_preload_route?: unknown }).__gideon_preload_route ===
-        'function',
-      undefined,
-      { timeout: 5_000 },
-    )
-    .catch(() => {
-    })
-  await page
-    .evaluate(
-      (target) =>
-        (window as unknown as { __gideon_preload_route?: (path: string) => Promise<boolean> })
-          .__gideon_preload_route?.(target),
-      route,
-    )
-    .catch(() => {
-    })
+  await page.waitForFunction(
+    () => typeof (window as unknown as { __gideon_preload_route?: unknown }).__gideon_preload_route === 'function',
+    undefined,
+    { timeout: 5_000 },
+  )
+  await page.evaluate(
+    (target) => (window as unknown as { __gideon_preload_route: (path: string) => Promise<boolean> })
+      .__gideon_preload_route(target),
+    route,
+  )
 }
 
 export async function gotoRoute(page: Page, route: string): Promise<void> {
   await page.goto(`/#/${route}`)
   await preloadRoute(page, route)
+  await assertShellMounted(page)
   await page.evaluate(() => (document as unknown as { fonts?: { ready: Promise<unknown> } }).fonts?.ready)
   await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {   })
-  await page.waitForTimeout(400)
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
   await settleEntranceAnimations(page)
-  await assertShellMounted(page)
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
 }
 
 export async function settleEntranceAnimations(page: Page, timeout = 2_000): Promise<void> {

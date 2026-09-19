@@ -286,7 +286,7 @@ class MemoryService:
         archive = self._vs
         if archive is None:
             return []
-        arguments = dict(
+        arguments: dict = dict(
             query_text=query_text,
             query_embedding=query_embedding,
             limit=limit,
@@ -997,12 +997,6 @@ class MemoryService:
         if not archive:
             return {}
         return archive.memory_stats()
-
-    def curated_count(self) -> int:
-        archive = self._vs
-        if not archive:
-            return 0
-        return archive.curated_count()
 
     def get_records(
         self, kinds: "set[str] | None" = None, include_deleted: bool = False

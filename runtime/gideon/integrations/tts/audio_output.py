@@ -11,7 +11,7 @@ from typing import Any
 
 
 def speech_payload(text: str, model: str, persona: str, speed: float) -> dict[str, Any]:
-    values = dict(zip(("model", "voice", "input"), (model, persona, text)))
+    values: dict = dict(zip(("model", "voice", "input"), (model, persona, text)))
     if speed and speed != 1.0:
         values["speed"] = speed
     return values

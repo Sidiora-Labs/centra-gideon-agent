@@ -36,8 +36,6 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional
 
-from gideon.operations.resilience.grammar import count_noun
-
 logger = logging.getLogger(__name__)
 
 BacklogProbe = Callable[[], int]
@@ -166,9 +164,9 @@ def _maybe_notify(
             )
         else:
             if drained:
-                tail = f" · {count_noun(drained, 'item')} re-enriched"
+                tail = f" · {drained} item(s) re-enriched"
             elif backlog:
-                tail = f" · {count_noun(backlog, 'item')} awaiting re-enrichment"
+                tail = f" · {backlog} item(s) awaiting re-enrichment"
             else:
                 tail = ""
             notify_fn(
@@ -207,11 +205,7 @@ def _fire_drain(contract: DegradedContract, state: object) -> Optional[int]:
             )
             return 0
         if moved:
-            logger.info(
-                "degraded: drained %s for %s",
-                count_noun(moved, "item"),
-                contract.surface,
-            )
+            logger.info("degraded: drained %d item(s) for %s", moved, contract.surface)
         return moved
 
     try:
@@ -298,9 +292,7 @@ async def _memory_staging_drain(state: Optional[object] = None) -> int:
     ids = [int(e.id) for e in entries]
     _verdict, prop = proposals.enqueue(
         kind=proposals.Kind.LESSON_BATCH.value,
-        title=(
-            f"{count_noun(len(entries), 'capture')} staged while no model was bound"
-        ),
+        title=f"{len(entries)} capture(s) staged while no model was bound",
         body="\n".join(f"- {e.content}" for e in entries),
         provenance="inferred",
         source_cadence=str(entries[0].cadence or ""),
@@ -437,9 +429,8 @@ async def _synthesis_evidence_drain(state: Optional[object] = None) -> int:
         _verdict, pid, _skip = queue_draft(
             title=f"Recompile “{title}” — its sources moved",
             body=(
-                f"{count_noun(report.new_source_items, 'new source item')} and "
-                f"{count_noun(report.changed_sources, 'changed cited source')} "
-                "landed after this "
+                f"{report.new_source_items} new source item(s) and "
+                f"{report.changed_sources} changed cited source(s) landed after this "
                 "synthesis was compiled. A model is available again: recompile the "
                 "compiled section over the current corpus. The dated evidence entries "
                 "below it were appended without a model and are already current."

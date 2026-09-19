@@ -125,7 +125,7 @@ class ScheduleProjection:
         trigger = self.trigger
         action = _inline_action(trigger)
         config = _action_config(trigger)
-        fields = {
+        fields: dict = {
             name: str(config.get(name) or "") or None
             for name in ("agent", "model", "approval_mode", "script", "command")
         }

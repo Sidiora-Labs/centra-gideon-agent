@@ -100,7 +100,6 @@ async def api_memory_history(request: web.Request) -> web.Response:
 _SETTINGS_FIELDS: tuple[str, ...] = (
     "history_idle_hours",
     "history_max_days",
-    "migrated",
     "l1_manifest",
     "active_recall",
     "proactive_commitments",
@@ -236,6 +235,69 @@ def _redact_memory_field(val: object) -> object:
     if isinstance(val, dict):
         return {k: _redact_memory_field(v) for k, v in val.items()}
     return val
+
+
+def _recall_ranking_disclosure(svc) -> dict:
+    from gideon.cognition.knowledge.retrieval import (
+        ranking_disclosure,
+        ranking_signal,
+    )
+
+    archive = getattr(svc, "_vs", None)
+    meaning_available = bool(archive and getattr(archive, "embed_fn", None))
+    graph_available = bool(getattr(svc, "has_graph", False))
+    return ranking_disclosure(
+        "separate_memory_rankings",
+        "Facts and episodes are ranked separately, then presented in those groups. "
+        "There is no single score that compares a fact with an episode.",
+        [
+            ranking_signal(
+                "keyword",
+                "Matches query words in fact keys and values; episodes use it when "
+                "meaning match is unavailable.",
+                applies_to=("facts", "episodes"),
+            ),
+            ranking_signal(
+                "vector",
+                "Matches meaning with embeddings.",
+                active=meaning_available,
+                applies_to=("facts", "episodes"),
+            ),
+            ranking_signal(
+                "graph",
+                "Boosts facts linked to entities named in the query.",
+                active=graph_available,
+                applies_to=("facts",),
+            ),
+            ranking_signal(
+                "recency",
+                "Newer episodes receive more weight.",
+                applies_to=("episodes",),
+            ),
+            ranking_signal(
+                "importance",
+                "Episode importance adjusts its ordering signal.",
+                applies_to=("episodes",),
+            ),
+            ranking_signal(
+                "prior_use",
+                "Previously recalled episodes can receive a bounded heat boost.",
+                applies_to=("episodes",),
+            ),
+            ranking_signal(
+                "diversity",
+                "Near-duplicate episodes are spread out so one theme does not fill "
+                "the result.",
+                applies_to=("episodes",),
+            ),
+            ranking_signal(
+                "contributor",
+                "At otherwise similar relevance, the configured owner's memories "
+                "can be ordered first. This does not change the stored score.",
+                applies_to=("facts", "episodes"),
+            ),
+        ],
+    )
 
 
 def _get_provider(state: ConsoleState):
@@ -629,9 +691,15 @@ async def api_memory_recall(request: web.Request) -> web.Response:
             resources=sk,
         )
         return web.json_response(
-            {"result": "No matching memory found.", "query": "", "deep": False}
+            {
+                "result": "No matching memory found.",
+                "query": "",
+                "deep": False,
+                "ranking": _recall_ranking_disclosure(None),
+            }
         )
-    svc = _get_service(request.app["state"])
+    svc = _get_service(state)
+    ranking = _recall_ranking_disclosure(svc)
     query = request.query.get("q", "")[:500]
     if not query:
         return web.json_response({"error": "q (query) is required"}, status=400)
@@ -681,7 +749,9 @@ async def api_memory_recall(request: web.Request) -> web.Response:
                 + "\n[End of recalled episodes]"
             )
     text = "\n\n".join(parts) if parts else "No matching memory found."
-    return web.json_response({"result": text, "query": query, "deep": deep})
+    return web.json_response(
+        {"result": text, "query": query, "deep": deep, "ranking": ranking}
+    )
 
 
 async def api_memory_episodic_list(request: web.Request) -> web.Response:

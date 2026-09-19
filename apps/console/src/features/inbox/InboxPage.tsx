@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useInboxQueue, projectInbox } from './inboxQueueState'
 import { fvs } from '../../shared/theme/fontWeight'
-import { Inbox as InboxIcon, CheckCheck, RotateCcw, Circle, Reply, Settings as SettingsIcon, ScrollText, Loader2, ExternalLink, LayoutGrid, StickyNote, Star } from 'lucide-react'
+import { Inbox as InboxIcon, CheckCheck, RotateCcw, Circle, Reply, Settings as SettingsIcon, ScrollText, Loader2, ExternalLink, LayoutGrid, StickyNote, Star, Users, UserRound } from 'lucide-react'
 import { TopBar } from '../../shared/ui/TopBar'
 import { WorkbenchLayout } from '../../shared/ui/WorkbenchLayout'
 import { EmptyState, ListRow, ListSkeleton, LoadError } from '../../shared/ui/ListScaffold'
@@ -36,13 +36,18 @@ export function InboxPage({ query, setQuery, navigate }: Pick<RouteProps, 'query
   const [filter, setFilter] = useQueryParam(query, setQuery, 'filter', 'open', { replace: true })
   const [kind, setKind] = useQueryParam(query, setQuery, 'kind', '', { replace: true })
   const [q, setQ] = useQueryParam(query, setQuery, 'q', '', { replace: true })
+  const [ownership, setOwnership] = useQueryParam(query, setQuery, 'owner', 'everyone', { replace: true })
   const [openIdRaw, setOpenId] = useQueryParam(query, setQuery, 'open', '')
   const openId = openIdRaw || null
   const [settingsOpen, setSettingsOpen] = useQueryFlag(query, setQuery, 'settings')
 
   const [captureOpen, setCaptureOpen] = useQueryFlag(query, setQuery, 'capture')
   const { items, itemsErr, itemsStale, status, open, load, reload, watched, busy, dismissAll, restart, digest } = useInboxQueue(openId, setOpenId)
-  const { filtered, filterCount, kindChips } = useMemo(() => projectInbox(items, filter, kind, q), [items, filter, kind, q])
+  const currentOwner = status?.owner ?? ''
+  const belongsToOwner = (item: InboxItem) => !currentOwner || !item.owner || item.owner.trim().toLowerCase() === currentOwner.trim().toLowerCase()
+  const foreignCount = currentOwner ? (items ?? []).filter(item => !belongsToOwner(item)).length : 0
+  const visibleItems = ownership === 'mine' ? items?.filter(belongsToOwner) : items
+  const { filtered, filterCount, kindChips } = useMemo(() => projectInbox(visibleItems, filter, kind, q), [visibleItems, filter, kind, q])
 
   const health = status?.health
   const disabled = status ? !status.enabled : false
@@ -58,7 +63,13 @@ export function InboxPage({ query, setQuery, navigate }: Pick<RouteProps, 'query
       ...((filterCount('favorites') ?? 0) > 0 ? [{ key: 'favorites', label: 'Favorites', count: filterCount('favorites') }] : []),
       ...((filterCount('filtered') ?? 0) > 0 ? [{ key: 'filtered', label: 'Filtered', count: filterCount('filtered') }] : []),
     ],
-  }]
+  }, ...(foreignCount > 0 ? [{
+    title: 'Owner', value: ownership, defaultKey: 'everyone', onChange: setOwnership,
+    options: [
+      { key: 'everyone', label: 'Everyone', icon: Users, count: items?.length },
+      { key: 'mine', label: 'Mine', icon: UserRound, count: (items?.length ?? 0) - foreignCount },
+    ],
+  }] : [])]
   return (
     <WorkbenchLayout
       topBar={
@@ -220,7 +231,7 @@ export function InboxPage({ query, setQuery, navigate }: Pick<RouteProps, 'query
             anchorKey={openId ?? undefined}
             className="flex flex-col gap-s"
           >
-            {(item, index, list) => <InboxQueueRow item={item} index={list.windowed ? 0 : index}
+            {(item, index, list) => <InboxQueueRow item={item} index={list.windowed ? 0 : index} owner={currentOwner}
               onOpen={() => setOpenId(item.id)} navigate={navigate} />}
 
           </WindowedList>
@@ -239,8 +250,8 @@ export function InboxPage({ query, setQuery, navigate }: Pick<RouteProps, 'query
   )
 }
 
-function InboxQueueRow({ item, index, onOpen, navigate }: {
-  item: InboxItem; index: number; onOpen: () => void; navigate: (path: string) => void
+function InboxQueueRow({ item, index, onOpen, navigate, owner }: {
+  item: InboxItem; index: number; onOpen: () => void; navigate: (path: string) => void; owner: string
 }) {
   const channel = !NON_CHANNEL_ITEM_KINDS.includes(item.item_kind || 'message')
   const kind = kindMeta(item.item_kind)
@@ -253,6 +264,8 @@ function InboxQueueRow({ item, index, onOpen, navigate }: {
   const pending = item.status === 'pending'
   const unresolved = isOpen(item.status)
   const preview = previewText(item.message)
+  const attributedOwner = item.owner?.trim()
+  const ownerLabel = attributedOwner && owner && attributedOwner.toLowerCase() === owner.trim().toLowerCase() ? 'you' : attributedOwner
   const context: ContextMenuItem[] = [
     { icon: <InboxIcon size={15} />, label: 'Open', onSelect: onOpen },
     ...(target ? [{ icon: <ExternalLink size={15} />, label: refLabel(item), onSelect: () => navigate(target) }] : []),
@@ -271,6 +284,7 @@ function InboxQueueRow({ item, index, onOpen, navigate }: {
           {!channel && target && <span data-type="caption" className="inline-flex shrink-0 items-center gap-1 text-on-surface-low"><ExternalLink size={11} /> deep link</span>}
           {item.draft && <span data-type="caption" className="inline-flex shrink-0 items-center gap-1 text-ok"><Reply size={11} /> draft</span>}
           {item.favorited && <Star size={12} className="shrink-0 text-primary" style={{ fill: 'currentColor' }} aria-label="Favorited" />}
+          {ownerLabel && <span data-type="caption" className="inline-flex shrink-0 items-center gap-1 text-on-surface-low" title={`Owned by ${ownerLabel}`}><UserRound size={11} /> {ownerLabel}</span>}
         </div>
         <p data-type="body-s" className="mt-1 truncate text-on-surface-low">{preview}</p>
       </div>

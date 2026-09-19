@@ -59,7 +59,7 @@ def mapped_fields(tree: Any) -> set[str]:
     """Read the literal field declarations without importing the inspected project."""
     import ast
 
-    names = set()
+    names: set = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
             continue

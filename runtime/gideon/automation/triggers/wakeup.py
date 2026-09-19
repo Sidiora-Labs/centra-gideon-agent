@@ -73,7 +73,7 @@ class Delivery:
         return self.disposition == Disposition.REQUEUED.value
 
     def to_dict(self) -> dict[str, Any]:
-        status = {"disposition": self.disposition, "reason": self.reason}
+        status: dict = {"disposition": self.disposition, "reason": self.reason}
         status.update(delivered=self.delivered, needs_retry=self.needs_retry)
         status.update(self.wakeup.to_dict())
         return status

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import threading
 
 import pytest
 
@@ -243,6 +244,46 @@ class TestWorktreeLifecycle:
         p2 = wt.add_worktree(str(d), "t-x")
         assert p1 == p2
         wt.remove_worktree(str(d), "t-x")
+
+    def test_parallel_adds_serialize_git_registration(self, tmp_path, monkeypatch):
+        d = tmp_path / "repo"
+        d.mkdir()
+        _init_repo(str(d))
+        real_git = wt._git
+        state_lock = threading.Lock()
+        first_registration = threading.Event()
+        overlapping_registration = threading.Event()
+        active = 0
+        peak = 0
+
+        def observed_git(workspace, *args, **kwargs):
+            nonlocal active, peak
+            registration = args[:2] == ("worktree", "add")
+            if not registration:
+                return real_git(workspace, *args, **kwargs)
+            with state_lock:
+                active += 1
+                peak = max(peak, active)
+                is_first = active == 1
+                if is_first:
+                    first_registration.set()
+                else:
+                    overlapping_registration.set()
+            if is_first:
+                overlapping_registration.wait(timeout=0.2)
+            try:
+                return real_git(workspace, *args, **kwargs)
+            finally:
+                with state_lock:
+                    active -= 1
+
+        monkeypatch.setattr(wt, "_git", observed_git)
+        results = wt.add_worktrees(str(d), [(f"t-{index}", []) for index in range(4)])
+
+        assert first_registration.is_set()
+        assert not overlapping_registration.is_set()
+        assert peak == 1
+        assert all(path and os.path.isdir(path) for path in results.values())
 
     def test_cleanup_all_removes_worktrees_dir(self, tmp_path):
         d = tmp_path / "repo"

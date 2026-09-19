@@ -141,7 +141,7 @@ class _CardAssembly:
         evidence: dict[str, Any] | None,
     ) -> dict[str, Any]:
         kind = classify_block(self.ask, self.failure)
-        fields = dict(
+        fields: dict = dict(
             block_kind=kind, blocker=_blocker_text(self.ask, self.failure, node_id)
         )
         fields["attempted"] = summarize_attempts(attempts)

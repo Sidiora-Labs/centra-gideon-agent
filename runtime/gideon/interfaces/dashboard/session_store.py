@@ -394,6 +394,20 @@ def device_sessions() -> dict[str, SessionRecord]:
     return {n: r for n, r in load_session_records().items() if r.device is not None}
 
 
+def paired_session_record(nonce: str) -> SessionRecord | None:
+    """Return the live paired-device row for *nonce*, or ``None``.
+
+    A device-shaped row is not sufficient: callers using this as request identity require the
+    pairing provenance too. Unknown, expired, and non-pair rows therefore all fail closed.
+    """
+    if not nonce:
+        return None
+    record = load_session_records().get(nonce)
+    if record is None or record.issuer != ISSUER_PAIR or record.device is None:
+        return None
+    return record
+
+
 def nonces_for_device(device_id: str) -> list[str]:
     """Every live nonce belonging to *device_id*.
 

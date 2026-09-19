@@ -195,7 +195,7 @@ def _record_savings(chars_in: int, chars_out: int) -> None:
     try:
         from gideon.integrations.tool_providers import savings
 
-        entry = {
+        entry: dict = {
             "month": datetime.now().strftime("%Y-%m"),
             "model": "unknown",
             "compressor": "bg_topic",

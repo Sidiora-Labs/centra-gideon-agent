@@ -203,7 +203,7 @@ class _Vocabulary:
                 self.positions.setdefault(word, set()).add(position)
 
     def matches(self, words):
-        positions = set()
+        positions: set = set()
         for word in words:
             positions.update(self.positions.get(word, ()))
         return [self.entries[position] for position in sorted(positions)]
@@ -383,7 +383,7 @@ class _ClassificationReply:
             else {}
         )
         allowed = _Vocabulary(tags).names(topics=True)
-        selected = []
+        selected: list = []
         for candidate in map(str.strip, self.tags.split(",")):
             entry = allowed.get(candidate.lower())
             if entry is not None and len(selected) < MAX_TAGS:

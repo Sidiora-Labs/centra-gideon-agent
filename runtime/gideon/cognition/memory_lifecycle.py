@@ -152,7 +152,7 @@ class ObservationLedger:
         ]
 
     def collapse_failures(self, threshold):
-        groups = {}
+        groups: dict = {}
         for record in self.service.get_records(kinds={MemoryKind.PROCEDURAL.value}):
             text = record.text
             if any(marker in text for marker in ("→ failed", "→ denied")):
@@ -253,7 +253,7 @@ class DailyMemoryRollup:
 
     def calendar(self, now):
         today = (now or datetime.now(tz=timezone.utc)).date().isoformat()
-        calendar = {}
+        calendar: dict = {}
         for record in self.archive.iter_records(kinds={MemoryKind.EPISODIC.value}):
             if self.tag in (record.tags or []) or not record.created_at:
                 continue

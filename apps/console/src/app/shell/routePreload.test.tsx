@@ -112,3 +112,12 @@ describe('every lazy page stays reachable through the preload hook', () => {
     expect(missing, 'these walked routes are split but unwarmed').toEqual([])
   })
 })
+
+describe('unknown route correction', () => {
+  it('replaces an unknown hash without changing onboarding redirects or removing the render clamp', () => {
+    expect(SRC).toContain("if (!onboarded && route !== 'onboarding') navigate('onboarding')")
+    expect(SRC).toContain("else if (onboarded && route === 'onboarding') navigate(peekOnboardingExit() || 'dashboard')")
+    expect(SRC).toContain("else if (onboarded && route !== 'companion' && !ROUTABLE.has(route)) navigate('dashboard', { replace: true })")
+    expect(SRC).toContain("const rendered = ROUTABLE.has(route) ? route : 'dashboard'")
+  })
+})

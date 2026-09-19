@@ -42,6 +42,7 @@ class AcpCommandsUnsupported(AcpError):  # noqa: N818
 
 class AcpTimeoutError(AcpError):
     def __init__(self, partial_output: str = ""):
+        self.partial_output = partial_output
         super().__init__("ACP prompt timed out", partial_output=partial_output)
 
 

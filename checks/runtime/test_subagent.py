@@ -25,7 +25,7 @@ def _mock_sessions() -> MagicMock:
     async def _empty_stream(*_args: object, **_kwargs: object):  # type: ignore[no-untyped-def]
         """Async generator that yields nothing — simulates an empty LLM stream."""
         return
-        yield  # noqa: unreachable — makes this an async generator
+        yield  # Unreachable; makes this an async generator.
 
     provider.stream = MagicMock(side_effect=lambda *a, **kw: _empty_stream())
     sessions.get_or_create = AsyncMock(return_value=(provider, True, False))

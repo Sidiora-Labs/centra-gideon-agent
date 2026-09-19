@@ -283,6 +283,8 @@ class _ChangeGrade:
         record.graded_at = _now()
 
     def handle_harm(self, report):
+        if self.attribution is None:
+            raise RuntimeError("change must be observed before harm is handled")
         proposal_id = _file_revert(
             self.record, self.attribution, [str(run.id) for run in self.runs]
         )
@@ -301,6 +303,8 @@ class _ChangeGrade:
             logger.warning("attribution: autonomy revocation failed", exc_info=True)
 
     def commit(self, report):
+        if self.attribution is None:
+            raise RuntimeError("change must be observed before it is committed")
         pending = self.attribution.verdict == self.rules.Verdict.PENDING.value
         if pending:
             report["pending"] += 1

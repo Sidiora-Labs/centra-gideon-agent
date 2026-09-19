@@ -1,5 +1,7 @@
 """Native task records, ordered edits, graph reconciliation and comment sidecars."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -15,6 +17,7 @@ from gideon.core.record_ids import record_path
 from gideon.engine.tasks import reconcile
 from gideon.engine.tasks.models import (
     TASK_FIELD_COERCERS,
+    TERMINAL_STATUSES,
     Task,
     TaskComment,
     TaskDependency,
@@ -129,7 +132,7 @@ def _write_json(path, value):
 
 @dataclass(frozen=True)
 class TaskRecordFiles:
-    provider: object
+    provider: NativeTaskProvider
 
     def label(self, task_list_id, cache):
         if not task_list_id:
@@ -159,13 +162,13 @@ class TaskRecordFiles:
             task.project = self.provider._derive_project_label(
                 task.task_list_id, cache=cache
             )
-            task._comment_count = self.provider._comment_count(task.id)
+            setattr(task, "_comment_count", self.provider._comment_count(task.id))
             return task
         except Exception:
             return None
 
     def all(self):
-        cache = {}
+        cache: dict[str, str] = {}
         return [
             row
             for path in sorted(self.provider._ensure_dir().glob("*.json"))
@@ -202,7 +205,7 @@ class TaskAdmission:
 
 @dataclass(frozen=True)
 class TaskMutation:
-    provider: object
+    provider: NativeTaskProvider
 
     def create(self, fields):
         identifier, now = f"t-{uuid.uuid4().hex[:8]}", _now_iso()
@@ -242,7 +245,8 @@ class TaskMutation:
         task = tasks.get(identifier)
         if not task:
             return None
-        previous, changed_graph = task.status.value, False
+        previous_status, changed_graph = task.status, False
+        previous = previous_status.value
         admission = TaskAdmission(task, tasks)
         for name, value in fields.items():
             if name == "status":
@@ -265,6 +269,14 @@ class TaskMutation:
                 setattr(task, name, models_coerce(name, value, strict=True))
         if "task_list_id" in fields:
             task.project = self.provider._derive_project_label(task.task_list_id)
+        if (
+            "status" in fields
+            and previous_status in TERMINAL_STATUSES
+            and task.status == TaskStatus.OPEN
+            and task.project == "Repeatable"
+        ):
+            task.reset_for_repeat()
+            changed_graph = True
         admission.cycle()
         task.updated_at = _now_iso()
         if "status" in fields:
@@ -278,8 +290,12 @@ class TaskMutation:
             )
         for row in changed:
             self.provider._write_task(row)
-        task._reconciled = changed
-        task._completed_edge = pool.should_fire_completion(previous, task.status.value)
+        setattr(task, "_reconciled", changed)
+        setattr(
+            task,
+            "_completed_edge",
+            pool.should_fire_completion(previous, task.status.value),
+        )
         return task
 
     def delete(self, identifier):
@@ -306,7 +322,7 @@ class TaskMutation:
 
 @dataclass(frozen=True)
 class TaskComments:
-    provider: object
+    provider: NativeTaskProvider
     task_id: str
 
     def path(self):
@@ -437,6 +453,7 @@ class NativeTaskProvider(TaskProvider):
         project: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        task_list_id: str | None = None,
     ) -> tuple[list[Task], int]:
         def select():
             records = [
@@ -445,6 +462,7 @@ class NativeTaskProvider(TaskProvider):
                 if (not status or row.status.value == status)
                 and (not assignee or row.assignee == assignee)
                 and (not project or row.project == project)
+                and (not task_list_id or row.task_list_id == task_list_id)
             ]
             return records[offset : offset + limit], len(records)
 

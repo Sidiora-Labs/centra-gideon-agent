@@ -193,6 +193,21 @@ const docs: UiDoc[] = [
     anatomy: ['native <input type="checkbox"> (accent-primary, focus-visible ring, propagation-guarded)'],
   },
   {
+    name: 'MetaChip',
+    keywords: ['metadata', 'chip', 'pill', 'badge', 'label', 'provider', 'neutral'],
+    description:
+      'The neutral metadata chip for short facts such as a provider, model lifecycle label, or compact category. It fixes the caption type, muted ink, surface-high ground, pill radius, spacing, and optional uppercase treatment so metadata does not drift into one-off spans. Semantic outcomes and warnings belong in StatusPill instead.',
+    props: [
+      { name: 'uppercase', description: 'Adds the shared uppercase + tracking-wide treatment for lifecycle/category labels; leave false for names and values.' },
+    ],
+    bestPractices: [
+      { guidance: true, description: 'Use MetaChip for neutral identifying metadata and StatusPill for semantic status whose tone carries meaning.' },
+      { guidance: true, description: 'Use uppercase only for short categorical labels; preserve the original case of provider and model names.' },
+      { guidance: false, description: 'Do not restyle the ground, ink, padding, or radius at the call site — those fixed metrics are the primitive contract.' },
+    ],
+    anatomy: ['span (caption type, surface-high ground, muted ink)', 'optional uppercase tracking treatment', 'children (short metadata label)'],
+  },
+  {
     name: 'FieldLabelProvider',
     keywords: ['field', 'label', 'accessibility', 'labelledby', 'context', 'provider', 'a11y'],
     description:

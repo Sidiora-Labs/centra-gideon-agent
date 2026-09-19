@@ -4,9 +4,9 @@ import {
   Check, MessageSquare, Boxes, Mic, Volume2, Eye, ImagePlus,
   Ear, Music, ScanEye, Clapperboard, Users, Download, Code2, BrainCircuit,
   Moon, Network, RefreshCcw, ArrowUp, ArrowDown, X, AlertTriangle, Wrench,
-  Trash2, Gavel, type LucideIcon,
+  Trash2, Gavel, KeyRound, Wifi, CheckCircle2, type LucideIcon,
 } from 'lucide-react'
-import { api, type AvailableModel, type JudgeBenchRecommendation, type ProviderHealth } from '../../shared/data/api'
+import { api, type AvailableModel, type JudgeBenchRecommendation, type LocalModelTokenStatus, type ProviderHealth } from '../../shared/data/api'
 import { humanBytes } from '../../shared/data/chunkedUpload'
 import {
   occupantDetail, pressureDetail, pressureTone, reclaimableCount, sortOccupants,
@@ -26,6 +26,9 @@ import { accentChip } from '../../shared/theme/accent'
 import { DisclosureCard } from '../../shared/ui/DisclosureCard'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
 import { reportingWrite } from '../../app/shell/reportingWrite'
+import { TextInput } from '../../shared/ui/forms'
+import { MetaChip } from '../../shared/ui/MetaChip'
+import { StatusPill } from '../../shared/ui/StatusPill'
 
 const USE_CASE_META: Record<string, { label: string; group?: string; description: string; chain: boolean; icon: LucideIcon; fallback?: string }> = {
   chat: { label: 'Chat', description: 'Conversational models for chat and agent interactions. Order matters: the first model is the default; later ones are fallbacks used when an earlier provider is down.', chain: true, icon: MessageSquare },
@@ -52,6 +55,20 @@ const USE_CASE_ORDER = [
 ]
 
 const CHAT_SUBCATEGORIES = new Set(['code_tools', 'reasoning', 'background', 'orchestration', 'loops'])
+
+export function localModelTokenReady(status: LocalModelTokenStatus | null | undefined): boolean {
+  return !!status?.configured && status.state === 'valid' && status.valid === true
+}
+
+export function localModelTokenSummary(status: LocalModelTokenStatus): string {
+  if (!localModelTokenReady(status)) return status.error || 'No valid Hugging Face token is available.'
+  const identity = status.username ? ` for ${status.username}` : ''
+  const masked = status.masked_token ? ` · ${status.masked_token}` : ''
+  const source = status.source === 'credential_store' ? 'Saved in Gideon'
+    : status.source === 'environment' ? 'From the environment'
+      : status.source === 'huggingface_cache' ? 'From the Hugging Face cache' : 'Available'
+  return `${source}${identity}${masked}`
+}
 
 export function capableModels(useCase: string, allModels: AvailableModel[], activeModels: string[]): AvailableModel[] {
   const capability = CHAT_SUBCATEGORIES.has(useCase) ? 'chat' : useCase
@@ -98,33 +115,28 @@ function ModelChips({ model, onRepair, repairing }: {
   return (
     <span className="flex shrink-0 items-center gap-1">
       {model.status === 'deprecated' && (
-        <span data-type="caption" className="rounded-pill bg-surface-high px-1.5 py-0.5 text-on-surface-low uppercase tracking-wide"
-          title="Deprecated — still bindable, but a newer model is preferred.">deprecated</span>
+        <MetaChip uppercase title="Deprecated — still bindable, but a newer model is preferred.">deprecated</MetaChip>
       )}
       {model.status === 'sunset' && (
-        <span data-type="caption" className="rounded-pill bg-surface-high px-1.5 py-0.5 text-on-surface-low uppercase tracking-wide"
-          title="Sunset — hidden from new bindings; an existing binding keeps working.">sunset</span>
+        <MetaChip uppercase title="Sunset — hidden from new bindings; an existing binding keeps working.">sunset</MetaChip>
       )}
       {model.non_commercial && (
-        <span data-type="caption" className="inline-flex items-center gap-1 rounded-pill px-1.5 py-0.5"
-          style={{ background: 'color-mix(in srgb, var(--color-warning) 16%, transparent)', color: 'var(--color-warning)' }}
+        <StatusPill tone="warn" className="gap-1 py-0.5"
           title={`Non-commercial license${model.license ? ` (${model.license})` : ''} — for personal/research use only.`}>
           <AlertTriangle size={9} /> non-commercial
-        </span>
+        </StatusPill>
       )}
       {model.integrity === 'truncated' && (
         <>
-          <span data-type="caption" className="inline-flex items-center gap-1 rounded-pill px-1.5 py-0.5"
-            style={{ background: 'color-mix(in srgb, var(--color-danger) 16%, transparent)', color: 'var(--color-danger)' }}
+          <StatusPill tone="danger" className="gap-1 py-0.5"
             title="Downloaded weights are incomplete — this model won't load. Repair to re-download.">
             truncated
-          </span>
-          <button type="button" onClick={onRepair} disabled={repairing}
-            data-type="caption" className="inline-flex items-center gap-1 rounded-pill px-1.5 py-0.5 transition-colors hover:bg-surface-high"
-            style={{ background: 'var(--color-surface-high)', color: 'var(--color-on-surface)' }}
+          </StatusPill>
+          <Button type="button" variant="secondary" size="xs" onClick={onRepair} loading={repairing}
+            loadingLabel="Repairing…"
             title="Re-download this model's weights.">
-            <Wrench size={9} /> {repairing ? 'repairing…' : 'Repair'}
-          </button>
+            <Wrench size={11} /> Repair
+          </Button>
         </>
       )}
     </span>
@@ -193,6 +205,7 @@ export function ModelsPanel() {
         <PanelHeader title="Models" hint="Assign discovered models to each use case. Chat and its routing sub-categories store an ordered fallback chain — the first model is the default; later ones take over when an earlier provider is down. Modality means understanding that media as input; Generation means producing it." />
         <div className="shrink-0 pt-1"><ReclaimButton onReclaimed={reloadActive} /></div>
       </div>
+      <ModelTokenSection />
       {
 }
       <Section title="Model bindings" hint="One model — or an ordered fallback chain — per use case.">
@@ -216,6 +229,105 @@ export function ModelsPanel() {
       <LoadedModelsSection />
       <PromptCacheSection />
     </div>
+  )
+}
+
+export function ModelTokenSection() {
+  const { data, error, refresh } = useQuery('settings:local-model-token', () => api.localModelTokenStatus?.() ?? Promise.resolve({
+    configured: false, valid: null, source: 'none', masked_token: '', state: 'unconfigured', username: '', error: '',
+    cached: false, checked_at: 0, expires_at: 0,
+  } as LocalModelTokenStatus), { persist: false })
+  const [token, setToken] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [testStatus, setTestStatus] = useState<LocalModelTokenStatus | null>(null)
+
+  const save = async () => {
+    const next = token.trim()
+    if (!next) return
+    setSaving(true)
+    try {
+      const ok = await reportingWrite('save the Hugging Face token', () => api.saveLocalModelToken(next))
+      if (ok) {
+        setToken(''); setTestStatus(null)
+        invalidateKeys('settings:local-model-token')
+        invalidateKeys('settings:models-available')
+        invalidateKeys('settings:models')
+        refresh()
+      }
+    } finally { setSaving(false) }
+  }
+  const remove = async () => {
+    const ok = await confirm({
+      title: 'Remove the saved Hugging Face token?',
+      body: 'Gated model downloads will use an environment or cached token if one is available; otherwise they will be blocked until you add another token.',
+      confirmLabel: 'Remove token',
+      danger: true,
+    })
+    if (!ok) return
+    setSaving(true)
+    try {
+      if (!(await reportingWrite('remove the Hugging Face token', () => api.deleteLocalModelToken()))) return
+      setTestStatus(null)
+      invalidateKeys('settings:local-model-token')
+      invalidateKeys('settings:models-available')
+      invalidateKeys('settings:models')
+      refresh()
+    } finally { setSaving(false) }
+  }
+  const test = async () => {
+    setTesting(true); setTestStatus(null)
+    try {
+      setTestStatus(await api.testLocalModelToken())
+      invalidateKeys('settings:local-model-token')
+      refresh()
+    }
+    catch (e) {
+      setTestStatus({
+        configured: false, valid: null, source: 'none', masked_token: '', state: 'unavailable', username: '',
+        error: e instanceof Error ? e.message : 'Token test failed', cached: false, checked_at: 0, expires_at: 0,
+      })
+    } finally { setTesting(false) }
+  }
+
+  return (
+    <Section title="Hugging Face access" hint="One token unlocks downloads for gated local models after you accept each model’s access terms. Gideon never shows the saved token again.">
+      {!data && error ? (
+        <LoadError what="Hugging Face token status" error={error} onRetry={refresh} />
+      ) : (
+        <div className="rounded-lg bg-surface-container px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <KeyRound size={15} className="text-on-surface-low" />
+            <span data-type="body-s" className="min-w-0 flex-1 text-on-surface-low">
+              {data ? localModelTokenSummary(data) : 'Checking for a token…'}
+            </span>
+            <Button variant="tonal" size="xs" onClick={test} loading={testing} loadingLabel="Testing…" disabled={!data?.configured} disabledReason="Add a token first">
+              <Wifi size={12} /> Test
+            </Button>
+            {data?.source === 'credential_store' ? (
+              <Button variant="ghost" size="xs" onClick={remove} disabled={saving}>Remove saved token</Button>
+            ) : null}
+          </div>
+          {testStatus && (
+            <div role="status" data-type="caption" className="mt-2 flex items-start gap-1.5"
+              style={{ color: localModelTokenReady(testStatus) ? 'var(--color-success)' : 'var(--color-danger)' }}>
+              {localModelTokenReady(testStatus) ? <CheckCircle2 size={12} className="mt-0.5" /> : <AlertTriangle size={12} className="mt-0.5" />}
+              <span>{localModelTokenReady(testStatus) ? `Token works. ${localModelTokenSummary(testStatus)}` : localModelTokenSummary(testStatus)}</span>
+            </div>
+          )}
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+            <TextInput type="password" value={token} onChange={setToken} ariaLabel="Hugging Face token"
+              placeholder={data?.configured ? 'Paste a replacement token' : 'Paste a Hugging Face token'} size="md" surface="high" mono />
+            <Button size="sm" onClick={save} loading={saving} loadingLabel="Saving…" disabled={!token.trim()} disabledReason="Paste a token first">
+              Save token
+            </Button>
+          </div>
+          <p data-type="caption" className="mt-2 text-on-surface-low">
+            Create a read token at huggingface.co/settings/tokens, then request access on each gated model page. Environment and Hugging Face cache credentials are detected automatically.
+          </p>
+        </div>
+      )}
+    </Section>
   )
 }
 
@@ -497,7 +609,7 @@ function UseCaseRow({ useCase, activeModels, allModels, health, judgeRec, onChan
                 </span>
                 <HealthDot provider={provider} health={health} />
                 <span data-type="body-s" className="min-w-0 flex-1 truncate font-mono text-on-surface">{id}</span>
-                {provider && <span data-type="caption" className="shrink-0 rounded-pill bg-surface-high px-1.5 py-0.5 text-on-surface-low">{provider}</span>}
+                {provider && <MetaChip>{provider}</MetaChip>}
                 {
 }
                 <IconButton icon={ArrowUp} label={`Move ${id} up`} size={24} iconSize={13}
@@ -584,13 +696,12 @@ function UseCaseRow({ useCase, activeModels, allModels, health, judgeRec, onChan
                 </button>
                 <ModelChips model={m} onRepair={() => repair(m)} repairing={repairing === ref} />
                 {on && notDownloaded && (
-                  <span data-type="caption" className="shrink-0 inline-flex items-center gap-1 rounded-pill px-1.5 py-0.5"
-                    style={{ background: 'color-mix(in srgb, var(--color-warning) 16%, transparent)', color: 'var(--color-warning)' }}
+                  <StatusPill tone="warn" className="gap-1 py-0.5"
                     title="Bound but not downloaded — download it in Providers to activate.">
                     <Download size={9} /> not downloaded
-                  </span>
+                  </StatusPill>
                 )}
-                <span data-type="caption" className="shrink-0 rounded-pill bg-surface-high px-1.5 py-0.5 text-on-surface-low">{m.provider}</span>
+                <MetaChip>{m.provider}</MetaChip>
               </div>
             )
               })}

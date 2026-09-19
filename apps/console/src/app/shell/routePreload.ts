@@ -5,23 +5,27 @@ type RouteModule<P> = { default: ComponentType<P> }
 type PreloadHost = { __gideon_preload_route?: (path: string) => Promise<boolean> }
 
 const loaders = new Map<string, () => Promise<unknown>>()
-const started = new Map<string, Promise<boolean>>()
 
 export function lazyRoute<P>(route: string, load: () => Promise<RouteModule<P>>): LazyExoticComponent<ComponentType<P>> {
-  loaders.set(route, load)
-  return lazy(load)
+  let pending: Promise<RouteModule<P>> | undefined
+  const loadOnce = () => {
+    pending ??= load()
+    return pending
+  }
+  loaders.set(route, loadOnce)
+  return lazy(loadOnce)
 }
 
-export function preloadRoute(path: string): Promise<boolean> {
+export async function preloadRoute(path: string): Promise<boolean> {
   const { route } = parseRouteHash(path, '')
   const load = loaders.get(route)
-  if (!load) return Promise.resolve(false)
-  let pending = started.get(route)
-  if (!pending) {
-    pending = load().then(() => true, () => false)
-    started.set(route, pending)
+  if (!load) return false
+  try {
+    await load()
+    return true
+  } catch {
+    return false
   }
-  return pending
 }
 
 export function installRoutePreload(): void {

@@ -254,7 +254,7 @@ def render_profile_block(vs, *, now: datetime | None = None) -> str:
     if not eligible:
         return ""
     eligible.sort(key=lambda pair: -pair[1])
-    grouped = {}
+    grouped: dict = {}
     for facet, _ in eligible[:_MAX_RENDERED]:
         grouped.setdefault(facet.cls, []).append(facet.text)
     body = [

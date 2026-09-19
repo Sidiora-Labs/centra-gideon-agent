@@ -53,6 +53,7 @@ const WorkflowsSection = lazyRoute('workflows', () => import('../../features/wor
 const SkillsPage = lazyRoute('skills', () => import('../../features/skills/SkillsPage').then((m) => ({ default: m.SkillsPage })))
 const ToolsPage = lazyRoute('tools', () => import('../../features/tools/ToolsPage').then((m) => ({ default: m.ToolsPage })))
 const KnowledgeSection = lazyRoute('knowledge', () => import('../../features/knowledge/KnowledgeSection').then((m) => ({ default: m.KnowledgeSection })))
+const KnowledgeReadingPage = lazyRoute('knowledge', () => import('../../features/knowledge/KnowledgeReadingPage').then((m) => ({ default: m.KnowledgeReadingPage })))
 const LoopSection = lazyRoute('loop', () => import('../../features/loop/LoopSection').then((m) => ({ default: m.LoopSection })))
 const InboxPage = lazyRoute('inbox', () => import('../../features/inbox/InboxPage').then((m) => ({ default: m.InboxPage })))
 const FilesSection = lazyRoute('files', () => import('../../features/files/FilesSection').then((m) => ({ default: m.FilesSection })))
@@ -127,6 +128,18 @@ const pageComponents: Record<string, ComponentType<RouteProps>> = {
 }
 
 function renderPage(route: string, props: RouteProps) {
+  if (route === 'knowledge') {
+    const parts = (props.sub || '').split('/')
+    const readingId = parts[0] === 'read' && parts[1]
+      ? parts.slice(1).join('/')
+      : parts[0] === 'item' && parts[1] && props.query.read === '1'
+        ? parts.slice(1).join('/')
+        : ''
+    if (readingId) {
+      const back = parts[0] === 'item' ? `knowledge/item/${encodeURIComponent(readingId)}` : 'knowledge'
+      return <KnowledgeReadingPage key={readingId} id={readingId} onBack={() => props.navigate(back)} />
+    }
+  }
   const Page = pageComponents[route]
   return Page ? <Page {...props} /> : <div className="flex h-full items-center justify-center text-on-surface-low" data-type="headline-s">{NAV.find((item) => item.id === route)?.label} — coming soon</div>
 }
@@ -185,6 +198,7 @@ function AppInner() {
     if (!loaded) return
     if (!onboarded && route !== 'onboarding') navigate('onboarding')
     else if (onboarded && route === 'onboarding') navigate(peekOnboardingExit() || 'dashboard')
+    else if (onboarded && route !== 'companion' && !ROUTABLE.has(route)) navigate('dashboard', { replace: true })
     else if (onboarded) clearOnboardingExit()
   }, [loaded, onboarded, route, navigate])
 

@@ -69,6 +69,8 @@ class TurnUsage:
 
 
 class ConversationProtocol(ModelProvider):
+    _client: Any
+
     def _initialize_conversation(self) -> None:
         self._history: list[dict[str, Any]] = []
         self._last_context_pct: float | None = None

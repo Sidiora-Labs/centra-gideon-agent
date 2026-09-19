@@ -29,13 +29,6 @@ class ReportClock:
     identifier: str
     name: str
     provider: str
-    purpose: str = ""
-
-    def converge(self, store: Any) -> Any:
-        """Collapse duplicate system copies of this clock before the caller reads the store."""
-        from gideon.automation.triggers.singletons import converge
-
-        return converge(store, self.purpose or self.provider)
 
     def plan(
         self, row: Any, expression: str, *, policy: str, enabled: bool = True
@@ -58,7 +51,6 @@ class ReportClock:
             if new
             else row.trigger
         )
-        trigger.purpose = self.purpose or self.provider
         spec = (
             dict(trigger.spec or {})
             if policy == "cadence"

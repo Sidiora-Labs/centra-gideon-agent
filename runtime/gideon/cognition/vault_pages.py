@@ -156,7 +156,7 @@ class VaultIndexPage:
     def render(self):
         from gideon.cognition.memory_record import MemoryKind, MemoryScope
 
-        counts = {}
+        counts: dict = {}
         for record in self.records:
             counts[record.kind.value] = counts.get(record.kind.value, 0) + 1
         draft = NoteDraft(

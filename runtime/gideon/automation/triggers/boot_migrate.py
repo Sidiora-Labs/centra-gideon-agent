@@ -38,7 +38,7 @@ class StartupMigration:
             return self.failure("migration raised")
         armed = arm_unarmed(store, now=self.now)
         frozen = backfill_capabilities(store)
-        result = {
+        result: dict = {
             key: int(report.get(key, 0) or 0)
             for key in ("converted", "written", "refused")
         }

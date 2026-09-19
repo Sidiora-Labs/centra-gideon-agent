@@ -15,6 +15,7 @@ import {
   type MemoryEntitiesResponse, type MemoryEntity, type MemoryEntityType,
   type MemoryGraphSummary, type MemoryLink, type MemoryGraphData,
   type MemoryEntityProposal, type MemorySlot, type MemorySlotTrimProposal,
+  type MemoryRecallResult, type RecallRankingDisclosure,
 } from '../../shared/data/api'
 import { PanelHeader, Section, Field, Row, Toggle, SavedToast } from './settingsUI'
 import { confirm, confirmDelete } from '../../shared/ui/dialog'
@@ -639,9 +640,38 @@ function StudioMeta({ pairs }: { pairs: [string, string][] }) {
   )
 }
 
-function StudioDocEditor({ which, onSaved }: { which: 'preferences' | 'projects' | 'history'; onSaved: () => void }) {
+type MemoryDocName = 'preferences' | 'projects' | 'history'
+
+const memoryDocDrafts = new Map<MemoryDocName, string>()
+let memoryDocUnloadGuardAttached = false
+
+function guardMemoryDocDrafts(event: BeforeUnloadEvent) {
+  if (memoryDocDrafts.size === 0) return
+  event.preventDefault()
+  event.returnValue = true
+}
+
+function syncMemoryDocUnloadGuard() {
+  if (typeof window === 'undefined') return
+  if (memoryDocDrafts.size > 0 && !memoryDocUnloadGuardAttached) {
+    window.addEventListener('beforeunload', guardMemoryDocDrafts)
+    memoryDocUnloadGuardAttached = true
+  } else if (memoryDocDrafts.size === 0 && memoryDocUnloadGuardAttached) {
+    window.removeEventListener('beforeunload', guardMemoryDocDrafts)
+    memoryDocUnloadGuardAttached = false
+  }
+}
+
+function keepMemoryDocDraft(which: MemoryDocName, draft: string, savedContent: string) {
+  if (draft === savedContent) memoryDocDrafts.delete(which)
+  else memoryDocDrafts.set(which, draft)
+  syncMemoryDocUnloadGuard()
+}
+
+export function StudioDocEditor({ which, onSaved }: { which: MemoryDocName; onSaved: () => void }) {
   const [content, setContent] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
+  const draftRef = useRef('')
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
   const [err, setErr] = useState('')
@@ -652,15 +682,28 @@ function StudioDocEditor({ which, onSaved }: { which: 'preferences' | 'projects'
     setContent(null)
     setLoadErr('')
     api.memoryDoc(which)
-      .then((c) => { if (alive) { setContent(c); setDraft(c) } })
+      .then((c) => {
+        if (!alive) return
+        const keptDraft = memoryDocDrafts.get(which)
+        setContent(c)
+        draftRef.current = keptDraft ?? c
+        setDraft(draftRef.current)
+        if (keptDraft === c) keepMemoryDocDraft(which, c, c)
+      })
       .catch((e) => { if (alive) setLoadErr(e instanceof Error ? e.message : 'Could not load this document') })
     return () => { alive = false }
   }, [which, reloads])
   const dirty = content !== null && draft !== content
   const save = async () => {
+    const savedDraft = draft
     setBusy(true)
     setErr('')
-    try { await api.saveMemoryDoc(which, draft); setContent(draft); setSaved(true); window.setTimeout(() => setSaved(false), 1800); onSaved() }
+    try {
+      await api.saveMemoryDoc(which, savedDraft)
+      setContent(savedDraft)
+      keepMemoryDocDraft(which, draftRef.current, savedDraft)
+      setSaved(true); window.setTimeout(() => setSaved(false), 1800); onSaved()
+    }
     catch (e) { setErr(e instanceof Error ? e.message : 'Save failed') }
     setBusy(false)
   }
@@ -673,7 +716,12 @@ function StudioDocEditor({ which, onSaved }: { which: 'preferences' | 'projects'
   if (content === null) return <div data-type="body-s" className="flex items-center gap-2 text-on-surface-low"><Loader2 size={14} className="animate-spin" /> Loading…</div>
   return (
     <div className="flex flex-col gap-2">
-      <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={16} spellCheck={false}
+      <textarea value={draft} onChange={(e) => {
+        draftRef.current = e.target.value
+        setDraft(e.target.value)
+        keepMemoryDocDraft(which, e.target.value, content)
+      }}
+        aria-label={`${which} memory document`} rows={16} spellCheck={false}
         data-type="caption" className="w-full resize-y rounded-lg bg-surface-high px-3 py-2 font-mono text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
         style={{ fontFamily: '"JetBrains Mono", ui-monospace, monospace' }} />
       <div className="flex items-center gap-2">
@@ -859,20 +907,20 @@ function InspectBlock({ title, body }: { title: string; body: string }) {
   )
 }
 
-function RecallTab() {
+export function RecallTab() {
   const [q, setQ] = useState('')
-  const [result, setResult] = useState<string | null>(null)
+  const [recall, setRecall] = useState<MemoryRecallResult | null>(null)
   const [busy, setBusy] = useState(false)
   const run = async () => {
     if (!q.trim()) return
     setBusy(true)
-    try { const r = await api.memoryRecall(q.trim()); setResult(r.result) }
-    catch { setResult('') }
+    try { setRecall(await api.memoryRecall(q.trim())) }
+    catch { setRecall(null) }
     setBusy(false)
   }
   return (
     <div>
-      <p data-type="body-s" className="mb-3 text-on-surface-low">Ask your memory a question — a ranked deep recall across every stored fact, lesson, and episode (records the recall signal).</p>
+      <p data-type="body-s" className="mb-3 text-on-surface-low">Ask your memory a question — a ranked deep recall across stored facts and episodes (records the recall signal).</p>
       <div className="mb-3 flex items-center gap-2">
         <div className="flex-1">
           <TextInput value={q} onChange={setQ} onKeyDown={(e) => { if (e.key === 'Enter') run() }}
@@ -881,10 +929,38 @@ function RecallTab() {
         <Button size="sm" onClick={run} loading={busy} disabled={busy || !q.trim()}
           disabledReason={!q.trim() ? 'Type a question first' : undefined}>Recall</Button>
       </div>
-      {result !== null && (result
-        ? <pre data-type="caption" className="overflow-x-auto rounded-lg bg-surface-container px-3 py-2 text-on-surface whitespace-pre-wrap">{result}</pre>
+      {recall !== null && (recall.result
+        ? <pre data-type="caption" className="overflow-x-auto rounded-lg bg-surface-container px-3 py-2 text-on-surface whitespace-pre-wrap">{recall.result}</pre>
         : <p data-type="caption" className="rounded-lg bg-surface-container px-3 py-2 text-on-surface-low italic">Nothing recalled for that query.</p>)}
+      {recall?.ranking && <RecallRankingDisclosureView disclosure={recall.ranking} />}
     </div>
+  )
+}
+
+export function RecallRankingDisclosureView({ disclosure }: { disclosure: RecallRankingDisclosure }) {
+  return (
+    <details className="mt-3 rounded-lg border border-outline-variant/40 bg-surface-container px-3 py-2">
+      <summary data-type="body-s" className="cursor-pointer text-on-surface">How recall was ranked</summary>
+      <div data-type="caption" className="mt-2 flex flex-col gap-2 text-on-surface-low">
+        <p>{disclosure.summary}</p>
+        <p>
+          <span className="text-on-surface-var">{disclosure.score.label}:</span>{' '}
+          {disclosure.score.shown && disclosure.score.value !== null
+            ? disclosure.score.value.toFixed(4)
+            : 'not shown for this combined recall'}. {disclosure.score.explanation}
+        </p>
+        <ul className="flex flex-col gap-1">
+          {disclosure.signals.map((signal) => (
+            <li key={signal.id}>
+              <span className="text-on-surface-var">{signal.label}</span>
+              {!signal.active && <span> (unavailable)</span>}
+              {signal.applies_to.length > 0 && <span> · {signal.applies_to.join(' + ')}</span>}
+              {' — '}{signal.detail}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </details>
   )
 }
 

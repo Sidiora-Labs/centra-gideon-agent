@@ -75,7 +75,7 @@ class _EvidenceRequest:
             derive(self.directory)
             for derive in (evidence.derive_contact_sheet, evidence.derive_gif)
         )
-        metadata = dict(
+        metadata: dict = dict(
             scenario_id=self.scenario, sha=self.revision, passed=self.passed
         )
         manifest = evidence.build_manifest(

@@ -89,7 +89,7 @@ def bind_tool_context(
 def reset_tool_context(tokens) -> None:
     from gideon.integrations.tool_providers import projection
 
-    variables = (
+    variables: tuple[Any, ...] = (
         _CURRENT_CWD,
         _CURRENT_AGENT,
         _CURRENT_EXTRA_ROOTS,
@@ -1031,7 +1031,7 @@ class NativeBuiltinToolProvider(ToolProvider):
             return ToolResult(
                 success=False, error="no session context for tool-result retrieval"
             )
-        options = {
+        options: dict = {
             name: int(a[name]) if a.get(name) is not None else None
             for name in ("end", "line_start", "line_end")
         }
@@ -1358,7 +1358,7 @@ class NativeBuiltinToolProvider(ToolProvider):
         from gideon.integrations.inbox_providers.native_source import post_to_inbox
 
         def publish():
-            parameters = dict(
+            parameters: dict = dict(
                 kind=category,
                 sender_name=self._agent or "agent",
                 context=str(a.get("context", "")) or None,
@@ -1510,7 +1510,7 @@ class NativeBuiltinToolProvider(ToolProvider):
                 error=error,
                 recovery_hints=[f"One of: {', '.join(allowed)}."],
             )
-        options = {
+        options: dict = {
             field: str(a.get(field, "") or "").strip()
             for field in ("origin", "since", "rank_query")
         }
@@ -1584,7 +1584,7 @@ class NativeBuiltinToolProvider(ToolProvider):
         from gideon.cognition.decisions import DecisionError, log_decision
 
         def persist():
-            text = {
+            text: dict = {
                 field: str(a.get(field, ""))
                 for field in ("summary", "content", "expectation")
             }
@@ -1671,7 +1671,7 @@ class NativeBuiltinToolProvider(ToolProvider):
     async def _t_task_list(self, a: dict) -> ToolResult:
         from gideon.engine.tasks import registry
 
-        filters = {
+        filters: dict = {
             field: a.get(field) or None
             for field in ("status", "project", "task_list_id")
         }
@@ -1728,7 +1728,9 @@ class NativeBuiltinToolProvider(ToolProvider):
     async def _t_task_ready(self, a: dict) -> ToolResult:
         from gideon.engine.tasks import registry
 
-        scope = {field: a.get(field) or None for field in ("project", "task_list_id")}
+        scope: dict = {
+            field: a.get(field) or None for field in ("project", "task_list_id")
+        }
         ready = await registry.ready_tasks(**scope)
         if ready:
             rows = [
@@ -1741,7 +1743,7 @@ class NativeBuiltinToolProvider(ToolProvider):
     async def _t_task_search(self, a: dict) -> ToolResult:
         from gideon.engine.tasks import registry
 
-        filters = {
+        filters: dict = {
             destination: a[source] if isinstance(a.get(source), list) else None
             for source, destination in (
                 ("status", "statuses"),
@@ -1773,7 +1775,7 @@ class NativeBuiltinToolProvider(ToolProvider):
 
         def persist():
             store = HierarchyStore()
-            parameters = {
+            parameters: dict = {
                 "name": name,
                 "agent_instructions_template": str(
                     a.get("agent_instructions_template", "")
@@ -1838,7 +1840,7 @@ class NativeBuiltinToolProvider(ToolProvider):
 def create_platform_tools_provider(
     config: dict | None = None,
 ) -> "NativeBuiltinToolProvider":
-    settings = {
+    settings: dict = {
         "categories": PLATFORM_CATEGORIES,
         "provider_name": "gideon-filesystem",
         "display": "Filesystem & Shell Tools",

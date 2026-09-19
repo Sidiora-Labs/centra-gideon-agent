@@ -121,7 +121,7 @@ class _Comparison:
     vector_score: float
 
     def decide(self, filename_floor: float, vector_floor: float) -> DupVerdict:
-        scores = dict(cosine=self.vector_score, filename_sim=self.filename_score)
+        scores: dict = dict(cosine=self.vector_score, filename_sim=self.filename_score)
         if self.filename_score < filename_floor:
             return DupVerdict(False, "filename too different", **scores)
         if self.vector_score < vector_floor:

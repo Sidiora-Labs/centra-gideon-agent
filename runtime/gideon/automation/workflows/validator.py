@@ -589,7 +589,7 @@ def _validate_binding_targets(
 def _parent_slots(
     nodes: list[tuple[str, Node]],
 ) -> dict[str, tuple[str, str, int, str]]:
-    links = {}
+    links: dict = {}
     for path, node in nodes:
         links.update(
             (f"{path}.children[{index}]", (path, "children", index, ""))
@@ -769,7 +769,7 @@ def dep_ordering_edges(
 
 
 def _first_ids(nodes):
-    result = {}
+    result: dict = {}
     for location, node in nodes:
         if node.id:
             result.setdefault(node.id, location)
@@ -825,7 +825,7 @@ def _validate_needs(res: ValidationResult, edges: list[DepEdge]) -> None:
 
 
 def _declared_contracts(nodes: list[tuple[str, Node]]) -> dict[str, dict[str, Any]]:
-    declarations = {}
+    declarations: dict = {}
     for _, node in nodes:
         candidate = (node.config or {}).get("output_contract")
         if node.id and isinstance(candidate, dict) and candidate:
@@ -845,7 +845,7 @@ def output_contract_reads(
     nodes: list[tuple[str, Node]], edges: list[DepEdge]
 ) -> list[ContractRead]:
     declarations = _declared_contracts(nodes)
-    resolved = []
+    resolved: list = []
     for edge in edges:
         contract = declarations.get(edge.producer_id)
         keys = None if contract is None else _guaranteed_keys(contract)
@@ -876,7 +876,7 @@ def _validate_output_contract(
 ) -> None:
     reads = output_contract_reads(nodes, edges)
     active = bool(_declared_contracts(nodes))
-    missing = {}
+    missing: dict = {}
     for read in reads:
         label = repr(read.reader_id) if read.reader_id else read.reader_path
         field = ".".join(read.path)
@@ -907,7 +907,7 @@ def _validate_output_contract(
 def _kahn_levels(
     res: ValidationResult, nodes: list[tuple[str, Node]], ids: dict[str, str]
 ) -> list[list[str]]:
-    prerequisites = {name: set() for name in ids}
+    prerequisites: dict = {name: set() for name in ids}
     for _, node in nodes:
         if node.id:
             prerequisites[node.id].update(
@@ -916,7 +916,7 @@ def _kahn_levels(
             prerequisites[node.id].update(
                 target for target in node.needs if target in ids
             )
-    dependents = {name: [] for name in ids}
+    dependents: dict = {name: [] for name in ids}
     counts = {}
     for name, requirements in prerequisites.items():
         counts[name] = len(requirements)

@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from gideon.automation.triggers import singletons
 from gideon.integrations.action_providers.base import (
     ActionContext,
     ActionProvider,
@@ -22,9 +21,7 @@ logger = logging.getLogger(__name__)
 USAGE_RECAP_JOB_NAME = "system:usage-recap"
 USAGE_RECAP_SCHEDULE = "0 9 1 * *"
 _MARK_FILE = "usage_recap_sent.json"
-_CLOCK = ReportClock(
-    USAGE_RECAP_JOB_NAME, USAGE_RECAP_JOB_NAME, "usage-recap", singletons.USAGE_RECAP
-)
+_CLOCK = ReportClock(USAGE_RECAP_JOB_NAME, USAGE_RECAP_JOB_NAME, "usage-recap")
 
 
 def previous_month(now: datetime | None = None) -> str:
@@ -136,7 +133,6 @@ def create_provider(config: dict[str, Any] | None = None) -> UsageRecapActionPro
 def reconcile_usage_recap_cron(store: Any) -> None:
     from gideon.automation.triggers.screen import capabilities_for_action
 
-    _CLOCK.converge(store)
     try:
         row = store.get(USAGE_RECAP_JOB_NAME)
     except Exception:

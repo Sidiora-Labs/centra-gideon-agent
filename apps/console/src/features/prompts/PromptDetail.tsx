@@ -11,7 +11,7 @@ import { confirmDelete } from '../../shared/ui/dialog'
 import { useQuery, invalidateKeys } from '../../shared/data/data'
 import { api, type PromptItem, type PromptVariable } from '../../shared/data/api'
 import { Field, FieldError } from '../../shared/ui/forms'
-import { isReadOnly, sourceTone, sourceLabel, promptVars } from './promptMeta'
+import { isReadOnly, sourceTone, sourceLabel, promptVars, mergePromptVariables, variableTypeLabel } from './promptMeta'
 import { toDraft, draftToPayload, type PromptDraft } from './PromptForm'
 import { PromptEditFields } from './PromptEditFields'
 import { accentChip } from '../../shared/theme/accent'
@@ -78,7 +78,7 @@ export function PromptDetail({ prompt, onSaved, onDeleted, editing: editingProp,
     )
   }
   const ownVars = promptVars(full)
-  const vars = full.merged_variables?.length ? full.merged_variables : ownVars
+  const vars = mergePromptVariables(ownVars, full.merged_variables)
   const includes = full.includes ?? []
   return (
     <div className="grid gap-l">
@@ -123,7 +123,8 @@ export function PromptDetail({ prompt, onSaved, onDeleted, editing: editingProp,
               <div key={v.name} className="rounded-md border border-outline-variant/25 bg-surface-container/40 px-m py-1.5">
                 <div className="flex items-center gap-s">
                   <span data-type="body-s" className="font-mono text-on-surface">{v.name}</span>
-                  <span data-type="caption" className="text-on-surface-low">{v.type}</span>
+                  <span data-type="caption" className="text-on-surface-low">{variableTypeLabel(v.type)}</span>
+                  {(v.options?.length ?? 0) > 0 && <span data-type="caption" className="text-on-surface-low">{v.options!.join(' · ')}</span>}
                   {v.required && <span data-type="caption" className="text-danger">required</span>}
                   {v.default != null && v.default !== '' && <span data-type="caption" className="text-on-surface-low">default: {String(v.default)}</span>}
                 </div>

@@ -1,10 +1,10 @@
-import { useState } from 'react'
-import { FieldError } from '../../shared/ui/forms'
+import { useEffect, useState } from 'react'
+import { Field, FieldError, TextInput } from '../../shared/ui/forms'
 import { Trash2, Play, FlaskConical, AlertTriangle, Users } from 'lucide-react'
 import { Button } from '../../shared/ui/Button'
 import { Toggle } from '../../shared/ui/Toggle'
 import { confirmDelete } from '../../shared/ui/dialog'
-import { api, type Trigger as WireTrigger } from '../../shared/data/api'
+import { api, isOutcomeRoute, type Trigger as WireTrigger } from '../../shared/data/api'
 import { RunHistory } from '../schedule/ScheduleDetail'
 import { triggerHealthMeta } from '../schedule/scheduleMeta'
 import { actionLabel } from './triggerMeta'
@@ -20,6 +20,15 @@ export function StoreTriggerDetail({ trigger, onChanged, onDeleted }: {
   const [runFlash, setRunFlash] = useState<string | null>(null)
   const [histKey, setHistKey] = useState(0)
   const [err, setErr] = useState('')
+  const [delivery, setDelivery] = useState(trigger.delivery ?? 'none')
+  const [failureDelivery, setFailureDelivery] = useState(trigger.failure_delivery ?? 'inbox')
+  const [dedupeFailures, setDedupeFailures] = useState(trigger.failure_policy?.dedupe_hash === true)
+
+  useEffect(() => {
+    setDelivery(trigger.delivery ?? 'none')
+    setFailureDelivery(trigger.failure_delivery ?? 'inbox')
+    setDedupeFailures(trigger.failure_policy?.dedupe_hash === true)
+  }, [trigger])
 
   const readOnly = trigger.read_only === true
   const broken = trigger.broken ?? []
@@ -33,6 +42,19 @@ export function StoreTriggerDetail({ trigger, onChanged, onDeleted }: {
       onChanged()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not change this automation')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function toggleSilent(silent: boolean) {
+    setBusy(true)
+    setErr('')
+    try {
+      await api.updateSchedule(trigger.raw_id, { silent })
+      onChanged()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not change delivery for this automation')
     } finally {
       setBusy(false)
     }
@@ -82,6 +104,32 @@ export function StoreTriggerDetail({ trigger, onChanged, onDeleted }: {
     }
   }
 
+  const outcomeSettingsChanged = delivery !== (trigger.delivery ?? 'none')
+    || failureDelivery !== (trigger.failure_delivery ?? 'inbox')
+    || dedupeFailures !== (trigger.failure_policy?.dedupe_hash === true)
+  const outcomeSettingsValid = isOutcomeRoute(delivery) && isOutcomeRoute(failureDelivery)
+
+  async function saveOutcomeSettings() {
+    if (!outcomeSettingsValid) {
+      setErr('Use inbox, notify, none, or channel:<id> for each outcome route')
+      return
+    }
+    setBusy(true)
+    setErr('')
+    try {
+      await api.updateStoreTrigger(trigger.raw_id, {
+        delivery: delivery.trim(),
+        failure_delivery: failureDelivery.trim(),
+        failure_policy: { dedupe_hash: dedupeFailures },
+      })
+      onChanged()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not save outcome notifications')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="flex flex-col gap-l px-m py-m">
       {broken.length > 0 && (
@@ -119,6 +167,18 @@ export function StoreTriggerDetail({ trigger, onChanged, onDeleted }: {
           : <Toggle on={trigger.enabled} onChange={toggle} disabled={busy} label="Enabled" />}
       </div>
 
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-on-surface-low text-[0.75rem] uppercase tracking-wide">Delivery</div>
+          <div className="text-on-surface text-[0.8125rem]">
+            {trigger.silent ? 'Silent — automatic delivery is suppressed' : 'Automatic delivery is available'}
+          </div>
+        </div>
+        {readOnly
+          ? <span className="shrink-0 text-on-surface-var text-[0.8125rem]">{trigger.silent ? 'Silent' : 'Delivery on'}</span>
+          : <Toggle on={trigger.silent === true} onChange={toggleSilent} disabled={busy} label="Silent" />}
+      </div>
+
       {readOnly && (
         <div className="rounded-lg bg-surface-container px-3 py-2 text-on-surface-var text-[0.8125rem]">
           <span className="inline-flex items-center gap-1.5 text-on-surface"><Users size={13} /> {trigger.author || 'Someone else'}</span>
@@ -141,6 +201,30 @@ export function StoreTriggerDetail({ trigger, onChanged, onDeleted }: {
       <Section label="What it runs">
         <div data-type="body-m" className="text-on-surface">{actionLabel(trigger.action?.provider)}</div>
       </Section>
+
+      {!readOnly && (
+        <Section label="Outcome notifications">
+          <div className="flex flex-col gap-m">
+            <Field label="Successful run route" hint="Use inbox, notify, none, or channel:<id>.">
+              <TextInput value={delivery} onChange={setDelivery} placeholder="none" mono />
+            </Field>
+            <Field label="Failed run route" hint="A separate route lets failures escape a muted success route.">
+              <TextInput value={failureDelivery} onChange={setFailureDelivery} placeholder="inbox" mono />
+            </Field>
+            <div className="flex items-center justify-between gap-m">
+              <span className="text-on-surface text-[0.8125rem]">Deduplicate repeated failures</span>
+              <Toggle on={dedupeFailures} onChange={setDedupeFailures} label="Deduplicate repeated failures" disabled={busy} />
+            </div>
+            <div className="flex justify-end">
+              <Button variant="secondary" size="sm" onClick={saveOutcomeSettings} loading={busy}
+                disabled={!outcomeSettingsChanged || !outcomeSettingsValid || busy}
+                disabledReason={!outcomeSettingsValid ? 'Use a valid outcome route' : !outcomeSettingsChanged ? 'No changes to save' : BUSY_REASON}>
+                Save notifications
+              </Button>
+            </div>
+          </div>
+        </Section>
+      )}
 
       {
 }

@@ -13,7 +13,6 @@ from gideon.automation.triggers.models import (
     Outcome,
     RunWeight,
 )
-from gideon.core.errors import AgentError, redacted_envelope
 
 logger = logging.getLogger(__name__)
 
@@ -105,27 +104,6 @@ class ScheduleProjection:
     source: dict[str, Any]
     trigger_id: str
 
-    def envelope(self) -> AgentError | None:
-        """The stored WHAT/WHY/FIX envelope, or None when the row carries plain prose."""
-        record = self.source.get("agent_error")
-        if not isinstance(record, dict):
-            return None
-        if not any(str(record.get(name) or "") for name in ("what", "why", "fix")):
-            return None
-        return redacted_envelope(AgentError.from_dict(record))
-
-    def explanation(self, status: str, outcome: str) -> tuple[str, AgentError | None]:
-        """The row's reason plus the envelope it came from, when it came from one.
-
-        An envelope is rendered whole rather than run through the 200-character cut the
-        prose branch takes: it arrives already bounded line by line, and a tail cut here
-        would drop the FIX line an operator reads first.
-        """
-        envelope = self.envelope()
-        if envelope is not None:
-            return envelope.render(), envelope
-        return _redact(self.reason(status, outcome))[:200], None
-
     def reason(self, status: str, outcome: str) -> str:
         reason = str(self.source.get("error") or "") or str(
             self.source.get("summary") or ""
@@ -155,13 +133,11 @@ class ScheduleProjection:
         job_id, run_id = (
             str(source.get(key, "") or "") for key in ("job_id", "run_id")
         )
-        reason, envelope = self.explanation(status, outcome)
         return FireRecord(
             id=run_id,
             trigger_id=self.trigger_id or (f"schedule:{job_id}" if job_id else ""),
             outcome=outcome,
-            reason=reason,
-            agent_error=envelope.to_dict() if envelope is not None else {},
+            reason=_redact(self.reason(status, outcome))[:200],
             weight=_weight(outcome),
             started_at=_iso(source.get("started_at")),
             finished_at=_iso(source.get("finished_at")),

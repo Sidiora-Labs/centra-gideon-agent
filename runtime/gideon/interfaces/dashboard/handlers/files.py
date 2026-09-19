@@ -1957,14 +1957,7 @@ def _has_rg() -> bool:
 async def _content_search_rg(
     root: str, query: str, include: str
 ) -> tuple[list[dict], bool]:
-    """Content search via ripgrep --json. Returns (results, truncated).
-
-    Bounded like :func:`_git`, and for the same measured reason: the deadline goes through
-    :func:`~gideon.core.cancellation.kill_timed_out` and the child leads its OWN session, so
-    the reap signals the whole group. Without the session a forking child leaves a grandchild
-    holding the inherited stdout pipe, and ``wait()`` resolves on pipe disconnect rather than
-    on reaping — a deadline that waits out the process it killed.
-    """
+    """Content search via ripgrep --json. Returns (results, truncated)."""
     import asyncio  # noqa: F811
     import json as _json  # noqa: F811
 
@@ -1976,7 +1969,6 @@ async def _content_search_rg(
             *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
-            start_new_session=True,
         )
     except (OSError, ValueError):
         return [], False

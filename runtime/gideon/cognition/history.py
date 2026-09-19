@@ -26,7 +26,6 @@ from gideon.security.sel import sel
 
 if TYPE_CHECKING:
     from gideon.cognition.memory import MemoryJournal
-    from gideon.cognition.memory_service import MemoryService
     from gideon.cognition.vector_memory import SemanticArchive
     from gideon.engine.session import ConversationDirectory
     from gideon.extensions.skills import ProcedureLibrary
@@ -293,7 +292,7 @@ class _SessionLineage:
         self.log = log
 
     def rebuild(self):
-        groups = {}
+        groups: dict = {}
         for path in sorted(self.log._dir.glob("dashboard_chat-*.jsonl")):
             try:
                 with path.open(encoding="utf-8") as stream:
@@ -439,7 +438,7 @@ class ConversationLog:
     def list_sessions(self) -> list[dict]:
         if not self._dir.exists():
             return []
-        summaries = {}
+        summaries: dict = {}
         for path in self._dir.glob("*.jsonl"):
             try:
                 info = path.stat()

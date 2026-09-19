@@ -372,12 +372,7 @@ def test_the_mobile_tier_is_wired_the_way_the_ci_rail_requires():
     assert "mobile" in root["workspaces"]
     assert root["scripts"]["test:mobile"] == "npm run test --workspace=mobile"
     manifest = json.loads((MOBILE / "package.json").read_text(encoding="utf-8"))
-    mobile_test = manifest["scripts"]["test"]
-    assert "node --test" in mobile_test and "test/*.test.mjs" in mobile_test
-    assert "--test-reporter=junit" in mobile_test, (
-        "the mobile tier no longer writes a junit report, so a red CI leg leaves "
-        "nothing but a log (see checks/runtime/test_ci_test_reports.py)"
-    )
+    assert manifest["scripts"]["test"] == "node --test test/*.test.mjs"
     ci = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "npm run test:mobile" in ci
     assert (

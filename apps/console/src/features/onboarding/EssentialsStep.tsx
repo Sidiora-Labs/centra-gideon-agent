@@ -7,7 +7,6 @@ import { TextLink } from '../../shared/ui/TextLink'
 import { listItemEnter, stagger, spring } from '../../shared/theme/motion'
 import { essentialLane, essentialCandidates, useEssentialSetup, useProviderConfiguration, useChatModelBinding, type EssentialLane, type ModelPhase } from './essentialSetupState'
 import { ConsentModal, PermissionList, CronConsentList } from '../apps/installConsent'
-import { LocalModelSetup } from './LocalModelSetup'
 import { SchemaField } from '../settings/ModelBackends'
 import { type AppCatalogEntry, type OnboardingState, type OnboardingStatePatch } from '../../shared/data/api'
 
@@ -94,38 +93,28 @@ export function EssentialsStep({ readiness, onDone, onSkip, onProgress }: {
             {isModel && phase !== 'pick' ? (
               <ModelSubFlow app={modelApp} phase={phase} boundLabel={boundLabel}
                 onBound={bound} onConfigured={configured} />
+            ) : items.length === 0 ? (
+              <p className="text-on-surface-low text-[0.8125rem]">
+                No {lane.title.toLowerCase()} app is available from the first-party source
+                (the workspace apps directory in a dev tree, otherwise the published apps
+                repository). Add a source in the Store later.
+              </p>
             ) : (
-              <>
-                {isModel && (
-                  <LocalModelSetup onBound={() => {
-                    onProgress({ essentials: { model: 'ollama' } })
-                    configured()
-                  }} />
+              <motion.div className="flex flex-col gap-1.5" initial="initial" animate="animate"
+                variants={{ animate: { transition: stagger(0.04) } }}>
+                {shown.map((e) => (
+                  <AppCard key={e.name} entry={e} open={open === e.name} installed={!!installed[e.name]}
+                    busy={guarded.busy && pendingRef.current?.name === e.name}
+                    error={pendingRef.current?.name === e.name ? guarded.error : null}
+                    onToggle={() => toggle(e.name)}
+                    onInstall={() => install(e)} />
+                ))}
+                {items.length > shown.length && (
+                  <TextLink onClick={() => expand(lane.id)}>
+                    Show all {items.length} {lane.title.toLowerCase()} apps
+                  </TextLink>
                 )}
-                {items.length === 0 ? (
-                  <p className="text-on-surface-low text-[0.8125rem]">
-                    No {lane.title.toLowerCase()} app is available from the first-party source
-                    (the workspace apps directory in a dev tree, otherwise the published apps
-                    repository). Add a source in the Store later.
-                  </p>
-                ) : (
-                  <motion.div className="flex flex-col gap-1.5" initial="initial" animate="animate"
-                    variants={{ animate: { transition: stagger(0.04) } }}>
-                    {shown.map((e) => (
-                      <AppCard key={e.name} entry={e} open={open === e.name} installed={!!installed[e.name]}
-                        busy={guarded.busy && pendingRef.current?.name === e.name}
-                        error={pendingRef.current?.name === e.name ? guarded.error : null}
-                        onToggle={() => toggle(e.name)}
-                        onInstall={() => install(e)} />
-                    ))}
-                    {items.length > shown.length && (
-                      <TextLink onClick={() => expand(lane.id)}>
-                        Show all {items.length} {lane.title.toLowerCase()} apps
-                      </TextLink>
-                    )}
-                  </motion.div>
-                )}
-              </>
+              </motion.div>
             )}
           </section>
         )

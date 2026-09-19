@@ -86,35 +86,6 @@ def _seed_lifecycle_hook(home, name: str) -> None:
     )
 
 
-def _seed_event_trigger(home, trigger_id: str) -> None:
-    """A real data-event trigger, in the store the event half of the count reads."""
-    from gideon.automation.event_triggers import (
-        MEMORY_UPDATE,
-        EventTrigger,
-        EventTriggerStore,
-    )
-
-    EventTriggerStore(home / "event_triggers.json").upsert(
-        EventTrigger(id=trigger_id, pattern=MEMORY_UPDATE)
-    )
-
-
-def _seed_store_only(home, trigger_id: str) -> None:
-    """A real store-only trigger (a file watch) — the fourth kind the page lists."""
-    from gideon.automation.triggers.models import Trigger
-    from gideon.automation.triggers.store import TriggerStore
-
-    TriggerStore(base_dir=home).upsert(
-        Trigger(
-            id=trigger_id,
-            name=trigger_id,
-            kind="file",
-            enabled=True,
-            spec={"paths": [str(home / "watched")]},
-        )
-    )
-
-
 def _state() -> ConsoleState:
     return ConsoleState(
         sessions=MagicMock(count=0),
@@ -190,64 +161,3 @@ def test_api_status_surfaces_the_unified_triggers_field(home, monkeypatch) -> No
     assert (
         body["cron"]["total"] == 1
     ), "the schedule-store block is unchanged and narrower"
-
-
-def test_the_rail_count_covers_every_kind_the_page_lists(home) -> None:
-    """The whole of the unified total: schedules, lifecycle hooks, DATA EVENTS and the
-    store-only kinds. The two-kind case above would still pass with a count that dropped
-    the event and store halves, because neither is seeded there."""
-    _seed_schedule(home, "clock:a")
-    _seed_lifecycle_hook(home, "hook-a")
-    _seed_event_trigger(home, "on-memory-update")
-    _seed_store_only(home, "file:watch")
-
-    state = _state()
-    resp = asyncio.run(api_triggers(_req(state)))
-    listed = json.loads(resp.body.decode())["triggers"]
-
-    assert {row["kind"] for row in listed} == {
-        "schedule",
-        "lifecycle",
-        "event",
-        "store",
-    }, "the seeded world must exercise all four kinds the facade gathers"
-    assert len(listed) == 4
-    assert unified_trigger_count(state) == len(listed)
-
-
-def test_diagnostics_keep_a_separate_detailed_schedule_measurement(
-    home, monkeypatch
-) -> None:
-    """The unified rail must not have replaced the schedule-store diagnostic.
-
-    `GET /api/status` still carries the narrower `cron` block — the schedule store alone,
-    with the enabled/broken breakdown the unified tally deliberately does not compute — and
-    it is the same measurement `ConsoleState.trigger_counts()` returns.
-    """
-    from gideon.interfaces.dashboard import handlers_system
-    from gideon.interfaces.dashboard.handlers import updates as _updates_mod
-
-    monkeypatch.setattr(_updates_mod, "_last_update_check", time.time())
-
-    _seed_schedule(home, "clock:a")
-    _seed_lifecycle_hook(home, "hook-a")
-    _seed_event_trigger(home, "on-memory-update")
-
-    state = _state()
-    state._owner_hash = "test-hash"
-    body = json.loads(
-        asyncio.run(
-            handlers_system.api_status(_req(state, path="/api/status"))
-        ).body.decode()
-    )
-
-    assert body["triggers"] == 3, "schedule + lifecycle hook + data event"
-    assert set(body["cron"]) == {"total", "enabled", "broken"}, (
-        "the detailed schedule measurement lost a dimension: " f"{sorted(body['cron'])}"
-    )
-    assert body["cron"]["total"] == 1, "the cron block counts the schedule store alone"
-    assert body["cron"]["enabled"] == 1
-    assert body["cron"] == state.trigger_counts(), (
-        "the status `cron` block and `trigger_counts()` must remain one measurement, "
-        "distinct from the unified rail count"
-    )

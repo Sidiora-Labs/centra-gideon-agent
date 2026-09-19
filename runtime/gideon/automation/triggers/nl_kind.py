@@ -108,7 +108,7 @@ class Route:
 
 
 def _paths_in(text: str) -> list[str]:
-    globs = {}
+    globs: dict = {}
     for match in _PATH_RE.finditer(text):
         value = match.group().rstrip(".,;:!?)")
         if value in ("", "/", "~"):
@@ -150,7 +150,7 @@ class WhenRequest:
         paths = _paths_in(self.text)
         cue = _has(self.lower, _FILE_CUES)
         if paths and (cue or _has(self.lower, _CHANGE_CUES)):
-            spec = {"paths": paths}
+            spec: dict = {"paths": paths}
             if _has(self.lower, ("content", "text changes", "edited")):
                 spec["dedup"] = "content"
             return Route(

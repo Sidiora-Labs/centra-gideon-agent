@@ -68,15 +68,19 @@ _PROBE_ATTEMPTS = 3
 
 
 def probe_gateway(
-    port: int, *, timeout: float = _PROBE_TIMEOUT_SECS, attempts: int = _PROBE_ATTEMPTS
+    port: int,
+    *,
+    timeout: float = _PROBE_TIMEOUT_SECS,
+    attempts: int = _PROBE_ATTEMPTS,
+    announce: bool = False,
 ) -> bool:
-    """True when a gateway answers on ``port``.
+    """True when a Gideon gateway answers on ``port``.
 
     Probes ``/api/healthz``, which is in ``token_auth._BYPASS_EXACT`` and so answers
     without a token. ``doctor`` and ``status`` both probe ``/api/status`` instead and
     then have to read 401/403 as "up" — an auth-gated liveness check needing a
     treat-the-error-as-success branch. This is the same readiness question asked at the
-    route that exists to answer it; nothing here reads a 401 as alive.
+    route that exists to answer it; nothing here reads an HTTP error as alive.
 
     Retries because a timeout is ambiguous (absent vs. busy) while a refused connection
     is not. Only a *connection* failure short-circuits to False; a timeout is retried,
@@ -88,9 +92,33 @@ def probe_gateway(
                 urllib.request.Request(f"http://127.0.0.1:{port}/api/healthz"),
                 timeout=timeout,
             ) as resp:
-                return 200 <= int(resp.status) < 300
+                alive = 200 <= int(resp.status) < 300
+                if alive and announce:
+                    try:
+                        payload = json.loads(resp.read())
+                    except (OSError, ValueError):
+                        payload = {}
+                    gateway_id = str(payload.get("gateway_id", "")).strip()
+                    pid = payload.get("pid")
+                    answered_port = payload.get("port", port)
+                    if gateway_id:
+                        pid_note = f", pid {pid}" if isinstance(pid, int) else ""
+                        print(
+                            f"gideon run: gateway {gateway_id} answered on port "
+                            f"{answered_port}{pid_note}.",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                    else:
+                        print(
+                            f"gideon run: gateway on port {port} answered without an "
+                            "instance identity.",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                return alive
         except urllib.error.HTTPError:
-            return True
+            return False
         except (urllib.error.URLError, OSError) as exc:
             reason = getattr(exc, "reason", exc)
             if isinstance(reason, ConnectionRefusedError):
@@ -497,7 +525,7 @@ def _run_one(args) -> int:
     transient: subprocess.Popen | None = None
     started = time.monotonic()
     try:
-        if probe_gateway(port):
+        if probe_gateway(port, announce=True):
             token = mint_local_token(port)
         else:
             print(

@@ -525,6 +525,38 @@ def token_nonce(token: str) -> str:
     return nonce if isinstance(nonce, str) else ""
 
 
+def attach_validated_paired_session(
+    request: web.Request, *, port: int = _DEFAULT_PORT
+) -> bool:
+    """Attach an optional paired-device cookie's identity to *request*.
+
+    This helper never authorizes a request. It is only for paths whose admission decision has
+    already been made (local-network bypass or auth-none loopback). A token must validate as a
+    live cookie session and its nonce must still name a paired-device row before any identity is
+    attached. Validation also drives the normal throttled device ``last_seen`` update.
+    """
+    token = request.cookies.get(f"gideon_token_{port}", "")
+    if not token:
+        return False
+    try:
+        valid, user_id, _reason = validate_token(token, use_session_exp=True)
+        if not valid:
+            return False
+        nonce = token_nonce(token)
+        from gideon.interfaces.dashboard.session_store import paired_session_record
+
+        if paired_session_record(nonce) is None:
+            return False
+    except (
+        Exception
+    ):  # noqa: BLE001 — identity enrichment must not change bypass admission
+        logger.debug("could not attach optional paired-session identity", exc_info=True)
+        return False
+    request["user"] = user_id
+    request["session_nonce"] = nonce
+    return True
+
+
 def _evict_expired() -> None:
     """Remove token state entries whose session has expired."""
     _state.evict_expired(time.time())
@@ -736,6 +768,11 @@ def token_auth_middleware(
     banners.  Use this for any internal-path that the browser polls.
 
     """
+    from gideon.interfaces.dashboard.exposure import public_proxy_bypass_warning
+
+    proxy_bypass_warning = public_proxy_bypass_warning()
+    if proxy_bypass_warning:
+        logger.warning("public proxy auth bypass: %s", proxy_bypass_warning)
 
     def _resolved_client_ip(request: web.Request) -> str:
         """Return the browser's IP, preferring a forwarded header from a TRUSTED peer.
@@ -801,13 +838,15 @@ def token_auth_middleware(
     @web.middleware
     async def middleware(request: web.Request, handler: object) -> web.StreamResponse:
         if os.environ.get("GIDEON_DEV_NO_AUTH") == "1":
-            request["user"] = request.get("user") or "dev-local"
+            if not attach_validated_paired_session(request, port=port):
+                request["user"] = request.get("user") or "dev-local"
             return await handler(request)  # type: ignore[operator]
 
         if os.environ.get("GIDEON_BYPASS_LOCAL_NETWORKS") == "1":
             client_ip = _resolved_client_ip(request)
             if is_private_network(client_ip):
-                request["user"] = request.get("user") or f"local-net:{client_ip}"
+                if not attach_validated_paired_session(request, port=port):
+                    request["user"] = request.get("user") or f"local-net:{client_ip}"
                 _log_auth(request, request["user"], "ok", "local-network bypass")
                 return await handler(request)  # type: ignore[operator]
 
@@ -887,7 +926,7 @@ def token_auth_middleware(
                 outcome="granted",
                 source="token_auth",
                 resources=path,
-                metadata={"reason": "cookie auth (no secret header)"},
+                error="cookie auth (no secret header)",
             )
             _log_auth(request, "internal", "granted", f"cookie auth for {_uid}")
             return await handler(request)  # type: ignore[operator]
@@ -938,7 +977,7 @@ def token_auth_middleware(
                     outcome="granted",
                     source="token_auth",
                     resources=path,
-                    metadata={"reason": "mixed non-loopback cookie auth"},
+                    error="mixed non-loopback cookie auth",
                 )
                 _log_auth(
                     request,
@@ -1076,6 +1115,7 @@ def auth_middleware(
         async def _passthrough(
             request: web.Request, handler: object
         ) -> web.StreamResponse:
+            attach_validated_paired_session(request, port=port)
             return await handler(request)  # type: ignore[operator]
 
         _passthrough._is_token_auth = False  # type: ignore[attr-defined]

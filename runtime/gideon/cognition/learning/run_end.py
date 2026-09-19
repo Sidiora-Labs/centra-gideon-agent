@@ -165,7 +165,7 @@ def _file_similarity_draft(run: Any, found: Any, verdict: Any) -> bool:
         f"Prior runs: {prior_ids}",
         "Naming it as a template makes the next one a single call instead of a re-plan.",
     ]
-    request = dict(
+    request: dict = dict(
         kind=proposals.Kind.TEMPLATE.value,
         title=f"Repeated plan shape in {name}"[:120],
         body="\n\n".join(paragraphs),
@@ -257,7 +257,7 @@ class _FailureLessons:
             ],
             evidence=[text[:_EVIDENCE_CLIP]][:_MAX_EVIDENCE],
         )
-        request = {
+        request: dict = {
             "kind": self.proposals.Kind.LESSON_BATCH.value,
             "title": f"Run failure in {self.template}/{node}: {mode}"[:120],
             "body": f"Step `{node}` of template `{self.template}` failed ({mode}). A future run of this "

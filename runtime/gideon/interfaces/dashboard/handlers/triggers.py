@@ -63,6 +63,7 @@ def _event_store():
 
 
 def _serialize_event(t) -> dict[str, Any]:
+    last_run_ts = float(t.last_fired_at or 0.0) or None
     return {
         "kind": _EVENT,
         "id": f"{_EVENT}:{t.id}",
@@ -77,6 +78,8 @@ def _serialize_event(t) -> dict[str, Any]:
         "event_glob": t.event_glob,
         "max_fires": t.max_fires,
         "fire_count": t.fire_count,
+        "last_run_ts": last_run_ts,
+        "last_run_status": "ran" if last_run_ts is not None else None,
         "action": {"provider": t.action_provider, "config": t.action_config},
         "state": t.state,
         "health": _event_health(t),
@@ -239,7 +242,7 @@ def _last_run_status_for(trigger_id: str) -> str:
     list serializer stays cheap.
     """
     try:
-        rows, _total = _runs_store()._list_for_job_sync(trigger_id, 0, 1)
+        rows, _total = _runs_store().list_for_job_sync(trigger_id, 0, 1)
     except Exception:
         logger.debug("last-run status unavailable for %s", trigger_id, exc_info=True)
         return ""
@@ -283,7 +286,7 @@ def _project_one(
     """
     from gideon.automation.triggers.arm import cadence_next_fire as raw_next_fire
     from gideon.automation.triggers.calendar import project_occurrences
-    from gideon.automation.triggers.service import to_epoch
+    from gideon.automation.triggers.models import next_fire_projection
 
     spec = trigger.spec if isinstance(getattr(trigger, "spec", None), dict) else {}
     kind = str(spec.get("kind") or "")
@@ -298,12 +301,19 @@ def _project_one(
         "skip_dates": [str(d) for d in (spec.get("skip_dates") or [])],
         "tz_name": str(spec.get("timezone") or ""),
     }
+    first = next_fire_projection(trigger)
     if kind in ("interval", "sequence") and interval > 0:
-        first = to_epoch(getattr(trigger, "next_fire_at", "")) or raw_next_fire(trigger)
         if first <= 0:
             return [], False
         return project_occurrences(
             interval_secs=interval, first_fire_at=first, **common
+        )
+    if kind == "at" and first > 0:
+        return project_occurrences(
+            interval_secs=0,
+            first_fire_at=0,
+            next_after=lambda after: first if after < first else 0,
+            **common,
         )
     if (kind == "cron" and spec.get("expr")) or kind == "adaptive":
         return project_occurrences(
@@ -358,6 +368,12 @@ def _serialize_store(
 ) -> dict[str, Any]:
     """A `TriggerStore` trigger in the shared list shape. Id is `store:<kind>:<slug>` so the
     mutation routes back to the store; `raw_id` is the store's own id."""
+    latest: dict[str, Any] = {}
+    try:
+        rows, _total = _runs_store().list_for_job_sync(trigger.id, 0, 1)
+        latest = rows[0] if rows else {}
+    except Exception:
+        logger.debug("last run unavailable for %s", trigger.id, exc_info=True)
     return {
         "kind": _STORE,
         "store_kind": trigger.kind,
@@ -368,9 +384,15 @@ def _serialize_store(
         "created_by": trigger.created_by,
         "spec": dict(trigger.spec or {}),
         "action": dict(trigger.workflow or {}),
+        "delivery": trigger.delivery,
+        "failure_delivery": trigger.failure_delivery,
+        "failure_policy": dict(trigger.failure_policy or {}),
+        "silent": trigger.delivery == "none",
         "health": trigger.health_status,
         "state": trigger.state,
         "run_count": trigger.run_count,
+        "last_run_ts": latest.get("finished_at") or latest.get("started_at") or None,
+        "last_run_status": str(latest.get("status") or "") or None,
         "last_error": _redact(trigger.last_error_summary or ""),
         "broken": list(broken or []),
         **_attribution(trigger, owner=owner),
@@ -444,9 +466,43 @@ def _schedule_row_for(
     for key in ("message", "last_error", "schedule"):
         if projected.get(key):
             projected[key] = _redact(str(projected[key]))
+    policy = trigger.failure_policy if isinstance(trigger.failure_policy, dict) else {}
+    projected["failure_delivery"] = str(trigger.failure_delivery or "")
+    projected["dedupe_hash"] = policy.get("dedupe_hash") is True
     projected["broken"] = list(issues or [])
+    projected["delivery"] = trigger.delivery
+    projected["failure_delivery"] = trigger.failure_delivery
+    projected["failure_policy"] = dict(trigger.failure_policy or {})
     projected.update(_attribution(trigger, owner=owner))
     return projected
+
+
+def _outcome_control_patch(
+    body: dict[str, Any], trigger: Any | None = None
+) -> tuple[dict[str, Any], str]:
+    from gideon.automation.triggers.models import (
+        validate_failure_policy,
+        validate_outcome_route,
+    )
+
+    patch: dict[str, Any] = {}
+    for field in ("delivery", "failure_delivery"):
+        if field not in body:
+            continue
+        issues = validate_outcome_route(body[field], field)
+        if issues:
+            return {}, f"{issues[0].path}: {issues[0].message}"
+        patch[field] = body[field].strip()
+    if "failure_policy" in body:
+        incoming = body["failure_policy"]
+        issues = validate_failure_policy(incoming)
+        if issues:
+            return {}, f"{issues[0].path}: {issues[0].message}"
+        current = getattr(trigger, "failure_policy", {}) if trigger is not None else {}
+        merged = dict(current) if isinstance(current, dict) else {}
+        merged.update(incoming)
+        patch["failure_policy"] = merged
+    return patch, ""
 
 
 def _serialize_lifecycle(hook, used_by: list[str]) -> dict[str, Any]:
@@ -795,6 +851,9 @@ async def _create_schedule(
         return web.json_response(
             {"error": f"invalid timezone: {_redact(timezone_val)!r}"}, status=400
         )
+    outcome_patch, outcome_error = _outcome_control_patch(body)
+    if outcome_error:
+        return web.json_response({"error": outcome_error}, status=400)
 
     spec: dict[str, Any] = {}
     if every:
@@ -830,6 +889,11 @@ async def _create_schedule(
         return json_error(
             "invalid_request", message="'enabled' must be a boolean", status=400
         )
+    dedupe_hash = body.get("dedupe_hash", False)
+    if not isinstance(dedupe_hash, bool):
+        return json_error(
+            "invalid_request", message="'dedupe_hash' must be a boolean", status=400
+        )
 
     store = _trigger_store()
     result = _tools.create(
@@ -851,6 +915,15 @@ async def _create_schedule(
         trigger.delivery = (
             "none" if body.get("silent") else (f"channel:{channel}" if channel else "")
         )
+        if "failure_delivery" in body:
+            trigger.failure_delivery = str(body.get("failure_delivery") or "")
+        if "dedupe_hash" in body:
+            trigger.failure_policy = {
+                **dict(trigger.failure_policy or {}),
+                "dedupe_hash": dedupe_hash,
+            }
+        for field, value in outcome_patch.items():
+            setattr(trigger, field, value)
         store.upsert(trigger)
         _arm_if_needed(store, raw_id)
         row = store.get(raw_id)
@@ -940,7 +1013,7 @@ async def api_trigger_detail(request: web.Request) -> web.Response:
         return _update_event(raw, body)
     if kind == _LIFECYCLE:
         return await _update_lifecycle(state, raw, body)
-    return await _update_schedule(state, raw, body)
+    return await _update_schedule(state, raw, body, store_response=kind == _STORE)
 
 
 def _update_event(raw: str, body: dict) -> web.Response:
@@ -1058,15 +1131,30 @@ async def _update_lifecycle(state: ConsoleState, raw: str, body: dict) -> web.Re
     )
 
 
-async def _update_schedule(state: ConsoleState, raw: str, body: dict) -> web.Response:
+async def _update_schedule(
+    state: ConsoleState, raw: str, body: dict, *, store_response: bool = False
+) -> web.Response:
     from zoneinfo import available_timezones
 
     from gideon.assurance.validation import CHANNEL_ID_RE, CHANNEL_MAX_LEN
 
     kwargs: dict[str, Any] = {}
-    for key in ("name", "channel", "silent", "strict_schedule"):
+    for key in (
+        "name",
+        "channel",
+        "silent",
+        "strict_schedule",
+        "failure_delivery",
+        "dedupe_hash",
+        "delivery",
+        "failure_policy",
+    ):
         if key in body:
             kwargs[key] = body[key]
+    if "dedupe_hash" in kwargs and not isinstance(kwargs["dedupe_hash"], bool):
+        return json_error(
+            "invalid_request", message="'dedupe_hash' must be a boolean", status=400
+        )
     if "action" in body and isinstance(body["action"], dict):
         kwargs["action"] = body["action"]
     if "channel" in kwargs:
@@ -1097,6 +1185,9 @@ async def _update_schedule(state: ConsoleState, raw: str, body: dict) -> web.Res
         from gideon.automation.triggers.schedule_view import channel_of
 
         spec = dict(row.trigger.spec or {})
+        outcome_patch, outcome_error = _outcome_control_patch(body, row.trigger)
+        if outcome_error:
+            return web.json_response({"error": outcome_error}, status=400)
         cadence_changed = False
         if "cron_expr" in kwargs and kwargs["cron_expr"]:
             spec = {
@@ -1132,19 +1223,44 @@ async def _update_schedule(state: ConsoleState, raw: str, body: dict) -> web.Res
             patch["delivery"] = (
                 "none" if silent else (f"channel:{channel_id}" if channel_id else "")
             )
+        if "failure_delivery" in kwargs:
+            patch["failure_delivery"] = str(kwargs["failure_delivery"] or "")
+        for field in ("delivery", "failure_delivery"):
+            if field in outcome_patch:
+                patch[field] = outcome_patch[field]
 
         result = _tools.update(store, trigger_id=raw, patch=patch)
         if not result.ok:
             return web.json_response({"error": result.text}, status=400)
+        if "dedupe_hash" in kwargs:
+            updated = store.get(raw).trigger
+            updated.failure_policy = {
+                **dict(updated.failure_policy or {}),
+                "dedupe_hash": kwargs["dedupe_hash"],
+            }
+            store.upsert(updated)
         if cadence_changed:
             updated = store.get(raw).trigger
             updated.next_fire_at = ""
             store.upsert(updated)
             _arm_if_needed(store, raw)
+        if "failure_policy" in outcome_patch:
+            updated = store.get(raw).trigger
+            updated.failure_policy = outcome_patch["failure_policy"]
+            store.upsert(updated)
         state.push_refresh("crons")
-        return web.json_response(
-            {"ok": True, "trigger": _schedule_row_for(state, store.get(raw).trigger)}
-        )
+        updated_row = store.get(raw)
+        if store_response:
+            from gideon.automation.triggers.ownership import owner_username
+
+            projected = _serialize_store(
+                updated_row.trigger,
+                broken=[issue.message for issue in updated_row.errors],
+                owner=owner_username(),
+            )
+        else:
+            projected = _schedule_row_for(state, updated_row.trigger)
+        return web.json_response({"ok": True, "trigger": projected})
 
     return web.json_response({"error": "not found"}, status=404)
 

@@ -244,9 +244,10 @@ class ZedAdapterDialect(ACPDialect):
         for axis in _records(session_new.get("configOptions")):
             if axis.get("id"):
                 axes[str(axis["id"])] = list(_records(axis.get("options")))
-        selected = lambda name: [
-            str(row["value"]) for row in axes.get(name, ()) if row.get("value")
-        ]
+
+        def selected(name):
+            return [str(row["value"]) for row in axes.get(name, ()) if row.get("value")]
+
         efforts = []
         for row in axes.get("effort", ()):
             value = str(row.get("value", "")).strip()

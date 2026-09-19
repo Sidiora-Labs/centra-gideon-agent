@@ -60,10 +60,10 @@ class TestCheckerLogic:
 
     def test_memory_tiers(self):
         assert not _checker(memory="").can_use_memory("app-scoped")
-        appc = _checker(memory="app-scoped")
-        assert apgideon.can_use_memory("app-scoped") and not apgideon.can_use_memory(
-            "shared"
-        )
+        app_checker = _checker(memory="app-scoped")
+        assert app_checker.can_use_memory(
+            "app-scoped"
+        ) and not app_checker.can_use_memory("shared")
         sharedc = _checker(memory="shared")
         assert sharedc.can_use_memory("app-scoped") and sharedc.can_use_memory("shared")
 

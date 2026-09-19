@@ -67,6 +67,7 @@ MAX_DIFF_BYTES = 1_000_000
 SECRET_EXCLUDE: tuple[str, ...] = (
     ".env",
     ".env.*",
+    "auth/",
     "*.pem",
     "*.key",
     "*.p12",

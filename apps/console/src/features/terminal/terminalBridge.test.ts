@@ -11,6 +11,31 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+describe('terminal registration lifecycle', () => {
+  it('removes an exited pane and routes future commands to the remaining active pane', () => {
+    const delivered: string[] = []
+    registerTerminal('t1', (text) => { delivered.push(`t1:${text}`); return true })
+    const unregisterExited = registerTerminal('t2', (text) => { delivered.push(`t2:${text}`); return true })
+
+    unregisterExited()
+
+    expect(runInTerminal('pwd', 't2')).toBe(false)
+    expect(runInTerminal('pwd')).toBe(true)
+    expect(delivered).toEqual(['t1:pwd\n'])
+  })
+
+  it('does not let an old pane unregister a newer registration with the same session id', () => {
+    const delivered: string[] = []
+    const unregisterOld = registerTerminal('t1', () => false)
+    registerTerminal('t1', (text) => { delivered.push(text); return true })
+
+    unregisterOld()
+
+    expect(runInTerminal('echo ready', 't1')).toBe(true)
+    expect(delivered).toEqual(['echo ready\n'])
+  })
+})
+
 describe('a dropped command says so on screen', () => {
   it('raises a toast when the terminal never becomes ready, not just a console warning', () => {
     vi.useFakeTimers()

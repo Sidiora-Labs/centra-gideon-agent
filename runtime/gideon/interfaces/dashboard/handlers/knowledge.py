@@ -28,7 +28,6 @@ from gideon.cognition.knowledge.embedder import (
 from gideon.cognition.knowledge.llm_pool import LLMPool
 from gideon.cognition.knowledge.media import classify, guess_mime, make_image_thumbnail
 from gideon.cognition.knowledge.retrieval import HybridRetriever, _bytes_to_floats
-from gideon.cognition.knowledge.searchability import summary as unsearchable_summary
 from gideon.cognition.knowledge.semantics import DEFAULT_LIST_EXCLUDED_KINDS
 from gideon.cognition.knowledge.staleness import is_synthesized, staleness_for
 from gideon.http_errors import json_error
@@ -181,13 +180,7 @@ async def list_items(request: web.Request) -> web.Response:
         offset = (page - 1) * limit
         items = filtered[offset : offset + limit]
         return web.json_response(
-            {
-                "items": items,
-                "total": total,
-                "page": page,
-                "limit": limit,
-                "unsearchable": unsearchable_summary(store),
-            }
+            {"items": items, "total": total, "page": page, "limit": limit}
         )
     else:
         where, params = ["1=1"], []  # type: list[str], list[object]
@@ -2460,7 +2453,7 @@ async def list_tag_taxonomy(request: web.Request) -> web.Response:
 
 
 async def list_conflicts(request: web.Request) -> web.Response:
-    """GET /api/knowledge/conflicts — every recorded disagreement in the store.
+    """GET /api/knowledge/conflicts — disagreements and pairs awaiting model review.
 
     A read surface, not a resolution one. Conflicts are flagged at INGEST (§3.2) and both claims
     are always kept; this route exists so the flag is visible to a human rather than sitting in
@@ -2474,10 +2467,12 @@ async def list_conflicts(request: web.Request) -> web.Response:
     store = _store(request)
     limit = _int_param(request, "limit", 100, low=1, high=500)
     rows: list[dict] = []
+    unsettled: list[dict] = []
     try:
         candidates = store.db.execute(
             "SELECT id, title, kind, file_metadata FROM items "
-            "WHERE is_archived = 0 AND file_metadata LIKE '%\"conflicts\"%' "
+            "WHERE is_archived = 0 AND (file_metadata LIKE '%\"conflicts\"%' "
+            "OR file_metadata LIKE '%\"conflict_candidates\"%') "
             "ORDER BY updated_at DESC LIMIT ?",
             (limit,),
         )
@@ -2487,17 +2482,48 @@ async def list_conflicts(request: web.Request) -> web.Response:
             except (TypeError, ValueError):
                 continue
             entries = meta.get("conflicts") if isinstance(meta, dict) else None
-            if not isinstance(entries, list):
-                continue
-            for entry in entries:
-                if isinstance(entry, dict):
-                    rows.append(
-                        {"item_id": row["id"], "item_title": row["title"], **entry}
-                    )
+            if isinstance(entries, list):
+                for entry in entries:
+                    if isinstance(entry, dict):
+                        rows.append(
+                            {
+                                "item_id": row["id"],
+                                "item_title": row["title"],
+                                **entry,
+                            }
+                        )
+            candidates = (
+                meta.get("conflict_candidates") if isinstance(meta, dict) else None
+            )
+            if isinstance(candidates, list):
+                for entry in candidates:
+                    if isinstance(entry, dict):
+                        unsettled.append(
+                            {
+                                "item_id": row["id"],
+                                "item_title": row["title"],
+                                **entry,
+                            }
+                        )
     except Exception:
         logger.warning("could not read knowledge conflicts", exc_info=True)
-        return web.json_response({"conflicts": [], "count": 0, "error": "unreadable"})
-    return web.json_response({"conflicts": rows[:limit], "count": len(rows)})
+        return web.json_response(
+            {
+                "conflicts": [],
+                "count": 0,
+                "candidates": [],
+                "candidate_count": 0,
+                "error": "unreadable",
+            }
+        )
+    return web.json_response(
+        {
+            "conflicts": rows[:limit],
+            "count": len(rows),
+            "candidates": unsettled[:limit],
+            "candidate_count": len(unsettled),
+        }
+    )
 
 
 async def list_item_relations(request: web.Request) -> web.Response:

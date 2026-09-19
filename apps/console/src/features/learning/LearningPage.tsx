@@ -6,7 +6,8 @@ import { QuietButton } from '../../shared/ui/QuietButton'
 import { Segmented } from '../../shared/ui/forms'
 import { InlineError } from '../../shared/ui/InlineError'
 import { EmptyState, ListSkeleton, LoadError } from '../../shared/ui/ListScaffold'
-import type { LearningRow, StagingWeek } from '../../shared/data/api'
+import { api, type LearningRow, type StagingWeek } from '../../shared/data/api'
+import { useQuery } from '../../shared/data/data'
 import { AblationPanel } from './AblationPanel'
 import { AttentionPanel } from './AttentionPanel'
 import { FieldMetricsPanel } from './FieldMetricsPanel'
@@ -33,6 +34,11 @@ export function LearningPage() {
   const kind = state.kind
   const err = state.error
   const { data: inbox, loading, error: inboxError, refresh: refreshProposals } = page.proposals
+  const pendingSkillProposals = useQuery(
+    'learning:pending-skill-proposal-count',
+    () => api.pendingSkillProposalCount(),
+    { persist: false },
+  )
   const rows = inbox?.rows ?? []
   const reports = [
     <IdentityReportPanel key="identity" report={page.identity.data} error={page.identity.error} onRetry={page.identity.refresh} onDelivered={page.identity.refresh} />,
@@ -58,7 +64,7 @@ export function LearningPage() {
         right={
           <QuietButton
             title="Refresh"
-            onClick={page.refresh}
+            onClick={() => { page.refresh(); pendingSkillProposals.refresh() }}
           >
             <RefreshCw size={14} /> Refresh
           </QuietButton>
@@ -101,10 +107,9 @@ export function LearningPage() {
             ) : loading && !inbox ? (
               <ListSkeleton rows={4} what="proposals" />
             ) : rows.length === 0 ? (
-              <EmptyState
-                icon={Brain}
-                title="Nothing to review"
-                hint="Proposals appear here when the system notices a pattern worth offering. Nothing is ever installed without your accept."
+              <LearningEmptyState
+                pendingSkillProposals={pendingSkillProposals.data}
+                pendingSkillProposalsError={pendingSkillProposals.error}
               />
             ) : (
               <div className="flex flex-col gap-s">
@@ -124,6 +129,43 @@ export function LearningPage() {
       </div>
     </div>
   )
+}
+
+export function LearningEmptyState({ pendingSkillProposals, pendingSkillProposalsError }: {
+  pendingSkillProposals: number | undefined
+  pendingSkillProposalsError?: unknown
+}) {
+  if (pendingSkillProposals === undefined && !pendingSkillProposalsError) {
+    return <ListSkeleton rows={1} what="proposal queues" />
+  }
+  if (pendingSkillProposals && pendingSkillProposals > 0) {
+    const noun = pendingSkillProposals === 1 ? 'proposal' : 'proposals'
+    return <EmptyState
+      icon={Brain}
+      title={`${pendingSkillProposals} skill ${noun} await${pendingSkillProposals === 1 ? 's' : ''} review`}
+      hint="This learning queue is empty, but the skill proposal queue still needs your review. Nothing is installed without your accept."
+      action={{
+        label: 'Review skill proposals',
+        onClick: () => { window.location.hash = '#/skills?mode=proposals' },
+      }}
+    />
+  }
+  if (pendingSkillProposalsError) {
+    return <EmptyState
+      icon={Brain}
+      title="No proposals in this learning queue"
+      hint="Skill proposals could not be checked, so there may still be proposals awaiting review. Nothing is installed without your accept."
+      action={{
+        label: 'Open skill proposals',
+        onClick: () => { window.location.hash = '#/skills?mode=proposals' },
+      }}
+    />
+  }
+  return <EmptyState
+    icon={Brain}
+    title="Nothing to review"
+    hint="Proposals appear here when the system notices a pattern worth offering. Nothing is ever installed without your accept."
+  />
 }
 
 function ProposalRow({ row, busy, onAccept, onReject }: {

@@ -951,9 +951,14 @@ def _unconsumed_data_copies(name: str) -> list[Path]:
 
 
 def _dir_entry_count(path: Path) -> int:
-    """Top-level entries in *path*, or 0 if it cannot be read."""
+    """User-visible top-level entries in *path*, or 0 if it cannot be read.
+
+    A ``.git`` directory is storage metadata, not one of the user's data items. It is
+    still preserved with the rest of ``data/``; it is only excluded from the count
+    shown in the uninstall confirmation and recorded in the lifecycle audit.
+    """
     try:
-        return sum(1 for _ in path.iterdir())
+        return sum(1 for entry in path.iterdir() if entry.name != ".git")
     except OSError:
         return 0
 
@@ -1235,11 +1240,19 @@ def _write_seed_marker(seeded: set[str]) -> None:
     atomic_write(p, json.dumps({"seeded": sorted(seeded)}, indent=2) + "\n")
 
 
-def _resync_native_manifest(name: str, src_manifest: "Path") -> None:
+def _resync_native_manifest(
+    name: str, src_manifest: "Path", manifest: AppManifest
+) -> None:
     """Refresh an already-seeded native app's ``app.json`` from packaged source when
-    it differs. Manifest-only: never touches ``data/`` (user config) or
-    ``installed.json`` (enabled state). No-op if the app dir is missing or the
-    manifest already matches (byte-compare avoids needless writes)."""
+    it differs. Never touches ``data/`` (user config) or the installed enabled state.
+    No-op if the app dir is missing or the manifest already matches (byte-compare
+    avoids needless writes).
+
+    The installed metadata and a provider registration built earlier in this process
+    are projections of that manifest, so refresh them in the same change. Otherwise
+    the Library card can keep showing the old version and the live provider registry
+    can keep serving the old declaration even though the installed ``app.json`` is new.
+    """
     dest_manifest = app_dir(name) / APP_MANIFEST_FILENAME
     if not dest_manifest.parent.is_dir():
         return
@@ -1248,158 +1261,23 @@ def _resync_native_manifest(name: str, src_manifest: "Path") -> None:
         if dest_manifest.is_file() and dest_manifest.read_bytes() == src_bytes:
             return
         dest_manifest.write_bytes(src_bytes)
-        logger.info("Re-synced native app manifest %r from packaged source", name)
-    except OSError:
-        logger.debug("Could not re-sync native manifest %s", name, exc_info=True)
-
-
-def _ships_own_implementation(name: str, manifest: AppManifest | None) -> bool:
-    """Whether *name*'s code lives in the app's OWN package rather than in core.
-
-    The question a retired built-in raises is not "is this app installed" but "is
-    there still anything behind it". An app whose provider module or backend entry
-    point is a file inside ``apps/<name>/`` keeps working with core's copy gone — it
-    is an independent app that merely used to be shipped with us; one whose
-    ``implementation`` is a dotted core path (``gideon.engine.tasks.native:...``) is a
-    shell once that module stops shipping.
-
-    Answered with the SAME file test the provider loader applies at import time
-    (:func:`~apps.native_contract.bundle_module_file`), so "has its own
-    implementation" here means exactly "the loader would load it from the app dir".
-    A second, looser opinion about that would eventually disagree with the loader,
-    and the direction it would disagree in is deleting a working app.
-    """
-    if manifest is None:
-        return False
-    from gideon.extensions.apps.native_contract import bundle_module_file
-
-    try:
-        pkg = app_dir(name)
-    except ValueError:
-        return False
-    entry = manifest.backend.entryPoint
-    if entry and (pkg / entry).is_file():
-        return True
-    for provider in manifest.all_providers():
-        module_path, _, _ = provider.implementation.rpartition(":")
-        if bundle_module_file(pkg, module_path) is not None:
-            return True
-    return False
-
-
-def _holds_user_data(name: str) -> bool:
-    """Whether removing *name* outright would destroy something the user made.
-
-    Reuses :func:`describe_app_data` — the same facts the keep-data uninstall rung
-    and its confirm dialog work from — so "has data" means one thing in the product:
-    entries under the app's ``data/`` (its ``config.json`` settings included, which
-    is where :mod:`~apps.app_config` keeps them) or an unconsumed copy of that
-    ``data/`` parked by an earlier keep-data uninstall or left by a failed one.
-
-    An existing but EMPTY ``data/`` is not user data: every seeded app gets one at
-    seed time whether or not it was ever used.
-    """
-    facts = describe_app_data(name)
-    return bool(facts.get("entries")) or bool(facts.get("unconsumed"))
-
-
-def _decore(name: str, meta: InstalledApp) -> None:
-    """Unlock a built-in-locked app in place: it stays installed and enabled, but
-    becomes an ordinary local app the user can configure, disable and remove.
-
-    BOTH halves of the lock are lifted, because :func:`_is_native` reads both: the
-    ``builtin`` origin in ``installed.json`` and the ``native`` flag in the app's own
-    ``app.json``. Lifting only the origin (what the ollama-models migration did, on an
-    app whose manifest had already dropped the flag) leaves any app that still carries
-    the flag locked, which is the state this whole path exists to get out of.
-    """
-    try:
-        mpath = app_dir(name) / APP_MANIFEST_FILENAME
-    except ValueError:
-        return
-    if mpath.is_file():
-        try:
-            data = json.loads(mpath.read_text(encoding="utf-8"))
-            if isinstance(data, dict) and data.pop("native", None) is not None:
-                atomic_write(mpath, json.dumps(data, indent=2) + "\n")
-        except (json.JSONDecodeError, OSError):
-            logger.warning(
-                "app %s: could not drop the native flag", name, exc_info=True
-            )
-    if meta.origin == "builtin":
-        meta.origin = "local"
-        meta.updatedAt = _now_iso()
-        _write_installed(name, meta)
-    logger.info("migrated %s from builtin→local (de-cored)", name)
-
-
-def _retire_removed_builtins(seeded: set[str], shipped: set[str]) -> bool:
-    """Reconcile every already-seeded built-in the shipped catalog no longer carries.
-
-    A built-in is retired by DELETING it from ``apps/native/``, and the installed copy
-    in the user's home outlives that deletion: it stays locked on (origin ``builtin``
-    ⇒ disable/uninstall/force-uninstall all refuse) while the core implementation it
-    called into is gone. So the app sits in the Apps UI, un-removable, doing nothing.
-
-    Three outcomes, decided per app rather than by a hardcoded name (this replaces the
-    one-off ``ollama-models`` migration, which is now just the middle case):
-
-    * **Independently implemented** — the installed copy is no longer a core app: its
-      manifest dropped the ``native`` flag, or its implementation ships inside its own
-      package. It still works, so it is UNLOCKED and left running.
-    * **Holds user data** — the core implementation is gone, but ``data/`` is not
-      empty or a parked copy is still on disk. UNLOCKED and left in place; the user
-      decides what happens to their data, through the uninstall rungs that de-coring
-      just made available. Removing it here would be a silent destructive act the user
-      never asked for, taken at gateway startup.
-    * **Neither** — a shell with nothing behind it and nothing in it. REMOVED, through
-      :func:`force_uninstall` (hooks, deregistration, dependency ledger) exactly as a
-      user-initiated removal would be, after de-coring so its own lock does not refuse.
-
-    An app installed under the same name from somewhere else (origin not ``builtin``)
-    is never any of these: it is somebody else's app that happens to share a name, and
-    it is left completely alone.
-
-    Returns whether the seed marker needs rewriting.
-    """
-    changed = False
-    for name in sorted(seeded - shipped):
         meta = _read_installed(name)
-        if meta is None:
-            seeded.discard(name)
-            changed = True
-            continue
-        if meta.origin != "builtin":
-            continue
-        manifest = _manifest_of(name)
-        independent = manifest is not None and (
-            not manifest.native or _ships_own_implementation(name, manifest)
-        )
-        holds_data = _holds_user_data(name)
-        if independent or holds_data:
-            reason = "independent_implementation" if independent else "user_data"
-            _decore(name, meta)
-            _audit("retire", "unlocked", name, caller="seed", detail=f"reason={reason}")
-        else:
-            _decore(name, meta)
-            if force_uninstall(name, caller="seed"):
-                logger.info(
-                    "removed retired builtin app %s: its core implementation no longer "
-                    "ships and it holds no user data",
-                    name,
-                )
-                _audit("retire", "removed", name, caller="seed", detail="data=absent")
-            else:
-                _audit(
-                    "retire",
-                    "error",
-                    name,
-                    caller="seed",
-                    error="retired builtin could not be removed; it was unlocked instead",
-                )
-        seeded.discard(name)
-        changed = True
-    return changed
+        if meta is not None:
+            meta.version = manifest.version
+            meta.displayName = manifest.displayName or name
+            meta.updatedAt = _now_iso()
+            _write_installed(name, meta)
+
+        registry = _provider_registry()
+        registered = registry.get(name)
+        if registered is not None:
+            enabled = any(record.enabled for record in registered.chain())
+            registry.deregister(name)
+            if manifest.all_providers():
+                registry.register(manifest, enabled=enabled)
+        logger.info("Re-synced native app manifest %r from packaged source", name)
+    except (OSError, ValueError):
+        logger.debug("Could not re-sync native manifest %s", name, exc_info=True)
 
 
 def seed_builtin_apps() -> list[str]:
@@ -1417,13 +1295,6 @@ def seed_builtin_apps() -> list[str]:
     (Because native apps can't be uninstalled, the marker just avoids clobbering a
     user's config edits on restart.) Returns the names newly seeded this run.
     Called once at startup, BEFORE extension discovery.
-
-    The marker is also what makes the reverse direction knowable: a name we seeded that
-    ``apps/native/`` no longer carries is a RETIRED built-in, and
-    :func:`_retire_removed_builtins` decides per app whether it is removed, unlocked, or
-    somebody else's app entirely. That pass runs from a catalog we just read, so it is
-    skipped whole (with the early return above) when the catalog directory is missing —
-    "every built-in retired at once" is a broken install, not a retirement.
     """
     from gideon.extensions.providers.loader import BUNDLED_DIR
 
@@ -1432,12 +1303,10 @@ def seed_builtin_apps() -> list[str]:
     seeded = _read_seed_marker()
     newly: list[str] = []
     changed = False
-    shipped: set[str] = set()
     for entry in sorted(BUNDLED_DIR.iterdir()):
         manifest_file = entry / APP_MANIFEST_FILENAME if entry.is_dir() else None
         if not manifest_file or not manifest_file.is_file():
             continue
-        shipped.add(entry.name)
         try:
             manifest = AppManifest.from_json_file(manifest_file)
         except Exception:
@@ -1445,12 +1314,11 @@ def seed_builtin_apps() -> list[str]:
                 "seed: failed to parse native manifest %s", entry.name, exc_info=True
             )
             continue
-        shipped.add(manifest.name)
         if not manifest.native:
             continue
         name = manifest.name
         if name in seeded:
-            _resync_native_manifest(name, manifest_file)
+            _resync_native_manifest(name, manifest_file, manifest)
             continue
         seeded.add(name)
         changed = True
@@ -1478,10 +1346,23 @@ def seed_builtin_apps() -> list[str]:
         except Exception as exc:  # noqa: BLE001 — one bad seed must not block the rest
             logger.warning("seed: failed to seed builtin app %s: %s", name, exc)
             shutil.rmtree(dest, ignore_errors=True)
-    if _retire_removed_builtins(seeded, shipped):
-        changed = True
     if changed:
         _write_seed_marker(seeded)
+    _OLLAMA_MIGRATION_NAME = "ollama-models"
+    if _OLLAMA_MIGRATION_NAME in seeded:
+        ollama_meta = _read_installed(_OLLAMA_MIGRATION_NAME)
+        if ollama_meta is not None and ollama_meta.origin == "builtin":
+            manifest_check = _manifest_of(_OLLAMA_MIGRATION_NAME)
+            if manifest_check is None or not manifest_check.native:
+                ollama_meta.origin = "local"
+                ollama_meta.updatedAt = _now_iso()
+                _write_installed(_OLLAMA_MIGRATION_NAME, ollama_meta)
+                logger.info(
+                    "migrated %s from builtin→local (de-cored)", _OLLAMA_MIGRATION_NAME
+                )
+        seeded.discard(_OLLAMA_MIGRATION_NAME)
+        _write_seed_marker(seeded)
+
     return newly
 
 
@@ -1773,22 +1654,12 @@ def uninstall_keep_data(name: str, *, caller: str = "app_manager") -> bool:
     if meta is None:
         return False
     if _is_native(name):
-        logger.error(
-            "app %s is native (locked) — keep-data uninstall refused; nothing was "
-            "removed and data/ is untouched",
-            name,
-        )
+        logger.info("app %s is native (locked) — uninstall refused", name)
         _audit("uninstall_keep_data", "refused_native", name, caller=caller)
         return False
     try:
         _validate_app_name(name)
     except ValueError as exc:
-        logger.error(
-            "app %s: the name cannot be turned into a path for the parked copy (%s); "
-            "keep-data uninstall refused, nothing was removed",
-            name,
-            exc,
-        )
         _audit("uninstall_keep_data", "refused", name, caller=caller, error=str(exc))
         return False
 
@@ -1824,13 +1695,6 @@ def uninstall_keep_data(name: str, *, caller: str = "app_manager") -> bool:
             shutil.copytree(live_data, staged)
     except OSError as exc:
         shutil.rmtree(staged, ignore_errors=True)
-        logger.error(
-            "app %s: data/ could not be copied out to %s (%s); keep-data uninstall "
-            "refused, nothing was removed",
-            name,
-            staged,
-            exc,
-        )
         _audit(
             "uninstall_keep_data",
             "error",
@@ -1845,12 +1709,6 @@ def uninstall_keep_data(name: str, *, caller: str = "app_manager") -> bool:
     try:
         if not force_uninstall(name, caller=caller):
             shutil.rmtree(staged, ignore_errors=True)
-            logger.error(
-                "app %s: removal was refused, so nothing was deleted and data/ is "
-                "untouched; the staged copy at %s was dropped",
-                name,
-                staged,
-            )
             _audit(
                 "uninstall_keep_data",
                 "error",
@@ -1865,11 +1723,7 @@ def uninstall_keep_data(name: str, *, caller: str = "app_manager") -> bool:
             staged.rename(target)
     except (OSError, ValueError) as exc:
         logger.error(
-            "app %s: data/ could not be parked (%s); the app is gone and the only copy "
-            "of its data is at %s",
-            name,
-            exc,
-            staged,
+            "app %s: data/ could not be parked; the copy is at %s", name, staged
         )
         _audit(
             "uninstall_keep_data",

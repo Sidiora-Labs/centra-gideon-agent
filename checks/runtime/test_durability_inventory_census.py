@@ -100,6 +100,8 @@ _UNDECLARED_DEBT = frozenset(
         "settings",
         "sources",
         "surfaces",
+        "update_check.json",
+        "update_releases.json",
     }
 )
 

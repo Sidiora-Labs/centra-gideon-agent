@@ -24,7 +24,7 @@ class PlanShape(DetectorBindings):
         )
         if not steps:
             return api.Score()
-        verbs = set()
+        verbs: set = set()
         for step in steps:
             verbs.update(
                 match.group(0).lower() for match in api._ACTION_VERBS.finditer(step)

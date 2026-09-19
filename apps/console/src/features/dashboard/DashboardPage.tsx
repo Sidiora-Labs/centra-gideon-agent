@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import {
   MessageSquare, History, type LucideIcon,
   MessageSquarePlus, ListTodo, BookOpen, FolderKanban, FileCode2, TerminalSquare, Sparkles, Compass,
-  Package, HardDrive, Orbit, Monitor, Globe,
+  Package, HardDrive, Orbit, Monitor,
 } from 'lucide-react'
 import { DashboardLiveProvider } from './DashboardLive'
 import { PinnedTiles } from './PinnedTiles'
@@ -18,7 +18,6 @@ import { Discover } from './widgets/Discover'
 import { PinnedArtifacts } from './widgets/PinnedArtifacts'
 import { OnThisMachine } from './widgets/OnThisMachine'
 import { DesktopLiveView } from './widgets/DesktopLiveView'
-import { BrowseMirrorPanel } from './widgets/BrowseMirrorPanel'
 import { ScheduleWidget } from './widgets/ScheduleWidget'
 import { SystemHealth } from './widgets/SystemHealth'
 import { TopBar } from '../../shared/ui/TopBar'
@@ -33,6 +32,7 @@ import { ComposerStage } from '../../shared/ui/ComposerStage'
 import { useComposerData } from '../../shared/data/useComposerData'
 import type { ComposerValue } from '../../shared/ui/composer/types'
 import type { RouteProps } from '../../app/shell/useQueryState'
+import { InlineError } from '../../shared/ui/InlineError'
 
 /** The dashboard — Gideon's home. Redesigned bare & launcher-forward: no
  *  bento boxes. A command launcher up top (jump straight into a chat or a
@@ -140,12 +140,6 @@ export function DashboardPage(route: RouteProps) {
             </EntranceRegion>
 
             <EntranceRegion className="min-w-0">
-              <Section label="Browser automation" icon={Globe}>
-                <BrowseMirrorPanel />
-              </Section>
-            </EntranceRegion>
-
-            <EntranceRegion className="min-w-0">
               <Section label="Recent activity" icon={History}>
                 <ScheduleWidget {...route} />
               </Section>
@@ -201,7 +195,7 @@ function Launcher({ navigate }: RouteProps) {
   const [text, setText] = useState('')
   const data = useComposerData()
   const [selection, setSelection] = useState<ComposerValue>({ agent: '', model: 'Auto', approval: 'normal', taskMode: 'agent', reasoning: '' })
-  const { data: sessions } = useQuery<ChatSessionSummary[]>(
+  const { data: sessions, error: sessionsError, refresh: refreshSessions } = useQuery<ChatSessionSummary[]>(
     'chat:sessions:recent', () => api.chatSessions(), { persist: true },
   )
 
@@ -233,6 +227,10 @@ function Launcher({ navigate }: RouteProps) {
           navigate(t ? `chat/new?seed=${encodeURIComponent(t)}` : 'chat/new')
         }}
       />
+
+      {sessionsError && (
+        <InlineError icon onRetry={refreshSessions}>{sessions === undefined ? 'Couldn’t load recent chats.' : 'Couldn’t refresh recent chats.'}</InlineError>
+      )}
 
       { }
       <div className="flex flex-wrap items-center gap-xs">
@@ -290,4 +288,3 @@ function Section({ label, icon: Icon, children, tour }: {
     </section>
   )
 }
-

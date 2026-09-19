@@ -819,7 +819,7 @@ class PromptAssembler:
     def _neighbor_blocks(self, key: str) -> list[str]:
         from gideon.integrations.prompt_providers.runtime import render_snippet_block
 
-        sections = []
+        sections: list = []
         if self.conversation_log is None:
             return sections
         if key.startswith("dashboard:"):

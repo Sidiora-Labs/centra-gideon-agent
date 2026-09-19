@@ -14,19 +14,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 from aiohttp import web
 
 from gideon.automation.loop import files as loop_files
 from gideon.automation.loop import kinds, manager, store, validation
-from gideon.automation.loop.loop import (
-    ACTION_SOURCE_STATES,
-    KINDS,
-    PRELAUNCH_STATUSES,
-    Loop,
-    LoopStatus,
-)
+from gideon.automation.loop.loop import ACTION_SOURCE_STATES, KINDS, Loop, LoopStatus
 from gideon.automation.loop.watchdog import registry_key
 from gideon.core.config.loader import AppConfig
 from gideon.http_errors import json_error
@@ -497,33 +492,35 @@ async def api_loop_action(request: web.Request) -> web.Response:
     action = str(body.get("action", ""))
     if action not in ACTION_SOURCE_STATES:
         return web.json_response({"error": f"Unknown action: {action}"}, status=400)
-    loop = store.get(cid)
-    if loop is None:
-        return web.json_response({"error": "Not found"}, status=404)
-    if LoopStatus(loop.status) not in ACTION_SOURCE_STATES[action]:
-        return web.json_response(
-            {"error": f"Cannot {action} a loop in '{loop.status}' state"}, status=409
-        )
-    if action == "start":
-        kinds.ensure_loaded()
-        strat = kinds.get_or_none(loop.kind)
-        blocker = getattr(strat, "launch_blocker", None)
-        reason = blocker(loop) if blocker else None
-        if reason:
-            return web.json_response({"error": reason}, status=422)
     state = request.app["state"]
-    from gideon.automation.triggers.nudge import get_instance
+    async with manager.dashboard_boundary_lock(state, cid):
+        loop = store.get(cid)
+        if loop is None:
+            return web.json_response({"error": "Not found"}, status=404)
+        if LoopStatus(loop.status) not in ACTION_SOURCE_STATES[action]:
+            return web.json_response(
+                {"error": f"Cannot {action} a loop in '{loop.status}' state"},
+                status=409,
+            )
+        if action == "start":
+            kinds.ensure_loaded()
+            strat = kinds.get_or_none(loop.kind)
+            blocker = getattr(strat, "launch_blocker", None)
+            reason = blocker(loop) if blocker else None
+            if reason:
+                return web.json_response({"error": reason}, status=422)
+        from gideon.automation.triggers.nudge import get_instance
 
-    svc = get_instance()
-    if svc is None:
-        return web.json_response({"error": "autonudge unavailable"}, status=503)
-    if action in ("start", "resume"):
-        await manager.start(state, svc, cid)
-    elif action == "pause":
-        await manager.pause(state, svc, cid)
-    elif action == "stop":
-        await manager.stop(state, svc, cid)
-    return web.json_response(store.get_redacted(cid))
+        svc = get_instance()
+        if svc is None:
+            return web.json_response({"error": "autonudge unavailable"}, status=503)
+        if action in ("start", "resume"):
+            await manager.start(state, svc, cid)
+        elif action == "pause":
+            await manager.pause(state, svc, cid)
+        elif action == "stop":
+            await manager.stop(state, svc, cid)
+        return web.json_response(store.get_redacted(cid))
 
 
 async def _reap_loop_sessions(state, loop_id: str) -> None:
@@ -555,27 +552,29 @@ async def api_loop_delete(request: web.Request) -> web.Response:
     cid = request.match_info["id"]
     if not loop_files.valid_loop_id(cid):
         return web.json_response({"error": "Invalid loop id"}, status=400)
-    from gideon.automation.triggers.nudge import get_instance
+    state = request.app["state"]
+    async with manager.dashboard_boundary_lock(state, cid):
+        from gideon.automation.triggers.nudge import get_instance
 
-    svc = get_instance()
-    if svc is not None:
+        svc = get_instance()
+        if svc is not None:
+            try:
+                await manager.teardown_for_delete(svc, cid)
+            except Exception:
+                logger.debug(
+                    "loop teardown-for-delete failed for %s", cid, exc_info=True
+                )
+        deleted = store.delete(cid)
         try:
-            await manager.teardown_for_delete(svc, cid)
+            await _reap_loop_sessions(state, cid)
         except Exception:
-            logger.debug("loop teardown-for-delete failed for %s", cid, exc_info=True)
-    deleted = store.delete(cid)
-    try:
-        await _reap_loop_sessions(request.app["state"], cid)
-    except Exception:
-        logger.debug("loop session reap failed for %s", cid, exc_info=True)
-    try:
-        request.app["state"].loop_sse().publish(
-            registry_key(cid), "deleted", {"loop_id": cid}
-        )
-        request.app["state"].push_refresh("loops")
-    except Exception:
-        logger.debug("loop delete publish failed", exc_info=True)
-    return web.json_response({"ok": deleted})
+            logger.debug("loop session reap failed for %s", cid, exc_info=True)
+        try:
+            state.loop_sse().publish(registry_key(cid), "deleted", {"loop_id": cid})
+            state.push_refresh("loops")
+        except Exception:
+            logger.debug("loop delete publish failed", exc_info=True)
+        return web.json_response({"ok": deleted})
 
 
 async def api_loop_nudge(request: web.Request) -> web.Response:
@@ -763,6 +762,62 @@ async def api_loop_autopilot(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "autopilot": updated.autopilot})
 
 
+_PLANNER_STALL_SECONDS = 180.0
+
+
+def _plan_task(app: web.Application, cid: str) -> asyncio.Task | None:
+    tasks = app.get("_loop_plan_tasks", {})
+    if not isinstance(tasks, dict):
+        return None
+    task = tasks.get(cid)
+    return task if isinstance(task, asyncio.Task) else None
+
+
+def _planner_status(request: web.Request, cid: str, session=None) -> dict[str, Any]:
+    """Server-owned planner liveness used by every Console planning surface."""
+    now = time.time()
+    task = _plan_task(request.app, cid)
+    active = bool(task is not None and not task.done())
+    starts = request.app.get("_loop_plan_started_at", {})
+    started_at = float(starts.get(cid, 0.0) or 0.0) if isinstance(starts, dict) else 0.0
+    state = request.app["state"]
+    get_session = getattr(state, "get_session", None)
+    planner_session = (
+        get_session(f"loop-plan-{cid}")
+        if callable(get_session)
+        else getattr(state, "_sessions", {}).get(f"loop-plan-{cid}")
+    )
+    session_activity = float(getattr(planner_session, "last_activity_at", 0.0) or 0.0)
+    last_activity_at = max(started_at, session_activity)
+    loop = store.get(cid)
+    try:
+        status = LoopStatus(getattr(loop, "status", ""))
+    except (TypeError, ValueError):
+        status = None
+    steps = list(getattr(session, "steps", None) or [])
+    awaiting_review = any(
+        str(getattr(step, "status", "")) == "awaiting_review" for step in steps
+    )
+    design_error = bool(str(getattr(session, "design_error", "") or ""))
+    expects_planner = status == LoopStatus.PLANNING and not awaiting_review
+    quiet = (
+        active
+        and last_activity_at > 0
+        and now - last_activity_at >= _PLANNER_STALL_SECONDS
+    )
+    planner_died = expects_planner and not active
+    stalled = bool(design_error or planner_died or quiet)
+    return {
+        "active": active,
+        "stalled": stalled,
+        "retryable": stalled,
+        "started_at": started_at or None,
+        "last_activity_at": last_activity_at or None,
+        "server_time": now,
+        "stall_after_seconds": _PLANNER_STALL_SECONDS,
+    }
+
+
 def _kick_plan_advance(request: web.Request, cid: str) -> web.Response:
     """Run ONE planning walkthrough pass in the background (it spawns the planner —
     minutes), publish a refresh when it lands, return 202. The client watches the
@@ -773,6 +828,9 @@ def _kick_plan_advance(request: web.Request, cid: str) -> web.Response:
     svc = get_instance()
     if svc is None:
         return web.json_response({"error": "autonudge unavailable"}, status=503)
+    existing = _plan_task(request.app, cid)
+    if existing is not None and not existing.done():
+        return web.json_response({"ok": True, "planning": True}, status=202)
     state = request.app["state"]
 
     async def _run() -> None:
@@ -793,45 +851,23 @@ def _kick_plan_advance(request: web.Request, cid: str) -> web.Response:
                 logger.debug("loop plan advance publish failed", exc_info=True)
 
     task = asyncio.create_task(_run())
-    tasks = request.app.setdefault("_loop_plan_tasks", set())
-    tasks.add(task)
-    task.add_done_callback(lambda t: tasks.discard(t))
+    tasks = request.app.setdefault("_loop_plan_tasks", {})
+    if not isinstance(tasks, dict):
+        tasks = {}
+        request.app["_loop_plan_tasks"] = tasks
+    tasks[cid] = task
+    starts = request.app.setdefault("_loop_plan_started_at", {})
+    if not isinstance(starts, dict):
+        starts = {}
+        request.app["_loop_plan_started_at"] = starts
+    starts[cid] = time.time()
+
+    def _forget(done: asyncio.Task) -> None:
+        if tasks.get(cid) is done:
+            tasks.pop(cid, None)
+
+    task.add_done_callback(_forget)
     return web.json_response({"ok": True, "planning": True}, status=202)
-
-
-def _plan_lifecycle_refusal(cid: str) -> web.Response | None:
-    """The ONE pre-launch lifecycle guard every planning action runs FIRST.
-
-    A loop's plan is a PRE-LAUNCH artifact: once the loop leaves
-    :data:`PRELAUNCH_STATUSES` the spec is frozen, and a planning action against it
-    would drag a launched run back into planning (re-arming the walkthrough behind a
-    running worker), erase a stop intent, or rewrite the very plan the worker is
-    executing. Only ``plan/start`` checked the phase; retry/approve/comment/edit
-    checked existence alone (or nothing at all), so each of them could do exactly
-    that.
-
-    Returns the refusal to send, or ``None`` when the caller may proceed. Call it
-    BEFORE touching the plan session or the design-error flag: the refusal has to
-    land with the stored loop and its session byte-identical.
-    """
-    loop = store.get(cid)
-    if loop is None:
-        return json_error("not_found", message="Not found", status=404)
-    try:
-        status: LoopStatus | None = LoopStatus(loop.status)
-    except ValueError:
-        status = None
-    if status not in PRELAUNCH_STATUSES:
-        return json_error(
-            "loop_not_prelaunch",
-            message=(
-                f"Loop spec is frozen (already started): planning is closed in "
-                f"'{loop.status}'."
-            ),
-            status=409,
-            error_extra={"status": loop.status},
-        )
-    return None
 
 
 async def api_loop_plan_session(request: web.Request) -> web.Response:
@@ -842,7 +878,12 @@ async def api_loop_plan_session(request: web.Request) -> web.Response:
     if store.get(cid) is None:
         return web.json_response({"error": "Not found"}, status=404)
     session = loop_files.read_plan_session(cid)
-    return web.json_response({"session": session.to_dict() if session else None})
+    return web.json_response(
+        {
+            "session": session.to_dict() if session else None,
+            "planner": _planner_status(request, cid, session),
+        }
+    )
 
 
 async def api_loop_plan_start(request: web.Request) -> web.Response:
@@ -850,9 +891,15 @@ async def api_loop_plan_start(request: web.Request) -> web.Response:
     cid = request.match_info["id"]
     if not loop_files.valid_loop_id(cid):
         return web.json_response({"error": "Invalid loop id"}, status=400)
-    refusal = _plan_lifecycle_refusal(cid)
-    if refusal is not None:
-        return refusal
+    loop = store.get(cid)
+    if loop is None:
+        return web.json_response({"error": "Not found"}, status=404)
+    from gideon.automation.loop.loop import PRELAUNCH_STATUSES
+
+    if LoopStatus(loop.status) not in PRELAUNCH_STATUSES:
+        return web.json_response(
+            {"error": "Loop spec is frozen (already started)"}, status=409
+        )
     return _kick_plan_advance(request, cid)
 
 
@@ -862,11 +909,17 @@ async def api_loop_plan_retry(request: web.Request) -> web.Response:
     cid = request.match_info["id"]
     if not loop_files.valid_loop_id(cid):
         return web.json_response({"error": "Invalid loop id"}, status=400)
-    refusal = _plan_lifecycle_refusal(cid)
-    if refusal is not None:
-        return refusal
+    if store.get(cid) is None:
+        return web.json_response({"error": "Not found"}, status=404)
     from gideon.automation.loop import plan_walkthrough as pw
 
+    running = _plan_task(request.app, cid)
+    if running is not None and not running.done():
+        running.cancel()
+        try:
+            await running
+        except asyncio.CancelledError:
+            pass
     pw.clear_design_error(cid)
     return _kick_plan_advance(request, cid)
 
@@ -876,9 +929,6 @@ async def api_loop_plan_approve(request: web.Request) -> web.Response:
     cid = request.match_info["id"]
     if not loop_files.valid_loop_id(cid):
         return web.json_response({"error": "Invalid loop id"}, status=400)
-    refusal = _plan_lifecycle_refusal(cid)
-    if refusal is not None:
-        return refusal
     body = await _json_body(request)
     if isinstance(body, web.Response):
         return body
@@ -901,9 +951,6 @@ async def api_loop_plan_comment(request: web.Request) -> web.Response:
     cid = request.match_info["id"]
     if not loop_files.valid_loop_id(cid):
         return web.json_response({"error": "Invalid loop id"}, status=400)
-    refusal = _plan_lifecycle_refusal(cid)
-    if refusal is not None:
-        return refusal
     body = await _json_body(request)
     if isinstance(body, web.Response):
         return body
@@ -932,9 +979,6 @@ async def api_loop_plan_edit(request: web.Request) -> web.Response:
     cid = request.match_info["id"]
     if not loop_files.valid_loop_id(cid):
         return web.json_response({"error": "Invalid loop id"}, status=400)
-    refusal = _plan_lifecycle_refusal(cid)
-    if refusal is not None:
-        return refusal
     body = await _json_body(request)
     if isinstance(body, web.Response):
         return body

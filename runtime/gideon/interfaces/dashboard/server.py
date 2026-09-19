@@ -4,7 +4,7 @@ import asyncio
 import errno
 import logging
 import os
-import re
+import secrets
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -21,6 +21,7 @@ from gideon.interfaces.dashboard.handlers.research_reports import (
     setup_research_report_routes,
 )
 from gideon.interfaces.dashboard.origin import (
+    allowed_cors_origin,
     build_allowed_origins,
     check_origin,
     resolve_bind_host,
@@ -40,6 +41,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _new_gateway_id() -> str:
+    return f"{os.getpid()}-{secrets.token_hex(8)}"
+
+
+def _log_auth_mode(auth_cfg: Any) -> None:
+    """Log both sides of auth resolution without changing the selected middleware."""
+    state = auth_cfg.mode_state()
+    if auth_cfg.fell_back_from_unauthorable_mode:
+        logger.warning(
+            "Auth mode fallback: %s; requested mode is not authorable by this runtime",
+            state,
+        )
+    else:
+        logger.info("Auth mode: %s", state)
+
+
 def _single_post_ceiling() -> int:
     """Body-size ceiling for the MAIN + API apps.
 
@@ -53,35 +70,6 @@ def _single_post_ceiling() -> int:
 
 
 _DIST_DIR = package_path("static", "dist")
-
-_NO_STORE = "no-store, no-cache, must-revalidate, max-age=0"
-
-_IMMUTABLE = "public, max-age=31536000, immutable"
-
-_HASHED_ASSET = re.compile(
-    r"-(?=[0-9A-Za-z_$]*[0-9A-Z])[0-9A-Za-z_$]{8,24}\.[0-9A-Za-z]{1,8}$"
-)
-
-
-def _is_immutable_asset(path: str) -> bool:
-    """True only for a content-hashed build artifact under ``/assets/``.
-
-    Vite names every bundle ``<name>-<hash>.<ext>``, the hash drawn from rollup's
-    base64 alphabet (``0-9A-Za-z_$`` — never ``-``), so the last ``-``-delimited run
-    before the extension IS the hash when it is hash-shaped: 8-24 of those characters
-    carrying at least one digit or capital. Such a name changes with its bytes, which
-    is the whole licence to cache it for a year.
-
-    Everything else answers no, and the test that matters is which way the doubt
-    falls: a stable name wrongly called immutable is stuck in browser caches for a
-    year with no way to recall it, while a hashed name wrongly called stable costs
-    one revalidation. So ``index.html``, ``dm-sans.woff2``, ``gideon-light.png``,
-    ``sw.js`` and every ``/api`` path stay no-store by construction, not by listing.
-    """
-    if not path.startswith("/assets/"):
-        return False
-    return bool(_HASHED_ASSET.search(path.rsplit("/", 1)[-1]))
-
 
 _SEL_PRUNE_INTERVAL_SECS = 6 * 60 * 60
 
@@ -298,87 +286,47 @@ def _ws_csp_sources() -> str:
         return ""
 
 
-def mount_dist_static(app: web.Application) -> None:
-    """Mount the built frontend's static trees.
-
-    Module level because ``start_dashboard`` cannot be invoked from a test, and the
-    cache class a path lands in (:func:`_is_immutable_asset`) is decided by which of
-    these mounts answers it — a fact worth asserting against the real router rather
-    than against a copy of it.
-
-    ``/fonts`` is a handler, not a static mount: the font media types are absent from
-    Python's built-in ``mimetypes`` table, and a missing font must not come back from
-    ``spa_fallback`` as index.html. See :func:`handlers.dist_font`.
-    """
-    app.router.add_get("/fonts/{tail:.*}", handlers.dist_font)
-    if not _DIST_DIR.is_dir():
-        return
-    app.router.add_static(
-        "/assets",
-        _DIST_DIR / "assets" if (_DIST_DIR / "assets").is_dir() else _DIST_DIR,
-        show_index=False,
-        append_version=True,
+def _dashboard_csp() -> str:
+    """Return the dashboard policy, including its explicit framing boundary."""
+    return (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' blob: "
+        "https://cdn.tailwindcss.com https://cdn.jsdelivr.net "
+        "https://cdnjs.cloudflare.com; "
+        "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com "
+        "https://cdn.jsdelivr.net; "
+        "img-src 'self' data: blob: https:; "
+        "font-src 'self' data:; "
+        f"connect-src 'self' ws://localhost:* ws://127.0.0.1:*{_ws_csp_sources()}; "
+        "frame-src 'self' blob:; "
+        "frame-ancestors 'self'; "
+        "worker-src 'self' blob:; "
+        "object-src 'none'; base-uri 'self'"
     )
-    if (_DIST_DIR / "sprites").is_dir():
-        app.router.add_static("/sprites", _DIST_DIR / "sprites", show_index=False)
-    if (_DIST_DIR / "icons").is_dir():
-        app.router.add_static(
-            "/icons",
-            _DIST_DIR / "icons",
-            show_index=False,
-            append_version=False,
-        )
-    if (_DIST_DIR / "vendor").is_dir():
-        app.router.add_static(
-            "/vendor",
-            _DIST_DIR / "vendor",
-            show_index=False,
-            append_version=False,
-        )
-    logger.info("Serving React build from %s", _DIST_DIR)
 
 
-@web.middleware  # type: ignore[misc]
-async def cache_headers_middleware(
-    request: web.Request,
-    handler: object,
-) -> web.StreamResponse:
-    """Cache-Control for every response, plus the standing security headers.
+def _append_vary(headers: Any, name: str) -> None:
+    values = [value.strip() for value in headers.get("Vary", "").split(",") if value]
+    if name.lower() not in {value.lower() for value in values}:
+        values.append(name)
+    headers["Vary"] = ", ".join(values)
 
-    Two classes, and only two. A content-hashed bundle under ``/assets/`` is
-    immutable for a year: its URL changes when its bytes change, so a client that
-    never revalidates it can never be stale. EVERYTHING else — the SPA entry and its
-    fallback, ``/api``, anything carrying a token or a cookie, ``sw.js``, the
-    manifest, ``/icons``, ``/vendor``, ``/fonts``, ``/sprites`` — keeps no-store,
-    because those names are reused and a stale copy of one is a wrong app that
-    outlives the fix.
 
-    ``Pragma``/``Expires`` ride with the no-store class only; sending ``Expires: 0``
-    beside a year of immutability is a contradiction an intermediary may resolve
-    either way.
-    """
-    resp = await handler(request)  # type: ignore[operator]
-    if hasattr(resp, "headers"):
-        if _is_immutable_asset(request.path) and resp.status < 400:
-            resp.headers.setdefault("Cache-Control", _IMMUTABLE)
-        else:
-            resp.headers.setdefault("Cache-Control", _NO_STORE)
-            resp.headers.setdefault("Pragma", "no-cache")
-            resp.headers.setdefault("Expires", "0")
-        resp.headers.setdefault(
-            "Content-Security-Policy",
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' blob: "
-            "https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "  # noqa: E501
-            "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; "  # noqa: E501
-            "img-src 'self' data: blob: https:; "
-            "font-src 'self' data:; "
-            f"connect-src 'self' ws://localhost:* ws://127.0.0.1:*{_ws_csp_sources()}; "
-            "frame-src 'self' blob:; "
-            "worker-src 'self' blob:; "
-            "object-src 'none'; base-uri 'self'",
-        )
-    return resp  # type: ignore[return-value]
+def _apply_response_policies(
+    request: web.Request, response: web.StreamResponse
+) -> None:
+    """Declare dashboard framing and the Agent Card's browser-origin boundary."""
+    response.headers.setdefault("Content-Security-Policy", _dashboard_csp())
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+
+    if request.path != "/a2a/agent-card":
+        return
+    response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+    response.headers.pop("Access-Control-Allow-Origin", None)
+    origin = allowed_cors_origin(request)
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+    _append_vary(response.headers, "Origin")
 
 
 @web.middleware  # type: ignore[misc]
@@ -394,7 +342,7 @@ async def spa_fallback(
 
             return json_error("not_found", status=404)
         if request.method == "GET" and not request.path.startswith(
-            ("/assets/", "/fonts/", "/icons/", "/sprites/", "/vendor/")
+            ("/assets/", "/icons/", "/sprites/", "/vendor/")
         ):
             return await handlers.index(request)
         raise
@@ -495,12 +443,14 @@ async def start_dashboard(
 
     app = web.Application(client_max_size=_single_post_ceiling())
     app["state"] = state
+    app["gateway_id"] = _new_gateway_id()
     state.load_folders()
     state.load_tags()
     app["port"] = port
     from gideon.security.auth.modes import AuthConfig as _AuthConfig
 
     app["auth_cfg"] = _AuthConfig.from_env()
+    _log_auth_mode(app["auth_cfg"])
 
     _precompute_telemetry(state)
 
@@ -593,11 +543,6 @@ async def start_dashboard(
     )
 
     register_onboarding_import_routes(app)
-    from gideon.interfaces.dashboard.handlers.onboarding_local_models import (
-        register_onboarding_local_model_routes,
-    )
-
-    register_onboarding_local_model_routes(app)
     app.router.add_get("/api/durability/status", handlers.api_durability_status)
     app.router.add_post("/api/durability/run", handlers.api_durability_run)
     app.router.add_post("/api/durability/export", handlers.api_durability_export)
@@ -663,9 +608,6 @@ async def start_dashboard(
     )
     app.router.add_post(
         "/api/doctor/simulate/automation", handlers.api_doctor_simulate_automation
-    )
-    app.router.add_post(
-        "/api/model-providers/{name}/selftest", handlers.api_provider_selftest
     )
     app.router.add_post(
         "/api/doctor/remediation/run", handlers.api_doctor_remediation_run
@@ -1391,7 +1333,7 @@ async def start_dashboard(
     app.router.add_post("/api/inbox/{id}/draft", handlers_inbox.api_inbox_draft)
     app.router.add_post("/api/inbox/{id}/open", handlers_inbox.api_inbox_open)
     app.router.add_post("/api/inbox/{id}/favorite", handlers_inbox.api_inbox_favorite)
-    app.router.add_post("/api/inbox/digest", handlers_inbox.api_inbox_digest)
+    app.router.add_get("/api/inbox/digest", handlers_inbox.api_inbox_digest)
     app.router.add_get("/api/inbox/providers", handlers_inbox.api_inbox_providers)
 
     app.router.add_delete("/api/notifications", handlers.api_notification_delete)
@@ -1404,6 +1346,7 @@ async def start_dashboard(
     app.router.add_get("/api/changelog", handlers.api_changelog)
     app.router.add_post("/api/update", handlers.api_update_apply)
     app.router.add_post("/api/update/auto", handlers.api_update_auto)
+    app.router.add_post("/api/update/dev-mode", handlers.api_update_dev_mode)
     app.router.add_post("/api/update/cancel", handlers.api_update_cancel)
     app.router.add_post("/api/system/restart", handlers.api_restart)
     _truthy = {"1", "true", "yes", "on"}
@@ -1827,7 +1770,47 @@ async def start_dashboard(
 
     app.on_cleanup.append(_discovery_shutdown)
 
-    mount_dist_static(app)
+    if _DIST_DIR.is_dir():
+        app.router.add_static(
+            "/assets",
+            _DIST_DIR / "assets" if (_DIST_DIR / "assets").is_dir() else _DIST_DIR,
+            show_index=False,
+            append_version=True,
+        )
+        if (_DIST_DIR / "sprites").is_dir():
+            app.router.add_static("/sprites", _DIST_DIR / "sprites", show_index=False)
+        if (_DIST_DIR / "fonts").is_dir():
+            app.router.add_static("/fonts", _DIST_DIR / "fonts", show_index=False)
+        if (_DIST_DIR / "icons").is_dir():
+            app.router.add_static(
+                "/icons",
+                _DIST_DIR / "icons",
+                show_index=False,
+                append_version=False,
+            )
+        if (_DIST_DIR / "vendor").is_dir():
+            app.router.add_static(
+                "/vendor",
+                _DIST_DIR / "vendor",
+                show_index=False,
+                append_version=False,
+            )
+        logger.info("Serving React build from %s", _DIST_DIR)
+
+    @web.middleware  # type: ignore[misc]
+    async def no_cache_middleware(
+        request: web.Request,
+        handler: object,
+    ) -> web.StreamResponse:
+        resp = await handler(request)  # type: ignore[operator]
+        if hasattr(resp, "headers"):
+            resp.headers.setdefault(
+                "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0"
+            )
+            resp.headers.setdefault("Pragma", "no-cache")
+            resp.headers.setdefault("Expires", "0")
+            _apply_response_policies(request, resp)
+        return resp  # type: ignore[return-value]
 
     _safe_methods = {"GET", "HEAD", "OPTIONS"}
 
@@ -1938,7 +1921,12 @@ async def start_dashboard(
     async def _dev_user_middleware(
         request: web.Request, handler: object
     ) -> web.StreamResponse:
-        request["user"] = request.get("user") or "dev-local"
+        from gideon.interfaces.dashboard.token_auth import (
+            attach_validated_paired_session,
+        )
+
+        if not attach_validated_paired_session(request, port=port):
+            request["user"] = request.get("user") or "dev-local"
         if not request.get("app"):
             from gideon.interfaces.dashboard.token_auth import validate_token_with_app
 
@@ -1959,7 +1947,7 @@ async def start_dashboard(
     from gideon.interfaces.dashboard.request_boundary import request_boundary_middleware
 
     app.middlewares[:] = [
-        cache_headers_middleware,
+        no_cache_middleware,
         api_version_middleware(),
         *(
             [_dev_user_middleware]
@@ -2147,12 +2135,14 @@ async def start_api_server(
 
     app = web.Application(client_max_size=_single_post_ceiling())
     app["state"] = state
+    app["gateway_id"] = _new_gateway_id()
     state.load_folders()
     state.load_tags()
     app["port"] = port
     from gideon.security.auth.modes import AuthConfig as _AuthConfig
 
     app["auth_cfg"] = _AuthConfig.from_env()
+    _log_auth_mode(app["auth_cfg"])
 
     _precompute_telemetry(state)
 
@@ -2189,6 +2179,7 @@ async def start_api_server(
     app.middlewares.append(sel_audit_middleware)
 
     _register_mcp_routes(app)
+    app.router.add_get("/api/healthz", handlers.api_healthz)
 
     runner = web.AppRunner(app)
     await runner.setup()

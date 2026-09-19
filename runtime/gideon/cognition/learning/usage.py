@@ -301,7 +301,7 @@ class UsageStore:
 
 
 def _to_record(row: Any) -> UsageRecord:
-    values = {name: str(row[name]) for name in ("kind", "entity")}
+    values: dict = {name: str(row[name]) for name in ("kind", "entity")}
     values.update(
         {
             name: int(row[name] or 0)

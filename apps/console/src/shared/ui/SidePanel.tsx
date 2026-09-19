@@ -9,8 +9,6 @@ import { IconButton } from './IconButton'
 import { spring, physics, expr } from '../theme/motion'
 import type { RouteProps } from '../../app/shell/useQueryState'
 
-// Resize handle: `.hit-24-x` widens the pointer target to 24px, but the dock's own overflow-hidden
-// clips the outward half — ~15px reachable, short of WCAG 2.5.8; the dock layout fix is separate work.
 export function SidePanel({ title, icon, onClose, urlKey, storeKey = 'sidepanel-w', fillHeight = false, onExpand, children }: {
   title: ReactNode
   icon?: ReactNode
@@ -77,7 +75,7 @@ export function SidePanel({ title, icon, onClose, urlKey, storeKey = 'sidepanel-
       <div role="separator" aria-orientation="vertical" tabIndex={0} aria-label="Resize panel — arrow keys to resize"
         aria-valuenow={Math.round(width)} aria-valuemin={min} aria-valuemax={max}
         onPointerDown={onHandleDown} onKeyDown={onHandleKey}
-        className="group absolute inset-y-0 left-0 z-20 w-1.5 cursor-ew-resize outline-none focus-visible:bg-primary/20 hit-24-x">
+        className="group absolute inset-y-0 left-0 z-20 w-1.5 cursor-ew-resize outline-none focus-visible:bg-primary/20">
         <motion.span className="absolute inset-y-0 left-0 bg-outline-variant/50 group-hover:bg-primary group-focus-visible:bg-primary"
           initial={false} animate={{ width: 1 }} whileHover={{ width: reduced ? 1 : 1 + expr(2.5, 0.3) }} transition={physics.snappy} />
       </div>

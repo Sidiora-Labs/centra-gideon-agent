@@ -52,7 +52,7 @@ class AskField:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> AskField:
         record = d or {}
-        values = {
+        values: dict = {
             name: str(record.get(name, fallback) or fallback)
             for name, fallback in (("name", ""), ("type", "string"), ("label", ""))
         }
@@ -104,7 +104,7 @@ class Ask:
             kind = AskKind(raw_kind)
         except ValueError:
             kind = AskKind.APPROVAL
-        values = dict(
+        values: dict = dict(
             kind=kind,
             prompt=str(record.get("prompt", "") or ""),
             node_id=str(record.get("node_id", "") or ""),
@@ -259,7 +259,7 @@ class Continuation:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Continuation:
         record = d or {}
-        identity = {
+        identity: dict = {
             name: str(record.get(name, "") or "")
             for name in ("token", "run_id", "node_id", "instance_path")
         }
@@ -411,7 +411,7 @@ def create_continuation(
     now: float = 0.0,
 ) -> Continuation:
     clock = now or time.time()
-    values = dict(
+    values: dict = dict(
         token=new_token(),
         run_id=run_id,
         node_id=node_id,
@@ -451,7 +451,7 @@ def drop_continuations(run_id: str, *, instance_prefix: str = "") -> int:
 
 
 def expired_item(cont: Continuation) -> dict[str, Any]:
-    result = dict(
+    result: dict = dict(
         kind="resume_expired",
         run_id=cont.run_id,
         node_id=cont.node_id,

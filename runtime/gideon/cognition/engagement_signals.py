@@ -104,8 +104,9 @@ class EngagementStore:
 
     def weight_for(self, topic_key: str, *, now: float) -> float:
         row = self._rows.get(topic_key)
-        warmed = bool(row) and int(row.get("count", 0)) >= _WARMUP_SIGNALS
-        return self._decayed_weight(row, now) if warmed else _NEUTRAL
+        if row is None or int(row.get("count", 0)) < _WARMUP_SIGNALS:
+            return _NEUTRAL
+        return self._decayed_weight(row, now)
 
     def _decayed_weight(self, row: dict, now: float) -> float:
         return _TopicWeight(row, now, self._half_life).value()

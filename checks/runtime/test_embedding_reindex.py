@@ -194,11 +194,66 @@ async def test_reindex_start_blocks_when_model_not_ready(monkeypatch):
 
 
 class _ChunkEmbedder:
+    embedding_provider = "test-provider"
+    embedding_model = "test-model"
+
     def embed(self, text):
         return [1.0, 0.0, 0.0, 0.0]
 
     def embed_for_item(self, title, summary, content=None):
         return [1.0, 0.0, 0.0, 0.0]
+
+
+def test_knowledge_reindex_repairs_chunk_vectors_and_space_fingerprints(tmp_path):
+    from gideon.cognition.knowledge.pipeline.runner import embed_item_chunks
+
+    class _SpaceEmbedder(_ChunkEmbedder):
+        def __init__(self, model, vector):
+            self.embedding_model = model
+            self.vector = vector
+
+        def embed(self, text):
+            return self.vector
+
+        def embed_for_item(self, title, summary, content=None):
+            return self.vector
+
+    store = _kstore(tmp_path)
+    item_id = _add(store, "Fingerprint migration", "# Section\n\nrepair this chunk")
+    old = _SpaceEmbedder("old-model", [1.0, 0.0, 0.0, 0.0])
+    new = _SpaceEmbedder("new-model", [0.0, 1.0, 0.0, 0.0])
+    embed_item_chunks(store, item_id, store.get_item(item_id)["content"], old)
+
+    before = store.db.execute(
+        "SELECT embedding_provider, embedding_model, embedding FROM chunks "
+        "WHERE item_id = ?",
+        (item_id,),
+    ).fetchone()
+    assert before["embedding_provider"] == "test-provider"
+    assert before["embedding_model"] == "old-model"
+
+    store.clear_embeddings()
+    cleared = store.db.execute(
+        "SELECT embedding, embedding_provider, embedding_model FROM chunks "
+        "WHERE item_id = ?",
+        (item_id,),
+    ).fetchone()
+    assert dict(cleared) == {
+        "embedding": None,
+        "embedding_provider": "",
+        "embedding_model": "",
+    }
+
+    assert store.reembed_all(new) == {"reembedded": 1, "failed": 0, "total": 1}
+    repaired = store.db.execute(
+        "SELECT embedding_provider, embedding_model, embedding FROM chunks "
+        "WHERE item_id = ?",
+        (item_id,),
+    ).fetchone()
+    assert repaired["embedding_provider"] == "test-provider"
+    assert repaired["embedding_model"] == "new-model"
+    assert repaired["embedding"] != before["embedding"]
+    assert store.chunk_embedding_status("test-provider", "new-model", 4)["stale"] == 0
 
 
 def _stub_resolve(monkeypatch, embedder):

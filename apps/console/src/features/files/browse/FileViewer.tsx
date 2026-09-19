@@ -43,6 +43,7 @@ export const FileViewer = forwardRef<FileViewerHandle, ViewerProps>(function Fil
   onMissingRef.current = onMissing
 
   const [content, setContent] = useState<string | null>(null)
+  const [contentPath, setContentPath] = useState(isBinaryType ? entry.path : '')
   const [draft, setDraft] = useState('')
   const [truncated, setTruncated] = useState(false)
   const [detectedBinary, setDetectedBinary] = useState(false)
@@ -52,20 +53,20 @@ export const FileViewer = forwardRef<FileViewerHandle, ViewerProps>(function Fil
   const [diskChanged, setDiskChanged] = useState(false)
 
   useEffect(() => {
-    if (isBinaryType) { setContent(null); setLoading(false); return }
+    if (isBinaryType) { setContent(null); setContentPath(entry.path); setLoading(false); return }
     let alive = true
-    setLoading(true); setErr(''); setDetectedBinary(false)
+    setContent(null); setLoading(true); setErr(''); setDetectedBinary(false)
     api.fileRead(entry.path, true).then((r) => {
       if (!alive) return
-      if (r.binary) { setDetectedBinary(true); setContent(''); setDraft(''); setLoading(false); return }
+      if (r.binary) { setDetectedBinary(true); setContent(''); setContentPath(entry.path); setDraft(''); setLoading(false); return }
       const cached = draftStore?.get(entry.path)
-      setContent(r.content); setDraft(cached ? cached.draft : r.content); setTruncated(r.truncated); setLoading(false)
+      setContent(r.content); setContentPath(entry.path); setDraft(cached ? cached.draft : r.content); setTruncated(r.truncated); setLoading(false)
       if (cached) setDiskChanged(cached.warned || cached.base !== r.content)
       else setDiskChanged(false)
     }).catch((e) => {
       if (!alive) return
       if ((e as { status?: number }).status === 404) onMissingRef.current?.(entry.path)
-      setErr(String(e.message || e)); setLoading(false)
+      setContentPath(entry.path); setErr(String(e.message || e)); setLoading(false)
     })
     return () => { alive = false }
   }, [entry.path, isBinaryType, attempt])
@@ -75,7 +76,8 @@ export const FileViewer = forwardRef<FileViewerHandle, ViewerProps>(function Fil
     setDraft((d) => { if (content !== null && d !== content && d !== next) setDiskChanged(true); return d })
   })
 
-  const loadFailed = content === null && !loading && !isBinaryType && !!err
+  const pathLoading = contentPath !== entry.path
+  const loadFailed = content === null && !loading && !pathLoading && !isBinaryType && !!err
   const noText = isBinaryType || detectedBinary || loadFailed
 
   const save = async () => surfaceRef.current?.save()
@@ -99,7 +101,7 @@ export const FileViewer = forwardRef<FileViewerHandle, ViewerProps>(function Fil
 
   const fileName = baseName(entry.path)
 
-  if (loading) return <Centered><Loader2 size={20} className="animate-spin text-on-surface-low" /></Centered>
+  if (loading || pathLoading) return <Centered><Loader2 size={20} className="animate-spin text-on-surface-low" /></Centered>
   if (loadFailed) {
     return (
       <Centered>

@@ -72,7 +72,15 @@ async def api_healthz(request: web.Request) -> web.Response:
 
     Used by container/compose healthchecks. No secret values returned.
     """
-    return web.json_response({"status": "ok", "version": gideon.__version__})
+    return web.json_response(
+        {
+            "status": "ok",
+            "version": gideon.__version__,
+            "gateway_id": request.app["gateway_id"],
+            "pid": os.getpid(),
+            "port": request.app["port"],
+        }
+    )
 
 
 def _safe_surfaces_flag() -> bool:
@@ -86,10 +94,14 @@ def _safe_surfaces_flag() -> bool:
 async def api_status(request: web.Request) -> web.Response:
     state: ConsoleState = request.app["state"]
     uptime = time.time() - state.start_time
-    from gideon.interfaces.dashboard.handlers import _do_update_check, _update_info
+    from gideon.interfaces.dashboard.handlers import (
+        _UPDATE_CHECK_INTERVAL,
+        _do_update_check,
+        _update_info,
+    )
     from gideon.interfaces.dashboard.handlers import updates as _updates_mod
 
-    if _updates_mod.update_check_due():
+    if time.time() - _updates_mod._last_update_check > _UPDATE_CHECK_INTERVAL:
         asyncio.create_task(_do_update_check())
 
     data = state.status_snapshot(update_available=bool(_update_info.get("available")))

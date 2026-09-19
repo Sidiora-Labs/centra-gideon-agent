@@ -279,7 +279,7 @@ async def test_guard_preflight_runs_before_any_connection(monkeypatch):
     sole egress function was never entered, and that the guard WAS consulted — together
     those two facts are the ordering claim.
     """
-    _enable(monkeypatch, enabled=True, allowlist=("allowed.example",))
+    cfg = _enable(monkeypatch, enabled=True, allowlist=("allowed.example",))
     token = _token()
 
     contacted: list[str] = []
@@ -288,13 +288,23 @@ async def test_guard_preflight_runs_before_any_connection(monkeypatch):
         contacted.append("upstream was dialed")
         raise AssertionError("a denied host must never be contacted")
 
-    consulted: list[str] = []
+    loaded: list[object] = []
+    real_load = proxy._load_config
+
+    def _load():
+        resolved = real_load()
+        loaded.append(resolved)
+        return resolved
+
+    consulted: list[tuple[str, object, object]] = []
     real_evaluate = proxy.evaluate
 
     def _spy(url, policy, **kw):
-        consulted.append(url)
-        return real_evaluate(url, policy, **kw)
+        decision = real_evaluate(url, policy, **kw)
+        consulted.append((url, policy, decision))
+        return decision
 
+    monkeypatch.setattr(proxy, "_load_config", _load)
     monkeypatch.setattr(proxy, "_forward", _never)
     monkeypatch.setattr(proxy, "evaluate", _spy)
 
@@ -313,7 +323,14 @@ async def test_guard_preflight_runs_before_any_connection(monkeypatch):
         payload = await resp.json()
         assert payload["error"]["code"] == "upstream_denied"
         assert "allow-list" in payload["error"]["reason"]
-        assert consulted == ["https://denied.example/v1/chat/completions"]
+        assert loaded == [cfg]
+        assert len(consulted) == 1
+        guarded_url, guarded_policy, decision = consulted[0]
+        assert guarded_url == "https://denied.example/v1/chat/completions"
+        assert guarded_policy == proxy.capture_policy(cfg)
+        assert guarded_policy.allow_only is True
+        assert guarded_policy.allow_hosts == ("allowed.example",)
+        assert decision.allow is False and decision.host == "denied.example"
         assert contacted == []
     finally:
         await client.close()

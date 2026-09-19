@@ -4,7 +4,7 @@ import {
   Clock, RotateCcw, Loader2, Trash2, FileSymlink, History, Tag, Download, ChevronUp, FileWarning,
   GitCompare, Lock,
 } from 'lucide-react'
-import { api, type Artifact, type ArtifactEvent } from '../../shared/data/api'
+import { api, ARTIFACT_MODEL_SAVED_EVENT, type Artifact, type ArtifactEvent } from '../../shared/data/api'
 import { useChatSocket, type WsMessage } from '../../shared/data/useChatSocket'
 import { isArtifactUpdateFor } from './artifactUpdateSignal'
 import { notify } from '../../app/shell/appSdk'
@@ -20,6 +20,7 @@ import { ArtifactCompare } from './ArtifactCompare'
 import { ArtifactDeploy } from './ArtifactDeploy'
 import type { CommentTarget } from '../../shared/ui/content/commentTarget'
 import { invalidateKeys } from '../../shared/data/data'
+import { ChipInput } from '../../shared/ui/forms'
 
 interface ViewerProps {
   slug: string
@@ -45,6 +46,7 @@ export function ArtifactViewer({ slug, onChanged, onDeleted, onOpenSourceFile, c
 
   const [comparing, setComparing] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [tagsBusy, setTagsBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [versionsError, setVersionsError] = useState('')
@@ -82,6 +84,15 @@ export function ArtifactViewer({ slug, onChanged, onDeleted, onOpenSourceFile, c
     reload({ keepVersion: true, quiet: true }).then(() => onChanged()).catch(() => {})
   })
 
+  useEffect(() => {
+    const onModelSaved = (event: Event) => {
+      if ((event as CustomEvent<{ slug?: string }>).detail?.slug !== slug) return
+      reload({ keepVersion: true, quiet: true }).then(() => onChanged()).catch(() => {})
+    }
+    window.addEventListener(ARTIFACT_MODEL_SAVED_EVENT, onModelSaved)
+    return () => window.removeEventListener(ARTIFACT_MODEL_SAVED_EVENT, onModelSaved)
+  }, [slug])  // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => { api.viewRender(`artifact.${slug}`).catch(() => {}) }, [slug])
 
   useEffect(() => {
@@ -114,6 +125,23 @@ export function ArtifactViewer({ slug, onChanged, onDeleted, onOpenSourceFile, c
       await api.updateArtifact(slug, { content: draft, snapshot: true, event_type: 'iterated' })
       await reload(); onChanged()
     } catch (e) { notify(`Could not snapshot artifact: ${(e as Error).message}`, 'error'); throw e }
+  }
+  const saveTags = async (tags: string[]) => {
+    if (!art || !editable || tagsBusy) return
+    const savingSlug = art.slug
+    const previous = art.tags
+    setTagsBusy(true)
+    setArt({ ...art, tags })
+    try {
+      const updated = await api.updateArtifact(savingSlug, { tags })
+      setArt((current) => current?.slug === savingSlug ? updated : current)
+      onChanged()
+    } catch (e) {
+      setArt((current) => current?.slug === savingSlug ? { ...current, tags: previous } : current)
+      notify(`Could not save artifact tags: ${(e as Error).message}`, 'error')
+    } finally {
+      setTagsBusy(false)
+    }
   }
   const revert = async () => {
     if (!art || selVersion === null) return
@@ -300,10 +328,17 @@ export function ArtifactViewer({ slug, onChanged, onDeleted, onOpenSourceFile, c
 
             <div>
               <Label icon={Tag}>Tags</Label>
-              <div className="mt-1.5 flex flex-wrap gap-1">
-                {art.tags.length ? art.tags.map((t) => <span key={t} className="rounded-pill bg-surface-high px-2 py-0.5 text-on-surface-low text-[0.75rem]">{t}</span>)
-                  : <span className="text-on-surface-low text-[0.75rem]">None</span>}
-              </div>
+              {editable ? (
+                <div className="mt-1.5">
+                  <ChipInput values={art.tags} onChange={saveTags} placeholder="Add a tag, Enter"
+                    ariaLabel="Artifact tags" disabled={tagsBusy} disabledReason="Saving tags" />
+                </div>
+              ) : (
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {art.tags.length ? art.tags.map((t) => <span key={t} className="rounded-pill bg-surface-high px-2 py-0.5 text-on-surface-low text-[0.75rem]">{t}</span>)
+                    : <span className="text-on-surface-low text-[0.75rem]">None</span>}
+                </div>
+              )}
             </div>
 
             <div>

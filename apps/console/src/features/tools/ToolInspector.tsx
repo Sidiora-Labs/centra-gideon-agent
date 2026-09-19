@@ -60,10 +60,16 @@ function RunPanel({ tool }: { tool: ToolItem }) {
   const [result, setResult] = useState<ToolInvokeResult | null>(null)
   const [formErr, setFormErr] = useState('')
   const { props, required } = schemaProps(tool.parameters)
+  const disabledReason = tool.providerDisabled
+    ? 'Enable this provider to try its tools'
+    : tool.disabled
+      ? 'Enable this tool to try it'
+      : ''
 
-  useEffect(() => { setOpen(false); setResult(null); setConfirming(false); setFormErr('') }, [tool.name])
+  useEffect(() => { setOpen(false); setResult(null); setConfirming(false); setFormErr('') }, [tool.name, disabledReason])
 
   async function run() {
+    if (disabledReason) return
     const { args: built, error } = buildArgs(tool.parameters, args)
     if (error) { setFormErr(error); return }
     setFormErr(''); setRunning(true); setResult(null)
@@ -74,7 +80,9 @@ function RunPanel({ tool }: { tool: ToolItem }) {
 
   return (
     <div className="rounded-lg border border-outline-variant/40">
-      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="flex w-full items-center gap-s px-m py-2.5 text-left">
+      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
+        disabled={!!disabledReason} title={disabledReason || undefined}
+        className="flex w-full items-center gap-s px-m py-2.5 text-left disabled:cursor-not-allowed disabled:opacity-40">
         <Play size={14} className="text-primary" />
         <span data-type="label-s" className="flex-1 text-on-surface" style={fvs(500)}>Try it</span>
         <ChevronRight size={15} className={`text-on-surface-low transition-transform ${open ? 'rotate-90' : ''}`} />
@@ -92,12 +100,13 @@ function RunPanel({ tool }: { tool: ToolItem }) {
           {formErr && <FieldError>{formErr}</FieldError>}
 
           {!confirming ? (
-            <Button size="sm" onClick={() => setConfirming(true)} disabled={running} disabledReason={BUSY_REASON}><Play size={15} /> Run tool</Button>
+            <Button size="sm" onClick={() => setConfirming(true)} disabled={running || !!disabledReason} disabledReason={disabledReason || BUSY_REASON}><Play size={15} /> Run tool</Button>
           ) : (
             <div className="rounded-md px-m py-2.5" style={{ background: 'color-mix(in srgb, var(--color-warn) 10%, transparent)' }}>
               <div data-type="label-s" className="flex items-center gap-1.5 text-warn mb-2" style={fvs(500)}><AlertTriangle size={14} /> This runs <span className="font-mono">{tool.name}</span> for real.</div>
               <div className="flex gap-s">
-                <Button size="sm" onClick={run} loading={running} loadingLabel="Running…"><Check size={15} /> Confirm & run</Button>
+                <Button size="sm" onClick={run} loading={running} loadingLabel="Running…"
+                  disabled={!!disabledReason} disabledReason={disabledReason}><Check size={15} /> Confirm & run</Button>
                 <Button size="sm" variant="ghost" onClick={() => setConfirming(false)} disabled={running} disabledReason={BUSY_REASON}>Cancel</Button>
               </div>
             </div>

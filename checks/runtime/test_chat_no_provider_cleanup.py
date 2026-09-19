@@ -84,18 +84,17 @@ async def test_no_provider_turn_runs_cleanup_without_unbound_error(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_the_no_provider_error_reaches_the_user_intact(tmp_path):
-    """The other half of the fix: the crash REPLACED the message the user needed.
+async def test_no_provider_shutdown_does_not_mint_pristine_sibling(tmp_path):
+    from gideon.interfaces.dashboard.chat_persistence import (
+        save_all_sessions_to_history,
+    )
 
-    The ``UnboundLocalError`` fired inside the turn's own error handling, so what the user
-    got was a dead turn instead of the provider's WHAT/WHY/FIX guidance. Asserted on the
-    message text, not merely on the presence of an ``error`` row — a turn that appended a
-    generic "something went wrong" would satisfy a role-only check while losing exactly
-    the thing that makes an immediate resolution failure actionable.
-    """
     state = _make_state(tmp_path)
-    session = _ChatSession("chat-2-test")
-    session._titled = True
+    failed = state.get_or_create_session("failed-provider")
+    failed._titled = True
+    pristine = state.get_or_create_session("pristine-sibling")
+    pristine.append("done", "")
+    pristine.drain()
 
     with (
         patch("gideon.interfaces.dashboard.chat_runner.maybe_offer_check_work"),
@@ -104,32 +103,10 @@ async def test_the_no_provider_error_reaches_the_user_intact(tmp_path):
         ),
         patch("gideon.interfaces.dashboard.chat_plan.maybe_submit_plan_draft"),
     ):
-        await run_chat(state, session, "hi")
+        await run_chat(state, failed, "hi")
 
-    errors = [m for m in session.messages if m.get("role") == "error"]
-    assert len(errors) == 1
-    text = errors[0]["content"]
-    assert "no model provider resolves for use case 'chat'" in text
-    assert "FIX: add a model provider in Settings" in text
+    save_all_sessions_to_history(state)
 
-
-@pytest.mark.asyncio
-async def test_the_turn_counter_is_bound_before_provider_setup(tmp_path):
-    """ac 84.1 stated on the source shape the fix is: the counter's initialization must
-    precede the ``try`` whose ``finally`` reads it. The behaviour test above proves the
-    turn survives; this pins WHY, so a later edit that moves the binding back inside the
-    ``try`` (where every provider-setup line can jump over it) fails here even if that
-    turn happens not to reach the reading branch."""
-    import inspect
-
-    from gideon.interfaces.dashboard import chat_runner
-
-    src = inspect.getsource(chat_runner.run_chat)
-    binding = src.index("_turn_tool_call_count = 0")
-    assert binding < src.index(
-        "maybe_offer_check_work(state, session, _turn_tool_call_count)"
-    )
-    tail = src[binding:].removeprefix("_turn_tool_call_count = 0").strip()
-    assert tail.startswith(
-        "try:"
-    ), f"the counter must be the last statement before the turn's try block, not {tail[:60]!r}"
+    persisted = state.conversation_log.read_messages("dashboard:failed-provider")
+    assert any(m.get("role") == "error" for m in persisted)
+    assert not state.conversation_log.has_log("dashboard:pristine-sibling")

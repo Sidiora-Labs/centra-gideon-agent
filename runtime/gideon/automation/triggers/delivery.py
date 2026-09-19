@@ -9,8 +9,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from gideon.core.errors import AgentError, redacted_envelope
-
 logger = logging.getLogger(__name__)
 
 EVENT_SUCCEEDED = "automation.run.succeeded"
@@ -187,7 +185,6 @@ def build_delivery(
     destination: str = "",
     attempt_key: str = "",
     duration_secs: float = 0.0,
-    agent_error: AgentError | None = None,
 ) -> Delivery:
     from gideon.workspace import notification_kinds
 
@@ -200,19 +197,13 @@ def build_delivery(
     metadata = (
         {"duration_secs": round(float(duration_secs), 3)} if duration_secs else {}
     )
-    envelope = None if agent_error is None else redacted_envelope(agent_error)
-    if envelope is not None:
-        metadata["agent_error"] = envelope.to_dict()
-    body = (
-        envelope.render() if envelope is not None else _redact(summary or "")[:BODY_CAP]
-    )
     return Delivery(
         event=event,
         event_id=event_id(
             trigger_id=trigger_id, run_id=run_id, attempt_key=attempt_key
         ),
         title=_redact(f"{label} {verb}"),
-        body=body,
+        body=_redact(summary or "")[:BODY_CAP],
         status_url=status_url(run_id=run_id, trigger_id=trigger_id),
         trigger_id=trigger_id,
         run_id=run_id,
@@ -225,6 +216,11 @@ def build_delivery(
 def route_for(trigger: Any, *, ok: bool) -> str:
     failure = "" if ok else str(getattr(trigger, "failure_delivery", "") or "")
     return failure or str(getattr(trigger, "delivery", "") or "none")
+
+
+def dedupe_hash_enabled(trigger: Any) -> bool:
+    policy = getattr(trigger, "failure_policy", None)
+    return isinstance(policy, dict) and policy.get("dedupe_hash") is True
 
 
 def failure_hash(text: str) -> str:

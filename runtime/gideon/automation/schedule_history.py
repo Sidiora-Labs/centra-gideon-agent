@@ -36,7 +36,6 @@ _LIST_FIELDS = (
     "status",
     "summary",
     "error",
-    "agent_error",
 )
 
 
@@ -52,7 +51,6 @@ class ExecutionRecord:
     summary: str = ""
     trace: str = ""
     error: str = ""
-    agent_error: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self, *, include_trace: bool = True) -> dict[str, Any]:
         fields = (*_LIST_FIELDS, "trace") if include_trace else _LIST_FIELDS
@@ -68,8 +66,6 @@ class ExecutionRecord:
                 converted = int(value or 0)
             elif name in {"started_at", "finished_at"}:
                 converted = float(value or 0.0)
-            elif name == "agent_error":
-                converted = dict(value) if isinstance(value, dict) else {}
             else:
                 converted = str(value)
             if name == "run_id" and not converted:
@@ -91,19 +87,6 @@ def _redact_stored(text: str | None) -> str:
         return redact_credentials(without_urls)[0]
     except Exception:
         return "[redaction failed; text withheld]"
-
-
-def _redact_envelope(envelope: Any) -> dict[str, Any]:
-    """Scrub a stored WHAT/WHY/FIX envelope line by line, keeping its shape."""
-    if not isinstance(envelope, dict):
-        return {}
-    cleaned: dict[str, Any] = {}
-    for key, value in envelope.items():
-        if isinstance(value, str):
-            cleaned[str(key)] = _redact_stored(value)
-        elif isinstance(value, (list, tuple)):
-            cleaned[str(key)] = [_redact_stored(str(item)) for item in value]
-    return cleaned
 
 
 def _inert(record: dict[str, Any]) -> bool:
@@ -215,7 +198,6 @@ class ExecutionJournal:
         ):
             value = _redact_stored(getattr(run, field_name))
             setattr(run, field_name, value if limit is None else value[:limit])
-        run.agent_error = _redact_envelope(run.agent_error)
         location = self._job_path(run.job_id)
         with self._exclusive():
             self._append_record(location, run.to_dict())
@@ -245,6 +227,11 @@ class ExecutionJournal:
         self, job_id: str, offset: int = 0, limit: int = 10
     ) -> tuple[list[dict[str, Any]], int]:
         return await asyncio.to_thread(self._job_page, job_id, offset, limit)
+
+    def list_for_job_sync(
+        self, job_id: str, offset: int = 0, limit: int = 10
+    ) -> tuple[list[dict[str, Any]], int]:
+        return self._job_page(job_id, offset, limit)
 
     def _window_count(self, job_id: str, since: float, manual: bool) -> int:
         counted = 0

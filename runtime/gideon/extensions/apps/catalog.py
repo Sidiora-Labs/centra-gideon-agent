@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -218,6 +219,7 @@ _registry_cache: dict[str, tuple[float, list["RegistryPointer"]]] = {}
 
 _GIT_SCAN_TTL_SECS = 300.0
 _git_scan_cache: dict[str, tuple[float, list["CatalogEntry"]]] = {}
+_catalog_build_lock = threading.Lock()
 
 
 @dataclass
@@ -1237,6 +1239,11 @@ def available_catalog() -> dict[str, Any]:
     step all depend on: with no name in two lists, no consumer can resolve a collision
     differently from another (#2528).
     """
+    with _catalog_build_lock:
+        return _build_available_catalog()
+
+
+def _build_available_catalog() -> dict[str, Any]:
     import time
 
     now = time.time()

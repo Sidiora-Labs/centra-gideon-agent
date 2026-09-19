@@ -55,7 +55,7 @@ class Item:
     def from_row(cls, row: Any) -> Item:
         data = row if isinstance(row, dict) else dict(row)
         metadata = _meta(data.get("file_metadata"))
-        fields = {
+        fields: dict = {
             name: str(data.get(name, "") or "")
             for name in (
                 "id",
@@ -347,7 +347,7 @@ class HealthReport:
         return not any(getattr(self, category) for category in _HEALTH_CATEGORIES)
 
     def to_dict(self) -> dict[str, Any]:
-        payload = {
+        payload: dict = {
             category: list(getattr(self, category)) for category in _HEALTH_CATEGORIES
         }
         payload["clean"] = self.clean

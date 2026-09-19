@@ -402,6 +402,69 @@ async def test_create_with_project_id_attaches_general_list(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_task_writes_reject_unknown_parent_ids_without_creating_orphans(tmp_path):
+    async with _client(tmp_path) as client:
+        for payload in (
+            {"title": "Bad project", "project_id": "p-missing"},
+            {"title": "Bad list", "task_list_id": "tl-missing"},
+        ):
+            response = await client.post("/api/tasks", json=payload)
+            assert response.status == 400
+        assert (await (await client.get("/api/tasks")).json())["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_task_update_rejects_unknown_parent_without_changing_task(tmp_path):
+    async with _client(tmp_path) as client:
+        task = await (await client.post("/api/tasks", json={"title": "Safe"})).json()
+        response = await client.put(
+            f"/api/tasks/{task['id']}", json={"task_list_id": "tl-missing"}
+        )
+        assert response.status == 400
+        stored = await (await client.get(f"/api/tasks/{task['id']}")).json()
+        assert stored["task_list_id"] == ""
+
+
+@pytest.mark.asyncio
+async def test_bulk_parent_validation_aborts_before_any_task_write(tmp_path):
+    async with _client(tmp_path) as client:
+        response = await client.post(
+            "/api/tasks/bulk",
+            json={
+                "op": "create",
+                "items": [
+                    {"title": "Would otherwise persist"},
+                    {"title": "Orphan", "task_list_id": "tl-missing"},
+                ],
+            },
+        )
+        assert response.status == 400
+        assert (await (await client.get("/api/tasks")).json())["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_bulk_writes_resolve_project_ids(tmp_path):
+    async with _client(tmp_path) as client:
+        project = await (
+            await client.post("/api/projects", json={"name": "Bulk project"})
+        ).json()
+        receipt = await (
+            await client.post(
+                "/api/tasks/bulk",
+                json={
+                    "op": "create",
+                    "items": [{"title": "Bulk child", "project_id": project["id"]}],
+                },
+            )
+        ).json()
+        task = await (
+            await client.get(f"/api/tasks/{receipt['results'][0]['task_id']}")
+        ).json()
+        assert task["project"] == "Bulk project"
+        assert task["task_list_id"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("shape", [12345, True, 1.5, [1], {"nested": "obj"}, None])
 async def test_non_string_title_is_400_not_500(tmp_path, shape):
     """`body.get("title", "").strip()` raised AttributeError on every non-string
@@ -462,6 +525,72 @@ async def test_search_query_and_priority_filter(tmp_path):
         ).json()
         assert body["total"] == 1
         assert body["tasks"][0]["priority"] == "critical"
+
+
+@pytest.mark.asyncio
+async def test_task_pagination_clamps_and_reports_the_applied_window(tmp_path):
+    async with _client(tmp_path) as client:
+        for title in ("A", "B", "C"):
+            await client.post("/api/tasks", json={"title": title})
+
+        listed = await (await client.get("/api/tasks?limit=0&offset=-20")).json()
+        assert (listed["limit"], listed["offset"]) == (1, 0)
+        assert len(listed["tasks"]) == 1 and listed["total"] == 3
+
+        searched = await (
+            await client.post(
+                "/api/tasks/search", json={"limit": 100_000, "offset": -20}
+            )
+        ).json()
+        assert (searched["limit"], searched["offset"]) == (500, 0)
+        assert len(searched["tasks"]) == 3 and searched["total"] == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [
+        ("get", "/api/tasks?provider=missing", None),
+        ("get", "/api/tasks/graph?provider=missing", None),
+        ("post", "/api/tasks", {"title": "No", "provider": "missing"}),
+        ("get", "/api/tasks/t-nope?provider=missing", None),
+        ("put", "/api/tasks/t-nope", {"title": "No", "provider": "missing"}),
+        ("delete", "/api/tasks/t-nope?provider=missing", None),
+        ("get", "/api/tasks/t-nope/comments?provider=missing", None),
+        (
+            "post",
+            "/api/tasks/t-nope/comments",
+            {"body": "No", "provider": "missing"},
+        ),
+        ("delete", "/api/tasks/t-nope/comments/c-nope?provider=missing", None),
+    ],
+)
+async def test_unknown_task_providers_are_400(tmp_path, method, path, payload):
+    async with _client(tmp_path) as client:
+        request = getattr(client, method)
+        response = (
+            await request(path, json=payload)
+            if payload is not None
+            else await request(path)
+        )
+        assert response.status == 400
+        assert (await response.json())["error"] == "Unknown task provider: missing"
+
+
+@pytest.mark.asyncio
+async def test_bulk_task_provider_selection_matches_single_write_semantics(tmp_path):
+    async with _client(tmp_path) as client:
+        refused = await client.post(
+            "/api/tasks/bulk",
+            json={
+                "op": "create",
+                "items": [{"title": "No", "provider": "missing"}],
+            },
+        )
+        assert refused.status == 400
+        receipt = await refused.json()
+        assert receipt["succeeded"] == 0
+        assert receipt["errors"][0]["error"] == "Unknown task provider: missing"
 
 
 @pytest.mark.asyncio
@@ -690,7 +819,22 @@ async def test_reset_repeatable_list(tmp_path):
         ).json()
         t = await (
             await client.post(
-                "/api/tasks", json={"title": "step", "task_list_id": tl["id"]}
+                "/api/tasks",
+                json={
+                    "title": "step",
+                    "task_list_id": tl["id"],
+                    "exit_criteria": [
+                        {
+                            "description": "verified",
+                            "status": "complete",
+                            "comment": "old proof",
+                        }
+                    ],
+                    "action_plan": [{"content": "run it", "completed": True}],
+                    "execution_notes": [{"content": "old run"}],
+                    "evidence": [{"kind": "gate", "ref": "old"}],
+                    "attempts": [{"status": "passed"}],
+                },
             )
         ).json()
         await client.put(f"/api/tasks/{t['id']}", json={"status": "done"})
@@ -700,6 +844,55 @@ async def test_reset_repeatable_list(tmp_path):
         assert r.status == 200
         reloaded = await (await client.get(f"/api/tasks/{t['id']}")).json()
         assert reloaded["status"] == "open"
+        assert reloaded["exit_criteria"] == [
+            {
+                "description": "verified",
+                "status": "incomplete",
+                "comment": "",
+                "met": False,
+            }
+        ]
+        assert reloaded["action_plan"][0]["completed"] is False
+        assert reloaded["execution_notes"] == []
+        assert reloaded["evidence"] == [] and reloaded["attempts"] == []
+
+
+@pytest.mark.asyncio
+async def test_reopening_repeatable_task_resets_previous_run_state(tmp_path):
+    async with _client(tmp_path) as client:
+        tl = await (
+            await client.post(
+                "/api/task-lists", json={"name": "Weekly", "repeatable": True}
+            )
+        ).json()
+        task = await (
+            await client.post(
+                "/api/tasks",
+                json={
+                    "title": "step",
+                    "task_list_id": tl["id"],
+                    "status": "done",
+                    "exit_criteria": [
+                        {"description": "verified", "met": True, "comment": "old"}
+                    ],
+                    "action_plan": [{"content": "run it", "completed": True}],
+                    "execution_notes": [{"content": "old run"}],
+                    "evidence": [{"kind": "gate", "ref": "old"}],
+                    "attempts": [{"status": "passed"}],
+                },
+            )
+        ).json()
+
+        response = await client.put(f"/api/tasks/{task['id']}", json={"status": "open"})
+
+        assert response.status == 200
+        reopened = await response.json()
+        assert reopened["status"] == "open"
+        assert reopened["exit_criteria"][0]["met"] is False
+        assert reopened["exit_criteria"][0]["comment"] == ""
+        assert reopened["action_plan"][0]["completed"] is False
+        assert reopened["execution_notes"] == []
+        assert reopened["evidence"] == [] and reopened["attempts"] == []
 
 
 @pytest.mark.asyncio

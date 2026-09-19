@@ -163,7 +163,7 @@ class EditCandidate:
             self.regex(pattern, resource)
             if strategy not in strategies:
                 self.deny(f"strategy must be one of {sorted(strategies)}", resource)
-            output = {
+            output: dict = {
                 "name": str(row.get("name", "")).strip()[:80],
                 "match_regex": pattern,
                 "strategy": strategy,

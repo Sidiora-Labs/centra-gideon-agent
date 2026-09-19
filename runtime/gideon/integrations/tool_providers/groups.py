@@ -285,16 +285,12 @@ def groups_enabled() -> bool:
         return False
 
 
-def resolve_default_groups(surface: str) -> set[str] | None:
-    """The groups that start active for ``surface``, or ``None`` for "all active".
-
-    ``None`` is the fail-open answer and the answer for every surface without a
-    configured default (notably interactive chat) — the runtime then skips group
-    filtering entirely, so the tool block is byte-identical to having no groups.
-    """
-    if not groups_enabled():
-        return None
-    defaults: dict[str, list[str]] = dict(DEFAULT_GROUP_DEFAULTS)
+def configured_group_defaults() -> dict[str, list[str]]:
+    """The configured starting groups for each surface, before runtime resolution."""
+    defaults = {
+        surface: list(group_names)
+        for surface, group_names in DEFAULT_GROUP_DEFAULTS.items()
+    }
     try:
         from gideon.core.config.loader import AppConfig
 
@@ -306,7 +302,19 @@ def resolve_default_groups(surface: str) -> set[str] | None:
         logger.debug(
             "groups: group_defaults unreadable — using built-in defaults", exc_info=True
         )
-    wanted = defaults.get((surface or "").strip() or "chat")
+    return defaults
+
+
+def resolve_default_groups(surface: str) -> set[str] | None:
+    """The groups that start active for ``surface``, or ``None`` for "all active".
+
+    ``None`` is the fail-open answer and the answer for every surface without a
+    configured default (notably interactive chat) — the runtime then skips group
+    filtering entirely, so the tool block is byte-identical to having no groups.
+    """
+    if not groups_enabled():
+        return None
+    wanted = configured_group_defaults().get((surface or "").strip() or "chat")
     if not wanted or ALL_GROUPS in wanted:
         return None
     return {CORE_GROUP, *wanted}

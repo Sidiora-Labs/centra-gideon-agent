@@ -72,7 +72,7 @@ class AcpAgentProvider(AcpToolOutcomesMixin, ModelProvider, AgentProvider):
         self._unattended = bool(unattended)
         self._capability_flags = dict(capability_flags or {})
         self._negotiated_capabilities: frozenset[str] = frozenset()
-        configuration = {
+        configuration: dict = {
             "work_dir": self._cwd,
             "command": self._command,
             "extra_env": self._env or None,
@@ -357,7 +357,9 @@ def _factory(
     credentials = kwargs.get("credential_store")
     if entry.credential and credentials is not None:
         try:
-            credentials.resolve(entry.credential)
+            resolve = getattr(credentials, "resolve", None)
+            if callable(resolve):
+                resolve(entry.credential)
         except Exception:
             logger.debug(
                 "ACP credential reference unavailable for %r: %r",

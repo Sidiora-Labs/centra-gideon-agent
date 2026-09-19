@@ -109,6 +109,65 @@ class ReversalOutcome:
     demoted: bool = False
 
 
+@dataclass(frozen=True)
+class ApprovalScreeningVerdict:
+    requested_mode: str
+    requested_approval: str
+    ceiling: str
+    verdict: str
+    reason: str = ""
+
+    @property
+    def allowed(self) -> bool:
+        return self.verdict == "allowed"
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "requested_mode": self.requested_mode,
+            "requested_approval": self.requested_approval,
+            "ceiling": self.ceiling,
+            "verdict": self.verdict,
+            "reason": self.reason,
+        }
+
+
+_APPROVAL_MODE_POSTURES = {
+    "normal": "ask",
+    "trust_reads": "hook_based",
+    "trust": "auto",
+    "yolo": "auto",
+}
+
+
+def approval_screening_verdict(mode: str) -> ApprovalScreeningVerdict:
+    """Screen a dashboard approval mode against the operator's hard ceiling."""
+    from gideon.security.guardrails.ceiling import active_ceiling
+    from gideon.security.guardrails.policy import ceiling_permits_approval
+
+    requested = _APPROVAL_MODE_POSTURES.get(mode, "")
+    control = active_ceiling().control("approval")
+    ceiling = str(getattr(control, "value", "") or "open")
+    if requested and ceiling_permits_approval(requested):
+        return ApprovalScreeningVerdict(
+            requested_mode=mode,
+            requested_approval=requested,
+            ceiling=ceiling,
+            verdict="allowed",
+        )
+    label = mode.replace("_", " ") or "unknown mode"
+    reason = (
+        f"{label} was not enabled because the operator approval ceiling requires "
+        f"{ceiling.replace('_', ' ')}."
+    )
+    return ApprovalScreeningVerdict(
+        requested_mode=mode,
+        requested_approval=requested,
+        ceiling=ceiling,
+        verdict="denied",
+        reason=reason,
+    )
+
+
 def _store_path() -> Path:
     from gideon.core.config.loader import config_dir
 

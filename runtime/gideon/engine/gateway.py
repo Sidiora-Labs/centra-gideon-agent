@@ -14,6 +14,8 @@ orchestrator. Core imports NO vendor channel code. With no channel configured th
 gateway runs dashboard-only.
 """
 
+from __future__ import annotations
+
 import asyncio
 import functools
 import json
@@ -421,6 +423,38 @@ class RuntimeCoordinator:
     :mod:`interactions` respectively.
     """
 
+    _cfg: AppConfig
+    _no_dashboard: bool
+    _no_crons: bool
+    _no_open: bool
+    _port_override: str | None
+    _json_ready: bool
+    _approval_mode: str | None
+    _app_token: str
+    _bot_token: str
+    _owner_id: str
+    _slack_enabled: bool
+    _configured_host: str
+    _local_only: bool
+    _dashboard_port: int
+    sessions: ConversationDirectory | None
+    ctx_builder: PromptAssembler | None
+    conv_log: ConversationLog | None
+    consolidator: HistoryConsolidator | None
+    heartbeat_svc: HeartbeatService | None
+    loop_watchdog: LoopWatchdog | None
+    workflow_watchdog: WorkflowWatchdog | None
+    inbox_svc: InboxService | None
+    subagent_mgr: DelegationSupervisor | None
+    channel_history: ChannelHistory | None
+    dashboard_state: ConsoleState | None
+    _dashboard_runner: web.AppRunner | None
+    _file_watch_task: asyncio.Task[Any] | None
+    _web_watch_task: asyncio.Task[Any] | None
+    _clock_task: asyncio.Task[Any] | None
+    _reaper_task: asyncio.Task[Any] | None
+    _handler_tasks: set[asyncio.Task[Any]]
+
     def __init__(
         self,
         cfg: AppConfig,
@@ -567,31 +601,17 @@ class RuntimeCoordinator:
 
         return TriggerPublication(self, logger).repeated_failure(trigger, error)
 
-    def _deliver_fire_outcome(
-        self,
-        trigger: Any,
-        *,
-        ok: bool,
-        error: str = "",
-        agent_error: Any = None,
-    ) -> None:
+    def _deliver_fire_outcome(self, trigger: Any, *, ok: bool, error: str = "") -> None:
         from gideon.engine.trigger_outcomes import TriggerPublication
 
-        TriggerPublication(self, logger).outcome(trigger, ok, error, agent_error)
+        TriggerPublication(self, logger).outcome(trigger, ok, error)
 
     async def _record_fire_outcome(
-        self,
-        trigger: Any,
-        *,
-        result: Any = None,
-        exc: BaseException | None = None,
-        agent_error: Any = None,
+        self, trigger: Any, *, result: Any = None, exc: BaseException | None = None
     ) -> None:
         from gideon.engine.trigger_outcomes import FireLedger
 
-        await FireLedger(self, ExecutionJournal, logger).record(
-            trigger, result, exc, agent_error
-        )
+        await FireLedger(self, ExecutionJournal, logger).record(trigger, result, exc)
 
     async def _record_blocked_fire(self, trigger: Any, groups: str) -> None:
         message = "payload blocked by the injection screen ({}); never retried".format(
@@ -823,7 +843,7 @@ class RuntimeCoordinator:
         stages = (
             StartupStage(
                 f"channel:{receiver.name}",
-                lambda receiver=receiver: receiver.start_inbound(self),
+                functools.partial(receiver.start_inbound, self),
                 optional=True,
             )
             for receiver in receivers

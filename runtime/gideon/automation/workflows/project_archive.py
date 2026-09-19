@@ -399,7 +399,7 @@ def _derive_key(passphrase: str, salt: bytes) -> bytes:
     from cryptography.hazmat.primitives import hashes
     from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-    parameters = dict(
+    parameters: dict = dict(
         algorithm=hashes.SHA256(), length=32, salt=salt, iterations=KDF_ITERATIONS
     )
     return PBKDF2HMAC(**parameters).derive(passphrase.encode("utf-8"))

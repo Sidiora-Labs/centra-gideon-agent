@@ -231,7 +231,7 @@ _EVIDENCE_CAP = 120
 # window is anchored at the start of the matched line — so a call brings its callee
 # and what it is assigned to — and, when the construct opens a bracket, walks to the
 # matching close bracket so the ARGUMENTS come along. A window that merely hugged the
-# matched token showed `subprocess.run(  # noqa: S603` and cut the argv off on the
+# matched token showed `subprocess.run(` and cut the argv off on the
 # next line: the reader was warned about a subprocess and shown everything except
 # what it runs. These two bound that walk on a pathological or unbalanced file.
 _EVIDENCE_MAX_LINES = 8

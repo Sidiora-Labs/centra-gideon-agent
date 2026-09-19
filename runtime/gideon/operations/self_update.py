@@ -49,7 +49,16 @@ _RELEASES_LIST_URL = (
 
 _LIST_CACHE_FILENAME = "update_releases.json"
 
+_UPDATE_STATE_FILENAME = "update_state.json"
+
+_ROLLBACK_PHASES = frozenset({"applying", "applied", "failed"})
+
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+DIRTY_TREE_REASON = (
+    "Working tree has uncommitted changes to tracked files — commit or stash "
+    "them before rolling back."
+)
 
 
 @dataclass(frozen=True)
@@ -134,6 +143,12 @@ def _list_cache_path() -> Path:
     return config_dir() / _LIST_CACHE_FILENAME
 
 
+def _update_state_path() -> Path:
+    from gideon.core.config.loader import config_dir
+
+    return config_dir() / _UPDATE_STATE_FILENAME
+
+
 @dataclass(frozen=True)
 class ReleaseCache:
     locate: object
@@ -167,6 +182,105 @@ def read_releases_cache() -> dict[str, object]:
 
 def write_releases_cache(data: dict[str, object]) -> None:
     ReleaseCache(_list_cache_path).write(data)
+
+
+def read_update_state() -> dict[str, object]:
+    """Read the durable journal for the most recent core update."""
+    value = ReleaseCache(_update_state_path).read()
+    return value if isinstance(value, dict) else {}
+
+
+def write_update_state(data: dict[str, object]) -> None:
+    """Persist the core update journal atomically."""
+    from gideon.core.atomic_write import atomic_write
+
+    atomic_write(_update_state_path(), json.dumps(data, indent=2) + "\n", fsync=True)
+
+
+def _state_version(value: object) -> str:
+    return normalize_version(str(value or ""))
+
+
+def begin_update(
+    kind: str,
+    current: str,
+    target: str,
+    *,
+    rollback_ref: str = "",
+) -> dict[str, object]:
+    """Record the recovery point before an in-process update mutates the install."""
+    now = time.time()
+    state: dict[str, object] = {
+        "schema": 1,
+        "phase": "applying",
+        "kind": kind,
+        "from_version": _state_version(current),
+        "to_version": _state_version(target),
+        "rollback_ref": str(rollback_ref or ""),
+        "started_at": now,
+        "updated_at": now,
+        "error": "",
+    }
+    write_update_state(state)
+    return state
+
+
+def transition_update(phase: str, *, error: str = "") -> dict[str, object]:
+    """Move an existing update journal to a new, documented lifecycle phase."""
+    state = read_update_state()
+    if not state:
+        return {}
+    state["phase"] = phase
+    state["updated_at"] = time.time()
+    state["error"] = str(error or "")
+    write_update_state(state)
+    return state
+
+
+def complete_update() -> dict[str, object]:
+    return transition_update("applied")
+
+
+def fail_update(error: str) -> dict[str, object]:
+    return transition_update("failed", error=error)
+
+
+def begin_rollback() -> dict[str, object]:
+    return transition_update("rolling_back")
+
+
+def complete_rollback() -> dict[str, object]:
+    return transition_update("rolled_back")
+
+
+def rollback_snapshot(kind: str) -> dict[str, str]:
+    """Return the validated recovery point for *kind*, or an empty mapping."""
+    state = read_update_state()
+    if state.get("kind") != kind or state.get("phase") not in _ROLLBACK_PHASES:
+        return {}
+    version = _state_version(state.get("from_version"))
+    ref = str(state.get("rollback_ref") or "")
+    if kind == "pip" and version:
+        return {"version": version, "ref": ""}
+    if kind == "git" and ref:
+        return {"version": version, "ref": ref}
+    return {}
+
+
+def update_state_view(kind: str) -> dict[str, object]:
+    """Stable API fields describing update progress and rollback availability."""
+    state = read_update_state()
+    snapshot = rollback_snapshot(kind)
+    return {
+        "update_state": str(state.get("phase") or "idle"),
+        "update_from_version": _state_version(state.get("from_version")),
+        "update_target": _state_version(state.get("to_version")),
+        "update_started_at": state.get("started_at"),
+        "update_updated_at": state.get("updated_at"),
+        "update_error": str(state.get("error") or ""),
+        "rollback_available": bool(snapshot),
+        "rollback_version": snapshot.get("version", ""),
+    }
 
 
 def _release_text(item):
@@ -226,11 +340,8 @@ class ReleaseRequest:
             return self.cache
 
 
-async def fetch_latest_release(*, offline: bool = False) -> dict[str, object]:
-    cache = read_release_cache()
-    if offline:
-        return cache
-    return await ReleaseRequest(_RELEASES_LATEST_URL, cache).refresh(
+async def fetch_latest_release() -> dict[str, object]:
+    return await ReleaseRequest(_RELEASES_LATEST_URL, read_release_cache()).refresh(
         _release_text, write_release_cache
     )
 
@@ -241,10 +352,9 @@ def _release_list(payload):
     }
 
 
-async def fetch_releases(*, offline: bool = False) -> list[dict[str, object]]:
+async def fetch_releases() -> list[dict[str, object]]:
     cache = read_releases_cache()
-    if offline:
-        return _releases_from_cache(cache)
+    _releases_from_cache(cache)
     refreshed = await ReleaseRequest(_RELEASES_LIST_URL, cache).refresh(
         _release_list, write_releases_cache
     )
@@ -297,55 +407,8 @@ def select_target(
     return ReleaseSelection(releases, channel, pin).choose()
 
 
-async def resolve_target(channel: str, pin: str = "", *, offline: bool = False) -> str:
-    return select_target(await fetch_releases(offline=offline), channel, pin)
-
-
-def package_channel(channel: str) -> str:
-    """The channel a PACKAGE install can actually install.
-
-    There is no nightly wheel — nightly is a git-checkout-only branch-tracking
-    channel — so a package install on ``nightly`` rides ``stable`` rather than
-    refusing or silently doing nothing.
-    """
-    return "stable" if channel == "nightly" else channel
-
-
-@dataclass(frozen=True)
-class PackageTarget:
-    """What a package upgrade should install, or why it cannot be chosen."""
-
-    spec: str = ""
-    version: str = ""
-    error: str = ""
-
-    @property
-    def ok(self) -> bool:
-        return not self.error
-
-
-def missing_pin_error(pin: str) -> str:
-    return (
-        f"Version pin {normalize_version(pin)!r} is not a published release — "
-        "clear the pin or set it to a released version in Settings > Updates."
-    )
-
-
-async def resolve_package_target(
-    channel: str, pin: str = "", *, offline: bool = False
-) -> PackageTarget:
-    """Pick the release a package install should upgrade to.
-
-    An exact pin that names no published release is REFUSED with an actionable
-    message rather than silently upgrading to something else. With no pin an
-    unresolvable channel (offline with a cold cache, or no release published
-    yet) degrades to the unpinned upgrade the installer already performs — that
-    is the offline story, and it is deliberately not an error.
-    """
-    tag = await resolve_target(package_channel(channel), pin, offline=offline)
-    if pin and not tag:
-        return PackageTarget(error=missing_pin_error(pin))
-    return PackageTarget(spec=upgrade_spec(tag), version=normalize_version(tag))
+async def resolve_target(channel: str, pin: str = "") -> str:
+    return select_target(await fetch_releases(), channel, pin)
 
 
 @dataclass(frozen=True)
@@ -373,13 +436,11 @@ class UpdateStatus:
         }
 
 
-async def build_update_status(
-    current: str, *, offline: bool = False
-) -> dict[str, object]:
+async def build_update_status(current: str) -> dict[str, object]:
     kind = detect_install_kind()
-    release = await fetch_latest_release(offline=offline)
+    release = await fetch_latest_release()
     behind = None
-    if kind == "git" and not offline:
+    if kind == "git":
         project = project_dir()
         if project:
             try:
@@ -485,117 +546,21 @@ def git_tracked_changes(proj: str) -> list[str]:
     return GitCheckout(proj).tracked()
 
 
-def git_fetch_tags(proj: str) -> subprocess.CompletedProcess[str]:
-    return GitCheckout(proj).run("fetch", "--tags", "origin", timeout=60)
-
-
 def git_commit_for(proj: str, ref: str) -> str:
-    """The commit *ref* names locally, or "" when the ref is unknown here."""
+    """Return the commit named by *ref*, or an empty string when unavailable."""
     result = GitCheckout(proj).run(
         "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"
     )
     return (result.stdout or "").strip() if result.returncode == 0 else ""
 
 
-def git_is_fast_forward(proj: str, ref: str) -> bool:
-    """True when HEAD is an ancestor of *ref*, i.e. moving there loses nothing."""
-    return (
-        GitCheckout(proj).run("merge-base", "--is-ancestor", "HEAD", ref).returncode
-        == 0
-    )
+def git_reset_hard(proj: str, branch: str) -> subprocess.CompletedProcess[str]:
+    return GitCheckout(proj).run("reset", "--hard", f"origin/{branch}")
 
 
-def git_merge_ff_only(proj: str, ref: str) -> subprocess.CompletedProcess[str]:
-    """Advance the checked-out branch to *ref*, or fail — never rewrite history.
-
-    ``--ff-only`` is the whole safety property: it moves the branch pointer when
-    the move is a pure fast-forward and refuses otherwise. It replaced a blind
-    ``git pull`` (which merges, and pulls whatever the branch's upstream happens
-    to be) and a ``git reset --hard`` (which discards commits and edits).
-    """
-    return GitCheckout(proj).run("merge", "--ff-only", ref, timeout=60)
-
-
-DIRTY_TREE_REASON = (
-    "Working tree has uncommitted changes to tracked files — commit or stash "
-    "them and the update applies on the next check."
-)
-
-SOURCE_MODE_TAG = "tag"
-SOURCE_MODE_BRANCH = "branch"
-SOURCE_MODE_PAUSED = "paused"
-SOURCE_MODE_NONE = "none"
-
-
-@dataclass(frozen=True)
-class SourcePlan:
-    """What a source (git) checkout should move to, or why it must not move.
-
-    ``paused`` is the ONE dirty-tree safeguard for every source update surface:
-    the unattended gateway apply, the dashboard apply and ``gideon update`` all
-    read this plan instead of running their own ``git status`` gate, so an
-    operator sees the same actionable reason and the same paused state wherever
-    the refusal happens.
-    """
-
-    mode: str
-    ref: str = ""
-    reason: str = ""
-    paths: tuple[str, ...] = ()
-
-    @property
-    def ok(self) -> bool:
-        return self.mode in (SOURCE_MODE_TAG, SOURCE_MODE_BRANCH)
-
-    @property
-    def paused(self) -> bool:
-        return self.mode == SOURCE_MODE_PAUSED
-
-
-async def plan_source_update(
-    proj: str, channel: str, pin: str = "", *, offline: bool = False
-) -> SourcePlan:
-    """Choose the ref a source install updates to, per release policy.
-
-    Normal source installs ride release TAGS chosen by channel or exact pin, the
-    same selection every other install kind uses. ``nightly`` is the only channel
-    that tracks a branch, and only when no pin overrides it.
-    """
-    tracked = git_tracked_changes(proj)
-    if tracked:
-        return SourcePlan(
-            SOURCE_MODE_PAUSED, reason=DIRTY_TREE_REASON, paths=tuple(tracked)
-        )
-    pin = (pin or "").strip()
-    if channel == "nightly" and not pin:
-        branch = current_branch(proj)
-        if not branch:
-            return SourcePlan(
-                SOURCE_MODE_NONE,
-                reason=(
-                    "Nightly tracks the checked-out branch, but this checkout has a "
-                    "detached HEAD — check out a branch first."
-                ),
-            )
-        return SourcePlan(SOURCE_MODE_BRANCH, f"origin/{branch}")
-    tag = await resolve_target(channel, pin, offline=offline)
-    if not tag:
-        return SourcePlan(
-            SOURCE_MODE_NONE,
-            reason=(
-                missing_pin_error(pin)
-                if pin
-                else f"No published release found for the {channel!r} channel."
-            ),
-        )
-    return SourcePlan(SOURCE_MODE_TAG, tag)
-
-
-def fetch_for_plan(proj: str, plan: SourcePlan) -> subprocess.CompletedProcess[str]:
-    """Fetch exactly what *plan* needs: the tag set, or the tracked branch."""
-    if plan.mode == SOURCE_MODE_BRANCH:
-        return git_fetch(proj, plan.ref.removeprefix("origin/"))
-    return git_fetch_tags(proj)
+def git_reset_to(proj: str, ref: str) -> subprocess.CompletedProcess[str]:
+    """Reset a clean checkout to an already validated rollback commit."""
+    return GitCheckout(proj).run("reset", "--hard", ref)
 
 
 async def _git_output(project, arguments, timeout, capture):

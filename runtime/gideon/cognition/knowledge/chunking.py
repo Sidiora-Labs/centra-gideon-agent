@@ -16,6 +16,8 @@ class Chunk:
     line_end: int
     chunk_index: int = 0
     embedding: bytes | None = None
+    embedding_provider: str = ""
+    embedding_model: str = ""
 
 
 @dataclass(frozen=True)

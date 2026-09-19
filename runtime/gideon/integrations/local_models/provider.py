@@ -11,10 +11,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import platform
 import sys
+import tempfile
+import wave
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field, fields
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -142,6 +146,81 @@ class LocalModel:
         }
 
 
+class LocalModelFailureCode(str, Enum):
+    """Stable machine-readable failure classes for local-model probes."""
+
+    UNKNOWN_PROVIDER = "unknown_provider"
+    NO_CAPABILITIES = "no_capabilities"
+    UNSUPPORTED_CAPABILITY = "unsupported_capability"
+    UNAVAILABLE = "unavailable"
+    BUSY = "busy"
+    TIMEOUT = "timeout"
+    SIDECAR_CRASHED = "sidecar_crashed"
+    PROVIDER_ERROR = "provider_error"
+    INVALID_RESULT = "invalid_result"
+
+
+@dataclass(frozen=True)
+class LocalModelFailure:
+    """A local-model failure as data rather than an unstructured exception string."""
+
+    code: LocalModelFailureCode
+    message: str
+    retryable: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "code": self.code.value,
+            "message": self.message,
+            "retryable": self.retryable,
+        }
+
+
+@dataclass(frozen=True)
+class CapabilitySelfTestResult:
+    """The result a provider returns after one real capability probe."""
+
+    ok: bool
+    detail: str = ""
+    failure: LocalModelFailure | None = None
+
+    @classmethod
+    def success(cls, detail: str = "") -> CapabilitySelfTestResult:
+        return cls(ok=True, detail=detail)
+
+    @classmethod
+    def failed(
+        cls,
+        code: LocalModelFailureCode,
+        message: str,
+        *,
+        retryable: bool = False,
+    ) -> CapabilitySelfTestResult:
+        return cls(
+            ok=False,
+            failure=LocalModelFailure(
+                code=code,
+                message=message,
+                retryable=retryable,
+            ),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "detail": self.detail,
+            "failure": self.failure.to_dict() if self.failure is not None else None,
+        }
+
+
+class LocalModelSelfTestError(RuntimeError):
+    """A provider-raised self-test refusal with a typed wire-safe failure."""
+
+    def __init__(self, failure: LocalModelFailure) -> None:
+        self.failure = failure
+        super().__init__(failure.message)
+
+
 class LocalModelProvider(ABC):
     """A provider that owns locally-downloadable models.
 
@@ -185,6 +264,110 @@ class LocalModelProvider(ABC):
         Default: no remote catalog → empty. Overridden by ollama to scrape its library.
         """
         return []
+
+    async def self_test(self, capability: str) -> CapabilitySelfTestResult:
+        """Run one small, real inference for ``capability``.
+
+        The default exercises the inference methods shared by local STT, TTS, embedding,
+        and diarization providers. Providers with a different inference contract can
+        override this method. Availability alone is never treated as a successful test.
+        """
+        models = await self.list_models()
+        model = next(
+            (item for item in models if bool(getattr(item, "downloaded", False))), None
+        )
+        if model is None:
+            return CapabilitySelfTestResult.failed(
+                LocalModelFailureCode.UNAVAILABLE,
+                f"{self.display_name} has no downloaded model to test",
+            )
+        model_name = str(getattr(model, "name", "") or "")
+
+        if capability == "embedding" and callable(getattr(self, "embed", None)):
+            vector = await self.embed(  # type: ignore[attr-defined]
+                "Gideon local model self-test", model=model_name
+            )
+            if vector:
+                return CapabilitySelfTestResult.success(
+                    f"embedding returned {len(vector)} dims"
+                )
+            return CapabilitySelfTestResult.failed(
+                LocalModelFailureCode.PROVIDER_ERROR,
+                "embedding inference returned no vector",
+            )
+
+        if capability == "tts" and callable(getattr(self, "synthesize", None)):
+            fd, output_path = tempfile.mkstemp(
+                prefix="gideon-local-model-selftest-", suffix=".wav"
+            )
+            os.close(fd)
+            try:
+                output = await self.synthesize(  # type: ignore[attr-defined]
+                    "Gideon self-test.", voice=model_name, output_path=output_path
+                )
+                if output:
+                    return CapabilitySelfTestResult.success("synthesis returned audio")
+                return CapabilitySelfTestResult.failed(
+                    LocalModelFailureCode.PROVIDER_ERROR,
+                    "synthesis returned no audio",
+                )
+            finally:
+                try:
+                    os.unlink(output_path)
+                except OSError:
+                    pass
+
+        if capability in {"stt", "diarization"}:
+            audio_path = self._self_test_audio()
+            try:
+                if capability == "stt" and callable(getattr(self, "transcribe", None)):
+                    transcript = await self.transcribe(  # type: ignore[attr-defined]
+                        audio_path, model=model_name
+                    )
+                    if transcript is not None:
+                        return CapabilitySelfTestResult.success(
+                            "transcription completed"
+                        )
+                    return CapabilitySelfTestResult.failed(
+                        LocalModelFailureCode.PROVIDER_ERROR,
+                        "transcription returned no result",
+                    )
+                if capability == "diarization" and callable(
+                    getattr(self, "diarize", None)
+                ):
+                    turns = await self.diarize(  # type: ignore[attr-defined]
+                        audio_path, model=model_name
+                    )
+                    if turns is not None:
+                        return CapabilitySelfTestResult.success("diarization completed")
+                    return CapabilitySelfTestResult.failed(
+                        LocalModelFailureCode.PROVIDER_ERROR,
+                        "diarization returned no result",
+                    )
+            finally:
+                try:
+                    os.unlink(audio_path)
+                except OSError:
+                    pass
+
+        return CapabilitySelfTestResult.failed(
+            LocalModelFailureCode.UNSUPPORTED_CAPABILITY,
+            f"{self.display_name} does not implement a {capability!r} self-test",
+        )
+
+    @staticmethod
+    def _self_test_audio() -> str:
+        """Create a short valid mono WAV for audio capability probes."""
+        fd, path = tempfile.mkstemp(
+            prefix="gideon-local-model-selftest-", suffix=".wav"
+        )
+        os.close(fd)
+        with wave.open(path, "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(16000)
+            audio.writeframes(b"\x00\x00" * 4000)
+        return path
 
     @abstractmethod
     async def download_model(self, model_name: str) -> bool:

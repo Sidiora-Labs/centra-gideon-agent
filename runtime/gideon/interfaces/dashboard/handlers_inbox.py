@@ -14,6 +14,7 @@ from gideon.integrations.inbox import (
     InboxStore,
     ItemKind,
     ItemStatus,
+    owner_username,
     redact_item,
     validate_updatable_fields,
 )
@@ -25,6 +26,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _UPDATABLE_FIELDS = {"status", "draft", "classification", "confidence", "favorited"}
+
+
+def _owner_item(item, owner: str) -> dict:
+    return _redact_item(item.to_owner_dict(owner))
 
 
 def _get_inbox(state: "ConsoleState") -> tuple[InboxState, InboxStore]:
@@ -194,9 +199,12 @@ async def api_inbox_list(request: web.Request) -> web.Response:
     """
     state: "ConsoleState" = request.app["state"]
     _, inbox = _get_inbox(state)
+    owner = owner_username()
     items = _rank_items(state, list(inbox.items.values()))
+    if request.query.get("mine") in {"1", "true", "yes"}:
+        items = [item for item in items if item.belongs_to(owner)]
     items = _filter_by_kind(items, request.query.get("kind"))
-    return web.json_response([_redact_item(i.to_dict()) for i in items])
+    return web.json_response([_owner_item(i, owner) for i in items])
 
 
 async def api_inbox_pending(request: web.Request) -> web.Response:
@@ -208,9 +216,10 @@ async def api_inbox_pending(request: web.Request) -> web.Response:
     """
     state: "ConsoleState" = request.app["state"]
     _, inbox = _get_inbox(state)
-    items = _rank_items(state, list(inbox.pending()))
+    owner = owner_username()
+    items = _rank_items(state, list(inbox.pending(owner)))
     items = _filter_by_kind(items, request.query.get("kind"))
-    return web.json_response([_redact_item(i.to_dict()) for i in items])
+    return web.json_response([_owner_item(i, owner) for i in items])
 
 
 async def api_inbox_kinds(request: web.Request) -> web.Response:
@@ -222,13 +231,14 @@ async def api_inbox_kinds(request: web.Request) -> web.Response:
     """
     state: "ConsoleState" = request.app["state"]
     _, inbox = _get_inbox(state)
+    owner = owner_username()
     open_states = {ItemStatus.PENDING.value, ItemStatus.SEEN.value}
     counts: dict[str, dict[str, int]] = {}
     for item in inbox.items.values():
         kind = item.item_kind or ItemKind.MESSAGE.value
         entry = counts.setdefault(kind, {"total": 0, "open": 0})
         entry["total"] += 1
-        if item.status in open_states:
+        if item.status_for(owner) in open_states:
             entry["open"] += 1
     return web.json_response(
         {
@@ -254,6 +264,7 @@ async def api_inbox_seen(request: web.Request) -> web.Response:
     """
     state: "ConsoleState" = request.app["state"]
     _, inbox = _get_inbox(state)
+    owner = owner_username()
     try:
         body = await request.json()
     except Exception:
@@ -276,13 +287,13 @@ async def api_inbox_seen(request: web.Request) -> web.Response:
 
     changed = []
     for item in targets:
-        if item.status == ItemStatus.PENDING:
-            item.status = ItemStatus.SEEN.value
+        if item.status_for(owner) == ItemStatus.PENDING:
+            item.set_status_for(owner, ItemStatus.SEEN.value)
             changed.append(item)
     if changed:
         inbox.save()
         for item in changed:
-            state.broadcast_ws("inbox_item_updated", _redact_item(item.to_dict()))
+            state.broadcast_ws("inbox_item_updated", _owner_item(item, owner))
     return web.json_response({"ok": True, "seen": len(changed)})
 
 
@@ -294,6 +305,7 @@ async def api_inbox_update(request: web.Request) -> web.Response:
     """
     state: "ConsoleState" = request.app["state"]
     inbox_state, inbox = _get_inbox(state)
+    owner = owner_username()
     item_id = request.match_info["id"]
 
     try:
@@ -329,7 +341,10 @@ async def api_inbox_update(request: web.Request) -> web.Response:
     if body.get("favorited") is True:
         _record_signal(state, item, "favorite")
 
-    updated = inbox.update(item_id, **updates)
+    status_update = updates.pop("status", None)
+    updated = inbox.update(item_id, **updates) if updates else item
+    if status_update is not None:
+        updated = inbox.update_status(item_id, status_update, owner=owner)
     if not updated:
         return web.json_response({"error": "not found"}, status=404)
 
@@ -344,8 +359,8 @@ async def api_inbox_update(request: web.Request) -> web.Response:
     except Exception:
         logger.warning("SEL audit failed for inbox update", exc_info=True)
 
-    state.broadcast_ws("inbox_item_updated", _redact_item(updated.to_dict()))
-    return web.json_response(_redact_item(updated.to_dict()))
+    state.broadcast_ws("inbox_item_updated", _owner_item(updated, owner))
+    return web.json_response(_owner_item(updated, owner))
 
 
 async def api_inbox_restore(request: web.Request) -> web.Response:
@@ -358,15 +373,16 @@ async def api_inbox_restore(request: web.Request) -> web.Response:
     """
     state: "ConsoleState" = request.app["state"]
     _, inbox = _get_inbox(state)
+    owner = owner_username()
     item_id = request.match_info["id"]
     item = inbox.items.get(item_id)
     if item is None:
         return web.json_response({"error": "not found"}, status=404)
-    if item.status != ItemStatus.FILTERED.value:
+    if item.status_for(owner) != ItemStatus.FILTERED.value:
         return web.json_response({"error": "item is not filtered"}, status=409)
 
     withheld = item.refs.get("verify_withheld") if isinstance(item.refs, dict) else None
-    item.status = ItemStatus.PENDING.value
+    item.set_status_for(owner, ItemStatus.PENDING.value)
     item.refs["verify"] = "restored"
     item.refs.pop("verify_withheld", None)
     inbox.save()
@@ -402,8 +418,8 @@ async def api_inbox_restore(request: web.Request) -> web.Response:
     except Exception:
         logger.warning("SEL audit failed for inbox restore", exc_info=True)
 
-    state.broadcast_ws("inbox_item_updated", _redact_item(item.to_dict()))
-    return web.json_response(_redact_item(item.to_dict()))
+    state.broadcast_ws("inbox_item_updated", _owner_item(item, owner))
+    return web.json_response(_owner_item(item, owner))
 
 
 async def api_inbox_dismiss_all(request: web.Request) -> web.Response:
@@ -416,11 +432,12 @@ async def api_inbox_dismiss_all(request: web.Request) -> web.Response:
     """
     state: "ConsoleState" = request.app["state"]
     inbox_state, inbox = _get_inbox(state)
+    owner = owner_username()
     count = 0
     swept: list = []
-    for item in inbox.open_items():
+    for item in inbox.open_items(owner):
         inbox_state.dismissed.add(item.id)
-        inbox.update(item.id, status=ItemStatus.DISMISSED)
+        inbox.update_status(item.id, ItemStatus.DISMISSED.value, owner=owner)
         swept.append(item)
         count += 1
     inbox_state.save()
@@ -447,6 +464,7 @@ async def api_inbox_draft(request: web.Request) -> web.Response:
         logger.warning("Draft request but inbox service not running")
         return web.json_response({"error": "Inbox service not running"}, status=503)
     item_id = request.match_info["id"]
+    owner = owner_username()
     _, inbox = _get_inbox(state)
     existing = inbox.items.get(item_id)
     if not existing:
@@ -479,8 +497,8 @@ async def api_inbox_draft(request: web.Request) -> web.Response:
         )
     except Exception:
         logger.warning("SEL audit failed for inbox draft success", exc_info=True)
-    state.broadcast_ws("inbox_item_updated", _redact_item(item.to_dict()))
-    return web.json_response(_redact_item(item.to_dict()))
+    state.broadcast_ws("inbox_item_updated", _owner_item(item, owner))
+    return web.json_response(_owner_item(item, owner))
 
 
 async def api_inbox_restart(request: web.Request) -> web.Response:
@@ -520,6 +538,7 @@ async def api_inbox_send(request: web.Request) -> web.Response:
         return web.json_response({"error": "id and text required"}, status=400)
 
     _, inbox = _get_inbox(state)
+    owner = owner_username()
     item = inbox.items.get(item_id)
     if not item:
         return web.json_response({"error": "not found"}, status=404)
@@ -537,9 +556,10 @@ async def api_inbox_send(request: web.Request) -> web.Response:
 
             session.enqueue_or_run_prompt(text, run_chat, state)
             delivered = True
-        inbox.update(item_id, status=ItemStatus.HANDLED.value, draft=text)
+        inbox.update(item_id, draft=text)
+        inbox.update_status(item_id, ItemStatus.HANDLED.value, owner=owner)
         _record_signal(state, item, "reply")
-        state.broadcast_ws("inbox_item_updated", _redact_item(item.to_dict()))
+        state.broadcast_ws("inbox_item_updated", _owner_item(item, owner))
         return web.json_response({"ok": True, "delivered_to_session": delivered})
 
     return web.json_response(
@@ -594,6 +614,8 @@ async def api_inbox_status(request: web.Request) -> web.Response:
     sec = cfg.inbox
     state: "ConsoleState" = request.app["state"]
     inbox_state, inbox = _get_inbox(state)
+    owner = owner_username()
+    mine = [item for item in inbox.items.values() if item.belongs_to(owner)]
 
     svc = getattr(state, "_inbox_svc", None)
     health = (
@@ -638,7 +660,10 @@ async def api_inbox_status(request: web.Request) -> web.Response:
             "channel_names": inbox_state.channel_names,
             "poll_interval_seconds": sec.poll_interval_seconds,
             "style_rules": sec.style_rules,
-            "pending_count": len(inbox.pending()),
+            "owner": owner,
+            "shared": bool(owner and len(mine) != len(inbox.items)),
+            "mine_count": len(mine),
+            "pending_count": len(inbox.pending(owner)),
             "total_count": len(inbox.items),
             "health": health,
         }
@@ -646,33 +671,13 @@ async def api_inbox_status(request: web.Request) -> web.Response:
 
 
 async def api_inbox_digest(request: web.Request) -> web.Response:
-    """POST /api/inbox/digest {channel_id, hours} — create an on-demand channel digest.
-
-    A creation, not a read: each call runs a summarization job and ADDS a new item to the
-    store, broadcasts it, and answers 201 with the created row. It was registered as a GET,
-    which made a cacheable, prefetchable, retry-on-idle-safe verb mint LLM-backed rows as a
-    side effect — and left it outside the CSRF and SEL-audit middlewares, both of which key
-    on the method (``server.py``'s ``_safe_methods`` / ``_sel_log_methods``).
-
-    The parameters moved to the JSON body with the verb, like every other POST on this
-    surface. A missing body is an empty one, so the shape of the refusal for a call with no
-    ``channel_id`` is unchanged.
-    """
+    """GET /api/inbox/digest?channel_id=X&hours=4 — on-demand channel digest."""
     state: "ConsoleState" = request.app["state"]
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-    if not isinstance(body, dict):
-        return web.json_response({"error": "body must be an object"}, status=400)
-    channel_id = body.get("channel_id") or ""
-    if not isinstance(channel_id, str) or not channel_id:
+    channel_id = request.query.get("channel_id", "")
+    if not channel_id:
         return web.json_response({"error": "channel_id required"}, status=400)
-    raw_hours = body.get("hours", 4.0)
-    if isinstance(raw_hours, bool):
-        return web.json_response({"error": "hours must be a number"}, status=400)
     try:
-        hours = float(raw_hours)
+        hours = float(request.query.get("hours", "4"))
     except (TypeError, ValueError):
         return web.json_response({"error": "hours must be a number"}, status=400)
     if hours <= 0:
@@ -685,7 +690,7 @@ async def api_inbox_digest(request: web.Request) -> web.Response:
         if not item:
             return web.json_response({"error": "no messages found"}, status=404)
         state.broadcast_ws("inbox_new_item", _redact_item(item.to_dict()))
-        return web.json_response(_redact_item(item.to_dict()), status=201)
+        return web.json_response(_redact_item(item.to_dict()))
     except Exception:
         logger.exception("Digest generation failed")
         return web.json_response({"error": "digest generation failed"}, status=500)

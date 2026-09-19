@@ -85,7 +85,7 @@ def _decode_token(token: str) -> str | None:
 
 
 def decoded_segments(text: str, *, limit: int = 8) -> list[str]:
-    decoded = []
+    decoded: list = []
     for candidate in _B64_RE.finditer(text or ""):
         if len(decoded) >= limit:
             break

@@ -413,6 +413,7 @@ RECORDS = {
             "offer_check_work": Value(("dashboard", "offer_check_work"), True, bool),
             "stream_reveal": Value(("dashboard", "stream_reveal"), "smooth"),
             "auto_open_browser": Value(("dashboard", "auto_open_browser"), True),
+            "update_dev_mode": Value(("dashboard", "update_dev_mode"), False),
             "screen_share_enabled": Value(
                 ("dashboard", "screen_share_enabled"), False, bool
             ),
@@ -508,6 +509,16 @@ RECORDS = {
             ),
             "hide_unrunnable_models": Value(
                 ("local_models", "hide_unrunnable_models"), True, bool
+            ),
+            "hf_whoami_ttl_secs": Value(
+                ("local_models", "hf_whoami_ttl_secs"),
+                None,
+                lambda value: min(86400, max(0, definitions._safe_int(value, 300))),
+            ),
+            "selftest_timeout_secs": Value(
+                ("local_models", "selftest_timeout_secs"),
+                None,
+                lambda value: min(600, max(1, definitions._safe_int(value, 60))),
             ),
         },
     ),
@@ -1070,6 +1081,19 @@ RECORDS = {
                 ("knowledge", "similarity_degree_cap"),
                 None,
                 lambda value: max(1, definitions._safe_int(value, 32) or 32),
+            ),
+            "reranker_enabled": Value(("knowledge", "reranker_enabled"), False, bool),
+            "reranker_model": Value(
+                ("knowledge", "reranker_model"),
+                "cross-encoder/ms-marco-MiniLM-L-6-v2",
+                lambda value: str(
+                    value or "cross-encoder/ms-marco-MiniLM-L-6-v2"
+                ).strip(),
+            ),
+            "reranker_max_candidates": Value(
+                ("knowledge", "reranker_max_candidates"),
+                None,
+                lambda value: min(128, max(1, definitions._safe_int(value, 32) or 32)),
             ),
             "consolidate_min_cluster": Value(
                 ("knowledge", "consolidate_min_cluster"),

@@ -23,10 +23,15 @@ import subprocess
 from gideon.cognition.knowledge.pipeline.nodes._llm import complete_text
 from gideon.cognition.knowledge.pipeline.registry import register_node
 from gideon.cognition.knowledge.pipeline.types import NodeContext, NodeOutput
+from gideon.cognition.knowledge.readers import OcrProvider
 
 logger = logging.getLogger(__name__)
 
 _FRAME_CAP = 8
+_OCR_PROMPT = (
+    "Transcribe ALL text visible in this image verbatim. "
+    "Output only the text, no commentary."
+)
 
 
 def _ffmpeg() -> str | None:
@@ -89,10 +94,22 @@ class ExifNode:
         )
 
 
+class ImageModalityOcrProvider:
+    """Synchronous OCR provider backed by the configured image-modality model."""
+
+    def ocr(self, image_path: str, *, page_number: int = 1) -> str:
+        return asyncio.run(
+            complete_text("image_modality", _OCR_PROMPT, images=[image_path])
+        )
+
+
 class OcrNode:
     node_type = "ocr"
     backend = "vision-llm"
     uses_use_case = "image_modality"
+
+    def __init__(self, ocr_provider: OcrProvider | None = None) -> None:
+        self.ocr_provider = ocr_provider or ImageModalityOcrProvider()
 
     async def run(self, inputs, ctx: NodeContext) -> NodeOutput:
         images = _images_from(inputs, ctx)
@@ -103,10 +120,10 @@ class OcrNode:
                 success=False,
                 error="no image",
             )
-        text = await complete_text(
-            self.uses_use_case,
-            "Transcribe ALL text visible in this image verbatim. Output only the text, no commentary.",  # noqa: E501
-            images=images[:1],
+        text = await asyncio.to_thread(
+            self.ocr_provider.ocr,
+            images[0],
+            page_number=1,
         )
         return NodeOutput(
             node_type=self.node_type,

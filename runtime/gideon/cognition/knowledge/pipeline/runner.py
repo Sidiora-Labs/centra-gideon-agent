@@ -14,8 +14,11 @@ from __future__ import annotations
 
 import logging
 
-from gideon.cognition.knowledge import searchability
-from gideon.cognition.knowledge.pipeline import ensure_nodes_registered, graph_for
+from gideon.cognition.knowledge.pipeline import (
+    TERMINAL_STAGES,
+    ensure_nodes_registered,
+    graph_for,
+)
 from gideon.cognition.knowledge.pipeline.executor import PipelineExecutor
 from gideon.cognition.knowledge.pipeline.types import NodeContext
 from gideon.integrations.knowledge_providers.base import ENRICHMENT_FULL, ENRICHMENT_RAW
@@ -68,13 +71,8 @@ async def ingest_item(
     publish=None,
 ) -> str:
     """Run the full ingestion graph for *item_id*. Returns the final status
-    (``done`` | ``partial`` | ``failed`` | ``unsearchable``). Never raises — a failure is
-    recorded on the item as ``processing_status='failed'`` + ``processing_error``.
-
-    ``unsearchable`` is the terminal state for an ingest that completed but left the item
-    with no retrieval reach at all (``knowledge.searchability``); the typed reason lands in
-    ``file_metadata['unsearchable_reason']`` and is cleared by any later ingest that leaves
-    the item findable. It never masks ``failed`` or ``unreachable``, which already say why.
+    (``done`` | ``partial`` | ``failed``). Never raises — a failure is recorded on
+    the item as ``processing_status='failed'`` + ``processing_error``.
 
     *publish* (optional) is a ``(event: str, data: dict) -> None`` SSE emitter for
     live progress; *params_for* layers user node-execution-param config.
@@ -203,8 +201,8 @@ async def ingest_item(
         _emit("node", node="embed", phase=embed_phase)
 
         _emit("node", node="dedup", phase="running")
-        dedup_result = _dedup(store, item_id, embedder)
-        _emit("node", node="dedup", phase="done")
+        dedup_phase, dedup_result = _run_dedup_stage(store, item_id, embedder)
+        _emit("node", node="dedup", phase=dedup_phase)
         if dedup_result:
             _emit("dedup", **dedup_result)
     except Exception as exc:
@@ -260,21 +258,15 @@ async def ingest_item(
         node_phases[nt] = "skipped"
     for nt in getattr(graph, "nodes", {}):
         node_phases.setdefault(nt, "skipped")
-    node_phases["insights"] = insights_phase
-    node_phases["entities"] = entities_phase
-    node_phases["intents"] = intents_phase
-    node_phases["embed"] = embed_phase
-    merged_metadata: dict = {"node_phases": node_phases}
-
-    ingest_status = status
-    unsearchable_reason = _assess_searchability(store, item_id, embedder)
-    merged_metadata[searchability.METADATA_KEY] = unsearchable_reason or None
-    if unsearchable_reason and status in ("done", "partial"):
-        status = searchability.STATE_UNSEARCHABLE
-        detail = searchability.REASON_DETAIL[unsearchable_reason]
-        proc_error = f"{detail}; {proc_error}" if proc_error else detail
-
-    _merge_file_metadata(store, item_id, merged_metadata)
+    terminal_phases = {
+        "insights": insights_phase,
+        "entities": entities_phase,
+        "intents": intents_phase,
+        "embed": embed_phase,
+        "dedup": dedup_phase,
+    }
+    node_phases.update({stage: terminal_phases[stage] for stage in TERMINAL_STAGES})
+    _merge_file_metadata(store, item_id, {"node_phases": node_phases})
 
     store.update_item(
         item_id, processing_status=status, processing_error=proc_error, touch=False
@@ -290,7 +282,7 @@ async def ingest_item(
     from gideon.extensions.apps.app_events import KNOWLEDGE_INGESTED
     from gideon.extensions.apps.app_events import emit as emit_platform_event
 
-    if ingest_status in ("done", "partial"):
+    if status in ("done", "partial"):
         emit_platform_event(KNOWLEDGE_INGESTED, {"item_id": item_id, "status": status})
     return status
 
@@ -344,38 +336,12 @@ def _cleanup_orphaned_artifacts(item_id: str) -> None:
 
 def _merge_file_metadata(store, item_id: str, new_keys: dict) -> None:
     """Merge keys into the item's file_metadata, re-reading current state first so a
-    prior merge (structural metadata) in the same run isn't clobbered.
-
-    A key whose new value is ``None`` is REMOVED rather than written as null — that is how
-    a re-ingest clears a state a previous run recorded (``unsearchable_reason``), and a
-    lingering null would leave every reader having to tell "absent" from "present and
-    empty" for a key that only ever means one thing when it is there."""
+    prior merge (structural metadata) in the same run isn't clobbered."""
     fresh = store.get_item(item_id) or {}
     merged = dict(fresh.get("file_metadata") or {})
-    for key, value in new_keys.items():
-        if value is None:
-            merged.pop(key, None)
-        else:
-            merged[key] = value
+    merged.update(new_keys)
     store.update_item(item_id, file_metadata=merged, touch=False)
     store.db.commit()
-
-
-def _assess_searchability(store, item_id: str, embedder) -> str:
-    """The typed unsearchable reason for the just-ingested item, or ``""``.
-
-    Runs AFTER embed + dedup so it measures the item's FINAL reach: the vector the embed
-    stage wrote and the keyword index the store synced. A fault here is not the ingest's
-    fault, so it degrades to "searchable" — reporting a phantom unsearchable state would
-    send a user after content that is perfectly findable."""
-    try:
-        available = bool(embedder) and bool(
-            getattr(embedder, "is_available", lambda: True)()
-        )
-        return searchability.assess(store, item_id, embedding_provider=available)
-    except Exception:  # noqa: BLE001 — a diagnosis must never fail an ingest
-        logger.debug("searchability assessment failed for %s", item_id, exc_info=True)
-        return ""
 
 
 def _persist_structural_metadata(store, item_id: str, item, result) -> None:
@@ -739,6 +705,47 @@ def _embed(store, item_id: str, embedder) -> str:
         return "failed"
 
 
+def embedding_space_fingerprint(embedder) -> tuple[str, str]:
+    """Return the provider/model identity of vectors produced by *embedder*.
+
+    Retrieval is often handed ``UnifiedEmbedder.embed`` rather than the wrapper itself, so a
+    bound method is unwrapped first. Explicit attributes keep provider implementations and
+    focused embedders deterministic; the unified production path falls back to the active
+    embedding binding. Unknown custom embedders deliberately share the legacy empty/empty
+    space instead of pretending their Python class name identifies a vector space.
+    """
+    owner = getattr(embedder, "__self__", None) or embedder
+
+    def _value(*names: str) -> str:
+        for name in names:
+            try:
+                value = getattr(owner, name, "")
+            except Exception:
+                continue
+            if value is not None and not callable(value) and str(value).strip():
+                return str(value).strip()
+        return ""
+
+    provider = _value("embedding_provider", "provider_name", "provider")
+    model = _value("embedding_model", "model_name", "model")
+    if provider and model:
+        return provider, model
+    try:
+        from gideon.cognition.knowledge.embedder import UnifiedEmbedder
+
+        if isinstance(owner, UnifiedEmbedder):
+            from gideon.integrations.embedding_providers.registry import (
+                _active_embedding_spec,
+            )
+
+            spec = _active_embedding_spec()
+            if spec:
+                return str(spec[0] or ""), str(spec[1] or "")
+    except Exception:
+        logger.debug("embedding space fingerprint unavailable", exc_info=True)
+    return provider, model
+
+
 def active_batch_embed_fn(embedder):
     """The provider's BATCH embedding entry point for the active selection, or ``None``.
 
@@ -794,17 +801,25 @@ def embed_item_chunks(store, item_id: str, content: str, embedder) -> None:
 
     Never raises into the ingest: a chunking/embedding hiccup must not fail an item whose
     whole-item vector already landed. A chunk whose embedding degrades to None is stored
-    vector-less (still FTS/keyword reachable) rather than dropped. When the embedder has
-    no ``embed`` (a minimal test stub) chunk embedding is skipped, matching the graceful
-    no-model path."""
+    vector-less (still FTS/keyword reachable) rather than dropped. Re-index embedders that
+    expose only ``embed_for_item`` are adapted to the same single-text contract so repairing
+    item vectors cannot leave the chunk layer stale."""
     from gideon.cognition.knowledge.chunking import chunk_text
     from gideon.cognition.knowledge.embed_batch import embed_texts
     from gideon.cognition.knowledge.embedder import floats_to_bytes
 
     embed_one = getattr(embedder, "embed", None)
     if not callable(embed_one):
-        return
+        embed_for_item = getattr(embedder, "embed_for_item", None)
+        if callable(embed_for_item):
+
+            def embed_one(text):
+                return embed_for_item(text, None)
+
+        else:
+            return
     try:
+        provider, model = embedding_space_fingerprint(embedder)
         chunks = chunk_text(content)
         if chunks:
             vectors = embed_texts(
@@ -814,31 +829,37 @@ def embed_item_chunks(store, item_id: str, content: str, embedder) -> None:
             )
             for c, vec in zip(chunks, vectors):
                 c.embedding = floats_to_bytes(vec) if vec else None
+                c.embedding_provider = provider if vec else ""
+                c.embedding_model = model if vec else ""
         store.replace_chunks(item_id, chunks)
     except Exception:
         logger.debug("knowledge chunk-embed failed for %s", item_id, exc_info=True)
 
 
-def _dedup(store, item_id: str, embedder) -> dict | None:
+def _run_dedup_stage(store, item_id: str, embedder) -> tuple[str, dict | None]:
     """P12 TIER-2 semantic dedup — runs AFTER `_embed` (the vector must exist; it doesn't at
     create time in the create-fast/enrich-async model). Fetches same-type candidates carrying
     an embedding and asks the pure `dedup.resolve_duplicate` (filename + cosine + date-gate) if
     the just-enriched item duplicates one. On a confirmed dup it ARCHIVES the format-recall
     LOSER (never deletes — archived is excluded from retrieval + reversible), which may be the
-    NEW item or the existing one. Returns a small verdict dict for the SSE phase, or None when
-    nothing fired. Never raises into the pipeline — a dedup fault must not fail an ingest.
+    NEW item or the existing one. Returns the truthful terminal phase and an optional verdict
+    dict for SSE. Never raises into the pipeline — a dedup fault reports ``failed`` without
+    failing an otherwise successful ingest.
 
-    Silently no-ops when the embedder is unavailable (no vector to compare) → behaves exactly
-    as pre-P12. TIER-1 exact dedup (URL/byte-hash, create-time in store.py) is unaffected.
+    An unavailable embedder or missing vector reports ``skipped`` because no comparison could
+    run. A completed candidate scan reports ``done`` whether or not it found a duplicate.
+    TIER-1 exact dedup (URL/byte-hash, create-time in store.py) is unaffected.
     """
-    if not embedder or not getattr(embedder, "is_available", lambda: True)():
-        return None
+    if not embedder:
+        return "skipped", None
     try:
+        if not getattr(embedder, "is_available", lambda: True)():
+            return "skipped", None
         from gideon.cognition.knowledge import dedup as dedup_mod
 
         item = store.get_item(item_id)
         if not item:
-            return None
+            return "skipped", None
         from gideon.cognition.knowledge.embedder import bytes_to_floats
 
         row = store.db.execute(
@@ -851,7 +872,7 @@ def _dedup(store, item_id: str, embedder) -> dict | None:
         )
         vec = bytes_to_floats(raw or b"")
         if not vec:
-            return None
+            return "skipped", None
         candidate = {
             "id": item_id,
             "title": item.get("title") or "",
@@ -882,15 +903,20 @@ def _dedup(store, item_id: str, embedder) -> dict | None:
                 verdict.filename_sim,
                 loser_id,
             )
-            return {
+            return "done", {
                 "winner_id": winner_id,
                 "loser_id": loser_id,
                 "cosine": round(verdict.cosine, 3),
                 "filename_sim": round(verdict.filename_sim, 3),
             }
-        return None
+        return "done", None
     except Exception:
         logger.debug(
             "knowledge dedup failed for %s (non-fatal)", item_id, exc_info=True
         )
-        return None
+        return "failed", None
+
+
+def _dedup(store, item_id: str, embedder) -> dict | None:
+    """Return only the semantic-dedup verdict for compatibility with direct callers."""
+    return _run_dedup_stage(store, item_id, embedder)[1]

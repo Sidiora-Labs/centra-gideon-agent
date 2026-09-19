@@ -352,7 +352,7 @@ class TestSubagentManagerCleanupIntegration:
 
         async def _error_stream(*_a, **_kw):
             raise RuntimeError("LLM error")
-            yield  # noqa: unreachable — makes this an async generator
+            yield  # Unreachable; makes this an async generator.
 
         provider.stream = MagicMock(side_effect=lambda *a, **kw: _error_stream())
         sessions.get_or_create = AsyncMock(return_value=(provider, True, False))

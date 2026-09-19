@@ -50,6 +50,64 @@ def _resilience_cfg():
     return AppConfig.load().resilience
 
 
+def _embedding_index_doctor_row(request: web.Request) -> dict[str, Any] | None:
+    """The active chunk-space diagnosis and its actionable re-index remedy.
+
+    The lower-level Doctor probe reports sqlite-vec availability/coverage. This row reports a
+    different stale-index class: vectors produced by another provider/model can have perfect
+    ANN row coverage and the same dimension while still being mathematically incomparable.
+    """
+    state = request.app.get("state")
+    store = getattr(state, "knowledge_store", None) if state is not None else None
+    if store is None or not hasattr(store, "chunk_embedding_status"):
+        return None
+    try:
+        from gideon.cognition.knowledge.pipeline.runner import (
+            embedding_space_fingerprint,
+        )
+        from gideon.interfaces.dashboard.handlers.knowledge import _get_embedder
+
+        embedder = _get_embedder(request)
+        if embedder is None or not embedder.is_available():
+            return None
+        provider, model = embedding_space_fingerprint(embedder)
+        active_dim = getattr(embedder, "_dim", None)
+        status = store.chunk_embedding_status(provider, model, active_dim)
+    except Exception:
+        return None
+
+    stale = int(status.get("stale") or 0)
+    evidence = {**status, "degraded": bool(stale)}
+    detail = (
+        f"{stale} chunk vector(s) are from another embedding space and are excluded "
+        "from semantic scoring; re-index embeddings to repair them"
+        if stale
+        else f"{int(status.get('compatible') or 0)} chunk vector(s) match the active "
+        "embedding space"
+    )
+    return {
+        "id": "knowledge.embedding-space",
+        "capability": "knowledge",
+        "tier": 3,
+        "title": "Knowledge chunk embedding space",
+        "ok": True,
+        "detail": detail,
+        "evidence": evidence,
+    }
+
+
+def _attach_embedding_index_doctor_row(report: dict, row: dict | None) -> dict:
+    if row is None:
+        return report
+    if "capabilities" in report:
+        bucket = (report.get("capabilities") or {}).get("knowledge")
+        if bucket is not None:
+            bucket.setdefault("probes", []).append(row)
+    elif report.get("capability") == "knowledge":
+        report.setdefault("probes", []).append(row)
+    return report
+
+
 async def api_doctor(request: web.Request) -> web.Response:
     """GET /api/doctor — all probes, grouped by capability, cached 30s."""
     if not _resilience_cfg().doctor_enabled:
@@ -59,6 +117,8 @@ async def api_doctor(request: web.Request) -> web.Response:
     if _doctor_cache is not None and now - _doctor_cache_ts < _DOCTOR_TTL:
         return web.json_response(_doctor_cache)
     report = await run_doctor(_ctx(request))
+    row = await asyncio.to_thread(_embedding_index_doctor_row, request)
+    _attach_embedding_index_doctor_row(report, row)
     _doctor_cache = report
     _doctor_cache_ts = now
     return web.json_response(report)
@@ -76,6 +136,9 @@ async def api_doctor_capability(request: web.Request) -> web.Response:
             message=f"No such capability: {capability}.",
             status=404,
         )
+    if capability == "knowledge":
+        row = await asyncio.to_thread(_embedding_index_doctor_row, request)
+        _attach_embedding_index_doctor_row(result, row)
     return web.json_response(result)
 
 

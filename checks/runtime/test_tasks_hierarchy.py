@@ -3,9 +3,20 @@
 from unittest.mock import patch
 
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import TestClient, TestServer
 
+from gideon.engine.tasks import registry
 from gideon.engine.tasks.hierarchy import HierarchyStore
-from gideon.engine.tasks.models import BUILTIN_PROJECTS, Project, TaskList
+from gideon.engine.tasks.hierarchy_handlers import register_hierarchy_routes
+from gideon.engine.tasks.models import (
+    BUILTIN_PROJECTS,
+    Project,
+    Task,
+    TaskList,
+    TaskStatus,
+)
+from gideon.engine.tasks.native import NativeTaskProvider
 
 
 @pytest.fixture()
@@ -284,6 +295,37 @@ class TestTaskListCrud:
         store.delete_project(p.id)
         assert store.get_task_list(tl.id) is None
 
+    @pytest.mark.asyncio
+    async def test_delete_route_cascades_only_tasks_in_the_deleted_list(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "gideon.engine.tasks.hierarchy.config_dir", lambda: tmp_path
+        )
+        monkeypatch.setattr("gideon.engine.tasks.native.config_dir", lambda: tmp_path)
+        monkeypatch.setattr(registry, "_providers", {"native": NativeTaskProvider()})
+        hierarchy = HierarchyStore()
+        project = hierarchy.create_project("Proj")
+        removed_list = hierarchy.create_task_list("Removed", project_id=project.id)
+        kept_list = hierarchy.create_task_list("Kept", project_id=project.id)
+        removed_task = await registry.create_task(
+            title="Removed task", task_list_id=removed_list.id
+        )
+        kept_task = await registry.create_task(
+            title="Kept task", task_list_id=kept_list.id
+        )
+        app = web.Application()
+        register_hierarchy_routes(app)
+
+        async with TestClient(TestServer(app)) as client:
+            response = await client.delete(f"/api/task-lists/{removed_list.id}")
+
+        assert response.status == 200
+        assert hierarchy.get_task_list(removed_list.id) is None
+        assert hierarchy.get_task_list(kept_list.id) is not None
+        assert await registry.get_task(removed_task.id) is None
+        assert await registry.get_task(kept_task.id) is not None
+
 
 class TestGeneralAutoAttach:
     def test_attaches_to_oldest_general_among_grandfathered_duplicates(self, store):
@@ -310,6 +352,29 @@ class TestGeneralAutoAttach:
         _attach_project_general_list(body)
         assert body["task_list_id"] == older.id
 
+    def test_unknown_task_list_is_rejected(self, store):
+        with pytest.raises(ValueError, match="no task list with id"):
+            store.task_destination(task_list_id="tl-missing").validate()
+
+    def test_task_list_with_missing_parent_project_is_rejected(self, store):
+        store._write_list(TaskList(id="tl-orphan", name="Lost", project_id="p-missing"))
+        with pytest.raises(ValueError, match="no existing parent project"):
+            store.task_destination(task_list_id="tl-orphan").validate()
+
+    def test_task_list_and_project_must_agree(self, store):
+        first = store.create_project("First")
+        second = store.create_project("Second")
+        task_list = store.create_task_list("List", project_id=first.id)
+        with pytest.raises(ValueError, match="does not belong"):
+            store.task_destination(
+                task_list_id=task_list.id, project_id=second.id
+            ).validate()
+
+    def test_unknown_project_is_rejected_before_general_list_creation(self, store):
+        with pytest.raises(ValueError, match="no project with id"):
+            store.task_destination(project_id="p-missing").resolve()
+        assert store.list_task_lists(project_id="p-missing") == []
+
 
 class TestModelSerialization:
     def test_project_roundtrip(self):
@@ -323,6 +388,47 @@ class TestModelSerialization:
     def test_tasklist_roundtrip(self):
         tl = TaskList(id="tl1", name="L", project_id="p1")
         assert TaskList.from_dict(tl.to_dict()).project_id == "p1"
+
+    def test_repeat_reset_clears_run_state_but_preserves_task_definition(self):
+        task = Task(
+            id="t1",
+            title="Weekly review",
+            status=TaskStatus.DONE,
+            description="Review the week",
+            exit_criteria=[
+                {"description": "Reviewed", "status": "complete", "comment": "yes"}
+            ],
+            action_plan=[{"content": "Read notes", "completed": True}],
+            notes=[{"content": "Keep this"}],
+            research_notes=[{"content": "And this"}],
+            execution_notes=[{"content": "Last run"}],
+            blocked_reason_kind="manual",
+            blocked_kind="input",
+            preview="old preview",
+            done_criterion="pytest -q",
+            evidence=[{"kind": "gate", "ref": "old"}],
+            attempts=[{"status": "passed"}],
+        )
+
+        task.reset_for_repeat()
+
+        assert task.status is TaskStatus.OPEN
+        assert task.exit_criteria == [
+            {
+                "description": "Reviewed",
+                "status": "incomplete",
+                "comment": "",
+                "met": False,
+            }
+        ]
+        assert task.action_plan[0]["completed"] is False
+        assert (
+            task.execution_notes == [] and task.evidence == [] and task.attempts == []
+        )
+        assert task.blocked_reason_kind == "" and task.blocked_kind == ""
+        assert task.preview == ""
+        assert task.description == "Review the week"
+        assert task.notes and task.research_notes and task.done_criterion == "pytest -q"
 
 
 class TestWorkspaceBindGuard:

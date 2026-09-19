@@ -29,7 +29,6 @@ from gideon.interfaces.dashboard.origin import (
     resolve_bind_host,
     tailnet_ip,
 )
-from gideon.operations.resilience.grammar import count_noun
 
 
 def config_dir() -> Path:
@@ -150,10 +149,7 @@ def _doctor_rebuild_routing_stats() -> None:
 
     home = config_dir()
     folded = rebuild(home)
-    print(
-        f"routing stats: refolded {count_noun(folded, 'attempt row')} "
-        f"→ {_stats_path(home)}"
-    )
+    print(f"routing stats: refolded {folded} attempt row(s) → {_stats_path(home)}")
     if not folded:
         print("  (no attempt rows in the audit log — the fold is empty, not broken)")
 
@@ -199,6 +195,46 @@ def _doctor_timezone() -> list[str]:
         return []
     print(f"               ⚠️  {facts['warning']}")
     return [f"timezone: unresolved — schedules fall back to {facts['resolved']}"]
+
+
+def _doctor_auth_mode() -> list[str]:
+    """Report requested and effective auth, including selector availability."""
+    from gideon.security.auth.modes import AuthConfig
+
+    auth_cfg = AuthConfig.from_env()
+    print(f"  auth mode:   {auth_cfg.mode_state()}")
+    if not auth_cfg.fell_back_from_unauthorable_mode:
+        return []
+    print(
+        "               ⚠️  requested auth mode is not authorable; "
+        "runtime fell back to local_token"
+    )
+    return [
+        f"auth mode: {auth_cfg.requested_mode} requested but runtime uses local_token"
+    ]
+
+
+def _doctor_proxy_bypass(cfg: AppConfig) -> list[str]:
+    """Name the local-network auth bypass and flag public reverse-proxy exposure."""
+    from gideon.interfaces.dashboard.exposure import (
+        local_network_bypass_enabled,
+        public_proxy_bypass_warning,
+    )
+
+    if not local_network_bypass_enabled():
+        return []
+
+    warning = public_proxy_bypass_warning(cfg)
+    if warning:
+        print("  proxy bypass: ❌ admits public internet without authentication")
+        print(f"                ⚠️  {warning}")
+        return ["proxy bypass: public internet may skip authentication"]
+
+    print(
+        "  proxy bypass: ⚠️  GIDEON_BYPASS_LOCAL_NETWORKS=1 "
+        "(private clients skip auth)"
+    )
+    return []
 
 
 def _doctor() -> None:
@@ -303,8 +339,10 @@ def _doctor() -> None:
         print("  chat model:  (unresolved)")
     print(f"  approval:    {cfg.agent.approval_mode}")
 
+    issues.extend(_doctor_auth_mode())
     issues.extend(_doctor_timezone())
     issues.extend(_doctor_credentials())
+    issues.extend(_doctor_proxy_bypass(cfg))
 
     _host: str = ""
     _port: int | None = None
@@ -366,7 +404,7 @@ def _doctor() -> None:
         allowed = agent_data.get("allowedTools", [])
         mcps = agent_data.get("mcpServers", {})
         mcp_fixed = False
-        mcp_cmd_fixed = 0
+        mcp_cmd_fixed = False
         for ref in ("@gideon-core",):
             name = ref[1:]
             in_tools = ref in tools
@@ -381,7 +419,7 @@ def _doctor() -> None:
                     resolved = shutil.which("gideon")
                     if resolved:
                         mcps[name]["command"] = resolved
-                        mcp_cmd_fixed += 1
+                        mcp_cmd_fixed = True
                         print(f"  {ref}: 🔧 fixed stale path: {cmd} → {resolved}")
                     else:
                         print(f"  {ref}: ❌ binary not found: {cmd}")
@@ -411,11 +449,7 @@ def _doctor() -> None:
                 print("  → Auto-fixed tools/allowedTools in gideon.json")
                 issues = [i for i in issues if "config" not in i]
             if mcp_cmd_fixed:
-                print(
-                    "  → Auto-fixed "
-                    f"{count_noun(mcp_cmd_fixed, 'stale binary path')} "
-                    "in gideon.json"
-                )
+                print("  → Auto-fixed stale binary path(s) in gideon.json")
 
     print("\nRuntime")
     print(f"  python:      ✅ {sys.executable} ({sys.version.split()[0]})")

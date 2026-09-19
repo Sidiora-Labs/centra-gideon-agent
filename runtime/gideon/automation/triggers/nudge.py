@@ -57,7 +57,7 @@ class NudgeRecord:
             except (TypeError, ValueError):
                 return default
 
-        values = dict(
+        values: dict = dict(
             id=self.trigger.id,
             session_name=idle_poll.scope_session(self.trigger),
             message=str(spec.get("message") or ""),

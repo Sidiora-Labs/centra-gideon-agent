@@ -470,9 +470,7 @@ class TestLoopHubAdoption:
         import inspect
 
         from gideon.automation.workflows.watchdog import WorkflowWatchdog as W
-        from gideon.automation.workflows.watchdog import (
-            _RunEventRelay,
-        )
+        from gideon.automation.workflows.watchdog import _RunEventRelay
 
         wrapper = inspect.getsource(W._publish_to_equivalent_loop_hub)
         assert "self._events.mirror(state, key, event, payload)" in wrapper

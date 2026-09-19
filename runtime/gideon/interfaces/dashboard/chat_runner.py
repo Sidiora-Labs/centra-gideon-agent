@@ -69,7 +69,6 @@ from gideon.interfaces.dashboard.chat_utils import (
     _extract_bash_command,
     _history_key_for,
     _maybe_consolidate,
-    _maybe_inject_persona,
     _normalize_model,
     _project_context_preamble,
     _redact_for_display,
@@ -1583,6 +1582,7 @@ async def run_chat(
     *,
     _prompt_depth: int = 0,
     regenerate_hint: str = "",
+    persona_snippet: str = "",
 ) -> None:
     """Stream LLM response into *session*.  Survives browser disconnect.
 
@@ -1783,7 +1783,13 @@ async def run_chat(
                         "via": "/prompts get",
                     },
                 )
-                await run_chat(state, session, expanded, _prompt_depth=1)
+                await run_chat(
+                    state,
+                    session,
+                    expanded,
+                    _prompt_depth=1,
+                    persona_snippet=persona_snippet,
+                )
             elif status == "blocked":
                 sel().log_tool_invocation(
                     session_key="",
@@ -2109,6 +2115,17 @@ async def run_chat(
                     metadata={"mention": original.split()[0], "session": session.key},
                 )
 
+        if not is_slash and is_new and persona_snippet:
+            from gideon.integrations.prompt_providers.runtime import (
+                render_persona_configuration,
+            )
+
+            persona = render_persona_configuration(persona_snippet)
+            if persona:
+                label = persona_snippet.removeprefix("persona-")
+                tag = f"{label.upper().replace('-', ' ')} PERSONA"
+                message += f"\n[{tag}]\n{persona}\n[END {tag}]\n\n"
+
         if is_slash:
             full_message = message
             sel().log_tool_invocation(
@@ -2169,9 +2186,6 @@ async def run_chat(
                 session._pending_context.clear()
                 if ctx_parts:
                     message = "\n".join(ctx_parts) + "\n" + message
-            message = _maybe_inject_persona(
-                message, getattr(session, "color_theme", ""), is_new
-            )
             from gideon.integrations import natural_voice as _nv
 
             message = _nv.maybe_inject(
@@ -3557,12 +3571,13 @@ async def run_chat(
                     {"session": session.key, "role": "error", "content": msg},
                 )
 
-            if _prompt_depth == 0 and session._acp_pipe_death_retries < 3:
-                session._acp_pipe_death_retries += 1
-                session.queue_insert(0, message)
-                _emit_error(f"⟳ Connection lost{_rc_suffix} — retrying...")
-            elif session._acp_pipe_death_retries >= 3:
-                _emit_error(f"Session stuck{_rc_suffix} — please start a new chat.")
+            if _prompt_depth == 0:
+                if session._acp_pipe_death_retries < 3:
+                    session._acp_pipe_death_retries += 1
+                    session.queue_insert(0, message)
+                    _emit_error(f"⟳ Connection lost{_rc_suffix} — retrying...")
+                else:
+                    _emit_error(f"Session stuck{_rc_suffix} — please start a new chat.")
             else:
                 _emit_error(f"⟳ Connection lost{_rc_suffix} — please retry.")
             return
@@ -3616,8 +3631,8 @@ async def run_chat(
             tool_call_count=_turn_tool_call_count,
             is_loop=getattr(session, "_app", "") == "loop",
         )
-        if _is_empty:
-            if _prompt_depth == 0 and session._empty_response_retries == 0:
+        if _is_empty and _prompt_depth == 0:
+            if session._empty_response_retries == 0:
                 session._empty_response_retries += 1
                 logger.info(
                     "Empty assistant turn for session %s — silently re-queuing once",
@@ -3634,14 +3649,15 @@ async def run_chat(
                     {"session": session.key, "role": "error", "content": _empty_msg},
                 )
                 return
-        else:
+        elif not _is_empty and _prompt_depth == 0:
             session._empty_response_retries = 0
 
         if assistant_text:
             _flush_segment(state, session, assistant_text, broadcast=False)
         save_session_to_history(state, session)
-        session._prompt_busy_retries = 0
-        session._acp_pipe_death_retries = 0
+        if _prompt_depth == 0:
+            session._prompt_busy_retries = 0
+            session._acp_pipe_death_retries = 0
 
         if is_cancelled_stop(_stop_reason):
             logger.info("Turn ended %s for session %s", _stop_reason, session.key)
@@ -3767,14 +3783,17 @@ async def run_chat(
                 redact_credentials(redact_exfiltration_urls(assistant_text)[0])[0],
                 "msg msg-a",
             )
-        session._acp_pipe_death_retries += 1
-        if _prompt_depth == 0 and session._acp_pipe_death_retries <= 3:
-            session.queue_insert(0, message)
-            session.append("error", "⟳ Connection lost — retrying...", "msg msg-err")
-        elif session._acp_pipe_death_retries > 3:
-            session.append(
-                "error", "Session stuck — please start a new chat.", "msg msg-err"
-            )
+        if _prompt_depth == 0:
+            session._acp_pipe_death_retries += 1
+            if session._acp_pipe_death_retries <= 3:
+                session.queue_insert(0, message)
+                session.append(
+                    "error", "⟳ Connection lost — retrying...", "msg msg-err"
+                )
+            else:
+                session.append(
+                    "error", "Session stuck — please start a new chat.", "msg msg-err"
+                )
         else:
             session.append("error", "⟳ Connection lost — please retry.", "msg msg-err")
     except PromptBusyExhaustedError:
@@ -3790,13 +3809,14 @@ async def run_chat(
                 redact_credentials(redact_exfiltration_urls(assistant_text)[0])[0],
                 "msg msg-a",
             )
-        session._prompt_busy_retries += 1
-        if _prompt_depth == 0 and session._prompt_busy_retries <= 3:
-            session.queue_insert(0, message)
-        elif session._prompt_busy_retries > 3:
-            session.append(
-                "error", "Session stuck — please start a new chat.", "msg msg-err"
-            )
+        if _prompt_depth == 0:
+            session._prompt_busy_retries += 1
+            if session._prompt_busy_retries <= 3:
+                session.queue_insert(0, message)
+            else:
+                session.append(
+                    "error", "Session stuck — please start a new chat.", "msg msg-err"
+                )
     except AcpError as exc:
         logger.warning("ACP error in session %s: %s", session.key, exc)
         _msg = str(exc)

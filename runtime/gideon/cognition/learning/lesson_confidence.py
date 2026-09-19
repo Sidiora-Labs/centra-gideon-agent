@@ -63,11 +63,15 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from gideon.cognition.learning import decay
 from gideon.cognition.learning.admission_policy import ConfidencePolicy
 from gideon.cognition.learning.hygiene import MIN_EVIDENCE_DEFAULT
 from gideon.cognition.learning.lesson_repository import EvidenceCache, LessonRepository
+
+if TYPE_CHECKING:
+    from gideon.cognition.learning.staging import StagingStore
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +215,8 @@ class LessonEvidenceStore:
     counter file must never take semantic memory down with it — the same reason
     the staging log lives here.
     """
+
+    _staging: StagingStore
 
     def __init__(self, base_dir: Path | str | None = None) -> None:
         self._repository = LessonRepository(self, base_dir)

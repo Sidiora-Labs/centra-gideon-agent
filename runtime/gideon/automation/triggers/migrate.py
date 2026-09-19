@@ -59,7 +59,7 @@ class LegacySchedule:
                     "legacy `every` has no trigger clock kind; converted to an explicit interval rather than `at`, which would turn a recurring job into a one-shot"
                 )
             case _:
-                spec = {"kind": ""}
+                spec: dict = {"kind": ""}
                 notes.append(
                     f"unknown legacy schedule kind {kind!r}; the trigger loads disabled for review"
                 )
@@ -128,7 +128,7 @@ class JobConversion:
         capabilities = {"env": dict(self.job["env"])} if self.job.get("env") else {}
         status = self.text("last_status").strip().lower()
         last_run = float(self.job.get("last_run_ts") or 0.0)
-        document = {key: self.text(key) for key in ("id", "name")}
+        document: dict = {key: self.text(key) for key in ("id", "name")}
         document.update(
             kind="clock",
             enabled=bool(self.job.get("enabled", False)) and not self.notes,

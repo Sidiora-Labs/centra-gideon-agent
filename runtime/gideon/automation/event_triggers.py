@@ -86,7 +86,7 @@ class EventTrigger:
             event_glob="",
             park_reason="",
         )
-        values = {
+        values: dict = {
             key: str(d.get(key, default)) for key, default in text_defaults.items()
         }
         values["source"] = str(
@@ -501,7 +501,7 @@ class EventTriggerEngine:
         try:
             from gideon.automation.triggers.dispatch import Envelope, spool_fire
 
-            payload = dict(trigger_id=t.id, key=key, value=value)
+            payload: dict = dict(trigger_id=t.id, key=key, value=value)
             if meta:
                 payload["meta"] = dict(meta)
             envelope = Envelope(

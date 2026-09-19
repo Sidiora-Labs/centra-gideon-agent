@@ -4,6 +4,7 @@ from aiohttp import web
 
 from gideon.engine.tasks import reconcile, registry
 from gideon.engine.tasks.models import Task
+from gideon.engine.tasks.provider import task_page_window
 
 _SUPPLIED_AUTHOR_ERROR = "author is server-derived and must not be supplied"
 _INVALID_JSON = object()
@@ -58,8 +59,10 @@ class TaskQuery:
         return str(self.values.get(name, "")).strip().lower() in {"1", "true", "yes"}
 
     async def page(self) -> dict:
-        limit = int(self.values.get("limit", "50"))
-        offset = int(self.values.get("offset", "0"))
+        registry.validate_provider(self.values.get("provider"))
+        limit, offset = task_page_window(
+            self.values.get("limit", "50"), self.values.get("offset", "0")
+        )
         tasks, total = await registry.list_all_tasks(
             **{
                 name: self.values.get(name)
@@ -99,7 +102,7 @@ class TaskBatch:
         self.operation = operation
         self.items = items
 
-    def admission_errors(self) -> list[dict]:
+    async def admission_errors(self) -> list[dict]:
         errors = []
         for index, item in enumerate(self.items):
             if self.operation != "delete" and _supplies_author(item):
@@ -112,6 +115,29 @@ class TaskBatch:
                 reason = "id required"
             if not valid:
                 errors.append({"index": index, "error": reason})
+            if isinstance(item, dict) and item.get("provider"):
+                try:
+                    registry.validate_provider(item["provider"])
+                except ValueError as exc:
+                    errors.append({"index": index, "error": str(exc)})
+        if errors:
+            return errors
+        if self.operation == "delete":
+            return errors
+        for index, item in enumerate(self.items):
+            try:
+                task_id = item["id"] if self.operation == "update" else None
+                await registry.validate_task_write(
+                    task_id,
+                    provider_name=item.get("provider"),
+                    **{
+                        key: value
+                        for key, value in item.items()
+                        if key not in ("id", "provider")
+                    },
+                )
+            except ValueError as exc:
+                errors.append({"index": index, "error": str(exc)})
         return errors
 
     def receipt(self, results: list, errors: list, *, refused=False) -> dict:
@@ -126,12 +152,14 @@ class TaskBatch:
     async def apply_item(self, item) -> dict:
         if self.operation == "create":
             task = await registry.create_task(
-                **{key: value for key, value in item.items() if key != "provider"}
+                provider_name=item.get("provider") or "native",
+                **{key: value for key, value in item.items() if key != "provider"},
             )
             return {"task_id": task.id, "status": "created"}
         if self.operation == "update":
             task = await registry.update_task(
                 item["id"],
+                provider_name=item.get("provider"),
                 **{
                     key: value
                     for key, value in item.items()
@@ -140,11 +168,16 @@ class TaskBatch:
             )
             return {"task_id": item["id"], "status": "updated" if task else "not_found"}
         identifier = item.get("id") if isinstance(item, dict) else item
-        removed = await registry.delete_task(str(identifier)) if identifier else False
+        provider = item.get("provider") if isinstance(item, dict) else None
+        removed = (
+            await registry.delete_task(str(identifier), provider_name=provider)
+            if identifier
+            else False
+        )
         return {"task_id": identifier, "status": "deleted" if removed else "not_found"}
 
     async def execute(self) -> web.Response:
-        errors = self.admission_errors()
+        errors = await self.admission_errors()
         if errors:
             return web.json_response(self.receipt([], errors, refused=True), status=400)
         results, errors = [], []
@@ -159,30 +192,25 @@ class TaskBatch:
 
 def _attach_project_general_list(body: dict) -> None:
     project_id = body.pop("project_id", "")
-    if not project_id or str(body.get("task_list_id") or "").strip():
+    has_task_list = "task_list_id" in body
+    if not project_id and not has_task_list:
         return
     from gideon.engine.tasks.hierarchy import HierarchyStore
 
-    hierarchy = HierarchyStore()
-    candidates = sorted(
-        (row for row in hierarchy.list_task_lists(project_id) if row.name == "General"),
-        key=lambda row: row.created_at or "",
+    body["task_list_id"] = (
+        HierarchyStore()
+        .task_destination(
+            task_list_id=body.get("task_list_id", ""), project_id=project_id
+        )
+        .resolve()
     )
-    if candidates:
-        selected = candidates[0]
-    else:
-        try:
-            selected = hierarchy.create_task_list(name="General", project_id=project_id)
-        except ValueError:
-            return
-    body["task_list_id"] = selected.id
 
 
 class TaskWrite:
     @staticmethod
     async def respond(request: web.Request, *, create: bool) -> web.Response:
         task_id = None if create else request.match_info["task_id"]
-        body = await _request_body(request)
+        body: dict = await _request_body(request)
         if body is _INVALID_JSON:
             return _error("invalid JSON")
         if _supplies_author(body):
@@ -192,9 +220,10 @@ class TaskWrite:
             if not isinstance(title, str) or not title.strip():
                 return _error("title required")
         provider = body.pop("provider", "native" if create else None)
-        if not create or provider == "native":
-            _attach_project_general_list(body)
         try:
+            registry.validate_provider(provider)
+            if not create or provider == "native":
+                _attach_project_general_list(body)
             if create:
                 task = await registry.create_task(provider_name=provider, **body)
             else:
@@ -220,7 +249,11 @@ class TaskWrite:
 
 
 async def api_tasks_list(request: web.Request) -> web.Response:
-    return web.json_response(await TaskQuery(request).page())
+    try:
+        page = await TaskQuery(request).page()
+    except (TypeError, ValueError) as exc:
+        return _error(str(exc))
+    return web.json_response(page)
 
 
 async def api_tasks_ready(request: web.Request) -> web.Response:
@@ -228,9 +261,12 @@ async def api_tasks_ready(request: web.Request) -> web.Response:
 
 
 async def api_tasks_graph(request: web.Request) -> web.Response:
-    projection = await registry.task_graph(
-        provider_filter=request.query.get("provider")
-    )
+    provider = request.query.get("provider")
+    try:
+        registry.validate_provider(provider)
+        projection = await registry.task_graph(provider_filter=provider)
+    except ValueError as exc:
+        return _error(str(exc))
     return web.json_response(projection)
 
 
@@ -238,18 +274,29 @@ async def api_tasks_search(request: web.Request) -> web.Response:
     body = await _request_body(request)
     if body is _INVALID_JSON:
         return _error("invalid JSON")
-    tasks, total = await registry.search_tasks(
-        query=body.get("query", ""),
-        statuses=body.get("status") or body.get("statuses"),
-        priorities=body.get("priority") or body.get("priorities"),
-        tags=body.get("tags"),
-        project=body.get("project") or body.get("project_id"),
-        task_list_id=body.get("task_list_id"),
-        sort_by=body.get("sort_by", "relevance"),
-        limit=int(body.get("limit", 50)),
-        offset=int(body.get("offset", 0)),
+    try:
+        limit, offset = task_page_window(body.get("limit", 50), body.get("offset", 0))
+        tasks, total = await registry.search_tasks(
+            query=body.get("query", ""),
+            statuses=body.get("status") or body.get("statuses"),
+            priorities=body.get("priority") or body.get("priorities"),
+            tags=body.get("tags"),
+            project=body.get("project") or body.get("project_id"),
+            task_list_id=body.get("task_list_id"),
+            sort_by=body.get("sort_by", "relevance"),
+            limit=limit,
+            offset=offset,
+        )
+    except (TypeError, ValueError) as exc:
+        return _error(str(exc))
+    return web.json_response(
+        {
+            "tasks": _task_rows(tasks),
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
     )
-    return web.json_response({"tasks": _task_rows(tasks), "total": total})
 
 
 async def api_tasks_bulk(request: web.Request) -> web.Response:
@@ -263,9 +310,14 @@ async def api_tasks_bulk(request: web.Request) -> web.Response:
 
 
 async def api_tasks_get(request: web.Request) -> web.Response:
-    task = await registry.get_task(
-        request.match_info["task_id"], provider_name=request.query.get("provider")
-    )
+    provider = request.query.get("provider")
+    try:
+        registry.validate_provider(provider)
+        task = await registry.get_task(
+            request.match_info["task_id"], provider_name=provider
+        )
+    except ValueError as exc:
+        return _error(str(exc))
     if not task:
         return _error("not found", 404)
     return web.json_response(
@@ -294,17 +346,25 @@ async def _delete_response(operation, **payload) -> web.Response:
 
 
 async def api_tasks_delete(request: web.Request) -> web.Response:
+    provider = request.query.get("provider")
+    try:
+        registry.validate_provider(provider)
+    except ValueError as exc:
+        return _error(str(exc))
     return await _delete_response(
-        registry.delete_task(
-            request.match_info["task_id"], provider_name=request.query.get("provider")
-        )
+        registry.delete_task(request.match_info["task_id"], provider_name=provider)
     )
 
 
 async def api_tasks_comments_get(request: web.Request) -> web.Response:
-    records = await registry.get_comments(
-        request.match_info["task_id"], provider_name=request.query.get("provider")
-    )
+    provider = request.query.get("provider")
+    try:
+        registry.validate_provider(provider)
+        records = await registry.get_comments(
+            request.match_info["task_id"], provider_name=provider
+        )
+    except ValueError as exc:
+        return _error(str(exc))
     return web.json_response({"comments": [record.to_dict() for record in records]})
 
 
@@ -323,12 +383,16 @@ async def api_tasks_comments_post(request: web.Request) -> web.Response:
     message = (raw or "").strip()
     if not message:
         return _error("body required")
-    comment = await registry.add_comment(
-        task_id,
-        body=message,
-        author=_owner_username(),
-        provider_name=body.get("provider"),
-    )
+    try:
+        registry.validate_provider(body.get("provider"))
+        comment = await registry.add_comment(
+            task_id,
+            body=message,
+            author=_owner_username(),
+            provider_name=body.get("provider"),
+        )
+    except ValueError as exc:
+        return _error(str(exc))
     return (
         web.json_response(comment.to_dict(), status=201)
         if comment
@@ -338,11 +402,16 @@ async def api_tasks_comments_post(request: web.Request) -> web.Response:
 
 async def api_tasks_comments_delete(request: web.Request) -> web.Response:
     comment_id = request.match_info["comment_id"]
+    provider = request.query.get("provider")
+    try:
+        registry.validate_provider(provider)
+    except ValueError as exc:
+        return _error(str(exc))
     return await _delete_response(
         registry.delete_comment(
             request.match_info["task_id"],
             comment_id,
-            provider_name=request.query.get("provider"),
+            provider_name=provider,
         ),
         id=comment_id,
     )

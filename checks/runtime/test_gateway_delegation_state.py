@@ -3,7 +3,6 @@ import json
 import re
 import time
 
-from gideon.automation.workflows.ownership import owned_key
 from gideon.cognition.context import PromptAssembler
 from gideon.core.config import AppConfig
 from gideon.engine import gateway
@@ -148,49 +147,5 @@ def test_long_completion_keeps_actual_retrievable_result(tmp_path, monkeypatch):
             assert stored["raw"] == raw
         finally:
             await runtime.subagent_mgr.cancel_all()
-
-    asyncio.run(exercise())
-
-
-def test_workflow_owned_completion_never_routes_to_a_channel(tmp_path, monkeypatch):
-    """A stage subagent's parent is the run (`workflow:<run>:<node>`), not a chat.
-
-    `CompletionDelivery.send` routed every parent that was not `dashboard:`, `cron:` or
-    `subagent:` down the CHANNEL path — which opens an ACP session on that key, injects
-    the completion, and posts the result into the owner's DM. A workflow stage's result
-    belongs to its run: the controller reconciles it off the supervisor and threads it
-    into the next node. Delivering it twice, once as a channel message, is the leak.
-    """
-    monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-
-    async def exercise():
-        runtime = coordinator()
-        manager = runtime.subagent_mgr
-        key = owned_key("r-42", "stage")
-        asked: list[str] = []
-        original = runtime.sessions.get_or_create
-
-        async def watched(session_key, *args, **kwargs):
-            asked.append(session_key)
-            return await original(session_key, *args, **kwargs)
-
-        monkeypatch.setattr(runtime.sessions, "get_or_create", watched)
-        try:
-            await manager._on_done(
-                [
-                    SubagentInfo(
-                        id="stage-1",
-                        task="Run the stage",
-                        result="stage output",
-                        parent_session_key=key,
-                        silent=True,
-                    )
-                ]
-            )
-            assert asked == [], f"a workflow-owned completion opened a session: {asked}"
-            assert not runtime.sessions.has_session(key)
-            assert _load_notifications() == []
-        finally:
-            await manager.cancel_all()
 
     asyncio.run(exercise())

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -69,6 +70,48 @@ class TriggerDispatch:
         self.payload = payload
         self.event = event
         self.logger = logger
+
+    def _stamp_run_owner(self) -> None:
+        """Persist the process that owns this fire before provider code can run."""
+        owner_pid = os.getpid()
+        self.trigger.run_owner_pid = owner_pid
+        try:
+            from gideon.automation.triggers.store import TriggerStore
+            from gideon.core.config.loader import config_dir
+
+            store = TriggerStore(base_dir=config_dir())
+            stored = store.get(str(getattr(self.trigger, "id", "") or ""))
+            current = stored.trigger if stored is not None else self.trigger
+            current.run_owner_pid = owner_pid
+            store.upsert(current)
+        except Exception:
+            self.logger.warning(
+                "trigger %s: could not persist run owner PID",
+                getattr(self.trigger, "id", ""),
+                exc_info=True,
+            )
+
+    def _clear_run_owner(self) -> None:
+        """Clear only this process's stamp after all dispatch work has settled."""
+        owner_pid = os.getpid()
+        try:
+            from gideon.automation.triggers.store import TriggerStore
+            from gideon.core.config.loader import config_dir
+
+            store = TriggerStore(base_dir=config_dir())
+            stored = store.get(str(getattr(self.trigger, "id", "") or ""))
+            if stored is None or stored.trigger.run_owner_pid != owner_pid:
+                return
+            stored.trigger.run_owner_pid = 0
+            store.upsert(stored.trigger)
+            if getattr(self.trigger, "run_owner_pid", 0) == owner_pid:
+                self.trigger.run_owner_pid = 0
+        except Exception:
+            self.logger.warning(
+                "trigger %s: could not clear run owner PID",
+                getattr(self.trigger, "id", ""),
+                exc_info=True,
+            )
 
     async def screen_payload(self) -> bool:
         from gideon.automation.triggers import screen as screen_mod
@@ -146,36 +189,12 @@ class TriggerDispatch:
         await self.refuse(f"held for your approval: {route.reason}")
         return None
 
-    @staticmethod
-    def envelope_of(result: Any) -> Any:
-        """The WHAT/WHY/FIX envelope a result carries, or None if it carries none."""
-        from gideon.core.errors import AgentError
-
-        candidate = getattr(result, "agent_error", None)
-        return candidate if isinstance(candidate, AgentError) else None
-
-    async def settle(
-        self, result: Any, *, ok: bool, envelope: Any, summary: str
-    ) -> None:
-        """Record the fire and notify with the SAME explanation, envelope shape intact.
-
-        An unattended failure is read later, from the run history or from the
-        notification, by someone who did not watch it happen — so both carriers get the
-        provider's whole envelope rather than a 200-character cut of its rendering.
-        """
-        await self.runtime._record_fire_outcome(
-            self.trigger, result=result, agent_error=envelope
-        )
-        self.runtime._deliver_fire_outcome(
-            self.trigger, ok=ok, error=summary, agent_error=envelope
-        )
-
     async def execute(
         self, action: TriggerAction, config: dict[str, Any], context: Any, route: Any
     ) -> None:
-        from gideon.integrations.action_providers import provider_failure
         from gideon.security.guardrails.rungs import record_reversal
 
+        self._stamp_run_owner()
         try:
             with fire_budget(self.trigger, self.logger):
                 result = await action.provider.execute(
@@ -185,30 +204,24 @@ class TriggerDispatch:
                 record_reversal(
                     route, result, label=action.name, refs=self.references(action)
                 )
-            ok = bool(getattr(result, "success", True))
-            await self.settle(
-                result,
-                ok=ok,
-                envelope=None if ok else self.envelope_of(result),
-                summary="" if ok else str(getattr(result, "error", "") or ""),
+            await self.runtime._record_fire_outcome(self.trigger, result=result)
+            self.runtime._deliver_fire_outcome(
+                self.trigger, ok=bool(getattr(result, "success", True))
             )
         except Exception as error:
             self.logger.warning(
                 "trigger %s: action failed", self.trigger.id, exc_info=True
             )
-            envelope = provider_failure(action.name, error)
-            await self.runtime._record_fire_outcome(
-                self.trigger, exc=error, agent_error=envelope
-            )
+            await self.runtime._record_fire_outcome(self.trigger, exc=error)
             self.runtime._deliver_fire_outcome(
-                self.trigger,
-                ok=False,
-                error=f"{type(error).__name__}: {error}",
-                agent_error=envelope,
+                self.trigger, ok=False, error=f"{type(error).__name__}: {error}"
             )
         finally:
-            self.runtime._push_trigger_refresh()
-            await self.runtime._fire_chained_triggers(self.trigger, self.payload)
+            try:
+                self.runtime._push_trigger_refresh()
+                await self.runtime._fire_chained_triggers(self.trigger, self.payload)
+            finally:
+                self._clear_run_owner()
 
     async def run(self) -> None:
         from gideon.automation.triggers import secrets

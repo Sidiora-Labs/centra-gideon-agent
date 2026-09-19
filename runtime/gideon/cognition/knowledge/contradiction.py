@@ -155,6 +155,33 @@ class Conflict:
         }
 
 
+@dataclass
+class ConflictCandidate:
+    """One nearby pair the deterministic pass could not settle.
+
+    Candidates are deliberately a different type from :class:`Conflict`: proximity is enough
+    to ask the model a question, but it is not evidence that the two claims disagree.  Keeping
+    that distinction in the payload prevents a review surface from presenting every shortlisted
+    neighbour as an already-established conflict.
+    """
+
+    left_claim: str = ""
+    right_claim: str = ""
+    left_item: str = ""
+    right_item: str = ""
+    similarity: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "left_claim": self.left_claim,
+            "right_claim": self.right_claim,
+            "left_item": self.left_item,
+            "right_item": self.right_item,
+            "basis": "unsettled",
+            "similarity": round(self.similarity, 4),
+        }
+
+
 _PREDICATE_RE = re.compile(
     r"^(?P<subject>.{1,80}?)\s+"
     r"(?P<predicate>is not|are not|is|are|was|were|has|have|had|lacks|requires|forbids|"
@@ -293,26 +320,78 @@ def shortlist(
     return [claim for score, _index, claim in scored[:cap] if score > 0]
 
 
+def unsettled_candidates(
+    incoming: list[Claim], existing: list[Claim]
+) -> list[ConflictCandidate]:
+    """Nearby incoming/stored pairs not decided by the deterministic tier.
+
+    This is the hand-off contract between the zero-token write pass and a model reviewer.  A
+    deterministic conflict is omitted because it is already settled; a zero-overlap neighbour is
+    omitted because asking a model about every stored claim would make write cost grow with the
+    library.  The total, not merely each incoming claim's shortlist, is capped.
+    """
+    out: list[ConflictCandidate] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for new in incoming:
+        for old in shortlist(new, existing):
+            if new.id and new.id == old.id:
+                continue
+            if deterministic_conflict(new, old) is not None:
+                continue
+            key = (new.id, old.id, new.statement, old.statement)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(
+                ConflictCandidate(
+                    left_claim=new.statement,
+                    right_claim=old.statement,
+                    left_item=new.source_ref,
+                    right_item=old.source_ref,
+                    similarity=similarity(new.statement, old.statement),
+                )
+            )
+            if len(out) >= MAX_CONFLICT_CANDIDATES:
+                return out
+    return out
+
+
 def conflict_prompt(incoming: Claim, candidates: list[Claim]) -> str:
     """The single fast-model call. Content fenced, output shape stated.
 
     Fenced because claims partly derive from web and inbox content: a stored item quoting an
     instruction is not an instruction, and this pass runs with nobody watching.
     """
+    from gideon.security.security import fence_untrusted
+
     lines = [
         "Decide whether the NEW claim contradicts any of the STORED claims.",
         "A contradiction means they cannot both be true of the same subject at the same time.",
         "Different aspects of one subject, or a refinement, are NOT contradictions.",
-        "If none conflict, return an empty list. Do not invent a conflict to be helpful.",
+        'Return one JSON object: {"conflicts": [{"index": 0, "kind": '
+        '"value", "reason": "one line", "confidence": 0.5}]}.',
+        "The index is the bracketed STORED index. If none conflict, return "
+        '{"conflicts": []}. Do not invent a conflict to be helpful.',
         "",
-        f"<untrusted_content source=knowledge>\nNEW: {incoming.statement}\n</untrusted_content>",
+        fence_untrusted(
+            f"NEW: {incoming.statement}",
+            source="knowledge",
+            source_type="claim",
+            source_id=incoming.source_ref,
+            transformation_path="contradiction-review",
+        ),
         "",
         "STORED:",
     ]
     for index, candidate in enumerate(candidates):
         lines.append(
-            f"<untrusted_content source=knowledge>\n[{index}] {candidate.statement}\n"
-            f"</untrusted_content>"
+            fence_untrusted(
+                f"[{index}] item={candidate.source_ref}\n{candidate.statement}",
+                source="knowledge",
+                source_type="claim",
+                source_id=candidate.source_ref,
+                transformation_path="contradiction-review",
+            )
         )
     return "\n".join(lines)
 

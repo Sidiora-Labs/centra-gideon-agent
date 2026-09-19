@@ -322,6 +322,8 @@ async def api_prompt_delete(request: web.Request) -> web.Response:
     provider = _get_default_prompt_provider()
     if provider is None:
         return web.json_response({"error": "no prompt provider registered"}, status=503)
+    if provider.get_prompt(bare) is None:
+        return web.json_response({"error": "not found"}, status=404)
     if not provider.delete_prompt(bare):
         return web.json_response({"error": "not found"}, status=404)
     return web.json_response({"ok": True})

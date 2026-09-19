@@ -15,7 +15,7 @@ from gideon.cognition.knowledge.pipeline.graph import (
     PipelineGraph,
     PipelineGraphError,
 )
-from gideon.cognition.knowledge.pipeline.graphs import graph_for
+from gideon.cognition.knowledge.pipeline.graphs import TERMINAL_STAGES, graph_for
 from gideon.cognition.knowledge.pipeline.types import (
     Edge,
     NodeContext,
@@ -42,6 +42,7 @@ __all__ = [
     "NodeSpec",
     "PipelineGraph",
     "PipelineGraphError",
+    "TERMINAL_STAGES",
     "graph_for",
     "Edge",
     "NodeContext",

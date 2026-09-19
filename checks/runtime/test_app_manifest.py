@@ -726,20 +726,20 @@ class TestProviderConfigEntity:
     def test_entity_round_trips(self):
         from gideon.extensions.apps.manifest import ProviderConfig
 
-        pc = ProviderConfig(
+        provider = ProviderConfig(
             type="action",
             implementation="mod:create_provider",
             entity="task",
         )
-        d = gideon.to_dict()
+        d = provider.to_dict()
         assert d["entity"] == "task"
         assert ProviderConfig.from_dict(d).entity == "task"
 
     def test_entity_omitted_when_empty(self):
         from gideon.extensions.apps.manifest import ProviderConfig
 
-        pc = ProviderConfig(type="model", implementation="mod:f")
-        assert "entity" not in gideon.to_dict()
+        provider = ProviderConfig(type="model", implementation="mod:f")
+        assert "entity" not in provider.to_dict()
         assert (
             ProviderConfig.from_dict(
                 {"type": "model", "implementation": "mod:f"}
@@ -847,8 +847,10 @@ class TestProviderTypesMatchHandlers:
         """Direct regression: a prompt-type provider manifest must pass validation."""
         from gideon.extensions.apps.manifest import ProviderConfig
 
-        pc = ProviderConfig(type="prompt", implementation="provider:create_provider")
-        errors = gideon.validate()
+        provider = ProviderConfig(
+            type="prompt", implementation="provider:create_provider"
+        )
+        errors = provider.validate()
         assert not any(
             "provider.type" in e for e in errors
         ), f"prompt provider.type rejected: {errors}"

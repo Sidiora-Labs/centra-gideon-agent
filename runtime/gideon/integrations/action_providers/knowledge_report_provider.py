@@ -293,7 +293,7 @@ class _ScopeSelection:
         )
         if not roots:
             return []
-        identifiers = set()
+        identifiers: set = set()
         for tag_id in _tag_closure(self.store, roots):
             identifiers.update(
                 str(identifier) for identifier in self.store._items_with_tag(tag_id)
