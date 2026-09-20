@@ -3,7 +3,9 @@
     "codify":{
       "command":
       "/usr/local/bin/cg",
-      "args":
-      ["mcp"]}
+      "args": [
+        "mcp"
+      ]
+    }
   }
 }
