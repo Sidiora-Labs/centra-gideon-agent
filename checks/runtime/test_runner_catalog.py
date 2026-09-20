@@ -114,13 +114,22 @@ def test_shipped_catalog_carries_the_four_runner_rows():
     showing an empty Runners section.
     """
     cat = runners.catalog()
-    assert {"claude-code", "codex", "gemini-cli", "kiro"} <= set(cat)
+    assert {"claude-code", "codex", "gemini-cli", "kiro-cli"} <= set(cat)
     names = {d.display_name for d in cat.values()}
     assert {"Claude Code", "Codex", "Gemini CLI", "Kiro"} <= names
     for defn in cat.values():
         assert defn.runtime_id.startswith("acp:")
         assert defn.bin_names, f"{defn.id} declares no binary to look for"
         assert defn.source == "builtin"
+
+
+def test_shipped_runtime_ids_are_canonical_provider_names():
+    from gideon.integrations.acp.permission_authority import normalize_provider
+
+    runtime_ids = {defn.runtime_id for defn in runners.catalog().values()}
+    assert "acp:kiro" not in runtime_ids
+    for runtime_id in runtime_ids:
+        assert runtime_id == f"acp:{normalize_provider(runtime_id)}"
 
 
 def test_byo_definition_adds_a_row_and_can_replace_a_shipped_one(tmp_path):

@@ -125,6 +125,19 @@ class TestNativeProvider:
         assert len(provider.list(tag="dash")) == 1
         assert len(provider.list(q="widget")) == 1
 
+    def test_list_searches_rendered_body(self, provider, tmp_path) -> None:
+        source = tmp_path / "live.md"
+        source.write_text("old body")
+        provider.create(
+            name="Unrelated title", content="old body", source_path=str(source)
+        )
+        source.write_text("rendered needle")
+
+        matches = provider.list(q="rendered needle")
+
+        assert [a.slug for a in matches] == ["unrelated-title"]
+        assert matches[0].content is None
+
     def test_delete(self, provider) -> None:
         provider.create(name="C", content="v1")
         assert provider.delete("c") is True

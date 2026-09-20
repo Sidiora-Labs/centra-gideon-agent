@@ -25,6 +25,7 @@ bundle says so rather than implying the provider takes no arguments.
 
 from __future__ import annotations
 
+import ast
 import inspect
 import logging
 import re
@@ -367,7 +368,28 @@ def _source_fields(provider: Any) -> list[tuple[str, str, bool]]:
     survives into the prompt.
     """
     try:
-        source = inspect.getsource(provider.__class__)
+        module = inspect.getmodule(provider.__class__)
+        source = inspect.getsource(module)
+        tree = ast.parse(source)
+        definitions = {
+            node.name: node
+            for node in tree.body
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        pending = [provider.__class__.__name__]
+        visited: set[str] = set()
+        fragments: list[str] = []
+        while pending:
+            name = pending.pop()
+            if name in visited or name not in definitions:
+                continue
+            visited.add(name)
+            node = definitions[name]
+            fragments.append(ast.get_source_segment(source, node) or "")
+            pending.extend(
+                ref.id for ref in ast.walk(node) if isinstance(ref, ast.Name)
+            )
+        source = "\n".join(fragments)
     except Exception:
         return []
     names = sorted(set(_SOURCE_FIELD_RE.findall(source)) - _GENERIC_KEYS)

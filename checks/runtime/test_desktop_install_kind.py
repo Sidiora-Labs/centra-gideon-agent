@@ -49,38 +49,63 @@ def test_the_shell_declares_the_desktop_install_kind() -> None:
     ``GIDEON_INSTALL_KIND=app`` would be junk that ``detect_install_kind`` ignores,
     falling straight back through to ``pip`` — the very outcome this pins shut.
     """
-    src = _source("gatewayEnv.js")
+    src = _source("src/gateway/environment.js")
     m = re.search(r'const INSTALL_KIND = "([^"]+)";', src)
-    assert m, 'apps/desktop/gatewayEnv.js must declare `const INSTALL_KIND = "…"`'
+    assert (
+        m
+    ), 'apps/desktop/src/gateway/environment.js must declare `const INSTALL_KIND = "…"`'
     assert m.group(1) == "desktop", f"the shell declares {m.group(1)!r}"
     assert m.group(1) in INSTALL_KINDS, (
         f"{m.group(1)!r} is not a self_update.INSTALL_KINDS member {INSTALL_KINDS} — "
         "detect_install_kind() would ignore it and classify the app as a pip install"
     )
-    assert re.search(
-        r"GIDEON_INSTALL_KIND:\s*INSTALL_KIND", src
-    ), "gatewayEnv.js declares the kind but does not put it in the child environment"
+    assert re.search(r"GIDEON_INSTALL_KIND:\s*INSTALL_KIND", src), (
+        "src/gateway/environment.js declares the kind but does not put it in the child "
+        "environment"
+    )
 
 
 def test_the_declared_kind_wins_over_an_inherited_one() -> None:
-    """The explicit keys must be spread AFTER the inherited env.
+    """The explicit keys must be applied AFTER the inherited env.
 
     A ``GIDEON_INSTALL_KIND=container`` in the user's shell profile would otherwise make
     a desktop install describe itself as a container and print `docker compose` instructions
     to somebody running an .app. Ordering is the whole mechanism, so it is read as ordering.
     """
-    src = _source("gatewayEnv.js")
-    body = re.search(r"return \{(.*?)\n  \};", src, re.S)
-    assert body, "buildGatewayEnv's returned object literal not found"
-    literal = body.group(1)
+    src = _source("src/gateway/environment.js")
+    assign = re.search(r"Object\.assign\(child, \{(.*?)\}\)", src, re.S)
     assert (
-        "...inherited" in literal
-    ), "buildGatewayEnv no longer spreads the inherited env"
-    assert "GIDEON_INSTALL_KIND" in literal, "the returned env carries no install kind"
-    assert literal.index("...inherited") < literal.index("GIDEON_INSTALL_KIND"), (
-        "the inherited env must be spread BEFORE the explicit keys, or an inherited "
+        assign
+    ), "buildGatewayEnv no longer applies the explicit keys over the inherited env"
+    inherited = src.index("Object.entries(env)")
+    assert "GIDEON_INSTALL_KIND" in assign.group(
+        1
+    ), "the returned env carries no install kind"
+    assert inherited < src.index(assign.group(0)), (
+        "the inherited env must be laid down BEFORE the explicit keys, or an inherited "
         "GIDEON_INSTALL_KIND would win"
     )
+
+
+def _require_closure(entry: Path) -> dict[Path, str]:
+    """Every module reachable from ``entry`` through relative ``require`` calls.
+
+    The spawn env moved out of main.js into the application layer, so the seam is read
+    the way the shell reads it — follow the chain rather than pinning one file's text.
+    """
+    pat = re.compile(r"""require\(["'](\.[^"']+)["']\)""")
+    seen: dict[Path, str] = {}
+    queue = [entry]
+    while queue:
+        path = queue.pop()
+        if path in seen or not path.is_file():
+            continue
+        src = path.read_text(encoding="utf-8")
+        seen[path] = src
+        for spec in pat.findall(src):
+            target = path.parent / spec
+            queue.append(target if target.suffix else target.with_suffix(".js"))
+    return seen
 
 
 def test_main_js_builds_the_spawn_env_through_the_shared_builder() -> None:
@@ -90,17 +115,24 @@ def test_main_js_builds_the_spawn_env_through_the_shared_builder() -> None:
     ``startGateway``, invisible to every test. Keep the one seam: the builder is executed by
     ``apps/desktop/test/gatewayEnv.test.js``, an inline literal is executed by nothing.
     """
-    src = _source("main.js")
-    assert 'require("./gatewayEnv")' in src, "main.js must require ./gatewayEnv"
-    assert (
-        "buildGatewayEnv({" in src
-    ), "main.js must build the spawn env through the builder"
-    for lineno, line in enumerate(src.splitlines(), start=1):
-        if re.search(r"GIDEON_DEV_NO_AUTH\s*[:=]", line):
-            raise AssertionError(
-                f"apps/desktop/main.js:{lineno} sets a spawn-env key directly again — those belong "
-                "in gatewayEnv.js, where a test can see them"
-            )
+    chain = _require_closure(DESKTOP / "src" / "application" / "main.js")
+    assert any(
+        path.name == "environment.js" and path.parent.name == "gateway"
+        for path in chain
+    ), "main.js no longer reaches the shared gateway env builder"
+    assert any(
+        "buildGatewayEnv(" in src for src in chain.values()
+    ), "the spawn env is no longer built through buildGatewayEnv"
+    for path, src in chain.items():
+        if path.name == "environment.js" and path.parent.name == "gateway":
+            continue
+        for lineno, line in enumerate(src.splitlines(), start=1):
+            if re.search(r"GIDEON_DEV_NO_AUTH\s*[:=]", line):
+                raise AssertionError(
+                    f"{path.relative_to(REPO_ROOT)}:{lineno} sets a spawn-env key directly "
+                    "again — those belong in src/gateway/environment.js, where a test can "
+                    "see them"
+                )
 
 
 def test_the_shipped_bundle_carries_the_env_builder() -> None:
@@ -111,7 +143,7 @@ def test_the_shipped_bundle_carries_the_env_builder() -> None:
     launch inside the bundle only, which is the one place nothing runs a test.
     """
     pkg = json.loads(_source("package.json"))
-    assert "gatewayEnv.js" in pkg["build"]["files"]
+    assert "src/gateway/environment.js" in pkg["build"]["files"]
 
 
 def _has_electron_updater() -> bool:
@@ -143,7 +175,7 @@ def test_no_surface_promises_self_update_while_the_updater_is_unbuilt() -> None:
 
     surfaces = (
         "runtime/gideon/interfaces/dashboard/handlers/updates.py",
-        "apps/console/src/pages/settings/UpdatesPanel.tsx",
+        "apps/console/src/features/settings/UpdatesPanel.tsx",
         "runtime/gideon/interfaces/cli/server.py",
     )
     for relative in surfaces:
@@ -157,12 +189,10 @@ def test_no_surface_promises_self_update_while_the_updater_is_unbuilt() -> None:
                 "shell ships no updater"
             )
 
-    releases = "github.com/Gideon/Gideon/releases"
     for relative in surfaces:
         text = (REPO_ROOT / relative).read_text(encoding="utf-8")
-        if relative.endswith("updates.py"):
-            assert (
-                "releases page" in text
-            ), f"{relative} does not name the releases page"
-        else:
-            assert releases in text, f"{relative} does not link the releases page"
+        assert "releases page" in text, f"{relative} does not name the releases page"
+    panel = (REPO_ROOT / surfaces[1]).read_text(encoding="utf-8")
+    assert (
+        "href={releasesUrl()}" in panel
+    ), "UpdatesPanel does not link the configured releases URL"

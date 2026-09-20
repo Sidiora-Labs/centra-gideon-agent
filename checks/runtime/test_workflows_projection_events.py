@@ -246,8 +246,9 @@ def test_the_FE_union_REGISTERS_every_projection_event():
     """EventSource SILENTLY DROPS an event type nobody listened for, and `_publish` has no
     server-side allowlist — so this array is the only thing between an emitted event and
     a frontend that never sees it. A missing member produces no error anywhere."""
-    source = pathlib.Path(
-        "apps/console/src/pages/workflows/useWorkflowStream.ts"
+    source = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "apps/console/src/features/workflows/useWorkflowStream.ts"
     ).read_text(encoding="utf-8")
     for kind in PROJECTION_KINDS:
         assert (

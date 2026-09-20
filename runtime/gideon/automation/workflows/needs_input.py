@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from gideon.integrations.inbox import is_open_status
+
 RENOTIFY_AFTER_HOURS = 24
 MAX_RENOTIFICATIONS = 1
 MAX_CHOICES = 5
@@ -269,7 +271,7 @@ class _ReminderDecision:
     def suppression(self) -> str | None:
         rules = (
             (
-                lambda: self.status not in ("pending", "seen"),
+                lambda: not is_open_status(self.status),
                 lambda: f"card is {self.status}",
             ),
             (

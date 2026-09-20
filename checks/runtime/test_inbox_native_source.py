@@ -81,16 +81,23 @@ def test_post_without_state_is_noop():
     assert ns.post_to_inbox("x") is None
 
 
-def _send_req(state, body):
+def _json_request(state, method, path, body, *, match_info=None):
+    """A real request carrying `body` as wire bytes, so `read_json_body` is exercised."""
     app = web.Application()
     app["state"] = state
-    req = make_mocked_request("POST", "/api/inbox/send", app=app)
-    req.json = lambda: _coro(body)
+    req = make_mocked_request(
+        method,
+        path,
+        app=app,
+        match_info=match_info or {},
+        headers={"Content-Type": "application/json"},
+    )
+    req._read_bytes = json.dumps(body).encode()
     return req
 
 
-async def _coro(v):
-    return v
+def _send_req(state, body):
+    return _json_request(state, "POST", "/api/inbox/send", body)
 
 
 def test_send_routes_native_reply_to_live_session(state, monkeypatch):
@@ -127,7 +134,7 @@ def test_send_captures_when_session_gone(state):
 
 @pytest.mark.parametrize("body", [None, [], 5, "text"])
 def test_send_rejects_a_non_object_body(state, body):
-    """A body that isn't an object parses fine, then used to 500 on body.get()."""
+    """A body that is not an object is refused without crashing."""
     resp = _run(H.api_inbox_send(_send_req(state, body)))
     assert resp.status == 400
     assert json.loads(resp.body)["error"] == "body must be an object"
@@ -145,13 +152,13 @@ def test_send_rejects_a_non_string_id_or_text(state, body):
 
 
 def _favorite_req(state, item_id, body):
-    app = web.Application()
-    app["state"] = state
-    req = make_mocked_request(
-        "POST", f"/api/inbox/{item_id}/favorite", app=app, match_info={"id": item_id}
+    return _json_request(
+        state,
+        "POST",
+        f"/api/inbox/{item_id}/favorite",
+        body,
+        match_info={"id": item_id},
     )
-    req.json = lambda: _coro(body)
-    return req
 
 
 @pytest.mark.parametrize("body", [None, [], 5, "text"])

@@ -22,6 +22,7 @@ from gideon.core.config.loader import (
     default_workspace_dir,
     resolve_session_workspace,
 )
+from gideon.core.http_request import read_json_body
 from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.chat_persistence import (
     _attach_variants,
@@ -138,7 +139,7 @@ async def api_chat(request: web.Request) -> web.StreamResponse:
     """POST /api/chat — send message to a session, stream response via SSE."""
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -323,20 +324,22 @@ async def api_chat(request: web.Request) -> web.StreamResponse:
     task.add_done_callback(state._background_tasks.discard)
     state.push_sessions_update()
 
+    session._routing_suggestion = None
     try:
         from gideon.engine.agents.routing import suggest_for_send
 
         _suggestion = suggest_for_send(state, session, message)
         if _suggestion is not None:
+            session._routing_suggestion = {
+                "session": session.key,
+                "agent": _suggestion.agent,
+                "specialty": _suggestion.specialty,
+                "score": round(_suggestion.score, 3),
+                "method": _suggestion.method,
+            }
             state.broadcast_ws(
                 "routing_suggestion",
-                {
-                    "session": session.key,
-                    "agent": _suggestion.agent,
-                    "specialty": _suggestion.specialty,
-                    "score": round(_suggestion.score, 3),
-                    "method": _suggestion.method,
-                },
+                session._routing_suggestion,
             )
     except Exception:
         logger.debug("routing suggestion hook failed", exc_info=True)
@@ -854,7 +857,7 @@ async def api_chat_session_create(request: web.Request) -> web.Response:
     """POST /api/chat/sessions — create a new chat session."""
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     if not isinstance(body, dict):
@@ -1144,7 +1147,7 @@ async def api_chat_screen_frame(request: web.Request) -> web.Response:
 
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -1268,7 +1271,7 @@ async def api_chat_screen_frame_pin(request: web.Request) -> web.Response:
 
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -1385,7 +1388,7 @@ async def api_chat_session_interrupt(request: web.Request) -> web.Response:
     body = {}
     if request.body_exists:
         try:
-            body = await request.json()
+            body = await read_json_body(request)
         except Exception:
             return web.json_response({"error": "invalid JSON body"}, status=400)
         if not isinstance(body, dict):
@@ -1585,7 +1588,7 @@ async def api_chat_sessions_cleanup(request: web.Request) -> web.Response:
     """
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     max_days = 3
@@ -1703,7 +1706,7 @@ async def api_chat_session_agent(request: web.Request) -> web.Response:
     if not session:
         return web.json_response({"error": "not found"}, status=404)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -1811,7 +1814,7 @@ async def api_chat_session_acp_agent(request: web.Request) -> web.Response:
     if not session:
         return web.json_response({"error": "not found"}, status=404)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -1885,7 +1888,7 @@ async def api_chat_session_model(request: web.Request) -> web.Response:
     if not session:
         return web.json_response({"error": "not found"}, status=404)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -1917,7 +1920,7 @@ async def api_chat_session_reasoning_effort(request: web.Request) -> web.Respons
     if not session:
         return web.json_response({"error": "not found"}, status=404)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -1973,7 +1976,7 @@ async def api_chat_session_workspace_dir(request: web.Request) -> web.Response:
     if not session:
         return web.json_response({"error": "not found"}, status=404)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -2079,7 +2082,7 @@ async def api_chat_session_resume(request: web.Request) -> web.Response:
     if not state.conversation_log:
         return web.json_response({"error": "no conversation log"}, status=400)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     history_key = body.get("key", name)
@@ -2264,7 +2267,7 @@ async def api_chat_mode(request: web.Request) -> web.Response:
     """
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -2435,7 +2438,7 @@ async def api_chat_task_mode(request: web.Request) -> web.Response:
     """
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -2496,6 +2499,32 @@ _APPROVE_ACTIONS = frozenset(
 )
 
 
+def persistable_grant_target(
+    session: _ChatSession, request_id: str, cfg: AppConfig
+) -> str | None:
+    """Return the configured agent eligible for a prompt/write/record grant."""
+    permission_kind = ""
+    for message in reversed(session.messages):
+        if message.get("role") != "permission":
+            continue
+        try:
+            meta = json.loads(message.get("cls", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if meta.get("request_id") == request_id:
+            permission_kind = str(meta.get("tool_kind") or "").lower()
+            break
+    if permission_kind not in {"prompt", "write", "record"}:
+        return None
+
+    from gideon.engine.agents.defaults import is_reserved_agent
+
+    agent_name = (session.agent or "").strip() or cfg.default_agent
+    if agent_name and not is_reserved_agent(agent_name) and agent_name in cfg.agents:
+        return agent_name
+    return None
+
+
 async def api_chat_session_approve(request: web.Request) -> web.Response:
     """POST /api/chat/sessions/{session}/approve — resolve a pending tool approval."""
     state: ConsoleState = request.app["state"]
@@ -2504,7 +2533,7 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
     if not session:
         return web.json_response({"error": "not found"}, status=404)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -2519,6 +2548,8 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
             status=400,
         )
     original_action = action
+    reported_decision = original_action
+    request_id = body.get("request_id", "")
     screening = None
     requested_mode = {
         "trust": "trust",
@@ -2539,16 +2570,10 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
         session._trust = True
         state.sessions.set_approval_policy(f"dashboard:{name}", "auto")
         action = "approved"
-        from gideon.engine.agents.defaults import is_reserved_agent
-
         try:
             cfg = AppConfig.load()
-            agent_name = (session.agent or "").strip() or cfg.default_agent
-            if (
-                agent_name
-                and not is_reserved_agent(agent_name)
-                and agent_name in cfg.agents
-            ):
+            agent_name = persistable_grant_target(session, request_id, cfg)
+            if agent_name:
                 prof = cfg.agents[agent_name]
                 if prof.approval_mode != "auto":
                     prof.approval_mode = "auto"
@@ -2560,11 +2585,13 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
                     resources=f"{name} agent={agent_name}",
                 )
             else:
+                reported_decision = "trust_agent_session"
                 logger.info(
                     "trust_agent on non-persistable agent %r — session-scope only",
                     agent_name or "(none)",
                 )
         except Exception:
+            reported_decision = "trust_agent_session"
             logger.warning("Failed to persist always-for-agent grant", exc_info=True)
     elif action == "trust_reads" and grant_allowed:
         action = "approved_trust_reads"
@@ -2575,7 +2602,6 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
         action = "approved"
     elif not grant_allowed:
         action = "approved"
-    request_id = body.get("request_id", "")
     if not request_id:
         pending = [(k, f) for k, f in session._approval_futures.items() if not f.done()]
         if len(pending) == 1:
@@ -2605,14 +2631,20 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
             session.messages,
             request_id,
             (
-                original_action
-                if grant_allowed and original_action in ("trust", "trust_reads")
+                reported_decision
+                if grant_allowed
+                and original_action in ("trust", "trust_agent", "trust_reads")
                 else resolved
             ),
         )
     if request_id:
         state.broadcast_ws(
-            "approval_resolved", {"id": request_id, "approved": resolved != "rejected"}
+            "approval_resolved",
+            {
+                "id": request_id,
+                "approved": resolved != "rejected",
+                "decision": reported_decision if grant_allowed else resolved,
+            },
         )
     state.push_sessions_update()
     try:
@@ -2624,7 +2656,15 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
         )
     except Exception:
         logger.warning("SEL audit failed for approval %s", request_id, exc_info=True)
-    payload: dict[str, object] = {"ok": True}
+    payload: dict[str, object] = {
+        "ok": True,
+        "decision": (
+            reported_decision
+            if grant_allowed
+            and original_action in ("trust", "trust_agent", "trust_reads", "yolo")
+            else resolved
+        ),
+    }
     if screening is not None:
         payload["approval_screening"] = screening.to_dict()
         payload["mode"] = _session_approval_mode(state, session)
@@ -2646,7 +2686,7 @@ async def api_chat_session_color(request: web.Request) -> web.Response:
     if not session:
         return web.json_response({"error": "not found"}, status=404)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -2710,7 +2750,7 @@ async def api_chat_session_natural_voice(request: web.Request) -> web.Response:
     if not session:
         return json_error("not_found", status=404)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return json_error("invalid_json", status=400)
     if not isinstance(body, dict):
@@ -2794,7 +2834,7 @@ async def api_chat_session_context(request: web.Request) -> web.Response:
             )
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -2905,7 +2945,7 @@ async def api_nav_resolve_links(request: web.Request) -> web.Response:
     (the explicit anti-N+1 goal) via the ``background`` use-case binding.
     """
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):

@@ -1,9 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { act, fireEvent, render, renderHook, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { TaskItem } from '../../shared/data/api'
 import { TaskGraph } from './TaskGraph'
+import { DagView } from './DagView'
 import { filterTasksByTag, taskNoMatchCause, taskTagOptions } from './taskGraphState'
+import { useTaskPreference } from './taskCollectionState'
 
 const tasks = [
   { id: 'plan', title: 'Plan release', status: 'open', priority: 'high', labels: [' release ', 'planning'] },
@@ -28,6 +30,28 @@ describe('task graph accessibility and filters', () => {
     await userEvent.keyboard('{Enter}')
 
     expect(open).toHaveBeenCalledWith('plan')
+  })
+
+  it('keeps gate actions as siblings of the accessible node button', () => {
+    const open = vi.fn(), approve = vi.fn(), deny = vi.fn()
+    render(<DagView width={200} height={100} nodes={[{ id: 'gate', x: 0, y: 0, w: 160, h: 44, state: 'awaiting', label: 'Review deployment', content: 'Review deployment' }]} edges={[]} onNodeClick={open} onApprove={approve} onDeny={deny} />)
+
+    const node = screen.getByRole('button', { name: 'Review deployment' })
+    fireEvent.keyDown(node, { key: ' ' })
+    expect(open).toHaveBeenCalledWith('gate')
+    expect(node.contains(screen.getByRole('button', { name: 'Approve' }))).toBe(false)
+    expect(node.contains(screen.getByRole('button', { name: 'Deny' }))).toBe(false)
+  })
+
+  it('treats an empty URL scope as authoritative and writes Clear through', () => {
+    localStorage.setItem('tasks-scope', 'Remembered project')
+    const setUrl = vi.fn()
+    const { result } = renderHook(() => useTaskPreference('', 'tasks-scope', '', setUrl, true))
+
+    expect(result.current[0]).toBe('')
+    act(() => result.current[1](''))
+    expect(setUrl).toHaveBeenCalledWith('')
+    expect(localStorage.getItem('tasks-scope')).toBe('')
   })
 
   it('derives reachable tag choices and applies the selected tag to real task rows', () => {

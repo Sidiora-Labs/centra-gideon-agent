@@ -463,10 +463,35 @@ def test_every_demo_surface_is_non_empty(seeded_home: Path) -> None:
 
 
 def _package_data_globs() -> list[str]:
+    """The wheel data patterns declared in ``[tool.setuptools.package-data]``.
+
+    The block keys every pattern under ``"*"`` and the patterns are relative to
+    each package directory — ``runtime/gideon`` here.
+    """
     text = (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     block = re.search(r"\[tool\.setuptools\.package-data\](.*?)\n\[", text, re.S)
     assert block, "could not find the [tool.setuptools.package-data] block"
     return re.findall(r'"([^"]+)"', block.group(1))
+
+
+def _manifest_selection(pkg_root: Path) -> set[Path]:
+    """The files ``MANIFEST.in`` selects below ``pkg_root``.
+
+    ``include-package-data`` is on by default under pyproject config, so these
+    land in the wheel alongside the package-data globs; without this half the
+    fixture's ``.db``/``.jsonl`` files match no glob and would be missing.
+    """
+    from setuptools._distutils.filelist import FileList
+
+    available = {
+        p.relative_to(_REPO_ROOT).as_posix() for p in pkg_root.rglob("*") if p.is_file()
+    }
+    listing = FileList()
+    listing.set_allfiles(sorted(available))
+    for line in (_REPO_ROOT / "MANIFEST.in").read_text(encoding="utf-8").splitlines():
+        if line.strip() and not line.lstrip().startswith("#"):
+            listing.process_template_line(line)
+    return {_REPO_ROOT / f for f in listing.files}
 
 
 def test_every_fixture_file_is_covered_by_a_package_data_glob() -> None:
@@ -483,13 +508,14 @@ def test_every_fixture_file_is_covered_by_a_package_data_glob() -> None:
     This asserts *coverage of the real tree* rather than the presence of a
     string, so it keeps holding as the fixture grows deeper.
     """
-    globs = [g for g in _package_data_globs() if g.startswith("tests_fixtures/")]
-    assert globs, "no tests_fixtures glob in the package-data block"
+    globs = _package_data_globs()
+    assert globs, "no package-data globs in the [tool.setuptools.package-data] block"
 
     pkg_root = _FIXTURES_DIR.parent
     matched: set[Path] = set()
     for pattern in globs:
         matched.update(p for p in pkg_root.glob(pattern) if p.is_file())
+    matched |= _manifest_selection(pkg_root)
 
     present = {p for p in _FIXTURES_DIR.rglob("*") if p.is_file()}
     assert present, "no fixture files on disk — this test would pass vacuously"

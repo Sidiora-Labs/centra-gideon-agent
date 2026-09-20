@@ -179,10 +179,8 @@ class TestTestedAxis:
         """The apps-repo CI discovers `<app>/tests/test_*.py` too (slack-channel has
         that shape), so the presence check must not miss it and mint a false lie."""
         d = make_bundle(tmp_path, quality={"tested": True})
-        (d / "checks/runtime").mkdir()
-        (d / "checks/runtime" / "test_nested.py").write_text(
-            _PASSING_TEST, encoding="utf-8"
-        )
+        (d / "tests").mkdir()
+        (d / "tests" / "test_nested.py").write_text(_PASSING_TEST, encoding="utf-8")
         assert [p.name for p in bundle_test_files(d)] == ["test_nested.py"]
         assert verify_app(d, run_tests=fake_tests(True)) == []
 

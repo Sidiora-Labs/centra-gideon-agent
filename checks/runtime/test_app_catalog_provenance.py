@@ -481,12 +481,12 @@ def test_one_owner_resolves_a_catalog_name_collision():
     and widen this deliberately.
     """
     assert _py_census("_installed_names()") == {
-        ("apps/catalog.py", "resolve_catalog_entries"),
-        ("apps/catalog.py", "_installed_names"),
+        ("extensions/apps/catalog.py", "resolve_catalog_entries"),
+        ("extensions/apps/catalog.py", "_installed_names"),
     }
     assert _py_census("precedence_rank(") == {
-        ("apps/catalog.py", "precedence_rank"),
-        ("apps/catalog.py", "resolve_catalog_entries"),
+        ("extensions/apps/catalog.py", "precedence_rank"),
+        ("extensions/apps/catalog.py", "resolve_catalog_entries"),
     }
 
     assert _py_census("_installed_names_for_every_source()") == set()
@@ -558,10 +558,13 @@ def test_one_owner_labels_app_provenance():
     should fix by editing code another change just landed. If the census grows a THIRD entry, the
     rail is doing its job and the duplication has stopped being mild."""
     assert _web_census("'platform'") == {
-        "lib/provenance.ts",
-        "pages/tools/ToolsPage.tsx",
+        "shared/data/provenance.ts",
+        "features/tools/ToolsPage.tsx",
     }
-    assert _web_census("'first-party'") == {"lib/provenance.ts", "lib/api.ts"}
+    assert _web_census("'first-party'") == {
+        "shared/data/provenance.ts",
+        "shared/data/api.ts",
+    }
 
     assert _web_census("'platform-provenance-that-does-not-exist'") == set()
     assert _web_raw_count("'platform'") >= 1
@@ -575,9 +578,9 @@ def test_one_owner_merges_the_app_catalog():
     "which copy of this app am I looking at?". The property accessors are the census tokens —
     the wire TYPE still names the fields, but nothing reads them outside the merge."""
     for token in (".bundled", ".localApps", ".remoteApps", ".gitApps"):
-        assert _web_census(f"catalog?{token}") == {"lib/appCatalog.ts"}, token
-    assert _web_census(".remoteApps") == {"lib/appCatalog.ts"}
-    assert _web_census(".gitApps") == {"lib/appCatalog.ts"}
+        assert _web_census(f"catalog?{token}") == {"shared/data/appCatalog.ts"}, token
+    assert _web_census(".remoteApps") == {"shared/data/appCatalog.ts"}
+    assert _web_census(".gitApps") == {"shared/data/appCatalog.ts"}
 
     assert _web_census("catalog?.notAListThatExists") == set()
     assert _web_raw_count(".remoteApps") >= 1

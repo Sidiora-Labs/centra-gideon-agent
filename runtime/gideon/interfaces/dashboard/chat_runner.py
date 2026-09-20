@@ -863,6 +863,27 @@ def _flush_file_changes(session: _ChatSession) -> None:
             break
 
 
+def _persist_turn_summary(session: _ChatSession, assistant_text: str) -> None:
+    """Persist a short extract from the completed outcome on its final message."""
+    lines = [
+        " ".join(line.split()) for line in assistant_text.splitlines() if line.strip()
+    ]
+    if not lines:
+        return
+    summary = lines[0].lstrip("#*- ")
+    if not summary:
+        return
+    if len(summary) > 160:
+        summary = summary[:159].rstrip() + "…"
+    summary = _redact_text(summary)
+    if not summary:
+        return
+    for message in reversed(session.messages):
+        if message.get("role") == "assistant":
+            message.setdefault("meta", {})["summary"] = summary
+            return
+
+
 def _flush_segment(
     state: ConsoleState,
     session: _ChatSession,
@@ -3272,6 +3293,7 @@ async def run_chat(
                 perm_meta = {
                     "request_id": str(event.request_id),
                     "tool_call_id": event.tool_call_id or "",
+                    "tool_kind": event.tool_kind or "",
                 }
                 if event.tool_input:
                     input_text = tool_input_to_str(event.tool_input)
@@ -3294,6 +3316,7 @@ async def run_chat(
                         "tool": event.title,
                         "tool_input": perm_meta.get("tool_input", ""),
                         "tool_purpose": event.tool_purpose or "",
+                        "tool_kind": event.tool_kind or "",
                         "risk": effective_risk,
                     },
                 )
@@ -3654,6 +3677,7 @@ async def run_chat(
 
         if assistant_text:
             _flush_segment(state, session, assistant_text, broadcast=False)
+            _persist_turn_summary(session, assistant_text)
         save_session_to_history(state, session)
         if _prompt_depth == 0:
             session._prompt_busy_retries = 0

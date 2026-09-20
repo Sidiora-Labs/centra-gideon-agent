@@ -279,9 +279,9 @@ class LoopWatchdog:
         return ""
 
     _NOTIFY_EVENTS = {
-        "complete": ("success", "Loop complete"),
-        "failed": ("error", "Loop failed"),
-        "stagnant": ("warning", "Loop stalled — needs direction"),
+        "complete": (notification_kinds.LOOP_COMPLETE, "Loop complete"),
+        "failed": (notification_kinds.LOOP_FAILED, "Loop failed"),
+        "stagnant": (notification_kinds.LOOP_STALLED, "Loop stalled — needs direction"),
         "blocked": ("warning", "Loop blocked — needs you"),
         "needs_input": ("info", "Loop needs your input"),
         "stage_advance": ("info", "Stage complete"),
@@ -292,7 +292,7 @@ class LoopWatchdog:
     _ATTENTION_EVENTS = {
         "needs_input": "needs_input",
         "blocked": "needs_input",
-        "stagnant": "needs_input",
+        "stagnant": "stalled",
     }
 
     def _attention_dedup_key(self, loop_id: str, event: str) -> str:

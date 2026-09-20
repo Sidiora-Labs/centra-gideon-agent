@@ -2,13 +2,48 @@
 
 import asyncio
 import json
+import subprocess
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from aiohttp import web
+from aiohttp.test_utils import make_mocked_request
 
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.operations import self_update as su
+
+
+def _json_request(app, body: dict):
+    """A real aiohttp request so read_json_body sees actual JSON bytes."""
+    request = make_mocked_request(
+        "POST",
+        "/api/update/simulate",
+        app=app,
+        headers={"Content-Type": "application/json"},
+    )
+    request._read_bytes = json.dumps(body).encode()
+    return request
+
+
+def _init_git_repo(tmp_path) -> None:
+    """A real HEAD commit — the rollback-point guard runs `git rev-parse` for real."""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=t@example.com",
+            "-c",
+            "user.name=T",
+            "commit",
+            "-qm",
+            "init",
+            "--allow-empty",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
 
 
 def _make_state(monkeypatch, tmp_path) -> ConsoleState:
@@ -116,9 +151,7 @@ class TestUpdateEndpoints:
 
         app = web.Application()
         app["state"] = state
-        request = MagicMock()
-        request.app = app
-        request.json = AsyncMock(return_value={"delay": 0.01})
+        request = _json_request(app, {"delay": 0.01})
 
         resp = await api_update_simulate(request)
         data = json.loads(resp.body)
@@ -158,9 +191,7 @@ class TestUpdateEndpoints:
 
         app = web.Application()
         app["state"] = state
-        request = MagicMock()
-        request.app = app
-        request.json = AsyncMock(return_value={"delay": 0.01, "fail_at": "building"})
+        request = _json_request(app, {"delay": 0.01, "fail_at": "building"})
 
         await api_update_simulate(request)
         await asyncio.sleep(0.15)
@@ -187,9 +218,7 @@ class TestUpdateEndpoints:
         state = _make_state(monkeypatch, tmp_path)
         app = web.Application()
         app["state"] = state
-        request = MagicMock()
-        request.app = app
-        request.json = AsyncMock(return_value={"reject": True})
+        request = _json_request(app, {"reject": True})
 
         resp = await api_update_simulate(request)
         assert resp.status == 409
@@ -347,7 +376,7 @@ class TestUpdateApplyPipeline:
             "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
         )
         monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
-        (tmp_path / ".git").mkdir(exist_ok=True)
+        _init_git_repo(tmp_path)
         import gideon.interfaces.dashboard.handlers.updates as upd
 
         monkeypatch.setattr(upd, "_apply_in_flight", False)
@@ -416,7 +445,7 @@ class TestUpdateApplyPipeline:
             "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
         )
         monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
-        (tmp_path / ".git").mkdir(exist_ok=True)
+        _init_git_repo(tmp_path)
         import gideon.interfaces.dashboard.handlers.updates as upd
 
         monkeypatch.setattr(upd, "_apply_in_flight", False)

@@ -143,7 +143,25 @@ async def _transcription(audio_path: str, *, detailed: bool, bias_terms=None):
 
 
 async def transcribe_audio(audio_path: str) -> str | None:
-    return await _transcription(audio_path, detailed=False)
+    try:
+        from gideon.cognition.lexicon import get_lexicon_service
+
+        lexicon = get_lexicon_service()
+        result = await _transcription(
+            audio_path,
+            detailed=True,
+            bias_terms=lexicon.select_bias_terms(),
+        )
+        if result is None:
+            return None
+        corrections = lexicon.correct(result)
+        lexicon.write_dictation_corrections(corrections)
+        return result.text
+    except Exception:
+        logger.warning(
+            "dictation lexicon failed; transcribing without it", exc_info=True
+        )
+        return await _transcription(audio_path, detailed=False)
 
 
 async def transcribe_audio_detailed(

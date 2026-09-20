@@ -641,9 +641,9 @@ class TestClientOnlyMechanicsAreCorrectlySilent:
 
     def test_find_scans_memory_and_never_calls_the_server(self):
         for parts in (
-            ("ui", "FindBar.tsx"),
-            ("ui", "findText.ts"),
-            ("pages", "chat", "findSegments.ts"),
+            ("shared", "ui", "FindBar.tsx"),
+            ("shared", "ui", "findText.ts"),
+            ("features", "chat", "findSegments.ts"),
         ):
             name = parts[-1]
             src = _WEB.joinpath(*parts).read_text(encoding="utf-8")
@@ -662,7 +662,7 @@ class TestClientOnlyMechanicsAreCorrectlySilent:
         assert "/api/chat/sessions/{session}/find" not in server
 
     def test_the_streaming_reveal_only_paces_text_already_delivered(self):
-        src = (_WEB / "pages" / "chat" / "useStreamCoalescer.ts").read_text(
+        src = (_WEB / "features" / "chat" / "useStreamCoalescer.ts").read_text(
             encoding="utf-8"
         )
         assert "fetch(" not in src
@@ -670,7 +670,7 @@ class TestClientOnlyMechanicsAreCorrectlySilent:
         assert "CoalescerCore" in src
 
     def test_quote_reply_writes_into_the_composer_not_over_the_wire(self):
-        page = (_WEB / "pages" / "ChatPage.tsx").read_text(encoding="utf-8")
+        page = (_WEB / "features" / "ChatPage.tsx").read_text(encoding="utf-8")
         assert "function quoteToComposer" in page or "const quoteToComposer" in page
         idx = page.index("quoteToComposer")
         body = page[idx : idx + 900]
@@ -679,14 +679,14 @@ class TestClientOnlyMechanicsAreCorrectlySilent:
 
 class TestTheAuditIsComplete:
     _EMITTERS = {
-        "chat.rewind": "dashboard/chat_regenerate.py",
-        "chat.fork_rewound": "dashboard/chat_fork.py",
-        "chat.session_fork": "dashboard/chat_fork.py",
-        "chat.plan_activate": "dashboard/chat_plan.py",
-        "chat.plan_approve": "dashboard/chat_plan.py",
-        "dashboard_interrupt": "dashboard/chat_handlers.py",
-        "chat_followups": "dashboard/chat_followups.py",
-        "upload.file": "dashboard/handlers/files.py",
+        "chat.rewind": "interfaces/dashboard/chat_regenerate.py",
+        "chat.fork_rewound": "interfaces/dashboard/chat_fork.py",
+        "chat.session_fork": "interfaces/dashboard/chat_fork.py",
+        "chat.plan_activate": "interfaces/dashboard/chat_plan.py",
+        "chat.plan_approve": "interfaces/dashboard/chat_plan.py",
+        "dashboard_interrupt": "interfaces/dashboard/chat_handlers.py",
+        "chat_followups": "interfaces/dashboard/chat_followups.py",
+        "upload.file": "interfaces/dashboard/handlers/files.py",
     }
 
     def test_every_operation_name_is_distinct_and_written_where_it_is_claimed(self):
@@ -730,10 +730,10 @@ class TestTheAuditIsComplete:
         guide = (_ROOT / "docs" / "guides" / "CHAT_SURFACE.md").read_text(
             encoding="utf-8"
         )
-        actions = (_WEB / "pages" / "chat" / "MessageActions.tsx").read_text(
+        actions = (_WEB / "features" / "chat" / "MessageActions.tsx").read_text(
             encoding="utf-8"
         )
-        page = (_WEB / "pages" / "ChatPage.tsx").read_text(encoding="utf-8")
+        page = (_WEB / "features" / "ChatPage.tsx").read_text(encoding="utf-8")
         assert 'label="Branch from here"' in actions and "**Branch from here**" in guide
         assert 'label="Plan this first"' in page and "**Plan this first**" in guide
 

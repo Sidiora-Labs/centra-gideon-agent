@@ -14,6 +14,7 @@ from typing import Any
 
 from aiohttp import web
 
+from gideon.core.http_request import RequestBodyTypeError, read_json_body
 from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.handlers._shared import _is_restricted_session
 from gideon.security.security import redact_credentials, redact_exfiltration_urls
@@ -133,7 +134,7 @@ async def api_artifacts_create(request: web.Request) -> web.Response:
             {"error": f"provider '{prov.name}' is read-only"}, status=400
         )
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -242,7 +243,7 @@ async def api_artifact_update(request: web.Request) -> web.Response:
         )
     slug = request.match_info["slug"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -723,11 +724,11 @@ async def api_artifact_model_write(request: web.Request) -> web.Response:
             status=415,
         )
     try:
-        body = await request.json()
+        body = await read_json_body(request)
+    except RequestBodyTypeError:
+        return json_error("invalid_body", status=400)
     except Exception:
         return json_error("invalid_json", status=400)
-    if not isinstance(body, dict):
-        return json_error("invalid_body", status=400)
     try:
         model = codec.from_dict(body.get("model"))
     except ValueError as exc:
@@ -894,7 +895,7 @@ async def api_artifact_regenerate(request: web.Request) -> web.Response:
         )
     slug = request.match_info["slug"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     if not isinstance(body, dict):
@@ -995,7 +996,7 @@ async def api_artifact_record_event(request: web.Request) -> web.Response:
         return web.json_response({"error": "unknown provider"}, status=400)
     slug = request.match_info["slug"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict) or body.get("type") != "referenced":
@@ -1047,7 +1048,7 @@ async def api_artifacts_pin(request: web.Request) -> web.Response:
         return web.json_response({"error": "restricted session"}, status=403)
     slug = request.match_info.get("slug", "")
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     if not isinstance(body, dict):
@@ -1093,7 +1094,7 @@ async def api_artifact_folder_create(request: web.Request) -> web.Response:
     if prov is None:
         return web.json_response({"error": "unknown provider"}, status=400)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -1122,7 +1123,7 @@ async def api_artifact_folder_update(request: web.Request) -> web.Response:
         return web.json_response({"error": "unknown provider"}, status=400)
     fid = request.match_info["id"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -1184,7 +1185,7 @@ async def api_artifact_set_folder(request: web.Request) -> web.Response:
         )
     slug = request.match_info["slug"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -1251,7 +1252,7 @@ async def api_artifact_deploy(request: web.Request) -> web.Response:
             status=400,
         )
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     if not isinstance(body, dict):

@@ -342,20 +342,24 @@ def test_the_tick_wires_the_pruner():
     see `test_learning_promotion_wire.test_the_consolidation_tick_calls_the_gate`).
 
     Parsed, not grepped: a text scan would count the sentence in a comment, and this
-    module's whole subject is a control that was described but not called.
+    module's whole subject is a control that was described but not called. The tick's body
+    was extracted into `ConsolidationRound`, so the wire is asserted where it now lives;
+    the retention tests above prove the tick reaches it.
     """
-    tree = ast.parse(Path("runtime/gideon/cognition/history.py").read_text())
+    tree = ast.parse(
+        Path("runtime/gideon/cognition/consolidation_cycle.py").read_text()
+    )
     fn = next(
         node
         for node in ast.walk(tree)
-        if isinstance(node, ast.AsyncFunctionDef) and node.name == "_consolidate_locked"
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "maintain"
     )
     called = {
         node.func.attr
         for node in ast.walk(fn)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
     }
-    assert "prune" in called, "_consolidate_locked calls no prune()"
+    assert "prune" in called, "the consolidation round calls no prune()"
     imported = {
         alias.name
         for node in ast.walk(fn)
@@ -364,4 +368,70 @@ def test_the_tick_wires_the_pruner():
     }
     assert (
         "capture_store" in imported
-    ), "_consolidate_locked never reaches the capture store"
+    ), "the consolidation round never reaches the capture store"
+
+
+@pytest.mark.parametrize("restriction", ["incognito", "temporary"])
+@pytest.mark.parametrize("imported", [False, True])
+def test_restricted_capture_records_without_learning(
+    _isolated_home, restriction, imported
+):
+    from gideon.engine import session_restrictions
+
+    session_id = capture_store.session_id_for("claude-code", _body())
+    marker = (
+        session_restrictions.mark_incognito
+        if restriction == "incognito"
+        else session_restrictions.mark_temporary
+    )
+    marker(session_id)
+    try:
+        if imported:
+            result = capture_store.stage_records(
+                [
+                    {
+                        "client_id": "claude-code",
+                        "request_body": _body(),
+                        "response_body": _response(),
+                    }
+                ],
+                source="jsonl",
+            )
+            assert result["imported"] == 1
+        else:
+            assert _record() == session_id
+        assert _capture_rows() == []
+        assert (capture_store.capture_dir() / f"{session_id}.jsonl").exists()
+        with staging_mod.get_store()._cursor() as cursor:
+            denials = cursor.execute(
+                "SELECT cadence, outcome, detail FROM flush_records"
+            ).fetchall()
+        assert [tuple(row) for row in denials] == [
+            (
+                "capture",
+                staging_mod.FlushOutcome.FLUSH_SKIPPED.value,
+                "restricted_session",
+            )
+        ]
+    finally:
+        session_restrictions.clear(session_id)
+    _record()
+    assert len(_capture_rows()) == 1
+
+
+@pytest.mark.parametrize(
+    "setting, reason",
+    [("enabled", "learning_disabled"), ("staging_enabled", "cadence_disabled")],
+)
+def test_capture_gate_records_learning_policy_denial(_isolated_home, setting, reason):
+    _write_config(_isolated_home, {"learning": {setting: False}})
+    session_id = _record()
+    assert _capture_rows() == []
+    assert (capture_store.capture_dir() / f"{session_id}.jsonl").exists()
+    with staging_mod.get_store()._cursor() as cursor:
+        denials = cursor.execute(
+            "SELECT cadence, outcome, detail FROM flush_records"
+        ).fetchall()
+    assert [tuple(row) for row in denials] == [
+        ("capture", staging_mod.FlushOutcome.FLUSH_SKIPPED.value, reason)
+    ]

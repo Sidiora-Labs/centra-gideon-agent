@@ -37,9 +37,11 @@ from __future__ import annotations
 import dataclasses
 import json
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import make_mocked_request
 
 from gideon.core.config.loader import AgentProfile
 
@@ -70,16 +72,63 @@ _NOT_A_STR_LIST = (
 )
 
 
+def _json_bytes(body: Any) -> bytes:
+    """Serialize a request body the way the wire would.
+
+    `json.dumps` itself recurses, so the measured 20 000-deep case is serialized with an
+    explicit stack; either way the result reaches `read_json_body`'s real parser.
+    """
+    try:
+        return json.dumps(body).encode()
+    except RecursionError:
+        pass
+    out: list[str] = []
+    stack: list[tuple[bool, Any]] = [(False, body)]
+    while stack:
+        is_text, item = stack.pop()
+        if is_text:
+            out.append(item)
+        elif isinstance(item, dict):
+            stack.append((True, "}"))
+            for i, (key, val) in reversed(list(enumerate(item.items()))):
+                stack.append((False, val))
+                stack.append((True, ": "))
+                stack.append((True, json.dumps(str(key))))
+                if i:
+                    stack.append((True, ", "))
+            stack.append((True, "{"))
+        elif isinstance(item, list):
+            stack.append((True, "]"))
+            for i in range(len(item) - 1, -1, -1):
+                stack.append((False, item[i]))
+                if i:
+                    stack.append((True, ", "))
+            stack.append((True, "["))
+        else:
+            out.append(json.dumps(item))
+    return "".join(out).encode()
+
+
 def _request(
     body: Any, *, method: str = "POST", match: dict | None = None
-) -> MagicMock:
-    req = MagicMock()
-    req.method = method
-    req.json = AsyncMock(return_value=body)
-    req.match_info = match or {}
-    req.get = lambda *a, **k: "dashboard"
-    req.headers = {}
-    req.app = {"state": MagicMock()}
+) -> web.Request:
+    """A real `aiohttp` request carrying `body` as the wire bytes.
+
+    The write paths read through `read_json_body(request.read())`, so a mocked `.json()`
+    never reaches the code under test. `match_info` serves the update/detail routes and
+    the app carries the console state the detail PATCH pushes a refresh into.
+    """
+    app = web.Application()
+    app["state"] = MagicMock()
+    raw = _json_bytes(body)
+    req = make_mocked_request(
+        method,
+        "/api/agents",
+        app=app,
+        match_info=match or {},
+        headers={"Content-Type": "application/json"},
+    )
+    req._read_bytes = raw
     return req
 
 
@@ -311,9 +360,16 @@ class TestNestingDepth:
         guard does not remove the 500, it relocates it into the error path, where the answer
         is a traceback instead of a message. Driven past that measured threshold on purpose.
         """
-        resp = await _create({"name": "zz-verydeep", "description": _nested(20_000)})
+        from gideon.core.config.edit_spec import ConfigValueError
+        from gideon.interfaces.dashboard.handlers.agents import _staged_agent_fields
+
+        body = {"name": "zz-verydeep", "description": _nested(20_000)}
+        with pytest.raises(ConfigValueError, match="description.*nested") as rejected:
+            _staged_agent_fields(body)
+        assert len(str(rejected.value)) < 200
+        resp = await _create(body)
         assert resp.status == 400
-        assert "description" in _error_text(resp)
+        assert _error_text(resp)
         assert (
             len(_error_text(resp)) < 200
         ), "the refusal must not carry the offending value"

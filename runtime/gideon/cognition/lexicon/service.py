@@ -109,6 +109,11 @@ class LexiconService:
         it (auto) or attach a suggestion (propose). Timestamps are preserved."""
         return TranscriptPass(sys.modules[__name__], self).run(result)
 
+    def write_dictation_corrections(self, outcome: CorrectionOutcome) -> None:
+        """Persist corrections that were applied to microphone dictation."""
+        for correction in outcome.applied:
+            self.learn_correction(correction.heard, correction.suggested)
+
     def _best_phonetic_match(self, word: str) -> tuple[str, float] | None:
         """Return (canonical, score) of the best same-sound Lexicon term, or None. Score
         blends phonetic-key overlap with a literal-difference bonus (sounds same, spelled

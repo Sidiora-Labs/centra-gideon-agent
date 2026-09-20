@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
-import { Reorder, useReducedMotion } from 'framer-motion'
-import { dragSpring } from '../../theme/motion'
+import { Reorder } from 'framer-motion'
+import { dragSpring, useReducedMotion } from '../../theme/motion'
 import { reconcileReorder } from './motionFamilyState'
 
 export function Reorderable<Item>({ items, onReorder, getKey, renderItem, className, axis = 'y', canDrag }: {

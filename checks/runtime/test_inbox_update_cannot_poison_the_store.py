@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
 from gideon.integrations.inbox import (
@@ -103,17 +104,16 @@ _MALFORMED = object()
 
 
 async def _put(st: _State, body: Any, item_id: str = ITEM_ID) -> tuple[int, dict]:
+    app = web.Application()
+    app["state"] = st
     req = make_mocked_request(
-        "PUT", f"/api/inbox/{item_id}", match_info={"id": item_id}
+        "PUT",
+        f"/api/inbox/{item_id}",
+        app=app,
+        match_info={"id": item_id},
+        headers={"Content-Type": "application/json"},
     )
-    req.app["state"] = st
-
-    async def _json():
-        if body is _MALFORMED:
-            raise json.JSONDecodeError("bad", "", 0)
-        return body
-
-    req.json = _json  # type: ignore[method-assign]
+    req._read_bytes = b"{not json" if body is _MALFORMED else json.dumps(body).encode()
     resp = await h.api_inbox_update(req)
     return resp.status, json.loads(resp.text or "{}")
 
@@ -179,6 +179,7 @@ async def test_every_updatable_field_is_type_checked(env, field, value, expected
 
 @pytest.mark.asyncio
 async def test_a_scalar_body_is_a_400_not_a_500(env):
+    """Valid scalar JSON is rejected as a non-object body."""
     st, _, _, _ = env
     status, body = await _put(st, "notadict")
     assert (status, body["error"]["code"]) == (400, "invalid_body")

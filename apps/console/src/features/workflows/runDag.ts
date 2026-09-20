@@ -82,6 +82,7 @@ export function layoutRunDag(
       w: NODE_W,
       h: NODE_H,
       state: awaiting ? 'awaiting' : dagState(row.node.state),
+      label: options.label ? options.label(row.node) : row.node.node_id,
       content: options.label ? options.label(row.node) : row.node.node_id,
     })
   }

@@ -1039,6 +1039,185 @@ wheels = [
 ]
 
 [[package]]
+name = "gideon-agent-harness"
+version = "0.1.3"
+source = { editable = "." }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "argon2-cffi" },
+    { name = "cron-descriptor" },
+    { name = "croniter" },
+    { name = "cryptography" },
+    { name = "html2text" },
+    { name = "httpx" },
+    { name = "jsonschema" },
+    { name = "nh3" },
+    { name = "numpy" },
+    { name = "openpyxl" },
+    { name = "pdfplumber" },
+    { name = "pillow" },
+    { name = "pysqlite3-binary", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "python-docx" },
+    { name = "python-dotenv" },
+    { name = "python-pptx" },
+    { name = "pyyaml" },
+    { name = "reportlab" },
+    { name = "snowballstemmer" },
+    { name = "sqlite-vec" },
+    { name = "trafilatura" },
+    { name = "tree-sitter" },
+    { name = "tree-sitter-language-pack" },
+    { name = "websockets" },
+]
+
+[package.optional-dependencies]
+anthropic = [
+    { name = "anthropic" },
+]
+bedrock = [
+    { name = "boto3" },
+]
+dev = [
+    { name = "black" },
+    { name = "boto3" },
+    { name = "build" },
+    { name = "faiss-cpu" },
+    { name = "faster-whisper" },
+    { name = "flake8" },
+    { name = "huggingface-hub" },
+    { name = "hypothesis" },
+    { name = "isort" },
+    { name = "mcp" },
+    { name = "mypy" },
+    { name = "piper-tts" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "pytest-split" },
+    { name = "pytest-timeout" },
+    { name = "pytest-xdist" },
+    { name = "sentence-transformers" },
+    { name = "setuptools" },
+]
+embeddings = [
+    { name = "faiss-cpu" },
+    { name = "sentence-transformers" },
+]
+eval = [
+    { name = "jinja2" },
+]
+httpx = [
+    { name = "httpx" },
+]
+js-render = [
+    { name = "playwright" },
+]
+keychain = [
+    { name = "keyring" },
+]
+mcp = [
+    { name = "mcp" },
+]
+models = [
+    { name = "faiss-cpu" },
+    { name = "faster-whisper" },
+    { name = "huggingface-hub" },
+    { name = "piper-tts" },
+    { name = "sentence-transformers" },
+]
+oauth2 = [
+    { name = "cryptography" },
+]
+openai = [
+    { name = "openai" },
+]
+slack = [
+    { name = "slack-sdk" },
+]
+stt = [
+    { name = "faster-whisper" },
+]
+test = [
+    { name = "hypothesis" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "pytest-split" },
+    { name = "pytest-timeout" },
+    { name = "pytest-xdist" },
+    { name = "setuptools" },
+]
+tts = [
+    { name = "huggingface-hub" },
+    { name = "piper-tts" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiohttp", specifier = ">=3.9,<4" },
+    { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.20" },
+    { name = "argon2-cffi", specifier = ">=23,<26" },
+    { name = "black", marker = "extra == 'dev'", specifier = ">=26,<27" },
+    { name = "boto3", marker = "extra == 'bedrock'", specifier = ">=1.34" },
+    { name = "build", marker = "extra == 'dev'", specifier = ">=1.0" },
+    { name = "cron-descriptor", specifier = ">=1.4,<3" },
+    { name = "croniter", specifier = ">=2.0,<7" },
+    { name = "cryptography", specifier = ">=42" },
+    { name = "cryptography", marker = "extra == 'oauth2'", specifier = ">=42" },
+    { name = "faiss-cpu", marker = "extra == 'embeddings'", specifier = ">=1.7" },
+    { name = "faster-whisper", marker = "extra == 'stt'", specifier = ">=1.0" },
+    { name = "flake8", marker = "extra == 'dev'", specifier = ">=7,<8" },
+    { name = "gideon-agent-harness", extras = ["bedrock"], marker = "extra == 'dev'" },
+    { name = "gideon-agent-harness", extras = ["embeddings"], marker = "extra == 'models'" },
+    { name = "gideon-agent-harness", extras = ["mcp"], marker = "extra == 'dev'" },
+    { name = "gideon-agent-harness", extras = ["models"], marker = "extra == 'dev'" },
+    { name = "gideon-agent-harness", extras = ["stt"], marker = "extra == 'models'" },
+    { name = "gideon-agent-harness", extras = ["test"], marker = "extra == 'dev'" },
+    { name = "gideon-agent-harness", extras = ["tts"], marker = "extra == 'models'" },
+    { name = "html2text", specifier = ">=2020.1.16" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "httpx", marker = "extra == 'httpx'", specifier = ">=0.27" },
+    { name = "huggingface-hub", marker = "extra == 'tts'", specifier = ">=0.23" },
+    { name = "hypothesis", marker = "extra == 'test'", specifier = ">=6" },
+    { name = "isort", marker = "extra == 'dev'", specifier = ">=8,<9" },
+    { name = "jinja2", marker = "extra == 'eval'", specifier = ">=3.0" },
+    { name = "jsonschema", specifier = ">=4" },
+    { name = "keyring", marker = "extra == 'keychain'", specifier = ">=24" },
+    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.2,<2" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=2,<3" },
+    { name = "nh3", specifier = ">=0.2" },
+    { name = "numpy", specifier = ">=1.21,<3" },
+    { name = "openai", marker = "extra == 'openai'", specifier = ">=1.0" },
+    { name = "openpyxl", specifier = ">=3.1,<4" },
+    { name = "pdfplumber", specifier = ">=0.11,<1" },
+    { name = "pillow", specifier = ">=10,<13" },
+    { name = "piper-tts", marker = "extra == 'tts'", specifier = ">=1.2" },
+    { name = "playwright", marker = "extra == 'js-render'", specifier = ">=1.40" },
+    { name = "pysqlite3-binary", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = ">=0.5.4" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=7" },
+    { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.23" },
+    { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=4" },
+    { name = "pytest-split", marker = "extra == 'test'", specifier = ">=0.8" },
+    { name = "pytest-timeout", marker = "extra == 'test'", specifier = ">=2" },
+    { name = "pytest-xdist", marker = "extra == 'test'", specifier = ">=3" },
+    { name = "python-docx", specifier = ">=1.1,<2" },
+    { name = "python-dotenv", specifier = ">=1.0" },
+    { name = "python-pptx", specifier = ">=0.6.21,<2" },
+    { name = "pyyaml", specifier = ">=6,<7" },
+    { name = "reportlab", specifier = ">=4,<6" },
+    { name = "sentence-transformers", marker = "extra == 'embeddings'", specifier = ">=3.0" },
+    { name = "setuptools", marker = "extra == 'test'", specifier = ">=64" },
+    { name = "slack-sdk", marker = "extra == 'slack'", specifier = ">=3.27,<4" },
+    { name = "snowballstemmer", specifier = ">=1.0" },
+    { name = "sqlite-vec", specifier = ">=0.1,<1" },
+    { name = "trafilatura", specifier = ">=2,<3" },
+    { name = "tree-sitter", specifier = ">=0.21,<1" },
+    { name = "tree-sitter-language-pack", specifier = ">=1.0,<2" },
+    { name = "websockets", specifier = ">=12,<18" },
+]
+provides-extras = ["anthropic", "openai", "bedrock", "httpx", "oauth2", "slack", "stt", "tts", "eval", "embeddings", "mcp", "js-render", "keychain", "models", "dev", "test"]
+
+[[package]]
 name = "greenlet"
 version = "3.5.3"
 source = { registry = "https://pypi.org/simple" }
@@ -2276,182 +2455,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/05/56/6f450312ba05a27d7
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a2/9a/07d658e1e7fad860f1c541ab941348125dbdab773be3a0afaf32361866c7/pdfplumber-0.11.10-py3-none-any.whl", hash = "sha256:7741ea81bf165b474b153e6789d10d18e06b6ddcf3ec84289c3ef2fed6802580", size = 60047, upload-time = "2026-06-15T03:31:29.702Z" },
 ]
-
-[[package]]
-name = "gideon-agent-harness"
-version = "0.1.3"
-source = { editable = "." }
-dependencies = [
-    { name = "aiohttp" },
-    { name = "argon2-cffi" },
-    { name = "cron-descriptor" },
-    { name = "croniter" },
-    { name = "cryptography" },
-    { name = "html2text" },
-    { name = "httpx" },
-    { name = "jsonschema" },
-    { name = "nh3" },
-    { name = "numpy" },
-    { name = "openpyxl" },
-    { name = "pdfplumber" },
-    { name = "pillow" },
-    { name = "pysqlite3-binary", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "python-docx" },
-    { name = "python-dotenv" },
-    { name = "python-pptx" },
-    { name = "pyyaml" },
-    { name = "reportlab" },
-    { name = "snowballstemmer" },
-    { name = "sqlite-vec" },
-    { name = "trafilatura" },
-    { name = "tree-sitter" },
-    { name = "tree-sitter-language-pack" },
-    { name = "websockets" },
-]
-
-[package.optional-dependencies]
-anthropic = [
-    { name = "anthropic" },
-]
-bedrock = [
-    { name = "boto3" },
-]
-dev = [
-    { name = "black" },
-    { name = "boto3" },
-    { name = "build" },
-    { name = "faiss-cpu" },
-    { name = "faster-whisper" },
-    { name = "flake8" },
-    { name = "huggingface-hub" },
-    { name = "hypothesis" },
-    { name = "isort" },
-    { name = "mcp" },
-    { name = "mypy" },
-    { name = "piper-tts" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
-    { name = "pytest-split" },
-    { name = "pytest-timeout" },
-    { name = "pytest-xdist" },
-    { name = "sentence-transformers" },
-]
-embeddings = [
-    { name = "faiss-cpu" },
-    { name = "sentence-transformers" },
-]
-eval = [
-    { name = "jinja2" },
-]
-httpx = [
-    { name = "httpx" },
-]
-js-render = [
-    { name = "playwright" },
-]
-keychain = [
-    { name = "keyring" },
-]
-mcp = [
-    { name = "mcp" },
-]
-models = [
-    { name = "faiss-cpu" },
-    { name = "faster-whisper" },
-    { name = "huggingface-hub" },
-    { name = "piper-tts" },
-    { name = "sentence-transformers" },
-]
-oauth2 = [
-    { name = "cryptography" },
-]
-openai = [
-    { name = "openai" },
-]
-slack = [
-    { name = "slack-sdk" },
-]
-stt = [
-    { name = "faster-whisper" },
-]
-test = [
-    { name = "hypothesis" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
-    { name = "pytest-split" },
-    { name = "pytest-timeout" },
-    { name = "pytest-xdist" },
-]
-tts = [
-    { name = "huggingface-hub" },
-    { name = "piper-tts" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aiohttp", specifier = ">=3.9,<4" },
-    { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.20" },
-    { name = "argon2-cffi", specifier = ">=23,<26" },
-    { name = "black", marker = "extra == 'dev'", specifier = ">=26,<27" },
-    { name = "boto3", marker = "extra == 'bedrock'", specifier = ">=1.34" },
-    { name = "build", marker = "extra == 'dev'", specifier = ">=1.0" },
-    { name = "cron-descriptor", specifier = ">=1.4,<3" },
-    { name = "croniter", specifier = ">=2.0,<7" },
-    { name = "cryptography", specifier = ">=42" },
-    { name = "cryptography", marker = "extra == 'oauth2'", specifier = ">=42" },
-    { name = "faiss-cpu", marker = "extra == 'embeddings'", specifier = ">=1.7" },
-    { name = "faster-whisper", marker = "extra == 'stt'", specifier = ">=1.0" },
-    { name = "flake8", marker = "extra == 'dev'", specifier = ">=7,<8" },
-    { name = "html2text", specifier = ">=2020.1.16" },
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "httpx", marker = "extra == 'httpx'", specifier = ">=0.27" },
-    { name = "huggingface-hub", marker = "extra == 'tts'", specifier = ">=0.23" },
-    { name = "hypothesis", marker = "extra == 'test'", specifier = ">=6" },
-    { name = "isort", marker = "extra == 'dev'", specifier = ">=8,<9" },
-    { name = "jinja2", marker = "extra == 'eval'", specifier = ">=3.0" },
-    { name = "jsonschema", specifier = ">=4" },
-    { name = "keyring", marker = "extra == 'keychain'", specifier = ">=24" },
-    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.2,<2" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=2,<3" },
-    { name = "nh3", specifier = ">=0.2" },
-    { name = "numpy", specifier = ">=1.21,<3" },
-    { name = "openai", marker = "extra == 'openai'", specifier = ">=1.0" },
-    { name = "openpyxl", specifier = ">=3.1,<4" },
-    { name = "pdfplumber", specifier = ">=0.11,<1" },
-    { name = "gideon-agent-harness", extras = ["bedrock"], marker = "extra == 'dev'" },
-    { name = "gideon-agent-harness", extras = ["embeddings"], marker = "extra == 'models'" },
-    { name = "gideon-agent-harness", extras = ["mcp"], marker = "extra == 'dev'" },
-    { name = "gideon-agent-harness", extras = ["models"], marker = "extra == 'dev'" },
-    { name = "gideon-agent-harness", extras = ["stt"], marker = "extra == 'models'" },
-    { name = "gideon-agent-harness", extras = ["test"], marker = "extra == 'dev'" },
-    { name = "gideon-agent-harness", extras = ["tts"], marker = "extra == 'models'" },
-    { name = "pillow", specifier = ">=10,<13" },
-    { name = "piper-tts", marker = "extra == 'tts'", specifier = ">=1.2" },
-    { name = "playwright", marker = "extra == 'js-render'", specifier = ">=1.40" },
-    { name = "pysqlite3-binary", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = ">=0.5.4" },
-    { name = "pytest", marker = "extra == 'test'", specifier = ">=7" },
-    { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.23" },
-    { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=4" },
-    { name = "pytest-split", marker = "extra == 'test'", specifier = ">=0.8" },
-    { name = "pytest-timeout", marker = "extra == 'test'", specifier = ">=2" },
-    { name = "pytest-xdist", marker = "extra == 'test'", specifier = ">=3" },
-    { name = "python-docx", specifier = ">=1.1,<2" },
-    { name = "python-dotenv", specifier = ">=1.0" },
-    { name = "python-pptx", specifier = ">=0.6.21,<2" },
-    { name = "pyyaml", specifier = ">=6,<7" },
-    { name = "reportlab", specifier = ">=4,<6" },
-    { name = "sentence-transformers", marker = "extra == 'embeddings'", specifier = ">=3.0" },
-    { name = "slack-sdk", marker = "extra == 'slack'", specifier = ">=3.27,<4" },
-    { name = "snowballstemmer", specifier = ">=1.0" },
-    { name = "sqlite-vec", specifier = ">=0.1,<1" },
-    { name = "trafilatura", specifier = ">=2,<3" },
-    { name = "tree-sitter", specifier = ">=0.21,<1" },
-    { name = "tree-sitter-language-pack", specifier = ">=1.0,<2" },
-    { name = "websockets", specifier = ">=12,<18" },
-]
-provides-extras = ["anthropic", "openai", "bedrock", "httpx", "oauth2", "slack", "stt", "tts", "eval", "embeddings", "mcp", "js-render", "keychain", "models", "dev", "test"]
 
 [[package]]
 name = "pillow"

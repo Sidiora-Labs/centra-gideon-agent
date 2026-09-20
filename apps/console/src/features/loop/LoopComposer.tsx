@@ -14,6 +14,8 @@ import { DotGlow } from '../../shared/ui/DotGlow'
 import { spring } from '../../shared/theme/motion'
 import { api, type Granularity, type LoopKind } from '../../shared/data/api'
 import type { ComposerControls } from '../../shared/ui/composer/types'
+import { notify } from '../../app/shell/appSdk'
+import { isNoModelSetupError } from '../chat/NoModelSetupState'
 
 
 const KINDS: { id: LoopKind; label: string; blurb: string }[] = [
@@ -100,8 +102,14 @@ export function LoopComposer({ onCreated, onHistory, initialProjectId, initialKi
     const t = task.trim()
     if (!t || optimizing) return
     setOptimizing(true)
-    try { const r = await api.optimizePrompt(t, ''); if (r.changed && r.optimized) setTask(r.optimized) }
-    catch {   } finally { setOptimizing(false) }
+    try {
+      const r = await api.optimizePrompt(t, '')
+      if (r.changed && r.optimized) setTask(r.optimized)
+      else notify('This prompt is already clear — no changes needed.', 'info')
+    } catch (e) {
+      const detail = String((e as Error)?.message || e)
+      notify(isNoModelSetupError(detail) ? 'Connect a model before optimizing this prompt.' : `Couldn't optimize this prompt: ${detail}`, 'error')
+    } finally { setOptimizing(false) }
   }
   async function transcribe(blob: Blob): Promise<string> {
     const r = await api.transcribeAudio(blob); return r.text ?? ''

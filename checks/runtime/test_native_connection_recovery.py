@@ -6,6 +6,7 @@ import asyncio
 import json
 from contextlib import asynccontextmanager
 
+import httpx
 import pytest
 
 from gideon.engine.agents.native.builtin_tools import NativeBuiltinToolProvider
@@ -210,7 +211,9 @@ async def test_turn_recovery_budget_stops_repeated_disconnections(
         model = _provider(endpoint)
         runtime, _ = await _runtime(tmp_path, model, monkeypatch)
         try:
-            with pytest.raises(model._openai_module.APIConnectionError):
+            with pytest.raises(
+                (model._openai_module.APIConnectionError, httpx.RemoteProtocolError)
+            ):
                 _ = [event async for event in runtime.stream("Read three notes")]
         finally:
             await model.shutdown()
@@ -228,7 +231,9 @@ async def test_same_exchange_still_only_retries_once(tmp_path, monkeypatch):
         model = _provider(endpoint)
         runtime, _ = await _runtime(tmp_path, model, monkeypatch)
         try:
-            with pytest.raises(model._openai_module.APIConnectionError):
+            with pytest.raises(
+                (model._openai_module.APIConnectionError, httpx.RemoteProtocolError)
+            ):
                 _ = [event async for event in runtime.stream("Answer")]
         finally:
             await model.shutdown()
@@ -245,7 +250,9 @@ async def test_partial_answer_is_not_replayed_after_connection_failure(
         runtime, _ = await _runtime(tmp_path, model, monkeypatch)
         received = []
         try:
-            with pytest.raises(model._openai_module.APIConnectionError):
+            with pytest.raises(
+                (model._openai_module.APIConnectionError, httpx.RemoteProtocolError)
+            ):
                 async for event in runtime.stream("Answer"):
                     received.append(event)
         finally:

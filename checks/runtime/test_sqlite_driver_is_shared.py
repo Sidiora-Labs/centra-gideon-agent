@@ -30,15 +30,15 @@ import pytest
 SRC = pathlib.Path(__file__).resolve().parents[2] / "runtime" / "gideon"
 
 CATCHERS = (
-    "memory_graph.py",
-    "memory.py",
-    "session_search.py",
-    "knowledge/store.py",
-    "knowledge/retrieval.py",
-    "portability.py",
-    "snapshot.py",
-    "vector_memory.py",
-    "loop/store.py",
+    "cognition/memory_graph.py",
+    "cognition/memory.py",
+    "engine/session_search.py",
+    "cognition/knowledge/store.py",
+    "cognition/knowledge/retrieval.py",
+    "workspace/portability.py",
+    "workspace/snapshot.py",
+    "cognition/vector_memory.py",
+    "automation/loop/store.py",
 )
 
 

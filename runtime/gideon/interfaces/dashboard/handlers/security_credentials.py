@@ -34,6 +34,7 @@ from gideon.core.config.credential_migration import (
     rollback_credentials_to_keychain,
     verify_credential_migration,
 )
+from gideon.core.http_request import read_json_body
 from gideon.http_errors import json_error
 from gideon.security.sel import sel
 
@@ -66,7 +67,7 @@ def _refuse_app(request: web.Request) -> web.Response | None:
 async def _confirmed(request: web.Request) -> bool:
     """Did the caller send ``confirm: true``? A malformed body is a NO, never a yes."""
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return False
     return isinstance(body, dict) and body.get("confirm") is True

@@ -119,7 +119,7 @@ class TestRegistration:
         """A handler nothing routes to is the defect this repo keeps finding: its own tests are
         green and the surface is unreachable. Asserted against ``server.py`` because that is the
         one file that decides whether a URL exists."""
-        src = (SRC / "dashboard" / "server.py").read_text()
+        src = (SRC / "interfaces" / "dashboard" / "server.py").read_text()
         assert (
             'add_get("/api/knowledge/decisions", handlers.api_decision_journal)' in src
         )
@@ -190,7 +190,9 @@ class TestOneReadPath:
         """The static half of the test above: a literal ten in the handler is a second spelling
         even while the values agree, and it agrees only until somebody tunes one of them.
         """
-        src = (SRC / "dashboard" / "handlers" / "decisions.py").read_text()
+        src = (
+            SRC / "interfaces" / "dashboard" / "handlers" / "decisions.py"
+        ).read_text()
         assert "CALIBRATION_MIN_N" in src
         body = src.split("def api_decision_journal")[1]
         assert (
@@ -352,7 +354,7 @@ class TestStoresStayUncoupled:
     """
 
     def test_the_journal_writes_memory_only_through_write_lesson(self) -> None:
-        src = (SRC / "decisions.py").read_text()
+        src = (SRC / "cognition" / "decisions.py").read_text()
         writes = [
             ln.strip()
             for ln in src.splitlines()
@@ -364,11 +366,13 @@ class TestStoresStayUncoupled:
 
     def test_the_memory_side_never_reaches_for_the_knowledge_store(self) -> None:
         for name in ("memory_service.py", "vector_memory.py"):
-            src = (SRC / name).read_text()
+            src = (SRC / "cognition" / name).read_text()
             assert (
                 "get_knowledge_store" not in src
             ), f"{name} reaches into the knowledge store"
             assert (
                 "from gideon.cognition.decisions" not in src
             ), f"{name} imports the journal"
-        assert "def write_lesson" in (SRC / "memory_service.py").read_text()
+        assert (
+            "def write_lesson" in (SRC / "cognition" / "memory_service.py").read_text()
+        )

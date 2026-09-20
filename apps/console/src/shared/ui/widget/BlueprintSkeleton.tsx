@@ -1,5 +1,5 @@
-import { motion, useReducedMotion } from 'framer-motion'
-import { spring } from '../../theme/motion'
+import { motion } from 'framer-motion'
+import { spring, useReducedMotion } from '../../theme/motion'
 
 interface Props { width?: number; height?: number }
 export function blueprintGeometry(width: number, height: number) {

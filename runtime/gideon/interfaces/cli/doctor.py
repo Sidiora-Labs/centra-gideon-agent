@@ -12,10 +12,6 @@ from pathlib import Path
 from gideon import __version__ as _pc_version
 from gideon.core.config import AppConfig
 from gideon.core.config import loader as config_loader
-from gideon.core.config.credentials import (
-    credential_backend,
-    credential_backend_warning,
-)
 from gideon.core.config.loader import env_path
 from gideon.core.layout import package_path
 from gideon.engine.agent import AGENT_FILENAME, AGENTS_DIR
@@ -41,6 +37,35 @@ def config_dir() -> Path:
 
 
 _MIN_NODE_VERSION = 18
+
+
+def _doctor_node(node: str) -> None:
+    try:
+        result = subprocess.run([node, "-v"], capture_output=True, text=True, timeout=5)
+        major = int(result.stdout.strip().lstrip("v").split(".")[0])
+        if major >= _MIN_NODE_VERSION:
+            print(f"  node:        ✅ {node} (v{major})")
+        else:
+            print(
+                f"  node:        ⚠️  v{major} < {_MIN_NODE_VERSION} "
+                f"(frontend needs Node {_MIN_NODE_VERSION}+)"
+            )
+            print(f"               Fix: install Node.js >= {_MIN_NODE_VERSION}")
+    except Exception:
+        print(f"  node:        ⚠️  {node} (version unknown)")
+
+
+def _git_repo_state(project: Path, git: str | None) -> bool | None:
+    try:
+        result = subprocess.run(
+            [git or "git", "-C", str(project), "rev-parse", "--is-inside-work-tree"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception:
+        return None
+    return result.returncode == 0 and result.stdout.strip() == "true"
 
 
 def _doctor_providers() -> list[str]:
@@ -162,11 +187,22 @@ def _doctor_credentials() -> list[str]:
     secret service keeps its credentials in ``.env`` at 0600, and echoing the request
     would tell that operator their secrets are somewhere they are not.
     """
-    if credential_backend() == "keychain":
+    from gideon.operations.resilience.doctor import credential_store_state
+
+    state = credential_store_state()
+    if state["backend"] == "keychain":
         print("  credentials: 🔐 OS keychain (keyring)")
+    elif state["env_exists"] is False:
+        print(f"  credentials: 🔐 .env not created — {env_path()}")
+    elif state["env_exists"] is None:
+        print(f"  credentials: ⚠️  .env state unknown — {env_path()}")
+    elif not state["env_readable"]:
+        print(
+            f"  credentials: ⚠️  .env unreadable (mode {state['env_mode']}) — {env_path()}"
+        )
     else:
-        print(f"  credentials: 🔐 .env 0600 — {env_path()}")
-    warning = credential_backend_warning()
+        print(f"  credentials: 🔐 .env {state['env_mode']} — {env_path()}")
+    warning = state["warning"]
     if not warning:
         return []
     print(f"               ⚠️  {warning}")
@@ -216,7 +252,7 @@ def _doctor_auth_mode() -> list[str]:
 
 def _doctor_proxy_bypass(cfg: AppConfig) -> list[str]:
     """Name the local-network auth bypass and flag public reverse-proxy exposure."""
-    from gideon.interfaces.dashboard.exposure import (
+    from gideon.security.exposure import (
         local_network_bypass_enabled,
         public_proxy_bypass_warning,
     )
@@ -254,28 +290,12 @@ def _doctor() -> None:
 
     node = shutil.which("node")
     if node:
-        try:
-            node_ver_result = subprocess.run(
-                ["node", "-v"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            major = int(node_ver_result.stdout.strip().lstrip("v").split(".")[0])
-            if major >= _MIN_NODE_VERSION:
-                print(f"  node:        ✅ {node} (v{major})")
-            else:
-                print(
-                    f"  node:        ⚠️  v{major} < {_MIN_NODE_VERSION} (frontend needs Node {_MIN_NODE_VERSION}+)"  # noqa: E501
-                )
-                print("               Fix: install Node.js >= 16")
-        except Exception:
-            print(f"  node:        ✅ {node}")
+        _doctor_node(node)
     else:
         print(
             f"  node:        ⚠️  not found (frontend needs Node {_MIN_NODE_VERSION}+)"
         )
-        print("               Fix: install Node.js >= 16")
+        print(f"               Fix: install Node.js >= {_MIN_NODE_VERSION}")
 
     from gideon.core.sqlite_compat import probe as _sqlite_probe
 
@@ -306,11 +326,13 @@ def _doctor() -> None:
                 stale_project = True
     if proj and Path(proj).is_dir():
         print(f"  project dir: ✅ {proj}")
-        git_dir = Path(proj) / ".git"
-        if git_dir.is_dir():
+        git_repo = _git_repo_state(Path(proj), git)
+        if git_repo is True:
             print("  git repo:    ✅")
-        else:
+        elif git_repo is False:
             print("  git repo:    ⚠️  not a git repo")
+        else:
+            print("  git repo:    ⚠️  state unknown")
     elif not stale_project:
         print("  project dir: ⏹  not set (source checkouts only — not needed here)")
 

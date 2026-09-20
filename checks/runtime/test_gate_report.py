@@ -21,10 +21,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from tooling.scripts import generate_config_baseline as config_gen
 from tooling.scripts import generate_docs_lint_baseline as docs_gen
 from tooling.scripts import generate_inert_surface_baseline as inert_gen
 from tooling.scripts.gate_report import GateResult, main, render_report, run_all_gates
+
+pytestmark = pytest.mark.timeout(300)
 
 _GATE_NAMES = ["config-baseline", "inert-surface", "docs-lint"]
 _ALL_GATE_NAMES = _GATE_NAMES + [

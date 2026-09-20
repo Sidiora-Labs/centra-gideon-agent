@@ -23,12 +23,14 @@ interface Props {
 export function ContributedPage({ app, host, src, mountFunction = 'mount' }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const [error, setError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let cancelled = false
     let cleanup: (() => void) | undefined
     let root: Root | undefined
+    let submitObserver: MutationObserver | undefined
 
     setLoading(true); setError(null)
     if (maxSurfaceLayer() < LAYER_APP) {
@@ -36,7 +38,16 @@ export function ContributedPage({ app, host, src, mountFunction = 'mount' }: Pro
       setLoading(false)
       return
     }
-    const ctx: AppContext = host ? Object.assign(app, { host }) : app
+    const ctx: AppContext = { ...app, host, reportError: setActionError }
+    if (app.enabled === false && hostRef.current) {
+      const disableSubmits = () => hostRef.current?.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button[type="submit"], input[type="submit"]').forEach(control => {
+        control.disabled = true
+        control.title = 'This app is disabled. Enable it to submit.'
+      })
+      submitObserver = new MutationObserver(disableSubmits)
+      submitObserver.observe(hostRef.current, { childList: true, subtree: true })
+      disableSubmits()
+    }
     loadContributedModule(src, ctx)
       .then((mod) => {
         if (cancelled || !hostRef.current) return
@@ -62,6 +73,7 @@ export function ContributedPage({ app, host, src, mountFunction = 'mount' }: Pro
 
     return () => {
       cancelled = true
+      submitObserver?.disconnect()
       try { cleanup?.() } catch {   }
       try { root?.unmount() } catch {   }
     }
@@ -83,6 +95,7 @@ export function ContributedPage({ app, host, src, mountFunction = 'mount' }: Pro
           <Loader2 size={22} className="animate-spin text-on-surface-low" />
         </div>
       )}
+      {actionError && <div role="alert" data-type="body-s" className="m-3 rounded-lg border border-danger/30 bg-danger/5 px-3 py-2 text-danger">{actionError}</div>}
       <div ref={hostRef} className="h-full" />
     </div>
   )

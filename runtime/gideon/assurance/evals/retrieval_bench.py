@@ -78,6 +78,8 @@ ARM_KEYWORD = "keyword"
 ARM_GRAPH = "graph"
 ARM_VECTOR = "vector"
 ARMS = (ARM_KEYWORD, ARM_GRAPH, ARM_VECTOR)
+ARM_RERANK = "rerank"
+NOT_MEASURED = "not measured"
 
 DEFAULT_K = 5
 
@@ -384,6 +386,25 @@ class ArmMaskRow:
             "no_candidate_queries": self.no_candidate_queries,
             "undefined_recall_queries": self.undefined_recall_queries,
         }
+
+
+@dataclass(frozen=True)
+class RerankRow:
+    """Rerank precision, kept distinct from candidate-generation ablations."""
+
+    arm: str = ARM_RERANK
+    p_at_k: float | str = NOT_MEASURED
+    queries: int = 0
+
+    def to_dict(self) -> dict:
+        return {"arm": self.arm, "p_at_k": self.p_at_k, "queries": self.queries}
+
+
+def build_rerank_row(scores: "list[QueryScore]") -> RerankRow:
+    measured = [score.precision for score in scores if score.precision is not None]
+    if not measured:
+        return RerankRow()
+    return RerankRow(p_at_k=sum(measured) / len(measured), queries=len(measured))
 
 
 TABLE_COLUMNS = (
@@ -749,11 +770,15 @@ def knowledge_retriever(knowledge_store) -> Retriever:
         embedder = None
     retriever = knowledge_retrieval.HybridRetriever(knowledge_store, embedder=embedder)
     knowledge_store._bench_retriever = retriever  # noqa: SLF001
+    rerank_applied: dict[str, bool] = {}
 
     def _search(query: str, k: int, arms: "tuple[str, ...]") -> list[str]:
         hits = retriever.search(query, limit=k, arms=arms)
+        if tuple(arms) == ARMS:
+            rerank_applied[query] = retriever.last_reranker_result.applied
         return [str(h.get("id", "")) for h in hits if h.get("id")]
 
+    _search.rerank_applied = rerank_applied  # type: ignore[attr-defined]
     return _search
 
 
@@ -1134,6 +1159,7 @@ class RetrievalBenchResult:
     aggregates: dict = field(default_factory=dict)
     corpus_drifted: bool = False
     executors: dict = field(default_factory=dict)
+    rerank: RerankRow = field(default_factory=RerankRow)
 
     def to_dict(self) -> dict:
         return {
@@ -1145,6 +1171,7 @@ class RetrievalBenchResult:
             "aggregates": dict(self.aggregates),
             "corpus_drifted": self.corpus_drifted,
             "arm_executors": dict(self.executors),
+            "rerank": self.rerank.to_dict(),
         }
 
 
@@ -1278,6 +1305,13 @@ def run_retrieval_bench(
 
         _assert_mask_applied(scores)
         table = build_table(scores, k=k)
+        applied = getattr(retriever, "rerank_applied", {})
+        rerank_scores = [
+            score
+            for score in scores
+            if score.mask == mask_name(ARMS) and applied.get(score.query, False)
+        ]
+        rerank = build_rerank_row(rerank_scores)
         executors = arm_executors(store_kind, handle)
         contribs = contributions(table, executors)
         aggregates = aggregate(cells)
@@ -1293,6 +1327,7 @@ def run_retrieval_bench(
             current_ref=current_ref,
             drifted=drifted,
             executors=executors,
+            rerank=rerank,
         )
         full_row = next((r for r in table if r.mask == mask_name(ARMS)), None)
         store.append_result(
@@ -1317,6 +1352,7 @@ def run_retrieval_bench(
             aggregates=aggregates,
             corpus_drifted=drifted,
             executors=executors,
+            rerank=rerank,
         )
     finally:
         if opened:
@@ -1386,6 +1422,7 @@ def write_bench_artifacts(
     current_ref: str,
     drifted: bool,
     executors: "dict[str, bool] | None" = None,
+    rerank: RerankRow | None = None,
 ) -> None:
     """Persist the drill-down and the published table beside the matrix artifacts.
 
@@ -1413,6 +1450,7 @@ def write_bench_artifacts(
                 "benchmark_corpus_snapshot_ref": benchmark.corpus_snapshot_ref,
                 "corpus_drifted": drifted,
                 "arm_executors": dict(executors or {}),
+                "rerank": (rerank or RerankRow()).to_dict(),
                 "qrels_sources": benchmark.sources(),
                 "queries": len(benchmark.queries),
                 "floors": {

@@ -20,6 +20,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from aiohttp.test_utils import make_mocked_request
 
 from gideon.interfaces.dashboard.handlers import (
     api_prompt_detail,
@@ -50,18 +51,14 @@ def _mock_sel(monkeypatch):
 
 
 def _req(name=None, body=None):
-    r = MagicMock()
-    if name is not None:
-        r.match_info = {"name": name}
-    r.query = {}
-
-    async def _json():
-        if body is None:
-            raise ValueError("no body")
-        return body
-
-    r.json = _json
-    return r
+    request = make_mocked_request(
+        "PUT",
+        f"/api/prompts/{name or ''}",
+        headers={"Content-Type": "application/json"},
+        match_info={"name": name} if name is not None else {},
+    )
+    request._read_bytes = b"" if body is None else json.dumps(body).encode()
+    return request
 
 
 def _payload(resp):

@@ -36,6 +36,7 @@ export function TerminalPage({ query, setQuery }: Pick<RouteProps, 'query' | 'se
   const [error, setError] = useState('')
   const [restored, setRestored] = useState(false)
   const [persist, setPersist] = useState<boolean | null>(null)
+  const [persistAvailable, setPersistAvailable] = useState<boolean | undefined>()
   useEffect(() => {
     api.gideonConfig()
       .then((c) => setPersist(Boolean(c?.dashboard?.terminal?.persist)))
@@ -62,6 +63,7 @@ export function TerminalPage({ query, setQuery }: Pick<RouteProps, 'query' | 'se
     let alive = true
     api.terminalSessions().then((r) => {
       if (!alive) return
+      setPersistAvailable(r.persist_available)
       const labels = loadLabels()
       const live = (r.sessions || []).filter((s) => s.alive !== false)
       if (live.length) {
@@ -122,13 +124,18 @@ export function TerminalPage({ query, setQuery }: Pick<RouteProps, 'query' | 'se
       <TopBar
         left={<PageTitle>Terminal</PageTitle>}
         right={<HeaderActions>
-          {persist !== null && (
+          {persistAvailable === true && persist !== null && (
             <HeaderControl icon={Anchor}
               label={persist ? 'Disable persistent sessions' : 'Enable persistent sessions'}
               hint={persist
                 ? 'Sessions are tmux-backed, so they survive a restart.'
                 : 'Sessions are lost on restart. Enabling keeps them alive with tmux.'}
               active={persist} priority="low" onClick={togglePersist} />
+          )}
+          {persistAvailable === false && (
+            <HeaderControl icon={Anchor} label="Persistent sessions unavailable"
+              hint="Install tmux to keep terminal sessions alive across restarts."
+              disabled priority="low" />
           )}
           {tabs.length > 0 && (
             <HeaderControl icon={SplitSquareHorizontal} label={split ? 'Close split' : 'Split right'}

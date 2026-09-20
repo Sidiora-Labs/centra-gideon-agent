@@ -34,6 +34,7 @@ from aiohttp.multipart import BodyPartReader
 
 from gideon.automation.workflows import service, store
 from gideon.automation.workflows.review_service import apply_triage, review_findings
+from gideon.core.http_request import read_json_body
 from gideon.interfaces.dashboard.handlers._shared import _is_restricted_session
 from gideon.interfaces.dashboard.sse import stream_response
 from gideon.security.safety_flags import strict_bool
@@ -127,7 +128,7 @@ def _reply(body: dict[str, Any], *, status: int = 200) -> web.Response:
 
 async def _json_body(request: web.Request) -> dict[str, Any] | web.Response:
     try:
-        raw = await request.json()
+        raw = await read_json_body(request)
     except Exception:
         return web.json_response(
             {"error": {"code": "invalid_request", "message": "invalid JSON body"}},
@@ -1125,7 +1126,7 @@ async def api_run_steer(request: web.Request) -> web.Response:
         return denied
     run_id = request.match_info.get("run_id", "")
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     result = service.steer_run(run_id, str((body or {}).get("text", "")))

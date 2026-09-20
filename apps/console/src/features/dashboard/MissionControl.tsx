@@ -64,7 +64,7 @@ function activityOf(s: ChatSessionSummary): SessionActivity {
 
 async function readAttention(): Promise<Attention> {
   const [items, approvals, sessions] = await Promise.all([
-    api.inboxPending(),
+    api.inboxOpen(),
     api.approvals(),
     api.chatSessions(),
   ])

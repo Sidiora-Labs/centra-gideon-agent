@@ -11,7 +11,7 @@
           {
             "canonical": "runtime/gideon/automation/workflows/judge_contract.py",
             "id": "verdict-type",
-            "purpose": "Verdict-shaped classes outside the shared workflow contract introduce additional decision formats for supervisors and evaluators to interpret. This count tracks those definitions while allowing genuinely different domain decisions to retain their own types. A definition leaves the population when it uses the shared contract or receives a more specific domain name."
+            "purpose": "Verdict-shaped classes outside the shared workflow contract introduce additional decision formats for supervisors and evaluators to interpret. This count tracks those definitions while allowing genuinely different domain decisions to retain their own types. A definition leaves the population when it uses the shared contract or has an explicitly classified, distinct domain contract pinned to its module, name and fields."
           },
           {
             "canonical": "runtime/gideon/core/atomic_write.py",
@@ -341,18 +341,18 @@
         "rules": [
           {
             "from": [
-              "ledger"
+              "assurance.ledger"
             ],
             "id": "ledger-is-a-leaf",
             "purpose": "The run ledger supplies durable records to orchestration, learning, evaluation, and user interfaces. It must remain independent of those consumers so each can use it without loading an application layer. Imports in the reverse direction are counted as dependency regressions, with the recorded population serving as the upper bound.",
             "to": [
-              "dashboard",
+              "interfaces.dashboard",
               "sdk",
-              "workflows",
-              "loop",
-              "agents",
-              "knowledge",
-              "learning"
+              "automation.workflows",
+              "automation.loop",
+              "engine.agents",
+              "cognition.knowledge",
+              "cognition.learning"
             ]
           },
           {
@@ -362,7 +362,7 @@
             "id": "core-must-not-import-the-http-surface",
             "purpose": "Domain operations should be usable from the browser, command line, and automation interfaces. Importing HTTP handlers from domain modules ties those operations to the web application. Existing imports remain measured, including composition entry points; additional edges require moving shared behavior below the interface layer.",
             "to": [
-              "dashboard"
+              "interfaces.dashboard"
             ]
           },
           {
@@ -415,29 +415,30 @@
             ]
           },
           {
-            "count": 20,
+            "count": 1,
+            "path": "runtime/gideon/engine/delegation_host.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat"
+            ]
+          },
+          {
+            "count": 6,
             "path": "runtime/gideon/engine/gateway.py",
             "violations": [
               "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard",
-              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard",
-              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat",
-              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat",
-              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat",
-              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat",
-              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat_persistence",
               "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat_runner",
-              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat_utils",
-              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat_utils",
-              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.handlers",
-              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.handlers",
               "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.handlers",
               "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.handlers.autonudge",
-              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.handlers.updates",
-              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.origin",
-              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.session_lifecycle",
               "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.state",
-              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.state",
-              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.token_auth"
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.state"
+            ]
+          },
+          {
+            "count": 2,
+            "path": "runtime/gideon/engine/gateway_maintenance.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.handlers",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.handlers.updates"
             ]
           },
           {
@@ -445,6 +446,40 @@
             "path": "runtime/gideon/engine/gateway_services.py",
             "violations": [
               "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.state"
+            ]
+          },
+          {
+            "count": 2,
+            "path": "runtime/gideon/engine/heartbeat_jobs.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat_persistence",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.session_lifecycle"
+            ]
+          },
+          {
+            "count": 5,
+            "path": "runtime/gideon/engine/lifecycle.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.handlers",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.origin",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.token_auth"
+            ]
+          },
+          {
+            "count": 2,
+            "path": "runtime/gideon/engine/nudge_dispatch.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat",
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat_utils"
+            ]
+          },
+          {
+            "count": 1,
+            "path": "runtime/gideon/engine/result_delivery.py",
+            "violations": [
+              "core-must-not-import-the-http-surface -> gideon.interfaces.dashboard.chat"
             ]
           },
           {
@@ -628,11 +663,11 @@
         "summary": {
           "by_rule": {
             "core-must-not-import-its-own-published-facade": 7,
-            "core-must-not-import-the-http-surface": 54,
+            "core-must-not-import-the-http-surface": 53,
             "ledger-is-a-leaf": 0
           },
-          "edges": 61,
-          "files": 31
+          "edges": 60,
+          "files": 37
         }
       },
       "size": {
@@ -645,17 +680,15 @@
           "over_limit": [],
           "slack_steps": 0,
           "watch_members": [
+            "runtime/gideon/automation/workflows/controller.py",
+            "runtime/gideon/cognition/knowledge/store.py",
             "runtime/gideon/core/config/loader.py",
             "runtime/gideon/interfaces/dashboard/chat_handlers.py",
             "runtime/gideon/interfaces/dashboard/chat_runner.py",
             "runtime/gideon/interfaces/dashboard/handlers/files.py",
-            "runtime/gideon/interfaces/dashboard/handlers/knowledge.py",
-            "runtime/gideon/engine/gateway.py",
-            "runtime/gideon/cognition/knowledge/store.py",
-            "runtime/gideon/cognition/vector_memory.py",
-            "runtime/gideon/automation/workflows/controller.py"
+            "runtime/gideon/interfaces/dashboard/handlers/knowledge.py"
           ],
-          "watched_files": 9
+          "watched_files": 7
         },
         "purpose": "Keep individual modules at or below 6000 lines and prevent growth in the population at or above 2800 lines. Existing large modules may change within that range; new entrants remain regressions. The 1000-line step measures opportunities to lower the ceiling after code is split. These limits preserve maintenance room without allowing new oversized modules."
       }

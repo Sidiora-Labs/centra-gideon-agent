@@ -3,7 +3,7 @@ import {
   Palette, Plug, Bell, Cpu, Shield, ShieldAlert, Database, User, MessageSquare, Bot, Inbox,
   FolderSync, ScrollText, Archive, AudioLines, DownloadCloud, FileText, ChevronRight, Search, Blocks, Activity, Scissors, Compass, Stethoscope, ThumbsUp,
   HardDriveDownload, Coins, Route, LayoutDashboard, Rss, Package, Smartphone, MonitorSmartphone, Plug2, FileType2,
-  FlaskConical, KeyRound, MessageCircle,
+  FlaskConical, KeyRound, MessageCircle, SlidersHorizontal,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { TopBar } from '../../shared/ui/TopBar'
@@ -47,6 +47,7 @@ import { GuardrailsPanel } from './GuardrailsPanel'
 import { DoctorPanel } from './DoctorPanel'
 import { AppsPanel } from './AppsPanel'
 import { SettingsHome } from './SettingsHome'
+import { ConfigSectionsPanel } from './ConfigSectionsPanel'
 import type { RouteProps } from '../../app/shell/useQueryState'
 import { fvs } from '../../shared/theme/fontWeight'
 import { PageTitle } from '../../shared/ui/PageTitle'
@@ -98,6 +99,7 @@ const SUBPAGES: SubPage[] = [
   { id: 'portability', label: 'Import / Export', icon: FolderSync, render: () => <PortabilityPanel /> },
   { id: 'durability', label: 'Backups', icon: HardDriveDownload, render: () => <DurabilityPanel /> },
   { id: 'updates', label: 'Updates', icon: DownloadCloud, render: () => <UpdatesPanel /> },
+  { id: 'runtime-config', label: 'Runtime configuration', icon: SlidersHorizontal, render: () => <ConfigSectionsPanel /> },
 ]
 
 export function SettingsPage({ sub, navigate, query, setQuery }: RouteProps) {

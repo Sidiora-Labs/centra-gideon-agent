@@ -1,10 +1,10 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
 import * as motion from './motion'
-import { motionRegistry, registeredMotionFamilies } from './motionRegistry'
+import { motionComponents, motionRegistry, registeredMotionFamilies } from './motionRegistry'
 
 const ORIGINAL_MATCH_MEDIA = window.matchMedia
 
@@ -66,9 +66,42 @@ describe('reduced motion policy', () => {
     expect(motion.prefersReducedMotion()).toBe(false)
 
     const app = readFileSync(join(process.cwd(), 'src/app/shell/App.tsx'), 'utf8')
-    expect(app).toContain("import { ease, duration, prefersReducedMotion } from '../../shared/theme/motion'")
+    expect(app).toContain('useReducedMotion')
     expect(app).toContain("reducedMotion={reducedMotion ? 'always' : 'never'}")
     expect(app).not.toContain('reducedMotion="user"')
+  })
+
+  it('rails every registered motion component through the shared accessor', () => {
+    for (const path of motionComponents) {
+      const source = readFileSync(join(process.cwd(), 'src', path), 'utf8')
+      expect(source, `${path} bypasses the shared reduced-motion boundary`).toMatch(
+        /from ['"][^'"]*theme\/motion['"]|from ['"]\.\/motion['"]/
+      )
+      expect(source, `${path} has no reduced-motion consultation`).toMatch(/(?:use|prefers)ReducedMotion\(/)
+      expect(source, `${path} imports Framer's reduced-motion hook`).not.toMatch(
+        /import\s*\{[^}]*useReducedMotion[^}]*\}\s*from ['"]framer-motion['"]/
+      )
+      expect(source, `${path} owns a media query`).not.toContain('prefers-reduced-motion')
+    }
+  })
+
+  it('has no ad-hoc TypeScript or CSS preference checks outside the accessor', () => {
+    const sourceRoot = join(process.cwd(), 'src')
+    const offenders: string[] = []
+    const visit = (directory: string) => {
+      for (const entry of readdirSync(directory, { withFileTypes: true })) {
+        const path = join(directory, entry.name)
+        if (entry.isDirectory()) visit(path)
+        else if (/\.(?:ts|tsx|css)$/.test(entry.name) && !/\.(?:test|doc)\./.test(entry.name)) {
+          const source = readFileSync(path, 'utf8')
+          if (source.includes('prefers-reduced-motion')
+            && path !== join(sourceRoot, 'shared/theme/motion.ts')
+            && path !== join(sourceRoot, 'shared/theme/consistencyAudit.report.ts')) offenders.push(path)
+        }
+      }
+    }
+    visit(sourceRoot)
+    expect(offenders.map((path) => path.slice(sourceRoot.length + 1))).toEqual([])
   })
 
   it('never resolves a spring or an indefinite transition when motion is reduced', () => {

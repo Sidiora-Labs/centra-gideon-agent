@@ -388,7 +388,7 @@ def test_the_producer_table_matches_the_engines_real_emitters(run_home):
     executes rots. If the engine grows a circuit breaker, this reds and forces the table to be
     updated, rather than leaving a `None` cell where a real zero now belongs.
     """
-    written = _kinds_written_under("workflows")
+    written = _kinds_written_under("automation/workflows")
     assert written, "vacuity floor: the AST scan found no journal writes at all"
     assert (
         "judge_verdict" in written
@@ -415,7 +415,7 @@ def test_the_loop_side_is_the_only_breaker_writer(run_home):
     ever lands, the test above reds; if the LOOP one is removed, this reds — so the asymmetry can
     never quietly become symmetric in either direction.
     """
-    assert "breaker_trip" in _kinds_written_under("loop"), (
+    assert "breaker_trip" in _kinds_written_under("automation/loop"), (
         "the loop watchdog was the only breaker_trip writer; if that changed, the kind has no "
         "producer anywhere and does not belong on the rails at all"
     )

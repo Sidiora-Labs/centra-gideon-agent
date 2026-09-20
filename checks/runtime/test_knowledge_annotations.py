@@ -50,13 +50,15 @@ def _run(coro):
 def _call(store, handler_name, method, path, *, match_info=None, body=None):
     app = web.Application()
     app["state"] = SimpleNamespace(knowledge_store=store)
-    req = make_mocked_request(method, path, app=app, match_info=match_info or {})
-    if body is not None:
-
-        async def _json():
-            return body
-
-        req.json = _json
+    raw = json.dumps(body).encode() if body is not None else b""
+    req = make_mocked_request(
+        method,
+        path,
+        headers={"Content-Type": "application/json"} if raw else None,
+        app=app,
+        match_info=match_info or {},
+    )
+    req._read_bytes = raw
     from gideon.interfaces.dashboard.handlers import knowledge as H
 
     resp = _run(getattr(H, handler_name)(req))

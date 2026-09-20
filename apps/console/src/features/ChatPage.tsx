@@ -12,7 +12,7 @@ const DEFAULT_CONFIRMATION_PHRASES = ['do it', 'go ahead', 'send it', 'execute']
 const DEFAULT_EXIT_PHRASES = ['cancel', 'never mind', 'forget it']
 import { fvs, withWeight } from '../shared/theme/fontWeight'
 import { playCue } from '../shared/theme/soundCues'
-import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import { Edit3, History, Search, MessageSquare, Trash2, Activity, ChevronRight, ChevronDown, Quote, PanelRight, Clipboard, X, Pin, FileText, BookText, AlertTriangle, Pencil, Sparkles, Link2, Check, Repeat, Rewind, PlayCircle, GitBranch, Folder, FolderPlus, Tag as TagIcon, Columns3, List as ListIcon, ListChecks, Filter, EyeOff, Clock, Loader2, Wrench, Target, Code2 as CodeIcon, Paperclip, ExternalLink, ArrowLeft, ArrowRight, ArrowUp, FolderKanban, GripVertical, MessageCircleQuestion, Bot, ShieldCheck, Shield, Eye, Zap, ClipboardList, Hammer, Camera, NotebookPen, FolderCog, Archive, ArchiveRestore, Boxes, CornerDownLeft, Download, Share2, Coins } from 'lucide-react'
 import { IconButton } from '../shared/ui/IconButton'
 import { SquareIconButton } from '../shared/ui/SquareIconButton'
@@ -34,6 +34,7 @@ import { CollapseColumnButton, CollapsedBoardColumn, boardGridTemplate, useBoard
 import { PromptPalette } from './chat/PromptPalette'
 import { SessionSkillsReview } from './chat/SessionSkillsReview'
 import { RoutingChip, type RoutingSuggestion } from './chat/RoutingChip'
+import { starterPrefill, type StarterPrefill } from './chat/starterPrefill'
 import { OrganizeChip } from './chat/OrganizeChip'
 import { ContextLedger } from './chat/ContextLedger'
 import { ScreenShareChip } from '../shared/ui/ScreenShareChip'
@@ -59,6 +60,7 @@ import { ApprovalCard } from './chat/ApprovalCard'
 import { ChatFilePanel } from './chat/ChatFilePanel'
 import { sameSessionTarget, type CommentTarget } from '../shared/ui/content/commentTarget'
 import { ChatActivityPanel } from './chat/ChatActivityPanel'
+import { createScrollToTurnHandler } from './chat/scrollToTurn'
 import { AssistantActions, UserActions } from './chat/MessageActions'
 import { parseOptions, parseSwitchToAgent } from './chat/parseAssistant'
 import { type PasteBlock, shouldCollapsePaste, nextSeq, makePasteId, markerFor, expandPasteMarkers, pruneBlocks } from './chat/pasteBlocks'
@@ -73,8 +75,8 @@ import { usePlatform } from '../app/shell/usePlatform'
 import { SnipOverlay } from '../shared/ui/SnipOverlay'
 import { chooseCaptureProvider, cropToPngFile, displayCaptureSupported, grabOneFrame, type SnipRect } from '../shared/ui/composer/displayCapture'
 import { notify } from '../app/shell/appSdk'
-import { spring, stagger, listItemEnter, expr } from '../shared/theme/motion'
-import { api, type ApprovalMode, type TaskMode, type ReasoningEffort, type ChatSessionSummary, type ChatHistoryMsg, type DiscoveredAgent, type MemoryMode, type NudgeLoop, type ChatFolder, type ChatTag, type RetagJob, type SessionTemplate, type RewindFileWire } from '../shared/data/api'
+import { spring, stagger, listItemEnter, expr, useReducedMotion } from '../shared/theme/motion'
+import { api, type ApprovalMode, type TaskMode, type ReasoningEffort, type ChatSessionSummary, type ChatHistoryMsg, type DiscoveredAgent, type MemoryMode, type NudgeLoop, type ChatFolder, type ChatTag, type RetagJob, type RewindFileWire } from '../shared/data/api'
 import { useChatSocket, type WsMessage } from '../shared/data/useChatSocket'
 import { useStreamCoalescer } from './chat/useStreamCoalescer'
 import { FindBar } from '../shared/ui/FindBar'
@@ -91,6 +93,7 @@ import type { ComposerControls, ComposerValue } from '../shared/ui/composer/type
 import { Popover, MenuRow } from '../shared/ui/Popover'
 import { useQueryFlag, useQueryParam, type RouteProps } from '../app/shell/useQueryState'
 import { copyText } from '../app/shell/clipboard'
+import { MoreRow } from '../shared/ui/MoreRow'
 
 type ChatDetail = Awaited<ReturnType<typeof api.chatSessionDetail>>
 const detailKey = (key: string) => `chat:detail:${key}`
@@ -105,7 +108,7 @@ type ApproveAction = 'approved' | 'rejected' | 'trust' | 'trust_agent' | 'trust_
 const MEMORY_MODES: { id: MemoryMode; label: string; hint: string }[] = [
   { id: 'persistent', label: 'Persistent', hint: 'Remember across sessions' },
   { id: 'temporary', label: 'Temporary', hint: 'Forget when the session ends' },
-  { id: 'incognito', label: 'Incognito', hint: 'No memory read or write' },
+  { id: 'incognito', label: 'Incognito', hint: 'Do not write to memory' },
 ]
 
 const APPROVAL_SLIDER = [
@@ -147,11 +150,12 @@ function SuggestionChips({ onPick }: { onPick: (s: string) => void }) {
           {s}
         </motion.button>
       ))}
+      <MoreRow total={data?.length ?? 0} shown={6} noun="suggestions" />
     </div>
   )
 }
 
-function StarterChips({ onPick }: { onPick: (t: SessionTemplate) => void }) {
+function StarterChips({ onPick }: { onPick: (prefill: StarterPrefill) => void }) {
   const { data } = useQuery('chat:starters', () => api.sessionTemplates(), { persist: true })
   const items = (data ?? []).slice(0, 6)
   if (!items.length) return null
@@ -160,7 +164,10 @@ function StarterChips({ onPick }: { onPick: (t: SessionTemplate) => void }) {
       <p className="text-[0.75rem] text-on-surface-low">Your starters</p>
       <div className="flex flex-wrap justify-center gap-2" style={{ maxWidth: 720 }}>
         {items.map((t, i) => (
-          <motion.button key={t.id} type="button" onClick={() => onPick(t)}
+          <motion.button key={t.id} type="button" onClick={() => {
+            const prefill = starterPrefill(t.id, items)
+            if (prefill) onPick(prefill)
+          }}
             title={t.first_prompt || t.name}
             initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring.spatialDefault, delay: 0.04 * i }}
             className="flex items-center gap-2 rounded-pill border border-primary/30 bg-primary-container/30 px-3.5 py-2 text-left text-[0.8125rem] text-on-surface-var transition-colors hover:border-primary/60 hover:bg-primary-container/50 hover:text-on-surface">
@@ -169,6 +176,7 @@ function StarterChips({ onPick }: { onPick: (t: SessionTemplate) => void }) {
           </motion.button>
         ))}
       </div>
+      <MoreRow total={data?.length ?? 0} shown={6} noun="starters" />
     </div>
   )
 }
@@ -193,6 +201,7 @@ function ChatHistorySidePanelBody({ navigate, onOpen }: { navigate: (p: string) 
       .sort((a, b) => sessionRecencyMs(b) - sessionRecencyMs(a))
       .slice(0, 20)
   }, [data])
+  const manualCount = (data ?? []).filter((s) => (s.origin ?? 'manual') === 'manual').length
   return (
     <div className="flex flex-col gap-1">
       {data === undefined && sessionsError ? (
@@ -203,7 +212,7 @@ function ChatHistorySidePanelBody({ navigate, onOpen }: { navigate: (p: string) 
         <div className="px-2 py-6 text-center text-on-surface-low text-[0.8125rem]">No chats yet.</div>
       ) : (
         <motion.div variants={{ animate: { transition: stagger(0.03) } }} initial="initial" animate="animate" className="flex flex-col gap-0.5">
-          {recent.map((s) => (
+           {recent.map((s) => (
             <motion.button key={s.key} type="button" variants={listItemEnter} onClick={() => onOpen(s.key)}
               whileHover={{ x: expr(3, 0.3) }} transition={spring.spatialFast}
               className="group flex items-center gap-s rounded-md px-2 py-2 text-left transition-colors hover:bg-surface-high">
@@ -211,7 +220,8 @@ function ChatHistorySidePanelBody({ navigate, onOpen }: { navigate: (p: string) 
               <span className="min-w-0 flex-1 truncate text-on-surface-var text-[0.8125rem] group-hover:text-on-surface">{sessionTitle(s)}</span>
               <span className="shrink-0 text-on-surface-low text-[0.75rem] tabular-nums">{relTimeShort(sessionActivitySeconds(s))}</span>
             </motion.button>
-          ))}
+           ))}
+           <MoreRow total={manualCount} shown={20} noun="chats" className="px-2 py-1" />
         </motion.div>
       )}
       { }
@@ -683,14 +693,14 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         patchLastAssistant((segs) => {
           const id = String(d.id ?? '')
           if (segs.some((sg) => sg.kind === 'approval' && sg.id === id)) return segs
-          segs.push({ kind: 'approval', id, tool: String(d.tool ?? 'tool'), input: String(d.tool_input ?? ''), purpose: String(d.tool_purpose ?? ''), risk: (d.risk ? String(d.risk) : undefined) as ApprovalSegment['risk'] })
+          segs.push({ kind: 'approval', id, tool: String(d.tool ?? 'tool'), toolKind: String(d.tool_kind ?? ''), input: String(d.tool_input ?? ''), purpose: String(d.tool_purpose ?? ''), risk: (d.risk ? String(d.risk) : undefined) as ApprovalSegment['risk'] })
           return segs
         })
         breakText.current = true
         break
       case 'approval_resolved':
         setTurns((prev) => prev.map((t) => ({ ...t, segments: t.segments.map((sg) =>
-          sg.kind === 'approval' && sg.id === String(d.id ?? '') ? { ...sg, resolved: d.approved ? 'approved' : 'rejected' } as ApprovalSegment : sg) })))
+          sg.kind === 'approval' && sg.id === String(d.id ?? '') ? { ...sg, resolved: d.approved ? String(d.decision ?? 'approved') : 'rejected' } as ApprovalSegment : sg) })))
         break
       case 'chat_segment': coalescer.flushNow(); breakText.current = true; break
       case 'chat_variant_switch': {
@@ -1187,7 +1197,11 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       const ctx = buildOptimizerContext(turns)
       const r = await api.optimizePrompt(t, ctx)
       if (r.changed && r.optimized) { setPreOptimize(input); setInput(r.optimized) }
-    } catch {   }
+      else notify('This prompt is already clear — no changes needed.', 'info')
+    } catch (e) {
+      const detail = String((e as Error)?.message || e)
+      notify(isNoModelSetupError(detail) ? 'Connect a model before optimizing this prompt.' : `Couldn't optimize this prompt: ${detail}`, 'error')
+    }
     finally { setOptimizing(false) }
   }
   async function optimizeAndSend(raw: string) {
@@ -1479,11 +1493,8 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   }
 
   const activity = useMemo(() => deriveActivity(turns), [turns])
-  const jumpToTurn = useCallback((turnIndex: number) => {
-    const node = turnNodes.current.get(turnIndex)
-    node?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  }, [])
   const nodeForTurn = useCallback((turnIndex: number) => turnNodes.current.get(turnIndex), [])
+  const jumpToTurn = useMemo(() => createScrollToTurnHandler(nodeForTurn), [nodeForTurn])
 
   async function killFanout() {
     const s = sessionRef.current
@@ -1561,14 +1572,11 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     if (patch.reasoning !== undefined) persistSelection('this reasoning effort', api.setReasoningEffort(s, patch.reasoning as ReasoningEffort))
   }
 
-  function applyTemplate(t: SessionTemplate) {
-    const patch: Partial<ComposerValue> = {}
-    if (t.agent) patch.agent = t.agent
-    if (t.model) patch.model = t.model
-    if (t.reasoning_effort) patch.reasoning = t.reasoning_effort as ReasoningEffort
-    if (Object.keys(patch).length) applySelection(patch)
-    if (t.first_prompt) setInput(t.first_prompt)
-    notify(`Started from "${t.name}".`, 'info')
+  function applyTemplate(prefill: StarterPrefill) {
+    if (Object.keys(prefill.selection).length)
+      applySelection({ ...prefill.selection, reasoning: prefill.selection.reasoning as ReasoningEffort | undefined })
+    if (prefill.input) setInput(prefill.input)
+    notify(`Started from "${prefill.name}".`, 'info')
   }
 
   async function saveAsTemplate() {
@@ -1740,7 +1748,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         <div className="mb-2 flex items-center gap-1.5 text-[0.75rem] text-on-surface-low">
           {memoryMode === 'incognito' ? <EyeOff size={13} className="shrink-0" /> : <Clock size={13} className="shrink-0" />}
           <span>{memoryMode === 'incognito'
-            ? 'Incognito — no memory is read or written, and this chat stays out of your history.'
+            ? 'Incognito — memory writes are disabled. This chat is still saved to your history.'
             : 'Temporary — this chat is forgotten when the session ends.'}</span>
         </div>
       )}
@@ -2153,7 +2161,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
                   </div>
                   </div>
                 </div>
-                <SessionMarkerRail turns={turns} scrollRef={scrollRef} nodeOf={nodeForTurn}
+                <SessionMarkerRail turns={turns} scrollRef={scrollRef} nodeOf={nodeForTurn} onJumpTo={jumpToTurn}
                   showReturnToNewest={scrolledUp}
                   onReturnToNewest={() => endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })} />
               </div>
@@ -2189,7 +2197,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
           {activityOpen && started && (
             <SidePanel title="Activity" icon={<Activity size={18} className="text-primary" />} storeKey="chat-activity-w"
               fillHeight urlKey={{ key: 'activity', setQuery }} onClose={() => setActivityOpen(false)}>
-              <ChatActivityPanel activity={activity} onJumpTo={jumpToTurn} onOpenFile={setOpenFile} subagents={subagents}
+              <ChatActivityPanel activity={activity} onOpenFile={setOpenFile} subagents={subagents}
                 onKillFanout={killFanout}
                 side={{ msgs: sideMsgs, busy: sideBusy, onAsk: askSide, onOpen: openSide }} />
             </SidePanel>
@@ -2328,7 +2336,8 @@ function ArtifactContextPicker({ attached, onPick, onRemove, onClose }: {
   const all = data ?? []
   const attachedSlugs = new Set(attached.map((a) => a.slug))
   const n = q.trim().toLowerCase()
-  const shown = (n ? all.filter((a) => `${a.name} ${a.slug} ${a.kind}`.toLowerCase().includes(n)) : all).slice(0, 40)
+  const matching = n ? all.filter((a) => `${a.name} ${a.slug} ${a.kind}`.toLowerCase().includes(n)) : all
+  const shown = matching.slice(0, 40)
   return (
     <Modal title="Reference an artifact" icon={<Boxes size={18} className="text-primary" />} onClose={onClose}>
       <div className="flex flex-col gap-m" style={{ minWidth: 420 }}>
@@ -2364,10 +2373,11 @@ function ArtifactContextPicker({ attached, onPick, onRemove, onClose }: {
                   onClick={() => (on ? onRemove(a.slug) : onPick({ slug: a.slug, name: a.name }))} />
               )
             })}
-            {n && shown.length === 0 && (
+             {n && shown.length === 0 && (
               <p className="px-2 py-2 text-on-surface-low text-[0.8125rem]">No artifact matches that.</p>
-            )}
-          </div>
+             )}
+             <MoreRow total={matching.length} shown={40} noun="artifacts" />
+           </div>
         )}
       </div>
     </Modal>

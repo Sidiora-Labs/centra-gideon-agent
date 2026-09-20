@@ -1609,6 +1609,14 @@ class KnowledgeConfig:
     reports, and someone tracking fast-moving facts wants shorter default expiry.
     """
 
+    ocr_max_bytes: int = field(
+        default=10 * 1024 * 1024,
+        metadata=_meta(
+            "OCR Byte Limit",
+            "Maximum image bytes passed to an OCR backend for one ingestion. Images over "
+            "the remaining budget are skipped and reported rather than silently truncated.",
+        ),
+    )
     idempotent_persist: bool = field(
         default=True,
         metadata=_meta(
@@ -1743,29 +1751,19 @@ class KnowledgeConfig:
             "above the top-K, or the cap immediately discards edges the pass just chose.",
         ),
     )
-    reranker_enabled: bool = field(
+    rerank_enabled: bool = field(
         default=False,
         metadata=_meta(
             "Relevance Reranker",
-            "Reorder hybrid knowledge-search candidates with a local cross-encoder. Off by "
-            "default because loading the model consumes memory and adds latency; when its "
-            "dependency or weights are unavailable, search keeps the existing RRF order.",
+            "Reorder hybrid knowledge-search candidates with the active reasoning model. Off "
+            "by default because it adds latency; an unusable response keeps the RRF order.",
         ),
     )
-    reranker_model: str = field(
-        default="cross-encoder/ms-marco-MiniLM-L-6-v2",
-        metadata=_meta(
-            "Relevance Reranker Model",
-            "Local Hugging Face model name or path used for knowledge-result reranking. "
-            "Weights must already be present locally; search never downloads them.",
-        ),
-    )
-    reranker_max_candidates: int = field(
+    rerank_max_candidates: int = field(
         default=32,
         metadata=_meta(
             "Relevance Reranker Candidate Limit",
-            "Maximum fused candidates scored for one search. Bounds local-model latency "
-            "and memory without changing keyword, graph, vector, or RRF candidate generation.",
+            "Maximum fused candidates sent to the reasoning model for one search.",
         ),
     )
     consolidate_min_cluster: int = field(

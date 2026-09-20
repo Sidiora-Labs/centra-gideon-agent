@@ -6,6 +6,7 @@ import logging
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body, string_field
 from gideon.extensions.providers.failure_copy import relayed_failure_copy
 from gideon.http_errors import json_error
 from gideon.security.security import redact_credentials, redact_exfiltration_urls
@@ -265,7 +266,7 @@ async def api_tool_invoke(request: web.Request) -> web.Response:
     from gideon.integrations.tool_providers.registry import get_provider, list_providers
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response(
             {"ok": False, "error": "invalid JSON body"}, status=400
@@ -375,6 +376,12 @@ async def api_tool_invoke(request: web.Request) -> web.Response:
 
     _declared = getattr(_tool_def, "risk_level", "") if _tool_def is not None else ""
     _risk = resolve_effective_risk(_declared, tool_name, "", arguments)
+    if _risk == "destructive" and body.get("confirm_risk") != "destructive":
+        return json_error(
+            "risk_confirmation_required",
+            message=f"Confirm destructive risk before invoking {tool_name!r}",
+            status=403,
+        )
 
     caller = request.headers.get("X-Session-Key", "") or "internal"
     try:
@@ -427,7 +434,7 @@ async def api_tools_toggle(request: web.Request) -> web.Response:
     from gideon.integrations.tool_providers.registry import list_all_tools
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response(
             {"ok": False, "error": "invalid JSON body"}, status=400
@@ -437,7 +444,7 @@ async def api_tools_toggle(request: web.Request) -> web.Response:
             {"ok": False, "error": "body must be a JSON object"}, status=400
         )
     provider = str(body.get("provider", "")).strip()
-    name = str(body.get("name", "")).strip()
+    name = string_field(body, "name")
     enabled = body.get("enabled", True)
     if not isinstance(enabled, bool):
         return web.json_response(
@@ -473,7 +480,7 @@ async def api_providers_toggle(request: web.Request) -> web.Response:
     from gideon.integrations.tool_providers import tool_prefs
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response(
             {"ok": False, "error": "invalid JSON body"}, status=400

@@ -5,19 +5,21 @@ import type { RouteProps } from '../../app/shell/useQueryState'
 import { EmptyState, LoadError, LoadingStatus } from '../../shared/ui/ListScaffold'
 import { AppFrame } from './AppFrame'
 import type { AppContext, AppPermissions } from '../../app/shell/appSdk'
+import { useVisiblePoll } from '../../shared/data/useVisiblePoll'
 
 interface UIPageDecl { route?: string; label?: string; entryPoint?: string; mountFunction?: string }
 
 export function AppHostPage({ sub, navigate }: Pick<RouteProps, 'sub' | 'navigate'>) {
   const name = sub.split('/')[0]
   const { data, error, refresh } = useQuery(`app-host:${name}`, () => api.app(name), { persist: false })
+  useVisiblePoll(refresh, name && data !== undefined ? 5000 : null)
 
   if (!name) return <Center>No app specified</Center>
   if (error) {
     if (error instanceof ApiError && error.status === 404) {
       return (
         <div className="flex h-full items-center justify-center">
-          <EmptyState icon={Blocks} title={`“${name}” isn’t installed`}
+          <EmptyState icon={Blocks} title="App no longer installed"
             hint="Install it from the Store to open it here."
             action={{ label: 'Open the Store', onClick: () => navigate('apps?view=store') }} />
         </div>
@@ -38,7 +40,7 @@ export function AppHostPage({ sub, navigate }: Pick<RouteProps, 'sub' | 'navigat
 
   const permissions = (manifest.permissions ?? {}) as AppPermissions
   const uiCapabilities = (manifest.uiCapabilities ?? []) as string[]
-  const ctx: AppContext = { name, permissions, uiCapabilities }
+  const ctx: AppContext = { name, permissions, uiCapabilities, enabled: data.installed.enabled !== false }
   const src = `/apps/${encodeURIComponent(name)}/ui/${page.entryPoint}`
   const title = page.label || (manifest.displayName as string) || name
   const icon = (page as { icon?: string }).icon || (manifest.icon as string) || ''

@@ -943,6 +943,25 @@ class DelegationSupervisor:
         self, run: _ExecutionPass, event: LLMEvent
     ) -> tuple[bool, str | None, dict | None]:
         info = run.info
+        from gideon.security.guardrails.policy import (
+            TOOL_READ_WRITE,
+            profile_for_session,
+            tool_grant_denial,
+            tool_grant_posture,
+        )
+
+        profile = profile_for_session(run.session_key)
+        if info.capability_class == CAPABILITY_MUTATING and not run.research:
+            profile = tool_grant_posture(TOOL_READ_WRITE)
+        grant_denial = tool_grant_denial(
+            event.title or "", profile.tool_grants, profile.tool_allowlist
+        )
+        if grant_denial:
+            return (
+                False,
+                grant_denial,
+                {"subagent_id": info.id, "reason": "tool_grant_deny"},
+            )
         if run.research:
             from gideon.automation.workflows.batch_compile import is_write_tool
 

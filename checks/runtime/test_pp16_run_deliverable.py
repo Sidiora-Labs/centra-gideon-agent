@@ -150,7 +150,9 @@ def test_the_source_file_hard_codes_none_of_the_document_names():
     """
     import ast
 
-    source = (_SRC / "workflows" / "deliverable.py").read_text(encoding="utf-8")
+    source = (_SRC / "automation" / "workflows" / "deliverable.py").read_text(
+        encoding="utf-8"
+    )
     tree = ast.parse(source)
     doc_nodes: set[int] = set()
     for holder in ast.walk(tree):
@@ -529,7 +531,7 @@ def test_no_bundled_template_the_five_kinds_resolve_to_names_its_own_document():
     If a template ever starts naming its document, this reds and the prose above (and the panel's
     copy) must be re-done rather than left claiming a gap that closed.
     """
-    bundled = _SRC / "workflows" / "bundled"
+    bundled = _SRC / "automation" / "workflows" / "bundled"
     table = D.template_deliverables()
     checked = 0
     naming: list[str] = []

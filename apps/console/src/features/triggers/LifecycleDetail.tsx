@@ -30,11 +30,12 @@ export function LifecycleDetail({ hook, providers, onSaved, onDeleted, editing, 
   const [err, setErr] = useState('')
   const [testOut, setTestOut] = useState<string | null>(null)
 
-  useEffect(() => {
+  const restore = () => {
     setName(hook.name); setEvent(hook.event); setMatcher(hook.matcher)
     setProvider(hook.provider); setConfig(hook.provider_config ?? {})
-    setTestOut(null)
-  }, [hook.id])
+    setTestOut(null); setErr('')
+  }
+  useEffect(() => restore(), [hook.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const catalog = useTriggerVariables()
   const em = lifecycleEventMeta(catalog, event)
@@ -81,7 +82,7 @@ export function LifecycleDetail({ hook, providers, onSaved, onDeleted, editing, 
         <ActionConfig providers={providers} provider={provider} config={config} onProvider={pickProvider} onConfig={setConfig} vars={em.vars} />
         {err && <FieldError>{err}</FieldError>}
         <FormFooter>
-          <Button variant="ghost" size="sm" onClick={() => { setEditing(false); setErr('') }}><X size={15} /> Cancel</Button>
+          <Button variant="ghost" size="sm" onClick={() => { restore(); setEditing(false) }}><X size={15} /> Cancel</Button>
           <Button size="sm" onClick={save} loading={saving} disabled={saving || !name.trim()}
             disabledReason={!name.trim() ? 'Enter a name first' : undefined}><Check size={15} /> Save</Button>
         </FormFooter>

@@ -29,9 +29,9 @@ REPO = Path(__file__).resolve().parents[2]
 SRC = REPO / "runtime" / "gideon"
 WEB = REPO / "apps/console" / "src"
 
-ORIGIN_PY = SRC / "api_version.py"
-ORIGIN_TS = WEB / "lib" / "apiVersion.ts"
-GATE_PY = SRC / "dashboard" / "api_version_gate.py"
+ORIGIN_PY = SRC / "assurance" / "api_version.py"
+ORIGIN_TS = WEB / "shared" / "data" / "apiVersion.ts"
+GATE_PY = SRC / "interfaces" / "dashboard" / "api_version_gate.py"
 
 _NAME_RE = re.compile(r"api_?version", re.IGNORECASE)
 
@@ -137,7 +137,7 @@ class TestSingleOriginTypeScript:
         assert m, "apiVersion.ts no longer declares CLIENT_API_VERSION"
         assert int(m.group(1)) == av.API_VERSION, (
             f"the SPA declares API version {m.group(1)} but the gateway speaks "
-            f"{av.API_VERSION}; bump apps/console/src/lib/apiVersion.ts in the same change"
+            f"{av.API_VERSION}; bump apps/console/src/shared/data/apiVersion.ts in the same change"
         )
         h = re.search(r"API_VERSION_HEADER\s*=\s*'([^']+)'", text)
         assert h, "apiVersion.ts no longer declares API_VERSION_HEADER"
@@ -148,11 +148,13 @@ class TestSingleOriginTypeScript:
         assert "API_VERSION_ERROR_CODE" not in text
 
     def test_the_api_client_actually_sends_the_declaration(self):
-        api_ts = (WEB / "lib" / "api.ts").read_text(encoding="utf-8")
+        api_ts = (WEB / "shared" / "data" / "gatewayRequest.ts").read_text(
+            encoding="utf-8"
+        )
         assert "from './apiVersion'" in api_ts
-        assert re.search(r"const SK = \{[^}]*\.\.\.apiVersionHeaders", api_ts), (
-            "apps/console/src/lib/api.ts's shared header object no longer spreads "
-            "apiVersionHeaders — every request would go out undeclared"
+        assert re.search(r"gatewayHeaders = \{[^}]*\.\.\.apiVersionHeaders", api_ts), (
+            "apps/console/src/shared/data/gatewayRequest.ts's shared header object no "
+            "longer spreads apiVersionHeaders — every request would go out undeclared"
         )
 
 
@@ -180,7 +182,9 @@ class TestSingleChokepoint:
         )
 
     def test_the_gate_is_installed_in_the_gateway_middleware_chain(self):
-        server = (SRC / "dashboard" / "server.py").read_text(encoding="utf-8")
+        server = (SRC / "interfaces" / "dashboard" / "server.py").read_text(
+            encoding="utf-8"
+        )
         chain = server.split("app.middlewares[:] = [", 1)
         assert (
             len(chain) == 2

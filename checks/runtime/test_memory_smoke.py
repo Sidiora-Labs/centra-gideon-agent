@@ -187,7 +187,7 @@ class TestEpisodicInjectionAllAgents:
         vs = SemanticArchive(db_path=tmp_path / "mem.db")
         vs.init()
         vs.write_episodic("User decided to use PostgreSQL for the database layer")
-        store._vector_store = vs
+        store.vector_store = vs
         builder = _builder(tmp_path, memory=store)
         msg, _ = builder.build_message(
             "what database should I use?",
@@ -202,7 +202,7 @@ class TestEpisodicInjectionAllAgents:
         vs = SemanticArchive(db_path=tmp_path / "mem.db")
         vs.init()
         vs.write_episodic("User decided to use PostgreSQL for the database layer")
-        store._vector_store = vs
+        store.vector_store = vs
         builder = _builder(tmp_path, memory=store)
         msg, _ = builder.build_message(
             "what database should I use?",
@@ -218,7 +218,7 @@ class TestEpisodicInjectionAllAgents:
         vs = SemanticArchive(db_path=tmp_path / "mem.db")
         vs.init()
         vs.write_episodic("User decided to use PostgreSQL for the database layer")
-        store._vector_store = vs
+        store.vector_store = vs
         builder = _builder(tmp_path, memory=store)
         msg, _ = builder.build_message(
             "what database should I use?",
@@ -234,7 +234,7 @@ class TestSemanticMemoryInSessionContext:
         vs = SemanticArchive(db_path=tmp_path / "mem.db")
         vs.init()
         vs.set_semantic("pref.language", "Python", 1.0, "user_explicit")
-        store._vector_store = vs
+        store.vector_store = vs
         builder = _builder(tmp_path, memory=store)
         ctx = builder.build_session_context(agent="my-custom-agent")
         assert "pref.language: Python" in ctx
@@ -245,7 +245,7 @@ class TestSemanticMemoryInSessionContext:
         vs = SemanticArchive(db_path=tmp_path / "mem.db")
         vs.init()
         vs.write_lesson("always run tests before committing", "tool")
-        store._vector_store = vs
+        store.vector_store = vs
         builder = _builder(tmp_path, memory=store)
         ctx = builder.build_session_context(agent="my-custom-agent")
         assert "always run tests" in ctx

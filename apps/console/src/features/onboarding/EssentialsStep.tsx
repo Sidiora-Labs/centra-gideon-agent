@@ -6,7 +6,7 @@ import { LoadError, LoadingStatus } from '../../shared/ui/ListScaffold'
 import { TextLink } from '../../shared/ui/TextLink'
 import { listItemEnter, stagger, spring } from '../../shared/theme/motion'
 import { essentialLane, essentialCandidates, useEssentialSetup, useProviderConfiguration, useChatModelBinding, type EssentialLane, type ModelPhase } from './essentialSetupState'
-import { ConsentModal, PermissionList, CronConsentList } from '../apps/installConsent'
+import { ConsentModal, PermissionConsent, CronConsentList } from '../apps/installConsent'
 import { SchemaField } from '../settings/ModelBackends'
 import { type AppCatalogEntry, type OnboardingState, type OnboardingStatePatch } from '../../shared/data/api'
 
@@ -111,7 +111,7 @@ export function EssentialsStep({ readiness, onDone, onSkip, onProgress }: {
                 ))}
                 {items.length > shown.length && (
                   <TextLink onClick={() => expand(lane.id)}>
-                    Show all {items.length} {lane.title.toLowerCase()} apps
+                    Showing {shown.length} of {items.length} · Show all {lane.title.toLowerCase()} apps
                   </TextLink>
                 )}
               </motion.div>
@@ -134,6 +134,7 @@ export function EssentialsStep({ readiness, onDone, onSkip, onProgress }: {
         <ConsentModal label={pendingRef.current.displayName || pendingRef.current.name}
           result={guarded.blocked} busy={guarded.busy}
           permissions={pendingRef.current.permissions} crons={pendingRef.current.crons}
+          appUI={pendingRef.current}
           onConfirm={confirmInstall} onClose={() => guarded.reset()} />
       )}
     </div>
@@ -153,7 +154,7 @@ function AppCard({ entry, open, installed, busy, error, onToggle, onInstall }: {
         : <Button variant="ghost" size="sm" ariaExpanded={open} onClick={onToggle}>{open ? 'Close' : 'Review'}</Button>}
     </header>
     {showDetails && <div className="mt-m grid gap-m border-t border-outline-variant pt-m">
-      {entry.permissions && Object.keys(entry.permissions).length > 0 && <PermissionList perms={entry.permissions} />}
+      <PermissionConsent permissions={entry.permissions} appUI={entry} />
       {(entry.crons ?? []).length > 0 && <CronConsentList crons={entry.crons!} />}
       <p className="flex items-start gap-s text-on-surface-low" data-type="body-s"><ShieldCheck size={14} aria-hidden="true" className="mt-0.5 shrink-0" />
         <span>Installing fetches this app behind the security scanner — a dangerous verdict is always refused.</span></p>

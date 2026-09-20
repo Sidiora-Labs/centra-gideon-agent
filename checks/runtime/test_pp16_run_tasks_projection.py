@@ -28,6 +28,7 @@ import pytest
 
 from gideon.automation.workflows import loop_run_map, materialize
 from gideon.engine.tasks import registry
+from gideon.engine.tasks.hierarchy import HierarchyStore
 from gideon.engine.tasks.models import Task, WorkflowTaskBinding
 
 
@@ -69,7 +70,12 @@ async def test_the_plural_mapping_derives_from_persisted_bindings(tmp_path):
     filter is the projection's whole reason to exist.
     """
     with _isolated_tasks(tmp_path):
-        for node, lst in (("design", "tl-design"), ("build", "tl-build")):
+        store = HierarchyStore()
+        design_list = store.create_task_list("design").id
+        build_list = store.create_task_list("build").id
+        foreign_list = store.create_task_list("foreign").id
+        personal_list = store.create_task_list("personal").id
+        for node, lst in (("design", design_list), ("build", build_list)):
             await registry.create_task(
                 "native",
                 title=f"step {node}",
@@ -79,22 +85,22 @@ async def test_the_plural_mapping_derives_from_persisted_bindings(tmp_path):
         await registry.create_task(
             "native",
             title="someone else's step",
-            task_list_id="tl-foreign",
+            task_list_id=foreign_list,
             workflow_binding={"run_id": "run-b", "node_id": "design", "managed": True},
         )
         await registry.create_task(
-            "native", title="groceries", task_list_id="tl-personal"
+            "native", title="groceries", task_list_id=personal_list
         )
 
         registry._providers.clear()
         tasks, _ = await registry.list_all_tasks(limit=50)
 
         assert materialize.task_list_ids_for_run("run-a", tasks) == {
-            "design": "tl-design",
-            "build": "tl-build",
+            "design": design_list,
+            "build": build_list,
         }
         assert materialize.task_list_ids_for_run("run-b", tasks) == {
-            "design": "tl-foreign"
+            "design": foreign_list
         }
 
 
@@ -112,6 +118,7 @@ async def test_the_engines_own_write_shape_projects_nothing_until_filed(tmp_path
         "permitted user move, and this projection's non-empty case just lost its only writer"
     )
     with _isolated_tasks(tmp_path):
+        board_list = HierarchyStore().create_task_list("board").id
         task = await registry.create_task(
             "native",
             title="Implement the parser",
@@ -128,12 +135,12 @@ async def test_the_engines_own_write_shape_projects_nothing_until_filed(tmp_path
         assert materialize.task_list_ids_for_run("run-a", tasks) == {}
 
         await registry.update_task(
-            task.id, provider_name="native", task_list_id="tl-board"
+            task.id, provider_name="native", task_list_id=board_list
         )
         registry._providers.clear()
         tasks, _ = await registry.list_all_tasks(limit=50)
         assert materialize.task_list_ids_for_run("run-a", tasks) == {
-            "implement": "tl-board"
+            "implement": board_list
         }
 
 

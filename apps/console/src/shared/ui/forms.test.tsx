@@ -61,6 +61,18 @@ describe('standard-field scale', () => {
     expect(classOf(plain)).not.toContain('pl-9')
   })
 
+  it('TextInput forwards provider constraints and reserves one exclusive padding branch', () => {
+    const { container } = render(
+      <TextInput id="requests" type="number" value="3" onChange={() => {}} min={1} max={9} minLength={2}
+        maxLength={4} pattern="[0-9]+" trailingSlot={<button type="button">units</button>} />,
+    )
+    const input = container.querySelector('input')!
+    expect(input).toMatchObject({ id: 'requests', type: 'number', min: '1', max: '9', minLength: 2, maxLength: 4, pattern: '[0-9]+' })
+    expectTokens(input, ['pl-m', 'pr-10'])
+    expect(classOf(input)).not.toContain('px-m')
+    expect(classOf(input)).not.toContain('px-3')
+  })
+
   it('TextInput ariaLabel survives a name (a name is not an accessible name)', () => {
     const input = render(
       <TextInput value="" onChange={() => {}} name="dep-search-x" ariaLabel="Find a prerequisite task" />,
@@ -92,6 +104,13 @@ describe('standard-field scale', () => {
     expect(monoLg?.getAttribute('data-type')).toBe('body-s')
   })
 
+  it('TextArea accepts an explicit id and surface', () => {
+    const ta = render(<TextArea id="payload" surface="high" value="" onChange={() => {}} />).container.querySelector('textarea')!
+    expect(ta.id).toBe('payload')
+    expect(classOf(ta)).toContain('bg-surface-high')
+    expect(classOf(ta)).not.toContain('bg-surface-container')
+  })
+
   it('Select default render is the prior fixed chrome and carries options', () => {
     const { container } = render(
       <Select value="a" onChange={() => {}} options={[{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }]} />,
@@ -100,6 +119,15 @@ describe('standard-field scale', () => {
     expectTokens(select, ['w-full', 'h-10', 'appearance-none', 'rounded-md', 'bg-surface-container'])
     expect(select?.getAttribute('data-type')).toBe('body-m')
     expect(container.querySelectorAll('option')).toHaveLength(2)
+  })
+
+  it('Select accepts an explicit id and surface', () => {
+    const select = render(
+      <Select id="region" surface="base" value="a" onChange={() => {}} options={[{ value: 'a', label: 'A' }]} />,
+    ).container.querySelector('select')!
+    expect(select.id).toBe('region')
+    expect(classOf(select)).toContain('bg-surface')
+    expect(classOf(select)).not.toContain('bg-surface-container')
   })
 })
 

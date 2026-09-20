@@ -81,3 +81,36 @@ def test_web_url_fetch_public_attempts(monkeypatch):
     assert meta.get("error") is None
     assert meta.get("url") == "https://example.com/"
     assert meta.get("content_hash")
+
+
+def test_web_url_follows_at_most_three_meta_refresh_hops_through_policy(monkeypatch):
+    import gideon.security.net as net
+    import gideon.security.net.client as client
+
+    calls = []
+
+    async def fake_fetch(url, **kw):
+        calls.append((url, kw.get("policy")))
+        step = len(calls)
+        body = (
+            f'<meta http-equiv="refresh" content="0; url=/hop-{step}">'
+            if step <= 4
+            else "done"
+        )
+        return client.FetchResponse(
+            url=url,
+            status=200,
+            headers={"Content-Type": "text/html"},
+            body=body.encode(),
+        )
+
+    monkeypatch.setattr(net, "fetch", fake_fetch)
+    _text, meta = _run(WebUrlConnector().fetch({"uri": "https://example.com/start"}))
+    assert [url for url, _policy in calls] == [
+        "https://example.com/start",
+        "https://example.com/hop-1",
+        "https://example.com/hop-2",
+        "https://example.com/hop-3",
+    ]
+    assert all(policy is calls[0][1] and policy is not None for _url, policy in calls)
+    assert meta["url"] == "https://example.com/hop-3"

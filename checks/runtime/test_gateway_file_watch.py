@@ -159,8 +159,14 @@ def test_the_loop_lives_in_the_no_crons_else_branch(monkeypatch):
 
 def test_shutdown_cancels_the_loop():
     """A dangling task across shutdown leaks a filesystem poll into the next process."""
-    import inspect
+    from gideon.core.config import AppConfig
 
-    src = inspect.getsource(G.RuntimeCoordinator._shutdown)
-    assert "_file_watch_task" in src
-    assert ".cancel()" in src
+    async def exercise():
+        runtime = G.RuntimeCoordinator(AppConfig())
+        runtime._file_watch_task = asyncio.create_task(asyncio.Event().wait())
+        await asyncio.sleep(0)
+        assert not runtime._file_watch_task.done()
+        await runtime._shutdown()
+        assert runtime._file_watch_task.cancelled()
+
+    asyncio.run(exercise())

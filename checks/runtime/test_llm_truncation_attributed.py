@@ -161,15 +161,47 @@ def test_the_openai_flush_recognises_length() -> None:
 
     src = open(openai_mod.__file__, encoding="utf-8").read()
     assert '{"tool_calls", "stop", "length"}' in src
-    assert 'stop_reason=str(finish_reason or "")' in src
+    assert "_flush_calls(str(reason))" in src
 
 
 def test_anthropic_reads_a_stop_reason_at_all() -> None:
-    """It read none. The field was declared in `llm/events.py` and never written on this path."""
-    from gideon.integrations.llm import anthropic as anthropic_mod
+    import ast
+    import inspect
+    import textwrap
 
-    src = open(anthropic_mod.__file__, encoding="utf-8").read()
-    assert "stop_reason = str(reason)" in src
-    assert (
-        src.count("stop_reason=stop_reason") >= 2
-    ), "both streaming regions must carry it"
+    from gideon.integrations.llm.anthropic import AnthropicProvider, _MessagesDecoder
+
+    decoder = _MessagesDecoder()
+    decoder.feed(
+        {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {
+                "type": "tool_use",
+                "id": "truncated",
+                "name": "read_file",
+            },
+        }
+    )
+    decoder.feed(
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "input_json_delta", "partial_json": '{"path": "notes/'},
+        }
+    )
+    decoder.feed({"type": "message_delta", "delta": {"stop_reason": "max_tokens"}})
+    events = decoder.finish()
+    assert len(events) == 1
+    assert events[0].stop_reason == "max_tokens"
+    assert events[0].tool_input == '{"path": "notes/'
+    assert decoder.finish() == []
+    for method in (AnthropicProvider.stream, AnthropicProvider.complete):
+        tree = ast.parse(textwrap.dedent(inspect.getsource(method)))
+        assert any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "_run_turn"
+            for node in ast.walk(tree)
+        )
+    assert "decoder.finish()" in inspect.getsource(AnthropicProvider._run_turn)

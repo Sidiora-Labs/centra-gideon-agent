@@ -31,9 +31,9 @@ export function isBlockingResult(r: GuardedResult | null | undefined): boolean {
 
 export function guardedFromApp(r: AppInstallResult): GuardedResult {
   return { ok: r.ok, needsConsent: !!r.needs_consent, scan: r.scan, error: r.error,
-           clientInstall: r.needs_client_install ? (r.client_install ?? {}) : null,
-           restartRequired: !!r.restart_required,
-           fixPrompt: r.fix_prompt || undefined }
+            clientInstall: r.needs_client_install ? (r.client_install ?? {}) : null,
+            restartRequired: !!r.restart_required,
+            fixPrompt: r.fix_prompt || undefined }
 }
 
 export function guardedFromSkill(r: SkillInstallResult): GuardedResult {

@@ -145,11 +145,13 @@ def test_fallback_model_default_agent_pin_ignored_when_provider_disagrees(monkey
 def _put(name: str, body: dict):
     from gideon.interfaces.dashboard.handlers import agents as H
 
-    async def _json():
-        return body
-
-    req = make_mocked_request("PUT", f"/api/agents/{name}", match_info={"name": name})
-    req.json = _json  # type: ignore[assignment]
+    req = make_mocked_request(
+        "PUT",
+        f"/api/agents/{name}",
+        headers={"Content-Type": "application/json"},
+        match_info={"name": name},
+    )
+    req._read_bytes = json.dumps(body).encode()
     return asyncio.run(H.api_gideon_agent_update(req)), H
 
 

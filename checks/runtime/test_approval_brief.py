@@ -10,7 +10,7 @@ What these tests hold down, in priority order:
    called and still decides. Pre-existing ``tool_meta`` keys survive. Each of these
    rails carries a vacuity assertion proving it reds under the change it forbids.
 3. **One vocabulary, two languages.** The facet words and hint lists are parsed out
-   of ``apps/console/src/pages/chat/approvalMeta.ts`` (OU-7/OU-8) and compared to this
+   of ``apps/console/src/features/chat/approvalMeta.ts`` (OU-7/OU-8) and compared to this
    module's, so the phone brief and the dashboard chips cannot drift.
 4. **The honesty contract** — every boolean a positive claim, ``None`` when nothing
    was established, ``readOnly`` never over an established write.
@@ -42,7 +42,8 @@ from gideon.security.approval_brief import (
 )
 
 _TS_SOURCE = (
-    Path(__file__).resolve().parents[2] / "apps/console/src/pages/chat/approvalMeta.ts"
+    Path(__file__).resolve().parents[2]
+    / "apps/console/src/features/chat/approvalMeta.ts"
 )
 
 

@@ -1,6 +1,6 @@
 import { useEffect, useId } from 'react'
-import { animate, motion, useMotionValue, useReducedMotion, useTransform } from 'framer-motion'
-import { expr, exprHeavy } from '../../theme/motion'
+import { animate, motion, useMotionValue, useTransform } from 'framer-motion'
+import { expr, exprHeavy, useReducedMotion } from '../../theme/motion'
 import { MORPH_FAMILY, familySpring } from './vocabulary'
 import { liquidOutline, type LiquidContour } from './motionFamilyState'
 

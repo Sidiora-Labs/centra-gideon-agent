@@ -388,6 +388,33 @@ def test_the_detail_route_serves_the_diff_and_the_version_it_would_create(home):
     assert _detail(second.id)["version"] == 2, "the served version must track the store"
 
 
+def test_the_accept_route_names_the_installed_skill_and_version(home, monkeypatch):
+    import asyncio
+
+    from gideon.interfaces.dashboard.handlers import skills as skills_handlers
+
+    class _Req:
+        match_info = {"id": ""}
+
+        def get(self, key, default=None):
+            return default
+
+    _install(home)
+    prop = _propose(home)
+    assert prop is not None
+    request = _Req()
+    request.match_info = {"id": prop.id}
+
+    async def _empty_body(_request):
+        return {}
+
+    monkeypatch.setattr(skills_handlers, "read_json_body", _empty_body)
+    response = asyncio.run(skills_handlers.api_skill_proposal_accept(request))
+
+    assert response.status == 200
+    assert json.loads(response.text) == {"ok": True, "name": SKILL, "version": 1}
+
+
 def test_a_new_kind_proposal_carries_no_diff_and_no_version(home):
     """The derived fields are refine-only: a ``kind="new"`` accept creates, it does not version."""
     import asyncio

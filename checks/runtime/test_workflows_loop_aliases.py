@@ -27,7 +27,7 @@ from gideon.automation.workflows.loop_aliases import (
 
 FE_MODULE = (
     Path(__file__).resolve().parents[2]
-    / "apps/console/src/pages/workflows/containerKey.ts"
+    / "apps/console/src/features/workflows/containerKey.ts"
 )
 
 
@@ -324,7 +324,7 @@ def test_the_steering_routes_are_documented():
 def test_the_frontend_can_reach_the_steering_endpoints():
     """A backend endpoint with no client method is unreachable from the UI."""
     api = (
-        Path(__file__).resolve().parents[2] / "apps/console/src/lib/api.ts"
+        Path(__file__).resolve().parents[2] / "apps/console/src/shared/data/api.ts"
     ).read_text()
     assert "steerWorkflowRun" in api
     assert "workflowSteering" in api

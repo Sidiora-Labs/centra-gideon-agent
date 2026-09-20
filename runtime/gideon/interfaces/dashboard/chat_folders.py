@@ -7,6 +7,7 @@ import uuid
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body, string_field
 from gideon.engine.session import BACKGROUND_KEY
 from gideon.integrations.llm.base import (
     EVENT_COMPLETE,
@@ -101,10 +102,10 @@ async def api_chat_folder_create(request: web.Request) -> web.Response:
     """POST /api/chat/folders — create a project folder."""
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
-    name = (body.get("name") or "").strip()[:100]
+    name = string_field(body, "name")[:100]
     if not name:
         return web.json_response({"error": "name required"}, status=400)
     parent_id = str(body.get("parent_id") or "")
@@ -141,7 +142,7 @@ async def api_chat_folder_update(request: web.Request) -> web.Response:
     if not folder:
         return web.json_response({"error": "not found"}, status=404)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if "name" in body:
@@ -204,7 +205,7 @@ async def api_chat_session_folder(request: web.Request) -> web.Response:
     if not session:
         return web.json_response({"error": "not found"}, status=404)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     folder_id = str(body.get("folder_id") or "")
@@ -232,7 +233,7 @@ async def api_chat_session_pin(request: web.Request) -> web.Response:
     if not session:
         return web.json_response({"error": "not found"}, status=404)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     session.pinned = bool(body.get("pinned", False))

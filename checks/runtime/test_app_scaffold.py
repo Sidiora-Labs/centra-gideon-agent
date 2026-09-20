@@ -123,9 +123,9 @@ def _check_files(app: Path) -> None:
 
 def _check_license(app: Path, manifest: AppManifest) -> None:
     text = (app / "LICENSE").read_text(encoding="utf-8")
-    assert text.startswith("MIT License")
+    assert text.startswith("Apache License")
     assert "Copyright (c) 2026 Scaffold Test" in text
-    assert manifest.license == "MIT"
+    assert manifest.license == "Apache License 2.0"
 
 
 def _check_no_credentials(app: Path) -> None:

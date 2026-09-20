@@ -962,14 +962,15 @@ class TestTheCuratorPass:
     def test_the_curator_tick_awaits_the_replay_pass(self):
         """The hook itself. A pass with no scheduled caller is the shape this program keeps
         finding — `capture_store.prune`'s docstring named a "curator tick" for a whole release
-        while nothing called it."""
+        while nothing called it. The tick's body was extracted into
+        `ConsolidationRound.maintain`, so the wire is asserted where it now lives."""
         from pathlib import Path
 
-        import gideon.cognition.history as history_mod
+        import gideon.cognition.consolidation_cycle as cycle_mod
 
-        source = Path(history_mod.__file__).read_text(encoding="utf-8")
-        assert "await replay_mod.run_pass()" in source
-        assert "from gideon.cognition.learning import replay as replay_mod" in source
+        source = Path(cycle_mod.__file__).read_text(encoding="utf-8")
+        assert "await replay.run_pass()" in source
+        assert "from gideon.cognition.learning import replay" in source
 
 
 class TestConfigRoundTrip:

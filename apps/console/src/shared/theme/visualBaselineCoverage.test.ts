@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { readdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { ROUTES, VIEW_ROUTES, THEMES } from '../../../e2e/routes'
+import { VISUAL_BASELINE_PLATFORMS } from '../../../playwright.config'
 
 
 const BASELINES = join(process.cwd(), "e2e/__screenshots__/visual.spec.ts")
@@ -28,15 +29,6 @@ function byPlatform(): Map<string, Set<string>> {
   return out
 }
 
-const UNCAPTURED: { key: string; why: string }[] = [
-  { key: 'artifacts-light', why: 'route added to routes.ts without capturing goldens' },
-  { key: 'artifacts-dark', why: 'route added to routes.ts without capturing goldens' },
-  { key: 'learning-light', why: 'route added to routes.ts without capturing goldens' },
-  { key: 'learning-dark', why: 'route added to routes.ts without capturing goldens' },
-  { key: 'knowledge-graph-light', why: 'VIEW_ROUTE added without capturing goldens' },
-  { key: 'knowledge-graph-dark', why: 'VIEW_ROUTE added without capturing goldens' },
-]
-
 describe('the visual gate has a committed baseline for every surface it snapshots', () => {
   it('the baseline directory and the route manifest are both non-empty (vacuity floor)', () => {
     expect(existsSync(BASELINES), `the baseline directory is gone: ${BASELINES}`).toBe(true)
@@ -44,14 +36,12 @@ describe('the visual gate has a committed baseline for every surface it snapshot
     expect(expectedKeys().length, 'the route manifest yielded no surfaces').toBeGreaterThan(10)
   })
 
-  it('every platform that has ANY baseline has a COMPLETE set', () => {
+  it('every declared platform has a complete set', () => {
     const platforms = byPlatform()
-    expect(platforms.size, 'no platform-suffixed goldens found — has the naming changed?').toBeGreaterThan(0)
-
-    const allowed = new Set(UNCAPTURED.map((u) => u.key))
     const problems: string[] = []
-    for (const [platform, have] of platforms) {
-      const missing = expectedKeys().filter((k) => !have.has(k) && !allowed.has(k))
+    for (const platform of VISUAL_BASELINE_PLATFORMS) {
+      const have = platforms.get(platform) ?? new Set()
+      const missing = expectedKeys().filter((key) => !have.has(key))
       if (missing.length) {
         problems.push(`${platform}: ${missing.length} missing → ${missing.join(', ')}`)
       }
@@ -66,16 +56,8 @@ describe('the visual gate has a committed baseline for every surface it snapshot
     ).toEqual([])
   })
 
-  it('every recorded UNCAPTURED surface is still uncaptured', () => {
-    const have = new Set<string>()
-    for (const set of byPlatform().values()) for (const k of set) have.add(k)
-    for (const { key, why } of UNCAPTURED) {
-      expect(
-        have.has(key),
-        `UNCAPTURED names "${key}", but a baseline now exists for it. The gate is wider than the ` +
-          `repo needs: DELETE the entry.\n  ${why}`,
-      ).toBe(false)
-    }
+  it('contains baselines only for declared platforms', () => {
+    expect([...byPlatform().keys()].sort()).toEqual([...VISUAL_BASELINE_PLATFORMS].sort())
   })
 
   it('no golden is orphaned — every committed baseline maps to a surface still in the manifest', () => {

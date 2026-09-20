@@ -422,8 +422,8 @@ def test_the_fire_path_routes_by_OUTCOME():
     """The wiring: the defect was `destination=trigger.delivery` regardless of `ok`."""
     import inspect
 
-    from gideon.engine import gateway
+    from gideon.engine import trigger_outcomes
 
-    source = inspect.getsource(gateway)
-    assert "_delivery.route_for(trigger, ok=ok)" in source
+    source = inspect.getsource(trigger_outcomes)
+    assert "destination=delivery.route_for(trigger, ok=ok)" in source
     assert 'destination=str(getattr(trigger, "delivery", "") or "")' not in source

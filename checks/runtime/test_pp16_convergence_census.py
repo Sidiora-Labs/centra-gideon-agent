@@ -2,7 +2,7 @@
 
 The atom's `done_when` names six unifications: *"One status vocabulary, one adoption/reaping path,
 one attention path, one ledger, one projection to tasks, one cockpit contract."* Three of those six
-are **satisfied** — `PP-5` made the loop a `gideon.assurance.ledger` writer, `workflows/attention.py`
+are **satisfied** — `PP-5` made the loop a `gideon.assurance.ledger` writer, `automation/workflows/attention.py`
 was built on the loop watchdog's own inbox seam, and the adoption/reaping slice converged both
 nouns' boot sweeps onto `concurrency.boot_sweep`. A clause that has already converged is as
 load-bearing to record as one that has not: a later slice that "unifies the ledger" would be
@@ -57,15 +57,19 @@ def _text(rel: str, root: Path = _SRC) -> str:
     return body
 
 
-_LEDGER_WRITERS = ("loop/journal.py", "loop/files.py", "workflows/journal.py")
+_LEDGER_WRITERS = (
+    "automation/loop/journal.py",
+    "automation/loop/files.py",
+    "automation/workflows/journal.py",
+)
 
 
 def test_the_ledger_clause_is_converged_and_stays_converged():
     """`PP-16`'s "one ledger" clause is ALREADY satisfied — both work-unit nouns write
     `gideon.assurance.ledger`, so there is no second ledger left to unify."""
     assert (
-        _SRC / "ledger"
-    ).is_dir(), "gideon/ledger/ is gone — PP-4 extraction reverted?"
+        _SRC / "assurance" / "ledger"
+    ).is_dir(), "gideon/assurance/ledger/ is gone — PP-4 extraction reverted?"
     for rel in _LEDGER_WRITERS:
         body = _text(rel)
         assert "gideon.assurance.ledger" in body, (
@@ -79,18 +83,21 @@ def test_the_attention_clause_is_converged_and_stays_converged():
     """`PP-16`'s "one attention path" clause is ALREADY satisfied — the loop watchdog and the
     run-side gate both raise through `inbox.emit_attention_item`."""
     assert "def emit_attention_item" in _text(
-        "inbox.py"
+        "integrations/inbox.py"
     ), "inbox.emit_attention_item is gone — the seam both nouns share no longer exists"
-    for rel in ("loop/watchdog.py", "workflows/attention.py"):
+    for rel in ("automation/loop/watchdog.py", "automation/workflows/attention.py"):
         assert "emit_attention_item" in _text(rel), (
             f"{rel} no longer calls emit_attention_item. Both work-unit nouns raise attention "
-            f"through the one seam today (workflows/attention.py's own header says it uses 'the "
+            f"through the one seam today (automation/workflows/attention.py's own header says it uses 'the "
             f"same seam the loop watchdog uses'); a caller that goes back to a separate "
             f"state.notify + store.add pair drifts the durable row from the notification."
         )
 
 
-_BOOT_SWEEPERS = ("loop/watchdog.py", "workflows/watchdog.py")
+_BOOT_SWEEPERS = (
+    "automation/loop/watchdog.py",
+    "automation/workflows/watchdog.py",
+)
 
 
 def test_the_adoption_clause_is_converged_and_stays_converged():
@@ -98,14 +105,14 @@ def test_the_adoption_clause_is_converged_and_stays_converged():
     their crash survivors through `concurrency.boot_sweep`, each from the first poll of the
     supervisor that owns the noun, with no second boot hook anywhere."""
     assert "async def boot_sweep(" in _text(
-        "concurrency.py"
+        "core/concurrency.py"
     ), "concurrency.boot_sweep is gone — the primitive both nouns share no longer exists"
     for rel in _BOOT_SWEEPERS:
         assert "concurrency.boot_sweep(" in _text(rel), (
             f"{rel} no longer sweeps through concurrency.boot_sweep. A private boot-adoption "
             f"loop here re-forks the path PP-16's adoption slice unified."
         )
-    assert "reap_orphaned_loops" not in _text("gateway.py"), (
+    assert "reap_orphaned_loops" not in _text("engine/gateway.py"), (
         "gateway.py awaits a loop boot-adoption hook again — the second INVOCATION is back even "
         "if the shared primitive is still used. See checks/runtime/test_pp16_boot_adoption.py for why "
         "that shape loses a failed sweep for the life of the process."
@@ -115,7 +122,7 @@ def test_the_adoption_clause_is_converged_and_stays_converged():
 def test_the_seam_probe_rejects_a_symbol_that_does_not_exist():
     """Vacuity floor for the three ratchets above: a scan that reports every symbol as present —
     or every symbol as absent — would pass them without measuring anything."""
-    body = _text("workflows/attention.py")
+    body = _text("automation/workflows/attention.py")
     assert (
         "emit_attention_item" in body
     ), "positive control failed — the probe sees nothing"
@@ -126,8 +133,8 @@ def test_the_seam_probe_rejects_a_symbol_that_does_not_exist():
 
 _UNCONVERGED: dict[str, tuple[tuple[str, str], ...]] = {
     "projection to tasks": (
-        ("loop/tasks_link.py", "def provision"),
-        ("workflows/materialize.py", "def plan_materialization"),
+        ("automation/loop/tasks_link.py", "def provision"),
+        ("automation/workflows/materialize.py", "def plan_materialization"),
     ),
 }
 
@@ -150,8 +157,8 @@ def test_the_pluggable_supervisor_clause_is_converged_and_stays_converged():
         KIND_CONVERGENCE,
     )
 
-    assert "def done_signal" in _text("loop/supervisor.py"), (
-        "loop/supervisor.py no longer declares done_signal — the ONE convergence evaluator is "
+    assert "def done_signal" in _text("automation/loop/supervisor.py"), (
+        "automation/loop/supervisor.py no longer declares done_signal — the ONE convergence evaluator is "
         "gone, so either the seam was reverted or a second one was minted."
     )
     kinds.ensure_loaded()
@@ -211,9 +218,9 @@ def test_the_unconverged_clauses_still_have_exactly_two_implementations(clause: 
 
 
 _COCKPIT_PAIRS = (
-    ("pages/loops/useRunStream.ts", "pages/workflows/useWorkflowStream.ts"),
-    ("pages/loops/runFold.ts", "pages/workflows/workflowFold.ts"),
-    ("pages/loops/LoopCockpitPage.tsx", "pages/workflows/WorkflowRunDetail.tsx"),
+    ("features/loops/useRunStream.ts", "features/workflows/useWorkflowStream.ts"),
+    ("features/loops/runFold.ts", "features/workflows/workflowFold.ts"),
+    ("features/loops/LoopCockpitPage.tsx", "features/workflows/WorkflowRunDetail.tsx"),
 )
 
 
@@ -246,7 +253,7 @@ def test_the_five_kinds_are_templates_plus_policies_and_the_plugin_keeps_only_th
         convergence_key,
     )
 
-    body = _text("loop/kinds/__init__.py")
+    body = _text("automation/loop/kinds/__init__.py")
     assert (
         "_REGISTRY: dict[str, LoopKindStrategy] = {}" in body
     ), "the kind registry changed shape — re-measure what the plugin seam still carries"

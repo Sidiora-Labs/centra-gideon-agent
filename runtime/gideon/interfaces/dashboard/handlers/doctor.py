@@ -19,6 +19,7 @@ from typing import Any, Optional
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.http_errors import json_error
 from gideon.operations.resilience import degraded
 from gideon.operations.resilience.doctor import (
@@ -204,7 +205,7 @@ async def api_doctor_fix_apply(request: web.Request) -> web.Response:
         return json_error("doctor_disabled", status=404)
     fix_id = request.match_info.get("fix_id", "")
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     if not (isinstance(body, dict) and body.get("confirm") is True):
@@ -224,7 +225,7 @@ async def api_doctor_simulate_surfacing(request: web.Request) -> web.Response:
     if not _resilience_cfg().doctor_enabled:
         return json_error("doctor_disabled", status=404)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     text = str(body.get("text", "")) if isinstance(body, dict) else ""
@@ -453,7 +454,7 @@ async def api_doctor_simulate_automation(request: web.Request) -> web.Response:
     if not _resilience_cfg().doctor_enabled:
         return json_error("doctor_disabled", status=404)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     trigger_id = (
@@ -698,7 +699,7 @@ async def api_doctor_remediation_run(request: web.Request) -> web.Response:
     if not _resilience_cfg().doctor_enabled:
         return json_error("doctor_disabled", status=404)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     if not (isinstance(body, dict) and body.get("confirm") is True):

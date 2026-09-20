@@ -140,7 +140,7 @@ def test_web_watch_items_carry_their_ORIGIN():
 
     from gideon.automation.triggers import web_poll
 
-    src = inspect.getsource(web_poll.poll_one)
+    src = inspect.getsource(web_poll.WebPoll.settle)
     assert "source_type=" in src and "source_id=url" in src
 
 
@@ -148,9 +148,21 @@ def test_event_triggers_name_their_TRANSFORMATION():
     """Two fences in that module truncate to DIFFERENT lengths (2000 and 200), and
     `transformation_path` is only honest if it names the truncation that actually happened.
     """
-    import inspect
+    from gideon.automation.event_triggers import (
+        EventActionAttempt,
+        EventOccurrence,
+        EventTrigger,
+    )
 
-    from gideon.automation import event_triggers
-
-    src = inspect.getsource(event_triggers)
-    assert "truncate:2000" in src and "truncate:200" in src
+    occurrence = EventOccurrence(
+        source="memory",
+        event_type="MemoryUpdate",
+        key="k",
+        value="x" * 3000,
+    )
+    trigger = EventTrigger(id="t1", pattern="MemoryUpdate")
+    context = EventActionAttempt(trigger, occurrence, test=False).context()
+    assert (
+        "transformation_path=truncate:2000" in context.payload["value"].split("\n")[0]
+    )
+    assert "transformation_path=truncate:200" in context.context.split("\n")[0]

@@ -25,18 +25,25 @@ from __future__ import annotations
 
 import json
 import math
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
 
 def _request(body, *, method="POST", match=None):
-    req = MagicMock()
-    req.method = method
-    req.json = AsyncMock(return_value=body)
-    req.match_info = match or {}
-    req.get = lambda *a, **k: "dashboard"
-    req.headers = {}
+    from aiohttp import web
+    from aiohttp.test_utils import make_mocked_request
+
+    app = web.Application()
+    req = make_mocked_request(
+        method,
+        "/api/chat",
+        headers={"Content-Type": "application/json"},
+        app=app,
+        match_info=match or {},
+    )
+    req._read_bytes = json.dumps(body).encode()
+    req["app"] = "dashboard"
     return req
 
 
@@ -51,7 +58,7 @@ class TestChatMessageType:
         from gideon.interfaces.dashboard.chat_handlers import api_chat
 
         req = _request({"message": bad, "session": ""})
-        req.app = {"state": MagicMock()}
+        req.app["state"] = MagicMock()
         resp = await api_chat(req)
         assert resp.status == 400
         assert "message" in json.loads(resp.body.decode())["error"]
@@ -68,7 +75,7 @@ class TestChatMessageType:
         from gideon.interfaces.dashboard.chat_handlers import api_chat
 
         req = _request({"session": ""})
-        req.app = {"state": MagicMock()}
+        req.app["state"] = MagicMock()
         resp = await api_chat(req)
         assert resp.status != 500
         if resp.status == 400:
@@ -93,7 +100,7 @@ class TestFolderOrderCoercion:
 
         state = self._state()
         req = _request({"order": bad}, method="PATCH", match={"id": "f1"})
-        req.app = {"state": state}
+        req.app["state"] = state
         resp = await api_chat_folder_update(req)
         assert resp.status == 200
         assert (
@@ -108,7 +115,7 @@ class TestFolderOrderCoercion:
 
         state = self._state()
         req = _request({"order": 9}, method="PATCH", match={"id": "f1"})
-        req.app = {"state": state}
+        req.app["state"] = state
         await api_chat_folder_update(req)
         assert state._folders[0]["order"] == 9
 
@@ -120,7 +127,7 @@ class TestFolderOrderCoercion:
 
         state = self._state()
         req = _request({"order": "7"}, method="PATCH", match={"id": "f1"})
-        req.app = {"state": state}
+        req.app["state"] = state
         await api_chat_folder_update(req)
         assert state._folders[0]["order"] == 7
 
@@ -270,13 +277,13 @@ class TestEventMetadataStaysJSON:
 
 
 def test_memory_import_already_guards_its_body_shape():
-    """#591 asked for an `isinstance(body, dict)` guard on `POST /api/memory/import`. It is already
-    there. Pinned rather than re-fixed, so the issue can be closed with evidence and so a later
+    """#591 asked for an `isinstance(body, dict)` guard on `POST /api/memory/import`. The shared request boundary now enforces it. Pinned rather than re-fixed, so the issue can be closed with evidence and so a later
     change cannot quietly remove it."""
     import inspect
 
     from gideon.interfaces.dashboard.handlers import memory as M
 
     src = inspect.getsource(M.api_memory_import)
-    assert "isinstance(data, dict)" in src
+    assert "data = await read_json_body(request)" in src
+    assert "except RequestBodyTypeError:" in src
     assert "JSON body must be an object" in src

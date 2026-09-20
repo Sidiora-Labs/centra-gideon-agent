@@ -25,11 +25,12 @@ mode a proxy that "just forwards headers" has by construction.
 
 from __future__ import annotations
 
+import json
 import os
 
 import pytest
 from aiohttp import web
-from aiohttp.test_utils import TestClient, TestServer
+from aiohttp.test_utils import TestClient, TestServer, make_mocked_request
 
 from gideon.integrations.inbound import auth
 from gideon.integrations.inbound import capture_proxy as proxy
@@ -434,18 +435,20 @@ async def test_the_create_route_pins_a_known_provider_and_reports_it(monkeypatch
 
     _register_provider("https://api.openai.com/v1")
 
-    class _Req:
-        method = "POST"
-        match_info: dict = {}
+    req = make_mocked_request(
+        "POST",
+        "/api/external-access/clients",
+        headers={"Content-Type": "application/json"},
+    )
+    req._read_bytes = json.dumps(
+        {
+            "label": "external-agent",
+            "surfaces": [proxy.CAPTURE_SURFACE],
+            "upstream": _PROVIDER_NAME,
+        }
+    ).encode()
 
-        async def json(self):
-            return {
-                "label": "external-agent",
-                "surfaces": [proxy.CAPTURE_SURFACE],
-                "upstream": _PROVIDER_NAME,
-            }
-
-    resp = await ea.api_external_access_client(_Req())  # type: ignore[arg-type]
+    resp = await ea.api_external_access_client(req)
     assert resp.status == 200
 
     rows = ea._client_rows()
@@ -467,28 +470,35 @@ async def test_the_create_route_refuses_an_unknown_provider_and_creates_nothing(
 
     _register_provider("https://api.openai.com/v1")
 
-    class _Req:
-        method = "POST"
-        match_info: dict = {}
+    bad = make_mocked_request(
+        "POST",
+        "/api/external-access/clients",
+        headers={"Content-Type": "application/json"},
+    )
+    bad._read_bytes = json.dumps(
+        {
+            "label": "external-agent",
+            "surfaces": [proxy.CAPTURE_SURFACE],
+            "upstream": "not-a-configured-provider",
+        }
+    ).encode()
 
-        async def json(self):
-            return {
-                "label": "external-agent",
-                "surfaces": [proxy.CAPTURE_SURFACE],
-                "upstream": "not-a-configured-provider",
-            }
-
-    resp = await ea.api_external_access_client(_Req())  # type: ignore[arg-type]
+    resp = await ea.api_external_access_client(bad)
     assert resp.status == 400
     assert clients_mod.load_clients() == {}
 
-    class _Ok(_Req):
-        async def json(self):
-            return {
-                "label": "external-agent",
-                "surfaces": [proxy.CAPTURE_SURFACE],
-                "upstream": _PROVIDER_NAME,
-            }
+    ok = make_mocked_request(
+        "POST",
+        "/api/external-access/clients",
+        headers={"Content-Type": "application/json"},
+    )
+    ok._read_bytes = json.dumps(
+        {
+            "label": "external-agent",
+            "surfaces": [proxy.CAPTURE_SURFACE],
+            "upstream": _PROVIDER_NAME,
+        }
+    ).encode()
 
-    assert (await ea.api_external_access_client(_Ok())).status == 200  # type: ignore[arg-type]
+    assert (await ea.api_external_access_client(ok)).status == 200
     assert len(clients_mod.load_clients()) == 1

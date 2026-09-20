@@ -20,6 +20,7 @@ from gideon.core.atomic_write import atomic_write
 from gideon.core.cancellation import run_with_timeout
 from gideon.core.config import loader as config_loader
 from gideon.core.config.loader import AppConfig
+from gideon.core.http_request import read_json_body
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.operations import self_update
 from gideon.operations.frontend import build_frontend_async
@@ -212,7 +213,7 @@ async def _do_update_check() -> None:
 async def api_update_auto(request: web.Request) -> web.Response:
     """POST /api/update/auto — toggle auto-update on/off."""
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -239,7 +240,7 @@ async def api_update_dev_mode(request: web.Request) -> web.Response:
     the git kind).
     """
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -370,7 +371,7 @@ async def _requested_update_action(request: web.Request) -> str:
     if not request.can_read_body:
         return "apply"
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return "apply"
     return str(body.get("action") or "apply") if isinstance(body, dict) else "apply"
@@ -880,7 +881,7 @@ async def api_update_simulate(request: web.Request) -> web.Response:
     """
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
 
@@ -955,7 +956,7 @@ async def api_log_level(request: web.Request) -> web.Response:
     Also persists the new level to config so it survives restarts.
     """
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):

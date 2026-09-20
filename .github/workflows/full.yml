@@ -206,13 +206,13 @@ jobs:
     container: ubuntu:latest
     timeout-minutes: 20
     steps:
-    - name: "bare-container prerequisites (curl \xB7 CA roots \xB7 diff)"
+    - name: bare-container prerequisites (curl · CA roots · diff)
       run: |
         set -eu
         apt-get update -qq
         apt-get install -y --no-install-recommends ca-certificates curl diffutils
     - uses: actions/checkout@v7
-    - name: "smoke \u2014 the STAGED installer (infrastructure/website/install.sh)"
+    - name: smoke — the STAGED installer (infrastructure/website/install.sh)
       if: ${{ !cancelled() }}
       run: |
         set -eu
@@ -224,39 +224,73 @@ jobs:
         sh infrastructure/website/install.sh
         # Installing proves a wheel downloaded. Running it proves the front door opens.
         gideon --version
-    - name: "smoke \u2014 the SERVED one-liner (configured installer endpoint)"
+    - name: smoke — the SERVED one-liner (configured installer endpoint)
       if: ${{ !cancelled() }}
-      run: "set -eu\nset -o pipefail\nUV_TOOL_DIR=\"$RUNNER_TEMP/uv-tools-served\"\nUV_TOOL_BIN_DIR=\"$RUNNER_TEMP/uv-bin-served\"\
-        \nexport UV_TOOL_DIR UV_TOOL_BIN_DIR\nmkdir -p \"$UV_TOOL_DIR\" \"$UV_TOOL_BIN_DIR\"\nPATH=\"$UV_TOOL_BIN_DIR:$PATH\"\
-        ; export PATH\nif ! curl -fsSL --retry 3 --retry-delay 5 --max-time 120 \\\n       \"$GIDEON_INSTALL_URL\"\
-        \ | sh; then\n  echo \"::error title=install one-liner unproven::unproven \u2014 the served one-liner did\"\
-        \ \\\n       \"not complete. If the configured installer or package source is unreachable this run proved\" \\\n       \"NOTHING;\
-        \ it is red rather than green because an unanswered question is not a\" \\\n       \"passing answer. Re-run\
-        \ once reachability is confirmed.\"\n  exit 1\nfi\ngideon --version\n"
-    - name: "drift \u2014 served bytes must equal the staged file"
+      run: |
+        set -eu
+        set -o pipefail
+        UV_TOOL_DIR="$RUNNER_TEMP/uv-tools-served"
+        UV_TOOL_BIN_DIR="$RUNNER_TEMP/uv-bin-served"
+        export UV_TOOL_DIR UV_TOOL_BIN_DIR
+        mkdir -p "$UV_TOOL_DIR" "$UV_TOOL_BIN_DIR"
+        PATH="$UV_TOOL_BIN_DIR:$PATH"; export PATH
+        if ! curl -fsSL --retry 3 --retry-delay 5 --max-time 120 \
+               "$GIDEON_INSTALL_URL" | sh; then
+          echo "::error title=install one-liner unproven::unproven — the served one-liner did" \
+               "not complete. If the configured installer or package source is unreachable this run proved" \
+               "NOTHING; it is red rather than green because an unanswered question is not a" \
+               "passing answer. Re-run once reachability is confirmed."
+          exit 1
+        fi
+        gideon --version
+    - name: drift — served bytes must equal the staged file
       if: ${{ !cancelled() }}
-      run: "set -eu\nserved=\"$RUNNER_TEMP/served-install.sh\"\nif ! curl -fsSL --retry 3 --retry-delay 5 --max-time\
-        \ 60 \\\n       -o \"$served\" \"$GIDEON_INSTALL_URL\"; then\n  echo \"::error title=install drift unproven::unproven\
-        \ \u2014 could not fetch\" \\\n       \"\"$GIDEON_INSTALL_URL\", so whether the mirror has drifted is\"\
-        \ \\\n       \"UNKNOWN. Reported red deliberately: an unanswered question must not arrive\" \\\n       \"\
-        as a green check.\"\n  exit 1\nfi\nif [ ! -s \"$served\" ]; then\n  echo \"::error title=install drift unproven::unproven\
-        \ \u2014 /install returned 0 bytes.\" \\\n       \"Nothing was compared.\"\n  exit 1\nfi\nserved_sum=$(sha256sum\
-        \ \"$served\" | cut -d' ' -f1)\nstaged_sum=$(sha256sum infrastructure/website/install.sh | cut -d' ' -f1)\n\
-        pinned_sum=$(cut -d' ' -f1 < infrastructure/website/install.sh.sha256)\necho \"served=$served_sum\"\necho\
-        \ \"staged=$staged_sum\"\necho \"pinned=$pinned_sum\"\n# staged-vs-pinned is already gated offline in checks/runtime/test_website_installer.py.\
-        \ Repeated\n# here so this leg's verdict does not depend on another job having run.\nif [ \"$staged_sum\"\
-        \ != \"$pinned_sum\" ]; then\n  echo \"::error title=install pin stale::infrastructure/website/install.sh.sha256\
-        \ does not\" \\\n       \"match install.sh. Update the pin in the same change as the script.\"\n  exit 1\n\
-        fi\nif [ \"$served_sum\" != \"$pinned_sum\" ]; then\n  echo \"::error title=install one-liner drift::the\
-        \ bytes served at\" \\\n       \"\"$GIDEON_INSTALL_URL\" are NOT the bytes staged here. Users are\" \\\n\
-        \       \"running something this repo does not lint or test. Re-apply\" \\\n       \"infrastructure/website/install.sh\
-        \ to the website repo's public/install (see\" \\\n       \"infrastructure/website/README.md \xA71) and re-run.\"\
-        \n  diff -u infrastructure/website/install.sh \"$served\" || true\n  exit 1\nfi\necho \"served bytes are\
-        \ identical to the staged installer ($served_sum)\"\n"
+      run: |
+        set -eu
+        served="$RUNNER_TEMP/served-install.sh"
+        if ! curl -fsSL --retry 3 --retry-delay 5 --max-time 60 \
+               -o "$served" "$GIDEON_INSTALL_URL"; then
+          echo "::error title=install drift unproven::unproven — could not fetch" \
+               "$GIDEON_INSTALL_URL, so whether the mirror has drifted is" \
+               "UNKNOWN. Reported red deliberately: an unanswered question must not arrive" \
+               "as a green check."
+          exit 1
+        fi
+        if [ ! -s "$served" ]; then
+          echo "::error title=install drift unproven::unproven — /install returned 0 bytes." \
+               "Nothing was compared."
+          exit 1
+        fi
+        served_sum=$(sha256sum "$served" | cut -d' ' -f1)
+        staged_sum=$(sha256sum infrastructure/website/install.sh | cut -d' ' -f1)
+        pinned_sum=$(cut -d' ' -f1 < infrastructure/website/install.sh.sha256)
+        echo "served=$served_sum"
+        echo "staged=$staged_sum"
+        echo "pinned=$pinned_sum"
+        # staged-vs-pinned is already gated offline in checks/runtime/test_website_installer.py. Repeated
+        # here so this leg's verdict does not depend on another job having run.
+        if [ "$staged_sum" != "$pinned_sum" ]; then
+          echo "::error title=install pin stale::infrastructure/website/install.sh.sha256 does not" \
+               "match install.sh. Update the pin in the same change as the script."
+          exit 1
+        fi
+        if [ "$served_sum" != "$pinned_sum" ]; then
+          echo "::error title=install one-liner drift::the bytes served at" \
+               "$GIDEON_INSTALL_URL are NOT the bytes staged here. Users are" \
+               "running something this repo does not lint or test. Re-apply" \
+               "infrastructure/website/install.sh to the configured endpoint (see" \
+               "infrastructure/website/README.md) and re-run."
+          diff -u infrastructure/website/install.sh "$served" || true
+          exit 1
+        fi
+        echo "served bytes are identical to the staged installer ($served_sum)"
     if: ${{ vars.GIDEON_INSTALL_URL != '' && vars.GIDEON_PACKAGE_SOURCE != '' }}
     env:
       GIDEON_INSTALL_URL: ${{ vars.GIDEON_INSTALL_URL }}
       GIDEON_PACKAGE_SOURCE: ${{ vars.GIDEON_PACKAGE_SOURCE }}
+    defaults:
+      run:
+        shell: bash
   registry-verdicts:
     runs-on: ubuntu-latest
     env:

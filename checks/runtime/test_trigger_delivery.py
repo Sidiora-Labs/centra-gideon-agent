@@ -40,13 +40,10 @@ def _request(method: str, state, body: dict, *, trigger_id: str = ""):
         method,
         "/api/triggers",
         match_info={"id": trigger_id} if trigger_id else {},
+        headers={"Content-Type": "application/json"},
         app=app,
     )
-
-    async def read_json():
-        return body
-
-    request.json = read_json  # type: ignore[assignment]
+    request._read_bytes = json.dumps(body).encode()  # noqa: SLF001
     return request
 
 
@@ -70,6 +67,7 @@ def test_explicit_empty_failure_delivery_survives_decode_and_inherits_delivery()
         id="clock:nightly",
         name="Nightly",
         kind="clock",
+        spec={"kind": "cron", "expr": "0 9 * * *"},
         delivery="channel:ops",
         failure_delivery="",
     ).to_dict()

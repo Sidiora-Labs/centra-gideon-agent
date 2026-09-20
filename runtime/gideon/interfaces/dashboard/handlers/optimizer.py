@@ -5,6 +5,7 @@ import logging
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.integrations.llm.base import (
     EVENT_COMPLETE,
     EVENT_PERMISSION_REQUEST,
@@ -64,7 +65,7 @@ async def handle_optimize(request: web.Request) -> web.Response:
     """POST /api/optimizer/optimize — rewrite a prompt using session context."""
     state: ConsoleState = request.app["state"]
     try:
-        data = await request.json()
+        data = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(data, dict):

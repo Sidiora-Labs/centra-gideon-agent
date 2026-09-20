@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { unavailableWhen } from '../../shared/ui/unavailable'
 import { fvs } from '../../shared/theme/fontWeight'
 import { motion } from 'framer-motion'
-import { ListTree, FileText, Link2, MessageSquare, ExternalLink, MessagesSquare, ArrowUp, Loader2, Bot, Check, AlertTriangle, OctagonX } from 'lucide-react'
+import { ListTree, FileText, Link2, ExternalLink, MessagesSquare, ArrowUp, Loader2, Bot, Check, AlertTriangle, OctagonX } from 'lucide-react'
 import { Markdown } from '../../shared/ui/Markdown'
 import { Button } from '../../shared/ui/Button'
 import { spring } from '../../shared/theme/motion'
@@ -10,7 +10,7 @@ import { SlotEmptyState } from '../dashboard/widgets/kit'
 import type { ChatActivity, SubagentCard } from './chatTypes'
 import { tabListKeys } from '../../shared/data/tabListKeys'
 
-type Tab = 'index' | 'files' | 'links' | 'subagents' | 'side'
+type Tab = 'files' | 'links' | 'subagents' | 'side'
 
 export interface SidePanelData {
   msgs: { q: string; a: string; runId: string; done: boolean }[]
@@ -19,20 +19,18 @@ export interface SidePanelData {
   onOpen: () => void
 }
 
-export function ChatActivityPanel({ activity, onJumpTo, onOpenFile, subagents = [], onKillFanout, side }: {
+export function ChatActivityPanel({ activity, onOpenFile, subagents = [], onKillFanout, side }: {
   activity: ChatActivity
-  onJumpTo: (turnIndex: number) => void
   onOpenFile: (path: string) => void
   subagents?: SubagentCard[]
   onKillFanout?: () => void
   side?: SidePanelData
 }) {
-  const [tab, setTab] = useState<Tab>('index')
+  const [tab, setTab] = useState<Tab>('files')
   useEffect(() => { if (tab === 'side') side?.onOpen() }, [tab]) // eslint-disable-line react-hooks/exhaustive-deps
-  const counts = { index: activity.index.length, files: activity.files.length, links: activity.links.length }
+  const counts = { files: activity.files.length, links: activity.links.length }
 
   const TABS: { key: Tab; label: string; icon: typeof ListTree; count: number }[] = [
-    { key: 'index', label: 'Index', icon: ListTree, count: counts.index },
     { key: 'files', label: 'Files', icon: FileText, count: counts.files },
     { key: 'links', label: 'Links', icon: Link2, count: counts.links },
     ...(subagents.length ? [{ key: 'subagents' as Tab, label: 'Subagents', icon: Bot, count: subagents.length }] : []),
@@ -73,19 +71,6 @@ export function ChatActivityPanel({ activity, onJumpTo, onOpenFile, subagents = 
         </div>
       ) : (
       <div role="tabpanel" id={`act-panel-${tab}`} aria-labelledby={`act-tab-${tab}`} className="min-h-0 flex-1 overflow-y-auto p-2">
-        {tab === 'index' && (
-          activity.index.length === 0
-            ? <Empty icon={MessageSquare} text="No messages yet." />
-            : <div className="flex flex-col gap-px">
-                {activity.index.map((e, i) => (
-                  <motion.button key={e.turnIndex} type="button" onClick={() => onJumpTo(e.turnIndex)} title={e.label}
-                    initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring.spatialDefault, delay: Math.min(i * 0.03, 0.3) }}
-                    data-type="body-s" className="block w-full truncate rounded-md px-2.5 py-2 text-left text-on-surface-var transition-colors hover:bg-surface-high hover:text-on-surface [&_*]:!my-0 [&_*]:!inline [&_p]:truncate">
-                    <Markdown className="truncate">{e.label}</Markdown>
-                  </motion.button>
-                ))}
-              </div>
-        )}
         {tab === 'files' && (
           activity.files.length === 0
             ? <Empty icon={FileText} text="No files referenced yet." />

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, type SkillProposal, type SkillProposalDetail, type SkillSearchResult } from '../../shared/data/api'
+import { api, ApiError, type SkillProposal, type SkillProposalDetail, type SkillSearchResult } from '../../shared/data/api'
 import { useMutation } from '../../shared/data/data'
 
 export function useSkillRequest(identity: string) {
@@ -40,8 +40,9 @@ export function useProposalReview(proposal: SkillProposal) {
   const [busy, setBusy] = useState('')
   const [loadError, setLoadError] = useState<unknown>(null)
   const [revision, setRevision] = useState(0)
-  const accepting = useMutation({ run: () => api.acceptSkillProposal(proposal.id), invalidates: [{ prefix: 'skill-proposals' }, 'skills'], onSuccess: result => setDone(['Accepted → ' + result.name, result.version ? `refinement v${result.version}` : ''].filter(Boolean).join(' · ')), onError: failure => setDone(failure instanceof Error ? failure.message : 'Failed') })
-  const rejecting = useMutation({ run: () => api.rejectSkillProposal(proposal.id), invalidates: [{ prefix: 'skill-proposals' }], onSuccess: () => setDone('Rejected'), onError: () => setDone('Failed') })
+  const decisionError = (failure: unknown) => setDone(failure instanceof ApiError && (failure.status === 404 || failure.status === 409) ? 'Already answered' : failure instanceof Error ? failure.message : 'Failed')
+  const accepting = useMutation({ run: () => api.acceptSkillProposal(proposal.id), invalidates: [{ prefix: 'skill-proposals' }, 'skills'], onSuccess: result => setDone(['Accepted → ' + result.name, result.version ? `refinement v${result.version}` : ''].filter(Boolean).join(' · ')), onError: decisionError })
+  const rejecting = useMutation({ run: () => api.rejectSkillProposal(proposal.id), invalidates: [{ prefix: 'skill-proposals' }], onSuccess: () => setDone('Rejected'), onError: decisionError })
   const lock = useRef(false)
   useEffect(() => {
     if (!open || detail) return

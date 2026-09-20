@@ -66,6 +66,7 @@ class InstalledPack:
     roster: list[dict[str, Any]] = field(default_factory=list)
     pack_owned: list[str] = field(default_factory=list)
     component_locks: dict[str, dict[str, str]] = field(default_factory=dict)
+    staged_triggers: list[str] = field(default_factory=list)
 
     @property
     def unbound(self) -> list[str]:
@@ -134,6 +135,7 @@ def load_installed(home: Path | None = None) -> list[InstalledPack]:
                     for ref, lock in (rec.get("component_locks") or {}).items()
                     if isinstance(lock, dict)
                 },
+                staged_triggers=[str(t) for t in rec.get("staged_triggers", [])],
             )
         )
     return out

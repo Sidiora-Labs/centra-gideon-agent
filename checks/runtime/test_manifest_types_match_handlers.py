@@ -68,7 +68,7 @@ def test_the_comparison_is_not_vacuous(registered):
     ), f"the handler registry looks truncated: {sorted(registered)}"
 
 
-SEAM_ONLY_TYPES = frozenset({"agent", "notification", "skills"})
+SEAM_ONLY_TYPES = frozenset({"agent", "skills"})
 
 
 def test_the_seam_only_types_are_exactly_the_declared_three(tmp_path, monkeypatch):

@@ -40,8 +40,8 @@ from gideon.automation.loop.loop import ACTIVE_STATUSES, LoopStatus
 
 _REPO = Path(__file__).resolve().parent.parent.parent
 _WEB = _REPO / "apps/console" / "src"
-_REGISTRY = _WEB / "lib" / "loopStatus.ts"
-_API = _WEB / "lib" / "api.ts"
+_REGISTRY = _WEB / "shared" / "data" / "loopStatus.ts"
+_API = _WEB / "shared" / "data" / "api.ts"
 
 pytestmark = pytest.mark.skipif(not _WEB.exists(), reason="web sources not present")
 
@@ -77,11 +77,11 @@ def test_the_registry_covers_the_backend_enum_exactly():
     missing = backend - keys
     stale = keys - backend - _SYNTHETIC
     assert not missing, (
-        f"LoopStatus members with no word in apps/console/src/lib/loopStatus.ts: {sorted(missing)}. "
+        f"LoopStatus members with no word in apps/console/src/shared/data/loopStatus.ts: {sorted(missing)}. "
         "A status the frontend cannot name renders as its raw snake_case wire value."
     )
     assert not stale, (
-        f"apps/console/src/lib/loopStatus.ts names statuses the backend never sends: {sorted(stale)}. "
+        f"apps/console/src/shared/data/loopStatus.ts names statuses the backend never sends: {sorted(stale)}. "
         f"Remove them, or list them in _SYNTHETIC if derived like {sorted(_SYNTHETIC)}."
     )
 
@@ -116,7 +116,7 @@ def test_there_is_exactly_one_loop_status_registry():
     ]
     assert not others, (
         f"a second loop-status registry reappeared: {[str(p) for p in others]}. The words and "
-        "tones live in apps/console/src/lib/loopStatus.ts only — two tables is how 'Stalled' vs 'Stagnant' "
+        "tones live in apps/console/src/shared/data/loopStatus.ts only — two tables is how 'Stalled' vs 'Stagnant' "
         "and two meanings of green shipped at once."
     )
 
@@ -132,7 +132,7 @@ def test_no_surface_rewrites_the_active_status_set_by_hand():
     ]
     assert not others, (
         f"a hand-written active-loop-status set reappeared: {[str(p) for p in others]}. Import "
-        "ACTIVE_LOOP_STATUSES from lib/loopStatus instead — four copies drifted here once, and the "
+        "ACTIVE_LOOP_STATUSES from shared/data/loopStatus instead — four copies drifted here once, and the "
         "one that dropped `blocked` made a blocked loop's cockpit read as finished."
     )
 
@@ -151,7 +151,7 @@ def _union_members(name: str) -> set[str]:
     )
     assert (
         m
-    ), f"could not find `export type {name}` in apps/console/src/lib/api.ts — parser drift?"
+    ), f"could not find `export type {name}` in apps/console/src/shared/data/api.ts — parser drift?"
     return set(re.findall(r"'([a-z_]+)'", m.group(1)))
 
 
@@ -171,7 +171,7 @@ def test_the_wire_type_union_covers_the_backend_enum_exactly():
     backend = {s.value for s in LoopStatus}
     assert backend, "LoopStatus enum is empty — import drift?"
     assert union == backend, (
-        "apps/console/src/lib/api.ts:UnifiedLoopStatus disagrees with loop.loop:LoopStatus "
+        "apps/console/src/shared/data/api.ts:UnifiedLoopStatus disagrees with loop.loop:LoopStatus "
         f"(union-only={sorted(union - backend)}, backend-only={sorted(backend - union)}). "
         "A member the union omits cannot be compared against without a type error, which is "
         "how a real state stops being reachable from any affordance."
@@ -188,7 +188,7 @@ def test_there_is_exactly_one_wire_status_union():
     found = set(re.findall(r"export type (\w*(?:Loop|Code)Status)\s*=", text))
     assert (
         "UnifiedLoopStatus" in found
-    ), "UnifiedLoopStatus is gone from apps/console/src/lib/api.ts — this rail can prove nothing"
+    ), "UnifiedLoopStatus is gone from apps/console/src/shared/data/api.ts — this rail can prove nothing"
     assert found == {
         "UnifiedLoopStatus"
-    }, f"more than one loop-status union is exported from apps/console/src/lib/api.ts: {sorted(found)}"
+    }, f"more than one loop-status union is exported from apps/console/src/shared/data/api.ts: {sorted(found)}"

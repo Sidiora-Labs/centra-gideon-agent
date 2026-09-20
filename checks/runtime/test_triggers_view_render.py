@@ -76,13 +76,14 @@ def _view(home, *, tid="view:tile", surface="artifact.notes", **spec):
 def _req(state, *, body):
     app = web.Application()
     app["state"] = state
-    req = make_mocked_request("POST", "/api/triggers/view/render", app=app)
+    req = make_mocked_request(
+        "POST",
+        "/api/triggers/view/render",
+        headers={"Content-Type": "application/json"},
+        app=app,
+    )
     req["user"] = "tester"
-
-    async def _json():
-        return body
-
-    req.json = _json  # type: ignore[assignment]
+    req._read_bytes = json.dumps(body).encode()
     return req
 
 

@@ -75,12 +75,13 @@ def test_the_mcp_dispatcher_hard_codes_the_scope(store):
     is no call that could demonstrate it at runtime.
     """
     import inspect
+    import re
 
     from gideon.assurance.validation import MCP_AUTOMATION_SCHEMAS
     from gideon.integrations import mcp_automation
 
     src = inspect.getsource(mcp_automation._call_tool_inner)
-    assert 'T.delete_all(store, created_by="agent"' in src
+    assert re.search(r'T\.delete_all\(\s*store,\s*created_by="agent"', src)
     assert "created_by=str(args" not in src
     fields = {f.name for f in MCP_AUTOMATION_SCHEMAS["automation_delete_all"].fields}
     assert fields == {"confirm"}, f"the scope must not be caller-settable: {fields}"
@@ -200,10 +201,12 @@ def test_the_legacy_alias_surface_is_gone():
     assert "gideon-schedule" not in _MANAGED_SERVER_NAMES
 
     root = pathlib.Path(gideon.__file__).parent
-    defaults = json.loads((root / "config" / "defaults.json").read_text())
+    defaults = json.loads((root / "core" / "config" / "defaults.json").read_text())
     assert "@gideon-schedule" not in defaults["tools"]
     assert "@gideon-schedule" not in defaults["allowedTools"]
-    assert not (root / "apps" / "native" / "gideon-schedule-tools").exists()
+    assert not (
+        root / "extensions" / "apps" / "native" / "gideon-schedule-tools"
+    ).exists()
 
 
 def test_the_shipped_prompts_do_not_name_a_retired_tool():
@@ -214,7 +217,7 @@ def test_the_shipped_prompts_do_not_name_a_retired_tool():
 
     import gideon
 
-    prompts = pathlib.Path(gideon.__file__).parent / "config" / "prompts"
+    prompts = pathlib.Path(gideon.__file__).parent / "core" / "config" / "prompts"
     for name in ("chat.md", "background.md"):
         text = (prompts / name).read_text(encoding="utf-8")
         assert "schedule_add" not in text, name

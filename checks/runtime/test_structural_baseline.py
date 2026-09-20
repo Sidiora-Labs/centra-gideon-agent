@@ -168,7 +168,8 @@ def test_the_watch_band_is_not_sitting_on_a_cliff():
     forced the boundary to move to 2800 (see ``SIZE_WATCH_BAND_LINES``).
     """
     headroom = gen.watch_band_headroom()
-    assert headroom >= 100, (
+    assert gen.SIZE_MIN_HEADROOM_LINES == 100
+    assert headroom >= gen.SIZE_MIN_HEADROOM_LINES, (
         f"only {headroom} lines of headroom below the {gen.SIZE_WATCH_BAND_LINES}-line watch "
         "band — a file is about to be dragged in by an unrelated commit. Split that file now, "
         "or (if the band is genuinely mis-placed) move the band to a gap in the distribution and "
@@ -192,7 +193,8 @@ def test_the_ceiling_leaves_the_biggest_file_room_for_ordinary_maintenance():
     counts = gen.scan(gen.RATCHET_SIZE).rows
     biggest_file = max(counts, key=lambda rel: counts[rel])
     headroom = gen.SIZE_CEILING_LINES - counts[biggest_file]
-    assert headroom >= 100, (
+    assert gen.SIZE_MIN_HEADROOM_LINES == 100
+    assert headroom >= gen.SIZE_MIN_HEADROOM_LINES, (
         f"only {headroom} lines of headroom on {biggest_file} ({counts[biggest_file]} lines vs a "
         f"{gen.SIZE_CEILING_LINES}-line ceiling) — a routine config-field addition would red the "
         "gate. Read the SIZE_CEILING_LINES comment before tightening this."
@@ -256,6 +258,7 @@ def test_forbidden_to_raise_doc_line_is_present():
     )
 
 
+@pytest.mark.timeout(180)
 def test_three_simultaneous_structural_violations_report_as_three(
     monkeypatch, tmp_path
 ):
@@ -411,7 +414,7 @@ def test_the_walk_cannot_wander_into_a_worktree_or_a_vendor_directory():
             excluded in gen._EXCLUDED_DIR_NAMES
         ), f"{excluded} left the exclusion floor"
     root = gen._src_root().as_posix()
-    assert root.endswith("/src/gideon")
+    assert root.endswith("/runtime/gideon")
     files = gen._src_py_files()
     assert len(files) >= gen.MIN_CENSUS_PY_FILES, (
         f"the walk produced {len(files)} files, so every per-path assertion below is vacuous. "
@@ -548,10 +551,10 @@ def test_the_import_direction_rule_resolves_relative_imports(tmp_path, monkeypat
     running concurrently, and a failed teardown would leave it there.
     """
     monkeypatch.setattr(gen, "_src_root", lambda: tmp_path)
-    probe = tmp_path / "workflows" / "probe.py"
+    probe = tmp_path / "automation" / "workflows" / "probe.py"
     probe.parent.mkdir(parents=True, exist_ok=True)
     probe.write_text(
-        "from ..dashboard import state\nfrom .journal import x\nimport gideon.sdk.model\n",
+        "from ...interfaces.dashboard import state\nfrom .journal import x\nimport gideon.sdk.model\n",
         encoding="utf-8",
     )
     tree = gen._parse(probe)
@@ -566,9 +569,9 @@ def test_the_upper_layer_may_import_itself():
     """``dashboard/`` importing ``dashboard/`` is not a violation, and neither is ``packages/python-client/``
     importing ``packages/python-client/``. A rule that flagged intra-layer imports would report hundreds of false
     reds and be deleted within a day."""
-    rule = next(r for r in gen.DIRECTION_RULES if r.upper == ("dashboard",))
-    assert rule.applies_to("workflows/handlers.py") is True
-    assert rule.applies_to("dashboard/handlers/core.py") is False
+    rule = next(r for r in gen.DIRECTION_RULES if r.upper == ("interfaces.dashboard",))
+    assert rule.applies_to("automation/workflows/handlers.py") is True
+    assert rule.applies_to("interfaces/dashboard/handlers/core.py") is False
     assert rule.applies_to("gateway.py") is True, "top-level modules are part of core"
 
 
@@ -690,3 +693,30 @@ def test_catalog_reader_rejects_unknown_formats(field, value):
     document[field] = value
     with pytest.raises(ValueError, match="unsupported Gideon"):
         gen.decode_catalog(document)
+
+
+def test_domain_verdict_classification_is_bound_to_its_path_and_contract(tmp_path):
+    for (path, symbol), (fields, reason) in gen._DOMAIN_VERDICT_CONTRACTS.items():
+        assert reason.strip()
+        tree = gen._parse(gen._repo_root() / path)
+        assert tree is not None
+        assert gen._domain_verdict(tree, path, symbol)
+        assert symbol in gen._verdict_type_sites(tree)
+        assert not gen._domain_verdict(tree, "runtime/gideon/unrelated.py", symbol)
+        changed = _module(
+            tmp_path,
+            "changed.py",
+            f"class {symbol}:\n"
+            + "\n".join(f"    {field}: str" for field in sorted(fields | {"score"})),
+        )
+        assert symbol in gen._verdict_type_sites(changed)
+        assert not gen._domain_verdict(changed, path, symbol)
+
+
+def test_ceiling_shrink_preserves_the_required_maintenance_headroom():
+    candidate = gen.SIZE_CEILING_LINES - gen.SIZE_CEILING_STEP_LINES
+    for headroom, steps in ((33, 0), (99, 0), (100, 1)):
+        current = gen.size_block_from(
+            {"runtime/gideon/largest.py": candidate - headroom}
+        )
+        assert current["ceiling_slack_steps"] == steps

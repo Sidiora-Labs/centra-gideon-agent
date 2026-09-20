@@ -3,7 +3,7 @@
 
 ``ACP-AGENT-PARITY.md`` §2.2 requires that the residual not-gateable set be
 enumerated in ONE place — :data:`gideon.integrations.acp.permission_authority.NOT_GATEABLE`
-— and that §2.7's parity doc (``docs/architecture/ACP_PARITY.md``) **render** that
+— and that §2.7's parity doc (``docs/agents/acp-parity.md``) **render** that
 registry rather than re-derive it in prose. A hand-written table beside the
 registry is exactly the drift the requirement exists to prevent, and it had
 already happened: the doc's third column carried sweep prose
@@ -41,9 +41,7 @@ from pathlib import Path
 
 from gideon.integrations.acp import permission_authority
 
-MARKER_BEGIN = (
-    "<!-- BEGIN GENERATED: not-gateable-registry (tooling/scripts/render_acp_parity_residual.py) -->"
-)
+MARKER_BEGIN = "<!-- BEGIN GENERATED: not-gateable-registry (tooling/scripts/render_acp_parity_residual.py) -->"
 MARKER_END = "<!-- END GENERATED: not-gateable-registry -->"
 
 _REDUNDANT_FIELDS = frozenset({"provider"})
@@ -51,7 +49,7 @@ _REDUNDANT_FIELDS = frozenset({"provider"})
 
 def doc_path() -> Path:
     """Repo-root location of the §2.7 parity doc."""
-    return Path(__file__).resolve().parents[2] / "docs" / "architecture" / "ACP_PARITY.md"
+    return Path(__file__).resolve().parents[2] / "docs" / "agents" / "acp-parity.md"
 
 
 def _flatten(value: object) -> str:
@@ -68,7 +66,9 @@ def _flatten(value: object) -> str:
     return " ".join(str(unwrapped).split())
 
 
-def _scalar_fields(obj: object, *, skip: frozenset[str] = frozenset()) -> list[tuple[str, str]]:
+def _scalar_fields(
+    obj: object, *, skip: frozenset[str] = frozenset()
+) -> list[tuple[str, str]]:
     """``(label, text)`` for every non-empty scalar dataclass field of ``obj``.
 
     Collection-shaped fields (``entries``, ``title_patterns``) are structure or
@@ -106,7 +106,9 @@ def _entry_label(entry: object) -> tuple[str, frozenset[str]]:
         return f"`{tool}`", frozenset({"tool"})
     for f in dataclasses.fields(entry) if dataclasses.is_dataclass(entry) else ():
         text = _flatten(getattr(entry, f.name, None))
-        if text and not isinstance(getattr(entry, f.name), (list, tuple, set, frozenset, dict)):
+        if text and not isinstance(
+            getattr(entry, f.name), (list, tuple, set, frozenset, dict)
+        ):
             return text, frozenset({f.name})
     return "(unlabelled entry)", frozenset()
 
@@ -155,7 +157,9 @@ def render_document(text: str) -> str:
             f"({MARKER_BEGIN!r} / {MARKER_END!r}); the §2.2 render contract cannot hold"
         )
     if end < begin:
-        raise ValueError(f"{doc_path().name} has the generated-block markers out of order")
+        raise ValueError(
+            f"{doc_path().name} has the generated-block markers out of order"
+        )
     if text.count(MARKER_BEGIN) != 1 or text.count(MARKER_END) != 1:
         raise ValueError(
             f"{doc_path().name} has duplicate generated-block markers; exactly one "

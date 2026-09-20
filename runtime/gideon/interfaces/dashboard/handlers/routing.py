@@ -13,6 +13,7 @@ import time
 from aiohttp import web
 
 from gideon.core.config.loader import AppConfig
+from gideon.core.http_request import read_json_body
 from gideon.engine.agents import routing
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ async def _agent_from_body(
     request: web.Request,
 ) -> tuple[str | None, web.Response | None]:
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return None, _bad("invalid JSON body")
     if not isinstance(body, dict):

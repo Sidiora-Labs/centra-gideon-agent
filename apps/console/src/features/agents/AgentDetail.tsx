@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Pencil, Trash2, Check, X, Star, Lock, Cpu, ShieldCheck, ChevronDown, VolumeX, RefreshCw } from 'lucide-react'
+import { Pencil, Trash2, Check, X, Star, Lock, Cpu, ShieldCheck, ChevronDown, VolumeX, RefreshCw, ExternalLink } from 'lucide-react'
 import { Button } from '../../shared/ui/Button'
 import { TextArea, FieldError } from '../../shared/ui/forms'
 import { FormFooter } from '../../shared/ui/FormFooter'
@@ -14,6 +14,7 @@ import { providerMeta, isReservedAgent } from './agentMeta'
 import { AgentForm, toDraft, draftToPayload } from './AgentForm'
 import { accentChip, toneChipSkin } from '../../shared/theme/accent'
 import { useAgentRoutingNotes, useAgentTriggerNames, useAgentWrite } from './agentEditorState'
+import { documentationUrl } from '../../app/shell/config'
 
 const badgeClass = 'inline-flex min-h-7 items-center gap-1 rounded-md px-m text-[0.8125rem]'
 
@@ -105,6 +106,7 @@ function ReservedModelEditor({ agent, onSaved }: { agent: SavedAgent; onSaved: (
 }
 export function DiscoveredAgentDetail({ agent, providerId }: { agent: DiscoveredAgent; providerId: string }) {
   const pm = providerMeta(providerId)
+  const parityDoc = acpParityDocUrl(providerId)
   return <div className="grid gap-l">
     <span className={`${badgeClass} justify-self-start border border-outline-variant/30 bg-surface-high text-on-surface-var`}><Lock size={13} /> {pm.label} — read-only</span>
     <p data-type="body-s" className="text-on-surface-low">This agent is defined and run by the {pm.label} runtime. It can't be edited here, but you can use it from the chat agent picker.</p>
@@ -112,7 +114,13 @@ export function DiscoveredAgentDetail({ agent, providerId }: { agent: Discovered
     {agent.description && <p className="text-[0.9375rem] leading-relaxed text-on-surface">{agent.description}</p>}
     {agent.provider_agent && <Section label="Runtime agent id"><span data-type="body-s" className="font-mono text-on-surface-var">{agent.provider_agent}</span></Section>}
     {!!agent.models?.length && <Section label="Models"><div className="flex flex-wrap gap-s">{agent.models.map(model => <span key={model} data-type="caption" className="inline-flex min-h-6 items-center gap-1 rounded-md bg-surface-high px-2 font-mono text-on-surface-var"><Cpu size={11} /> {model}</span>)}</div></Section>}
+    {parityDoc && <a href={parityDoc} target="_blank" rel="noreferrer" className="inline-flex w-fit items-center gap-xs text-[0.8125rem] text-primary underline decoration-primary/40 underline-offset-2">Review {pm.label} ACP parity before binding <ExternalLink size={12} aria-hidden="true" /></a>}
   </div>
+}
+function acpParityDocUrl(providerId: string): string | undefined {
+  const id = providerId.replace(/^acp:/, '').toLowerCase()
+  const section = id.includes('claude') ? 'claude-code' : id.includes('codex') ? 'codex' : id.includes('kiro') ? 'kiro-cli' : id.includes('gemini') ? 'gemini-cli-unverified' : ''
+  return section ? documentationUrl(`docs/agents/acp-parity.md#${section}`) : undefined
 }
 function Caps({ label, items, resolve }: { label: string; items?: string[]; resolve?: Map<string, string> | null }) {
   if (!items?.length) return null

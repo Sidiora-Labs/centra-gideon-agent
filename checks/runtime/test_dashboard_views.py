@@ -175,13 +175,13 @@ def _req(method, path, *, match=None, body=None):
     from aiohttp.test_utils import make_mocked_request
 
     request = make_mocked_request(
-        method, path, match_info=match or {}, app=web.Application()
+        method,
+        path,
+        match_info=match or {},
+        headers={"Content-Type": "application/json"},
+        app=web.Application(),
     )
-
-    async def _json():
-        return body or {}
-
-    request.json = _json  # type: ignore[method-assign]
+    request._read_bytes = json.dumps(body or {}).encode()
     return request
 
 

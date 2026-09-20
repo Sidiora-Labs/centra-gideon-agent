@@ -232,6 +232,15 @@ def test_a_nameless_shelf_is_refused(store):
         store.create_collection(name="   ")
 
 
+def test_shelf_name_cap_is_shared_by_create_and_update(store):
+    with pytest.raises(ValueError, match="200 characters or fewer"):
+        store.create_collection(name="x" * 201)
+    cid = store.create_collection(name="x" * 200)
+    with pytest.raises(ValueError, match="200 characters or fewer"):
+        store.update_collection(cid, name="y" * 201)
+    assert store.get_collection(cid)["name"] == "x" * 200
+
+
 def test_read_state_cycles_through_all_three(store):
     iid = _item(store, "One")
     assert store.get_item(iid)["read_state"] == "unread"

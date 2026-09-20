@@ -46,9 +46,7 @@ def _ensure_native() -> None:
 def validate_provider(name: str | None) -> None:
     if name is None:
         return
-    _ensure_native()
-    if not isinstance(name, str) or not name or name not in _providers:
-        raise ValueError(f"Unknown task provider: {name}")
+    _resolve(name)
 
 
 @dataclass(frozen=True)
@@ -87,10 +85,15 @@ class TaskDirectory:
                         for parameter in parameters.values()
                     )
                 }
-                rows, _ = await provider.list_tasks(
-                    **provider_fields, limit=MAX_TASK_PAGE_LIMIT, offset=0
-                )
-                records.extend(rows)
+                offset = 0
+                while True:
+                    rows, total = await provider.list_tasks(
+                        **provider_fields, limit=MAX_TASK_PAGE_LIMIT, offset=offset
+                    )
+                    records.extend(rows)
+                    offset += len(rows)
+                    if not rows or offset >= total:
+                        break
             except Exception:
                 logger.warning(
                     "Task provider %s failed to list", provider.name, exc_info=True
@@ -107,6 +110,23 @@ class TaskDirectory:
 def _directory():
     _ensure_native()
     return TaskDirectory(_providers)
+
+
+def _resolve(name: str | None = None) -> TaskProvider | None:
+    if name is not None and (not isinstance(name, str) or not name):
+        raise ValueError(f"Unknown task provider: {name}")
+    sources = _directory()
+    provider = sources.selected(name)
+    if name is not None and provider is None:
+        raise ValueError(f"Unknown task provider: {name}")
+    return provider
+
+
+async def _resolve_one(
+    task_id: str, provider_name: str | None = None
+) -> TaskProvider | None:
+    selected = _resolve(provider_name)
+    return selected if selected is not None else await _directory().owner(task_id, None)
 
 
 def _task_write_fields(provider, fields, *, resolve):
@@ -137,12 +157,9 @@ async def validate_task_write(
 ) -> None:
     sources = _directory()
     if task_id is None:
-        selected_name = provider_name or "native"
-        provider = sources.selected(selected_name)
-        if provider is None:
-            raise ValueError(f"Unknown task provider: {selected_name}")
+        provider = _resolve(provider_name or "native")
     else:
-        provider = await sources.owner(task_id, provider_name)
+        provider = await _resolve_one(task_id, provider_name)
         if provider is None:
             return
     _task_write_fields(sources.writable(provider), fields, resolve=False)
@@ -175,20 +192,14 @@ async def list_all_tasks(
 
 
 async def get_task(task_id: str, provider_name: str | None = None) -> Task | None:
-    sources = _directory()
-    provider = sources.selected(provider_name)
-    return (
-        await provider.get_task(task_id)
-        if provider is not None
-        else (await sources.find(task_id))[1]
-    )
+    provider = await _resolve_one(task_id, provider_name)
+    return await provider.get_task(task_id) if provider is not None else None
 
 
 async def create_task(provider_name: str = "native", **fields: Any) -> Task:
     sources = _directory()
-    provider = sources.selected(provider_name)
-    if provider is None:
-        raise ValueError(f"Unknown task provider: {provider_name}")
+    provider = _resolve(provider_name)
+    assert provider is not None
     provider = sources.writable(provider)
     return await provider.create_task(
         **_task_write_fields(provider, fields, resolve=True)
@@ -199,7 +210,7 @@ async def update_task(
     task_id: str, provider_name: str | None = None, **fields: Any
 ) -> Task | None:
     sources = _directory()
-    provider = await sources.owner(task_id, provider_name)
+    provider = await _resolve_one(task_id, provider_name)
     return (
         None
         if provider is None
@@ -211,7 +222,7 @@ async def update_task(
 
 async def delete_task(task_id: str, provider_name: str | None = None) -> bool:
     sources = _directory()
-    provider = await sources.owner(task_id, provider_name)
+    provider = await _resolve_one(task_id, provider_name)
     return (
         False
         if provider is None

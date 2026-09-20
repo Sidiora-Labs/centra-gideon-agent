@@ -83,14 +83,9 @@ _RUNTIME_DISPLAY = {
 
 
 def _path_home_gideon():
-    try:
-        from gideon.core.config.loader import config_dir
+    from gideon.core.config.loader import config_dir
 
-        return config_dir()
-    except Exception:
-        from pathlib import Path
-
-        return Path.home().joinpath(".gideon")
+    return config_dir()
 
 
 def _attach_vector_store(store: MemoryJournal, ws_path) -> None:
@@ -699,7 +694,7 @@ class PromptAssembler:
                 continue
         return ""
 
-    def _slots_block(self, vector_store: _SlotStore | None) -> str:
+    def _slots_block(self, vector_store: "_SlotStore | None") -> str:
         if vector_store is not None:
             try:
                 from gideon.cognition import memory_slots

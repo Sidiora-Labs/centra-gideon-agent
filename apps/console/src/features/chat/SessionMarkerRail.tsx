@@ -1,21 +1,29 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
-import { ArrowDown } from 'lucide-react'
+import { useCallback, useEffect, useState, type KeyboardEvent, type RefObject } from 'react'
+import { ArrowDown, Check, ListTree, Search, Wrench, X } from 'lucide-react'
 import { turnText, type ChatTurn } from './chatTypes'
 import { clockTime, fullStamp, isoStamp } from '../../shared/data/epoch'
+import { useAppearance } from '../../app/shell/appearance'
+import { TOKENS, type SelectToken } from '../../shared/theme/tokenRegistry'
+import { findInText, hasMatch } from '../../shared/ui/findText'
 
 type ViewportPosition = {
   top: number
   height: number
 }
 
-type MarkerTurn = Pick<ChatTurn, 'role'> & Partial<Pick<ChatTurn, 'segments' | 'ts'>>
+type MarkerTurn = Pick<ChatTurn, 'role'> & Partial<Pick<ChatTurn, 'segments' | 'ts' | 'summary'>>
+type MarkKind = 'tool' | 'error' | 'completion'
+
+const MAP_DENSITY = TOKENS.find((token): token is SelectToken => token.kind === 'select' && token.varName === '--session-map-density')!
 
 export interface SessionMarkerRailProps {
   turns: readonly MarkerTurn[]
   scrollRef: RefObject<HTMLDivElement | null>
   nodeOf: (index: number) => HTMLElement | null | undefined
+  onJumpTo: (turnIndex: number) => void
   showReturnToNewest: boolean
   onReturnToNewest: () => void
+  searchSource?: 'rail' | 'drawer' | 'transcript'
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
@@ -24,12 +32,25 @@ export function SessionMarkerRail({
   turns,
   scrollRef,
   nodeOf,
+  onJumpTo,
   showReturnToNewest,
   onReturnToNewest,
+  searchSource = 'rail',
 }: SessionMarkerRailProps) {
-  const railRef = useRef<HTMLDivElement>(null)
+  const appearance = useAppearance()
+  const compact = appearance.selectValue(MAP_DENSITY) === 'compact'
   const [viewport, setViewport] = useState<ViewportPosition>({ top: 0, height: 100 })
   const [current, setCurrent] = useState(0)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [query, setQuery] = useState('')
+
+  const clearHighlight = useCallback(() => {
+    const highlights = (window as unknown as { CSS?: { highlights?: Map<string, unknown> } }).CSS?.highlights
+    highlights?.delete('gideon-session-map')
+  }, [])
+
+  useEffect(() => clearHighlight, [clearHighlight])
 
   useEffect(() => {
     const scroller = scrollRef.current
@@ -65,8 +86,38 @@ export function SessionMarkerRail({
   }, [nodeOf, scrollRef, turns.length])
 
   const jumpTo = useCallback((index: number) => {
-    nodeOf(index)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  }, [nodeOf])
+    onJumpTo(index)
+    setDrawerOpen(false)
+  }, [onJumpTo])
+
+  const selectResult = useCallback((index: number) => {
+    const root = nodeOf(index)
+    root?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    clearHighlight()
+    const CSSns = (window as unknown as { CSS?: { highlights?: Map<string, unknown> } }).CSS
+    const HighlightCtor = (window as unknown as { Highlight?: new (...ranges: Range[]) => unknown }).Highlight
+    if (!root || !CSSns?.highlights || !HighlightCtor) return
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+    let node: Node | null
+    while ((node = walker.nextNode())) {
+      const match = findInText(node.nodeValue ?? '', query)[0]
+      if (!match) continue
+      const range = document.createRange()
+      range.setStart(node, match.start)
+      range.setEnd(node, match.end)
+      CSSns.highlights.set('gideon-session-map', new HighlightCtor(range))
+      break
+    }
+  }, [clearHighlight, nodeOf, query])
+
+  const results = query.trim()
+    ? turns.flatMap((turn, index) => {
+        const text = turn.segments
+          ? turnText({ role: turn.role, segments: turn.segments, ts: turn.ts })
+          : ''
+        return hasMatch(text, query) ? [{ index, text }] : []
+      })
+    : []
 
   const moveWithKeyboard = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
     let next: number | null = null
@@ -77,20 +128,80 @@ export function SessionMarkerRail({
     if (next === null) return
 
     event.preventDefault()
-    const buttons = railRef.current?.querySelectorAll<HTMLButtonElement>('[data-session-marker]')
+    const buttons = event.currentTarget.closest('[data-session-map]')?.querySelectorAll<HTMLButtonElement>('[data-session-marker]')
     buttons?.[next]?.focus()
-    jumpTo(next)
+    onJumpTo(next)
   }
 
   if (!turns.length) return null
 
   return (
-    <aside aria-label="Session map" className="pointer-events-none absolute inset-y-0 right-2 z-20 flex items-center">
-      <div className="pointer-events-auto flex flex-col items-center gap-1.5">
-        <div ref={railRef} role="region" aria-label="Session map messages"
-          aria-describedby="session-map-keyboard-help"
+    <>
+      <div className="absolute right-14 top-3 z-30 hidden md:block">
+        <SearchControl open={searchOpen} query={query} source={searchSource} results={results}
+          onToggle={() => { setSearchOpen((open) => !open); if (searchOpen) { setQuery(''); clearHighlight() } }}
+          onQuery={(value) => { setQuery(value); clearHighlight() }} onSelect={selectResult} />
+      </div>
+      <aside aria-label="Session map" className="pointer-events-none absolute inset-y-0 right-2 z-20 hidden items-center md:flex">
+        <div className={`pointer-events-auto flex flex-col items-center ${compact ? 'gap-1' : 'gap-1.5'}`}>
+          <MapMarks id="desktop" turns={turns} viewport={viewport} current={current} compact={compact} jumpTo={jumpTo} moveWithKeyboard={moveWithKeyboard} />
+          {showReturnToNewest && <ReturnToNewest onClick={onReturnToNewest} />}
+        </div>
+      </aside>
+      <button type="button" aria-label="Open session map" aria-expanded={drawerOpen} onClick={() => setDrawerOpen(true)}
+        className="absolute right-3 top-3 z-20 inline-flex size-11 items-center justify-center rounded-pill border border-outline-variant/50 bg-surface/95 text-on-surface-var shadow-md backdrop-blur-md md:hidden">
+        <ListTree size={18} aria-hidden="true" />
+      </button>
+      {drawerOpen && (
+        <div className="fixed inset-0 z-[var(--z-content)] md:hidden">
+          <button type="button" aria-label="Close session map" onClick={() => setDrawerOpen(false)} className="absolute inset-0 bg-scrim/40" />
+          <aside role="dialog" aria-modal="true" aria-label="Session map drawer"
+            className="absolute inset-y-0 right-0 flex w-72 max-w-[85vw] flex-col border-l border-outline-variant bg-surface p-l shadow-xl">
+            <header className="mb-l flex items-center justify-between gap-s">
+              <h2 data-type="title-l">Session map</h2>
+              <button type="button" aria-label="Close session map" onClick={() => setDrawerOpen(false)}
+                className="inline-flex size-11 items-center justify-center rounded-pill text-on-surface-var hover:bg-surface-high">
+                <X size={18} aria-hidden="true" />
+              </button>
+            </header>
+            <SearchControl open query={query} source={searchSource} results={results}
+              onToggle={() => { setQuery(''); clearHighlight() }}
+              onQuery={(value) => { setQuery(value); clearHighlight() }} onSelect={selectResult} />
+            <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto">
+              <MapMarks id="mobile" turns={turns} viewport={viewport} current={current} compact={compact} jumpTo={jumpTo} moveWithKeyboard={moveWithKeyboard} />
+            </div>
+            {showReturnToNewest && <div className="mt-l flex justify-center"><ReturnToNewest onClick={() => { onReturnToNewest(); setDrawerOpen(false) }} /></div>}
+          </aside>
+        </div>
+      )}
+    </>
+  )
+}
+
+function marksFor(turn: MarkerTurn): MarkKind[] {
+  const segments = turn.segments ?? []
+  const marks: MarkKind[] = []
+  if (segments.some((segment) => segment.kind === 'tool')) marks.push('tool')
+  if (segments.some((segment) => segment.kind === 'error' || (segment.kind === 'tool' && (segment.ok === false || !!segment.agentError)))) marks.push('error')
+  if (turn.role === 'assistant' && segments.some((segment) => segment.kind === 'text' || (segment.kind === 'tool' && segment.done))) marks.push('completion')
+  return marks.length ? marks : ['completion']
+}
+
+function MapMarks({ id, turns, viewport, current, compact, jumpTo, moveWithKeyboard }: {
+  id: string
+  turns: readonly MarkerTurn[]
+  viewport: ViewportPosition
+  current: number
+  compact: boolean
+  jumpTo: (index: number) => void
+  moveWithKeyboard: (event: KeyboardEvent<HTMLButtonElement>, index: number) => void
+}) {
+  return (
+        <div data-session-map role="region" aria-label="Session map messages"
+          data-session-map-state="open"
+          aria-describedby={`${id}-session-map-keyboard-help`}
           className="relative flex flex-col items-center rounded-xl border border-outline-variant/50 bg-surface/95 py-1 shadow-md backdrop-blur-md">
-          <span id="session-map-keyboard-help" className="sr-only">
+          <span id={`${id}-session-map-keyboard-help`} className="sr-only">
             Use the Up and Down arrow keys to jump between messages. Home jumps to the first message and End jumps to the newest.
           </span>
           <div aria-hidden="true" className="pointer-events-none absolute inset-y-2 left-1/2 w-px -translate-x-1/2 bg-outline-variant/60">
@@ -99,20 +210,26 @@ export function SessionMarkerRail({
           </div>
           {turns.map((turn, index) => {
             const speaker = turn.role === 'user' ? 'You' : 'Assistant'
-            const previewId = `session-marker-preview-${index}`
-            const excerpt = turn.segments
+            const previewId = `${id}-session-marker-preview-${index}`
+            const marks = marksFor(turn)
+            const excerpt = turn.summary || (turn.segments
               ? turnText({ role: turn.role, segments: turn.segments, ts: turn.ts }).slice(0, 240)
-              : ''
+              : '')
             return (
               <button key={index} type="button" data-session-marker
-                aria-label={`Jump to message ${index + 1}, ${speaker}`}
+                data-marker-tone={current === index ? 'current' : 'history'}
+                aria-label={`Jump to message ${index + 1}, ${speaker}: ${marks.join(', ')}`}
                 aria-describedby={previewId}
                 aria-current={current === index ? 'location' : undefined}
                 onClick={() => jumpTo(index)} onKeyDown={(event) => moveWithKeyboard(event, index)}
-                className="group relative inline-flex size-8 items-center justify-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-visible:ring-offset-surface">
-                <span aria-hidden="true" className={`relative rounded-pill transition-all group-hover:scale-125 ${
-                  turn.role === 'user' ? 'size-2 bg-primary' : 'size-1.5 bg-on-surface-low'
-                 } ${current === index ? 'ring-2 ring-primary/35 ring-offset-2 ring-offset-surface' : ''}`} />
+                className={`group relative inline-flex items-center justify-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-visible:ring-offset-surface ${compact ? 'size-6' : 'size-8'}`}>
+                <span aria-hidden="true" className={`relative z-10 flex items-center gap-0.5 rounded-pill px-0.5 transition-transform group-hover:scale-125 ${current === index ? 'bg-primary ring-2 ring-primary ring-offset-2 ring-offset-surface' : 'bg-outline'}`}>
+                  {marks.map((mark) => mark === 'tool'
+                    ? <Wrench key={mark} data-mark="tool" size={8} className="text-primary" />
+                    : mark === 'error'
+                      ? <X key={mark} data-mark="error" size={9} className="text-danger" />
+                      : <Check key={mark} data-mark="completion" size={8} className="text-on-surface-low" />)}
+                </span>
                 <span id={previewId} role="tooltip"
                   className="pointer-events-none invisible absolute right-[calc(100%+0.5rem)] top-1/2 z-20 w-72 -translate-y-1/2 rounded-lg border border-outline-variant bg-surface-high p-3 text-left opacity-0 shadow-lg group-hover:visible group-hover:opacity-100 group-focus-visible:visible group-focus-visible:opacity-100">
                   <span className="flex justify-between gap-3" data-type="caption">
@@ -127,13 +244,42 @@ export function SessionMarkerRail({
             )
           })}
         </div>
-        {showReturnToNewest && (
-          <button type="button" aria-label="Return to newest message" onClick={onReturnToNewest}
-            className="inline-flex size-11 items-center justify-center rounded-pill border border-outline-variant/50 bg-surface/95 text-on-surface-var shadow-md backdrop-blur-md transition-colors hover:bg-surface-high hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-            <ArrowDown size={16} aria-hidden="true" />
-          </button>
-        )}
-      </div>
-    </aside>
   )
+}
+
+function SearchControl({ open, query, source, results, onToggle, onQuery, onSelect }: {
+  open: boolean
+  query: string
+  source: 'rail' | 'drawer' | 'transcript'
+  results: { index: number; text: string }[]
+  onToggle: () => void
+  onQuery: (value: string) => void
+  onSelect: (index: number) => void
+}) {
+  return <div className="relative">
+    <button type="button" aria-label="Search session map" aria-expanded={open} onClick={onToggle}
+      className="inline-flex size-8 items-center justify-center rounded-pill border border-outline-variant/50 bg-surface/95 text-on-surface-var shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+      {open ? <X size={14} aria-hidden="true" /> : <Search size={14} aria-hidden="true" />}
+    </button>
+    {open && <div role="search" aria-label="Search session map" className="absolute right-10 top-0 w-72 rounded-xl border border-outline-variant bg-surface p-2 shadow-lg">
+      <input type="search" autoFocus value={query} onChange={(event) => onQuery(event.target.value)} placeholder="Search this session" aria-label="Search this session"
+        className="h-9 w-full rounded-lg border border-outline-variant bg-surface-container px-3 text-sm text-on-surface outline-none focus:border-primary" />
+      {query.trim() && <div className="mt-2 max-h-64 overflow-y-auto" role="list" aria-label="Session map search results">
+        {results.length ? results.map(({ index, text }) => {
+          const match = findInText(text, query)[0]
+          return <button key={index} type="button" role="listitem" onClick={() => onSelect(index)} className="block w-full rounded-lg px-2 py-2 text-left hover:bg-surface-high">
+            <span className="block truncate text-xs text-on-surface">{text.slice(0, match.start)}<mark className="rounded bg-primary/25 text-on-surface">{text.slice(match.start, match.end)}</mark>{text.slice(match.end)}</span>
+            <span className="mt-1 block text-[0.6875rem] capitalize text-on-surface-low">Source: {source}</span>
+          </button>
+        }) : <p className="px-2 py-3 text-xs text-on-surface-low">No matches</p>}
+      </div>}
+    </div>}
+  </div>
+}
+
+function ReturnToNewest({ onClick }: { onClick: () => void }) {
+  return <button type="button" aria-label="Return to newest message" onClick={onClick}
+    className="inline-flex size-11 items-center justify-center rounded-pill border border-outline-variant/50 bg-surface/95 text-on-surface-var shadow-md backdrop-blur-md transition-colors hover:bg-surface-high hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+    <ArrowDown size={16} aria-hidden="true" />
+  </button>
 }

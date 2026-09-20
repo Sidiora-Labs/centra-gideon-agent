@@ -216,9 +216,10 @@ def test_module_import_pulls_in_no_http_client() -> None:
     import sys
 
     module_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "src",
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "runtime",
         "gideon",
+        "integrations",
         "browse",
         "safety_script.py",
     )

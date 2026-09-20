@@ -37,7 +37,12 @@ from enum import Enum
 from typing import Any
 
 from gideon.automation.workflows import leases, longrun, ownership
-from gideon.automation.workflows.bindings import BindingContext, BindingError, resolve
+from gideon.automation.workflows.bindings import (
+    BindingContext,
+    BindingError,
+    resolve,
+    resolve_prompt,
+)
 from gideon.automation.workflows.compaction import complete_with_compaction
 from gideon.automation.workflows.judge_contract import (
     JudgeHints,
@@ -178,7 +183,15 @@ def resolve_config(
     raw = dict(node.config or {})
     held = {key: raw.pop(key) for key in _condition_keys(node) if key in raw}
     try:
+        prompts = {
+            key: raw.pop(key)
+            for key in ("prompt", "system", "instruction", "instructions", "message")
+            if key in raw
+        }
         resolved = resolve(raw, ctx)
+        resolved.update(
+            {key: resolve_prompt(value, ctx) for key, value in prompts.items()}
+        )
         resolved.update(held)
         return resolved, None
     except BindingError as exc:
@@ -464,6 +477,12 @@ async def dispatch_infer(
         fn = one_shot_completion
 
     want_json = bool(cfg.get("schema")) or str(cfg.get("output", "")) == "json"
+    sent_prompt = prompt
+
+    def remember_sent_prompt(value: str) -> None:
+        nonlocal sent_prompt
+        sent_prompt = value
+
     try:
         text = await complete_with_compaction(
             fn,
@@ -471,6 +490,7 @@ async def dispatch_infer(
             use_case=use_case,
             output_type=dict if want_json else None,
             saves=compaction_saves,
+            on_prompt=remember_sent_prompt,
         )
     except asyncio.CancelledError:
         raise
@@ -478,7 +498,7 @@ async def dispatch_infer(
         return NodeResult(
             state=InstanceState.FAILED,
             failure=_classify_exception(exc),
-            resolved_prompt=prompt,
+            resolved_prompt=sent_prompt,
         )
 
     output: Any = text
@@ -493,13 +513,13 @@ async def dispatch_infer(
                     remediation="add an explicit schema to the prompt, or split into a "
                     "produce-then-extract pair",
                 ),
-                resolved_prompt=prompt,
+                resolved_prompt=sent_prompt,
             )
         output = parsed
     return NodeResult(
         state=InstanceState.DONE,
         output=output,
-        resolved_prompt=prompt,
+        resolved_prompt=sent_prompt,
         tokens=_estimate_tokens(prompt, text),
     )
 

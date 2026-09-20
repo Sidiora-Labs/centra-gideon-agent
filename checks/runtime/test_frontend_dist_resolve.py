@@ -20,9 +20,9 @@ def _fake_package(root: Path) -> Path:
     """Build the minimal directory shape the resolver walks.
 
     The resolver computes ``repo_root = pkg_dir.parent.parent`` and looks for
-    ``<repo_root>/web/dist`` (the single probe tier — the workspace-root
-    sibling probe was deleted). This lays out ``<root>/src/repo/src/
-    gideon`` as the package dir so the candidate resolves under ``root``.
+    ``<repo_root>/apps/console/dist`` (the single probe tier — the
+    workspace-root sibling probe was deleted). This lays out ``<root>/src/repo/
+    runtime/gideon`` as the package dir so the candidate resolves under ``root``.
     """
     pkg = root / "src" / "repo" / "runtime" / "gideon"
     pkg.mkdir(parents=True)
@@ -38,14 +38,15 @@ def _make_dist(path: Path) -> Path:
 
 @pytest.fixture
 def fake_pkg(tmp_path, monkeypatch):
-    """Patch ``frontend.__file__`` to a throwaway filesystem layout.
+    """Redirect the package root to a throwaway filesystem layout.
 
-    Returns the package dir. The resolver uses ``Path(__file__)`` from
-    ``gideon.operations.frontend`` to locate the package; monkeypatching that
-    attribute redirects every probe to the temp-dir tree built per test.
+    Returns the package dir. The resolver locates the package through
+    ``gideon.core.layout.package_root`` (imported into the frontend module),
+    so monkeypatching that name redirects every probe to the temp-dir tree
+    built per test.
     """
     pkg = _fake_package(tmp_path)
-    monkeypatch.setattr(frontend, "__file__", str(pkg / "frontend.py"))
+    monkeypatch.setattr(frontend, "package_root", lambda: pkg)
     return pkg
 
 

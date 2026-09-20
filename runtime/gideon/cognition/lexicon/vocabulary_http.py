@@ -1,3 +1,5 @@
+from gideon.core.http_request import read_json_body
+
 """Vocabulary request decoding, record projection and mutation responses."""
 
 from dataclasses import dataclass
@@ -13,7 +15,7 @@ class RequestDocument:
     @classmethod
     async def read(cls, request):
         try:
-            return cls(await request.json(), True)
+            return cls(await read_json_body(request), True)
         except Exception:
             return cls(None, False)
 

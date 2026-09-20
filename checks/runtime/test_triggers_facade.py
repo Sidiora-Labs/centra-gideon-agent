@@ -65,14 +65,16 @@ def _req(method, path, state, *, body=None, match_info=None, query=None):
     app = web.Application()
     app["state"] = state
     full = path + ("?" + query if query else "")
-    req = make_mocked_request(method, full, match_info=match_info or {}, app=app)
+    req = make_mocked_request(
+        method,
+        full,
+        match_info=match_info or {},
+        app=app,
+        headers={"Content-Type": "application/json"} if body is not None else {},
+    )
     req["user"] = "tester"
     if body is not None:
-
-        async def _json():
-            return body
-
-        req.json = _json  # type: ignore[assignment]
+        req._read_bytes = json.dumps(body).encode()
     return req
 
 
@@ -648,7 +650,12 @@ def test_week_grid_annotates_suppressed_slots(state):
     _seed_interval(
         state, "j1", "Hourly", gates={"quiet_hours": {"start": "22:00", "end": "08:00"}}
     )
-    req = _req("GET", "/api/triggers/week", state, query="start=2024-01-01&days=1")
+    req = _req(
+        "GET",
+        "/api/triggers/week",
+        state,
+        query="start=2024-01-01T00:00:00%2B00:00&days=1",
+    )
     resp = _run(T.api_triggers_week(req))
     assert resp.status == 200
     body = _body(resp)

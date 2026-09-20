@@ -93,7 +93,7 @@ def test_there_is_exactly_one_boot_adoption_primitive():
 
 def test_both_watchdogs_sweep_through_the_shared_primitive():
     """The convergence itself: neither noun may keep a private boot-adoption loop."""
-    for rel in ("loop/watchdog.py", "workflows/watchdog.py"):
+    for rel in ("automation/loop/watchdog.py", "automation/workflows/watchdog.py"):
         body = _text(rel)
         assert "concurrency.boot_sweep(" in body, (
             f"{rel} no longer calls concurrency.boot_sweep. PP-16's 'one adoption/reaping path' "
@@ -105,7 +105,7 @@ def test_both_watchdogs_sweep_through_the_shared_primitive():
 def test_the_scan_rejects_a_symbol_that_does_not_exist():
     """Vacuity floor for the source scans: a probe that reported everything present — or
     everything absent — would pass the assertions above and below without measuring."""
-    body = _text("loop/watchdog.py")
+    body = _text("automation/loop/watchdog.py")
     assert (
         "concurrency.boot_sweep(" in body
     ), "positive control failed — the probe sees nothing"
@@ -173,7 +173,7 @@ def test_the_loop_boot_sweep_loads_the_kind_registry_itself():
     is how the defect was in fact found while landing this slice. A guard whose verdict depends on
     which worker picked up the test is not a guard, so the property gets its own rail.
     """
-    body = _text("loop/watchdog.py")
+    body = _text("automation/loop/watchdog.py")
     marker = "    async def _boot_sweep(self)"
     assert (
         marker in body

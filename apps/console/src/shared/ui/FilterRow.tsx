@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react'
-import { motion, useReducedMotion } from 'framer-motion'
+import { motion } from 'framer-motion'
 import type { LucideIcon } from 'lucide-react'
 import { withWeight } from '../theme/fontWeight'
-import { spring } from '../theme/motion'
+import { spring, useReducedMotion } from '../theme/motion'
 
 export function FilterRow({ label, count, icon: Icon, selected, indicatorId, onClick, pressed, trailing }: {
   label: string; count?: number; icon?: LucideIcon; selected: boolean; indicatorId?: string

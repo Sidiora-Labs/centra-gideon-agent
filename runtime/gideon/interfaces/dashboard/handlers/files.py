@@ -26,6 +26,10 @@ from gideon.assurance.validation import (
 )
 from gideon.core.cancellation import run_with_timeout, wait_with_timeout
 from gideon.core.config.loader import AppConfig
+from gideon.core.http_request import (
+    RequestValidationError,
+    read_json_body,
+)
 from gideon.extensions.providers.failure_copy import relayed_failure_copy
 from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.state import ConsoleState
@@ -74,7 +78,7 @@ async def api_reveal_path(request: web.Request) -> web.Response:
     import sys  # noqa: F811
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except (json.JSONDecodeError, ValueError):
         return web.json_response({"error": "invalid JSON body"}, status=400)
     if not isinstance(body, dict):
@@ -138,7 +142,7 @@ async def api_outbox_notify(request: web.Request) -> web.Response:
     """POST /api/outbox/notify — agent sent a file, notify the user."""
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except (json.JSONDecodeError, ValueError):
 
         _sel().log_tool_invocation(
@@ -426,7 +430,7 @@ async def api_channel_upload_file(request: web.Request) -> web.Response:
         )
         return web.json_response({"ok": True, "skipped": "no_channel"})
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except (json.JSONDecodeError, ValueError):
         _sel().log_tool_invocation(
             session_key="api",
@@ -1408,7 +1412,7 @@ async def api_file_write(request: web.Request) -> web.Response:
     )
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON body"}, status=400)
     if not isinstance(body, dict):
@@ -2174,7 +2178,7 @@ async def api_file_create(request: web.Request) -> web.Response:
     """
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON body"}, status=400)
     if not isinstance(body, dict):
@@ -2250,7 +2254,7 @@ async def api_file_move(request: web.Request) -> web.Response:
     out-of-allowlist path) and refuse to overwrite an existing destination.
     """
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON body"}, status=400)
     if not isinstance(body, dict):
@@ -2313,7 +2317,7 @@ async def api_file_delete(request: web.Request) -> web.Response:
     contents (the explorer's delete-folder affordance).
     """
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON body"}, status=400)
     if not isinstance(body, dict):
@@ -2836,7 +2840,7 @@ async def api_create_dir(request: web.Request) -> web.Response:
 
     caller = request.get("user", "dashboard")
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -2954,23 +2958,14 @@ async def api_dashboard_config(request: web.Request) -> web.Response:
     cfg = AppConfig.load()
     if request.method == "PUT":
         try:
-            body = await request.json()
-        except Exception:
+            body = await read_json_body(request)
+        except RequestValidationError as exc:
             _sel().log_tool_invocation(
                 session_key="dashboard",
                 tool_name="dashboard_config_write",
                 outcome="failure",
             )
-            return web.json_response({"error": "invalid JSON"}, status=400)
-        if not isinstance(body, dict):
-            _sel().log_tool_invocation(
-                session_key="dashboard",
-                tool_name="dashboard_config_write",
-                outcome="failure",
-            )
-            return web.json_response(
-                {"error": "request body must be a JSON object"}, status=400
-            )
+            return web.json_response({"error": str(exc)}, status=400)
         _allowed = {
             "restore_sessions",
             "restore_window_minutes",

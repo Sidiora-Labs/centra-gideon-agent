@@ -32,7 +32,7 @@ class TestDeleteNotFound:
         response = await sessions.api_session_delete(request)
 
         assert response.status == 404
-        assert json.loads(response.body)["error"] == "session_not_found"
+        assert json.loads(response.body)["error"]["code"] == "session_not_found"
         state.push_sessions_update.assert_not_called()
         state.push_refresh.assert_not_called()
 
@@ -407,12 +407,19 @@ class TestUnreadDerived:
 
     def test_prefers_the_running_services_store(self, monkeypatch, tmp_path) -> None:
         """A live gateway's in-memory store is authoritative over a fresh disk read."""
+        from gideon.integrations.inbox import InboxStore
+        from gideon.integrations.inbox_service import InboxService
+
         state = self._state(monkeypatch, tmp_path)
-        self._add_item(tmp_path, "pending")
-        svc = MagicMock()
-        svc.inbox = MagicMock(items={})
-        state._inbox_svc = svc
-        assert state.unread_count() == 0, "the service's store won"
+        item_id = self._add_item(tmp_path, "pending")
+        store = InboxStore(tmp_path / "inbox.json")
+        store.load()
+        state._inbox_svc = InboxService(store=store)
+        assert state.unread_count() == 1
+        store.items[item_id].status = "seen"
+        assert state.unread_count() == 0, "the service's unsaved state won"
+        state._inbox_svc = None
+        assert state.unread_count() == 1, "the persisted item remains pending"
 
     def test_no_cached_counter_attribute(self, monkeypatch, tmp_path) -> None:
         state = self._state(monkeypatch, tmp_path)

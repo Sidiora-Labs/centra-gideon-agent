@@ -16,6 +16,7 @@ an optional dependency is missing, so extraction never hard-fails.
 import logging
 import re
 from dataclasses import dataclass
+from html.parser import HTMLParser
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,38 @@ class ExtractedDoc:
     title: str = ""
     char_count: int = 0
     extractor: str = ""
+
+
+class _MetaRefreshParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.target = ""
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if self.target or tag.casefold() != "meta":
+            return
+        values = {key.casefold(): value or "" for key, value in attrs}
+        if values.get("http-equiv", "").strip().casefold() != "refresh":
+            return
+        match = re.search(
+            r"(?:^|;)\s*url\s*=\s*(?:['\"]([^'\"]+)['\"]|([^;\s]+))",
+            values.get("content", ""),
+            re.IGNORECASE,
+        )
+        if match:
+            self.target = (match.group(1) or match.group(2) or "").strip()
+
+
+def meta_refresh_target(html: str) -> str:
+    """Return an HTML meta-refresh target, or an empty string when absent."""
+    if not html:
+        return ""
+    parser = _MetaRefreshParser()
+    try:
+        parser.feed(html)
+    except Exception:
+        return ""
+    return parser.target
 
 
 def sanitize_html(html: str) -> str:

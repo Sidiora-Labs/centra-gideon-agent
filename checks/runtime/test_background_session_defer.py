@@ -39,7 +39,7 @@ async def test_defers_quietly_when_no_model_resolves(caplog):
     assert any("deferred" in m.lower() for m in msgs), msgs
     assert not any(
         r.levelno >= logging.WARNING
-        and "Failed to create background session" in r.getMessage()
+        and "Background session startup failed" in r.getMessage()
         for r in caplog.records
     )
 
@@ -66,7 +66,7 @@ async def test_genuine_error_still_warns(caplog):
     assert BACKGROUND_KEY not in mgr._sessions
     assert any(
         r.levelno >= logging.WARNING
-        and "Failed to create background session" in r.getMessage()
+        and "Background session startup failed" in r.getMessage()
         for r in caplog.records
     )
 

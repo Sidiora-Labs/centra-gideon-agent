@@ -14,6 +14,7 @@ import tempfile
 from aiohttp import web
 
 from gideon.core.config import AppConfig
+from gideon.core.http_request import read_json_body
 from gideon.http_errors import json_error
 from gideon.integrations.tts.registry import active_voice_params
 from gideon.integrations.voice.duplex import clean_for_speech
@@ -60,7 +61,7 @@ async def api_voice_synthesize(request: web.Request) -> web.Response:
 
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):

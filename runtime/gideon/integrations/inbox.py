@@ -35,6 +35,8 @@ __all__ = [
     "Classification",
     "Confidence",
     "ItemStatus",
+    "STATUS_OPEN",
+    "is_open_status",
     "InboxStore",
     "InboxItem",
     "InboxState",
@@ -45,6 +47,7 @@ __all__ = [
     "SOURCE_DECLARABLE_KINDS",
     "make_item_id",
     "emit_attention_item",
+    "emit_shared_knowledge_item",
     "evaluate_alert",
     "notify_inbox_alert",
     "redact_item",
@@ -85,6 +88,24 @@ class ItemStatus(str, Enum):
     DISMISSED = "dismissed"
     HANDLED = "handled"
     FILTERED = "filtered"
+
+
+STATUS_OPEN = frozenset({ItemStatus.PENDING.value, ItemStatus.SEEN.value})
+STATUS_CLOSED = frozenset(
+    {
+        ItemStatus.SENT.value,
+        ItemStatus.DISMISSED.value,
+        ItemStatus.HANDLED.value,
+        ItemStatus.FILTERED.value,
+    }
+)
+assert STATUS_OPEN.isdisjoint(STATUS_CLOSED) and STATUS_OPEN | STATUS_CLOSED == {
+    status.value for status in ItemStatus
+}
+
+
+def is_open_status(status: str) -> bool:
+    return status in STATUS_OPEN
 
 
 class ItemKind(str, Enum):
@@ -461,25 +482,11 @@ class InboxStore:
         ]
 
     def open_items(self, owner: str = "") -> list[InboxItem]:
-        """Every item still awaiting a decision — PENDING **or** SEEN.
-
-        Distinct from :meth:`pending`, and both are needed. "How many are waiting for me" is a
-        count of `pending` (a badge should not keep counting a row you have read), but "clear
-        everything waiting for me" has to mean every OPEN row.
-
-        🔴 `POST /api/inbox/dismiss-all` used `pending()`, and the UI marks a row SEEN the moment
-        you open it — so merely LOOKING at an item permanently removed it from the reach of the
-        only bulk control, and a queue you had browsed could not be cleared except one row at a
-        time. Measured on an instance with 32 open proposal rows (#409).
-
-        The frontend already draws this distinction (`isOpen = pending | seen`); this is the same
-        predicate on the server, so the two agree about what "open" means.
-        """
+        """Every item still awaiting a decision."""
         return [
             i
             for i in self.items.values()
-            if i.belongs_to(owner)
-            and i.status_for(owner) in (ItemStatus.PENDING, ItemStatus.SEEN)
+            if i.belongs_to(owner) and is_open_status(i.status_for(owner))
         ]
 
     def update_status(
@@ -628,6 +635,7 @@ def emit_attention_item(
     item_kind: str = "",
     store: "InboxStore | None" = None,
     dedup_key: str = "",
+    addressee: str | None = None,
 ) -> str:
     """Raise a standing attention item AND deliver one notification for it.
 
@@ -682,6 +690,7 @@ def emit_attention_item(
     )
     if dedup_key:
         item.refs["dedup_key"] = dedup_key
+    item.owner = owner_username() if addressee is None else str(addressee)
 
     withheld = False
     if _verification_opted_in(source, kind):
@@ -716,12 +725,53 @@ def emit_attention_item(
                 meta={
                     "inbox_item": item_id,
                     "item_kind": resolved_kind,
+                    "addressee": item.owner,
                     **dict(refs or {}),
                 },
             )
         except Exception:
             logger.warning("attention item: notify failed", exc_info=True)
     return item_id
+
+
+def emit_shared_knowledge_item(
+    state: Any,
+    provider: Any,
+    item: Any,
+    *,
+    store: "InboxStore | None" = None,
+) -> str:
+    """Queue one foreign-authored, explicitly shared provider knowledge item."""
+    metadata = (
+        item.metadata if isinstance(getattr(item, "metadata", None), dict) else {}
+    )
+    author = str(metadata.get("owner_username") or "").strip().lower()
+    owner = owner_username().strip().lower()
+    if (
+        metadata.get("sharing_policy") != "shared"
+        or not author
+        or (owner and author == owner)
+    ):
+        return ""
+    provider_name = str(getattr(provider, "name", "") or "knowledge")
+    item_id = str(getattr(item, "id", "") or "")
+    title = str(getattr(item, "title", "") or "Shared knowledge")
+    content = str(getattr(item, "content", "") or "")
+    return emit_attention_item(
+        state,
+        source="knowledge",
+        kind="research_finding",
+        title=f"{author} shared: {title}",
+        body=content,
+        refs={
+            "knowledge_item": item_id,
+            "provider": provider_name,
+            "shared_by": author,
+        },
+        item_kind=ItemKind.SYSTEM.value,
+        store=store,
+        dedup_key=f"shared-knowledge:{provider_name}:{item_id}",
+    )
 
 
 def _verification_opted_in(source: str, kind: str) -> bool:
@@ -742,11 +792,6 @@ def _verification_opted_in(source: str, kind: str) -> bool:
     except Exception:
         logger.debug("verify opt-in check failed — not verifying", exc_info=True)
         return False
-
-
-OPEN_STATUSES: frozenset[str] = frozenset(
-    {ItemStatus.PENDING.value, ItemStatus.SEEN.value}
-)
 
 
 def resolve_attention_items(
@@ -787,7 +832,7 @@ def resolve_attention_items(
             target.load()
         closed = 0
         for item in list(target.items.values()):
-            if item.status_for(item.owner) not in OPEN_STATUSES:
+            if not is_open_status(item.status_for(item.owner)):
                 continue
             if any(item.refs.get(key) != value for key, value in refs.items()):
                 continue
@@ -811,7 +856,7 @@ def _find_open_by_dedup(store: "InboxStore", dedup_key: str) -> "InboxItem | Non
         i
         for i in store.items.values()
         if i.refs.get("dedup_key") == dedup_key
-        and i.status_for(i.owner) in OPEN_STATUSES
+        and is_open_status(i.status_for(i.owner))
     ]
     if not matches:
         return None

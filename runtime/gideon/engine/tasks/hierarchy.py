@@ -16,6 +16,13 @@ from gideon.engine.tasks.models import BUILTIN_PROJECTS, Project, TaskList
 logger = logging.getLogger(__name__)
 
 
+def validate_container_name(name: str) -> str:
+    selected = str(name or "").strip()
+    if not selected:
+        raise ValueError("container name is required")
+    return selected
+
+
 def config_dir() -> Path:
     return config_loader.config_dir()
 
@@ -337,9 +344,7 @@ class HierarchyStore:
         name_locked: bool = False,
         brief: str = "",
     ) -> Project:
-        selected = name.strip()
-        if not selected:
-            raise ValueError("project name is required")
+        selected = validate_container_name(name)
         if self.get_project_by_name(selected):
             raise ValueError(f"a project named '{selected}' already exists")
         project = Project(
@@ -428,9 +433,7 @@ class HierarchyStore:
         repeatable: bool = False,
         agent_instructions_template: str = "",
     ) -> TaskList:
-        selected = name.strip()
-        if not selected:
-            raise ValueError("task list name is required")
+        selected = validate_container_name(name)
         self.ensure_defaults()
         project = ListDestination(self, project_id, project_name, repeatable).resolve()
         if any(

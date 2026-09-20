@@ -102,6 +102,7 @@ from gideon.interfaces.dashboard.handlers.core import (
     api_session_agent_result,
     api_session_agent_stream,
     api_session_agents_list,
+    api_settings_config,
     api_stt_transcribe,
     api_token_local,
     favicon,

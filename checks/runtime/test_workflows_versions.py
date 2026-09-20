@@ -248,13 +248,11 @@ def _req(method: str, path: str, *, match_info=None, body=None):
 
     app = web.Application()
     app["state"] = None
-    req = make_mocked_request(method, path, app=app, match_info=match_info or {})
-    if body is not None:
-
-        async def _json():
-            return body
-
-        req.json = _json  # type: ignore[method-assign]
+    headers = {"Content-Type": "application/json"} if body is not None else {}
+    req = make_mocked_request(
+        method, path, headers=headers, app=app, match_info=match_info or {}
+    )
+    req._read_bytes = json.dumps(body).encode() if body is not None else b""
     return req
 
 

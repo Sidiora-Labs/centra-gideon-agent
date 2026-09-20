@@ -22,6 +22,7 @@ above are point fixes, and nothing about them prevents the next destructive verb
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from pathlib import Path
 from types import SimpleNamespace
@@ -48,13 +49,14 @@ def _run(coro):
 def _merge(store, tag_id, body):
     app = web.Application()
     app["state"] = SimpleNamespace(knowledge_store=store)
-    req = make_mocked_request("POST", f"/api/knowledge/tags/{tag_id}/merge", app=app)
-    req.match_info["id"] = str(tag_id)
-
-    async def _json():
-        return body
-
-    req.json = _json
+    req = make_mocked_request(
+        "POST",
+        f"/api/knowledge/tags/{tag_id}/merge",
+        app=app,
+        match_info={"id": str(tag_id)},
+        headers={"Content-Type": "application/json"},
+    )
+    req._read_bytes = json.dumps(body).encode()
     from gideon.interfaces.dashboard.handlers import knowledge as H
 
     return _run(H.merge_tag(req))

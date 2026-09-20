@@ -38,7 +38,7 @@ import pathlib
 import pytest
 
 SRC = pathlib.Path(__file__).resolve().parents[2] / "runtime" / "gideon"
-BRIDGE = SRC / "providers" / "provider_bridge.py"
+BRIDGE = SRC / "extensions" / "providers" / "provider_bridge.py"
 
 CHOKEPOINT = "wrap_model_call_guard"
 

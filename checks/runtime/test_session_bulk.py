@@ -70,15 +70,15 @@ def _quiet(monkeypatch):
 
 
 async def _bulk(state, body, *, app: str = "") -> tuple[int, dict]:
-    req = make_mocked_request("POST", "/api/chat/sessions/bulk")
+    req = make_mocked_request(
+        "POST",
+        "/api/chat/sessions/bulk",
+        headers={"Content-Type": "application/json"},
+    )
     req.app["state"] = state
     if app:
         req["app"] = app
-
-    async def _json():
-        return body
-
-    req.json = _json  # type: ignore[method-assign]
+    req._read_bytes = json.dumps(body).encode()
     resp = await sb.api_chat_sessions_bulk(req)
     return resp.status, json.loads(resp.text or "{}")
 

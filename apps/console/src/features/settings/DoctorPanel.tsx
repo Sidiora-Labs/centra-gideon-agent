@@ -11,6 +11,7 @@ import { PanelHeader, Section } from './settingsUI'
 import { Select, TextInput } from '../../shared/ui/forms'
 import { Button } from '../../shared/ui/Button'
 import { FormSkeleton } from '../../shared/ui/ListScaffold'
+import { MoreRow } from '../../shared/ui/MoreRow'
 
 function capLabel(key: string): string {
   const words = key.replace(/[-/_]/g, ' ').split(' ')
@@ -36,7 +37,7 @@ export function DoctorPanel() {
     <div>
       <PanelHeader
         title="Doctor"
-        hint="Read-only health probes across every subsystem — memory, channels, local models, app backends, the SPA symlink, and model-provider breakers. A degraded capability never means the gateway is down; only a core failure does. Nothing here changes anything on your machine."
+        hint="Health probing is read-only. Fix and Run now are the only controls here that mutate; they repair harness state, never your content. A degraded capability never means the gateway is down; only a core failure does."
       />
 
       <div className="mb-l flex items-center justify-between gap-l">
@@ -404,6 +405,7 @@ export function RemediationSection() {
                 score {Math.round(r.score_before)}→{Math.round(r.score_after)} · {r.jobs.length} job{r.jobs.length === 1 ? '' : 's'} · {r.stopped_reason}
               </div>
             ))}
+            <MoreRow total={snap.recent_runs.length} shown={5} noun="runs" />
           </div>
         )}
       </div>

@@ -557,19 +557,31 @@ async def _probe_apps(ctx: DoctorContext) -> ProbeResult:
 
 
 async def _probe_serving_fs(ctx: DoctorContext) -> ProbeResult:
-    """serving/fs — the static/dist symlink (the stale-SPA bug-class) + dead
+    """serving/fs — the static/dist bundle (the stale-SPA bug-class) + dead
     lock/PID leftovers.
 
     Replicates ``frontend.ensure_dev_dist_symlink``'s DETECTION logic read-only
     (never calls it — that mutates): flags a real-directory copy shadowing the
-    runtime symlink, and a symlink whose target is gone. Also counts dead
-    ``locks/*.lock`` and dead PID rows in ``session_pids.txt``/``agent_pids.txt``.
+    runtime symlink, a symlink whose target is gone, and a running bundle whose
+    service-worker build hash differs from the latest console build artifact.
+    Also counts dead ``locks/*.lock`` and dead PID rows in
+    ``session_pids.txt``/``agent_pids.txt``.
     """
     import os
 
     home = ctx.home
 
     def _read() -> dict[str, Any]:
+        import re
+
+        def _build_hash(bundle: Path) -> Optional[str]:
+            try:
+                worker = (bundle / "sw.js").read_text(encoding="utf-8")
+            except OSError:
+                return None
+            match = re.search(r"gideon-shell-([0-9a-f]{12})", worker)
+            return match.group(1) if match else None
+
         ev: dict[str, Any] = {}
         import gideon
 
@@ -587,6 +599,21 @@ async def _probe_serving_fs(ctx: DoctorContext) -> ProbeResult:
             ev["dist"] = {"kind": "copy", "target_ok": (dist / "index.html").is_file()}
         else:
             ev["dist"] = {"kind": "missing", "target_ok": False}
+
+        latest = pkg_dir.parent.parent / "apps" / "console" / "dist"
+        running_hash = _build_hash(dist)
+        latest_hash = _build_hash(latest) if (latest / "index.html").is_file() else None
+        ev["dist"].update(
+            {
+                "build_hash": running_hash,
+                "latest_build_hash": latest_hash,
+                "build_current": (
+                    running_hash == latest_hash
+                    if running_hash is not None and latest_hash is not None
+                    else None
+                ),
+            }
+        )
 
         locks_dir = home / "locks"
         dead_locks = 0
@@ -638,6 +665,11 @@ async def _probe_serving_fs(ctx: DoctorContext) -> ProbeResult:
         fix_id = "serving-fs.symlink-repair"
     elif not dist.get("target_ok"):
         problems.append(f"static/dist {dist.get('kind')} — SPA not resolvable")
+    elif dist.get("build_current") is False:
+        problems.append(
+            "static/dist serves an outdated SPA build "
+            f"({dist.get('build_hash')} != latest {dist.get('latest_build_hash')})"
+        )
     if ev.get("dead_locks") or ev.get("dead_pids"):
         fix_id = fix_id or "serving-fs.orphan-prune"
     return ProbeResult(
@@ -1066,6 +1098,51 @@ async def _probe_baseline_denylist(_ctx: DoctorContext) -> ProbeResult:
     )
 
 
+def credential_store_state() -> dict[str, Any]:
+    """Return only credential-store facts that can be established read-only."""
+    from gideon.core.config.credentials import (
+        credential_backend,
+        credential_backend_warning,
+        keychain_available,
+        requested_credential_backend,
+    )
+    from gideon.core.config.loader import env_path
+
+    ep = env_path()
+    exists: bool | None
+    readable: bool | None
+    mode = ""
+    try:
+        metadata = ep.stat()
+    except FileNotFoundError:
+        exists, readable = False, False
+    except OSError:
+        exists, readable = None, None
+    else:
+        exists = True
+        mode = format(metadata.st_mode & 0o777, "04o")
+        try:
+            with ep.open("rb"):
+                pass
+        except OSError:
+            readable = False
+        else:
+            readable = True
+
+    warning = credential_backend_warning()
+    if not mode:
+        warning = warning.replace(" at mode 0600", "")
+    return {
+        "backend": credential_backend(),
+        "requested": requested_credential_backend(),
+        "keychain_available": keychain_available(),
+        "warning": warning,
+        "env_exists": exists,
+        "env_readable": readable,
+        "env_mode": mode,
+    }
+
+
 async def _probe_credential_backend(_ctx: DoctorContext) -> ProbeResult:
     """security — which credential store is actually holding the secrets? (SH-1)
 
@@ -1080,29 +1157,7 @@ async def _probe_credential_backend(_ctx: DoctorContext) -> ProbeResult:
     floor the fallback promises. Read-only: the probe never repairs the mode (the next
     ``load_credentials()`` does) and never reads a secret VALUE — only names, modes, states.
     """
-    from gideon.core.config.credentials import (
-        credential_backend,
-        credential_backend_warning,
-        keychain_available,
-        requested_credential_backend,
-    )
-    from gideon.core.config.loader import env_path
-
-    def _facts() -> dict[str, Any]:
-        ep = env_path()
-        mode = ""
-        with contextlib.suppress(OSError):
-            if ep.exists():
-                mode = format(ep.stat().st_mode & 0o777, "04o")
-        return {
-            "backend": credential_backend(),
-            "requested": requested_credential_backend(),
-            "keychain_available": keychain_available(),
-            "warning": credential_backend_warning(),
-            "env_mode": mode,
-        }
-
-    facts = await asyncio.to_thread(_facts)
+    facts = await asyncio.to_thread(credential_store_state)
     evidence = {k: v for k, v in facts.items() if k != "warning"}
 
     if facts["warning"]:
@@ -1125,11 +1180,15 @@ async def _probe_credential_backend(_ctx: DoctorContext) -> ProbeResult:
             ),
             evidence=evidence,
         )
-    return ProbeResult(
-        ok=True,
-        detail=f"credentials stored in .env at mode {mode or '0600'}",
-        evidence=evidence,
-    )
+    if facts["env_exists"] is False:
+        detail = "credential file .env does not exist"
+    elif facts["env_exists"] is None:
+        detail = "credential file .env state unknown"
+    elif not facts["env_readable"]:
+        detail = f"credential file .env is unreadable (mode {mode})"
+    else:
+        detail = f"credentials stored in .env at mode {mode}"
+    return ProbeResult(ok=bool(facts["env_readable"]), detail=detail, evidence=evidence)
 
 
 async def _probe_knowledge_vault(ctx: DoctorContext) -> ProbeResult:

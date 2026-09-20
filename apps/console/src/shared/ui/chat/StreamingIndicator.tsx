@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
+import { AnimatePresence, motion } from 'framer-motion'
 import { Spark } from '../Spark'
-import { spring, physics } from '../../theme/motion'
+import { spring, physics, useReducedMotion } from '../../theme/motion'
 
 const CURATED_PHRASES = [
   'Connecting the dots…',

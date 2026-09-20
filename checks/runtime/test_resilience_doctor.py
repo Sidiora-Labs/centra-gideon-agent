@@ -295,6 +295,48 @@ async def test_serving_fs_probe_flags_copy_shadowing_symlink(tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_serving_fs_probe_flags_outdated_correctly_linked_build(
+    tmp_path, monkeypatch
+):
+    """A valid static/dist symlink can still serve an older SPA than the latest
+    console artifact; comparing their real service-worker build hashes catches it
+    without changing either bundle."""
+    import gideon
+
+    fake_pkg = tmp_path / "runtime" / "gideon"
+    old_dist = tmp_path / "builds" / "old"
+    latest_dist = tmp_path / "apps" / "console" / "dist"
+    for bundle, build_hash in (
+        (old_dist, "111111111111"),
+        (latest_dist, "222222222222"),
+    ):
+        bundle.mkdir(parents=True)
+        (bundle / "index.html").write_text("<html></html>", encoding="utf-8")
+        (bundle / "sw.js").write_text(
+            f'const CACHE_NAME="gideon-shell-{build_hash}";', encoding="utf-8"
+        )
+    (fake_pkg / "static").mkdir(parents=True)
+    (fake_pkg / "static" / "dist").symlink_to(old_dist, target_is_directory=True)
+    monkeypatch.setattr(gideon, "__file__", str(fake_pkg / "__init__.py"))
+
+    before = {
+        path: path.read_bytes() for path in (old_dist / "sw.js", latest_dist / "sw.js")
+    }
+    res = await doctor._probe_serving_fs(DoctorContext(home=tmp_path / "home"))
+
+    assert res.ok is False
+    assert res.evidence["dist"] == {
+        "kind": "symlink",
+        "target_ok": True,
+        "build_hash": "111111111111",
+        "latest_build_hash": "222222222222",
+        "build_current": False,
+    }
+    assert "outdated SPA build" in res.detail
+    assert before == {path: path.read_bytes() for path in before}
+
+
+@pytest.mark.asyncio
 async def test_the_inventory_probe_reports_unclaimed_state(tmp_path):
     """🔴 THE DEFECT this probe closes. `durability.inventory.audit_home()` is the guard that "keeps
     the manifest honest … which is precisely how nine directories silently escaped backup before the

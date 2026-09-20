@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { motion, useReducedMotion } from 'framer-motion'
-import { expr, exprHeavy } from '../../theme/motion'
+import { motion } from 'framer-motion'
+import { expr, exprHeavy, useReducedMotion } from '../../theme/motion'
 import { familyFade, familyTween } from './vocabulary'
 import { ActivationCompletion } from './motionFamilyState'
 

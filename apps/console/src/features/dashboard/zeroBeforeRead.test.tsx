@@ -12,7 +12,7 @@ function mockApi(over: Record<string, unknown>) {
     ...(await orig<Record<string, unknown>>()),
     api: {
       approvals: () => Promise.resolve([]),
-      inboxPending: () => Promise.resolve([]),
+      inboxOpen: () => Promise.resolve([]),
       skillProposals: () => Promise.resolve({ proposals: [] }),
       uLoops: () => Promise.resolve([]),
       readyTasks: () => Promise.resolve([]),
@@ -32,7 +32,7 @@ function mockApi(over: Record<string, unknown>) {
 const route = { sub: '', navigate: () => {}, navEpoch: 0, setQuery: () => {}, query: {} }
 
 const ALL_PENDING = {
-  approvals: pending, inboxPending: pending, skillProposals: pending, uLoops: pending,
+  approvals: pending, inboxOpen: pending, skillProposals: pending, uLoops: pending,
   readyTasks: pending, notifications: pending, triggersHistory: pending,
 }
 
@@ -97,7 +97,7 @@ describe('a widget does not deliver its verdict before the read', () => {
   })
 
   it('🔑 a FAILED lane shows its retry, NOT an endless skeleton', async () => {
-    mockApi({ approvals: boom, inboxPending: boom, skillProposals: boom })
+    mockApi({ approvals: boom, inboxOpen: boom, skillProposals: boom })
     await mount('action')
     await waitFor(() => expect(screen.getAllByText(/Retry/i).length).toBeGreaterThan(0))
     expect(screen.queryByText(/All clear/)).toBeNull()
@@ -151,7 +151,7 @@ describe('the signal itself', () => {
 
   it('every counted loader marks its slice in `.finally`, so a REJECTION also counts as read', () => {
     for (const [call, slice] of [
-      ['approvals', 'approvals'], ['inboxPending', 'inbox'], ['skillProposals', 'proposals'],
+      ['approvals', 'approvals'], ['inboxOpen', 'inbox'], ['skillProposals', 'proposals'],
       ['uLoops', 'loops'], ['readyTasks', 'tasks'], ['notifications', 'notifications'],
       ['triggersHistory', 'schedule'],
     ]) {

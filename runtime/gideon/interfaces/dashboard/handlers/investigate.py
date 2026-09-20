@@ -17,6 +17,7 @@ import logging
 from aiohttp import web
 
 from gideon.cognition import investigate as inv
+from gideon.core.http_request import read_json_body
 from gideon.security.sel import sel
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 async def api_investigate(request: web.Request) -> web.Response:
     state = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response(
             {"error": {"code": "bad_request", "message": "invalid JSON body"}},

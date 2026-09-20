@@ -1,6 +1,7 @@
+import { useReducedMotion } from '../theme/motion'
 import { useMode } from '../../app/shell/theme'
 import { gideonAssets } from './gideonIdentity'
-import { motion, useReducedMotion } from 'framer-motion'
+import { motion } from 'framer-motion'
 
 export function GideonMark({ size = 24, animated = false, blob = false }: {
   size?: number

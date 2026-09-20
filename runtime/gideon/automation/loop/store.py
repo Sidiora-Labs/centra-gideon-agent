@@ -382,7 +382,7 @@ def _resolve_attention_rows(loop_id: str) -> int:
     reachable. `emit_attention_item` dedups on the loop's key and, while a row is open, returns
     it and fires no notification — so before this, one block per loop was all the user would
     ever hear about for the lifetime of the home. Both directions read
-    `inbox.OPEN_STATUSES`, so "closed" and "no longer suppressing" cannot drift apart.
+    `inbox.STATUS_OPEN`, so "closed" and "no longer suppressing" cannot drift apart.
 
     Only fires on the ATTENTION → non-ATTENTION transition, so an ordinary status write costs
     nothing. Best-effort and swallowing: losing a loop transition to a bookkeeping failure is
@@ -444,6 +444,8 @@ def update_spec(loop_id: str, fields: dict) -> Loop | None:
     patch = {k: v for k, v in fields.items() if k in _EDITABLE_SPEC_COLS}
     if not patch:
         return loop
+    if isinstance(patch.get("kind_config"), dict):
+        patch["kind_config"] = {**(loop.kind_config or {}), **patch["kind_config"]}
     conn = _connect()
     try:
         sets, vals = [], []

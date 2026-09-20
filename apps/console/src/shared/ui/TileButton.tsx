@@ -1,6 +1,6 @@
 import type { MouseEvent, ReactNode } from 'react'
-import { motion, useReducedMotion } from 'framer-motion'
-import { spring } from '../theme/motion'
+import { motion } from 'framer-motion'
+import { spring, useReducedMotion } from '../theme/motion'
 import { cx } from './cx'
 import { controlMotion } from './controlState'
 

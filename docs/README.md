@@ -26,7 +26,7 @@ Every link below points at a file in this tree. Start with the two files at the 
 - [PROVIDER_BOUNDARY_KEEPS.txt](architecture/PROVIDER_BOUNDARY_KEEPS.txt): which vendor-shaped references are deliberate, with the reasoning for each.
 - [SECURITY.md](architecture/SECURITY.md): how the internal controls layer fits together, from authentication to the audit log.
 - [NETWORK_EGRESS_HOSTS.txt](architecture/NETWORK_EGRESS_HOSTS.txt): every host the shipped code can contact, and the condition that triggers it.
-- [ACP_PARITY.md](architecture/ACP_PARITY.md): what running a turn over the Agent Client Protocol costs against the native runtime, provider by provider.
+- [acp-parity.md](agents/acp-parity.md): what running a turn over the Agent Client Protocol costs against the native runtime, provider by provider.
 - [WINDOWS_NATIVE_AUDIT.md](architecture/WINDOWS_NATIVE_AUDIT.md): what native Windows support would cost, and the go/no-go it feeds.
 
 ## `guides/` (the how-to)

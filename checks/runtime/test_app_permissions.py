@@ -115,7 +115,8 @@ _API_TS = (
     Path(__file__).resolve().parent.parent.parent
     / "apps/console"
     / "src"
-    / "lib"
+    / "shared"
+    / "data"
     / "api.ts"
 )
 
@@ -142,10 +143,10 @@ def _permissions_with_every_field_set() -> Permissions:
 
 
 def _wire_declared_keys() -> set[str]:
-    """The optional fields of ``AppPermissionsWire`` in apps/console/src/lib/api.ts."""
+    """The optional fields of ``AppPermissionsWire`` in apps/console/src/shared/data/api.ts."""
     src = _API_TS.read_text(encoding="utf-8")
     m = re.search(r"export interface AppPermissionsWire \{(.*?)\n\}", src, re.S)
-    assert m, "AppPermissionsWire not found in apps/console/src/lib/api.ts"
+    assert m, "AppPermissionsWire not found in apps/console/src/shared/data/api.ts"
     body = re.sub(r"//[^\n]*", "", m.group(1))
     return set(re.findall(r"(\w+)\?:", body))
 

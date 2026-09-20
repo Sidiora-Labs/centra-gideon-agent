@@ -475,7 +475,10 @@ async def test_non_string_title_is_400_not_500(tmp_path, shape):
     async with _client(tmp_path) as client:
         r = await client.post("/api/tasks", json={"title": shape})
         assert r.status == 400
-        assert (await r.json())["error"] == "title required"
+        assert (await r.json())["error"] == {
+            "code": "invalid_request",
+            "message": "title required",
+        }
         assert (await (await client.get("/api/tasks")).json())["total"] == 0
 
 
@@ -547,6 +550,16 @@ async def test_task_pagination_clamps_and_reports_the_applied_window(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_task_list_default_page_is_not_truncated_at_fifty(tmp_path):
+    async with _client(tmp_path) as client:
+        for index in range(51):
+            await client.post("/api/tasks", json={"title": f"Task {index}"})
+
+        listed = await (await client.get("/api/tasks")).json()
+        assert listed["total"] == len(listed["tasks"]) == 51
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("method", "path", "payload"),
     [
@@ -574,7 +587,10 @@ async def test_unknown_task_providers_are_400(tmp_path, method, path, payload):
             else await request(path)
         )
         assert response.status == 400
-        assert (await response.json())["error"] == "Unknown task provider: missing"
+        assert (await response.json())["error"] == {
+            "code": "invalid_request",
+            "message": "Unknown task provider: missing",
+        }
 
 
 @pytest.mark.asyncio
@@ -653,7 +669,7 @@ async def test_supplied_comment_author_is_refused_and_stores_nothing(tmp_path):
                 },
             )
             assert r.status == 400
-            assert "author" in (await r.json())["error"]
+            assert "author" in (await r.json())["error"]["message"]
             assert _comments_on_disk(tmp_path, t["id"]) == []
 
 
@@ -683,7 +699,7 @@ async def test_non_string_comment_body_is_400_not_500(tmp_path, shape):
         t = await (await client.post("/api/tasks", json={"title": "T"})).json()
         r = await client.post(f"/api/tasks/{t['id']}/comments", json={"body": shape})
         assert r.status == 400
-        assert "string" in (await r.json())["error"]
+        assert "string" in (await r.json())["error"]["message"]
         assert _comments_on_disk(tmp_path, t["id"]) == []
 
 
@@ -696,7 +712,10 @@ async def test_null_and_absent_comment_body_stay_400_body_required(tmp_path):
         for payload in ({"body": None}, {}, {"body": "   "}):
             r = await client.post(f"/api/tasks/{t['id']}/comments", json=payload)
             assert r.status == 400
-            assert (await r.json())["error"] == "body required"
+            assert (await r.json())["error"] == {
+                "code": "invalid_request",
+                "message": "body required",
+            }
 
 
 @pytest.mark.asyncio
@@ -707,6 +726,7 @@ async def test_non_object_comment_body_is_400(tmp_path):
         for payload in ([1, 2, 3], "hello", 5):
             r = await client.post(f"/api/tasks/{t['id']}/comments", json=payload)
             assert r.status == 400
+            assert (await r.json())["error"]["code"] == "invalid_body"
 
 
 @pytest.mark.asyncio
@@ -746,7 +766,9 @@ async def test_comment_delete_unknown_id_is_404(tmp_path):
         await client.post(f"/api/tasks/{t['id']}/comments", json={"body": "one"})
         r = await client.delete(f"/api/tasks/{t['id']}/comments/c-nope")
         assert r.status == 404
-        assert (await r.json()) == {"error": "not found"}
+        assert (await r.json()) == {
+            "error": {"code": "not_found", "message": "not found"}
+        }
         assert len(_comments_on_disk(tmp_path, t["id"])) == 1
 
 
@@ -755,7 +777,9 @@ async def test_comment_delete_unknown_task_is_404(tmp_path):
     async with _client(tmp_path) as client:
         r = await client.delete("/api/tasks/t-nope/comments/c-nope")
         assert r.status == 404
-        assert (await r.json()) == {"error": "not found"}
+        assert (await r.json()) == {
+            "error": {"code": "not_found", "message": "not found"}
+        }
 
 
 @pytest.mark.asyncio
@@ -925,7 +949,7 @@ async def test_done_blocked_by_incomplete_criteria(tmp_path):
         ).json()
         r = await client.put(f"/api/tasks/{t['id']}", json={"status": "done"})
         assert r.status == 400
-        assert "exit criteria" in (await r.json())["error"]
+        assert "exit criteria" in (await r.json())["error"]["message"]
 
 
 @pytest.mark.asyncio
@@ -938,6 +962,8 @@ async def test_invalid_status_is_400_not_silent_noop(tmp_path):
         r = await client.put(f"/api/tasks/{t['id']}", json={"status": "completed"})
         assert r.status == 400
         err = (await r.json())["error"]
+        assert err["code"] == "invalid_request"
+        err = err["message"]
         assert "completed" in err and "done" in err
         got = await (await client.get(f"/api/tasks/{t['id']}")).json()
         assert got["status"] == "open"

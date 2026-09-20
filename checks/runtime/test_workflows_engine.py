@@ -152,8 +152,11 @@ class TestInfer:
         )
         assert r.state == InstanceState.DONE
         assert r.output == "answer"
-        assert seen["prompt"] == "sum 7"
-        assert r.resolved_prompt == "sum 7"
+        assert (
+            seen["prompt"]
+            == "sum <untrusted_content source=workflow:inputs>\n7\n</untrusted_content>"
+        )
+        assert r.resolved_prompt == seen["prompt"]
 
     async def test_the_tier_selects_a_use_case_never_a_model(self) -> None:
         """Templates name an intent; the use-case bridge owns the model. That is what

@@ -2022,7 +2022,7 @@ List the whole ui/ design-system catalog by name — every component (with a one
 
 ### `ui_search`
 
-Search the web/src/ui design-system kit (components + design tokens) by keyword. Returns brief hits — name, kind, one-line description — so you can find the right primitive to reach for instead of hand-rolling markup. Follow up with ui_get(name) for the full props + best-practices of any hit.
+Search the apps/console/src/shared/ui design-system kit (components + design tokens) by keyword. Returns brief hits — name, kind, one-line description — so you can find the right primitive to reach for instead of hand-rolling markup. Follow up with ui_get(name) for the full props + best-practices of any hit.
 
 **Response type:** `ui.search.results`
 

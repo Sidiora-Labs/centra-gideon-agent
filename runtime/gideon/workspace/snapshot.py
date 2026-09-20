@@ -105,8 +105,8 @@ CORE_FILES: dict[str, tuple[str, ...]] = {
         "autonomy_rungs.json",
         "routing_policy.json",
     ),
-    "notifications": ("notifications.jsonl",),
-    "security": ("sel_hmac.key", "telemetry_salt"),
+    "notifications": ("notifications.jsonl", "digest_queue.jsonl"),
+    "security": ("sel_hmac.key", "telemetry_salt", "credentials.json"),
 }
 
 
@@ -336,7 +336,7 @@ COMPONENT_HELP = {
     "skills": "skills/ directory",
     "workspace": "workspace/ directory",
     "notifications": "notifications.jsonl (notification history)",
-    "security": "sel_hmac.key, telemetry_salt",
+    "security": "sel_hmac.key, telemetry_salt, credentials.json",
     "projects": "projects/ — briefs, context ledgers, templates (worktrees excluded, git-owned)",
     "everything": "every other store: tasks, projects, agents, prompts, workflows, uploads, …",
 }
@@ -1200,21 +1200,23 @@ def _merge_keyed_jsonl(src: Path, dst: Path, key_field: str, label: str) -> int:
     and folding a security gate into a generic helper is how the gate gets dropped by a later caller
     who only wanted the dedup.
     """
-    if not src.is_file() or not dst.is_file():
+    if not src.is_file() or (dst.exists() and not dst.is_file()):
         return 0
     existing: set[str] = set()
-    with open(dst, encoding="utf-8") as f:
-        for line in f:
-            try:
-                existing.add(json.loads(line).get(key_field) or line.strip())
-            except (ValueError, TypeError):
-                pass
+    if dst.is_file():
+        with open(dst, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    existing.add(json.loads(line).get(key_field) or line.strip())
+                except (ValueError, TypeError, AttributeError):
+                    pass
+    dst.parent.mkdir(parents=True, exist_ok=True)
     imported = 0
     with open(dst, "a", encoding="utf-8") as out, open(src, encoding="utf-8") as f:
         for line in f:
             try:
                 key = json.loads(line).get(key_field) or line.strip()
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, AttributeError):
                 continue
             if key not in existing:
                 out.write(line if line.endswith("\n") else line + "\n")
@@ -1520,6 +1522,7 @@ def merge_plan(snap: Path, pc: Path, components: list[str] | None) -> list[dict]
             _add(name, inv.MERGE_REPLACE_ONLY, "copy-if-missing; never overwritten")
     if _want(components, "notifications"):
         _add("notifications.jsonl", inv.MERGE_APPEND_DEDUP, "dedup on ts")
+        _add("digest_queue.jsonl", inv.MERGE_APPEND_DEDUP, "dedup on ts")
         _add("feedback.jsonl", inv.MERGE_APPEND_DEDUP, "dedup on id")
         _add("model_calls.jsonl", inv.MERGE_APPEND_DEDUP, "dedup on audit_id")
     if _want(components, "security"):
@@ -1645,6 +1648,9 @@ def _do_merge(snap: Path, pc: Path, components: list[str] | None) -> None:
             else:
                 shutil.copy2(str(sn), str(dn))
                 print("  Notifications: copied")
+        _merge_keyed_jsonl(
+            snap / "digest_queue.jsonl", pc / "digest_queue.jsonl", "ts", "Digest queue"
+        )
         _merge_feedback(snap / "feedback.jsonl", pc / "feedback.jsonl")
         _merge_keyed_jsonl(
             snap / "model_calls.jsonl",

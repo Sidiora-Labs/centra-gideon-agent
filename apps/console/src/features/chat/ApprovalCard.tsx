@@ -82,7 +82,10 @@ export function ApprovalCard({ seg, onAct }: { seg: ApprovalSegment; onAct: (id:
       </div>
     )
   }
-  const chosen = REMEMBER_SCOPES.find((s) => s.key === scope) ?? REMEMBER_SCOPES[0]
+  const scopes = seg.toolKind && ['prompt', 'write', 'record'].includes(seg.toolKind)
+    ? REMEMBER_SCOPES
+    : REMEMBER_SCOPES.slice(0, 2)
+  const chosen = scopes.find((s) => s.key === scope) ?? scopes[0]
   return (
     <ApprovalPrompt
       tool={seg.tool}
@@ -102,7 +105,7 @@ export function ApprovalCard({ seg, onAct }: { seg: ApprovalSegment; onAct: (id:
           <div className="flex flex-wrap items-center gap-2">
             <span data-type="caption" className="text-on-surface-low">Remember this choice</span>
             <Segmented size="sm" ariaLabel="Remember this choice"
-              options={REMEMBER_SCOPES.map((s) => ({ key: s.key, label: s.label, title: s.promise }))}
+              options={scopes.map((s) => ({ key: s.key, label: s.label, title: s.promise }))}
               value={scope} onChange={(k) => setScope(k as RememberScope)} />
           </div>
           {

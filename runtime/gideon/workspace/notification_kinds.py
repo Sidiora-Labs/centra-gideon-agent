@@ -175,7 +175,7 @@ def kind_for_legacy(kind: str) -> NotificationKind:
 
 _KINDS: tuple[NotificationKind, ...] = (
     NotificationKind("cron", "result", "Scheduled job result", "immediate", SEV_INFO),
-    NotificationKind("cron", "failed", "Scheduled job failed", "immediate", SEV_INFO),
+    NotificationKind("cron", "failed", "Scheduled job failed", "immediate", SEV_ERROR),
     NotificationKind("heartbeat", "status", "Heartbeat", "immediate", SEV_INFO),
     NotificationKind("loop", "complete", "Loop complete", "immediate", SEV_INFO),
     NotificationKind("loop", "failed", "Loop failed", "immediate", SEV_ERROR),
@@ -306,6 +306,10 @@ _LEGACY_FLAT: dict[str, tuple[str, str]] = {
 }
 
 _ATTENTION_FLAT: dict[str, tuple[str, str]] = {
+    "cron_failed": ("cron", "failed"),
+    "loop_complete": ("loop", "complete"),
+    "loop_failed": ("loop", "failed"),
+    "loop_stalled": ("loop", "stalled"),
     "needs_input": ("loop", "needs_input"),
     "proposal": ("skills", "proposal"),
     "learning_proposal": ("learning", "proposal"),
@@ -318,6 +322,7 @@ _ATTENTION_FLAT: dict[str, tuple[str, str]] = {
     "report": ("learning", "report"),
     "approval": ("approval", "requested"),
     "user_note": ("user", "note"),
+    "autonomy_revocation": ("guardrails", "autonomy_revocation"),
 }
 
 _WIRE_TO_PAIR: dict[str, tuple[str, str]] = {**_ATTENTION_FLAT, **_LEGACY_FLAT}
@@ -327,6 +332,7 @@ for _k in _KINDS:
 
 
 CRON = "cron"
+CRON_FAILED = "cron_failed"
 HEARTBEAT = "heartbeat"
 INBOX_ALERT = "inbox_alert"
 AGENT = "agent"
@@ -342,10 +348,15 @@ FEEDBACK_RETIRE = "feedback_retire"
 USAGE_RECAP = "usage_recap"
 RESEARCH_FINDING = "research_finding"
 APPROVAL = "approval"
+LOOP_COMPLETE = "loop_complete"
+LOOP_FAILED = "loop_failed"
+LOOP_STALLED = "loop_stalled"
+AUTONOMY_REVOCATION = "autonomy_revocation"
 GENERIC = GENERIC_KIND
 
 WIRE_CONSTANTS: tuple[str, ...] = (
     CRON,
+    CRON_FAILED,
     HEARTBEAT,
     INBOX_ALERT,
     AGENT,
@@ -361,6 +372,10 @@ WIRE_CONSTANTS: tuple[str, ...] = (
     USAGE_RECAP,
     RESEARCH_FINDING,
     APPROVAL,
+    LOOP_COMPLETE,
+    LOOP_FAILED,
+    LOOP_STALLED,
+    AUTONOMY_REVOCATION,
     GENERIC,
 )
 
@@ -369,3 +384,12 @@ if _unmapped:  # pragma: no cover - import-time guard
     raise RuntimeError(
         f"notification wire constants missing a registration: {_unmapped}"
     )
+
+REGISTERED_REACHABILITY_EXEMPTIONS: frozenset[str] = frozenset(
+    {f"{GENERIC_SOURCE}/{GENERIC_KIND}"}
+)
+
+
+def unreachable_registered_kinds() -> set[str]:
+    reachable = {f"{source}/{kind}" for source, kind in _WIRE_TO_PAIR.values()}
+    return {k.key for k in all_kinds()} - reachable - REGISTERED_REACHABILITY_EXEMPTIONS

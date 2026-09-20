@@ -35,6 +35,20 @@ describe('PermissionList — the network claim is advisory, not a grant', () => 
   })
 })
 
+describe('PermissionList — app UI host access is advisory', () => {
+  it('discloses host authority outside the enforced bullets for page and component UI', () => {
+    for (const appUI of [
+      { hasUI: true, uiComponents: '' },
+      { hasUI: false, uiComponents: 'components.mjs' },
+    ]) {
+      const { container } = render(<PermissionList perms={{}} appUI={appUI} />)
+      expect(enforcedRows(container)).toHaveLength(0)
+      expect(container.textContent).toMatch(/Host-page access: advisory only/)
+      expect(container.textContent).toMatch(/host DOM, session cookie, and same-origin APIs/)
+    }
+  })
+})
+
 describe('PermissionList — the network row distinguishes a denial from a silence', () => {
   const claim = (perms: AppPermissionsWire) =>
     ((render(<PermissionList perms={perms} />).container.textContent ?? '')

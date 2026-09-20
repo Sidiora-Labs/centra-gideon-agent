@@ -382,9 +382,12 @@ def test_watchdog_attention_events_are_all_registered_kinds():
     from gideon.automation.loop.watchdog import LoopWatchdog
 
     for event, kind in LoopWatchdog._ATTENTION_EVENTS.items():
+        # The watchdog emits with source="loop"; the bare kind resolves through the
+        # same pair mapping `emit_attention_item` uses.
+        wire = nk.kind_for_legacy_pair("loop", kind)
         assert (
-            nk.kind_for_legacy(kind).kind != nk.GENERIC_KIND
-        ), f"{event} → {kind} unregistered"
+            nk.kind_for_legacy(wire).kind != nk.GENERIC_KIND
+        ), f"{event} → {wire} unregistered"
 
 
 def test_watchdog_attention_events_are_a_subset_of_its_notify_events():
@@ -490,13 +493,13 @@ async def test_an_item_with_no_kind_counts_as_a_message(store):
 
 
 @pytest.mark.asyncio
-async def test_pending_endpoint_also_filters(store):
+async def test_open_endpoint_includes_seen_and_filters_by_kind(store):
     from gideon.interfaces.dashboard import handlers_inbox as h
 
     _seed(store)
     req, _ = _api_request(store, query={"kind": "needs_input"})
-    got = await _payload(await h.api_inbox_pending(req))
-    assert len(got) == 1 and got[0]["status"] == "pending"
+    got = await _payload(await h.api_inbox_open_items(req))
+    assert {item["status"] for item in got} == {"pending", "seen"}
 
 
 @pytest.mark.asyncio

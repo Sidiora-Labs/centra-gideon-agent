@@ -15,6 +15,7 @@ from gideon.core.config import loader as config_loader
 from gideon.core.config.edit_spec import ConfigValueError, coerce_edit_value
 from gideon.core.config.loader import AgentProfile, AppConfig, resolve_agent_config_path
 from gideon.core.config.schema import SCHEMA_REGISTRY, config_entry_to_dict
+from gideon.core.http_request import read_json_body
 from gideon.extensions.providers.failure_copy import relayed_failure_copy
 from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.chat_utils import _SLASH_COMMAND_HINTS
@@ -197,7 +198,7 @@ async def api_themes(request: web.Request) -> web.Response:
 async def api_themes_create(request: web.Request) -> web.Response:
     """POST /api/themes — create a new custom theme."""
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -253,7 +254,7 @@ async def api_theme_detail(request: web.Request) -> web.Response:
         if not target.exists():
             return web.json_response({"error": "not found"}, status=404)
         try:
-            body = await request.json()
+            body = await read_json_body(request)
         except Exception:
             return web.json_response({"error": "invalid JSON"}, status=400)
         if not isinstance(body, dict):
@@ -337,7 +338,7 @@ async def api_agent_config(request: web.Request) -> web.Response:
 
     if request.method == "PUT":
         try:
-            body = await request.json()
+            body = await read_json_body(request)
         except Exception:
             return web.json_response({"error": "invalid JSON"}, status=400)
         if not isinstance(body, dict):
@@ -393,7 +394,7 @@ async def api_default_agent(request: web.Request) -> web.Response:
 
     if request.method == "PUT":
         try:
-            body = await request.json()
+            body = await read_json_body(request)
         except Exception:
             return web.json_response({"error": "invalid JSON"}, status=400)
         if not isinstance(body, dict):
@@ -494,7 +495,7 @@ async def api_agent_detail(request: web.Request) -> web.Response:
     patch_body = None
     if request.method == "PATCH":
         try:
-            patch_body = await request.json()
+            patch_body = await read_json_body(request)
         except (json.JSONDecodeError, ValueError):
             return web.json_response({"error": "invalid JSON"}, status=400)
         if not isinstance(patch_body, dict):
@@ -580,7 +581,6 @@ async def api_agent_detail(request: web.Request) -> web.Response:
                     **dataclasses.asdict(prof),
                     "reserved": is_reserved_agent(name),
                     "editable": not is_reserved_agent(name),
-                    "model_editable": True,
                 }
             )
         return web.json_response(
@@ -749,7 +749,6 @@ async def api_gideon_agents(request: web.Request) -> web.Response:
             **dataclasses.asdict(agent_cfg),
             "reserved": is_reserved_agent(name),
             "editable": not is_reserved_agent(name),
-            "model_editable": True,
         }
         for name, agent_cfg in cfg.agents.items()
     ]
@@ -791,7 +790,7 @@ async def api_gideon_agents_create(request: web.Request) -> web.Response:
     """POST /api/agents — create a new Gideon agent."""
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -844,7 +843,7 @@ async def api_gideon_agent_update(request: web.Request) -> web.Response:
 
     name = request.match_info["name"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -961,7 +960,7 @@ async def api_agent_metadata_put(request: web.Request) -> web.Response:
         return web.json_response({"error": "authentication required"}, status=401)
     name = request.match_info["name"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):

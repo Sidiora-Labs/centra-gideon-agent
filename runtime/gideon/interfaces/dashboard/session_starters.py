@@ -17,6 +17,7 @@ import logging
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.engine import session_search
 from gideon.interfaces.dashboard import session_export, session_share, session_templates
 from gideon.interfaces.dashboard.chat_utils import _history_key_for, resolve_history_key
@@ -40,7 +41,7 @@ async def api_session_templates_create(request: web.Request) -> web.Response:
     is what makes a template survive the user changing their default model.
     """
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     if not isinstance(body, dict):
@@ -64,7 +65,7 @@ async def api_session_template_update(request: web.Request) -> web.Response:
     """PUT /api/chat/sessions/templates/{template} — replace a starter's fields."""
     tid = request.match_info["template"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     if not isinstance(body, dict):

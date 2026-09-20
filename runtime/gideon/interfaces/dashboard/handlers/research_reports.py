@@ -46,6 +46,10 @@ from typing import Any
 
 from aiohttp import web
 
+from gideon.core.http_request import (
+    RequestBodyTypeError,
+    read_json_body,
+)
 from gideon.http_errors import json_error
 
 logger = logging.getLogger(__name__)
@@ -117,13 +121,13 @@ async def _body(
 ) -> tuple[dict[str, Any] | None, web.Response | None]:
     """Parse a JSON object body, or return the 400 that says why it is not one."""
     try:
-        raw = await request.json()
-    except Exception:
-        return None, json_error("invalid_json", message="invalid JSON", status=400)
-    if not isinstance(raw, dict):
+        raw = await read_json_body(request)
+    except RequestBodyTypeError:
         return None, json_error(
             "invalid_json", message="JSON body must be an object", status=400
         )
+    except Exception:
+        return None, json_error("invalid_json", message="invalid JSON", status=400)
     return raw, None
 
 

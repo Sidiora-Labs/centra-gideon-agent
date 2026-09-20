@@ -10,6 +10,7 @@ from aiohttp import web
 from gideon.automation.triggers.nudge import get_instance as _autonudge_get
 from gideon.core.config import loader as config_loader
 from gideon.core.config.loader import workspace_root
+from gideon.core.http_request import read_json_body
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.security.security import is_sensitive_path
 from gideon.security.sel import sel
@@ -83,7 +84,7 @@ async def api_autonudge_start(request: web.Request) -> web.Response:
         )
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -143,7 +144,7 @@ async def api_autonudge_update(request: web.Request) -> web.Response:
         return web.json_response({"error": "auto-nudge disabled"}, status=503)
     loop_id = request.match_info["loop_id"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):

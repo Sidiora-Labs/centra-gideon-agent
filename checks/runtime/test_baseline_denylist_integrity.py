@@ -31,7 +31,7 @@ from gideon.security.sel import SecurityEventLog
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 EXPECTED_BASELINE_SHA256 = (
-    "2b7db3c6d0be84890aff1ad3bf2bcbcbf3bdf5cb6b991079734db1ee10c6e872"
+    "1cfa1b46d011a0432765456d6bf4c8e104b5f7519c6796dbf9a0a22248423aac"
 )
 
 
@@ -80,7 +80,7 @@ def _sel_events(home: Path, event_type: str) -> list[dict]:
 class TestPackagedSource:
     def test_the_file_ships_and_its_declared_hash_matches_its_patterns(self):
         version, declared, patterns = security._read_packaged_baseline()
-        assert version == security.BASELINE_DENYLIST_VERSION == 1
+        assert version == security.BASELINE_DENYLIST_VERSION == 3
         assert (
             declared == security._baseline_digest(patterns) == EXPECTED_BASELINE_SHA256
         )
@@ -270,7 +270,7 @@ class TestPeriodicReverify:
     def test_a_clean_reverify_passes_and_stays_silent(self, tmp_path):
         report = security.verify_baseline_denylist()
         assert report == {
-            "version": 1,
+            "version": 3,
             "sha256": EXPECTED_BASELINE_SHA256,
             "count": 112,
             "file_verified": True,
@@ -328,7 +328,7 @@ class TestPeriodicReverify:
 
         assert res.ok is True
         assert res.evidence["patterns"] == 112
-        assert res.evidence["version"] == 1
+        assert res.evidence["version"] == 3
         assert EXPECTED_BASELINE_SHA256.startswith(res.evidence["sha256"])
 
     @pytest.mark.asyncio
@@ -471,7 +471,7 @@ class TestSharedSource:
             for p in src.rglob("*.py")
             if "baseline_denylist.json" in p.read_text(encoding="utf-8")
         )
-        assert namers == ["security.py"]
+        assert namers == ["security/security.py"]
 
     def test_the_security_panel_payload_reads_the_shared_accessor(self, tmp_path):
         core = (
@@ -553,7 +553,7 @@ class TestSecurityPanelPayload:
         body = await self._payload()
 
         assert body["baseline"] == {
-            "version": 1,
+            "version": 3,
             "sha256": EXPECTED_BASELINE_SHA256,
             "count": 112,
             "verified": True,
@@ -587,7 +587,7 @@ class TestSecurityPanelPayload:
         assert after["baseline"]["detail"] == (
             "packaged file no longer matches the verified baseline"
         )
-        assert after["baseline"]["version"] == 1
+        assert after["baseline"]["version"] == 3
         assert after["baseline"]["sha256"] == EXPECTED_BASELINE_SHA256
         assert after["baseline"]["count"] == 112
         assert len(after["builtin"]) == 112

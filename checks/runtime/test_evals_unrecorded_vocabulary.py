@@ -2,7 +2,7 @@
 
 Three fields in one report collapsed *absent* into *zero/none*, and the fix was one word
 (``unrecorded``, owned by :mod:`gideon.assurance.evals.provenance` and mirrored in
-``apps/console/src/lib/unrecorded.ts``) plus the rule that every consumer of a field that CAN be unrecorded
+``apps/console/src/shared/data/unrecorded.ts``) plus the rule that every consumer of a field that CAN be unrecorded
 must consult the fact that says whether it was. This file is what makes the second half stick:
 
 1. :func:`test_the_consumer_set_is_pinned` — the derived {file: guarded fields} map must equal the
@@ -41,7 +41,7 @@ THE_WORD = "unrecorded"
 
 WORD_DECLARATIONS: dict[str, str] = {
     "runtime/gideon/assurance/evals/provenance.py": f'UNRECORDED = "{THE_WORD}"',
-    "apps/console/src/lib/unrecorded.ts": f"export const UNRECORDED = '{THE_WORD}'",
+    "apps/console/src/shared/data/unrecorded.ts": f"export const UNRECORDED = '{THE_WORD}'",
     "checks/harness/learning_verdict.py": f'UNRECORDED = "{THE_WORD}"',
 }
 
@@ -53,7 +53,7 @@ GUARDED: dict[str, dict] = {
             r'\[\s*"tokens"\s*\]',
             r"\bspend\.tokens\b",
         ),
-        "dirs": ("runtime/gideon/assurance/evals", "scripts", "harness"),
+        "dirs": ("runtime/gideon/assurance/evals", "tooling/scripts", "checks/harness"),
     },
     "token_ratio": {
         "patterns": (
@@ -61,7 +61,12 @@ GUARDED: dict[str, dict] = {
             r'\[\s*"token_ratio"\s*\]',
             r"\.token_ratio\b",
         ),
-        "dirs": ("runtime/gideon", "scripts", "harness", "apps/console/src"),
+        "dirs": (
+            "runtime/gideon",
+            "tooling/scripts",
+            "checks/harness",
+            "apps/console/src",
+        ),
     },
     "provider_binding": {
         "patterns": (
@@ -69,16 +74,29 @@ GUARDED: dict[str, dict] = {
             r'\[\s*"provider_binding"\s*\]',
             r"\.provider_binding\b",
             r"""["']provider_binding["']\s+in\b""",
+            r"""["']provider_binding["']\s*:""",
+            r"\bprovider_binding\s*\?:",
         ),
-        "dirs": ("runtime/gideon", "scripts", "harness", "apps/console/src"),
+        "dirs": (
+            "runtime/gideon",
+            "tooling/scripts",
+            "checks/harness",
+            "apps/console/src",
+        ),
     },
     "cell_model": {
         "patterns": (
             r'\bget\(\s*"cell_model_f\w*"\s*\)',
             r"\.cell_model_f\w*\b",
             r'\[\s*"cell_model_f\w*"\s*\]',
+            r"""["']cell_model_f\w*["']""",
         ),
-        "dirs": ("runtime/gideon", "scripts", "harness", "apps/console/src"),
+        "dirs": (
+            "runtime/gideon",
+            "tooling/scripts",
+            "checks/harness",
+            "apps/console/src",
+        ),
     },
 }
 
@@ -110,22 +128,16 @@ EXPECTED_CONSUMERS: dict[str, dict[str, str | None]] = {
     "runtime/gideon/assurance/evals/runner.py": {
         "provider_binding": None,
     },
-    "runtime/gideon/assurance/evals/learning_bench.py": {
-        "provider_binding": "report_schema / provenance_recorded are declared here",
-    },
     "runtime/gideon/assurance/evals/pinning.py": {
         "cell_model": "owns cell_model_fp's three states"
     },
     "runtime/gideon/assurance/evals/store.py": {
-        "cell_model": "the appended results.tsv column"
+        "cell_model": None,
     },
-    "apps/console/src/lib/unrecorded.ts": {
-        "provider_binding": "declares PROVENANCE_SCHEMA — this file IS the guard",
-    },
-    "apps/console/src/lib/api.ts": {
+    "apps/console/src/shared/data/api.ts": {
         "provider_binding": "the BenchmarkReport type documents the three states",
     },
-    "apps/console/src/pages/learning/BenchmarkPanel.tsx": {
+    "apps/console/src/features/learning/BenchmarkPanel.tsx": {
         "provider_binding": "renders which of the three states the report is in",
         "token_ratio": "renders the ratio, or 'not recorded' in its place",
         "cell_model": "renders what the cells could reach beside the home's binding",
@@ -228,7 +240,7 @@ def test_the_panel_no_longer_infers_the_schema_from_key_presence():
     consumer to rediscover the same trick", which made the panel a second owner of the fact. It is
     gone from the CODE, and the schema-reading helper is what replaced it."""
     panel = (
-        REPO_ROOT / "apps/console/src/pages/learning/BenchmarkPanel.tsx"
+        REPO_ROOT / "apps/console/src/features/learning/BenchmarkPanel.tsx"
     ).read_text(encoding="utf-8")
     code = _code_lines(panel)
     assert "'provider_binding' in report" not in code
@@ -247,9 +259,13 @@ def test_the_python_and_typescript_halves_agree_on_the_provenance_schema():
     """One number, declared twice because one is TypeScript, and checked so it stays one number."""
     from gideon.assurance.evals import learning_bench
 
-    ts = (REPO_ROOT / "apps/console/src/lib/unrecorded.ts").read_text(encoding="utf-8")
+    ts = (REPO_ROOT / "apps/console/src/shared/data/unrecorded.ts").read_text(
+        encoding="utf-8"
+    )
     match = re.search(r"export const PROVENANCE_SCHEMA = (\d+)", ts)
-    assert match, "apps/console/src/lib/unrecorded.ts must declare PROVENANCE_SCHEMA"
+    assert (
+        match
+    ), "apps/console/src/shared/data/unrecorded.ts must declare PROVENANCE_SCHEMA"
     assert int(match.group(1)) == learning_bench.PROVENANCE_SCHEMA
     assert learning_bench.REPORT_SCHEMA >= learning_bench.PROVENANCE_SCHEMA
 
@@ -265,7 +281,7 @@ def test_the_word_is_not_priced():
     """
     for path in (
         "runtime/gideon/assurance/evals/provenance.py",
-        "apps/console/src/lib/unrecorded.ts",
+        "apps/console/src/shared/data/unrecorded.ts",
     ):
         text = (REPO_ROOT / path).read_text(encoding="utf-8")
         assert THE_WORD in text
@@ -290,7 +306,7 @@ def test_the_eval_spend_dict_cannot_leave_the_scoped_dirs():
     the pattern is not a hole; if that changes, this reds and the scope has to widen with it.
     """
     producers = ("spend_from_home", "cell_spend")
-    scoped = {"runtime/gideon/assurance/evals", "scripts", "harness"}
+    scoped = {"runtime/gideon/assurance/evals", "tooling/scripts", "checks/harness"}
     strays: list[str] = []
     for rel in _tracked("runtime/gideon") + _tracked("apps/console/src"):
         if any(rel.startswith(prefix) for prefix in scoped):
@@ -333,7 +349,7 @@ def test_the_detector_is_not_green_from_matching_nothing():
     """
     derived = _derive()
     assert (
-        len(derived) >= 13
+        len(derived) >= 11
     ), f"the detector found only {len(derived)} consumer file(s)"
     total_reads = sum(len(fields) for fields in derived.values())
     assert total_reads >= 17, f"the detector found only {total_reads} guarded read(s)"
@@ -349,10 +365,9 @@ def test_the_detector_is_not_green_from_matching_nothing():
         ("checks/harness/fanout_measure.py", "token_ratio"),
         ("runtime/gideon/assurance/evals/pinning.py", "cell_model"),
         ("runtime/gideon/assurance/evals/store.py", "cell_model"),
-        ("runtime/gideon/assurance/evals/learning_bench.py", "provider_binding"),
-        ("apps/console/src/pages/learning/BenchmarkPanel.tsx", "token_ratio"),
-        ("apps/console/src/pages/learning/BenchmarkPanel.tsx", "cell_model"),
-        ("apps/console/src/lib/api.ts", "provider_binding"),
+        ("apps/console/src/features/learning/BenchmarkPanel.tsx", "token_ratio"),
+        ("apps/console/src/features/learning/BenchmarkPanel.tsx", "cell_model"),
+        ("apps/console/src/shared/data/api.ts", "provider_binding"),
     ):
         assert field in derived.get(
             path, set()

@@ -1,5 +1,6 @@
+import { useReducedMotion } from '../theme/motion'
 import type { ReactNode } from 'react'
-import { motion, useReducedMotion } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { AlertTriangle, X } from 'lucide-react'
 import { cx } from './cx'
 

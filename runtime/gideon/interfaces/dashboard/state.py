@@ -264,6 +264,7 @@ class _ChatSession:
         "_acp_breaker",
         "_memory_citations",
         "_skills_used",
+        "_routing_suggestion",
         "_side",
         "_extra_tool_roots",
         "_unattended",
@@ -374,6 +375,7 @@ class _ChatSession:
         self._acp_breaker = LoopBreaker()
         self._memory_citations: list[dict] = []
         self._skills_used: list[dict] = []
+        self._routing_suggestion: dict[str, Any] | None = None
         self._side: "SideState | None" = None
 
     @property
@@ -432,24 +434,6 @@ class _ChatSession:
         self._pending.clear()
         self.event.clear()
         return out
-
-    def mark_permission_resolved(
-        self, approval_id: str, decision: str = "approved"
-    ) -> None:
-        """Update stored permission message cls JSON with resolved flag."""
-        for m in self.messages:
-            if m.get("role") == "permission":
-                try:
-                    cls_data = json.loads(m.get("cls", ""))
-                    if (
-                        isinstance(cls_data, dict)
-                        and cls_data.get("request_id") == approval_id
-                    ):
-                        cls_data["resolved"] = decision
-                        m["cls"] = json.dumps(cls_data)
-                        return
-                except (json.JSONDecodeError, TypeError):
-                    pass
 
     def queue_append(self, content: str) -> str:
         """Append a message to the queue. Returns the generated queue ID."""
@@ -735,6 +719,7 @@ class ConsoleState:
         self._ws_loop: asyncio.AbstractEventLoop | None = None
         self._pending_approvals: dict[str, dict] = {}
         self._approval_futures: dict[str, asyncio.Future] = {}  # type: ignore[type-arg]
+        self._mcp_elicitation_futures: dict[str, asyncio.Future] = {}  # type: ignore[type-arg]
         self._flush_task: asyncio.Task | None = None  # type: ignore[type-arg]
         self._upload_sweep_task: asyncio.Task | None = None  # type: ignore[type-arg]
         self._durability_svc: object | None = None
@@ -1047,6 +1032,34 @@ class ConsoleState:
             self._pending_approvals.pop(approval_id, None)
             self._approval_futures.pop(approval_id, None)
 
+    async def request_mcp_elicitation(self, server: str, params: Any) -> Any:
+        from mcp.types import ElicitResult
+
+        request_id = __import__("uuid").uuid4().hex
+        fut = asyncio.get_running_loop().create_future()
+        self._mcp_elicitation_futures[request_id] = fut
+        payload = (
+            params.model_dump(by_alias=True) if hasattr(params, "model_dump") else {}
+        )
+        self.broadcast_ws(
+            "mcp_elicitation", {"id": request_id, "server": server, **payload}
+        )
+        try:
+            response = await fut
+            return ElicitResult(
+                action=response.get("action", "cancel"),
+                content=response.get("content"),
+            )
+        finally:
+            self._mcp_elicitation_futures.pop(request_id, None)
+
+    def resolve_mcp_elicitation(self, request_id: str, response: dict) -> bool:
+        fut = self._mcp_elicitation_futures.get(request_id)
+        if fut is None or fut.done():
+            return False
+        fut.set_result(response)
+        return True
+
     def _push_approval(self, approval_id: str) -> None:
         """Wake the phone for a pending approval — MOBILE-COMPANION `MC-5`'s milestone.
 
@@ -1159,8 +1172,31 @@ class ConsoleState:
                 )
 
     _RESERVED_NOTE_KEYS: frozenset[str] = frozenset(
-        {"mode", "targets", "source", "escalated_by", "badge_only", "native", "acked"}
+        {
+            "mode",
+            "targets",
+            "source",
+            "severity",
+            "escalated_by",
+            "badge_only",
+            "native",
+            "acked",
+            "withheld_reason",
+            "routed_to",
+        }
     )
+
+    @staticmethod
+    def is_locally_addressed(addressee: str, owner: str | None = None) -> bool:
+        from gideon.integrations.inbox import owner_username
+
+        local = (owner_username() if owner is None else owner).strip().lower()
+        addressed = str(addressee or "").strip().lower()
+        return not (local and addressed and local != addressed)
+
+    def _append_notification(self, note: dict[str, Any]) -> None:
+        self._notification_log.append(note)
+        _persist_notification(note)
 
     def notify(
         self, kind: str, title: str, body: str, *, meta: dict | None = None
@@ -1181,15 +1217,17 @@ class ConsoleState:
         behaves exactly as it did before rules existed — that equivalence is the safety
         property of shipping without a gate, and `test_notification_rules.py` pins it.
         """
-        from gideon.extensions.providers.entity_routes import notification_allowed
+        from gideon.extensions.providers.entity_routes import notification_posture
         from gideon.workspace import notification_rules as rules
 
         try:
-            if not notification_allowed(kind):
+            posture = notification_posture(kind)
+            if posture == "blocked":
                 logger.debug("Notification suppressed by settings: %s %r", kind, title)
                 return
         except Exception:
             logger.debug("notification_allowed failed; delivering", exc_info=True)
+            posture = "allowed"
 
         supplied = dict(meta or {})
         smuggled = sorted(set(supplied) & self._RESERVED_NOTE_KEYS)
@@ -1211,6 +1249,18 @@ class ConsoleState:
             }
         )
 
+        if not self.is_locally_addressed(str(note.get("addressee") or "")):
+            note["withheld_reason"] = "foreign_addressee"
+            note["routed_to"] = ""
+            try:
+                from gideon.integrations.notification_providers.registry import route
+
+                note["routed_to"] = route(note)
+            except Exception:
+                logger.warning("foreign notification routing failed", exc_info=True)
+            self._append_notification(note)
+            return
+
         try:
             rule = rules.resolve_rule_for_legacy(kind)
             reason = rule.conditions.matches(f"{title}\n{body}", self._operator_name())
@@ -1224,10 +1274,13 @@ class ConsoleState:
             rule = None
 
         mode = rule.mode if rule is not None else "immediate"
+        if posture == "quiet" and mode == "immediate":
+            mode = "quiet"
         note["mode"] = mode
         if rule is not None:
             note["targets"] = list(rule.targets)
             note["source"] = rule.source
+            note["severity"] = rules.nk.kind_for_legacy(kind).default_severity
 
         if mode == "never":
             logger.debug(
@@ -1237,10 +1290,9 @@ class ConsoleState:
         if mode == "digest":
             rules.queue_for_digest(note)
             return
-        if mode == "badge":
+        if mode in ("badge", "quiet"):
             note["badge_only"] = True
-            self._notification_log.append(note)
-            _persist_notification(note)
+            self._append_notification(note)
             return
 
         try:
@@ -1255,9 +1307,8 @@ class ConsoleState:
         if native is not None:
             note["native"] = native
 
-        self._notification_log.append(note)
+        self._append_notification(note)
         self._broadcast(note)
-        _persist_notification(note)
         if rule is not None and "push" in rule.targets:
             self._push_target(kind, note)
 
@@ -1318,21 +1369,17 @@ class ConsoleState:
         down every consumer of the sessions payload.
         """
         try:
-            from gideon.integrations.inbox import InboxStore, ItemStatus
+            from gideon.integrations.inbox import InboxStore, owner_username
 
-            store = getattr(self, "_inbox_store", None)
-            svc = getattr(self, "_inbox_svc", None)
-            if svc is not None:
-                store = svc.inbox
-            elif store is None:
+            service = self._inbox_svc
+            if service is not None:
+                store = service.inbox
+            else:
                 store = InboxStore()
                 store.load()
-                self._inbox_store = store
-            return sum(
-                1 for i in store.items.values() if i.status == ItemStatus.PENDING
-            )
+            return len(store.pending(owner_username()))
         except Exception:
-            logger.debug("unread_count from inbox failed", exc_info=True)
+            logger.debug("inbox unread count unavailable", exc_info=True)
             return 0
 
     def loop_sse(self) -> SseRegistry:

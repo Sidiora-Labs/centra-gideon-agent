@@ -182,9 +182,7 @@ def is_context_overflow(exc: BaseException) -> bool:
     from gideon.automation.workflows.loop_middleware import (
         FailureClass as MiddlewareFailureClass,
     )
-    from gideon.automation.workflows.loop_middleware import (
-        classify_failure,
-    )
+    from gideon.automation.workflows.loop_middleware import classify_failure
 
     return classify_failure(str(exc)) is MiddlewareFailureClass.CONTEXT_OVERFLOW
 
@@ -246,6 +244,7 @@ async def complete_with_compaction(
     summarize_fn: Callable[[list[dict]], str] | None = None,
     saves: list[float] | None = None,
     model_resolver: Callable[[str], str] | None = None,
+    on_prompt: Callable[[str], None] | None = None,
 ) -> str:
     bound = _resolve_model(model, use_case, model_resolver)
     budget = prompt_char_budget(bound)
@@ -255,6 +254,8 @@ async def complete_with_compaction(
         arguments["model"] = model
     for attempt in range(2):
         try:
+            if on_prompt is not None:
+                on_prompt(current)
             return await fn(current, **arguments)
         except Exception as error:
             if attempt or not is_context_overflow(error):

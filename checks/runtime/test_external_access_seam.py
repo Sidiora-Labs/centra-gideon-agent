@@ -218,7 +218,7 @@ class TestPatchRefusals:
         await client.start_server()
         try:
             resp = await client.patch(
-                "/api/config/gideon", data=json.dumps({"path": path, "value": value})
+                "/api/config/gideon", json={"path": path, "value": value}
             )
             return resp.status, await resp.text()
         finally:
@@ -569,7 +569,7 @@ class TestClientIdentityAndPins:
         http = await _client()
         try:
             resp = await _rpc(
-                http, "tooling/call", token=token, name="knowledge_search", arguments={}
+                http, "tools/call", token=token, name="knowledge_search", arguments={}
             )
             assert resp.status == 403, await resp.text()
             body = await resp.json()
@@ -591,7 +591,7 @@ class TestClientIdentityAndPins:
     async def test_the_403_rail_can_fail(self, monkeypatch):
         """Vacuity floor: the same request WITHOUT the pin is not a 403.
 
-        Without this, a handler that 403'd every `tooling/call` would pass the test above.
+        Without this, a handler that 403'd every `tools/call` would pass the test above.
         """
         _cfg(monkeypatch)
         auth.create_surface_token("mcp")
@@ -599,7 +599,7 @@ class TestClientIdentityAndPins:
         http = await _client()
         try:
             resp = await _rpc(
-                http, "tooling/call", token=token, name="knowledge_search", arguments={}
+                http, "tools/call", token=token, name="knowledge_search", arguments={}
             )
             assert (
                 resp.status != 403
@@ -621,7 +621,7 @@ class TestClientIdentityAndPins:
         )
         http = await _client()
         try:
-            body = await (await _rpc(http, "tooling/list", token=token)).json()
+            body = await (await _rpc(http, "tools/list", token=token)).json()
             assert [t["name"] for t in body["result"]["tools"]] == [available[0]]
         finally:
             await http.close()
@@ -966,7 +966,7 @@ class TestLayeredKillSwitches:
         monkeypatch.setattr(AppConfig, "load", staticmethod(lambda *a, **k: cfg))
 
         class _Req:
-            headers = {"Host": "gideon.example.com"}
+            headers = {"Host": "pc.example.com"}
             remote = "203.0.113.9"
             transport = None
 
@@ -1173,7 +1173,9 @@ class TestOperatorSurface:
         from pathlib import Path
 
         root = Path(__file__).resolve().parents[2]
-        page = (root / "apps/console/src/pages/settings/SettingsPage.tsx").read_text()
+        page = (
+            root / "apps/console/src/features/settings/SettingsPage.tsx"
+        ).read_text()
         routes = (root / "apps/console/e2e/routes.ts").read_text()
         assert "id: 'external-access'" in page
         assert "'external-access'" in routes

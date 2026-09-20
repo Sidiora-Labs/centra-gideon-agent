@@ -46,10 +46,10 @@ _SCREENS = frozenset(
 )
 
 _DEFINED_IN = {
-    "check_app": "computer_use/policy.py",
-    "check_input_target": "computer_use/policy.py",
-    "check_autonomy": "computer_use/policy.py",
-    "require_computer_use": "computer_use/gate.py",
+    "check_app": "integrations/computer_use/policy.py",
+    "check_input_target": "integrations/computer_use/policy.py",
+    "check_autonomy": "integrations/computer_use/policy.py",
+    "require_computer_use": "integrations/computer_use/gate.py",
 }
 
 
@@ -82,7 +82,7 @@ def _production_call_sites() -> dict[str, list[str]]:
 
 
 _EXPECTED_CALL_SITES: dict[str, list[str]] = {
-    "computer_use/service.py": [
+    "integrations/computer_use/service.py": [
         "check_app",
         "check_autonomy",
         "check_input_target",
@@ -162,4 +162,7 @@ def test_the_census_actually_reads_the_shipped_modules():
     mis-rooted ``SRC`` glob would also report zero call sites. Asserts the census really
     walked the two files `DCU-2` shipped."""
     scanned = {str(p.relative_to(SRC)) for p in SRC.rglob("*.py")}
-    assert {"computer_use/policy.py", "computer_use/gate.py"} <= scanned
+    assert {
+        "integrations/computer_use/policy.py",
+        "integrations/computer_use/gate.py",
+    } <= scanned

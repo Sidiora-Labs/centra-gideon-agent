@@ -125,6 +125,4 @@
   padding-inline: 0;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .gideon-nav-row { transition: none; }
-}
+[data-reduced-motion] .gideon-nav-row { transition: none; }

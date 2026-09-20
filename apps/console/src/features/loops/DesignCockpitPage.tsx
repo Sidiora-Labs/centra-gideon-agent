@@ -13,7 +13,7 @@ import { HeaderActions, HeaderControl } from '../../shared/ui/HeaderActions'
 import { ReactWidgetFrame } from '../../shared/ui/widget/ReactWidgetFrame'
 import { api, type Loop, type Artifact, type LoopPhase } from '../../shared/data/api'
 import { downloadText, safeFilename } from '../../shared/data/download'
-import { ACTIVE_LOOP_STATUSES, PRELAUNCH_LOOP_STATUSES, LOOP_ACTION_SOURCE_STATUSES, type LoopAction } from '../../shared/data/loopStatus'
+import { shownCycle, ACTIVE_LOOP_STATUSES, PRELAUNCH_LOOP_STATUSES, LOOP_ACTION_SOURCE_STATUSES, type LoopAction } from '../../shared/data/loopStatus'
 import { useRunStream } from './useRunStream'
 import { CockpitPromptBar } from './CockpitPromptBar'
 import type { RouteProps } from '../../app/shell/useQueryState'
@@ -21,6 +21,7 @@ import { promptInput } from '../../shared/ui/dialog'
 import { accentChip } from '../../shared/theme/accent'
 import { notify } from '../../app/shell/appSdk'
 import { copyText } from '../../app/shell/clipboard'
+import { MoreRow } from '../../shared/ui/MoreRow'
 
 export type Scheme = 'light' | 'dark'
 type Tab = 'tokens' | 'canvas' | 'palette' | 'contrast' | 'exports'
@@ -232,7 +233,7 @@ export function DesignCockpitPage({ id, onBack, onDeleted, onOpenProject, onBuil
         style={{ background: 'var(--color-surface-container)' }}>
         <DesignPhaseTrail plan={(loop.plan ?? []) as LoopPhase[]} phaseStatus={loop.phase_status || {}}
           cycle={loop.total_cycles || 0} active={active} complete={status === 'complete'} />
-        <span data-type="caption" className="text-on-surface-var capitalize">{status}{loop.total_cycles ? ` · cycle ${loop.total_cycles}/${loop.max_cycles}` : ''}</span>
+        <span data-type="caption" className="text-on-surface-var capitalize">{status}{(loop.total_cycles || active) ? ` · cycle ${shownCycle(loop.total_cycles, loop.status)}/${loop.max_cycles}` : ''}</span>
         {(loop.elapsed_seconds ?? 0) > 0 && (
           <span data-type="caption" className="inline-flex items-center gap-1 text-on-surface-low" title="Elapsed (running time)">
             <Clock size={11} />{fmtDesignElapsed(loop.elapsed_seconds ?? 0)}
@@ -413,7 +414,7 @@ export function TokensView({ tokens, tokensErr, scheme, overrideCount, onRefresh
                   const hex = resolveSwatch(raw, scheme)
                   return (
                     <div key={step} title={`${name}.${step} · ${hex || '—'}`} className="flex-1 h-8"
-                         style={hex ? { background: hex } : undefined} />
+                          style={hex ? { background: hex } : undefined} />
                   )
                 })}
               </div>
@@ -443,6 +444,7 @@ export function TokensView({ tokens, tokensErr, scheme, overrideCount, onRefresh
                 <span data-type="caption" className="text-on-surface-low font-mono">{v}</span>
               </div>
             ))}
+            <MoreRow total={Object.keys(spacing).filter(k => !['px', '0'].includes(k)).length} shown={14} noun="tokens" />
           </div>
         </Section>
         <Section icon={Box} title="Radius & elevation">

@@ -366,3 +366,25 @@ def test_the_coverage_checker_does_not_find_ITSELF():
         assert assert_gate_covers_cadences() == ["PHANTOM_CADENCE"]
     finally:
         gate_mod.Cadence = real_cadence
+
+
+def test_cadence_mentions_and_staging_are_not_gate_coverage(tmp_path):
+    from gideon.cognition.learning.gate import Cadence
+
+    source = tmp_path / "integrations" / "inbound" / "capture.py"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "# gate.decide(Cadence.CAPTURE)\n"
+        'description = "gate.decide(Cadence.CAPTURE)"\n'
+        "store.stage(cadence=Cadence.CAPTURE.value)\n",
+        encoding="utf-8",
+    )
+    assert assert_gate_covers_cadences(tmp_path) == sorted(c.name for c in Cadence)
+    source.write_text("decision = gate.decide(Cadence.CAPTURE)\n", encoding="utf-8")
+    assert assert_gate_covers_cadences(tmp_path) == sorted(
+        c.name for c in Cadence if c is not Cadence.CAPTURE
+    )
+    source.write_text(
+        "decision = gate.decide(cadence=Cadence.CAPTURE)\n", encoding="utf-8"
+    )
+    assert "CAPTURE" not in assert_gate_covers_cadences(tmp_path)

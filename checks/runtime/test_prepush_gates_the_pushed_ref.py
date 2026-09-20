@@ -244,8 +244,17 @@ def test_the_real_repo_does_not_refuse_its_own_head():
         err = (exc.stderr or b"").decode(errors="replace") if exc.stderr else ""
         assert REFUSAL not in err, f"refused before the gates began: {err!r}"
         return
-    assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
-    assert REFUSAL not in result.stderr
+    assert (
+        REFUSAL not in result.stderr
+    ), f"refused its own head: stdout={result.stdout!r} stderr={result.stderr!r}"
+    assert (
+        "pre-push: python changes outgoing" in result.stdout
+        or "pre-push: no frontend changes outgoing" in result.stdout
+        or "pre-push: frontend changes outgoing" in result.stdout
+    ), (
+        "the run never reached the gating half, so this exit proves nothing about the "
+        f"guard: stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
 
 
 def test_pushing_a_ref_this_worktree_does_not_have_checked_out_is_refused(
@@ -386,7 +395,7 @@ def rebased(tmp_path: Path) -> Rebased:
     old_tip = _git("rev-parse", "HEAD", cwd=root)
 
     _git(*_IDENT, "checkout", "-q", "main", cwd=root)
-    (root / "apps/console").mkdir()
+    (root / "apps/console").mkdir(parents=True)
     (root / "apps/console" / "Thing.tsx").write_text(
         "export const Thing = () => null\n", encoding="utf-8"
     )

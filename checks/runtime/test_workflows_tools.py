@@ -268,6 +268,7 @@ class TestRegistration:
 
         manifest = (
             Path(gideon.__file__).parent
+            / "extensions"
             / "apps"
             / "native"
             / "gideon-workflows"

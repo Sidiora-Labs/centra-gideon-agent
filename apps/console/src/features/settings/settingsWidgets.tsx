@@ -2,7 +2,7 @@ import {
   User, Palette, MessageSquare, Plug, Cpu, FileText, Database, Bot, AudioLines,
   Inbox, Bell, Shield, ShieldAlert, ScrollText, Archive, FolderSync, DownloadCloud, CheckCircle2, Search, Blocks, Activity, Compass, Stethoscope, Scissors, ThumbsUp, HardDriveDownload, Coins, Route, Trophy,
   MonitorSmartphone, Plug2, FileType2, LayoutDashboard, Smartphone, Rss, Package, FlaskConical, KeyRound,
-  MessageCircle,
+  MessageCircle, SlidersHorizontal,
 } from 'lucide-react'
 import { verifiedScope } from './AuditPanel'
 import type { LucideIcon } from 'lucide-react'
@@ -125,6 +125,12 @@ async function mutate(fn: () => Promise<unknown>, ...affects: CacheKeySpec[]) {
 }
 
 export const SETTINGS_WIDGETS: SettingsWidget[] = [
+  {
+    id: 'runtime-config', group: 'System', label: 'Runtime configuration', icon: SlidersHorizontal, size: 'sm',
+    description: 'Sandbox, routing, updates, loops, workflows, learning, knowledge, local models, and tool groups.',
+    useSearchText() { return 'sandbox routing updates loops workflows learning knowledge local models tool groups runtime configuration' },
+    render(query, go) { return <BentoCard icon={SlidersHorizontal} title="Runtime configuration" query={query} onClick={() => go('runtime-config')}><div data-type="body-s" className="text-on-surface-low">Nine editable runtime sections</div></BentoCard> },
+  },
   {
     id: 'account', group: 'General', label: 'Account', icon: User, size: 'sm',
     description: 'Your name and onboarding.',
@@ -667,7 +673,7 @@ export const SETTINGS_WIDGETS: SettingsWidget[] = [
   },
   {
     id: 'doctor', group: 'System', label: 'Doctor', icon: Stethoscope, size: 'sm',
-    description: 'Read-only health probes across every subsystem — memory, channels, models, apps, the SPA symlink.',
+    description: 'Health probing is read-only; Fix and Run now are the only controls that mutate.',
     useSearchText() {
       const { data: d } = useDoctor()
       const failed = d ? Object.entries(d.capabilities).filter(([, c]) => !c.ok).map(([k]) => k).join(' ') : ''
@@ -869,7 +875,7 @@ export const SETTINGS_WIDGETS: SettingsWidget[] = [
   },
   {
     id: 'feedback', group: 'System', label: 'AI feedback', icon: ThumbsUp, size: 'sm',
-    description: 'Per-source accuracy from your 👍/👎 on AI judgments — a source that keeps missing stops surfacing.',
+    description: 'Per-source accuracy from your 👍/👎 on AI judgments — weak skills stop surfacing; other sources get a retire proposal.',
     useSearchText() {
       const { data } = useFeedbackProducers()
       const rows = data?.producers ?? []
@@ -879,11 +885,11 @@ export const SETTINGS_WIDGETS: SettingsWidget[] = [
       const { data, stale: isStalePaint } = useFeedbackProducers()
       const rows = data?.producers ?? []
       const rated = rows.filter((r) => !r.collecting)
-      const suppressed = rows.filter((r) => r.suppressed).length
+      const suppressed = rows.filter((r) => r.producer_kind === 'skill_synthesis' && r.suppressed).length
       return (
         <BentoCard icon={ThumbsUp} title="AI feedback" query={query} onClick={() => go('feedback')} loading={data === undefined} stale={isStalePaint}>
           {rows.length === 0
-            ? <div data-type="body-s" className="text-on-surface-low">👍/👎 on inbox triage, drafts, digests, and loop findings collect here per judgment source. A source that keeps missing stops surfacing.</div>
+            ? <div data-type="body-s" className="text-on-surface-low">👍/👎 on inbox triage, drafts, digests, and loop findings collect here per judgment source. Weak skills stop surfacing; other sources get a retire proposal.</div>
             : <><BigStat value={rows.length} caption={rows.length === 1 ? 'judgment source' : 'judgment sources'} />
                 <div data-type="body-s" className="mt-1 text-on-surface-low">
                   {rated.length ? `${rated.length} rated` : 'collecting verdicts'}

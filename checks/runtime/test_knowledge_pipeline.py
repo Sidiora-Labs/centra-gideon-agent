@@ -536,7 +536,11 @@ def test_document_read_rasterizes_scanned_pdf_through_ocr_provider(tmp_path):
 
     assert output.success is True
     assert output.text == "Recovered text from scanned page"
-    assert provider.pages == [(1, (625, 250))]
+    import pdfplumber
+
+    with pdfplumber.open(pdf) as document:
+        rendered_size = document.pages[0].to_image(resolution=150).original.size
+    assert provider.pages == [(1, rendered_size)]
     assert output.metadata["ocr_used"] is True
     assert output.metadata["ocr_page_count"] == 1
     assert output.metadata["scanned_page_count"] == 1
@@ -577,6 +581,40 @@ def test_image_ocr_node_uses_the_same_provider_seam(tmp_path):
 
     assert output.text == "Recovered text from scanned page"
     assert provider.pages == [(1, (80, 40))]
+
+
+def test_ocr_byte_cap_gates_pdf_and_image_backends_and_reports_bytes(tmp_path):
+    from PIL import Image
+
+    from gideon.cognition.knowledge.pipeline.nodes.media_nodes import OcrNode
+    from gideon.cognition.knowledge.readers import FileReader
+
+    image = tmp_path / "page.png"
+    Image.new("RGB", (80, 40), "white").save(image)
+    image_size = image.stat().st_size
+    image_provider = _PngOcrProvider()
+    image_output = _run(
+        OcrNode(ocr_provider=image_provider, ocr_max_bytes=image_size - 1).run(
+            {}, NodeContext(item_id="image", item_type="image", file_path=str(image))
+        )
+    )
+    assert image_output.success is False
+    assert image_provider.pages == []
+    assert image_output.metadata == {
+        "ocr_bytes_read": 0,
+        "ocr_bytes_skipped": image_size,
+    }
+
+    pdf = tmp_path / "scan.pdf"
+    _write_scanned_pdf(pdf)
+    pdf_provider = _PngOcrProvider()
+    _, pdf_meta = FileReader(ocr_provider=pdf_provider, ocr_max_bytes=1).read(str(pdf))
+    assert pdf_provider.pages == []
+    assert pdf_meta["ocr_bytes_read"] == 0
+    assert pdf_meta["ocr_bytes_skipped"] > 1
+    assert pdf_meta["ocr_page_count"] == 0
+    assert pdf_meta["error_kind"] == "ocr_byte_limit"
+    assert "skipped" in pdf_meta["error"] and "reading 0 bytes" in pdf_meta["error"]
 
 
 def test_reingest_preserves_updated_at(store):

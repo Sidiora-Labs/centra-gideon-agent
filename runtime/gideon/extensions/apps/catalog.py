@@ -130,6 +130,8 @@ class CatalogEntry:
     pointer: str = ""
     permissions: dict[str, Any] = field(default_factory=dict)
     crons: list[dict[str, Any]] = field(default_factory=list)
+    hasUI: bool = False  # noqa: N815
+    uiComponents: str = ""  # noqa: N815
     quality: dict[str, Any] = field(default_factory=dict)
     coreCompatibility: dict[str, Any] = field(default_factory=dict)  # noqa: N815
 
@@ -490,6 +492,8 @@ def _scan_git_source(url: str, *, now: float) -> list[CatalogEntry]:
                     pointer=f"{url}#{entry.name}",
                     permissions=_perms,
                     crons=_crons,
+                    hasUI=bool(m.ui.pages),
+                    uiComponents=m.ui.components,
                     coreCompatibility=m.core_compatibility().to_dict(),
                 )
             )
@@ -962,6 +966,8 @@ def _scan_local_sources() -> list[CatalogEntry]:
                     quality=(m.quality.to_dict() if m.quality else {}),
                     permissions=_perms,
                     crons=_crons,
+                    hasUI=bool(m.ui.pages),
+                    uiComponents=m.ui.components,
                     coreCompatibility=m.core_compatibility().to_dict(),
                 )
             )
@@ -1059,6 +1065,8 @@ def available_bundled() -> list[CatalogEntry]:
                 quality=(m.quality.to_dict() if m.quality else {}),
                 permissions=_perms,
                 crons=_crons,
+                hasUI=bool(m.ui.pages),
+                uiComponents=m.ui.components,
                 coreCompatibility=m.core_compatibility().to_dict(),
             )
         )

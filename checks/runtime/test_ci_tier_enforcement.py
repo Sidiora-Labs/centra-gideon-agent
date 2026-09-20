@@ -11,8 +11,8 @@ whoever remembered to type ``npm test`` inside ``apps/desktop/``. That includes
 crashes on launch.
 
 The rails below make that class of gap loud instead of silent: a new workspace
-member carrying a ``test`` script must also get a root ``test:<name>`` script and a
-CI step that runs it, or this file reds.
+member carrying a ``test`` script must also be reachable through a root
+``test:*`` script and a CI step that runs it, or this file reds.
 
 Parsed from source, not executed — node is not a test dependency of the Python
 suite (same convention as ``checks/runtime/test_desktop_seam.py``'s vocabulary rail).
@@ -80,25 +80,43 @@ def test_the_run_command_scan_is_not_vacuous():
     assert any(c.startswith("uv run pytest") for c in commands)
 
 
+def _root_test_scripts() -> dict[str, str]:
+    """Every root ``test:*`` script, keyed by script name."""
+    return {
+        key: value
+        for key, value in _root_manifest()["scripts"].items()
+        if key.startswith("test:")
+    }
+
+
+def _scripts_reaching(name: str) -> list[str]:
+    """Root ``test:*`` script names that run ``--workspace=<name>``."""
+    return [
+        key
+        for key, value in _root_test_scripts().items()
+        if f"--workspace={name}" in value
+    ]
+
+
 def test_every_tested_workspace_has_a_root_test_script():
     """npm runs from the REPO ROOT (single-root lockfile, npm/cli#4828).
 
-    So a workspace's tests are only reachable in CI through a root
-    ``test:<name>`` script — there is no ``cd desktop && npm ci``.
+    So a workspace's tests are only reachable in CI through a root ``test:*``
+    script — there is no ``cd desktop && npm ci``. The script name need not equal
+    the workspace directory: ``test:web`` reaches ``apps/console``.
     """
     tested = _tested_workspaces()
-    assert set(tested) >= {"web", "desktop"}, f"workspace discovery broke: {tested}"
+    assert set(tested) >= {
+        "apps/console",
+        "apps/desktop",
+        "apps/mobile",
+    }, f"workspace discovery broke: {tested}"
 
-    scripts = _root_manifest()["scripts"]
     for name in tested:
-        key = f"test:{name}"
-        assert key in scripts, (
-            f"{name}/package.json declares a `test` script but the root package.json "
-            f"has no `{key}` — nothing in CI can reach that tier."
-        )
-        assert f"--workspace={name}" in scripts[key], (
-            f"root script `{key}` must run the tier via `--workspace={name}` "
-            f"(npm runs from the repo root), got: {scripts[key]!r}"
+        assert _scripts_reaching(name), (
+            f"{name}/package.json declares a `test` script but no root package.json "
+            f"`test:*` script runs it via `--workspace={name}` — nothing in CI can "
+            "reach that tier."
         )
 
 
@@ -106,8 +124,9 @@ def test_ci_runs_every_tested_workspace_tier():
     """A root script nobody invokes is not enforcement."""
     commands = _ci_run_commands()
     for name in _tested_workspaces():
-        expected = f"npm run test:{name}"
-        assert expected in commands, (
-            f"no ci.yml step runs `{expected}` — {name}/'s tests are enforced only by "
-            f"whoever remembers to run them locally."
+        scripts = _scripts_reaching(name)
+        assert any(f"npm run {key}" in commands for key in scripts), (
+            f"no ci.yml step runs a root test script for {name} "
+            f"({scripts or 'none found'}) — {name}/'s tests are enforced only by "
+            "whoever remembers to run them locally."
         )

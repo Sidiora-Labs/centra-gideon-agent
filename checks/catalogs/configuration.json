@@ -721,6 +721,11 @@
         "sensitive": false,
         "type": "int"
       },
+      "knowledge.ocr_max_bytes": {
+        "default": 10485760,
+        "sensitive": false,
+        "type": "int"
+      },
       "knowledge.report_budget_chars": {
         "default": 40000,
         "sensitive": false,
@@ -730,6 +735,16 @@
         "default": true,
         "sensitive": false,
         "type": "bool"
+      },
+      "knowledge.rerank_enabled": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "knowledge.rerank_max_candidates": {
+        "default": 32,
+        "sensitive": false,
+        "type": "int"
       },
       "knowledge.session_brief_max_tokens": {
         "default": 800,

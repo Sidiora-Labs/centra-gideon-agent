@@ -28,7 +28,9 @@ async def test_real_registry_crud_comments_and_unknown_filter_fallback(source):
     )
     rows, count = await registry.list_all_tasks(provider_filter="absent")
     assert count == 2 and {item.id for item in rows} == {row.id, other.id}
-    assert (await registry.get_task(row.id, provider_name="absent")).id == row.id
+    with pytest.raises(ValueError, match="Unknown task provider"):
+        await registry.get_task(row.id, provider_name="absent")
+    assert (await registry.get_task(row.id, provider_name="native")).id == row.id
     found, total = await registry.search_tasks("search", limit=1)
     assert total == 2 and [item.id for item in found] == [row.id]
     found, total = await registry.search_tasks(
@@ -39,8 +41,11 @@ async def test_real_registry_crud_comments_and_unknown_filter_fallback(source):
     assert [item.id for item in await registry.get_comments(row.id)] == [comment.id]
     assert await registry.delete_comment(row.id, comment.id)
     assert await registry.get_comments(row.id) == []
+    with pytest.raises(ValueError, match="Unknown task provider"):
+        await registry.update_task(row.id, provider_name="unknown", title="Refused")
+    assert (await registry.get_task(row.id)).title == "Search search"
     updated = await registry.update_task(
-        row.id, provider_name="unknown", title="Changed"
+        row.id, provider_name="native", title="Changed"
     )
     assert updated.title == "Changed"
     assert await registry.delete_task(row.id)

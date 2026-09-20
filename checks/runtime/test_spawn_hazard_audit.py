@@ -4,9 +4,11 @@
 a spawn reached off a thread while the event loop / another thread holds locks, that could
 wedge holding inherited fds:
 
-  (a) ``apps/backend_runtime.py`` — the watchdog daemon thread respawns app backends
-      (``BackendSupervisor.start`` is called from ``_check_and_revive`` on a 30s timer).
-  (b) ``action_providers/bash_provider.py`` — a bash-action spawn on the event-loop thread.
+  (a) ``extensions/apps/backend_runtime.py`` — the watchdog daemon thread respawns app
+      backends (``BackendSupervisor.start`` is called from ``_check_and_revive`` on a 30s
+      timer).
+  (b) ``integrations/action_providers/bash_provider.py`` — a bash-action spawn on the
+      event-loop thread.
 
 The audit outcome (recorded here as executable assertions, per the done-when "a regression
 test for a proven wedge, or a recorded finding that the sites are safe and why"):
@@ -82,7 +84,7 @@ def test_backend_respawn_uses_argv_shim_not_preexec_fn():
     """SAFE-finding (a): the backend respawn Popen carries no preexec_fn and prepends the
     ceiling shim to argv, so the watchdog daemon thread never forks-then-runs-bytecode.
     """
-    node = _func_node("apps/backend_runtime.py", "BackendSupervisor.start")
+    node = _func_node("extensions/apps/backend_runtime.py", "BackendSupervisor.start")
     calls = _func_calls_named(node)
     assert (
         "spawn_shim_argv" in calls
@@ -95,14 +97,16 @@ def test_backend_respawn_uses_argv_shim_not_preexec_fn():
 
 def test_backend_respawn_is_reached_from_watchdog_thread():
     """Corroborates that this IS the watchdog-thread path §1.1 named (revive → start)."""
-    src = (_src_root() / "apps" / "backend_runtime.py").read_text(encoding="utf-8")
+    src = (_src_root() / "extensions" / "apps" / "backend_runtime.py").read_text(
+        encoding="utf-8"
+    )
     assert "_check_and_revive" in src and "start_backend_watchdog" in src
 
 
 def test_bash_action_spawn_is_async_and_has_no_preexec_fn():
     """SAFE-finding (b): the bash action provider spawns via create_subprocess_limited
     (async, no preexec_fn), so the event loop is never blocked on a forked child."""
-    node = _func_node("action_providers/bash_provider.py", "execute")
+    node = _func_node("integrations/action_providers/bash_provider.py", "execute")
     assert "create_subprocess_limited" in _func_calls_named(
         node
     ), "bash action must ceiling-wrap (async helper)"

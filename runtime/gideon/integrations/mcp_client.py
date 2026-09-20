@@ -32,6 +32,8 @@ from gideon.assurance import trace_recorder as _trace
 
 logger = logging.getLogger(__name__)
 
+ElicitationHandler = Callable[[str, Any], Awaitable[Any]]
+
 _CALL_TIMEOUT_SECS = 120.0
 _CONNECT_TIMEOUT_SECS = 30.0
 _IDLE_TTL_SECS = 600.0
@@ -119,7 +121,13 @@ class McpServerConn:
     tasks).
     """
 
-    def __init__(self, name: str, spec: dict[str, Any], scope: str = "") -> None:
+    def __init__(
+        self,
+        name: str,
+        spec: dict[str, Any],
+        scope: str = "",
+        elicitation_handler: ElicitationHandler | None = None,
+    ) -> None:
         self.name = name
         self.spec = spec
         self.scope = scope
@@ -132,6 +140,7 @@ class McpServerConn:
         self._last_used: float = time.monotonic()
         self._consecutive_failures: int = 0
         self._breaker_until: float = 0.0
+        self._elicitation_handler = elicitation_handler
 
     @property
     def error(self) -> str:
@@ -242,7 +251,19 @@ class McpServerConn:
 
             async with AsyncExitStack() as stack:
                 read, write = await self._open_transport(stack)
-                session = await stack.enter_async_context(ClientSession(read, write))
+                session_kwargs = {}
+                if (
+                    self.spec.get("allowElicitation") is True
+                    and self._elicitation_handler
+                ):
+
+                    async def _elicit(_context: Any, params: Any) -> Any:
+                        return await self._elicitation_handler(self.name, params)
+
+                    session_kwargs["elicitation_callback"] = _elicit
+                session = await stack.enter_async_context(
+                    ClientSession(read, write, **session_kwargs)
+                )
                 await session.initialize()
                 await self._refresh_tools(session)
                 self._ready.set()
@@ -383,6 +404,7 @@ def _spec_hash(spec: dict[str, Any]) -> str:
         "env": spec.get("env", {}),
         "url": spec.get("url", ""),
         "transport": spec.get("transport", ""),
+        "allowElicitation": spec.get("allowElicitation") is True,
     }
     blob = json.dumps(material, sort_keys=True, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
@@ -408,11 +430,12 @@ class McpClientRegistry:
     are reaped on a sweep so resident memory tracks *active* (server, session)
     pairs, not every session that ever touched a server."""
 
-    def __init__(self) -> None:
+    def __init__(self, elicitation_handler: ElicitationHandler | None = None) -> None:
         self._conns: dict[_ConnKey, McpServerConn] = {}
         self._specs: dict[str, dict[str, Any]] = {}
         self._sweeper: asyncio.Task | None = None
         self._stats = {"spawns": 0, "reaps": 0, "served": 0, "evicted": 0}
+        self._elicitation_handler = elicitation_handler
 
     def _canonical_key(self, name: str) -> _ConnKey | None:
         """The shared (scope ``""``) key for a configured server, or None if unknown.
@@ -449,7 +472,9 @@ class McpClientRegistry:
         key = _conn_key(name, spec, session_key)
         conn = self._conns.get(key)
         if conn is None:
-            conn = McpServerConn(name, spec, scope=key[1])
+            conn = McpServerConn(
+                name, spec, scope=key[1], elicitation_handler=self._elicitation_handler
+            )
             self._conns[key] = conn
             self._stats["spawns"] += 1
         self._stats["served"] += 1
@@ -470,7 +495,12 @@ class McpClientRegistry:
         for name, spec in self._specs.items():
             key = _conn_key(name, spec, "")
             if key not in self._conns:
-                self._conns[key] = McpServerConn(name, spec, scope="")
+                self._conns[key] = McpServerConn(
+                    name,
+                    spec,
+                    scope="",
+                    elicitation_handler=self._elicitation_handler,
+                )
                 self._stats["spawns"] += 1
         for key in list(self._conns):
             name, scope, _hash = key
@@ -557,6 +587,16 @@ class McpClientRegistry:
 
 
 _registry: McpClientRegistry | None = None
+_elicitation_handler: ElicitationHandler | None = None
+
+
+def set_mcp_elicitation_handler(handler: ElicitationHandler | None) -> None:
+    global _elicitation_handler
+    _elicitation_handler = handler
+    if _registry is not None:
+        _registry._elicitation_handler = handler
+        for conn in _registry._conns.values():
+            conn._elicitation_handler = handler
 
 
 def _gideon_mcp_specs() -> dict[str, dict[str, Any]]:
@@ -596,7 +636,7 @@ def get_mcp_client_registry() -> McpClientRegistry | None:
         return None
     global _registry
     if _registry is None:
-        _registry = McpClientRegistry()
+        _registry = McpClientRegistry(elicitation_handler=_elicitation_handler)
     _registry.load_from_specs(_gideon_mcp_specs())
     return _registry
 

@@ -15,6 +15,8 @@ The two risks these tests target:
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from gideon.cognition.knowledge.alias_prepass import (
@@ -119,6 +121,44 @@ def test_links_by_declared_alias(store):
     item_id = _item(store)
     assert link_known_entities(store, item_id, "SPRW is on track.") == 1
     assert _mention_ids(store, item_id) == {eid}
+
+
+def test_extracted_alias_persists_and_matches_canonical_entity(tmp_path):
+    from gideon.cognition.knowledge.extractor import EntityExtractor
+    from gideon.cognition.knowledge.pipeline.runner import _write_extracted_entity
+    from gideon.cognition.knowledge.store import KnowledgeStore
+
+    path = tmp_path / "aliases.db"
+    store = KnowledgeStore(path)
+    extraction = EntityExtractor()._parse_response(
+        json.dumps(
+            {
+                "entities": [
+                    {
+                        "name": "PostgreSQL",
+                        "type": "technology",
+                        "aliases": ["Postgres", " pg ", 42, ""],
+                    }
+                ]
+            }
+        )
+    )
+    canonical, eid = _write_extracted_entity(store, extraction["entities"][0])
+    assert canonical == "PostgreSQL"
+    source_id = _item(store, "PostgreSQL is also called Postgres.")
+    store.add_mention(source_id, eid)
+    store.close()
+
+    reopened = KnowledgeStore(path)
+    row = reopened.db.execute(
+        "SELECT aliases FROM entities WHERE id = ?", (eid,)
+    ).fetchone()
+    assert json.loads(row["aliases"]) == ["Postgres", "pg"]
+    item_id = _item(reopened, "Postgres powers the application.")
+    assert (
+        link_known_entities(reopened, item_id, "Postgres powers the application.") == 1
+    )
+    assert _linked_names(reopened, item_id) == {"PostgreSQL"}
 
 
 def test_does_not_invent_entities(store):

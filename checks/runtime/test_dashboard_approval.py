@@ -541,16 +541,20 @@ class TestStateMetaAndPermissions:
     def test_mark_permission_resolved(self):
         import json
 
+        from gideon.interfaces.dashboard.state import _mark_permission_resolved
+
         session = _make_session()
         cls_data = json.dumps({"request_id": "req-42"})
         session.append("permission", "tool_x", cls_data, broadcast=False)
-        session.mark_permission_resolved("req-42", "rejected")
+        _mark_permission_resolved(session.messages, "req-42", "rejected")
         updated = json.loads(session.messages[-1]["cls"])
         assert updated["resolved"] == "rejected"
 
     def test_mark_permission_resolved_not_found(self):
+        from gideon.interfaces.dashboard.state import _mark_permission_resolved
+
         session = _make_session()
-        session.mark_permission_resolved("nonexistent", "approved")
+        _mark_permission_resolved(session.messages, "nonexistent", "approved")
 
     def test_parse_cls_meta_normalizes_request_id(self):
         meta = parse_cls_meta('{"request_id": "req-1", "tool_input": "x"}')

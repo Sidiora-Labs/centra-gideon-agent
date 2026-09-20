@@ -21,6 +21,8 @@ import json
 from unittest.mock import MagicMock
 
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import make_mocked_request
 
 from gideon.cognition.memory import MemoryJournal
 from gideon.cognition.vector_memory import SemanticArchive
@@ -56,16 +58,19 @@ def _state_with_record_store(tmp_path, *, with_embedder: bool):
     return state, vs
 
 
-def _req(state, *, body=None, session_key="dashboard:ui"):
-    req = MagicMock()
-    req.app = {"state": state}
-    req.headers = {"X-Session-Key": session_key}
-    req.query = {}
-
-    async def _json():
-        return body if body is not None else {}
-
-    req.json = _json
+def _req(state, *, body=None, session_key="dashboard:ui", method="POST"):
+    app = web.Application()
+    app["state"] = state
+    req = make_mocked_request(
+        method,
+        "/api/lessons",
+        app=app,
+        headers={
+            "X-Session-Key": session_key,
+            "Content-Type": "application/json",
+        },
+    )
+    req._read_bytes = json.dumps(body).encode() if body is not None else b""
     return req
 
 
@@ -88,7 +93,7 @@ async def test_dashboard_create_list_delete_roundtrip(tmp_path, with_embedder):
         json.loads(e["value_json"]) == "always run make lint" for e in vs.get_lessons()
     )
 
-    resp = await api_lessons(_req(state))
+    resp = await api_lessons(_req(state, method="GET"))
     data = (await _read_body(resp))["lessons"]
     assert [le["rule"] for le in data] == ["always run make lint"]
 

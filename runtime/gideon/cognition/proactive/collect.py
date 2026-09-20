@@ -40,10 +40,11 @@ from gideon.cognition.proactive.manifest import (
     SOURCE_RUN,
     CollectedItem,
 )
+from gideon.integrations.inbox import STATUS_OPEN, is_open_status
 
 logger = logging.getLogger(__name__)
 
-ATTENTION_STATUSES = frozenset({"pending", "seen"})
+ATTENTION_STATUSES = STATUS_OPEN
 
 RUN_SCAN_LIMIT = 25
 
@@ -70,7 +71,7 @@ def collect_inbox(store: Any, *, since_ts: float = 0.0) -> list[CollectedItem]:
         return []
     for item in items:
         try:
-            if str(getattr(item, "status", "")) not in ATTENTION_STATUSES:
+            if not is_open_status(str(getattr(item, "status", ""))):
                 continue
             created = float(getattr(item, "created_at", 0.0) or 0.0)
             if since_ts and created and created < since_ts:

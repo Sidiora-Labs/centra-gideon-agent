@@ -122,7 +122,9 @@ def test_setup_prints_the_pointer_on_every_path_that_ends_the_wizard():
 
 def test_gateway_asks_the_shared_predicate_instead_of_its_own_copy():
     """The gateway's auto-open branch is the predicate's other caller, not a second copy."""
-    src = Path(env.__file__).with_name("gateway.py").read_text(encoding="utf-8")
+    src = (
+        Path(env.__file__).resolve().parents[1] / "engine" / "lifecycle.py"
+    ).read_text(encoding="utf-8")
     assert "browser_available()" in src
     for leaked in ("SSH_CONNECTION", "SSH_CLIENT", "WAYLAND_DISPLAY"):
         assert (

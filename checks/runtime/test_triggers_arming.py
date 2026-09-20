@@ -184,13 +184,14 @@ def test_a_freshly_created_blocking_hook_reports_not_enforcing(store, home):
         "event": HOOK_EVENT_PRE_TOOL_USE,
         "action": {"provider": "bash", "config": {"command": "exit 2"}},
     }
-    req = make_mocked_request("POST", "/api/triggers", app=app)
+    req = make_mocked_request(
+        "POST",
+        "/api/triggers",
+        app=app,
+        headers={"Content-Type": "application/json"},
+    )
     req["user"] = "tester"
-
-    async def _json():
-        return body
-
-    req.json = _json  # type: ignore[assignment]
+    req._read_bytes = json.dumps(body).encode()
     resp = asyncio.run(T.api_trigger_create(req))
     created = json.loads(resp.body.decode())["trigger"]
     assert created["blocking"] is True

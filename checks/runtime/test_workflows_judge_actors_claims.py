@@ -32,7 +32,7 @@ _AUTHORED = (
 _UNWIRED_MARKER = "AUTHORED, NOT ENFORCED"
 
 
-def _production_callers(name: str) -> set[str]:
+def _production_callers(name: str, seen: frozenset[str] = frozenset()) -> set[str]:
     """Files under `src/` that reference `name`, excluding its own module.
 
     A reference is enough: this rail asks "does production reach this symbol at all",
@@ -40,7 +40,17 @@ def _production_callers(name: str) -> set[str]:
     function-local statement is the shape the engine actually uses, so a call-graph
     walk would have to follow it anyway.
     """
+    if name in seen:
+        return set()
+    seen = seen | {name}
     hits: set[str] = set()
+    tree = ast.parse(MODULE.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if any(
+                isinstance(ref, ast.Name) and ref.id == name for ref in ast.walk(node)
+            ):
+                hits.update(_production_callers(node.name, seen))
     for path in SRC.rglob("*.py"):
         if path == MODULE:
             continue

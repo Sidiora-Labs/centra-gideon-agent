@@ -20,6 +20,7 @@ from pathlib import Path
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.workspace.uploads.policy import limits_table, single_post_threshold
 from gideon.workspace.uploads.store import UploadError, UploadStore
 
@@ -59,7 +60,7 @@ async def api_uploads_limits(request: web.Request) -> web.Response:
 async def api_uploads_init(request: web.Request) -> web.Response:
     """POST /api/uploads/init {filename, size, mime, target[, path]} → session."""
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):

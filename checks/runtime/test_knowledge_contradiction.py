@@ -35,7 +35,11 @@ from gideon.cognition.knowledge.contradiction import (
     unsettled_candidates,
 )
 from gideon.cognition.knowledge.session_brief import BriefItem, compose, project_tag
+from gideon.cognition.knowledge.store import KnowledgeStore
 from gideon.integrations.action_providers.base import ActionContext
+from gideon.integrations.action_providers.knowledge_persist_provider import (
+    run_ingest_conflict_pass,
+)
 
 
 def claim(
@@ -48,6 +52,42 @@ def claim(
 
 def run(coro):
     return asyncio.get_event_loop().run_until_complete(coro)
+
+
+def test_normal_ingest_conflict_pass_uses_provider_records_and_typed_edges(tmp_path):
+    store = KnowledgeStore(tmp_path / "knowledge.db")
+    old = store.create_typed_item(
+        item_type="note", title="Old measurement", content="old"
+    )
+    store.update_item(
+        old,
+        file_metadata={
+            "claims": [
+                {
+                    "statement": "Cold start latency is 4.2 seconds",
+                    "source_ref": old,
+                }
+            ]
+        },
+    )
+    new = store.create_typed_item(
+        item_type="bookmark", title="New measurement", content="new"
+    )
+    store.update_item(
+        new, insights={"key_points": ["Cold start latency is 9.1 seconds"]}
+    )
+
+    review = run_ingest_conflict_pass(store, new)
+
+    assert review.conflicts[0]["right_item"] == old
+    metadata = store.get_item(new)["file_metadata"]
+    assert metadata["conflicts"] == review.conflicts
+    assert metadata["claims"][0]["statement"] == "Cold start latency is 9.1 seconds"
+    edge = store.db.execute(
+        "SELECT relation_type FROM item_relations WHERE source_item_id = ? AND target_item_id = ?",
+        (new, old),
+    ).fetchone()
+    assert edge["relation_type"] == "contradicts"
 
 
 @pytest.fixture
@@ -371,6 +411,60 @@ def test_edge_proposals_are_validated_against_the_vocabulary():
         source_item="a",
     )
     assert [e.target for e in edges] == ["b"]
+
+
+def test_workflow_model_edges_are_persisted_only_between_stored_items(home, ctx):
+    persist = _persist()
+    targets = [
+        json.loads(
+            run(
+                persist.execute(
+                    {"kind": "decision", "title": title, "content": content}, ctx
+                )
+            ).stdout
+        )["item_id"]
+        for title, content in (
+            ("Old guidance", "Use the old endpoint."),
+            ("Conflicting guidance", "Use the alternate endpoint."),
+        )
+    ]
+    result = json.loads(
+        run(
+            persist.execute(
+                {
+                    "kind": "fact",
+                    "title": "Current guidance",
+                    "content": "Use port 443.",
+                    "edges": [
+                        {
+                            "target": targets[0],
+                            "relation": "supersedes",
+                            "confidence": 0.8,
+                        },
+                        {
+                            "target": targets[1],
+                            "relation": "contradicts",
+                            "confidence": 0.7,
+                        },
+                        {"target": "missing", "relation": "contradicts"},
+                        {"target": targets[0], "relation": "invented"},
+                    ],
+                },
+                ctx,
+            )
+        ).stdout
+    )
+    store = _open(home)
+    rows = store.db.execute(
+        "SELECT source_item_id, target_item_id, relation_type, confidence, provenance "
+        "FROM item_relations"
+    ).fetchall()
+
+    assert result["relations_persisted"] == 2
+    assert [tuple(row) for row in rows] == [
+        (result["item_id"], targets[0], "supersedes", 0.8, "inferred"),
+        (result["item_id"], targets[1], "contradicts", 0.7, "inferred"),
+    ]
 
 
 def test_polarity_counts_negations():

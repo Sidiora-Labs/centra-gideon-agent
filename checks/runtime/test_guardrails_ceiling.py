@@ -238,14 +238,12 @@ def test_unreadable_ceiling_aborts_boot(home):
     path = home / "governance" / "ceiling.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text('{"version": 1, "scopes": {}}', encoding="utf-8")
-    path.chmod(0o000)
+    path.unlink()
+    path.mkdir()
     C.reset_ceiling()
-    try:
-        with pytest.raises(C.GovernanceBootError) as exc:
-            C.ensure_governance_boot()
-        _assert_what_why_fix(exc)
-    finally:
-        path.chmod(0o600)
+    with pytest.raises(C.GovernanceBootError) as exc:
+        C.ensure_governance_boot()
+    _assert_what_why_fix(exc)
 
 
 def test_future_version_aborts_boot(home):
@@ -414,8 +412,13 @@ def test_spawn_call_site_consults_the_ceiling():
 
     import gideon.engine.subagent as subagent
 
+    assert "self._execution_policy(info)" in inspect.getsource(
+        subagent.DelegationSupervisor._run_inner
+    )
     tree = ast.parse(
-        textwrap.dedent(inspect.getsource(subagent.DelegationSupervisor._run_inner))
+        textwrap.dedent(
+            inspect.getsource(subagent.DelegationSupervisor._execution_policy)
+        )
     )
     called = {
         node.func.id
@@ -710,19 +713,17 @@ def test_gateway_boot_calls_governance_first():
     import inspect
 
     from gideon.engine.gateway import RuntimeCoordinator
+    from gideon.engine.lifecycle import RuntimeProcess
 
-    src = inspect.getsource(RuntimeCoordinator.run)
-    tree = ast.parse(src.lstrip())
-    body = tree.body[0].body
-    called_names: list[str] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-            called_names.append(node.func.id)
-    assert "ensure_governance_boot" in called_names
-    first_calls = [
-        n.func.id
-        for stmt in body[:4]
-        for n in ast.walk(stmt)
-        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+    assert "RuntimeProcess(self).serve()" in inspect.getsource(RuntimeCoordinator.run)
+    serve = inspect.getsource(RuntimeProcess.serve)
+    assert serve.index("self.establish_policy()") < serve.index("await self.start()")
+    tree = ast.parse(inspect.getsource(RuntimeProcess.establish_policy).lstrip())
+    called_names = [
+        node.value.func.id
+        for node in tree.body[0].body
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
     ]
-    assert "ensure_governance_boot" in first_calls
+    assert called_names[0] == "ensure_governance_boot"

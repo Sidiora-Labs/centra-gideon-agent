@@ -279,24 +279,37 @@ def proposer_trust(records: list[tuple[str, str]]) -> list[ProposerTrust]:
     return results
 
 
-def assert_gate_covers_cadences() -> list[str]:
-    import re
+def assert_gate_covers_cadences(source_root=None) -> list[str]:
+    import ast
     from pathlib import Path
 
     from gideon.cognition.learning.gate import Cadence
 
     current = Path(__file__).resolve()
+    root = Path(source_root) if source_root is not None else current.parents[2]
     unseen = {cadence.name for cadence in Cadence}
-    expression = re.compile(r"Cadence\.([A-Z_]+)")
-    for candidate in current.parent.parent.rglob("*.py"):
-        excluded = candidate.resolve() == current or (
-            candidate.name == "gate.py" and candidate.parent.name == "learning"
-        )
-        if excluded:
+    for candidate in root.rglob("*.py"):
+        if candidate.resolve() == current:
             continue
         try:
-            source = candidate.read_text(encoding="utf-8", errors="replace")
+            tree = ast.parse(candidate.read_text(encoding="utf-8"))
         except OSError:
             continue
-        unseen.difference_update(expression.findall(source))
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "decide"
+            ):
+                continue
+            arguments = list(node.args[:1]) + [
+                keyword.value for keyword in node.keywords if keyword.arg == "cadence"
+            ]
+            for argument in arguments:
+                if (
+                    isinstance(argument, ast.Attribute)
+                    and isinstance(argument.value, ast.Name)
+                    and argument.value.id == "Cadence"
+                ):
+                    unseen.discard(argument.attr)
     return sorted(unseen)

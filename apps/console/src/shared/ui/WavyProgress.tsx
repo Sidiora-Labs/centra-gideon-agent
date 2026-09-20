@@ -1,4 +1,5 @@
-import { motion, useReducedMotion } from 'framer-motion'
+import { useReducedMotion } from '../theme/motion'
+import { motion } from 'framer-motion'
 import { progressFraction, progressWave } from './statusSurfaceState'
 
 type WavyProgressProps = { width?: number; color?: string } & ({ value: number; label: string } | { value?: undefined; label?: never })

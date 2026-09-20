@@ -190,7 +190,9 @@ def test_the_literal_route_is_registered_before_the_dynamic_one():
 
     import gideon
 
-    src = (pathlib.Path(gideon.__file__).parent / "dashboard" / "server.py").read_text()
-    lit = src.index('add_get("/api/chat/sessions/bound-project"')
-    dyn = src.index('add_get("/api/chat/sessions/{session}"')
+    src = (
+        pathlib.Path(gideon.__file__).parent / "interfaces" / "dashboard" / "server.py"
+    ).read_text()
+    lit = src.index('"/api/chat/sessions/bound-project"')
+    dyn = src.index('"/api/chat/sessions/{session}"')
     assert lit < dyn, "bound-project must register before the {session} pattern"

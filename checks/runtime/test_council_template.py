@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -35,6 +34,7 @@ import pytest
 from gideon.automation.workflows.bundled_defs import bundled_root
 from gideon.automation.workflows.models import CONTAINER_KINDS, Node, walk
 from gideon.automation.workflows.validator import dep_edges_for_root
+from gideon.core.layout import package_root
 
 TEMPLATE = "council"
 SIBLING = "best-of-n"
@@ -238,4 +238,4 @@ def test_it_is_shipped_from_the_package_and_not_a_stray_file() -> None:
     directory has to be where `bundled_root()` looks, or an editable checkout passes every
     assertion above while `pip install gideon` ships no council at all."""
     assert (bundled_root() / TEMPLATE / "workflow.json").is_file()
-    assert bundled_root().is_relative_to(Path(__file__).resolve().parents[2] / "src")
+    assert bundled_root().is_relative_to(package_root())

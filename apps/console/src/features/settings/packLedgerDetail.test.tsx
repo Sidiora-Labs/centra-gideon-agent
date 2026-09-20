@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import { render } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { PackRow } from './PacksPanel'
-import type { InstalledPackRec } from '../../shared/data/api'
+import { api, type InstalledPackRec } from '../../shared/data/api'
 
 vi.mock('../../app/shell/appSdk', () => ({ notify: vi.fn() }))
 
@@ -19,6 +19,7 @@ const base: InstalledPackRec = {
   setup_skill: 'cfo-pack-setup',
   setup_pending: false,
   installed_at: '2026-08-01T09:30:00Z',
+  staged_triggers: [],
 }
 
 const text = (p: InstalledPackRec) => render(<PackRow pack={p} />).container.textContent ?? ''
@@ -116,9 +117,40 @@ describe('the detail block gate', () => {
   it('renders no detail block for a bare record', () => {
     const { container } = render(<PackRow pack={{
       name: 'bare', version: '0.1', components: [], connectors: [], connector_markers: [],
-      setup_skill: '', setup_pending: false, installed_at: '',
+      setup_skill: '', setup_pending: false, installed_at: '', staged_triggers: [],
     }} />)
     expect(container.textContent).toContain('bare')
     expect(container.querySelector('.border-t')).toBeNull()
+  })
+})
+
+describe('staged triggers', () => {
+  it('offers to add staged triggers to Automations', () => {
+    expect(text({ ...base, staged_triggers: ['month-end'] })).toContain('Add triggers to Automations')
+  })
+})
+
+describe('staged roster', () => {
+  it('deploys the roster and its staged triggers with one click', async () => {
+    const roster = vi.spyOn(api, 'packRosterDeploy').mockResolvedValue({
+      ok: true, pack: base.name, deployed: ['cfo'], dormant: [], missing: [],
+    })
+    const triggers = vi.spyOn(api, 'packTriggersDeploy').mockResolvedValue({
+      ok: true, pack: base.name, deployed: ['month-end'], skipped: [],
+    })
+    render(<PackRow pack={{
+      ...base,
+      roster: [{ slug: 'cfo', target: 'cfo', tier: 'always' }],
+      staged_triggers: ['month-end'],
+    }} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Deploy roster' }))
+
+    await waitFor(() => {
+      expect(roster).toHaveBeenCalledOnce()
+      expect(triggers).toHaveBeenCalledOnce()
+    })
+    expect(roster).toHaveBeenCalledWith(base.name)
+    expect(triggers).toHaveBeenCalledWith(base.name)
   })
 })

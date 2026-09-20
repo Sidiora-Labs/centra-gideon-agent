@@ -32,7 +32,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from gideon.cognition import feedback as fb
 from gideon.interfaces.dashboard.handlers.feedback import api_feedback_producers
 
-SRC = pathlib.Path(fb.__file__).resolve().parent
+SRC = pathlib.Path(fb.__file__).resolve().parents[1]
 
 
 class TestTheConstantMatchesTheCode:
@@ -62,7 +62,7 @@ class TestTheConstantMatchesTheCode:
         consumers: set[str] = set()
         for path in sorted(SRC.rglob("*.py")):
             rel = str(path.relative_to(SRC))
-            if rel == "feedback.py":
+            if rel == "cognition/feedback.py":
                 continue
             try:
                 tree = ast.parse(path.read_text(), filename=str(path))
@@ -80,7 +80,7 @@ class TestTheConstantMatchesTheCode:
             "computed and never consulted, so `suppressed` cannot be true of anything. Either a "
             "gate was deleted or this rail is measuring the wrong symbol."
         )
-        gating = {c for c in consumers if c.startswith("skills/")}
+        gating = {c for c in consumers if c.startswith("extensions/skills/")}
         non_gating = consumers - gating
         assert gating, (
             f"no module under skills/ consults the withholding set any more (consumers: "
@@ -88,8 +88,8 @@ class TestTheConstantMatchesTheCode:
             f"{list(fb.ENFORCED_SUPPRESSION_KINDS)} is withheld. The API now over-claims."
         )
         allowed_readers = {
-            "dashboard/handlers/feedback.py",
-            "dashboard/handlers/doctor.py",
+            "interfaces/dashboard/handlers/feedback.py",
+            "interfaces/dashboard/handlers/doctor.py",
         }
         assert non_gating <= allowed_readers, (
             f"a NEW module consults the withholding set: {sorted(non_gating - allowed_readers)}. "
@@ -102,7 +102,7 @@ class TestTheConstantMatchesTheCode:
         """``skills/surfacing.py`` withholds on the literal ``("skill_synthesis", key)``. If that
         literal changes, the constant is stale even though every other assertion still passes.
         """
-        text = (SRC / "skills" / "surfacing.py").read_text()
+        text = (SRC / "extensions" / "skills" / "surfacing.py").read_text()
         for kind in fb.ENFORCED_SUPPRESSION_KINDS:
             assert kind in text, (
                 f"ENFORCED_SUPPRESSION_KINDS claims {kind!r} is withheld, but "

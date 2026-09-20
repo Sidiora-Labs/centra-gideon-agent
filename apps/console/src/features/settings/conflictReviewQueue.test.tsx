@@ -80,7 +80,7 @@ function mount() {
 }
 
 beforeEach(() => {
-  invalidateKeys('settings:durability')
+  invalidateKeys('settings:durability', true)
 })
 
 afterEach(() => {
@@ -200,6 +200,11 @@ describe('an empty queue and a failed read are different answers', () => {
     })))
     mount()
     await waitFor(() => expect(screen.getByText(/2 memory conflicts are waiting/i)).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: 'Review 2 memory conflicts' }))
+    await waitFor(() => expect(api.durabilityConflicts).toHaveBeenCalledWith('memory'))
+    await waitFor(() => expect((screen.getByLabelText('Conflict category') as HTMLSelectElement).value).toBe('memory'))
+    fireEvent.change(screen.getByLabelText('Conflict category'), { target: { value: 'knowledge' } })
+    await waitFor(() => expect(api.durabilityConflicts).toHaveBeenCalledWith('knowledge'))
   })
 })
 

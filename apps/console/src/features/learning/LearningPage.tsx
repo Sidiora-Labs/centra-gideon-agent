@@ -27,6 +27,7 @@ import { PageTitle } from '../../shared/ui/PageTitle'
 import { useLearningPage } from './learningPageState'
 import { learningPanelClass } from './learningDisplay'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
+import { useHashRoute } from '../../app/shell/useHashRoute'
 
 export function LearningPage() {
   const page = useLearningPage()
@@ -135,6 +136,7 @@ export function LearningEmptyState({ pendingSkillProposals, pendingSkillProposal
   pendingSkillProposals: number | undefined
   pendingSkillProposalsError?: unknown
 }) {
+  const { navigate } = useHashRoute('learning')
   if (pendingSkillProposals === undefined && !pendingSkillProposalsError) {
     return <ListSkeleton rows={1} what="proposal queues" />
   }
@@ -146,7 +148,7 @@ export function LearningEmptyState({ pendingSkillProposals, pendingSkillProposal
       hint="This learning queue is empty, but the skill proposal queue still needs your review. Nothing is installed without your accept."
       action={{
         label: 'Review skill proposals',
-        onClick: () => { window.location.hash = '#/skills?mode=proposals' },
+        onClick: () => navigate('skills?mode=proposals'),
       }}
     />
   }
@@ -157,7 +159,7 @@ export function LearningEmptyState({ pendingSkillProposals, pendingSkillProposal
       hint="Skill proposals could not be checked, so there may still be proposals awaiting review. Nothing is installed without your accept."
       action={{
         label: 'Open skill proposals',
-        onClick: () => { window.location.hash = '#/skills?mode=proposals' },
+        onClick: () => navigate('skills?mode=proposals'),
       }}
     />
   }

@@ -130,12 +130,12 @@ def test_empty_default_dir_with_no_session_binding_falls_back_to_the_workspace(
 
 
 _ACP_SPAWN_MODULES = (
-    "gideon/acp/client.py",
-    "gideon/acp/session.py",
-    "gideon/acp/transport.py",
-    "gideon/acp/connection_pool.py",
-    "gideon/llm/acp_agent.py",
-    "gideon/llm/acp_session_provider.py",
+    "gideon/integrations/acp/client.py",
+    "gideon/integrations/acp/session.py",
+    "gideon/integrations/acp/transport.py",
+    "gideon/integrations/acp/connection_pool.py",
+    "gideon/integrations/llm/acp_agent.py",
+    "gideon/integrations/llm/acp_session_provider.py",
 )
 
 
@@ -167,7 +167,7 @@ def test_the_agent_bind_path_resolves_the_workspace_through_the_contract():
     profile just to read one assignment back; the string this checks IS the seam.
     """
     src = Path(gideon.__file__).resolve().parent
-    handlers = src / "dashboard" / "chat_handlers.py"
+    handlers = src / "interfaces" / "dashboard" / "chat_handlers.py"
     assert (
         handlers.is_file()
     ), "chat_handlers.py moved — this rail no longer covers the bind path"
@@ -200,7 +200,7 @@ def test_no_acp_spawn_site_anchors_its_cwd_to_the_real_home():
     from a gateway or a test that set GIDEON_HOME precisely to prevent that."""
     src = Path(gideon.__file__).resolve().parent.parent
 
-    control = _home_call_lines(src / "gideon/config/loader.py")
+    control = _home_call_lines(src / "gideon/core/config/loader.py")
     assert (
         control
     ), "detector found no Path.home() call in config/loader.py — rail is vacuous"

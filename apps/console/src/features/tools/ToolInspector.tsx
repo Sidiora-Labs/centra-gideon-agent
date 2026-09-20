@@ -8,6 +8,8 @@ import { api, type ToolItem, type ToolInvokeResult } from '../../shared/data/api
 import { schemaProps, typeLabel, SchemaField, buildArgs, useArgs, type JsonSchema } from './schema'
 import { ToolOutput } from './ToolOutput'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
+import { Modal } from '../../shared/ui/Modal'
+import { hasApiCode } from '../../shared/data/api'
 
 export function ToolInspector({ tool, serverStatus }: { tool: ToolItem; serverStatus?: { state: string; detail?: string } }) {
   const { props, required } = schemaProps(tool.parameters)
@@ -59,6 +61,8 @@ function RunPanel({ tool }: { tool: ToolItem }) {
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<ToolInvokeResult | null>(null)
   const [formErr, setFormErr] = useState('')
+  const [typedName, setTypedName] = useState('')
+  const [escalated, setEscalated] = useState(false)
   const { props, required } = schemaProps(tool.parameters)
   const disabledReason = tool.providerDisabled
     ? 'Enable this provider to try its tools'
@@ -66,16 +70,26 @@ function RunPanel({ tool }: { tool: ToolItem }) {
       ? 'Enable this tool to try it'
       : ''
 
-  useEffect(() => { setOpen(false); setResult(null); setConfirming(false); setFormErr('') }, [tool.name, disabledReason])
+  useEffect(() => { setOpen(false); setResult(null); setConfirming(false); setFormErr(''); setTypedName(''); setEscalated(false) }, [tool.name, disabledReason])
+
+  const risk = escalated ? 'destructive' : (tool.risk_level ?? 'safe')
 
   async function run() {
     if (disabledReason) return
     const { args: built, error } = buildArgs(tool.parameters, args)
     if (error) { setFormErr(error); return }
     setFormErr(''); setRunning(true); setResult(null)
-    try { setResult(await api.invokeTool(tool.name, built, tool.provider)) }
-    catch (e) { setResult({ ok: false, error: e instanceof Error ? e.message : 'invoke failed' }) }
-    finally { setRunning(false); setConfirming(false) }
+    try {
+      setResult(await api.invokeTool(tool.name, built, tool.provider, risk === 'destructive' ? 'destructive' : undefined))
+      setConfirming(false)
+    } catch (e) {
+      if (hasApiCode(e, 'risk_confirmation_required')) {
+        setEscalated(true); setTypedName(''); setConfirming(true)
+      } else {
+        setResult({ ok: false, error: e instanceof Error ? e.message : 'invoke failed' })
+        setConfirming(false)
+      }
+    } finally { setRunning(false) }
   }
 
   return (
@@ -101,7 +115,7 @@ function RunPanel({ tool }: { tool: ToolItem }) {
 
           {!confirming ? (
             <Button size="sm" onClick={() => setConfirming(true)} disabled={running || !!disabledReason} disabledReason={disabledReason || BUSY_REASON}><Play size={15} /> Run tool</Button>
-          ) : (
+          ) : risk === 'safe' ? (
             <div className="rounded-md px-m py-2.5" style={{ background: 'color-mix(in srgb, var(--color-warn) 10%, transparent)' }}>
               <div data-type="label-s" className="flex items-center gap-1.5 text-warn mb-2" style={fvs(500)}><AlertTriangle size={14} /> This runs <span className="font-mono">{tool.name}</span> for real.</div>
               <div className="flex gap-s">
@@ -110,6 +124,27 @@ function RunPanel({ tool }: { tool: ToolItem }) {
                 <Button size="sm" variant="ghost" onClick={() => setConfirming(false)} disabled={running} disabledReason={BUSY_REASON}>Cancel</Button>
               </div>
             </div>
+          ) : null}
+
+          {confirming && risk !== 'safe' && (
+            <Modal title={risk === 'destructive' ? 'Confirm destructive tool' : 'Confirm tool run'} icon={<AlertTriangle size={18} />} onClose={() => !running && setConfirming(false)}>
+              <div className="flex flex-col gap-m">
+                <p data-type="body-s" className={risk === 'destructive' ? 'text-danger' : 'text-warn'}>
+                  This {risk} action runs <span className="font-mono">{tool.name}</span> for real.
+                </p>
+                {risk === 'destructive' && <label data-type="body-s" className="flex flex-col gap-s text-on-surface">
+                  Type <span className="font-mono">{tool.name}</span> to continue
+                  <input autoFocus value={typedName} onChange={(e) => setTypedName(e.target.value)} className="rounded-md border border-outline bg-surface px-m py-s" />
+                </label>}
+                <div className="flex gap-s">
+                  <Button size="sm" onClick={run} loading={running} loadingLabel="Running…"
+                    disabled={!!disabledReason || (risk === 'destructive' && typedName !== tool.name)} disabledReason={disabledReason || (typedName !== tool.name ? `Type ${tool.name} exactly` : undefined)}>
+                    <Check size={15} /> Confirm & run
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setConfirming(false)} disabled={running} disabledReason={BUSY_REASON}>Cancel</Button>
+                </div>
+              </div>
+            </Modal>
           )}
 
           {result && (

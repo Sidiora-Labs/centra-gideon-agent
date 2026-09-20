@@ -596,7 +596,7 @@ function MiniDag({ graph, phases }: { graph: import('../../shared/data/api').Kno
       <span className="inline-flex items-center gap-1" title={`${nt.replace(/_/g, ' ')}: ${ph}${loop ? ` (⟲ resamples up to ${loop.max}×)` : ''}`}>
         <span className="grid size-3.5 shrink-0 place-items-center rounded-full"
           style={{ border: `1.5px ${ph === 'pending' ? 'dashed' : 'solid'} ${c}`,
-                   background: ph === 'done' ? 'color-mix(in srgb, var(--color-success) 22%, transparent)' : 'transparent' }}>
+                    background: ph === 'done' ? 'color-mix(in srgb, var(--color-success) 22%, transparent)' : 'transparent' }}>
           {ph === 'running' && <Loader2 size={8} className="animate-spin" style={{ color: c }} />}
           {ph === 'done' && <Check size={8} strokeWidth={3} style={{ color: c }} />}
           {ph === 'failed' && <X size={8} style={{ color: c }} />}

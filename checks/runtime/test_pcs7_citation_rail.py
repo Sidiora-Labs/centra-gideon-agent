@@ -48,19 +48,55 @@ from gideon.operations.stats import cache_hit_pct
 SRC = Path(gideon.__file__).parent
 
 _CITATIONS = (
-    ("stats.py", 43, 44, "cache_read_tokens", "stats.py:43-44"),
-    ("llm/anthropic.py", 529, 531, "input_tokens = it", "llm/anthropic.py:529-531"),
-    ("llm/anthropic.py", 715, 717, "input_tokens = it", ":715-717"),
-    ("llm/anthropic.py", 84, 98, "cache_read_input_tokens", "llm/anthropic.py:84-98"),
-    ("pricing.py", 106, 113, "cache_read_rate", "pricing.py:106-113"),
-    ("usage_ledger.py", 197, 200, "cache_creation_tokens", "usage_ledger.py:197-200"),
-    ("pricing.py", 166, 168, "cache_creation_tokens", "pricing.py:166-168"),
+    ("operations/stats.py", 16, 17, "cache_read_tokens", "operations/stats.py:16-17"),
     (
-        "dashboard/chat_runner.py",
-        645,
-        646,
+        "integrations/llm/anthropic.py",
+        200,
+        209,
+        "setattr(self.usage, name, value)",
+        "integrations/llm/anthropic.py:200-209",
+    ),
+    (
+        "integrations/llm/anthropic.py",
+        40,
+        46,
+        "cache_read_input_tokens",
+        "integrations/llm/anthropic.py:40-46",
+    ),
+    (
+        "operations/pricing.py",
+        74,
+        84,
+        "charges[0] + charges[1] + charges[2] + charges[3]",
+        "operations/pricing.py:74-84",
+    ),
+    (
+        "operations/usage_ledger.py",
+        18,
+        23,
+        "cache_creation_tokens",
+        "operations/usage_ledger.py:18-23",
+    ),
+    (
+        "operations/usage_ledger.py",
+        172,
+        174,
+        "agg[key] += int(row.get(key, 0) or 0)",
+        "operations/usage_ledger.py:172-174",
+    ),
+    (
+        "operations/pricing.py",
+        119,
+        122,
+        "cache_creation_tokens",
+        "operations/pricing.py:119-122",
+    ),
+    (
+        "interfaces/dashboard/chat_runner.py",
+        608,
+        609,
         "context_pct is not None",
-        "dashboard/chat_runner.py:645-646",
+        "interfaces/dashboard/chat_runner.py:608-609",
     ),
 )
 
@@ -116,7 +152,7 @@ class TestTheCheckerDiscriminates:
     def test_the_checker_discriminates(self, tmp_path: Path) -> None:
         """Positive control: ``_range_contains`` must answer False on a wrong range."""
         assert not _range_contains(
-            "llm/anthropic.py", 84, 98, "context_pct is not None"
+            "integrations/llm/anthropic.py", 84, 98, "context_pct is not None"
         )
         (tmp_path / "m.py").write_text("a\nb\nTOKEN\n", encoding="utf-8")
         assert not _range_contains("m.py", 1, 2, "TOKEN", root=tmp_path)

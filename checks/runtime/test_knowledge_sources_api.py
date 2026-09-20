@@ -159,12 +159,15 @@ def _run(coro):
 def _call(handler, store, method, path, *, body=None, match_info=None):
     app = web.Application()
     app["state"] = SimpleNamespace(knowledge_store=store)
-    req = make_mocked_request(method, path, app=app, match_info=match_info or {})
-
-    async def _json():
-        return body or {}
-
-    req.json = _json  # type: ignore[method-assign]
+    raw = json.dumps(body).encode() if body is not None else b""
+    req = make_mocked_request(
+        method,
+        path,
+        headers={"Content-Type": "application/json"} if raw else None,
+        app=app,
+        match_info=match_info or {},
+    )
+    req._read_bytes = raw
     resp = _run(handler(req))
     return resp, json.loads(resp.body)
 
@@ -803,7 +806,11 @@ def test_update_source_on_a_missing_row_is_none_not_a_silent_insert(store):
 
 
 _WEB = (
-    Path(__file__).resolve().parents[2] / "apps/console" / "src" / "pages" / "knowledge"
+    Path(__file__).resolve().parents[2]
+    / "apps/console"
+    / "src"
+    / "features"
+    / "knowledge"
 )
 
 

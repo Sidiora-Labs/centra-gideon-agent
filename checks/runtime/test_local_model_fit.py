@@ -47,9 +47,10 @@ SMALL_HOST_RESERVE_GB = 3.0
 @pytest.fixture(autouse=True)
 def _no_leaked_gpu_probe():
     """Drop the cached GPU facts around every test — a probe result must not leak."""
-    fit.reset_gpu_probe_cache()
+    clear = fit._probe_gpu.cache_clear
+    clear()
     yield
-    fit.reset_gpu_probe_cache()
+    clear()
 
 
 def _usage(free_bytes: int) -> SimpleNamespace:

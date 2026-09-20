@@ -25,6 +25,7 @@ import logging
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.http_errors import json_error
 
 logger = logging.getLogger(__name__)
@@ -177,7 +178,7 @@ async def api_external_access_client(request: web.Request) -> web.Response:
         return web.json_response({"ok": True, "revoked": client_id})
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:  # noqa: BLE001
         body = {}
     if not isinstance(body, dict):
@@ -252,7 +253,7 @@ async def api_external_access_client_toggle(request: web.Request) -> web.Respons
 
     client_id = str(request.match_info.get("client_id", "") or "")
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:  # noqa: BLE001
         body = {}
     if not isinstance(body, dict) or not isinstance(body.get("disabled"), bool):

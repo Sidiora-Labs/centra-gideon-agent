@@ -35,13 +35,17 @@ const BASE_LANE: Record<InboxItemKind, Lane | null> = {
   user_note: 'your-turn',
 }
 
-const STATUS_OPEN: Record<InboxItemStatus, boolean> = {
+export const STATUS_OPEN: Record<InboxItemStatus, boolean> = {
   pending: true,
   seen: true,
   sent: false,
   handled: false,
   dismissed: false,
   filtered: false,
+}
+
+export function isOpenStatus(status: unknown): status is InboxItemStatus {
+  return typeof status === 'string' && STATUS_OPEN[status as InboxItemStatus] === true
 }
 
 export const KNOWN_KINDS = Object.keys(BASE_LANE) as InboxItemKind[]
@@ -74,9 +78,7 @@ export function laneFor(item: AttentionInput): Lane | null {
   if (!isKnownKind(kind)) return null
 
   const status = item.status
-  if (typeof status === 'string' && Object.prototype.hasOwnProperty.call(STATUS_OPEN, status)) {
-    if (!STATUS_OPEN[status as InboxItemStatus]) return null
-  }
+  if (!isOpenStatus(status)) return null
 
   const base = BASE_LANE[kind]
   if (base === null) return null

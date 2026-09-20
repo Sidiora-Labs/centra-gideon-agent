@@ -1,6 +1,6 @@
 """Rendering-engine registry guards (R6 of rendering-engine-architecture.md).
 
-The frontend ContentTypeRegistry (apps/console/src/ui/content/) is the ONE source of
+The frontend ContentTypeRegistry (apps/console/src/shared/ui/content/) is the ONE source of
 truth for how a content type renders/edits/sanitizes. Two cross-tier invariants
 keep it from forking again:
 
@@ -27,7 +27,7 @@ from gideon.workspace.artifacts.models import ALLOWED_KINDS
 
 _REPO = Path(__file__).resolve().parent.parent.parent
 _WEB = _REPO / "apps/console" / "src"
-_REGISTER = _WEB / "ui" / "content" / "registerBuiltins.ts"
+_REGISTER = _WEB / "shared" / "ui" / "content" / "registerBuiltins.ts"
 
 pytestmark = pytest.mark.skipif(not _WEB.exists(), reason="web sources not present")
 
@@ -62,7 +62,7 @@ def test_registry_kinds_match_backend_allowed_kinds():
     )
     assert not missing_in_registry, (
         f"backend ALLOWED_KINDS has kinds the FE registry doesn't render: {sorted(missing_in_registry)}. "  # noqa: E501
-        "Register them in apps/console/src/ui/content/registerBuiltins.ts (or remove from ALLOWED_KINDS)."
+        "Register them in apps/console/src/shared/ui/content/registerBuiltins.ts (or remove from ALLOWED_KINDS)."
     )
 
 
@@ -86,19 +86,19 @@ def test_no_kind_is_claimed_by_two_content_types():
         f"these artifact kinds are claimed by more than one content type: {duplicates}. "
         "resolveContentType returns the FIRST registered match, so the later type never "
         "renders and the shadowing is silent — give the kind to exactly one type in "
-        "apps/console/src/ui/content/registerBuiltins.ts."
+        "apps/console/src/shared/ui/content/registerBuiltins.ts."
     )
 
 
 _DISPATCH_ALLOWED = {
-    "ui/content/registerBuiltins.ts",
-    "ui/content/contentTypes.ts",
-    "ui/content/renderers.tsx",
-    "ui/content/sanitize.ts",
-    "ui/content/ContentSurface.tsx",
-    "ui/content/chatEmbeds.tsx",
-    "ui/content/InfographicView.tsx",
-    "ui/content/exporters.ts",
+    "shared/ui/content/registerBuiltins.ts",
+    "shared/ui/content/contentTypes.ts",
+    "shared/ui/content/renderers.tsx",
+    "shared/ui/content/sanitize.ts",
+    "shared/ui/content/ContentSurface.tsx",
+    "shared/ui/content/chatEmbeds.tsx",
+    "shared/ui/content/InfographicView.tsx",
+    "shared/ui/content/exporters.ts",
 }
 
 _FORBIDDEN_DECL = re.compile(r"\b(IFRAME_KINDS|EDITABLE_KINDS)\b\s*=")
@@ -124,7 +124,7 @@ def test_no_raw_html_injection_outside_registry():
     """`dangerouslySetInnerHTML` is allowed only in the registry's renderers (where
     content is sanitized) + the markdown/code highlighters (hljs-escaped output).
     A new one elsewhere is a sanitizer-bypass risk — route it through the registry."""
-    hljs_ok = {"ui/Markdown.tsx", "pages/skills/SkillInspector.tsx"}
+    hljs_ok = {"shared/ui/Markdown.tsx", "features/skills/SkillInspector.tsx"}
     allowed = _DISPATCH_ALLOWED | hljs_ok
     offenders = []
     for p in _web_sources():

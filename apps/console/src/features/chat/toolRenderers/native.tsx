@@ -8,16 +8,16 @@ import {
 import { Markdown } from '../../../shared/ui/Markdown'
 import { fvs } from '../../../shared/theme/fontWeight'
 import type { ToolSegment } from '../chatTypes'
-import { RawBlock, resolveInputObj } from './primitives'
+import { RawBlock, inputOf } from './primitives'
 import type { ToolRenderer } from './registry'
 
 const asObj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {})
 const str = (v: unknown): string => (v == null ? '' : String(v))
-const inputOf = (seg: ToolSegment): Record<string, unknown> => resolveInputObj(seg) ?? {}
+const resolvedInput = (seg: ToolSegment): Record<string, unknown> => inputOf(seg) ?? {}
 
 
 function editFileInput(seg: ToolSegment): ReactNode {
-  const o = inputOf(seg)
+  const o = resolvedInput(seg)
   const path = str(o.path)
   const oldStr = str(o.old_str)
   const newStr = str(o.new_str)
@@ -26,22 +26,21 @@ function editFileInput(seg: ToolSegment): ReactNode {
   return (
     <div className="mb-1.5">
       <div data-type="caption" className="mb-1 flex items-center gap-1.5 text-on-surface-low"><FilePen size={12} /> <span className="font-mono">{path}</span>{o.replace_all ? <span className="rounded bg-surface-high px-1 py-0.5">replace all</span> : null}</div>
-      <RawBlock label="Change"><Markdown>{`\`\`\`diff\n${diff}\n\`\`\``}</Markdown></RawBlock>
+      <RawBlock label={nativeRendererForTool(seg.tool)?.inputLabel ?? 'Input'}><Markdown>{`\`\`\`diff\n${diff}\n\`\`\``}</Markdown></RawBlock>
     </div>
   )
 }
 
 const PRIMARY_INPUT_KEYS = ['path', 'pattern', 'query', 'command', 'url'] as const
 
-function pathChipInput(label: string) {
-  return (seg: ToolSegment): ReactNode => {
-    const o = inputOf(seg)
+function pathChipInput(seg: ToolSegment): ReactNode {
+    const o = resolvedInput(seg)
     const primary = str(PRIMARY_INPUT_KEYS.map((k) => o[k]).find((v) => v != null && v !== ''))
     if (!primary) return undefined as unknown as ReactNode
     const rest = Object.entries(o).filter(([k]) => !(PRIMARY_INPUT_KEYS as readonly string[]).includes(k))
     return (
       <div className="mb-1.5">
-        <div data-type="caption" className="mb-0.5 text-on-surface-low uppercase tracking-wide">{label}</div>
+        <div data-type="caption" className="mb-0.5 text-on-surface-low uppercase tracking-wide">{nativeRendererForTool(seg.tool)?.inputLabel}</div>
         <code data-type="caption" className="block rounded-md bg-surface-low px-2 py-1.5 font-mono text-on-surface break-words">{primary}</code>
         {rest.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1.5">
@@ -50,7 +49,6 @@ function pathChipInput(label: string) {
         )}
       </div>
     )
-  }
 }
 
 
@@ -109,7 +107,7 @@ function searchResultsOutput(seg: ToolSegment): ReactNode {
 function webFetchOutput(seg: ToolSegment): ReactNode {
   const text = (seg.output ?? '').trim()
   if (!text || text.startsWith('{') || text.startsWith('[')) return undefined as unknown as ReactNode
-  const url = str(inputOf(seg).url)
+  const url = str(resolvedInput(seg).url)
   return (
     <RawBlock label="Fetched page">
       {url && <div data-type="caption" className="mb-1 truncate text-primary">{url}</div>}
@@ -171,21 +169,6 @@ function runStatusOutput(seg: ToolSegment): ReactNode {
   )
 }
 
-export const NATIVE_RENDERERS: ToolRenderer[] = [
-  { match: (n) => n === 'edit_file', input: editFileInput },
-  { match: (n) => n === 'read_file', input: pathChipInput('File') },
-  { match: (n) => n === 'write_file', input: pathChipInput('File') },
-  { match: (n) => n === 'glob' || n === 'list_dir', input: pathChipInput('Pattern'), output: hitListOutput },
-  { match: (n) => n === 'grep', input: pathChipInput('Query'), output: hitListOutput },
-  { match: (n) => n === 'bash', input: pathChipInput('Command'), output: diffOutput },
-  { match: (n) => n === 'knowledge_search', output: searchResultsOutput },
-  { match: (n) => n === 'web_search' || n === 'web', output: searchResultsOutput },
-  { match: (n) => n === 'web_fetch', input: pathChipInput('URL'), output: webFetchOutput },
-  { match: (n) => n === 'task_create' || n === 'task_update', output: taskChipOutput },
-  { match: (n) => n.startsWith('memory_'), output: memoryChipOutput },
-  { match: (n) => n === 'project_run_create' || n === 'project_run_status', output: runStatusOutput },
-]
-
 function bareName(name: string): string {
   if (!name.startsWith('mcp__')) return name.toLowerCase()
   const parts = name.split('__').filter(Boolean)
@@ -193,19 +176,45 @@ function bareName(name: string): string {
 }
 
 
-const ICON_BY_NAME: Record<string, LucideIcon> = {
-  read_file: FileText, write_file: FilePlus, edit_file: FilePen,
-  list_dir: List, glob: Search, grep: Search, repo_map: FolderInput,
-  bash: Terminal,
-  knowledge_search: BookOpen, knowledge_create: BookOpen, knowledge_get: BookOpen,
-  knowledge_update: BookOpen, knowledge_stats: BookOpen,
-  task_create: ListChecks, task_get: ListChecks, task_list: ListChecks,
-  task_update: ListChecks, task_search: ListChecks, task_ready: ListChecks,
-  task_list_create: ListChecks, project_create: FolderInput, project_list: FolderInput,
-  project_run_create: Bot, project_run_start: Bot, project_run_status: ListChecks,
-  project_run_list: ListChecks,
-  web_search: Globe, web_fetch: Globe, memory_recall: Brain, memory_remember: Brain,
-  tool_result_get: FileText, post_to_inbox: MessageSquare,
+type NativeTool = ToolRenderer & { icon: LucideIcon }
+
+export const NATIVE_TOOL_REGISTRY: Record<string, NativeTool> = {
+  read_file: { label: 'Read', icon: FileText, inputLabel: 'File', input: pathChipInput },
+  write_file: { label: 'Write', icon: FilePlus, inputLabel: 'File', input: pathChipInput },
+  edit_file: { label: 'Edit', icon: FilePen, inputLabel: 'Change', input: editFileInput },
+  list_dir: { label: 'List', icon: List, inputLabel: 'Pattern', input: pathChipInput, output: hitListOutput },
+  glob: { label: 'Find files', icon: Search, inputLabel: 'Pattern', input: pathChipInput, output: hitListOutput },
+  grep: { label: 'Search code', icon: Search, inputLabel: 'Query', input: pathChipInput, output: hitListOutput },
+  repo_map: { label: 'Map repo', icon: FolderInput },
+  bash: { label: 'Run command', icon: Terminal, inputLabel: 'Command', input: pathChipInput, output: diffOutput },
+  knowledge_search: { label: 'Search Knowledge', icon: BookOpen, output: searchResultsOutput },
+  knowledge_create: { label: 'Add Knowledge', icon: BookOpen },
+  knowledge_get: { label: 'Get Knowledge', icon: BookOpen },
+  knowledge_update: { label: 'Update Knowledge', icon: BookOpen },
+  knowledge_stats: { label: 'Knowledge stats', icon: BookOpen },
+  task_create: { label: 'Create task', icon: ListChecks, output: taskChipOutput },
+  task_get: { label: 'Get task', icon: ListChecks }, task_list: { label: 'List tasks', icon: ListChecks },
+  task_update: { label: 'Update task', icon: ListChecks, output: taskChipOutput },
+  task_search: { label: 'Search tasks', icon: ListChecks }, task_ready: { label: 'Ready tasks', icon: ListChecks },
+  task_list_create: { label: 'Create task list', icon: ListChecks },
+  project_create: { label: 'Create project', icon: FolderInput }, project_list: { label: 'List projects', icon: FolderInput },
+  project_run_create: { label: 'Create project run', icon: Bot, output: runStatusOutput },
+  project_run_start: { label: 'Start project run', icon: Bot },
+  project_run_status: { label: 'Project status', icon: ListChecks, output: runStatusOutput },
+  project_run_list: { label: 'List project runs', icon: ListChecks },
+  web_search: { label: 'Web search', icon: Globe, output: searchResultsOutput },
+  web: { label: 'Web', icon: Globe, output: searchResultsOutput },
+  web_fetch: { label: 'Fetch page', icon: Globe, inputLabel: 'URL', input: pathChipInput, output: webFetchOutput },
+  memory_recall: { label: 'Recall', icon: Brain, output: memoryChipOutput },
+  memory_remember: { label: 'Remember', icon: Brain, output: memoryChipOutput },
+  tool_result_get: { label: 'Fetch full result', icon: FileText }, post_to_inbox: { label: 'Notify', icon: MessageSquare },
+}
+
+export function nativeRendererForTool(tool: string): NativeTool | undefined {
+  const name = bareName(tool || '')
+  return NATIVE_TOOL_REGISTRY[name] ?? (name.startsWith('memory_')
+    ? { label: humanize(name), icon: Brain, output: memoryChipOutput }
+    : undefined)
 }
 
 const _BY_KIND: Record<string, LucideIcon> = {
@@ -215,7 +224,8 @@ const _BY_KIND: Record<string, LucideIcon> = {
 
 export function iconForTool(seg: ToolSegment): LucideIcon {
   const name = bareName(seg.tool || '')
-  if (ICON_BY_NAME[name]) return ICON_BY_NAME[name]
+  const native = nativeRendererForTool(name)
+  if (native) return native.icon
   if (seg.toolKind && _BY_KIND[seg.toolKind]) return _BY_KIND[seg.toolKind]
   if (/terminal|bash|shell|exec|command|run/.test(name)) return Terminal
   if (/edit|write|patch|create|str_?replace/.test(name)) return FilePen
@@ -232,26 +242,9 @@ export function iconForTool(seg: ToolSegment): LucideIcon {
   return Wrench
 }
 
-const LABEL_BY_NAME: Record<string, string> = {
-  read_file: 'Read', write_file: 'Write', edit_file: 'Edit', list_dir: 'List',
-  glob: 'Find files', grep: 'Search code', repo_map: 'Map repo',
-  bash: 'Run command',
-  knowledge_search: 'Search Knowledge', knowledge_create: 'Add Knowledge',
-  knowledge_get: 'Get Knowledge', knowledge_update: 'Update Knowledge',
-  knowledge_stats: 'Knowledge stats',
-  task_create: 'Create task', task_get: 'Get task', task_list: 'List tasks',
-  task_update: 'Update task', task_search: 'Search tasks', task_ready: 'Ready tasks',
-  task_list_create: 'Create task list', project_create: 'Create project',
-  project_list: 'List projects',
-  project_run_create: 'Create project run', project_run_start: 'Start project run',
-  project_run_status: 'Project status', project_run_list: 'List project runs',
-  web_search: 'Web search', web_fetch: 'Fetch page', memory_recall: 'Recall',
-  memory_remember: 'Remember', tool_result_get: 'Fetch full result',
-  post_to_inbox: 'Notify',
-}
 export function labelForTool(seg: ToolSegment): string {
   const raw = seg.tool || ''
-  const known = LABEL_BY_NAME[bareName(raw)]
+  const known = nativeRendererForTool(raw)?.label
   if (known) return known
   return humanize(bareName(raw)) || 'Tool'
 }

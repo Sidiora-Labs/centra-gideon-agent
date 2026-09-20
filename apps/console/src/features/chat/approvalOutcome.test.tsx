@@ -20,6 +20,8 @@ function paintSettled(resolved: string): { icon: string | null; text: string } {
 const CASES: { resolved: ApprovalResolution; approved: boolean; says: string }[] = [
   { resolved: 'approved', approved: true, says: 'approved' },
   { resolved: 'trust', approved: true, says: 'this chat' },
+  { resolved: 'trust_agent', approved: true, says: 'this agent' },
+  { resolved: 'trust_agent_session', approved: true, says: 'this chat' },
   { resolved: 'trust_reads', approved: true, says: 'reads' },
   { resolved: 'yolo', approved: true, says: 'YOLO' },
   { resolved: 'rejected', approved: false, says: 'denied' },
@@ -81,7 +83,7 @@ describe('ApprovalCard settled line', () => {
   it('still renders the actionable picker while PENDING', () => {
     const { container } = render(<ApprovalCard seg={{ kind: 'approval', id: 'a1', tool: 'Terminal' }} onAct={() => {}} />)
     const labels = [...container.querySelectorAll('button')].map((b) => b.textContent?.trim())
-    expect(labels).toEqual(['Just this once', 'This chat', 'This agent', 'Allow', 'Deny'])
+    expect(labels).toEqual(['Just this once', 'This chat', 'Allow', 'Deny'])
   })
 })
 

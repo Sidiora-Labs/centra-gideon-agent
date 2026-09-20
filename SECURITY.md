@@ -65,7 +65,9 @@ granting, so use it on purpose and turn it off when you are done.
 
 Review application permissions and provider configuration before you enable an
 integration, and check what isolation your platform actually gives you before you rely on
-it.
+it. Application UI runs in Gideon's host origin: its frontend code can access the host
+DOM, session cookie, and same-origin APIs. The UI disclosure is advisory; app-scoped API
+permissions do not sandbox the bundle.
 
 ## If you think you are compromised
 

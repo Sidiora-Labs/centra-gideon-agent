@@ -4,10 +4,14 @@
 # Publication destinations are configured by the operator; no release registry
 # or hosted install endpoint is assumed. The installer is POSIX sh and keeps
 # execution inside main so an incomplete download cannot execute a partial body.
+# ci.yml `lint` checks syntax, shellcheck and the offline installer contract.
+# full.yml `install-smoke` runs only when the operator configures both sources.
 
 set -eu
 
 GIDEON_PACKAGE="${GIDEON_PACKAGE_SOURCE:-}"
+GIDEON_DISTRIBUTION="gideon-agent-harness"
+GIDEON_MIN_VERSION="0.1.2"
 UV_INSTALLER_URL="https://astral.sh/uv/install.sh"
 
                                                                                
@@ -74,6 +78,10 @@ ensure_uv() {
                                                                                            
                                                                         
                                      
+    # The uv bootstrap script is fetched over TLS but these piped bytes are unverified.
+    # Its later binary checks do not verify the script we execute here. Preinstall uv
+    # from a trusted source to avoid this bootstrap. See "Verify the one-liner" in
+    # docs/guides/GETTING_STARTED.md for Gideon script verification and its limits.
     if have curl; then
         curl -fsSL "$UV_INSTALLER_URL" | sh
     elif have wget; then
@@ -111,7 +119,12 @@ install_gideon() {
     step "Installing Gideon from $GIDEON_PACKAGE with uv…"
     # An explicit source avoids installing an unrelated package with a similar name.
     # Versioned release specifications are supplied by the configured publisher.
-    uv tool install --upgrade "$GIDEON_PACKAGE"
+    constraints=$(mktemp)
+    trap 'rm -f "$constraints"' 0
+    printf '%s>=%s\n' "$GIDEON_DISTRIBUTION" "$GIDEON_MIN_VERSION" > "$constraints"
+    uv tool install --upgrade --constraints "$constraints" "$GIDEON_PACKAGE"
+    rm -f "$constraints"
+    trap - 0
     have gideon || {
         warn "gideon installed but not yet on PATH."
         warn "Run 'uv tool update-shell' (or open a new shell), then 'gideon setup'."

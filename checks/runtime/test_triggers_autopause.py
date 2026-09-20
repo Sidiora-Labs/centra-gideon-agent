@@ -454,9 +454,9 @@ def test_the_fire_path_PASSES_the_per_trigger_budget():
     """The wiring — the defect was a missing argument, which source inspection sees exactly."""
     import inspect
 
-    from gideon.engine import gateway
+    from gideon.engine import trigger_outcomes
 
-    assert "budget=autopause.budget_for(trigger)" in inspect.getsource(gateway)
+    assert "budget=autopause.budget_for(trigger)" in inspect.getsource(trigger_outcomes)
 
 
 def test_the_reason_string_reports_the_REAL_budget():

@@ -1,5 +1,6 @@
 import { errText } from './errText'
 import { gatewayHeaders as SK, gatewayRequest, requestJson, requestDelete, readJson as j, responseError as apiError } from './gatewayRequest'
+import { emitTaskListCreated } from './taskListCount'
 export { ApiError, hasApiCode } from './gatewayRequest'
 
 const get = <T>(path: string) => requestJson<T>(path)
@@ -586,6 +587,8 @@ export interface AppCatalogEntry {
   pointer?: string
   permissions?: AppPermissionsWire
   crons?: AppCronSummary[]
+  hasUI?: boolean
+  uiComponents?: string
   quality?: AppQualityWire
 }
 export interface AppCatalog {
@@ -784,6 +787,7 @@ export interface ScheduleJob {
   has_result?: boolean; last_result?: string | null; last_error?: string | null
   is_running?: boolean; running_since?: number | null; has_session?: boolean
   broken?: string[]
+  warnings?: string[]
 }
 export interface ScheduleRun {
   id?: string
@@ -1412,7 +1416,7 @@ export interface Trigger {
   pattern?: string; sender_glob?: string; address_glob?: string; key_glob?: string; content_re?: string
   event_glob?: string; fire_count?: number; max_fires?: number
   store_kind?: string; created_by?: string; spec?: Record<string, unknown>
-  health?: string; state?: string; broken?: string[]
+  health?: string; state?: string; broken?: string[]; warnings?: string[]
   author?: string; read_only?: boolean
   message?: string; schedule?: string; cron_expr?: string | null; every_secs?: number | null
   agent?: string | null; model?: string | null; channel?: string | null; approval_mode?: string | null
@@ -2181,7 +2185,7 @@ export interface InboxStatus {
   enabled: boolean; user_id?: string
   native_source_active?: boolean; sources?: InboxSourceHealth[]
   watched_channels?: Array<{ id: string; name: string }>
-  pending_count: number; total_count: number; health: InboxHealth
+  open_count: number; total_count: number; health: InboxHealth
   poll_interval_seconds?: number
   owner?: string
   shared?: boolean
@@ -3042,6 +3046,7 @@ export interface CodeStage {
 }
 export interface CodeFinding {
   cycle: number; summary?: string; key_insight?: string; stage?: string
+  stage_label?: string
   task_id?: string
   evidence?: unknown; ts?: number
   files_touched?: string[]
@@ -3463,6 +3468,8 @@ export interface InstalledPackRec {
   installed_at: string
   pack_owned?: string[]
   component_locks?: Record<string, { source: string; computedHash: string; path: string }>
+  roster?: Array<{ slug?: string; target?: string; tier?: string }>
+  staged_triggers: string[]
 }
 
 export interface BundledPackRec {
@@ -3580,6 +3587,7 @@ export const api = {
     ),
   rejectRoutingProposal: (id: string) => del(`/api/models/routing-proposals/${encodeURIComponent(id)}`),
   gideonConfig: () => get<Record<string, any>>('/api/config/gideon'),
+  settingsConfig: () => get<{ sections: { id: string; label: string; path: string; field_label: string; value: boolean }[] }>('/api/config/settings'),
   patchConfig: (path: string, value: unknown) => patch<Record<string, any>>('/api/config/gideon', { path, value }),
 
   companionDiscovery: () => get<CompanionDiscovery>('/api/companion/discovery'),
@@ -3596,6 +3604,8 @@ export const api = {
   packProposals: (projectId?: string) => get<{ proposals: PackProposalRec[] }>(`/api/packs/proposals${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`).then((d) => d.proposals),
   packRejectProposal: (projectId: string, pack: string) => post<{ ok: boolean }>('/api/packs/proposals/reject', { project_id: projectId, pack }),
   packUpdate: (name: string, confirm = false) => post<{ ok: boolean; update: PackUpdateRec }>(`/api/packs/${encodeURIComponent(name)}/update`, { confirm }),
+  packRosterDeploy: (name: string) => post<{ ok: boolean; pack: string; deployed: string[]; dormant: string[]; missing: string[] }>(`/api/packs/${encodeURIComponent(name)}/roster/deploy`, {}),
+  packTriggersDeploy: (name: string) => post<{ ok: boolean; pack: string; deployed: string[]; skipped: Array<{ file: string; id?: string; reason: string }> }>(`/api/packs/${encodeURIComponent(name)}/triggers/deploy`, {}),
 
   authSession: () => get<{
     login_enabled: boolean
@@ -4201,7 +4211,7 @@ export const api = {
     }),
   pushRelayUnregister: (device_id: string) =>
     post<{ ok: boolean }>('/api/push/relay-unregister', { device_id }),
-  inboxPending: () => get<InboxItem[]>('/api/inbox/pending'),
+  inboxOpen: () => get<InboxItem[]>('/api/inbox/open'),
   triggersHistory: (limit = 20, offset = 0) =>
     get<{
       runs: ScheduleRun[]; total: number; schedule_total?: number; kinds?: string[]
@@ -4262,15 +4272,29 @@ export const api = {
   scheduleRunDetail: (id: string, runId: string) => get<{ run: ScheduleRun }>(`/api/triggers/schedule:${encodeURIComponent(id)}/history/${encodeURIComponent(runId)}`).then((d) => d.run),
   triggerVariables: () => get<TriggerVariables>('/api/triggers/variables'),
 
-  tasks: (opts: { project?: string; task_list?: string; status?: string; limit?: number; mine?: boolean } = {}) => {
+  tasks: (opts: { project?: string; task_list?: string; status?: string; limit?: number; offset?: number; mine?: boolean } = {}) => {
     const qs = new URLSearchParams()
     if (opts.project) qs.set('project', opts.project)
     if (opts.task_list) qs.set('task_list', opts.task_list)
     if (opts.status) qs.set('status', opts.status)
     if (opts.limit) qs.set('limit', String(opts.limit))
+    if (opts.offset) qs.set('offset', String(opts.offset))
     if (opts.mine) qs.set('mine', '1')
     const s = qs.toString()
     return get<{ tasks: TaskItem[]; total: number; owner?: string }>(`/api/tasks${s ? `?${s}` : ''}`)
+  },
+  allTasks: async (opts: { project?: string; task_list?: string; status?: string; mine?: boolean } = {}) => {
+    const tasks: TaskItem[] = []
+    let owner: string | undefined
+    let total = 0
+    do {
+      const page = await api.tasks({ ...opts, limit: 500, offset: tasks.length })
+      tasks.push(...page.tasks)
+      owner ??= page.owner
+      total = page.total
+      if (!page.tasks.length) break
+    } while (tasks.length < total)
+    return { tasks, total, owner }
   },
   task: (id: string, provider?: string) => get<TaskItem>(`/api/tasks/${encodeURIComponent(id)}${provider ? `?provider=${encodeURIComponent(provider)}` : ''}`),
   taskGraph: (provider?: string) => get<TaskGraphData>(`/api/tasks/graph${provider ? `?provider=${encodeURIComponent(provider)}` : ''}`),
@@ -4304,7 +4328,10 @@ export const api = {
     post<{ ok: boolean; written: string[]; errors: { file: string; error: string }[]; workspace_dir: string }>(
       `/api/projects/${encodeURIComponent(id)}/context-adapters/regenerate`, {}),
   taskLists: (projectId?: string) => get<{ task_lists: TaskListItem[] }>(`/api/task-lists${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`).then((d) => d.task_lists),
-  createTaskList: (body: Record<string, unknown>) => post<TaskListItem>('/api/task-lists', body),
+  createTaskList: (body: Record<string, unknown>) => post<TaskListItem>('/api/task-lists', body).then((list) => {
+    emitTaskListCreated(list.project_id)
+    return list
+  }),
   updateTaskList: (id: string, body: Record<string, unknown>) => put<TaskListItem>(`/api/task-lists/${encodeURIComponent(id)}`, body),
   deleteTaskList: (id: string) => del(`/api/task-lists/${encodeURIComponent(id)}`),
   resetTaskList: (id: string) => post<{ ok: boolean; reset_task_ids: string[] }>(`/api/task-lists/${encodeURIComponent(id)}/reset`, { confirm: true }),
@@ -4415,8 +4442,8 @@ export const api = {
   toolsIndex: () => get<{
     tools: ToolItem[]; load_failures?: ToolLoadFailure[]
   }>('/api/tools'),
-  invokeTool: (tool: string, args: Record<string, unknown>, provider?: string) =>
-    post<ToolInvokeResult>('/api/tools/invoke', { tool, arguments: args, provider }),
+  invokeTool: (tool: string, args: Record<string, unknown>, provider?: string, confirmRisk?: 'destructive') =>
+    post<ToolInvokeResult>('/api/tools/invoke', { tool, arguments: args, provider, confirm_risk: confirmRisk }),
   mcpServers: () => get<McpServer[]>('/api/mcp'),
   toggleMcpServer: (name: string, enabled: boolean) => post('/api/mcp/toggle', { name, enabled }),
   toggleMcpTool: (server: string, tool: string, enabled: boolean) => post('/api/mcp/toggle-tool', { server, tool, enabled }),
@@ -4443,7 +4470,7 @@ export const api = {
 
   createTerminal: (cwd?: string, sandbox?: string) => post<{ session_id: string; shell: string; cwd: string; sandbox: string }>('/api/terminal/sessions', { ...(cwd ? { cwd } : {}), ...(sandbox ? { sandbox } : {}) }),
   sandboxProviders: () => get<{ providers: Array<{ name: string; display_name: string; available: boolean }> }>('/api/sandbox/providers'),
-  terminalSessions: () => get<{ enabled?: boolean; sessions: Array<{ session_id: string; pid?: number; alive?: boolean; cols?: number; rows?: number; connected?: boolean; cwd: string; shell: string; label?: string }> }>('/api/terminal/sessions'),
+  terminalSessions: () => get<{ enabled?: boolean; persist_available?: boolean; sessions: Array<{ session_id: string; pid?: number; alive?: boolean; cols?: number; rows?: number; connected?: boolean; cwd: string; shell: string; label?: string }> }>('/api/terminal/sessions'),
   deleteTerminal: (id: string) => del(`/api/terminal/sessions/${encodeURIComponent(id)}`),
 
   hooks: () => get<{ triggers: Trigger[] }>('/api/triggers?type=lifecycle').then((d) => d.triggers.map(_triggerToHook)),
@@ -4549,6 +4576,8 @@ export const api = {
   knowledgeIntents: () => get<{ intents: KnowledgeIntent[] }>('/api/knowledge/intents'),
   upsertKnowledgeIntent: (body: Omit<KnowledgeIntent, 'id'> & { id?: string }) =>
     post<{ intents: KnowledgeIntent[]; id: string }>('/api/knowledge/intents', body),
+  updateKnowledgeIntent: (id: string, body: Pick<KnowledgeIntent, 'enabled'> | Pick<KnowledgeIntent, 'propose_skill'>) =>
+    patch<{ intent: KnowledgeIntent }>(`/api/knowledge/intents/${encodeURIComponent(id)}`, body),
   deleteKnowledgeIntent: (id: string) => del(`/api/knowledge/intents/${encodeURIComponent(id)}`),
   knowledgeIntentOutcomes: (id: string) =>
     get<{ intent: KnowledgeIntent; outcomes: IntentOutcome[] }>(`/api/knowledge/intents/${encodeURIComponent(id)}/outcomes`),
@@ -4725,7 +4754,7 @@ export const api = {
   notificationSettings: () => get<{ settings: NotificationSettings }>('/api/notifications/settings').then((d) => d.settings),
   saveNotificationSettings: (s: Partial<NotificationSettings>) => put<{ settings: NotificationSettings }>('/api/notifications/settings', s),
   notificationRules: () => get<NotificationRulesDoc>('/api/notifications/rules'),
-  saveNotificationRules: (body: { rules?: Record<string, NotificationRulePatch>; digest?: { schedule?: string } }) =>
+  saveNotificationRules: (body: { rules?: Record<string, NotificationRulePatch | null>; digest?: { schedule?: string } }) =>
     put<NotificationRulesDoc & { ok: boolean }>('/api/notifications/rules', body),
   proactiveDigest: () => get<TriageDigestView>('/api/proactive/digest'),
   proactiveReply: (runId: string, text: string) =>

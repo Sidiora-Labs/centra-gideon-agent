@@ -1,7 +1,7 @@
 import { useCallback, useId, useRef, type ReactNode, type Ref, type KeyboardEvent } from 'react'
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
+import { AnimatePresence, motion } from 'framer-motion'
 import { Search, X } from 'lucide-react'
-import { physics } from '../theme/motion'
+import { physics, useReducedMotion } from '../theme/motion'
 import { cx } from './cx'
 
 type SearchSize = 'sm' | 'md' | 'lg'

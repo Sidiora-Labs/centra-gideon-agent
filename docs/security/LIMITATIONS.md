@@ -103,6 +103,18 @@ scan, consent, install, with `dangerous` terminal) is the control that vets them
 What an app cannot do is silently change the version of a library the gateway
 depends on.
 
+## 4. App UI runs in the host origin
+
+An app's frontend bundle is loaded into Gideon's page, not into a separate
+security origin. It can access the host DOM, the session cookie, and same-origin
+gateway APIs. `createAppApi` checks declared paths for well-behaved SDK clients,
+but it does not contain arbitrary bundle code; server permission middleware
+only narrows requests that carry an app-scoped identity.
+
+**What this means for you:** UI access is an advisory install disclosure, not a
+sandbox guarantee. Install UI-bearing apps only when you trust their frontend
+code with the same browser authority as Gideon's own page.
+
 ## Why these are listed, not fixed
 
 Per the project's lifecycle discipline, a control gap discovered while writing

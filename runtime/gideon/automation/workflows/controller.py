@@ -50,10 +50,7 @@ from gideon.automation.workflows import (
     conditions,
 )
 from gideon.automation.workflows import context as context_mod
-from gideon.automation.workflows import (
-    execution_hints,
-    gate_policy,
-)
+from gideon.automation.workflows import execution_hints, gate_policy
 from gideon.automation.workflows import journal as journal_mod
 from gideon.automation.workflows import (
     judge_calibration,
@@ -162,6 +159,13 @@ _LOOP_MARKER_RE = re.compile(r"@(\d+)")
 TICK_WAKE_SECS = 5.0
 
 ESCALATION_ANSWER_HORIZON_SECS = 24 * 3600.0
+
+_DECLARED_INPUT_TYPES = {
+    "string": lambda value: isinstance(value, str),
+    "object": lambda value: isinstance(value, dict),
+    "number": lambda value: isinstance(value, (int, float))
+    and not isinstance(value, bool),
+}
 
 _ROOT_TO_RUN = {
     InstanceState.DONE: RunStatus.COMPLETE,
@@ -2373,6 +2377,10 @@ class RunController:
         total = self.services.node_timeout_total
         node = self._with_retry_hint(item)
         node = self._with_carried_context(node, item)
+        if node.kind in (NodeKind.STAGE, NodeKind.INFER):
+            failure = self._declared_input_failure()
+            if failure is not None:
+                return NodeResult(state=InstanceState.FAILED, failure=failure)
         allowed = scope_allowed(node.config or {}, self.services.cwd)
         watched = scope_watch_roots(node.config or {}, self.services.cwd)
         before = scope_snapshot(watched) if enforces_scope(node.config or {}) else None
@@ -2420,6 +2428,45 @@ class RunController:
         if before is not None:
             result = self._check_write_scope(node, result, before, allowed, watched)
         return self._check_success_when(node, result, ctx)
+
+    def _declared_input_failure(self) -> Failure | None:
+        declared = self.spec.get("inputs")
+        if not isinstance(declared, dict):
+            return None
+        for name, metadata in declared.items():
+            if not isinstance(metadata, dict):
+                continue
+            declared_type = str(metadata.get("type", "") or "").strip().lower()
+            accepts = _DECLARED_INPUT_TYPES.get(declared_type)
+            if accepts is None or name not in self.run.inputs:
+                continue
+            value = self.run.inputs[name]
+            if accepts(value):
+                continue
+            actual_type = (
+                "object"
+                if isinstance(value, dict)
+                else (
+                    "boolean"
+                    if isinstance(value, bool)
+                    else (
+                        "number"
+                        if isinstance(value, (int, float))
+                        else (
+                            "string" if isinstance(value, str) else type(value).__name__
+                        )
+                    )
+                )
+            )
+            return Failure(
+                failure_class=FailureClass.USER,
+                cause_plain=(
+                    f"workflow input {str(name)!r} declares type {declared_type!r} "
+                    f"but received {actual_type!r}"
+                ),
+                remediation=f"provide {str(name)!r} as a {declared_type}",
+            )
+        return None
 
     def _check_success_when(
         self, node: Node, result: NodeResult, ctx: BindingContext

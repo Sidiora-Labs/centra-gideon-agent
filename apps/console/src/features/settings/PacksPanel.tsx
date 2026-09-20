@@ -316,6 +316,32 @@ export function PackRow({ pack }: { pack: InstalledPackRec }) {
       notify(`Couldn't start setup: ${String((e as Error)?.message || e)}`, 'error')
     }).finally(() => setBusy(false))
   }
+  const deployTriggers = () => {
+    setBusy(true)
+    api.packTriggersDeploy(pack.name).then((r) => {
+      notify(
+        r.skipped.length
+          ? `${r.deployed.length} trigger${r.deployed.length === 1 ? '' : 's'} added disabled; ${r.skipped.length} skipped.`
+          : `${r.deployed.length} trigger${r.deployed.length === 1 ? '' : 's'} added to Automations, disabled until you arm them.`,
+        r.skipped.length ? 'info' : 'success',
+      )
+    }).catch((e) => notify(`Couldn't add triggers: ${String((e as Error)?.message || e)}`, 'error'))
+      .finally(() => setBusy(false))
+  }
+  const deployRoster = () => {
+    setBusy(true)
+    Promise.all([
+      api.packRosterDeploy(pack.name),
+      pack.staged_triggers?.length ? api.packTriggersDeploy(pack.name) : Promise.resolve(null),
+    ]).then(([roster, triggers]) => {
+      const triggerCount = triggers?.deployed.length ?? 0
+      notify(
+        `${roster.deployed.length} roster member${roster.deployed.length === 1 ? '' : 's'} deployed with ${triggerCount} disabled trigger${triggerCount === 1 ? '' : 's'}.`,
+        roster.missing.length || triggers?.skipped.length ? 'info' : 'success',
+      )
+    }).catch((e) => notify(`Couldn't deploy roster: ${String((e as Error)?.message || e)}`, 'error'))
+      .finally(() => setBusy(false))
+  }
   const components = pack.components ?? []
   const connectors = pack.connectors ?? []
   const parsed = pack.installed_at ? new Date(pack.installed_at) : null
@@ -327,6 +353,12 @@ export function PackRow({ pack }: { pack: InstalledPackRec }) {
         <div className="flex items-center gap-2">
           {pack.setup_pending && (
             <Button variant="primary" size="sm" disabled={busy} disabledReason={BUSY_REASON} onClick={finishSetup}>Finish setup</Button>
+          )}
+          {!!pack.roster?.length && (
+            <Button variant="primary" size="sm" disabled={busy} disabledReason={BUSY_REASON} onClick={deployRoster}>Deploy roster</Button>
+          )}
+          {!pack.roster?.length && !!pack.staged_triggers?.length && (
+            <Button variant="primary" size="sm" disabled={busy} disabledReason={BUSY_REASON} onClick={deployTriggers}>Add triggers to Automations</Button>
           )}
           <Button variant="ghost" size="sm" loading={busy} loadingLabel="Checking…" onClick={checkUpdate}>
             Check for update

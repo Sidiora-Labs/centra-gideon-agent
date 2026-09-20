@@ -1,12 +1,12 @@
 import { useId, useReducer, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { motion, useReducedMotion } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { X, Maximize2, Minimize2 } from 'lucide-react'
 import { useFocusReturn } from './useFocusReturn'
 import { useResizablePanel } from './useResizablePanel'
 import { useDismissKey, useDockReservation } from './overlayInteraction'
 import { IconButton } from './IconButton'
-import { spring, physics, expr } from '../theme/motion'
+import { spring, physics, expr, useReducedMotion } from '../theme/motion'
 import type { RouteProps } from '../../app/shell/useQueryState'
 
 export function SidePanel({ title, icon, onClose, urlKey, storeKey = 'sidepanel-w', fillHeight = false, onExpand, children }: {

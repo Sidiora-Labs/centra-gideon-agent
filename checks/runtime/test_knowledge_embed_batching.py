@@ -198,16 +198,7 @@ def test_a_caller_supplied_embedder_is_never_batched_through_the_registry(
     assert all(blob is not None for _t, blob in _chunk_rows(store, item_id))
 
 
-def test_embedder_without_embed_reaches_no_embedding_path_at_all(store, monkeypatch):
-    """Vacuity guard: with no `.embed` the function must not reach the batch path.
-
-    NOTE the preserved shape — the `.embed` guard is an EARLY RETURN, so such an embedder
-    writes no chunk rows either. That predates this atom (`embed_item_chunks`' docstring
-    calls it "chunk embedding is skipped"), and changing it would silently reclassify every
-    such item in `chunk_backfill`'s chunked/unchanged accounting, which is not this atom's
-    scope. What this test guarantees is that the batching added here is unreachable when
-    there is nothing to embed with.
-    """
+def test_embedder_without_embedding_methods_skips_chunks(store, monkeypatch):
     resolved: list[str] = []
     monkeypatch.setattr(
         registry,
@@ -215,14 +206,8 @@ def test_embedder_without_embed_reaches_no_embedding_path_at_all(store, monkeypa
         lambda: resolved.append("resolved") or (lambda texts: [_vec(t) for t in texts]),
     )
 
-    class _NoEmbed:
-        def embed_for_item(
-            self, title, summary, content=None
-        ):  # pragma: no cover - unused
-            raise AssertionError("embed_for_item is not the chunk path")
-
     item_id = _item(store)
-    embed_item_chunks(store, item_id, SIX_SECTIONS, _NoEmbed())
+    embed_item_chunks(store, item_id, SIX_SECTIONS, object())
 
     assert resolved == []
     assert _chunk_rows(store, item_id) == []
@@ -275,12 +260,18 @@ def test_reembed_all_embeds_the_library_in_one_batch_call(store, monkeypatch):
     )
 
     assert res == {"reembedded": 5, "failed": 0, "total": 5}
-    assert len(calls) == 1 and len(calls[0]) == 5
+    assert len(calls) == 6 and len(calls[0]) == 5
+    assert sorted(text for batch in calls[1:] for text in batch) == [
+        f"content {i}" for i in range(5)
+    ]
     assert progress == [(1, 5), (2, 5), (3, 5), (4, 5), (5, 5)]
     blobs = _item_blobs(store)
     for i, iid in enumerate(ids):
         expected = compose_item_text(f"Title {i}", f"sum {i}", f"content {i}")
         assert bytes_to_floats(blobs[iid]) == _vec(expected)
+        assert _chunk_rows(store, iid) == [
+            (f"content {i}", floats_to_bytes(_vec(f"content {i}")))
+        ]
 
 
 def test_reembed_all_vectors_match_the_per_item_embed_for_item_path(store):

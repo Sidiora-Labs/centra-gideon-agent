@@ -29,6 +29,7 @@ from typing import Any
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.extensions.providers.failure_copy import relayed_failure_copy
 from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.handlers.page_shell import page_document
@@ -154,7 +155,7 @@ async def api_auth_login(request: web.Request) -> web.Response:
         )
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     if not isinstance(body, dict):
@@ -336,7 +337,7 @@ async def api_auth_set_password(request: web.Request) -> web.Response:
     if not check_origin(request):
         return json_error(ERR_ORIGIN, status=403)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     if not isinstance(body, dict):
@@ -380,7 +381,7 @@ async def api_auth_enroll_start(request: web.Request) -> web.Response:
     from gideon.security.auth import enrollment
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     label = str((body or {}).get("label") or "") if isinstance(body, dict) else ""
@@ -423,7 +424,7 @@ async def api_auth_enroll_complete(request: web.Request) -> web.Response:
     from gideon.security.auth import enrollment
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     code = str((body or {}).get("code") or "") if isinstance(body, dict) else ""

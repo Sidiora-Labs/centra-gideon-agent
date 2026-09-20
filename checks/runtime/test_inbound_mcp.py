@@ -204,7 +204,7 @@ class TestTransport:
         token = auth.create_surface_token("mcp")
         client = await _client(monkeypatch)
         try:
-            body = await (await _rpc(client, "tooling/list", token=token)).json()
+            body = await (await _rpc(client, "tools/list", token=token)).json()
             names = {t["name"] for t in body["result"]["tools"]}
             assert names == set(tools_mod.TOOLS)
         finally:
@@ -273,7 +273,7 @@ class TestTransport:
         try:
             body = await (await _rpc(client, "evil/exec", token=token)).json()
             assert body["error"]["code"] == -32601
-            resp = await _rpc(client, "tooling/call", token=token, name="rm_rf")
+            resp = await _rpc(client, "tools/call", token=token, name="rm_rf")
             assert (await resp.json())["error"]["code"] == -32601
         finally:
             await client.close()
@@ -315,12 +315,10 @@ class TestTransport:
         try:
             statuses = []
             for _ in range(caps_mod.DEFAULT_CAPS.burst + 3):
-                statuses.append(
-                    (await _rpc(client, "tooling/list", token=token)).status
-                )
+                statuses.append((await _rpc(client, "tools/list", token=token)).status)
             assert statuses.count(200) == caps_mod.DEFAULT_CAPS.burst
             assert 429 in statuses
-            resp = await _rpc(client, "tooling/list", token=token)
+            resp = await _rpc(client, "tools/list", token=token)
             assert resp.status == 429
             assert int(resp.headers["Retry-After"]) >= 1
         finally:
@@ -451,8 +449,8 @@ class TestRefusalEnvelope:
         client = await _client(monkeypatch)
         try:
             for _ in range(caps_mod.DEFAULT_CAPS.burst + 3):
-                await _rpc(client, "tooling/list", token=token)
-            resp = await _rpc(client, "tooling/list", token=token)
+                await _rpc(client, "tools/list", token=token)
+            resp = await _rpc(client, "tools/list", token=token)
             assert resp.status == 429
             self._assert_envelope(await resp.json(), resp.headers, "rate_limited")
             assert int(resp.headers["Retry-After"]) >= 1
@@ -694,7 +692,7 @@ class TestAudit:
         try:
             resp = await _rpc(
                 client,
-                "tooling/call",
+                "tools/call",
                 token=token,
                 name="tasks_list",
                 arguments={"nosuchargument": 1},

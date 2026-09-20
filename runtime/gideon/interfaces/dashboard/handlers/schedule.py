@@ -15,6 +15,7 @@ import logging
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.interfaces.dashboard.handlers._shared import (
     _blocks_reads_session,
     _get_memory,
@@ -37,7 +38,7 @@ async def api_lessons_create(request: web.Request) -> web.Response:
     """POST /api/lessons — add a lesson to memory.db ``lesson.*``."""
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -182,7 +183,7 @@ async def api_lessons_delete(request: web.Request) -> web.Response:
             {"error": "Memory writes are not allowed in this session mode."}, status=403
         )
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):

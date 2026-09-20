@@ -4,6 +4,7 @@ import logging
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body, string_field
 from gideon.engine.session import BACKGROUND_KEY
 from gideon.integrations.llm.base import (
     EVENT_COMPLETE,
@@ -297,12 +298,12 @@ async def api_chat_session_rename(request: web.Request) -> web.Response:
     if not session:
         return web.json_response({"error": "not found"}, status=404)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
         return web.json_response({"error": "invalid JSON"}, status=400)
-    title = body.get("title", "").strip()[:200]
+    title = string_field(body, "title")[:200]
     if not title:
         return web.json_response({"error": "title required"}, status=400)
     _apply_title(state, session, title)

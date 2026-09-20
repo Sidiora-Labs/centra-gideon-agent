@@ -1606,6 +1606,7 @@ def test_every_declared_APPEND_DEDUP_entry_now_has_a_path(tmp_path: Path) -> Non
     assert set(declared) == {
         "cron-history",
         "notifications.jsonl",
+        "digest_queue.jsonl",
         "security_events.jsonl",
         "feedback.jsonl",
         "model_calls.jsonl",
@@ -1618,6 +1619,7 @@ def test_every_declared_APPEND_DEDUP_entry_now_has_a_path(tmp_path: Path) -> Non
     executors = {
         "cron-history": "_merge_run_history",
         "notifications.jsonl": "_merge_notifications",
+        "digest_queue.jsonl": "_merge_keyed_jsonl",
         "security_events.jsonl": "_merge_security_events",
         "feedback.jsonl": "_merge_feedback",
         "model_calls.jsonl": "_merge_keyed_jsonl",
@@ -1625,7 +1627,7 @@ def test_every_declared_APPEND_DEDUP_entry_now_has_a_path(tmp_path: Path) -> Non
     for path, symbol in executors.items():
         assert symbol in merge_src, f"{path} has no executor reachable from _do_merge"
         assert hasattr(snapshot, symbol), f"{symbol} is not defined"
-    for path in ("feedback.jsonl", "model_calls.jsonl"):
+    for path in ("feedback.jsonl", "model_calls.jsonl", "digest_queue.jsonl"):
         assert path in merge_src, f"{path} is not passed at any _do_merge call site"
     assert declared["crashes"].kind == "json_entity_dir"
     assert declared["sessions"].kind == "jsonl_append"
@@ -2572,3 +2574,71 @@ def test_RESTORE_APPLY_refuses_while_the_gateway_runs(tmp_path, monkeypatch) -> 
 
     assert result["ok"] is False
     assert "gateway is running" in result["error"]
+
+
+@pytest.mark.parametrize("components", [None, ["everything"], ["notifications"]])
+@pytest.mark.parametrize("existing", [False, True])
+def test_digest_queue_restore_unions_by_timestamp_and_is_idempotent(
+    tmp_path, monkeypatch, components, existing
+):
+    from gideon.workspace import notification_rules as rules
+    from gideon.workspace.snapshot import _do_merge, merge_plan
+
+    snap, live = tmp_path / "snapshot", tmp_path / "live"
+    live.mkdir()
+    shared = {"ts": "2026-09-20T10:00:00+00:00", "kind": "digest", "body": "snapshot"}
+    recovered = {
+        "ts": "2026-09-20T11:00:00+00:00",
+        "kind": "digest",
+        "body": "recovered",
+    }
+    local = {"ts": "2026-09-20T12:00:00+00:00", "kind": "digest", "body": "local only"}
+    monkeypatch.setenv("GIDEON_HOME", str(snap))
+    for note in (shared, recovered, recovered):
+        rules.queue_for_digest(note)
+    with (snap / "digest_queue.jsonl").open("a") as stream:
+        stream.write("broken JSON\n[]\n")
+    monkeypatch.setenv("GIDEON_HOME", str(live))
+    if existing:
+        rules.queue_for_digest(dict(shared, body="live wins"))
+        rules.queue_for_digest(local)
+    planned = [
+        row
+        for row in merge_plan(snap, live, components)
+        if row["path"] == "digest_queue.jsonl"
+    ]
+    assert planned == [
+        {
+            "path": "digest_queue.jsonl",
+            "strategy": "append_dedup",
+            "action": "merge" if existing else "copy",
+            "detail": "dedup on ts",
+        }
+    ]
+
+    _do_merge(snap, live, components)
+    first = (live / "digest_queue.jsonl").read_bytes()
+    _do_merge(snap, live, components)
+    assert (live / "digest_queue.jsonl").read_bytes() == first
+    expected = (
+        [dict(shared, body="live wins"), local, recovered]
+        if existing
+        else [shared, recovered]
+    )
+    assert rules.drain_digest_queue() == expected
+
+
+def test_digest_queue_restore_honors_component_selection(tmp_path, monkeypatch):
+    from gideon.workspace import notification_rules as rules
+    from gideon.workspace.snapshot import _do_merge, merge_plan
+
+    snap, live = tmp_path / "snapshot", tmp_path / "live"
+    live.mkdir()
+    monkeypatch.setenv("GIDEON_HOME", str(snap))
+    rules.queue_for_digest({"ts": "2026-09-20T10:00:00+00:00", "body": "recover me"})
+    assert not any(
+        row["path"] == "digest_queue.jsonl"
+        for row in merge_plan(snap, live, ["memory"])
+    )
+    _do_merge(snap, live, ["memory"])
+    assert not (live / "digest_queue.jsonl").exists()

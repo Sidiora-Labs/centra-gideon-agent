@@ -127,6 +127,15 @@ describe('the consent modal discloses the grants, not only the scan', () => {
       .not.toMatch(/granted no gateway capability/)
   })
 
+  it('renders an explicitly empty declaration as no grants, not an unfetched manifest', () => {
+    const { container } = render(<ConsentModal label="demo-app" busy={false}
+      permissions={{}} crons={undefined} onConfirm={() => {}} onClose={() => {}}
+      result={guarded({ needsConsent: true, scan: scan({ verdict: 'warning' }) })} />)
+    const text = (container.ownerDocument.body.textContent || '').replace(/\s+/g, ' ')
+    expect(text).toMatch(/granted no gateway capability/)
+    expect(text).not.toMatch(/could not read this app's declared permissions/)
+  })
+
   it('discloses the grants on a REFUSAL too — they are why the findings matter', () => {
     const { container } = render(<ConsentModal label="demo-app" busy={false}
       permissions={{ agent: true }} crons={undefined} onConfirm={() => {}} onClose={() => {}}

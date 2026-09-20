@@ -73,12 +73,20 @@ def _acfg(monkeypatch, tmp_path, agents: dict):
 
 
 def _put(body):
-    req = make_mocked_request("PUT", "/api/config/default-agent")
+    req = make_mocked_request(
+        "PUT",
+        "/api/config/default-agent",
+        headers={"Content-Type": "application/json"},
+    )
+    req._read_bytes = _json.dumps(body).encode()
+    return req
 
-    async def _j():
-        return body
 
-    req.json = _j
+def _post_agents(body):
+    req = make_mocked_request(
+        "POST", "/api/agents", headers={"Content-Type": "application/json"}
+    )
+    req._read_bytes = _json.dumps(body).encode()
     return req
 
 
@@ -132,13 +140,7 @@ def test_is_reserved_agent_case_insensitive():
 @pytest.mark.asyncio
 async def test_api_agents_create_rejects_non_alphanumeric(monkeypatch, tmp_path):
     _acfg(monkeypatch, tmp_path, {"default": {}})
-    req = make_mocked_request("POST", "/api/agents")
-
-    async def _j():
-        return {"name": "---"}
-
-    req.json = _j
-    resp = await _agents_h.api_gideon_agents_create(req)
+    resp = await _agents_h.api_gideon_agents_create(_post_agents({"name": "---"}))
     assert resp.status == 400
     assert "Agent name must match" in _json.loads(resp.body.decode())["error"]
 
@@ -148,13 +150,9 @@ async def test_api_agents_create_case_insensitive_conflict(monkeypatch, tmp_path
     from gideon.engine.agents.defaults import LOOP_WORKER_AGENT_NAME
 
     _acfg(monkeypatch, tmp_path, {LOOP_WORKER_AGENT_NAME: {}})
-    req = make_mocked_request("POST", "/api/agents")
-
-    async def _j():
-        return {"name": LOOP_WORKER_AGENT_NAME.upper()}
-
-    req.json = _j
-    resp = await _agents_h.api_gideon_agents_create(req)
+    resp = await _agents_h.api_gideon_agents_create(
+        _post_agents({"name": LOOP_WORKER_AGENT_NAME.upper()})
+    )
     assert resp.status == 409
     assert "already exists" in _json.loads(resp.body.decode())["error"]
 
@@ -162,12 +160,8 @@ async def test_api_agents_create_case_insensitive_conflict(monkeypatch, tmp_path
 @pytest.mark.asyncio
 async def test_api_agents_create_lowercases_name(monkeypatch, tmp_path):
     cfg = _acfg(monkeypatch, tmp_path, {})
-    req = make_mocked_request("POST", "/api/agents")
-
-    async def _j():
-        return {"name": "MyNewAgent"}
-
-    req.json = _j
-    resp = await _agents_h.api_gideon_agents_create(req)
+    resp = await _agents_h.api_gideon_agents_create(
+        _post_agents({"name": "MyNewAgent"})
+    )
     assert resp.status == 200
     assert "mynewagent" in _json.loads(cfg.read_text())["agents"]

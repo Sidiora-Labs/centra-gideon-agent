@@ -27,7 +27,7 @@ _TOKEN_FIELDS = (
 class TurnUsage:
     ts: str
     session_key: str
-    source: str
+    source: str  # chat | loop | cron | subagent | channel | cli | background
     agent: str
     provider: str
     model: str

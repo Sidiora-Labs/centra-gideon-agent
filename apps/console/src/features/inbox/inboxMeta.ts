@@ -2,6 +2,7 @@ import { Reply, Info, BellOff, CheckCircle2, Send, XCircle, Inbox as InboxIcon, 
 import { epochSeconds } from '../../shared/data/epoch'
 import type { LucideIcon } from 'lucide-react'
 import type { InboxClassification, InboxConfidence, InboxItemStatus, InboxItemKind, InboxItem } from '../../shared/data/api'
+import { isOpenStatus, STATUS_OPEN } from '../../shared/data/attentionLanes'
 
 function resolveMeta<Row extends { key: string }>(rows: Row[], key: string | undefined, fallback: number): Row {
   const index = rows.map(row => row.key).indexOf(key ?? '')
@@ -45,9 +46,9 @@ export function statusMeta(s?: string): StatusMeta {
   return resolveMeta(STATUSES, s, 0)
 }
 
-export const OPEN_STATUSES: InboxItemStatus[] = ['pending', 'seen']
+export const OPEN_STATUSES = (Object.keys(STATUS_OPEN) as InboxItemStatus[]).filter(status => STATUS_OPEN[status])
 export function isOpen(s?: string): boolean {
-  return OPEN_STATUSES.some(status => status === (s || 'pending'))
+  return isOpenStatus(s || 'pending')
 }
 
 export interface KindMeta { key: InboxItemKind; label: string; tone: string; icon: LucideIcon }

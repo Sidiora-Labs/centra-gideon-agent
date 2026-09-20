@@ -1,5 +1,5 @@
-import { motion, useReducedMotion } from 'framer-motion'
-import { spring } from '../theme/motion'
+import { motion } from 'framer-motion'
+import { spring, useReducedMotion } from '../theme/motion'
 import { useFieldHintId } from './forms'
 import { controlAvailability } from './controlState'
 

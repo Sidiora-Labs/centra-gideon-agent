@@ -3,11 +3,12 @@
 import json
 import logging
 import os
-import tempfile
 import threading
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal, cast
+
+from gideon.core.atomic_write import atomic_write
 
 logger = logging.getLogger(__name__)
 CredentialKind = Literal["none", "api_key", "static_token", "oauth2"]
@@ -83,31 +84,10 @@ class CredentialStore:
         snapshot = {name: dict(row) for name, row in descriptors.items()}
         payload = json.dumps(snapshot, indent=2, sort_keys=True) + "\n"
         with self._state_lock:
-            self._home.mkdir(parents=True, exist_ok=True)
-            staged = None
-            try:
-                with tempfile.NamedTemporaryFile(
-                    mode="w",
-                    encoding="utf-8",
-                    dir=self._home,
-                    prefix=".credentials-",
-                    suffix=".tmp",
-                    delete=False,
-                ) as output:
-                    staged = Path(output.name)
-                    os.fchmod(output.fileno(), self.FILE_MODE)
-                    output.write(payload)
-                    output.flush()
-                    os.fsync(output.fileno())
-                os.replace(staged, self._credentials_path)
-                staged = None
-                self._descriptors = snapshot
-            finally:
-                if staged is not None:
-                    try:
-                        staged.unlink()
-                    except OSError:
-                        logger.warning("Cannot remove incomplete credential snapshot")
+            atomic_write(
+                self._credentials_path, payload, fsync=True, mode=self.FILE_MODE
+            )
+            self._descriptors = snapshot
 
     def _private_text(self, path: Path) -> str | None:
         if not path.is_file():

@@ -25,6 +25,7 @@ file is present but its contents are gone.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import re
 import subprocess
@@ -44,8 +45,10 @@ from gideon.extensions.skills.marketplace import (
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _GLOSS_JSON = Path(sc.__file__).with_name("scan_rule_gloss.json")
-_SCAN_FINDINGS_TS = _REPO_ROOT / "apps/console" / "src" / "lib" / "scanFindings.ts"
-_WHEEL_MEMBER = "gideon/scan_rule_gloss.json"
+_SCAN_FINDINGS_TS = (
+    _REPO_ROOT / "apps/console" / "src" / "shared" / "data" / "scanFindings.ts"
+)
+_WHEEL_MEMBER = "gideon/security/scan_rule_gloss.json"
 
 
 def test_the_map_is_data_not_a_python_literal() -> None:
@@ -74,8 +77,8 @@ def test_the_frontend_reads_the_same_file_rather_than_a_second_literal() -> None
     """
     src = _SCAN_FINDINGS_TS.read_text(encoding="utf-8")
     assert re.search(
-        r"import \w+ from '(\.\./)+runtime/gideon/scan_rule_gloss\.json'", src
-    ), "apps/console/src/lib/scanFindings.ts must import the canonical gloss JSON"
+        r"import \w+ from '(\.\./)+runtime/gideon/security/scan_rule_gloss\.json'", src
+    ), "apps/console/src/shared/data/scanFindings.ts must import the canonical gloss JSON"
     for rule in ("python_exec", "destructive_root", "injection_ignore"):
         sentence = sc.load_scan_rule_gloss()[rule]
         assert (
@@ -92,7 +95,10 @@ def test_the_cli_cap_matches_the_frontend_cap() -> None:
 
     ts = _SCAN_FINDINGS_TS.read_text(encoding="utf-8")
     m = re.search(r"export const SCAN_FINDINGS_SHOWN = (\d+)", ts)
-    assert m, "SCAN_FINDINGS_SHOWN not found in apps/console/src/lib/scanFindings.ts"
+    assert m, (
+        "SCAN_FINDINGS_SHOWN not found in "
+        "apps/console/src/shared/data/scanFindings.ts"
+    )
     assert _SKILL_FINDINGS_SHOWN == int(m.group(1)), (
         f"the CLI shows {_SKILL_FINDINGS_SHOWN} findings but the consent surfaces show "
         f"{m.group(1)} — one refusal, two different amounts of it"
@@ -127,9 +133,18 @@ def test_pyproject_declares_the_gloss_as_package_data() -> None:
         r"^\[tool\.setuptools\.package-data\](.*?)(?=^\[|\Z)", text, re.S | re.M
     )
     assert block, "pyproject has no [tool.setuptools.package-data]"
-    assert '"scan_rule_gloss.json"' in block.group(0), (
-        "scan_rule_gloss.json is not declared as package data — a non-.py file is not "
-        "shipped by default, so the wheel would carry no gloss at all"
+    package = ".".join(_GLOSS_JSON.relative_to(_REPO_ROOT / "runtime").parts[:-1])
+    declarations = re.findall(r'"([^"]+)"\s*=\s*\[([^\]]*)\]', block.group(0))
+    assert any(
+        fnmatch.fnmatch(package, key)
+        and any(
+            fnmatch.fnmatch(_GLOSS_JSON.name, pattern)
+            for pattern in re.findall(r'"([^"]+)"', patterns)
+        )
+        for key, patterns in declarations
+    ), (
+        f"{_WHEEL_MEMBER} is not covered by [tool.setuptools.package-data] — a non-.py "
+        "file is not shipped by default, so the wheel would carry no gloss at all"
     )
 
 

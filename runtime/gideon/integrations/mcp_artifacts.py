@@ -1037,10 +1037,20 @@ def _visualize(args: dict[str, Any], _audit: Any) -> str:
 def _validate_args(name: str, args: dict[str, Any]) -> dict[str, Any]:
     """Validate tool arguments against the shared MCP schema (enforces e.g. the
     artifact_save ``kind`` enum). Tools without a schema pass through."""
-    from gideon.assurance.validation import MCP_CORE_SCHEMAS, validate_tool_args
+    from gideon.assurance.validation import (
+        MCP_CORE_SCHEMAS,
+        FieldSpec,
+        ToolSchema,
+        validate_tool_args,
+    )
 
     schema = MCP_CORE_SCHEMAS.get(name)
     if schema:
+        if name in {"artifact_save", "artifact_update", "artifact_list"}:
+            schema = ToolSchema(
+                tool_name=schema.tool_name,
+                fields=[*schema.fields, FieldSpec("collection", str, max_len=200)],
+            )
         return validate_tool_args(args, schema)
     return args
 

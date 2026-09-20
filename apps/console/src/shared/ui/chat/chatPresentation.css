@@ -61,8 +61,4 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .gideon-composer-panel {
-    transition: none;
-  }
-}
+[data-reduced-motion] .gideon-composer-panel { transition: none; }

@@ -299,7 +299,8 @@ class TestClientMethodExists:
             Path(__file__).resolve().parent.parent.parent
             / "apps/console"
             / "src"
-            / "lib"
+            / "shared"
+            / "data"
             / "api.ts"
         ).read_text(encoding="utf-8")
         assert "workflowRunNodeInspect" in api_ts

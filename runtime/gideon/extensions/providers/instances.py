@@ -127,7 +127,7 @@ def update_instance(
     if display_name is not None:
         inst.display_name = display_name
     if config is not None:
-        inst.config = config
+        inst.config = {**inst.config, **config}
     if enabled is not None:
         inst.enabled = enabled
     path = _instances_dir(extension_name) / f"{instance_id}.json"

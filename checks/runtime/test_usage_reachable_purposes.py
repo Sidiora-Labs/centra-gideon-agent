@@ -125,7 +125,9 @@ def test_the_census_is_scoped_to_the_call_and_not_the_file() -> None:
     assert (
         "dashboard" not in sources and "gateway" not in sources
     ), f"census leaked non-seam sources {sources} — it is matching per FILE, not per CALL"
-    watchdog = (_SRC / "loop" / "watchdog.py").read_text(encoding="utf-8")
+    watchdog = (_SRC / "automation" / "loop" / "watchdog.py").read_text(
+        encoding="utf-8"
+    )
     assert (
         'source="loop"' in watchdog
     ), "the innocent inbox line moved; re-derive this guard"
@@ -158,13 +160,11 @@ def test_the_app_name_census_is_not_vacuous() -> None:
         apps
     ), "no `app=` literal found — the regex or the worker-session call sites moved"
     assert "loops" in apps, apps
-    gw = (_SRC / "gateway.py").read_text(encoding="utf-8")
-    assert _APP_ARG.findall(
-        gw
-    ), "gateway.py no longer mentions an app name; re-derive this guard"
-    assert not _APP_ARG.findall(
-        _code_lines(gw)
-    ), "comment stripping is broken — gateway.py's prose is counting as a writer"
+    sample = '# app="loop"\napp="loops"\n'
+    assert _APP_ARG.findall(sample) == ["loop", "loops"], _APP_ARG.findall(sample)
+    assert _APP_ARG.findall(_code_lines(sample)) == [
+        "loops"
+    ], "comment stripping is broken — commented prose is counting as a writer"
 
 
 def test_loop_has_a_turn_ledger_writer_via_the_worker_session_app() -> None:
@@ -178,15 +178,17 @@ def test_loop_has_a_turn_ledger_writer_via_the_worker_session_app() -> None:
     ``PURPOSE_BY_SOURCE["loop"]`` on the first lookup, so it is the ``loop`` purpose and not
     ``app``.
     """
-    manager = (_SRC / "loop" / "manager.py").read_text(encoding="utf-8")
+    manager = (_SRC / "automation" / "loop" / "manager.py").read_text(encoding="utf-8")
     assert (
         manager.count('app="loop"') >= 2
     ), "the main worker + task worker app names moved"
-    state = (_SRC / "dashboard" / "state.py").read_text(encoding="utf-8")
+    state = (_SRC / "interfaces" / "dashboard" / "state.py").read_text(encoding="utf-8")
     assert (
         "session._app = app" in state
     ), "the _app assignment moved; re-derive this chain"
-    runner = (_SRC / "dashboard" / "chat_runner.py").read_text(encoding="utf-8")
+    runner = (_SRC / "interfaces" / "dashboard" / "chat_runner.py").read_text(
+        encoding="utf-8"
+    )
     assert (
         'source=getattr(session, "_app", "") or "chat"' in runner
     ), "the chat seam moved"

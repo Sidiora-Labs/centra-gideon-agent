@@ -632,7 +632,7 @@ def secure_cookies() -> bool:
     Any failure resolving this returns False — the value that keeps the box usable.
     """
     try:
-        from gideon.interfaces.dashboard.exposure import is_https
+        from gideon.security.exposure import is_https
 
         return bool(is_https())
     except Exception:  # noqa: BLE001
@@ -768,7 +768,7 @@ def token_auth_middleware(
     banners.  Use this for any internal-path that the browser polls.
 
     """
-    from gideon.interfaces.dashboard.exposure import public_proxy_bypass_warning
+    from gideon.security.exposure import public_proxy_bypass_warning
 
     proxy_bypass_warning = public_proxy_bypass_warning()
     if proxy_bypass_warning:
@@ -799,7 +799,7 @@ def token_auth_middleware(
         if not forwarded:
             return raw
         try:
-            from gideon.interfaces.dashboard.exposure import (
+            from gideon.security.exposure import (
                 is_exposed,
                 is_trusted_proxy,
             )

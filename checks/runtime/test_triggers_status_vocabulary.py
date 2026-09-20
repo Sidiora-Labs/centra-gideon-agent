@@ -95,6 +95,17 @@ WRITERS: tuple[Writer, ...] = (
         min_values=4,
     ),
     Writer(
+        label="automation_boot.py records a recovered interrupted run's ExecutionRecord",
+        path="engine/automation_boot.py",
+        table=H.SCHEDULE_STATUS_TO_OUTCOME,
+        table_name="SCHEDULE_STATUS_TO_OUTCOME",
+        kind="kwarg",
+        name="status",
+        call="ExecutionRecord",
+        min_sites=1,
+        min_values=1,
+    ),
+    Writer(
         label="triggers/service.py records a suppressed fire's ExecutionRecord",
         path="automation/triggers/service.py",
         table=H.SCHEDULE_STATUS_TO_OUTCOME,
@@ -452,6 +463,7 @@ def test_the_writer_file_census_is_pinned() -> None:
         "cognition/knowledge/research_reports.py",
     }, f"the set of modules assigning .last_status changed: {sorted(attr_files)}"
     assert call_files == {
+        "engine/automation_boot.py",
         "engine/trigger_outcomes.py",
         "automation/triggers/service.py",
         "interfaces/dashboard/handlers/triggers.py",

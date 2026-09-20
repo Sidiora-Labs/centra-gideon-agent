@@ -108,8 +108,14 @@ class OcrNode:
     backend = "vision-llm"
     uses_use_case = "image_modality"
 
-    def __init__(self, ocr_provider: OcrProvider | None = None) -> None:
+    def __init__(
+        self,
+        ocr_provider: OcrProvider | None = None,
+        *,
+        ocr_max_bytes: int | None = None,
+    ) -> None:
         self.ocr_provider = ocr_provider or ImageModalityOcrProvider()
+        self.ocr_max_bytes = ocr_max_bytes
 
     async def run(self, inputs, ctx: NodeContext) -> NodeOutput:
         images = _images_from(inputs, ctx)
@@ -120,9 +126,24 @@ class OcrNode:
                 success=False,
                 error="no image",
             )
+        image_path = images[0]
+        image_bytes = os.path.getsize(image_path)
+        max_bytes = self.ocr_max_bytes
+        if max_bytes is None:
+            from gideon.core.config.loader import AppConfig
+
+            max_bytes = AppConfig.load().knowledge.ocr_max_bytes
+        if image_bytes > max_bytes:
+            return NodeOutput(
+                node_type=self.node_type,
+                backend=self.backend,
+                success=False,
+                error=f"OCR byte limit exceeded ({image_bytes} > {max_bytes})",
+                metadata={"ocr_bytes_read": 0, "ocr_bytes_skipped": image_bytes},
+            )
         text = await asyncio.to_thread(
             self.ocr_provider.ocr,
-            images[0],
+            image_path,
             page_number=1,
         )
         return NodeOutput(
@@ -130,6 +151,7 @@ class OcrNode:
             backend=self.backend,
             text=text,
             classification="text-heavy",
+            metadata={"ocr_bytes_read": image_bytes, "ocr_bytes_skipped": 0},
         )
 
 

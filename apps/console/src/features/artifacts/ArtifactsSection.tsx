@@ -45,11 +45,14 @@ export function ArtifactsSection({ sub, navigate, query: routeQuery, setQuery }:
 
   const load = useCallback(async () => {
     setLoading(true)
-    try { setArtifacts(await api.artifacts()); setLoadErr(null) }
+    try { setArtifacts(await api.artifacts(q.trim() ? { q: q.trim() } : undefined)); setLoadErr(null) }
     catch (e) { setLoadErr(e) }
     finally { setLoading(false) }
-  }, [])
-  useEffect(() => { load() }, [load])
+  }, [q])
+  useEffect(() => {
+    const timer = window.setTimeout(load, q.trim() ? 200 : 0)
+    return () => window.clearTimeout(timer)
+  }, [load, q])
 
   const collections = useMemo(() => {
     const s = new Set<string>()
@@ -86,15 +89,10 @@ export function ArtifactsSection({ sub, navigate, query: routeQuery, setQuery }:
   }, [artifacts, collections, src, col, sort, setSrc, setCol, setSort])
 
   const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase()
     let out = artifacts.filter((a) => {
       if (kind && a.kind !== kind) return false
       if (src && a.source !== src) return false
       if (col && a.collection !== col) return false
-      if (needle) {
-        const hay = `${a.name}\n${a.description}\n${a.tags.join(' ')}\n${a.collection ?? ''}`.toLowerCase()
-        if (!hay.includes(needle)) return false
-      }
       return true
     })
     if (sort === 'name') out = [...out].sort((a, b) => a.name.localeCompare(b.name))
@@ -107,7 +105,7 @@ export function ArtifactsSection({ sub, navigate, query: routeQuery, setQuery }:
 
   const openSourceFile = useCallback((path: string) => {
     const dir = path.replace(/\/[^/]*$/, '')
-    navigate(`files?dir=${encodeURIComponent(dir)}`)
+    navigate(`files?dir=${encodeURIComponent(dir)}&file=${encodeURIComponent(path)}`)
   }, [navigate])
 
   const active = slug ? artifacts.find((a) => a.slug === slug) : undefined
@@ -205,4 +203,3 @@ export function ArtifactsSection({ sub, navigate, query: routeQuery, setQuery }:
     </div>
   )
 }
-

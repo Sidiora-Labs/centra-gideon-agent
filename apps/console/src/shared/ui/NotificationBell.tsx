@@ -14,6 +14,7 @@ import { accentChip } from '../theme/accent'
 import { notify } from '../../app/shell/appSdk'
 import { confirmDelete } from './dialog'
 import { reportingWrite } from '../../app/shell/reportingWrite'
+import { MoreRow } from './MoreRow'
 
 const MAX_SHADE = 5
 
@@ -113,10 +114,11 @@ export function NotificationBell({ navigate }: { navigate: (path: string) => voi
                 </div>
               ) : (
                 <motion.div variants={{ animate: { transition: stagger(0.05) } }} initial="initial" animate="animate">
-                  <AnimatePresence initial={false}>
-                    {recent.map((n) => <ShadeRow key={n.ts} n={n} now={now} onOpen={() => openItem(n)} onAck={() => ack(n)} onDelete={() => remove(n)} />)}
-                  </AnimatePresence>
-                </motion.div>
+                   <AnimatePresence initial={false}>
+                     {recent.map((n) => <ShadeRow key={n.ts} n={n} now={now} onOpen={() => openItem(n)} onAck={() => ack(n)} onDelete={() => remove(n)} />)}
+                   </AnimatePresence>
+                   <MoreRow total={items.length} shown={MAX_SHADE} noun="notifications" className="px-m py-s" />
+                 </motion.div>
               )}
             </div>
             <button type="button" onClick={() => { setOpen(false); navigate('notifications') }}

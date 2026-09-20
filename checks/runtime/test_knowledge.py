@@ -1259,6 +1259,7 @@ def _fixed_corpus(store):
 _PINNED_TOKEN_RANKING = [("B", 0.048916), ("A", 0.048660), ("C", 0.048395)]
 
 _PINNED_RESULT_KEYS = {
+    "ranking",
     "content",
     "deep_link",
     "id",
@@ -1291,6 +1292,9 @@ class TestVectorArmUnchangedOnFixedCorpus:
             assert got["score"] == pytest.approx(expected, abs=1e-6)
         for r in results:
             assert set(r.keys()) == _PINNED_RESULT_KEYS
+            assert r["ranking"]["method"] == "reciprocal_rank_fusion"
+            assert r["ranking"]["score"]["value"] == r["score"]
+            assert r["ranking"]["score"]["is_probability"] is False
             assert r["id"] in names
             assert r["match_type"] == "keyword+vector"
 
@@ -1885,30 +1889,20 @@ class TestChunkAnnIndex:
     def test_faiss_stays_an_extra_and_sqlite_vec_is_core(self):
         """The dependency ruling, asserted: sqlite-vec joins core, faiss does NOT move."""
         import pathlib
-        import re
+        import tomllib
 
-        text = (
-            pathlib.Path(__file__).resolve().parents[2] / "pyproject.toml"
-        ).read_text()
-
-        def requirements(block: str) -> list[str]:
-            """The REQUIREMENT strings of a dependency block, with comment lines dropped —
-            both blocks explain in prose why faiss is not core, and a substring scan that
-            counted that prose would fail on the very comment that documents the rule.
-            """
-            body = re.search(rf"^{block} = \[(.*?)^\]", text, re.S | re.M).group(1)
-            return [
-                line.strip()
-                for line in body.splitlines()
-                if line.strip().startswith(('"', "'"))
-            ]
-
-        core = requirements("dependencies")
-        assert any(r.startswith('"sqlite-vec>=0.1,<1"') for r in core)
+        project = tomllib.loads(
+            (pathlib.Path(__file__).resolve().parents[2] / "pyproject.toml").read_text()
+        )["project"]
+        core = project["dependencies"]
+        assert "sqlite-vec>=0.1,<1" in core
         assert not any(
-            "faiss" in r for r in core
+            "faiss" in requirement for requirement in core
         ), "faiss must stay in the [embeddings] extra"
-        assert any("faiss" in r for r in requirements("embeddings"))
+        assert any(
+            "faiss" in requirement
+            for requirement in project["optional-dependencies"]["embeddings"]
+        )
 
 
 class TestDoctorVectorIndexLine:

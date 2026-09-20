@@ -14,6 +14,7 @@ from typing import Any
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.interfaces.dashboard.chat_persistence import (
     resolve_session,
     save_session_to_history,
@@ -114,7 +115,7 @@ async def api_chat_tag_create(request: web.Request) -> web.Response:
     """POST /api/chat/tags — create a new tag."""
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     tag = create_tag(
@@ -144,7 +145,7 @@ async def api_chat_tag_update(request: web.Request) -> web.Response:
     if not tag:
         return web.json_response({"error": "not found"}, status=404)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if "name" in body:
@@ -213,7 +214,7 @@ async def api_chat_session_tags(request: web.Request) -> web.Response:
     if not session:
         return web.json_response({"error": "not found"}, status=404)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     raw_ids = body.get("tags")
@@ -291,7 +292,7 @@ async def api_chat_tag_column_create(request: web.Request) -> web.Response:
     """
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -326,7 +327,7 @@ async def api_chat_tag_column_update(request: web.Request) -> web.Response:
     if not column:
         return web.json_response({"error": "not found"}, status=404)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     merged = _normalize_column(state, body, existing=column)
@@ -366,7 +367,7 @@ async def api_chat_tag_columns_reorder(request: web.Request) -> web.Response:
     """PUT /api/chat/tag-columns/order — reorder columns by id list."""
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     ids = body.get("ids")
@@ -407,7 +408,7 @@ async def api_chat_session_drop(request: web.Request) -> web.Response:
     if not session:
         return web.json_response({"error": "not found"}, status=404)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     column_id = str(body.get("column_id") or "")

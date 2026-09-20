@@ -4,9 +4,8 @@ import glossSource from '../../../../../runtime/gideon/security/scan_rule_gloss.
 export const SCAN_FINDINGS_SHOWN = 8
 
 export function hiddenFindingsNote(total: number): string | null {
-  const hidden = total - SCAN_FINDINGS_SHOWN
-  if (hidden <= 0) return null
-  return `+${hidden} more finding${hidden === 1 ? '' : 's'} not shown`
+  if (total <= SCAN_FINDINGS_SHOWN) return null
+  return `Showing ${SCAN_FINDINGS_SHOWN} of ${total} findings`
 }
 
 export const SCAN_RULE_GLOSS: Record<string, string> = Object.fromEntries(

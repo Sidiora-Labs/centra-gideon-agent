@@ -1,5 +1,5 @@
-import { motion, useReducedMotion } from 'framer-motion'
-import { spring } from '../theme/motion'
+import { motion } from 'framer-motion'
+import { spring, useReducedMotion } from '../theme/motion'
 import { progressArc, progressFraction } from './statusSurfaceState'
 
 export function ProgressRing({ pct, tone, size = 28, label }: { pct: number; tone: string; size?: number; label: string }) {

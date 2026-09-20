@@ -49,7 +49,7 @@ from gideon.automation.loop.loop import ACTION_SOURCE_STATES
 
 _REPO = Path(__file__).resolve().parent.parent.parent
 _WEB = _REPO / "apps/console" / "src"
-_REGISTRY = _WEB / "lib" / "loopStatus.ts"
+_REGISTRY = _WEB / "shared" / "data" / "loopStatus.ts"
 
 pytestmark = pytest.mark.skipif(not _WEB.exists(), reason="web sources not present")
 
@@ -326,11 +326,11 @@ def test_no_surface_hand_writes_a_lifecycle_action_guard():
 
 
 _LIFECYCLE_SURFACES = (
-    "pages/loops/LoopsListPage.tsx",
-    "pages/loops/LoopCockpitPage.tsx",
-    "pages/loops/DesignCockpitPage.tsx",
-    "pages/code/CodeCockpitPage.tsx",
-    "pages/chat/SdlcProgressCard.tsx",
+    "features/loops/LoopsListPage.tsx",
+    "features/loops/LoopCockpitPage.tsx",
+    "features/loops/DesignCockpitPage.tsx",
+    "features/code/CodeCockpitPage.tsx",
+    "features/chat/SdlcProgressCard.tsx",
 )
 
 

@@ -224,6 +224,7 @@ export function TriggersListPage({ onCreate, query, setQuery }: {
                               ? <span data-type="caption" className="shrink-0 text-on-surface-low">· dormant</span>
                               : t.kind === 'lifecycle' && t.usedBy.length === 0 && eventIsAgentScoped(catalog, t.hook?.event) && <span data-type="caption" className="shrink-0 text-on-surface-low">· no agent references this</span>}
                           {t.broken && t.broken.length > 0 && <span className="shrink-0 text-danger text-[0.75rem]">· needs attention</span>}
+                          {(!t.broken || t.broken.length === 0) && t.warnings && t.warnings.length > 0 && <span className="shrink-0 text-warn text-[0.75rem]" title={t.warnings.join('; ')}>· check schedule</span>}
                           {t.kind === 'store' && t.storeKind && <span className="shrink-0 text-on-surface-low text-[0.75rem]">· {t.storeKind}</span>}
                           {
 }

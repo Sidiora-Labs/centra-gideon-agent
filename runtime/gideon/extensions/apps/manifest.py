@@ -1008,6 +1008,7 @@ PROVIDER_TYPES = frozenset(
         "sandbox",
         "trigger_source",
         "trigger",
+        "vector_store",
     }
 )
 
@@ -1527,6 +1528,13 @@ class AppManifest:
             if entry.name == name:
                 return entry
         return None
+
+    def validated_source_specs(self) -> tuple[PackSourceEntry, ...]:
+        """The authoritative per-source specs, after applying manifest validation."""
+        errors = self._validate_sources()
+        if errors:
+            raise ValueError("; ".join(errors))
+        return tuple(self.sources)
 
     def all_providers(self) -> list[ProviderConfig]:
         """Every provider this app registers — the single ``provider`` (if any)

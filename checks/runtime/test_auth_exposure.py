@@ -21,8 +21,9 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from gideon.core.config.loader import AppConfig
-from gideon.interfaces.dashboard import exposure, token_auth
+from gideon.interfaces.dashboard import token_auth
 from gideon.interfaces.dashboard.handlers import auth as auth_h
+from gideon.security import exposure
 from gideon.security.auth import credentials as creds
 from gideon.security.auth import enrollment
 
@@ -63,7 +64,7 @@ def test_a_local_install_is_not_exposed() -> None:
 def test_dashboard_public_url_declares_exposure(_isolated) -> None:
     _write_config(_isolated, public_url="https://pc.example.com")
     assert exposure.is_exposed() is True
-    assert exposure.public_host() == "gideon.example.com"
+    assert exposure.public_host() == "pc.example.com"
     assert exposure.is_https() is True
 
 
@@ -74,7 +75,7 @@ def test_external_access_public_url_is_honored_as_a_fallback(_isolated) -> None:
         encoding="utf-8",
     )
     assert exposure.is_exposed() is True
-    assert exposure.public_host() == "gideon.example.com"
+    assert exposure.public_host() == "pc.example.com"
 
 
 def test_dashboard_url_alone_does_NOT_declare_exposure(_isolated) -> None:
@@ -91,7 +92,7 @@ def test_dashboard_url_alone_does_NOT_declare_exposure(_isolated) -> None:
 def test_a_bare_host_is_assumed_https(_isolated) -> None:
     _write_config(_isolated, public_url="gideon.example.com")
     assert exposure.is_https() is True
-    assert exposure.public_host() == "gideon.example.com"
+    assert exposure.public_host() == "pc.example.com"
 
 
 def test_an_http_public_url_does_not_get_a_secure_cookie(_isolated) -> None:

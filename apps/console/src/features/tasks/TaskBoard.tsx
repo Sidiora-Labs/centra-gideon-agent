@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
-import { AnimatePresence, motion, LayoutGroup, useReducedMotion } from 'framer-motion'
+import { AnimatePresence, motion, LayoutGroup } from 'framer-motion'
 import { MessageSquare, GripVertical } from 'lucide-react'
 import type { TaskItem } from '../../shared/data/api'
 import { STATUSES, signalPriority, dueMeta, exitDoneCount } from './taskMeta'
 import { prereqIds } from './dag'
-import { spring, physics, expr } from '../../shared/theme/motion'
+import { spring, physics, expr, useReducedMotion } from '../../shared/theme/motion'
 import { CollapseColumnButton, CollapsedBoardColumn, boardGridTemplate, useBoardCollapse } from '../../shared/ui/BoardCollapse'
 
 export function TaskBoard({ tasks, onOpen, onMove }: { tasks: TaskItem[]; onOpen: (id: string) => void; onMove: (id: string, status: string) => void }) {

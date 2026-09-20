@@ -32,6 +32,7 @@ from pathlib import Path, PurePosixPath
 from aiohttp import web
 from aiohttp.multipart import BodyPartReader
 
+from gideon.core.http_request import read_json_body
 from gideon.http_errors import json_error
 
 logger = logging.getLogger(__name__)
@@ -199,7 +200,7 @@ async def api_durability_export(request: web.Request) -> web.Response:
     body: dict = {}
     if request.can_read_body:
         try:
-            body = await request.json()
+            body = await read_json_body(request)
         except (json.JSONDecodeError, ValueError):
             return web.json_response(
                 {"error": {"code": "bad_body", "message": "body must be JSON"}},
@@ -370,7 +371,7 @@ async def api_durability_run(request: web.Request) -> web.Response:
     from gideon.operations.durability import service
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except (json.JSONDecodeError, ValueError):
         return web.json_response({"error": "body must be JSON"}, status=400)
     job = str(body.get("job", "") or "").strip().lower()
@@ -442,7 +443,7 @@ async def api_durability_archive_restore(request: web.Request) -> web.Response:
     body: dict = {}
     if request.can_read_body:
         try:
-            body = await request.json()
+            body = await read_json_body(request)
         except (json.JSONDecodeError, ValueError):
             return web.json_response(
                 {"error": {"code": "bad_body", "message": "body must be JSON"}},
@@ -669,7 +670,7 @@ async def api_durability_conflict_resolve(request: web.Request) -> web.Response:
     body: dict = {}
     if request.can_read_body:
         try:
-            body = await request.json()
+            body = await read_json_body(request)
         except (json.JSONDecodeError, ValueError):
             return web.json_response(
                 {"error": {"code": "bad_body", "message": "body must be JSON"}},
@@ -777,7 +778,7 @@ async def _history_body(request: web.Request) -> tuple[dict, web.Response | None
     if not request.can_read_body:
         return {}, None
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except (json.JSONDecodeError, ValueError):
         return {}, web.json_response(
             {"error": {"code": "bad_body", "message": "body must be JSON"}}, status=400

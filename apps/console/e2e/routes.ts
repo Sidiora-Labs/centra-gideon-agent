@@ -44,6 +44,7 @@ export const SETTINGS_ROUTES: RouteEntry[] = SETTINGS_PANELS.map((id) => ({
 
 export const VIEW_ROUTES: RouteEntry[] = [
   { route: 'knowledge?view=graph', id: 'knowledge-graph', label: 'Knowledge › Graph', needsData: true },
+  { route: 'tasks?view=dag', id: 'tasks-dag', label: 'Tasks › Dependency graph', needsData: true },
 ]
 
 export const NON_NAV_ROUTES: RouteEntry[] = [

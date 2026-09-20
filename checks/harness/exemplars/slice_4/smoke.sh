@@ -11,7 +11,7 @@ cd "$REPO_ROOT"
 
                                                                                 
 # shellcheck source-path=SCRIPTDIR/..
-source "$REPO_ROOT/harness/exemplars/resolve_py.sh"
+source "$REPO_ROOT/checks/harness/exemplars/resolve_py.sh"
 
 HOME_DIR="$(mktemp -d)"
 trap 'rm -rf "$HOME_DIR"' EXIT

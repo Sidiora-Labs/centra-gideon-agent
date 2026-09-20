@@ -167,6 +167,24 @@ class TestFileHelpers:
         assert loop_files.record_cycle_findings(g.id) == 0
         assert len(loop_files.get_findings(g.id)) == 2
 
+    def test_findings_canonicalize_stage_label_and_preserve_raw_label(self):
+        c = _code(
+            plan=[
+                {"stage": "implementation", "title": "Build All Modules"},
+                {"stage": "verification", "title": "Tests & QA"},
+            ]
+        )
+        (loop_files.loop_dir(c.id) / "findings" / "cycle_001.json").write_text(
+            json.dumps(
+                {"cycle": 1, "stage": "Stage 1 — BUILD ALL MODULES", "summary": "built"}
+            )
+        )
+
+        assert loop_files.record_cycle_findings(c.id) == 1
+        finding = loop_files.get_findings(c.id)[0]
+        assert finding["stage"] == "implementation"
+        assert finding["stage_label"] == "Stage 1 — BUILD ALL MODULES"
+
     def test_nudges_applied_stamp(self):
         g = _goal()
         loop_files.append_nudge(g.id, "focus on the db path", 0)

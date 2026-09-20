@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { motion, useReducedMotion } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { Plus, List, LayoutGrid, GitFork, Columns3, MessageSquare, FolderKanban, X, RotateCcw, ListChecks, Target, Code2, Check, CheckCircle2, Trash2, Users, UserRound, Search, Filter, Tag, GripVertical } from 'lucide-react'
 import { TopBar } from '../../shared/ui/TopBar'
 import { HeaderActions, HeaderControl, HeaderSegmented } from '../../shared/ui/HeaderActions'
@@ -15,7 +15,7 @@ import { confirm, confirmDelete } from '../../shared/ui/dialog'
 import { SidePanel } from '../../shared/ui/SidePanel'
 import { WorkbenchLayout } from '../../shared/ui/WorkbenchLayout'
 import { ContextMenu, Reorderable, type ContextMenuItem } from '../../shared/ui/motion'
-import { spring, expr } from '../../shared/theme/motion'
+import { spring, expr, useReducedMotion } from '../../shared/theme/motion'
 import { api, type TaskItem, type TaskListItem } from '../../shared/data/api'
 import { statusMeta, signalPriority, dueMeta, TERMINAL, ListChecksLike, exitDoneCount } from './taskMeta'
 import { TaskDetail } from './TaskDetail'
@@ -45,7 +45,7 @@ export function TasksListPage({ onCreate, view: viewProp, filter, openId, setVie
   const [savedView, setView] = useTaskPreference(viewProp, 'tasks-view', 'list', changeView)
   const view = (viewOptions.some(option => option.key === savedView) ? savedView : 'list') as TaskView
   const [sortBy, setSortBy] = useTaskPreference(sortProp, 'tasks-sort', 'recent', setSort)
-  const [scope, setScope] = useTaskPreference(scopeProp, 'tasks-scope', '', changeScope)
+  const [scope, setScope] = useTaskPreference(scopeProp, 'tasks-scope', '', changeScope, true)
   const [assigned, setAssigned] = useState(ASSIGNED_EVERYONE)
   const [tag, setTag] = useState('')
   const [manualTaskIds, setManualTaskIds] = useState<string[] | null>(null)

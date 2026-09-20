@@ -2790,7 +2790,7 @@ class TestBgSessionDashboardBranch:
     """run() -> _start_bg_session dashboard URL printing path."""
 
     @pytest.mark.asyncio
-    async def test_bg_session_prints_dashboard_url(self):
+    async def test_bg_session_prints_dashboard_url(self, capsys):
         """_start_bg_session prints dashboard URLs when not _no_dashboard."""
         orch = _make_orchestrator(no_dashboard=False, no_open=True)
 
@@ -2816,23 +2816,23 @@ class TestBgSessionDashboardBranch:
         orch._init_dashboard = _init_dash
 
         fresh_event = asyncio.Event()
-        fresh_event.set()
+        orch.sessions.start_pool.side_effect = lambda **kwargs: fresh_event.set()
         with patch(
             "gideon.integrations.embedding_providers.registry.get_active_embed_fn",
             return_value=None,
         ):
             with patch("gideon.shutdown_event", fresh_event):
-                with patch("gideon.engine.gateway.shutdown_event", fresh_event):
+                with patch("gideon.engine.lifecycle.shutdown_event", fresh_event):
                     with patch(
-                        "gideon.engine.gateway.resolve_dashboard_host",
+                        "gideon.engine.lifecycle.resolve_dashboard_host",
                         return_value="127.0.0.1",
                     ):
                         with patch(
-                            "gideon.engine.gateway.build_dashboard_url",
+                            "gideon.engine.lifecycle.build_dashboard_url",
                             return_value="http://127.0.0.1:6779/?t=tok",
                         ):
                             with patch(
-                                "gideon.engine.gateway.format_dashboard_urls",
+                                "gideon.engine.lifecycle.format_dashboard_urls",
                                 return_value=["url-line-1", "url-line-2"],
                             ):
                                 with patch(
@@ -2853,6 +2853,8 @@ class TestBgSessionDashboardBranch:
                                                     await asyncio.sleep(0)
 
         orch.sessions.start_pool.assert_awaited_once_with(blocking=False)
+        output = capsys.readouterr().out
+        assert "url-line-1" in output and "url-line-2" in output
 
 
 class TestCheckMissingDepsPip:

@@ -16,8 +16,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-_PAGES = Path("apps/console/src/pages")
-_ROUTER = Path("apps/console/src/app/useHashRoute.ts")
+_PAGES = Path("apps/console/src/features")
+_ROUTER = Path("apps/console/src/app/shell/useHashRoute.ts")
 
 _BYPASS_RE = re.compile(
     r"location\.hash\s*=|history\.(pushState|replaceState)\b|location\.replace\s*\(",
@@ -55,10 +55,16 @@ def _uncommented(line: str) -> str:
     return "".join(out)
 
 
+def _page_files() -> list[Path]:
+    """Every page under ``_PAGES``. Co-located jsdom tests drive the router by
+    writing ``location.hash`` themselves, so a ``.test.tsx`` is not a page."""
+    return [f for f in _PAGES.rglob("*.tsx") if not f.name.endswith(".test.tsx")]
+
+
 def test_no_raw_history_or_location_bypass_in_pages():
     """No page writes the URL directly — all nav routes through navigate/setQuery."""
     offenders: list[str] = []
-    for f in _PAGES.rglob("*.tsx"):
+    for f in _page_files():
         for lineno, raw in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
             m = _BYPASS_RE.search(_uncommented(raw))
             if m:
@@ -76,7 +82,7 @@ def test_no_partial_routeprops_in_pages():
     ever breaks. App.tsx always spreads the full bundle, so Partial is a lie."""
     offenders = [
         str(f)
-        for f in _PAGES.rglob("*.tsx")
+        for f in _page_files()
         if "Partial<RouteProps>" in f.read_text(encoding="utf-8")
     ]
     assert not offenders, (
@@ -93,7 +99,7 @@ def test_no_startediting_seed_prop_in_pages():
     Edit didn't push, Back couldn't leave edit, and refresh dropped it. Banning the
     prop keeps every view↔edit toggle on the single ?edit=1 contract (S4)."""
     offenders: list[str] = []
-    for f in _PAGES.rglob("*.tsx"):
+    for f in _page_files():
         for lineno, raw in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
             if "startEditing" in _uncommented(raw):
                 offenders.append(f"{f}:{lineno}")
@@ -127,7 +133,7 @@ def test_replace_keys_use_replace_semantics():
         r"useQueryParam\([^,]+,[^,]+,\s*'(" + "|".join(replace_keys) + r")'"
     )
     offenders: list[str] = []
-    for f in _PAGES.rglob("*.tsx"):
+    for f in _page_files():
         for lineno, raw in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
             code = _uncommented(raw)
             if call_re.search(code) and "replace" not in code:
@@ -146,7 +152,7 @@ def test_tasks_deep_links_use_a_key_the_tasks_route_reads():
     Tasks list with no detail panel open — a dead deep link with no error anywhere.
     The reader's key set is DERIVED from TasksSection.tsx rather than duplicated
     here, so renaming the contract can't leave this guard asserting a stale name."""
-    reader = Path("apps/console/src/pages/tasks/TasksSection.tsx").read_text(
+    reader = Path("apps/console/src/features/tasks/TasksSection.tsx").read_text(
         encoding="utf-8"
     )
     read_keys = set(re.findall(r"query\.([a-zA-Z_]+)", reader))
@@ -154,7 +160,7 @@ def test_tasks_deep_links_use_a_key_the_tasks_route_reads():
         "open" in read_keys
     ), "TasksSection should still read the ?open=<id> deep link"
     offenders: list[str] = []
-    for f in _PAGES.rglob("*.tsx"):
+    for f in _page_files():
         for lineno, raw in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
             for key in re.findall(
                 r"navigate\(`tasks\?([a-zA-Z_]+)=", _uncommented(raw)

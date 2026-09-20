@@ -13,7 +13,7 @@ import types
 
 import pytest
 
-from gideon.security.net.client import EgressBlocked, fetch
+from gideon.sdk.net import EgressBlocked, fetch
 from gideon.security.net.policy import STRICT
 
 

@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from aiohttp import web
 
+from gideon.integrations.inbox import InboxItem
 from gideon.interfaces.dashboard.handlers_inbox import api_inbox_draft
 
 
@@ -35,10 +36,15 @@ def _req(item) -> tuple[MagicMock, AsyncMock]:
 
 
 def _item(can_reply: bool):
-    return SimpleNamespace(
+    return InboxItem(
         id="it-1",
+        channel="c1",
+        channel_name="general",
+        thread_ts=None,
+        message="hello",
+        sender_id="u1",
+        sender_name="Ann",
         can_reply=can_reply,
-        to_dict=lambda: {"id": "it-1", "can_reply": can_reply},
     )
 
 

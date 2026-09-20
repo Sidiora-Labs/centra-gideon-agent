@@ -1,13 +1,13 @@
 import { useEffect, useId, useMemo, useRef, type ReactNode } from 'react'
-import { motion, useReducedMotion } from 'framer-motion'
-import { expr, exprHeavy } from '../../shared/theme/motion'
+import { motion } from 'framer-motion'
+import { expr, exprHeavy, useReducedMotion } from '../../shared/theme/motion'
 import { accentChip } from '../../shared/theme/accent'
 import { graphLineages } from './taskGraphState'
 
 export type DagNodeState = 'todo' | 'active' | 'blocked' | 'awaiting' | 'done' | 'error'
 export interface DagNode {
   id: string; x: number; y: number; w: number; h: number; state: DagNodeState
-  radius?: number; accent?: string; ringed?: boolean; content: ReactNode
+  radius?: number; accent?: string; ringed?: boolean; label: string; content: ReactNode
 }
 export interface DagEdge {
   id: string; from?: string; to?: string
@@ -48,19 +48,20 @@ export function DagView({ nodes, edges, width, height, onNodeClick, onApprove, o
     {nodes.map((node, index) => {
       const radius = node.radius ?? 12
       const gated = gateTones[node.state]
-      const approvals = node.state === 'awaiting' && !!onApprove && !!onDeny
-      const button = !!onNodeClick && !approvals
       const clip = `${prefix}-node-${index}`
       const stroke = node.state === 'error' ? 'var(--color-danger)' : node.ringed ? 'var(--color-primary)' : 'var(--color-outline-variant)'
-      return <g key={node.id} transform={`translate(${node.x},${node.y})`} data-dag-node={node.id} className={`dag-node group${onNodeClick ? ' cursor-pointer' : ''}`}
-        role={button ? 'button' : undefined} tabIndex={onNodeClick ? 0 : undefined}
-        onClick={() => onNodeClick?.(node.id)} onKeyDown={event => { if (event.target === event.currentTarget && onNodeClick && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onNodeClick(node.id) } }}
-        onMouseEnter={() => highlight(node.id)} onMouseLeave={() => highlight()} onFocus={() => highlight(node.id)} onBlur={() => highlight()}>
+      const activate = () => onNodeClick?.(node.id)
+      return <g key={node.id} transform={`translate(${node.x},${node.y})`} data-dag-node={node.id} className="dag-node"
+        onMouseEnter={() => highlight(node.id)} onMouseLeave={() => highlight()}>
+        <g role="button" tabIndex={0} aria-label={node.label} className={`group outline-none${onNodeClick ? ' cursor-pointer' : ''}`}
+          onClick={activate} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activate() } }}
+          onFocus={() => highlight(node.id)} onBlur={() => highlight()}>
         {gated && <motion.rect x={-2} y={-2} width={node.w + 4} height={node.h + 4} rx={radius + 2} fill="none" stroke={gated} strokeWidth={2} initial={false} animate={reduced ? { opacity: 0.7 } : { opacity: [0.25, expr(0.85, 0.5), 0.25] }} transition={reduced ? undefined : { duration: 1.8, repeat: Infinity, ease: 'easeInOut' }} />}
         <clipPath id={clip}><rect width={node.w} height={node.h} rx={radius} /></clipPath>
         <rect width={node.w} height={node.h} rx={radius} fill="var(--color-surface-container)" stroke={stroke} strokeWidth={node.state === 'error' || node.ringed ? 1.5 : 1} className="transition-all group-hover:brightness-125 group-focus:brightness-125" />
         {node.accent && <rect width={4} height={node.h} fill={node.accent} clipPath={`url(#${clip})`} />}
         <foreignObject x={16} y={8} width={node.w - 28} height={node.h - 16}>{node.content}</foreignObject>
+        </g>
         {node.state === 'awaiting' && onApprove && onDeny && <foreignObject x={0} y={node.h} width={node.w} height={34}><div className="flex items-center gap-1.5 pt-1.5">
           <button type="button" onClick={event => { event.stopPropagation(); onApprove(node.id) }} data-type="caption" className="inline-flex h-6 items-center rounded-md px-2" style={accentChip}>Approve</button>
           <button type="button" onClick={event => { event.stopPropagation(); onDeny(node.id) }} data-type="caption" className="inline-flex h-6 items-center rounded-md px-2 text-danger" style={{ background: 'color-mix(in srgb, var(--color-danger) 16%, transparent)' }}>Deny</button>

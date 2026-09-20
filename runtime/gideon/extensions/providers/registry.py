@@ -829,6 +829,7 @@ class KnowledgeTypeHandler(_TypeHandler):
     def register(self, ext: RegisteredProvider, instance: Any) -> None:
         from gideon.integrations.knowledge_providers.registry import register_provider
 
+        instance.source_specs = ext.manifest.validated_source_specs()
         register_provider(instance)
 
     def deregister(self, ext: RegisteredProvider, instance: Any) -> None:
@@ -839,6 +840,30 @@ class KnowledgeTypeHandler(_TypeHandler):
         )
         if name:
             unregister_provider(name)
+
+
+class VectorStoreTypeHandler(_TypeHandler):
+    """Lifecycle handler for external knowledge chunk vector stores."""
+
+    def create(self, ext: RegisteredProvider) -> Any:
+        from gideon.extensions.providers.loader import load_factory
+        from gideon.extensions.providers.settings import ProviderSettings
+
+        return load_factory(ext)(ProviderSettings.load(ext.name))
+
+    def register(self, ext: RegisteredProvider, instance: Any) -> None:
+        from gideon.integrations.vector_store_providers.registry import (
+            register_provider,
+        )
+
+        register_provider(instance)
+
+    def deregister(self, ext: RegisteredProvider, instance: Any) -> None:
+        from gideon.integrations.vector_store_providers.registry import (
+            unregister_provider,
+        )
+
+        unregister_provider(getattr(instance, "name", ext.name))
 
 
 class InboxTypeHandler(_TypeHandler):
@@ -887,6 +912,30 @@ class InboxTypeHandler(_TypeHandler):
         )
         if name:
             unregister_source(str(name))
+
+
+class NotificationTypeHandler(_TypeHandler):
+    def create(self, ext: RegisteredProvider) -> Any:
+        from gideon.extensions.providers.loader import load_factory
+        from gideon.extensions.providers.settings import ProviderSettings
+
+        return load_factory(ext)(ProviderSettings.load(ext.name))
+
+    def register(self, ext: RegisteredProvider, instance: Any) -> None:
+        from gideon.integrations.notification_providers.registry import (
+            register_provider,
+        )
+
+        register_provider(instance)
+
+    def deregister(self, ext: RegisteredProvider, instance: Any) -> None:
+        from gideon.integrations.notification_providers.registry import (
+            unregister_provider,
+        )
+
+        name = getattr(instance, "delivery_name", None) or getattr(ext, "name", "")
+        if name:
+            unregister_provider(str(name))
 
 
 class EntitySeamHandler(_TypeHandler):
@@ -1130,21 +1179,13 @@ def get_provider_registry() -> ProviderRegistry:
         # ConsoleState store, so it self-registers via state.knowledge_provider());
         _registry.register_type_handler("knowledge", KnowledgeTypeHandler())
         _registry.register_type_handler("inbox", InboxTypeHandler())
-        _registry.register_type_handler(
-            "notification",
-            EntitySeamHandler(
-                source_of_truth="delivery preferences live in entity_settings/"
-                "notifications.json, enforced by ConsoleState.notify()'s gate "
-                "(providers.entity_routes.notification_allowed). No provider "
-                "declares type=notification; pluggable delivery backends remain "
-                "a future design.",
-            ),
-        )
+        _registry.register_type_handler("notification", NotificationTypeHandler())
         _registry.register_type_handler("channel", ChannelTypeHandler())
         _registry.register_type_handler("sync", SyncTypeHandler())
         _registry.register_type_handler("sandbox", SandboxTypeHandler())
         _registry.register_type_handler("trigger_source", TriggerSourceTypeHandler())
         _registry.register_type_handler("trigger", TriggerTypeHandler())
+        _registry.register_type_handler("vector_store", VectorStoreTypeHandler())
         _registry.register_type_handler(
             "skills",
             EntitySeamHandler(

@@ -365,6 +365,7 @@ def test_doctor_reports_the_env_fallback_and_not_the_request(
     from gideon.interfaces.cli.doctor import _doctor_credentials
 
     monkeypatch.setenv(CREDENTIAL_BACKEND_ENV, "keychain")
+    save_credential(_KEY, "fallback-value")
     issues = _doctor_credentials()
     out = capsys.readouterr().out
 

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { spring } from '../../theme/motion'
+import { AnimatePresence, motion } from 'framer-motion'
+import { spring, useReducedMotion } from '../../theme/motion'
 
 const disclosureStates = { closed: { height: 0, opacity: 0 }, open: { height: 'auto', opacity: 1 } }
 export function Expandable({ open, header, children, className }: { open: boolean; header: ReactNode; children: ReactNode; className?: string }) {

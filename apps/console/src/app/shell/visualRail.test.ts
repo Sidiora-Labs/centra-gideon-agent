@@ -1,14 +1,18 @@
 import { describe, expect, it, vi } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { ROUTES, THEMES, VIEW_ROUTES } from '../../../e2e/routes'
+import { createElement } from 'react'
+import { render } from '@testing-library/react'
+import { NON_NAV_ROUTES, ROUTES, SETTINGS_ROUTES, THEMES, VIEW_ROUTES } from '../../../e2e/routes'
 import { VISUAL_BASELINE_PLATFORMS } from '../../../playwright.config'
 import { lazyRoute, preloadRoute } from './routePreload'
+import { Loading, Skeleton } from '../../shared/ui/ListScaffold'
 
 const ROOT = process.cwd()
 const APP = readFileSync(join(ROOT, 'src/app/shell/App.tsx'), 'utf8')
 const HELPERS = readFileSync(join(ROOT, 'e2e/helpers.ts'), 'utf8')
 const VISUAL_SPEC = readFileSync(join(ROOT, 'e2e/visual.spec.ts'), 'utf8')
+const PACKAGE = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as { scripts: Record<string, string> }
 const BASELINES = join(ROOT, 'e2e/__screenshots__/visual.spec.ts')
 
 describe('visual route loading', () => {
@@ -60,6 +64,28 @@ describe('visual route loading', () => {
     expect(body.lastIndexOf(paint)).toBeGreaterThan(body.indexOf('settleEntranceAnimations(page)'))
     expect(body).not.toContain('waitForTimeout(')
   })
+
+  it('waits for the shared pending-read signal before settling a capture', () => {
+    const body = HELPERS.slice(HELPERS.indexOf('export async function gotoRoute'), HELPERS.indexOf('export async function settleEntranceAnimations'))
+    const network = body.indexOf("waitForLoadState('networkidle'")
+    const waiting = body.indexOf('VISUAL_WAITING_SELECTOR')
+    const settle = body.indexOf('settleEntranceAnimations(page)')
+    expect(network).toBeGreaterThanOrEqual(0)
+    expect(waiting).toBeGreaterThan(network)
+    expect(settle).toBeGreaterThan(waiting)
+
+    const { container, rerender } = render(createElement(Skeleton, { className: 'h-4 w-20' }))
+    expect(container.querySelector('[data-visual-state="waiting"]')).toBeTruthy()
+    rerender(createElement(Loading, { what: 'projects' }))
+    expect(container.querySelector('[data-visual-state="waiting"]')).toBeTruthy()
+  })
+
+  it('keeps every shared skeleton and route spinner in the waiting census', () => {
+    const scaffold = readFileSync(join(ROOT, 'src/shared/ui/ListScaffold.tsx'), 'utf8')
+    expect(scaffold.match(/data-visual-state="waiting"/g)).toHaveLength(3)
+    expect(APP.slice(APP.indexOf('function PageFallback'), APP.indexOf('const pageComponents'))).toContain('data-visual-state="waiting"')
+    expect(APP.slice(APP.indexOf('if (!loaded)'), APP.indexOf("if (route === 'onboarding'"))).toContain('data-visual-state="waiting"')
+  })
 })
 
 describe('visual golden census', () => {
@@ -83,23 +109,42 @@ describe('visual golden census', () => {
     expect(VISUAL_SPEC).toContain('const VISUAL_ROUTES = [...ROUTES, ...VIEW_ROUTES]')
     expect(VISUAL_SPEC).toContain("test.describe.configure({ mode: 'serial' })")
     expect(VISUAL_SPEC).toContain("test.use({ reducedMotion: 'reduce' })")
+    expect(VISUAL_SPEC).toContain("{ tag: '@visual' }")
   })
 
-  it('keeps the committed platform set closed to Darwin', () => {
+  it('runs state-changing specs before the isolated visual partition', () => {
+    expect(PACKAGE.scripts.e2e).toBe('playwright test --grep-invert @visual && playwright test --grep @visual')
+    expect(PACKAGE.scripts['e2e:update']).toBe('playwright test e2e/visual.spec.ts --update-snapshots')
+  })
+
+  it('checks pristine flywheel state before comparing pixels', () => {
+    const screenshot = HELPERS.slice(HELPERS.indexOf('export async function expectRouteScreenshot'))
+    expect(screenshot.indexOf('assertPristineFlywheel(page)')).toBeLessThan(screenshot.indexOf('toHaveScreenshot'))
+    expect(HELPERS).toContain("page.request.get('/api/learning/health?days=7')")
+    expect(HELPERS).toContain('if (typeof measured !== \'number\') return')
+    expect(HELPERS).toContain(').toBe(0)')
+  })
+
+  it('keeps the committed platform set equal to the declared platforms', () => {
     const platforms = [...new Set(parsed.map(({ platform }) => platform))].sort()
     expect(platforms).toEqual([...VISUAL_BASELINE_PLATFORMS])
   })
 
-  it('derives the committed count and requires a complete theme pair per captured surface', () => {
-    const capturedSurfaces = new Set(parsed.map(({ surface }) => surface))
-    for (const surface of capturedSurfaces) expect(surfaceIds.has(surface), `${surface} is not in the visual manifest`).toBe(true)
-
-    const expected = [...capturedSurfaces].flatMap((surface) =>
+  it('requires every declared platform to capture every manifest surface and theme', () => {
+    const expected = [...surfaceIds].flatMap((surface) =>
       VISUAL_BASELINE_PLATFORMS.flatMap((platform) =>
         THEMES.map((theme) => `${surface}-${theme}-${platform}.png`),
       ),
     ).sort()
     expect(files).toEqual(expected)
-    expect(files).toHaveLength(capturedSurfaces.size * THEMES.length * VISUAL_BASELINE_PLATFORMS.length)
+    expect(files).toHaveLength(40)
+    expect(files).toHaveLength(surfaceIds.size * THEMES.length * VISUAL_BASELINE_PLATFORMS.length)
+  })
+})
+
+describe('axe route census', () => {
+  it('pins every route and theme scanned by axe', () => {
+    const routeCases = (ROUTES.length + SETTINGS_ROUTES.length + VIEW_ROUTES.length + NON_NAV_ROUTES.length) * THEMES.length
+    expect(routeCases).toBe(124)
   })
 })

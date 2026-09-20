@@ -32,12 +32,16 @@ from __future__ import annotations
 
 import pathlib
 import re
+import tarfile
 
 from gideon.operations.durability import inventory as inv
 
 _SRC = pathlib.Path(__file__).resolve().parent.parent.parent / "runtime" / "gideon"
 
 _USE = re.compile(r'config_dir\(\)\s*/\s*(?:"([^"]+)"|([A-Za-z_][A-Za-z0-9_]*))')
+_JOIN = re.compile(
+    r'config_dir\(\)\.joinpath\(\s*(?:"([^"]+)"|([A-Za-z_][A-Za-z0-9_]*))'
+)
 
 
 def _censused() -> tuple[dict[str, set[str]], set[str]]:
@@ -46,7 +50,7 @@ def _censused() -> tuple[dict[str, set[str]], set[str]]:
     unresolved: set[str] = set()
     for path in _SRC.rglob("*.py"):
         text = path.read_text(encoding="utf-8", errors="replace")
-        for match in _USE.finditer(text):
+        for match in (*_USE.finditer(text), *_JOIN.finditer(text)):
             literal, ident = match.group(1), match.group(2)
             if literal:
                 resolved.setdefault(literal, set()).add(path.name)
@@ -69,37 +73,22 @@ _NOT_STATE = frozenset(
         "locks",
         "loop.md",
         "gateway.runtime.json",
+        "update_state.json",
     }
 )
 
 _UNDECLARED_DEBT = frozenset(
     {
         "app_messages",
-        "auth",
         "browse_kill.json",
-        "chat_plans",
         "control_bridge.json",
-        "credentials.json",
-        "digest_queue.jsonl",
         "doctor",
-        "engagement.json",
-        "graph_maintenance.json",
         "history",
-        "inbox",
-        "inbox_state.json",
-        "incident.json",
-        "onboarding",
-        "packs",
         "push_subscriptions.json",
         "push_relay_tokens.json",
-        "recent_projects.json",
-        "research_reports.json",
-        "runners",
         "session_key",
         "sessions.json",
         "settings",
-        "sources",
-        "surfaces",
         "update_check.json",
         "update_releases.json",
     }
@@ -126,6 +115,68 @@ def test_themes_is_declared_so_snapshot_carries_a_custom_theme():
     assert "themes" in _declared_tops()
     claim = inv.claim_for("themes/nurse-handoff-night.json")
     assert claim is not None and claim.id == "themes"
+
+
+def test_auth_is_declared_as_a_secret_store():
+    claim = inv.claim_for("auth/owner.json")
+    assert claim is not None and claim.id == "auth"
+    assert claim.secret
+
+
+def test_the_fourteen_durable_debt_stores_are_declared_and_snapshot_reachable(tmp_path):
+    from gideon.workspace.snapshot import _everything_paths
+
+    expected = {
+        "chat_plans",
+        "digest_queue.jsonl",
+        "engagement.json",
+        "graph_maintenance.json",
+        "inbox",
+        "inbox_state.json",
+        "incident.json",
+        "onboarding",
+        "packs",
+        "recent_projects.json",
+        "research_reports.json",
+        "runners",
+        "sources",
+        "surfaces",
+    }
+    declared = {entry.path for entry in inv.all_entries()}
+    assert expected <= declared
+
+    for rel in expected:
+        target = tmp_path / rel
+        if pathlib.PurePosixPath(rel).suffix:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("{}", encoding="utf-8")
+        else:
+            target.mkdir(parents=True, exist_ok=True)
+    assert expected == set(_everything_paths(tmp_path))
+
+
+def test_provider_credentials_survive_snapshot_restore(tmp_path, monkeypatch):
+    from gideon.workspace.snapshot import restore_main, snapshot_main
+
+    home = tmp_path / "home"
+    out = tmp_path / "snapshots"
+    home.mkdir()
+    credentials = home / "credentials.json"
+    payload = '{"openai":{"api_key":"provider-secret"}}'
+    credentials.write_text(payload, encoding="utf-8")
+    monkeypatch.setenv("GIDEON_HOME", str(home))
+
+    assert snapshot_main([str(out)]) == 0
+    archive = next(out.glob("gideon-snapshot-*.tar.gz"))
+    with tarfile.open(archive) as snapshot:
+        assert any(name.endswith("/credentials.json") for name in snapshot.getnames())
+
+    credentials.unlink()
+    assert restore_main([str(archive), "--force", "--components", "security"]) == 0
+    assert credentials.read_text(encoding="utf-8") == payload
+    assert credentials.stat().st_mode & 0o777 == 0o600
+    claim = inv.claim_for("credentials.json")
+    assert claim is not None and claim.secret
 
 
 def test_every_censused_location_is_declared_or_pinned():

@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { motion, useReducedMotion } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { ArrowLeft, ArrowRight, Check, X, type LucideIcon } from 'lucide-react'
 import { Button } from './Button'
 import { IconButton } from './IconButton'
 import { useFocusTrap } from './useFocusTrap'
-import { ease, instant, spring } from '../theme/motion'
+import { ease, instant, spring, useReducedMotion } from '../theme/motion'
 
 export interface SpotlightStep {
   id: string

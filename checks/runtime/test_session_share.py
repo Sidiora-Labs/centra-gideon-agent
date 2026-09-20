@@ -343,7 +343,7 @@ def test_share_has_exactly_one_call_site():
     conversations in production.
     """
     assert _share_call_sites(_core_sources()) == {
-        ("dashboard/session_starters.py", "api_session_share")
+        ("interfaces/dashboard/session_starters.py", "api_session_share")
     }
 
 

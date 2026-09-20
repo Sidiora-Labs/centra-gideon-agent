@@ -1,7 +1,7 @@
 """approval_mode / silent fields + list serialization on the unified Trigger facade."""
 
 import json
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -24,7 +24,9 @@ def _action(task="m", approval_mode=""):
 
 
 class TestScheduleTriggerApprovalMode:
-    def _make_request(self, body: dict) -> MagicMock:
+    def _make_request(self, body: dict):
+        from aiohttp.test_utils import make_mocked_request
+
         mock_state = MagicMock()
         mock_state.crons.add_job.return_value = ScheduleJob(
             id="abc",
@@ -35,10 +37,11 @@ class TestScheduleTriggerApprovalMode:
         mock_state.crons.is_running.return_value = False
         mock_state.crons.running_since.return_value = None
         mock_state._sessions = {}
-        request = MagicMock()
-        request.app = {"state": mock_state}
-        request.get = lambda *a, **k: "dashboard"
-        request.json = AsyncMock(return_value=body)
+        request = make_mocked_request(
+            "POST", "/api/triggers", headers={"Content-Type": "application/json"}
+        )
+        request.app["state"] = mock_state
+        request._read_bytes = json.dumps(body).encode()
         return request
 
     @pytest.mark.asyncio
@@ -153,13 +156,16 @@ class TestTriggerListFields:
 
 
 class TestCreateHonorsEnabledOverTheWire:
-    def _request(self, body: dict) -> MagicMock:
+    def _request(self, body: dict):
+        from aiohttp.test_utils import make_mocked_request
+
         mock_state = MagicMock()
         mock_state._sessions = {}
-        request = MagicMock()
-        request.app = {"state": mock_state}
-        request.get = lambda *a, **k: "dashboard"
-        request.json = AsyncMock(return_value=body)
+        request = make_mocked_request(
+            "POST", "/api/triggers", headers={"Content-Type": "application/json"}
+        )
+        request.app["state"] = mock_state
+        request._read_bytes = json.dumps(body).encode()
         return request
 
     def _home(self, monkeypatch, tmp_path):

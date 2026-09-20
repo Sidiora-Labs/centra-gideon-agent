@@ -22,6 +22,8 @@ import pytest
 from gideon.workspace import notification_kinds as nk
 
 SRC = pathlib.Path(nk.__file__).parent
+# Emitters live across the package, not only beside the registry module.
+EMITTER_SRC = SRC.parent
 
 
 def test_registry_is_populated():
@@ -259,11 +261,9 @@ def test_EVERY_EMITTER_IN_THE_TREE_IS_REGISTERED():
     emitter is added — a runtime sweep would only see the paths a test happens to exercise.
     """
     import ast
-    import pathlib
 
-    root = pathlib.Path(nk.__file__).parent
     pairs: dict[tuple[str, str], str] = {}
-    for path in root.rglob("*.py"):
+    for path in EMITTER_SRC.rglob("*.py"):
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except (
@@ -345,6 +345,15 @@ def test_attention_pairs_round_trip_through_the_wire():
         assert nk.kind_for_legacy(flat).key == f"{source}/{kind}"
 
 
+def test_every_registered_row_is_reachable_with_only_the_pinned_generic_exemption():
+    assert nk.REGISTERED_REACHABILITY_EXEMPTIONS == {"system/generic"}
+    assert nk.unreachable_registered_kinds() == set()
+
+
+def test_restored_cron_failure_is_error_ranked():
+    assert nk.kind_for_legacy(nk.CRON_FAILED).default_severity == nk.SEV_ERROR
+
+
 def test_legacy_strings_win_a_collision_with_an_attention_kind():
     """A newly added attention kind must never re-point an existing persisted kind."""
     for flat, ident in nk._LEGACY_FLAT.items():
@@ -361,7 +370,7 @@ def _emitted_kind_strings() -> set[str]:
     the dedicated tests below.
     """
     found: set[str] = set()
-    for path in SRC.rglob("*.py"):
+    for path in EMITTER_SRC.rglob("*.py"):
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except (SyntaxError, UnicodeDecodeError):
@@ -409,7 +418,7 @@ def test_no_call_site_passes_a_bare_string_literal():
 def _emitted_constant_names() -> set[str]:
     """``notification_kinds.X`` attribute names passed as the kind at a call site."""
     found: set[str] = set()
-    for path in SRC.rglob("*.py"):
+    for path in EMITTER_SRC.rglob("*.py"):
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except (SyntaxError, UnicodeDecodeError):
@@ -460,7 +469,7 @@ def test_loop_watchdog_dynamic_kinds_are_all_registered():
 
     for event, (kind, _title) in LoopWatchdog._NOTIFY_EVENTS.items():
         assert (
-            kind.lower() in nk._LEGACY_FLAT
+            kind.lower() in nk._WIRE_TO_PAIR
         ), f"watchdog event {event!r} emits {kind!r}"
 
 
@@ -480,10 +489,10 @@ def _frontend_kind_keys():
     likely to drift was the one key never checked.
     """
     meta = (
-        SRC.parent.parent
+        pathlib.Path(__file__).resolve().parents[2]
         / "apps/console"
         / "src"
-        / "pages"
+        / "features"
         / "notifications"
         / "notificationMeta.ts"
     )
@@ -510,10 +519,10 @@ def _frontend_kind_labels():
     reader against the same source.
     """
     meta = (
-        SRC.parent.parent
+        pathlib.Path(__file__).resolve().parents[2]
         / "apps/console"
         / "src"
-        / "pages"
+        / "features"
         / "notifications"
         / "notificationMeta.ts"
     )

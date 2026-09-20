@@ -96,6 +96,14 @@ async def api_ws(request: web.Request) -> web.WebSocketResponse:
         await ws.send_json(
             {"type": "sessions", "data": sessions_data, "yolo": state.is_yolo_active()}
         )
+        app = request.get("app", "")
+        for session in state._sessions.values():
+            if session._routing_suggestion is not None and (
+                not app or state._app_may_see_event(app, "routing_suggestion")
+            ):
+                await ws.send_json(
+                    {"type": "routing_suggestion", "data": session._routing_suggestion}
+                )
     except Exception:
         pass
 
@@ -171,6 +179,18 @@ async def api_ws(request: web.Request) -> web.WebSocketResponse:
                                     pass
                     elif msg_type == "unsubscribe_subagents":
                         state.unsubscribe_subagents(ws)
+                    elif msg_type == "mcp_elicitation_response":
+                        request_id = data.get("id", "")
+                        action = data.get("action", "cancel")
+                        content = data.get("content")
+                        if (
+                            isinstance(request_id, str)
+                            and action in {"accept", "decline", "cancel"}
+                            and (content is None or isinstance(content, dict))
+                        ):
+                            state.resolve_mcp_elicitation(
+                                request_id, {"action": action, "content": content}
+                            )
                 except Exception:
                     pass
             elif msg.type in (WSMsgType.ERROR, WSMsgType.CLOSE):

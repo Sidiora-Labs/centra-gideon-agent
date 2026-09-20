@@ -332,6 +332,10 @@ def resolve(template: Any, ctx: BindingContext) -> Any:
     return BindingTemplate(ctx).render(template)
 
 
+def resolve_prompt(template: Any, ctx: BindingContext) -> Any:
+    return BindingTemplate(ctx, fence_untrusted_spans=True).render(template)
+
+
 def refs_in(template: Any) -> list[str]:
     pending: list[Any] = [template]
     expressions: list[str] = []
@@ -552,8 +556,25 @@ class BindingPlan:
 
 
 class BindingTemplate:
-    def __init__(self, context: BindingContext):
+    def __init__(self, context: BindingContext, *, fence_untrusted_spans: bool = False):
         self.context = context
+        self.fence_untrusted_spans = fence_untrusted_spans
+
+    def _interpolate(self, expression: str) -> str:
+        value = _stringify(resolve_expr(expression, self.context))
+        root = _root_name(expression.split("|", 1)[0].strip())
+        if not self.fence_untrusted_spans or root not in {
+            "inputs",
+            "item",
+            "trigger",
+            "payload",
+            "webhook",
+            "fetched",
+        }:
+            return value
+        from gideon.security.security import fence_untrusted
+
+        return fence_untrusted(value, source=f"workflow:{root}")
 
     def render(self, template: Any) -> Any:
         if isinstance(template, dict):
@@ -564,14 +585,17 @@ class BindingTemplate:
             return template
         complete = _WHOLE_RE.match(template)
         if complete is not None:
-            return resolve_expr(complete.group(1).strip(), self.context)
+            expression = complete.group(1).strip()
+            if self.fence_untrusted_spans:
+                return self._interpolate(expression)
+            return resolve_expr(expression, self.context)
         segments: list[str] = []
         start = 0
         for match in _REF_RE.finditer(template):
             segments.extend(
                 (
                     template[start : match.start()],
-                    _stringify(resolve_expr(match.group(1).strip(), self.context)),
+                    self._interpolate(match.group(1).strip()),
                 )
             )
             start = match.end()

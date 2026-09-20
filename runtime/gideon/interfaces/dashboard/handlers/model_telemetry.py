@@ -14,6 +14,7 @@ import logging
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.http_errors import json_error
 
 logger = logging.getLogger(__name__)
@@ -112,7 +113,7 @@ async def api_routing_policy_put(request: web.Request) -> web.Response:
     from gideon.extensions.providers.use_cases import VALID_USE_CASES
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:  # noqa: BLE001
         return json_error("bad_request", message="a JSON body is required", status=400)
     if not isinstance(body, dict):

@@ -164,6 +164,7 @@ export interface Trigger {
   author?: string
   readOnly?: boolean
   broken?: string[]
+  warnings?: string[]
   schedule?: ScheduleJob
   hook?: HookItem
   store?: WireTrigger
@@ -186,7 +187,7 @@ export function scheduleToTrigger(j: ScheduleJob): Trigger {
     lastStatus: j.last_run_status || (j.last_run_ts ? j.last_status : null) || null,
     runCount: null, usedBy: [],
     schedule: j,
-    broken: j.broken ?? [],
+    broken: j.broken ?? [], warnings: j.warnings ?? [],
     author: j.author, readOnly: j.read_only === true,
   }
 }
@@ -217,7 +218,7 @@ export function storeToTrigger(t: WireTrigger): Trigger {
     actionProvider: provider,
     lastRunTs: null, lastStatus: t.health || null, state: t.state || null,
     runCount: t.run_count ?? null, usedBy: [],
-    storeKind: t.store_kind, broken: t.broken ?? [], store: t,
+    storeKind: t.store_kind, broken: t.broken ?? [], warnings: t.warnings ?? [], store: t,
     author: t.author, readOnly: t.read_only === true,
   }
 }

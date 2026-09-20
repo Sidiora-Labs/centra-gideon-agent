@@ -3,7 +3,7 @@
 The extension ``ProviderRegistry`` has real type handlers for the types that own
 a consumed domain registry (model/task/workflow/memory/tool/hook/prompt/channel/
 knowledge/inbox) and ``EntitySeamHandler`` for the types whose real entity lives
-in a separate subsystem: agent, skills, notification.
+in a separate subsystem: agent, skills.
 
 These tests pin the seam invariant: the seam must NAME where each entity actually
 lives (so no future feature wires the Nth consumer of a no-op path), a genuine
@@ -23,7 +23,7 @@ from gideon.extensions.providers.registry import (
     reset_provider_registry,
 )
 
-SEAM_TYPES = {"agent", "skills", "notification"}
+SEAM_TYPES = {"agent", "skills"}
 REAL_REGISTRY_TYPES = {
     "model",
     "task",
@@ -35,6 +35,7 @@ REAL_REGISTRY_TYPES = {
     "channel",
     "knowledge",
     "inbox",
+    "notification",
 }
 MISMATCH_TYPES = {"skills"}
 
@@ -137,7 +138,11 @@ def test_knowledge_type_handler_registers_external_provider():
     """The handler's register/deregister round-trips a KnowledgeProvider through the
     domain registry — the fixture appears in list_provider_info as kind:external and
     is gone after deregister (single source of truth, real consumer)."""
-    from gideon.extensions.providers.registry import KnowledgeTypeHandler
+    from gideon.extensions.apps.manifest import AppManifest, ProviderConfig
+    from gideon.extensions.providers.registry import (
+        KnowledgeTypeHandler,
+        RegisteredProvider,
+    )
     from gideon.integrations.knowledge_providers import registry as kreg
     from gideon.integrations.knowledge_providers.base import (
         KnowledgeItem,
@@ -166,8 +171,14 @@ def test_knowledge_type_handler_registers_external_provider():
     kreg.unregister_provider("watched-fixture")
     handler = KnowledgeTypeHandler()
     inst = _FixtureProvider()
+    ext = RegisteredProvider(
+        name=inst.name,
+        manifest=AppManifest(name=inst.name),
+        provider_config=ProviderConfig(type="knowledge"),
+    )
     try:
-        handler.register(None, inst)
+        handler.register(ext, inst)
+        assert inst.source_specs == ext.manifest.validated_source_specs()
         info = {p["name"]: p for p in kreg.list_provider_info()}
         assert "watched-fixture" in info
         assert info["watched-fixture"]["kind"] == "external"
@@ -176,7 +187,7 @@ def test_knowledge_type_handler_registers_external_provider():
             info["native"]["kind"] == "native" and info["native"]["always_on"] is True
         )
 
-        handler.deregister(None, inst)
+        handler.deregister(ext, inst)
         assert "watched-fixture" not in {p["name"] for p in kreg.list_provider_info()}
     finally:
         kreg.unregister_provider("watched-fixture")

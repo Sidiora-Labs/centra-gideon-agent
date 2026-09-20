@@ -57,6 +57,7 @@ they imitate the neighboring handler and are not standardized retroactively).
 from __future__ import annotations
 
 import ast
+import copy
 import pathlib
 from dataclasses import dataclass, field
 
@@ -242,6 +243,77 @@ def _static_code(call: ast.Call, constants: dict[str, str]) -> str | None:
     return None
 
 
+def _payload_factories(tree: ast.Module) -> dict[str, ast.FunctionDef]:
+    factories = {}
+    for node in tree.body:
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        body = node.body
+        if (
+            body
+            and isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+        ):
+            body = body[1:]
+        if (
+            len(body) == 1
+            and isinstance(body[0], ast.Return)
+            and isinstance(body[0].value, ast.Dict)
+            and all(isinstance(key, ast.Constant) for key in body[0].value.keys)
+            and not node.decorator_list
+            and node.args.vararg is None
+            and node.args.kwarg is None
+        ):
+            factories[node.name] = node
+    return factories
+
+
+def _expand_payload_factory(
+    payload: ast.expr, factories: dict[str, ast.FunctionDef]
+) -> ast.expr:
+    if not isinstance(payload, ast.Call) or not isinstance(payload.func, ast.Name):
+        return payload
+    factory = factories.get(payload.func.id)
+    if factory is None or any(isinstance(arg, ast.Starred) for arg in payload.args):
+        return payload
+    params = _positional_params(factory)
+    if len(payload.args) > len(params):
+        return payload
+    bound = dict(zip(params, payload.args))
+    for keyword in payload.keywords:
+        if (
+            keyword.arg is None
+            or keyword.arg in bound
+            or keyword.arg in {arg.arg for arg in factory.args.posonlyargs}
+        ):
+            return payload
+        bound[keyword.arg] = keyword.value
+    all_params = params + [arg.arg for arg in factory.args.kwonlyargs]
+    if set(bound) - set(all_params):
+        return payload
+    defaults = dict(
+        zip(params[len(params) - len(factory.args.defaults) :], factory.args.defaults)
+    )
+    defaults.update(
+        {
+            arg.arg: value
+            for arg, value in zip(factory.args.kwonlyargs, factory.args.kw_defaults)
+            if value is not None
+        }
+    )
+    for name in all_params:
+        if name not in bound:
+            if name not in defaults:
+                return payload
+            bound[name] = defaults[name]
+
+    class Substitute(ast.NodeTransformer):
+        def visit_Name(self, node):
+            return copy.deepcopy(bound.get(node.id, node))
+
+    return Substitute().visit(copy.deepcopy(factory.body[-1].value))
+
+
 def scan_source(source: str, rel: str, census: Census) -> None:
     """Classify one module's error sites into ``census``.
 
@@ -254,6 +326,7 @@ def scan_source(source: str, rel: str, census: Census) -> None:
     census.files_scanned += 1
     constants = _module_string_constants(tree)
     wrappers, accounted = _response_wrappers(tree)
+    factories = _payload_factories(tree)
     for name in sorted(wrappers):
         census.wrapper_defs.append((rel, name))
     for node in ast.walk(tree):
@@ -278,6 +351,7 @@ def scan_source(source: str, rel: str, census: Census) -> None:
             continue
         if payload is None:
             continue
+        payload = _expand_payload_factory(payload, factories)
         if not isinstance(payload, ast.Dict):
             if id(node) in accounted:
                 continue
@@ -429,10 +503,11 @@ def test_a_renamed_helper_cannot_escape_the_wrapper_scan():
     )
 
 
-_MCP_HTTP = SRC / "inbound" / "mcp_http.py"
+_MCP_HTTP = SRC / "integrations" / "inbound" / "mcp_http.py"
 _CONVERTED_LINE = (
-    '        return _refuse(json_error("not_found", status=404, headers=_NO_STORE), '
-    "refused=problem)"
+    "        return _refuse(\n"
+    '            json_error("not_found", status=404, headers=_NO_STORE), refused=problem\n'
+    "        )"
 )
 _PLANTED_LINE = '        return _done(404, {"error": "planted flat envelope"})'
 
@@ -716,3 +791,64 @@ def test_the_a2a_surface_hides_no_flat_envelope_in_its_unresolved_rows():
     assert all(row[3] is False for row in unresolved), "none of these is via a wrapper"
     assert [row for row in census.flat if row[0] == module] == []
     assert [row for row in census.flat_via_wrapper if row[0] == module] == []
+
+
+def test_literal_payload_factories_preserve_error_shapes_and_argument_binding():
+    source = """
+from aiohttp import web
+
+def packet(error, *, request_id=None):
+    return {"id": request_id, "error": error}
+
+def direct():
+    return web.json_response(packet({"code": "bad_request", "message": "invalid"}))
+
+def flat():
+    return web.json_response(packet(error="no code", request_id=7))
+
+def _forward(payload):
+    return web.json_response(payload)
+
+def wrapped():
+    return _forward(packet(error="also flat"))
+"""
+    census = Census()
+    scan_source(source, "factory.py", census)
+    assert len(census.structured_direct) == 1
+    assert len(census.flat) == 1
+    assert len(census.flat_via_wrapper) == 1
+    assert not census.unresolved
+    planted = source.replace(
+        '{"code": "bad_request", "message": "invalid"}', '"planted flat"'
+    )
+    census = Census()
+    scan_source(planted, "factory.py", census)
+    assert not census.structured_direct
+    assert len(census.flat) == 2
+
+
+def test_dynamic_or_ambiguous_payload_factories_remain_unresolved():
+    source = """
+from aiohttp import web
+
+def conditional(error):
+    if error:
+        return {"error": error}
+    return {"ok": True}
+
+def expanded(extra):
+    return {**extra}
+
+def literal(error):
+    return {"error": error}
+
+def routes(args, kwargs):
+    web.json_response(conditional("bad"))
+    web.json_response(expanded({"error": "bad"}))
+    web.json_response(literal(*args))
+    web.json_response(literal(**kwargs))
+"""
+    census = Census()
+    scan_source(source, "dynamic.py", census)
+    assert len(census.unresolved) == 4
+    assert not census.flat and not census.structured_direct

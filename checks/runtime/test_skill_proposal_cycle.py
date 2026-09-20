@@ -167,11 +167,11 @@ class TestGeneratorLabelsARefine:
         """
         import inspect
 
-        from gideon.cognition import history
+        from gideon.cognition import consolidation_cycle
 
-        src = inspect.getsource(history)
-        assert 'kind="refine" if _is_refine else "new"' in src
-        assert "load_skill(_existing)" in src
+        src = inspect.getsource(consolidation_cycle.SkillExtraction.propose)
+        assert 'kind="refine" if installed else "new"' in src
+        assert "load_skill(existing)" in src
 
     def test_the_inbox_label_follows_the_kind(self, home):
         """A row that says "New skill proposed" for a refinement is the same lie in the UI. The
@@ -341,7 +341,7 @@ class TestDismissAllMeansAll:
         from gideon.interfaces.dashboard import handlers_inbox as H
 
         src = inspect.getsource(H.api_inbox_dismiss_all)
-        assert "inbox.open_items()" in src
+        assert "inbox.open_items(owner)" in src
         assert "inbox.pending()" not in src
 
 

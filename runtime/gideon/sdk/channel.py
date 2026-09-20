@@ -73,6 +73,11 @@ from gideon.integrations.acp.types import (
     is_cancelled_stop,
 )
 from gideon.integrations.channel_delivery import ChannelDelivery
+from gideon.integrations.channel_transports import (
+    get_transport,
+    register_transport,
+    unregister_transport,
+)
 from gideon.integrations.channel_transports.base import (
     ChannelCapabilities,
     ChannelMessage,
@@ -218,6 +223,7 @@ __all__ = [
     "generate_token",
     "get_update_info",
     "guard_inbound",
+    "get_transport",
     "is_allowed_sender",
     "is_local_bind",
     "is_parseable_document",
@@ -232,6 +238,7 @@ __all__ = [
     "redact_and_truncate",
     "redact_credentials",
     "redact_exfiltration_urls",
+    "register_transport",
     "redeem_pairing_code",
     "render_use_case_prompt",
     "resolve_bind_host",
@@ -253,6 +260,7 @@ __all__ = [
     "trust_mode",
     "trust_policies",
     "untrack",
+    "unregister_transport",
     "validate_file_path",
     "voice_reply",
 ]

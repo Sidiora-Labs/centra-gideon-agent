@@ -216,12 +216,20 @@ describe('run-level folding', () => {
     expect(done.live).toBe(false)
   })
 
-  it('a terminal run clears attention so no dead ask card renders', () => {
+  it('a terminal run clears a dead ask card', () => {
     let vm = foldSnapshot(snap())
     vm = foldEvent(vm, 'workflow_attention', ev({ event_id: 'e1', ask: { prompt: 'ok?' } }))
     expect(vm.attention).toEqual({ prompt: 'ok?' })
     vm = foldEvent(vm, 'workflow_run_update', ev({ event_id: 'e2', status: 'complete' }))
     expect(vm.attention).toBeNull()
+  })
+
+  it('keeps escalation evidence through terminal status without claiming input is needed', () => {
+    let vm = foldSnapshot(snap())
+    vm = foldEvent(vm, 'workflow_attention', ev({ event_id: 'e1', ask: { kind: 'escalation', reason: 'no_progress' } }))
+    expect(vm.needsInput).toBe(false)
+    vm = foldEvent(vm, 'workflow_run_update', ev({ event_id: 'e2', status: 'failed' }))
+    expect(vm.attention).toEqual({ kind: 'escalation', reason: 'no_progress' })
   })
 
   it('gate_resolved clears the ask immediately', () => {

@@ -84,9 +84,11 @@ class TestTheMetaTag:
         against the FE source because the name is a literal on both sides."""
         src = (
             Path(__file__).resolve().parent.parent.parent
-            / "apps/console/src/ui/surfaces/layers.ts"
+            / "apps/console/src/shared/ui/surfaces/layers.ts"
         )
-        assert f"'{surface_layers.SAFE_META_NAME}'" in src.read_text(encoding="utf-8")
+        assert f'meta[name="{surface_layers.SAFE_META_NAME}"]' in src.read_text(
+            encoding="utf-8"
+        )
 
 
 class TestTheCliFlag:
@@ -223,11 +225,7 @@ class TestTheTileActionRoute:
             api_dashboard_view_tile_action,
         )
 
-        req = make_mocked_request(
-            "POST", "/api/dashboard/views/overview/tiles/action", app=web.Application()
-        )
-        req._match_info = {"view_id": "overview"}  # noqa: SLF001
-        req.json = _json_returning({})  # type: ignore[method-assign]
+        req = _tile_request({})
         resp = _run(api_dashboard_view_tile_action(req))
         assert resp.status == 400
         assert _body(resp)["error"]["code"] == "tile_ref_required"
@@ -240,12 +238,8 @@ class TestTheTileActionRoute:
             api_dashboard_view_tile_action,
         )
 
-        req = make_mocked_request(
-            "POST", "/api/dashboard/views/overview/tiles/action", app=web.Application()
-        )
-        req._match_info = {"view_id": "overview"}  # noqa: SLF001
         body = {"ref": "artifact:ghost", "action": "refresh"}
-        req.json = _json_returning(body)  # type: ignore[method-assign]
+        req = _tile_request(body)
         resp = _run(api_dashboard_view_tile_action(req))
         assert resp.status == 404
 
@@ -275,12 +269,8 @@ class TestTheTileActionRoute:
                 ],
             },
         )
-        req = make_mocked_request(
-            "POST", "/api/dashboard/views/overview/tiles/action", app=web.Application()
-        )
-        req._match_info = {"view_id": "overview"}  # noqa: SLF001
         payload = {"ref": "artifact:sales", "action": "bash"}
-        req.json = _json_returning(payload)  # type: ignore[method-assign]
+        req = _tile_request(payload)
         resp = _run(api_dashboard_view_tile_action(req))
         assert resp.status == 200
         body = _body(resp)
@@ -289,11 +279,17 @@ class TestTheTileActionRoute:
         assert any(v[1] == "bash" for v in body["violations"])
 
 
-def _json_returning(payload: dict):
-    async def _json():
-        return payload
-
-    return _json
+def _tile_request(payload: dict):
+    """A real POST whose body the shared boundary reads from serialized bytes."""
+    req = make_mocked_request(
+        "POST",
+        "/api/dashboard/views/overview/tiles/action",
+        match_info={"view_id": "overview"},
+        headers={"Content-Type": "application/json"},
+        app=web.Application(),
+    )
+    req._read_bytes = json.dumps(payload).encode()  # noqa: SLF001
+    return req
 
 
 def _manifest(**over):

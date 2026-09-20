@@ -34,6 +34,7 @@ from gideon.integrations.inbox_service import InboxService
 from gideon.interfaces.dashboard import handlers_inbox
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.interfaces.dashboard.ws import api_ws
+from gideon.sdk.channel import get_transport, register_transport, unregister_transport
 from gideon.security import trust_mode
 
 
@@ -67,16 +68,16 @@ def drop_batch(home, name, messages):
 
 def test_default_transport_registration_retains_external_catalog_entries():
     echo = ReferenceEchoTransport()
-    channel_transports.register_transport(echo)
+    register_transport(echo)
     channel_transports.register_default_transports()
     assert channel_transports.list_transports() == ["reference-echo", "webui"]
-    assert channel_transports.get_transport("reference-echo") is echo
-    prior = channel_transports.get_transport("webui")
+    assert get_transport("reference-echo") is echo
+    prior = get_transport("webui")
     channel_transports.register_default_transports()
-    assert channel_transports.get_transport("webui") is not prior
+    assert get_transport("webui") is not prior
     assert channel_transports.list_transports() == ["reference-echo", "webui"]
-    channel_transports.unregister_transport("reference-echo")
-    channel_transports.unregister_transport("absent")
+    unregister_transport("reference-echo")
+    unregister_transport("absent")
     assert channel_transports.list_transports() == ["webui"]
 
 

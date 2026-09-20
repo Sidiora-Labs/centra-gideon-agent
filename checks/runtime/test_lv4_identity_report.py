@@ -668,16 +668,19 @@ async def test_quiet_hours_suppresses_the_ping_but_not_the_artifact(
     """Both directions, one clock read. The delivering case IS the vacuity floor.
 
     A suppression assertion that would also hold with suppression removed proves nothing,
-    so the same fixture runs twice: once with the quiet window over now (no notification,
-    artifact and inbox row both durable) and once with it hours away (notification
-    delivered). If the second leg did not deliver, the first leg's silence would be
-    meaningless.
+    so the same fixture runs twice: once with the quiet window over now (the notification
+    persists badge-only with no broadcast; artifact and inbox row both durable) and once
+    with it hours away (notification delivered). If the second leg did not deliver, the
+    first leg's silence would be meaningless.
     """
     from gideon.integrations.inbox import InboxStore
 
     state, vs = _state(tmp_path)
     _facet(vs, "prefers terse replies")
     _patch_model(monkeypatch, "")
+
+    broadcasts = []
+    monkeypatch.setattr(state, "_broadcast", broadcasts.append)
 
     start, end = _window_around(0)
     _notifications(
@@ -690,7 +693,11 @@ async def test_quiet_hours_suppresses_the_ping_but_not_the_artifact(
     )
     quiet = await LR.deliver_identity_report(state, vs=vs, now=NOW)
 
-    assert state._notification_log == [], "quiet hours did not suppress the ping"
+    assert [n["kind"] for n in state._notification_log] == [LR.NOTIFY_KIND]
+    quiet_note = state._notification_log[0]
+    assert quiet_note["mode"] == "quiet"
+    assert quiet_note["badge_only"] is True
+    assert broadcasts == [], "quiet hours broadcast the ping"
     assert (
         quiet.artifact_slug == LR.ARTIFACT_SLUG
     ), "quiet hours must not lose the artifact"
@@ -714,6 +721,7 @@ async def test_quiet_hours_suppresses_the_ping_but_not_the_artifact(
     await LR.deliver_identity_report(state, vs=vs, now=NOW + timedelta(days=40))
 
     assert [n["kind"] for n in state._notification_log] == [LR.NOTIFY_KIND]
+    assert [n["kind"] for n in broadcasts] == [LR.NOTIFY_KIND]
 
 
 @pytest.mark.asyncio

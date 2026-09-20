@@ -20,6 +20,7 @@ import logging
 from aiohttp import web
 
 from gideon.cognition import feedback as fb
+from gideon.core.http_request import read_json_body
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ async def api_feedback_record(request: web.Request) -> web.Response:
     if not _enabled():
         return _disabled_response()
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response(
             {"error": {"code": "bad_request", "message": "invalid JSON body"}},
@@ -195,7 +196,7 @@ async def api_feedback_snooze(request: web.Request) -> web.Response:
     if not _enabled():
         return _disabled_response()
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     parsed = _producer_body(body if isinstance(body, dict) else {})
@@ -218,7 +219,7 @@ async def api_feedback_clear(request: web.Request) -> web.Response:
     if not _enabled():
         return _disabled_response()
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     parsed = _producer_body(body if isinstance(body, dict) else {})

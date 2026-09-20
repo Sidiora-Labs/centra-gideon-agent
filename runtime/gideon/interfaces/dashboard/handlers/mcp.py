@@ -13,6 +13,7 @@ from typing import Any
 from aiohttp import web
 
 from gideon.core.cancellation import run_with_timeout
+from gideon.core.http_request import read_json_body, string_field
 from gideon.extensions.providers.failure_copy import relayed_failure_copy
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.security.security import redact_credentials, redact_exfiltration_urls
@@ -600,12 +601,12 @@ async def api_mcp_toggle(request: web.Request) -> web.Response:
     2. Syncs ``tools``/``allowedTools`` in ``gideon.json`` (non-ACP mode).
     """
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
         return web.json_response({"error": "JSON body must be an object"}, status=400)
-    name = body.get("name", "").strip()
+    name = string_field(body, "name")
     enabled = body.get("enabled", True)
     if not name:
         return web.json_response({"error": "name is required"}, status=400)
@@ -671,7 +672,7 @@ async def api_mcp_toggle_tool(request: web.Request) -> web.Response:
     Updates ``disabledTools`` in ``~/.gideon/mcp.json``.
     """
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -738,7 +739,7 @@ async def api_mcp_toggle_tool(request: web.Request) -> web.Response:
 async def api_mcp_toggle_all(request: web.Request) -> web.Response:
     """POST /api/mcp/toggle-all — enable or disable all MCP servers."""
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -789,12 +790,12 @@ async def api_mcp_remove(request: web.Request) -> web.Response:
     and syncs gideon.json.
     """
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
         return web.json_response({"error": "JSON body must be an object"}, status=400)
-    name = body.get("name", "").strip()
+    name = string_field(body, "name")
     if not name:
         return web.json_response({"error": "name is required"}, status=400)
 
@@ -915,7 +916,7 @@ async def api_mcp_server_detail(request: web.Request) -> web.Response:
         )
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -1245,7 +1246,7 @@ async def api_mcp_apply(request: web.Request) -> web.Response:
     new merged state.  Returns a summary with per-change outcomes.
     """
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):

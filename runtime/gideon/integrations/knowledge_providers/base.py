@@ -9,6 +9,7 @@ contract-owner-before-consumer rule.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -138,6 +139,8 @@ class SourcePreview:
 
 
 class KnowledgeProvider(ABC):
+    _shared_item_sink: Callable[["KnowledgeProvider", KnowledgeItem], str] | None = None
+
     @property
     @abstractmethod
     def name(self) -> str: ...
@@ -166,6 +169,15 @@ class KnowledgeProvider(ABC):
 
     async def delete_item(self, item_id: str) -> bool:
         return False
+
+    def set_shared_item_sink(
+        self, sink: Callable[["KnowledgeProvider", KnowledgeItem], str] | None
+    ) -> None:
+        self._shared_item_sink = sink
+
+    def push_shared_item(self, item: KnowledgeItem) -> str:
+        """Deliver a provider-observed team item to the owner's configured queue."""
+        return self._shared_item_sink(self, item) if self._shared_item_sink else ""
 
     def info(self) -> dict[str, Any]:
         return {"name": self.name, "display_name": self.display_name}

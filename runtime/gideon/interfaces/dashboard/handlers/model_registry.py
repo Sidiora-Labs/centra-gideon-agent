@@ -24,6 +24,7 @@ from typing import Any
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.extensions.providers.use_cases import (
     USE_CASES,
     VALID_USE_CASES,
@@ -91,7 +92,7 @@ async def api_huggingface_auth_put(request: web.Request) -> web.Response:
     if denied is not None:
         return denied
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
     if not isinstance(body, dict) or not isinstance(body.get("token"), str):
@@ -553,7 +554,7 @@ async def api_local_model_selftest(request: web.Request) -> web.Response:
     body: Any = {}
     if request.can_read_body:
         try:
-            body = await request.json()
+            body = await read_json_body(request)
         except Exception:
             return web.json_response(
                 {
@@ -657,7 +658,7 @@ async def api_models_active_set(request: web.Request) -> web.Response:
         )
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
     if not isinstance(body, dict):

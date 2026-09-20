@@ -684,10 +684,10 @@ def test_the_park_cooldown_is_PERSISTED_by_the_outcome_path():
     dropped it, so even a caller that asked `unpark_due` had nothing to read."""
     import inspect
 
-    from gideon.engine import gateway
+    from gideon.engine import trigger_outcomes
 
-    source = inspect.getsource(gateway)
-    assert "live.park_retry_after = (" in source
+    source = inspect.getsource(trigger_outcomes)
+    assert "trigger.park_retry_after = (" in source
     assert "float(decision.retry_after)" in source
 
 

@@ -1,20 +1,4 @@
 #!/bin/sh
-                                                                            
-#
-                                                                                 
-                                                                           
-                                                                                 
-                                                                                
-                                                                              
-#
-                                                                                  
-                                                                                  
-                                                                                  
-                                        
-#
-                                                                               
-                                                                            
-                                                                             
 set -eu
 
 commit_msg_file=$1

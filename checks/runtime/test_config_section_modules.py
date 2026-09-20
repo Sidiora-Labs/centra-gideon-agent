@@ -220,11 +220,14 @@ def test_lv4s_field_still_reaches_all_five_points_from_its_new_home():
     ), "the moved field lost its PATCH allowlist entry — the Settings control 400s"
     assert spec["type"] == "enum" and "weekly" in spec["values"]
 
-    panel = (
+    learning = (
         Path(__file__).resolve().parent.parent.parent
-        / "apps/console/src/features/learning/IdentityReportPanel.tsx"
-    ).read_text(encoding="utf-8")
-    assert "api.patchConfig('learning.identity_report_cadence'" in panel
+        / "apps/console/src/features/learning"
+    )
+    panel = (learning / "IdentityReportPanel.tsx").read_text(encoding="utf-8")
+    actions = (learning / "learningActionState.ts").read_text(encoding="utf-8")
+    assert "useIdentityReportActions(" in panel
+    assert "api.patchConfig('learning.identity_report_cadence'" in actions
 
 
 def test_the_moved_sections_all_survive_a_save_load_round_trip(tmp_path, monkeypatch):

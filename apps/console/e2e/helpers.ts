@@ -10,6 +10,7 @@ export async function seedTheme(page: Page, theme: Theme): Promise<void> {
 }
 
 export const SHELL_SELECTOR = 'nav[data-tour="rail"]'
+export const VISUAL_WAITING_SELECTOR = '[data-visual-state="waiting"]'
 
 export async function assertShellMounted(page: Page): Promise<void> {
   await expect(
@@ -39,6 +40,7 @@ export async function gotoRoute(page: Page, route: string): Promise<void> {
   await assertShellMounted(page)
   await page.evaluate(() => (document as unknown as { fonts?: { ready: Promise<unknown> } }).fonts?.ready)
   await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {   })
+  await page.locator(VISUAL_WAITING_SELECTOR).waitFor({ state: 'detached', timeout: 10_000 })
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
   await settleEntranceAnimations(page)
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
@@ -74,6 +76,22 @@ export async function assertMounted(page: Page, before: number, label: string): 
     `${label}: element count did not grow (${before} → ${after}). The opener ran without\n` +
       `opening anything, so a clean axe result here would be meaningless.`,
   ).toBeGreaterThan(before)
+}
+
+export async function assertPristineFlywheel(page: Page): Promise<void> {
+  let measured: unknown
+  try {
+    const response = await page.request.get('/api/learning/health?days=7')
+    if (!response.ok()) return
+    measured = (await response.json() as { composite?: { measured?: unknown } }).composite?.measured
+  } catch {
+    return
+  }
+  if (typeof measured !== 'number') return
+  expect(
+    measured,
+    'the shared e2e gateway already contains measured flywheel state; refusing to compare pixels',
+  ).toBe(0)
 }
 
 export type OpenResult = true | { skip: string }
@@ -131,6 +149,7 @@ export const OPENERS: Opener[] = [
 ]
 
 export async function expectRouteScreenshot(page: Page, name: string): Promise<void> {
+  await assertPristineFlywheel(page)
   await expect(page).toHaveScreenshot(`${name}.png`, {
     fullPage: true,
     animations: 'disabled',

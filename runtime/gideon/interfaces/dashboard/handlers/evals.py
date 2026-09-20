@@ -25,6 +25,7 @@ import logging
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.http_errors import json_error
 
 logger = logging.getLogger(__name__)
@@ -219,7 +220,7 @@ async def api_evals_learning_benchmark(request: web.Request) -> web.Response:
 
     Read-only for a sharper reason than the other routes here: §3 pairs ``k = 5`` trials per
     arm over ten tasks — 100 real model calls — so a POST that started one would spend serious
-    money on a click. The RUN is ``python scripts/learning_benchmark.py --run``, which has
+    money on a click. The RUN is ``python tooling/scripts/learning_benchmark.py --run``, which has
     ``--preflight`` and ``--dry-run`` modes that call nothing, and this route publishes what it
     produced.
 
@@ -254,7 +255,7 @@ async def api_evals_learning_benchmark(request: web.Request) -> web.Response:
         return json_error(
             "learning_benchmark_absent",
             message="No skill-impact benchmark has run yet. Run "
-            "`python scripts/learning_benchmark.py --preflight` and then `--run`.",
+            "`python tooling/scripts/learning_benchmark.py --preflight` and then `--run`.",
             status=404,
         )
     _audit(
@@ -376,7 +377,7 @@ async def api_evals_retrieval_labels(request: web.Request) -> web.Response:
     from gideon.assurance.evals import retrieval_bench as rb
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return json_error("invalid_json", message="Body must be JSON.", status=400)
     if not isinstance(body, dict):

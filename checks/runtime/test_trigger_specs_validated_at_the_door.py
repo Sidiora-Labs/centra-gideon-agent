@@ -222,8 +222,19 @@ class TestApiAndDoctor:
             report = await resp.json()
         findings = [f for f in report["findings"] if f["trigger_id"].endswith("t560")]
         codes = {f["code"] for f in findings}
-        assert "unfireable_spec" in codes, "the malformed skip date is reported"
-        assert "inert_spec_entry" in codes, "the never-firing skip date is reported"
+        assert "invalid_trigger" in codes, "the malformed skip date is reported"
+        assert "trigger_warning" in codes, "the never-firing skip date is reported"
+        assert any(
+            f["code"] == "invalid_trigger"
+            and "spec.skip_dates" in f["detail"]
+            and "not-a-date" in f["detail"]
+            for f in findings
+        )
+        assert any(
+            f["code"] == "trigger_warning"
+            and "never fires on 2026-12-25" in f["detail"]
+            for f in findings
+        )
         assert all(
             f["fix"] for f in findings
         ), "a doctor finding always says what to do"

@@ -17,10 +17,10 @@ function stored(key: string, fallback: string) {
   try { return localStorage.getItem(key) ?? fallback } catch { return fallback }
 }
 function remember(key: string, value: string) { try { localStorage.setItem(key, value) } catch {} }
-export function useTaskPreference(raw: string, key: string, fallback: string, change: (value: string) => void) {
-  const [saved, setSaved] = useState(() => stored(key, fallback))
-  useEffect(() => { if (raw) { remember(key, raw); setSaved(raw) } }, [raw, key])
-  return [raw || saved, (value: string) => { remember(key, value); setSaved(value); change(value) }] as const
+export function useTaskPreference(raw: string, key: string, fallback: string, change: (value: string) => void, emptyIsExplicit = false) {
+  const [saved, setSaved] = useState(() => emptyIsExplicit ? raw : stored(key, fallback))
+  useEffect(() => { if (raw || emptyIsExplicit) { remember(key, raw); setSaved(raw) } }, [raw, key, emptyIsExplicit])
+  return [emptyIsExplicit ? raw : raw || saved, (value: string) => { remember(key, value); setSaved(value); change(value) }] as const
 }
 export function belongsToOwner(task: TaskItem, owner: string) {
   if (!owner) return true
@@ -61,7 +61,7 @@ export function filterTaskCollection(input: { tasks: TaskItem[] | null; ready: T
 }
 
 export function useTaskCollection(query: string, filter: string) {
-  const collection = useQuery('tasks', () => api.tasks().then(result => result.tasks), { persist: false })
+  const collection = useQuery('tasks', () => api.allTasks().then(result => result.tasks), { persist: false })
   const [tasks, setTasks] = useState<TaskItem[] | null>(null)
   const [owner, setOwner] = useState('')
   const [catalog, setCatalog] = useState<{ projects: ProjectItem[]; lists: TaskListItem[]; coding: Set<string> }>({ projects: [], lists: [], coding: new Set() })

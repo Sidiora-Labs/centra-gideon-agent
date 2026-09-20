@@ -131,7 +131,7 @@ export function ActionCenter({ navigate }: RouteProps) {
           className="mt-xs self-start rounded-pill px-m py-xs text-on-surface-low transition-colors hover:bg-surface-high hover:text-on-surface"
           data-type="label-m"
         >
-          +{overflow} more to triage →
+          Showing {entries.length} of {allEntries.length} · Open the rest →
         </button>
       )}
     </div>

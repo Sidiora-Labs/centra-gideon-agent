@@ -66,8 +66,8 @@ export function useInboxQueue(openId: string | null, setOpenId: (id: string) => 
     return [...channels.values()]
   }, [status, items])
   const dismissAll = () => operation.run('dismiss', async () => {
-    const count = status?.pending_count ?? 0
-    if (!await confirm({ title: `Dismiss all ${count} pending item${count === 1 ? '' : 's'}?`, body: 'Every pending item of every kind is dismissed at once. There is no undo — but they stay readable under Handled.', danger: true, confirmLabel: 'Dismiss all' })) return false
+    const count = status?.open_count ?? 0
+    if (!await confirm({ title: `Dismiss all ${count} open item${count === 1 ? '' : 's'}?`, body: 'Every open item of every kind is dismissed at once. There is no undo — but they stay readable under Handled.', danger: true, confirmLabel: 'Dismiss all' })) return false
     return reportingWrite(`dismiss ${count === 1 ? 'this item' : `all ${count} items`}`, () => api.dismissAllInbox())
   }, accepted => { if (accepted) reload() }, 'Dismiss failed')
   const restart = () => operation.run('restart', () => reportingWrite('restart the inbox sources', async () => {

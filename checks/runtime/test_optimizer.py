@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from aiohttp.test_utils import make_mocked_request
 
 from gideon.interfaces.dashboard.handlers.optimizer import (
     _CTX_MAX_TURNS,
@@ -14,6 +15,30 @@ from gideon.interfaces.dashboard.handlers.optimizer import (
     _clip_context,
     handle_optimize,
 )
+
+
+def _req(body: dict, state=None):
+    """A real aiohttp request carrying ``body`` as the wire payload."""
+    request = make_mocked_request(
+        "POST",
+        "/api/optimizer/optimize",
+        app={"state": state if state is not None else MagicMock()},
+        headers={"Content-Type": "application/json"},
+    )
+    request._read_bytes = json.dumps(body).encode()
+    return request
+
+
+def _raw_req(raw: bytes):
+    """A real request whose body is not valid JSON."""
+    request = make_mocked_request(
+        "POST",
+        "/api/optimizer/optimize",
+        app={"state": MagicMock()},
+        headers={"Content-Type": "application/json"},
+    )
+    request._read_bytes = raw
+    return request
 
 
 def _optimizer_system() -> str:
@@ -72,8 +97,7 @@ class TestOptimizerEndpoint:
 
     @pytest.mark.asyncio
     async def test_empty_prompt_returns_unchanged(self):
-        request = MagicMock()
-        request.json = AsyncMock(return_value={"prompt": "", "context": ""})
+        request = _req({"prompt": "", "context": ""})
 
         resp = await handle_optimize(request)
         data = json.loads(resp.body)
@@ -82,8 +106,7 @@ class TestOptimizerEndpoint:
 
     @pytest.mark.asyncio
     async def test_invalid_json_returns_400(self):
-        request = MagicMock()
-        request.json = AsyncMock(side_effect=ValueError("bad json"))
+        request = _raw_req(b"{not json")
 
         resp = await handle_optimize(request)
         assert resp.status == 400
@@ -107,14 +130,13 @@ class TestOptimizerEndpoint:
         mock_state = MagicMock()
         mock_state.sessions = mock_sessions
 
-        request = MagicMock()
-        request.json = AsyncMock(
-            return_value={
+        request = _req(
+            {
                 "prompt": "refactor the auth module to be cleaner",
                 "context": "",
-            }
+            },
+            state=mock_state,
         )
-        request.app = {"state": mock_state}
 
         resp = await handle_optimize(request)
         data = json.loads(resp.body)
@@ -141,14 +163,13 @@ class TestOptimizerEndpoint:
         mock_state = MagicMock()
         mock_state.sessions = mock_sessions
 
-        request = MagicMock()
-        request.json = AsyncMock(
-            return_value={
+        request = _req(
+            {
                 "prompt": "refactor the auth module to be cleaner",
                 "context": "",
-            }
+            },
+            state=mock_state,
         )
-        request.app = {"state": mock_state}
 
         resp = await handle_optimize(request)
         data = json.loads(resp.body)
@@ -178,9 +199,7 @@ class TestOptimizerEndpoint:
         mock_state = MagicMock()
         mock_state.sessions = mock_sessions
 
-        request = MagicMock()
-        request.json = AsyncMock(return_value={"prompt": "yes", "context": ""})
-        request.app = {"state": mock_state}
+        request = _req({"prompt": "yes", "context": ""}, state=mock_state)
 
         resp = await handle_optimize(request)
         data = json.loads(resp.body)
@@ -197,11 +216,9 @@ class TestOptimizerEndpoint:
         mock_state = MagicMock()
         mock_state.sessions = mock_sessions
 
-        request = MagicMock()
-        request.json = AsyncMock(
-            return_value={"prompt": "refactor the auth module", "context": ""}
+        request = _req(
+            {"prompt": "refactor the auth module", "context": ""}, state=mock_state
         )
-        request.app = {"state": mock_state}
 
         resp = await handle_optimize(request)
         data = json.loads(resp.body)
@@ -229,11 +246,9 @@ class TestOptimizerEndpoint:
         mock_state = MagicMock()
         mock_state.sessions = mock_sessions
 
-        request = MagicMock()
-        request.json = AsyncMock(
-            return_value={"prompt": "refactor the auth module", "context": ""}
+        request = _req(
+            {"prompt": "refactor the auth module", "context": ""}, state=mock_state
         )
-        request.app = {"state": mock_state}
 
         resp = await handle_optimize(request)
         data = json.loads(resp.body)
@@ -264,14 +279,13 @@ class TestOptimizerEndpoint:
         mock_state.sessions = mock_sessions
 
         long_context = "A" * (MAX_CONTEXT_CHARS + 1000) + "B" * 2000
-        request = MagicMock()
-        request.json = AsyncMock(
-            return_value={
+        request = _req(
+            {
                 "prompt": "refactor the auth module to be better",
                 "context": long_context,
-            }
+            },
+            state=mock_state,
         )
-        request.app = {"state": mock_state}
 
         await handle_optimize(request)
         assert "B" * 2000 in captured_prompt[0]
@@ -301,15 +315,13 @@ def _stub_request(prompt: str, context: str = "", reply: str = "optimized result
     mock_state = MagicMock()
     mock_state.sessions = mock_sessions
 
-    request = MagicMock()
-    request.json = AsyncMock(return_value={"prompt": prompt, "context": context})
-    request.app = {"state": mock_state}
+    request = _req({"prompt": prompt, "context": context}, state=mock_state)
     return request, captured
 
 
 def _labeled_context(n: int, body_chars: int = 600) -> str:
     """``n`` role-labeled turns, one per line, newest LAST — the shape
-    apps/console/src/pages/chat/optimizerContext.ts emits, at a size that exercises the cap.
+    apps/console/src/features/chat/optimizerContext.ts emits, at a size that exercises the cap.
     """
     lines = []
     for i in range(n):
@@ -328,7 +340,7 @@ class TestContextCap:
         starts cutting well-formed contexts again."""
         ts = (
             Path(__file__).resolve().parents[2]
-            / "apps/console/src/pages/chat/optimizerContext.ts"
+            / "apps/console/src/features/chat/optimizerContext.ts"
         ).read_text()
         fe_turns = int(re.search(r"CTX_MAX_TURNS = (\d+)", ts).group(1))
         fe_chars = int(re.search(r"CTX_TURN_CHARS = (\d+)", ts).group(1))
@@ -387,10 +399,7 @@ class TestContextCap:
 
     @pytest.mark.asyncio
     async def test_non_string_context_is_a_400_not_a_500(self):
-        request = MagicMock()
-        request.json = AsyncMock(
-            return_value={"prompt": "do a thing", "context": {"a": 1}}
-        )
+        request = _req({"prompt": "do a thing", "context": {"a": 1}})
         resp = await handle_optimize(request)
         assert resp.status == 400
 

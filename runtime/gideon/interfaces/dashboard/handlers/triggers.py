@@ -29,6 +29,7 @@ from typing import Any
 from aiohttp import web
 
 from gideon.core.config import loader as config_loader
+from gideon.core.http_request import read_json_body
 from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.security.security import redact_credentials, redact_exfiltration_urls
@@ -363,8 +364,20 @@ def _attribution(trigger: Any, *, owner: str) -> dict[str, Any]:
     }
 
 
+def _issue_messages(row: Any) -> tuple[list[str], list[str]]:
+    """Return the one wire representation of a loaded trigger's issues."""
+    return (
+        [issue.message for issue in row.errors],
+        [issue.message for issue in row.warnings],
+    )
+
+
 def _serialize_store(
-    trigger: Any, *, broken: list[str] | None = None, owner: str = ""
+    trigger: Any,
+    *,
+    broken: list[str] | None = None,
+    warnings: list[str] | None = None,
+    owner: str = "",
 ) -> dict[str, Any]:
     """A `TriggerStore` trigger in the shared list shape. Id is `store:<kind>:<slug>` so the
     mutation routes back to the store; `raw_id` is the store's own id."""
@@ -395,6 +408,7 @@ def _serialize_store(
         "last_run_status": str(latest.get("status") or "") or None,
         "last_error": _redact(trigger.last_error_summary or ""),
         "broken": list(broken or []),
+        "warnings": list(warnings or []),
         **_attribution(trigger, owner=owner),
     }
 
@@ -429,12 +443,15 @@ def _schedule_rows(state: ConsoleState) -> list[dict[str, Any]]:
     owner = owner_username()
     clock_rows = [row for row in all_rows(store) if row.trigger.kind == "clock"]
     if clock_rows:
-        return [
-            _schedule_row_for(
-                state, row.trigger, issues=[i.message for i in row.errors], owner=owner
+        rows = []
+        for row in clock_rows:
+            errors, warnings = _issue_messages(row)
+            rows.append(
+                _schedule_row_for(
+                    state, row.trigger, issues=errors, warnings=warnings, owner=owner
+                )
             )
-            for row in clock_rows
-        ]
+        return rows
     return []
 
 
@@ -443,6 +460,7 @@ def _schedule_row_for(
     trigger: Any,
     *,
     issues: list[str] | None = None,
+    warnings: list[str] | None = None,
     owner: str = "",
 ) -> dict[str, Any]:
     """ONE schedule row, projected and redacted (S101).
@@ -470,6 +488,7 @@ def _schedule_row_for(
     projected["failure_delivery"] = str(trigger.failure_delivery or "")
     projected["dedupe_hash"] = policy.get("dedupe_hash") is True
     projected["broken"] = list(issues or [])
+    projected["warnings"] = list(warnings or [])
     projected["delivery"] = trigger.delivery
     projected["failure_delivery"] = trigger.failure_delivery
     projected["failure_policy"] = dict(trigger.failure_policy or {})
@@ -689,9 +708,13 @@ async def api_triggers(request: web.Request) -> web.Response:
         owner = owner_username()
         for row in all_rows(_trigger_store()):
             if row.trigger.kind in _STORE_ONLY_KINDS:
+                errors, warnings = _issue_messages(row)
                 triggers.append(
                     _serialize_store(
-                        row.trigger, broken=[i.message for i in row.errors], owner=owner
+                        row.trigger,
+                        broken=errors,
+                        warnings=warnings,
+                        owner=owner,
                     )
                 )
 
@@ -713,7 +736,7 @@ async def api_trigger_create(request: web.Request) -> web.Response:
     """
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -936,7 +959,13 @@ async def _create_schedule(
         source="dashboard",
         resources=f"trigger:schedule:{raw_id}:{name}",
     )
-    projected = _schedule_row_for(state, row.trigger) if row is not None else {}
+    if row is not None:
+        errors, warnings = _issue_messages(row)
+        projected = _schedule_row_for(
+            state, row.trigger, issues=errors, warnings=warnings
+        )
+    else:
+        projected = {}
     return web.json_response({"ok": True, "trigger": projected})
 
 
@@ -1003,7 +1032,7 @@ async def api_trigger_detail(request: web.Request) -> web.Response:
         return web.json_response({"ok": True})
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -1184,33 +1213,30 @@ async def _update_schedule(
         from gideon.automation.triggers import tools as _tools
         from gideon.automation.triggers.schedule_view import channel_of
 
-        spec = dict(row.trigger.spec or {})
+        original_spec = dict(row.trigger.spec or {})
+        spec = dict(original_spec)
         outcome_patch, outcome_error = _outcome_control_patch(body, row.trigger)
         if outcome_error:
             return web.json_response({"error": outcome_error}, status=400)
-        cadence_changed = False
         if "cron_expr" in kwargs and kwargs["cron_expr"]:
             spec = {
                 "kind": "cron",
                 "expr": str(kwargs["cron_expr"]).strip(),
                 **_carried(spec),
             }
-            cadence_changed = True
         elif "every_secs" in kwargs and kwargs["every_secs"]:
             spec = {
                 "kind": "interval",
                 "interval_secs": int(kwargs["every_secs"]),
                 **_carried(spec),
             }
-            cadence_changed = True
         if "timezone" in kwargs:
             spec["timezone"] = kwargs["timezone"]
-            cadence_changed = True
         if "strict_schedule" in kwargs:
             spec["strict"] = bool(kwargs["strict_schedule"])
         if "skip_dates" in kwargs:
             spec["skip_dates"] = kwargs["skip_dates"]
-            cadence_changed = True
+        cadence_changed = spec != original_spec
 
         patch: dict[str, Any] = {"spec": spec}
         if "name" in kwargs:
@@ -1253,13 +1279,18 @@ async def _update_schedule(
         if store_response:
             from gideon.automation.triggers.ownership import owner_username
 
+            errors, warnings = _issue_messages(updated_row)
             projected = _serialize_store(
                 updated_row.trigger,
-                broken=[issue.message for issue in updated_row.errors],
+                broken=errors,
+                warnings=warnings,
                 owner=owner_username(),
             )
         else:
-            projected = _schedule_row_for(state, updated_row.trigger)
+            errors, warnings = _issue_messages(updated_row)
+            projected = _schedule_row_for(
+                state, updated_row.trigger, issues=errors, warnings=warnings
+            )
         return web.json_response({"ok": True, "trigger": projected})
 
     return web.json_response({"error": "not found"}, status=404)
@@ -1287,7 +1318,7 @@ async def api_trigger_toggle(request: web.Request) -> web.Response:
         if row is None:
             return web.json_response({"error": "not found"}, status=404)
         try:
-            body = await request.json()
+            body = await read_json_body(request)
         except Exception:
             body = {}
         want = body.get("enabled") if isinstance(body, dict) else None
@@ -1295,8 +1326,15 @@ async def api_trigger_toggle(request: web.Request) -> web.Response:
         result = T.set_paused(store, trigger_id=raw, paused=paused)
         if not result.ok:
             return web.json_response({"error": result.text}, status=400)
+        updated_row = store.get(raw)
+        errors, warnings = _issue_messages(updated_row)
         return web.json_response(
-            {"ok": True, "trigger": _serialize_store(store.get(raw).trigger)}
+            {
+                "ok": True,
+                "trigger": _serialize_store(
+                    updated_row.trigger, broken=errors, warnings=warnings
+                ),
+            }
         )
     if kind == _LIFECYCLE:
         hook = _hook_store(state).toggle(raw)
@@ -1314,7 +1352,7 @@ async def api_trigger_toggle(request: web.Request) -> web.Response:
         if trigger is None:
             return web.json_response({"error": "not found"}, status=404)
         try:
-            body = await request.json()
+            body = await read_json_body(request)
         except Exception:
             body = {}
         want = body.get("enabled") if isinstance(body, dict) else None
@@ -1328,7 +1366,7 @@ async def api_trigger_toggle(request: web.Request) -> web.Response:
         store.upsert(trigger)
         return web.json_response({"ok": True, "trigger": _serialize_event(trigger)})
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     enabled = body.get("enabled")
@@ -1344,7 +1382,16 @@ async def api_trigger_toggle(request: web.Request) -> web.Response:
         if want:
             _arm_if_needed(store, raw)
         state.push_refresh("crons")
-        return web.json_response({"ok": True})
+        updated_row = store.get(raw)
+        errors, warnings = _issue_messages(updated_row)
+        return web.json_response(
+            {
+                "ok": True,
+                "trigger": _schedule_row_for(
+                    state, updated_row.trigger, issues=errors, warnings=warnings
+                ),
+            }
+        )
     return web.json_response({"error": "not found"}, status=404)
 
 
@@ -1589,7 +1636,7 @@ async def _run_store(raw: str, request: web.Request) -> web.Response:
     dry_run = request.query.get("dry_run", "") in ("1", "true", "yes")
     if not dry_run:
         try:
-            body = await request.json()
+            body = await read_json_body(request)
             dry_run = (
                 bool(body.get("dry_run", False)) if isinstance(body, dict) else False
             )
@@ -1827,7 +1874,7 @@ async def api_trigger_view_render(request: web.Request) -> web.Response:
 
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     surface = (
@@ -1873,7 +1920,7 @@ async def _run_event(raw: str, request: web.Request) -> web.Response:
     if trigger is None:
         return web.json_response({"error": "not found"}, status=404)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     body = body if isinstance(body, dict) else {}
@@ -1922,7 +1969,7 @@ async def api_trigger_test(request: web.Request) -> web.Response:
     if not hook:
         return web.json_response({"error": "not found"}, status=404)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     context = sanitize_string(body.get("context", "test"))[:10000]
@@ -2134,12 +2181,16 @@ async def api_triggers_doctor(request: web.Request) -> web.Response:
 
     rows: list[dict[str, Any]] = []
     store = _trigger_store()
-    store_rows = [row for row in store.load() if row.trigger.kind == "clock"]
+    store_rows = store.load()
     if store_rows:
         for row in store_rows:
             rows.append(
                 {
-                    "id": f"{_SCHEDULE}:{row.trigger.id}",
+                    "id": (
+                        f"{_SCHEDULE}:{row.trigger.id}"
+                        if row.trigger.kind == "clock"
+                        else f"{_STORE}:{row.trigger.id}"
+                    ),
                     "gates": row.trigger.gates or {},
                     "workflow": row.trigger.workflow or {},
                     "spec": dict(row.trigger.spec or {}),
@@ -2157,22 +2208,25 @@ async def api_triggers_doctor(request: web.Request) -> web.Response:
         )
 
     report = diagnose(rows, known_workflows=known_workflows)
-    from gideon.automation.triggers.arm import semantic_spec_issues
     from gideon.automation.triggers.calendar import Finding
 
     for row in store_rows:
-        for issue in semantic_spec_issues(row.trigger.kind, row.trigger.spec):
+        for issue in row.issues:
             is_error = issue.severity == "error"
+            trigger_id = (
+                f"{_SCHEDULE}:{row.trigger.id}"
+                if row.trigger.kind == "clock"
+                else f"{_STORE}:{row.trigger.id}"
+            )
             report.findings.append(
                 Finding(
-                    trigger_id=f"{_SCHEDULE}:{row.trigger.id}",
-                    code="unfireable_spec" if is_error else "inert_spec_entry",
+                    trigger_id=trigger_id,
+                    code="invalid_trigger" if is_error else "trigger_warning",
                     detail=f"{issue.path}: {issue.message}",
                     fix=(
-                        "correct the expression or date — as authored, this part of the "
-                        "trigger cannot do what it says"
+                        "correct this trigger field before enabling it"
                         if is_error
-                        else "confirm this is intended, or adjust the schedule/skip date"
+                        else "confirm this is intended, or adjust the trigger"
                     ),
                 )
             )

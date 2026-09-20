@@ -287,9 +287,9 @@ def test_the_startup_url_uses_the_browser_default():
     """The two gateway mint sites open a URL a HUMAN clicks, so 30d applies."""
     import pathlib
 
-    import gideon.engine.gateway as gw
+    import gideon.engine.lifecycle as lifecycle
 
-    src = pathlib.Path(gw.__file__).read_text(encoding="utf-8")
+    src = pathlib.Path(lifecycle.__file__).read_text(encoding="utf-8")
     assert "ttl_seconds=DEFAULT_BROWSER_SESSION_TTL_SECS" in src
     assert (
         'generate_token("local-startup", ttl_seconds=MAX_SESSION_TTL_SECS)' not in src

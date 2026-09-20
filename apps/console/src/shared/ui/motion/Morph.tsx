@@ -1,5 +1,6 @@
+import { useReducedMotion } from '../../theme/motion'
 import type { CSSProperties, ReactNode } from 'react'
-import { motion, useReducedMotion } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { MORPH_FAMILY, familySpring } from './vocabulary'
 
 export function Morph({ id, className, style, children }: { id: string; className?: string; style?: CSSProperties; children: ReactNode }) {

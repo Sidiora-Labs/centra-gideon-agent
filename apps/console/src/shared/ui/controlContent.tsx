@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
+import { AnimatePresence, motion } from 'framer-motion'
 import { Loader2, type LucideIcon } from 'lucide-react'
-import { physics, spring } from '../theme/motion'
+import { physics, spring, useReducedMotion } from '../theme/motion'
 
 export function ControlContent({ busy, children, label, iconSize = 16, glyph = false }: {
   busy: boolean; children: ReactNode; label?: string; iconSize?: number; glyph?: boolean
