@@ -127,7 +127,9 @@ class TestGateIsInstalled:
         assert getattr(mw, "_is_request_boundary_gate", False) is True
 
     def test_server_installs_it_just_outside_invalid_id(self) -> None:
-        src = (SRC / "dashboard" / "server.py").read_text(encoding="utf-8")
+        src = (SRC / "interfaces" / "dashboard" / "server.py").read_text(
+            encoding="utf-8"
+        )
         assert "request_boundary_middleware()" in src
         boundary = src.index("request_boundary_middleware()")
         invalid_id = src.index("invalid_id_middleware()")

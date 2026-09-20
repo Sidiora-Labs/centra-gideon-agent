@@ -47,7 +47,8 @@ export function layoutPlanDag(draft: PlanDraft, label: (step: PlanStep) => strin
     const column = columns.get(step.id) ?? 0
     const row = occupied.get(column) ?? 0
     occupied.set(column, row + 1)
-    return { id: step.id, x: column * (BOX.width + BOX.across), y: row * (BOX.height + BOX.down), w: BOX.width, h: BOX.height, state: step.pending ? 'active' : 'todo', content: label(step) }
+    const name = label(step)
+    return { id: step.id, x: column * (BOX.width + BOX.across), y: row * (BOX.height + BOX.down), w: BOX.width, h: BOX.height, state: step.pending ? 'active' : 'todo', label: name, content: name }
   })
   const positions = new Map(nodes.map((node) => [node.id, node]))
   const links = draft.steps.flatMap((step, index) => {

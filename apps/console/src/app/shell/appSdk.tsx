@@ -40,6 +40,8 @@ export interface AppContext {
   name: string
   permissions: AppPermissions
   uiCapabilities?: string[]
+  enabled?: boolean
+  reportError?: (message: string) => void
   host?: {
     setHeaderActions: (actions: Array<{ id: string; label: string; icon?: string; variant?: 'primary' | 'secondary' | 'ghost'; onClick: () => void }>) => void
     openPanel: (spec: { title: string; icon?: string; render: (el: HTMLElement) => void | (() => void) }) => void
@@ -100,6 +102,7 @@ export interface AppApiClient {
 }
 
 export function createAppApi(app: AppContext): AppApiClient {
+  // This allowlist scopes the SDK client; app UI shares the host origin and is not a bundle sandbox.
   function allowed(path: string): boolean {
     const pathname = path.split(/[?#]/, 1)[0]
     if (pathname.startsWith(`/apps/${app.name}/api`)) return true
@@ -122,6 +125,7 @@ export function createAppApi(app: AppContext): AppApiClient {
       const text = await r.text().catch(() => '')
       let msg = text || `HTTP ${r.status}`
       try { const p = JSON.parse(text); if (p?.error) msg = p.error } catch {   }
+      app.reportError?.(msg)
       throw new Error(msg)
     }
     const ct = r.headers.get('Content-Type') || ''
@@ -328,6 +332,7 @@ export function ChatEmbed(props: {
   const q = qs.toString()
   const base = session ? `chat/${encodeURIComponent(session)}` : 'chat/new'
   const src = `${location.origin}/#/${base}?${q}`
+  // Presentation boundary only: allow-same-origin means this frame has the host DOM, cookie, and API authority.
   return createElement('iframe', {
     src,
     title: 'Gideon chat',

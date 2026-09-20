@@ -871,7 +871,7 @@ def test_the_census_counts_a_leak_and_clears_a_masked_route():
     )
 
 
-_INSTANCE_ROUTES = SRC / "providers" / "instance_routes.py"
+_INSTANCE_ROUTES = SRC / "extensions" / "providers" / "instance_routes.py"
 _MASKED_LINE = (
     '            "instances": [mask_instance(inst, schema) for inst in instances],'
 )
@@ -893,7 +893,7 @@ def test_reverting_the_mask_in_instance_routes_is_counted():
     real = _INSTANCE_ROUTES.read_text(encoding="utf-8")
 
     baseline = Census()
-    scan_source(real, "providers/instance_routes.py", baseline)
+    scan_source(real, "extensions/providers/instance_routes.py", baseline)
     assert (
         baseline.surfaces
     ), "the census classified no surface in instance_routes.py at all"
@@ -911,7 +911,7 @@ def test_reverting_the_mask_in_instance_routes_is_counted():
     assert len(planted) != len(real), "the swap applied but changed no bytes"
 
     census = Census()
-    scan_source(planted, "providers/instance_routes.py", census)
+    scan_source(planted, "extensions/providers/instance_routes.py", census)
     assert len(census.violations) == 1, (
         "reverting a real mask_instance call to the raw disk serializer was NOT counted, so "
         "the zero-violation ratchet is measuring the detector rather than the code. "

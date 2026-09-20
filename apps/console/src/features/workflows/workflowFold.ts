@@ -110,6 +110,9 @@ export function foldEvent(
       break
 
     case 'workflow_attention':
+      next.attention = (env.ask as Record<string, unknown>) ?? next.attention
+      break
+
     case 'workflow_needs_input':
       next.attention = (env.ask as Record<string, unknown>) ?? next.attention
       next = applyRunStatus(next, 'needs_input')
@@ -155,7 +158,7 @@ function applyRunStatus(vm: WorkflowViewModel, status: string): WorkflowViewMode
     status,
     live: !TERMINAL_RUN.has(status),
     needsInput: status === 'needs_input',
-    attention: TERMINAL_RUN.has(status) ? null : vm.attention,
+    attention: TERMINAL_RUN.has(status) && vm.attention?.kind !== 'escalation' ? null : vm.attention,
   }
 }
 

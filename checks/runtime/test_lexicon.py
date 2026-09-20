@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from gideon.cognition.lexicon.phonetics import (
     double_metaphone,
     phonetic_keys,
@@ -9,6 +11,7 @@ from gideon.cognition.lexicon.phonetics import (
 )
 from gideon.cognition.lexicon.service import LexiconService
 from gideon.cognition.lexicon.store import LexiconStore
+from gideon.integrations import transcribe
 from gideon.integrations.stt.provider import (
     TranscriptResult,
     TranscriptSegment,
@@ -225,3 +228,39 @@ class TestService:
         )
         outcome = svc.correct(r)
         assert not any(c.heard == "the" for c in outcome.applied + outcome.suggested)
+
+
+@pytest.mark.asyncio
+async def test_microphone_dictation_uses_and_reinforces_the_lexicon(
+    tmp_path, monkeypatch
+):
+    svc = LexiconService(LexiconStore(str(tmp_path / "lex.db")))
+    svc.add_manual_term("Nero")
+    svc.learn_correction("niro", "Nero", always=True)
+    received = []
+
+    async def decode(_path, *, detailed, bias_terms=None):
+        assert detailed is True
+        received.extend(bias_terms or [])
+        return TranscriptResult(
+            text="ask niro",
+            segments=[
+                TranscriptSegment(
+                    0,
+                    1,
+                    "ask niro",
+                    words=[
+                        TranscriptWord(0, 0.4, "ask ", 0.99),
+                        TranscriptWord(0.4, 1, "niro", 0.99),
+                    ],
+                )
+            ],
+        )
+
+    monkeypatch.setattr("gideon.cognition.lexicon.service._service", svc)
+    monkeypatch.setattr(transcribe, "_transcription", decode)
+
+    assert await transcribe.transcribe_audio("microphone.webm") == "ask Nero"
+    assert "Nero" in received
+    correction = svc.list_corrections()[0]
+    assert (correction.heard, correction.meant, correction.count) == ("niro", "Nero", 2)

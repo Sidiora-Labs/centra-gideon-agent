@@ -85,7 +85,7 @@ def _shipped_tools() -> dict[str, str]:
     """Every tool name the in-process registries expose, mapped to its module."""
     out: dict[str, str] = {}
     for mod_name in _REGISTRIES:
-        mod = importlib.import_module(f"gideon.{mod_name}")
+        mod = importlib.import_module(f"gideon.integrations.{mod_name}")
         for tool in mod._list_tools():
             name = tool.name if hasattr(tool, "name") else tool.get("name")
             if name:

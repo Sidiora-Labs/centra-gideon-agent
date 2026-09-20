@@ -14,13 +14,18 @@ from unittest.mock import patch
 
 import pytest
 
-from gideon.integrations.mcp_artifacts import _call_tool
+from gideon.integrations.mcp_artifacts import _call_tool, _list_tools
 from gideon.workspace.artifacts.native import NativeArtifactProvider
 
 
 @pytest.fixture
 def provider(tmp_path):
     return NativeArtifactProvider(root=tmp_path / "artifacts")
+
+
+@pytest.fixture
+def _isolate_trigger_store():
+    yield
 
 
 @pytest.fixture
@@ -104,6 +109,21 @@ class TestArtifactMcpTools:
         rows = json.loads(out)
         assert len(rows) == 1
         assert rows[0]["slug"] == "doc-two"
+
+    def test_collection_is_in_schemas_and_scopes_dispatch(self, wired) -> None:
+        schemas = {tool["name"]: tool["inputSchema"] for tool in _list_tools()}
+        for name in ("artifact_save", "artifact_update", "artifact_list"):
+            assert "collection" in schemas[name]["properties"]
+
+        _call_tool(
+            "artifact_save",
+            {"name": "Report", "content": "v1", "kind": "text", "collection": "A"},
+        )
+        assert wired.get("report").collection == "A"
+        _call_tool("artifact_update", {"slug": "report", "collection": "B"})
+        assert wired.get("report").collection == "B"
+        rows = json.loads(_call_tool("artifact_list", {"collection": "B"}))
+        assert [row["slug"] for row in rows] == ["report"]
 
     def test_list_empty(self, wired) -> None:
         assert "No artifacts" in _call_tool("artifact_list", {})

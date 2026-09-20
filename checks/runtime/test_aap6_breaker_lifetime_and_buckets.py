@@ -176,7 +176,10 @@ class TestTheBreakerLivesForTheSession:
         import gideon
 
         src = (
-            pathlib.Path(gideon.__file__).parent / "dashboard" / "chat_runner.py"
+            pathlib.Path(gideon.__file__).parent
+            / "interfaces"
+            / "dashboard"
+            / "chat_runner.py"
         ).read_text()
         assert "_acp_breaker = session._acp_breaker" in src
         assert "_acp_breaker = LoopBreaker()" not in src

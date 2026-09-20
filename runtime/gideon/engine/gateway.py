@@ -43,8 +43,6 @@ from gideon.core.config import AppConfig
 from gideon.core.config import loader as config_loader
 from gideon.core.config.loader import (
     CRED_OWNER_ID,
-    CRED_SLACK_APP_TOKEN,
-    CRED_SLACK_BOT_TOKEN,
 )
 from gideon.core.constants import CHAT_TURN_TIMEOUT, DATA_WARNING
 from gideon.core.env import _is_wsl, browser_available
@@ -72,19 +70,7 @@ from gideon.interfaces.dashboard import start_dashboard
 from gideon.interfaces.dashboard.chat_runner import run_chat
 from gideon.interfaces.dashboard.handlers import MAX_PROMPT_BYTES
 from gideon.interfaces.dashboard.handlers.autonudge import render_nudge_message
-from gideon.interfaces.dashboard.origin import (
-    build_dashboard_url,
-    format_dashboard_urls,
-    is_local_bind,
-    parse_dashboard_url,
-    resolve_bind_host,
-    resolve_dashboard_host,
-)
 from gideon.interfaces.dashboard.state import ConsoleState
-from gideon.interfaces.dashboard.token_auth import (
-    DEFAULT_BROWSER_SESSION_TTL_SECS,
-    generate_token,
-)
 from gideon.operations.frontend import build_frontend_async
 from gideon.security.approval_brief import attach_approval_brief
 from gideon.security.security import redact_credentials, redact_exfiltration_urls

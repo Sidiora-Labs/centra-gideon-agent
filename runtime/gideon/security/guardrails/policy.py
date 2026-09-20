@@ -229,6 +229,45 @@ def ceiling_permits_approval(value: str) -> bool:
     return resolve(active_ceiling(), probe).approval == value
 
 
+def tool_grant_posture(
+    tier: str, tool_allowlist: tuple[str, ...] = ()
+) -> SafetyProfile:
+    """Return a fail-closed tool tier intersected with the operator ceiling."""
+    from gideon.security.guardrails.ceiling import active_ceiling, resolve
+
+    normalized = (
+        tier if tier in (TOOL_READ, TOOL_READ_WRITE, TOOL_CUSTOM) else TOOL_READ
+    )
+    probe = SafetyProfile(
+        name="tool_grant", tool_grants=normalized, tool_allowlist=tool_allowlist
+    )
+    return resolve(active_ceiling(), probe)
+
+
+def tool_grant_denial(
+    name: str, tier: str, tool_allowlist: tuple[str, ...] = ()
+) -> str:
+    """Why ``name`` is denied by the effective tool grant, or ``""`` when allowed."""
+    if tier == TOOL_CUSTOM and not any(pattern.strip() for pattern in tool_allowlist):
+        return f"{name!r} is not allowed by the empty custom tool grant"
+    posture = tool_grant_posture(tier, tool_allowlist)
+    if posture.tool_grants == TOOL_READ_WRITE:
+        return ""
+    if posture.tool_grants == TOOL_CUSTOM:
+        from gideon.security.guardrails.registries import name_glob
+
+        allow = tuple(pattern for pattern in posture.tool_allowlist if pattern.strip())
+        if allow and any(name_glob(name, pattern) for pattern in allow):
+            return ""
+        return f"{name!r} is not allowed by the custom tool grant"
+
+    from gideon.automation.workflows.batch_compile import is_write_tool
+
+    if is_write_tool(name):
+        return f"{name!r} is write-class and the tool grant is read-only"
+    return ""
+
+
 def rung_ceiling_for_profile(profile: SafetyProfile) -> str:
     """The highest autonomy rung a run under ``profile`` may reach (AUTONOMY-GUARDRAILS
     §5.2, layered per PLATFORM-HARDENING-FLOORS §5).

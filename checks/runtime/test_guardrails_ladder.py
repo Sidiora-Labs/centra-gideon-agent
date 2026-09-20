@@ -25,8 +25,10 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
+from aiohttp import streams
 from aiohttp.test_utils import make_mocked_request
 
 from gideon.extensions.apps.manifest import AppManifest, AutonomyConfig, ProviderConfig
@@ -189,13 +191,21 @@ def _inbox_rows(home: Path) -> list[dict]:
 
 
 def _post(path: str, body: dict):
-    req = make_mocked_request("POST", path)
-
-    async def _j():
-        return body
-
-    req.json = _j  # type: ignore[method-assign]
-    return req
+    raw = json.dumps(body).encode("utf-8")
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        # asyncio.run() closed and unset the loop the conftest fixture installed.
+        loop = asyncio.new_event_loop()
+    payload = streams.StreamReader(Mock(), 2**16, loop=loop)
+    payload.feed_data(raw)
+    payload.feed_eof()
+    return make_mocked_request(
+        "POST",
+        path,
+        payload=payload,
+        headers={"Content-Type": "application/json", "Content-Length": str(len(raw))},
+    )
 
 
 def _json_body(resp) -> dict:
@@ -418,7 +428,7 @@ def test_nothing_but_the_api_handler_grants_a_rung():
     """
     import ast
 
-    root = Path(au.__file__).resolve().parent.parent
+    root = Path(au.__file__).resolve().parents[2]
     callers: set[str] = set()
     for path in root.rglob("*.py"):
         try:
@@ -436,7 +446,7 @@ def test_nothing_but_the_api_handler_grants_a_rung():
             )
             if name == "grant_rung":
                 callers.add(str(path.relative_to(root)))
-    assert callers == {"dashboard/handlers/autonomy.py"}, callers
+    assert callers == {"interfaces/dashboard/handlers/autonomy.py"}, callers
 
 
 def test_the_api_refuses_a_grant_ABOVE_the_declared_ceiling(_isolated_home):

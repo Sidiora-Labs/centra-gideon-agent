@@ -616,15 +616,27 @@ class TestSecurityBoundaries:
         ), "the binding language calls compile()"
 
     def test_a_binding_cannot_reach_the_filesystem(self) -> None:
+        import ast
         import inspect
 
         from gideon.automation.workflows import bindings
 
-        source = inspect.getsource(bindings)
-        for forbidden in ("open(", "Path(", "subprocess"):
-            assert (
-                forbidden not in source
-            ), f"the binding language can reach {forbidden}"
+        tree = ast.parse(inspect.getsource(bindings))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                name = (
+                    node.func.id
+                    if isinstance(node.func, ast.Name)
+                    else node.func.attr if isinstance(node.func, ast.Attribute) else ""
+                )
+                assert name not in {
+                    "open",
+                    "Path",
+                }, f"the binding language can reach {name}"
+            if isinstance(node, ast.Import):
+                assert all(alias.name != "subprocess" for alias in node.names)
+            if isinstance(node, ast.ImportFrom):
+                assert node.module != "subprocess"
 
     def test_an_unknown_pipe_is_REFUSED_not_ignored(self) -> None:
         """A silently-dropped sanitization pipe is worse than a hard error: the spec looks

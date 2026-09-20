@@ -1,11 +1,11 @@
 import { useId, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { motion, useReducedMotion } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { X } from 'lucide-react'
 import { IconButton } from './IconButton'
 import { useFocusTrap } from './useFocusTrap'
 import { useDismissKey } from './overlayInteraction'
-import { spring, physics, expr } from '../theme/motion'
+import { spring, physics, expr, useReducedMotion } from '../theme/motion'
 
 export function Modal({ title, icon, onClose, children, layoutId }: {
   title: ReactNode

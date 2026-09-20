@@ -18,6 +18,7 @@ import logging
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.integrations.search_providers.registry import list_providers
 from gideon.integrations.search_providers.use_cases import (
     SEARCH_USE_CASES,
@@ -107,7 +108,7 @@ async def api_search_active_set(request: web.Request) -> web.Response:
         )
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
     if not isinstance(body, dict):

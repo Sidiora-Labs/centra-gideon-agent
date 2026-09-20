@@ -405,13 +405,38 @@ def _upsert(knowledge_store, body):
 
     app = web.Application()
     app["state"] = SimpleNamespace(knowledge_store=knowledge_store)
-    req = make_mocked_request("POST", "/api/knowledge/intents", app=app)
-
-    async def _json():
-        return body
-
-    req.json = _json
+    req = make_mocked_request(
+        "POST",
+        "/api/knowledge/intents",
+        headers={"Content-Type": "application/json"},
+        app=app,
+    )
+    req._read_bytes = json.dumps(body).encode()
     resp = _run(H.upsert_intent(req))
+    return resp, json.loads(resp.body)
+
+
+def _update(knowledge_store, intent_id, body):
+    """Drive `PATCH /api/knowledge/intents/{id}` the way the panel does."""
+    import json
+    from types import SimpleNamespace
+
+    from aiohttp import web
+    from aiohttp.test_utils import make_mocked_request
+
+    from gideon.interfaces.dashboard.handlers import knowledge as H
+
+    app = web.Application()
+    app["state"] = SimpleNamespace(knowledge_store=knowledge_store)
+    req = make_mocked_request(
+        "PATCH",
+        f"/api/knowledge/intents/{intent_id}",
+        headers={"Content-Type": "application/json"},
+        app=app,
+        match_info={"id": intent_id},
+    )
+    req._read_bytes = json.dumps(body).encode()
+    resp = _run(H.update_intent(req))
     return resp, json.loads(resp.body)
 
 
@@ -420,6 +445,35 @@ def knowledge_store(tmp_path):
     from gideon.cognition.knowledge.store import KnowledgeStore
 
     return KnowledgeStore(tmp_path / "k.db")
+
+
+def test_pause_and_propose_skill_patch_the_saved_intent(knowledge_store):
+    _, created = _upsert(knowledge_store, {"goal": "track useful patterns"})
+
+    resp, body = _update(
+        knowledge_store,
+        created["id"],
+        {"enabled": False, "propose_skill": True},
+    )
+
+    assert resp.status == 200
+    assert body["intent"]["enabled"] is False
+    assert body["intent"]["propose_skill"] is True
+    from gideon.cognition.knowledge.intents import IntentStore
+
+    saved = IntentStore(knowledge_store.db_path.parent / "intents.json").get(
+        created["id"]
+    )
+    assert saved is not None and not saved.enabled and saved.propose_skill
+
+
+def test_intent_patch_rejects_non_boolean_control_values(knowledge_store):
+    _, created = _upsert(knowledge_store, {"goal": "track useful patterns"})
+
+    resp, body = _update(knowledge_store, created["id"], {"enabled": "false"})
+
+    assert resp.status == 400
+    assert body["error"] == "values must be boolean"
 
 
 def test_creating_a_colliding_goal_is_a_typed_409_not_a_201(knowledge_store):

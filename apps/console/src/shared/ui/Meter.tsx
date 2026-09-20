@@ -1,4 +1,5 @@
-import { useReducedMotion } from 'framer-motion'
+import { useReducedMotion } from '../theme/motion'
+import {  } from 'framer-motion'
 import { cx } from './cx'
 import { progressFraction } from './statusSurfaceState'
 

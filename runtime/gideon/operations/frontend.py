@@ -25,6 +25,13 @@ def ensure_dev_dist_symlink() -> Path | None:
         return destination.resolve()
     source = _resolve_website_dist(package_root())
     if source is None:
+        if destination.is_symlink() and not destination.exists():
+            try:
+                destination.unlink()
+            except OSError as error:
+                logger.warning(
+                    "Could not remove missing console bundle link: %s", error
+                )
         return None
     _link_bundle(source, destination, logger.warning)
     return source if (destination / "index.html").is_file() else None

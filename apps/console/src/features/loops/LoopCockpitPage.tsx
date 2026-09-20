@@ -39,7 +39,7 @@ import { type SkillUsed, skillsUsedLabel, skillsUsedTitle } from '../chat/chatTy
 import { useQueryFlag, type RouteProps } from '../../app/shell/useQueryState'
 import { accentChip } from '../../shared/theme/accent'
 import { tabListKeys } from '../../shared/data/tabListKeys'
-import { loopStatusLabel, effectiveLoopStatus, ACTIVE_LOOP_STATUSES, LOOP_ACTION_SOURCE_STATUSES } from '../../shared/data/loopStatus'
+import { shownCycle, loopStatusLabel, effectiveLoopStatus, ACTIVE_LOOP_STATUSES, LOOP_ACTION_SOURCE_STATUSES } from '../../shared/data/loopStatus'
 import { notify } from '../../app/shell/appSdk'
 import { copyText } from '../../app/shell/clipboard'
 
@@ -499,8 +499,8 @@ export function LoopCockpitPage({ id, onBack, onDeleted, onOpenArtifact, onOpenT
       {statusBar}
 
       <div className="flex-1 min-h-0 flex">
-       { }
-       <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
+        { }
+        <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
         <div className="shrink-0 px-2xl pt-m pb-m flex flex-col gap-m" style={{ marginInline: 'auto', width: '100%', maxWidth: W }}>
           {
 }
@@ -629,118 +629,118 @@ export function LoopCockpitPage({ id, onBack, onDeleted, onOpenArtifact, onOpenT
             onDownloadReport={() => downloadText(`${safeFilename(c.name || c.goal, c.id)}-deliverable.md`, report, 'text/markdown;charset=utf-8')}
           />
         </div>
-       </div>
+        </div>
 
-       { }
-       <AnimatePresence>
-         {railOpen && (
-           <SidePanel
-             key="details"
-             storeKey="loop-rail-w"
-             fillHeight
-             icon={selected
-               ? <SquareIconButton icon={ArrowLeft} iconSize={16} label="Back to list" onClick={() => setSelected(null)} />
-               : <PanelRight size={18} />}
-             title={selected == null ? 'Details' : selected.kind === 'log' ? 'Findings Log' : selected.kind === 'roi' ? 'Returns per cycle' : `Cycle ${selected.cycle}`}
-             onClose={() => { setRailOpen(false); setSelected(null) }}
-           >
-             {selected == null ? (
-               <div className="flex flex-col gap-1">
-                 <RailRow
-                   icon={<ScrollText size={15} />}
-                   label="Findings Log"
-                   hint={`${findings.length} ${findings.length === 1 ? 'cycle' : 'cycles'}`}
-                   onClick={() => setSelected({ kind: 'log' })}
-                 />
-                 {c.goal_type === 'open_ended' && (c.marginal_scores?.length ?? 0) > 0 && (
-                   <RailRow
-                     icon={<BarChart3 size={15} />}
-                     label="Returns per cycle"
-                     hint={`▲${c.marginal_scores!.at(-1)!.toFixed(1)}`}
-                     onClick={() => setSelected({ kind: 'roi' })}
-                   />
-                 )}
-                 {pending.length > 0 && (
-                   <div data-type="body-s" className="rounded-lg px-m py-2" style={{ background: 'color-mix(in srgb, var(--color-info) 8%, transparent)', border: '1px dashed color-mix(in srgb, var(--color-info) 30%, transparent)' }}>
-                     <Eyebrow tone="info" className="flex items-center gap-1.5 mb-1"><MessageSquarePlus size={12} /> nudge queued — applies next cycle</Eyebrow>
-                     {pending.map((n, i) => <p key={i} className="text-on-surface-var">{n.text}</p>)}
-                   </div>
-                 )}
-                 {(() => {
-                   const cycleNode = (f: LoopFinding, idx: number) => {
-                     const sorted = cycleTs
-                     const ti = sorted.indexOf(f.ts ?? -1)
-                     const prev = ti > 0 ? sorted[ti - 1] : c.started_at ?? undefined
-                     const dur = f.ts != null && prev != null ? f.ts - prev : undefined
-                     return <CycleNode key={f.cycle} f={f} verdict={verdictByCycle.get(f.cycle)} dur={dur} hasNudge={!!byCycle.get(f.cycle)?.length} onClick={() => setSelected({ kind: 'cycle', cycle: f.cycle })} delay={idx * 0.02} />
-                   }
-                   const liveCycle = active ? (
-                     <div className="rounded-lg bg-surface-container px-m py-2">
-                       <div className="flex items-center gap-s">
-                         <span className="relative inline-flex items-center justify-center size-5 shrink-0">
-                           {running && <motion.span aria-hidden className="absolute inset-[-6px] rounded-pill" style={{ background: thinkingGlow() }} animate={{ opacity: [0.3, 0.7, 0.3] }} transition={{ duration: 3, repeat: Infinity }} />}
-                           <span className={running ? '' : 'text-on-surface-low'}><Spark size={13} /></span>
-                         </span>
-                         <span data-type="label-s" className="flex-1 truncate text-on-surface" style={fvs(500)}>Cycle {c.total_cycles + 1} · {running ? (statusText || 'working') : loopStatusLabel(effectiveLoopStatus(c.status, c.error_message)).toLowerCase()}</span>
-                         {running && <span data-type="caption" className="shrink-0 text-on-surface-low tabular-nums">{fmt(curCycleElapsed)}</span>}
-                       </div>
-                       {running && activity.length > 0 && <LiveSubsteps activity={activity} />}
-                     </div>
-                   ) : null
-                   if (execPlan.length === 0) {
-                     const emptyNote = findings.length === 0 && !active
-                       ? (c.total_cycles > 0
-                           ? `${c.total_cycles} ${c.total_cycles === 1 ? 'cycle' : 'cycles'} ran — no per-cycle detail recorded for this loop.`
-                           : 'No cycles completed yet.')
-                       : null
-                     return (<>
-                       {liveCycle}
-                       {emptyNote && <p data-type="body-s" className="text-on-surface-low px-m py-1">{emptyNote}</p>}
-                       {findings.map((f, idx) => cycleNode(f, idx))}
-                     </>)
-                   }
-                   return execPlan.map((_ph, pi) => pi).reverse().map((pi) => (
-                     <PhaseGroup key={pi} phase={execPlan[pi]} index={pi} active={pi === activePhase}
-                       minCycles={phaseMinCycles(execPlan[pi])}
-                       cycles={findings.filter((f) => phaseForCycle(f.cycle, execPlan) === pi)}
-                       renderCycle={cycleNode} liveCycle={pi === activePhase ? liveCycle : null} />
-                   ))
-                 })()}
-               </div>
-             ) : (
-               selected.kind === 'roi'
-                 ? (<div className="flex flex-col gap-m">
-                     <p data-type="body-s" className="text-on-surface-var">The judge's marginal value per cycle, against your <span className="text-on-surface">{c.granularity}</span> stop threshold. A run of bars below the line is what trips the auto-stop.</p>
-                     <div className="rounded-lg bg-surface-container px-m py-l">
-                       <RoiRail points={roiPoints} granularity={c.granularity} />
-                     </div>
-                   </div>)
-                 : selected.kind === 'log'
-                 ? (log
-                   ? (<div className="flex flex-col gap-m">
-                       <div className="flex justify-end">
-                         <QuietButton onClick={() => downloadText(`${safeFilename(c.name || c.goal, c.id)}-findings.md`, log, 'text/markdown;charset=utf-8')}><Download size={13} /> Download</QuietButton>
-                       </div>
-                       <Markdown>{log}</Markdown>
-                     </div>)
-                   : <p data-type="body-s" className="text-on-surface-low">No findings logged yet — the cumulative trail appears here as cycles complete.</p>)
-                 : (() => {
-                     const f = findings.find((x) => x.cycle === selected.cycle)
-                     if (!f) return <p data-type="body-s" className="text-on-surface-low">Cycle not found.</p>
-                     return (<>
-                       {
+        { }
+        <AnimatePresence>
+          {railOpen && (
+            <SidePanel
+              key="details"
+              storeKey="loop-rail-w"
+              fillHeight
+              icon={selected
+                ? <SquareIconButton icon={ArrowLeft} iconSize={16} label="Back to list" onClick={() => setSelected(null)} />
+                : <PanelRight size={18} />}
+              title={selected == null ? 'Details' : selected.kind === 'log' ? 'Findings Log' : selected.kind === 'roi' ? 'Returns per cycle' : `Cycle ${selected.cycle}`}
+              onClose={() => { setRailOpen(false); setSelected(null) }}
+            >
+              {selected == null ? (
+                <div className="flex flex-col gap-1">
+                  <RailRow
+                    icon={<ScrollText size={15} />}
+                    label="Findings Log"
+                    hint={`${findings.length} ${findings.length === 1 ? 'cycle' : 'cycles'}`}
+                    onClick={() => setSelected({ kind: 'log' })}
+                  />
+                  {c.goal_type === 'open_ended' && (c.marginal_scores?.length ?? 0) > 0 && (
+                    <RailRow
+                      icon={<BarChart3 size={15} />}
+                      label="Returns per cycle"
+                      hint={`▲${c.marginal_scores!.at(-1)!.toFixed(1)}`}
+                      onClick={() => setSelected({ kind: 'roi' })}
+                    />
+                  )}
+                  {pending.length > 0 && (
+                    <div data-type="body-s" className="rounded-lg px-m py-2" style={{ background: 'color-mix(in srgb, var(--color-info) 8%, transparent)', border: '1px dashed color-mix(in srgb, var(--color-info) 30%, transparent)' }}>
+                      <Eyebrow tone="info" className="flex items-center gap-1.5 mb-1"><MessageSquarePlus size={12} /> nudge queued — applies next cycle</Eyebrow>
+                      {pending.map((n, i) => <p key={i} className="text-on-surface-var">{n.text}</p>)}
+                    </div>
+                  )}
+                  {(() => {
+                    const cycleNode = (f: LoopFinding, idx: number) => {
+                      const sorted = cycleTs
+                      const ti = sorted.indexOf(f.ts ?? -1)
+                      const prev = ti > 0 ? sorted[ti - 1] : c.started_at ?? undefined
+                      const dur = f.ts != null && prev != null ? f.ts - prev : undefined
+                      return <CycleNode key={f.cycle} f={f} verdict={verdictByCycle.get(f.cycle)} dur={dur} hasNudge={!!byCycle.get(f.cycle)?.length} onClick={() => setSelected({ kind: 'cycle', cycle: f.cycle })} delay={idx * 0.02} />
+                    }
+                    const liveCycle = active ? (
+                      <div className="rounded-lg bg-surface-container px-m py-2">
+                        <div className="flex items-center gap-s">
+                          <span className="relative inline-flex items-center justify-center size-5 shrink-0">
+                            {running && <motion.span aria-hidden className="absolute inset-[-6px] rounded-pill" style={{ background: thinkingGlow() }} animate={{ opacity: [0.3, 0.7, 0.3] }} transition={{ duration: 3, repeat: Infinity }} />}
+                            <span className={running ? '' : 'text-on-surface-low'}><Spark size={13} /></span>
+                          </span>
+                          <span data-type="label-s" className="flex-1 truncate text-on-surface" style={fvs(500)}>Cycle {shownCycle(c.total_cycles, c.status)} · {running ? (statusText || 'working') : loopStatusLabel(effectiveLoopStatus(c.status, c.error_message)).toLowerCase()}</span>
+                          {running && <span data-type="caption" className="shrink-0 text-on-surface-low tabular-nums">{fmt(curCycleElapsed)}</span>}
+                        </div>
+                        {running && activity.length > 0 && <LiveSubsteps activity={activity} />}
+                      </div>
+                    ) : null
+                    if (execPlan.length === 0) {
+                      const emptyNote = findings.length === 0 && !active
+                        ? (c.total_cycles > 0
+                            ? `${c.total_cycles} ${c.total_cycles === 1 ? 'cycle' : 'cycles'} ran — no per-cycle detail recorded for this loop.`
+                            : 'No cycles completed yet.')
+                        : null
+                      return (<>
+                        {liveCycle}
+                        {emptyNote && <p data-type="body-s" className="text-on-surface-low px-m py-1">{emptyNote}</p>}
+                        {findings.map((f, idx) => cycleNode(f, idx))}
+                      </>)
+                    }
+                    return execPlan.map((_ph, pi) => pi).reverse().map((pi) => (
+                      <PhaseGroup key={pi} phase={execPlan[pi]} index={pi} active={pi === activePhase}
+                        minCycles={phaseMinCycles(execPlan[pi])}
+                        cycles={findings.filter((f) => phaseForCycle(f.cycle, execPlan) === pi)}
+                        renderCycle={cycleNode} liveCycle={pi === activePhase ? liveCycle : null} />
+                    ))
+                  })()}
+                </div>
+              ) : (
+                selected.kind === 'roi'
+                  ? (<div className="flex flex-col gap-m">
+                      <p data-type="body-s" className="text-on-surface-var">The judge's marginal value per cycle, against your <span className="text-on-surface">{c.granularity}</span> stop threshold. A run of bars below the line is what trips the auto-stop.</p>
+                      <div className="rounded-lg bg-surface-container px-m py-l">
+                        <RoiRail points={roiPoints} granularity={c.granularity} />
+                      </div>
+                    </div>)
+                  : selected.kind === 'log'
+                  ? (log
+                    ? (<div className="flex flex-col gap-m">
+                        <div className="flex justify-end">
+                          <QuietButton onClick={() => downloadText(`${safeFilename(c.name || c.goal, c.id)}-findings.md`, log, 'text/markdown;charset=utf-8')}><Download size={13} /> Download</QuietButton>
+                        </div>
+                        <Markdown>{log}</Markdown>
+                      </div>)
+                    : <p data-type="body-s" className="text-on-surface-low">No findings logged yet — the cumulative trail appears here as cycles complete.</p>)
+                  : (() => {
+                      const f = findings.find((x) => x.cycle === selected.cycle)
+                      if (!f) return <p data-type="body-s" className="text-on-surface-low">Cycle not found.</p>
+                      return (<>
+                        {
 }
-                       <div className="mb-s flex justify-end">
-                         <InvestigateButton kind="loop_cycle" id={`${c.id}:${f.cycle}`}
-                           backLink={`#/loops/${c.id}`} size={28} />
-                       </div>
-                       <CycleDetail f={f} verdict={verdictByCycle.get(f.cycle)} nudges={byCycle.get(f.cycle) ?? []} activity={running && c.total_cycles === f.cycle ? activity : []} />
-                     </>)
-                   })()
-             )}
-           </SidePanel>
-         )}
-       </AnimatePresence>
+                        <div className="mb-s flex justify-end">
+                          <InvestigateButton kind="loop_cycle" id={`${c.id}:${f.cycle}`}
+                            backLink={`#/loops/${c.id}`} size={28} />
+                        </div>
+                        <CycleDetail f={f} verdict={verdictByCycle.get(f.cycle)} nudges={byCycle.get(f.cycle) ?? []} activity={running && c.total_cycles === f.cycle ? activity : []} />
+                      </>)
+                    })()
+              )}
+            </SidePanel>
+          )}
+        </AnimatePresence>
       </div>
 
       { }
@@ -849,7 +849,7 @@ function OutputsPanel({ loop, artifacts, tasks, report, active, onOpenArtifact, 
               const status = <span data-type="caption" className="shrink-0 text-on-surface-low">{t.status}</span>
               return onOpenTask ? (
                 <button key={t.id} type="button" onClick={() => onOpenTask(t.id)}
-                  data-type="body-s" className="group flex w-full items-center gap-s rounded-md px-2 py-1 -mx-2 text-left hover:bg-surface-2 transition-colors"
+                  data-type="body-s" className="group flex w-full items-center gap-s rounded-md px-2 py-1 -mx-2 text-left hover:bg-surface-high transition-colors"
                   title="Open task">
                   {box}{label}{status}
                   <ChevronRight size={14} className="shrink-0 text-on-surface-low opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity" />

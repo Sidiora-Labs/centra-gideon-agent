@@ -114,10 +114,10 @@ def test_every_call_site_still_EMBEDS_the_reason_rather_than_showing_it_alone() 
     import inspect
 
     from gideon.automation import event_triggers
-    from gideon.engine import gateway, hooks
+    from gideon.engine import hooks, trigger_dispatch
 
     embedded = 0
-    for mod in (gateway, hooks, event_triggers):
+    for mod in (trigger_dispatch, hooks, event_triggers):
         src = inspect.getsource(mod)
         assert "{route.reason}" in src, f"{mod.__name__} should compose the reason"
         at = 0

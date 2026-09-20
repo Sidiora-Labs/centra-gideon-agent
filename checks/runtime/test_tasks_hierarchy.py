@@ -7,7 +7,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from gideon.engine.tasks import registry
-from gideon.engine.tasks.hierarchy import HierarchyStore
+from gideon.engine.tasks.hierarchy import HierarchyStore, validate_container_name
 from gideon.engine.tasks.hierarchy_handlers import register_hierarchy_routes
 from gideon.engine.tasks.models import (
     BUILTIN_PROJECTS,
@@ -98,6 +98,13 @@ class TestDefaults:
 
 
 class TestProjectCrud:
+    @pytest.mark.parametrize("name", ["Roadmap", "  Roadmap  ", "🚀 Launch"])
+    def test_project_and_task_list_share_name_validation(self, store, name):
+        selected = validate_container_name(name)
+        project = store.create_project(name)
+        task_list = store.create_task_list(name, project_id=project.id)
+        assert project.name == task_list.name == selected
+
     def test_create_and_get(self, store):
         p = store.create_project("Website")
         assert p.name == "Website"

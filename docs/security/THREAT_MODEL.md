@@ -95,6 +95,11 @@ Installed apps extend the gateway but must not reach the owner's full authority:
   mode, `dashboard/server.py`'s `_dev_user_middleware` re-adopts the app claim
   through `validate_token_with_app`, so an app token only ever narrows reach.
 
+These controls bind app-scoped clients and backends, not frontend bundle code.
+App UI executes in the host origin and therefore has the host DOM, session
+cookie, and same-origin API reach. That is a documented limitation and an
+advisory shown during install, not an isolation boundary.
+
 ### 3. Gateway to channels and inbound
 
 Content and requests arriving from outside the owner's trust boundary:

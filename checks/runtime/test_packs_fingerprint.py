@@ -178,7 +178,7 @@ def test_reading_a_project_does_not_scan():
     a third caller — which is the failure mode "on-create and on-demand only" describes, and it
     is invisible to any test that only exercises the scanner itself.
     """
-    root = Path(fp.__file__).parents[1]
+    root = Path(fp.__file__).parents[2]
     callers: set[str] = set()
     for path in sorted(root.rglob("*.py")):
         try:
@@ -198,8 +198,8 @@ def test_reading_a_project_does_not_scan():
                 if name == "scan_project":
                     callers.add(f"{rel}::{parent.name}")
     assert sorted(callers) == [
-        "dashboard/handlers/packs.py::api_pack_proposals",
-        "tasks/hierarchy_handlers.py::_fingerprint_proposals",
+        "engine/tasks/hierarchy_handlers.py::_fingerprint_proposals",
+        "interfaces/dashboard/handlers/packs.py::api_pack_proposals",
     ], f"a third scan_project call site appeared: {sorted(callers)}"
 
 

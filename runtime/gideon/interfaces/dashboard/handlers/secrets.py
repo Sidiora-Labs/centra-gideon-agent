@@ -36,6 +36,7 @@ import logging
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.http_errors import json_error
 from gideon.security.secrets_vault import (
     SCOPE_HOST,
@@ -151,7 +152,7 @@ async def api_secrets_put(request: web.Request) -> web.Response:
     if denied is not None:
         return denied
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return json_error("invalid_json", status=400)
     if not isinstance(body, dict):

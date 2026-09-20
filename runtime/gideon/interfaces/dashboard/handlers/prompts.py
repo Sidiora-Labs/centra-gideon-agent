@@ -7,6 +7,7 @@ from typing import Any
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.handlers._shared import (
     _get_skills,
@@ -265,7 +266,7 @@ def _build_prompt_template(body: dict[str, Any], default_name: str = "") -> Any:
 async def api_prompt_create(request: web.Request) -> web.Response:
     """POST /api/prompts — create a new prompt template via the registered provider."""
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
     if not isinstance(body, dict):
@@ -289,7 +290,7 @@ async def api_prompt_save(request: web.Request) -> web.Response:
     raw = request.match_info["name"]
     bare = raw.split("/", 1)[-1] if "/" in raw else raw
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
     if not isinstance(body, dict):
@@ -336,7 +337,7 @@ async def api_prompt_render(request: web.Request) -> web.Response:
     raw = request.match_info["name"]
     bare = raw.split("/", 1)[-1] if "/" in raw else raw
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
     if not isinstance(body, dict):
@@ -396,7 +397,7 @@ async def api_campaign_template_launch(request: web.Request) -> web.Response:
     raw = request.match_info["name"]
     bare = raw.split("/", 1)[-1] if "/" in raw else raw
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
     if not isinstance(body, dict):
@@ -490,7 +491,7 @@ async def api_prompt_preview(request: web.Request) -> web.Response:
     the same render path the runtime uses, so the preview can never drift from
     what the agent receives (the key lesson from peer prompt UIs)."""
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
     if not isinstance(body, dict):
@@ -736,7 +737,7 @@ async def api_snippet_detail(request: web.Request) -> web.Response:
 async def api_snippet_create(request: web.Request) -> web.Response:
     """POST /api/prompt-snippets — create a snippet."""
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
     if not isinstance(body, dict):
@@ -758,7 +759,7 @@ async def api_snippet_save(request: web.Request) -> web.Response:
     """PUT /api/prompt-snippets/{name} — update a snippet."""
     bare = request.match_info["name"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
     if not isinstance(body, dict):
@@ -817,7 +818,7 @@ async def api_snippet_render(request: web.Request) -> web.Response:
     """POST /api/prompt-snippets/{name}/render — preview a snippet standalone."""
     bare = request.match_info["name"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
     if not isinstance(body, dict):
@@ -911,7 +912,7 @@ async def api_prompt_bindings_save(request: web.Request) -> web.Response:
     )
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
     if not isinstance(body, dict):
@@ -968,7 +969,7 @@ async def api_skill_detail(request: web.Request) -> web.Response:
 
     if request.method == "PUT":
         try:
-            body = await request.json()
+            body = await read_json_body(request)
         except Exception:
             return web.json_response({"error": "invalid JSON"}, status=400)
         if not isinstance(body, dict):
@@ -1013,7 +1014,7 @@ async def api_skills_create(request: web.Request) -> web.Response:
     """POST /api/skills — create a new skill."""
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):

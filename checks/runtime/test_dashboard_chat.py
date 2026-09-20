@@ -429,7 +429,8 @@ class TestSessionLifecycle:
             )
             assert (await resp.json())["ok"] is True
             state.broadcast_ws.assert_any_call(
-                "approval_resolved", {"id": "req-abc", "approved": True}
+                "approval_resolved",
+                {"id": "req-abc", "approved": True, "decision": "approved"},
             )
 
     @pytest.mark.asyncio
@@ -454,7 +455,8 @@ class TestSessionLifecycle:
             )
             assert (await resp.json())["ok"] is True
             state.broadcast_ws.assert_any_call(
-                "approval_resolved", {"id": "req-xyz", "approved": True}
+                "approval_resolved",
+                {"id": "req-xyz", "approved": True, "decision": "approved"},
             )
 
     @pytest.mark.asyncio
@@ -477,7 +479,8 @@ class TestSessionLifecycle:
             )
             assert (await resp.json())["ok"] is True
             state.broadcast_ws.assert_any_call(
-                "approval_resolved", {"id": "req-rej", "approved": False}
+                "approval_resolved",
+                {"id": "req-rej", "approved": False, "decision": "rejected"},
             )
 
 
@@ -2379,8 +2382,14 @@ class TestRuntimeWiring:
         }
         mock_cfg.default_agent = "default"
 
-        mock_bindings = MagicMock()
-        mock_bindings.memory_store_name = "oncall-mem"
+        from gideon.core.config.loader import ResolvedBindings
+
+        mock_bindings = ResolvedBindings(
+            workspace_dir=tmp_path / "oncall-ws",
+            memory_store_name="oncall-mem",
+            effective_memory_config={},
+            provider_agent="",
+        )
 
         monkeypatch.setattr(
             "gideon.interfaces.dashboard.chat.AppConfig.load", lambda: mock_cfg
@@ -6655,9 +6664,7 @@ class TestStopHistoryBanner:
         assert self._last_stop_soft(session) is False
 
 
-from gideon.interfaces.dashboard.chat_runner import (  # noqa: E402
-    run_chat as _REAL_RUN_CHAT,
-)
+from gideon.interfaces.dashboard.chat_runner import run_chat as _REAL_RUN_CHAT  # noqa: E402
 
 
 class TestAcpProcessDiedRecovery:

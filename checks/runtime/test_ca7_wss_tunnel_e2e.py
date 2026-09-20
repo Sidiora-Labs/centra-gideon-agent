@@ -65,12 +65,12 @@ import pytest
 from aiohttp import ClientConnectionError, ClientSession, WSServerHandshakeError, web
 from aiohttp.test_utils import TestServer
 
-from gideon.interfaces.dashboard import exposure
 from gideon.interfaces.dashboard import origin as origin_mod
 from gideon.interfaces.dashboard import session_store as ss
 from gideon.interfaces.dashboard import token_auth
 from gideon.interfaces.dashboard import ws as ws_mod
 from gideon.interfaces.dashboard.origin import build_allowed_origins
+from gideon.security import exposure
 
 PORT = 10000
 COOKIE = f"gideon_token_{PORT}"
@@ -664,6 +664,6 @@ def test_no_cloud_middle_tier_the_gateway_advertises_no_host_the_owner_did_not_c
     )
     assert exposure.public_url(owner) == "https://pc.example.com"
     assert (
-        exposure.public_host(owner) == "gideon.example.com"
+        exposure.public_host(owner) == "pc.example.com"
     ), "the owner's host, not a rewrite"
     assert exposure.is_https(owner) is True

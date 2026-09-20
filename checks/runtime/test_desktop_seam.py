@@ -42,11 +42,13 @@ def test_capability_vocabulary_matches_the_electron_side():
     and silently vanish, which is exactly the half-wired shape this rail exists to
     prevent. Parsed from source rather than executed — node is not a test dependency.
     """
-    src = (REPO_ROOT / "apps/desktop" / "capabilities.js").read_text(encoding="utf-8")
+    src = (REPO_ROOT / "apps/desktop" / "src" / "native" / "capabilities.js").read_text(
+        encoding="utf-8"
+    )
 
     def _array(name: str) -> list[str]:
         m = re.search(rf"const {name} = \[(.*?)\];", src, re.S)
-        assert m, f"{name} not found in apps/desktop/capabilities.js"
+        assert m, f"{name} not found in apps/desktop/src/native/capabilities.js"
         return re.findall(r'"([^"]+)"', m.group(1))
 
     assert sorted(_array("CAPABILITIES")) == sorted(CAPABILITIES)
@@ -56,7 +58,9 @@ def test_capability_vocabulary_matches_the_electron_side():
 def test_every_capability_has_an_electron_spec():
     """Each name in the vocabulary must have a SPEC entry, or probe() returns
     ``unknown capability`` for a capability the gateway happily stores."""
-    src = (REPO_ROOT / "apps/desktop" / "capabilities.js").read_text(encoding="utf-8")
+    src = (REPO_ROOT / "apps/desktop" / "src" / "native" / "capabilities.js").read_text(
+        encoding="utf-8"
+    )
     specs = re.search(r"const SPECS = \{(.*?)\n\};", src, re.S)
     assert specs
     declared = set(re.findall(r"^  (\w+): \{", specs.group(1), re.M))

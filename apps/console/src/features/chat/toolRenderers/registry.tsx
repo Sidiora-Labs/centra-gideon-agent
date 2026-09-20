@@ -1,26 +1,30 @@
 import { type ReactNode } from 'react'
 import type { ToolSegment } from '../chatTypes'
 import { ToolOutput } from '../../tools/ToolOutput'
-import { RawBlock, KeyValueFields, ContentTypeOutput, resolveInputObj } from './primitives'
-import { NATIVE_RENDERERS } from './native'
+import { RawBlock, KeyValueFields, ContentTypeOutput, inputOf } from './primitives'
+import { nativeRendererForTool } from './native'
 
 export interface ToolRenderer {
-  match: (toolName: string) => boolean
+  label: string
+  inputLabel?: string
   input?: (seg: ToolSegment) => ReactNode
   output?: (seg: ToolSegment) => ReactNode
 }
 
 function findNative(seg: ToolSegment): ToolRenderer | undefined {
-  const name = (seg.tool || '').toLowerCase()
-  return NATIVE_RENDERERS.find((r) => r.match(name))
+  return nativeRendererForTool(seg.tool)
 }
 
 export function renderToolInput(seg: ToolSegment): ReactNode {
-  const obj = resolveInputObj(seg)
+  const obj = inputOf(seg)
   const effective: ToolSegment = obj && !seg.inputObj ? { ...seg, inputObj: obj } : seg
   const native = findNative(effective)
   if (native?.input) {
     const node = safe(() => native.input!(effective))
+    if (node !== undefined) return node
+  }
+  if (obj && native?.inputLabel) {
+    const node = safe(() => <KeyValueFields obj={obj} label={native.inputLabel} />)
     if (node !== undefined) return node
   }
   if (obj) {
@@ -89,4 +93,4 @@ function safe(fn: () => ReactNode): ReactNode | undefined {
 }
 
 export { iconForTool, labelForTool } from './native'
-export { resolveInputObj } from './primitives'
+export { inputOf, resolveInputObj } from './primitives'

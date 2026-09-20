@@ -27,6 +27,7 @@ import logging
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.http_errors import json_error
 from gideon.integrations.voice import bindings as vb
 from gideon.integrations.voice import profiles as vp
@@ -62,7 +63,7 @@ def _broadcast(
 
 async def _body(request: web.Request) -> dict:
     try:
-        raw = await request.json()
+        raw = await read_json_body(request)
     except Exception as exc:
         raise vp.VoiceProfileError("invalid JSON", 400, "invalid_json") from exc
     if not isinstance(raw, dict):
@@ -303,7 +304,7 @@ async def api_voice_migrate(request: web.Request) -> web.Response:
     from gideon.integrations.voice import migration as vm
 
     try:
-        raw = await request.json()
+        raw = await read_json_body(request)
     except Exception:
         raw = {}
     name = str(raw.get("name") or "") if isinstance(raw, dict) else ""

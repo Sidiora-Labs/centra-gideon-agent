@@ -100,13 +100,15 @@ def _app(store, enqueued=None):
 
 def _req(store, method, body=None, match_info=None, enqueued=None):
     app = _app(store, enqueued=enqueued)
-    req = make_mocked_request(method, "/", app=app, match_info=match_info or {})
-    if body is not None:
-
-        async def _json():
-            return body
-
-        req.json = _json
+    raw = json.dumps(body).encode() if body is not None else b""
+    req = make_mocked_request(
+        method,
+        "/",
+        headers={"Content-Type": "application/json"} if raw else None,
+        app=app,
+        match_info=match_info or {},
+    )
+    req._read_bytes = raw
     return req
 
 
@@ -430,12 +432,13 @@ class TestHandlers:
             knowledge_store=store,
             knowledge_ingest_queue=lambda: SimpleNamespace(enqueue=enq.append),
         )
-        req = make_mocked_request("POST", "/", app=app)
-
-        async def _json():
-            return body
-
-        req.json = _json
+        req = make_mocked_request(
+            "POST",
+            "/",
+            headers={"Content-Type": "application/json"},
+            app=app,
+        )
+        req._read_bytes = json.dumps(body).encode()
         resp = _run(H.regenerate_intelligence(req))
         return json.loads(resp.body), enq
 

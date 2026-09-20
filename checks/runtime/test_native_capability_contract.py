@@ -38,7 +38,7 @@ from gideon.extensions.apps.native_contract import (
     native_bundle_dirs,
 )
 
-_SRC_DIR = Path(__file__).resolve().parents[2] / "src"
+_SRC_DIR = Path(__file__).resolve().parents[2] / "runtime" / "gideon"
 
 
 @functools.lru_cache(maxsize=1)
@@ -147,12 +147,14 @@ def test_bundle_owned_capability_has_no_core_implementation(bundle_name):
 
 def test_ui_docs_capability_left_core_entirely():
     """The exemplar's clean break: no core module, no core factory, no dual path."""
-    assert not (_SRC_DIR / "gideon" / "tool_providers" / "ui_docs.py").exists(), (
+    assert not (_SRC_DIR / "integrations" / "tool_providers" / "ui_docs.py").exists(), (
         "tool_providers/ui_docs.py is back — the provider now lives in "
-        "apps/native/gideon-ui-docs/provider.py; two copies is the dual path the "
-        "clean-break rule forbids."
+        "extensions/apps/native/gideon-ui-docs/provider.py; two copies is the dual "
+        "path the clean-break rule forbids."
     )
-    registry_src = (_SRC_DIR / "gideon" / "tool_providers" / "registry.py").read_text()
+    registry_src = (
+        _SRC_DIR / "integrations" / "tool_providers" / "registry.py"
+    ).read_text()
     assert "def create_ui_docs_provider" not in registry_src, (
         "tool_providers/registry.py grew a ui-docs factory again — the bundle resolves "
         "provider:create_provider itself."

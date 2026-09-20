@@ -60,6 +60,10 @@ from typing import Any, Awaitable, Callable
 
 from aiohttp import web
 
+from gideon.core.http_request import (
+    RequestBodyTypeError,
+    read_json_body,
+)
 from gideon.http_errors import json_error
 from gideon.integrations.inbound import auth
 from gideon.integrations.inbound.audit import audit
@@ -738,7 +742,16 @@ async def handle_import(request: web.Request) -> web.StreamResponse:
 
     bytes_in = int(request.content_length or 0)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
+    except RequestBodyTypeError:
+        audit(
+            CAPTURE_SURFACE,
+            route=ROUTE_IMPORT,
+            status=400,
+            refused="body is not an object",
+            client_id=client_id,
+        )
+        return json_error("invalid_body", status=400)
     except Exception:  # noqa: BLE001 — an unparsable body is a 400, never a 500
         audit(
             CAPTURE_SURFACE,
@@ -748,15 +761,6 @@ async def handle_import(request: web.Request) -> web.StreamResponse:
             client_id=client_id,
         )
         return json_error("invalid_json", status=400)
-    if not isinstance(body, dict):
-        audit(
-            CAPTURE_SURFACE,
-            route=ROUTE_IMPORT,
-            status=400,
-            refused="body is not an object",
-            client_id=client_id,
-        )
-        return json_error("invalid_body", status=400)
 
     path, why = resolve_import_file(str(body.get("file", "") or ""))
     if path is None:

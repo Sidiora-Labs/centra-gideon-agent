@@ -2,21 +2,22 @@
 
 from aiohttp import web
 
+from gideon.core.http_request import RequestBodyTypeError, read_json_body
 from gideon.engine.tasks import reconcile, registry
 from gideon.engine.tasks.models import Task
 from gideon.engine.tasks.provider import task_page_window
+from gideon.http_errors import json_error
 
 _SUPPLIED_AUTHOR_ERROR = "author is server-derived and must not be supplied"
 _INVALID_JSON = object()
-
-
-def _error(message: str, status: int = 400, **details) -> web.Response:
-    return web.json_response({"error": message, **details}, status=status)
+_INVALID_BODY = object()
 
 
 async def _request_body(request: web.Request):
     try:
-        return await request.json()
+        return await read_json_body(request)
+    except RequestBodyTypeError:
+        return _INVALID_BODY
     except Exception:
         return _INVALID_JSON
 
@@ -61,7 +62,7 @@ class TaskQuery:
     async def page(self) -> dict:
         registry.validate_provider(self.values.get("provider"))
         limit, offset = task_page_window(
-            self.values.get("limit", "50"), self.values.get("offset", "0")
+            self.values.get("limit", "500"), self.values.get("offset", "0")
         )
         tasks, total = await registry.list_all_tasks(
             **{
@@ -117,9 +118,12 @@ class TaskBatch:
                 reason = "id required"
             if not valid:
                 errors.append({"index": index, "error": reason})
-            if isinstance(item, dict) and item.get("provider"):
+            if isinstance(item, dict):
                 try:
-                    registry.validate_provider(item["provider"])
+                    if self.operation == "create":
+                        registry._resolve(item.get("provider", "native"))
+                    elif item.get("id"):
+                        await registry._resolve_one(item["id"], item.get("provider"))
                 except ValueError as exc:
                     errors.append({"index": index, "error": str(exc)})
         if errors:
@@ -154,7 +158,7 @@ class TaskBatch:
     async def apply_item(self, item) -> dict:
         if self.operation == "create":
             task = await registry.create_task(
-                provider_name=item.get("provider") or "native",
+                provider_name=item.get("provider", "native"),
                 **{key: value for key, value in item.items() if key != "provider"},
             )
             return {"task_id": task.id, "status": "created"}
@@ -216,14 +220,22 @@ class TaskWrite:
     async def respond(request: web.Request, *, create: bool) -> web.Response:
         task_id = None if create else request.match_info["task_id"]
         body: dict = await _request_body(request)
+        if body is _INVALID_BODY:
+            return json_error(
+                "invalid_body", message="body must be an object", status=400
+            )
         if body is _INVALID_JSON:
-            return _error("invalid JSON")
+            return json_error("invalid_json", message="invalid JSON", status=400)
         if _supplies_author(body):
-            return _error(_SUPPLIED_AUTHOR_ERROR)
+            return json_error(
+                "invalid_request", message=_SUPPLIED_AUTHOR_ERROR, status=400
+            )
         if create:
             title = body.get("title")
             if not isinstance(title, str) or not title.strip():
-                return _error("title required")
+                return json_error(
+                    "invalid_request", message="title required", status=400
+                )
         provider = body.pop("provider", "native" if create else None)
         created_task = None
         updated_task = None
@@ -237,20 +249,26 @@ class TaskWrite:
                 )
             else:
                 if task_id is None:
-                    return _error("task id required")
+                    return json_error(
+                        "invalid_request", message="task id required", status=400
+                    )
                 updated_task = await registry.update_task(
                     task_id, provider_name=provider, **body
                 )
         except reconcile.DependencyCycleError as exc:
-            return _error(str(exc), cycle=exc.cycle)
+            return json_error(
+                "invalid_request", message=str(exc), status=400, cycle=exc.cycle
+            )
         except ValueError as exc:
-            return _error(str(exc))
+            return json_error("invalid_request", message=str(exc), status=400)
         if create:
             if created_task is None:
-                return _error("task creation failed", status=500)
+                return json_error(
+                    "action_failed", message="task creation failed", status=500
+                )
             return web.json_response(created_task.to_dict(), status=201)
         if not updated_task:
-            return _error("not found", 404)
+            return json_error("not_found", message="not found", status=404)
         changed = getattr(updated_task, "_reconciled", [updated_task])
         siblings = {row.id: row for row in changed}
         return web.json_response(
@@ -265,7 +283,7 @@ async def api_tasks_list(request: web.Request) -> web.Response:
     try:
         page = await TaskQuery(request).page()
     except (TypeError, ValueError) as exc:
-        return _error(str(exc))
+        return json_error("invalid_request", message=str(exc), status=400)
     return web.json_response(page)
 
 
@@ -279,14 +297,16 @@ async def api_tasks_graph(request: web.Request) -> web.Response:
         registry.validate_provider(provider)
         projection = await registry.task_graph(provider_filter=provider)
     except ValueError as exc:
-        return _error(str(exc))
+        return json_error("invalid_request", message=str(exc), status=400)
     return web.json_response(projection)
 
 
 async def api_tasks_search(request: web.Request) -> web.Response:
     body = await _request_body(request)
+    if body is _INVALID_BODY:
+        return json_error("invalid_body", message="body must be an object", status=400)
     if body is _INVALID_JSON:
-        return _error("invalid JSON")
+        return json_error("invalid_json", message="invalid JSON", status=400)
     try:
         limit, offset = task_page_window(body.get("limit", 50), body.get("offset", 0))
         tasks, total = await registry.search_tasks(
@@ -301,7 +321,7 @@ async def api_tasks_search(request: web.Request) -> web.Response:
             offset=offset,
         )
     except (TypeError, ValueError) as exc:
-        return _error(str(exc))
+        return json_error("invalid_request", message=str(exc), status=400)
     return web.json_response(
         {
             "tasks": _task_rows(tasks),
@@ -314,11 +334,17 @@ async def api_tasks_search(request: web.Request) -> web.Response:
 
 async def api_tasks_bulk(request: web.Request) -> web.Response:
     body = await _request_body(request)
+    if body is _INVALID_BODY:
+        return json_error("invalid_body", message="body must be an object", status=400)
     if body is _INVALID_JSON:
-        return _error("invalid JSON")
+        return json_error("invalid_json", message="invalid JSON", status=400)
     operation, items = body.get("op", ""), body.get("items")
     if operation not in ("create", "update", "delete") or not isinstance(items, list):
-        return _error("body must be {op: create|update|delete, items: [...]}")
+        return json_error(
+            "invalid_request",
+            message="body must be {op: create|update|delete, items: [...]}",
+            status=400,
+        )
     return await TaskBatch(operation, items).execute()
 
 
@@ -330,9 +356,9 @@ async def api_tasks_get(request: web.Request) -> web.Response:
             request.match_info["task_id"], provider_name=provider
         )
     except ValueError as exc:
-        return _error(str(exc))
+        return json_error("invalid_request", message=str(exc), status=400)
     if not task:
-        return _error("not found", 404)
+        return json_error("not_found", message="not found", status=404)
     return web.json_response(
         {**task.to_dict(), "comment_count": getattr(task, "_comment_count", 0)}
     )
@@ -350,11 +376,11 @@ async def _delete_response(operation, **payload) -> web.Response:
     try:
         removed = await operation
     except ValueError as exc:
-        return _error(str(exc))
+        return json_error("invalid_request", message=str(exc), status=400)
     return (
         web.json_response({"ok": True, **payload})
         if removed
-        else _error("not found", 404)
+        else json_error("not_found", message="not found", status=404)
     )
 
 
@@ -363,7 +389,7 @@ async def api_tasks_delete(request: web.Request) -> web.Response:
     try:
         registry.validate_provider(provider)
     except ValueError as exc:
-        return _error(str(exc))
+        return json_error("invalid_request", message=str(exc), status=400)
     return await _delete_response(
         registry.delete_task(request.match_info["task_id"], provider_name=provider)
     )
@@ -377,25 +403,31 @@ async def api_tasks_comments_get(request: web.Request) -> web.Response:
             request.match_info["task_id"], provider_name=provider
         )
     except ValueError as exc:
-        return _error(str(exc))
+        return json_error("invalid_request", message=str(exc), status=400)
     return web.json_response({"comments": [record.to_dict() for record in records]})
 
 
 async def api_tasks_comments_post(request: web.Request) -> web.Response:
     task_id = request.match_info["task_id"]
     body = await _request_body(request)
+    if body is _INVALID_BODY:
+        return json_error("invalid_body", message="body must be an object", status=400)
     if body is _INVALID_JSON:
-        return _error("invalid JSON")
+        return json_error("invalid_json", message="invalid JSON", status=400)
     if not isinstance(body, dict):
-        return _error("body must be an object")
+        return json_error(
+            "invalid_request", message="body must be an object", status=400
+        )
     if _supplies_author(body):
-        return _error(_SUPPLIED_AUTHOR_ERROR)
+        return json_error("invalid_request", message=_SUPPLIED_AUTHOR_ERROR, status=400)
     raw = body.get("body")
     if raw is not None and not isinstance(raw, str):
-        return _error("body must be a string")
+        return json_error(
+            "invalid_request", message="body must be a string", status=400
+        )
     message = (raw or "").strip()
     if not message:
-        return _error("body required")
+        return json_error("invalid_request", message="body required", status=400)
     try:
         registry.validate_provider(body.get("provider"))
         comment = await registry.add_comment(
@@ -405,11 +437,11 @@ async def api_tasks_comments_post(request: web.Request) -> web.Response:
             provider_name=body.get("provider"),
         )
     except ValueError as exc:
-        return _error(str(exc))
+        return json_error("invalid_request", message=str(exc), status=400)
     return (
         web.json_response(comment.to_dict(), status=201)
         if comment
-        else _error("task not found", 404)
+        else json_error("not_found", message="task not found", status=404)
     )
 
 
@@ -419,7 +451,7 @@ async def api_tasks_comments_delete(request: web.Request) -> web.Response:
     try:
         registry.validate_provider(provider)
     except ValueError as exc:
-        return _error(str(exc))
+        return json_error("invalid_request", message=str(exc), status=400)
     return await _delete_response(
         registry.delete_comment(
             request.match_info["task_id"],

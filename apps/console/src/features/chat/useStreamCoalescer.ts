@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { runtime } from '../../shared/theme/runtime'
+import { prefersReducedMotion } from '../../shared/theme/motion'
 
 
 export const FRAME_MS = 16
@@ -86,7 +87,7 @@ export function useStreamCoalescer(
   const isImmediate = () =>
     immediateRef.current === true
     || runtime.animSpeed === 0
-    || (typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches)
+    || prefersReducedMotion()
 
   const stop = () => { if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = 0 } }
 

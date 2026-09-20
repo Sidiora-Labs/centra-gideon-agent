@@ -421,7 +421,7 @@ def test_a_boundary_naming_a_PARENT_directory_still_catches_the_write():
                 "a",
                 capability=Capability.MUTATING,
                 writes=["runtime/gideon/engine.py"],
-                boundary="never write under src/",
+                boundary="never write under runtime/",
             )
         ]
     )

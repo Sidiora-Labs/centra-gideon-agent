@@ -88,7 +88,19 @@ class EntityExtractor:
                 if value.strip():
                     accepted.append({"name": value.strip()})
             elif isinstance(value, dict) and str(value.get("name") or "").strip():
-                accepted.append(value)
+                normalized = dict(value)
+                aliases = value.get("aliases")
+                if "aliases" in value:
+                    normalized["aliases"] = (
+                        [
+                            alias.strip()
+                            for alias in aliases
+                            if isinstance(alias, str) and alias.strip()
+                        ]
+                        if isinstance(aliases, list)
+                        else []
+                    )
+                accepted.append(normalized)
         return accepted
 
     @staticmethod

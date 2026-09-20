@@ -1,5 +1,6 @@
 """Knowledge provider registry."""
 
+from collections.abc import Callable
 from typing import Any
 
 from gideon.integrations.knowledge_providers.base import (
@@ -8,10 +9,21 @@ from gideon.integrations.knowledge_providers.base import (
 )
 
 _providers: dict[str, KnowledgeProvider] = {}
+_shared_item_sink: Callable[[KnowledgeProvider, KnowledgeItem], str] | None = None
 
 
 def register_provider(provider: KnowledgeProvider) -> None:
     _providers[provider.name] = provider
+    provider.set_shared_item_sink(_shared_item_sink)
+
+
+def configure_shared_item_push(
+    sink: Callable[[KnowledgeProvider, KnowledgeItem], str] | None,
+) -> None:
+    global _shared_item_sink
+    _shared_item_sink = sink
+    for provider in _providers.values():
+        provider.set_shared_item_sink(sink)
 
 
 def unregister_provider(name: str) -> None:

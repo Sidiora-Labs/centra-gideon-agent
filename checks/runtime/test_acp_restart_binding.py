@@ -21,6 +21,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from aiohttp.test_utils import make_mocked_request
 
 from gideon.cognition.history import ConversationLog
 from gideon.engine.hooks import ToolHookResult
@@ -335,10 +336,14 @@ class TestAnUnrestorableBindingIsAnnounced:
         s._acp_meta_binding = "acp:claude-agent-acp"
         s.acp_provider = "acp:claude-agent-acp"
 
-        request = MagicMock()
-        request.app = {"state": state}
-        request.match_info = {"session": SESSION}
-        request.json = AsyncMock(return_value={"agent": "gideon"})
+        request = make_mocked_request(
+            "POST",
+            f"/api/chat/sessions/{SESSION}/agent",
+            headers={"Content-Type": "application/json"},
+            app={"state": state},
+            match_info={"session": SESSION},
+        )
+        request._read_bytes = json.dumps({"agent": "gideon"}).encode()
         with patch("gideon.interfaces.dashboard.chat_handlers.sel", MagicMock()):
             await api_chat_session_agent(request)
         assert s._acp_meta_binding == ""

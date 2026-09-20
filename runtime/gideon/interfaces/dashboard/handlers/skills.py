@@ -16,6 +16,7 @@ from typing import Any
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body, string_field
 from gideon.extensions.providers.failure_copy import relayed_failure_copy
 from gideon.extensions.skills.marketplace import DEFAULT_SKILLS_INSTALL_PATH
 from gideon.http_errors import json_error
@@ -496,7 +497,7 @@ async def api_skills_install(request: web.Request) -> web.Response:
     Body: ``{id: "<skill-id>", marketplace: "skills.sh", target?: "..."}``.
     """
     try:
-        body: dict[str, Any] = await request.json()
+        body: dict[str, Any] = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
 
@@ -629,10 +630,10 @@ async def api_skill_overlay_revert(request: web.Request) -> web.Response:
     the deletion of exactly ONE sidecar file: the base ``SKILL.md`` and its ``.gideon-lock.json``
     are untouched, so a marketplace skill stays verifiable across the round trip."""
     try:
-        body: dict[str, Any] = await request.json()
+        body: dict[str, Any] = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
-    name = str(body.get("name", "")).strip()
+    name = string_field(body, "name")
     if not name:
         return web.json_response({"error": "name is required"}, status=400)
 
@@ -666,7 +667,7 @@ async def api_ephemeral_skill_promote(request: web.Request) -> web.Response:
 
     session = request.match_info.get("session", "")
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -760,7 +761,7 @@ async def api_skill_proposal_accept(request: web.Request) -> web.Response:
 
     pid = request.match_info.get("id", "")
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     body = body if isinstance(body, dict) else {}

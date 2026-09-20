@@ -7,7 +7,7 @@ import {
   ShieldAlert, ShieldCheck, Server, LayoutGrid, RefreshCw, Plug, ChevronDown,
   MoreVertical, Database, Sparkles, Archive, HardDrive, MapPin, AlertTriangle,
 } from 'lucide-react'
-import { launchChat } from '../../app/shell/appSdk'
+import { launchChat, notify } from '../../app/shell/appSdk'
 import { ContextMenu, type ContextMenuItem } from '../../shared/ui/motion'
 import { spring, expr } from '../../shared/theme/motion'
 import { Popover, MenuRow } from '../../shared/ui/Popover'
@@ -44,7 +44,7 @@ import { artGradient } from './appArt'
 import { AppConfigFields, useAppConfig } from './appConfigForm'
 import { isInNav, setInNav } from './navApps'
 import { PageTitle } from '../../shared/ui/PageTitle'
-import { ScanReport, ConsentModal, PermissionList, CronConsentList } from './installConsent'
+import { ScanReport, ConsentModal, PermissionList, PermissionConsent, CronConsentList } from './installConsent'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
 
 interface PendingInstall {
@@ -299,7 +299,7 @@ export function AppsSection({ query, setQuery, navigate }: Pick<RouteProps, 'que
   const { data: apps, error: appsErr, refresh } = useQuery<AppSummary[]>(
     'apps', () => api.apps(), { persist: true },
   )
-  const { data: catalog, error: catalogErr, refresh: refreshCatalog } = useQuery(
+  const { data: catalog, error: catalogErr, revalidating: catalogRevalidating, refresh: refreshCatalog } = useQuery(
     'app-catalog', () => api.appCatalog(), { persist: true },
   )
   const [search, setSearch] = useQueryParam(q, sq, 'q', '', { replace: true })
@@ -485,7 +485,7 @@ export function AppsSection({ query, setQuery, navigate }: Pick<RouteProps, 'que
           <SidePanel key="sources" fillHeight storeKey="app-sources-panel-w"
             title="Manage Sources" icon={<Database size={18} />}
             onClose={() => setSourcesOpen(false)}>
-            <SourcesPanel catalog={catalog} reloadCatalog={reloadCatalog} onInstalled={reload} />
+            <SourcesPanel catalog={catalog} settled={!catalogRevalidating && !catalogErr} reloadCatalog={reloadCatalog} onInstalled={reload} />
           </SidePanel>
         )}
       >
@@ -622,6 +622,7 @@ export function StoreView({ catalog, catalogError, result, totalKnown, installed
           busy={guarded.busy}
           permissions={pending.entry?.permissions}
           crons={pending.entry?.crons}
+          appUI={pending.entry}
           onConfirm={confirmPending}
           onClose={() => { setPending(null); guarded.reset() }}
         />
@@ -659,8 +660,9 @@ export function StoreView({ catalog, catalogError, result, totalKnown, installed
   )
 }
 
-export function SourcesPanel({ catalog, reloadCatalog, onInstalled }: {
+export function SourcesPanel({ catalog, settled = catalog !== undefined, reloadCatalog, onInstalled }: {
   catalog: AppCatalog | null | undefined
+  settled?: boolean
   reloadCatalog: () => void
   onInstalled: () => void
 }) {
@@ -721,6 +723,20 @@ export function SourcesPanel({ catalog, reloadCatalog, onInstalled }: {
     finally { setBusy(null) }
   }
 
+  async function removeSource(url: string) {
+    try {
+      await api.removeAppSource(url)
+      notify('Git app source removed.', 'success'); reloadCatalog()
+    } catch (e) { notify(`Couldn’t remove this Git app source: ${String((e as Error)?.message || e)}`, 'error') }
+  }
+
+  async function removeLocalSource(path: string) {
+    try {
+      await api.removeLocalAppSource(path)
+      notify('Local app source removed.', 'success'); reloadCatalog()
+    } catch (e) { notify(`Couldn’t remove this local app source: ${String((e as Error)?.message || e)}`, 'error') }
+  }
+
   const sources = catalog?.gitSources ?? []
   const localSources = catalog?.localSources ?? []
   const firstPartySources = new Set(catalog?.firstPartySources ?? [])
@@ -739,6 +755,7 @@ export function SourcesPanel({ catalog, reloadCatalog, onInstalled }: {
           busy={guarded.busy}
           permissions={pending.entry?.permissions}
           crons={pending.entry?.crons}
+          appUI={pending.entry}
           onConfirm={confirmPending}
           onClose={() => { setPending(null); guarded.reset() }}
         />
@@ -755,7 +772,7 @@ export function SourcesPanel({ catalog, reloadCatalog, onInstalled }: {
           </Button>
         </div>
         {sources.length === 0 ? (
-          <div className="text-on-surface-low text-[0.8125rem]">No git sources configured. Add a git URL to discover apps from it.</div>
+          settled && <div className="text-on-surface-low text-[0.8125rem]">No git sources configured. Add a git URL to discover apps from it.</div>
         ) : (
           <div className="flex flex-col gap-1">
             {sources.map((url) => {
@@ -770,9 +787,9 @@ export function SourcesPanel({ catalog, reloadCatalog, onInstalled }: {
                 )}
                 <Button variant="ghost" size="sm" loading={busy === url} onClick={() => installFrom(url, url)}><Download size={14} /> Install
                 </Button>
-                {!isBuiltin && (
-                  <SquareIconButton icon={Trash2} tone="danger" label="Remove source" className="shrink-0"
-                    onClick={async () => { await api.removeAppSource(url); reloadCatalog() }} />
+                 {!isBuiltin && (
+                   <SquareIconButton icon={Trash2} tone="danger" label="Remove source" className="shrink-0"
+                    onClick={() => removeSource(url)} />
                 )}
               </div>
             )})}
@@ -780,7 +797,7 @@ export function SourcesPanel({ catalog, reloadCatalog, onInstalled }: {
         )}
         {
 }
-        {networkSources.length > 0 && (
+        {settled && networkSources.length > 0 && (
           <p data-testid="store-egress-disclosure" data-type="caption" className="mt-2 text-on-surface-low">
             Reading these listings contacts {networkSources.join(', ')}. Only listings are
             fetched — nothing is installed or run without your consent.
@@ -814,9 +831,9 @@ export function SourcesPanel({ catalog, reloadCatalog, onInstalled }: {
                 <span className="min-w-0 flex-1 truncate font-mono text-on-surface text-[0.75rem]">{path}</span>
                 {isFirstParty ? (
                   <span className="shrink-0 rounded-pill bg-surface-highest px-2 py-0.5 text-on-surface-low text-[0.75rem]">First-party</span>
-                ) : (
-                  <SquareIconButton icon={Trash2} tone="danger" label="Remove local source" className="shrink-0"
-                    onClick={async () => { await api.removeLocalAppSource(path); reloadCatalog() }} />
+                 ) : (
+                   <SquareIconButton icon={Trash2} tone="danger" label="Remove local source" className="shrink-0"
+                    onClick={() => removeLocalSource(path)} />
                 )}
               </div>
             )})}
@@ -1113,7 +1130,7 @@ function AppDetailPanel({ app, onClose, onChanged, onOpen }: { app: AppSummary; 
           </div>
         )}
 
-        <PermissionList perms={app.permissions} />
+        <PermissionList perms={app.permissions} appUI={app} />
 
         {app.hasBackend && (
           <div className="rounded-md border border-outline-variant bg-surface-high p-m" data-type="body-s">
@@ -1259,9 +1276,7 @@ function StoreDetailPanel({ item, onInstalled }: { item: StoreItem; onInstalled:
 
       {
 }
-      {item.permissions && Object.keys(item.permissions).length > 0 && (
-        <PermissionList perms={item.permissions} />
-      )}
+      <PermissionConsent permissions={item.permissions} appUI={item} />
       {(item.crons ?? []).length > 0 && <CronConsentList crons={item.crons!} />}
 
       <div className="rounded-md border border-outline-variant bg-surface-high p-m" data-type="body-s">
@@ -1280,6 +1295,7 @@ function StoreDetailPanel({ item, onInstalled }: { item: StoreItem; onInstalled:
       {consent && guarded.blocked && (
         <ConsentModal label={item.displayName} result={guarded.blocked} busy={guarded.busy}
           permissions={item.permissions} crons={item.crons}
+          appUI={item}
           onConfirm={async () => { const r = await guarded.confirmInstall(); if (r?.ok) { setConsent(null); onInstalled() } }}
           onClose={() => { setConsent(null); guarded.reset() }} />
       )}

@@ -128,28 +128,24 @@ class _State:
         return self._sse
 
 
-def _req(method: str, path: str, *, state=None, body: dict | None = None, headers=None):
+def _req(
+    method: str, path: str, *, state=None, body: object | None = None, headers=None
+):
     """A mocked request with app state attached, matching how the gateway serves these.
 
     A REAL `web.Application` is passed, not the default mock: `make_mocked_request`'s stub
     app returns a MagicMock from `app.get("state")`, so a handler would await a mock and
-    surface it as a 500 — masking whatever the handler actually did.
+    surface it as a 500 — masking whatever the handler actually did. The body is the real
+    serialized bytes `read_json_body` consumes; no body reads as an empty body.
     """
     app = web.Application()
     app["state"] = state
-    req = make_mocked_request(method, path, headers=headers or {}, app=app)
-    if body is not None:
-
-        async def _json():
-            return body
-
-        req.json = _json  # type: ignore[method-assign]
-    else:
-
-        async def _bad():
-            raise ValueError("no body")
-
-        req.json = _bad  # type: ignore[method-assign]
+    raw = json.dumps(body).encode() if body is not None else b""
+    req_headers = dict(headers or {})
+    if raw:
+        req_headers.setdefault("Content-Type", "application/json")
+    req = make_mocked_request(method, path, headers=req_headers, app=app)
+    req._read_bytes = raw
     return req
 
 
@@ -1078,13 +1074,13 @@ class TestPolicyOverridesRoute:
         assert resp.status == 404 and _body(resp)["error"]["code"] == "not_found"
 
     async def test_a_non_object_body_is_a_400(self) -> None:
-        req = _req("PUT", "/api/workflows/runs/x/policy-overrides", state=_State(None))
+        req = _req(
+            "PUT",
+            "/api/workflows/runs/x/policy-overrides",
+            state=_State(None),
+            body=["not", "a", "dict"],
+        )
         req.match_info["run_id"] = "x"  # type: ignore[index]
-
-        async def _json():
-            return ["not", "a", "dict"]
-
-        req.json = _json  # type: ignore[method-assign]
         resp = await H.api_run_policy_overrides(req)
         assert resp.status == 400 and _body(resp)["error"]["code"] == "invalid_request"
 

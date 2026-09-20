@@ -31,6 +31,7 @@ from typing import Any
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.http_errors import json_error
 from gideon.security.security import (
     is_sensitive_path,
@@ -375,7 +376,7 @@ async def api_app_sources_add(request: web.Request) -> web.Response:
     from gideon.extensions.apps import catalog
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     url = str(body.get("url", "")).strip()
@@ -414,7 +415,7 @@ async def api_app_local_sources_add(request: web.Request) -> web.Response:
     from gideon.extensions.apps import catalog
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     path = str(body.get("path", "")).strip()
@@ -476,7 +477,7 @@ async def api_app_install(request: web.Request) -> web.Response:
     from gideon.extensions.apps import source as app_source
 
     try:
-        body: dict[str, Any] = await request.json()
+        body: dict[str, Any] = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     src = str(body.get("source", "")).strip()
@@ -532,7 +533,7 @@ async def api_app_update(request: web.Request) -> web.Response:
 
     name = request.match_info["name"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     src = str(body.get("source", "")).strip()
@@ -714,7 +715,7 @@ async def api_app_config_put(request: web.Request) -> web.Response:
     if manifest is None:
         return web.json_response({"error": f"app {name!r} not installed"}, status=404)
     try:
-        values = await request.json()
+        values = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     schema = _effective_config_schema(manifest)
@@ -788,7 +789,7 @@ async def api_app_agent_run(request: web.Request) -> web.Response:
     if not getattr(state, "subagents", None):
         return web.json_response({"error": "subagents not available"}, status=503)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if body is not None and not isinstance(body, dict):
@@ -928,7 +929,7 @@ async def api_app_message_send(request: web.Request) -> web.Response:
             {"error": "app-scoped identity required to send an app message"}, status=403
         )
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):

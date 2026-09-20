@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { render, cleanup } from '@testing-library/react'
+import { render, cleanup, fireEvent } from '@testing-library/react'
 import { SchemaField } from './ProviderConfigForm'
 import type { ProviderSchemaProp } from '../../shared/data/api'
 
@@ -45,5 +45,32 @@ describe('provider config form mirrors declared constraints', () => {
     expect(el.getAttribute('pattern')).toBeNull()
     expect(el.getAttribute('minlength')).toBeNull()
     expect(el.getAttribute('maxlength')).toBeNull()
+  })
+
+  it.each([
+    { type: 'string' },
+    { type: 'integer' },
+    { type: 'string', enum: ['one', 'two'] },
+    { type: 'object' },
+  ] as ProviderSchemaProp[])('binds each primitive control to its visible label', (prop) => {
+    const { container } = render(
+      <SchemaField fieldKey="endpoint" prop={{ ...prop, 'x-meta': { label: 'Endpoint' } }} value={undefined} onChange={() => {}} />,
+    )
+    const label = container.querySelector('label')!
+    const control = container.querySelector('input, select, textarea')!
+    expect(label.htmlFor).toBe(control.id)
+    expect(control.className.split(/\s+/)).not.toContain('px-3')
+  })
+
+  it('the secret eye toggles the primitive input type', () => {
+    const { container, getByRole } = render(
+      <SchemaField fieldKey="api_key" prop={{ type: 'string', 'x-meta': { sensitive: true } }} value="secret" onChange={() => {}} />,
+    )
+    const input = container.querySelector('input')!
+    expect(input.type).toBe('password')
+    fireEvent.click(getByRole('button', { name: 'Show' }))
+    expect(input.type).toBe('text')
+    fireEvent.click(getByRole('button', { name: 'Hide' }))
+    expect(input.type).toBe('password')
   })
 })

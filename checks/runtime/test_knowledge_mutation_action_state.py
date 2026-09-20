@@ -70,7 +70,7 @@ async def test_repeat_and_create_mode_are_real_noops_without_scope_or_content_ch
         {**config, "content": "another wording", "mode": "create"}
     )
     assert noop["item_id"] == refused_create["item_id"] == original["item_id"]
-    assert "conflicts" not in noop and noop["mentions_appended"] == 0
+    assert noop["conflicts"] == [] and noop["mentions_appended"] == 0
     assert "mode=create" in refused_create["reason"]
     assert row(store, original["item_id"]) == before
     names = [
@@ -237,7 +237,7 @@ async def test_only_named_lineage_fields_can_reach_metadata(store):
     assert metadata["parent_ids"] == ["p1"] and metadata["reflection_count"] == 2
     assert metadata["source_count"] == 3 and metadata["compression_ratio"] == 0.5
     assert metadata["project_id"] == "alpha" and metadata["sharing_policy"] == "private"
-    assert "claims" not in metadata
+    assert [claim["statement"] for claim in metadata["claims"]] == ["trusted result"]
 
 
 @pytest.mark.asyncio
@@ -358,6 +358,7 @@ async def test_json_content_preserves_unicode_and_markerless_legacy_citations(st
             "title": "Unicode",
             "content": {"city": "München", "n": 4},
             "citations": ["manual notebook"],
+            "unsourced": True,
         }
     )
     stored = row(store, result["item_id"])

@@ -14,6 +14,8 @@ from uuid import uuid4
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
+
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from gideon.cognition.knowledge.restructure import RestructureError
 
@@ -30,7 +32,9 @@ from gideon.cognition.knowledge.media import classify, guess_mime, make_image_th
 from gideon.cognition.knowledge.retrieval import HybridRetriever, _bytes_to_floats
 from gideon.cognition.knowledge.semantics import DEFAULT_LIST_EXCLUDED_KINDS
 from gideon.cognition.knowledge.staleness import is_synthesized, staleness_for
+from gideon.core.http_request import string_field
 from gideon.http_errors import json_error
+from gideon.interfaces.dashboard.handlers._shared import require_string
 from gideon.interfaces.dashboard.sse import stream_response
 from gideon.security.security import redact_credentials, redact_exfiltration_urls
 from gideon.security.sel import sel
@@ -250,7 +254,7 @@ async def create_item(request: web.Request) -> web.Response:
     via /ingest instead. Returns the created item."""
     store = _store(request)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -267,7 +271,7 @@ async def create_item(request: web.Request) -> web.Response:
             },
             status=400,
         )
-    title = str(body.get("title") or "").strip()
+    title = string_field(body, "title")
     content = str(body.get("content") or "")
     url = str(body.get("url") or "").strip()
     if item_type == "bookmark":
@@ -345,7 +349,7 @@ async def regenerate_intelligence(request: web.Request) -> web.Response:
     """
     store = _store(request)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     if not isinstance(body, dict):
@@ -595,7 +599,7 @@ async def update_item(request: web.Request) -> web.Response:
     if not existing:
         return web.json_response({"error": "not found"}, status=404)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -615,6 +619,11 @@ async def update_item(request: web.Request) -> web.Response:
         "gist_language",
     }
     fields = {k: v for k, v in body.items() if k in allowed}
+    if "title" in fields:
+        try:
+            fields["title"] = require_string(fields["title"], "title")
+        except TypeError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
     if "url" in fields and str(fields["url"]).strip():
         from urllib.parse import urlsplit
 
@@ -848,7 +857,7 @@ async def merge_items(request: web.Request) -> web.Response:
     store = _store(request)
     keep_id = request.match_info["id"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -897,7 +906,7 @@ async def add_item_annotation(request: web.Request) -> web.Response:
     store = _store(request)
     item_id = request.match_info["id"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -1532,7 +1541,7 @@ async def batch_embed_items(request: web.Request) -> web.Response:
     if not embedder.is_available():
         return web.json_response({"error": "Embedding model not available"}, status=503)
 
-    body = await request.json() if request.can_read_body else {}
+    body = await read_json_body(request)
     rebuild = body.get("rebuild", False)
 
     if rebuild:
@@ -1700,7 +1709,7 @@ async def upsert_intent(request: web.Request) -> web.Response:
     from gideon.cognition.knowledge.intents import Intent
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -1730,6 +1739,33 @@ async def upsert_intent(request: web.Request) -> web.Response:
     return web.json_response(
         {"intents": _intents_payload(request), "id": intent.id}, status=201
     )
+
+
+async def update_intent(request: web.Request) -> web.Response:
+    """PATCH /api/knowledge/intents/{id} -- pause or change skill proposals."""
+    try:
+        body = await read_json_body(request)
+    except Exception:
+        return web.json_response({"error": "invalid JSON"}, status=400)
+    if not isinstance(body, dict):
+        return web.json_response({"error": "JSON body must be an object"}, status=400)
+    allowed = {"enabled", "propose_skill"}
+    if not body or not set(body).issubset(allowed):
+        return web.json_response(
+            {"error": "only enabled and propose_skill may be changed"}, status=400
+        )
+    if any(not isinstance(value, bool) for value in body.values()):
+        return web.json_response({"error": "values must be boolean"}, status=400)
+
+    store = _intent_store(request)
+    intent = store.get(request.match_info["id"])
+    if intent is None:
+        return web.json_response({"error": "not found"}, status=404)
+    for field, value in body.items():
+        setattr(intent, field, value)
+    store.upsert(intent, replace=True)
+    _sel_log("intent.update", intent_id=intent.id, fields=sorted(body))
+    return web.json_response({"intent": intent.to_dict()})
 
 
 async def delete_intent(request: web.Request) -> web.Response:
@@ -2244,7 +2280,7 @@ def _collection_clash_response(detail: str) -> web.Response | None:
 async def create_collection(request: web.Request) -> web.Response:
     """POST /api/knowledge/collections — create a manual or smart shelf."""
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -2267,7 +2303,7 @@ async def update_collection(request: web.Request) -> web.Response:
     """PATCH /api/knowledge/collections/{id} — rename / re-icon / re-query / reorder."""
     cid = request.match_info["id"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -2280,6 +2316,11 @@ async def update_collection(request: web.Request) -> web.Response:
         for k, v in body.items()
         if k in ("name", "kind", "query", "icon", "position")
     }
+    if "name" in fields:
+        try:
+            fields["name"] = require_string(fields["name"], "name")
+        except TypeError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
     if not fields:
         return web.json_response(
             {
@@ -2333,7 +2374,7 @@ async def add_collection_items(request: web.Request) -> web.Response:
     """
     cid = request.match_info["id"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -2379,7 +2420,10 @@ async def remove_collection_item(request: web.Request) -> web.Response:
     """DELETE /api/knowledge/collections/{id}/items/{item_id} — unshelve one item."""
     cid = request.match_info["id"]
     iid = request.match_info["item_id"]
-    if not _store(request).remove_from_collection(cid, iid):
+    store = _store(request)
+    if not store.get_collection(cid):
+        return web.json_response({"error": "collection not found"}, status=404)
+    if not store.remove_from_collection(cid, iid):
         return web.json_response({"error": "not on that collection"}, status=404)
     return web.json_response({"ok": True})
 
@@ -2388,7 +2432,7 @@ async def set_item_read_state(request: web.Request) -> web.Response:
     """POST /api/knowledge/items/{id}/read-state — unread | reading | read."""
     iid = request.match_info["id"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict) or "state" not in body:
@@ -2417,7 +2461,7 @@ async def set_item_favorited(request: web.Request) -> web.Response:
     """POST /api/knowledge/items/{id}/favorite — star or unstar."""
     iid = request.match_info["id"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     if not isinstance(body, dict):
@@ -2683,7 +2727,7 @@ async def rename_tag(request: web.Request) -> web.Response:
     if tid is None:
         return web.json_response({"error": "tag not found"}, status=404)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -2701,7 +2745,11 @@ async def rename_tag(request: web.Request) -> web.Response:
         )
     try:
         if "name" in body:
-            if not store.rename_tag(tid, str(body["name"])):
+            try:
+                name = require_string(body["name"], "name")
+            except TypeError as exc:
+                return web.json_response({"error": str(exc)}, status=400)
+            if not store.rename_tag(tid, name):
                 return web.json_response({"error": "tag not found"}, status=404)
         if "parent_id" in body:
             raw = body["parent_id"]
@@ -2737,7 +2785,7 @@ async def merge_tag(request: web.Request) -> web.Response:
     if tid is None:
         return web.json_response({"error": "tag not found"}, status=404)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict) or body.get("into") in (None, ""):
@@ -2810,7 +2858,7 @@ async def bulk_items(request: web.Request) -> web.Response:
     than get a silent no-op across the whole selection.
     """
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -3089,8 +3137,8 @@ async def create_watched_source(request: web.Request) -> web.Response:
     """
     from gideon.integrations.knowledge_providers.base import ENRICHMENTS
 
-    body = await request.json()
-    name = str(body.get("name") or "").strip()
+    body = await read_json_body(request)
+    name = string_field(body, "name")
     provider_name = str(body.get("provider") or "").strip()
     if not name:
         return web.json_response({"error": "name is required"}, status=400)
@@ -3171,11 +3219,11 @@ async def update_watched_source(request: web.Request) -> web.Response:
     current = store.get_source(source_id)
     if current is None:
         return web.json_response({"error": "not found"}, status=404)
-    body = await request.json()
+    body = await read_json_body(request)
 
     fields: dict = {}
     if "name" in body:
-        name = str(body.get("name") or "").strip()
+        name = string_field(body, "name")
         if not name:
             return web.json_response({"error": "name cannot be empty"}, status=400)
         fields["name"] = name
@@ -3268,7 +3316,7 @@ async def preview_watched_source(request: web.Request) -> web.Response:
     """
     from gideon.cognition.knowledge.source_engine import SourceEngine
 
-    body = await request.json()
+    body = await read_json_body(request)
     provider_name = str(body.get("provider") or "").strip()
     provider = next((p for p in _source_providers() if p.name == provider_name), None)
     if provider is None:
@@ -3341,7 +3389,7 @@ def _restructure_refusal(exc: "RestructureError") -> web.Response:
 
 async def _restructure_body(request: web.Request) -> tuple[dict, web.Response | None]:
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return {}, web.json_response(
             {"error": {"code": "bad_body", "message": "body must be JSON"}}, status=400
@@ -3539,6 +3587,7 @@ def setup_knowledge_routes(app: web.Application) -> None:
     app.router.add_get("/api/knowledge/items/{id}/ingest/stream", stream_item_ingest)
     app.router.add_get("/api/knowledge/intents", list_intents)
     app.router.add_post("/api/knowledge/intents", upsert_intent)
+    app.router.add_patch("/api/knowledge/intents/{id}", update_intent)
     app.router.add_delete("/api/knowledge/intents/{id}", delete_intent)
     app.router.add_get("/api/knowledge/intents/{id}/outcomes", list_intent_outcomes)
     app.router.add_post("/api/knowledge/intents/{id}/run", run_intent)

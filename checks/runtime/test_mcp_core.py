@@ -2,7 +2,7 @@
 
 from unittest.mock import patch
 
-from gideon.integrations.mcp_core import _call_tool
+from gideon.integrations.mcp_core import _call_tool, _call_tool_inner
 
 
 class TestSpawnRunSessionKeyRouting:
@@ -90,7 +90,7 @@ class TestSendMessageCronAutoOrigin:
             patch.dict("os.environ", {"GIDEON_SESSION_KEY": "cron:abc123"}),
         ):
             mock_post.return_value = {"ok": True}
-            _call_tool("notify", {"text": "build passed"})
+            _call_tool_inner("notify", {"text": "build passed"})
 
             payload = mock_post.call_args[0][1]
             assert payload.get("session") == "origin"
@@ -102,7 +102,7 @@ class TestSendMessageCronAutoOrigin:
             patch.dict("os.environ", {"GIDEON_SESSION_KEY": "cron:abc123"}),
         ):
             mock_post.return_value = {"ok": True}
-            _call_tool("notify", {"text": "hi", "channel": "C12345"})
+            _call_tool_inner("notify", {"text": "hi", "channel": "C12345"})
 
             payload = mock_post.call_args[0][1]
             assert "session" not in payload
@@ -115,7 +115,7 @@ class TestSendMessageCronAutoOrigin:
             patch.dict("os.environ", {"GIDEON_SESSION_KEY": "cron:abc123"}),
         ):
             mock_post.return_value = {"ok": True}
-            _call_tool("notify", {"text": "hi", "user": "U05J78ZGYNQ"})
+            _call_tool_inner("notify", {"text": "hi", "user": "U05J78ZGYNQ"})
 
             payload = mock_post.call_args[0][1]
             assert "session" not in payload
@@ -128,7 +128,7 @@ class TestSendMessageCronAutoOrigin:
             patch.dict("os.environ", {"GIDEON_SESSION_KEY": "dashboard:chat-1"}),
         ):
             mock_post.return_value = {"ok": True}
-            _call_tool("notify", {"text": "hi"})
+            _call_tool_inner("notify", {"text": "hi"})
 
             payload = mock_post.call_args[0][1]
             assert "session" not in payload
@@ -142,7 +142,7 @@ class TestSendMessageCronAutoOrigin:
             env.pop("GIDEON_SESSION_KEY", None)
             with patch.dict("os.environ", env, clear=True):
                 mock_post.return_value = {"ok": True}
-                _call_tool("notify", {"text": "hi"})
+                _call_tool_inner("notify", {"text": "hi"})
 
                 payload = mock_post.call_args[0][1]
                 assert "session" not in payload
@@ -154,7 +154,7 @@ class TestSendMessageCronAutoOrigin:
             patch.dict("os.environ", {"GIDEON_SESSION_KEY": "cron:abc123"}),
         ):
             mock_post.return_value = {"ok": True}
-            _call_tool("notify", {"text": "hi", "session": "origin"})
+            _call_tool_inner("notify", {"text": "hi", "session": "origin"})
 
             payload = mock_post.call_args[0][1]
             assert payload.get("session") == "origin"
@@ -166,7 +166,7 @@ class TestSendMessageCronAutoOrigin:
             patch.dict("os.environ", {"GIDEON_SESSION_KEY": "cron:abc123"}),
         ):
             mock_post.return_value = {"ok": True}
-            _call_tool("notify", {"text": "hi", "session": "channel"})
+            _call_tool_inner("notify", {"text": "hi", "session": "channel"})
 
             payload = mock_post.call_args[0][1]
             assert payload.get("session") == "channel"
@@ -177,6 +177,14 @@ class TestSendMessageCronAutoOrigin:
             patch("gideon.integrations.mcp_core._post") as mock_post,
             patch.dict("os.environ", {"GIDEON_SESSION_KEY": "cron:abc123"}),
         ):
-            result = _call_tool("notify", {"text": "hi", "session": "bogus"})
+            result = _call_tool_inner("notify", {"text": "hi", "session": "bogus"})
             assert "session" in result.lower() or "error" in result.lower()
             mock_post.assert_not_called()
+
+
+def test_public_cron_notify_requires_write_authority(monkeypatch):
+    monkeypatch.setenv("GIDEON_SESSION_KEY", "cron:abc123")
+    result = _call_tool("notify", {"text": "build passed"})
+    assert result.startswith("Error:")
+    assert "notify" in result
+    assert "read" in result.lower()

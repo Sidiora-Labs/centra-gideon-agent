@@ -101,7 +101,8 @@ export function NotificationsPage({ query, setQuery, navigate }: Pick<RouteProps
         ) : (
           <>
             {filtered.length === 0 ? (
-              <div className="text-center text-on-surface-low text-[0.8125rem] py-2xl">Nothing matches this filter.</div>
+              <EmptyState icon={Bell} title="No notifications match" hint="Try a different filter."
+                action={{ label: 'Clear filter', onClick: () => setFilter('all') }} />
             ) : (
               <div className="grid gap-l">
                 {BUCKET_ORDER.filter((b) => groups[b]?.length).map((b) => (

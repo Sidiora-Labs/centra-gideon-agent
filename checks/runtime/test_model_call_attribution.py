@@ -314,7 +314,9 @@ class TestEveryLadderExitNamesAMappedVerdict:
     def test_every_returned_verdict_is_mapped_to_a_level(self):
         import ast
 
-        source = (_SRC / "after_turn_review.py").read_text(encoding="utf-8")
+        source = (_SRC / "cognition" / "after_turn_review.py").read_text(
+            encoding="utf-8"
+        )
         fn = next(
             n
             for n in ast.walk(ast.parse(source))

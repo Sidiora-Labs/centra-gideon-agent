@@ -45,7 +45,7 @@ _TALLY_WRITERS = ("inc_cache_read_tokens", "inc_cache_creation_tokens")
 
 _TURN_LOCALS = ("_turn_cache_read_tokens", "_turn_cache_creation_tokens")
 
-_READ_SIDE_FOLDS = frozenset({"usage_ledger.py"})
+_READ_SIDE_FOLDS = frozenset({"operations/usage_ledger.py"})
 
 _POSITIVE_CONTROL = """
 class Runner:
@@ -81,19 +81,53 @@ def _target_names(node: ast.AST) -> list[str]:
     return names
 
 
+def _cache_field_constants(tree: ast.Module) -> set[str]:
+    """Module constants holding a literal collection that names cache quantities.
+
+    ``_fold`` accumulates through ``for key in _TOKEN_FIELDS: agg[key] += ...``, so
+    the cache name lives in the iterated constant rather than the assignment target.
+    """
+    names: set[str] = set()
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        try:
+            values = ast.literal_eval(node.value)
+        except (ValueError, SyntaxError):
+            continue
+        if not isinstance(values, (tuple, list, set, frozenset)):
+            continue
+        if any(frag in str(v) for v in values for frag in _CACHE_NAMES):
+            names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+    return names
+
+
 def _accumulators(source: str, label: str) -> list[str]:
     """``x += ...`` (or ``-=``, ``|=`` &c.) onto a prompt-cache-named quantity.
 
     The TARGET is what makes a store: ``total += cache_read_tokens`` accumulates a
     turn total the caller already owns, while ``self._cache_read_tokens += n``
-    accumulates the cache tally itself. Only the latter is a second store.
+    accumulates the cache tally itself. Only the latter is a second store — including
+    the dynamic form ``for key in _TOKEN_FIELDS: agg[key] += ...``, where the key
+    names the cache field through the iterated constant.
     """
+    tree = ast.parse(source)
+    fields = _cache_field_constants(tree)
+    loops = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.For)
+        and isinstance(node.iter, ast.Name)
+        and node.iter.id in fields
+        and isinstance(node.target, ast.Name)
+    ]
     hits: list[str] = []
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.walk(tree):
         if not isinstance(node, ast.AugAssign):
             continue
-        if any(
-            frag in name for name in _target_names(node.target) for frag in _CACHE_NAMES
+        names = _target_names(node.target)
+        if any(frag in name for name in names for frag in _CACHE_NAMES) or any(
+            loop.target.id in names for loop in loops
         ):
             hits.append(f"{label}:{node.lineno}")
     return hits
@@ -206,9 +240,11 @@ def test_the_only_tally_writers_are_the_stats_mutators() -> None:
     """One module writes the tally, and it writes both halves of it."""
     calls = _tally_writer_calls()
     assert set(calls) == {
-        "dashboard/chat_runner.py"
+        "interfaces/dashboard/chat_runner.py"
     }, f"expected exactly one module to write the cache tally, found: {sorted(calls)}"
-    written = {entry.split(":")[0] for entry in calls["dashboard/chat_runner.py"]}
+    written = {
+        entry.split(":")[0] for entry in calls["interfaces/dashboard/chat_runner.py"]
+    }
     assert written == set(
         _TALLY_WRITERS
     ), f"expected both mutators to be called, found {written}"

@@ -36,7 +36,11 @@ export function parseAppearance(raw: string | null): AppearanceState {
       result.colors[key] = Object.fromEntries(Object.entries(modes).filter(([mode, value]) => (mode === 'dark' || mode === 'light') && typeof value === 'string'))
     }
     if (record(saved.scalars)) result.scalars = Object.fromEntries(Object.entries(saved.scalars).filter((entry): entry is [string, number] => typeof entry[1] === 'number' && Number.isFinite(entry[1])))
-    if (record(saved.selects)) result.selects = Object.fromEntries(Object.entries(saved.selects).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
+    if (record(saved.selects)) result.selects = Object.fromEntries(Object.entries(saved.selects).filter((entry): entry is [string, string] => {
+      if (typeof entry[1] !== 'string') return false
+      const token = TOKENS.find((candidate) => candidate.kind === 'select' && candidate.varName === entry[0])
+      return !token || (token.kind === 'select' && token.options.includes(entry[1]))
+    }))
     if (typeof saved.scheme === 'string') result.scheme = saved.scheme
     if (result.scheme === 'coral' && Object.keys(result.colors).length === 0) result.scheme = DEFAULT_SCHEME
     if (typeof saved.widthPreset === 'string' && Object.hasOwn(WIDTH_PRESETS, saved.widthPreset)) result.widthPreset = saved.widthPreset as WidthPreset

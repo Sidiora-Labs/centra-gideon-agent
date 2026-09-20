@@ -6,11 +6,8 @@ hand-building a record. That is the vacuity floor for the whole file: an asserti
 queue lists "no conflicts" would pass against a broken detector, a broken queue and an empty
 home alike, so each list assertion pins a non-zero count of a record the detector produced.
 
-The one measured fact this surface is shaped around: **no memory- or knowledge-domain entry
-can produce a conflict record today** — see
-``test_no_memory_or_knowledge_entry_can_currently_conflict``. So the review screen is the
-Durability one, and the memory/knowledge surfaces exist as routing + counts rather than as
-two screens built for a population of zero.
+Memory, knowledge and other data conflicts share the review controls in Backups, with
+separate categories and counts. Each domain below is driven through detection and resolution.
 """
 
 from __future__ import annotations
@@ -182,35 +179,87 @@ class TestResolvePrimitive:
         assert json.loads((home / "tasks" / "t1.json").read_text())["title"] == "theirs"
 
 
-def test_no_memory_or_knowledge_entry_can_currently_conflict():
-    """The measured reason the review screen is the Durability one.
+def _seed_document_conflict(home: Path, entry_id: str):
+    entry = inv.by_id(entry_id)
+    assert entry is not None and reconcile.handles_kind(entry.kind)
+    path = home / entry.path
+    if entry_id == "engagement":
+        versions = [
+            {"rows": {"reports": {"weight": weight, "updated_at": 100, "count": 2}}}
+            for weight in (1.0, 1.2, 1.6)
+        ]
+    elif entry_id == "graph_maintenance":
+        versions = [{"dirty_ts": stamp, "clean_ts": 0} for stamp in (1, 2, 3)]
+    else:
+        from gideon.automation.schedule import ScheduleDefinition
+        from gideon.cognition.knowledge.research_reports import (
+            ReportDefinition,
+            to_dict,
+        )
 
-    `detect_conflicts` fires only for an id-keyed merge (`union_by_id`/`lww`) on a row kind
-    that `reconcile` handles. No memory- or knowledge-domain entry is BOTH: the memory and
-    knowledge stores are sqlite (ATTACH-OR-IGNORE, no conflict concept), `memory_ids` is
-    `replace_only`, and `knowledge_files`/`learning_proposals` are `tree` kinds reconcile
-    declines. So those two surfaces are reachable by routing but structurally unfed today —
-    which is why this atom ships their COUNTS rather than two screens for a population of
-    zero. If a future entry changes that, this test fails and the screens become real work.
-    """
-    conflictable = [
-        e
-        for e in inv.all_entries()
-        if e.merge in (inv.MERGE_UNION_BY_ID, inv.MERGE_LWW)
-        and reconcile.handles_kind(e.kind)
-    ]
-    assert conflictable, "no entry can conflict at all — the detector is unreachable"
-    domains = {e.domain for e in conflictable}
-    assert inv.DOMAIN_MEMORY not in domains
-    assert inv.DOMAIN_KNOWLEDGE not in domains
-    assert (
-        conflicts_mod.surface_for_domain(inv.DOMAIN_MEMORY)
-        == conflicts_mod.SURFACE_MEMORY
+        versions = [
+            [
+                to_dict(
+                    ReportDefinition(
+                        id="report-1",
+                        name=name,
+                        prompt="Review the source documents",
+                        schedule=ScheduleDefinition(kind="interval", every_secs=3600),
+                    )
+                )
+            ]
+            for name in ("Shared report", "Local report", "Remote report")
+        ]
+    rows = []
+    for version in versions:
+        path.write_text(json.dumps(version))
+        rows.append(reconcile.read_local_rows(entry, path))
+    ancestor, local, remote = rows
+    path.write_text(json.dumps(versions[1]))
+    found = conflicts_mod.detect_conflicts(
+        entry,
+        local,
+        remote,
+        {row["id"]: conflicts_mod.row_sha(row) for row in ancestor},
     )
-    assert (
-        conflicts_mod.surface_for_domain(inv.DOMAIN_KNOWLEDGE)
-        == conflicts_mod.SURFACE_KNOWLEDGE
-    )
+    assert len(found) == 1
+    assert conflicts_mod.ConflictQueue(home).record(found[0])
+    return found[0], versions[2]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "entry_id,surface",
+    [
+        ("engagement", conflicts_mod.SURFACE_MEMORY),
+        ("graph_maintenance", conflicts_mod.SURFACE_KNOWLEDGE),
+        ("research_reports", conflicts_mod.SURFACE_KNOWLEDGE),
+    ],
+)
+async def test_memory_and_knowledge_conflicts_are_reviewable_and_resolvable(
+    home, entry_id, surface
+):
+    record, remote = _seed_document_conflict(home, entry_id)
+    assert record.surface == surface
+    async with TestClient(TestServer(_app())) as client:
+        response = await client.get(f"/api/durability/conflicts?surface={surface}")
+        body = await response.json()
+        assert response.status == 200
+        assert [item["id"] for item in body["conflicts"]] == [record.id]
+        assert body["counts"]["by_surface"][surface] == 1
+        response = await client.post(
+            f"/api/durability/conflicts/{record.id}/resolve",
+            json={"choice": "take_remote", "confirm": True},
+        )
+        body = await response.json()
+        assert response.status == 200 and body["ok"]
+        assert body["conflict"]["status"] == conflicts_mod.STATUS_RESOLVED
+        refreshed = await (
+            await client.get(f"/api/durability/conflicts?surface={surface}")
+        ).json()
+        assert refreshed["counts"]["needs_review"] == 0
+    entry = inv.by_id(entry_id)
+    assert json.loads((home / entry.path).read_text()) == remote
 
 
 def _app(*, app_token: str = "") -> web.Application:
@@ -272,16 +321,7 @@ async def test_the_surface_filter_selects_without_hiding_the_others_count(home):
     """Criterion 9's separate-surfaces clause as the API expresses it: a filtered read still
     reports what waits on the surfaces it did not return."""
     rec = _seed_conflict(home)
-    memory_rec = conflicts_mod.ConflictRecord(
-        entry_id="memory_ids",
-        entity_id="m1",
-        domain=inv.DOMAIN_MEMORY,
-        surface=conflicts_mod.SURFACE_MEMORY,
-        ancestor_sha="a",
-        local_sha="b",
-        remote_sha="c",
-    )
-    assert conflicts_mod.ConflictQueue(home).record(memory_rec) is True
+    memory_rec, _ = _seed_document_conflict(home, "engagement")
     async with TestClient(TestServer(_app())) as client:
         resp = await client.get(
             f"/api/durability/conflicts?surface={conflicts_mod.SURFACE_DURABILITY}"

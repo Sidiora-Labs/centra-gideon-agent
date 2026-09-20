@@ -15,6 +15,7 @@ import logging
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.engine import session_organize
 from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.chat_persistence import resolve_session
@@ -60,7 +61,7 @@ async def _proposal_from_body(
             json_error("not_found", message="session not found", status=404),
         )
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return (
             None,

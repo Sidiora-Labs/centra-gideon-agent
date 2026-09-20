@@ -26,15 +26,52 @@ import pytest
 from gideon.engine import hooks
 from gideon.security.safety_flags import strict_bool
 
-SRC = pathlib.Path(hooks.__file__).resolve().parent
+SRC = pathlib.Path(hooks.__file__).resolve().parents[1]
 
 GUARDED_FLAGS = [
-    ("hooks.py", "auto_approve_subagent_spawn"),
-    ("hooks.py", "auto_approve_subagent_tools"),
-    ("workflows/handlers.py", "skip_preflight"),
-    ("workflows/handlers.py", "always_allow"),
-    ("workflows/engine.py", "unattended_suppress"),
+    ("engine/hooks.py", "auto_approve_subagent_spawn"),
+    ("engine/hooks.py", "auto_approve_subagent_tools"),
+    ("automation/workflows/handlers.py", "skip_preflight"),
+    ("automation/workflows/handlers.py", "always_allow"),
+    ("automation/workflows/engine.py", "unattended_suppress"),
 ]
+
+
+def _flag_call_linenos(tree: ast.AST, flag: str) -> tuple[list[int], list[int]]:
+    """``(bare, strict)`` linenos of calls reading *flag*.
+
+    The two hooks flags are read through ``for name in (...)``, then ``data.get(name)``.
+    The loop-variable indirection means the flag's name is not in the call node, so a
+    matcher reading only the call text would see *nothing* — and would miss a bare
+    ``bool()`` regression written in that same shape. Follow the loop variable.
+    """
+    bare: list[int] = []
+    strict: list[int] = []
+    loops: list[str] = []
+
+    class _Visit(ast.NodeVisitor):
+        def visit_For(self, node: ast.For) -> None:  # noqa: N802
+            bound = isinstance(node.target, ast.Name) and flag in ast.dump(node.iter)
+            if bound:
+                loops.append(node.target.id)
+            self.generic_visit(node)
+            if bound:
+                loops.pop()
+
+        def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
+            name = node.func.id if isinstance(node.func, ast.Name) else ""
+            if name in ("bool", "strict_bool") and (
+                flag in ast.dump(node)
+                or any(
+                    isinstance(sub, ast.Name) and sub.id in loops
+                    for sub in ast.walk(node)
+                )
+            ):
+                (strict if name == "strict_bool" else bare).append(node.lineno)
+            self.generic_visit(node)
+
+    _Visit().visit(tree)
+    return bare, strict
 
 
 class TestTheHelper:
@@ -88,17 +125,7 @@ class TestTheCallSites:
         path = SRC / module_rel
         assert path.exists(), f"{module_rel} moved — re-point this rail"
         tree = ast.parse(path.read_text(), filename=str(path))
-        bare: list[int] = []
-        strict: list[int] = []
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            name = node.func.id if isinstance(node.func, ast.Name) else ""
-            if name not in ("bool", "strict_bool"):
-                continue
-            if flag not in ast.dump(node):
-                continue
-            (strict if name == "strict_bool" else bare).append(node.lineno)
+        bare, strict = _flag_call_linenos(tree, flag)
         assert not bare, (
             f"{module_rel}:{bare} reads the safety flag {flag!r} with bare bool(). "
             f'bool("false") is True, so a value written to DISABLE the control enables it. '

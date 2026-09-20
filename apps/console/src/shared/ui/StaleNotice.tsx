@@ -1,5 +1,6 @@
+import { useReducedMotion } from '../theme/motion'
 import { RefreshCw } from 'lucide-react'
-import { useReducedMotion } from 'framer-motion'
+import {  } from 'framer-motion'
 import { cx } from './cx'
 
 export function StaleNotice({ stale, what, className, announce = true }: {

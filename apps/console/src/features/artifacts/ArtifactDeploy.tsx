@@ -37,6 +37,7 @@ export function ArtifactDeploy({ slug, kind }: { slug: string; kind: ArtifactKin
     try {
       const r = await api.deployArtifact(slug)
       setDep(r.deployment); setNonce((n) => n + 1); setPreview(true)
+      notify('Artifact deployed.', 'success')
     } catch (e) { notify(`Could not deploy: ${(e as Error).message}`, 'error') }
     finally { setBusy(false) }
   }
@@ -46,6 +47,7 @@ export function ArtifactDeploy({ slug, kind }: { slug: string; kind: ArtifactKin
     try {
       await api.teardownArtifact(slug)
       setDep(null); setPreview(false)
+      notify('Artifact torn down. The artifact was kept.', 'success')
     } catch (e) { notify(`Could not tear down: ${(e as Error).message}`, 'error') }
     finally { setBusy(false) }
   }

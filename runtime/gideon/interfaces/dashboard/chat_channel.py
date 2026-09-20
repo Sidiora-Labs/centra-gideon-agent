@@ -4,6 +4,7 @@ import logging
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.integrations.sync_bridge import handoff_to_channel
 from gideon.interfaces.dashboard.chat_persistence import save_session_to_history
 from gideon.interfaces.dashboard.chat_utils import _history_key_for
@@ -50,7 +51,7 @@ async def api_chat_session_channel_link(request: web.Request) -> web.Response:
             }
         )
 
-    body = await request.json() if request.content_length else {}
+    body = await read_json_body(request)
     raw_channel = body.get("channel", "")
     if not raw_channel or raw_channel == "dm":
         target_channel = await delivery.open_dm(owner_id)
@@ -129,7 +130,7 @@ async def api_chat_session_handoff(request: web.Request) -> web.Response:
 
     channel = None
     try:
-        body = await request.json()
+        body = await read_json_body(request)
         channel = body.get("channel")
     except Exception:
         pass

@@ -20,6 +20,8 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import make_mocked_request
 
 from gideon.integrations.action_providers.base import ActionContext
 from gideon.integrations.action_providers.browse_provider import BrowseActionProvider
@@ -333,15 +335,17 @@ class TestTheSeam:
         assert len(rows) == 1, f"expected one deduped row, got {len(rows)}"
 
 
-class _FakeReq:
-    def __init__(self, body=None, state=None) -> None:
-        self._body = body
-        self.app = {"state": state} if state is not None else {}
-
-    async def json(self):
-        if self._body is None:
-            raise ValueError("no body")
-        return self._body
+def _req(body=None):
+    raw = json.dumps(body).encode() if body is not None else b""
+    req = make_mocked_request(
+        "POST",
+        "/api/browse/kill",
+        app=web.Application(),
+        headers={"Content-Type": "application/json"} if raw else None,
+    )
+    if raw:
+        req._read_bytes = raw
+    return req
 
 
 def _body_of(resp) -> dict:
@@ -354,24 +358,24 @@ class TestTheRoutes:
 
         record_login("https://news.test/home")
         mark_expired("https://news.test/home")
-        resp = _run(bm.api_browse_status(_FakeReq()))
+        resp = _run(bm.api_browse_status(_req()))
         body = _body_of(resp)
         assert body["kill"]["active"] is False
         assert any(e["site"] == "news.test" for e in body["expired"])
 
     def test_kill_route_engages_and_release_route_disengages(self):
-        engaged = _run(bm.api_browse_kill(_FakeReq(body={"reason": "manual"})))
+        engaged = _run(bm.api_browse_kill(_req({"reason": "manual"})))
         assert _body_of(engaged)["kill"]["active"] is True
         assert killswitch.browse_killed() is True
 
-        released = _run(bm.api_browse_kill_release(_FakeReq(body={"confirm": True})))
+        released = _run(bm.api_browse_kill_release(_req({"confirm": True})))
         assert _body_of(released)["kill"]["active"] is False
         assert killswitch.browse_killed() is False
 
     def test_release_requires_confirmation(self):
         """EXPLICIT release, like incident resume — a stray POST cannot re-enable browse."""
         killswitch.engage("stop")
-        resp = _run(bm.api_browse_kill_release(_FakeReq(body={})))
+        resp = _run(bm.api_browse_kill_release(_req({})))
         assert resp.status == 400
         assert (
             killswitch.browse_killed() is True

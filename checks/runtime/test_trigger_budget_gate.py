@@ -98,7 +98,7 @@ def test_the_production_tick_SUPPLIES_the_budget():
     """
     import inspect
 
-    assert "budget_remaining=" in inspect.getsource(svc.tick)
+    assert "budget_remaining=" in inspect.getsource(svc.TickPass.context_for)
 
 
 def test_RUN_COUNT_is_incremented_and_PERSISTED(store, tmp_path):

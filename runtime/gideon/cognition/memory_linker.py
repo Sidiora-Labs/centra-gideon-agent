@@ -195,6 +195,16 @@ class _IdentitySeeds:
         return row["name"], kind, aliases, f"knowledge:{row['id']}"
 
 
+def _was_deleted(graph: MemoryGraph, name: str) -> bool:
+    return (
+        graph.db.execute(
+            "SELECT 1 FROM mem_entities WHERE LOWER(name) = LOWER(?) AND is_deleted = 1 LIMIT 1",
+            ((name or "").strip(),),
+        ).fetchone()
+        is not None
+    )
+
+
 def seed_from_memory_facts(graph: MemoryGraph) -> int:
     rows = graph.db.execute(
         "SELECT key, value_json FROM semantic_memory WHERE is_deleted = 0 "
@@ -208,6 +218,8 @@ def seed_from_memory_facts(graph: MemoryGraph) -> int:
         except (json.JSONDecodeError, TypeError):
             continue
         for name, kind in _IdentitySeeds.from_fact(key, decoded):
+            if _was_deleted(graph, name):
+                continue
             graph.upsert_entity(name, kind, source="facet")
             total += 1
     return total
@@ -234,6 +246,8 @@ def seed_from_knowledge(graph: MemoryGraph, knowledge_db_path=None) -> int:
     touched = 0
     for row in records:
         name, kind, aliases, source = _IdentitySeeds.from_knowledge(row)
+        if _was_deleted(graph, name):
+            continue
         try:
             graph.upsert_entity(name, kind, aliases=aliases, source=source)
         except ValueError:

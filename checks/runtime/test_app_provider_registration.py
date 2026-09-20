@@ -77,6 +77,67 @@ def _provider_app(tmp_path: Path) -> Path:
     return d
 
 
+def test_knowledge_provider_receives_validated_source_specs_on_registration():
+    from gideon.extensions.apps.manifest import AppManifest
+    from gideon.extensions.providers.registry import (
+        KnowledgeTypeHandler,
+        RegisteredProvider,
+    )
+    from gideon.integrations.knowledge_providers.base import KnowledgeProvider
+    from gideon.integrations.knowledge_providers.registry import unregister_provider
+
+    manifest = AppManifest.from_dict(
+        {
+            "name": "fixture-knowledge",
+            "version": "1.0.0",
+            "displayName": "Fixture Knowledge",
+            "description": "knowledge source fixture",
+            "permissions": {"network": True},
+            "provider": {
+                "type": "knowledge",
+                "implementation": "provider:create_provider",
+                "capabilities": ["source"],
+            },
+            "sources": [
+                {
+                    "name": "updates",
+                    "script": "parse.py",
+                    "fetchSpec": {"url": "https://example.com/updates"},
+                }
+            ],
+        }
+    )
+    assert manifest.validate() == []
+
+    class FixtureKnowledge(KnowledgeProvider):
+        name = "fixture-knowledge"
+        display_name = "Fixture Knowledge"
+
+        async def list_sources(self):
+            return []
+
+        async def search(self, query, limit=10):
+            return []
+
+        async def get_item(self, item_id):
+            return None
+
+    ext = RegisteredProvider(
+        name=manifest.name,
+        manifest=manifest,
+        provider_config=manifest.provider,
+    )
+    instance = FixtureKnowledge()
+    handler = KnowledgeTypeHandler()
+    try:
+        handler.register(ext, instance)
+        assert instance.source_specs == (manifest.sources[0],)
+        assert instance.source_specs[0] is manifest.sources[0]
+    finally:
+        handler.deregister(ext, instance)
+        unregister_provider(instance.name)
+
+
 @pytest.mark.asyncio
 async def test_provider_only_app_registers_and_is_callable(tmp_path):
     from gideon.integrations.search_providers.registry import (

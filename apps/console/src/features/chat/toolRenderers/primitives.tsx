@@ -4,18 +4,19 @@ import { Markdown } from '../../../shared/ui/Markdown'
 import { ToolOutput } from '../../tools/ToolOutput'
 import type { ToolSegment } from '../chatTypes'
 
-export function resolveInputObj(seg: ToolSegment): Record<string, unknown> | null {
-  if (seg.inputObj && typeof seg.inputObj === 'object' && !Array.isArray(seg.inputObj)) {
-    return seg.inputObj as Record<string, unknown>
-  }
-  const raw = (seg.input ?? '').trim()
-  if (raw.startsWith('{')) {
+export function resolveInputObj(input: unknown): Record<string, unknown> | null {
+  if (input && typeof input === 'object' && !Array.isArray(input)) return input as Record<string, unknown>
+  if (typeof input === 'string' && input.trim().startsWith('{')) {
     try {
-      const parsed = JSON.parse(raw)
+      const parsed = JSON.parse(input.trim())
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>
     } catch {   }
   }
   return null
+}
+
+export function inputOf(seg: ToolSegment): Record<string, unknown> | null {
+  return resolveInputObj(seg.inputObj) ?? resolveInputObj(seg.input)
 }
 
 export function RawBlock({ label, children }: { label: string; children: ReactNode }) {
@@ -29,12 +30,12 @@ export function RawBlock({ label, children }: { label: string; children: ReactNo
   )
 }
 
-export function KeyValueFields({ obj }: { obj: Record<string, unknown> }) {
+export function KeyValueFields({ obj, label = 'Input' }: { obj: Record<string, unknown>; label?: string }) {
   const entries = Object.entries(obj)
-  if (entries.length === 0) return <RawBlock label="Input">(no arguments)</RawBlock>
+  if (entries.length === 0) return <RawBlock label={label}>(no arguments)</RawBlock>
   return (
     <div className="mb-1.5">
-      <div data-type="caption" className="mb-1 text-on-surface-low uppercase tracking-wide">Input</div>
+      <div data-type="caption" className="mb-1 text-on-surface-low uppercase tracking-wide">{label}</div>
       <div className="flex flex-col gap-1.5 rounded-md bg-surface-low px-2.5 py-2">
         {entries.map(([k, v]) => (
           <div key={k} className="flex flex-col gap-0.5">

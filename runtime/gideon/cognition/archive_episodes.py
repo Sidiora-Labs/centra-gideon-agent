@@ -127,10 +127,9 @@ class EpisodeIndex:
 
     def append(self, identity, blob):
         store, api = self.store, self.api
-        if blob is None or store._faiss_index is None:
+        if blob is None:
             return
-        vector = api.np.frombuffer(blob, dtype=api.np.float32).reshape(1, -1)
-        width = vector.shape[1]
+        width = len(blob) // 4
         if width != store._embedding_dim:
             api.logger.warning(
                 "Skipping FAISS add for episodic %s: embedding is %d-dim but the index is "
@@ -142,6 +141,9 @@ class EpisodeIndex:
                 store._embedding_dim,
             )
             return
+        if store._faiss_index is None:
+            return
+        vector = api.np.frombuffer(blob, dtype=api.np.float32).reshape(1, -1)
         store._faiss_index.add(vector)
         store._faiss_id_map.append(identity)
         store._faiss_writes_since_save += 1

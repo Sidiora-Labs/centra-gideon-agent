@@ -27,7 +27,7 @@ from gideon.extensions.manifest_reference import reference_dir, render_reference
 
 _STALE_REMEDY = (
     "Offline reference is stale. Regenerate it with the path PINNED to this checkout:\n"
-    '    PYTHONPATH="$(git rev-parse --show-toplevel)/src" \\\n'
+    '    PYTHONPATH="$(git rev-parse --show-toplevel)/runtime" \\\n'
     "        .venv/bin/python -m gideon.extensions.manifest_reference\n"
     "Then confirm the write landed HERE and not in the main checkout:\n"
     "    git status --porcelain -- runtime/gideon/reference/\n"
@@ -186,3 +186,23 @@ def test_the_stale_remedy_stays_actionable():
         "the remedy no longer says the drift may be main's from a merge-train union, "
         "which is what sends people hunting through their own diff for an hour"
     )
+
+
+def test_offline_reference_includes_live_table_registered_routes():
+    from aiohttp import web
+
+    from gideon.cognition.lexicon.handlers import register_lexicon_routes
+    from gideon.engine.tasks.handlers import register_task_routes
+    from gideon.extensions.manifest_meta import canonical_route
+
+    app = web.Application()
+    register_task_routes(app)
+    register_lexicon_routes(app)
+    expected = {
+        (route.method, canonical_route(route.resource.canonical))
+        for route in app.router.routes()
+        if route.method != "HEAD"
+    }
+    assert len(expected) == 39
+    actual = {(row["method"], row["path"]) for row in ref_mod._routes_from_ast()}
+    assert expected <= actual, sorted(expected - actual)

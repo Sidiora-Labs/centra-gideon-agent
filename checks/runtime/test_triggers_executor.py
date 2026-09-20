@@ -552,18 +552,20 @@ def test_a_noop_counts_as_NEITHER_success_nor_failure_in_the_rollup():
 
 def test_EVERY_provider_success_status_is_mapped():
     """The completeness guard this pattern earned. `run_script_provider` names its success statuses
-    in one tuple; every one of them must classify to a non-FAILED outcome. A provider that grows a
-    fifth success status now fails here instead of silently recording a success as a failure.
+    in one mapping; every status it admits must classify to a non-FAILED outcome. A provider that
+    grows a fifth success status now fails here instead of silently recording a success as a
+    failure.
     """
-    import inspect
-
     from gideon.integrations.action_providers import run_script_provider
 
-    source = inspect.getsource(run_script_provider)
-    assert (
-        'status in ("ok", "done", "report", "skip")' in source
-    ), "the provider's success tuple moved; re-derive this test against it"
-    for status in ("ok", "done", "report", "skip"):
+    statuses = set(run_script_provider._SCRIPT_OUTCOMES)
+    assert statuses >= {
+        "ok",
+        "done",
+        "report",
+        "skip",
+    }, "the provider's success mapping no longer admits the four statuses this guard covers"
+    for status in statuses:
         outcome, _reason = E.classify(status)
         assert outcome != Outcome.FAILED.value, (
             f"the provider calls {status!r} a success (success=True) and the fire path records it "

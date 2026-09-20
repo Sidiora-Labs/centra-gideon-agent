@@ -122,7 +122,16 @@ for _p in (_REPO_ROOT, _REPO_ROOT / "runtime"):
 # The walk is rooted at ``runtime/gideon`` and NEVER at the repo root. That is deliberate
 # of those directories can appear under ``runtime/gideon``; ``_EXCLUDED_DIR_NAMES`` is a
 _EXCLUDED_DIR_NAMES = frozenset(
-    {"__pycache__", ".venv", ".venv-client", "node_modules", "build", "dist", ".worktrees", ".git"}
+    {
+        "__pycache__",
+        ".venv",
+        ".venv-client",
+        "node_modules",
+        "build",
+        "dist",
+        ".worktrees",
+        ".git",
+    }
 )
 
 # under ``runtime/gideon``. The floor is far below that and far above a broken walk (0, or
@@ -211,7 +220,7 @@ def census_py_files() -> int:
 
 
 def census_packages() -> set[str]:
-    """Every immediate sub-package of ``runtime/gideon`` that holds at least one ``.py``
+    """Every nested sub-package of ``runtime/gideon`` that holds at least one ``.py``
     file, taken straight from disk. Compared against what the ratchets actually walked: a
     file COUNT alone cannot see a whole package dropping out of the walk (66 packages, so
     losing one still leaves the count above any plausible floor)."""
@@ -220,7 +229,7 @@ def census_packages() -> set[str]:
         if _is_excluded(path):
             continue
         rel = path.resolve().relative_to(_src_root()).as_posix()
-        packages.add(rel.split("/")[0] if "/" in rel else "")
+        packages.add(rel.rpartition("/")[0])
     return packages
 
 
@@ -238,15 +247,13 @@ class Scan:
     rows: dict[str, Any]
 
 
-
 SIZE_WATCH_BAND_LINES = 2800
 
 SIZE_CEILING_STEP_LINES = 1000
 SIZE_CEILING_LINES = 6000
+SIZE_MIN_HEADROOM_LINES = 100
 
-_SIZE_RATIONALE = (
-    "Keep individual modules at or below 6000 lines and prevent growth in the population at or above 2800 lines. Existing large modules may change within that range; new entrants remain regressions. The 1000-line step measures opportunities to lower the ceiling after code is split. These limits preserve maintenance room without allowing new oversized modules."
-)
+_SIZE_RATIONALE = "Keep individual modules at or below 6000 lines and prevent growth in the population at or above 2800 lines. Existing large modules may change within that range; new entrants remain regressions. The 1000-line step measures opportunities to lower the ceiling after code is split. These limits preserve maintenance room without allowing new oversized modules."
 
 
 def scan_sizes() -> Scan:
@@ -290,7 +297,11 @@ def size_block_from(counts: dict[str, int]) -> dict[str, Any]:
     return {
         "ceiling_lines": SIZE_CEILING_LINES,
         "ceiling_step_lines": SIZE_CEILING_STEP_LINES,
-        "ceiling_slack_steps": max(0, (SIZE_CEILING_LINES - biggest) // SIZE_CEILING_STEP_LINES),
+        "ceiling_slack_steps": max(
+            0,
+            (SIZE_CEILING_LINES - biggest - SIZE_MIN_HEADROOM_LINES)
+            // SIZE_CEILING_STEP_LINES,
+        ),
         "over_ceiling": over,
         "watch_band_lines": SIZE_WATCH_BAND_LINES,
         "watch_band_members": watched,
@@ -342,8 +353,6 @@ def regressions_size(baseline: dict[str, Any], current: dict[str, Any]) -> list[
     return lines
 
 
-
-
 @dataclass(frozen=True)
 class DirectionRule:
     """One declared layer-order rule: files in ``lower`` may not import ``upper``.
@@ -358,17 +367,32 @@ class DirectionRule:
     rationale: str
 
     def applies_to(self, in_src: str) -> bool:
-        top = in_src.split("/")[0] if "/" in in_src else ""
-        if top in self.upper:
+        module = in_src.removesuffix(".py").replace("/", ".")
+
+        def belongs(packages):
+            return any(
+                module == package or module.startswith(package + ".")
+                for package in packages
+            )
+
+        if belongs(self.upper):
             return False
-        return self.lower == ("*",) or top in self.lower
+        return self.lower == ("*",) or belongs(self.lower)
 
 
 DIRECTION_RULES: tuple[DirectionRule, ...] = (
     DirectionRule(
         name="ledger-is-a-leaf",
-        lower=("ledger",),
-        upper=("dashboard", "sdk", "workflows", "loop", "agents", "knowledge", "learning"),
+        lower=("assurance.ledger",),
+        upper=(
+            "interfaces.dashboard",
+            "sdk",
+            "automation.workflows",
+            "automation.loop",
+            "engine.agents",
+            "cognition.knowledge",
+            "cognition.learning",
+        ),
         rationale=(
             "The run ledger supplies durable records to orchestration, learning, evaluation, and user interfaces. It must remain independent of those consumers so each can use it without loading an application layer. Imports in the reverse direction are counted as dependency regressions, with the recorded population serving as the upper bound."
         ),
@@ -376,16 +400,18 @@ DIRECTION_RULES: tuple[DirectionRule, ...] = (
     DirectionRule(
         name="core-must-not-import-the-http-surface",
         lower=("*",),
-        upper=("dashboard",),
+        upper=("interfaces.dashboard",),
         rationale=(
-            "Domain operations should be usable from the browser, command line, and automation interfaces. Importing HTTP handlers from domain modules ties those operations to the web application. Existing imports remain measured, including composition entry points; additional edges require moving shared behavior below the interface layer."       ),
+            "Domain operations should be usable from the browser, command line, and automation interfaces. Importing HTTP handlers from domain modules ties those operations to the web application. Existing imports remain measured, including composition entry points; additional edges require moving shared behavior below the interface layer."
+        ),
     ),
     DirectionRule(
         name="core-must-not-import-its-own-published-facade",
         lower=("*",),
         upper=("sdk",),
         rationale=(
-            "The published client facade is the supported entry point for extension bundles. Internal code should use its underlying implementation instead of depending on that external facade, so the public API can evolve without becoming an internal dependency cycle. The stored count limits further imports in this direction."       ),
+            "The published client facade is the supported entry point for extension bundles. Internal code should use its underlying implementation instead of depending on that external facade, so the public API can evolve without becoming an internal dependency cycle. The stored count limits further imports in this direction."
+        ),
     ),
 )
 
@@ -466,7 +492,9 @@ def _import_direction_block() -> dict[str, Any]:
     }
 
 
-def regressions_import_direction(baseline: dict[str, Any], current: dict[str, Any]) -> list[str]:
+def regressions_import_direction(
+    baseline: dict[str, Any], current: dict[str, Any]
+) -> list[str]:
     """Files whose upward-edge counter ROSE, sorted. A DECREASE is an inversion landing and
     is welcome; the ratchet forbids only a NEW upward edge."""
     base_per_file: dict[str, Any] = baseline["per_file"]
@@ -485,8 +513,6 @@ def regressions_import_direction(baseline: dict[str, Any], current: dict[str, An
             "— invert the dependency (move the shared piece down), do not raise the count"
         )
     return lines
-
-
 
 
 @dataclass(frozen=True)
@@ -511,16 +537,50 @@ DUPLICATE_FAMILIES: tuple[DuplicateFamily, ...] = (
         name="verdict-type",
         canonical="runtime/gideon/automation/workflows/judge_contract.py",
         rationale=(
-            "Verdict-shaped classes outside the shared workflow contract introduce additional decision formats for supervisors and evaluators to interpret. This count tracks those definitions while allowing genuinely different domain decisions to retain their own types. A definition leaves the population when it uses the shared contract or receives a more specific domain name."
+            "Verdict-shaped classes outside the shared workflow contract introduce additional decision formats for supervisors and evaluators to interpret. This count tracks those definitions while allowing genuinely different domain decisions to retain their own types. A definition leaves the population when it uses the shared contract or has an explicitly classified, distinct domain contract pinned to its module, name and fields."
         ),
     ),
     DuplicateFamily(
         name="durable-write",
         canonical="runtime/gideon/core/atomic_write.py",
         rationale=(
-            "Functions that create a temporary file and then rename it can bypass the shared persistence hooks and durability guarantees. Count these local implementations while excluding wrappers that delegate to the canonical atomic-write function. New persistence paths must use that function so writes retain their established history and synchronization behavior."       ),
+            "Functions that create a temporary file and then rename it can bypass the shared persistence hooks and durability guarantees. Count these local implementations while excluding wrappers that delegate to the canonical atomic-write function. New persistence paths must use that function so writes retain their established history and synchronization behavior."
+        ),
     ),
 )
+
+_DOMAIN_VERDICT_CONTRACTS = {
+    ("runtime/gideon/automation/triggers/executor.py", "StatusVerdict"): (
+        frozenset({"reported", "exception"}),
+        "Classifies a runner status or exception into a fire outcome; no judge score or proof decision.",
+    ),
+    ("runtime/gideon/security/guardrails/ladder.py", "ApprovalScreeningVerdict"): (
+        frozenset(
+            {"requested_mode", "requested_approval", "ceiling", "verdict", "reason"}
+        ),
+        "Screens operator approval mode against its ceiling; not a workflow quality judgment.",
+    ),
+}
+
+
+def _domain_verdict(tree: ast.Module, path: str, symbol: str) -> bool:
+    contract = _DOMAIN_VERDICT_CONTRACTS.get((path, symbol))
+    if contract is None:
+        return False
+    fields, _reason = contract
+    return any(
+        isinstance(node, ast.ClassDef)
+        and node.name == symbol
+        and {
+            statement.target.id
+            for statement in node.body
+            if isinstance(statement, ast.AnnAssign)
+            and isinstance(statement.target, ast.Name)
+        }
+        == fields
+        for node in tree.body
+    )
+
 
 _ENUM_BASES = frozenset({"Enum", "StrEnum", "IntEnum", "Flag", "IntFlag"})
 _TEMPFILE_FACTORIES = frozenset({"mkstemp", "NamedTemporaryFile", "mkdtemp"})
@@ -631,7 +691,11 @@ def scan_duplicates() -> Scan:
         ):
             if canonical.get(family) == rel:
                 continue
-            sites.extend(f"{family}:{symbol}" for symbol in finder(tree))
+            sites.extend(
+                f"{family}:{symbol}"
+                for symbol in finder(tree)
+                if family != "verdict-type" or not _domain_verdict(tree, rel, symbol)
+            )
         if sites:
             per_file[rel] = {"count": len(sites), "sites": sorted(sites)}
     return Scan(frozenset(inspected), dict(sorted(per_file.items())))
@@ -657,7 +721,9 @@ def _duplication_block() -> dict[str, Any]:
     }
 
 
-def regressions_duplication(baseline: dict[str, Any], current: dict[str, Any]) -> list[str]:
+def regressions_duplication(
+    baseline: dict[str, Any], current: dict[str, Any]
+) -> list[str]:
     """Files whose duplicate-implementation counter ROSE, sorted. A DECREASE means a
     re-derivation was deleted or folded into the canonical, and is welcome."""
     base_per_file: dict[str, Any] = baseline["per_file"]
@@ -676,8 +742,6 @@ def regressions_duplication(baseline: dict[str, Any], current: dict[str, Any]) -
             "— reuse the canonical implementation, do not raise the count"
         )
     return lines
-
-
 
 
 def build_inventory() -> dict[str, Any]:
@@ -717,7 +781,10 @@ def encode_catalog(inventory: dict[str, Any]) -> dict[str, Any]:
                     },
                     "observed": {
                         "slack_steps": size["ceiling_slack_steps"],
-                        "over_limit": [{"path": path, "lines": count} for path, count in sorted(size["over_ceiling"].items())],
+                        "over_limit": [
+                            {"path": path, "lines": count}
+                            for path, count in sorted(size["over_ceiling"].items())
+                        ],
                         "watch_members": size["watch_band_members"],
                         "watched_files": size["totals"]["watched_files"],
                     },
@@ -725,18 +792,31 @@ def encode_catalog(inventory: dict[str, Any]) -> dict[str, Any]:
                 },
                 "imports": {
                     "rules": [
-                        {"id": rule["name"], "from": rule["lower"], "to": rule["upper"], "purpose": rule["rationale"]}
+                        {
+                            "id": rule["name"],
+                            "from": rule["lower"],
+                            "to": rule["upper"],
+                            "purpose": rule["rationale"],
+                        }
                         for rule in imports["rules"]
                     ],
                     "sources": [
-                        {"path": path, "count": entry["edges"], "violations": entry["violations"]}
+                        {
+                            "path": path,
+                            "count": entry["edges"],
+                            "violations": entry["violations"],
+                        }
                         for path, entry in sorted(imports["per_file"].items())
                     ],
                     "summary": imports["totals"],
                 },
                 "duplication": {
                     "families": [
-                        {"id": family["name"], "canonical": family["canonical"], "purpose": family["rationale"]}
+                        {
+                            "id": family["name"],
+                            "canonical": family["canonical"],
+                            "purpose": family["rationale"],
+                        }
                         for family in duplication["families"]
                     ],
                     "sources": [
@@ -745,7 +825,9 @@ def encode_catalog(inventory: dict[str, Any]) -> dict[str, Any]:
                             "count": entry["count"],
                             "sites": [
                                 {"family": family, "symbol": symbol}
-                                for family, symbol in (site.split(":", 1) for site in entry["sites"])
+                                for family, symbol in (
+                                    site.split(":", 1) for site in entry["sites"]
+                                )
                             ],
                         }
                         for path, entry in sorted(duplication["per_file"].items())
@@ -764,7 +846,11 @@ def decode_catalog(document: dict[str, Any]) -> dict[str, Any]:
     size = data["checks"]["size"]
     imports = data["checks"]["imports"]
     duplication = data["checks"]["duplication"]
-    for entries in (size["observed"]["over_limit"], imports["sources"], duplication["sources"]):
+    for entries in (
+        size["observed"]["over_limit"],
+        imports["sources"],
+        duplication["sources"],
+    ):
         paths = [entry["path"] for entry in entries]
         if len(paths) != len(set(paths)):
             raise ValueError("duplicate source in structure catalog")
@@ -776,31 +862,48 @@ def decode_catalog(document: dict[str, Any]) -> dict[str, Any]:
             "ceiling_step_lines": size["limits"]["step_lines"],
             "watch_band_lines": size["limits"]["watch_lines"],
             "ceiling_slack_steps": size["observed"]["slack_steps"],
-            "over_ceiling": {entry["path"]: entry["lines"] for entry in size["observed"]["over_limit"]},
+            "over_ceiling": {
+                entry["path"]: entry["lines"]
+                for entry in size["observed"]["over_limit"]
+            },
             "watch_band_members": size["observed"]["watch_members"],
             "totals": {"watched_files": size["observed"]["watched_files"]},
             "rationale": size["purpose"],
         },
         RATCHET_IMPORT_DIRECTION: {
             "rules": [
-                {"name": rule["id"], "lower": rule["from"], "upper": rule["to"], "rationale": rule["purpose"]}
+                {
+                    "name": rule["id"],
+                    "lower": rule["from"],
+                    "upper": rule["to"],
+                    "rationale": rule["purpose"],
+                }
                 for rule in imports["rules"]
             ],
             "per_file": {
-                entry["path"]: {"edges": entry["count"], "violations": entry["violations"]}
+                entry["path"]: {
+                    "edges": entry["count"],
+                    "violations": entry["violations"],
+                }
                 for entry in imports["sources"]
             },
             "totals": imports["summary"],
         },
         RATCHET_DUPLICATION: {
             "families": [
-                {"name": family["id"], "canonical": family["canonical"], "rationale": family["purpose"]}
+                {
+                    "name": family["id"],
+                    "canonical": family["canonical"],
+                    "rationale": family["purpose"],
+                }
                 for family in duplication["families"]
             ],
             "per_file": {
                 entry["path"]: {
                     "count": entry["count"],
-                    "sites": [f"{site['family']}:{site['symbol']}" for site in entry["sites"]],
+                    "sites": [
+                        f"{site['family']}:{site['symbol']}" for site in entry["sites"]
+                    ],
                 }
                 for entry in duplication["sources"]
             },
@@ -810,7 +913,15 @@ def decode_catalog(document: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_baseline() -> str:
-    return json.dumps(encode_catalog(build_inventory()), indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    return (
+        json.dumps(
+            encode_catalog(build_inventory()),
+            indent=2,
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+        + "\n"
+    )
 
 
 _SCAN_CACHE: dict[str, tuple[tuple[object, object], Scan]] = {}
@@ -833,7 +944,9 @@ def scan(ratchet: str) -> Scan:
         RATCHET_DUPLICATION: scan_duplicates,
     }
     if ratchet not in builders:
-        raise ValueError(f"unknown structural ratchet {ratchet!r}; known: {list(RATCHETS)}")
+        raise ValueError(
+            f"unknown structural ratchet {ratchet!r}; known: {list(RATCHETS)}"
+        )
     key = (_parse, _src_py_files)
     cached = _SCAN_CACHE.get(ratchet)
     if cached is not None and cached[0] == key:
@@ -883,7 +996,7 @@ def vacuity_failures(ratchet: str | None = None) -> list[str]:
             continue
         # ``runtime/gideon/<pkg>/...`` → ``<pkg>``; ``runtime/gideon/mod.py`` → ``""``.
         seen_packages = {
-            (parts[2] if len(parts) > 3 else "") for parts in (rel.split("/") for rel in inspected)
+            rel.removeprefix("runtime/gideon/").rpartition("/")[0] for rel in inspected
         }
         missed = sorted(packages - seen_packages)
         if missed:
@@ -894,7 +1007,9 @@ def vacuity_failures(ratchet: str | None = None) -> list[str]:
     return failures
 
 
-def ratchet_failures(ratchet: str, baseline: dict[str, Any], current: dict[str, Any]) -> list[str]:
+def ratchet_failures(
+    ratchet: str, baseline: dict[str, Any], current: dict[str, Any]
+) -> list[str]:
     """Every failure line for ONE ratchet: its vacuity failures first, then its backslides.
 
     Scoped to a single ratchet on purpose — that is what lets ``tooling/scripts/gate_report.py``
@@ -902,7 +1017,9 @@ def ratchet_failures(ratchet: str, baseline: dict[str, Any], current: dict[str, 
     report as three rather than the first one hiding the rest.
     """
     if ratchet not in RATCHETS:
-        raise ValueError(f"unknown structural ratchet {ratchet!r}; known: {list(RATCHETS)}")
+        raise ValueError(
+            f"unknown structural ratchet {ratchet!r}; known: {list(RATCHETS)}"
+        )
     failures = vacuity_failures(ratchet)
     comparer = {
         RATCHET_SIZE: regressions_size,
@@ -912,7 +1029,9 @@ def ratchet_failures(ratchet: str, baseline: dict[str, Any], current: dict[str, 
     return failures + comparer(baseline[ratchet], current[ratchet])
 
 
-def stale_high(ratchet: str, baseline: dict[str, Any], current: dict[str, Any]) -> list[str]:
+def stale_high(
+    ratchet: str, baseline: dict[str, Any], current: dict[str, Any]
+) -> list[str]:
     """Counters whose COMMITTED value is above the current one — a legitimate shrink that was
     never regenerated, leaving the ratchet's floor looser than reality. Not a code defect;
     the fix is to regenerate in the commit that did the shrinking."""
@@ -921,12 +1040,16 @@ def stale_high(ratchet: str, baseline: dict[str, Any], current: dict[str, Any]) 
     if ratchet == RATCHET_SIZE:
         slack = int(now["ceiling_slack_steps"])
         if slack > 0:
-            lower_to = int(base["ceiling_lines"]) - slack * int(base["ceiling_step_lines"])
+            lower_to = int(base["ceiling_lines"]) - slack * int(
+                base["ceiling_step_lines"]
+            )
             lines.append(
                 f"ceiling: the largest file dropped {slack} full step(s) below the committed "
                 f"ceiling of {base['ceiling_lines']} — lower SIZE_CEILING_LINES to {lower_to}"
             )
-        departed = sorted(set(base["watch_band_members"]) - set(now["watch_band_members"]))
+        departed = sorted(
+            set(base["watch_band_members"]) - set(now["watch_band_members"])
+        )
         if departed:
             lines.append(
                 f"watch band: committed {len(base['watch_band_members'])} members > current "
@@ -953,7 +1076,9 @@ def main() -> None:
     path.write_text(build_baseline(), encoding="utf-8")
     inventory = build_inventory()
     print(f"wrote {path}")
-    print(f"  census: {census_py_files()} production .py files (floor {MIN_CENSUS_PY_FILES})")
+    print(
+        f"  census: {census_py_files()} production .py files (floor {MIN_CENSUS_PY_FILES})"
+    )
     size = inventory[RATCHET_SIZE]
     print(
         f"  {RATCHET_SIZE}: ceiling {size['ceiling_lines']} lines "

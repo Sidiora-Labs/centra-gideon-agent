@@ -10,6 +10,7 @@ import logging
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body, string_field
 from gideon.interfaces.dashboard import views_store as store
 
 logger = logging.getLogger(__name__)
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 async def _json_body(request: web.Request) -> dict:
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return {}
     return body if isinstance(body, dict) else {}
@@ -42,7 +43,7 @@ async def api_dashboard_views(request: web.Request) -> web.Response:
     """
     if request.method == "POST":
         body = await _json_body(request)
-        name = str(body.get("name", "")).strip()
+        name = string_field(body, "name")
         if not name:
             return web.json_response({"error": "name is required"}, status=400)
         try:

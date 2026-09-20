@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { reportActionFailure, reportingWrite } from '../../app/shell/reportingWrite'
-import { BookOpen, FileClock, Filter, Home, Plus, Search, Database, Sparkles, Network, Library, Trash2, Target, X, Pin, Star, Archive, Play, FileText, Loader2, CircleAlert, Boxes, WifiOff, Layers, Scale, Tag as TagIcon, Rss, ExternalLink, Gavel } from 'lucide-react'
+import { BookOpen, FileClock, Filter, Home, Plus, Search, Database, Sparkles, Network, Library, Trash2, Target, X, Pin, Star, Archive, Play, Pause, FileText, Loader2, CircleAlert, Boxes, WifiOff, Layers, Scale, Tag as TagIcon, Rss, ExternalLink, Gavel } from 'lucide-react'
 import { TopBar } from '../../shared/ui/TopBar'
 import { fvs } from '../../shared/theme/fontWeight'
 import { WorkbenchLayout } from '../../shared/ui/WorkbenchLayout'
@@ -470,7 +470,7 @@ export function KnowledgeListPage({ onCreate, onOpenItem, onOpenReader, onOpenSo
                   {collections.map((c) => (
                     <FilterChip key={c.id} active={collectionTok === c.id} onClick={() => setCollectionTok(c.id)}>
                       {c.kind === 'smart' ? <Sparkles size={12} /> : <Layers size={12} />}
-                      {' '}{c.name}
+                      <span className="max-w-48 truncate" title={c.name}>{c.name}</span>
                       {c.kind === 'manual' && typeof c.item_count === 'number' ? ` ${c.item_count}` : ''}
                     </FilterChip>
                   ))}
@@ -730,7 +730,7 @@ function IntentsView({ selectedId, onSelect, reloadKey }: {
               {it.propose_skill && <span data-type="caption" className="rounded-pill bg-surface-high px-1.5 text-primary-emphasis">proposes skill</span>}
             </div>
             <div data-type="caption" className="truncate text-on-surface-low">
-              {(it.outcome_count ?? 0) > 0 ? `${it.outcome_count} gathered` : 'nothing gathered yet'}
+              {(it.outcome_count ?? 0) > 0 ? `${it.outcome_count} gathered` : it.enabled ? 'nothing gathered yet — run on existing items' : 'nothing gathered yet'}
               {(it.enabled_for?.length ?? 0) > 0 && ` · ${it.enabled_for!.join('/')}`}
             </div>
           </div>
@@ -783,6 +783,7 @@ function IntentDetail({ intent, onChanged, onClose, onOpenItem }: {
   const [outcomesErr, setOutcomesErr] = useState<unknown>(null)
   const [running, setRunning] = useState(false)
   const [genning, setGenning] = useState(false)
+  const [updating, setUpdating] = useState(false)
   const [note, setNote] = useState('')
   const load = () => api.knowledgeIntentOutcomes(intent.id)
     .then((r) => { setOutcomesErr(null); setOutcomes(r.outcomes) })
@@ -812,6 +813,14 @@ function IntentDetail({ intent, onChanged, onClose, onOpenItem }: {
     } catch (e) { setNote(e instanceof Error ? e.message : 'Skill generation failed.') } finally { setGenning(false) }
   }
 
+  const update = async (body: Pick<KnowledgeIntent, 'enabled'> | Pick<KnowledgeIntent, 'propose_skill'>) => {
+    setUpdating(true); setNote('')
+    try {
+      await api.updateKnowledgeIntent(intent.id, body)
+      onChanged()
+    } catch (e) { setNote(e instanceof Error ? e.message : 'Intent update failed.') } finally { setUpdating(false) }
+  }
+
   const hasOutcomes = (outcomes?.length ?? 0) > 0
 
   return (
@@ -821,10 +830,12 @@ function IntentDetail({ intent, onChanged, onClose, onOpenItem }: {
         {
 }
         <Button size="sm" variant="secondary" onClick={run} loading={running} loadingLabel="Running…"><Play size={14} /> Run on existing items</Button>
-        {
-}
-        {
-}
+        <Button size="sm" variant="secondary" onClick={() => update({ enabled: !intent.enabled })} disabled={updating}>
+          {intent.enabled ? <Pause size={14} /> : <Play size={14} />} {intent.enabled ? 'Pause' : 'Resume'}
+        </Button>
+        <Button size="sm" variant="secondary" onClick={() => update({ propose_skill: !intent.propose_skill })} disabled={updating}>
+          <Sparkles size={14} /> {intent.propose_skill ? 'Stop proposing skill' : 'Propose skill'}
+        </Button>
         {intent.propose_skill && (
           <Button size="sm" variant="secondary" onClick={generateSkill}
             title="Synthesize a reusable skill from what this intent has gathered"

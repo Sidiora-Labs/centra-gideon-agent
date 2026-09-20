@@ -316,6 +316,7 @@ def record_cycle_findings(loop_id: str) -> int:
     by the source filename, so the watchdog calling it each poll (and across restarts) never
     double-emits. Returns how many new findings were ledgered.
     """
+    from gideon.automation.loop import store
     from gideon.automation.loop.journal import LoopJournal
 
     raw = _read_raw_finding_files(loop_id)
@@ -326,12 +327,46 @@ def record_cycle_findings(loop_id: str) -> int:
         for e in read_jsonl(loop_id, EVENTS_FILE)
         if e.get("kind") == STEP_COMPLETED
     }
+    loop = store.get(loop_id)
+    stages = loop.plan if loop else []
+
+    def _normalize_stage_label(label: str) -> str:
+        label = re.sub(
+            r"^\s*(?:stage\s*)?\d+\s*/\s*\d+\s*[.–—:)\-]?\s*", "", label, flags=re.I
+        )
+        label = re.sub(r"^\s*(?:stage\s*)?\d+\s*[.–—:)\-]\s*", "", label, flags=re.I)
+        return label.strip().casefold()
+
+    def _canonical_stage(raw_label: str) -> str | None:
+        for stage in stages:
+            key = str(stage.get("stage") or stage.get("title") or "")
+            if raw_label in (
+                str(stage.get("stage") or ""),
+                str(stage.get("title") or ""),
+            ):
+                return key
+        normalized = _normalize_stage_label(raw_label)
+        for stage in stages:
+            key = str(stage.get("stage") or stage.get("title") or "")
+            if normalized in {
+                _normalize_stage_label(str(stage.get("stage") or "")),
+                _normalize_stage_label(str(stage.get("title") or "")),
+            } - {""}:
+                return key
+        return None
+
     journal = LoopJournal.open(loop_id)
     filed = 0
     for finding in raw:
         src = str(finding.get("_source_file") or "")
         if src and src in already:
             continue
+        raw_stage = finding.get("stage")
+        if isinstance(raw_stage, str):
+            canonical_stage = _canonical_stage(raw_stage)
+            if canonical_stage is not None:
+                finding["stage_label"] = raw_stage
+                finding["stage"] = canonical_stage
         cycle_val = finding.get("cycle")
         try:
             cycle = int(cycle_val)  # type: ignore[arg-type]

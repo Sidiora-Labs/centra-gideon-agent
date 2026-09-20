@@ -5,7 +5,7 @@ import type { ApprovalSegment } from './chatTypes'
 
 
 const seg = (over: Partial<ApprovalSegment> = {}): ApprovalSegment => ({
-  kind: 'approval', id: 'a1', tool: 'bash', ...over,
+  kind: 'approval', id: 'a1', tool: 'bash', toolKind: 'write', ...over,
 })
 
 const scopeTab = (label: string) => screen.getByRole('tab', { name: label })

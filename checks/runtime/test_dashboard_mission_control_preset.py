@@ -159,7 +159,7 @@ def test_the_frontend_names_the_same_four_refs_as_the_registry():
 
     tsx = (
         pathlib.Path(__file__).resolve().parents[2]
-        / "apps/console/src/pages/dashboard/MissionControl.tsx"
+        / "apps/console/src/features/dashboard/MissionControl.tsx"
     )
     assert tsx.exists(), f"{tsx} moved — re-point this rail"
     body = tsx.read_text()

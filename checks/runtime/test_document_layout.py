@@ -316,7 +316,7 @@ def test_the_frontends_page_size_table_matches_the_models():
 
     source = (
         Path(__file__).resolve().parents[2]
-        / "apps/console/src/ui/content/documentPage.ts"
+        / "apps/console/src/shared/ui/content/documentPage.ts"
     )
     text = source.read_text(encoding="utf-8")
 

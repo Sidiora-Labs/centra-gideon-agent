@@ -14,7 +14,7 @@ function placeBloom(element: HTMLElement | null, rect: GlowRect | null, opacity:
   })
 }
 
-export function connectGlowCanvas(canvas: HTMLCanvasElement, blooms: [HTMLElement | null, HTMLElement | null], style: GlowStyle, sources: () => GlowSources) {
+export function connectGlowCanvas(canvas: HTMLCanvasElement, blooms: [HTMLElement | null, HTMLElement | null], style: GlowStyle, reduced: boolean, sources: () => GlowSources) {
   const context = canvas.getContext('2d')
   const parent = canvas.parentElement
   if (!context || !parent) return () => {}
@@ -24,7 +24,6 @@ export function connectGlowCanvas(canvas: HTMLCanvasElement, blooms: [HTMLElemen
     blooms.forEach(element => placeBloom(element, null, 0))
     return () => {}
   }
-  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)')
   const travel = new GlowTravel(sources().intensity)
   let frame: number | undefined
   let active = true
@@ -40,7 +39,7 @@ export function connectGlowCanvas(canvas: HTMLCanvasElement, blooms: [HTMLElemen
   function paint(time: number) {
     frame = undefined
     if (!active) return
-    const mode = glowMode(style, reduced.matches)
+    const mode = glowMode(style, reduced)
     const source = sources()
     const origin = canvas.getBoundingClientRect()
     const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1
@@ -59,19 +58,12 @@ export function connectGlowCanvas(canvas: HTMLCanvasElement, blooms: [HTMLElemen
     context.setTransform(ratio, 0, 0, ratio, 0, 0)
     schedule()
   }
-  const motionChanged = () => {
-    if (frame !== undefined) cancelAnimationFrame(frame)
-    frame = undefined
-    schedule()
-  }
   const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(resize)
   resize()
   observer?.observe(parent)
-  reduced.addEventListener?.('change', motionChanged)
   return () => {
     active = false
     if (frame !== undefined) cancelAnimationFrame(frame)
     observer?.disconnect()
-    reduced.removeEventListener?.('change', motionChanged)
   }
 }

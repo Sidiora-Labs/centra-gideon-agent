@@ -88,6 +88,7 @@ def write_config(
     invalid input; returns the saved values on success."""
     if not isinstance(values, dict):
         raise AppConfigError("config must be a JSON object")
+    values = {**read_config(name), **values}
     errors = validate_config(values, schema)
     if errors:
         raise AppConfigError("; ".join(errors))

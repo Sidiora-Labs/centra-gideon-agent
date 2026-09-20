@@ -10,6 +10,7 @@ hard item failure).
 from __future__ import annotations
 
 import logging
+import os
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -18,15 +19,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 NODE_REGISTRY: dict[tuple[str, str], "ProcessingNode"] = {}
+_WORKER_NODE_REGISTRIES: dict[str, dict[tuple[str, str], "ProcessingNode"]] = {}
+
+
+def _node_registry() -> dict[tuple[str, str], "ProcessingNode"]:
+    worker = os.environ.get("PYTEST_XDIST_WORKER")
+    if worker is None:
+        return NODE_REGISTRY
+    return _WORKER_NODE_REGISTRIES.setdefault(worker, {})
 
 
 def register_node(node: "ProcessingNode") -> None:
     """Register a node implementation under ``(node_type, backend)``."""
-    NODE_REGISTRY[(node.node_type, node.backend)] = node
+    _node_registry()[(node.node_type, node.backend)] = node
 
 
 def get_node(node_type: str, backend: str) -> "ProcessingNode | None":
-    return NODE_REGISTRY.get((node_type, backend))
+    return _node_registry().get((node_type, backend))
 
 
 def can_resolve_use_case(use_case: str | None) -> bool:

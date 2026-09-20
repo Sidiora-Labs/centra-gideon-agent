@@ -196,7 +196,7 @@ export function TasksSection() {
 }
 
 export function InboxSection() {
-  const query = useQuery<InboxItem[]>('inbox-companion', () => api.inboxPending())
+  const query = useQuery<InboxItem[]>('inbox-companion', () => api.inboxOpen())
   const { act, view, busy } = useCompanionAction<{ status: InboxItem['status'] }>(query.data)
 
   const resolve = (i: InboxItem, status: 'handled' | 'dismissed', verb: string) =>
@@ -205,9 +205,7 @@ export function InboxSection() {
   return (
     <Section id="companion-inbox" icon={Inbox} title="Inbox" what="inbox items" query={query}
       empty={{ title: 'Inbox clear', hint: 'Messages and requests waiting on you appear here.' }}>
-      {(items) => items
-        .filter((raw) => view(raw.id, raw).status === 'pending')
-        .map((raw) => {
+      {(items) => items.map((raw) => {
           const i = view(raw.id, raw)
           const working = busy.has(i.id)
           const who = i.sender_name || i.channel_name || i.channel || 'Unknown sender'

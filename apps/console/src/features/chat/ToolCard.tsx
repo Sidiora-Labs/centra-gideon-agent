@@ -4,7 +4,7 @@ import { ChevronRight, Loader2, Check, Zap, Maximize2, Lightbulb, AlertTriangle 
 import { motion, AnimatePresence } from 'framer-motion'
 import { spring } from '../../shared/theme/motion'
 import type { ToolSegment } from './chatTypes'
-import { renderToolInput, renderToolOutput, iconForTool, labelForTool, resolveInputObj } from './toolRenderers/registry'
+import { renderToolInput, renderToolOutput, iconForTool, labelForTool, inputOf } from './toolRenderers/registry'
 import { requestToolResultFull } from './toolResultBridge'
 
 export function ToolCard({ seg }: { seg: ToolSegment }) {
@@ -126,7 +126,7 @@ export function ToolCard({ seg }: { seg: ToolSegment }) {
 
 function secondaryDetail(seg: ToolSegment): string {
   if (seg.detail) return seg.detail.replace(/\s+/g, ' ').trim()
-  const obj = resolveInputObj(seg)
+  const obj = inputOf(seg)
   if (obj) return summarizeInputObj(obj)
   const inp = (seg.input ?? '').trim()
   if (!inp || inp.startsWith('{') || inp.startsWith('[')) return ''

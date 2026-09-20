@@ -38,6 +38,7 @@ from typing import Any
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.handlers.page_shell import page_document
 from gideon.interfaces.dashboard.origin import check_origin
@@ -115,7 +116,7 @@ def _audit(
 
 async def _body(request: web.Request) -> dict[str, Any]:
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:  # noqa: BLE001 — a malformed body is an empty body, not a 500
         return {}
     return body if isinstance(body, dict) else {}
@@ -132,7 +133,7 @@ def _pair_base_url(request: web.Request) -> str:
     characters so it cannot smuggle anything into a rendered QR payload.
     """
     try:
-        from gideon.interfaces.dashboard.exposure import public_url
+        from gideon.security.exposure import public_url
 
         configured = public_url()
         if configured:

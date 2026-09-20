@@ -134,7 +134,7 @@ class TestManualOnlyActivation:
             if "chat_plan.activate(" in p.read_text()
         )
         assert callers == [], callers
-        own = (_SRC / "dashboard" / "chat_plan.py").read_text()
+        own = (_SRC / "interfaces" / "dashboard" / "chat_plan.py").read_text()
         assert own.count("= activate(chat, running=") == 1
 
 

@@ -7,8 +7,10 @@ field-by-field mapping silently reverts to its default on every reload
 (and the next save() then wipes the user's value from the file).
 """
 
+import ast
 import json
 from dataclasses import fields, is_dataclass
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -72,6 +74,7 @@ def test_cli_config_set_preserves_unmodeled_document_sections(cfg_file):
         "use_cases": {"chat": "anthropic:claude-sonnet"},
         "slack": {"bot_token": "xoxb-keep"},
         "meta": {"format": 7, "createdBy": "setup"},
+        "future_extension": {"opaque": [1, {"nested": True}]},
     }
     cfg_file.write_text(json.dumps(opaque), encoding="utf-8")
 
@@ -88,6 +91,189 @@ def test_cli_config_set_preserves_unmodeled_document_sections(cfg_file):
     for section, value in opaque.items():
         assert written[section] == value
     assert written["agent"]["bot_name"] == "Round Trip"
+
+
+def test_cli_config_get_reads_the_complete_document(cfg_file, capsys):
+    from argparse import Namespace
+
+    from gideon.interfaces.cli.config import _config_cmd
+
+    raw = {
+        "providers": [{"id": "private", "settings": {"opaque": True}}],
+        "use_cases": {"chat": "private"},
+        "slack": {"bot_token": "xoxb-visible-for-now"},
+        "meta": {"format": 7},
+    }
+    cfg_file.write_text(json.dumps(raw), encoding="utf-8")
+
+    _config_cmd(Namespace(config_action="get", key=None))
+
+    shown = json.loads(capsys.readouterr().out)
+    assert {key: shown[key] for key in ("providers", "use_cases", "meta")} == {
+        key: raw[key] for key in ("providers", "use_cases", "meta")
+    }
+    assert shown["slack"]["bot_token"] == "[REDACTED: credential]"
+
+
+def test_cli_config_get_redacts_nested_credentials_in_whole_and_key_json(
+    cfg_file, capsys
+):
+    from argparse import Namespace
+
+    from gideon.interfaces.cli.config import _config_cmd
+
+    secret = "sk-not-for-cli-output"
+    raw = {
+        "providers": [
+            {
+                "id": "private",
+                "options": {"api_key": secret, "endpoint": "https://example.test"},
+            }
+        ],
+        "agent": {"bot_name": "Visible"},
+    }
+    cfg_file.write_text(json.dumps(raw), encoding="utf-8")
+
+    _config_cmd(Namespace(config_action="get", key=None))
+    whole = capsys.readouterr().out
+    assert secret not in whole
+    assert json.loads(whole)["providers"][0]["options"] == {
+        "api_key": "[REDACTED: credential]",
+        "endpoint": "https://example.test",
+    }
+
+    _config_cmd(Namespace(config_action="get", key="providers"))
+    keyed = capsys.readouterr().out
+    assert secret not in keyed
+    assert json.loads(keyed)[0]["options"]["api_key"] == "[REDACTED: credential]"
+
+
+def test_config_set_file_merges_and_refuses_destructive_inputs(
+    cfg_file, tmp_path, capsys
+):
+    from argparse import Namespace
+
+    from gideon.interfaces.cli.config import _config_cmd
+
+    cfg_file.write_text(
+        json.dumps({"providers": [{"id": "keep"}], "future": {"keep": True}}),
+        encoding="utf-8",
+    )
+    incoming = tmp_path / "incoming.json"
+    incoming.write_text(json.dumps({"agent": {"bot_name": "Imported"}}))
+    _config_cmd(Namespace(config_action="set", file=str(incoming)))
+    written = json.loads(cfg_file.read_text())
+    expected = {
+        "providers": [{"id": "keep"}],
+        "future": {"keep": True},
+        "agent": {"bot_name": "Imported"},
+    }
+    assert {key: written[key] for key in expected} == expected
+
+    for content in ('["not", "an", "object"]', "{broken"):
+        incoming.write_text(content, encoding="utf-8")
+        before = cfg_file.read_text(encoding="utf-8")
+        with pytest.raises(SystemExit) as exc:
+            _config_cmd(Namespace(config_action="set", file=str(incoming)))
+        assert exc.value.code == 1
+        assert cfg_file.read_text(encoding="utf-8") == before
+
+
+def test_config_set_file_restores_omitted_and_redacted_nested_credentials(
+    cfg_file, tmp_path
+):
+    from argparse import Namespace
+
+    from gideon.interfaces.cli.config import _config_cmd
+
+    stored = {
+        "providers": [
+            {
+                "id": "private",
+                "options": {
+                    "api_key": "sk-keep-provider",
+                    "access_token": "keep-access-token",
+                    "endpoint": "https://old.test",
+                },
+            }
+        ],
+        "slack": {"bot_token": "xoxb-keep-token", "channel": "old"},
+    }
+    cfg_file.write_text(json.dumps(stored), encoding="utf-8")
+    incoming = tmp_path / "incoming.json"
+    incoming.write_text(
+        json.dumps(
+            {
+                "providers": [
+                    {
+                        "id": "private",
+                        "options": {
+                            "api_key": "[REDACTED: credential]",
+                            "endpoint": "https://new.test",
+                        },
+                    }
+                ],
+                "slack": {"channel": "new"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    _config_cmd(Namespace(config_action="set", file=str(incoming)))
+
+    written = json.loads(cfg_file.read_text(encoding="utf-8"))
+    options = written["providers"][0]["options"]
+    assert options == {
+        "api_key": "sk-keep-provider",
+        "access_token": "keep-access-token",
+        "endpoint": "https://new.test",
+    }
+    assert written["slack"] == {"bot_token": "xoxb-keep-token", "channel": "new"}
+
+
+def test_config_set_file_refuses_to_replace_an_unreadable_existing_document(
+    cfg_file, tmp_path
+):
+    from argparse import Namespace
+
+    from gideon.interfaces.cli.config import _config_cmd
+
+    incoming = tmp_path / "incoming.json"
+    incoming.write_text("{}", encoding="utf-8")
+    cfg_file.write_text("{broken", encoding="utf-8")
+    with pytest.raises(SystemExit) as exc:
+        _config_cmd(Namespace(config_action="set", file=str(incoming)))
+    assert exc.value.code == 1
+    assert cfg_file.read_text(encoding="utf-8") == "{broken"
+
+
+def test_all_three_config_writes_consult_the_existing_document_before_atomic_write():
+    root = Path(__file__).resolve().parents[2] / "runtime/gideon"
+    cli_tree = ast.parse((root / "interfaces/cli/config.py").read_text())
+    loader_tree = ast.parse((root / "core/config/loader.py").read_text())
+    document_tree = ast.parse((root / "core/config/document.py").read_text())
+
+    calls = [
+        node
+        for tree in (cli_tree, loader_tree)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "write_configuration"
+    ]
+    assert len(calls) == 3, "the scan must keep finding keyed, --file, and save writes"
+
+    writer = next(
+        node
+        for node in document_tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "write_configuration"
+    )
+    tells = [
+        node.func.id
+        for node in ast.walk(writer)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    ]
+    assert tells.index("merge_configuration") < tells.index("atomic_write")
 
 
 def test_save_load_roundtrip_companion(cfg_file):
@@ -187,30 +373,23 @@ def test_the_fit_reserve_defaults_to_three_gb_and_the_filter_defaults_on():
 def test_relevance_reranker_defaults_off_and_roundtrips(cfg_file):
     """The heavyweight ranking stage is opt-in and all of its bounds survive disk."""
     cfg = AppConfig()
-    assert cfg.knowledge.reranker_enabled is False
-    assert cfg.knowledge.reranker_model == "cross-encoder/ms-marco-MiniLM-L-6-v2"
-    assert cfg.knowledge.reranker_max_candidates == 32
+    assert cfg.knowledge.rerank_enabled is False
+    assert cfg.knowledge.rerank_max_candidates == 32
 
-    cfg.knowledge.reranker_enabled = True
-    cfg.knowledge.reranker_model = "local/reranker-v2"
-    cfg.knowledge.reranker_max_candidates = 17
+    cfg.knowledge.rerank_enabled = True
+    cfg.knowledge.rerank_max_candidates = 17
     cfg.save()
 
     loaded = AppConfig.load().knowledge
-    assert loaded.reranker_enabled is True
-    assert loaded.reranker_model == "local/reranker-v2"
-    assert loaded.reranker_max_candidates == 17
+    assert loaded.rerank_enabled is True
+    assert loaded.rerank_max_candidates == 17
 
 
 def test_relevance_reranker_fields_are_patch_editable():
     from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG
 
-    assert _EDITABLE_CONFIG["knowledge.reranker_enabled"] == {"type": "bool"}
-    assert _EDITABLE_CONFIG["knowledge.reranker_model"] == {
-        "type": "str",
-        "max_len": 256,
-    }
-    assert _EDITABLE_CONFIG["knowledge.reranker_max_candidates"] == {
+    assert _EDITABLE_CONFIG["knowledge.rerank_enabled"] == {"type": "bool"}
+    assert _EDITABLE_CONFIG["knowledge.rerank_max_candidates"] == {
         "type": "int",
         "min": 1,
         "max": 128,

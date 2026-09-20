@@ -19,6 +19,7 @@ Both halves of this file guard a measured live failure, not a hypothetical:
    worse than one that fails loudly, because the audit trail says "mode forwarded".
 """
 
+import asyncio
 import logging
 
 import pytest
@@ -36,6 +37,7 @@ from gideon.integrations.acp.permission_authority import (
     PASSTHROUGH_MODES,
     sanitize_mode,
 )
+from gideon.integrations.acp.types import JsonRpcMessage
 
 CODEX_NATIVE_MODES = {"read-only", "agent", "agent-full-access"}
 
@@ -137,63 +139,50 @@ def test_the_authority_still_clamps_before_the_dialect_translates():
     assert _sent_mode(CodexDialect(), unattended.mode) == "agent-full-access"
 
 
-class _ImmediateFuture:
-    """Minimal stand-in for the router future: ``add_done_callback`` fires now."""
-
-    def __init__(self, *, result=None, exc: Exception | None = None):
-        self._result = result
-        self._exc = exc
-
-    def add_done_callback(self, cb):
-        cb(self)
-
-    def result(self):
-        if self._exc is not None:
-            raise self._exc
-        return self._result
-
-
-class _Reply:
-    def __init__(self, result=None, error=None):
-        self.result = result
-        self.error = error
-
-
 def _client(tmp_path) -> AcpClient:
     return AcpClient(work_dir=tmp_path, dialect=CodexDialect())
 
 
-def test_adapter_rejection_is_logged(tmp_path, caplog):
+@pytest.mark.asyncio
+async def test_adapter_rejection_is_logged(tmp_path, caplog):
     """The measured failure mode: the adapter answers ``-32602`` and the host says
     nothing, so a refused mode reads exactly like an applied one."""
     client = _client(tmp_path)
     params = {"sessionId": "s1", "configId": "mode", "value": "read-only"}
-    fut = _ImmediateFuture(
-        result=_Reply(error={"code": -32602, "message": "Invalid params"})
+    fut = asyncio.get_running_loop().create_future()
+    fut.set_result(
+        JsonRpcMessage(id=3, error={"code": -32602, "message": "Invalid params"})
     )
     with caplog.at_level(logging.WARNING, logger="gideon.integrations.acp.client"):
         client._watch_dialect_reply("session/set_config_option", params, 3, fut)
+        await asyncio.sleep(0)
     assert "REJECTED" in caplog.text
     assert "-32602" in caplog.text
     assert "mode" in caplog.text
 
 
-def test_accepted_reply_is_not_logged(tmp_path, caplog):
+@pytest.mark.asyncio
+async def test_accepted_reply_is_not_logged(tmp_path, caplog):
     """The success path must stay quiet, or the warning stops meaning anything."""
     client = _client(tmp_path)
     params = {"sessionId": "s1", "configId": "mode", "value": "read-only"}
-    fut = _ImmediateFuture(result=_Reply(result={"configOptions": []}))
+    fut = asyncio.get_running_loop().create_future()
+    fut.set_result(JsonRpcMessage(id=3, result={"configOptions": []}))
     with caplog.at_level(logging.WARNING, logger="gideon.integrations.acp.client"):
         client._watch_dialect_reply("session/set_config_option", params, 3, fut)
+        await asyncio.sleep(0)
     assert "REJECTED" not in caplog.text
 
 
-def test_unanswered_send_stays_best_effort(tmp_path, caplog):
+@pytest.mark.asyncio
+async def test_unanswered_send_stays_best_effort(tmp_path, caplog):
     """A cancelled/never-answered future must not raise out of the callback — the
     send is deliberately fire-and-forget so the handshake pays no latency for it."""
     client = _client(tmp_path)
     params = {"sessionId": "s1", "configId": "mode", "value": "read-only"}
-    fut = _ImmediateFuture(exc=RuntimeError("process gone"))
+    fut = asyncio.get_running_loop().create_future()
+    fut.set_exception(RuntimeError("process gone"))
     with caplog.at_level(logging.WARNING, logger="gideon.integrations.acp.client"):
         client._watch_dialect_reply("session/set_config_option", params, 3, fut)
+        await asyncio.sleep(0)
     assert "REJECTED" not in caplog.text

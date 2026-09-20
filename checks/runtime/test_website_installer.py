@@ -90,12 +90,12 @@ _FULL = _ROOT / ".github" / "workflows" / "full.yml"
 _PYPROJECT = _ROOT / "pyproject.toml"
 _CHANGELOG = _ROOT / "CHANGELOG.md"
 _GUIDE = _ROOT / "docs" / "guides" / "GETTING_STARTED.md"
-_DEPLOY_README = _ROOT / "infrastructure" / "website" / "README.md"
 _REPO_README = _ROOT / "README.md"
+_WEBSITE_README = _ROOT / "infrastructure" / "website" / "README.md"
 
-SERVED_URL = "https://gideon.dev/install"
+SERVED_URL = "$GIDEON_INSTALL_URL"
 
-SERVED_HOST = "gideon.dev"
+SERVED_HOST = "installer.example"
 
 FLOOR_CONST = "GIDEON_MIN_VERSION"
 
@@ -113,7 +113,7 @@ DISPATCH = 'main "$@"'
 
 SH = "/bin/sh"
 
-SANDBOX_TOOLS = ("cat", "uname", "printf")
+SANDBOX_TOOLS = ("cat", "dirname", "uname", "printf")
 
 FORBIDDEN_TOOLS = ("curl", "wget", "uv")
 
@@ -493,6 +493,28 @@ class TestOfflineArgumentPaths:
             f"{proc.stderr!r}"
         )
 
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "gideon-agent-harness==0.1.3",
+            "https://packages.example/gideon_agent_harness-0.1.3-py3-none-any.whl",
+            "/tmp/a checkout with spaces",
+        ],
+    )
+    def test_explicit_source_is_preserved(self, source, installer_text, sandbox_env):
+        definitions = installer_text.rsplit(DISPATCH, 1)[0]
+        proc = subprocess.run(
+            [SH, "-s"],
+            input=definitions
+            + '\nresolve_package_source\nprintf "%s" "$GIDEON_PACKAGE"\n',
+            env={**sandbox_env, "GIDEON_PACKAGE_SOURCE": source},
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout == source
+
 
 class TestTruncatedDownloadFailsClosed:
     """A dropped connection mid-``curl | sh`` must install nothing.
@@ -551,7 +573,7 @@ class TestTruncatedDownloadFailsClosed:
                 capture_output=True,
                 text=True,
                 timeout=60,
-                env=dict(sandbox_env),
+                env={**sandbox_env, "GIDEON_PACKAGE_SOURCE": "gideon"},
             )
             if "==>" in proc.stdout:
                 started.append(count)
@@ -575,7 +597,7 @@ class TestTruncatedDownloadFailsClosed:
             capture_output=True,
             text=True,
             timeout=120,
-            env=dict(sandbox_env),
+            env={**sandbox_env, "GIDEON_PACKAGE_SOURCE": "gideon"},
         )
         assert "==>" in proc.stdout, (
             "the complete installer never printed the `==>` marker the truncation sweep "
@@ -667,10 +689,18 @@ class TestInstallFloorTracksTheReleaseHistory:
             "the install path moved — either way every assertion in this class is vacuous."
         )
         for line in lines:
-            assert f">=${FLOOR_CONST}" in line, (
-                f"this install runs without the {FLOOR_CONST} floor, so a rolled-back PyPI "
-                f"index installs old code silently:\n    {line}"
-            )
+            assert (
+                '--constraints "$constraints"' in line
+            ), f"this install does not apply the distribution version constraint: {line}"
+        constraint_write = (
+            "printf '%s>=%s\\n' "
+            '"$GIDEON_DISTRIBUTION" "$GIDEON_MIN_VERSION" > "$constraints"'
+        )
+        assert constraint_write in code_only(installer_text)
+        assert (
+            installer_constant(installer_text, "GIDEON_DISTRIBUTION")
+            == tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))["project"]["name"]
+        )
 
     def test_the_floor_did_not_cost_the_idempotent_upgrade(
         self, installer_text: str
@@ -873,12 +903,30 @@ class TestDocumentedVerifyPathIsReal:
             f"the recipe never fetches {_PIN.name} from a URL, so the digest it checks against "
             f"can only have come from the same place as the script:\n{recipe}"
         )
+        assert '[ "$installer_host" != raw.githubusercontent.com ]' in recipe
+        assert "installer_host=${GIDEON_INSTALL_URL#https://}" in recipe
+        assert "installer_host=${installer_host%%/*}" in recipe
+        assert 'case "$GIDEON_INSTALL_URL" in https://*)' in recipe
         for url in digest_urls:
+            assert (
+                host_of(url) == "raw.githubusercontent.com"
+            ), f"the independently checked digest origin changed without its guard: {url}"
             assert host_of(url) != SERVED_HOST, (
                 f"the digest is fetched from {host_of(url)}, the same host that serves the "
                 "script. That host can serve a modified script AND a matching digest, so the "
                 "check would prove nothing against exactly the attacker it appears to stop."
             )
+
+    def test_the_digest_revision_is_immutable(self, section: str) -> None:
+        (recipe,) = verify_recipes(section)
+        assert (
+            'case "$GIDEON_VERIFY_REVISION" in *[!0-9a-f]*|"") exit 1 ;; esac' in recipe
+        )
+        assert '[ "${#GIDEON_VERIFY_REVISION}" -eq 40 ]' in recipe
+        digest_urls = [url for url in urls(recipe) if url.endswith(_PIN.name)]
+        assert digest_urls
+        assert all("/$GIDEON_VERIFY_REVISION/" in url for url in digest_urls)
+        assert "${GIDEON_DIGEST_REPOSITORY:?" in recipe
 
     def test_the_recipe_checks_the_digest_instead_of_printing_it(
         self, section: str
@@ -899,9 +947,7 @@ class TestDocumentedVerifyPathIsReal:
         """
         (recipe,) = verify_recipes(section)
         pinned_name = _PIN.read_text(encoding="utf-8").split()[1]
-        match = re.search(
-            rf"-o\s+(\S+)\s+\S*{re.escape(SERVED_HOST)}/install\b", recipe
-        )
+        match = re.search(rf"-o\s+(\S+)\s+[\"']?{re.escape(SERVED_URL)}\b", recipe)
         assert (
             match
         ), f"the recipe does not save the served script to a named file:\n{recipe}"
@@ -938,7 +984,7 @@ class TestDocumentedVerifyPathIsReal:
         """
         counts = {
             path.name: len(verify_recipes(path.read_text(encoding="utf-8")))
-            for path in (_REPO_README, _GUIDE, _DEPLOY_README)
+            for path in (_REPO_README, _GUIDE, _WEBSITE_README)
         }
         assert sum(counts.values()) == 1, (
             f"the verify recipe appears {sum(counts.values())} times across the docs "
@@ -952,7 +998,7 @@ class TestDocumentedVerifyPathIsReal:
         updating them leaves three dead ends and a recipe nobody reaches.
         """
         anchor = "#" + VERIFY_HEADING.lower().replace(" ", "-")
-        for path in (_REPO_README, _DEPLOY_README):
+        for path in (_REPO_README, _WEBSITE_README):
             assert anchor in path.read_text(encoding="utf-8"), (
                 f"{path.name} does not link to {anchor}, so a reader there is not told the "
                 "verify path exists."
@@ -1047,7 +1093,14 @@ def _live_leg(full_text: str) -> tuple[str, str]:
     Found by "the job that mentions the served URL", not by its id, so renaming it stays
     green while deleting it does not.
     """
-    matches = {jid: body for jid, body in jobs(full_text).items() if SERVED_URL in body}
+    matches = {
+        jid: body
+        for jid, body in jobs(full_text).items()
+        if re.search(
+            rf"curl[^\n]*{re.escape(SERVED_URL)}",
+            code_only(body).replace("\\\n", " "),
+        )
+    }
     assert matches, (
         f"no job in full.yml mentions {SERVED_URL}. The installer's live rail is gone, "
         "and the header's smoke claim is false again."
@@ -1069,6 +1122,13 @@ class TestLiveInstallerLegIsWired:
     def test_full_yml_has_a_live_installer_leg(self, leg: tuple[str, str]) -> None:
         jid, _body = leg
         assert jid, "unreachable — _live_leg asserts this"
+
+    def test_live_sources_are_explicitly_configured(self, leg: tuple[str, str]) -> None:
+        _jid, body = leg
+        for name in ("GIDEON_INSTALL_URL", "GIDEON_PACKAGE_SOURCE"):
+            assert f"{name}: ${{{{ vars.{name} }}}}" in body
+            assert f"vars.{name} != ''" in body
+        assert "shell: bash" in body
 
     def test_it_exercises_the_staged_file_too(self, leg: tuple[str, str]) -> None:
         """Served-only would not catch a broken edit until after it was hand-applied.
@@ -1383,7 +1443,7 @@ class TestParsersAreNotVacuous:
 
     def test_installer_constant_reads_a_value_and_admits_absence(self) -> None:
         assert (
-            installer_constant('X="1"\nPC_MIN_VERSION="0.9.9"\n', FLOOR_CONST)
+            installer_constant('X="1"\nGIDEON_MIN_VERSION="0.9.9"\n', FLOOR_CONST)
             == "0.9.9"
         )
         assert installer_constant('GIDEON_PACKAGE="gideon"\n', FLOOR_CONST) is None

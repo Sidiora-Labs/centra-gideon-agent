@@ -63,12 +63,13 @@ def _import_request(monkeypatch):
     def _make(body):
         app = web.Application()
         app["state"] = MagicMock()
-        request = make_mocked_request("POST", "/api/memory/import", app=app)
-
-        async def _json():
-            return body
-
-        request.json = _json  # type: ignore[method-assign]
+        request = make_mocked_request(
+            "POST",
+            "/api/memory/import",
+            app=app,
+            headers={"Content-Type": "application/json"},
+        )
+        request._read_bytes = json.dumps(body).encode()
         return request
 
     return _make, store
@@ -273,12 +274,13 @@ async def test_promote_normal_session_is_not_blocked(monkeypatch):
     )
     app = web.Application()
     app["state"] = MagicMock()
-    request = make_mocked_request("POST", "/api/memory/promote", app=app)
-
-    async def _json():
-        return {}
-
-    request.json = _json  # type: ignore[method-assign]
+    request = make_mocked_request(
+        "POST",
+        "/api/memory/promote",
+        app=app,
+        headers={"Content-Type": "application/json"},
+    )
+    request._read_bytes = b"{}"
 
     resp = await api_memory_promote(request)
 

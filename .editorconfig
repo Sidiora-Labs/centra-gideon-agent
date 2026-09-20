@@ -18,6 +18,14 @@ indent_size = 4
 indent_style = space
 indent_size = 2
 
+[web/src/**/*.{ts,tsx}]
+indent_style = space
+indent_size = 2
+
+[apps/console/src/**/*.{ts,tsx}]
+indent_style = space
+indent_size = 2
+
 [Makefile]
 indent_style = tab
 

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { prefersReducedMotion } from '../../shared/theme/motion'
 
 type Row = { kind: 'same' | 'add' | 'del'; text: string }
 
@@ -44,8 +45,7 @@ export function DiffReveal({ oldText, newText, theme, onDone }: {
   const scrollRef = useRef<HTMLPreElement>(null)
 
   useEffect(() => {
-    const reduce = typeof window !== 'undefined'
-      && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    const reduce = prefersReducedMotion()
     if (reduce || tooLarge || (addChars === 0 && delChars === 0)) {
       setAddShown(addChars); setDelGone(delChars); setPhase('done'); doneRef.current?.()
       return

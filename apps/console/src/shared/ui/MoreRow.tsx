@@ -4,11 +4,10 @@ export function MoreRow({ total, shown, noun, className }: {
   noun?: string
   className?: string
 }) {
-  const hidden = total - shown
-  if (hidden <= 0) return null
+  if (total <= shown) return null
   return (
     <div data-type="caption" className={`text-on-surface-low ${className ?? ''}`}>
-      … {hidden} more{noun ? ` ${noun}` : ''}
+      Showing {shown} of {total}{noun ? ` ${noun}` : ''}
     </div>
   )
 }

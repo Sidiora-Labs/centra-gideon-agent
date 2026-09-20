@@ -12,16 +12,16 @@ const read = (rel: string) => strip(readFileSync(join(SRC, rel), 'utf8'))
 
 const CONSENT = ['features/apps/installConsent.tsx', 'features/skills/MarketplaceDetail.tsx']
 
-describe('the residue sentence', () => {
+describe('the truncated count sentence', () => {
   it('says nothing when nothing is hidden', () => {
     expect(hiddenFindingsNote(0)).toBeNull()
     expect(hiddenFindingsNote(SCAN_FINDINGS_SHOWN), 'exactly at the cap hides nothing').toBeNull()
     expect(hiddenFindingsNote(SCAN_FINDINGS_SHOWN - 1)).toBeNull()
   })
 
-  it('counts the residue, not the total', () => {
-    expect(hiddenFindingsNote(SCAN_FINDINGS_SHOWN + 6)).toBe('+6 more findings not shown')
-    expect(hiddenFindingsNote(SCAN_FINDINGS_SHOWN + 1), 'singular at one').toBe('+1 more finding not shown')
+  it('states both the rendered and total counts', () => {
+    expect(hiddenFindingsNote(SCAN_FINDINGS_SHOWN + 6)).toBe('Showing 8 of 14 findings')
+    expect(hiddenFindingsNote(SCAN_FINDINGS_SHOWN + 1)).toBe('Showing 8 of 9 findings')
   })
 })
 
@@ -32,7 +32,7 @@ describe('both consent surfaces disclose their cap', () => {
       expect(src, `${rel} must slice by the shared constant`).toMatch(/\.slice\(0, SCAN_FINDINGS_SHOWN\)/)
       expect(src, `${rel} must not re-choose the limit`).not.toMatch(/findings\.slice\(\s*0\s*,\s*\d/)
       expect(src, `${rel} must import the shared rules`).toMatch(
-        /import \{[^}]*\bSCAN_FINDINGS_SHOWN\b[^}]*\bhiddenFindingsNote\b[^}]*\} from '(\.\.\/)+lib\/scanFindings'/,
+        /import \{[^}]*\bSCAN_FINDINGS_SHOWN\b[^}]*\bhiddenFindingsNote\b[^}]*\} from '(\.\.\/)+shared\/data\/scanFindings'/,
       )
     }
   })
@@ -88,13 +88,13 @@ describe('what the consent screen actually reads', () => {
     expect(screen.getByText(/Security scan: warning/)).toBeTruthy()
     expect(screen.getByText(/14 findings/), 'the total').toBeTruthy()
     expect(screen.getAllByText(/^rule_/).length, 'eight listed').toBe(SCAN_FINDINGS_SHOWN)
-    expect(screen.getByText('+6 more findings not shown'), 'and the residue').toBeTruthy()
+    expect(screen.getByText('Showing 8 of 14 findings'), 'and the truncated count').toBeTruthy()
   })
 
   it('a scan inside the cap says neither a residue nor a lie', () => {
     render(<ScanReport scan={scanOf(3) as never} />)
     expect(screen.getByText(/3 findings/)).toBeTruthy()
-    expect(screen.queryByText(/more findings? not shown/), 'nothing is hidden').toBeNull()
+    expect(screen.queryByText(/Showing \d+ of/), 'nothing is hidden').toBeNull()
   })
 
   it('a clean scan carries no count at all — there is nothing to count', () => {

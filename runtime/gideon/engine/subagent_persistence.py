@@ -21,12 +21,7 @@ def config_dir() -> Path:
 
 
 def _path_home_gideon():
-    try:
-        from gideon.core.config.loader import config_dir as active_home
-
-        return active_home()
-    except Exception:
-        return Path.home().joinpath(".gideon")
+    return config_dir()
 
 
 def _subagents_dir() -> Path:

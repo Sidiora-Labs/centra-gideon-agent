@@ -86,7 +86,7 @@ def test_doc_matches_the_live_registry(doc_text: str) -> None:
     the markers. Fix: ``python tooling/scripts/render_acp_parity_residual.py``.
     """
     assert renderer.render_document(doc_text) == doc_text, (
-        "docs/architecture/ACP_PARITY.md has drifted from acp/permission_authority.NOT_GATEABLE. "
+        "docs/agents/acp-parity.md has drifted from acp/permission_authority.NOT_GATEABLE. "
         "Run: python tooling/scripts/render_acp_parity_residual.py"
     )
 

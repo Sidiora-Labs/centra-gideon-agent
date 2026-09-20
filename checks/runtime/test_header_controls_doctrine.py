@@ -27,8 +27,8 @@ _WEB = Path("apps/console/src")
 def test_no_overflowmenu_primitive():
     """The standalone OverflowMenu primitive stays deleted — the HeaderActions
     cluster's internal auto-`…` is the single overflow mechanism for headers."""
-    assert not (_WEB / "ui" / "OverflowMenu.tsx").exists(), (
-        "apps/console/src/ui/OverflowMenu.tsx is back — headers must use the HeaderActions "
+    assert not (_WEB / "shared" / "ui" / "OverflowMenu.tsx").exists(), (
+        "apps/console/src/shared/ui/OverflowMenu.tsx is back — headers must use the HeaderActions "
         "cluster's built-in `…` (a hand-built OverflowMenu is the anti-pattern this "
         "plan removed)."
     )
@@ -61,6 +61,6 @@ def test_no_headerbutton_alias():
 def test_headeractions_is_four_tier():
     """Sanity: the HeaderActions primitive still implements the 4-tier ladder + the
     controlled children (so the guards above ban *bypasses*, not the mechanism)."""
-    src = (_WEB / "ui" / "HeaderActions.tsx").read_text(encoding="utf-8")
+    src = (_WEB / "shared" / "ui" / "HeaderActions.tsx").read_text(encoding="utf-8")
     for token in ("'overflow'", "HeaderControl", "HeaderSegmented", "ResizeObserver"):
         assert token in src, f"HeaderActions.tsx should contain {token}"

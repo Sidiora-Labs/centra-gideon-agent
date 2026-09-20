@@ -15,8 +15,8 @@ plants real content and asserts the planted content was non-trivial before compa
 
 from __future__ import annotations
 
-import os
-import stat
+import resource
+import signal
 from unittest.mock import patch
 
 import pytest
@@ -228,20 +228,25 @@ def test_a_failed_write_raises_and_leaves_the_previous_text_intact(
     Measured behaviour: ``project_context.write_overview`` swallows its own ``OSError`` and
     returns ``False``, and because the write is atomic the previous content survives. A caller
     that ignored the ``False`` would render "Saved" over an edit that was silently discarded.
+
+    The failure is injected with the OS file-size limit rather than directory permission bits:
+    the suite runs as root, for whom ``chmod`` read-only is advisory, so the permission route
+    was vacuous. ``SIGXFSZ`` is ignored so the kernel reports ``EFBIG`` from the write instead
+    of terminating the test process.
     """
     project = store.create_project("Roofing Rebuild")
     assert project_context.write_overview(project.id, OVERVIEW_BODY)
     item_id = f"project_instruction:{project_context.OVERVIEW_FILE}"
 
-    context_dir = project_context._context_dir(project.id)
-    assert context_dir is not None
-    original_mode = stat.S_IMODE(os.stat(context_dir).st_mode)
-    os.chmod(context_dir, 0o500)
+    previous_handler = signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+    original_limit = resource.getrlimit(resource.RLIMIT_FSIZE)
+    resource.setrlimit(resource.RLIMIT_FSIZE, (4, original_limit[1]))
     try:
         with pytest.raises(InstructionWriteError) as excinfo:
             write_instruction(item_id, "SHOULD_NOT_LAND", project_id=project.id)
     finally:
-        os.chmod(context_dir, original_mode)
+        resource.setrlimit(resource.RLIMIT_FSIZE, original_limit)
+        signal.signal(signal.SIGXFSZ, previous_handler)
 
     assert excinfo.value.status == 500
     assert "NOT saved" in excinfo.value.reason
@@ -447,26 +452,41 @@ def test_new_skills_are_present_in_a_sessions_on_demand_index(isolated_home):
         ), f"{name} is missing from the session skill index"
 
 
-class _FakeRequest:
-    """Minimal stand-in for the two attributes these handlers touch."""
-
-    _MISSING = object()
-
-    def __init__(self, *, query: dict | None = None, body: object = _MISSING):
-        self.query = query or {}
-        self._body = body
-
-    async def json(self):
-        if self._body is self._MISSING:
-            raise ValueError("no body")
-        return self._body
+_NO_BODY = object()
 
 
-def _call(handler, **kwargs) -> tuple[int, dict]:
+def _call(
+    handler,
+    *,
+    method: str = "GET",
+    query: dict | None = None,
+    body: object = _NO_BODY,
+    raw: bytes | None = None,
+) -> tuple[int, dict]:
+    """Drive a handler with a real ``aiohttp`` request.
+
+    The query string goes in the path (``make_mocked_request`` parses it into ``request.query``)
+    and the body as serialized bytes with a JSON content type, so the handler reads through the
+    real ``gideon.core.http_request`` boundary instead of a request-shaped fake.
+    """
     import asyncio
     import json
+    from urllib.parse import urlencode
 
-    resp = asyncio.run(handler(_FakeRequest(**kwargs)))
+    from aiohttp.test_utils import make_mocked_request
+
+    path = "/api/legibility/always-on"
+    if query:
+        path += "?" + urlencode(query)
+    headers: dict[str, str] = {}
+    payload = b""
+    if raw is not None:
+        payload, headers["Content-Type"] = raw, "application/json"
+    elif body is not _NO_BODY:
+        payload, headers["Content-Type"] = json.dumps(body).encode(), "application/json"
+    request = make_mocked_request(method, path, headers=headers)
+    request._read_bytes = payload
+    resp = asyncio.run(handler(request))
     return resp.status, json.loads(resp.body.decode())
 
 
@@ -524,6 +544,7 @@ def test_doc_get_and_put_round_trip_over_http(isolated_home, store):
     edited = "PEP10_HTTP_EDIT_MARKER — the flashing is done and the scaffold comes down Friday."
     status, payload = _call(
         api_always_on_doc_write,
+        method="PUT",
         body={"id": item_id, "project_id": project.id, "body": edited},
     )
     assert status == 200 and payload["ok"] is True
@@ -543,6 +564,7 @@ def test_doc_put_surfaces_a_refusal_as_an_error_not_a_silent_success(
     )
     status, payload = _call(
         api_always_on_doc_write,
+        method="PUT",
         body={
             "id": "project_instruction:decisions.md",
             "project_id": project.id,
@@ -568,7 +590,7 @@ def test_doc_put_surfaces_a_refusal_as_an_error_not_a_silent_success(
 def test_doc_put_validates_its_payload(isolated_home, body, expected):
     from gideon.interfaces.dashboard.handlers.legibility import api_always_on_doc_write
 
-    status, payload = _call(api_always_on_doc_write, body=body)
+    status, payload = _call(api_always_on_doc_write, method="PUT", body=body)
     assert status == 400
     assert payload["error"] == expected
 
@@ -576,7 +598,9 @@ def test_doc_put_validates_its_payload(isolated_home, body, expected):
 def test_doc_put_rejects_a_non_json_body(isolated_home):
     from gideon.interfaces.dashboard.handlers.legibility import api_always_on_doc_write
 
-    status, payload = _call(api_always_on_doc_write)
+    status, payload = _call(
+        api_always_on_doc_write, method="PUT", raw=b"not json at all"
+    )
     assert status == 400 and payload["error"] == "Invalid JSON body"
 
 

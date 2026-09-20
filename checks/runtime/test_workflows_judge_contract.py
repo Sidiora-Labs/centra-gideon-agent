@@ -425,7 +425,7 @@ _OWNER = "workflows/judge_contract.py"
 def _repo_src():
     from pathlib import Path
 
-    return Path(__file__).resolve().parents[2] / "src"
+    return Path(__file__).resolve().parents[2] / "runtime"
 
 
 def _production_callers() -> dict[str, list[str]]:
@@ -457,7 +457,7 @@ def test_every_enforcement_entry_point_has_a_production_caller():
     inverted rather than deleted, because "the contract is authored but nothing runs it" is a state
     this module has already been in once, and it is invisible from inside the module.
     """
-    source = (_repo_src() / "gideon/workflows/judge_contract.py").read_text(
+    source = (_repo_src() / "gideon/automation/workflows/judge_contract.py").read_text(
         encoding="utf-8"
     )
     missing = [
@@ -488,7 +488,9 @@ def test_the_rules_under_validate_verdict_are_still_reached_from_it():
     import ast
 
     tree = ast.parse(
-        (_repo_src() / "gideon/workflows/judge_contract.py").read_text(encoding="utf-8")
+        (_repo_src() / "gideon/automation/workflows/judge_contract.py").read_text(
+            encoding="utf-8"
+        )
     )
     reached: set[str] = set()
     for func in ast.walk(tree):

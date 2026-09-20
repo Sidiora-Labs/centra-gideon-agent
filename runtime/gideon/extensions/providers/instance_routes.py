@@ -46,6 +46,7 @@ import logging
 import aiohttp
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.extensions.apps.secret_fields import (
     mask_instance,
     preserve_unchanged_secrets,
@@ -181,7 +182,7 @@ async def handle_create_instance(request: web.Request) -> web.Response:
         )
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return json_error("invalid_json", status=400)
 
@@ -271,7 +272,7 @@ async def handle_update_instance(request: web.Request) -> web.Response:
         )
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return json_error("invalid_json", status=400)
 
@@ -517,7 +518,7 @@ async def handle_set_use_case_settings(request: web.Request) -> web.Response:
         )
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return json_error("invalid_json", status=400)
 

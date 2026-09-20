@@ -75,12 +75,12 @@ def _stored(home: Path) -> list[str] | None:
 
 async def _post(body: object) -> tuple[int, dict]:
     """Drive the real handler, so the refusal is measured as the 400 a client sees."""
-    req = make_mocked_request("POST", "/api/legibility/discover/dismiss")
-
-    async def _json():
-        return body
-
-    req.json = _json  # type: ignore[method-assign]
+    req = make_mocked_request(
+        "POST",
+        "/api/legibility/discover/dismiss",
+        headers={"Content-Type": "application/json"},
+    )
+    req._read_bytes = json.dumps(body).encode()
     resp = await handler.api_discover_dismiss(req)
     return resp.status, json.loads(resp.text or "{}")
 
@@ -150,7 +150,7 @@ async def test_the_existing_shape_checks_still_answer_first(home: Path):
     "unknown tip id", because "you sent nothing" and "you sent a thing that isn't a tip"
     are different answers to the caller."""
     assert (await _post({"id": ""}))[1] == {"error": "id is required"}
-    assert (await _post([1, 2]))[1] == {"error": "Body must be a JSON object"}
+    assert (await _post([1, 2]))[1] == {"error": "Invalid JSON body"}
     assert _stored(home) is None
 
 

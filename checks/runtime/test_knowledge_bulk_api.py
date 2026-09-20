@@ -39,12 +39,13 @@ def _run(coro):
 def _post(store, body):
     app = web.Application()
     app["state"] = SimpleNamespace(knowledge_store=store)
-    req = make_mocked_request("POST", "/api/knowledge/bulk", app=app)
-
-    async def _json():
-        return body
-
-    req.json = _json
+    req = make_mocked_request(
+        "POST",
+        "/api/knowledge/bulk",
+        headers={"Content-Type": "application/json"},
+        app=app,
+    )
+    req._read_bytes = json.dumps(body).encode()
     from gideon.interfaces.dashboard.handlers import knowledge as H
 
     resp = _run(H.bulk_items(req))
@@ -119,12 +120,13 @@ def test_a_smart_shelf_refusal_keeps_its_own_error_code(store):
 def test_invalid_json_is_rejected(store):
     app = web.Application()
     app["state"] = SimpleNamespace(knowledge_store=store)
-    req = make_mocked_request("POST", "/api/knowledge/bulk", app=app)
-
-    async def _boom():
-        raise ValueError("not json")
-
-    req.json = _boom
+    req = make_mocked_request(
+        "POST",
+        "/api/knowledge/bulk",
+        headers={"Content-Type": "application/json"},
+        app=app,
+    )
+    req._read_bytes = b"{not json"
     from gideon.interfaces.dashboard.handlers import knowledge as H
 
     resp = _run(H.bulk_items(req))
@@ -164,18 +166,15 @@ def test_the_route_is_registered(store):
 def _tag_req(store, method, path_id=None, body=None):
     app = web.Application()
     app["state"] = SimpleNamespace(knowledge_store=store)
+    raw = json.dumps(body).encode() if body is not None else b""
     req = make_mocked_request(
         method,
         "/api/knowledge/tags",
+        headers={"Content-Type": "application/json"} if raw else None,
         app=app,
         match_info={"id": str(path_id)} if path_id else {},
     )
-    if body is not None:
-
-        async def _json():
-            return body
-
-        req.json = _json
+    req._read_bytes = raw
     return req
 
 

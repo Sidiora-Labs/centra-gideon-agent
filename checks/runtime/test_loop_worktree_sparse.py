@@ -64,7 +64,7 @@ def _repo(tmp_path, name="repo", extra: dict[str, str] | None = None) -> str:
     test that never checks it would not notice if that stopped being true.
     """
     d = tmp_path / name
-    for sub in ("src", "docs", "web"):
+    for sub in ("src", "docs", "apps/console"):
         (d / sub).mkdir(parents=True, exist_ok=True)
     (d / "src" / "app.py").write_text("print('app')\n")
     (d / "src" / "util.py").write_text("X = 1\n")
@@ -110,10 +110,11 @@ class TestScopeDerivation:
         assert wt.scope_candidates("refactor the worktree module and its tests") == []
 
     def test_a_sentence_final_directory_mention_is_not_a_dot_token(self):
-        """Found by driving the real path: "…do not touch apps/console/." yielded the token
-        ``apps/console/.``, which then resolved to the ``web`` directory and silently widened the
-        scope. The final component must start with a word char."""
-        assert wt.scope_candidates("Do not touch apps/console/.") == []
+        """Found by driving the real path: "…do not touch apps/console/." must not yield the
+        token ``apps/console/.``, which names nothing and would make the scope unguessable.
+        The final component must start with a word char, so the sentence's ``.`` stays out
+        of the token and the directory itself is the candidate."""
+        assert wt.scope_candidates("Do not touch apps/console/.") == ["apps/console"]
         assert wt.scope_candidates("Edit apps/console/main.ts.") == [
             "apps/console/main.ts"
         ]
@@ -148,7 +149,7 @@ class TestScopeDerivation:
     def test_a_real_path_survives_alongside_a_fake_one(self, tmp_path):
         ws = _repo(tmp_path)
         assert wt.resolve_scope(ws, ["nope/whatever.py", "apps/console/main.ts"]) == [
-            "web"
+            "apps/console"
         ]
 
     def test_traversal_candidates_are_refused(self, tmp_path):
@@ -332,7 +333,7 @@ class TestAutoWiden:
         """
         ws = _repo(tmp_path)
         path = wt.add_worktree(ws, "t-lost", scope=["src"])
-        os.makedirs(os.path.join(path, "web"), exist_ok=True)
+        os.makedirs(os.path.join(path, "apps/console"), exist_ok=True)
         with open(os.path.join(path, "apps/console/lost.ts"), "w") as f:
             f.write("export const gone = 1;\n")
 
@@ -393,7 +394,7 @@ class TestAutoWiden:
         path = wt.add_worktree(ws, "t-merge", scope=["src"])
         with open(os.path.join(path, "src/app.py"), "a") as f:
             f.write("# in scope\n")
-        os.makedirs(os.path.join(path, "web"), exist_ok=True)
+        os.makedirs(os.path.join(path, "apps/console"), exist_ok=True)
         with open(os.path.join(path, "apps/console/extra.ts"), "w") as f:
             f.write("export const b = 2;\n")
 

@@ -21,9 +21,9 @@ from __future__ import annotations
 
 import json
 import time
-from types import SimpleNamespace
 
 import pytest
+from aiohttp.test_utils import make_mocked_request
 
 from gideon.integrations.inbound import bridge
 
@@ -42,19 +42,14 @@ class _State:
         self.notices.append((kind, title, body, meta or {}))
 
 
-def _request(state, *, headers=None, body=None, peer="127.0.0.1"):
-    async def _json_body():
-        if body is None:
-            raise ValueError("no body")
-        return body
-
-    return SimpleNamespace(
-        app={"state": state},
-        headers=headers or {},
-        json=_json_body,
-        transport=SimpleNamespace(get_extra_info=lambda _k: (peer, 0)),
-        remote=peer,
-    )
+def _request(state, *, headers=None, body=None):
+    headers = dict(headers or {})
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+    req = make_mocked_request("POST", "/action", headers=headers, app={"state": state})
+    if body is not None:
+        req._read_bytes = json.dumps(body).encode()
+    return req
 
 
 def _payload(resp):
@@ -967,7 +962,9 @@ def test_every_refusal_goes_through_the_shared_wire_emitter():
 
     import gideon
 
-    src = (pathlib.Path(gideon.__file__).parent / "inbound" / "bridge.py").read_text()
+    src = (
+        pathlib.Path(gideon.__file__).parent / "integrations" / "inbound" / "bridge.py"
+    ).read_text()
     assert "from gideon.http_errors import json_error" in src
     assert (
         '_json({"error"' not in src
@@ -985,7 +982,9 @@ def test_write_actions_call_the_dashboards_own_services_not_a_second_path():
 
     import gideon
 
-    src = (pathlib.Path(gideon.__file__).parent / "inbound" / "bridge.py").read_text()
+    src = (
+        pathlib.Path(gideon.__file__).parent / "integrations" / "inbound" / "bridge.py"
+    ).read_text()
     assert "from gideon.engine.tasks import registry" in src
     assert "registry.create_task(" in src
     assert "store.set_enabled(" in src

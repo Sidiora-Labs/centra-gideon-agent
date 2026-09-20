@@ -23,6 +23,7 @@ from typing import Any
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body, string_field
 from gideon.engine.agents.marketplace import AgentDefinition, get_default_agent_registry
 from gideon.extensions.providers.failure_copy import relayed_failure_copy
 from gideon.security.sel import sel as _sel_fn
@@ -88,13 +89,13 @@ async def api_agent_marketplace_get(request: web.Request) -> web.Response:
 async def api_agent_marketplace_create(request: web.Request) -> web.Response:
     """POST /api/agent-marketplace/agents — create a new agent definition."""
     try:
-        body: dict[str, Any] = await request.json()
+        body: dict[str, Any] = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
         return web.json_response({"error": "JSON body must be an object"}, status=400)
 
-    name = str(body.get("name", "")).strip()
+    name = string_field(body, "name")
     if not name:
         return web.json_response({"error": "name is required"}, status=400)
 
@@ -134,7 +135,7 @@ async def api_agent_marketplace_update(request: web.Request) -> web.Response:
     """PUT /api/agent-marketplace/agents/:name — update agent fields (partial)."""
     name = request.match_info["name"]
     try:
-        body: dict[str, Any] = await request.json()
+        body: dict[str, Any] = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
 
@@ -239,7 +240,7 @@ async def api_agent_marketplace_test(request: web.Request) -> web.Response:
         return web.json_response({"error": f"Agent '{name}' not found"}, status=404)
 
     try:
-        body: dict[str, Any] = await request.json()
+        body: dict[str, Any] = await read_json_body(request)
     except Exception:
         body = {}
 

@@ -41,16 +41,16 @@ def _config(store, **payload) -> None:
 
 
 async def _put(body: object, use_case: str = "chat") -> tuple[int, dict]:
-    """Drive the real handler with a mocked request."""
+    """Drive the real handler with a request carrying real JSON bytes."""
     from aiohttp.test_utils import make_mocked_request
 
-    req = make_mocked_request("PUT", f"/api/models/active/{use_case}")
+    req = make_mocked_request(
+        "PUT",
+        f"/api/models/active/{use_case}",
+        headers={"Content-Type": "application/json"},
+    )
     req.match_info["use_case"] = use_case
-
-    async def _json():
-        return body
-
-    req.json = _json  # type: ignore[method-assign]
+    req._read_bytes = json.dumps(body).encode()
     resp: web.Response = await mr.api_models_active_set(req)
     return resp.status, json.loads(resp.text or "{}")
 

@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
-import { motion, useReducedMotion } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { cx } from './cx'
-import { spring, expr } from '../theme/motion'
+import { spring, expr, useReducedMotion } from '../theme/motion'
 
 export function AddItemButton({ children, onClick, className }: {
   children: ReactNode

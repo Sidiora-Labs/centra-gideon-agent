@@ -148,14 +148,12 @@ def test_unreadable_enable_file_is_off_and_does_not_raise(home):
     the way an unreadable ceiling is: there "no bound" would be a widening, here the
     fail-closed answer (off) is a state the system runs in perfectly well."""
     path = _arm(home)
-    path.chmod(0o000)
+    path.unlink()
+    path.mkdir()
     ES.reset_enable_state()
-    try:
-        state = ES.active_enable_state()
-        assert state.enabled is False
-        assert "could not be read" in state.detail
-    finally:
-        path.chmod(0o600)
+    state = ES.active_enable_state()
+    assert state.enabled is False
+    assert "could not be read" in state.detail
 
 
 def test_a_mid_run_write_cannot_arm_the_running_process(home):
@@ -651,11 +649,13 @@ def test_gateway_boot_resolves_the_keystone_once(home):
     import inspect
 
     from gideon.engine.gateway import RuntimeCoordinator
+    from gideon.engine.lifecycle import RuntimeProcess
 
-    source = inspect.getsource(RuntimeCoordinator.run)
+    assert "RuntimeProcess(self).serve()" in inspect.getsource(RuntimeCoordinator.run)
+    source = inspect.getsource(RuntimeProcess.establish_policy)
     called = [
         node.func.id
         for node in ast.walk(ast.parse(source.lstrip()))
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     ]
-    assert "ensure_computer_use_boot" in called
+    assert called.count("ensure_computer_use_boot") == 1

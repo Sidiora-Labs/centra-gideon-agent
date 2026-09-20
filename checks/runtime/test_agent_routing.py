@@ -7,6 +7,7 @@ import time
 from types import SimpleNamespace
 
 import pytest
+from aiohttp.test_utils import TestClient, TestServer
 
 from gideon.engine.agents import routing
 
@@ -232,3 +233,58 @@ class TestSuggestForSend:
             )
             is None
         )
+
+
+@pytest.mark.asyncio
+async def test_new_chat_replays_routing_suggestion_when_ws_connects_late(
+    tmp_path, monkeypatch
+):
+    from unittest.mock import AsyncMock, patch
+
+    from chat_test_helpers import _make_app, _make_state
+
+    from gideon.interfaces.dashboard.ws import api_ws
+
+    cfg = _cfg(
+        {"dba": _profile("database expert", "optimize slow sql query, fix db index")}
+    )
+    monkeypatch.setattr(
+        "gideon.core.config.loader.AppConfig.load", staticmethod(lambda: cfg)
+    )
+    monkeypatch.setattr(
+        "gideon.extensions.providers.entity_routes.config_dir", lambda: tmp_path
+    )
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+    )
+    state = _make_state(tmp_path)
+    app = _make_app(state)
+    app["allowed_origins"] = set()
+    app.router.add_get("/api/ws", api_ws)
+
+    with patch("gideon.interfaces.dashboard.chat_handlers.run_chat", new=AsyncMock()):
+        async with TestClient(TestServer(app)) as client:
+            response = await client.post(
+                "/api/chat?ws=1",
+                json={"message": "please optimize this slow sql query now"},
+            )
+            assert response.status == 200
+            session = (await response.json())["session"]
+
+            app["allowed_origins"].add(str(client.make_url("/")).rstrip("/"))
+            async with client.ws_connect(
+                "/api/ws", origin=str(client.make_url("/")).rstrip("/")
+            ) as socket:
+                assert (await socket.receive_json())["type"] == "sessions"
+                replay = await socket.receive_json()
+
+    assert replay == {
+        "type": "routing_suggestion",
+        "data": {
+            "session": session,
+            "agent": "dba",
+            "specialty": "database expert",
+            "score": 1.0,
+            "method": "keyword",
+        },
+    }

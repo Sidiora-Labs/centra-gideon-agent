@@ -21,9 +21,9 @@ user state**. Copy can change freely; only a dead end coming back reds the gate.
 """
 
 import re
-from pathlib import Path
 
 from gideon.cognition import suggestions
+from gideon.core.layout import package_path
 
 _BACKREFERENCE = re.compile(
     r"\b(?:my\s+recent|recent|latest|my\s+last|last\s+week|earlier|previous|my\s+conversations)\b",
@@ -89,8 +89,10 @@ def test_the_handwritten_list_meets_the_bound_the_prompt_asks_the_model_for():
     ever asked for, on the one surface where these strings are guaranteed to appear. Nothing
     violates it today — this pins the headroom so it stays that way.
     """
+    # The bundled prompt the seed step writes from; production resolves it through
+    # `package_path` (`native_provider.seed_bundled_prompts`).
     prompt = (
-        Path(suggestions.__file__).parent / "config" / "prompts" / "task-suggestions.md"
+        package_path("core", "config") / "prompts" / "task-suggestions.md"
     ).read_text(encoding="utf-8")
     stated = re.search(r"under (\d+) characters", prompt)
     assert stated, (

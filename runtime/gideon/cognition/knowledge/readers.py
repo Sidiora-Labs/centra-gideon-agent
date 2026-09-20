@@ -153,9 +153,11 @@ class FileReader:
         *,
         ocr_provider: OcrProvider | None = None,
         pdf_limits: PdfResourceLimits | None = None,
+        ocr_max_bytes: int | None = None,
     ) -> None:
         self.ocr_provider = ocr_provider
         self.pdf_limits = pdf_limits or PdfResourceLimits()
+        self.ocr_max_bytes = ocr_max_bytes
 
     def read(self, path: str) -> tuple[str, dict]:
         if is_sensitive_path(path):
@@ -236,13 +238,26 @@ class FileReader:
                     len(scanned),
                     self.pdf_limits.max_raster_pages,
                 )
-                self._ocr_scanned_pages(document.pages, pages, scanned)
+                ocr_read, ocr_skipped, ocr_pages = self._ocr_scanned_pages(
+                    document.pages, pages, scanned
+                )
                 metadata.update(
                     ocr_required=True,
                     ocr_available=True,
-                    ocr_used=True,
-                    ocr_page_count=len(scanned),
+                    ocr_used=bool(ocr_pages),
+                    ocr_page_count=ocr_pages,
+                    ocr_bytes_read=ocr_read,
+                    ocr_bytes_skipped=ocr_skipped,
                 )
+                if ocr_skipped and not any(text.strip() for text in pages):
+                    message = (
+                        f"OCR byte limit skipped {ocr_skipped} bytes after reading "
+                        f"{ocr_read} bytes"
+                    )
+                    metadata.update(
+                        format="error", error=message, error_kind="ocr_byte_limit"
+                    )
+                    return f"Error reading PDF: {message}", metadata
             return "\n".join(pages), metadata
         except PdfResourceLimitError as error:
             return f"Error reading PDF: {error}", {
@@ -263,13 +278,21 @@ class FileReader:
 
     def _ocr_scanned_pages(
         self, pdf_pages, pages: list[str], scanned: list[int]
-    ) -> None:
+    ) -> tuple[int, int, int]:
         limits = self.pdf_limits
         provider = self.ocr_provider
         if provider is None:
             raise RuntimeError("OCR provider is unavailable")
         raster_pixels = 0
         raster_bytes = 0
+        ocr_bytes_read = 0
+        ocr_bytes_skipped = 0
+        ocr_pages = 0
+        ocr_max_bytes = self.ocr_max_bytes
+        if ocr_max_bytes is None:
+            from gideon.core.config.loader import AppConfig
+
+            ocr_max_bytes = AppConfig.load().knowledge.ocr_max_bytes
         text_chars = sum(len(text) for text in pages)
         with tempfile.TemporaryDirectory(prefix="gideon-pdf-ocr-") as directory:
             for index in scanned:
@@ -293,7 +316,13 @@ class FileReader:
                 self._check_pdf_limit(
                     "raster bytes", raster_bytes, limits.max_raster_bytes
                 )
+                image_bytes = os.path.getsize(image_path)
+                if ocr_bytes_read + image_bytes > ocr_max_bytes:
+                    ocr_bytes_skipped += image_bytes
+                    continue
                 text = provider.ocr(image_path, page_number=index + 1)
+                ocr_bytes_read += image_bytes
+                ocr_pages += 1
                 if not isinstance(text, str):
                     raise TypeError("OCR provider must return text")
                 text_chars += len(text)
@@ -301,6 +330,7 @@ class FileReader:
                     "text characters", text_chars, limits.max_text_chars
                 )
                 pages[index] = text.strip()
+        return ocr_bytes_read, ocr_bytes_skipped, ocr_pages
 
     @staticmethod
     def _check_pdf_limit(resource: str, actual: int, limit: int) -> None:

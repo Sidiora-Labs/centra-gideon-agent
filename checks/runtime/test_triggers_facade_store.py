@@ -79,14 +79,16 @@ def _req(method, path, state, *, body=None, match_info=None, query=None):
     app = web.Application()
     app["state"] = state
     full = path + ("?" + query if query else "")
-    req = make_mocked_request(method, full, match_info=match_info or {}, app=app)
+    req = make_mocked_request(
+        method,
+        full,
+        match_info=match_info or {},
+        app=app,
+        headers={"Content-Type": "application/json"} if body is not None else {},
+    )
     req["user"] = "tester"
     if body is not None:
-
-        async def _json():
-            return body
-
-        req.json = _json  # type: ignore[assignment]
+        req._read_bytes = json.dumps(body).encode()
     return req
 
 
@@ -778,19 +780,27 @@ def test_the_manual_path_reads_the_SAME_shapes_as_the_autonomous_one(
     home, state, monkeypatch
 ):
     """A STRUCTURAL guard on the property `_dispatch_store_action`'s docstring claims: "a manual Run
-    and an autonomous fire share one dispatch so their behaviour cannot drift". They HAD drifted —
-    the gateway unwrapped `inline` and the manual path did not — and a behavioural test on one row
-    shape cannot catch the next divergence. So this asserts both functions resolve the action
-    through the same `(inline or workflow)` idiom.
+    and an autonomous fire share one dispatch so their behaviour cannot drift". The autonomous path
+    now delegates to `TriggerDispatch`, whose `TriggerAction.resolve` owns the `(inline or workflow)`
+    unwrap; the manual path still does it inline. Assert the whole chain, since a behavioural test on
+    one row shape cannot catch the next divergence.
     """
     import inspect
 
-    from gideon.engine import gateway
+    from gideon.engine import gateway, trigger_dispatch
     from gideon.interfaces.dashboard.handlers import triggers as handlers
 
     manual = inspect.getsource(handlers._dispatch_store_action)
     autonomous = inspect.getsource(gateway.RuntimeCoordinator._fire_store_trigger)
-    for name, src in (("manual", manual), ("autonomous", autonomous)):
+    dispatch_run = inspect.getsource(trigger_dispatch.TriggerDispatch.run)
+    resolve = inspect.getsource(trigger_dispatch.TriggerAction.resolve)
+    assert (
+        "TriggerDispatch(" in autonomous and ".run()" in autonomous
+    ), "the autonomous path no longer routes through the shared TriggerDispatch"
+    assert (
+        "TriggerAction.resolve" in dispatch_run
+    ), "TriggerDispatch.run no longer resolves the action shape"
+    for name, src in (("manual", manual), ("autonomous", resolve)):
         assert (
             'workflow.get("inline")' in src
         ), f"{name} no longer unwraps the nested action shape"

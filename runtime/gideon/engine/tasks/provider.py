@@ -5,7 +5,7 @@ from typing import Any
 
 from gideon.engine.tasks.models import Task, TaskComment
 
-DEFAULT_TASK_PAGE_LIMIT = 50
+DEFAULT_TASK_PAGE_LIMIT = 500
 MAX_TASK_PAGE_LIMIT = 500
 
 

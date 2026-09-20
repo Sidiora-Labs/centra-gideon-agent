@@ -109,12 +109,12 @@ async def test_pip_kind_routes_to_pip_update(monkeypatch) -> None:
 
 
 def _post_devmode(body: object):
-    req = make_mocked_request("POST", "/api/update/dev-mode")
-
-    async def _j():
-        return body
-
-    req.json = _j  # type: ignore[method-assign]
+    req = make_mocked_request(
+        "POST",
+        "/api/update/dev-mode",
+        headers={"Content-Type": "application/json"},
+    )
+    req._read_bytes = json.dumps(body).encode()
     return req
 
 

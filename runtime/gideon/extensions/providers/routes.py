@@ -12,6 +12,7 @@ from typing import Any
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.extensions.apps.secret_fields import (
     mask_secrets,
     preserve_unchanged_secrets,
@@ -165,7 +166,7 @@ async def handle_patch_config(request: web.Request) -> web.Response:
         return web.json_response({"error": f"Extension {name!r} not found"}, status=404)
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
 

@@ -1,7 +1,7 @@
 import { forwardRef } from 'react'
-import { motion, useReducedMotion } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { Composer } from './Composer'
-import { physics, expr } from '../theme/motion'
+import { physics, expr, useReducedMotion } from '../theme/motion'
 import type { ComposerProps } from './composer/types'
 
 export const ComposerStage = forwardRef<HTMLDivElement, ComposerProps>(function ComposerStage(props, ref) {

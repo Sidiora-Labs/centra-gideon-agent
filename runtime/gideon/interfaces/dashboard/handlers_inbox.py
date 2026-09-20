@@ -6,6 +6,10 @@ from typing import TYPE_CHECKING
 
 from aiohttp import web
 
+from gideon.core.http_request import (
+    RequestBodyTypeError,
+    read_json_body,
+)
 from gideon.http_errors import json_error
 from gideon.integrations.inbox import (
     NON_CHANNEL_KINDS,
@@ -14,6 +18,7 @@ from gideon.integrations.inbox import (
     InboxStore,
     ItemKind,
     ItemStatus,
+    is_open_status,
     owner_username,
     redact_item,
     validate_updatable_fields,
@@ -207,17 +212,12 @@ async def api_inbox_list(request: web.Request) -> web.Response:
     return web.json_response([_owner_item(i, owner) for i in items])
 
 
-async def api_inbox_pending(request: web.Request) -> web.Response:
-    """GET /api/inbox/pending — list pending items only (recency, optionally weighted).
-
-    ``?kind=`` narrows as on the list endpoint. Note this is PENDING only: an item the
-    user has seen but not resolved is deliberately excluded, because this endpoint feeds
-    the "needs attention now" surfaces.
-    """
+async def api_inbox_open_items(request: web.Request) -> web.Response:
+    """GET /api/inbox/open — list unresolved items (recency, optionally weighted)."""
     state: "ConsoleState" = request.app["state"]
     _, inbox = _get_inbox(state)
     owner = owner_username()
-    items = _rank_items(state, list(inbox.pending(owner)))
+    items = _rank_items(state, list(inbox.open_items(owner)))
     items = _filter_by_kind(items, request.query.get("kind"))
     return web.json_response([_owner_item(i, owner) for i in items])
 
@@ -232,13 +232,12 @@ async def api_inbox_kinds(request: web.Request) -> web.Response:
     state: "ConsoleState" = request.app["state"]
     _, inbox = _get_inbox(state)
     owner = owner_username()
-    open_states = {ItemStatus.PENDING.value, ItemStatus.SEEN.value}
     counts: dict[str, dict[str, int]] = {}
     for item in inbox.items.values():
         kind = item.item_kind or ItemKind.MESSAGE.value
         entry = counts.setdefault(kind, {"total": 0, "open": 0})
         entry["total"] += 1
-        if item.status_for(owner) in open_states:
+        if is_open_status(item.status_for(owner)):
             entry["open"] += 1
     return web.json_response(
         {
@@ -266,11 +265,11 @@ async def api_inbox_seen(request: web.Request) -> web.Response:
     _, inbox = _get_inbox(state)
     owner = owner_username()
     try:
-        body = await request.json()
+        body = await read_json_body(request)
+    except RequestBodyTypeError:
+        return web.json_response({"error": "body must be an object"}, status=400)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
-    if not isinstance(body, dict):
-        return web.json_response({"error": "body must be an object"}, status=400)
     ids = body.get("ids")
     if ids is not None and not isinstance(ids, list):
         return web.json_response({"error": "ids must be a list"}, status=400)
@@ -309,13 +308,13 @@ async def api_inbox_update(request: web.Request) -> web.Response:
     item_id = request.match_info["id"]
 
     try:
-        body = await request.json()
-    except (json.JSONDecodeError, ValueError):
-        return json_error("invalid_json", message="Body must be valid JSON", status=400)
-    if not isinstance(body, dict):
+        body = await read_json_body(request)
+    except RequestBodyTypeError:
         return json_error(
             "invalid_body", message="JSON body must be an object", status=400
         )
+    except (json.JSONDecodeError, ValueError):
+        return json_error("invalid_json", message="Body must be valid JSON", status=400)
 
     item = inbox.items.get(item_id)
     if item is None:
@@ -523,11 +522,11 @@ async def api_inbox_send(request: web.Request) -> web.Response:
     """
     state: "ConsoleState" = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
+    except RequestBodyTypeError:
+        return web.json_response({"error": "body must be an object"}, status=400)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
-    if not isinstance(body, dict):
-        return web.json_response({"error": "body must be an object"}, status=400)
     for field in ("id", "text", "draft"):
         value = body.get(field)
         if value is not None and not isinstance(value, str):
@@ -590,10 +589,10 @@ async def api_inbox_favorite(request: web.Request) -> web.Response:
     _, inbox = _get_inbox(state)
     item_id = request.match_info["id"]
     try:
-        body = await request.json()
-    except Exception:
+        body = await read_json_body(request)
+    except RequestBodyTypeError:
         body = {}
-    if not isinstance(body, dict):
+    except Exception:
         body = {}
     favorited = bool(body.get("favorited", True))
     item = inbox.items.get(item_id)
@@ -663,7 +662,7 @@ async def api_inbox_status(request: web.Request) -> web.Response:
             "owner": owner,
             "shared": bool(owner and len(mine) != len(inbox.items)),
             "mine_count": len(mine),
-            "pending_count": len(inbox.pending(owner)),
+            "open_count": len(inbox.open_items(owner)),
             "total_count": len(inbox.items),
             "health": health,
         }
@@ -778,11 +777,11 @@ async def api_inbox_note_create(request: web.Request) -> web.Response:
 
     state: "ConsoleState" = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
+    except RequestBodyTypeError:
+        return json_error("invalid_body", status=400)
     except Exception:
         return json_error("invalid_json", status=400)
-    if not isinstance(body, dict):
-        return json_error("invalid_body", status=400)
 
     raw = body.get("text")
     if not isinstance(raw, str) or not raw.strip():
@@ -848,11 +847,11 @@ async def api_inbox_proposal_create(request: web.Request) -> web.Response:
         )
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
+    except RequestBodyTypeError:
+        return web.json_response({"error": "body must be an object"}, status=400)
     except Exception:
         return web.json_response({"error": "invalid JSON body"}, status=400)
-    if not isinstance(body, dict):
-        return web.json_response({"error": "body must be an object"}, status=400)
 
     kind_suffix = str(body.get("kind_suffix") or "")
     manifest = app_manager._manifest_of(app_name)
@@ -944,7 +943,7 @@ async def api_inbox_proposal_apply(request: web.Request) -> web.Response:
     edited = None
     if request.can_read_body:
         try:
-            body = await request.json()
+            body = await read_json_body(request)
         except Exception:
             body = {}
         if isinstance(body, dict) and isinstance(body.get("proposal"), dict):

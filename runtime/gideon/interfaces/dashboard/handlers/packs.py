@@ -45,6 +45,7 @@ import logging
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.http_errors import json_error
 
 logger = logging.getLogger(__name__)
@@ -159,6 +160,18 @@ async def api_pack_roster_deploy(request: web.Request) -> web.Response:
             "pack_has_no_roster", message=f"pack {name!r} ships no roster", status=404
         )
     result = deploy_roster(name)
+    return web.json_response({"ok": True, "pack": name, **result})
+
+
+async def api_pack_triggers_deploy(request: web.Request) -> web.Response:
+    """Promote valid staged triggers, always disabled for explicit user arming."""
+    from gideon.extensions.packs.triggers import PackTriggersError, deploy_triggers
+
+    name = request.match_info.get("name", "")
+    try:
+        result = deploy_triggers(name)
+    except PackTriggersError as exc:
+        return json_error("pack_not_installed", message=str(exc), status=404)
     return web.json_response({"ok": True, "pack": name, **result})
 
 
@@ -357,7 +370,7 @@ async def _json_body(request: web.Request) -> dict | None:
     if not request.can_read_body:
         return {}
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return None
     return body if isinstance(body, dict) else None
@@ -382,5 +395,6 @@ def register_pack_routes(app: web.Application) -> None:
     app.router.add_post("/api/packs/one-link", api_pack_one_link)
     app.router.add_post("/api/packs/{name}/finish-setup", api_pack_finish_setup)
     app.router.add_post("/api/packs/{name}/roster/deploy", api_pack_roster_deploy)
+    app.router.add_post("/api/packs/{name}/triggers/deploy", api_pack_triggers_deploy)
     app.router.add_post("/api/packs/{name}/bindings", api_pack_bindings)
     app.router.add_post("/api/packs/{name}/update", api_pack_update)

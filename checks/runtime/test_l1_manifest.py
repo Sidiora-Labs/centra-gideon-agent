@@ -88,7 +88,7 @@ def test_get_context_uses_manifest_when_l1_on(tmp_path, monkeypatch):
     vs = SemanticArchive(db_path=tmp_path / "vec.db")
     vs.init()
     vs.set_semantic("pref.tone", "concise", 1.0, "user_explicit")
-    ms._vector_store = vs
+    ms.vector_store = vs
     svc = MemoryService(ms)
 
     ctx_l1 = svc.get_context(query="tone", l1_manifest=True)

@@ -1,10 +1,10 @@
 import type { ReactNode } from 'react'
-import { motion, useReducedMotion } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { AlertTriangle, RotateCcw, type LucideIcon } from 'lucide-react'
 import { TopBar } from './TopBar'
 import { Spark } from './Spark'
 import { Button } from './Button'
-import { spring, expr } from '../theme/motion'
+import { spring, expr, useReducedMotion } from '../theme/motion'
 import { readableErrText } from '../data/errText'
 import { PageTitle } from './PageTitle'
 import { Surface } from './Surface'
@@ -78,11 +78,11 @@ export function ListRow({ index = 0, onClick, children, accent, label }: {
 function loadingText(what?: string) { return what ? `Loading ${what}…` : 'Loading…' }
 
 export function Loading({ what }: { what?: string }) {
-  return <div role="status" aria-busy="true" data-type="body-s" className="text-on-surface-low">{loadingText(what)}</div>
+  return <div role="status" aria-busy="true" data-visual-state="waiting" data-type="body-s" className="text-on-surface-low">{loadingText(what)}</div>
 }
 
 export function Skeleton({ className }: { className: string }) {
-  return <div aria-hidden="true" className={cx('skeleton rounded-md', className)} />
+  return <div aria-hidden="true" data-visual-state="waiting" className={cx('skeleton rounded-md', className)} />
 }
 
 export function LoadingStatus({ what }: { what?: string }) {
@@ -90,7 +90,7 @@ export function LoadingStatus({ what }: { what?: string }) {
 }
 
 function PlaceholderRegion({ what, className, children }: { what?: string; className?: string; children: ReactNode }) {
-  return <div role="status" aria-busy="true" className={className}><LoadingStatus what={what} />{children}</div>
+  return <div role="status" aria-busy="true" data-visual-state="waiting" className={className}><LoadingStatus what={what} />{children}</div>
 }
 
 function repeat(count: number, render: (index: number) => ReactNode) {

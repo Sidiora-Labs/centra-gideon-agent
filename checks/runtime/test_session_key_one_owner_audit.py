@@ -25,9 +25,9 @@ site reaches disk from either source), which is why the vacuity floor below matt
 than the assertion: a taint rule that resolves nothing is green for free.
 
 The site set is DERIVED, never listed. The keyed ``ConversationLog`` methods come from
-parsing ``history.py`` (every method whose first parameter is ``key``), and the call sites
-come from parsing every module under ``dashboard/``. Add a keyed method to
-``ConversationLog``, or a new handler, and both are picked up with no edit here.
+parsing ``cognition/history.py`` (every method whose first parameter is ``key``), and the
+call sites come from parsing every module under ``interfaces/dashboard/``. Add a keyed
+method to ``ConversationLog``, or a new handler, and both are picked up with no edit here.
 """
 
 from __future__ import annotations
@@ -38,8 +38,8 @@ from pathlib import Path
 import pytest
 
 SRC = Path(__file__).resolve().parents[2] / "runtime" / "gideon"
-DASHBOARD = SRC / "dashboard"
-HISTORY = SRC / "history.py"
+DASHBOARD = SRC / "interfaces" / "dashboard"
+HISTORY = SRC / "cognition" / "history.py"
 
 OWNER_MODULE = DASHBOARD / "chat_utils.py"
 

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+from unittest.mock import Mock
 
 import pytest
-from aiohttp import web
+from aiohttp import streams, web
 from aiohttp.test_utils import make_mocked_request
 
 from gideon.core.config import credentials
@@ -137,13 +139,17 @@ async def test_transport_error_is_redacted(isolated_home, monkeypatch) -> None:
 
 
 def _json_request(method: str, path: str, body: object | None = None):
-    request = make_mocked_request(method, path)
-
-    async def read_json():
-        return body
-
-    request.json = read_json  # type: ignore[method-assign]
-    return request
+    """A real mocked request carrying actual serialized JSON, as the handler reads it."""
+    raw = json.dumps(body).encode("utf-8")
+    payload = streams.StreamReader(Mock(), 2**16, loop=asyncio.get_event_loop())
+    payload.feed_data(raw)
+    payload.feed_eof()
+    return make_mocked_request(
+        method,
+        path,
+        payload=payload,
+        headers={"Content-Type": "application/json", "Content-Length": str(len(raw))},
+    )
 
 
 @pytest.mark.asyncio

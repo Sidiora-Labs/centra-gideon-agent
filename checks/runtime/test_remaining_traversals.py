@@ -185,11 +185,16 @@ class TestRevealRootAllowlist:
     itself was always correct."""
 
     def _request(self, body: dict):
-        from unittest.mock import AsyncMock, MagicMock
+        import json
 
-        request = MagicMock()
-        request.json = AsyncMock(return_value=body)
-        request.get = lambda *a, **k: "dashboard"
+        from aiohttp.test_utils import make_mocked_request
+
+        request = make_mocked_request(
+            "POST",
+            "/api/reveal",
+            headers={"Content-Type": "application/json"},
+        )
+        request._read_bytes = json.dumps(body).encode()
         return request
 
     @pytest.mark.asyncio

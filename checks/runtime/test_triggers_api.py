@@ -30,13 +30,10 @@ def request(method, state, body, trigger_id=""):
         "/api/triggers" + (f"/{trigger_id}" if trigger_id else ""),
         match_info={"id": trigger_id} if trigger_id else {},
         app=app,
+        headers={"Content-Type": "application/json"},
     )
     req["user"] = "tester"
-
-    async def read_json():
-        return body
-
-    req.json = read_json
+    req._read_bytes = json.dumps(body).encode()
     return req
 
 

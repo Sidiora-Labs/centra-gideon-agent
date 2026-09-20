@@ -544,14 +544,21 @@ def _stage_capture(
     :func:`record_turn` never raises: a staging problem must not cost the captured turn.
     """
     try:
-        from gideon.cognition.learning.gate import Cadence
+        from types import SimpleNamespace
+
+        from gideon.cognition.learning.gate import Cadence, LearningGate, record_denial
         from gideon.cognition.learning.staging import get_store
         from gideon.core.config.loader import AppConfig
 
         cfg = AppConfig.load().learning
-        if not getattr(cfg, "enabled", True) or not getattr(
-            cfg, "staging_enabled", True
-        ):
+        decision = LearningGate.for_session(
+            SimpleNamespace(key=session_id), cfg
+        ).decide(
+            Cadence.CAPTURE,
+            cadence_enabled=bool(getattr(cfg, "staging_enabled", True)),
+        )
+        if not decision.allowed:
+            record_denial(decision)
             return 0
 
         content = "\n".join(

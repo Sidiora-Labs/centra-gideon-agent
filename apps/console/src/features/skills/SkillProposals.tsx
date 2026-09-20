@@ -65,11 +65,12 @@ export function refinePillLabel(trigger?: string): string {
 
 function ProposalRow({ proposal }: { proposal: SkillProposal }) {
   const { open, detail, busy, done, loadError, expand, retry, accept, reject } = useProposalReview(proposal)
+  const name = proposal.kind === 'refine' && proposal.refine_target ? proposal.refine_target : proposal.slug
 
   if (done) {
     return (
       <div className="rounded-lg bg-surface-container px-3 py-2 text-on-surface-low text-[0.8125rem] flex items-center gap-2">
-        <Check size={14} className="text-ok" /> {proposal.slug} — {done}
+        <Check size={14} className="text-ok" /> {name} — {done}
       </div>
     )
   }
@@ -80,7 +81,7 @@ function ProposalRow({ proposal }: { proposal: SkillProposal }) {
         <button type="button" onClick={expand} aria-expanded={open} className="min-w-0 flex-1 text-left">
           <div className="flex items-center gap-1.5">
             {open ? <ChevronDown size={14} className="text-on-surface-low" /> : <ChevronRight size={14} className="text-on-surface-low" />}
-            <span className="truncate text-on-surface text-[0.9375rem]" style={fvs(500)}>{proposal.slug}</span>
+            <span className="truncate text-on-surface text-[0.9375rem]" style={fvs(500)}>{name}</span>
             {proposal.kind === 'refine' && <span className="shrink-0 rounded-md bg-surface-high px-1.5 py-0.5 text-on-surface-low text-[0.75rem]">{refinePillLabel(proposal.trigger)}</span>}
           </div>
           <p className="mt-0.5 truncate text-on-surface-low text-[0.75rem]">{proposal.description}</p>

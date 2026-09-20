@@ -248,6 +248,12 @@ def leaf_tool_denial(name: str) -> str:
     `subagent_run` still works.
     """
     from gideon.automation.workflows import batch_compile
+    from gideon.security.guardrails.policy import profile_for_session, tool_grant_denial
+
+    profile = profile_for_session(os.environ.get("GIDEON_SESSION_KEY", ""))
+    denial = tool_grant_denial(name, profile.tool_grants, profile.tool_allowlist)
+    if denial:
+        return denial
 
     depth = _leaf_depth()
     if depth <= 0:

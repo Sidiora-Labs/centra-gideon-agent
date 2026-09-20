@@ -2,6 +2,7 @@
 
 import hashlib
 import logging
+from urllib.parse import urljoin
 
 try:
     import httpx as _httpx
@@ -12,7 +13,7 @@ from gideon.cognition.knowledge.connectors.base import (
     BaseConnector,
     extract_html_metadata,
 )
-from gideon.integrations.web.extract import extract_main_content
+from gideon.integrations.web.extract import extract_main_content, meta_refresh_target
 
 logger = logging.getLogger(__name__)
 
@@ -87,9 +88,19 @@ class WebUrlConnector(BaseConnector):
         from gideon.security.net import fetch as net_fetch
 
         try:
-            resp = await net_fetch(
-                url, policy=egress_policy_for(CONNECTOR), headers=self._HEADERS
-            )
+            policy = egress_policy_for(CONNECTOR)
+            resp = await net_fetch(url, policy=policy, headers=self._HEADERS)
+            for _ in range(3):
+                content_type = resp.headers.get("Content-Type", "") or resp.headers.get(
+                    "content-type", ""
+                )
+                target = (
+                    meta_refresh_target(resp.text) if "html" in content_type else ""
+                )
+                if not target:
+                    break
+                url = urljoin(resp.url, target)
+                resp = await net_fetch(url, policy=policy, headers=self._HEADERS)
             if resp.status >= 400:
                 return "", {
                     "error": f"The site returned HTTP {resp.status}.",

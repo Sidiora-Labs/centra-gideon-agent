@@ -29,6 +29,7 @@ import pytest
 from gideon.extensions.packs import bundled as pack_bundled
 from gideon.extensions.packs import onelink, prompt_cards, roster
 from gideon.extensions.packs.import_ import PackImportRefused, import_pack, inspect_pack
+from gideon.extensions.packs.triggers import deploy_triggers
 
 
 @pytest.fixture
@@ -605,6 +606,31 @@ def test_one_link_imports_through_the_same_pipeline(tmp_path, build_home, fresh_
     assert roster.load_roster("health-os", home)[0]
 
 
+def test_deploy_staged_triggers_forces_disabled_and_reports_skips(
+    tmp_path, build_home, fresh_home
+):
+    archive = pack_bundled.build_bundled("health-os", tmp_path / "h.gideon")
+    home = fresh_home()
+    import_pack(archive, connector_choices=_skip_connectors("health-os"))
+    staged = home / "packs" / "staged" / "health-os" / "triggers"
+    valid = staged / "health-checkup-cadence.json"
+    raw = json.loads(valid.read_text())
+    raw["enabled"] = True
+    valid.write_text(json.dumps(raw))
+    (staged / "bad-json.json").write_text("{")
+    (staged / "refused.json").write_text(json.dumps({"id": "broken", "kind": "wat"}))
+
+    result = deploy_triggers("health-os", home)
+
+    assert result["deployed"] == ["pack-health-os-checkup-cadence"]
+    assert {row["file"] for row in result["skipped"]} == {
+        "bad-json.json",
+        "refused.json",
+    }
+    live = json.loads((home / "triggers.json").read_text())["triggers"]
+    assert live[0]["enabled"] is False
+
+
 def test_tampered_resource_refuses_before_any_gideon_exists(tmp_path, build_home):
     """Per-resource hashes are ENFORCED — the whole materialization refuses on one mismatch."""
     archive = pack_bundled.build_bundled("health-os", tmp_path / "h.gideon")
@@ -871,12 +897,9 @@ def test_every_bundled_pack_file_is_declared_package_data():
     repo = Path(__file__).resolve().parents[2]
     with (repo / "pyproject.toml").open("rb") as handle:
         config = tomllib.load(handle)
-    globs = [
-        g
-        for g in config["tool"]["setuptools"]["package-data"]["gideon"]
-        if g.startswith("packs/bundled/")
-    ]
-    assert globs, "pyproject declares no packs/bundled package-data at all"
+    declarations = config["tool"]["setuptools"]["package-data"]
+    globs = declarations.get("*", []) + declarations.get("gideon", [])
+    assert globs, "pyproject declares no package-data globs at all"
 
     tree = repo / "runtime" / "gideon" / "extensions" / "packs" / "bundled"
     members = [

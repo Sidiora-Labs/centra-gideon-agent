@@ -20,6 +20,7 @@ from typing import Any
 from aiohttp import web
 
 from gideon.core.atomic_write import atomic_write
+from gideon.core.http_request import read_json_body, string_field
 from gideon.extensions.providers.failure_copy import relayed_failure_copy
 
 logger = logging.getLogger(__name__)
@@ -627,7 +628,7 @@ async def api_provider_model_pull(request: web.Request) -> web.StreamResponse:
         )
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -713,7 +714,7 @@ async def api_provider_model_delete(request: web.Request) -> web.Response:
         )
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -739,13 +740,13 @@ async def api_provider_create(request: web.Request) -> web.Response:
     from gideon.interfaces.dashboard.handlers.agents import _get_config_lock
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "Invalid JSON"}, status=400)
     if not isinstance(body, dict):
         return web.json_response({"error": "JSON body must be an object"}, status=400)
 
-    name = body.get("name", "").strip()
+    name = string_field(body, "name")
     ptype = body.get("type", "").strip()
     model = body.get("model", "")
     options = body.get("options", {})
@@ -861,7 +862,7 @@ async def api_provider_update(request: web.Request) -> web.Response:
 
     name = request.match_info["name"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "Invalid JSON"}, status=400)
     if not isinstance(body, dict):

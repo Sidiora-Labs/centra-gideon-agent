@@ -188,7 +188,9 @@ def test_the_tool_surface_is_unchanged_with_the_views_on(tmp_path, monkeypatch):
 
 def _registered_computer_use_routes() -> set[tuple[str, str]]:
     """(verb, path) for every /api/computer-use route server.py registers, by AST."""
-    tree = ast.parse((SRC / "dashboard" / "server.py").read_text(encoding="utf-8"))
+    tree = ast.parse(
+        (SRC / "interfaces" / "dashboard" / "server.py").read_text(encoding="utf-8")
+    )
     found: set[tuple[str, str]] = set()
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
@@ -257,7 +259,9 @@ def _reach(source: str) -> list[str]:
 
 def test_the_view_modules_import_no_driver_and_reach_no_dispatch():
     for module in ("overlay.py", "render.py"):
-        source = (SRC / "computer_use" / module).read_text(encoding="utf-8")
+        source = (SRC / "integrations" / "computer_use" / module).read_text(
+            encoding="utf-8"
+        )
         assert _reach(source) == [], (
             f"{module} reaches the desktop: {_reach(source)}. The views are observation-only "
             "(§3 floor 7) — they mirror stored state and may never import a driver or call "

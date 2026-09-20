@@ -1,14 +1,14 @@
 """The Capacitor shell wraps the SERVED companion route — rails that keep it a wrapper.
 
 ``apps/mobile/`` (MOBILE-COMPANION ``MC-7``) is a Capacitor app whose entire job is to hand a WebView
-one URL: ``<gateway>/#/companion``, the route ``apps/console/src/app/App.tsx`` already serves. Its failure
+one URL: ``<gateway>/#/companion``, the route ``apps/console/src/app/shell/App.tsx`` already serves. Its failure
 mode is not a crash — it is **drift**, in three directions that a green ``node --test`` cannot see
 because each one spans two files this repo builds separately:
 
 1. the shell's route string drifting from the route the SPA registers;
 2. the shell's navigation rail drifting from the ``allowNavigation`` list the native platforms
    actually read out of ``capacitor.config.json``;
-3. the shell's persisted registry drifting from ``apps/console/src/lib/endpoints.ts``, which owns that
+3. the shell's persisted registry drifting from ``apps/console/src/shared/data/endpoints.ts``, which owns that
    format and says so — *"two shells that disagree about the format are two shells that cannot
    share a registry."*
 
@@ -32,12 +32,12 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 MOBILE = REPO_ROOT / "apps/mobile"
-SHELL = MOBILE / "www" / "shell"
+WWW = MOBILE / "www"
 CAP_CONFIG = MOBILE / "capacitor.config.json"
-NETWORK_MJS = SHELL / "network.mjs"
-REGISTRY_MJS = SHELL / "registry.mjs"
-ENDPOINTS_TS = REPO_ROOT / "apps/console" / "src" / "lib" / "endpoints.ts"
-APP_TSX = REPO_ROOT / "apps/console" / "src" / "app" / "App.tsx"
+NETWORK_MJS = WWW / "connection" / "address.mjs"
+REGISTRY_MJS = WWW / "connection" / "registry.mjs"
+ENDPOINTS_TS = REPO_ROOT / "apps/console" / "src" / "shared" / "data" / "endpoints.ts"
+APP_TSX = REPO_ROOT / "apps/console" / "src" / "app" / "shell" / "App.tsx"
 
 
 def _config() -> dict:
@@ -74,7 +74,7 @@ def test_the_shell_points_at_the_route_the_spa_actually_serves():
     app = APP_TSX.read_text(encoding="utf-8")
     slug = route.removeprefix("#/")
     assert f"route === '{slug}'" in app, (
-        f"apps/console/src/app/App.tsx does not register a {slug!r} route, so the shell's "
+        f"apps/console/src/app/shell/App.tsx does not register a {slug!r} route, so the shell's "
         f"{route!r} opens nothing."
     )
 
@@ -151,7 +151,7 @@ def test_the_gateway_url_is_not_baked_into_the_build():
     """``server.url`` would make the gateway address a BUILD constant.
 
     Every owner's gateway lives at a different private address, so a baked URL means one store
-    build per owner. The shell learns the address at runtime instead (``apps/mobile/www/shell/``),
+    build per owner. The shell learns the address at runtime instead (``apps/mobile/www/``),
     which is the only reason the bootstrap document exists at all.
     """
     server = _config()["server"]
@@ -184,7 +184,7 @@ def test_the_bootstrap_document_opts_into_real_insets():
     """
     html = (MOBILE / "www" / "index.html").read_text(encoding="utf-8")
     assert "viewport-fit=cover" in html
-    css = (SHELL / "shell.css").read_text(encoding="utf-8")
+    css = (WWW / "bootstrap" / "shell.css").read_text(encoding="utf-8")
     for edge in ("top", "right", "bottom", "left"):
         assert f"--gideon-safe-{edge}: env(safe-area-inset-{edge}" in css, (
             f"shell.css must resolve env(safe-area-inset-{edge}) into --gideon-safe-{edge}; "
@@ -272,7 +272,7 @@ def test_the_shell_mints_endpoint_ids_the_way_endpoints_ts_does():
 
 def _tracked_mobile_files() -> list[str]:
     out = subprocess.run(
-        ["git", "ls-files", "mobile"],
+        ["git", "ls-files", "apps/mobile"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -280,7 +280,7 @@ def _tracked_mobile_files() -> list[str]:
     ).stdout.split()
     assert (
         len(out) >= 10
-    ), f"git ls-files mobile found only {len(out)} files — the scan broke"
+    ), f"git ls-files apps/mobile found only {len(out)} files — the scan broke"
     return out
 
 
@@ -369,8 +369,8 @@ def test_the_mobile_tier_is_wired_the_way_the_ci_rail_requires():
     kept 37 node cases out of every gate — the exact gap that rail was written to close.
     """
     root = json.loads((REPO_ROOT / "package.json").read_text(encoding="utf-8"))
-    assert "mobile" in root["workspaces"]
-    assert root["scripts"]["test:mobile"] == "npm run test --workspace=mobile"
+    assert "apps/mobile" in root["workspaces"]
+    assert root["scripts"]["test:mobile"] == "npm run test --workspace=apps/mobile"
     manifest = json.loads((MOBILE / "package.json").read_text(encoding="utf-8"))
     assert manifest["scripts"]["test"] == "node --test test/*.test.mjs"
     ci = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")

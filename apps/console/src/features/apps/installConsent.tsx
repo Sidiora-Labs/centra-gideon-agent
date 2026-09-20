@@ -85,10 +85,11 @@ export function ScanReport({ scan }: { scan: NonNullable<AppInstallResult['scan'
 }
 
 // Exported so the onboarding essential-apps step consents through THIS surface rather
-export function ConsentModal({ label, result, busy, permissions, crons, onConfirm, onClose }: {
+export function ConsentModal({ label, result, busy, permissions, crons, appUI, onConfirm, onClose }: {
   label: string; result: GuardedResult; busy: boolean
   permissions: AppSummary['permissions'] | undefined
   crons: AppCronSummary[] | undefined
+  appUI?: { hasUI?: boolean; uiComponents?: string }
   onConfirm: () => void; onClose: () => void
 }) {
   if (result.clientInstall) {
@@ -123,15 +124,7 @@ export function ConsentModal({ label, result, busy, permissions, crons, onConfir
         {result.scan && <ScanReport scan={result.scan} />}
         {
 }
-        {permissions
-          ? <PermissionList perms={permissions} />
-          : (
-            <div data-type="body-s" className="text-on-surface-low">
-              Gideon could not read this app's declared permissions before installing —
-              its manifest is fetched as part of the install. Open the app in the Store to see
-              them, or review them on its page once installed.
-            </div>
-          )}
+        <PermissionConsent permissions={permissions} appUI={appUI} />
         {(crons ?? []).length > 0 && <CronConsentList crons={crons!} />}
         <div className="flex justify-end gap-2 pt-s">
           {
@@ -174,7 +167,10 @@ function networkClaim(network: boolean | undefined): string {
   return network ? 'declared' : 'declared as denied'
 }
 
-export function PermissionList({ perms }: { perms: AppSummary['permissions'] }) {
+export function PermissionList({ perms, appUI }: {
+  perms: AppSummary['permissions']
+  appUI?: { hasUI?: boolean; uiComponents?: string }
+}) {
   const rows: string[] = []
   if (perms.api?.length) rows.push(`API: ${perms.api.join(', ')}`)
   if (perms.events?.length) rows.push(`Events: ${perms.events.join(', ')}`)
@@ -229,6 +225,15 @@ export function PermissionList({ perms }: { perms: AppSummary['permissions'] }) 
           mediates every app→desktop call, so it can reach nothing native on this machine.
         </div>
       )}
+      {(appUI?.hasUI || appUI?.uiComponents) && (
+        <div className="mt-2 flex gap-2 rounded-md border border-outline-variant bg-surface-high p-m">
+          <Globe size={14} aria-hidden="true" className="mt-0.5 shrink-0 text-on-surface-low" />
+          <div data-type="body-s" className="text-on-surface-low">
+            <span className="text-on-surface">Host-page access: advisory only.</span>
+            {' This app\'s UI runs in Gideon\'s origin, not an isolated origin. Its frontend code can access the host DOM, session cookie, and same-origin APIs.'}
+          </div>
+        </div>
+      )}
       <div className="mt-2 flex gap-2 rounded-md border border-outline-variant bg-surface-high p-m">
         <Globe size={14} aria-hidden="true" className="mt-0.5 shrink-0 text-on-surface-low" />
         <div data-type="body-s" className="text-on-surface-low">
@@ -239,6 +244,19 @@ export function PermissionList({ perms }: { perms: AppSummary['permissions'] }) 
       </div>
     </div>
   )
+}
+
+export function PermissionConsent({ permissions, appUI }: {
+  permissions: AppSummary['permissions'] | undefined
+  appUI?: { hasUI?: boolean; uiComponents?: string }
+}) {
+  return permissions === undefined ? (
+    <div data-type="body-s" className="text-on-surface-low">
+      Gideon could not read this app's declared permissions before installing —
+      its manifest is fetched as part of the install. Open the app in the Store to see
+      them, or review them on its page once installed.
+    </div>
+  ) : <PermissionList perms={permissions} appUI={appUI} />
 }
 
 function fmtCadence(c: AppCronSummary): string {

@@ -26,7 +26,7 @@ import { loopKindMeta } from '../../shared/data/loopKind'
 import { loopToGoalLoop } from './goalAdapter'
 import { rowSubject } from '../../shared/data/rowSubject'
 import { activePhaseIndex, phaseMinCycles, phaseForCycle, hasDistinctName } from './loopPhases'
-import { loopStatusLabel, loopStatusColor, loopStatusTone, effectiveLoopStatus, ACTIVE_LOOP_STATUSES, PRELAUNCH_LOOP_STATUSES, LOOP_ACTION_SOURCE_STATUSES } from '../../shared/data/loopStatus'
+import { loopStatusLabel, loopStatusColor, loopStatusTone, effectiveLoopStatus, shownCycle, ACTIVE_LOOP_STATUSES, PRELAUNCH_LOOP_STATUSES, LOOP_ACTION_SOURCE_STATUSES } from '../../shared/data/loopStatus'
 import { PageTitle } from '../../shared/ui/PageTitle'
 
 
@@ -146,7 +146,7 @@ export function LoopsListPage({ onOpen, onCreate, query, setQuery }: { onOpen: (
                   ? 1
                   : (c.max_cycles ? Math.min(1, c.total_cycles / c.max_cycles) : 0)
                 const running = c.status === 'running'
-                const shownCycle = running ? c.total_cycles + 1 : c.total_cycles
+                const cycle = shownCycle(c.total_cycles, c.status)
                 const latest = c.findings?.length ? c.findings[c.findings.length - 1] : null
                 const latestText = latest?.key_insight || latest?.summary
                 const title = c.name || c.goal
@@ -185,7 +185,7 @@ export function LoopsListPage({ onOpen, onCreate, query, setQuery }: { onOpen: (
                           const label = k === 'design' ? 'design' : k === 'general' ? 'loop' : (GOAL_GLYPH[c.goal_type] ?? c.goal_type)
                           const title = k === 'design' ? 'design loop' : k === 'general' ? 'general loop' : `${c.goal_type} goal`
                           return <span data-type="caption" className="shrink-0 rounded-pill px-1.5 h-4 inline-flex items-center uppercase tracking-wide bg-surface-high text-on-surface-low" title={title}>{label}</span> })()}
-                        <span data-type="caption" className="shrink-0 text-on-surface-low">· {loopStatusLabel(dispStatus)}{(running || c.status === 'paused') && (c.max_cycles === 0 ? ` · ongoing · cycle ${shownCycle}` : ` · cycle ${shownCycle}/${c.max_cycles}`)}</span>
+                        <span data-type="caption" className="shrink-0 text-on-surface-low">· {loopStatusLabel(dispStatus)}{ACTIVE_LOOP_STATUSES.has(c.status) && (c.max_cycles === 0 ? ` · ongoing · cycle ${cycle}` : ` · cycle ${cycle}/${c.max_cycles}`)}</span>
                       </div>
                       {(latestText || goalEarnsItsLine) && (
                         <p data-type="body-s" className="mt-1 text-on-surface-low truncate">
@@ -208,7 +208,7 @@ export function LoopsListPage({ onOpen, onCreate, query, setQuery }: { onOpen: (
                     </div>
 
                     <div className="flex items-center gap-1.5 shrink-0">
-                      <ProgressRing pct={pct} tone={loopStatusColor(dispStatus)} label={`Cycle progress: ${shownCycle}${c.max_cycles ? ` of ${c.max_cycles}` : ''}`} />
+                      <ProgressRing pct={pct} tone={loopStatusColor(dispStatus)} label={`Cycle progress: ${cycle}${c.max_cycles ? ` of ${c.max_cycles}` : ''}`} />
                       {
 }
                       <span data-type="caption" className="text-on-surface-low tabular-nums w-9"
@@ -233,8 +233,8 @@ function LoopPeek({ loop, onOpenFull }: { loop: GoalLoop; onOpenFull: () => void
   const dispStatus = effectiveLoopStatus(loop.status, loop.error_message)
   const running = loop.status === 'running'
   const kind = (loop as { kind?: string }).kind
-  const shownCycle = running ? loop.total_cycles + 1 : loop.total_cycles
-  const cycleLabel = loop.max_cycles === 0 ? `cycle ${shownCycle} · ongoing` : `cycle ${shownCycle}/${loop.max_cycles}`
+  const cycle = shownCycle(loop.total_cycles, loop.status)
+  const cycleLabel = loop.max_cycles === 0 ? `cycle ${cycle} · ongoing` : `cycle ${cycle}/${loop.max_cycles}`
   const latest = loop.findings?.length ? loop.findings[loop.findings.length - 1] : null
   const latestText = latest?.key_insight || latest?.summary
   return (
@@ -249,7 +249,7 @@ function LoopPeek({ loop, onOpenFull }: { loop: GoalLoop; onOpenFull: () => void
         {kind === 'design' ? <span className="text-on-surface-low">design</span>
           : kind === 'general' ? <span className="text-on-surface-low">loop</span>
           : <span className="text-on-surface-low">{GOAL_GLYPH[loop.goal_type] ?? loop.goal_type}</span>}
-        {(running || loop.status === 'paused') && <span className="text-on-surface-low">· {cycleLabel}</span>}
+        {ACTIVE_LOOP_STATUSES.has(loop.status) && <span className="text-on-surface-low">· {cycleLabel}</span>}
       </div>
 
       <div>

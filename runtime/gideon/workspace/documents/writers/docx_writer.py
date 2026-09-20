@@ -104,7 +104,7 @@ def _add_hyperlink(para, run, *, monospace: bool = False, bold: bool = False) ->
     element are built directly — the alternative is rendering the display text and
     dropping the URL, which loses content the user wrote.
     """
-    from docx.ogideon.constants import RELATIONSHIP_TYPE
+    from docx.opc.constants import RELATIONSHIP_TYPE
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
 

@@ -28,8 +28,11 @@ from __future__ import annotations
 
 import json
 from unittest.mock import MagicMock
+from urllib.parse import urlencode
 
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import make_mocked_request
 
 from gideon.cognition.memory import MemoryJournal
 from gideon.cognition.memory_record import MemoryScope
@@ -76,16 +79,17 @@ def wired(tmp_path):
     return state, db_path, str(ws_a), str(ws_b)
 
 
-def _req(state, *, body=None, query=None):
-    req = MagicMock()
-    req.app = {"state": state}
-    req.headers = {"X-Session-Key": "dashboard:ui"}
-    req.query = query or {}
-
-    async def _json():
-        return body if body is not None else {}
-
-    req.json = _json
+def _req(state, *, body=None, query=None, method="POST"):
+    app = web.Application()
+    app["state"] = state
+    path = "/api/lessons" + (f"?{urlencode(query)}" if query else "")
+    req = make_mocked_request(
+        method,
+        path,
+        app=app,
+        headers={"X-Session-Key": "dashboard:ui", "Content-Type": "application/json"},
+    )
+    req._read_bytes = json.dumps(body).encode() if body is not None else b""
     return req
 
 
@@ -303,7 +307,7 @@ async def test_list_reports_scope_and_filters_on_request(wired):
     await _post(state, {"rule": "everyone rule"})
     await _post(state, {"rule": "alpha rule", "scope": "workspace", "workspace": ws_a})
 
-    body = json.loads((await api_lessons(_req(state))).body)
+    body = json.loads((await api_lessons(_req(state, method="GET"))).body)
     by_rule = {e["rule"]: e for e in body["lessons"]}
     assert by_rule["everyone rule"]["scope"] == "global"
     assert by_rule["everyone rule"]["workspace"] == ""
@@ -311,7 +315,7 @@ async def test_list_reports_scope_and_filters_on_request(wired):
     assert by_rule["alpha rule"]["workspace"] == normalize_workspace_ref(ws_a)
 
     scoped = json.loads(
-        (await api_lessons(_req(state, query={"workspace": ws_b}))).body
+        (await api_lessons(_req(state, query={"workspace": ws_b}, method="GET"))).body
     )
     assert {e["rule"] for e in scoped["lessons"]} == {"everyone rule"}
 
@@ -319,7 +323,7 @@ async def test_list_reports_scope_and_filters_on_request(wired):
 @pytest.mark.asyncio
 async def test_list_refuses_a_relative_workspace_filter(wired):
     state, _db_path, _ws_a, _ws_b = wired
-    resp = await api_lessons(_req(state, query={"workspace": "alpha"}))
+    resp = await api_lessons(_req(state, query={"workspace": "alpha"}, method="GET"))
     assert resp.status == 400
 
 

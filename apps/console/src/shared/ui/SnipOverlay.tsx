@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { motion, useReducedMotion } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { Crop } from 'lucide-react'
 import { Button } from './Button'
 import { useFocusTrap } from './useFocusTrap'
-import { spring, physics, expr } from '../theme/motion'
+import { spring, physics, expr, useReducedMotion } from '../theme/motion'
 import { cropViewStyle, type SnipRect } from './composer/displayCapture'
 
 const STEP = 24

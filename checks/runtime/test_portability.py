@@ -945,6 +945,7 @@ _SNAPSHOT_COVERAGE_GAPS: frozenset[str] = frozenset(
         "sampling_outcomes",
         "turn_checkpoints",
         "inbound_audit",
+        "huggingface_auth_cache",
     }
 )
 

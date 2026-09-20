@@ -8,7 +8,6 @@ import logging
 import os
 import time
 import uuid
-from collections import Counter
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -53,8 +52,13 @@ class LoadedTrigger:
 
     @classmethod
     def parse(cls, record: dict) -> LoadedTrigger:
+        from gideon.automation.triggers.arm import semantic_spec_issues
+
         trigger, issues = parse_trigger(record)
-        return cls(trigger, list(issues))
+        return cls(
+            trigger,
+            [*issues, *semantic_spec_issues(trigger.kind, trigger.spec)],
+        )
 
     def to_dict(self) -> dict[str, Any]:
         names = ("path", "message", "severity", "closest")
@@ -307,22 +311,3 @@ def _carry_runtime_state(existing: Trigger, incoming: Trigger) -> None:
     }
     for name, value in retained.items():
         setattr(incoming, name, value)
-
-
-def health(store: TriggerStore) -> dict[str, Any]:
-    rows = store.load()
-    broken = tuple(row for row in rows if not row.ok)
-    return dict(
-        path=str(store.path),
-        exists=store.exists(),
-        total=len(rows),
-        enabled=sum(1 for row in rows if row.trigger.enabled),
-        broken=len(broken),
-        broken_ids=[row.trigger.id for row in broken if row.trigger.id],
-        warnings=sum(len(row.warnings) for row in rows),
-        by_kind=_by_kind(rows),
-    )
-
-
-def _by_kind(rows: list[LoadedTrigger]) -> dict[str, int]:
-    return dict(sorted(Counter(row.trigger.kind for row in rows).items()))

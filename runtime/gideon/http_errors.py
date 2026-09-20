@@ -55,6 +55,9 @@ HTTP_ERROR_CODES: dict[str, str] = {
     "not_found": "The addressed resource does not exist.",
     "forbidden": "The caller is not permitted to touch this resource.",
     "confirmation_required": "The operation is destructive and needs an explicit confirm.",
+    "risk_confirmation_required": "Confirm destructive risk before invoking this tool.",
+    "browse_grant_decision_invalid": "The browser grant decision must be approve or reject.",
+    "browse_grant_not_pending": "The browser grant is no longer waiting for an answer.",
     "model_unresolved": (
         "No model provider resolves for the use case this route needs — no provider is "
         "configured, or the bound one is absent. Connect a model in Settings → Models."

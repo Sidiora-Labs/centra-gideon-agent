@@ -391,6 +391,20 @@ def test_rules_document_is_json_serializable(home):
     json.dumps(nr.rules_document())
 
 
+def test_quiet_hours_persist_warning_and_attention_without_broadcast(home, monkeypatch):
+    from gideon.extensions.providers import entity_routes
+    from gideon.interfaces.dashboard.state import ConsoleState
+
+    monkeypatch.setattr(entity_routes, "notification_posture", lambda kind: "quiet")
+    state = ConsoleState(sessions=MagicMock(count=0), start_time=0.0)
+    broadcasts = []
+    monkeypatch.setattr(state, "_broadcast", broadcasts.append)
+    state.notify(nk.WARNING, "Warning", "persist me")
+    assert state._notification_log[-1]["mode"] == "quiet"
+    assert state._notification_log[-1]["badge_only"] is True
+    assert broadcasts == []
+
+
 def test_queue_and_drain_round_trip(home):
     nr.queue_for_digest({"kind": "cron", "title": "a"})
     nr.queue_for_digest({"kind": "cron", "title": "b"})

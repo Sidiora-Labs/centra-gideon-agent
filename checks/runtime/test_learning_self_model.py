@@ -495,13 +495,24 @@ def test_the_gate_exists_and_defaults_on():
     assert LearningConfig().self_model_enabled is True
 
 
-def test_the_gate_is_read_by_load():
-    """Point (b): omission from the field-by-field mapping means the value is silently dropped."""
-    import inspect
+def test_the_gate_is_read_by_load(tmp_path, monkeypatch):
+    """Point (b): omission from the field-by-field mapping means the value is silently dropped.
 
-    from gideon.core.config import loader
+    Measured behaviourally rather than by grepping the mapping: the mapping table moved out of
+    ``config.loader`` into the declarative ``config.decoding`` registry, and a source probe would
+    have followed the table instead of the property. What must hold is that a ``false`` on disk
+    actually reaches the field a caller reads.
+    """
+    import json
 
-    assert "self_model_enabled=bool(learning_data.get(" in inspect.getsource(loader)
+    from gideon.core.config import AppConfig
+
+    monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
+    assert AppConfig.load().learning.self_model_enabled is True
+    (tmp_path / "config.json").write_text(
+        json.dumps({"learning": {"self_model_enabled": False}}), encoding="utf-8"
+    )
+    assert AppConfig.load().learning.self_model_enabled is False
 
 
 def test_the_gate_is_runtime_editable():

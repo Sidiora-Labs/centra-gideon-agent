@@ -275,7 +275,7 @@ def _ws_csp_sources() -> str:
     but never receives an event.
     """
     try:
-        from gideon.interfaces.dashboard.exposure import public_host
+        from gideon.security.exposure import public_host
 
         host = public_host()
         if not host:
@@ -404,6 +404,9 @@ async def start_dashboard(
         consolidator=consolidator,
         owner_id=owner_id,
     )
+    from gideon.integrations.mcp_client import set_mcp_elicitation_handler
+
+    set_mcp_elicitation_handler(state.request_mcp_elicitation)
 
     state._hook_store = ScriptHookStore()
     set_global_hook_store(state._hook_store)
@@ -851,6 +854,7 @@ async def start_dashboard(
     app.router.add_get("/api/config/gideon", handlers.api_gideon_config)
     app.router.add_put("/api/config/gideon", handlers.api_gideon_config)
     app.router.add_patch("/api/config/gideon", handlers.api_gideon_config_patch)
+    app.router.add_get("/api/config/settings", handlers.api_settings_config)
     app.router.add_get("/api/companion/discovery", handlers.api_companion_discovery)
     app.router.add_get("/api/incident", handlers.api_incident)
     app.router.add_post("/api/incident", handlers.api_incident)
@@ -1314,7 +1318,7 @@ async def start_dashboard(
     register_artifact_routes(app)
 
     app.router.add_get("/api/inbox", handlers_inbox.api_inbox_list)
-    app.router.add_get("/api/inbox/pending", handlers_inbox.api_inbox_pending)
+    app.router.add_get("/api/inbox/open", handlers_inbox.api_inbox_open_items)
     app.router.add_get("/api/inbox/kinds", handlers_inbox.api_inbox_kinds)
     app.router.add_post("/api/inbox/seen", handlers_inbox.api_inbox_seen)
     app.router.add_get("/api/inbox/status", handlers_inbox.api_inbox_status)
@@ -1868,7 +1872,9 @@ async def start_dashboard(
         Only acts on requests carrying an app identity (``request["app"]`` set
         from an app-scoped token). A path the app didn't declare is rejected
         403 before the handler runs — the server-side, bypass-proof half of the
-        permission boundary. Owner/dashboard requests (no app identity) pass.
+        permission boundary for an app-scoped client or backend. It does not
+        sandbox an app's frontend bundle, which executes in the host origin.
+        Owner/dashboard requests (no app identity) pass.
 
         The decision itself is ``permissions.app_request_denial``, not inline here:
         this closure cannot be imported, so every test of the boundary had to
@@ -2061,16 +2067,23 @@ async def start_dashboard(
 
     try:
         from gideon.cognition.knowledge.source_engine import SourceEngine
+        from gideon.integrations.inbox import emit_shared_knowledge_item
         from gideon.integrations.knowledge_providers.dir_source import DirSourceProvider
         from gideon.integrations.knowledge_providers.feed_source import (
             FeedSourceProvider,
         )
-        from gideon.integrations.knowledge_providers.registry import register_provider
+        from gideon.integrations.knowledge_providers.registry import (
+            configure_shared_item_push,
+            register_provider,
+        )
         from gideon.integrations.knowledge_providers.web_source import WebSourceProvider
 
         register_provider(DirSourceProvider(state.knowledge_store))
         register_provider(FeedSourceProvider(state.knowledge_store))
         register_provider(WebSourceProvider(state.knowledge_store))
+        configure_shared_item_push(
+            lambda provider, item: emit_shared_knowledge_item(state, provider, item)
+        )
         state._source_engine = SourceEngine(
             state.knowledge_store,
             state.knowledge_ingest_queue(),

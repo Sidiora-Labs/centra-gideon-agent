@@ -27,6 +27,7 @@ _CALL_SITE_SURFACES = {
     "knowledge/llm_pool.py": "knowledge_ingest",
     "knowledge/source_digest.py": "source_digest",
     "knowledge/updates.py": "synthesis_watchers",
+    "knowledge/retrieval.py": "assistant_reasoning",
     "proactive/pipeline.py": "triage_digest",
     "action_providers/browse_provider.py": "browse",
     "nl_to_cron.py": "assistant_reasoning",

@@ -39,7 +39,7 @@ class _CitationWiring:
     content: str
     summary: str
     stored: list[str] = field(default_factory=list)
-    records: list[Any] = field(default_factory=list)
+    records: list[Any] | None = None
     warnings: list[str] = field(default_factory=list)
 
 
@@ -179,6 +179,7 @@ class _PreparedWrite:
             item_id=decision.item_id,
             logical_key=self.validation.logical_key,
             created=False,
+            relations_persisted=0,
             mentions_appended=0,
             citation_warnings=self.citations.warnings,
             reason=decision.reason,
@@ -195,6 +196,9 @@ class _PreparedWrite:
             )
 
         if decision.action == "noop":
+            receipt["relations_persisted"] = _write_model_edges(
+                store, self.config, source_item=decision.item_id
+            )
             return finish()
         source = str(self.config.get("source_ref") or _run_source_ref(self.context))
         identifier = decision.item_id or uuid.uuid4().hex[:12]
@@ -234,6 +238,9 @@ class _PreparedWrite:
         if decision.action == "reinforce":
             _write_metadata(store, decision.item_id, metadata, source_ref=source)
             _write_tags(store, decision.item_id, scope_tags)
+            receipt["relations_persisted"] = _write_model_edges(
+                store, self.config, source_item=decision.item_id
+            )
             return finish()
         lineage = self.config.get("lineage")
         if isinstance(lineage, dict):
@@ -271,6 +278,9 @@ class _PreparedWrite:
             return ActionResult(False, error=f"knowledge write failed: {exc}")
         if review.conflicts:
             _write_conflict_edges(store, review.conflicts, source_item=identifier)
+        receipt["relations_persisted"] = _write_model_edges(
+            store, self.config, source_item=identifier
+        )
         _write_item_citations(store, identifier, self.citations.records or [])
         _enqueue_enrichment(identifier)
         receipt.update(item_id=identifier, created=decision.action == "create")
@@ -616,6 +626,38 @@ def _detect_conflicts(
         return _ConflictReview()
 
 
+def run_ingest_conflict_pass(store: Any, item_id: str) -> _ConflictReview:
+    """Flag claims extracted from a normal ingest using the provider write contract."""
+    item = store.get_item(item_id)
+    if not item:
+        return _ConflictReview()
+    insights = item.get("insights") or {}
+    points = insights.get("key_points") if isinstance(insights, dict) else None
+    arriving = [
+        {"statement": point, "origin": "external", "source_ref": item_id}
+        for point in (points or [])
+        if isinstance(point, str) and point.strip()
+    ]
+    if not arriving:
+        return _ConflictReview()
+    metadata = dict(item.get("file_metadata") or {})
+    metadata["claims"], _ = _merge_claims(
+        existing=metadata.get("claims") or [], incoming=arriving, source_ref=item_id
+    )
+    review = _detect_conflicts(
+        store, arriving, item_id=item_id, source_ref=item_id, edge_source=item_id
+    )
+    metadata.pop("conflicts", None)
+    metadata.pop("conflict_candidates", None)
+    if review.conflicts:
+        metadata["conflicts"] = review.conflicts
+    if review.candidates:
+        metadata["conflict_candidates"] = review.candidates
+    store.update_item(item_id, touch=False, file_metadata=metadata)
+    store.db.commit()
+    return review
+
+
 def _claim_bearing_ids(store, *, exclude: str, limit: int = 40) -> list[str]:
     try:
         records = store.db.execute(
@@ -692,45 +734,42 @@ def _write_conflict_edges(store, conflicts: list[dict], *, source_item: str) -> 
     return _write_edges(store, edges, source_item=source_item)
 
 
+def _write_model_edges(store, proposal: Any, *, source_item: str) -> int:
+    from gideon.cognition.knowledge.contradiction import parse_edge_proposals
+
+    return _write_edges(
+        store,
+        parse_edge_proposals(proposal, source_item=source_item),
+        source_item=source_item,
+    )
+
+
 @dataclass(frozen=True)
 class _EdgeBatch:
     store: Any
     source: str
 
     def write(self, edges: list) -> int:
-        written, stamp = 0, _now()
+        written = 0
         for edge in edges:
-            target = edge.target or ""
-            if not self.source or not target or target == self.source:
-                continue
-            values = (
-                self.source,
-                target,
-                edge.relation,
-                edge.confidence,
-                edge.provenance,
-                stamp,
-            )
             try:
-                self.store.db.execute(
-                    "INSERT OR REPLACE INTO item_relations (source_item_id, target_item_id, relation_type, confidence, provenance, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                    values,
+                written += bool(
+                    self.store.add_item_relation(
+                        self.source,
+                        edge.target,
+                        edge.relation,
+                        confidence=edge.confidence,
+                        provenance=edge.provenance,
+                    )
                 )
-                written += 1
             except Exception:
                 logger.warning(
                     "could not write %s edge %s -> %s",
                     edge.relation,
                     self.source,
-                    target,
+                    edge.target,
                     exc_info=True,
                 )
-        if written:
-            try:
-                self.store.db.commit()
-            except Exception:
-                logger.warning("could not commit item_relations", exc_info=True)
-                return 0
         return written
 
 

@@ -186,7 +186,7 @@ def test_the_masking_policy_has_exactly_one_implementation():
         for p in src.rglob("*.py")
         if SECRET_MASK in p.read_text(encoding="utf-8")
     )
-    assert carriers == ["apps/secret_fields.py"], (
+    assert carriers == ["extensions/apps/secret_fields.py"], (
         f"the sensitive-field mask sentinel appears in more than one module: {carriers}. "
         "One rule, one owner — a second copy is how /api/apps and /api/providers came to "
         "disagree about whether a token is write-only."

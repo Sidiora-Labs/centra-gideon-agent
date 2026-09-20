@@ -118,6 +118,101 @@ def _handler_name(node: ast.expr | None) -> str:
     return ""
 
 
+def _route_table_calls(tree: ast.AST) -> list[ast.Call]:
+    class BoundRoute(ast.NodeTransformer):
+        def __init__(self, values):
+            self.values = values
+
+        def visit_Name(self, node):
+            return self.values.get(node.id, node)
+
+        def visit_JoinedStr(self, node):
+            node = self.generic_visit(node)
+            parts = [
+                v.value if isinstance(v, ast.FormattedValue) else v for v in node.values
+            ]
+            if all(
+                isinstance(v, ast.Constant) and isinstance(v.value, str) for v in parts
+            ):
+                return ast.Constant("".join(v.value for v in parts))
+            return node
+
+        def visit_BinOp(self, node):
+            node = self.generic_visit(node)
+            if (
+                isinstance(node.op, ast.Add)
+                and isinstance(node.left, ast.Constant)
+                and isinstance(node.right, ast.Constant)
+                and isinstance(node.left.value, str)
+                and isinstance(node.right.value, str)
+            ):
+                return ast.Constant(node.left.value + node.right.value)
+            return node
+
+        def visit_Call(self, node):
+            node = self.generic_visit(node)
+            if (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "lower"
+                and isinstance(node.func.value, ast.Constant)
+                and isinstance(node.func.value.value, str)
+                and not node.args
+            ):
+                return ast.Constant(node.func.value.value.lower())
+            if (
+                isinstance(node.func, ast.Name)
+                and node.func.id == "getattr"
+                and len(node.args) == 2
+                and isinstance(node.args[1], ast.Constant)
+                and isinstance(node.args[1].value, str)
+            ):
+                return ast.Attribute(
+                    value=node.args[0], attr=node.args[1].value, ctx=ast.Load()
+                )
+            return node
+
+    import copy
+
+    calls = []
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        tables = {}
+        for statement in function.body:
+            if isinstance(statement, ast.Assign) and isinstance(
+                statement.value, (ast.Tuple, ast.List)
+            ):
+                for target in statement.targets:
+                    if isinstance(target, ast.Name):
+                        tables[target.id] = statement.value.elts
+            if not (
+                isinstance(statement, ast.For)
+                and isinstance(statement.target, ast.Tuple)
+                and isinstance(statement.iter, ast.Name)
+                and statement.iter.id in tables
+            ):
+                continue
+            names = statement.target.elts
+            if not all(isinstance(name, ast.Name) for name in names):
+                continue
+            for row in tables[statement.iter.id]:
+                if not isinstance(row, (ast.Tuple, ast.List)) or len(row.elts) != len(
+                    names
+                ):
+                    continue
+                values = {name.id: value for name, value in zip(names, row.elts)}
+                for body in statement.body:
+                    bound = BoundRoute(values).visit(copy.deepcopy(body))
+                    if isinstance(bound, ast.Assign):
+                        for target in bound.targets:
+                            if isinstance(target, ast.Name):
+                                values[target.id] = bound.value
+                    calls.extend(
+                        node for node in ast.walk(bound) if isinstance(node, ast.Call)
+                    )
+    return calls
+
+
 def _routes_from_ast() -> list[dict[str, Any]]:
     """Every literal HTTP route registered in the package, with its summary.
 
@@ -133,7 +228,7 @@ def _routes_from_ast() -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for py in _route_source_files():
         tree = ast.parse(py.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
+        for node in [*ast.walk(tree), *_route_table_calls(tree)]:
             if not isinstance(node, ast.Call) or not isinstance(
                 node.func, ast.Attribute
             ):

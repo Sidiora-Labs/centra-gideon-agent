@@ -53,6 +53,7 @@ asserts every per-file inert counter **may only shrink** versus the committed ba
 
 from __future__ import annotations
 
+import ast
 import json
 import textwrap
 from pathlib import Path
@@ -481,6 +482,25 @@ def test_value_lookup_alone_does_not_clear_a_member(tmp_path):
     )
 
 
+def _calls_symbol(tree: ast.Module, name: str) -> bool:
+    """True when ``name`` is CALLED in ``tree``, following ``import name as alias`` bindings."""
+    aliases = {name}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name == name:
+                    aliases.add(alias.asname or alias.name)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Name) and func.id in aliases:
+            return True
+        if isinstance(func, ast.Attribute) and func.attr == name:
+            return True
+    return False
+
+
 def test_the_audited_value_lookup_call_sites_are_wired_and_the_members_re_verdicted():
     """``PHF-13``'s ruling, RE-VERDICTED after ``WF2LOO-13`` wired the judge contract.
 
@@ -508,11 +528,13 @@ def test_the_audited_value_lookup_call_sites_are_wired_and_the_members_re_verdic
     callers: dict[str, list[str]] = {name: [] for name in owners}
     for f in _src_py_files():
         rel = f.as_posix()
-        text = f.read_text(encoding="utf-8")
+        tree = _parse(f)
+        if tree is None:
+            continue
         for name, owner in owners.items():
             if rel.endswith(owner):
                 continue
-            if f"{name}(" in text or f"import {name}" in text:
+            if _calls_symbol(tree, name):
                 callers[name].append(rel)
     stranded = [name for name, found in callers.items() if not found]
     assert not stranded, (

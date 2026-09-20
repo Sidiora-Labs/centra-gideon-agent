@@ -136,6 +136,93 @@ def test_scan_unknown_mode_treated_as_warn():
     assert not r.blocked
 
 
+@pytest.mark.parametrize(
+    "phone",
+    [
+        "+1 212 555 1212",
+        "+1 (212) 555-1212",
+        "(212) 555-1212",
+        "212-555-1212",
+        "212.555.1212",
+        "212 555 1212",
+        "2125551212",
+        "+44 20 7946 0958",
+        "+49 (30) 1234 5678",
+        "020 7946 0958",
+    ],
+)
+def test_phone_formats_are_redacted(phone):
+    result = scan_outbound(phone, mode="redact")
+    assert result.findings == 1
+    assert result.text == "[REDACTED_PHONE]"
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [
+        "0.0.0.0",
+        "1.2.3.4",
+        "10.20.30.40",
+        "127.0.0.1",
+        "192.168.1.1",
+        "255.255.255.255",
+        "2024-01-02",
+        "2000-02-29",
+        "2024-01-02T03:04",
+        "2024-01-02 03:04:05",
+        "2024-01-02T03:04:05.678",
+        "2024-01-02T03:04:05Z",
+        "2024-01-02T03:04:05+01:30",
+        "2024-01-02T03:04:05-0730",
+        "0.25",
+        "1.0",
+        "12.34",
+        "123.456",
+        "1000.001",
+        "999999.000001",
+        "42.000000",
+    ],
+)
+def test_non_phone_numeric_shapes_survive(shape):
+    result = scan_outbound(shape, mode="redact")
+    assert result.findings == 0
+    assert result.text == shape
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("212-555-1212 192.168.1.1", "[REDACTED_PHONE] 192.168.1.1"),
+        ("192.168.1.1 212-555-1212", "192.168.1.1 [REDACTED_PHONE]"),
+        ("212-555-1212 2024-01-02", "[REDACTED_PHONE] 2024-01-02"),
+        ("2024-01-02 212-555-1212", "2024-01-02 [REDACTED_PHONE]"),
+        ("212-555-1212 12.34", "[REDACTED_PHONE] 12.34"),
+        ("12.34 212-555-1212", "12.34 [REDACTED_PHONE]"),
+    ],
+)
+def test_phone_beside_spared_shape_in_both_orders(text, expected):
+    assert scan_outbound(text, mode="redact").text == expected
+
+
+def test_phone_redaction_is_idempotent():
+    once = scan_outbound("call +1 (212) 555-1212", mode="redact").text
+    twice = scan_outbound(once, mode="redact").text
+    assert once == twice == "call [REDACTED_PHONE]"
+
+
+def test_generated_numeric_corpus_uses_real_scanner():
+    for n in range(1, 100):
+        spared = [
+            f"10.20.{n // 10}.{n % 10}",
+            f"2024-{(n % 12) + 1:02d}-{(n % 28) + 1:02d}T03:04:05+01:00",
+            f"{n}.{n + 1}",
+        ]
+        text = " | ".join(spared)
+        assert scan_outbound(text, mode="redact").text == text
+        phone = f"212-555-{n:04d}"
+        assert scan_outbound(phone, mode="redact").text == "[REDACTED_PHONE]"
+
+
 @pytest.mark.asyncio
 async def test_guard_charges_meter_on_success(tmp_path, monkeypatch):
     monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
@@ -604,18 +691,19 @@ def test_the_fire_seam_binds_the_ceiling_and_drops_the_counter():
     """
     import inspect
 
-    from gideon.engine import gateway
+    from gideon.engine import trigger_dispatch
 
-    source = inspect.getsource(gateway)
+    source = inspect.getsource(trigger_dispatch)
+    compact = " ".join(source.split())
     assert (
-        'set_current_run_budget(run_budget_for(getattr(trigger, "gates", None)))'
-        in source
+        'budgets.set_current_run_budget( run_budget_for(getattr(trigger, "gates", None)) )'
+        in compact
     )
     assert (
-        "reset_current_run_budget(budget_token)" in source
+        "reset_current_run_budget(ceiling)" in source
     ), "and it must not leak the ceiling"
     assert (
-        "get_meter().end_run(run_key)" in source
+        "get_meter().end_run(key)" in source
     ), "a per-fire run counter has no reader once the fire ends; retaining it grows without bound"
 
 

@@ -81,15 +81,17 @@ def _query_req(query):
 
 
 def _json_req(body, match_info=None):
-    r = MagicMock()
-    r.match_info = match_info or {}
-    r.get = lambda *_a, **_k: "test"
+    """A real aiohttp request carrying the serialized body the handlers parse."""
+    from aiohttp.test_utils import make_mocked_request
 
-    async def _json():
-        return body
-
-    r.json = _json
-    return r
+    request = make_mocked_request(
+        "POST",
+        "/api/_test",
+        headers={"Content-Type": "application/json"},
+        match_info=match_info or {},
+    )
+    request._read_bytes = json.dumps(body).encode("utf-8")
+    return request
 
 
 class TestSkillEndpoints4xx:

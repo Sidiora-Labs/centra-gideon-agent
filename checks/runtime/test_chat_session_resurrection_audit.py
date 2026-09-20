@@ -54,50 +54,50 @@ _CREATOR = "get_or_create_session"
 
 
 _CLIENT_NAMED_MUST_GUARD: dict[str, str] = {
-    "dashboard/chat_handlers.py::api_chat": (
+    "interfaces/dashboard/chat_handlers.py::api_chat": (
         "POST /api/chat — `body['session']` is client-supplied; the resurrection this "
         "module is named for"
     ),
-    "dashboard/chat_handlers.py::api_chat_session_resume": (
+    "interfaces/dashboard/chat_handlers.py::api_chat_session_resume": (
         "POST /api/chat/sessions/{session}/resume — `match_info['session']` / "
         "`body['key']` are client-supplied; the second resurrection"
     ),
 }
 
 _CREATES_BY_DESIGN: dict[str, str] = {
-    "channel_inbound.py::_route_to_session": (
+    "integrations/channel_inbound.py::_SessionIngress.resolve": (
         "no name — an unlinked channel thread mints a session, then link_channel binds it"
     ),
-    "dashboard/handlers/investigate.py::api_investigate": "no name — investigate mints its own",
-    "gateway.py::RuntimeCoordinator._deliver_result": "no name — result delivery mints its own",
-    "dashboard/chat_fork.py::api_chat_session_fork": (
+    "interfaces/dashboard/handlers/investigate.py::api_investigate": "no name — investigate mints its own",
+    "engine/gateway.py::RuntimeCoordinator._deliver_result": "no name — result delivery mints its own",
+    "interfaces/dashboard/chat_fork.py::api_chat_session_fork": (
         "name=None — a fork mints a NEW key; the PARENT it reads is resolved and 404s"
     ),
-    "dashboard/chat_fork.py::api_chat_session_fork_rewound": (
+    "interfaces/dashboard/chat_fork.py::api_chat_session_fork_rewound": (
         "name=None — same as the fork above"
     ),
-    "dashboard/chat_handlers.py::api_chat_session_create": (
+    "interfaces/dashboard/chat_handlers.py::api_chat_session_create": (
         "POST /api/chat/sessions IS the create verb — this is the one route whose job "
         "is to mint a key, and it is what a client uses instead of naming a dead one"
     ),
-    "dashboard/schedule_inject.py::inject_schedule_result_to_session": (
+    "interfaces/dashboard/schedule_inject.py::inject_schedule_result_to_session": (
         "name=`cron-{job.id}` — derived from the cron job that owns the session"
     ),
-    "loop/manager.py::start": "name=`session_key(loop_id)` — derived from the loop",
-    "loop/manager.py::spawn_task_worker": (
+    "automation/loop/manager.py::start": "name=`session_key(loop_id)` — derived from the loop",
+    "automation/loop/manager.py::spawn_task_worker": (
         "name=`task_session_key(loop.id, task.id)` — derived from the loop task"
     ),
-    "planning/runner.py::run_planner_pass": "name=`skey` — derived from the planner pass",
-    "inbound/openai_dialect.py::handle_chat_completions": (
+    "cognition/planning/runner.py::run_planner_pass": "name=`skey` — derived from the planner pass",
+    "integrations/inbound/openai_dialect.py::handle_chat_completions": (
         "name=`session_key_for(client_id, tag)` — namespaced by the AUTHENTICATED client "
         "id, and create-on-first-use is this dialect's whole contract (it has no delete "
         "verb of its own, so there is no deleted state for a client to resurrect through)"
     ),
-    "dashboard/chat_persistence.py::_rehydrate_session_from_history": (
+    "interfaces/dashboard/chat_persistence.py::_rehydrate_session_from_history": (
         "reached only AFTER resolve_history_key + get_metadata confirmed the key is "
         "persisted — this site IS the existence check the owner delegates to"
     ),
-    "dashboard/chat_persistence.py::restore_recent_sessions": (
+    "interfaces/dashboard/chat_persistence.py::restore_recent_sessions": (
         "iterates keys the conversation log itself listed, so existence is a given"
     ),
 }
@@ -211,9 +211,9 @@ def _session_routes() -> set[tuple[str, str]]:
     modules that register them. Derived, not hand-listed."""
     out: set[tuple[str, str]] = set()
     for rel in (
-        "dashboard/server.py",
-        "dashboard/session_bulk.py",
-        "dashboard/session_starters.py",
+        "interfaces/dashboard/server.py",
+        "interfaces/dashboard/session_bulk.py",
+        "interfaces/dashboard/session_starters.py",
     ):
         tree = ast.parse((SRC / rel).read_text(encoding="utf-8"))
         for node in ast.walk(tree):
@@ -337,7 +337,7 @@ def test_the_scanner_tells_a_guarded_writer_from_an_unguarded_one():
     )
 
 
-_HANDLERS = SRC / "dashboard" / "chat_handlers.py"
+_HANDLERS = SRC / "interfaces" / "dashboard" / "chat_handlers.py"
 _GUARD_LINE = "        if not session_key_exists(state, session_name):"
 
 
@@ -355,8 +355,8 @@ def test_stripping_the_real_guard_reds_the_ratchet():
 
     creators: dict[str, list[int]] = {}
     guards: dict[str, list[int]] = {}
-    scan_source(real, "dashboard/chat_handlers.py", creators, guards)
-    assert "dashboard/chat_handlers.py::api_chat" in guards, (
+    scan_source(real, "interfaces/dashboard/chat_handlers.py", creators, guards)
+    assert "interfaces/dashboard/chat_handlers.py::api_chat" in guards, (
         "api_chat does not call the owner in the shipped source, so this floor cannot "
         f"attribute the plant. guards={sorted(guards)}"
     )
@@ -378,12 +378,12 @@ def test_stripping_the_real_guard_reds_the_ratchet():
 
     creators2: dict[str, list[int]] = {}
     guards2: dict[str, list[int]] = {}
-    scan_source(stripped, "dashboard/chat_handlers.py", creators2, guards2)
-    assert "dashboard/chat_handlers.py::api_chat" in creators2, (
+    scan_source(stripped, "interfaces/dashboard/chat_handlers.py", creators2, guards2)
+    assert "interfaces/dashboard/chat_handlers.py::api_chat" in creators2, (
         "api_chat stopped reaching get_or_create_session under the plant — the plant "
         "removed more than the guard, so this floor proves nothing"
     )
-    assert "dashboard/chat_handlers.py::api_chat" not in guards2, (
+    assert "interfaces/dashboard/chat_handlers.py::api_chat" not in guards2, (
         "stripping api_chat's `session_key_exists` call left the ratchet green. "
         "test_every_client_named_writer_actually_calls_the_owner is therefore measuring "
         f"the detector, not the code. guards={sorted(guards2)}"
@@ -405,9 +405,9 @@ def test_a_new_unguarded_writer_planted_into_the_real_module_is_unmapped():
     )
     creators: dict[str, list[int]] = {}
     guards: dict[str, list[int]] = {}
-    scan_source(planted, "dashboard/chat_handlers.py", creators, guards)
+    scan_source(planted, "interfaces/dashboard/chat_handlers.py", creators, guards)
 
-    key = "dashboard/chat_handlers.py::api_chat_planted_writer"
+    key = "interfaces/dashboard/chat_handlers.py::api_chat_planted_writer"
     assert (
         key in creators
     ), f"the planted writer was not censused at all: {sorted(creators)}"

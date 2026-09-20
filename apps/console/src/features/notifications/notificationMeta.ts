@@ -4,6 +4,7 @@ import type { NotificationItem } from '../../shared/data/api'
 
 export interface KindMeta { label: string; icon: LucideIcon; tone: string }
 const KINDS: Record<string, KindMeta> = {
+  cron_failed: { label: 'Scheduled job failed', icon: XCircle, tone: 'var(--color-danger)' },
   cron: { label: 'Scheduled job result', icon: Clock, tone: 'var(--color-info)' },
   schedule: { label: 'Scheduled job result', icon: Clock, tone: 'var(--color-info)' },
   result: { label: 'Scheduled job result', icon: CheckCircle2, tone: 'var(--color-ok)' },
@@ -17,6 +18,9 @@ const KINDS: Record<string, KindMeta> = {
   status: { label: 'Heartbeat', icon: HeartPulse, tone: 'var(--color-info)' },
   inbox_alert: { label: 'Inbox alert', icon: BellRing, tone: 'var(--color-warn)' },
   alert: { label: 'Inbox alert', icon: BellRing, tone: 'var(--color-warn)' },
+  loop_complete: { label: 'Loop complete', icon: CheckCircle2, tone: 'var(--color-ok)' },
+  loop_failed: { label: 'Loop failed', icon: XCircle, tone: 'var(--color-danger)' },
+  loop_stalled: { label: 'Loop stalled or blocked', icon: AlertTriangle, tone: 'var(--color-warn)' },
   loop: { label: 'Loop progress', icon: Target, tone: 'var(--color-primary)' },
   complete: { label: 'Loop complete', icon: CheckCircle2, tone: 'var(--color-ok)' },
 

@@ -14,6 +14,7 @@ import gideon.assurance.validation as _validation_mod
 from gideon.core.atomic_write import atomic_write
 from gideon.core.config.edit_spec import ConfigValueError, coerce_edit_value
 from gideon.core.config.loader import MEMORY_VAULT_MODES, PUSH_BACKENDS, AppConfig
+from gideon.core.http_request import read_json_body
 from gideon.core.layout import package_path
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.interfaces.dashboard.token_auth import (
@@ -291,7 +292,7 @@ async def api_sel_rotate(request: web.Request) -> web.Response:
     archive = True
     if request.can_read_body:
         try:
-            body = await request.json()
+            body = await read_json_body(request)
             if isinstance(body, dict) and body.get("archive") is False:
                 archive = False
         except Exception:
@@ -401,7 +402,7 @@ async def api_gideon_config(request: web.Request) -> web.Response:
             return web.json_response({"error": error}, status=status)
 
         try:
-            body = await request.json()
+            body = await read_json_body(request)
         except Exception:
             return _deny("invalid JSON")
         if not isinstance(body, dict):
@@ -486,6 +487,41 @@ async def api_gideon_config(request: web.Request) -> web.Response:
 
     cfg = AppConfig.load()
     return web.json_response(cfg.to_dict())
+
+
+_SETTINGS_CONFIG_SECTIONS = {
+    "sandbox": ("Sandbox", "cgroup_scopes", "Use cgroup scopes"),
+    "routing": ("Routing policy", "enabled", "Adaptive routing"),
+    "updates": ("Update checks", "check_enabled", "Check for updates"),
+    "loops": ("Agent loops", "check_work_stages", "Check work stages"),
+    "workflows": ("Workflows", "enabled", "Run workflows"),
+    "learning": ("Learning", "staging_enabled", "Stage learned changes"),
+    "knowledge": ("Knowledge", "require_citations", "Require citations"),
+    "local_models": (
+        "Local models",
+        "hide_unrunnable_models",
+        "Hide unrunnable models",
+    ),
+    "tools": ("Tool groups", "groups_enabled", "Enable tool groups"),
+}
+
+
+async def api_settings_config(request: web.Request) -> web.Response:
+    """Return the small editable config surface owned by Settings."""
+    config = AppConfig.load().to_dict()
+    sections = []
+    for section, (label, field, field_label) in _SETTINGS_CONFIG_SECTIONS.items():
+        path = f"{section}.{field}"
+        sections.append(
+            {
+                "id": section,
+                "label": label,
+                "path": path,
+                "field_label": field_label,
+                "value": bool(config.get(section, {}).get(field, False)),
+            }
+        )
+    return web.json_response({"sections": sections})
 
 
 def _agent_values() -> set[str]:
@@ -819,9 +855,8 @@ _EDITABLE_CONFIG: dict[str, dict] = {
     "knowledge.similarity_min_score": {"type": "float", "min": 0.05, "max": 1.0},
     "knowledge.similarity_top_k": {"type": "int", "min": 1, "max": 64},
     "knowledge.similarity_degree_cap": {"type": "int", "min": 1, "max": 512},
-    "knowledge.reranker_enabled": {"type": "bool"},
-    "knowledge.reranker_model": {"type": "str", "max_len": 256},
-    "knowledge.reranker_max_candidates": {
+    "knowledge.rerank_enabled": {"type": "bool"},
+    "knowledge.rerank_max_candidates": {
         "type": "int",
         "min": 1,
         "max": 128,
@@ -896,7 +931,7 @@ async def api_gideon_config_patch(request: web.Request) -> web.Response:
         return web.json_response({"error": msg}, status=status)
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return _deny("invalid JSON", "invalid JSON body")
     if not isinstance(body, dict):
@@ -1026,9 +1061,7 @@ async def api_gideon_config_patch(request: web.Request) -> web.Response:
 
     if path_key in ("companion.discovery_enabled", "companion.instance_name"):
         try:
-            from gideon.integrations.companion import (  # noqa: F811
-                discovery as _discovery,
-            )
+            from gideon.integrations.companion import discovery as _discovery  # noqa: F811
 
             _discovery.reconcile()
         except Exception:
@@ -1084,7 +1117,7 @@ async def api_incident(request: web.Request) -> web.Response:
             {"active": st.active, "reason": st.reason, "started_at": st.started_at}
         )
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     reason = str(body.get("reason", "")) if isinstance(body, dict) else ""
@@ -1103,7 +1136,7 @@ async def api_incident_resume(request: web.Request) -> web.Response:
     from gideon.security.guardrails import incident as _incident
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     if not (isinstance(body, dict) and body.get("confirm") is True):
@@ -1127,7 +1160,7 @@ async def api_project_trust(request: web.Request) -> web.Response:
     if request.method == "GET":
         return web.json_response({"projects": _pt._read_store()})
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     if not isinstance(body, dict):

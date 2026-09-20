@@ -1,19 +1,8 @@
 
-import { useEffect, useState } from 'react'
-import { prefersReducedMotion } from '../../theme/motion'
-
-const REDUCE_QUERY = '(prefers-reduced-motion: reduce)'
+import { useReducedMotion } from '../../theme/motion'
 
 export function TerminalStrip() {
-  const [reduce, setReduce] = useState(prefersReducedMotion)
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
-    const mq = window.matchMedia(REDUCE_QUERY)
-    const onChange = () => setReduce(mq.matches)
-    mq.addEventListener('change', onChange)
-    onChange()
-    return () => mq.removeEventListener('change', onChange)
-  }, [])
+  const reduce = useReducedMotion()
 
   return (
     <div

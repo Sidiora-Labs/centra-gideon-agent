@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { render } from '@testing-library/react'
-import { renderToolInput, renderToolOutput } from './registry'
+import { inputOf, labelForTool, renderToolInput, renderToolOutput } from './registry'
+import { NATIVE_TOOL_REGISTRY } from './native'
 import type { ToolSegment } from '../chatTypes'
 
 
@@ -15,6 +16,12 @@ const fromLiveFrame = (tool: string, input: Record<string, unknown>, output?: st
 const html = (node: React.ReactNode): string => render(<>{node}</>).container.innerHTML
 
 describe('native INPUT overrides resolve the input from persisted history (#682)', () => {
+  it('has one input owner for object and string-shaped calls', () => {
+    const value = { command: 'make test' }
+    expect(inputOf(fromLiveFrame('bash', value))).toBe(value)
+    expect(inputOf(fromHistory('bash', value))).toEqual(value)
+  })
+
   it.each([
     ['bash', { command: 'ls -la' }, 'Command', 'ls -la'],
     ['read_file', { path: '/a/b.py' }, 'File', '/a/b.py'],
@@ -50,6 +57,18 @@ describe('native INPUT overrides resolve the input from persisted history (#682)
     expect(out).toContain('Input')
     expect(out).toContain('ls -la')
     expect(out).not.toContain('Command')
+  })
+})
+
+describe('the tool card rail is keyed by registry metadata', () => {
+  it.each([
+    ['bash', 'Run command', 'Command'],
+    ['read_file', 'Read', 'File'],
+    ['grep', 'Search code', 'Query'],
+    ['web_fetch', 'Fetch page', 'URL'],
+  ])('%s supplies its card title and body label from one entry', (tool, title, body) => {
+    expect(labelForTool(fromHistory(tool, {}))).toBe(NATIVE_TOOL_REGISTRY[tool].label)
+    expect(NATIVE_TOOL_REGISTRY[tool]).toMatchObject({ label: title, inputLabel: body })
   })
 })
 

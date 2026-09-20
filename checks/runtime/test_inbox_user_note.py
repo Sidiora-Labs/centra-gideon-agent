@@ -24,9 +24,11 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import make_mocked_request
 
 from gideon.http_errors import HTTP_ERROR_CODES
 from gideon.integrations.inbox import (
@@ -69,13 +71,16 @@ def _state(svc):
 
 
 def _request(state, body, *, raw: str | None = None):
-    req = MagicMock()
-    req.app = {"state": state}
-    req.query = {}
-    if raw is not None:
-        req.json = AsyncMock(side_effect=ValueError("not json"))
-    else:
-        req.json = AsyncMock(return_value=body)
+    """A real request carrying the body as wire bytes, so `read_json_body` is exercised."""
+    app = web.Application()
+    app["state"] = state
+    req = make_mocked_request(
+        "POST",
+        "/api/inbox/notes",
+        app=app,
+        headers={"Content-Type": "application/json"},
+    )
+    req._read_bytes = (raw if raw is not None else json.dumps(body)).encode()
     return req
 
 

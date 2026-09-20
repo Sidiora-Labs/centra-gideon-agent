@@ -226,8 +226,8 @@ def test_nothing_on_a_turn_path_calls_the_review_automatically():
     """
     import pathlib
 
-    root = pathlib.Path(pcr.__file__).resolve().parents[1]
-    for rel in ("dashboard/chat_runner.py", "heartbeat.py"):
+    root = pathlib.Path(pcr.__file__).resolve().parents[2]
+    for rel in ("interfaces/dashboard/chat_runner.py", "engine/heartbeat.py"):
         text = (root / rel).read_text(encoding="utf-8")
         assert "project_context_review" not in text, rel
 

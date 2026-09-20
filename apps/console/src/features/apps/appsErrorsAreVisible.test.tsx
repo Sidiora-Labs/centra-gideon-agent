@@ -112,15 +112,11 @@ describe('the allowlist shrank, which is the only direction it may move', () => 
     }
   })
 
-  it('🪤 the four unrelated entries are UNTOUCHED — they are a different change', () => {
-    for (const f of [
-      'features/loops/LoopCockpitPage.tsx', 'features/settings/ChatPanel.tsx',
-      'features/settings/DurabilityPanel.tsx', 'features/settings/OllamaModelManager.tsx',
-    ]) expect(Object.keys(allow.allow), `${f} is still listed`).toContain(f)
+  it('has reached zero', () => {
+    expect(allow.allow).toEqual({})
   })
 
   it('the rule that makes this the right direction is still written down', () => {
-    expect(allow._comment).toMatch(/may only SHRINK/)
-    expect(allow._comment, 'and the intent it recorded for these two').toMatch(/text-negative -> text-danger/)
+    expect(allow._comment).toMatch(/enforced at zero/)
   })
 })

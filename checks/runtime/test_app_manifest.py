@@ -860,7 +860,7 @@ class TestUiCapabilities:
     """The manifest half of APE-11.
 
     The block's whole job is to be READ by the browser's UI-SDK gate
-    (``resolvableAppSpecs`` in ``apps/console/src/app/appSdk.tsx``), and the only path it
+    (``resolvableAppSpecs`` in ``apps/console/src/app/shell/appSdk.tsx``), and the only path it
     travels to get there is ``GET /api/apps/<name>`` → ``manifest`` →
     ``AppHostPage`` → ``ContributedPage``. That handler serializes with
     ``AppManifest.to_dict()``, so a value that does not survive the round trip
@@ -943,6 +943,7 @@ class TestUiCapabilities:
             / "apps/console"
             / "src"
             / "app"
+            / "shell"
             / "appSdk.tsx"
         )
         src = sdk.read_text(encoding="utf-8")

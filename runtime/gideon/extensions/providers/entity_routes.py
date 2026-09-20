@@ -20,6 +20,7 @@ from aiohttp import web
 
 from gideon.core.atomic_write import atomic_write
 from gideon.core.config import loader as config_loader
+from gideon.core.http_request import read_json_body
 from gideon.http_errors import json_error
 
 
@@ -157,8 +158,10 @@ def load_notifications_settings() -> dict[str, Any]:
     return {**NOTIFICATIONS_DEFAULTS, **known}
 
 
-_KIND_SEVERITY: dict[str, int] = {"error": 3, "warning": 2, "inbox_alert": 2}
 _MIN_SEVERITY_RANK: dict[str, int] = {"info": 1, "warning": 2, "error": 3}
+# Compatibility snapshot for callers that display the former flat-wire ranks; delivery reads
+# NotificationKind.default_severity below.
+_KIND_SEVERITY: dict[str, int] = {"error": 3, "warning": 2, "inbox_alert": 2}
 
 
 def _parse_hhmm(hhmm: str) -> int | None:
@@ -185,7 +188,7 @@ def _in_quiet_window(start: str, end: str, now_minutes: int) -> bool:
     return now_minutes >= s or now_minutes < e
 
 
-def notification_allowed(kind: str, *, now: "object | None" = None) -> bool:
+def notification_posture(kind: str, *, now: "object | None" = None) -> str:
     """THE delivery gate for dashboard notifications (ConsoleState.notify()).
 
     Applies the notification entity settings semantically:
@@ -201,19 +204,28 @@ def notification_allowed(kind: str, *, now: "object | None" = None) -> bool:
 
     s = load_notifications_settings()
     if s.get("mute_all"):
-        return False
-    severity = _KIND_SEVERITY.get(kind, 1)
+        return "blocked"
+    from gideon.workspace import notification_kinds
+
+    registered = notification_kinds.kind_for_legacy(kind)
+    severity = registered.default_severity
     threshold = _MIN_SEVERITY_RANK.get(str(s.get("min_severity", "info")), 1)
     if severity < threshold:
-        return False
+        return "blocked"
     if s.get("quiet_hours_enabled") and severity < 3:
         dt = now if isinstance(now, datetime) else datetime.now()
         minutes = dt.hour * 60 + dt.minute
         if _in_quiet_window(
             s.get("quiet_hours_start", ""), s.get("quiet_hours_end", ""), minutes
         ):
-            return False
-    return True
+            if registered.attention or severity == notification_kinds.SEV_WARNING:
+                return "quiet"
+            return "blocked"
+    return "allowed"
+
+
+def notification_allowed(kind: str, *, now: "object | None" = None) -> bool:
+    return notification_posture(kind, now=now) != "blocked"
 
 
 def register_entity_routes(app: web.Application) -> None:
@@ -234,7 +246,7 @@ async def handle_inbox_settings_get(request: web.Request) -> web.Response:
 async def handle_inbox_settings_put(request: web.Request) -> web.Response:
     """PUT /api/inbox/settings"""
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
 
@@ -263,7 +275,7 @@ async def handle_notifications_settings_get(request: web.Request) -> web.Respons
 async def handle_notifications_settings_put(request: web.Request) -> web.Response:
     """PUT /api/notifications/settings"""
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
 
@@ -332,7 +344,7 @@ async def handle_notification_rules_put(request: web.Request) -> web.Response:
     from gideon.workspace import notification_rules
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
     if not isinstance(body, dict):
@@ -352,6 +364,9 @@ async def handle_notification_rules_put(request: web.Request) -> web.Response:
                 return web.json_response(
                     {"error": f"unknown notification kind '{key}'"}, status=400
                 )
+            if raw is None:
+                stored.pop(key, None)
+                continue
             if not isinstance(raw, dict):
                 return web.json_response(
                     {"error": f"rule '{key}' must be an object"}, status=400

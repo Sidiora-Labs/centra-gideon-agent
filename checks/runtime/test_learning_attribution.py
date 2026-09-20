@@ -298,13 +298,18 @@ def test_verdict_history_feeds_proposer_trust(home):
 
 def test_accountability_now_has_a_production_importer():
     """WF2LEA-5's headline: `accountability.py` had ZERO production importers. `attribution` is that
-    importer, and it is itself wired into the curator tick in `history.py`."""
+    importer, and the curator tick reaches it through `consolidation_cycle.CuratorNotes`.
+    """
     import inspect
 
     src = inspect.getsource(A)
     assert "accountability" in src
+    cycle = inspect.getsource(
+        __import__("gideon.cognition.consolidation_cycle", fromlist=["_x"])
+    )
+    assert "attribution.grade_accepted_changes" in cycle
     hist = inspect.getsource(__import__("gideon.cognition.history", fromlist=["_x"]))
-    assert "attribution.grade_accepted_changes" in hist
+    assert "CuratorNotes" in hist
 
 
 def test_a_harmful_verdict_also_revokes_standing_autonomy_grants(home, monkeypatch):

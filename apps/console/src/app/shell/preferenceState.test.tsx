@@ -15,6 +15,12 @@ it('rejects damaged persisted fields while retaining valid independent preferenc
   expect(loaded.selects).toEqual({ '--font': 'mono' })
   expect(loaded.widthPreset).toBe('wide')
 })
+it('validates and round-trips the Session Map density in the appearance payload', () => {
+  const valid = parseAppearance(JSON.stringify({ selects: { '--session-map-density': 'compact' } }))
+  expect(valid.selects['--session-map-density']).toBe('compact')
+  expect(parseAppearance(JSON.stringify(valid)).selects['--session-map-density']).toBe('compact')
+  expect(parseAppearance(JSON.stringify({ selects: { '--session-map-density': 'hidden' } })).selects['--session-map-density']).toBeUndefined()
+})
 it('edits and resets a token independently of its neighboring fields', () => {
   let state = appearanceReducer(defaultAppearance(), { type: 'color', key: '--color-primary', mode: 'dark', value: '#123456' })
   expect(state.scheme).toBe('custom:unsaved')

@@ -48,6 +48,7 @@ def test_trigger_projection_keeps_wire_order_and_shallow_copy_contract():
         "expires_at",
         "next_fire_at",
         "last_run_id",
+        "run_owner_pid",
         "run_count",
         "last_success_at",
         "last_failure_at",

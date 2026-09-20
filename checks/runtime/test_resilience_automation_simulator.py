@@ -53,12 +53,14 @@ def _put(home: Path, trigger: Trigger) -> Trigger:
 
 def _simulate(trigger_id: Any) -> tuple[int, dict]:
     """POST /api/doctor/simulate/automation over the real handler."""
-    req = make_mocked_request("POST", "/api/doctor/simulate/automation")
-
-    async def _json():
-        return {} if trigger_id is None else {"trigger_id": trigger_id}
-
-    req.json = _json  # type: ignore[method-assign]
+    req = make_mocked_request(
+        "POST",
+        "/api/doctor/simulate/automation",
+        headers={"Content-Type": "application/json"},
+    )
+    req._read_bytes = json.dumps(
+        {} if trigger_id is None else {"trigger_id": trigger_id}
+    ).encode()
     resp = asyncio.run(doctor_h.api_doctor_simulate_automation(req))
     return resp.status, json.loads(resp.body.decode())
 

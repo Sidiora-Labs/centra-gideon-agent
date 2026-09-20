@@ -67,16 +67,6 @@
         "declarations": [
           {
             "kind": "enum",
-            "symbol": "ItemStatus.SENT"
-          }
-        ],
-        "path": "runtime/gideon/integrations/inbox.py"
-      },
-      {
-        "count": 1,
-        "declarations": [
-          {
-            "kind": "enum",
             "symbol": "StructuredOutput.JSON_MODE"
           }
         ],
@@ -1175,11 +1165,11 @@
       "kinds": {
         "config": 0,
         "editable_config": 0,
-        "enum": 8,
+        "enum": 7,
         "sdk_export": 230,
         "trigger_kind": 0
       },
-      "total": 238
+      "total": 237
     }
   },
   "kind": "gideon.inert-surfaces",

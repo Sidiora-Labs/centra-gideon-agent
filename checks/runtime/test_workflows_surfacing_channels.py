@@ -322,7 +322,7 @@ def test_no_in_flight_run_means_no_boost():
 
 def test_a_directory_predicate_matches_a_path_PREFIX():
     """`checks/runtime/` asks about a directory, which may be empty in a fresh checkout."""
-    assert Predicate("checks/runtime/").matches(["tests"]) is True
+    assert Predicate("checks/runtime/").matches(["checks/runtime"]) is True
     assert Predicate("checks/runtime/").matches(["checks/runtime/test_a.py"]) is True
     assert Predicate("checks/runtime/").matches(["src/app.py"]) is False
 
@@ -394,8 +394,8 @@ def test_the_scan_is_BOUNDED(tmp_path):
 
 
 def test_the_scan_includes_DIRECTORIES(tmp_path):
-    (tmp_path / "checks/runtime").mkdir()
-    assert "tests" in scan_paths(tmp_path)
+    (tmp_path / "checks/runtime").mkdir(parents=True)
+    assert "checks/runtime" in scan_paths(tmp_path)
 
 
 def test_scanning_a_MISSING_directory_is_empty_not_an_error(tmp_path):

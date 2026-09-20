@@ -55,7 +55,7 @@ SCAFFOLD_FILES = (
 
 _KEBAB_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
-_NAME_PROPERTIES = ("name", "source_name", "provider_name")
+_NAME_PROPERTIES = ("name", "source_name", "provider_name", "delivery_name")
 _DISPLAY_PROPERTIES = ("display_name", "displayName")
 
 _DUCK_CONTRACT_MEMBERS: dict[str, tuple[tuple[str, bool, str, str], ...]] = {
@@ -788,6 +788,21 @@ def _render_test_provider_py(
         if contract.has_abc
         else f"Contract: duck-typed ({contract.type} publishes no SDK ABC yet)"
     )
+    channel_registration = ""
+    if contract.type == "channel":
+        channel_registration = f"""
+
+
+def test_registers_with_the_channel_transport_catalog() -> None:
+    from gideon.sdk.channel import get_transport, register_transport, unregister_transport
+
+    provider = create_provider({{}})
+    try:
+        register_transport(provider)
+        assert get_transport("{app_name}") is provider
+    finally:
+        unregister_transport("{app_name}")
+"""
     return f'''"""Stub-level contract tests for the {app_name} {contract.type} provider.
 
 {contract_note}
@@ -834,7 +849,7 @@ def test_every_contract_method_is_declared_on_the_stub() -> None:
 
 def test_settings_reach_the_provider() -> None:
     assert create_provider({{"timeout_secs": 5}})._timeout == 5
-'''
+{channel_registration}'''
 
 
 def _render_readme(

@@ -551,6 +551,11 @@ jobs:
         env:
           PLAYWRIGHT_JUNIT_OUTPUT_FILE: ${{ github.workspace }}/reports/ci-e2e-a11y-chat.junit.xml
         run: npx playwright test e2e/chat.spec.ts --project=chromium
+      - name: desktop Session Map accessibility and keyboard navigation
+        working-directory: apps/console
+        env:
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: ${{ github.workspace }}/reports/ci-e2e-a11y-session-map.junit.xml
+        run: npx playwright test e2e/sessionMap.spec.ts --project=chromium
       - name: upload the axe reports
         if: always()
         uses: actions/upload-artifact@v7

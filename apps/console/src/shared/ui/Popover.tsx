@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useReducer, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
+import { AnimatePresence, motion } from 'framer-motion'
 import { fvs } from '../theme/fontWeight'
-import { overlayEnter, spring } from '../theme/motion'
+import { overlayEnter, spring, useReducedMotion } from '../theme/motion'
 import { returnFocus } from './focusNavigation'
 import { claimPopup, enterPopup, keepPopupVisible, ownsPopupKeyboard, popupPosition, popupSide, type PopupSide } from './popupController'
 

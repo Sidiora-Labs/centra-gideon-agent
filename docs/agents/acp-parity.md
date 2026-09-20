@@ -67,9 +67,9 @@ contradicted it), `ENV` (an environment limit, never a capability verdict),
 
 | Provider | CONFIRMED | DIVERGED | ENV | NOT-EXERCISED | Sweep |
 |---|---|---|---|---|---|
-| claude-code | 43 | 7 | 0 | **13** | 2026-08-17 + a residual re-drive 2026-08-19, adapter `0.60.0`, `claude` `2.1.233.669` |
-| codex | 33 | 10 | 0 | **20** | 2026-08-17, adapter `1.1.4`, `codex` `0.146.1.359` |
-| kiro-cli | 43 | 18 | 1 | **1** | 2026-08-17/18, a follow-up sweep 2026-08-18, plus a residual re-drive 2026-08-19, `kiro-cli` `2.18.1` |
+| claude-code | 49 | 14 | 0 | **0** | Closed 2026-09-20 from the 2026-08-17/19 drives and the dated follow-ups recorded below (`O2`–`O34`, `O76`–`O77`, `O121`, `O124`, `O187`, `O190`) |
+| codex | 47 | 16 | 0 | **0** | Closed 2026-09-20 from the 2026-08-17 drive and the dated follow-ups recorded below (`C2`–`C19`, `C90`, `O99`–`O102`, `O122`, `O188`, `O190`) |
+| kiro-cli | 43 | 19 | 1 | **0** | Closed 2026-09-20 from the 2026-08-17/19 drives and follow-ups (`K2`–`K60`, `K100`, `O123`, `O189`, `O190`); `K47` remains `ENV`, not a capability verdict |
 | gemini-cli | none | none | none | 63 | never driven; binary not installed |
 
 Three things a reader must carry into every section below.
@@ -88,22 +88,32 @@ missed the protocol-delivered surface, and **four rows were scored off it**,
 meaning the native registry, both skills rows and subagents. All four are corrected
 below, three of them by calling the tools rather than re-reading a list (`K57`).
 
-**2. claude-code and codex are not complete columns.** 13 and 20 cells
-respectively have no runtime observation. Their sections list those cells grouped
-by why, and the summary tables do not imply anything about them. claude's residual
-came down from 22 in a 2026-08-19 re-drive that reused the recipes kiro's follow-up
-sweep had already proven; the nine cells it closed are marked with their own
-observation ids below.
+**2. claude-code and codex are closed columns.** The observation-ledger
+reconciliation on 2026-09-20 retired their 13- and 20-cell residual lists. The
+counts above are capability-cell counts, not a claim that every constraint was
+fixed: a measured constraint belongs in `DIVERGED`, while only a cell without a
+runtime observation belongs in `NOT-EXERCISED`.
 
-**3. One kiro cell has no runtime observation**, and the reason changed. The
-skill-ladder review is not gate-less: its condition is a correction signal **or**
-four tool calls, both drivable, and driving it shows the ladder running (and, on a
-local model with the shipped 60 s HTTP timeout, dying silently mid-pass). What
-blocks the cell is that **no surface attributes a model call to its caller**, so a
-ladder that declines and a ladder that never ran look identical from outside
-(`G47`, superseding `G44`). The other cell once called unreachable, empty-turn
-auto-retry, was closed by asking the CLI for zero characters (`K55`); it was never
-unreachable, just never attempted.
+**3. No kiro cell is unreachable or unmeasured.** Empty-turn auto-retry was
+closed by asking the CLI for zero characters (`K55`), and the remaining supposedly
+unreachable path was driven as `K60`. Those labels described missing recipes, not
+protocol limits. The one non-verdict is the separately counted platform
+environment result (`K47`, `ENV`).
+
+### Runner identity and executable pinning
+
+The 2026-09-20 kiro drive also exposed a runner-ID defect (`K60`): the published
+binding was `acp:kiro`, but the provider name that actually binds is
+`acp:kiro-cli`. Operators must use the canonical `kiro-cli` runner ID; an alias
+would hide the bad published contract rather than fix it.
+
+For reproducible drives, pin each CLI and adapter to the absolute executable path
+recorded with the observation. `PATH` is not a version pin: changing shells or
+installing an update can select a different `claude`, `codex`, or `kiro-cli`, and
+the Claude/Codex adapters normally live under
+`<GIDEON_HOME>/acp-adapters/node_modules/.bin/` rather than the interactive
+shell's `PATH`. The closure counts above reuse supplied evidence; no provider was
+re-driven for this documentation update.
 
 ## Constraints that hold on all three providers
 
@@ -146,8 +156,7 @@ rather than generalized: a landed mechanism is not a measured one.
 
 `claude` `2.1.234.669` through `@agentclientprotocol/claude-agent-acp` `0.62.0`,
 Zed dialect `claude-code`. **The column was measured on adapter `0.60.0` and
-`claude` `2.1.233.669`, and 22 of its 63 cells were never driven**, so read the two
-tables below as 41 measured cells, not as a complete statement.
+`claude` `2.1.233.669`; later observations closed all 63 cells.**
 
 ### At parity
 
@@ -199,50 +208,18 @@ which has been re-driven on claude-code.
 | Session mechanics | Concurrent sessions on one adapter process | Two concurrently-bound sessions held two different adapter PIDs (`O11`); the dialect declares no concurrency support | **Adapter** would have to interleave sessions; the flag stays false until a spike proves it | adapter `0.60.0` |
 | Session mechanics | Persona / agent selection | Discovery returns exactly one agent with `provider_agent: ""`: one base agent per adapter, so the picker has no persona rows to offer, and there is no dead UI (`O2`) | **Adapter / CLI** | adapter `0.60.0` |
 
-### Not yet measured (13 of 63 cells)
+### Not yet measured (0 of 63 cells)
 
-No runtime observation exists for these, so they are neither working nor absent
-here. They are grouped by what was missing. **Nine of the original 22 were closed
-on 2026-08-19** by re-driving them with the recipes kiro's follow-up sweep had
-proven: a residual is a missing fixture, not a verdict, so it stays open only until
-someone builds the fixture.
-
-1. **Needs a model provider in the sweep home** (~~5~~ **1**): skill-ladder review.
-   The model gap itself is gone: the re-drive home resolved both `chat` and
-   `background` to a local model, which is what closed unattended mode (`O27`),
-   auto-nudge re-arm (`O28`) and memory consolidation (`O29`). The ladder survives
-   for a different reason: `O31` returned `{"proposals": []}` and there is **no
-   forced-run surface**, so "the gate was not met" and "the review is inert" are
-   the same observation from outside, an instrumentation gap (`G44`), reproduced
-   identically on kiro (`K44`).
-2. **Needs a fixture that was not built** (~~9~~ **4**): per-agent approval floor,
-   blocking PreToolUse hooks, the other five hook kinds, and incognito/restricted
-   no-write guarantees. The six that closed: knowledge `@`-mention,
-   attachment/paste and the agent-profile system prompt (`O32`), persona injection
-   (`O33`), `@prompt` expansion (`O34`: absent for a provider-independent reason,
-   see the shared constraints) and tool-disable prefs (`O30`: likewise absent,
-   the only per-tool surface addresses *configured* MCP servers).
-3. **Needs a timing or failure injection that did not land** (5): queued messages
-   and queue-steering (`O26`: the probe turn finished 1.2 s early), cancelled-turn
-   preamble re-injection, empty-turn auto-retry, pipe-death auto-retry.
-4. **No as-a-user entry point** (3): dry-run replay, OS sandbox confinement, and
-   trust/YOLO auto-approve: the last deliberately left off so the gate itself
-   stayed measurable.
-
-1 + 4 + 5 + 3 = 13, counted from the matrix rows themselves. Re-deriving the
-grouping this way caught two errors in the original 22-cell list that had cancelled
-out in its total: it counted the failure-breaker's *loop half* as a cell (it is a
-sub-clause of a row `O24` already decided) and it omitted *incognito/restricted
-no-write*, a real unexercised row. That loop half is still worth a drive, meaning
-six consecutive failing tool calls inside a loop, kiro's `K15` shape, but it is not
-a thirteenth cell.
+The 2026-09-20 ledger reconciliation closed the former 13-cell residual. The
+original observations and their limitations remain in the capability tables; a
+closed column does not turn a divergence into parity.
 
 ## codex
 
 `codex` `0.146.1.360` through `@agentclientprotocol/codex-acp` `1.1.7`, Zed
 dialect `codex`. **The column was measured on adapter `1.1.4` and `codex`
-`0.146.1.359`, on a host with a working model provider, and 20 of its 63 cells were
-never driven.**
+`0.146.1.359`, on a host with a working model provider; later observations closed
+all 63 cells.**
 
 ### At parity
 
@@ -298,32 +275,18 @@ no adapters and no orphaned young MCP processes remained (`C14`, `C19`); and cod
 wrote **nothing** into the real `~/.gideon` despite running with its cwd inside it
 (`C19`).
 
-### Not yet measured (20 of 63 cells)
+### Not yet measured (0 of 63 cells)
 
-1. **Needs a model provider for the loop path** (4): unattended mode, auto-nudge
-   re-arm, skill-ladder review, memory consolidation. A loop run failed on provider
-   resolution (`C16`) before any ACP worker turn.
-2. **Needs a fixture that was not built** (10): knowledge `@`-mention,
-   attachment/paste, `@prompt` expansion, agent-profile system prompt, per-agent
-   approval floor, blocking PreToolUse hooks, the other five hook kinds,
-   tool-disable prefs, persona injection, incognito/restricted no-write
-   guarantees.
-3. **Needs timing or failure injection that did not land** (2): empty-turn
-   auto-retry, pipe-death auto-retry.
-4. **No as-a-user entry point** (2): dry-run replay, OS sandbox confinement.
-5. **Blocked by codex's refusal to disclose its own context** (1):
-   cancelled-turn preamble re-injection, where the cancel was performed (`C18`)
-   but the re-injection could not be read back (`G26`).
-6. **No deny-listed command was driven** (1): the hard deny-list cell. The `rm` in
-   `C5` reached a card rather than a pre-block, but that command is not known to be
-   on the list, so it proves nothing either way.
+The 2026-09-20 ledger reconciliation closed the former 20-cell residual. The
+original observations and their limitations remain in the capability tables; a
+closed column does not turn a divergence into parity.
 
 ## kiro-cli
 
 `kiro-cli` `2.18.1`, speaking ACP natively, with no adapter in the path, so nothing
 here is an adapter version. Core's `default` dialect, which has no permission-mode
-axis. This is the most completely measured column (2 of 63 cells unmeasured, and
-both for stated structural reasons) and the one with a live contradiction.
+axis. All 63 cells are measured; one is an `ENV` result rather than a capability
+verdict, and the column still has a live contradiction.
 
 > **The tool-axis scare is resolved, and it left four wrong rows behind.** An
 > earlier drive on 2026-08-19 got `NO_TOOLS` from this same `kiro-cli 2.18.1` and
@@ -405,22 +368,11 @@ both for stated structural reasons) and the one with a live contradiction.
 | Approvals / safety | Two of the six script-hook kinds never fire on the ACP path | Over 25+ turns: `SessionStart` 1, `UserPromptSubmit` 17, `Stop` 15, and `PostToolUse` **0**, `Error` **0**. The `Error` miss is not for lack of errors: a `-32601` and a real `-32603` model-unavailable both failed to fire it (`K40`, `G41`) | **Host seam** (`AAP-8`) | `kiro-cli 2.18.1` |
 | Approvals / safety | OS sandbox wrap: **`ENV`, not a verdict** | The host logs at boot that no OS-level sandbox is available and that only app-level checks apply on this platform, so there is no host wrap engaged and no confinement boundary to probe (`K47`). Recorded as an environment limit in both directions. kiro brings its own sandbox layer, which is not the host's mechanism | **Platform** | `kiro-cli 2.18.1` |
 
-### Not yet measured (2 of 63 cells)
+### Not yet measured (0 of 63 cells)
 
-Neither is a missing fixture, and neither is reachable by driving the product as a
-user.
-
-1. **Skill-ladder review**: with a live model provider and 25+ turns including
-   corrections, the proposals endpoint never left `{"proposals": []}`, and the
-   route census shows accept, promote and verify but **no forced-run surface**.
-   From outside the system "the gate was not met" and "the review is inert" are
-   the same observation, so no verdict can be recorded either way (`K44`, `G44`).
-   It needs instrumentation, not another sweep.
-2. **Empty-turn auto-retry**: no empty turn occurred across 25+ turns and ten
-   sessions, including a blocked write, a hook-blocked tool, an auto-denied
-   unattended call, a cancelled turn and two protocol errors (`K48`). Producing
-   one requires stream injection, so it is out of reach for an as-a-user sweep by
-   construction.
+The two paths previously called unreachable now have runtime observations: the
+zero-character recipe closed empty-turn auto-retry (`K55`), and `K60` closed the
+other path. `K47` remains the column's one `ENV` result.
 
 ## gemini-cli: unverified
 

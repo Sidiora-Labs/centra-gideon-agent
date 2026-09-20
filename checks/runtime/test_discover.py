@@ -16,7 +16,7 @@ import pytest
 
 from gideon.assurance.legibility import discover as dc
 
-_APP_TSX = Path("apps/console/src/app/App.tsx")
+_APP_TSX = Path("apps/console/src/app/shell/App.tsx")
 
 _REDIRECTING_ROUTES = {"loops"}
 

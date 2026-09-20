@@ -71,6 +71,7 @@ from typing import Any, Awaitable, Callable
 
 from aiohttp import web
 
+from gideon.core.http_request import RequestBodyTypeError, read_json_body
 from gideon.http_errors import json_error
 from gideon.integrations.inbound.audit import audit
 from gideon.integrations.inbound.auth import (
@@ -585,15 +586,15 @@ async def handle_action(request: web.Request) -> web.Response:
     if refusal is not None:
         return refusal
     try:
-        body = await request.json()
-    except Exception:
-        audit(BRIDGE_SURFACE, route="/action", status=400, refused="invalid JSON")
-        return json_error("invalid_json", status=400)
-    if not isinstance(body, dict):
+        body = await read_json_body(request)
+    except RequestBodyTypeError:
         audit(
             BRIDGE_SURFACE, route="/action", status=400, refused="body is not an object"
         )
         return json_error("invalid_body", status=400)
+    except Exception:
+        audit(BRIDGE_SURFACE, route="/action", status=400, refused="invalid JSON")
+        return json_error("invalid_json", status=400)
     name = str(body.get("action") or "").strip()
     raw_params = body.get("params")
     params: dict = raw_params if isinstance(raw_params, dict) else {}
@@ -649,7 +650,7 @@ async def handle_confirm(request: web.Request) -> web.Response:
     if refusal is not None:
         return refusal
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         audit(BRIDGE_SURFACE, route="/confirm", status=400, refused="invalid JSON")
         return json_error("invalid_json", status=400)

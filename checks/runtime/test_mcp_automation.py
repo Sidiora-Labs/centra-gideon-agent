@@ -161,7 +161,13 @@ def test_a_native_app_bundle_registers_the_provider():
 
     import gideon
 
-    root = Path(gideon.__file__).parent / "apps" / "native" / "gideon-automation-tools"
+    root = (
+        Path(gideon.__file__).parent
+        / "extensions"
+        / "apps"
+        / "native"
+        / "gideon-automation-tools"
+    )
     manifest = _json.loads((root / "app.json").read_text())
     assert manifest["native"] is True
     assert (

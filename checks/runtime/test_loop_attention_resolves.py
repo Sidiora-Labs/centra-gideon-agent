@@ -434,7 +434,7 @@ class TestOneOpenStatusVocabulary:
         """The clean break. A second definition is how the two would drift; the workflow module
         now supplies only its ref vocabulary."""
         assert not hasattr(attention, "_OPEN_STATUSES")
-        assert inbox_mod.OPEN_STATUSES == frozenset(
+        assert inbox_mod.STATUS_OPEN == frozenset(
             {ItemStatus.PENDING.value, ItemStatus.SEEN.value}
         )
 

@@ -175,14 +175,16 @@ async def test_an_over_cap_append_is_a_409_carrying_the_trim_proposal(svc, monke
     monkeypatch.setattr(handlers, "_get_service", lambda _state: svc)
     cap = next(s for s in svc.slots() if s["name"] == "persona")["cap_chars"]
 
-    request = MagicMock()
-    request.match_info = {"name": "persona"}
-    request.app = {"state": MagicMock()}
+    from aiohttp.test_utils import make_mocked_request
 
-    async def _json():
-        return {"text": "z" * (cap + 50)}
-
-    request.json = _json
+    request = make_mocked_request(
+        "POST",
+        "/api/memory/slots/persona/lines",
+        match_info={"name": "persona"},
+        headers={"Content-Type": "application/json"},
+    )
+    request.app["state"] = MagicMock()
+    request._read_bytes = json.dumps({"text": "z" * (cap + 50)}).encode()
     resp = await handlers.api_memory_slot_append(request)
     assert resp.status == 409
     body = json.loads(resp.body)

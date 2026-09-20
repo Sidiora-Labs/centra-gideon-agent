@@ -26,6 +26,7 @@ import logging
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.engine import turn_checkpoints
 from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.state import ConsoleState
@@ -114,7 +115,7 @@ async def api_chat_session_rewind(request: web.Request) -> web.Response:
     body: dict = {}
     if request.body_exists:
         try:
-            parsed = await request.json()
+            parsed = await read_json_body(request)
         except Exception:
             return json_error("invalid_body", message="invalid JSON body", status=400)
         if isinstance(parsed, dict):

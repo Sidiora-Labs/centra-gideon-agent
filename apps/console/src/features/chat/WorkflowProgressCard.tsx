@@ -10,6 +10,8 @@ import { foldEvent, foldSnapshot, type WorkflowViewModel } from '../workflows/wo
 import { useWorkflowStream } from '../workflows/useWorkflowStream'
 import { fmtElapsed, isTerminal, nodeLook, runLook } from '../workflows/workflowMeta'
 import { TextLink } from '../../shared/ui/TextLink'
+import { escalationReasonSentence } from '../workflows/escalationReasons'
+import { isEscalationRecord } from '../workflows/EscalationPanel'
 
 const WORKFLOW_TOOLS = new Set(['workflow_start', 'workflow_status', 'workflow_observe'])
 
@@ -112,6 +114,13 @@ export function WorkflowProgressCard({ refObj }: { refObj: WorkflowRunRef }) {
         </p>
       )}
 
+      {vm && isEscalationRecord(vm.attention) && (
+        <p data-type="caption" className="text-warning">
+          {escalationReasonSentence(vm.attention.reason)}{' '}
+          <TextLink href={`#/workflows/runs/${refObj.runId}#escalation`} size="xs">View diagnosis</TextLink>
+        </p>
+      )}
+
       {vm?.error && <p role="alert" data-type="caption" className="text-danger">{vm.error}</p>}
 
       {
@@ -123,10 +132,15 @@ export function WorkflowProgressCard({ refObj }: { refObj: WorkflowRunRef }) {
         const nl = nodeLook(active.state)
         const NIcon = nl.icon
         return (
-          <div data-type="caption" className="flex min-w-0 items-center gap-s text-on-surface-low">
+          <TextLink
+            href={`#/workflows/runs/${encodeURIComponent(refObj.runId)}?node=${encodeURIComponent(active.node_id || active.instance_path)}`}
+            size="xs"
+            className="flex min-w-0 items-center gap-s text-on-surface-low"
+            title="Inspect the active node"
+          >
             <NIcon size={12} className={`shrink-0 ${nl.tone}${nl.spin ? ' animate-spin' : ''}`} />
             <span className="min-w-0 flex-1 truncate">{active.node_id || active.instance_path}</span>
-          </div>
+          </TextLink>
         )
       })()}
 

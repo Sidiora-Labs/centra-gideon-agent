@@ -1029,6 +1029,11 @@ RECORDS = {
     "config.knowledge.KnowledgeConfig": Record(
         "KnowledgeConfig",
         {
+            "ocr_max_bytes": Value(
+                ("knowledge", "ocr_max_bytes"),
+                10 * 1024 * 1024,
+                lambda value: max(1, definitions._safe_int(value, 10 * 1024 * 1024)),
+            ),
             "idempotent_persist": Value(
                 ("knowledge", "idempotent_persist"), True, bool
             ),
@@ -1082,16 +1087,9 @@ RECORDS = {
                 None,
                 lambda value: max(1, definitions._safe_int(value, 32) or 32),
             ),
-            "reranker_enabled": Value(("knowledge", "reranker_enabled"), False, bool),
-            "reranker_model": Value(
-                ("knowledge", "reranker_model"),
-                "cross-encoder/ms-marco-MiniLM-L-6-v2",
-                lambda value: str(
-                    value or "cross-encoder/ms-marco-MiniLM-L-6-v2"
-                ).strip(),
-            ),
-            "reranker_max_candidates": Value(
-                ("knowledge", "reranker_max_candidates"),
+            "rerank_enabled": Value(("knowledge", "rerank_enabled"), False, bool),
+            "rerank_max_candidates": Value(
+                ("knowledge", "rerank_max_candidates"),
                 None,
                 lambda value: min(128, max(1, definitions._safe_int(value, 32) or 32)),
             ),

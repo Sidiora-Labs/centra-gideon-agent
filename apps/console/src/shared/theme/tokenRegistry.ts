@@ -86,6 +86,7 @@ export const TOKENS: Token[] = [
   sel('--font-family', 'Font family', 'Typography', 'inter', ['dm-sans', 'inter', 'mono', 'system']),
 
   sel('--ui-density', 'UI density', 'Layout', 'comfortable', ['comfortable', 'dense', 'cli']),
+  sel('--session-map-density', 'Session map density', 'Layout', 'comfortable', ['comfortable', 'compact']),
 
   s('--radius-scale', 'Corner roundness', 'Shape', 1, 0, 2, 0.05),
 

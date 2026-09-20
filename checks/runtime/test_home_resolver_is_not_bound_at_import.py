@@ -45,7 +45,7 @@ SRC = Path(gideon.__file__).parent
 LOADER_MODULE = "gideon.core.config.loader"
 HOME_RESOLVERS = {"config_dir", "config_path"}
 
-OWNER = SRC / "config" / "loader.py"
+OWNER = SRC / "core" / "config" / "loader.py"
 
 #: `packages/python-client/channel.py` and `packages/python-client/util.py` are pure published surfaces, and
 SDK_FACADE_EXEMPT = frozenset(
@@ -182,13 +182,22 @@ class TestDelegationActuallyFollowsTheLoader:
         """Keeping the module-level NAME is what let the sweep change zero test files:
         ``conftest``'s home guard re-points it, and several modules re-export it as a documented
         test patch seam. A delegator that removed the name would break both."""
-        from gideon.engine import agent_metadata
+        from gideon.engine import agent_metadata, lifecycle
         from gideon.engine.tasks import native
 
-        for module in (native, agent_metadata):
+        for module in (native, agent_metadata, lifecycle):
             assert hasattr(
                 module, "config_dir"
             ), f"{module.__name__} lost its patch seam"
             assert (
                 module.config_dir.__module__ == module.__name__
             ), f"{module.__name__}.config_dir must be DEFINED there, not re-imported"
+
+
+def test_lifecycle_re_resolves_loader_after_import(tmp_path, monkeypatch):
+    from gideon.core.config import loader
+    from gideon.engine import lifecycle
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(loader, "config_dir", Path.cwd)
+    assert lifecycle.config_dir() == tmp_path

@@ -6,9 +6,14 @@ import os
 import sys
 from pathlib import Path
 
-from gideon.core.atomic_write import atomic_write
 from gideon.core.config import AppConfig
 from gideon.core.config import loader as config_loader
+from gideon.core.config.document import (
+    preserve_configuration_credentials,
+    read_configuration,
+    redact_configuration,
+    write_configuration,
+)
 from gideon.engine.hooks import safe_read_file
 from gideon.security.sel import sel
 
@@ -31,7 +36,8 @@ def _config_cmd(args: argparse.Namespace) -> None:
     if action == "get":
 
         cfg = AppConfig.load()
-        d = cfg.to_dict()
+        raw = read_configuration(config_path(), config_loader.logger)
+        d = redact_configuration({**cfg.to_dict(), **(raw or {})})
         key = getattr(args, "key", None)
         sel().log_api_access(
             caller="cli",
@@ -65,7 +71,16 @@ def _config_cmd(args: argparse.Namespace) -> None:
             except (json.JSONDecodeError, OSError) as e:
                 print(f"❌ Invalid JSON: {e}", file=sys.stderr)
                 sys.exit(1)
-            atomic_write(config_path(), json.dumps(data, indent=2) + "\n")
+            if not isinstance(data, dict):
+                print("❌ Config must be a JSON object", file=sys.stderr)
+                sys.exit(1)
+            try:
+                existing = _read_config_for_update(config_path())
+                data = preserve_configuration_credentials(data, existing)
+                write_configuration(config_path(), data, ValueError)
+            except (OSError, ValueError) as e:
+                print(f"❌ Could not read config: {e}", file=sys.stderr)
+                sys.exit(1)
             sel().log_api_access(
                 caller="cli",
                 operation="config_set_file",
@@ -112,7 +127,7 @@ def _config_cmd(args: argparse.Namespace) -> None:
             if not _dict_set(d, key, parsed):
                 print(f"❌ Unknown key: {key}", file=sys.stderr)
                 sys.exit(1)
-            atomic_write(p, json.dumps({**raw, **d}, indent=2) + "\n")
+            write_configuration(p, d, ValueError)
             sel().log_api_access(
                 caller="cli",
                 operation="config_set",

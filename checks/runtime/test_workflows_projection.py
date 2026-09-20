@@ -210,7 +210,7 @@ def test_the_field_table_matches_the_frontend_type() -> None:
     `WorkflowRunDetailData` directly.
     """
     root = Path(__file__).resolve().parents[2]
-    api = (root / "apps/console/src/lib/api.ts").read_text(encoding="utf-8")
+    api = (root / "apps/console/src/shared/data/api.ts").read_text(encoding="utf-8")
 
     run_iface = re.search(
         r"export interface WorkflowRunDetailData \{(.*?)\n\}", api, re.S

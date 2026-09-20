@@ -21,6 +21,7 @@ import logging
 from aiohttp import web
 
 from gideon.core.config.loader import AppConfig
+from gideon.core.http_request import read_json_body
 from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.chat_folders import folder_exists
 from gideon.interfaces.dashboard.chat_persistence import (
@@ -55,7 +56,7 @@ async def api_chat_sessions_bulk(request: web.Request) -> web.Response:
     """
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -180,7 +181,7 @@ async def api_chat_sessions_auto_archive(request: web.Request) -> web.Response:
     """
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     if not isinstance(body, dict):
@@ -237,7 +238,7 @@ async def api_chat_session_lifecycle(request: web.Request) -> web.Response:
     if session is None:
         return web.json_response({"error": "not found"}, status=404)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):

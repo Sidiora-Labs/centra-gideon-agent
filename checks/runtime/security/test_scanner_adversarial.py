@@ -252,10 +252,8 @@ def assert_dangerous(case: dict[str, Any], tmp_path: Path) -> None:
             ), f"{case['id']} variant {i} not dangerous via scan_text: {variant!r}"
             staged = tmp_path / f"v{i}" / "helper"
             staged.mkdir(parents=True)
-            (staged / "tooling/scripts").mkdir()
-            (staged / "tooling/scripts" / "setup.sh").write_text(
-                variant, encoding="utf-8"
-            )
+            (staged / "scripts").mkdir()
+            (staged / "scripts" / "setup.sh").write_text(variant, encoding="utf-8")
             dir_report = default_scanner.scan(staged)
             assert (
                 dir_report.verdict is Verdict.DANGEROUS
@@ -358,7 +356,7 @@ def assert_installed_equals_scanned(
     assert seen["scanned"], "the scan was never instrumented — the rail proved nothing"
     assert installed == seen["scanned"], "installed bytes differ from scanned bytes"
     assert market.fetch_calls == 1, f"the install re-fetched ({market.fetch_calls}x)"
-    body = (tmp_path / "live" / "helper" / "tooling/scripts" / "setup.sh").read_text(
+    body = (tmp_path / "live" / "helper" / "scripts" / "setup.sh").read_text(
         encoding="utf-8"
     )
     for entry in swap:
@@ -386,7 +384,7 @@ def assert_midscan_payload_swap_refused(
     instrument_scan(monkeypatch, at_scan=on_attacker_thread(mutate))
     with pytest.raises(ValueError, match="dangerous"):
         mk.install_scanned(market, "adversarial", "helper", tmp_path / "live")
-    assert not (tmp_path / "live" / "helper" / "tooling/scripts").exists()
+    assert not (tmp_path / "live" / "helper" / "scripts").exists()
 
 
 def assert_integrity_tamper_detected(case: dict[str, Any], tmp_path: Path) -> None:
@@ -401,7 +399,7 @@ def assert_integrity_tamper_detected(case: dict[str, Any], tmp_path: Path) -> No
     (skill_dir / "extra.sh").write_text("echo smuggled\n", encoding="utf-8")
     report = mk.verify_skill_integrity(skill_dir)
     assert report.ok is False
-    assert "tooling/scripts/setup.sh" in report.mutated, report.mutated
+    assert "scripts/setup.sh" in report.mutated, report.mutated
     assert "extra.sh" in report.added, report.added
     assert "TAMPERED" in report.summary()
 
@@ -416,7 +414,7 @@ def assert_oversize_skipped_by_walk_refused_at_commit(
     staged = tmp_path / "staged" / "helper"
     staged.mkdir(parents=True)
     write_entries(staged, files)
-    blob = staged / "tooling/scripts" / "setup.sh"
+    blob = staged / "scripts" / "setup.sh"
     assert blob.stat().st_size > supply_chain._MAX_FILE_BYTES
     assert (
         default_scanner.scan(staged).verdict is Verdict.CLEAN
@@ -427,7 +425,7 @@ def assert_oversize_skipped_by_walk_refused_at_commit(
     market = AdversarialMarket(files)
     with pytest.raises(ValueError, match="dangerous"):
         mk.install_scanned(market, "adversarial", "helper", tmp_path / "live2")
-    assert not (tmp_path / "live2" / "helper" / "tooling/scripts").exists()
+    assert not (tmp_path / "live2" / "helper" / "scripts").exists()
 
 
 def assert_manifest_rejected(case: dict[str, Any], tmp_path: Path) -> None:

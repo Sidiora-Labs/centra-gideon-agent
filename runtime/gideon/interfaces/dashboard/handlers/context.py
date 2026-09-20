@@ -23,6 +23,7 @@ from aiohttp import web
 
 from gideon.assurance.legibility import context_router as cr
 from gideon.core.atomic_write import atomic_write
+from gideon.core.http_request import read_json_body
 from gideon.engine.tasks.hierarchy import HierarchyStore
 from gideon.http_errors import json_error
 
@@ -168,7 +169,7 @@ async def api_project_context_regenerate(request: web.Request) -> web.Response:
 
     query = ""
     try:
-        body = await request.json()
+        body = await read_json_body(request)
         query = str((body or {}).get("query", ""))[:500]
     except Exception:
         query = ""

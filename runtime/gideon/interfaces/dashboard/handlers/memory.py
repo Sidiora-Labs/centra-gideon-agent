@@ -11,6 +11,7 @@ from aiohttp import web
 
 from gideon.cognition.vector_memory import SemanticRejectCode
 from gideon.core.atomic_write import atomic_write
+from gideon.core.http_request import RequestBodyTypeError, read_json_body, string_field
 from gideon.interfaces.dashboard.handlers._shared import (
     _blocks_reads_session,
     _get_memory,
@@ -45,7 +46,7 @@ async def api_memory_preferences(request: web.Request) -> web.Response:
     mem = _get_memory(state)
     if request.method == "PUT":
         try:
-            body = await request.json()
+            body = await read_json_body(request)
         except Exception:
             return web.json_response({"error": "invalid JSON"}, status=400)
         if not isinstance(body, dict):
@@ -64,7 +65,7 @@ async def api_memory_projects(request: web.Request) -> web.Response:
     mem = _get_memory(state)
     if request.method == "PUT":
         try:
-            body = await request.json()
+            body = await read_json_body(request)
         except Exception:
             return web.json_response({"error": "invalid JSON"}, status=400)
         if not isinstance(body, dict):
@@ -83,7 +84,7 @@ async def api_memory_history(request: web.Request) -> web.Response:
     mem = _get_memory(state)
     if request.method == "PUT":
         try:
-            body = await request.json()
+            body = await read_json_body(request)
         except Exception:
             return web.json_response({"error": "invalid JSON"}, status=400)
         if not isinstance(body, dict):
@@ -134,7 +135,7 @@ async def api_memory_settings(request: web.Request) -> web.Response:
             return web.json_response({"error": error}, status=status)
 
         try:
-            body = await request.json()
+            body = await read_json_body(request)
         except Exception:
             return _deny("invalid JSON", "invalid JSON body")
         if not isinstance(body, dict):
@@ -378,7 +379,7 @@ async def api_memory_semantic_write(request: web.Request) -> web.Response:
         )
     svc = _get_service(request.app["state"])
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -499,7 +500,7 @@ async def api_memory_approval_rule_add(request: web.Request) -> web.Response:
             {"error": "Memory writes are not allowed in this session mode."}, status=403
         )
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -955,11 +956,11 @@ async def api_memory_import(request: web.Request) -> web.Response:
         )
     store = _get_provider(request.app["state"])
     try:
-        data = await request.json()
+        data = await read_json_body(request)
+    except RequestBodyTypeError:
+        return web.json_response({"error": "JSON body must be an object"}, status=400)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
-    if not isinstance(data, dict):
-        return web.json_response({"error": "JSON body must be an object"}, status=400)
     counts = store.import_memory(data)
     return web.json_response(counts)
 
@@ -996,7 +997,7 @@ async def api_memory_consolidate(request: web.Request) -> web.Response:
     if not state.consolidator:
         return web.json_response({"error": "consolidator not available"}, status=503)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -1046,7 +1047,7 @@ async def api_memory_promote(request: web.Request) -> web.Response:
         )
     store = _get_provider(request.app["state"])
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     if not isinstance(body, dict):
@@ -1243,10 +1244,10 @@ async def api_memory_entity_create(request: web.Request) -> web.Response:
             {"error": "the memory entity graph is disabled"}, status=409
         )
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except (json.JSONDecodeError, ValueError):
         return web.json_response({"error": "body must be JSON"}, status=400)
-    name = str(body.get("name", "") or "").strip()
+    name = string_field(body, "name")
     entity_type = str(body.get("entity_type", "") or "").strip().lower()
     if not name:
         return web.json_response({"error": "name is required"}, status=400)
@@ -1293,10 +1294,10 @@ async def api_memory_entity_proposals(request: web.Request) -> web.Response:
             {"error": "the memory entity graph is disabled"}, status=409
         )
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except (json.JSONDecodeError, ValueError):
         return web.json_response({"error": "body must be JSON"}, status=400)
-    name = str(body.get("name", "") or "").strip()
+    name = string_field(body, "name")
     action = str(body.get("action", "") or "").strip().lower()
     if not name:
         return web.json_response({"error": "name is required"}, status=400)
@@ -1442,7 +1443,7 @@ async def api_memory_slot_append(request: web.Request) -> web.Response:
     svc = _get_service(request.app["state"])
     name = request.match_info.get("name", "")
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except (json.JSONDecodeError, ValueError):
         return web.json_response({"error": "body must be JSON"}, status=400)
     text = str(body.get("text", "") or "").strip()
@@ -1477,7 +1478,7 @@ async def api_memory_slot_line_retire(request: web.Request) -> web.Response:
     svc = _get_service(request.app["state"])
     name = request.match_info.get("name", "")
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except (json.JSONDecodeError, ValueError):
         return web.json_response({"error": "body must be JSON"}, status=400)
     text = str(body.get("text", "") or "").strip()

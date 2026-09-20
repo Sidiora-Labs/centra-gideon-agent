@@ -84,7 +84,9 @@ _WIRE_LEAK = re.compile(
 
 
 def _handler_source(name: str) -> str:
-    return (SRC / "dashboard" / "handlers" / name).read_text(encoding="utf-8")
+    return (SRC / "interfaces" / "dashboard" / "handlers" / name).read_text(
+        encoding="utf-8"
+    )
 
 
 def test_providers_handlers_ship_no_exception_text_as_copy() -> None:
@@ -106,7 +108,9 @@ def test_self_check_the_leak_pattern_still_matches() -> None:
 
 
 def test_probe_failure_uses_the_shared_classifier() -> None:
-    src = (SRC / "providers" / "instance_routes.py").read_text(encoding="utf-8")
+    src = (SRC / "extensions" / "providers" / "instance_routes.py").read_text(
+        encoding="utf-8"
+    )
     assert (
         "from gideon.extensions.providers.failure_copy import connectivity_guidance"
         in src

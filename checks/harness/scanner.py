@@ -102,7 +102,8 @@ def check_hook_provider_parity(files: list[Path], root: Path) -> list[Finding]:
     validation_py = root / "runtime" / "gideon" / "assurance" / "validation.py"
     changed = set(files)
     touches_providers = any(
-        _is_under(f, root, "src", "gideon", "action_providers") for f in changed
+        _is_under(f, root, "runtime", "gideon", "integrations", "action_providers")
+        for f in changed
     )
     touches_allowlist = validation_py in changed
     if not (touches_providers or touches_allowlist):

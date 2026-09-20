@@ -433,33 +433,29 @@ def test_a_card_read_that_wrote_to_a_store_is_reported_not_swallowed(
     assert _body(resp)["error"]["code"] == "store_mutated"
 
 
-class _JsonRequest:
-    """A minimal request stand-in for the POST body, since `make_mocked_request` has none."""
-
-    def __init__(self, payload):
-        self._payload = payload
-        self._store = {"user": "owner"}
-
-    async def json(self):
-        if isinstance(self._payload, Exception):
-            raise self._payload
-        return self._payload
-
-    def __getitem__(self, key):
-        return self._store[key]
-
-    def get(self, key, default=None):
-        return self._store.get(key, default)
+def _json_req(payload):
+    """A real aiohttp request carrying the serialized body ``read_json_body``
+    parses. ``bytes`` payloads go through raw, for the invalid-JSON case."""
+    request = make_mocked_request(
+        "POST",
+        "/api/evals/retrieval/labels",
+        headers={"Content-Type": "application/json"},
+    )
+    request["user"] = "owner"
+    request._read_bytes = (
+        payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+    )
+    return request
 
 
 def test_saving_labels_refuses_a_bad_body(evals_on):
     cases = [
-        (_JsonRequest(ValueError("not json")), "invalid_json"),
-        (_JsonRequest([1, 2]), "invalid_json"),
-        (_JsonRequest({"labels": {}}), "store_required"),
-        (_JsonRequest({"store": "both", "labels": {}}), "store_required"),
-        (_JsonRequest({"store": "memory"}), "labels_required"),
-        (_JsonRequest({"store": "memory", "labels": []}), "labels_required"),
+        (_json_req(b"not json"), "invalid_json"),
+        (_json_req([1, 2]), "invalid_json"),
+        (_json_req({"labels": {}}), "store_required"),
+        (_json_req({"store": "both", "labels": {}}), "store_required"),
+        (_json_req({"store": "memory"}), "labels_required"),
+        (_json_req({"store": "memory", "labels": []}), "labels_required"),
     ]
     for request, code in cases:
         resp = _run(E.api_evals_retrieval_labels(request))
@@ -490,7 +486,7 @@ def test_saving_an_empty_selection_is_accepted_as_a_real_judgement(
     monkeypatch.setattr(rb, "apply_labels_for_store", fake_apply)
     resp = _run(
         E.api_evals_retrieval_labels(
-            _JsonRequest({"store": "memory", "labels": {"q": []}})
+            _json_req({"store": "memory", "labels": {"q": []}})
         )
     )
     assert resp.status == 200
@@ -503,9 +499,7 @@ def test_saving_an_empty_selection_is_accepted_as_a_real_judgement(
 def test_a_card_that_marked_nothing_at_all_is_refused(evals_on):
     """An accepted card that changed nothing would report success while the qrels stayed weak."""
     resp = _run(
-        E.api_evals_retrieval_labels(
-            _JsonRequest({"store": "memory", "labels": {"": []}})
-        )
+        E.api_evals_retrieval_labels(_json_req({"store": "memory", "labels": {"": []}}))
     )
     assert resp.status == 400
     assert _body(resp)["error"]["code"] == "labels_rejected"

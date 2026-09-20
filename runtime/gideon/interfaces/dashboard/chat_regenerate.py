@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.interfaces.dashboard.chat_persistence import save_session_to_history
 from gideon.interfaces.dashboard.chat_runner import run_chat
 from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
@@ -139,7 +140,7 @@ async def api_chat_session_switch_variant(request: web.Request) -> web.Response:
         return web.json_response({"error": "not found"}, status=404)
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -208,7 +209,7 @@ async def api_chat_session_edit_resend(request: web.Request) -> web.Response:
         return web.json_response({"error": "not found"}, status=404)
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
 

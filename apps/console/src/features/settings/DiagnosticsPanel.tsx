@@ -90,7 +90,7 @@ export function DiagnosticsPanel() {
 }
       <PanelHeader
         title="Diagnostics"
-        hint="A live tail of the gateway's own log, plus the backend log level. Nothing here changes your data — the level is the only setting it writes, and it persists across restarts."
+        hint="A live tail of the gateway's own log, plus the backend log level. Doctor probing is read-only; its Fix and Run now controls are the only exceptions that mutate. Changing the log level here also writes that setting, which persists across restarts."
       />
 
       { }

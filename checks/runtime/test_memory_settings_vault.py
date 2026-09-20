@@ -18,9 +18,11 @@ silently upgraded to reading the user's files back.
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock
+from types import SimpleNamespace
 
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import make_mocked_request
 
 from gideon.interfaces.dashboard.handlers.memory import api_memory_settings
 
@@ -35,23 +37,23 @@ def _cfg(tmp_path, monkeypatch):
 
 
 def _put_request(body: dict):
-    request = MagicMock()
-    request.method = "PUT"
-    request.app = {"state": MagicMock(consolidator=None)}
-    request.get = lambda key, default=None: "tester" if key == "user" else default
-
-    async def _json():
-        return body
-
-    request.json = _json
+    app = web.Application()
+    app["state"] = SimpleNamespace(consolidator=None)
+    request = make_mocked_request(
+        "PUT",
+        "/api/memory/settings",
+        headers={"Content-Type": "application/json"},
+        app=app,
+    )
+    request["user"] = "tester"
+    request._read_bytes = json.dumps(body).encode()
     return request
 
 
 def _get_request():
-    request = MagicMock()
-    request.method = "GET"
-    request.app = {"state": MagicMock(consolidator=None)}
-    return request
+    app = web.Application()
+    app["state"] = SimpleNamespace(consolidator=None)
+    return make_mocked_request("GET", "/api/memory/settings", app=app)
 
 
 @pytest.mark.asyncio

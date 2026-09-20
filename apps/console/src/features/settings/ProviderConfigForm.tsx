@@ -5,10 +5,8 @@ import { parseJsonField, serializeJsonField } from '../apps/appConfigForm'
 import { Button } from '../../shared/ui/Button'
 import { SquareIconButton } from '../../shared/ui/SquareIconButton'
 import { Toggle } from '../../shared/ui/Toggle'
-import { TextArea } from '../../shared/ui/forms'
+import { Select, TextArea, TextInput } from '../../shared/ui/forms'
 import { SavedToast } from './settingsUI'
-
-export const inputCls = 'h-9 w-full rounded-md bg-surface-high px-3 text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary'
 
 export function schemaDefaults(schema: ProviderSchema | null | undefined): Record<string, unknown> {
   const out: Record<string, unknown> = {}
@@ -91,7 +89,7 @@ export function SchemaField({ fieldKey, prop, value, onChange, secretAlreadySet 
   if (prop.type === 'array' || prop.type === 'object') {
     const expected = prop.type === 'object' ? 'object' : 'array'
     control = (
-      <TextArea value={jsonText} rows={4} mono ariaLabel={label}
+      <TextArea id={id} value={jsonText} rows={4} mono ariaLabel={label} surface="high"
         onChange={(nv) => {
           setJsonText(nv)
           const res = parseJsonField(nv, expected)
@@ -102,38 +100,34 @@ export function SchemaField({ fieldKey, prop, value, onChange, secretAlreadySet 
     )
   } else if (prop.enum && prop.enum.length) {
     control = (
-      <select id={id} value={String(value ?? prop.default ?? '')} onChange={(e) => onChange(e.target.value)} data-type="body-s" className={inputCls + ' cursor-pointer'}>
-        {prop.enum.map((o) => <option key={o} value={o}>{o}</option>)}
-      </select>
+      <Select id={id} value={String(value ?? prop.default ?? '')} onChange={onChange} size="md" surface="high"
+        options={prop.enum.map((option) => ({ value: option, label: option }))} />
     )
   } else if (prop.type === 'boolean') {
     const on = Boolean(value ?? prop.default)
     control = <Toggle on={on} onChange={onChange} label={label} />
   } else if (prop.type === 'integer' || prop.type === 'number') {
     control = (
-      <input id={id} type="number" value={value == null ? '' : String(value)} min={prop.minimum} max={prop.maximum}
-        onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))}
-        placeholder={meta.placeholder ?? (prop.default != null ? String(prop.default) : '')} data-type="body-s" className={inputCls} />
+      <TextInput id={id} type="number" value={value == null ? '' : String(value)} min={prop.minimum} max={prop.maximum}
+        onChange={(next) => onChange(next === '' ? undefined : Number(next))} size="md" surface="high"
+        placeholder={meta.placeholder ?? (prop.default != null ? String(prop.default) : '')} />
     )
   } else if (meta.sensitive) {
     control = (
-      <div className="relative">
-        <input id={id} type={showSecret ? 'text' : 'password'} value={String(value ?? '')} onChange={(e) => onChange(e.target.value)}
-          minLength={prop.minLength} maxLength={prop.maxLength}
-          placeholder={secretAlreadySet ? 'saved — leave blank to keep' : meta.placeholder ?? '••••••••'}
-          data-type="body-s" className={inputCls + ' pr-10'} />
-        <span className="absolute right-1.5 top-1/2 -translate-y-1/2">
+      <TextInput id={id} type={showSecret ? 'text' : 'password'} value={String(value ?? '')} onChange={onChange}
+        minLength={prop.minLength} maxLength={prop.maxLength} size="md" surface="high"
+        placeholder={secretAlreadySet ? 'saved — leave blank to keep' : meta.placeholder ?? '••••••••'}
+        trailingSlot={
           <SquareIconButton label={showSecret ? 'Hide' : 'Show'} onClick={() => setShowSecret((s) => !s)}>
             {showSecret ? <EyeOff size={14} /> : <Eye size={14} />}
           </SquareIconButton>
-        </span>
-      </div>
+        } />
     )
   } else {
     control = (
-      <input id={id} type="text" value={String(value ?? '')} onChange={(e) => onChange(e.target.value)}
+      <TextInput id={id} type="text" value={String(value ?? '')} onChange={onChange}
         minLength={prop.minLength} maxLength={prop.maxLength} pattern={prop.pattern}
-        placeholder={meta.placeholder ?? (prop.default != null ? String(prop.default) : '')} data-type="body-s" className={inputCls} />
+        placeholder={meta.placeholder ?? (prop.default != null ? String(prop.default) : '')} size="md" surface="high" />
     )
   }
 

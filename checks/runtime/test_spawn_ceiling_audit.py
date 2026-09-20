@@ -39,283 +39,271 @@ _SPAWN_CALLEES = {
 }
 
 _CEILING_WRAPPED: dict[str, str] = {
-    "workflows/container_env.py::_run_cli::create_subprocess_limited": (
+    "engine/tmux_substrate.py::TmuxCommand.status::asyncio.create_subprocess_exec": (
+        "tmux worker command is ceiling-wrapped by provisioning._DurableSetupJob.run before new_session; other verbs are fixed session controls"
+    ),
+    "automation/workflows/container_env.py::_run_cli::create_subprocess_limited": (
         "container backend CLI verbs — manifest-derived (agent-authorable) argv → tool ceiling"
     ),
-    "sandbox.py::create_subprocess_limited::asyncio.create_subprocess_exec": (
+    "security/sandbox.py::create_subprocess_limited::asyncio.create_subprocess_exec": (
         "the ceiling helper — spawns the shim-prepended argv for every routed async seam"
     ),
-    "_spawn_exec_shim.py::main::os.execvp": (
+    "engine/_spawn_exec_shim.py::main::os.execvp": (
         "the shim's post-exec handoff to the real target (limits already applied)"
     ),
-    "agents/native/builtin_tools.py::NativeBuiltinToolProvider._t_bash::"
+    "engine/agents/native/builtin_tools.py::NativeBuiltinToolProvider._t_bash::"
     "create_subprocess_limited": "native bash tool → tool ceiling via create_subprocess_limited",
-    "action_providers/bash_provider.py::BashActionProvider.execute::"
+    "integrations/action_providers/bash_provider.py::BashActionProvider.execute::"
     "create_subprocess_limited": "bash action provider → tool ceiling",
-    "computer_use/service.py::_run_driver::create_subprocess_limited": (
+    "integrations/computer_use/service.py::_run_driver::create_subprocess_limited": (
         "desktop computer-use driver → tool ceiling via create_subprocess_limited"
     ),
-    "loop/gates.py::run_verify_command::create_subprocess_limited": (
+    "automation/loop/gates.py::run_verify_command::create_subprocess_limited": (
         "loop verify command → tool ceiling (was create_subprocess_shell)"
     ),
-    "loop/worktree.py::_git::subprocess.run": (
+    "automation/loop/worktree.py::_git::subprocess.run": (
         "loop worktree git → build ceiling via spawn_shim_argv"
     ),
-    "selfqa/fix_branch.py::_git::subprocess.run": (
+    "assurance/selfqa/fix_branch.py::_git::subprocess.run": (
         "selfqa fix-branch git → build ceiling via spawn_shim_argv"
     ),
-    "artifacts/build.py::_run_esbuild::create_subprocess_limited": (
+    "workspace/artifacts/build.py::_run_esbuild::create_subprocess_limited": (
         "react artifact bundle → build ceiling via create_subprocess_limited"
     ),
-    "apps/backend_runtime.py::BackendSupervisor.start::subprocess.Popen": (
+    "extensions/apps/backend_runtime.py::BackendSupervisor.start::subprocess.Popen": (
         "app backend → tool ceiling via spawn_shim_argv (argv-prepend; NOT preexec_fn)"
     ),
-    "apps/worker_runtime.py::WorkerSupervisor._spawn::subprocess.Popen": (
+    "extensions/apps/worker_runtime.py::WorkerSupervisor._spawn::subprocess.Popen": (
         "app background worker → tool ceiling via spawn_shim_argv (argv-prepend; NOT preexec_fn)"
     ),
-    "mcp_discovery.py::probe_server::create_subprocess_limited": (
+    "integrations/mcp_discovery.py::probe_server::create_subprocess_limited": (
         "MCP probe → tool ceiling via create_subprocess_limited"
     ),
-    "mcp_client.py::McpServerConn._open_transport::StdioServerParameters": (
+    "integrations/mcp_client.py::McpServerConn._open_transport::StdioServerParameters": (
         "MCP stdio client → tool ceiling via spawn_shim_argv baked into StdioServerParameters"
     ),
-    "workflows/effects.py::run_teardown::create_subprocess_limited": (
+    "automation/workflows/effects.py::_TeardownInvocation.run::create_subprocess_limited": (
         "workflow BYOI teardown → tool ceiling via create_subprocess_limited"
     ),
-    "workflows/provisioning.py::run_step::create_subprocess_limited": (
+    "automation/workflows/provisioning.py::_StepExecution.subprocess::create_subprocess_limited": (
         "workspace setup/teardown step → tool ceiling via create_subprocess_limited"
     ),
-    "tmux_substrate.py::new_session::asyncio.create_subprocess_exec": (
-        "durable worker spawn → tool ceiling via spawn_shim_argv inside the tmux session"
-    ),
-    "sandbox_providers/none.py::_NoneHandle.exec::create_subprocess_limited": (
+    "integrations/sandbox_providers/none.py::_NoneHandle.exec::create_subprocess_limited": (
         "none sandbox provider → profile ceiling via create_subprocess_limited (post-exec shim); "
         "the single routed-spawn seam (subsumes the former AcpProcess.spawn session_host site)"
     ),
-    "sandbox_providers/docker.py::_DockerHandle.exec::create_subprocess_limited": (
+    "integrations/sandbox_providers/docker.py::_DockerHandle.exec::create_subprocess_limited": (
         "docker sandbox provider → profile ceiling via create_subprocess_limited on the docker "
         "client (mirrors the none seam); container itself bounded by native --pids-limit/--memory"
     ),
-    "sandbox_providers/lima.py::_LimaHandle.exec::create_subprocess_limited": (
+    "integrations/sandbox_providers/lima.py::_LimaHandle.exec::create_subprocess_limited": (
         "lima sandbox provider → profile ceiling via create_subprocess_limited on the limactl "
         "client (mirrors the none/docker seam); guest VM bounded by instance-creation config"
     ),
-    "schedule_script.py::run_script_sandboxed::subprocess.run": (
+    "automation/schedule_script.py::run_script_sandboxed::subprocess.run": (
         "cron/scheduled script → tool ceiling via spawn_shim_argv, prepended outside the "
         "OS-sandbox wrap (sync site; rlimits inherit through exec)"
     ),
-    "dashboard/handlers/terminal.py::api_terminal_ws::create_subprocess_limited": (
+    "interfaces/dashboard/handlers/terminal.py::api_terminal_ws::create_subprocess_limited": (
         "interactive terminal → none profile (user's own shell; helper is a no-op)"
     ),
-    "knowledge_providers/pack_parse.py::run_parse_script::subprocess.run": (
+    "integrations/knowledge_providers/pack_parse.py::run_parse_script::subprocess.run": (
         "connector-pack parse script → tool ceiling via spawn_shim_argv, prepended outside "
         "the OS-sandbox wrap (sync site; rlimits inherit through exec)"
     ),
-    "local_models/sidecar.py::SidecarRunner._spawn::subprocess.Popen": (
+    "integrations/local_models/sidecar.py::SidecarRunner._spawn::subprocess.Popen": (
         "model sidecar child → tool ceiling via spawn_shim_argv (argv-prepend)"
     ),
-    "local_models/sidecar.py::SidecarInstall._run::subprocess.run": (
+    "integrations/local_models/sidecar.py::SidecarInstall._run::subprocess.run": (
         "sidecar venv/pip install → build ceiling via spawn_shim_argv"
     ),
 }
 
 _OPERATOR_EXEMPT: dict[str, str] = {
-    "acp/cli_resolve.py::_npm_root_global_bin::subprocess.run": "operator: npm prefix probe",
-    "acp/cli_resolve.py::resolve_node_ge::subprocess.run": "operator: node version probe",
-    "acp/cli_resolve.py::provision_acp_adapter::subprocess.run": "operator: ACP adapter install",
-    "acp/transport.py::_direct_children::subprocess.check_output": "host-fact: child PID probe",
-    "acp/transport.py::_get_start_time::subprocess.check_output": (
+    "engine/tmux_substrate.py::TmuxCommand.lines::asyncio.create_subprocess_exec": "operator: tmux session listing",
+    "engine/tmux_substrate.py::TmuxCommand.status_sync::subprocess.run": "operator: tmux session existence probe",
+    "engine/tmux_substrate.py::TmuxCommand.output_sync::subprocess.run": "operator: tmux pane cwd listing",
+    "engine/gateway_maintenance.py::run_command::asyncio.create_subprocess_exec": "service: gateway git/pip update commands",
+    "engine/gateway_maintenance.py::RuntimeUpdates.restart::os.execv": "service: re-exec gateway after update",
+    "engine/gateway_maintenance.py::DependencyRepair.run::subprocess.run": "operator: install missing gateway dependencies",
+    "interfaces/cli/doctor.py::_doctor_node::subprocess.run": "host-fact: node version probe",
+    "interfaces/cli/doctor.py::_git_repo_state::subprocess.run": "host-fact: git branch and worktree status",
+    "interfaces/dashboard/handlers/updates.py::_run_rollback._rollback::asyncio.create_subprocess_exec": "operator: explicit package/git rollback",
+    "integrations/acp/cli_resolve.py::_npm_root_global_bin::subprocess.run": "operator: npm prefix probe",
+    "integrations/acp/cli_resolve.py::resolve_node_ge::subprocess.run": "operator: node version probe",
+    "integrations/acp/cli_resolve.py::_AdapterInstall.execute::subprocess.run": "operator: ACP adapter install",
+    "integrations/acp/transport.py::_direct_children::subprocess.check_output": "host-fact: child PID probe",
+    "integrations/acp/transport.py::_get_start_time::subprocess.check_output": (
         "host-fact: process start-time probe"
     ),
-    "acp/transport.py::_is_our_child::subprocess.check_output": "host-fact: PID-recycle probe",
-    "acp/transport.py::_kill_escaped_children::subprocess.check_output": (
+    "integrations/acp/transport.py::_is_our_child::subprocess.check_output": "host-fact: PID-recycle probe",
+    "integrations/acp/transport.py::_kill_escaped_children::subprocess.check_output": (
         "host-fact: pgid membership scan for escaped children"
     ),
-    "agents/runners.py::probe_runner::subprocess.run": "host-fact: runner --version probe",
-    "workflows/web_preview.py::_run::subprocess.run": "host-fact: listening-port/cwd probe",
-    "durability/state_history.py::_git::subprocess.run": "operator: state-history git runner",
-    "selfqa/triage.py::_git::subprocess.run": "host-fact: read-only git commit inspection",
-    "selfqa/watch.py::_git::subprocess.run": (
+    "engine/agents/runners.py::probe_runner::subprocess.run": "host-fact: runner --version probe",
+    "automation/workflows/web_preview.py::_run::subprocess.run": "host-fact: listening-port/cwd probe",
+    "operations/durability/state_history.py::_git::subprocess.run": "operator: state-history git runner",
+    "assurance/selfqa/triage.py::_git::subprocess.run": "host-fact: read-only git commit inspection",
+    "assurance/selfqa/watch.py::_git::subprocess.run": (
         "host-fact: read-only git HEAD/rev-list probe (SV-11 — the retired sandbox "
         "script's delta logic, moved in-process; same fixed argv, no shell, 30s timeout)"
     ),
-    "selfqa/evidence.py::_ffmpeg_ping::subprocess.run": (
+    "assurance/selfqa/evidence.py::_ffmpeg_ping::subprocess.run": (
         "host-fact: ffmpeg availability probe (fixed `ffmpeg -version` argv)"
     ),
-    "selfqa/evidence.py::_run_ffmpeg::subprocess.run": (
+    "assurance/selfqa/evidence.py::_run_ffmpeg::subprocess.run": (
         "host tool: ffmpeg contact-sheet/GIF derivation "
         "(fixed filter argv, paths in the bundle dir)"
     ),
-    "durability/state_history.py::ensure_repo::subprocess.run": "operator: state-history repo init",
-    "durability/state_history.py::_repo_usable::subprocess.run": "operator: repo usability probe",
-    "durability/state_history.py::git_available::subprocess.run": "host-fact: git presence probe",
-    "apps/app_manager.py::_run_hook::subprocess.run": "operator: app install setup hook",
-    "apps/app_manager.py::_install_python_deps::subprocess.run": "operator: app dep install",
-    "apps/catalog.py::_read_git_registry::subprocess.run": "operator: git app registry read",
-    "apps/catalog.py::_scan_git_source::subprocess.run": "operator: git app source scan",
-    "apps/source.py::_clone_git::subprocess.run": "operator: git app clone",
-    "cli_config.py::_config_cmd::os.execvp": "operator: opens $EDITOR on config",
-    "cli_doctor.py::_doctor::subprocess.run": "operator: doctor host probes",
-    "cli_server.py::_stop::subprocess.check_output": "operator: stop — pid lookup",
-    "cli_server.py::_is_gideon_process::subprocess.check_output": (
+    "operations/durability/state_history.py::ensure_repo::subprocess.run": "operator: state-history repo init",
+    "operations/durability/state_history.py::_repo_usable::subprocess.run": "operator: repo usability probe",
+    "operations/durability/state_history.py::git_available::subprocess.run": "host-fact: git presence probe",
+    "extensions/apps/app_manager.py::_run_hook::subprocess.run": "operator: app install setup hook",
+    "extensions/apps/app_manager.py::_install_python_deps::subprocess.run": "operator: app dep install",
+    "extensions/apps/catalog.py::_read_git_registry::subprocess.run": "operator: git app registry read",
+    "extensions/apps/catalog.py::_scan_git_source::subprocess.run": "operator: git app source scan",
+    "extensions/apps/source.py::_clone_git::subprocess.run": "operator: git app clone",
+    "interfaces/cli/config.py::_config_cmd::os.execvp": "operator: opens $EDITOR on config",
+    "interfaces/cli/doctor.py::_doctor::subprocess.run": "operator: doctor host probes",
+    "interfaces/cli/server.py::_stop::subprocess.check_output": "operator: stop — pid lookup",
+    "interfaces/cli/server.py::_is_gideon_process::subprocess.check_output": (
         "operator: pid identity probe"
     ),
-    "cli_server.py::_spawn_detached_gateway::subprocess.Popen": (
+    "interfaces/cli/server.py::_spawn_detached_gateway::subprocess.Popen": (
         "operator: launch the gateway itself"
     ),
-    "cli_run.py::start_transient_gateway::subprocess.Popen": (
+    "interfaces/cli/run.py::start_transient_gateway::subprocess.Popen": (
         "operator: launch the gateway itself (headless `run` bootstrap)"
     ),
-    "cli_server.py::_install::subprocess.run": "operator: self-update package install",
-    "cli_server.py::_refresh_agent_config::subprocess.run": (
+    "interfaces/cli/server.py::_install::subprocess.run": "operator: self-update package install",
+    "interfaces/cli/server.py::_refresh_agent_config::subprocess.run": (
         "operator: post-update `setup --agent-only` re-run"
     ),
-    "cli_server.py::_logs_cmd::subprocess.run": "operator: logs source probe",
-    "cli_server.py::_logs_cmd::os.execvp": "operator: exec journalctl/tail for `logs`",
-    "dashboard/handlers/_shared.py::_list_marketplace_skills::asyncio.create_subprocess_exec": (
+    "interfaces/cli/server.py::_logs_cmd::subprocess.run": "operator: logs source probe",
+    "interfaces/cli/server.py::_logs_cmd::os.execvp": "operator: exec journalctl/tail for `logs`",
+    "interfaces/dashboard/handlers/_shared.py::_list_marketplace_skills::asyncio.create_subprocess_exec": (
         "operator: `gideon skills list`"
     ),
-    "dashboard/handlers/mcp.py::api_mcp_remove::asyncio.create_subprocess_exec": (
+    "interfaces/dashboard/handlers/mcp.py::api_mcp_remove::asyncio.create_subprocess_exec": (
         "operator: `gideon skills mcp uninstall`"
     ),
-    "dashboard/handlers/files.py::_content_search_rg::asyncio.create_subprocess_exec": (
+    "interfaces/dashboard/handlers/files.py::_content_search_rg::asyncio.create_subprocess_exec": (
         "operator: file search (rg)"
     ),
-    "dashboard/handlers/files.py::_git::asyncio.create_subprocess_exec": (
+    "interfaces/dashboard/handlers/files.py::_git::asyncio.create_subprocess_exec": (
         "operator: file browser git read"
     ),
-    "workflows/review_service.py::_git::asyncio.create_subprocess_exec": (
+    "automation/workflows/review_service.py::_git::asyncio.create_subprocess_exec": (
         "operator: run workspace git diff read"
     ),
-    "dashboard/handlers/files.py::api_reveal_path::subprocess.Popen": (
+    "interfaces/dashboard/handlers/files.py::api_reveal_path::subprocess.Popen": (
         "operator: reveal in Finder/xdg-open"
     ),
-    "dashboard/handlers/files.py::api_screenshot::asyncio.create_subprocess_exec": (
+    "interfaces/dashboard/handlers/files.py::api_screenshot::asyncio.create_subprocess_exec": (
         "operator: screencapture"
     ),
-    "dashboard/handlers/files.py::api_upload::asyncio.create_subprocess_exec": (
+    "interfaces/dashboard/handlers/files.py::api_upload::asyncio.create_subprocess_exec": (
         "operator: native file picker"
     ),
-    "dashboard/handlers/terminal.py::_kill_tmux_session::asyncio.create_subprocess_exec": (
+    "interfaces/dashboard/handlers/terminal.py::_kill_tmux_session::asyncio.create_subprocess_exec": (
         "operator: kill user's tmux session"
     ),
-    "dashboard/handlers/terminal.py::_list_tmux_sessions::asyncio.create_subprocess_exec": (
+    "interfaces/dashboard/handlers/terminal.py::_list_tmux_sessions::asyncio.create_subprocess_exec": (
         "operator: list user's tmux sessions"
     ),
-    "tmux_substrate.py::has_session::asyncio.create_subprocess_exec": (
-        "operator: probe our own tmux server for a session"
-    ),
-    "tmux_substrate.py::has_session_sync::subprocess.run": (
-        "operator: probe our own tmux server for a session (sync boot sweep)"
-    ),
-    "tmux_substrate.py::list_sessions::asyncio.create_subprocess_exec": (
-        "operator: list sessions on our own tmux server"
-    ),
-    "tmux_substrate.py::pane_paths_sync::subprocess.run": (
-        "operator: read pane cwds from our own tmux server"
-    ),
-    "tmux_substrate.py::kill_session::asyncio.create_subprocess_exec": (
-        "operator: kill a session on our own tmux server"
-    ),
-    "self_update.py::_run_git::subprocess.run": (
+    "operations/self_update.py::_run_git::subprocess.run": (
         "service: the one git seam every sync self-update probe funnels through"
     ),
-    "self_update.py::commits_behind_upstream::asyncio.create_subprocess_exec": (
+    "operations/self_update.py::_git_output::asyncio.create_subprocess_exec": (
         "service: update git fetch + rev-list"
     ),
-    "dashboard/handlers/updates.py::_do_update_check::asyncio.create_subprocess_exec": (
+    "interfaces/dashboard/handlers/updates.py::_do_update_check::asyncio.create_subprocess_exec": (
         "service: update check git"
     ),
-    "dashboard/handlers/updates.py::_apply_pip_update._apply::asyncio.create_subprocess_exec": (
+    "interfaces/dashboard/handlers/updates.py::_apply_pip_update._apply::asyncio.create_subprocess_exec": (
         "service: self pip update"
     ),
-    "dashboard/handlers/updates.py::api_update_apply::asyncio.create_subprocess_exec": (
+    "interfaces/dashboard/handlers/updates.py::api_update_apply::asyncio.create_subprocess_exec": (
         "service: update git"
     ),
-    "dashboard/handlers/updates.py::api_update_apply._apply::asyncio.create_subprocess_exec": (
+    "interfaces/dashboard/handlers/updates.py::api_update_apply._apply::asyncio.create_subprocess_exec": (
         "service: update git/pip"
     ),
-    "dashboard/handlers/updates.py::_graceful_reexec::os.execve": (
+    "interfaces/dashboard/handlers/updates.py::_graceful_reexec::os.execve": (
         "service: re-exec the gateway itself"
     ),
-    "dashboard/handlers_system.py::_get_static_system_info::subprocess.check_output": (
+    "interfaces/dashboard/handlers_system.py::_get_static_system_info::subprocess.check_output": (
         "host-fact: static sysinfo"
     ),
-    "dashboard/handlers_system.py::_collect_gpu_metrics::subprocess.check_output": (
+    "interfaces/dashboard/handlers_system.py::_collect_gpu_metrics::subprocess.check_output": (
         "host-fact: GPU metrics"
     ),
-    "local_models/fit.py::_probe_gpu::subprocess.check_output": (
+    "integrations/local_models/fit.py::_probe_gpu::subprocess.check_output": (
         "host-fact: GPU/VRAM capacity"
     ),
-    "dashboard/handlers_system.py::_collect_system_metrics::subprocess.check_output": (
+    "interfaces/dashboard/handlers_system.py::_collect_system_metrics::subprocess.check_output": (
         "host-fact: system metrics"
     ),
-    "local_models/residency.py::_darwin_memory::subprocess.check_output": (
+    "integrations/local_models/residency.py::_darwin_memory::subprocess.check_output": (
         "host-fact: macOS memory-pressure probe (sysctl/vm_stat, static argv)"
     ),
-    "evals/runner.py::_spawn_cell::subprocess.run": (
+    "assurance/evals/runner.py::_spawn_cell::subprocess.run": (
         "operator: evals matrix cell (own env isolation)"
     ),
-    "frontend.py::build_frontend_sync::subprocess.run": "operator: frontend npm build",
-    "frontend.py::build_frontend_async::asyncio.create_subprocess_exec": (
+    "operations/frontend.py::build_frontend_sync::subprocess.run": "operator: frontend npm build",
+    "operations/frontend.py::build_frontend_async::asyncio.create_subprocess_exec": (
         "operator: frontend npm build"
     ),
-    "gateway.py::RuntimeCoordinator._auto_apply_update::asyncio.create_subprocess_exec": (
-        "service: auto-update git/pip"
-    ),
-    "gateway.py::RuntimeCoordinator._auto_apply_update::os.execv": (
-        "service: re-exec the gateway itself"
-    ),
-    "gateway.py::_wslview_open::subprocess.run": "operator: open browser on WSL",
-    "knowledge/pipeline/executor.py::PipelineExecutor._media_duration::subprocess.run": (
+    "engine/gateway.py::_wslview_open::subprocess.run": "operator: open browser on WSL",
+    "cognition/knowledge/pipeline/executor.py::PipelineExecutor._media_duration::subprocess.run": (
         "host tool: ffprobe"
     ),
-    "knowledge/pipeline/nodes/media_nodes.py::VideoClassifyNode._dense_regions::subprocess.run": (
+    "cognition/knowledge/pipeline/nodes/media_nodes.py::VideoClassifyNode._dense_regions::subprocess.run": (
         "host tool: ffprobe scene detect"
     ),
-    "knowledge/pipeline/nodes/media_nodes.py::_run_cmd::asyncio.create_subprocess_exec": (
+    "cognition/knowledge/pipeline/nodes/media_nodes.py::_run_cmd::asyncio.create_subprocess_exec": (
         "host tool: ffmpeg"
     ),
-    "mcp_core.py::_get_ppid::subprocess.check_output": "host-fact: ppid probe",
-    "mcp_shared.py::_resolve_excluded_tools._get_ppid::subprocess.check_output": (
+    "integrations/mcp_core.py::_get_ppid::subprocess.check_output": "host-fact: ppid probe",
+    "integrations/mcp_shared.py::_resolve_excluded_tools._get_ppid::subprocess.check_output": (
         "host-fact: ppid probe"
     ),
-    "session_pid.py::_is_managed_agent_process::subprocess.check_output": (
+    "engine/session_pid.py::_is_managed_agent_process::subprocess.check_output": (
         "host-fact: managed-process probe"
     ),
-    "subagent.py::_total_memory_gb::subprocess.check_output": "host-fact: total RAM probe",
-    "sandbox.py::_probe_sandbox_exec::subprocess.run": (
+    "engine/subagent.py::_total_memory_gb::subprocess.check_output": "host-fact: total RAM probe",
+    "security/sandbox.py::_probe_sandbox_exec::subprocess.run": (
         "host-fact: sandbox-exec availability probe"
     ),
-    "sandbox.py::_ssh_supports_accept_new::subprocess.run": "host-fact: ssh version probe",
-    "sandbox_providers/docker.py::_daemon_ping::subprocess.run": (
+    "security/sandbox.py::_ssh_supports_accept_new::subprocess.run": "host-fact: ssh version probe",
+    "integrations/sandbox_providers/docker.py::_daemon_ping::subprocess.run": (
         "host-fact: docker daemon availability probe (fixed docker version argv)"
     ),
-    "sandbox_providers/lima.py::_probe::subprocess.run": (
+    "integrations/sandbox_providers/lima.py::_probe::subprocess.run": (
         "host-fact: lima instance status probe (fixed limactl list argv)"
     ),
-    "sandbox_providers/docker.py::_DockerHandle.cleanup::subprocess.run": (
+    "integrations/sandbox_providers/docker.py::_DockerHandle.cleanup::subprocess.run": (
         "operator: docker rm -f of our own ephemeral container (fixed argv, self-generated name)"
     ),
-    "service/linux.py::_current_group::subprocess.run": "operator: service install id probe",
-    "service/linux.py::_sudo_run::subprocess.run": "operator: service install sudo",
-    "service/linux.py::_systemctl::subprocess.run": "operator: systemctl control",
-    "service/linux.py::_write_unit_via_sudo::subprocess.run": "operator: write systemd unit",
-    "service/macos.py::_launchctl::subprocess.run": "operator: launchctl control",
-    "triggers/liveness.py::_dirty_git_active::subprocess.run": (
+    "operations/service/linux.py::_current_group::subprocess.run": "operator: service install id probe",
+    "operations/service/linux.py::_sudo_run::subprocess.run": "operator: service install sudo",
+    "operations/service/linux.py::_systemctl::subprocess.run": "operator: systemctl control",
+    "operations/service/linux.py::_write_unit_via_sudo::subprocess.run": "operator: write systemd unit",
+    "operations/service/macos.py::_launchctl::subprocess.run": "operator: launchctl control",
+    "automation/triggers/liveness.py::ActivityProbe.git_changes::subprocess.run": (
         "host-fact: workspace git-dirty probe"
     ),
-    "computer_use/macos_tcc.py::_probe::subprocess.run": (
+    "integrations/computer_use/macos_tcc.py::_probe::subprocess.run": (
         "host-fact: tccd responsible-process probe (fixed argv, read-only, own timeout)"
     ),
-    "transcribe.py::_transcribe_segmented::asyncio.create_subprocess_exec": (
+    "integrations/transcribe.py::_transcribe_segmented::asyncio.create_subprocess_exec": (
         "host tool: transcription ffmpeg"
     ),
-    "transcribe.py::_transcribe_segmented_detailed::asyncio.create_subprocess_exec": (
+    "integrations/transcribe.py::_transcribe_segmented_detailed::asyncio.create_subprocess_exec": (
         "host tool: transcription ffmpeg"
     ),
-    "voice_reply.py::stitch_wavs::asyncio.create_subprocess_exec": "host tool: wav stitch ffmpeg",
-    "apps/quality.py::run_bundle_tests::subprocess.run": (
+    "integrations/voice_reply.py::stitch_wavs::asyncio.create_subprocess_exec": "host tool: wav stitch ffmpeg",
+    "extensions/apps/quality.py::run_bundle_tests::subprocess.run": (
         "CI tool: app-bundle pytest for a quality declaration (no gateway call site)"
     ),
 }
@@ -432,19 +420,19 @@ def test_agent_influenced_seams_are_all_ceiling_wrapped():
     in the ceiling-wrapped set (a regression guard so one cannot be quietly re-exempted).
     """
     required = {
-        "agents/native/builtin_tools.py::NativeBuiltinToolProvider._t_bash::"
+        "engine/agents/native/builtin_tools.py::NativeBuiltinToolProvider._t_bash::"
         "create_subprocess_limited",
-        "action_providers/bash_provider.py::BashActionProvider.execute::"
+        "integrations/action_providers/bash_provider.py::BashActionProvider.execute::"
         "create_subprocess_limited",
-        "apps/backend_runtime.py::BackendSupervisor.start::subprocess.Popen",
-        "mcp_discovery.py::probe_server::create_subprocess_limited",
-        "mcp_client.py::McpServerConn._open_transport::StdioServerParameters",
-        "sandbox_providers/none.py::_NoneHandle.exec::create_subprocess_limited",
-        "loop/gates.py::run_verify_command::create_subprocess_limited",
-        "loop/worktree.py::_git::subprocess.run",
-        "schedule_script.py::run_script_sandboxed::subprocess.run",
-        "knowledge_providers/pack_parse.py::run_parse_script::subprocess.run",
-        "artifacts/build.py::_run_esbuild::create_subprocess_limited",
+        "extensions/apps/backend_runtime.py::BackendSupervisor.start::subprocess.Popen",
+        "integrations/mcp_discovery.py::probe_server::create_subprocess_limited",
+        "integrations/mcp_client.py::McpServerConn._open_transport::StdioServerParameters",
+        "integrations/sandbox_providers/none.py::_NoneHandle.exec::create_subprocess_limited",
+        "automation/loop/gates.py::run_verify_command::create_subprocess_limited",
+        "automation/loop/worktree.py::_git::subprocess.run",
+        "automation/schedule_script.py::run_script_sandboxed::subprocess.run",
+        "integrations/knowledge_providers/pack_parse.py::run_parse_script::subprocess.run",
+        "workspace/artifacts/build.py::_run_esbuild::create_subprocess_limited",
     }
     missing = sorted(required - set(_CEILING_WRAPPED))
     assert not missing, f"agent seams not ceiling-wrapped: {missing}"

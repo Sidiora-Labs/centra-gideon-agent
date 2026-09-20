@@ -461,20 +461,13 @@ def rules_api(tmp_path, monkeypatch):
 def _mocked(method, path, body=None, match_info=None):
     from aiohttp.test_utils import make_mocked_request
 
-    payload = json.dumps(body or {}).encode()
-    req = make_mocked_request(method, path, payload=None)
-    req._payload = None
+    req = make_mocked_request(
+        method, path, headers={"Content-Type": "application/json"}
+    )
+    req._read_bytes = json.dumps({} if body is None else body).encode()
     req.app["state"] = object()
     if match_info:
         req._match_info.update(match_info)
-
-    async def _json():
-        if body is None:
-            raise ValueError("no body")
-        return body
-
-    req.json = _json  # type: ignore[method-assign]
-    assert payload
     return req
 
 

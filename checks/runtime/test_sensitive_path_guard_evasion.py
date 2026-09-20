@@ -117,7 +117,8 @@ def test_an_ordinary_home_path_is_still_allowed():
     """Vacuity for the case fix. Casefolding everything into "blocked" is not a fix."""
     assert not is_sensitive_path(f"{_HOME}/Documents/notes.md")
     assert not is_sensitive_path(f"{_HOME}/code/project/README.md")
-    assert not is_system_path(f"{_HOME}/code/project")
+    assert not is_system_path("/home/operator/code/project")
+    assert is_system_path("/root/code/project")
 
 
 @pytest.mark.parametrize(

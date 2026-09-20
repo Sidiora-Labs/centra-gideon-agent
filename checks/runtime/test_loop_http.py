@@ -5,6 +5,7 @@ kind-aware create, list/get/update, lifecycle action guards, nudge, delete."""
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 from aiohttp import web
@@ -148,14 +149,17 @@ def svc(monkeypatch):
 def _req(method, path, state, *, body=None, match_info=None):
     app = web.Application()
     app["state"] = state
-    req = make_mocked_request(method, path, match_info=match_info or {}, app=app)
+    raw = json.dumps(body).encode() if body is not None else b""
+    req = make_mocked_request(
+        method,
+        path,
+        match_info=match_info or {},
+        app=app,
+        headers={"Content-Type": "application/json"} if raw else None,
+    )
     req["user"] = "alice"
-    if body is not None:
-
-        async def _json():
-            return body
-
-        req.json = _json  # type: ignore[assignment]
+    if raw:
+        req._read_bytes = raw
     return req
 
 

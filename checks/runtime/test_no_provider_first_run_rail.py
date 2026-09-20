@@ -45,6 +45,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from aiohttp.test_utils import make_mocked_request
 
 from gideon.cognition.knowledge.pipeline.runner import ingest_item
 from gideon.cognition.knowledge.store import KnowledgeStore
@@ -128,8 +129,12 @@ def assert_calm_http_no_model(status: int, body: object) -> None:
 
 async def _classify_response(body: dict):
     """Drive the real ``POST /api/loops/classify`` handler; return (status, parsed body)."""
-    req = MagicMock()
-    req.json = AsyncMock(return_value=body)
+    req = make_mocked_request(
+        "POST",
+        "/api/loops/classify",
+        headers={"Content-Type": "application/json"},
+    )
+    req._read_bytes = json.dumps(body).encode()
     resp = await api_loop_classify(req)
     parsed = json.loads(resp.body.decode())
     return resp.status, parsed

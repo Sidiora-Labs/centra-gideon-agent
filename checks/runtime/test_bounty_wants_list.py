@@ -437,6 +437,6 @@ def test_cited_in_tree_paths_exist(rows: list[Row]) -> None:
     for rel in (
         "runtime/gideon/interfaces/cli/app_new.py",
         "runtime/gideon/assurance/testing/channel_conformance.py",
-        "guides/build-a-channel-app.md",
+        "guides/BUILD_A_CHANNEL_APP.md",
     ):
         assert rel in text, f"wants-list stopped citing {rel}"

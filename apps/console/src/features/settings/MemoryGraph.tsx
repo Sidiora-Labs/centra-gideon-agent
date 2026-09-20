@@ -3,6 +3,7 @@ import { Loader2 } from 'lucide-react'
 import { api, type MemoryGraphData } from '../../shared/data/api'
 import { litNeighbourhood } from '../../shared/data/litSet'
 import { GraphZoomControls } from '../../shared/ui/GraphZoomControls'
+import { MoreRow } from '../../shared/ui/MoreRow'
 
 export function MemoryGraph({ data, focusRef, hopDepth = 1, onSelectRef, boxHeight, nodeNoun = 'fact', nodeNounPlural, emptyHint }: {
   data?: MemoryGraphData | null
@@ -160,6 +161,7 @@ export function MemoryGraph({ data, focusRef, hopDepth = 1, onSelectRef, boxHeig
               <span className="size-2 rounded-pill" style={{ background: groupColor(g) }} />{g}
             </span>
           ))}
+          <MoreRow total={groups.length} shown={8} noun="groups" />
         </div>
       )}
 

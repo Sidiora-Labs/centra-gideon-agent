@@ -973,14 +973,15 @@ def _run(coro):
 def _call(store, handler, method, path, *, match_info=None, body=None):
     app = web.Application()
     app["state"] = SimpleNamespace(knowledge_store=store)
-    req = make_mocked_request(method, path, app=app, match_info=match_info or {})
-
-    async def _json():
-        if body is None:
-            raise ValueError("no body")
-        return body
-
-    req.json = _json
+    raw = json.dumps(body).encode() if body is not None else b""
+    req = make_mocked_request(
+        method,
+        path,
+        headers={"Content-Type": "application/json"} if raw else None,
+        app=app,
+        match_info=match_info or {},
+    )
+    req._read_bytes = raw
     resp = _run(handler(req))
     return resp, json.loads(resp.body)
 

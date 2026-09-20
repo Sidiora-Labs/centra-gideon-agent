@@ -24,13 +24,20 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from datetime import datetime
 
 from gideon.security.security import redact_credentials, redact_exfiltration_urls
 
 logger = logging.getLogger(__name__)
 
 _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
-_PHONE_RE = re.compile(r"(?<!\d)(?:\+?\d[\d\s().-]{7,}\d)(?!\d)")
+_PHONE_RE = re.compile(r"(?<!\d)(?:\+?\d|\(\d)[\d\s().-]{7,}\d(?!\d)")
+_IPV4_RE = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
+_ISO_DATE_RE = re.compile(
+    r"(?<!\d)\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?"
+    r"(?:Z|[+-]\d{2}:?\d{2})?)?(?!\d)"
+)
+_DECIMAL_RE = re.compile(r"(?<![\d.])\d+\.\d+(?![\d.])")
 
 
 @dataclass
@@ -45,6 +52,24 @@ class ScanResult:
     injection_group: str = ""
 
 
+def _phone_spans(text: str) -> list[tuple[int, int]]:
+    masked = list(text)
+    spared: list[tuple[int, int]] = []
+    for match in _IPV4_RE.finditer(text):
+        if all(0 <= int(octet) <= 255 for octet in match.group().split(".")):
+            spared.append(match.span())
+    for match in _ISO_DATE_RE.finditer(text):
+        try:
+            datetime.fromisoformat(match.group().replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        spared.append(match.span())
+    spared.extend(match.span() for match in _DECIMAL_RE.finditer(text))
+    for start, end in spared:
+        masked[start:end] = "#" * (end - start)
+    return [match.span() for match in _PHONE_RE.finditer("".join(masked))]
+
+
 def _count_pii(text: str) -> tuple[int, list[str]]:
     cats: list[str] = []
     n = 0
@@ -52,7 +77,7 @@ def _count_pii(text: str) -> tuple[int, list[str]]:
     if emails:
         n += len(emails)
         cats.append("email")
-    phones = _PHONE_RE.findall(text)
+    phones = _phone_spans(text)
     if phones:
         n += len(phones)
         cats.append("phone")
@@ -61,7 +86,8 @@ def _count_pii(text: str) -> tuple[int, list[str]]:
 
 def _redact_pii(text: str) -> str:
     text = _EMAIL_RE.sub("[REDACTED_EMAIL]", text)
-    text = _PHONE_RE.sub("[REDACTED_PHONE]", text)
+    for start, end in reversed(_phone_spans(text)):
+        text = text[:start] + "[REDACTED_PHONE]" + text[end:]
     return text
 
 

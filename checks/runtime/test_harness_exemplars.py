@@ -86,7 +86,7 @@ def test_slice_2_is_the_required_artifacts_example() -> None:
     keeps the named example from drifting away from a generic gate demo."""
     root = exemplars_root() / "slice_2"
     result = subprocess.run(
-        [sys.executable, "-m", "harness.exemplars.slice_2.exemplar"],
+        [sys.executable, "-m", "checks.harness.exemplars.slice_2.exemplar"],
         cwd=_REPO_ROOT,
         capture_output=True,
         text=True,

@@ -340,7 +340,9 @@ def test_the_ledger_package_does_not_import_the_workflow_engine():
     import probe) because a lazy function-local import is exactly how this would creep back in and
     would not show up at import time.
     """
-    pkg = Path(journal_mod.__file__).parent.parent / "ledger"
+    from gideon.assurance import ledger as ledger_pkg
+
+    pkg = Path(ledger_pkg.__file__).parent
     modules = sorted(pkg.glob("*.py"))
     assert len(modules) >= 6, f"expected the ledger package's modules, found {modules}"
 

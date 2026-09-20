@@ -24,6 +24,7 @@ from gideon.automation.loop import kinds, manager, store, validation
 from gideon.automation.loop.loop import ACTION_SOURCE_STATES, KINDS, Loop, LoopStatus
 from gideon.automation.loop.watchdog import registry_key
 from gideon.core.config.loader import AppConfig
+from gideon.core.http_request import read_json_body, string_field
 from gideon.http_errors import json_error
 
 logger = logging.getLogger(__name__)
@@ -35,7 +36,7 @@ def _as_list(v) -> list:
 
 async def _json_body(request: web.Request) -> dict | web.Response:
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -107,7 +108,7 @@ def _build_loop_from_body(body: dict) -> Loop:
         id="",
         kind=kind,
         task=task,
-        name=str(body.get("name") or "").strip(),
+        name=string_field(body, "name"),
         project_id=str(body.get("project_id", "")),
         plan=[
             p
@@ -156,7 +157,7 @@ def _build_loop_from_body(body: dict) -> Loop:
         except Exception:
             logger.debug("project workspace inheritance failed for loop", exc_info=True)
     if not loop.name:
-        loop.name = str(body.get("title") or "").strip() or _derive_name(task)
+        loop.name = string_field(body, "title") or _derive_name(task)
     return loop
 
 

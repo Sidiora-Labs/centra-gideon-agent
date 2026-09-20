@@ -523,28 +523,54 @@ def test_the_measurement_sweep_sees_the_same_pool_as_the_render():
 
 
 def test_context_render_ambient_passes_the_block_through():
-    """The call site, structurally: `build_session_context` must produce the block and
-    hand it to `_render_ambient` — a producer that computes a block and drops it is the
-    exact shape this atom exists to close."""
+    """The call site, structurally: the producer computes the block and hands it to
+    `_render_ambient` through `standing.ambient` — a producer that computes a block and
+    drops it is the exact shape this atom exists to close."""
     from gideon.cognition import context as ctx_mod
 
     tree = ast.parse(pathlib.Path(ctx_mod.__file__).read_text(encoding="utf-8"))
-    fn = next(
-        n
-        for n in ast.walk(tree)
-        if isinstance(n, ast.FunctionDef) and n.name == "build_session_context"
-    )
-    calls = [n for n in ast.walk(fn) if isinstance(n, ast.Call)]
+    fns = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+    producer = fns["_standing_memory"]
     assert any(
         isinstance(c.func, ast.Attribute) and c.func.attr == "procedural_block"
-        for c in calls
-    ), "build_session_context must call MemoryService.procedural_block()"
+        for c in ast.walk(producer)
+        if isinstance(c, ast.Call)
+    ), "_standing_memory must call MemoryService.procedural_block()"
+    renderer = fns["_render_ambient"]
+    params = {a.arg for a in renderer.args.args + renderer.args.kwonlyargs}
+    assert "procedural" in params, "_render_ambient must accept the procedural block"
+
+    builder = fns["build_session_context"]
+    standing_assign = [
+        n
+        for n in ast.walk(builder)
+        if isinstance(n, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == "standing" for t in n.targets)
+    ]
+    assert any(
+        isinstance(n.value, ast.IfExp)
+        and isinstance(n.value.test, ast.Name)
+        and n.value.test.id == "blocks_reads"
+        and isinstance(n.value.orelse, ast.Call)
+        and isinstance(n.value.orelse.func, ast.Attribute)
+        and n.value.orelse.func.attr == "_standing_memory"
+        for n in standing_assign
+    ), "build_session_context must take its standing sections from _standing_memory()"
     render = next(
         c
-        for c in calls
-        if isinstance(c.func, ast.Name) and c.func.id == "_render_ambient"
+        for c in ast.walk(builder)
+        if isinstance(c, ast.Call)
+        and isinstance(c.func, ast.Name)
+        and c.func.id == "_render_ambient"
     )
-    assert "procedural" in [kw.arg for kw in render.keywords]
+    assert any(
+        kw.arg is None
+        and isinstance(kw.value, ast.Attribute)
+        and isinstance(kw.value.value, ast.Name)
+        and kw.value.value.id == "standing"
+        and kw.value.attr == "ambient"
+        for kw in render.keywords
+    ), "build_session_context must hand standing.ambient to _render_ambient"
 
 
 def test_heat_may_rank_priors_but_strength_alone_cannot_win(svc):
@@ -582,6 +608,8 @@ def test_heat_may_rank_priors_but_strength_alone_cannot_win(svc):
 
 def test_the_reader_never_imports_the_eviction_verdict():
     """A source-level rail: the ranking path may use `strength`, never `DecayVerdict`."""
-    src = pathlib.Path(__file__).resolve().parents[2] / "runtime" / "gideon"
+    src = (
+        pathlib.Path(__file__).resolve().parents[2] / "runtime" / "gideon" / "cognition"
+    )
     text = (src / "memory_service.py").read_text(encoding="utf-8")
     assert "DecayVerdict" not in text

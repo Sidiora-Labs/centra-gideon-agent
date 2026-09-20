@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { prefersReducedMotion } from '../../shared/theme/motion'
 
 const MIN_MS = 450
 const MAX_MS = 1500
@@ -16,8 +17,7 @@ export function TypingReveal({ text, mode, theme, onDone }: {
   const scrollRef = useRef<HTMLPreElement>(null)
 
   useEffect(() => {
-    const reduce = typeof window !== 'undefined'
-      && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    const reduce = prefersReducedMotion()
     if (reduce || total === 0) {
       setShown(mode === 'write' ? total : 0)
       doneRef.current?.()

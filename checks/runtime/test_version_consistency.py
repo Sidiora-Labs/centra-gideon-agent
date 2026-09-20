@@ -86,7 +86,7 @@ def test_changelog_latest_matches_pyproject() -> None:
 
 
 def _client_version() -> str:
-    with (_REPO_ROOT / "packages" / "gideon-client-py" / "pyproject.toml").open(
+    with (_REPO_ROOT / "packages" / "python-client" / "pyproject.toml").open(
         "rb"
     ) as fh:
         data = tomllib.load(fh)
@@ -105,7 +105,7 @@ def test_client_version_locksteps_core() -> None:
     """
     assert _client_version() == _pyproject_version(), (
         f"gideon-client version={_client_version()!r} disagrees with core "
-        f"version={_pyproject_version()!r} — bump packages/gideon-client-py/"
+        f"version={_pyproject_version()!r} — bump packages/python-client/"
         "pyproject.toml in the same release-prep commit (lockstep policy)"
     )
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -192,7 +193,16 @@ def build_delivery(
     event, kind, verb = (
         (EVENT_SUCCEEDED, notification_kinds.INFO, "finished")
         if ok
-        else (EVENT_FAILED, notification_kinds.ERROR, "failed")
+        else (
+            EVENT_FAILED,
+            (
+                notification_kinds.CRON_FAILED
+                if os.environ.get("GIDEON_CRON_FAILED_NOTIFICATIONS", "").lower()
+                in {"1", "true", "yes"}
+                else notification_kinds.ERROR
+            ),
+            "failed",
+        )
     )
     metadata = (
         {"duration_secs": round(float(duration_secs), 3)} if duration_secs else {}

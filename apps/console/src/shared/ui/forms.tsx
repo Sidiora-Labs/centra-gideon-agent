@@ -37,38 +37,44 @@ export function Field({ label, hint, right, children }: { label: string; hint?: 
 interface TextInputProps {
   value: string; onChange: (value: string) => void; placeholder?: string; autoFocus?: boolean
   onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void; name?: string; ariaLabel?: string; required?: boolean
-  size?: FieldSize; surface?: FieldSurface; type?: 'text' | 'password'; mono?: boolean; leadingIcon?: ReactNode
+  id?: string; size?: FieldSize; surface?: FieldSurface; type?: 'text' | 'password' | 'number'; mono?: boolean
+  min?: number; max?: number; minLength?: number; maxLength?: number; pattern?: string; leadingIcon?: ReactNode; trailingSlot?: ReactNode
   disabled?: boolean; disabledReason?: string
 }
 export function TextInput({ value, onChange, placeholder, autoFocus, onKeyDown, name, ariaLabel, required,
-  size = 'lg', surface = 'container', type, mono, leadingIcon, disabled, disabledReason }: TextInputProps) {
+  id, size = 'lg', surface = 'container', type, mono, min, max, minLength, maxLength, pattern, leadingIcon, trailingSlot,
+  disabled, disabledReason }: TextInputProps) {
   const label = useFieldLabelId()
   const hint = useFieldHintId()
   const identity = useId()
   const dimensions = sizeTokens[size]
-  const input = <input id={name || identity} name={name} type={type} value={value} autoFocus={autoFocus} placeholder={placeholder}
+  const input = <input id={id || name || identity} name={name} type={type} value={value} autoFocus={autoFocus} placeholder={placeholder}
+    min={min} max={max} minLength={minLength} maxLength={maxLength} pattern={pattern}
     {...fieldNaming(label, ariaLabel, name)} aria-describedby={hint} aria-required={required || undefined}
     disabled={disabled} title={disabled ? disabledReason || undefined : undefined}
     onChange={(event) => { if (!disabled) onChange(event.target.value) }} onKeyDown={onKeyDown}
     data-type={dimensions.role} className={cx(fieldChrome, 'w-full', dimensions.height, surfaces[surface],
-      leadingIcon ? 'pl-9 pr-m' : 'px-m', mono && 'font-mono', disabled && 'opacity-50')} />
-  if (!leadingIcon) return input
+      leadingIcon && trailingSlot ? 'pl-9 pr-10' : leadingIcon ? 'pl-9 pr-m' : trailingSlot ? 'pl-m pr-10' : 'px-m',
+      mono && 'font-mono', disabled && 'opacity-50')} />
+  if (!leadingIcon && !trailingSlot) return input
   return <div className="relative w-full">
-    <span aria-hidden className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-low">{leadingIcon}</span>{input}
+    {leadingIcon && <span aria-hidden className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-low">{leadingIcon}</span>}
+    {input}
+    {trailingSlot && <span className="absolute right-1.5 top-1/2 -translate-y-1/2">{trailingSlot}</span>}
   </div>
 }
 
-export function TextArea({ value, onChange, placeholder, rows = 4, mono, ariaLabel, autoFocus, size = 'lg', disabled, disabledReason }: {
+export function TextArea({ value, onChange, placeholder, rows = 4, mono, ariaLabel, autoFocus, id, size = 'lg', surface = 'container', disabled, disabledReason }: {
   value: string; onChange: (value: string) => void; placeholder?: string; rows?: number; mono?: boolean; ariaLabel?: string
-  autoFocus?: boolean; size?: FieldSize; disabled?: boolean; disabledReason?: string
+  autoFocus?: boolean; id?: string; size?: FieldSize; surface?: FieldSurface; disabled?: boolean; disabledReason?: string
 }) {
   const label = useFieldLabelId()
   const hint = useFieldHintId()
   const identity = useId()
-  return <textarea id={identity} value={value} rows={rows} autoFocus={autoFocus} placeholder={placeholder}
+  return <textarea id={id || identity} value={value} rows={rows} autoFocus={autoFocus} placeholder={placeholder}
     {...fieldNaming(label, ariaLabel)} aria-describedby={hint} disabled={disabled} title={disabled ? disabledReason || undefined : undefined}
     onChange={(event) => { if (!disabled) onChange(event.target.value) }} data-type={mono ? 'body-s' : sizeTokens[size].role}
-    className={cx(fieldChrome, 'w-full resize-y bg-surface-container px-m py-2', mono && 'font-mono')} />
+    className={cx(fieldChrome, 'w-full resize-y px-m py-2', surfaces[surface], mono && 'font-mono')} />
 }
 
 export function NumberField({ value, onChange, min, max, step, width = 'w-24', ariaLabel }: {
@@ -100,19 +106,19 @@ export function DateInput({ value, onChange }: { value: string; onChange: (value
 
 interface SelectProps {
   value: string; onChange: (value: string) => void; options: { value: string; label: string; disabled?: boolean; title?: string }[]
-  disabled?: boolean; name?: string; ariaLabel?: string; disabledReason?: string; size?: FieldSize; required?: boolean
+  disabled?: boolean; id?: string; name?: string; ariaLabel?: string; disabledReason?: string; size?: FieldSize; surface?: FieldSurface; required?: boolean
 }
-export function Select({ value, onChange, options, disabled, name, ariaLabel, disabledReason, size = 'lg', required }: SelectProps) {
+export function Select({ value, onChange, options, disabled, id, name, ariaLabel, disabledReason, size = 'lg', surface = 'container', required }: SelectProps) {
   const label = useFieldLabelId()
   const hint = useFieldHintId()
   const identity = useId()
-  return <select id={name || identity} name={name} value={value} disabled={disabled}
+  return <select id={id || name || identity} name={name} value={value} disabled={disabled}
     {...fieldNaming(label, ariaLabel, name)} aria-describedby={hint} aria-required={required || undefined}
     title={disabled ? disabledReason || undefined : undefined} data-type={sizeTokens[size].role}
     onChange={(event) => {
       const next = event.target.value
       if (!disabled && !options.find((option) => option.value === next)?.disabled) onChange(next)
-    }} className={cx(fieldChrome, sizeTokens[size].height, 'w-full appearance-none bg-surface-container pl-m pr-8 disabled:opacity-50')}>
+    }} className={cx(fieldChrome, sizeTokens[size].height, 'w-full appearance-none pl-m pr-8 disabled:opacity-50', surfaces[surface])}>
     {options.map(({ value: key, label: text, disabled: unavailable, title }) => <option key={key} value={key} disabled={unavailable} title={title}>{text}</option>)}
   </select>
 }

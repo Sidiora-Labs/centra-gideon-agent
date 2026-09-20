@@ -1,6 +1,6 @@
 import type { MouseEvent, ReactNode } from 'react'
-import { motion, useMotionTemplate, useMotionValue, useReducedMotion } from 'framer-motion'
-import { physics, exprHeavy } from '../theme/motion'
+import { motion, useMotionTemplate, useMotionValue } from 'framer-motion'
+import { physics, exprHeavy, useReducedMotion } from '../theme/motion'
 import { fvs } from '../theme/fontWeight'
 import { cx } from './cx'
 import { ControlContent } from './controlContent'

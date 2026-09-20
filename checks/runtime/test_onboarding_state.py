@@ -16,9 +16,9 @@ Three properties carry this contract, and each has a rail here:
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from aiohttp.test_utils import make_mocked_request
 
 from gideon.cognition import onboarding as ob
 from gideon.interfaces.dashboard import handlers_system as hs
@@ -47,8 +47,12 @@ def _write_raw(home, payload):
 
 
 def _req(body):
-    r = MagicMock()
-    r.json = AsyncMock(return_value=body)
+    r = make_mocked_request(
+        "POST",
+        "/api/onboarding/state",
+        headers={"Content-Type": "application/json"},
+    )
+    r._read_bytes = json.dumps(body).encode()
     return r
 
 
@@ -270,8 +274,12 @@ async def test_post_rejects_bad_bodies_with_400(_isolate_home, body):
 
 @pytest.mark.asyncio
 async def test_post_rejects_unparseable_json_with_400(_isolate_home):
-    r = MagicMock()
-    r.json = AsyncMock(side_effect=ValueError("boom"))
+    r = make_mocked_request(
+        "POST",
+        "/api/onboarding/state",
+        headers={"Content-Type": "application/json"},
+    )
+    r._read_bytes = b"{not json"
     resp = await hs.api_onboarding_state(r)
     assert resp.status == 400
 

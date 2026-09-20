@@ -49,16 +49,48 @@ choices.
 
 ### Verify the one-liner
 
+For a checkout, the committed `infrastructure/website/install.sh.sha256` checks the
+local script. For a published installer, obtain its HTTPS URL from your publisher,
+and choose an independently trusted GitHub repository and immutable commit that
+contain its digest. Set `GIDEON_INSTALL_URL`, `GIDEON_DIGEST_REPOSITORY` (`owner/repo`),
+`GIDEON_VERIFY_REVISION` (the full 40-character lowercase commit ID), and
+`GIDEON_PACKAGE_SOURCE` explicitly. No hosted endpoint is assumed to exist.
+
 ```bash
-cd infrastructure/website
+set -eu
+: "${GIDEON_INSTALL_URL:?set the published HTTPS installer URL}"
+: "${GIDEON_DIGEST_REPOSITORY:?set the independently trusted GitHub owner/repo}"
+: "${GIDEON_VERIFY_REVISION:?set the trusted immutable commit ID}"
+: "${GIDEON_PACKAGE_SOURCE:?set the wheel, checkout, or versioned package source}"
+case "$GIDEON_VERIFY_REVISION" in *[!0-9a-f]*|"") exit 1 ;; esac
+[ "${#GIDEON_VERIFY_REVISION}" -eq 40 ]
+case "$GIDEON_INSTALL_URL" in https://*) ;; *) exit 1 ;; esac
+installer_host=${GIDEON_INSTALL_URL#https://}
+installer_host=${installer_host%%/*}
+installer_host=${installer_host##*@}
+installer_host=${installer_host%%:*}
+installer_host=$(printf '%s' "$installer_host" | tr '[:upper:]' '[:lower:]')
+[ "$installer_host" != raw.githubusercontent.com ]
+verify_dir=$(mktemp -d)
+cd "$verify_dir"
+curl -fsS -o install.sh "$GIDEON_INSTALL_URL"
+curl -fsSL -o install.sh.sha256 "https://raw.githubusercontent.com/$GIDEON_DIGEST_REPOSITORY/$GIDEON_VERIFY_REVISION/infrastructure/website/install.sh.sha256"
 sha256sum -c install.sh.sha256
+export GIDEON_PACKAGE_SOURCE
 sh install.sh
 ```
 
-The digest checks these installer bytes. A published installer should have its
-digest distributed through an independent trusted release channel. The installer
-may fetch Astral's `uv` installer over TLS if uv is unavailable; that dependency
-fetch is not covered by this file's digest.
+The digest must come from a separately trusted channel: a digest on the same host
+or origin as the script can be replaced along with it. The check does not prove
+that the code is safe, that the chosen repository or commit is trustworthy, or
+that subsequently downloaded dependencies are authentic. It only checks that the
+installer matches the selected immutable revision. Publish the matching script
+and pin before offering this recipe; an unpublished revision cannot be verified.
+The installer may fetch Astral's `uv` bootstrap over TLS when uv is absent; those
+script bytes are unverified and are not covered by Gideon's digest. Preinstall uv
+from a trusted source to avoid that fetch. The configured Gideon distribution is
+constrained to at least the previous recorded release, including for wheel and
+checkout sources; this does not establish the source's authenticity.
 
 ### Optional extras
 

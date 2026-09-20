@@ -58,15 +58,17 @@ def test_gpu_capacity_detection_has_exactly_one_site() -> None:
         f"{_GPU_CAPACITY_MARKERS} went stale; re-derive them from fit._probe_gpu before "
         "trusting this test"
     )
-    assert set(hits) == {"local_models/fit.py"}, (
+    assert set(hits) == {"integrations/local_models/fit.py"}, (
         "GPU capacity (VRAM total, vendor, model) must be detected only by "
-        f"fit._probe_gpu; also found in: {sorted(set(hits) - {'local_models/fit.py'})}"
+        f"fit._probe_gpu; also found in: {sorted(set(hits) - {'integrations/local_models/fit.py'})}"
     )
 
 
 def test_handlers_system_gpu_query_is_telemetry_only() -> None:
     """The metrics handler's own nvidia-smi read asks for live values, never capacity."""
-    source = (_SRC / "dashboard" / "handlers_system.py").read_text(encoding="utf-8")
+    source = (_SRC / "interfaces" / "dashboard" / "handlers_system.py").read_text(
+        encoding="utf-8"
+    )
     queries = [line.strip() for line in source.splitlines() if "--query-gpu=" in line]
     assert (
         queries
@@ -84,9 +86,11 @@ def test_handlers_system_gpu_query_is_telemetry_only() -> None:
 def test_handlers_system_reads_no_memory_total_itself() -> None:
     """The metrics handler routes memory through residency instead of probing again."""
     handler_hits = _census(_MEMORY_TOTAL_MARKERS).get(
-        "dashboard/handlers_system.py", []
+        "interfaces/dashboard/handlers_system.py", []
     )
-    owner_hits = _census(_MEMORY_TOTAL_MARKERS).get("local_models/residency.py", [])
+    owner_hits = _census(_MEMORY_TOTAL_MARKERS).get(
+        "integrations/local_models/residency.py", []
+    )
     assert owner_hits, (
         "census found no memory-total probe in residency.py — the markers "
         f"{_MEMORY_TOTAL_MARKERS} went stale and would no longer catch a duplicate"

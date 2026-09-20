@@ -48,6 +48,7 @@ from gideon.cognition.planning import session as PS
 from gideon.cognition.planning.session import PlanSession, PlanStep, StepStatus
 from gideon.core.atomic_write import atomic_write
 from gideon.core.config import loader as config_loader
+from gideon.core.http_request import read_json_body
 from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.chat_utils import _history_key_for, apply_task_mode
 from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
@@ -234,7 +235,7 @@ def _resume_prompt(markdown: str) -> str:
 
 async def _body(request: web.Request) -> dict | web.Response:
     try:
-        data = await request.json()
+        data = await read_json_body(request)
     except Exception:  # noqa: BLE001
         return json_error(
             "invalid_json", message="Request body must be JSON", status=400

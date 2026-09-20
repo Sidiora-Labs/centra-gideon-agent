@@ -333,3 +333,20 @@ def test_record_and_decision_round_trip(trust_home):
     assert pt.project_decision(project) == pt.DECISION_UNKNOWN
     pt.record_project_trust(project + "/.", trusted=True)
     assert pt.project_decision(project) == pt.DECISION_TRUSTED
+
+
+@pytest.mark.asyncio
+async def test_mutating_spawn_cannot_exceed_operator_tool_ceiling(
+    agent_root, monkeypatch
+):
+    from gideon.security.guardrails import ceiling
+
+    monkeypatch.setattr(
+        ceiling,
+        "_ACTIVE",
+        ceiling.parse_ceiling({"scopes": {"tools": {"allow": ["read_*"]}}}),
+    )
+    manager, provider = _manager_with_tool("Write")
+    await _run_spawn(manager, capability_class="mutating", approval_mode="auto")
+    provider.reject_tool.assert_awaited_once_with(1)
+    provider.approve_tool.assert_not_awaited()

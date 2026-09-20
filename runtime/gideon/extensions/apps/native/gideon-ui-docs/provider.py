@@ -7,7 +7,7 @@ imports core only through ``gideon.sdk.*``, exactly like an installed app, and i
 bundle-relative module rather than a core dotted path. Growing this capability (the
 ``ui_list`` tool below was added this way) touches nothing outside this directory.
 
-Exposes the ``web/src/ui`` design-system kit as documentation-as-data an
+Exposes the ``apps/console/src/shared/ui`` design-system kit as documentation-as-data an
 app-building agent can query, so it reaches for a shipped primitive (Button,
 SidePanel, HeaderActions…) instead of hand-rolling a ``<button>`` or a drawer.
 
@@ -29,7 +29,7 @@ Three tools, deliberately — not one per component:
 ``list_tools`` is STATIC — the definitions exist independent of whether
 ``ui-docs.json`` has been built — so the offline manifest/drift harness sees them.
 The JSON is read LAZILY in ``invoke`` (off the ``static/dist`` symlink, falling back
-to ``web/dist``); if it isn't built yet, the tools return a clear FIX pointing at the
+to ``apps/console/dist``); if it isn't built yet, the tools return a clear FIX pointing at the
 web build rather than vanishing.
 """
 
@@ -50,7 +50,7 @@ _BRIEF_DESC_CHARS = 160
 
 
 class UiDocsToolProvider(ToolProvider):
-    """Serve the ``web/src/ui`` kit docs as ``ui_search`` / ``ui_get``."""
+    """Serve the ``apps/console/src/shared/ui`` kit docs as ``ui_search`` / ``ui_get``."""
 
     @property
     def name(self) -> str:
@@ -65,7 +65,7 @@ class UiDocsToolProvider(ToolProvider):
             ToolDefinition(
                 name="ui_search",
                 description=(
-                    "Search the web/src/ui design-system kit (components + design "
+                    "Search the apps/console/src/shared/ui design-system kit (components + design "
                     "tokens) by keyword. Returns brief hits — name, kind, one-line "
                     "description — so you can find the right primitive to reach for "
                     "instead of hand-rolling markup. Follow up with ui_get(name) for "
@@ -166,7 +166,7 @@ class UiDocsToolProvider(ToolProvider):
                     "WHY: The web frontend hasn't been built in this checkout, so the "
                     "design-system docs artifact doesn't exist yet.\n"
                     "FIX: Build the web app from the repo root (`make web-build`, or "
-                    "`npm run build --workspace web`); the build emits web/dist/"
+                    "`npm run build --workspace @gideon/console`); the build emits apps/console/dist/"
                     "ui-docs.json, which this tool reads."
                 ),
                 recovery_hints=[
@@ -199,18 +199,18 @@ _BUNDLE_DIR = Path(__file__).resolve().parent
 
 
 def _dist_dir() -> Path:
-    """The served dist dir — ``<gideon>/static/dist`` (a symlink to web/dist)."""
-    return _BUNDLE_DIR.parents[2] / "static" / "dist"
+    """The served dist dir — ``<gideon>/static/dist`` (a symlink to apps/console/dist)."""
+    return _BUNDLE_DIR.parents[3] / "static" / "dist"
 
 
 def _ui_docs_path() -> Path | None:
-    """Locate ``ui-docs.json``: the served static/dist first, else repo web/dist."""
+    """Locate ``ui-docs.json``: the served static/dist first, else repo apps/console/dist."""
     served = _dist_dir() / "ui-docs.json"
     if served.is_file():
         return served
     parents = _BUNDLE_DIR.parents
-    if len(parents) > 4:
-        repo_web = parents[4] / "web" / "dist" / "ui-docs.json"
+    if len(parents) > 5:
+        repo_web = parents[5] / "apps" / "console" / "dist" / "ui-docs.json"
         if repo_web.is_file():
             return repo_web
     return None
@@ -359,7 +359,7 @@ def _ui_list(data: dict[str, Any], args: dict[str, Any]) -> ToolResult:
             desc = _brief(comp.get("description", ""))
             src = comp.get("source", "")
             head = f"- {comp.get('name', '?')}" + (
-                f"  (web/src/ui/{src})" if src else ""
+                f"  (apps/console/src/shared/ui/{src})" if src else ""
             )
             out.append(head)
             if desc:
@@ -434,7 +434,9 @@ def _render_component(comp: dict[str, Any], section: str | None) -> str:
 
     if show_all:
         src = comp.get("source", "")
-        out.append(f"# {name}  (web/src/ui/{src})" if src else f"# {name}")
+        out.append(
+            f"# {name}  (apps/console/src/shared/ui/{src})" if src else f"# {name}"
+        )
         keywords = comp.get("keywords", [])
         if keywords:
             out.append(f"keywords: {', '.join(keywords)}")

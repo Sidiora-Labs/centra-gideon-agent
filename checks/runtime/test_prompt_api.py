@@ -6,8 +6,10 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
+from urllib.parse import urlencode
 
 import pytest
+from aiohttp.test_utils import make_mocked_request
 
 from gideon.interfaces.dashboard.handlers import (
     api_campaign_template_launch,
@@ -37,18 +39,22 @@ def _mock_sel(monkeypatch):
     monkeypatch.setattr("gideon.interfaces.dashboard.handlers.sel", lambda: MagicMock())
 
 
-def _req(name=None, body=None, query=None):
-    r = MagicMock()
-    if name is not None:
-        r.match_info = {"name": name}
-    r.query = query or {}
+def _req(name=None, body=None, query=None, *, method="GET", state=None):
+    """A real aiohttp request, because the handlers read the body through
+    ``read_json_body`` (Content-Type + serialized bytes, not ``.json()``)."""
+    path = "/api/prompts"
+    if query:
+        path = f"{path}?{urlencode(query)}"
+    request = make_mocked_request(
+        method,
+        path,
+        headers={"Content-Type": "application/json"},
+        match_info={"name": name} if name is not None else {},
+        app={"state": state},
+    )
     if body is not None:
-
-        async def _json():
-            return body
-
-        r.json = _json
-    return r
+        request._read_bytes = json.dumps(body).encode()
+    return request
 
 
 def _body(resp):
@@ -463,10 +469,7 @@ class TestSkillDetailPut:
 
         loader = ProcedureLibrary(skills_path=tmp_path, install_builtins=False)
         state = SimpleNamespace(context_builder=SimpleNamespace(skills=loader))
-        r = _req(name=name, body=body)
-        r.method = "PUT"
-        r.app = {"state": state}
-        return r, loader
+        return _req(name=name, body=body, method="PUT", state=state), loader
 
     def test_put_non_string_content_returns_400(self, tmp_path):
         r, loader = self._put_req(tmp_path, "editable", {"content": 12345})

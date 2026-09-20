@@ -1540,9 +1540,7 @@ Examples:
 
 
 from gideon.integrations.inbound.auth import inbound_cmd as _inbound_cmd  # noqa: E402
-from gideon.integrations.inbound.capture_import import (  # noqa: E402
-    capture_cmd as _capture_cmd,
-)
+from gideon.integrations.inbound.capture_import import capture_cmd as _capture_cmd  # noqa: E402
 from gideon.interfaces.cli.app_new import add_parser as _add_app_parser  # noqa: E402
 from gideon.interfaces.cli.app_new import app_cmd as _app_cmd  # noqa: E402
 from gideon.interfaces.cli.chat import _chat  # noqa: E402

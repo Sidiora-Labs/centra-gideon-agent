@@ -11,6 +11,7 @@ from gideon.integrations.web import extract as ex
 from gideon.integrations.web.extract import (
     ExtractedDoc,
     extract_main_content,
+    meta_refresh_target,
     sanitize_html,
 )
 
@@ -40,6 +41,22 @@ def test_sanitize_strips_script_and_style():
 
 def test_sanitize_empty():
     assert sanitize_html("") == ""
+
+
+def test_meta_refresh_target_parses_quoted_and_unquoted_urls():
+    assert (
+        meta_refresh_target(
+            '<meta HTTP-EQUIV="refresh" content="0; URL=\'/next?a=1\'">'
+        )
+        == "/next?a=1"
+    )
+    assert (
+        meta_refresh_target(
+            "<meta http-equiv=refresh content='2;url=https://example.com/end'>"
+        )
+        == "https://example.com/end"
+    )
+    assert meta_refresh_target("<meta name=description content='refresh'>") == ""
 
 
 def test_extract_returns_main_content():

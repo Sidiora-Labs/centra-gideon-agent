@@ -10,6 +10,12 @@ from gideon.interfaces.dashboard.state import ConsoleState
 logger = logging.getLogger(__name__)
 
 
+def require_string(value: Any, field: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"{field} must be a string")
+    return value
+
+
 def _get_memory(state: ConsoleState):
     """Get MemoryJournal from context_builder, or create standalone.
 

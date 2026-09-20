@@ -183,6 +183,12 @@ async def ingest_item(
             )
             insights_phase = "done" if insights_ok else "failed"
             _emit("node", node="insights", phase=insights_phase)
+            if insights_ok:
+                from gideon.integrations.action_providers.knowledge_persist_provider import (
+                    run_ingest_conflict_pass,
+                )
+
+                run_ingest_conflict_pass(store, item_id)
 
             _emit("node", node="entities", phase="running")
             entities_phase = await _run_entities_stage(
@@ -431,6 +437,26 @@ def _persist_structural_metadata(store, item_id: str, item, result) -> None:
         store.db.commit()
 
 
+def _write_extracted_entity(store, ent: dict) -> tuple[str, str] | None:
+    name = (ent.get("name") or "").strip()
+    if not name:
+        return None
+    aliases = ent.get("aliases") or []
+    existing = store.find_entity(name)
+    if existing:
+        eid = existing["id"]
+        store.backfill_entity_description(eid, ent.get("description"))
+        store.merge_entity_aliases(eid, aliases)
+    else:
+        eid = store.add_entity(
+            name=name,
+            entity_type=ent.get("type", "concept"),
+            description=ent.get("description"),
+            aliases=aliases,
+        )
+    return name, eid
+
+
 async def _run_entities_stage(store, item_id: str, content: str, pool) -> str:
     """Link + extract entities for the item, writing to the entity graph.
 
@@ -513,19 +539,10 @@ async def _run_entities_stage(store, item_id: str, content: str, pool) -> str:
                 )
         entity_map: dict[str, str] = {}
         for ent in entities:
-            name = (ent.get("name") or "").strip()
-            if not name:
+            written = _write_extracted_entity(store, ent)
+            if not written:
                 continue
-            existing = store.find_entity(name)
-            if existing:
-                eid = existing["id"]
-                store.backfill_entity_description(eid, ent.get("description"))
-            else:
-                eid = store.add_entity(
-                    name=name,
-                    entity_type=ent.get("type", "concept"),
-                    description=ent.get("description"),
-                )
+            name, eid = written
             entity_map[name] = eid
             store.add_mention(item_id, eid, context=ent.get("description"))
         for rel in relations:

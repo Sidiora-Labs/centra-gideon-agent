@@ -28,13 +28,14 @@ per the ``failure_copy`` module's boundaries.
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from aiohttp import web
+from aiohttp import streams, web
 from aiohttp.test_utils import TestClient, TestServer, make_mocked_request
 
 from gideon.extensions.providers.failure_copy import UNEXPECTED_FAILURE_COPY
@@ -95,18 +96,17 @@ async def test_skills_search_failure_speaks_guidance(monkeypatch) -> None:
     _assert_guidance_not_leak(_body(resp))
 
 
-class _JsonRequest:
-    """Minimal stand-in: the handler reads only the JSON body."""
-
-    def __init__(self, body: dict) -> None:
-        self._payload = body
-        self.headers: dict[str, str] = {}
-
-    async def json(self):
-        return self._payload
-
-    def get(self, key, default=None):
-        return default
+def _json_request(method: str, path: str, body: dict):
+    raw = json.dumps(body).encode("utf-8")
+    payload = streams.StreamReader(Mock(), 2**16, loop=asyncio.get_event_loop())
+    payload.feed_data(raw)
+    payload.feed_eof()
+    return make_mocked_request(
+        method,
+        path,
+        payload=payload,
+        headers={"Content-Type": "application/json", "Content-Length": str(len(raw))},
+    )
 
 
 @pytest.mark.asyncio
@@ -123,7 +123,9 @@ async def test_mcp_toggle_write_failure_speaks_guidance(tmp_path, monkeypatch) -
 
     monkeypatch.setattr(mcp_h, "_write_mcp_json", _boom)
 
-    resp = await mcp_h.api_mcp_toggle(_JsonRequest({"name": "srv", "enabled": False}))
+    resp = await mcp_h.api_mcp_toggle(
+        _json_request("POST", "/api/mcp/toggle", {"name": "srv", "enabled": False})
+    )
 
     assert resp.status == 500
     _assert_guidance_not_leak(_body(resp))
@@ -159,14 +161,11 @@ async def test_agent_config_apply_failure_speaks_guidance(tmp_path) -> None:
     installed = tmp_path / "gideon.json"
     installed.write_text(json.dumps({"name": "gideon"}))
 
-    request = MagicMock(spec=web.Request)
-    request.method = "PUT"
-    request.app = {"state": MagicMock()}
-
-    async def mock_json():
-        return {"config": {"name": "test", "tools": [], "allowedTools": []}}
-
-    request.json = mock_json
+    request = _json_request(
+        "PUT",
+        "/api/agent/config",
+        {"config": {"name": "test", "tools": [], "allowedTools": []}},
+    )
 
     with (
         patch(
@@ -265,7 +264,9 @@ async def test_tool_invoke_failure_speaks_guidance(monkeypatch) -> None:
         lambda: set(),
     )
 
-    resp = await tools_h.api_tool_invoke(_JsonRequest({"tool": "artifact_list"}))
+    resp = await tools_h.api_tool_invoke(
+        _json_request("POST", "/api/tools/invoke", {"tool": "artifact_list"})
+    )
 
     assert resp.status == 500
     payload = _body(resp)
@@ -350,7 +351,7 @@ def _leaky_500_sites(source: str, filename: str) -> list[str]:
 
 def test_no_handler_ships_exception_text_in_a_500_payload() -> None:
     for name in _HANDLER_FILES:
-        path = SRC / "dashboard" / "handlers" / name
+        path = SRC / "interfaces" / "dashboard" / "handlers" / name
         src = path.read_text(encoding="utf-8")
         leaks = _leaky_500_sites(src, name)
         assert not leaks, f"raw exception text reaches a 500 payload at: {leaks}"

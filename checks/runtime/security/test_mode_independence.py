@@ -483,13 +483,12 @@ class _DenyTargetTool(ToolProvider):
         return ToolResult(success=True, output="EXECUTED")
 
 
-def _guard_and_invoke_node() -> ast.FunctionDef:
+def _guard_and_invoke_node(name: str = "_guard_and_invoke") -> ast.FunctionDef:
     tree = ast.parse(RUNTIME_SRC.read_text(encoding="utf-8"))
     return next(
         n
         for n in ast.walk(tree)
-        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-        and n.name == "_guard_and_invoke"
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name
     )
 
 
@@ -512,18 +511,18 @@ class TestDenyPrecedesTheApprovalGate:
     the source order but breaks the behaviour (or vice versa) still trips a rail."""
 
     def test_structural_deny_call_precedes_the_approval_gate_call(self):
-        """AST, not regex: inside ``_guard_and_invoke``, ``security.is_denied(...)`` must
-        appear before ``self._requires_approval(...)``. Swap the two blocks and this reds
-        on the line numbers alone."""
+        """The policy helper checks denial and runs before the approval gate."""
         fn = _guard_and_invoke_node()
-        deny_line = _first_call_line(fn, "is_denied")
+        policy = _guard_and_invoke_node("_policy_refusal")
+        assert _first_call_line(policy, "is_denied") is not None
+        deny_line = _first_call_line(fn, "_policy_refusal")
         gate_line = _first_call_line(fn, "_requires_approval")
-        assert deny_line is not None, "no is_denied() call in _guard_and_invoke at all"
+        assert deny_line is not None, "no _policy_refusal() call in _guard_and_invoke"
         assert (
             gate_line is not None
         ), "no _requires_approval() call in _guard_and_invoke at all"
         assert deny_line < gate_line, (
-            f"DENY-AFTER-APPROVAL ORDERING REGRESSION: security.is_denied() is at line "
+            f"DENY-AFTER-APPROVAL ORDERING REGRESSION: _policy_refusal() is at line "
             f"{deny_line} but the approval gate _requires_approval() is at line {gate_line} "
             f"in {RUNTIME_SRC.name}::_guard_and_invoke. The deny check MUST precede the "
             f"approval gate: the gate returns the _NEEDS_APPROVAL sentinel, and the gated "
@@ -660,19 +659,35 @@ class TestDenyPrecedesTheApprovalGate:
                 n
                 for n in ast.walk(tree)
                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-                and _first_call_line(n, "_denied_bash_reason") is not None
-                and _first_call_line(n, "create_subprocess_limited") is not None
+                and n.name == "_t_bash"
             ),
             None,
         )
-        assert handler is not None, (
-            "no function in builtin_tools.py both screens the command and spawns it — the "
-            "bash denylist screen and the spawn are no longer in the same body, so their "
-            "order is no longer verifiable here"
+        assert handler is not None
+        checks = next(
+            node
+            for node in handler.body
+            if isinstance(node, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == "checks" for t in node.targets)
         )
-        screen = _first_call_line(handler, "_denied_bash_reason")
+        assert any(
+            isinstance(node, ast.Name) and node.id == "_denied_bash_reason"
+            for node in ast.walk(checks.value)
+        )
+        loop = next(
+            node
+            for node in handler.body
+            if isinstance(node, ast.For)
+            and isinstance(node.iter, ast.Name)
+            and node.iter.id == "checks"
+        )
+        assert isinstance(loop.target, ast.Tuple)
+        assert isinstance(loop.target.elts[0], ast.Name)
+        assert loop.target.elts[0].id == "screen"
+        screen = _first_call_line(loop, "screen")
         spawn = _first_call_line(handler, "create_subprocess_limited")
         assert screen is not None and spawn is not None
+        assert checks.lineno < loop.lineno
         assert screen < spawn, (
             f"DENY-AFTER-SPAWN ORDERING REGRESSION in {BUILTIN_SRC.name}::{handler.name}: the "
             f"denylist screen is at line {screen} but the subprocess spawn is at line {spawn}. "

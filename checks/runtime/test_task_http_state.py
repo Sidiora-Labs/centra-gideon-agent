@@ -51,6 +51,21 @@ async def test_bulk_admission_then_partial_mutation_uses_real_records(
             },
         )
         receipt = await response.json()
+        assert response.status == 400
+        assert receipt["succeeded"] == 0 and receipt["failed"] == 2
+        assert "Unknown task provider" in receipt["errors"][0]["error"]
+        assert not list((tmp_path / "tasks").glob("t-*.json"))
+        response = await client.post(
+            "/api/tasks/bulk",
+            json={
+                "op": "create",
+                "items": [
+                    {"title": "Stored", "provider": "native"},
+                    {"title": "Refused", "status": "invalid"},
+                ],
+            },
+        )
+        receipt = await response.json()
         assert response.status == 200
         assert receipt["succeeded"] == receipt["failed"] == 1
         task_id = receipt["results"][0]["task_id"]
@@ -132,7 +147,9 @@ async def test_invalid_json_admission_and_real_comment_lifecycle(tmp_path, monke
         ]:
             response = await client.request(method, url, data="{")
             assert response.status == 400
-            assert await response.json() == {"error": "invalid JSON"}
+            assert await response.json() == {
+                "error": {"code": "invalid_json", "message": "invalid JSON"}
+            }
         response = await client.post(
             task_url + "/comments", json={"body": "  Actual note  "}
         )
@@ -146,4 +163,6 @@ async def test_invalid_json_admission_and_real_comment_lifecycle(tmp_path, monke
         ] == []
         assert (await client.delete(task_url)).status == 200
         missing = await client.get(task_url)
-        assert missing.status == 404 and await missing.json() == {"error": "not found"}
+        assert missing.status == 404 and await missing.json() == {
+            "error": {"code": "not_found", "message": "not found"}
+        }

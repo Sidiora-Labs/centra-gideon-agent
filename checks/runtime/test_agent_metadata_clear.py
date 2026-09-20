@@ -17,6 +17,8 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import make_mocked_request
 
 from gideon.engine import agent_metadata
 from gideon.interfaces.dashboard.handlers.agents import api_agent_metadata_put
@@ -39,15 +41,15 @@ def _quiet_side_effects():
         yield
 
 
-def _req(name: str, body: dict) -> MagicMock:
-    r = MagicMock()
-    r.match_info = {"name": name}
-    r.get = lambda key, default=None: "tester" if key == "user" else default
-
-    async def _json():
-        return body
-
-    r.json = _json
+def _req(name: str, body: dict) -> web.Request:
+    r = make_mocked_request(
+        "PUT",
+        f"/api/agent-metadata/{name}",
+        headers={"Content-Type": "application/json"},
+        match_info={"name": name},
+    )
+    r._read_bytes = json.dumps(body).encode()
+    r["user"] = "tester"
     return r
 
 

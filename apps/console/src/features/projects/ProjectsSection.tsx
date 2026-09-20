@@ -201,6 +201,7 @@ export function ProjectKnowledgeList({ items }: { items: ProjectKnowledgeItem[] 
       </span>}
       <span className="shrink-0 rounded-md bg-surface-high px-1.5 text-[0.75rem] text-on-surface-low">{sharingPolicyLabel(item.sharing_policy)}</span>
     </article>)}
+    <MoreRow total={items.length} shown={8} noun="items" />
   </div>
 }
 
@@ -507,7 +508,7 @@ function TaskListRow({ list, active, onOpen }: { list: TaskListItem; active: boo
 
 function TaskListPanel({ list, onOpenTask }: { list: TaskListItem; onOpenTask: (taskId: string) => void }) {
   const { data: tasks, loading, error, refresh } = useQuery<TaskItem[]>(`tasklist:tasks:${list.id}`, async () => {
-    const result = await api.tasks({ task_list: list.id, limit: 200 })
+    const result = await api.allTasks({ task_list: list.id })
     return result.tasks
   })
   if (!tasks && error) return <LoadError what="tasks" error={error} onRetry={refresh} />

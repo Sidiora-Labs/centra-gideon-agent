@@ -9,6 +9,7 @@ from pathlib import Path
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.workspace import notification_kinds
 
@@ -210,7 +211,7 @@ async def api_hooks_agent(request: web.Request) -> web.Response:
 
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):

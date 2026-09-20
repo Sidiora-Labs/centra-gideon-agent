@@ -60,7 +60,7 @@ export function LibraryHome({ onOpenItem, onOpenReader, onOpenCollection, onShow
 }
               <Button variant="secondary" size="xs" onClick={() => onOpenCollection(c.id)}
                 ariaLabel={`${c.name || 'Untitled shelf'}, ${c.count}${c.count_capped ? ' or more' : ''} item${c.count === 1 && !c.count_capped ? '' : 's'}`}>
-                {c.name || 'Untitled shelf'}
+                <span className="max-w-48 truncate" title={c.name || 'Untitled shelf'}>{c.name || 'Untitled shelf'}</span>
                 <span className="text-on-surface-low tabular-nums">{c.count}{c.count_capped ? '+' : ''}</span>
               </Button>
             </li>

@@ -2,6 +2,7 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
 from gideon.cognition.knowledge.embedder import UnifiedEmbedder
@@ -178,9 +179,10 @@ def test_doctor_surfaces_chunk_space_reason_and_reindex_remedy(store):
         store.get_item(item_id)["content"],
         _SpaceEmbedder("model-old"),
     )
-    request = make_mocked_request("GET", "/api/doctor/knowledge")
-    request.app["state"] = SimpleNamespace(knowledge_store=store)
-    request.app["knowledge_embedder"] = _SpaceEmbedder("model-new")
+    app = web.Application()
+    app["state"] = SimpleNamespace(knowledge_store=store)
+    app["knowledge_embedder"] = _SpaceEmbedder("model-new")
+    request = make_mocked_request("GET", "/api/doctor/knowledge", app=app)
 
     row = _embedding_index_doctor_row(request)
     assert row is not None

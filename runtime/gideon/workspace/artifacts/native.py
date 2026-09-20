@@ -403,7 +403,11 @@ class NativeArtifactProvider(ArtifactProvider):
             if folder is not None and art.folder_id != folder:
                 continue
             if q:
-                hay = f"{art.name}\n{art.description}\n{' '.join(art.tags)}".lower()
+                full = self.get(slug)
+                hay = (
+                    f"{art.name}\n{art.description}\n{' '.join(art.tags)}\n"
+                    f"{art.collection}\n{full.content if full else ''}"
+                ).lower()
                 if q.lower() not in hay:
                     continue
             art.content = None

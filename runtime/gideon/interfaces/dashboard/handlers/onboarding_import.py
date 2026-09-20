@@ -39,6 +39,10 @@ import logging
 
 from aiohttp import web
 
+from gideon.core.http_request import (
+    RequestBodyTypeError,
+    read_json_body,
+)
 from gideon.http_errors import json_error
 
 logger = logging.getLogger(__name__)
@@ -165,11 +169,11 @@ async def api_onboarding_import_run(request: web.Request) -> web.Response:
     )
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
+    except RequestBodyTypeError:
+        return json_error("invalid_body", status=400)
     except Exception:  # noqa: BLE001 — an unparsable body is a 400, never a 500
         return json_error("invalid_json", status=400)
-    if not isinstance(body, dict):
-        return json_error("invalid_body", status=400)
 
     sources, refusal = _selection(body, "sources", {src.name for src in list_sources()})
     if refusal is not None:

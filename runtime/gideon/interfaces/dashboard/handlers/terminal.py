@@ -22,6 +22,7 @@ from gideon.core.cancellation import (
     wait_with_timeout,
 )
 from gideon.core.config import loader as config_loader
+from gideon.core.http_request import read_json_body
 from gideon.engine import tmux_substrate
 
 
@@ -528,7 +529,7 @@ async def api_terminal_create(request: web.Request) -> web.Response:
     requested_sandbox = ""
     if request.body_exists:
         try:
-            body = await request.json()
+            body = await read_json_body(request)
             if isinstance(body, dict):
                 if isinstance(body.get("cwd"), str):
                     requested_cwd = body["cwd"]
@@ -679,7 +680,13 @@ async def api_terminal_list(request: web.Request) -> web.Response:
             source="dashboard",
             resources="feature_disabled",
         )
-        return web.json_response({"enabled": False, "sessions": []})
+        return web.json_response(
+            {
+                "enabled": False,
+                "persist_available": _tmux_available(),
+                "sessions": [],
+            }
+        )
 
     registry = _get_registry(request)
     sessions = []
@@ -729,7 +736,13 @@ async def api_terminal_list(request: web.Request) -> web.Response:
         source="dashboard",
         resources=f"count={len(sessions)}",
     )
-    return web.json_response({"enabled": True, "sessions": sessions})
+    return web.json_response(
+        {
+            "enabled": True,
+            "persist_available": _tmux_available(),
+            "sessions": sessions,
+        }
+    )
 
 
 async def _list_tmux_sessions() -> list[str]:

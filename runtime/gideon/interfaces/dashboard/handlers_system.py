@@ -14,6 +14,7 @@ from pathlib import Path
 from aiohttp import web
 
 import gideon
+from gideon.core.http_request import read_json_body
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.operations.stats import Stats
 
@@ -616,7 +617,7 @@ async def api_onboarding_state(request: web.Request) -> web.Response:
     from gideon.cognition.onboarding import merge_onboarding_state
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:  # noqa: BLE001
         return web.json_response({"error": "Invalid JSON body"}, status=400)
     try:

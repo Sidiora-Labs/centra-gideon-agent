@@ -26,13 +26,14 @@ import { BUSY_REASON } from '../../shared/ui/unavailable'
 
 export function DurabilityPanel() {
   const [cfg, setCfg] = useState<Record<string, unknown> | null>(null)
+  const [surface, setSurface] = useState(SURFACE_DURABILITY)
 
-  const { data, error: loadErr, refresh } = useQuery('settings:durability', async () => {
+  const { data, error: loadErr, refresh } = useQuery(`settings:durability:${surface}`, async () => {
     const [plaw, status, snaps, conflicts, transports] = await Promise.all([
       api.gideonConfig(),
       api.durabilityStatus().catch(() => null),
       api.durabilityArchive().catch(() => null),
-      settle(api.durabilityConflicts(SURFACE_DURABILITY)),
+      settle(api.durabilityConflicts(surface)),
       settle(api.settingsProviders().then((ps) => ps.filter((p) => p.provider?.type === 'sync'))),
     ])
     return {
@@ -59,7 +60,7 @@ export function DurabilityPanel() {
       <ArchiveSection snaps={data.snaps} onChanged={refresh} />
       <TimeTravelSection cfg={cfg} setCfg={setCfg} />
       <SyncSection cfg={cfg} setCfg={setCfg} status={data.status} transports={data.transports} />
-      <ConflictsSection read={data.conflicts} onChanged={refresh} />
+      <ConflictsSection key={surface} read={data.conflicts} surface={surface} onSurface={setSurface} onChanged={refresh} />
     </div>
   )
 }
@@ -227,7 +228,7 @@ function TimeTravelSection({ cfg, setCfg }: {
           {timeline.data && timeline.data.entries.length > 0 && (
             <ul className="mt-3 flex list-none flex-col gap-3 p-0">
               {timeline.data.entries.map((entry, i) => (
-                <li key={entry.sha} className="border-outline-var border-t pt-3 first:border-t-0 first:pt-0">
+                <li key={entry.sha} className="border-outline-variant border-t pt-3 first:border-t-0 first:pt-0">
                   <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                     <span data-type="label-s" className="min-w-0 flex-1 truncate text-on-surface" style={fvs(550)}>
                       {entry.subject}
@@ -441,7 +442,7 @@ function ScheduleSection({ cfg, setCfg, status }: {
         </Row>
 
         {status && (
-          <div className="border-t border-outline-var py-3">
+          <div className="border-t border-outline-variant py-3">
             <div data-type="caption" className="mb-2 text-on-surface-low">
               {status.enabled
                 ? 'Last run of each job:'
@@ -455,7 +456,7 @@ function ScheduleSection({ cfg, setCfg, status }: {
           </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-2 border-t border-outline-var py-3">
+        <div className="flex flex-wrap items-center gap-2 border-t border-outline-variant py-3">
           <span data-type="body-s" className="mr-1 text-on-surface-var">Run now:</span>
           <RunButton label="Export" icon={HardDriveDownload} busy={running === 'export'}
             disabled={!!running} onClick={() => run('export', 'Export')} />
@@ -502,7 +503,7 @@ function RetentionSection({ cfg, setCfg, snaps }: {
           onCommit={(n, l) => patch('keep_monthly', n, undefined, l)} />
 
         {pruneCount > 0 && (
-          <div data-type="body-s" className="border-t border-outline-var py-3 text-on-surface-low">
+          <div data-type="body-s" className="border-t border-outline-variant py-3 text-on-surface-low">
             {pruneCount} of {snaps?.archives.length ?? 0} snapshots would be removed by the
             settings above on the next pass. They are struck through in the archive below.
           </div>
@@ -571,7 +572,7 @@ function ArchiveSection({ snaps, onChanged }: {
         ) : (
           <ul className="flex list-none flex-col gap-3 p-0">
             {snaps.archives.map((a) => (
-              <li key={a.id} className="border-outline-var border-t pt-3 first:border-t-0 first:pt-0">
+              <li key={a.id} className="border-outline-variant border-t pt-3 first:border-t-0 first:pt-0">
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                   <span data-type="label-s" className={`min-w-0 flex-1 truncate ${a.retained ? 'text-on-surface' : 'text-on-surface-low line-through'}`} style={fvs(500)}>
                     {a.name}
@@ -608,6 +609,11 @@ function ArchiveSection({ snaps, onChanged }: {
 
 
 const SURFACE_DURABILITY = 'durability'
+const CONFLICT_SURFACES = [
+  { value: SURFACE_DURABILITY, label: 'Data and settings' },
+  { value: 'memory', label: 'Memory' },
+  { value: 'knowledge', label: 'Knowledge' },
+]
 
 const ENCRYPT_OPTIONS = [
   { value: 'auto', label: 'Automatic (per transport)' },
@@ -642,12 +648,12 @@ function SyncSection({ cfg, setCfg, status, transports }: {
         {
 }
         {!transports.ok ? (
-          <div data-type="body-s" className="border-t border-outline-var py-3" style={{ color: 'var(--color-error)' }}>
+          <div data-type="body-s" className="border-t border-outline-variant py-3" style={{ color: 'var(--color-error)' }}>
             The installed transports could not be read ({transports.error}). Reload to try
             again — this is not the same as having none installed.
           </div>
         ) : enabledTransports.length === 0 ? (
-          <div data-type="body-s" className="border-t border-outline-var py-3 text-on-surface-low">
+          <div data-type="body-s" className="border-t border-outline-variant py-3 text-on-surface-low">
             No sync transport is installed and enabled yet. Install one from the Store (git-sync
             keeps a human-readable history in a repo you own; dir-sync uses any folder that
             already syncs itself), then enable it under Settings → Providers, where its own
@@ -684,7 +690,7 @@ function SyncSection({ cfg, setCfg, status, transports }: {
         </Row>
 
         {status?.sync && (
-          <div className="border-t border-outline-var py-3">
+          <div className="border-t border-outline-variant py-3">
             <div className="flex flex-col gap-1.5">
               <JobLine label="Last sync" when={status.sync.last_run} due={status.sync.due} />
               <div data-type="body-s" className="flex items-baseline justify-between gap-3">
@@ -716,18 +722,28 @@ const CHOICE_LABELS: Record<DurabilityConflictChoice, string> = {
   accept_proposal: 'Accept the drafted merge',
 }
 
-function ConflictsSection({ read, onChanged }: {
+function ConflictsSection({ read, surface, onSurface, onChanged }: {
   read: Settled<DurabilityConflicts>
+  surface: string
+  onSurface: (surface: string) => void
   onChanged: () => void
 }) {
   const [busy, setBusy] = useState('')
   const [expanded, setExpanded] = useState('')
 
   const hint = 'When two machines edit the same thing while apart, Gideon keeps both versions and waits for you instead of guessing.'
+  const categories = <Row label="Conflict category">
+    <Select value={surface} onChange={onSurface} ariaLabel="Conflict category"
+      options={CONFLICT_SURFACES.map((option) => ({
+        ...option,
+        label: `${option.label} (${read.ok ? read.value.counts.by_surface[option.value] ?? 0 : '?'})`,
+      }))} />
+  </Row>
 
   if (!read.ok) {
     return (
       <Section title="Conflicts to review" hint={hint}>
+        {categories}
         <div data-type="body-s" className="rounded-lg bg-surface-container px-4 py-3">
           <div className="flex items-start gap-2" style={{ color: 'var(--color-error)' }}>
             <AlertTriangle size={14} className="mt-0.5 shrink-0" aria-hidden />
@@ -748,7 +764,7 @@ function ConflictsSection({ read, onChanged }: {
   const pending = conflicts.filter((c) => c.status === 'needs-review')
   const decided = conflicts.filter((c) => c.status !== 'needs-review')
   const elsewhere = Object.entries(counts.by_surface)
-    .filter(([surface, n]) => surface !== SURFACE_DURABILITY && n > 0)
+    .filter(([other, n]) => other !== surface && n > 0)
 
   const resolve = async (c: DurabilityConflict, choice: DurabilityConflictChoice) => {
     if (!(await confirm({
@@ -772,6 +788,7 @@ function ConflictsSection({ read, onChanged }: {
 
   return (
     <Section title="Conflicts to review" hint={hint}>
+        {categories}
       <div className="rounded-lg bg-surface-container px-4 py-3">
         {pending.length === 0 ? (
           <div data-type="body-s" className="text-on-surface-low">
@@ -782,7 +799,7 @@ function ConflictsSection({ read, onChanged }: {
         ) : (
           <ul className="flex list-none flex-col gap-3 p-0">
             {pending.map((c) => (
-              <li key={c.id} className="border-outline-var border-t pt-3 first:border-t-0 first:pt-0">
+              <li key={c.id} className="border-outline-variant border-t pt-3 first:border-t-0 first:pt-0">
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                   <span data-type="label-s" className="min-w-0 flex-1 truncate text-on-surface" style={fvs(550)}>
                     {c.entity_id}
@@ -847,12 +864,18 @@ function ConflictsSection({ read, onChanged }: {
         )}
 
         {elsewhere.length > 0 && (
-          <p data-type="caption" className="mt-3 text-on-surface-low">
-            {elsewhere.map(([surface, n]) => `${n} ${surface}`).join(' and ')} conflict
-            {elsewhere.reduce((t, [, n]) => t + n, 0) === 1 ? '' : 's'} are waiting on their own
-            review surface — memory and knowledge divergences are reviewed where that data lives,
-            not here.
-          </p>
+          <div className="mt-3 flex flex-col items-start gap-2">
+            <p data-type="caption" className="text-on-surface-low">
+              {elsewhere.map(([other, n]) => `${n} ${other}`).join(' and ')} conflict
+              {elsewhere.reduce((t, [, n]) => t + n, 0) === 1 ? '' : 's'} are waiting.
+              Choose a category to compare both versions and decide which to keep.
+            </p>
+            {elsewhere.map(([other, n]) => (
+              <Button key={other} variant="secondary" size="sm" onClick={() => onSurface(other)}>
+                Review {n} {other} {n === 1 ? 'conflict' : 'conflicts'}
+              </Button>
+            ))}
+          </div>
         )}
         {decided.length > 0 && (
           <p data-type="caption" className="mt-3 text-on-surface-low">

@@ -18,13 +18,11 @@ from aiohttp.test_utils import make_mocked_request
 from gideon.interfaces.dashboard.handlers import providers as H
 
 
-async def _coro(v):
-    return v
-
-
 def _post(body):
-    req = make_mocked_request("POST", "/api/model-providers")
-    req.json = lambda: _coro(body)
+    req = make_mocked_request(
+        "POST", "/api/model-providers", headers={"Content-Type": "application/json"}
+    )
+    req._read_bytes = json.dumps(body).encode()
     return req
 
 

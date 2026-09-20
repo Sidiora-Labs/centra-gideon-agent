@@ -38,6 +38,30 @@ def _make_request(user="testuser", session_id="abc123", registry=None, cfg=None)
     return request
 
 
+def _real_request(body: dict):
+    """A real aiohttp Request whose body the shared boundary reads from JSON bytes.
+
+    The `payload` reader is what makes `body_exists` true, matching a POST that actually
+    carried a body; without it the handler skips the body block entirely.
+    """
+    from aiohttp.streams import StreamReader
+    from aiohttp.test_utils import make_mocked_request
+
+    state = MagicMock()
+    state._terminal_sessions = {}
+    request = make_mocked_request(
+        "POST",
+        "/api/terminal/sessions",
+        match_info={"session_id": "abc123"},
+        headers={"Content-Type": "application/json"},
+        payload=StreamReader(MagicMock(), 2**16),
+    )
+    request.app["state"] = state
+    request["user"] = "testuser"
+    request._read_bytes = json.dumps(body).encode()  # noqa: SLF001
+    return request
+
+
 def _make_session(session_id="s1", alive=True, ws=None, disconnect=None, master_fd=-1):
     """Build a mock _TerminalSession.
 
@@ -249,13 +273,7 @@ class TestApiTerminalCreate:
         import os as _os
 
         for bad in (_os.path.expanduser("~/.ssh"), "/etc"):
-            req = _make_request()
-            req.body_exists = True
-
-            async def _json(_b=bad):
-                return {"cwd": _b}
-
-            req.json = _json
+            req = _real_request({"cwd": bad})
             with (
                 patch.object(terminal, "_get_config", return_value={"enabled": True}),
                 patch.object(terminal, "_sel") as mock_sel,
@@ -266,13 +284,7 @@ class TestApiTerminalCreate:
 
     @pytest.mark.asyncio
     async def test_allows_a_normal_workspace_cwd(self, tmp_path):
-        req = _make_request()
-        req.body_exists = True
-
-        async def _json():
-            return {"cwd": str(tmp_path)}
-
-        req.json = _json
+        req = _real_request({"cwd": str(tmp_path)})
         with (
             patch.object(terminal, "_get_config", return_value={"enabled": True}),
             patch.object(terminal, "_sel") as mock_sel,
@@ -405,11 +417,14 @@ class TestApiTerminalList:
     @pytest.mark.asyncio
     async def test_returns_empty_list(self):
         req = _make_request()
-        with patch.object(terminal, "_sel") as mock_sel:
+        with (
+            patch.object(terminal, "_sel") as mock_sel,
+            patch.object(terminal, "_tmux_available", return_value=False),
+        ):
             mock_sel.return_value.log_api_access = MagicMock()
             resp = await terminal.api_terminal_list(req)
         body = json.loads(resp.body)
-        assert body == {"enabled": True, "sessions": []}
+        assert body == {"enabled": True, "sessions": [], "persist_available": False}
 
     @pytest.mark.asyncio
     async def test_lists_sessions_with_details(self):
@@ -888,6 +903,12 @@ class TestPersistence:
         assert terminal._persist_enabled(_make_request()) is True
         monkeypatch.setattr(terminal.shutil, "which", lambda _b: None)
         assert terminal._persist_enabled(_make_request()) is False
+
+    @pytest.mark.asyncio
+    async def test_list_publishes_persistence_availability(self, monkeypatch):
+        monkeypatch.setattr(terminal, "_tmux_available", lambda: True)
+        response = await terminal.api_terminal_list(_make_request())
+        assert json.loads(response.text)["persist_available"] is True
 
     def test_tmux_session_name_maps_dots(self):
         assert terminal._tmux_session_name("abc.123") == "gideon-abc_123"

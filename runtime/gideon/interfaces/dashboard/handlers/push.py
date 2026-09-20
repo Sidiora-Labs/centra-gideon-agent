@@ -33,6 +33,7 @@ from typing import Any
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.http_errors import json_error
 from gideon.workspace import push
 
@@ -49,7 +50,7 @@ _MAX_DEVICE_ID = 128
 
 async def _body(request: web.Request) -> dict[str, Any]:
     try:
-        data = await request.json()
+        data = await read_json_body(request)
     except (json.JSONDecodeError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}

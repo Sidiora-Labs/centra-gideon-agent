@@ -10,20 +10,18 @@ import json
 from unittest.mock import MagicMock
 
 import pytest
-from aiohttp import web
+from aiohttp.test_utils import make_mocked_request
 
 
-def _make_request(body: dict) -> MagicMock:
-    """Build a fake aiohttp request for the api_mcp_apply handler."""
-    state = MagicMock()
-    state._background_tasks = set()
-    request = MagicMock(spec=web.Request)
-    request.app = {"state": state}
-
-    async def _json() -> dict:
-        return body
-
-    request.json = _json
+def _make_request(body: dict):
+    """A real aiohttp request carrying the serialized JSON body api_mcp_apply parses
+    through ``read_json_body``."""
+    request = make_mocked_request(
+        "POST",
+        "/api/mcp/apply",
+        headers={"Content-Type": "application/json"},
+    )
+    request._read_bytes = json.dumps(body).encode()
     return request
 
 

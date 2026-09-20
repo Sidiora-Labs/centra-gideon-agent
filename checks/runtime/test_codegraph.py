@@ -100,7 +100,7 @@ def workspace(tmp_path):
     """A small multi-language workspace on disk."""
     root = tmp_path / "ws"
     (root / "pkg").mkdir(parents=True)
-    (root / "apps/console").mkdir()
+    (root / "apps/console").mkdir(parents=True)
     (root / "pkg" / "widget.py").write_bytes(PY_SOURCE)
     (root / "apps/console" / "Panel.tsx").write_bytes(TS_SOURCE)
     (root / "pkg" / "config.rs").write_bytes(RUST_SOURCE)
@@ -416,7 +416,8 @@ class TestQueries:
 
     @needs_grammar
     def test_definition_lookup_reports_location(self, workspace):
-        row = _index(workspace).definitions_of("render")[0]
+        rows = _index(workspace).definitions_of("render")
+        row = next(r for r in rows if r["owner"] == "Widget")
         assert row["path"] == "pkg/widget.py"
         assert row["line"] == 9
         assert row["owner"] == "Widget"
@@ -620,6 +621,7 @@ class TestCodeMapTool:
 
         manifest = (
             Path(gideon.__file__).parent
+            / "extensions"
             / "apps"
             / "native"
             / "gideon-code-map"

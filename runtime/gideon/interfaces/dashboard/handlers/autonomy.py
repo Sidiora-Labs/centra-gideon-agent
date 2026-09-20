@@ -31,12 +31,14 @@ import logging
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
+
 logger = logging.getLogger(__name__)
 
 
 async def _body(request: web.Request) -> dict:
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:  # noqa: BLE001
         return {}
     return body if isinstance(body, dict) else {}

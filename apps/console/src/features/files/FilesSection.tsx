@@ -36,6 +36,7 @@ export function FilesSection({ sub, navigate, query: routeQuery, setQuery }: Rou
     if (deepSlug) navigate(`artifacts/${deepSlug}`, { replace: true })
   }, [deepSlug, navigate])
   const [dir, setDir] = useQueryParam(routeQuery, setQuery, 'dir', '')
+  const [requestedFile] = useQueryParam(routeQuery, setQuery, 'file', '')
   const [tab, setTab] = useState<string>(() => localStorage.getItem(TAB_KEY) || '')
   useEffect(() => { if (tab) localStorage.setItem(TAB_KEY, tab) }, [tab])
 
@@ -97,7 +98,11 @@ export function FilesSection({ sub, navigate, query: routeQuery, setQuery }: Rou
   const openByPath = useCallback((path: string, rootPath?: string) => {
     if (rootPath) setTab(rootPath)
     fileTabs.open({ name: baseName(path), path, is_dir: false })
-  }, [fileTabs])
+  }, [fileTabs.open])
+
+  useEffect(() => {
+    if (requestedFile) openByPath(requestedFile)
+  }, [requestedFile, openByPath])
 
   useEffect(() => {
     if (!activeRoot || grep.trim().length < 2) { setResults([]); setSearchEngine(''); setSearchErr(null); return }

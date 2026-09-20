@@ -499,22 +499,39 @@ def test_the_middleware_events_are_ledger_kinds():
         assert event in LEDGER_KINDS, event
 
 
-def test_every_middleware_event_is_registered_in_the_frontend_union():
-    """EventSource silently DROPS event types it has no listener for.
-
-    So an unregistered event is not a rendering bug you can see — it is an event that
-    never arrives. This test is the only thing standing between "the backend emits it"
-    and "the user sees it".
-    """
+def test_middleware_stream_uses_the_workflow_transport_event():
+    """Ledger kinds and stream event names are separate contracts."""
+    import ast
+    import inspect
+    import textwrap
     from pathlib import Path
 
-    source = (
-        Path(__file__).resolve().parents[2]
-        / "apps/console/src/features/loops/useRunStream.ts"
+    from gideon.automation.workflows.controller import RunController
+
+    root = Path(__file__).resolve().parents[2] / "apps/console/src/features"
+    workflow = (root / "workflows/useWorkflowStream.ts").read_text()
+    workflow_union = workflow.split("export const WORKFLOW_LIFECYCLE = [", 1)[1].split(
+        "] as const", 1
+    )[0]
+    steering = ast.parse(
+        textwrap.dedent(inspect.getsource(RunController._consume_steering))
     )
-    text = source.read_text(encoding="utf-8")
-    union = text.split("export const RUN_LIFECYCLE = [", 1)[1].split("] as const", 1)[0]
-    for event in MIDDLEWARE_EVENTS:
-        assert (
-            f"'{event}'" in union
-        ), f"{event} is emitted but not registered in RUN_LIFECYCLE"
+    published = {
+        node.args[0].value
+        for node in ast.walk(steering)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "_publish"
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+    }
+    assert published == {"workflow_steering_consumed"}
+    for event in published:
+        assert f"'{event}'" in workflow_union
+
+    loop = (root / "loops/useRunStream.ts").read_text()
+    loop_union = loop.split("export const RUN_LIFECYCLE = [", 1)[1].split(
+        "] as const", 1
+    )[0]
+    for kind in MIDDLEWARE_EVENTS:
+        assert f"'{kind}'" not in loop_union

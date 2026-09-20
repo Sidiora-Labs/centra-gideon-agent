@@ -11,10 +11,12 @@ import signal
 import time
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from gideon import shutdown_event
-from gideon.core.config.loader import AppConfig, config_dir
+from gideon.core.config import loader as config_loader
+from gideon.core.config.loader import AppConfig
 from gideon.core.constants import DATA_WARNING
 from gideon.core.env import browser_available
 from gideon.engine import gateway_base
@@ -35,6 +37,10 @@ if TYPE_CHECKING:
     from gideon.engine.gateway import RuntimeCoordinator
 
 log = logging.getLogger(__name__)
+
+
+def config_dir() -> Path:
+    return config_loader.config_dir()
 
 
 @dataclass(frozen=True, slots=True)

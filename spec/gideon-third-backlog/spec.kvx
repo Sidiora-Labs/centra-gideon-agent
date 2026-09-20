@@ -1,0 +1,1284 @@
+# gideon-third-backlog — feature spec. Requirements, design, then the task list.
+
+[meta]
+feature = "gideon-third-backlog"
+status  = "draft"
+intro   = "This specification converts the 82 actionable work items in 3rd-todo.md into traceable requirements and pending implementation tasks across Gideon."
+
+[qualification.test_dependencies]
+status = "implemented-not-fully-qualified"
+implementation = "Declare setuptools>=64 in the test extra and regenerate uv.lock; install locked setuptools 83.0.0 in wt/base/.venv."
+evidence = "e125ffd51e7686157b9c5b19a7959d1e66ab6829 + working-tree dependency fix; .venv/bin/python -m pytest checks/runtime/test_sdist_bundles_spa.py -q; exit 0; /tmp/gideon-setuptools-test.log"
+remaining = "Focused gate: 3 passed, 1 skipped because apps/console/dist is absent. Full make test and built-console packaging coverage remain unqualified; no merge, commit or push performed."
+
+[qualification.merge_failure_repairs]
+status = "implemented-not-fully-qualified"
+implementation = "Repair recorded runtime failures after package extraction and active backlog changes: shared request validation and error envelopes, persisted inbox and snapshot data, permission ceilings, capture learning admission, structural and protocol inventories, packaging and installer paths, generated API reference, and reachable memory/knowledge conflict review. Preserve the original acceptance assertions with real request/type fixtures."
+evidence = "Focused repair reports and logs: /tmp/gideon-repair-agents/*.result.json; resumed parallel batch: /tmp/gideon-resume-focused.log. Source e125ffd51e7686157b9c5b19a7959d1e66ab6829 plus uncommitted active-spec work and repairs."
+remaining = "Final parallel runtime suite and browser build qualification pending. Target working-tree transfer authorized to /root/openapi/centra-gideon-agent; preserve target edits, do not stage, commit or push."
+
+[design]
+overview = "Implement the third Gideon backlog as independently traceable vertical slices. Each task owns one source work item and preserves every nested source bullet as a distinct acceptance criterion."
+
+[design.traceability]
+note = "Requirement and task numbering follow source order. Source headings become task sections; repeated external identifiers remain separate requirements when 3rd-todo.md describes separate deliverables."
+
+[design.delivery]
+note = "All implementation tasks begin pending in wave 0 because the source declares no ordering dependencies. Each slice must deliver its backend, surface, SDK, evaluation, documentation, and focused regression obligations wherever its acceptance criteria name them."
+
+[documentation]
+mode      = "auto"
+status    = "pending"
+audiences = ["user", "developer"]
+targets   = ["README.md", "docs/**", "CONTRIBUTING.md", "CHANGELOG.md"]
+
+[tasks]
+heading = "Implementation Plan: gideon-third-backlog"
+
+[req.1]
+title = "KBVS-2 — Relevance reranker stage (off by default)"
+story = "As a knowledge user, I want KBVS-2 — Relevance reranker stage (off by default) delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Add a post-fusion relevance stage to `HybridRetriever`, gated by `knowledge.rerank_enabled` (default `false`)."
+ac_2 = "Send top RRF-fused candidates to the active reasoning model via the existing `one_shot_completion` seam — no vendor branch in core."
+ac_3 = "On model failure, empty response, or response naming no real candidate ID: fail open to the un-reranked order."
+ac_4 = "Extend `gideon.evals.retrieval_bench` to measure the rerank arm as its own `\"rerank\"` row alongside keyword/graph/vector. The row reads `\"not measured\"` when the reranker never gets a usable response."
+ac_5 = "Register `knowledge/retrieval.py` in the degraded-contract lint map (`assistant_reasoning`, fail-open floor)."
+ac_6 = "Fix stale `config-baseline.json` so the new config keys pass the config-baseline gate."
+ac_7 = "Add a falsifier test: score one corpus twice with the model ordering changed and assert the bench row moves (1.0 → 0.0). A mutation that ignores the model's ordering must red."
+
+[task.1]
+title   = "KBVS-2 — Relevance reranker stage (off by default)"
+section = "Knowledge / Retrieval"
+status  = "done"
+wave    = 0
+reqs    = ["1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7"]
+do_1    = "Implement every acceptance criterion for requirement 1 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 1"
+
+[req.2]
+title = "WF2KNO-10 — Render unsettled stored neighbours into the judge prompt"
+story = "As a knowledge user, I want WF2KNO-10 — Render unsettled stored neighbours into the judge prompt delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Update the bundled `contradiction-review` workflow so the judge prompt includes stored neighbour entities whose contradiction edges are still unset, giving the model the context it needs to rule on conflicts."
+
+[task.2]
+title   = "WF2KNO-10 — Render unsettled stored neighbours into the judge prompt"
+section = "Knowledge / Retrieval"
+status  = "done"
+wave    = 0
+reqs    = ["2.1"]
+do_1    = "Implement every acceptance criterion for requirement 2 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 2"
+
+[req.3]
+title = "Ingestion NODE_REGISTRY leak"
+story = "As a knowledge user, I want Ingestion NODE_REGISTRY leak delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Ensure the ingestion `NODE_REGISTRY` does not leak stub nodes across pytest workers. Isolate per-worker state so parallel test runs don't cross-contaminate."
+
+[task.3]
+title   = "Ingestion NODE_REGISTRY leak"
+section = "Knowledge / Retrieval"
+status  = "done"
+wave    = 0
+reqs    = ["3.1"]
+do_1    = "Implement every acceptance criterion for requirement 3 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 3"
+
+[req.4]
+title = "TSE2-4 — Shared items flow out through the provider push half"
+story = "As a knowledge user, I want TSE2-4 — Shared items flow out through the provider push half delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Add the provider-side push path so shared knowledge items (created by a teammate's instance) are delivered to the local owner's inbox/queue, completing the TSE2-3 store→push pipeline."
+
+[task.4]
+title   = "TSE2-4 — Shared items flow out through the provider push half"
+section = "Knowledge / Retrieval"
+status  = "done"
+wave    = 0
+reqs    = ["4.1"]
+do_1    = "Implement every acceptance criterion for requirement 4 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 4"
+
+[req.5]
+title = "AE-1 — Accept `collection` in the MCP tool schemas"
+story = "As a knowledge user, I want AE-1 — Accept `collection` in the MCP tool schemas delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Add `collection` as a recognized parameter in the artifact-related MCP tool input schemas so callers can scope artifact reads/writes to a collection."
+
+[task.5]
+title   = "AE-1 — Accept `collection` in the MCP tool schemas"
+section = "Knowledge / Retrieval"
+status  = "done"
+wave    = 0
+reqs    = ["5.1"]
+do_1    = "Implement every acceptance criterion for requirement 5 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 5"
+
+[req.6]
+title = "AECO-2 — Deliver the validated per-source spec to app knowledge providers"
+story = "As a knowledge user, I want AECO-2 — Deliver the validated per-source spec to app knowledge providers delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Pass the validated, per-source knowledge spec through to each app's knowledge provider on registration, so app authors receive the authoritative spec rather than deriving it themselves."
+
+[task.6]
+title   = "AECO-2 — Deliver the validated per-source spec to app knowledge providers"
+section = "Knowledge / Retrieval"
+status  = "done"
+wave    = 0
+reqs    = ["6.1"]
+do_1    = "Implement every acceptance criterion for requirement 6 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 6"
+
+[req.7]
+title = "Editable knowledge intents"
+story = "As a knowledge user, I want Editable knowledge intents delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Make knowledge intents editable so the \"Pause\" and \"Propose skill\" actions are no longer dead ends. Wire both controls to the backend endpoints and update the UI state model accordingly."
+
+[task.7]
+title   = "Editable knowledge intents"
+section = "Knowledge / Retrieval"
+status  = "done"
+wave    = 0
+reqs    = ["7.1"]
+do_1    = "Implement every acceptance criterion for requirement 7 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 7"
+
+[req.8]
+title = "KOCR-2 — Report a capped OCR read and gate both OCR backends by bytes"
+story = "As a knowledge user, I want KOCR-2 — Report a capped OCR read and gate both OCR backends by bytes delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Add a byte cap to the OCR pipeline so neither backend (Tesseract nor any alternative) reads beyond a configured limit."
+ac_2 = "Report the capped read result honestly (what was read, what was skipped) rather than silently truncating."
+
+[task.8]
+title   = "KOCR-2 — Report a capped OCR read and gate both OCR backends by bytes"
+section = "Knowledge / Retrieval"
+status  = "implemented"
+wave    = 0
+reqs    = ["8.1", "8.2"]
+do_1    = "Implement every acceptance criterion for requirement 8 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 8"
+
+[req.9]
+title = "KBVS-1 — External vector-store backend seam"
+story = "As a knowledge user, I want KBVS-1 — External vector-store backend seam delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Add a provider seam so an external vector store (e.g. Qdrant) can replace the local `vec0` index for chunk similarity search."
+ac_2 = "The contract: external store computes cosine similarity in [−1, 1], returns results in descending order; core applies its own `_VECTOR_MIN_SIMILARITY` floor, MAX roll-up, liveness join and RRF fusion."
+ac_3 = "A bound-but-unreachable backend contributes nothing (WARNING log); keyword/graph/whole-item arms still answer. No fallback to `vec0` from a failed external store."
+ac_4 = "Write-through: hook the three chunk-write sites (`replace_chunks`, `clear_chunks`, `_delete_item_cascade`) to immediately index/delete on the external store per item. Swallow write failures at WARNING."
+ac_5 = "Add `PROVIDER_TYPES` entry + `VectorStoreTypeHandler`; regenerate `reference/providers.md`."
+ac_6 = "Rels: forbid vendor-specific constants (host, port, API key) in `retrieval.py`; verify output byte-identity between the branch and its merge base over 7 queries × archived/unarchived."
+
+[task.9]
+title   = "KBVS-1 — External vector-store backend seam"
+section = "Knowledge / Retrieval"
+status  = "done"
+wave    = 0
+reqs    = ["9.1", "9.2", "9.3", "9.4", "9.5", "9.6"]
+do_1    = "Implement every acceptance criterion for requirement 9 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 9"
+
+[req.10]
+title = "WF2KNO-10 — Persist model-proposed typed edges"
+story = "As a knowledge user, I want WF2KNO-10 — Persist model-proposed typed edges delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "When the workflow model proposes a `supersedes` or `contradicts` edge between two stored knowledge entities, validate and persist it into the knowledge graph rather than discarding it."
+
+[task.10]
+title   = "WF2KNO-10 — Persist model-proposed typed edges"
+section = "Knowledge / Retrieval"
+status  = "done"
+wave    = 0
+reqs    = ["10.1"]
+do_1    = "Implement every acceptance criterion for requirement 10 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 10"
+
+[req.11]
+title = "Entity alias write"
+story = "As a knowledge user, I want Entity alias write delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Write entity aliases to the knowledge store so the pre-pass can match a query's alias to the canonical entity, rather than requiring the exact canonical name."
+
+[task.11]
+title   = "Entity alias write"
+section = "Knowledge / Retrieval"
+status  = "done"
+wave    = 0
+reqs    = ["11.1"]
+do_1    = "Implement every acceptance criterion for requirement 11 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 11"
+
+[req.12]
+title = "Meta-refresh stub follow + conflict flag + shelf name cap"
+story = "As a knowledge user, I want Meta-refresh stub follow + conflict flag + shelf name cap delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Add a shared `meta_refresh_target()` parser to `web/extract.py`; follow HTML `<meta http-equiv=\"refresh\">` stubs in the `web_url` connector (bounded to 3 hops). Every hop re-enters the same connector policy (SSRF guard)."
+ac_2 = "Add `run_ingest_conflict_pass()` and call it from the enrichment pipeline right after insights, so UI-saved items (dashboard, connector, bookmark) populate the Knowledge Conflicts tab. Share the record shape and typed edges with the provider path."
+ac_3 = "Cap shelf name at 200 chars via a shared validator on both `create_collection` and `update_collection`. Bound and truncate the chip in the UI (full name in `title`)."
+
+[task.12]
+title   = "Meta-refresh stub follow + conflict flag + shelf name cap"
+section = "Knowledge / Retrieval"
+status  = "implemented"
+wave    = 0
+reqs    = ["12.1", "12.2", "12.3"]
+do_1    = "Implement every acceptance criterion for requirement 12 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 12"
+
+[req.13]
+title = "#951 — `config set` no longer deletes unmodeled `providers[]`"
+story = "As a operator, I want #951 — `config set` no longer deletes unmodeled `providers[]` delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Add a merge primitive: before any `config set` write, read the existing file, extract every top-level key the current write does not serialize, and copy those forward into the output. No hand-maintained allowlist."
+
+[task.13]
+title   = "#951 — `config set` no longer deletes unmodeled `providers[]`"
+section = "Configuration"
+status  = "done"
+wave    = 0
+reqs    = ["13.1"]
+do_1    = "Implement every acceptance criterion for requirement 13 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 13"
+
+[req.14]
+title = "#951 — `config get`/`set --file` round-trip preserves everything"
+story = "As a operator, I want #951 — `config get`/`set --file` round-trip preserves everything delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "`config get` must show what the file actually holds, not just the ~40 sections the `AppConfig` dataclass models. Four sections (`providers`, `use_cases`, `slack`, `meta`) are read directly off the raw dict and must not be omitted."
+ac_2 = "Route all three write paths (`config set <key> <value>`, `config set --file`, and the internal `save()`) through the same merge primitive from #3103."
+ac_3 = "`config set --file` refuses an unreadable config and a JSON document that parses but is not an object (both previously replaced the file)."
+ac_4 = "Add a property rail: a config write must have consulted the existing document before reaching `atomic_write` — by merge or by starting from it. Two floors: one fails if the scan stops finding the three known write sites; one pins the tells."
+
+[task.14]
+title   = "#951 — `config get`/`set --file` round-trip preserves everything"
+section = "Configuration"
+status  = "done"
+wave    = 0
+reqs    = ["14.1", "14.2", "14.3", "14.4"]
+do_1    = "Implement every acceptance criterion for requirement 14 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 14"
+
+[req.15]
+title = "#2952/#2950/#2958 — Three config write paths that silently discard values"
+story = "As a operator, I want #2952/#2950/#2958 — Three config write paths that silently discard values delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Identify and fix three additional write paths where a user's config value is silently dropped on save. The fix pattern is the same: read the existing file, merge the write's keys over it, write the merged result."
+
+[task.15]
+title   = "#2952/#2950/#2958 — Three config write paths that silently discard values"
+section = "Configuration"
+status  = "done"
+wave    = 0
+reqs    = ["15.1"]
+do_1    = "Implement every acceptance criterion for requirement 15 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 15"
+
+[req.16]
+title = "FM-3 — One reduced-motion accessor + registry-driven family rail"
+story = "As a frontend maintainer, I want FM-3 — One reduced-motion accessor + registry-driven family rail delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Consolidate every ad-hoc reduced-motion check (`useReducedMotion`, `prefers-reduced-motion` matchMedia, inline `@media`) into a single shared accessor."
+ac_2 = "Build a registry that enumerates every motion-bearing component and asserts each consults the shared accessor, so a new component cannot ship an independent check."
+ac_3 = "Update all motion-family components (`DotGlow`, `WavyProgress`, `Bud`, `Disintegrate`, `LiquidShape`, `Morph`, …) to use it."
+
+[task.16]
+title   = "FM-3 — One reduced-motion accessor + registry-driven family rail"
+section = "Motion / Design System / Frontend Infra"
+status  = "implemented"
+wave    = 0
+reqs    = ["16.1", "16.2", "16.3"]
+do_1    = "Implement every acceptance criterion for requirement 16 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 16"
+
+[req.17]
+title = "DSC-2 — Make the visual rail deterministic"
+story = "As a frontend maintainer, I want DSC-2 — Make the visual rail deterministic delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Root-cause the visual-rail drift: `fullyParallel` + a shared gateway home lets chat-turn state (flywheel health panel) leak into visual captures depending on worker schedule."
+ac_2 = "Separate capture from verification invocation shapes: `e2e` runs non-visual specs then visual; `e2e:update` targets only the snapshot-bearing spec."
+ac_3 = "Tag `visual.spec.ts` with `{ tag: '@visual' }` so renaming a describe cannot re-merge the partitions."
+ac_4 = "`helpers.assertPristineFlywheel` refuses to compare pixels when `composite.measured > 0`; fails open on an unreadable read; hard-fails once the signal is read."
+ac_5 = "Recapture all 40 Darwin goldens from a clean run. Pin the 40-golden count and the 124-route axe scan."
+
+[task.17]
+title   = "DSC-2 — Make the visual rail deterministic"
+section = "Motion / Design System / Frontend Infra"
+status  = "implemented"
+wave    = 0
+reqs    = ["17.1", "17.2", "17.3", "17.4", "17.5"]
+do_1    = "Implement every acceptance criterion for requirement 17 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 17"
+
+[req.18]
+title = "DSC-2 — Root-cause visual-rail non-determinism (follow-up)"
+story = "As a frontend maintainer, I want DSC-2 — Root-cause visual-rail non-determinism (follow-up) delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Replace the existential \"at least one platform is complete\" invariant with a named-platform assertion: the capture must produce a complete set for every declared platform (`-darwin`, `-linux`, …). No `UNCAPTURED` allowance list may exist."
+
+[task.18]
+title   = "DSC-2 — Root-cause visual-rail non-determinism (follow-up)"
+section = "Motion / Design System / Frontend Infra"
+status  = "implemented"
+wave    = 0
+reqs    = ["18.1"]
+do_1    = "Implement every acceptance criterion for requirement 18 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 18"
+
+[req.19]
+title = "SSM-15 — Desktop rail-open axe state, mark-tone contrast, keyboard walkthrough"
+story = "As a frontend maintainer, I want SSM-15 — Desktop rail-open axe state, mark-tone contrast, keyboard walkthrough delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Add an axe test that verifies the Session Map's desktop rail-open state passes accessibility."
+ac_2 = "Ensure the mark tone (current vs history) has sufficient contrast ratio."
+ac_3 = "Add a keyboard walkthrough test for the rail."
+
+[task.19]
+title   = "SSM-15 — Desktop rail-open axe state, mark-tone contrast, keyboard walkthrough"
+section = "Motion / Design System / Frontend Infra"
+status  = "implemented"
+wave    = 0
+reqs    = ["19.1", "19.2", "19.3"]
+do_1    = "Implement every acceptance criterion for requirement 19 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 19"
+
+[req.20]
+title = "A pending read says it is waiting"
+story = "As a frontend maintainer, I want A pending read says it is waiting delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "When a component renders a skeleton/spinner (pending read), it must visually signal \"waiting\" to the visual rail so the golden does not capture a mid-load state as if it were rest."
+
+[task.20]
+title   = "A pending read says it is waiting"
+section = "Motion / Design System / Frontend Infra"
+status  = "implemented"
+wave    = 0
+reqs    = ["20.1"]
+do_1    = "Implement every acceptance criterion for requirement 20 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 20"
+
+[req.21]
+title = "DSC-6 — Provider form's four raw fields adopt the shared family"
+story = "As a frontend maintainer, I want DSC-6 — Provider form's four raw fields adopt the shared family delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Migrate the provider settings form's four hand-rolled `<input>` / `<select>` / `<textarea>` fields to the design-system's `TextInput` / `Select` / `TextArea` primitives."
+ac_2 = "Extend the primitives: `TextInput` gains `type=\"number\"`, `min`/`max`, `minLength`, `pattern`, `trailingSlot`, explicit `id`, exclusive padding branch. `Select` and `TextArea` gain `surface` axis and `id`."
+ac_3 = "Rail: no branch carries `px-3`; every label binds via `label[for]`; the secret field's eye toggles the input type."
+
+[task.21]
+title   = "DSC-6 — Provider form's four raw fields adopt the shared family"
+section = "Motion / Design System / Frontend Infra"
+status  = "implemented"
+wave    = 0
+reqs    = ["21.1", "21.2", "21.3"]
+do_1    = "Implement every acceptance criterion for requirement 21 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 21"
+
+[req.22]
+title = "#1106 — Whitespace rail + `.editorconfig` for the frontend"
+story = "As a frontend maintainer, I want #1106 — Whitespace rail + `.editorconfig` for the frontend delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Add an `.editorconfig` with 2-space indent for `web/src/**/*.ts` / `.tsx`."
+ac_2 = "Add a CI lint rule (or vitest) that rejects trailing whitespace and inconsistent indentation in `web/src/`."
+
+[task.22]
+title   = "#1106 — Whitespace rail + `.editorconfig` for the frontend"
+section = "Motion / Design System / Frontend Infra"
+status  = "implemented"
+wave    = 0
+reqs    = ["22.1", "22.2"]
+do_1    = "Implement every acceptance criterion for requirement 22 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 22"
+
+[req.23]
+title = "#474/#476/#477 — Operable graph nodes, clearable scope filter, reachable tags"
+story = "As a task and loop user, I want #474/#476/#477 — Operable graph nodes, clearable scope filter, reachable tags delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Make every DAG node keyboard- and screen-reader-accessible: inner `<g role=\"button\" tabIndex={0}>` with an accessible name, Enter/Space handler. Gate buttons (`Approve`/`Deny`) remain siblings, not children of the button subtree."
+ac_2 = "The Scope filter's Clear writes through to both React state and the URL param so \"All tasks\" is a genuine cleared state (empty string, not a fallback to stale remembered scope)."
+ac_3 = "Task tags become filterable: the tag chips on task rows are clickable and filter the task list by that tag."
+
+[task.23]
+title   = "#474/#476/#477 — Operable graph nodes, clearable scope filter, reachable tags"
+section = "Tasks / DAG / Loops"
+status  = "implemented"
+wave    = 0
+reqs    = ["23.1", "23.2", "23.3"]
+do_1    = "Implement every acceptance criterion for requirement 23 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 23"
+
+[req.24]
+title = "#3159 — The list, DAG and prerequisite picker see every task, not the first 50"
+story = "As a task and loop user, I want #3159 — The list, DAG and prerequisite picker see every task, not the first 50 delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Remove the 50-task limit from the tasks list endpoint and every consumer that renders from it (DAG builder, prerequisite picker, cockpit). Paginate or stream for large sets."
+
+[task.24]
+title   = "#3159 — The list, DAG and prerequisite picker see every task, not the first 50"
+section = "Tasks / DAG / Loops"
+status  = "implemented"
+wave    = 0
+reqs    = ["24.1"]
+do_1    = "Implement every acceptance criterion for requirement 24 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 24"
+
+[req.25]
+title = "#3157 — One name validator for projects and task lists, and a count badge emitter"
+story = "As a task and loop user, I want #3157 — One name validator for projects and task lists, and a count badge emitter delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Extract a shared `validate_container_name` used by both project-create and task-list-create, so a name accepted by one door is accepted by the other."
+ac_2 = "Add an event emitter for the task-list count badge so the sidebar count updates without a full re-fetch."
+
+[task.25]
+title   = "#3157 — One name validator for projects and task lists, and a count badge emitter"
+section = "Tasks / DAG / Loops"
+status  = "done"
+wave    = 0
+reqs    = ["25.1", "25.2"]
+do_1    = "Implement every acceptance criterion for requirement 25 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 25"
+
+[req.26]
+title = "#411 — Launching from Plan Review preserves unmodeled `kind_config` fields"
+story = "As a task and loop user, I want #411 — Launching from Plan Review preserves unmodeled `kind_config` fields delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Change `PUT /api/loops/{id}` so `kind_config` is a PATCH: merge the request's `kind_config` over the stored config rather than replacing it. This preserves every field the Plan Review screen does not render (subtopics, output template, granularity, breadth/depth, etc.)."
+ac_2 = "Server-side merge (not client-side) because `store.get_redacted` returns a redacted view the client cannot faithfully reconstruct."
+
+[task.26]
+title   = "#411 — Launching from Plan Review preserves unmodeled `kind_config` fields"
+section = "Tasks / DAG / Loops"
+status  = "implemented"
+wave    = 0
+reqs    = ["26.1", "26.2"]
+do_1    = "Implement every acceptance criterion for requirement 26 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 26"
+
+[req.27]
+title = "Findings attribute to tasks — canonicalize model-authored stage labels"
+story = "As a task and loop user, I want Findings attribute to tasks — canonicalize model-authored stage labels delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "At ingest: `record_cycle_findings` resolves the model-authored stage label against the loop's plan — exact ID/title first, then numeric-decoration-stripped + case-folded. Stamp the canonical stage key; preserve the raw label as `stage_label`."
+ac_2 = "At cockpit: export `normalizeStageLabel` (mirroring the ingest regex) as `stageTasksFor`'s fallback, so already-ledgered legacy labels also attribute."
+
+[task.27]
+title   = "Findings attribute to tasks — canonicalize model-authored stage labels"
+section = "Tasks / DAG / Loops"
+status  = "implemented"
+wave    = 0
+reqs    = ["27.1", "27.2"]
+do_1    = "Implement every acceptance criterion for requirement 27 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 27"
+
+[req.28]
+title = "#130 — Declare `auth/` as a secret entry"
+story = "As a operator, I want #130 — Declare `auth/` as a secret entry delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Add `auth/` to the durability manifest so Doctor's secret-store census recognizes it and stops reporting a missing secret entry."
+
+[task.28]
+title   = "#130 — Declare `auth/` as a secret entry"
+section = "Durability / Secrets / Snapshot"
+status  = "done"
+wave    = 0
+reqs    = ["28.1"]
+do_1    = "Implement every acceptance criterion for requirement 28 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 28"
+
+[req.29]
+title = "#2217 — Declare `credentials.json`"
+story = "As a operator, I want #2217 — Declare `credentials.json` delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Add `credentials.json` to the snapshot manifest so provider API keys survive a home-directory snapshot/restore."
+
+[task.29]
+title   = "#2217 — Declare `credentials.json`"
+section = "Durability / Secrets / Snapshot"
+status  = "done"
+wave    = 0
+reqs    = ["29.1"]
+do_1    = "Implement every acceptance criterion for requirement 29 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 29"
+
+[req.30]
+title = "#2217 — Declare 14 debt stores + resolve two more census spellings"
+story = "As a operator, I want #2217 — Declare 14 debt stores + resolve two more census spellings delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Audit every file the durability system claims to snapshot. Declare the 14 stores that were missing (chat index, entity index, trigger state, learning health, …)."
+ac_2 = "Fix two additional store-name spelling mismatches in the census that prevented the snapshot from recognizing an existing file."
+
+[task.30]
+title   = "#2217 — Declare 14 debt stores + resolve two more census spellings"
+section = "Durability / Secrets / Snapshot"
+status  = "done"
+wave    = 0
+reqs    = ["30.1", "30.2"]
+do_1    = "Implement every acceptance criterion for requirement 30 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 30"
+
+[req.31]
+title = "AP-7 — Enable-path for staged pack triggers"
+story = "As a automation user, I want AP-7 — Enable-path for staged pack triggers delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Add `packs.triggers.deploy_triggers`: read each staged trigger from `packs/staged/<pack>/triggers/`, parse it, skip any file the entity refuses or that is unreadable JSON (reported, never raised), and upsert the rest into the live `triggers.json` store."
+ac_2 = "Safety rule: the deploy **forces `enabled=False`** rather than trusting the staged bytes. The user arms each trigger in the Automations UI."
+ac_3 = "Wire `POST /api/packs/{name}/triggers/deploy`, `InstalledPack.staged_triggers` on the ledger, `api.packTriggersDeploy`, and an \"Add triggers to Automations\" control on the pack row."
+ac_4 = "Fix both bundled packs' staged triggers: spec used `{cron:...}` instead of `{kind:cron, expr:...}`; unread until this path existed."
+
+[task.31]
+title   = "AP-7 — Enable-path for staged pack triggers"
+section = "Packs / Triggers"
+status  = "done"
+wave    = 0
+reqs    = ["31.1", "31.2", "31.3", "31.4"]
+do_1    = "Implement every acceptance criterion for requirement 31 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 31"
+
+[req.32]
+title = "AP-4 — The staged roster's one-click deploy reaches a surface"
+story = "As a automation user, I want AP-4 — The staged roster's one-click deploy reaches a surface delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Surface the \"Deploy roster\" action in the packs UI so a staged pack's full roster (skills + triggers) can be deployed with one click from the pack detail row."
+
+[task.32]
+title   = "AP-4 — The staged roster's one-click deploy reaches a surface"
+section = "Packs / Triggers"
+status  = "implemented"
+wave    = 0
+reqs    = ["32.1"]
+do_1    = "Implement every acceptance criterion for requirement 32 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 32"
+
+[req.33]
+title = "#531 — Sub-floor cadence warning reaches a surface"
+story = "As a automation user, I want #531 — Sub-floor cadence warning reaches a surface delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "One owner for `(errors, warnings)`: `_issue_messages(row)` derives both from the loaded row for every projection, fixing the create, update and toggle responses."
+ac_2 = "`GET /api/triggers/doctor` folds `row.issues` for every kind rather than re-deriving the floor rule a second time."
+ac_3 = "The list renders a warn-toned \"check schedule\" when the row has a warning but no error."
+ac_4 = "The interval control states the floor at author time."
+ac_5 = "`cadence_changed` is derived by comparing the resulting clock spec against the stored one (not by key presence), so cosmetic saves do not re-arm the trigger."
+ac_6 = "`health()` is deleted (a count is strictly weaker than the per-row signal now reaching two surfaces)."
+
+[task.33]
+title   = "#531 — Sub-floor cadence warning reaches a surface"
+section = "Packs / Triggers"
+status  = "implemented"
+wave    = 0
+reqs    = ["33.1", "33.2", "33.3", "33.4", "33.5", "33.6"]
+do_1    = "Implement every acceptance criterion for requirement 33 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 33"
+
+[req.34]
+title = "WV-10 — Chat card deep-links its active node into the run inspector"
+story = "As a workflow user, I want WV-10 — Chat card deep-links its active node into the run inspector delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "The active-node row in `WorkflowProgressCard` becomes a link: routes to `#/workflows/runs/<run_id>?node=<node_id>`."
+ac_2 = "`WorkflowsSection` reads the query param and `WorkflowRunDetail` opens `NodeInspectorDrawer` on that node."
+ac_3 = "The param is followed on navigation, not merely seeded."
+ac_4 = "Rail: zero `<NodeInspectorDrawer` under `pages/chat` (grep census — one inspector, owned by the run view)."
+
+[task.34]
+title   = "WV-10 — Chat card deep-links its active node into the run inspector"
+section = "Workflows"
+status  = "implemented"
+wave    = 0
+reqs    = ["34.1", "34.2", "34.3", "34.4"]
+do_1    = "Implement every acceptance criterion for requirement 34 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 34"
+
+[req.35]
+title = "A terminal run advertises no answerable gate"
+story = "As a workflow user, I want A terminal run advertises no answerable gate delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "When a workflow run reaches a terminal status (completed, failed, cancelled), the UI must not render an active approve/deny gate. The gate is terminal-state-gated."
+
+[task.35]
+title   = "A terminal run advertises no answerable gate"
+section = "Workflows"
+status  = "implemented"
+wave    = 0
+reqs    = ["35.1"]
+do_1    = "Implement every acceptance criterion for requirement 35 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 35"
+
+[req.36]
+title = "A declared input type is enforced, not documentation"
+story = "As a workflow user, I want A declared input type is enforced, not documentation delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "If a workflow stage declares an input type (e.g. `string`, `object`, `number`), the runtime validates the actual input against that type before invoking the stage. A mismatch produces a clear error rather than silently passing the wrong shape."
+
+[task.36]
+title   = "A declared input type is enforced, not documentation"
+section = "Workflows"
+status  = "done"
+wave    = 0
+reqs    = ["36.1"]
+do_1    = "Implement every acceptance criterion for requirement 36 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 36"
+
+[req.37]
+title = "A failed run explains itself — the escalation record gets its first reader"
+story = "As a workflow user, I want A failed run explains itself — the escalation record gets its first reader delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "`EscalationPanel` renders the run's escalation diagnosis on the workflow-run page: the reason as a sentence, the cause (when the error line does not already carry it), and every attempt with its failure class, signature and suggested fix."
+ac_2 = "The chat card gets one line (the reason) with a link to the depth."
+ac_3 = "The fold keeps the record through a terminal status (the fold previously nulled `attention` on terminal, losing evidence)."
+ac_4 = "An escalation on the `workflow_attention` channel no longer flips the run to `needs_input`."
+ac_5 = "Rail: a Python test derives the reason vocabulary from `resilience.check_breaker` and `loop/tick.py` and reds if a producer adds a reason the panel has no sentence for."
+
+[task.37]
+title   = "A failed run explains itself — the escalation record gets its first reader"
+section = "Workflows"
+status  = "implemented"
+wave    = 0
+reqs    = ["37.1", "37.2", "37.3", "37.4", "37.5"]
+do_1    = "Implement every acceptance criterion for requirement 37 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 37"
+
+[req.38]
+title = "#258 — Give a workflow stage's approval a place it can be answered"
+story = "As a workflow user, I want #258 — Give a workflow stage's approval a place it can be answered delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "When a workflow stage pauses for user approval, surface an actionable approve/deny control in the run detail (not just in the activity log). The user can answer the gate from the run page."
+
+[task.38]
+title   = "#258 — Give a workflow stage's approval a place it can be answered"
+section = "Workflows"
+status  = "implemented"
+wave    = 0
+reqs    = ["38.1"]
+do_1    = "Implement every acceptance criterion for requirement 38 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 38"
+
+[req.39]
+title = "SSM-11/SSM-10 — Wire the Session Map into the transcript, with a mobile drawer"
+story = "As a chat user, I want SSM-11/SSM-10 — Wire the Session Map into the transcript, with a mobile drawer delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Add a Session Map rail alongside the chat transcript (desktop) that shows per-turn marks (tool calls, errors, completions)."
+ac_2 = "On mobile, render the rail in a slide-in drawer rather than a side panel."
+ac_3 = "Clicking a mark scrolls the transcript to that turn."
+
+[task.39]
+title   = "SSM-11/SSM-10 — Wire the Session Map into the transcript, with a mobile drawer"
+section = "Chat / Session Map"
+status  = "implemented"
+wave    = 0
+reqs    = ["39.1", "39.2", "39.3"]
+do_1    = "Implement every acceptance criterion for requirement 39 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 39"
+
+[req.40]
+title = "One owner for a tool call's input, and a rail keyed off the registry"
+story = "As a chat user, I want One owner for a tool call's input, and a rail keyed off the registry delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Extract `resolveInputObj` (via `inputOf`) as the single owner of where a tool call's input object comes from — dispatching both the object-shaped and string-shaped paths rather than reading raw on one and losing it on the other."
+ac_2 = "The tool-call card's title and body render from the registry-derived metadata, not from hardcoded per-tool strings."
+
+[task.40]
+title   = "One owner for a tool call's input, and a rail keyed off the registry"
+section = "Chat / Session Map"
+status  = "implemented"
+wave    = 0
+reqs    = ["40.1", "40.2"]
+do_1    = "Implement every acceptance criterion for requirement 40 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 40"
+
+[req.41]
+title = "SSM-12 — Prove the Index tab's jump and the rail's are one handler"
+story = "As a chat user, I want SSM-12 — Prove the Index tab's jump and the rail's are one handler delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Extract the scroll-to-turn logic shared by both the Activity Index tab and the Session Map rail into one function; add a test that proves both call the same handler."
+
+[task.41]
+title   = "SSM-12 — Prove the Index tab's jump and the rail's are one handler"
+section = "Chat / Session Map"
+status  = "implemented"
+wave    = 0
+reqs    = ["41.1"]
+do_1    = "Implement every acceptance criterion for requirement 41 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 41"
+
+[req.42]
+title = "Incognito copy must not promise unblocked reads; the open cycle counts when paused"
+story = "As a chat user, I want Incognito copy must not promise unblocked reads; the open cycle counts when paused delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Correct the incognito banner and mode-picker hint: incognito suppresses writes, not reads. The transcript IS persisted (exclusion from history is a separate `ephemeral` flag not sent by `createChatSession`)."
+ac_2 = "The human-facing cycle count uses `+1` whenever the cycle is open, gated on `ACTIVE_LOOP_STATUSES` (not just `running`). Extract a shared `shownCycle()` in `lib/loopStatus.ts`; add a census rail so a fourth copy cannot ship."
+
+[task.42]
+title   = "Incognito copy must not promise unblocked reads; the open cycle counts when paused"
+section = "Chat / Session Map"
+status  = "implemented"
+wave    = 0
+reqs    = ["42.1", "42.2"]
+do_1    = "Implement every acceptance criterion for requirement 42 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 42"
+
+[req.43]
+title = "TSE2-5 — Addressable, pluggable notification delivery"
+story = "As a chat user, I want TSE2-5 — Addressable, pluggable notification delivery delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Notes carry an `addressee` (the same `owner_username` slug as TSE2-1/2/3). `inbox.emit_attention_item` supplies the item's own owner."
+ac_2 = "A foreign-addressed note is visible-but-not-fired: `_append_notification` is the listing (bell + GET show it, marked `withheld_reason: foreign_addressee`); the fire half (WS broadcast, native, push, digest) is what the addressee gates."
+ac_3 = "`is_locally_addressed` is `is_owner_authored` clause for clause: empty addressee or unset username reads as the owner's."
+ac_4 = "Add `NotificationTypeHandler` → `notification_providers/registry.py`; publish as `sdk/notification.NotificationDeliveryProvider`."
+ac_5 = "A foreign-addressed note is offered to backends that say they can reach its addressee; the accepting one is recorded in `routed_to`. With none installed, `routed_to` is `\"\"` and the note is visible-but-inert."
+ac_6 = "Fix the app scaffold generator: `_NAME_PROPERTIES` gains `delivery_name` so `app new --type notification` emits a stub that passes registration."
+
+[task.43]
+title   = "TSE2-5 — Addressable, pluggable notification delivery"
+section = "Chat / Session Map"
+status  = "done"
+wave    = 0
+reqs    = ["43.1", "43.2", "43.3", "43.4", "43.5", "43.6"]
+do_1    = "Implement every acceptance criterion for requirement 43 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 43"
+
+[req.44]
+title = "Five controls that advertised what they could not do"
+story = "As a chat user, I want Five controls that advertised what they could not do delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "#530: One-shot triggers convert `datetime-local` to `epochSeconds` in the browser (no zone → parse client-side). Drop the \"Soon\" tag. Extract `scheduleWhenMet` so both create forms agree."
+ac_2 = "#545: Terminal header publishes `persist_available` and branches on it; `undefined` makes no claim."
+ac_3 = "#510: LifecycleDetail's Cancel restores the original state via one shared path (mount effect + Cancel)."
+ac_4 = "#648: Settings-home feedback tile matches the corrected sibling in FeedbackPanel — only skills have a surfacing gate."
+ac_5 = "#570: Delete `model_editable` (hardcoded `True`, zero readers)."
+
+[task.44]
+title   = "Five controls that advertised what they could not do"
+section = "Chat / Session Map"
+status  = "done"
+wave    = 0
+reqs    = ["44.1", "44.2", "44.3", "44.4", "44.5"]
+do_1    = "Implement every acceptance criterion for requirement 44 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 44"
+
+[req.45]
+title = "The narrowed notification list was a dead end, not an empty state"
+story = "As a chat user, I want The narrowed notification list was a dead end, not an empty state delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "When the notification filter narrows the list to zero, render a \"no results match\" state (with a clear-filter action) rather than an empty-list placeholder that implies there is nothing to see."
+
+[task.45]
+title   = "The narrowed notification list was a dead end, not an empty state"
+section = "Chat / Session Map"
+status  = "implemented"
+wave    = 0
+reqs    = ["45.1"]
+do_1    = "Implement every acceptance criterion for requirement 45 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 45"
+
+[req.46]
+title = "#3125 — `config get` withholds credentials, and the write side keeps them"
+story = "As a chat user, I want #3125 — `config get` withholds credentials, and the write side keeps them delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "`config get` (and the JSON output) redacts credential values before printing. `config set --file` preserves any credential field it did not receive, rather than overwriting it with the redaction placeholder."
+
+[task.46]
+title   = "#3125 — `config get` withholds credentials, and the write side keeps them"
+section = "Chat / Session Map"
+status  = "done"
+wave    = 0
+reqs    = ["46.1"]
+do_1    = "Implement every acceptance criterion for requirement 46 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 46"
+
+[req.47]
+title = "One shared request-body reader"
+story = "As a chat user, I want One shared request-body reader delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Extract a shared `read_json_body(request)` helper that validates content type, handles empty body, and returns a typed dict or raises `RequestValidationError`. Replace every inline `await request.json()` call in the dashboard/API handlers."
+
+[task.47]
+title   = "One shared request-body reader"
+section = "Chat / Session Map"
+status  = "done"
+wave    = 0
+reqs    = ["47.1"]
+do_1    = "Implement every acceptance criterion for requirement 47 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 47"
+
+[req.48]
+title = "SSM-3/SSM-14 — Per-turn summary label + persisted map density"
+story = "As a chat user, I want SSM-3/SSM-14 — Per-turn summary label + persisted map density delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "SSM-3: a completed turn persists a one-line extractive summary label on the last assistant message's `meta.summary`. The label is redacted at write (not just on read). A turn with no outcome persists no label."
+ac_2 = "SSM-14: a Session Map mark-density preference round-trips through `tokenRegistry.ts` + `appearance.tsx` to localStorage, validated on read. Not a `config.json` field."
+
+[task.48]
+title   = "SSM-3/SSM-14 — Per-turn summary label + persisted map density"
+section = "Chat / Session Map"
+status  = "implemented"
+wave    = 0
+reqs    = ["48.1", "48.2"]
+do_1    = "Implement every acceptance criterion for requirement 48 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 48"
+
+[req.49]
+title = "AG-5 — Gate dispatch on `tool_grants`"
+story = "As a chat user, I want AG-5 — Gate dispatch on `tool_grants` delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "`guardrails/policy.py` gains `tool_grant_denial` (tier algebra: `read_write` permits, `read` denies write-class, `custom` admits only `tool_allowlist` matches by the ceiling's `name_glob` matcher) and `tool_grant_posture` (a tier intersected with the operator ceiling)."
+ac_2 = "`mcp_shared.leaf_tool_denial` — the handler every in-process MCP tool call funnels through — now asks the tier."
+ac_3 = "`subagent._run_inner`'s permission loop now asks the tier."
+ac_4 = "Fail-closed: an unrecognised tier resolves to `read`; a `custom` tier with an empty/blank-only allowlist denies everything."
+ac_5 = "Deliberately NOT wired at the CLI/native turn seams: `HEADLESS.tool_grants` is `read`, so reading it there would veto `gideon run --allow`."
+
+[task.49]
+title   = "AG-5 — Gate dispatch on `tool_grants`"
+section = "Chat / Session Map"
+status  = "done"
+wave    = 0
+reqs    = ["49.1", "49.2", "49.3", "49.4", "49.5"]
+do_1    = "Implement every acceptance criterion for requirement 49 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 49"
+
+[req.50]
+title = "SSM-13 — Retire the superseded Index tab"
+story = "As a chat user, I want SSM-13 — Retire the superseded Index tab delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Delete the Chat Activity → Index tab (now replaced by the Session Map rail). Remove the component, route, and test. Keep the Session Map rail as the sole per-turn overview surface."
+
+[task.50]
+title   = "SSM-13 — Retire the superseded Index tab"
+section = "Chat / Session Map"
+status  = "implemented"
+wave    = 0
+reqs    = ["50.1"]
+do_1    = "Implement every acceptance criterion for requirement 50 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 50"
+
+[req.51]
+title = "MBR-1 — Server-to-client elicitation, default-deny per server"
+story = "As a chat user, I want MBR-1 — Server-to-client elicitation, default-deny per server delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "When an MCP server sends an elicitation request (asking the user a question during a tool call), the gateway surfaces it to the client and waits for a response."
+ac_2 = "Default deny: each MCP server must be explicitly opted in to elicitation before any request is forwarded."
+
+[task.51]
+title   = "MBR-1 — Server-to-client elicitation, default-deny per server"
+section = "Chat / Session Map"
+status  = "done"
+wave    = 0
+reqs    = ["51.1", "51.2"]
+do_1    = "Implement every acceptance criterion for requirement 51 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 51"
+
+[req.52]
+title = "Deliver the routing suggestion to a chat the send just created"
+story = "As a chat user, I want Deliver the routing suggestion to a chat the send just created delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "When the send handler creates a new chat session and the routing classifier fires, the routing suggestion must be delivered into the newly created chat (not dropped because the WS subscription was not yet established at emit time)."
+
+[task.52]
+title   = "Deliver the routing suggestion to a chat the send just created"
+section = "Chat / Session Map"
+status  = "done"
+wave    = 0
+reqs    = ["52.1"]
+do_1    = "Implement every acceptance criterion for requirement 52 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 52"
+
+[req.53]
+title = "SM-7 — Pin starter selection-prefill via extracted pure helper"
+story = "As a chat user, I want SM-7 — Pin starter selection-prefill via extracted pure helper delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Extract the starter-card selection prefill logic into a pure function; add a unit test that pins the mapping from starter ID to prefill content."
+
+[task.53]
+title   = "SM-7 — Pin starter selection-prefill via extracted pure helper"
+section = "Chat / Session Map"
+status  = "implemented"
+wave    = 0
+reqs    = ["53.1"]
+do_1    = "Implement every acceptance criterion for requirement 53 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 53"
+
+[req.54]
+title = "SM-2 — Scroll a search result to its match + surface search source"
+story = "As a chat user, I want SM-2 — Scroll a search result to its match + surface search source delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Clicking a search result in the Session Map scrolls the transcript to the matching turn and highlights the match span."
+ac_2 = "The search result row names its source (rail / drawer / transcript) so the user knows where the hit came from."
+
+[task.54]
+title   = "SM-2 — Scroll a search result to its match + surface search source"
+section = "Chat / Session Map"
+status  = "implemented"
+wave    = 0
+reqs    = ["54.1", "54.2"]
+do_1    = "Implement every acceptance criterion for requirement 54 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 54"
+
+[req.55]
+title = "#537 — The Doctor's no-mutation promise names the two controls that mutate"
+story = "As a operator, I want #537 — The Doctor's no-mutation promise names the two controls that mutate delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Correct the header in both `DiagnosticsPanel` and the Settings hub tile: probing is read-only; the Fix and Run-now controls are the two exceptions that mutate."
+ac_2 = "Rail: blanket \"read-only\" claim must be absent; both control labels must appear; both controls still render; the mutating-call census reads from source so a third write reds the rail."
+
+[task.55]
+title   = "#537 — The Doctor's no-mutation promise names the two controls that mutate"
+section = "Settings / Doctor"
+status  = "implemented"
+wave    = 0
+reqs    = ["55.1", "55.2"]
+do_1    = "Implement every acceptance criterion for requirement 55 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 55"
+
+[req.56]
+title = "The stale-SPA check sees an outdated build, not just a shadowing copy"
+story = "As a operator, I want The stale-SPA check sees an outdated build, not just a shadowing copy delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Doctor's stale-SPA check compares the running bundle's build hash against the latest build artifact (not just looking for a shadowing copy), so an outdated but correctly-placed build is flagged."
+
+[task.56]
+title   = "The stale-SPA check sees an outdated build, not just a shadowing copy"
+section = "Settings / Doctor"
+status  = "done"
+wave    = 0
+reqs    = ["56.1"]
+do_1    = "Implement every acceptance criterion for requirement 56 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 56"
+
+[req.57]
+title = "#2907/#2908/#2922 — Doctor reports only what it established"
+story = "As a operator, I want #2907/#2908/#2922 — Doctor reports only what it established delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "#2907: The git row uses `git` as the authority (not `.git` as a dir check). A worktree/submodule `.git` pointer FILE is correctly detected. \"Cannot tell\" is a third state."
+ac_2 = "#2908: Both Node version rows interpolate `_MIN_NODE_VERSION`. The exception branch prints \"version unknown\" (not ✅)."
+ac_3 = "#2922: The credentials row uses one `credential_store_state()` that keeps `env_exists`/`env_readable` separate from `env_mode`. No `0600` is rendered unless stat-ed."
+
+[task.57]
+title   = "#2907/#2908/#2922 — Doctor reports only what it established"
+section = "Settings / Doctor"
+status  = "done"
+wave    = 0
+reqs    = ["57.1", "57.2", "57.3"]
+do_1    = "Implement every acceptance criterion for requirement 57 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 57"
+
+[req.58]
+title = "Rules matrix — five defects"
+story = "As a notification user, I want Rules matrix — five defects delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "#343: Wire the `notification` WS frame to the shell-level toast hook so \"toast\" actually fires. Mark `channel_dm` as inert."
+ac_2 = "#341: Make five unreachable rows reachable by emitting their typed kinds. Read severity from the registry (not a local wire-string table). Quiet hours return a third posture (`quiet`: persisted badge, silent) for attention AND SEV_WARNING kinds."
+ac_3 = "#285: Rules PUT accepts `null` as a clear; the chip follows `configured` alone."
+ac_4 = "#422: `GET /api/notifications`' `unread` counts unacked notifications (not pending inbox items)."
+ac_5 = "#415: Restore `cron/failed` as a kind, behind a flag, re-ranked `SEV_ERROR`."
+ac_6 = "Rail: every registered row must be reachable from some wire string, with a pinned one-entry exemption."
+
+[task.58]
+title   = "Rules matrix — five defects"
+section = "Notifications"
+status  = "implemented"
+wave    = 0
+reqs    = ["58.1", "58.2", "58.3", "58.4", "58.5", "58.6"]
+do_1    = "Implement every acceptance criterion for requirement 58 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 58"
+
+[req.59]
+title = "AAPX-2/AAPX-3 — Publish the closed 63-cell columns, re-drive against today's CLIs"
+story = "As a agent operator, I want AAPX-2/AAPX-3 — Publish the closed 63-cell columns, re-drive against today's CLIs delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Update `docs/agents/acp-parity.md` to reflect the actual closure counts (claude 49/14/0/0, codex 47/16/0/0, kiro 43/19/1/0), with real dates and observation IDs."
+ac_2 = "Retire the \"unreachable\" claim for K55/K60."
+ac_3 = "Record the new kiro runner-ID defect and the PATH-pin caveat."
+
+[task.59]
+title   = "AAPX-2/AAPX-3 — Publish the closed 63-cell columns, re-drive against today's CLIs"
+section = "Agents / ACP"
+status  = "done"
+wave    = 0
+reqs    = ["59.1", "59.2", "59.3"]
+do_1    = "Implement every acceptance criterion for requirement 59 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 59"
+
+[req.60]
+title = "AAP-10 — Link ACP parity doc from discovered-agent inspector"
+story = "As a agent operator, I want AAP-10 — Link ACP parity doc from discovered-agent inspector delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "The discovered-agent inspector links to the per-provider section of `docs/agents/acp-parity.md`, so the user sees the parity context at the moment they bind an agent."
+
+[task.60]
+title   = "AAP-10 — Link ACP parity doc from discovered-agent inspector"
+section = "Agents / ACP"
+status  = "implemented"
+wave    = 0
+reqs    = ["60.1"]
+do_1    = "Implement every acceptance criterion for requirement 60 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 60"
+
+[req.61]
+title = "AAPX-2 — Publish the kiro runner id that actually binds"
+story = "As a agent operator, I want AAPX-2 — Publish the kiro runner id that actually binds delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Change `runner_catalog.json`'s kiro row from `id: \"kiro\"` / `runtime_id: \"acp:kiro\"` to `id: \"kiro-cli\"` / `runtime_id: \"acp:kiro-cli\"`."
+ac_2 = "No alias. The unpublishable `acp:kiro` resolves to nothing."
+ac_3 = "Rail: every shipped row's `runtime_id` must already BE the canonical provider name (not one of `_PROVIDER_ALIASES`' aliases for it). Asserted as canonical-form equality, not against a hardcoded list."
+
+[task.61]
+title   = "AAPX-2 — Publish the kiro runner id that actually binds"
+section = "Agents / ACP"
+status  = "done"
+wave    = 0
+reqs    = ["61.1", "61.2", "61.3"]
+do_1    = "Implement every acceptance criterion for requirement 61 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 61"
+
+[req.62]
+title = "AAPX-3 — Re-drive four dated parity cells on all three providers"
+story = "As a agent operator, I want AAPX-3 — Re-drive four dated parity cells on all three providers delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Update the parity doc's re-drive section with fresh measurements for the four cells driven in this commit, replacing the stale dates."
+
+[task.62]
+title   = "AAPX-3 — Re-drive four dated parity cells on all three providers"
+section = "Agents / ACP"
+status  = "pending"
+wave    = 0
+reqs    = ["62.1"]
+do_1    = "Implement every acceptance criterion for requirement 62 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 62"
+
+[req.63]
+title = "#3111 — Stop the phone pass eating IPv4 addresses and ISO dates"
+story = "As a security-conscious operator, I want #3111 — Stop the phone pass eating IPv4 addresses and ISO dates delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "The candidate span (which spans whitespace) is masked rather than skipped: spans that parse as dotted-quad IPv4 (validated octets), ISO-8601 date (with optional time/offset tail), or plain two-part decimal are masked out before candidates are scanned. Both narrowings only ever discard candidates."
+ac_2 = "One span function feeds both the redactor and the counter."
+ac_3 = "Pins: ten phone formats redacted, twenty-one non-phone shapes surviving, both orders of phone-beside-spared-shape, idempotency rail, generated-corpus rail."
+
+[task.63]
+title   = "#3111 — Stop the phone pass eating IPv4 addresses and ISO dates"
+section = "Security / Guardrails"
+status  = "done"
+wave    = 0
+reqs    = ["63.1", "63.2", "63.3"]
+do_1    = "Implement every acceptance criterion for requirement 63 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 63"
+
+[req.64]
+title = "#506/#541/#683 — Risk gates the control and a grant card keeps its promise"
+story = "As a security-conscious operator, I want #506/#541/#683 — Risk gates the control and a grant card keeps its promise delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "`POST /api/tools/invoke` refuses an effective-destructive call without `confirm_risk: \"destructive\"` (`403 risk_confirmation_required`)."
+ac_2 = "UI ladder: safe keeps inline confirm; caution opens a modal; destructive requires typing the tool name and sends the ack. A server refusal escalates and retries."
+ac_3 = "`persistable_grant_target` answers the \"always for this agent\" question once for prompt, write and record; the approve response reports what it did; the transcript keeps `trust_agent` vs `trust_agent_session` instead of a generic `approved`."
+ac_4 = "Delete the duplicate `Session.mark_permission_resolved` (zero production callers, wrong default, wrong walk direction)."
+
+[task.64]
+title   = "#506/#541/#683 — Risk gates the control and a grant card keeps its promise"
+section = "Security / Guardrails"
+status  = "done"
+wave    = 0
+reqs    = ["64.1", "64.2", "64.3", "64.4"]
+do_1    = "Implement every acceptance criterion for requirement 64 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 64"
+
+[req.65]
+title = "Install consent separates \"declared none\" from \"not read yet\""
+story = "As a app user, I want Install consent separates \"declared none\" from \"not read yet\" delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "The install-consent screen distinguishes between a manifest that explicitly declares no permissions and a manifest that has not been fetched yet. The authority is one function, not two ad-hoc checks on different screens."
+
+[task.65]
+title   = "Install consent separates \"declared none\" from \"not read yet\""
+section = "Apps / Permissions"
+status  = "implemented"
+wave    = 0
+reqs    = ["65.1"]
+do_1    = "Implement every acceptance criterion for requirement 65 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 65"
+
+[req.66]
+title = "#492 — Disclose that an app's frontend runs in the host origin"
+story = "As a app user, I want #492 — Disclose that an app's frontend runs in the host origin delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Docs: `limitations.md` §4, the threat model, and `SECURITY.md` all state that app UI runs in the host origin and holds the host DOM + session cookie + same-origin API reach."
+ac_2 = "Code: `ChatEmbed` corrects its \"sandboxed iframe\" claim; `createAppApi` and `app_permission_middleware` state that their scope binds the client and backend, not the bundle."
+ac_3 = "Consent: `hasUI`/`uiComponents` ride the catalog wire; `PermissionList` carries a host-page advisory row beside the enforced bullets."
+
+[task.66]
+title   = "#492 — Disclose that an app's frontend runs in the host origin"
+section = "Apps / Permissions"
+status  = "implemented"
+wave    = 0
+reqs    = ["66.1", "66.2", "66.3"]
+do_1    = "Implement every acceptance criterion for requirement 66 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 66"
+
+[req.67]
+title = "#2588/#2577 — Prove removal keeps an app's data, and scaffold a channel app the kit can fail"
+story = "As a app user, I want #2588/#2577 — Prove removal keeps an app's data, and scaffold a channel app the kit can fail delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Add tests that prove removing an app from the dashboard does not delete its data directory (the user can reinstall and find state intact)."
+ac_2 = "Add a channel app scaffold to the SDK kit, with a test that proves the scaffold's registration can fail (negative-path coverage)."
+
+[task.67]
+title   = "#2588/#2577 — Prove removal keeps an app's data, and scaffold a channel app the kit can fail"
+section = "Apps / Permissions"
+status  = "done"
+wave    = 0
+reqs    = ["67.1", "67.2"]
+do_1    = "Implement every acceptance criterion for requirement 67 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 67"
+
+[req.68]
+title = "Entity deletion is durable"
+story = "As a Gideon user, I want Entity deletion is durable delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Deleting a knowledge entity marks it tombstoned; the rebuild pass does not resurrect it. The pre-pass skips tombstoned entities in match."
+
+[task.68]
+title   = "Entity deletion is durable"
+section = "Memory / Voice / Widgets"
+status  = "done"
+wave    = 0
+reqs    = ["68.1"]
+do_1    = "Implement every acceptance criterion for requirement 68 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 68"
+
+[req.69]
+title = "Voice — Mic dictation gets the Lexicon halves"
+story = "As a Gideon user, I want Voice — Mic dictation gets the Lexicon halves delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Wire bias terms (the Lexicon's domain vocabulary) and learned corrections into the mic dictation path so the copy's promise (\"learns your vocabulary\") is true."
+ac_2 = "Add the missing writer so learned corrections persist after a dictation session."
+
+[task.69]
+title   = "Voice — Mic dictation gets the Lexicon halves"
+section = "Memory / Voice / Widgets"
+status  = "done"
+wave    = 0
+reqs    = ["69.1", "69.2"]
+do_1    = "Implement every acceptance criterion for requirement 69 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 69"
+
+[req.70]
+title = "Widgets — A Submit that cannot deliver says so"
+story = "As a Gideon user, I want Widgets — A Submit that cannot deliver says so delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Three silent paths in the widget frame are closed: (1) the widget's target app is disabled → the Submit button renders disabled with a tooltip; (2) the gateway returns a non-2xx → the widget surfaces the error inline; (3) the app is removed → the frame shows \"app no longer installed\" rather than a blank frame."
+
+[task.70]
+title   = "Widgets — A Submit that cannot deliver says so"
+section = "Memory / Voice / Widgets"
+status  = "implemented"
+wave    = 0
+reqs    = ["70.1"]
+do_1    = "Implement every acceptance criterion for requirement 70 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 70"
+
+[req.71]
+title = "A view that shows less than it was given says how much"
+story = "As a Gideon user, I want A view that shows less than it was given says how much delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "When a list or grid intentionally truncates its input (e.g. \"showing 20 of 143\"), the UI states the truncated count so the user knows more exists."
+
+[task.71]
+title   = "A view that shows less than it was given says how much"
+section = "Web / Frontend UX"
+status  = "implemented"
+wave    = 0
+reqs    = ["71.1"]
+do_1    = "Implement every acceptance criterion for requirement 71 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 71"
+
+[req.72]
+title = "Four silent frontend surfaces"
+story = "As a Gideon user, I want Four silent frontend surfaces delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "#277: \"Optimize prompt\" renders a verdict in every path (`changed:false` → info toast; error → error toast; no model → error toast). `/optimize` stays quiet."
+ac_2 = "#2629: Manage Sources gates both \"No git sources\" and the egress disclosure behind a settled-ness check, so an in-flight or failed read does not read as \"empty config\"."
+ac_3 = "#266: A fresh knowledge intent's row names the cause (\"nothing gathered yet — run on existing items\") and points at the backfill button; withholds the hint while paused."
+ac_4 = "#563: The inert-utility allowlist is emptied to zero; the last four sites are fixed; the rail enforces at zero."
+
+[task.72]
+title   = "Four silent frontend surfaces"
+section = "Web / Frontend UX"
+status  = "implemented"
+wave    = 0
+reqs    = ["72.1", "72.2", "72.3", "72.4"]
+do_1    = "Implement every acceptance criterion for requirement 72 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 72"
+
+[req.73]
+title = "Four more silent frontend surfaces"
+story = "As a Gideon user, I want Four more silent frontend surfaces delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Identify and fix four additional surfaces where an operation completes silently (no feedback on success or failure). The pattern is the same as #3177: every user-initiated action renders a verdict."
+
+[task.73]
+title   = "Four more silent frontend surfaces"
+section = "Web / Frontend UX"
+status  = "implemented"
+wave    = 0
+reqs    = ["73.1"]
+do_1    = "Implement every acceptance criterion for requirement 73 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 73"
+
+[req.74]
+title = "#2983 — Resolve the bulk provider on all three verbs"
+story = "As a API client, I want #2983 — Resolve the bulk provider on all three verbs delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "`api_tasks_bulk` resolves `provider` in phase 1 for create, update AND delete, through the registry's own `_resolve`/`_resolve_one` so the verdict cannot drift. One bad value aborts the whole batch."
+
+[task.74]
+title   = "#2983 — Resolve the bulk provider on all three verbs"
+section = "API / Gateway"
+status  = "done"
+wave    = 0
+reqs    = ["74.1"]
+do_1    = "Implement every acceptance criterion for requirement 74 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 74"
+
+[req.75]
+title = "#3168 — Four PATCH doors validate the name they persist"
+story = "As a API client, I want #3168 — Four PATCH doors validate the name they persist delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Four PATCH endpoints (identify by audit) run `require_string` on any `name`/`title` field they receive, so a wrong-typed value is refused at 400 rather than coerced to its Python repr and stored."
+
+[task.75]
+title   = "#3168 — Four PATCH doors validate the name they persist"
+section = "API / Gateway"
+status  = "done"
+wave    = 0
+reqs    = ["75.1"]
+do_1    = "Implement every acceptance criterion for requirement 75 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 75"
+
+[req.76]
+title = "#2940/#2995 — A request scoped to a parent resolves that parent"
+story = "As a API client, I want #2940/#2995 — A request scoped to a parent resolves that parent delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "When an API request includes a parent-scope parameter (e.g. `project_id`, `collection_id`), the handler resolves the parent entity and rejects if it does not exist, rather than silently treating the scope as global."
+
+[task.76]
+title   = "#2940/#2995 — A request scoped to a parent resolves that parent"
+section = "API / Gateway"
+status  = "done"
+wave    = 0
+reqs    = ["76.1"]
+do_1    = "Implement every acceptance criterion for requirement 76 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 76"
+
+[req.77]
+title = "Fifteen more write doors route name/title through the shared validator"
+story = "As a API client, I want Fifteen more write doors route name/title through the shared validator delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Each of fifteen doors across eleven modules calls `require_string` / `optional_string` / `string_field` on every `name`/`title` it persists. The refusals reach the wire as the existing 400 `RequestValidationError` envelope."
+ac_2 = "`tests/test_write_door_scalar_typing.py` enumerates the table; a whole-tree sweep is bounded by a count of surviving `.strip()`-on-raw-read sites."
+
+[task.77]
+title   = "Fifteen more write doors route name/title through the shared validator"
+section = "API / Gateway"
+status  = "done"
+wave    = 0
+reqs    = ["77.1", "77.2"]
+do_1    = "Implement every acceptance criterion for requirement 77 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 77"
+
+[req.78]
+title = "#493 — One owner for what counts as open, and a count a glance cannot spend"
+story = "As a inbox user, I want #493 — One owner for what counts as open, and a count a glance cannot spend delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "One shared predicate for \"open item\": `status ∈ STATUS_OPEN` (seen=true but unacked still counts as open). The pending-only endpoint is replaced by an open-endpoint."
+ac_2 = "Three count surfaces (Mission Control lanes, Action Center, hero pill) read from the open endpoint. The mobile companion drops its client-side `pending` filter."
+ac_3 = "Rails: one spelling of the pair in `src/`, one in `web/src`; a cross-language test parses `STATUS_OPEN` from `attentionLanes.ts` and pins it to the Python set; a partition test forces a new `ItemStatus` member to be classified."
+
+[task.78]
+title   = "#493 — One owner for what counts as open, and a count a glance cannot spend"
+section = "Inbox"
+status  = "implemented"
+wave    = 0
+reqs    = ["78.1", "78.2", "78.3"]
+do_1    = "Implement every acceptance criterion for requirement 78 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 78"
+
+[req.79]
+title = "#283/#433 — A proposal decision says what it did, and a refine names the skill it changes"
+story = "As a inbox user, I want #283/#433 — A proposal decision says what it did, and a refine names the skill it changes delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "#283: Accept response names the installed skill + version; the confirmation replaces the buttons (re-click unreachable); a 409/404 race reads as \"already answered\"."
+ac_2 = "#433: The collapsed refine-proposal row names `refine_target` (the skill being changed), not its own slug."
+
+[task.79]
+title   = "#283/#433 — A proposal decision says what it did, and a refine names the skill it changes"
+section = "Inbox"
+status  = "done"
+wave    = 0
+reqs    = ["79.1", "79.2"]
+do_1    = "Implement every acceptance criterion for requirement 79 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 79"
+
+[req.80]
+title = "Journal the prompt the provider saw, fence untrusted spans via the helper"
+story = "As a model operator, I want Journal the prompt the provider saw, fence untrusted spans via the helper delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Persist the exact prompt text sent to the provider (not the pre-processed version) so the journal records what the model actually received."
+ac_2 = "Untrusted content interpolated into a prompt is wrapped in the shared fence helper, so a prompt-injection payload cannot escape the fence by crafting its own delimiters."
+
+[task.80]
+title   = "Journal the prompt the provider saw, fence untrusted spans via the helper"
+section = "Prompts"
+status  = "done"
+wave    = 0
+reqs    = ["80.1", "80.2"]
+do_1    = "Implement every acceptance criterion for requirement 80 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 80"
+
+[req.81]
+title = "Controls for nine editable config sections, and resolve four inert paths"
+story = "As a settings user, I want Controls for nine editable config sections, and resolve four inert paths delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Add Settings UI controls for nine config sections that are editable but currently have no UI surface. Each control reads/writes through the config API."
+ac_2 = "Fix four Settings paths that render a control but never dispatch the write (or read from a stale store and never re-fetch)."
+
+[task.81]
+title   = "Controls for nine editable config sections, and resolve four inert paths"
+section = "Settings Controls"
+status  = "implemented"
+wave    = 0
+reqs    = ["81.1", "81.2"]
+do_1    = "Implement every acceptance criterion for requirement 81 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 81"
+
+[req.82]
+title = "#292/#351/#421 — Search the body a card shows and open the file the button names"
+story = "As a artifact user, I want #292/#351/#421 — Search the body a card shows and open the file the button names delivered so that the documented behavior is complete, observable, and regression-protected."
+ac_1 = "Artifact search searches the rendered body content (not just the title)."
+ac_2 = "The \"Open\" button on an artifact card opens the exact file path the card displays (not a stale or wrong path from a different record)."
+
+[task.82]
+title   = "#292/#351/#421 — Search the body a card shows and open the file the button names"
+section = "Artifacts"
+status  = "done"
+wave    = 0
+reqs    = ["82.1", "82.2"]
+do_1    = "Implement every acceptance criterion for requirement 82 as one complete vertical slice"
+do_2    = "Add or update focused regression coverage and any explicit rails required by requirement 82"

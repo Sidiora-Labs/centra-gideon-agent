@@ -173,7 +173,7 @@ class TestSubagentPassesParentKey:
 
         mock_client = MagicMock()
         perm_event = LLMEvent(
-            kind="permission_request", request_id="tool1", title="shell: ls"
+            kind="permission_request", request_id="tool1", title="read /tmp/foo.txt"
         )
 
         async def _stream(_msg: str):

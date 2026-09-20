@@ -511,7 +511,7 @@ def test_the_census_floor_holds_under_a_byte_count_that_shares_no_parser():
         f"a byte census of {sorted(MONEY_PRODUCERS)} call syntax found {calls} occurrences, "
         f"below the floor {MIN_MONEY_CONSUMERS} — either the tree shrank or the floors are wrong"
     )
-    reader = (_SRC / "ledger" / "reader.py").read_text(encoding="utf-8")
+    reader = (_SRC / "assurance" / "ledger" / "reader.py").read_text(encoding="utf-8")
     assert (
         f'"{DISCLOSURE}"' in reader
     ), "the primitive does not emit the key this rail polices"

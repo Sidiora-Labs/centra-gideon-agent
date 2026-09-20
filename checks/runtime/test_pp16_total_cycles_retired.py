@@ -253,7 +253,7 @@ def _writes_of(tree: ast.AST) -> list[str]:
     return out
 
 
-_TICK_STATE_OWNS_THE_NAME = "loop/tick.py"
+_TICK_STATE_OWNS_THE_NAME = "automation/loop/tick.py"
 
 
 def test_no_module_writes_the_retired_column() -> None:
@@ -318,7 +318,9 @@ def test_the_write_census_can_actually_fail() -> None:
         f"{_TICK_STATE_OWNS_THE_NAME} is exempted from the census but contains no write of "
         f"{_RETIRED!r} — the exemption is stale and should be deleted"
     )
-    sdlc = (_SRC / "loop" / "kinds" / "sdlc.py").read_text(encoding="utf-8")
+    sdlc = (_SRC / "automation" / "loop" / "kinds" / "sdlc.py").read_text(
+        encoding="utf-8"
+    )
     feeders = [
         node
         for node in ast.walk(ast.parse(sdlc))

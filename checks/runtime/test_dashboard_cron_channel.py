@@ -1,6 +1,7 @@
 """Channel validation on schedule-trigger create (the unified /api/triggers facade)."""
 
-from unittest.mock import AsyncMock, MagicMock
+import json
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -35,6 +36,17 @@ def _schedule_body(**extra):
     return body
 
 
+def _request(state, body: dict):
+    from aiohttp.test_utils import make_mocked_request
+
+    request = make_mocked_request(
+        "POST", "/api/triggers", headers={"Content-Type": "application/json"}
+    )
+    request.app["state"] = state
+    request._read_bytes = json.dumps(body).encode()
+    return request
+
+
 class TestScheduleTriggerChannel:
     @pytest.mark.asyncio
     async def test_valid_channel_accepted(self):
@@ -43,11 +55,9 @@ class TestScheduleTriggerChannel:
         mock_state.crons.is_running.return_value = False
         mock_state.crons.running_since.return_value = None
         mock_state._sessions = {}
-        request = MagicMock()
-        request.app = {"state": mock_state}
-        request.get = lambda *a, **k: "dashboard"
-        request.json = AsyncMock(return_value=_schedule_body(channel="C0AP77JJSN6"))
-        resp = await api_trigger_create(request)
+        resp = await api_trigger_create(
+            _request(mock_state, _schedule_body(channel="C0AP77JJSN6"))
+        )
         assert resp.status == 200
         from gideon.interfaces.dashboard.handlers.triggers import _trigger_store
 
@@ -57,10 +67,8 @@ class TestScheduleTriggerChannel:
     @pytest.mark.asyncio
     async def test_invalid_channel_rejected(self):
         mock_state = MagicMock()
-        request = MagicMock()
-        request.app = {"state": mock_state}
-        request.get = lambda *a, **k: "dashboard"
-        request.json = AsyncMock(return_value=_schedule_body(channel="not-valid"))
-        resp = await api_trigger_create(request)
+        resp = await api_trigger_create(
+            _request(mock_state, _schedule_body(channel="not-valid"))
+        )
         assert resp.status == 400
         mock_state.crons.add_job.assert_not_called()

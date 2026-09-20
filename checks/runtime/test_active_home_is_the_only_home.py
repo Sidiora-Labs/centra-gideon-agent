@@ -48,7 +48,7 @@ import pytest
 SRC = pathlib.Path(__file__).resolve().parents[2] / "runtime" / "gideon"
 
 _LITERAL_HOME = re.compile(
-    r"""Path\.home\(\)\s*/\s*["']\.gideon|expanduser\(\s*["']~/\.gideon"""
+    r"""Path\.home\(\)\s*/\s*["']\.gideon|Path\.home\(\)\s*\.joinpath\(\s*["']\.gideon|expanduser\(\s*["']~/\.gideon"""
 )
 
 _RESOLVER_TOKENS = ("GIDEON_HOME", "config_dir", "workspace_root")
@@ -56,11 +56,11 @@ _RESOLVER_TOKENS = ("GIDEON_HOME", "config_dir", "workspace_root")
 _GUARDED_CEILING = 12
 
 _REAL_HOME_IS_CORRECT: dict[str, str] = {
-    "seed.py": (
-        "`real_home()` exists so `--seed` can REFUSE to seed the operator's real home. "
+    "operations/seed.py": (
+        "`_main_home()` exists so `--seed` can REFUSE to seed the operator's real home. "
         "Resolving the active home here would defeat the guard it implements."
     ),
-    "cli.py": (
+    "interfaces/cli/main.py": (
         "`main_home` is compared AGAINST the active home to detect that a command is "
         "pointed at the real installation. It is the comparand, not a destination."
     ),
@@ -206,18 +206,20 @@ def test_the_scanner_ignores_the_historical_comments_and_docstrings():
     """
     sites = _sites()
 
-    seed = [s for s in sites if s[0] == "seed.py"]
-    assert len(seed) == 1, f"seed.py should report only its code line, got {seed}"
+    seed = [s for s in sites if s[0] == "operations/seed.py"]
+    assert (
+        len(seed) == 1
+    ), f"operations/seed.py should report only its code line, got {seed}"
     assert (
         "return" in seed[0][2]
-    ), f"the reported seed.py line is not the code: {seed[0]}"
+    ), f"the reported operations/seed.py line is not the code: {seed[0]}"
 
-    mcp_text = (SRC / "dashboard" / "handlers" / "mcp.py").read_text(encoding="utf-8")
-    assert 'Path.home() / ".gideon" /' in mcp_text, (
+    mcp_text = (SRC / "integrations" / "mcp_core.py").read_text(encoding="utf-8")
+    assert 'Path.home() / ".gideon"' in mcp_text, (
         "the comment recording the original bug was deleted — it is the record of why this "
         "rail exists"
     )
-    assert [s for s in sites if s[0] == "dashboard/handlers/mcp.py"] == []
+    assert [s for s in sites if s[0] == "integrations/mcp_core.py"] == []
 
 
 @pytest.fixture
@@ -324,7 +326,46 @@ def test_the_claude_cli_paths_are_not_swept_up():
     GIDEON_HOME — a rail that forced them into the active home would break MCP sync
     against that backend. Asserted so a future widening of the pattern has to notice.
     """
-    mcp_py = (SRC / "dashboard" / "handlers" / "mcp.py").read_text(encoding="utf-8")
+    mcp_py = (SRC / "interfaces" / "dashboard" / "handlers" / "mcp.py").read_text(
+        encoding="utf-8"
+    )
     assert 'Path.home() / ".claude.json"' in mcp_py
     assert not _LITERAL_HOME.search('Path.home() / ".claude.json"')
     assert not _LITERAL_HOME.search('Path.home() / ".claude" / "agents"')
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    [
+        "gideon.cognition.context",
+        "gideon.engine.subagent_persistence",
+    ],
+)
+def test_resolver_failure_cannot_fall_back_to_real_home(
+    sealed_home, monkeypatch, module_name
+):
+    import importlib
+
+    blocker = sealed_home / "not-a-directory"
+    blocker.write_text("occupied", encoding="utf-8")
+    monkeypatch.setenv("GIDEON_HOME", str(blocker))
+    module = importlib.import_module(module_name)
+    with pytest.raises(FileExistsError):
+        module._path_home_gideon()
+    assert not (sealed_home / "fake-user" / ".gideon").exists()
+
+
+def test_session_cleanup_preserves_real_home_when_active_home_is_unavailable(
+    sealed_home, monkeypatch
+):
+    from gideon.engine.subagent_persistence import _cleanup_session_files_sync
+
+    sessions = sealed_home / "fake-user" / ".gideon" / "sessions"
+    sessions.mkdir(parents=True)
+    transcript = sessions / "session-1.json"
+    transcript.write_text('{"messages": []}', encoding="utf-8")
+    blocker = sealed_home / "not-a-directory"
+    blocker.write_text("occupied", encoding="utf-8")
+    monkeypatch.setenv("GIDEON_HOME", str(blocker))
+    _cleanup_session_files_sync("session-1")
+    assert transcript.read_text(encoding="utf-8") == '{"messages": []}'

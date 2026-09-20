@@ -10,7 +10,8 @@ was stored; the mock happily accepted `action=` for as long as that path existed
 real store and read the row back, so they assert the mapping actually survives a write.
 """
 
-from unittest.mock import AsyncMock, MagicMock
+import json
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -48,14 +49,19 @@ def _seed(home, raw_id="abc123", *, agent="", approval_mode=""):
     )
 
 
-def _make_request(body: dict, raw_id: str = "abc123") -> MagicMock:
+def _make_request(body: dict, raw_id: str = "abc123"):
+    from aiohttp.test_utils import make_mocked_request
+
     mock_state = MagicMock()
     mock_state._sessions = {}
-    request = MagicMock()
-    request.app = {"state": mock_state}
-    request.method = "PUT"
-    request.match_info = {"id": f"schedule:{raw_id}"}
-    request.json = AsyncMock(return_value=body)
+    request = make_mocked_request(
+        "PUT",
+        f"/api/triggers/schedule:{raw_id}",
+        headers={"Content-Type": "application/json"},
+        match_info={"id": f"schedule:{raw_id}"},
+    )
+    request.app["state"] = mock_state
+    request._read_bytes = json.dumps(body).encode()
     return request
 
 

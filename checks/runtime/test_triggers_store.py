@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import json
 import time
-from pathlib import Path
 
 import pytest
 
@@ -31,7 +30,6 @@ from gideon.automation.triggers.store import (
     STORE_VERSION,
     LoadedTrigger,
     TriggerStore,
-    health,
 )
 
 
@@ -434,35 +432,6 @@ def test_a_converted_row_the_entity_refuses_is_RECORDED_not_dropped(store, monke
     report = store.migrate_from_crons()
     assert report["written"] == 0
     assert report["unparseable"] and report["unparseable"][0]["id"] == "j-bad"
-
-
-def test_health_NAMES_the_broken_ids(store):
-    """ "3 triggers have problems" sends the user hunting; naming them is the difference between a
-    report and a chore. Same rule `InboxView.unrenderable` follows."""
-    store.path.parent.mkdir(parents=True, exist_ok=True)
-    store.path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "triggers": [
-                    _trigger("good").to_dict(),
-                    {"id": "bad1", "name": "b", "kind": "nope"},
-                ],
-            }
-        )
-    )
-    report = health(store)
-    assert report["total"] == 2
-    assert report["broken"] == 1
-    assert report["broken_ids"] == ["bad1"]
-    assert report["by_kind"]
-
-
-def test_health_on_a_missing_store_is_honest(store):
-    report = health(store)
-    assert report["exists"] is False
-    assert report["total"] == 0
-    assert Path(report["path"]).name == "triggers.json"
 
 
 def test_real_concurrent_process_mutations_keep_every_trigger(tmp_path):

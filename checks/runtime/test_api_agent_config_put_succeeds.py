@@ -5,10 +5,10 @@ imported config_path() function, causing "'PosixPath' object is not callable".
 """
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from aiohttp import web
+from aiohttp.test_utils import make_mocked_request
 
 from gideon.interfaces.dashboard.handlers import api_agent_config
 
@@ -20,14 +20,12 @@ async def test_api_agent_config_put_succeeds(tmp_path):
     defaults = tmp_path / "defaults.json"
     pc_cfg = tmp_path / "config.json"
 
-    request = MagicMock(spec=web.Request)
-    request.method = "PUT"
-    request.app = {"state": MagicMock()}
-
-    async def mock_json():
-        return {"config": {"name": "test", "tools": ["a"], "allowedTools": ["b"]}}
-
-    request.json = mock_json
+    request = make_mocked_request(
+        "PUT", "/api/agent/config", headers={"Content-Type": "application/json"}
+    )
+    request._read_bytes = json.dumps(
+        {"config": {"name": "test", "tools": ["a"], "allowedTools": ["b"]}}
+    ).encode()
 
     with (
         patch(

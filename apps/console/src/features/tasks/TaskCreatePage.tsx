@@ -12,7 +12,7 @@ import { useTaskOperation } from './taskEditorState'
 export function TaskCreatePage({ onBack, onCreated }: { onBack: () => void; onCreated: (t: TaskItem) => void }) {
   const [draft, setDraft] = useState<TaskDraft>(emptyDraft)
   const { busy: saving, error: err, setError, run } = useTaskOperation('create-task')
-  const { data: allTasks = [] } = useQuery<TaskItem[]>('tasks-all', () => api.tasks().then(result => result.tasks).catch(() => []), { persist: true })
+  const { data: allTasks = [] } = useQuery<TaskItem[]>('tasks-all', () => api.allTasks().then(result => result.tasks).catch(() => []), { persist: true })
   const errRef = useRef<HTMLParagraphElement>(null)
   useEffect(() => { if (err) errRef.current?.scrollIntoView({ block: 'nearest' }) }, [err])
   const create = () => {

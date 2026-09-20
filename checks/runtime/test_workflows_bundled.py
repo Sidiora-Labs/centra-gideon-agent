@@ -17,12 +17,14 @@ and nobody notices until a user tries it" kind:
 
 from __future__ import annotations
 
+import fnmatch
 import json
-import re
+import tomllib
 from pathlib import Path
 
 import pytest
 
+from gideon.automation.workflows.bindings import BindingContext
 from gideon.automation.workflows.blocks import resolve_spec
 from gideon.automation.workflows.bundled_defs import (
     BundledWorkflowDefProvider,
@@ -31,6 +33,7 @@ from gideon.automation.workflows.bundled_defs import (
     register_bundled_provider,
     template_names,
 )
+from gideon.automation.workflows.engine import resolve_config
 from gideon.automation.workflows.macros import expand_spec, has_macros
 from gideon.automation.workflows.models import Node, WorkflowDef, valid_name, walk
 from gideon.automation.workflows.validator import (
@@ -621,10 +624,16 @@ def test_the_templates_are_declared_as_package_data() -> None:
     produced, so it matched nothing at all.
     """
     root = Path(__file__).resolve().parents[2]
-    text = (root / "pyproject.toml").read_text(encoding="utf-8")
-    block = re.search(r"\[tool\.setuptools\.package-data\](.*?)\n\[", text, re.S)
-    assert block, "could not find the package-data block"
-    assert "workflows/bundled/*/workflow.json" in block.group(1)
+    config = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    declarations = config["tool"]["setuptools"]["package-data"]
+    patterns = declarations.get("*", []) + declarations.get("gideon", [])
+    files = list(bundled_root().glob("*/workflow.json"))
+    assert files
+    for path in files:
+        relative = path.relative_to(root / "runtime" / "gideon").as_posix()
+        assert any(
+            fnmatch.fnmatchcase(relative, pattern) for pattern in patterns
+        ), relative
 
 
 class TestActionArgShape:
@@ -711,10 +720,16 @@ def test_the_shared_blocks_are_declared_as_package_data() -> None:
     would make every review template fail to load rather than merely lose a convention.
     """
     root = Path(__file__).resolve().parents[2]
-    text = (root / "pyproject.toml").read_text(encoding="utf-8")
-    block = re.search(r"\[tool\.setuptools\.package-data\](.*?)\n\[", text, re.S)
-    assert block, "could not find the package-data block"
-    assert "workflows/bundled/shared/*.md" in block.group(1)
+    config = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    declarations = config["tool"]["setuptools"]["package-data"]
+    patterns = declarations.get("*", []) + declarations.get("gideon", [])
+    files = list(bundled_root().glob("shared/*.md"))
+    assert files
+    for path in files:
+        relative = path.relative_to(root / "runtime" / "gideon").as_posix()
+        assert any(
+            fnmatch.fnmatchcase(relative, pattern) for pattern in patterns
+        ), relative
 
 
 def test_the_shared_directory_is_not_mistaken_for_a_template() -> None:
@@ -876,3 +891,28 @@ class TestContradictionReviewFastTier:
             "model_tier"
         ) == "fast", "the judge must declare the `fast` tier so it is the fast-model pass the atom names"
         assert resolve_use_case(judge) == "background"
+
+    def test_the_compiled_judge_prompt_includes_unsettled_stored_neighbours(
+        self,
+    ) -> None:
+        candidate = {
+            "left_claim": "The gateway binds localhost by default",
+            "right_claim": "The gateway binds every interface by default",
+            "left_item": "new-item",
+            "right_item": "stored-neighbour",
+            "similarity": 0.8,
+        }
+        config, failure = resolve_config(
+            self._judge(),
+            BindingContext(
+                inputs={"statement": candidate["left_claim"]},
+                node_outputs={
+                    "persist": {"conflicts": [], "conflict_candidates": [candidate]}
+                },
+            ),
+        )
+
+        assert failure is None
+        assert "contradiction edges are still unset" in config["prompt"]
+        assert candidate["right_item"] in config["prompt"]
+        assert candidate["right_claim"] in config["prompt"]

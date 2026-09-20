@@ -166,6 +166,7 @@ _UPDATES_GROUP_LED = {
     "pip_up",
     "pull",
     "pip_install",
+    "install",
 }
 _UPDATES_LEAF = {
     "local",
@@ -197,7 +198,7 @@ def _spawns_by_target(source: str, callee: str) -> dict[str, set[str]]:
 
 
 def test_only_the_censused_spawns_lead_their_own_group():
-    """Both directions: the four forking spawns opt in, the five leaves stay out."""
+    """Both directions: the five forking spawns opt in, the five leaves stay out."""
     src = (_HANDLERS / "updates.py").read_text()
     spawns = _spawns_by_target(src, "create_subprocess_exec")
 
@@ -260,7 +261,7 @@ def _timeout_kill_style(source: str) -> dict[str, str]:
 
 
 def test_every_updates_spawn_hands_its_deadline_to_the_owner():
-    """All nine spawns — forking and leaf — route their timeout through the owner.
+    """All ten spawns — forking and leaf — route their timeout through the owner.
 
     The group-vs-leaf distinction lives in the ``start_new_session`` census above, not
     here: the owner group-signals only a child that LEADS a group, so routing a leaf

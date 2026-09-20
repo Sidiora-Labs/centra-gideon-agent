@@ -52,24 +52,24 @@ describe('MoreRow', () => {
       'and a list shorter than its own cap cannot hide anything').toBe('')
   })
 
-  it('names the residue, not the total', () => {
+  it('states the shown and total counts', () => {
     render(<MoreRow total={47} shown={30} />)
-    expect(screen.getByText('… 17 more')).toBeTruthy()
+    expect(screen.getByText('Showing 30 of 47')).toBeTruthy()
   })
 
   it('names what is hidden when the caller says what it is', () => {
     render(<MoreRow total={247} shown={200} noun="rows" />)
-    expect(screen.getByText('… 47 more rows')).toBeTruthy()
+    expect(screen.getByText('Showing 200 of 247 rows')).toBeTruthy()
   })
 
   it('stays subject-less where the list above it already says what these are', () => {
     const { container } = render(<MoreRow total={9} shown={6} />)
-    expect(container.textContent?.trim(), 'no dangling noun, no guessed one').toBe('… 3 more')
+    expect(container.textContent?.trim(), 'no dangling noun, no guessed one').toBe('Showing 6 of 9')
   })
 
   it('is one wording, so eleven sites cannot drift again', () => {
     const src = readFileSync(join(SRC, 'shared/ui/MoreRow.tsx'), 'utf8')
-    expect((src.match(/\bmore(?:<|\{)/g) ?? []).length, 'exactly one place spells it').toBe(1)
+    expect((src.match(/Showing/g) ?? []).length, 'exactly one place spells it').toBe(1)
   })
 })
 
@@ -165,6 +165,20 @@ describe('every list whose label states a total discloses its cap', () => {
       expect(strip(readFileSync(join(SRC, rel), 'utf8')), `${rel} must disclose its cap`).toMatch(re)
     }
     expect(readdirSync(widgets).length, 'the widget directory must be readable').toBeGreaterThan(4)
+  })
+
+  it('the capped frontend census covers indirect and named caps', () => {
+    const pins: Array<[string, RegExp]> = [
+      ['shared/ui/NotificationBell.tsx', /<MoreRow total=\{items\.length\} shown=\{MAX_SHADE\} noun="notifications"/],
+      ['features/dashboard/widgets/DesktopLiveView.tsx', /<MoreRow total=\{\(data\.feed \?\? \[\]\)\.length\} shown=\{FEED_ROWS\} noun="events"/],
+      ['features/projects/ProjectsSection.tsx', /<MoreRow total=\{items\.length\} shown=\{8\} noun="items"/],
+      ['features/settings/MemoryGraph.tsx', /<MoreRow total=\{groups\.length\} shown=\{8\} noun="groups"/],
+      ['features/settings/DoctorPanel.tsx', /<MoreRow total=\{snap\.recent_runs\.length\} shown=\{5\} noun="runs"/],
+      ['features/ChatPage.tsx', /<MoreRow total=\{matching\.length\} shown=\{40\} noun="artifacts"/],
+    ]
+    for (const [rel, re] of pins) {
+      expect(strip(readFileSync(join(SRC, rel), 'utf8')), `${rel} must state shown N of total`).toMatch(re)
+    }
   })
 
   it('the SCHEDULE widget applied a standard it already held', () => {

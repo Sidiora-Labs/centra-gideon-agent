@@ -285,7 +285,10 @@ class TestConsumerAxes:
         from gideon.engine import subagent
 
         src = Path(subagent.__file__).read_text(encoding="utf-8")
-        assert 'extra_kwargs["model_axis"] = "orchestration"' in src
+        assert (
+            '{"model": info.model} if info.model else {"model_axis": "orchestration"}'
+            in src
+        )
 
     def test_guard_extends_to_all_noninteractive_axes(
         self, isolated_store, monkeypatch

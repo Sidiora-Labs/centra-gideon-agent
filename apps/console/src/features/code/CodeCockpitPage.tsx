@@ -92,6 +92,13 @@ function resolveTouchedPath(raw: string, root: string): { abs: string; rel: stri
 
 const stageKey = (s: CodeStage): string => (s.stage || s.title || '')
 
+export function normalizeStageLabel(label: string): string {
+  return (label || '')
+    .replace(/^\s*(?:stage\s*)?\d+\s*\/\s*\d+\s*[.–—:)\-]?\s*/i, '')
+    .replace(/^\s*(?:stage\s*)?\d+\s*[.–—:)\-]\s*/i, '')
+    .trim().toLowerCase()
+}
+
 const cmdLabel = (cmd: string, max = 36): string => {
   const c = (cmd || '').trim()
   return c.length > max ? `${c.slice(0, max - 1)}…` : c
@@ -858,7 +865,7 @@ function RightPanel({ project, onTasksChanged, tasksNonce, activityBySession, ga
     if (!lists.length) { setLoading(false); return }
     const seq = ++refreshSeq.current
     let anyFailed = false
-    Promise.all(lists.map((lid) => api.tasks({ task_list: lid, limit: 200 }).then((r) => [lid, r.tasks] as const)
+    Promise.all(lists.map((lid) => api.allTasks({ task_list: lid }).then((r) => [lid, r.tasks] as const)
       .catch(() => { anyFailed = true; return [lid, null] as const })))
       .then((pairs) => {
         if (seq !== refreshSeq.current) return
@@ -883,6 +890,10 @@ function RightPanel({ project, onTasksChanged, tasksNonce, activityBySession, ga
   for (const s of stages) tasksByStage[stageKey(s)] = (links[stageKey(s)] && tasksByList[links[stageKey(s)]]) || []
   const stageTasksFor = (fstage: string): TaskItem[] => {
     const s = stages.find((sg) => sg.stage === fstage || sg.title === fstage)
+      ?? stages.find((sg) => {
+        const label = normalizeStageLabel(fstage)
+        return label === normalizeStageLabel(sg.stage) || label === normalizeStageLabel(sg.title)
+      })
     return s ? (tasksByStage[stageKey(s)] || []) : []
   }
   for (const f of (project.findings ?? [])) {
@@ -1582,7 +1593,7 @@ function WorkspaceTree({ ws, running, isProjectDir }: { ws: string; running: boo
 }
       {!isProjectDir && (
         <div className="flex flex-col gap-1 px-1.5 pb-1">
-         <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1">
           {creating ? (
             <input autoFocus value={newName} onChange={(e) => { setNewName(e.target.value); if (createErr) setCreateErr('') }}
               onKeyDown={(e) => { if (e.key === 'Enter') submitCreate(); if (e.key === 'Escape') cancelCreate() }}
@@ -1597,8 +1608,8 @@ function WorkspaceTree({ ws, running, isProjectDir }: { ws: string; running: boo
                 className="gap-1 px-1.5 text-[0.75rem] text-on-surface-low"><FolderPlus size={13} /> Folder</Button>
             </>
           )}
-         </div>
-         {createErr && <span role="alert" data-type="caption" className="px-0.5 text-danger">{createErr}</span>}
+          </div>
+          {createErr && <span role="alert" data-type="caption" className="px-0.5 text-danger">{createErr}</span>}
         </div>
       )}
       {

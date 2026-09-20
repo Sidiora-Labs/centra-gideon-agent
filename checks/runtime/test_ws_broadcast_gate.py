@@ -195,15 +195,16 @@ def test_extra_cannot_relabel_the_frame_a_client_receives(state, monkeypatch):
 def test_every_note_type_in_the_tree_is_mapped():
     """The rail that makes an unmapped type a failing BUILD rather than a mystery frame.
 
-    Scans `src/` for `"_type": "<value>"` literals and requires each to be translatable. Without
-    it, the drop above is only discovered by someone noticing a missing toast in production.
+    Scans the package source for `"_type": "<value>"` literals and requires each to be
+    translatable. Without it, the drop above is only discovered by someone noticing a missing
+    toast in production.
     """
     import re
     from pathlib import Path
 
     from gideon.interfaces.dashboard.state import BROADCAST_NOTE_TYPES
 
-    src = Path(__file__).resolve().parent.parent.parent / "src"
+    src = Path(__file__).resolve().parent.parent.parent / "runtime" / "gideon"
     found: dict[str, str] = {}
     for path in src.rglob("*.py"):
         for m in re.finditer(

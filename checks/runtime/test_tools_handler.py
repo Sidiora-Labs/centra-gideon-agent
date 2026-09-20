@@ -10,8 +10,10 @@ without delaying the rest.
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
+from aiohttp.test_utils import make_mocked_request
 
 import gideon.interfaces.dashboard.handlers.tools as tools_mod
 
@@ -263,19 +265,16 @@ async def test_groups_endpoint_survives_a_broken_registry(monkeypatch):
     assert "groups" in payload
 
 
-class _InvokeRequest:
-    """Minimal stand-in for api_tool_invoke: supplies the JSON body and the
-    optional app identity the handler reads off the request mapping."""
-
-    def __init__(self, body: dict) -> None:
-        self._body = body
-        self.headers: dict[str, str] = {}
-
-    async def json(self):
-        return self._body
-
-    def get(self, key, default=None):
-        return default
+def _invoke_request(body: dict):
+    """A real aiohttp request carrying the serialized body the handler parses
+    through ``read_json_body`` (Content-Type + raw bytes, not ``.json()``)."""
+    request = make_mocked_request(
+        "POST",
+        "/api/tools/invoke",
+        headers={"Content-Type": "application/json"},
+    )
+    request._read_bytes = json.dumps(body).encode()
+    return request
 
 
 @pytest.mark.asyncio
@@ -290,7 +289,7 @@ async def test_invoke_rejects_non_string_provider(bad_provider):
     import json
 
     resp = await tools_mod.api_tool_invoke(
-        _InvokeRequest({"tool": "artifact_list", "provider": bad_provider})
+        _invoke_request({"tool": "artifact_list", "provider": bad_provider})
     )
     assert resp.status == 400
     payload = json.loads(resp.body.decode())
@@ -317,7 +316,7 @@ async def test_toggle_rejects_non_bool_enabled(bad_enabled, monkeypatch):
         "gideon.integrations.tool_providers.registry.list_all_tools", _one_tool
     )
     resp = await tools_mod.api_tools_toggle(
-        _InvokeRequest(
+        _invoke_request(
             {"provider": "gideon-core", "name": "artifact_list", "enabled": bad_enabled}
         )
     )
@@ -342,7 +341,7 @@ async def test_toggle_rejects_unknown_tool_name(monkeypatch):
         lambda *a, **k: calls.append((a, k)) or {"ok": True},
     )
     resp = await tools_mod.api_tools_toggle(
-        _InvokeRequest(
+        _invoke_request(
             {"provider": "gideon-core", "name": "zz-not-a-real-tool", "enabled": False}
         )
     )
@@ -371,7 +370,7 @@ async def test_toggle_accepts_a_real_bool_and_known_tool(monkeypatch):
         },
     )
     resp = await tools_mod.api_tools_toggle(
-        _InvokeRequest(
+        _invoke_request(
             {"provider": "gideon-core", "name": "artifact_list", "enabled": False}
         )
     )
@@ -393,7 +392,11 @@ class _RecordingProvider:
                 name=tool_name,
                 description="d",
                 provider=provider_tag,
-                risk_level=RiskLevel.DESTRUCTIVE,
+                risk_level=(
+                    RiskLevel.DESTRUCTIVE
+                    if tool_name in {"memory_forget", "bash"}
+                    else RiskLevel.SAFE
+                ),
             )
         ]
 
@@ -437,7 +440,7 @@ async def test_invoke_refuses_a_disabled_tool(monkeypatch):
     _install_provider(monkeypatch, prov)
     _disable(monkeypatch, "gideon-artifacts:artifact_list")
 
-    resp = await tools_mod.api_tool_invoke(_InvokeRequest({"tool": "artifact_list"}))
+    resp = await tools_mod.api_tool_invoke(_invoke_request({"tool": "artifact_list"}))
     assert resp.status == 403
     payload = json.loads(resp.body.decode())
     assert payload["error"]["code"] == "tool_disabled"
@@ -455,7 +458,7 @@ async def test_invoke_refuses_a_disabled_destructive_tool(monkeypatch):
     _disable(monkeypatch, "gideon-core:memory_forget")
 
     resp = await tools_mod.api_tool_invoke(
-        _InvokeRequest({"tool": "memory_forget", "arguments": {"query": "x"}})
+        _invoke_request({"tool": "memory_forget", "arguments": {"query": "x"}})
     )
     assert resp.status == 403
     assert prov.invoked == []
@@ -471,10 +474,34 @@ async def test_an_enabled_tool_still_runs(monkeypatch):
     _install_provider(monkeypatch, prov)
     _disable(monkeypatch)
 
-    resp = await tools_mod.api_tool_invoke(_InvokeRequest({"tool": "artifact_list"}))
+    resp = await tools_mod.api_tool_invoke(_invoke_request({"tool": "artifact_list"}))
     assert resp.status == 200
     assert json.loads(resp.body.decode())["ok"] is True
     assert prov.invoked == [("artifact_list", {})]
+
+
+@pytest.mark.asyncio
+async def test_destructive_invoke_requires_and_accepts_explicit_ack(monkeypatch):
+    import json
+
+    prov = _RecordingProvider("memory_forget", provider_tag="gideon-core")
+    _install_provider(monkeypatch, prov)
+    _disable(monkeypatch)
+    body = {"tool": "memory_forget", "arguments": {"query": "x"}}
+
+    refused = await tools_mod.api_tool_invoke(_invoke_request(body))
+    assert refused.status == 403
+    assert (
+        json.loads(refused.body.decode())["error"]["code"]
+        == "risk_confirmation_required"
+    )
+    assert prov.invoked == []
+
+    accepted = await tools_mod.api_tool_invoke(
+        _invoke_request({**body, "confirm_risk": "destructive"})
+    )
+    assert accepted.status == 200
+    assert prov.invoked == [("memory_forget", {"query": "x"})]
 
 
 @pytest.mark.asyncio
@@ -489,7 +516,9 @@ async def test_a_core_locked_tool_is_never_refused(monkeypatch):
     _install_provider(monkeypatch, prov)
     _disable(monkeypatch, "gideon-filesystem:bash")
 
-    resp = await tools_mod.api_tool_invoke(_InvokeRequest({"tool": "bash"}))
+    resp = await tools_mod.api_tool_invoke(
+        _invoke_request({"tool": "bash", "confirm_risk": "destructive"})
+    )
     assert resp.status == 200
     assert prov.invoked == [("bash", {})]
 
@@ -506,7 +535,7 @@ async def test_the_gate_keys_on_the_tools_own_provider_tag(monkeypatch):
     _disable(monkeypatch, "gideon-artifacts:artifact_list")
 
     resp = await tools_mod.api_tool_invoke(
-        _InvokeRequest({"tool": "artifact_list", "provider": "artifacts-instance-42"})
+        _invoke_request({"tool": "artifact_list", "provider": "artifacts-instance-42"})
     )
     assert resp.status == 403
     assert prov.invoked == []
@@ -526,7 +555,7 @@ async def test_a_disabled_provider_refuses_its_whole_toolset(monkeypatch):
         lambda: {"gideon-artifacts"},
     )
 
-    resp = await tools_mod.api_tool_invoke(_InvokeRequest({"tool": "artifact_list"}))
+    resp = await tools_mod.api_tool_invoke(_invoke_request({"tool": "artifact_list"}))
     assert resp.status == 403
     assert prov.invoked == []
 
@@ -549,8 +578,8 @@ def test_only_two_execution_paths_exist_and_both_are_gated():
                 rel = py.relative_to(src).as_posix()
                 hits[rel] = hits.get(rel, 0) + 1
     assert hits == {
-        "agents/native/runtime.py": 1,
-        "dashboard/handlers/tools.py": 1,
+        "engine/agents/native/runtime.py": 1,
+        "interfaces/dashboard/handlers/tools.py": 1,
     }, (
         "the set of tool-execution call sites changed — a new one needs the same "
         f"tool_prefs gate before it dispatches. Found: {hits}"

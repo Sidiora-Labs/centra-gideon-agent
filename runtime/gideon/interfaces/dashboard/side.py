@@ -20,6 +20,7 @@ import uuid
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.interfaces.dashboard.side_context import build_side_message
 from gideon.interfaces.dashboard.side_state import SideState
 from gideon.interfaces.dashboard.state import ConsoleState
@@ -105,7 +106,7 @@ async def api_side_turn(request: web.Request) -> web.Response:
     if err is not None:
         return err
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON body"}, status=400)
     if not isinstance(body, dict):

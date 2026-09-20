@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.http_errors import json_error
 from gideon.integrations.browse.mirror import broadcast_kill
 
@@ -51,7 +52,7 @@ async def api_browse_kill(request: web.Request) -> web.Response:
     from gideon.integrations.browse import killswitch
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     reason = str(body.get("reason", "")) if isinstance(body, dict) else ""
@@ -77,7 +78,7 @@ async def api_browse_kill_release(request: web.Request) -> web.Response:
     from gideon.integrations.browse import killswitch
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     if not (isinstance(body, dict) and body.get("confirm") is True):

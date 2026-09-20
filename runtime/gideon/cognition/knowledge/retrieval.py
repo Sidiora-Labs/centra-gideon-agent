@@ -1,13 +1,14 @@
 """HybridRetriever -- FTS5 keyword + graph + optional vector, fused with RRF."""
 
+import asyncio
+import concurrent.futures
+import json
 import logging
 import math
 import re
 import struct
-import threading
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Literal
 
 from gideon.cognition.knowledge.embedder import floats_to_bytes
 from gideon.cognition.knowledge.store import KnowledgeStore
@@ -28,10 +29,7 @@ _ANN_MAX_ATTEMPTS = 4
 
 _ID_BATCH = 400
 
-_DEFAULT_RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 _DEFAULT_RERANKER_MAX_CANDIDATES = 32
-_RERANK_QUERY_MAX_CHARS = 2_000
-_RERANK_TEXT_MAX_CHARS = 12_000
 
 ARM_KEYWORD = "keyword"
 ARM_GRAPH = "graph"
@@ -99,82 +97,25 @@ def ranking_disclosure(
     }
 
 
-RerankerState = Literal["disabled", "ready", "unavailable", "failed"]
-
-
-@dataclass(frozen=True)
-class RerankerHealth:
-    """Typed truth about the optional relevance stage.
-
-    ``available`` is true only after the configured model has loaded successfully. A
-    configured-but-missing model is therefore never reported as healthy merely because
-    the feature flag is on. ``reason`` is a stable machine value; ``detail`` is diagnostic
-    text for an operator surface.
-    """
-
-    state: RerankerState
-    enabled: bool
-    available: bool
-    model: str
-    reason: str = ""
-    detail: str = ""
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "state": self.state,
-            "enabled": self.enabled,
-            "available": self.available,
-            "model": self.model,
-            "reason": self.reason,
-            "detail": self.detail,
-        }
-
-
-@dataclass(frozen=True)
-class RerankedCandidate:
-    item_id: str
-    score: float
-
-
 @dataclass(frozen=True)
 class RerankResult:
-    """One attempted rerank, including the candidates and its actual health outcome."""
-
-    candidates: tuple[RerankedCandidate, ...]
-    health: RerankerHealth
+    enabled: bool
     applied: bool
+    candidate_ids: tuple[str, ...] = ()
+    reason: str = ""
 
 
 class RelevanceReranker:
-    """Lazy, local-only cross-encoder reranker.
-
-    Loading is delayed until an enabled search has candidates. ``local_files_only`` is
-    load-bearing: turning on retrieval must not silently download model weights. The model
-    is loaded and invoked under one lock because concurrent first searches must not create
-    duplicate heavyweight models, and common torch-backed cross encoders do not promise
-    concurrent ``predict`` safety.
-    """
+    """Post-fusion relevance ordering through the active reasoning model."""
 
     def __init__(
         self,
         *,
         enabled: bool = False,
-        model_name: str = _DEFAULT_RERANKER_MODEL,
         max_candidates: int = _DEFAULT_RERANKER_MAX_CANDIDATES,
-        model: Any = None,
     ) -> None:
         self.enabled = bool(enabled)
-        self.model_name = (
-            str(model_name or _DEFAULT_RERANKER_MODEL).strip()
-            or _DEFAULT_RERANKER_MODEL
-        )
         self.max_candidates = min(128, max(1, int(max_candidates)))
-        self._model = model
-        self._load_attempted = model is not None
-        self._load_reason = ""
-        self._load_detail = ""
-        self._last_health: RerankerHealth | None = None
-        self._lock = threading.Lock()
 
     @classmethod
     def from_config(cls) -> "RelevanceReranker":
@@ -183,183 +124,64 @@ class RelevanceReranker:
 
             config = AppConfig.load().knowledge
             return cls(
-                enabled=config.reranker_enabled,
-                model_name=config.reranker_model,
-                max_candidates=config.reranker_max_candidates,
+                enabled=config.rerank_enabled,
+                max_candidates=config.rerank_max_candidates,
             )
-        except Exception as exc:  # a retrieval constructor must remain fail-soft
-            reranker = cls(enabled=False)
-            reranker._load_reason = "config_unavailable"
-            reranker._load_detail = f"{type(exc).__name__}: {exc}"
-            return reranker
-
-    def _load(self) -> Any:
-        from sentence_transformers import CrossEncoder
-
-        return CrossEncoder(self.model_name, local_files_only=True)
-
-    def _ensure_model(self) -> Any:
-        if not self.enabled:
-            return None
-        with self._lock:
-            if self._model is not None:
-                return self._model
-            if self._load_attempted:
-                return None
-            self._load_attempted = True
-            try:
-                self._model = self._load()
-            except (ImportError, ModuleNotFoundError) as exc:
-                self._load_reason = "dependency_unavailable"
-                self._load_detail = f"{type(exc).__name__}: {exc}"
-            except (
-                Exception
-            ) as exc:  # noqa: BLE001 — availability must be typed, not raised
-                self._load_reason = "model_unavailable"
-                self._load_detail = f"{type(exc).__name__}: {exc}"
-            return self._model
-
-    def availability(self) -> RerankerHealth:
-        if not self.enabled:
-            return RerankerHealth(
-                state="disabled",
-                enabled=False,
-                available=False,
-                model=self.model_name,
-                reason=self._load_reason or "disabled",
-                detail=self._load_detail,
-            )
-        model = self._ensure_model()
-        if model is None:
-            return RerankerHealth(
-                state="unavailable",
-                enabled=True,
-                available=False,
-                model=self.model_name,
-                reason=self._load_reason or "model_unavailable",
-                detail=self._load_detail,
-            )
-        return RerankerHealth(
-            state="ready",
-            enabled=True,
-            available=True,
-            model=self.model_name,
-        )
-
-    def health(self) -> RerankerHealth:
-        """Return the last inference failure, otherwise current availability."""
-        return self._last_health or self.availability()
-
-    def passive_health(self) -> RerankerHealth:
-        """Describe the configured state without importing or loading a model."""
-        if not self.enabled:
-            return RerankerHealth(
-                state="disabled",
-                enabled=False,
-                available=False,
-                model=self.model_name,
-                reason=self._load_reason or "disabled",
-                detail=self._load_detail,
-            )
-        if self._model is not None:
-            return self._last_health or RerankerHealth(
-                state="ready",
-                enabled=True,
-                available=True,
-                model=self.model_name,
-            )
-        if self._load_attempted:
-            return RerankerHealth(
-                state="unavailable",
-                enabled=True,
-                available=False,
-                model=self.model_name,
-                reason=self._load_reason or "model_unavailable",
-                detail=self._load_detail,
-            )
-        return RerankerHealth(
-            state="unavailable",
-            enabled=True,
-            available=False,
-            model=self.model_name,
-            reason="not_checked",
-        )
+        except Exception:  # noqa: BLE001 — retrieval remains available without config
+            return cls(enabled=False)
 
     def rerank(self, query: str, candidates: list[dict]) -> RerankResult:
-        """Rank candidates by cross-encoder relevance, or return a typed no-op.
-
-        The returned scores are sigmoid-normalized logits. The transform is monotonic, so
-        it cannot change model ordering, while giving callers a finite, comparable [0, 1]
-        value instead of backend-specific logits.
-        """
+        """Return a validated model ordering, failing open on every unusable response."""
         bounded = candidates[: self.max_candidates]
-        if not bounded:
+        if not self.enabled or not bounded:
             return RerankResult(
-                candidates=(), health=self.passive_health(), applied=False
+                self.enabled,
+                False,
+                reason="disabled" if not self.enabled else "no_candidates",
             )
-        health = self.availability()
-        if not health.available:
-            return RerankResult(candidates=(), health=health, applied=False)
-
-        pairs = [
-            (
-                query[:_RERANK_QUERY_MAX_CHARS],
-                "\n".join(
-                    str(part or "")
-                    for part in (
-                        item.get("title"),
-                        item.get("summary"),
-                        item.get("content"),
-                    )
-                    if part
-                )[:_RERANK_TEXT_MAX_CHARS],
+        prompt = (
+            "Order these knowledge candidates by relevance to the query. Return only a JSON "
+            "array of candidate IDs, most relevant first.\n"
+            f"Query: {query[:2000]}\nCandidates:\n"
+            + "\n".join(
+                json.dumps(
+                    {
+                        "id": item["id"],
+                        "title": item.get("title"),
+                        "summary": item.get("summary"),
+                        "content": str(item.get("content") or "")[:12000],
+                    },
+                    ensure_ascii=False,
+                )
+                for item in bounded
             )
-            for item in bounded
-        ]
-        try:
-            with self._lock:
-                raw_scores = self._model.predict(pairs)
-            ranked = _rank_scored_candidates(bounded, raw_scores)
-        except Exception as exc:  # noqa: BLE001 — retrieval degrades to RRF
-            failed = RerankerHealth(
-                state="failed",
-                enabled=True,
-                available=True,
-                model=self.model_name,
-                reason="inference_failed",
-                detail=f"{type(exc).__name__}: {exc}",
-            )
-            self._last_health = failed
-            return RerankResult(candidates=(), health=failed, applied=False)
-
-        self._last_health = None
-        return RerankResult(candidates=ranked, health=health, applied=True)
-
-
-def _sigmoid(value: float) -> float:
-    if value >= 0:
-        z = math.exp(-value)
-        return 1.0 / (1.0 + z)
-    z = math.exp(value)
-    return z / (1.0 + z)
-
-
-def _rank_scored_candidates(
-    candidates: list[dict], raw_scores
-) -> tuple[RerankedCandidate, ...]:
-    scores = [float(score) for score in raw_scores]
-    if len(scores) != len(candidates) or not all(math.isfinite(s) for s in scores):
-        raise ValueError("reranker returned invalid scores")
-    return tuple(
-        sorted(
-            (
-                RerankedCandidate(item_id=str(item["id"]), score=_sigmoid(score))
-                for item, score in zip(candidates, scores)
-            ),
-            key=lambda candidate: candidate.score,
-            reverse=True,
         )
-    )
+        try:
+            from gideon.integrations.llm_helpers import one_shot_completion
+
+            call = one_shot_completion(prompt, use_case="reasoning")
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                response = asyncio.run(call)
+            else:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    response = pool.submit(asyncio.run, call).result()
+            requested = json.loads(response)
+            if not isinstance(requested, list):
+                raise ValueError("response is not an ID array")
+            real = {str(item["id"]) for item in bounded}
+            ordered = tuple(
+                dict.fromkeys(
+                    str(item_id) for item_id in requested if str(item_id) in real
+                )
+            )
+            if not ordered:
+                raise ValueError("response names no candidate")
+            return RerankResult(True, True, ordered)
+        except Exception:  # noqa: BLE001 — assistant reasoning has a fail-open floor
+            logger.debug("knowledge rerank unavailable", exc_info=True)
+            return RerankResult(True, False, reason="unusable_response")
 
 
 def relevance_cliff_cut(
@@ -409,13 +231,7 @@ class HybridRetriever:
         self.vector_index_status: dict = {}
         self.stale_index_reasons: list[dict] = []
         self.reranker = reranker or RelevanceReranker.from_config()
-        self.last_reranker_result = RerankResult(
-            candidates=(), health=self.reranker.passive_health(), applied=False
-        )
-
-    def reranker_health(self) -> RerankerHealth:
-        """Return typed health, probing model availability when not yet known."""
-        return self.reranker.health()
+        self.last_reranker_result = RerankResult(self.reranker.enabled, False)
 
     def search(
         self,
@@ -499,18 +315,9 @@ class HybridRetriever:
             if item_id in items_cache
         ]
         self.last_reranker_result = self.reranker.rerank(query, rerank_input)
-        reranker_scores: dict[str, float] = {}
         if self.last_reranker_result.applied:
-            reranker_scores = {
-                candidate.item_id: candidate.score
-                for candidate in self.last_reranker_result.candidates
-            }
             original_scores = dict(fused)
-            reranked_ids = [
-                candidate.item_id
-                for candidate in self.last_reranker_result.candidates
-                if candidate.item_id in original_scores
-            ]
+            reranked_ids = list(self.last_reranker_result.candidate_ids)
             reranked = set(reranked_ids)
             reranked_ids.extend(
                 item_id for item_id, _ in fused if item_id not in reranked
@@ -572,10 +379,7 @@ class HybridRetriever:
                 ],
                 score=score,
             )
-            if item_id in reranker_scores:
-                result["fusion_score"] = score
-                result["reranker_score"] = reranker_scores[item_id]
-                result["score"] = reranker_scores[item_id]
+            if self.last_reranker_result.applied:
                 result["match_type"] += "+reranker"
             results.append(result)
         return results
@@ -733,6 +537,14 @@ class HybridRetriever:
         best: dict[str, float] = {}
         best_loc: dict[str, dict] = {}
 
+        from gideon.integrations.vector_store_providers.registry import get_provider
+
+        external_store = get_provider()
+        chunk_archived = (
+            "" if include_archived else "AND COALESCE(i.is_archived, 0) = 0"
+        )
+        chunk_cols = "SELECT c.id AS chunk_id, c.item_id, c.embedding, c.section, c.line_start, c.line_end "
+
         def _consider(item_id: str, blob, locator: dict | None) -> float | None:
             """Score one vector into the roll-up. Returns the similarity, or ``None`` when the
             vector is unscoreable (dimension guard). The value is returned — not just applied —
@@ -752,16 +564,63 @@ class HybridRetriever:
                     best_loc[item_id] = locator
             return sim
 
+        if external_store is not None:
+            try:
+                candidates = external_store.search(
+                    list(query_vec), limit=max(1, limit) * _ANN_OVERFETCH
+                )
+                previous = 1.0
+                candidate_ids: list[str] = []
+                candidate_scores: dict[str, float] = {}
+                for hit in candidates:
+                    similarity = float(hit["similarity"])
+                    if not math.isfinite(similarity) or not -1.0 <= similarity <= 1.0:
+                        raise ValueError(
+                            "vector-store similarity must be finite and in [-1, 1]"
+                        )
+                    if similarity > previous:
+                        raise ValueError("vector-store results must be descending")
+                    previous = similarity
+                    if similarity < _VECTOR_MIN_SIMILARITY:
+                        break
+                    chunk_id = str(hit["chunk_id"])
+                    candidate_ids.append(chunk_id)
+                    candidate_scores[chunk_id] = similarity
+                for start in range(0, len(candidate_ids), _ID_BATCH):
+                    batch = candidate_ids[start : start + _ID_BATCH]
+                    placeholders = ",".join("?" * len(batch))
+                    for row in self.store.db.execute(
+                        chunk_cols + "FROM chunks c JOIN items i ON i.id = c.item_id "
+                        f"WHERE c.id IN ({placeholders}) AND i.status = 'active' "  # noqa: S608
+                        f"{chunk_archived}",
+                        batch,
+                    ):
+                        similarity = candidate_scores[row["chunk_id"]]
+                        item_id = row["item_id"]
+                        if similarity > best.get(item_id, -1.0):
+                            best[item_id] = similarity
+                            best_loc[item_id] = {
+                                "section": row["section"],
+                                "line_start": row["line_start"],
+                                "line_end": row["line_end"],
+                            }
+            except Exception:
+                logger.warning("External vector-store search failed", exc_info=True)
+                return []
+
+            scored = sorted(best.items(), key=lambda x: (-x[1], x[0]))[:limit]
+            if chunk_locators is not None:
+                for item_id, _ in scored:
+                    loc = best_loc.get(item_id)
+                    if loc is not None:
+                        chunk_locators[item_id] = loc
+            return [(item_id, rank + 1) for rank, (item_id, _) in enumerate(scored)]
+
         index = getattr(self.store, "vec_index", None)
         if index is not None and not index.enabled:
             index = None
         q_blob = floats_to_bytes(query_vec) if index is not None else b""
         chunk_index = index if not self.vector_index_status.get("stale") else None
-
-        chunk_archived = (
-            "" if include_archived else "AND COALESCE(i.is_archived, 0) = 0"
-        )
-        chunk_cols = "SELECT c.id AS chunk_id, c.item_id, c.embedding, c.section, c.line_start, c.line_end "
 
         def _consider_chunk_row(row) -> float | None:
             return _consider(
@@ -857,7 +716,7 @@ class HybridRetriever:
             ):
                 _consider(row["id"], row["embedding"], None)
 
-        scored = sorted(best.items(), key=lambda x: x[1], reverse=True)[:limit]
+        scored = sorted(best.items(), key=lambda x: (-x[1], x[0]))[:limit]
         if chunk_locators is not None:
             for item_id, _ in scored:
                 loc = best_loc.get(item_id)

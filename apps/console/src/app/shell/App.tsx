@@ -2,7 +2,7 @@ import './shell.css'
 import { Suspense, useEffect, useRef, useState, type ComponentType } from 'react'
 import { useApplicationEvents, useShellNavigation, useTerminalShell } from './shellControllers'
 import { MotionConfig, motion } from 'framer-motion'
-import { ease, duration } from '../../shared/theme/motion'
+import { ease, duration, useReducedMotion } from '../../shared/theme/motion'
 import { armCueAudio } from '../../shared/theme/soundCues'
 import { installPushCuePlayback } from './pushCuePlayback'
 import { Bell, Blocks, BookOpen, Brain, Compass, FileCode, FileText, Files, FolderKanban, Inbox, LayoutDashboard, ListChecks, Loader2, MessageSquare, Radar, Settings, Sparkles, Terminal, Users, Workflow, Wrench, Zap } from 'lucide-react'
@@ -38,6 +38,8 @@ import { useWidgetActionLauncher } from '../../shared/ui/widget/useWidgetActionB
 import { getNavApps, onNavAppsChange } from '../../features/apps/navApps'
 import { isDisclosed, undisclosedCount, useNavDisclosure } from './navDisclosure'
 import type { AppSummary } from '../../shared/data/api'
+import { onTaskListCreated } from '../../shared/data/taskListCount'
+import { useNotificationToasts } from './useNotificationToasts'
 
 const LoopsSection = lazyRoute('loops', () => import('../../features/loops/LoopsSection').then((m) => ({ default: m.LoopsSection })))
 const CodeSection = lazyRoute('code', () => import('../../features/code/CodeSection').then((m) => ({ default: m.CodeSection })))
@@ -92,7 +94,7 @@ const ROUTABLE = new Set([...NAV.map((n) => n.id), 'notifications', 'discover', 
 
 function PageFallback() {
   return (
-    <div role="status" aria-busy="true" className="flex h-full items-center justify-center">
+    <div role="status" aria-busy="true" data-visual-state="waiting" className="flex h-full items-center justify-center">
       <LoadingStatus />
       <Loader2 size={22} className="animate-spin text-on-surface-low" />
     </div>
@@ -145,8 +147,13 @@ function renderPage(route: string, props: RouteProps) {
 }
 
 export function App() {
+  const reducedMotion = useReducedMotion()
+  useEffect(() => {
+    document.documentElement.toggleAttribute('data-reduced-motion', reducedMotion)
+    return () => document.documentElement.removeAttribute('data-reduced-motion')
+  }, [reducedMotion])
   return (
-    <MotionConfig reducedMotion="user">
+    <MotionConfig reducedMotion={reducedMotion ? 'always' : 'never'}>
       <AppInner />
     </MotionConfig>
   )
@@ -157,6 +164,7 @@ function AppInner() {
   const activeChatSession = route === 'chat' && sub && sub !== 'new' && sub !== 'history' ? sub : ''
   useApprovalToasts(activeChatSession)
   useNativeNotifications(navigate)
+  useNotificationToasts()
   useEffect(() => { armCueAudio() }, [])
   useEffect(() => installPushCuePlayback(), [])
   const { onboarded, loaded } = useIdentity()
@@ -167,6 +175,13 @@ function AppInner() {
   const toggleNav = rail.toggle
   const onNavSelect = rail.select
   const [activeLoops, setActiveLoops] = useState(0)
+  const [taskListCount, setTaskListCount] = useState(0)
+  useEffect(() => {
+    let active = true
+    api.taskLists().then((lists) => { if (active) setTaskListCount(lists.length) }).catch(() => {})
+    const unsubscribe = onTaskListCreated(() => setTaskListCount((count) => count + 1))
+    return () => { active = false; unsubscribe() }
+  }, [])
   useVisiblePoll(() => {
     api.uLoops().then((ls) => setActiveLoops(ls.filter((l) => ACTIVE_LOOP_STATUSES.has(l.status)).length)).catch(() => {})
   }, 8000)
@@ -218,7 +233,7 @@ function AppInner() {
   const embedRef = useRef(query.embed === '1')
   if (query.embed === '1') embedRef.current = true
 
-  if (!loaded) return <div className="grid h-full place-items-center" style={{ background: 'var(--color-canvas)' }}><Loader2 size={22} className="animate-spin text-on-surface-low" /></div>
+  if (!loaded) return <div data-visual-state="waiting" className="grid h-full place-items-center" style={{ background: 'var(--color-canvas)' }}><Loader2 size={22} className="animate-spin text-on-surface-low" /></div>
   if (route === 'onboarding' || !onboarded) return <Onboarding />
 
   if (route === 'companion') {
@@ -270,6 +285,8 @@ function AppInner() {
   for (const n of NAV) {
     if (n.id === 'projects' && activeLoops > 0) {
       navItems.push({ ...n, badge: String(activeLoops), badgeLabel: `${activeLoops} active loop${activeLoops === 1 ? '' : 's'}` })
+    } else if (n.id === 'tasks' && taskListCount > 0) {
+      navItems.push({ ...n, badge: String(taskListCount), badgeLabel: `${taskListCount} task list${taskListCount === 1 ? '' : 's'}` })
     } else if (n.id === 'apps' && appBadgeTotal > 0) {
       navItems.push({
         ...n,

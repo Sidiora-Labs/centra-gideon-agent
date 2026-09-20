@@ -53,7 +53,7 @@ _KILL_CALLEES = {"kill", "terminate", "send_signal"}
 _PROCESS_NAMES = {"proc", "process", "_process", "child", "subproc", "popen"}
 
 _EXEMPT: dict[str, str] = {
-    "integrations/acp/transport.py::AcpProcess._wait_exit::self._process.wait": (
+    "integrations/acp/transport.py::AcpProcess._wait_exit::process.wait": (
         "ACP agent-session retirement, not a command deadline: it signals the pgid "
         "recorded at spawn (not only when the child still leads a group) and then sweeps "
         "descendants that escaped it — strictly more than the generic owner does"
@@ -116,22 +116,7 @@ _OWNED_BY_THE_OWNER = {
     "kill": "core/cancellation.py::_signal_child::killpg",
 }
 
-_SPAWN_TIMEOUT_EXEMPT: dict[str, str] = {
-    "integrations/acp/transport.py::AcpProcess.spawn::self._process": (
-        "ACP retirement records the original pgid and sweeps descendants that escaped "
-        "it, so its session-specific kill path is deliberately stronger than "
-        "kill_timed_out"
-    ),
-    "integrations/mcp_discovery.py::probe_server::proc": (
-        "the deadlines bound individual MCP protocol reads, not process completion; "
-        "the unconditional finally retires the still-running server through "
-        "terminate_and_reap"
-    ),
-    "interfaces/dashboard/handlers/terminal.py::api_terminal_ws::proc": (
-        "the deadline only bounds observation of an already-ending PTY; session "
-        "retirement belongs to _close_session and uses terminate_and_reap"
-    ),
-}
+_SPAWN_TIMEOUT_EXEMPT: dict[str, str] = {}
 
 
 def _dotted(node: ast.AST) -> str:

@@ -8,6 +8,7 @@ from aiohttp import web
 
 from gideon.automation.workflows import containers, leases
 from gideon.automation.workflows import store as run_store
+from gideon.core.http_request import read_json_body
 from gideon.engine.tasks.hierarchy import HierarchyStore
 from gideon.engine.tasks.project_views import (
     BoardProjection,
@@ -38,7 +39,7 @@ class HierarchyRequest:
     @staticmethod
     async def body(request):
         try:
-            return await request.json()
+            return await read_json_body(request)
         except Exception:
             return json_error("invalid_json", status=400)
 
@@ -354,7 +355,7 @@ async def api_projects_work(request: web.Request) -> web.Response:
 
 async def _claim_body(request: web.Request) -> tuple[str, str] | web.Response:
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return json_error("invalid_json", status=400)
     if not isinstance(body, dict):
@@ -484,7 +485,11 @@ async def api_projects_delete(request: web.Request) -> web.Response:
 
 
 async def api_task_lists_list(request: web.Request) -> web.Response:
-    records = _store().list_task_lists(project_id=request.query.get("project_id"))
+    store = _store()
+    project_id = request.query.get("project_id")
+    if project_id is not None and store.get_project(project_id) is None:
+        return web.json_response({"error": "project not found"}, status=404)
+    records = store.list_task_lists(project_id=project_id)
     return web.json_response(
         {"task_lists": list(map(lambda record: record.to_dict(), records))}
     )
@@ -533,7 +538,7 @@ async def api_task_lists_delete(request: web.Request) -> web.Response:
 
 async def api_task_lists_reset(request: web.Request) -> web.Response:
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     if not isinstance(body, dict) or not body.get("confirm"):

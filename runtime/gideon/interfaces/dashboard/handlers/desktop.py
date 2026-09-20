@@ -26,6 +26,7 @@ import logging
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.interfaces.dashboard.desktop_registry import CAPABILITIES
 
 logger = logging.getLogger(__name__)
@@ -94,7 +95,7 @@ def _require_shell_token(request: web.Request, operation: str) -> web.Response |
 
 async def _json_body(request: web.Request) -> dict:
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return {}
     return body if isinstance(body, dict) else {}

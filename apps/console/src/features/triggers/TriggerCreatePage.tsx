@@ -11,7 +11,7 @@ import { Field, TextInput, Segmented } from '../../shared/ui/forms'
 import { Combobox } from '../../shared/ui/Combobox'
 import { PageTitle } from '../../shared/ui/PageTitle'
 import { ScheduleForm, emptyDraft as emptySchedule, type ScheduleDraft } from '../schedule/ScheduleForm'
-import { intervalToSecs } from '../schedule/scheduleMeta'
+import { scheduleWhenMet } from '../schedule/scheduleMeta'
 import { ActionConfig, coerceActionConfig, seedActionConfig } from './ActionConfig'
 import { findTriggerPreset, prefillDraft } from './triggerPresets'
 import { schemaProps } from '../tools/schema'
@@ -108,9 +108,7 @@ export function TriggerCreatePage({ onBack, onCreated, query, setQuery }: {
           failure_delivery: failureDelivery.trim(),
           failure_policy: { dedupe_hash: dedupeFailures },
         }
-        if (sched.kind === 'cron') body.cron = sched.cron.trim()
-        else if (sched.kind === 'every') body.every = intervalToSecs(sched.intervalValue, sched.intervalUnit)
-        else if (sched.kind === 'at') body.at = sched.at
+        Object.assign(body, scheduleWhenMet(sched))
         body.action = { provider, config: coerced.config }
         await api.createSchedule(body)
       } else if (kind === 'lifecycle') {

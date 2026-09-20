@@ -1,7 +1,10 @@
 """Tests for process tree tracking, recursive kill, and session cleanup."""
 
+import os
 import signal
-from unittest.mock import MagicMock, patch
+import subprocess
+import sys
+from unittest.mock import patch
 
 import pytest
 
@@ -121,9 +124,7 @@ class TestIsOurChild:
             yield
 
     def test_rejects_missing_proc(self):
-        with patch("gideon.integrations.acp.transport.Path") as mock_path_cls:
-            mock_path_cls.return_value.exists.return_value = False
-            assert _is_our_child(999, expected_start=1) is False
+        assert _is_our_child(-1, expected_start=1) is False
 
     def test_rejects_unknown_binary(self):
         with patch("gideon.integrations.acp.transport.Path") as mock_path_cls:
@@ -176,22 +177,14 @@ class TestIsOurChild:
 
 class TestDirectChildren:
     def test_proc_children_parsed(self):
-        with (
-            patch("gideon.integrations.acp.transport.sys") as mock_sys,
-            patch("gideon.integrations.acp.transport.Path") as mock_path_cls,
-        ):
-            mock_sys.platform = "linux"
-            mock_path = MagicMock()
-            mock_path_cls.return_value = mock_path
-            mock_path.is_dir.return_value = True
-            child_file = MagicMock()
-            child_file.exists.return_value = True
-            child_file.read_text.return_value = "200 300 "
-            tid = MagicMock()
-            tid.__truediv__ = lambda self, x: child_file
-            mock_path.iterdir.return_value = [tid]
-            result = _direct_children(100)
-        assert result == [200, 300]
+        with subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"]
+        ) as child:
+            try:
+                assert child.pid in _direct_children(os.getpid())
+            finally:
+                child.terminate()
+                child.wait(timeout=5)
 
 
 class TestSnapshotProcessTree:

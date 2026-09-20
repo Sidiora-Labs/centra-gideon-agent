@@ -33,7 +33,7 @@ const TARGET_LABELS: Record<NotificationTarget, string> = {
   push: 'Push (mobile app required)',
   native: 'Desktop notification (when the desktop app is running)',
 }
-const INERT_TARGETS: NotificationTarget[] = ['push']
+const INERT_TARGETS: NotificationTarget[] = ['channel_dm', 'push']
 
 export function NotificationRulesMatrix({ doc, onSaved }: { doc: NotificationRulesDoc; onSaved: () => void }) {
   const [busy, setBusy] = useState<string | null>(null)
@@ -50,7 +50,7 @@ export function NotificationRulesMatrix({ doc, onSaved }: { doc: NotificationRul
     return [...groups.entries()]
   }, [doc.rules])
 
-  async function save(key: string, patch: Record<string, unknown>) {
+  async function save(key: string, patch: Record<string, unknown> | null) {
     setBusy(key); setErr('')
     try { await api.saveNotificationRules({ rules: { [key]: patch } }); onSaved() }
     catch (e) { setErr(e instanceof Error ? e.message : 'Save failed') }
@@ -75,8 +75,8 @@ export function NotificationRulesMatrix({ doc, onSaved }: { doc: NotificationRul
                       <span data-type="body-m" className="flex-1 min-w-0 truncate text-on-surface">{r.label}</span>
                       {
 }
-                      {r.configured && r.mode !== r.default_mode && (
-                        <Button size="xs" variant="ghost" onClick={() => save(r.key, { mode: r.default_mode })}
+                      {r.configured && (
+                        <Button size="xs" variant="ghost" onClick={() => save(r.key, null)}
                           loading={busy === r.key} title={`Reset to default (${r.default_mode})`}>
                           <RotateCcw size={11} /> reset
                         </Button>

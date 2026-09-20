@@ -30,6 +30,7 @@ from gideon.assurance.legibility.discover import (
     compute_discover,
     dismiss,
 )
+from gideon.core.http_request import RequestBodyTypeError, read_json_body
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ async def api_discover_dismiss(request: web.Request) -> web.Response:
     single request could leave megabytes there for every later Discover read to parse.
     """
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
     if not isinstance(body, dict):
@@ -107,7 +108,9 @@ async def api_always_on_doc_write(request: web.Request) -> web.Response:
     ``False`` and rendering "Saved" over a discarded edit is the failure this guards.
     """
     try:
-        payload = await request.json()
+        payload = await read_json_body(request)
+    except RequestBodyTypeError:
+        return web.json_response({"error": "Body must be a JSON object"}, status=400)
     except Exception:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
     if not isinstance(payload, dict):

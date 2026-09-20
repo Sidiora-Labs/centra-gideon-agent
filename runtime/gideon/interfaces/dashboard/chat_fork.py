@@ -4,6 +4,7 @@ import logging
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.interfaces.dashboard.chat_persistence import save_session_to_history
 from gideon.interfaces.dashboard.chat_utils import (
     _history_key_for,
@@ -90,7 +91,7 @@ async def api_chat_session_fork(request: web.Request) -> web.Response:
         )
     if request.body_exists:
         try:
-            body = await request.json()
+            body = await read_json_body(request)
         except Exception:
             return web.json_response({"error": "invalid JSON body"}, status=400)
         if not isinstance(body, dict):
@@ -236,7 +237,7 @@ async def api_chat_session_fork_rewound(request: web.Request) -> web.Response:
         )
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON body"}, status=400)
     if not isinstance(body, dict):

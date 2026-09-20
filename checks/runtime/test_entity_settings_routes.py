@@ -10,9 +10,11 @@ authoritative allowlist.
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import make_mocked_request
 
 from gideon.extensions.providers import entity_routes as er
 
@@ -25,8 +27,13 @@ def _isolate_settings(monkeypatch, tmp_path):
 
 
 def _req(body):
-    r = MagicMock()
-    r.json = AsyncMock(return_value=body)
+    r = make_mocked_request(
+        "PUT",
+        "/api/notifications/settings",
+        headers={"Content-Type": "application/json"},
+        app=web.Application(),
+    )
+    r._read_bytes = json.dumps(body).encode()
     return r
 
 
@@ -222,7 +229,7 @@ class TestNotificationAllowed:
         inside2 = datetime(2026, 1, 1, 7, 59)
         outside = datetime(2026, 1, 1, 12, 0)
         assert er.notification_allowed("info", now=inside) is False
-        assert er.notification_allowed("warning", now=inside2) is False
+        assert er.notification_posture("warning", now=inside2) == "quiet"
         assert er.notification_allowed("error", now=inside) is True
         assert er.notification_allowed("info", now=outside) is True
 
@@ -304,6 +311,25 @@ async def test_rules_put_persists_and_takes_effect(_isolate_rules):
     data = await _json(resp)
     assert data["ok"] is True
     assert nr.resolve_rule("heartbeat", "status").mode == "badge"
+
+
+@pytest.mark.asyncio
+async def test_rules_put_null_clears_the_configured_rule(_isolate_rules):
+    from gideon.workspace import notification_rules as nr
+
+    await er.handle_notification_rules_put(
+        _req({"rules": {"heartbeat/status": {"mode": "badge"}}})
+    )
+    response = await er.handle_notification_rules_put(
+        _req({"rules": {"heartbeat/status": None}})
+    )
+    row = next(
+        row
+        for row in (await _json(response))["rules"]
+        if row["key"] == "heartbeat/status"
+    )
+    assert row["configured"] is False
+    assert nr.resolve_rule("heartbeat", "status").mode == "immediate"
 
 
 @pytest.mark.asyncio

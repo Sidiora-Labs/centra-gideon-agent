@@ -92,14 +92,14 @@ def apply_fix(fix_id: str, *, session_key: str = "dashboard") -> dict:
 
 
 def _dist_paths() -> tuple[Path, Optional[Path]]:
-    """(static/dist path, resolved web/dist target-or-None) — mirrors frontend.py's
+    """(static/dist path, resolved apps/console/dist target-or-None) — mirrors frontend.py's
     resolution without calling it (that function early-returns on a valid copy)."""
     import gideon
 
     pkg_dir = Path(gideon.__file__).resolve().parent
     tree_dist = pkg_dir / "static" / "dist"
     repo_root = pkg_dir.parent.parent
-    built = repo_root / "web" / "dist"
+    built = repo_root / "apps" / "console" / "dist"
     target = built.resolve() if (built / "index.html").is_file() else None
     return tree_dist, target
 
@@ -112,10 +112,10 @@ def _symlink_repair_preview() -> str:
         return "static/dist is missing." + (
             f" Would create a symlink → {target}."
             if target
-            else " No web/dist build found to link."
+            else " No apps/console/dist build found to link."
         )
     if target is None:
-        return "static/dist is a directory copy, but no web/dist build was found to link to."
+        return "static/dist is a directory copy, but no apps/console/dist build was found to link to."
     return (
         f"Would back up the shadowing copy to static/dist.shadow, then symlink "
         f"static/dist → {target} (closes the stale-SPA bug-class)."
@@ -127,7 +127,9 @@ def _symlink_repair_apply() -> str:
     if dist.is_symlink():
         return "Already a symlink — no change."
     if target is None:
-        raise RuntimeError("no web/dist build found to link (build the frontend first)")
+        raise RuntimeError(
+            "no apps/console/dist build found to link (build the frontend first)"
+        )
     if dist.exists():
         shadow = dist.parent / "dist.shadow"
         if shadow.exists():
@@ -247,7 +249,7 @@ def _register_builtin_fixes() -> None:
             id="serving-fs.symlink-repair",
             title="Repair the static/dist symlink",
             impact="Replaces a directory COPY shadowing the runtime symlink with a symlink "
-            "to web/dist (backing up the copy). Closes the stale-SPA bug-class.",
+            "to apps/console/dist (backing up the copy). Closes the stale-SPA bug-class.",
             dry_preview=_symlink_repair_preview,
             apply=_symlink_repair_apply,
         )

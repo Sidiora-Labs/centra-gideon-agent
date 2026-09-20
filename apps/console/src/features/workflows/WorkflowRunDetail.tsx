@@ -29,6 +29,7 @@ import { LedgerRailsPanel } from './LedgerRailsPanel'
 import { DeliverablePanel } from './DeliverablePanel'
 import { ReviewTriagePanel } from './ReviewTriagePanel'
 import { foldEvent, foldSnapshot } from './workflowFold'
+import { EscalationPanel, isEscalationRecord } from './EscalationPanel'
 
 function mergeCachedNodes(next: WorkflowRunDetailData, previous: WorkflowRunDetailData | null): WorkflowRunDetailData {
   if (!previous) return next
@@ -90,14 +91,19 @@ function layoutWorkflowRunDag(nodes: WorkflowNodeState[], continuations: Workflo
   }
 }
 
-export function WorkflowRunDetail({ runId, onBack }: { runId: string; onBack: () => void }) {
+export function WorkflowRunDetail({ runId, onBack, initialInspectNodeId, onInspectorClose }: {
+  runId: string
+  onBack: () => void
+  initialInspectNodeId?: string
+  onInspectorClose?: () => void
+}) {
   const [run, setRun] = useState<WorkflowRunDetailData | null>(null)
   const [conts, setConts] = useState<WorkflowContinuation[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState('')
   const [loadError, setLoadError] = useState('')
-  const [inspectNodeId, setInspectNodeId] = useState<string | null>(null)
+  const [inspectNodeId, setInspectNodeId] = useState<string | null>(initialInspectNodeId || null)
   const [steerOpen, setSteerOpen] = useState(false)
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
   const [outboxOpen, setOutboxOpen] = useState(false)
@@ -123,6 +129,8 @@ export function WorkflowRunDetail({ runId, onBack }: { runId: string; onBack: ()
   }, [runId])
 
   useEffect(() => { refetch() }, [refetch])
+
+  useEffect(() => { setInspectNodeId(initialInspectNodeId || null) }, [initialInspectNodeId])
 
   const scheduleRefetch = useCallback(() => {
     if (pending.current !== null) return
@@ -158,6 +166,12 @@ export function WorkflowRunDetail({ runId, onBack }: { runId: string; onBack: ()
   }, [refetch])
 
   const answer = useCallback(async (cont: WorkflowContinuation, value: unknown, alwaysAllow: boolean) => {
+    if ((cont.ask.kind || 'approval') === 'approval') {
+      await act(value ? 'Approve' : 'Deny', () => api.confirmWorkflowRun(runId, {
+        verb: value ? 'approve' : 'reject', resume_token: cont.resume_token,
+      }))
+      return
+    }
     await act('Answer', () => api.resumeWorkflowRun(runId, {
       answer: value, resume_token: cont.resume_token, always_allow: alwaysAllow,
     }))
@@ -367,7 +381,7 @@ export function WorkflowRunDetail({ runId, onBack }: { runId: string; onBack: ()
         ) : (
           <div className="mx-auto flex max-w-[var(--content-width)] flex-col gap-l">
             { }
-            {conts.map((c) => (
+            {!isTerminal(run.status) && conts.map((c) => (
               <WorkflowAsk key={c.resume_token} continuation={c} runId={runId} busy={busy} onAnswer={answer} />
             ))}
 
@@ -377,6 +391,10 @@ export function WorkflowRunDetail({ runId, onBack }: { runId: string; onBack: ()
 
             {run.error && (
               <p data-type="body-s" className="text-danger">{run.error}</p>
+            )}
+
+            {isEscalationRecord(run.attention) && (
+              <EscalationPanel escalation={run.attention} error={run.error} />
             )}
 
             <div data-type="caption" className="flex flex-wrap items-center gap-l text-on-surface-low">
@@ -546,7 +564,10 @@ export function WorkflowRunDetail({ runId, onBack }: { runId: string; onBack: ()
       {
 }
       {inspectNodeId && (
-        <NodeInspectorDrawer runId={runId} nodeId={inspectNodeId} onClose={() => setInspectNodeId(null)} />
+        <NodeInspectorDrawer runId={runId} nodeId={inspectNodeId} onClose={() => {
+          setInspectNodeId(null)
+          onInspectorClose?.()
+        }} />
       )}
 
       {

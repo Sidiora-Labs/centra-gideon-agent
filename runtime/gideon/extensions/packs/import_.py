@@ -1251,6 +1251,7 @@ def _resolve_and_record(
             roster=[dict(r) for r in plan.roster],
             pack_owned=list(plan.pack_owned),
             component_locks=pack_update.stamp_locks(plan, home, committed or {}),
+            staged_triggers=list(plan.staged_triggers),
         ),
         home,
     )

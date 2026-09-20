@@ -37,6 +37,7 @@ export interface ApprovalSegment {
   input?: string
   purpose?: string
   risk?: 'safe' | 'caution' | 'destructive'
+  toolKind?: string
 
   resolved?: string
 }
@@ -109,6 +110,7 @@ export interface ChatTurn {
   pastes?: { seq: number; lines: number; content: string }[]
   files?: string[]
   optimized?: string
+  summary?: string
   variantCount?: number
   variantIdx?: number
   rewound?: { messages: { role: string; content: string; ts?: string }[]; ts?: string }[]
@@ -135,10 +137,9 @@ export interface SubagentCard {
   tokens?: number
 }
 
-export interface IndexEntry { turnIndex: number; label: string }
 export interface FileEntry { path: string; name: string }
 export interface LinkEntry { url: string; label: string }
-export interface ChatActivity { index: IndexEntry[]; files: FileEntry[]; links: LinkEntry[] }
+export interface ChatActivity { files: FileEntry[]; links: LinkEntry[] }
 
 const ACT_FILE_RE = /(?:^|[\s(`'"])((?:~|\/)[\w./\-]+\.\w{1,8}|[\w./\-]+\/[\w./\-]+\.\w{1,8})/g
 const ACT_URL_RE = /\bhttps?:\/\/[^\s)<>"'`\]]+/g
@@ -146,7 +147,6 @@ const baseNameOf = (p: string) => p.replace(/\/+$/, '').split('/').pop() || p
 const DIFF_NOISE = /^(?:[ab]\/|\/dev\/null$)/
 
 export function deriveActivity(turns: ChatTurn[]): ChatActivity {
-  const index: IndexEntry[] = []
   const files = new Map<string, FileEntry>()
   const links = new Map<string, LinkEntry>()
 
@@ -157,10 +157,8 @@ export function deriveActivity(turns: ChatTurn[]): ChatActivity {
     if (!files.has(p)) files.set(p, { path: p, name: baseNameOf(p) })
   }
 
-  turns.forEach((t, i) => {
+  turns.forEach((t) => {
     if (t.role === 'user') {
-      const txt = turnText(t).replace(/\s+/g, ' ').trim()
-      if (txt) index.push({ turnIndex: i, label: txt })
       return
     }
     for (const seg of t.segments) {
@@ -178,10 +176,10 @@ export function deriveActivity(turns: ChatTurn[]): ChatActivity {
       }
     }
   })
-  return { index, files: [...files.values()], links: [...links.values()] }
+  return { files: [...files.values()], links: [...links.values()] }
 }
 
-export interface HistMsg { role: string; content: string; ts?: string; variants?: { content: string; ts?: string }[]; variant_idx?: number; rewound?: { messages: { role: string; content: string; ts?: string }[]; ts?: string }[]; meta?: { tool_call_id?: string; approval_id?: string; input?: string; tool_input?: string; purpose?: string; risk?: string; output?: string; done?: boolean; tool?: string; detail?: string; resolved?: string; content_type?: string; raw_ref?: string; truncated?: boolean; original_length?: number; recovery_hints?: string[]; agent_error?: AgentError; ok?: boolean; pastes?: { seq: number; lines: number; content: string }[]; files?: string[]; original?: string; ui_label?: string; memory_citations?: MemoryCitation[]; skills_used?: SkillUsed[] } }
+export interface HistMsg { role: string; content: string; ts?: string; variants?: { content: string; ts?: string }[]; variant_idx?: number; rewound?: { messages: { role: string; content: string; ts?: string }[]; ts?: string }[]; meta?: { tool_call_id?: string; approval_id?: string; tool_kind?: string; input?: string; tool_input?: string; purpose?: string; risk?: string; output?: string; done?: boolean; tool?: string; detail?: string; resolved?: string; content_type?: string; raw_ref?: string; truncated?: boolean; original_length?: number; recovery_hints?: string[]; agent_error?: AgentError; ok?: boolean; pastes?: { seq: number; lines: number; content: string }[]; files?: string[]; original?: string; ui_label?: string; summary?: string; memory_citations?: MemoryCitation[]; skills_used?: SkillUsed[] } }
 
 function recollapsePastes(content: string, pastes: { seq: number; lines: number; content: string }[]): string {
   let out = content
@@ -232,6 +230,7 @@ export function hydrateTurns(messages: HistMsg[], running = false): ChatTurn[] {
       const at = lastAssistant()
       at.visibleIndex = visible
       at.segments.push({ kind: 'text', text: m.content })
+      if (m.meta?.summary) at.summary = m.meta.summary
       if (Array.isArray(m.meta?.memory_citations) && m.meta!.memory_citations.length) {
         at.citations = m.meta!.memory_citations
       }
@@ -264,7 +263,7 @@ export function hydrateTurns(messages: HistMsg[], running = false): ChatTurn[] {
       }
     } else if (m.role === 'permission') {
       const resolved = m.meta?.resolved || undefined
-      lastAssistant().segments.push({ kind: 'approval', id: m.meta?.approval_id || m.meta?.tool_call_id || `perm-${turns.length}`, tool: toolName(m.meta, m.content), input: m.meta?.input || m.meta?.tool_input, purpose: m.meta?.purpose, risk: m.meta?.risk as ApprovalSegment['risk'], resolved })
+      lastAssistant().segments.push({ kind: 'approval', id: m.meta?.approval_id || m.meta?.tool_call_id || `perm-${turns.length}`, tool: toolName(m.meta, m.content), toolKind: m.meta?.tool_kind, input: m.meta?.input || m.meta?.tool_input, purpose: m.meta?.purpose, risk: m.meta?.risk as ApprovalSegment['risk'], resolved })
     } else if (m.role === 'error') {
       lastAssistant().segments.push({ kind: 'error', text: m.content })
     }

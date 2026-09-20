@@ -54,17 +54,17 @@ import pytest
 
 SRC = Path(__file__).resolve().parents[2] / "runtime" / "gideon"
 
-OWNER = "timezones.py"
+OWNER = "core/timezones.py"
 
 MACHINE_ZONE_PATHS = frozenset({"/etc/localtime", "/etc/timezone"})
 
 DERIVED_CONSUMERS = (
-    "triggers/arm.py",
-    "schedule.py",
-    "triggers/calendar.py",
-    "knowledge/research_reports.py",
-    "knowledge/report_schedules.py",
-    "cli_setup.py",
+    "automation/triggers/arm.py",
+    "automation/schedule.py",
+    "automation/triggers/calendar.py",
+    "cognition/knowledge/research_reports.py",
+    "cognition/knowledge/report_schedules.py",
+    "interfaces/cli/setup.py",
 )
 
 
@@ -215,10 +215,15 @@ def test_the_scan_is_not_vacuous_it_finds_the_owners_own_resolutions():
     Without this, deleting the body of `zone_resolution_sites` would make every rail above
     pass — a green suite asserting nothing about the real package.
     """
+    # The owner consolidated into `core/` with the platform reorg and now constructs
+    # `ZoneInfo` in exactly two places — `zone_or_raise` (explicit/config validation) and
+    # `resolve_zone` (final construction) — down from three in the pre-reorg 339-line
+    # module. The floor is regenerated for the current owner; the raw cross-check moves
+    # with it so deleting either construction still reds here.
     sites = zone_resolution_sites(SRC)
     owned = [s for s in sites if s.path == OWNER and s.kind == "ZoneInfo"]
     assert (
-        len(owned) >= 3
+        len(owned) >= 2
     ), f"the owner constructs zones; the scan found {len(owned)}: {sites}"
 
     machine = [s for s in sites if s.path == OWNER and s.kind == "machine-path"]
@@ -227,7 +232,7 @@ def test_the_scan_is_not_vacuous_it_finds_the_owners_own_resolutions():
     ), f"the owner reads /etc/localtime AND /etc/timezone: {machine}"
 
     raw = (SRC / OWNER).read_text(encoding="utf-8")
-    assert raw.count("ZoneInfo(") >= 3
+    assert raw.count("ZoneInfo(") >= 2
     assert raw.count('"/etc/localtime"') >= 1
     assert raw.count('"/etc/timezone"') >= 1
 

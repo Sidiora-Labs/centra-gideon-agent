@@ -17,6 +17,7 @@ import logging
 
 from aiohttp import web
 
+from gideon.core.http_request import read_json_body
 from gideon.extensions.providers.failure_copy import relayed_failure_copy
 
 logger = logging.getLogger(__name__)
@@ -45,7 +46,7 @@ async def api_model_download_start(request: web.Request) -> web.Response:
     stream and progress would be keyed to that other model.
     """
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
     if not isinstance(body, dict):
@@ -245,7 +246,7 @@ async def api_model_download_cleanup(request: web.Request) -> web.Response:
     import os
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     if not (isinstance(body, dict) and body.get("confirm") is True):
@@ -382,7 +383,7 @@ async def api_models_unload(request: web.Request) -> web.Response:
     from gideon.integrations.local_models.residency import unload_provider
 
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         body = {}
     provider = str((body or {}).get("provider", "")) if isinstance(body, dict) else ""

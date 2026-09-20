@@ -19,21 +19,20 @@ export function InboxSettingsPanel() {
   const [cfgErr, setCfgErr] = useState('')
 
   const { data, error: loadErr, refresh } = useQuery('settings:inbox', () => api.inboxSettings(), { persist: true })
+  const { data: config, error: configError, refresh: refreshConfig } = useQuery('settings:inbox-config', () => api.gideonConfig())
   useEffect(() => { if (data) setS(data) }, [data])
 
   useEffect(() => {
-    api.gideonConfig()
-      .then((c) => {
-        setEngagementOn(Boolean(c?.inbox?.engagement_ranking_enabled))
-        setSourcesOn(Boolean(c?.inbox?.enabled))
-        setTriageOn(Boolean(c?.proactive?.triage_enabled))
-        setAutoExecOn(Boolean(c?.proactive?.auto_execute_enabled))
-      })
-      .catch((e) => {
-        setEngagementOn(false); setSourcesOn(false)
-        setCfgErr(String((e as Error)?.message || e))
-      })
-  }, [])
+    if (config) {
+      setEngagementOn(Boolean(config?.inbox?.engagement_ranking_enabled))
+      setSourcesOn(Boolean(config?.inbox?.enabled))
+      setTriageOn(Boolean(config?.proactive?.triage_enabled))
+      setAutoExecOn(Boolean(config?.proactive?.auto_execute_enabled))
+      setCfgErr('')
+    } else if (configError) {
+      setCfgErr(String((configError as Error)?.message || configError))
+    }
+  }, [config, configError])
 
   const patch = (p: Partial<InboxSettings>) => {
     const prev = s
@@ -52,7 +51,7 @@ export function InboxSettingsPanel() {
     setSourcesOn(v)
     api.patchConfig('inbox.enabled', v)
       .then(() => api.restartInbox())
-      .then(flash)
+      .then(() => { refreshConfig(); flash() })
       .catch(() => setSourcesOn(!v))
   }
 
@@ -60,21 +59,21 @@ export function InboxSettingsPanel() {
     setTriageOn(v)
     api.patchConfig('proactive.triage_enabled', v)
       .then(() => api.proactiveInstall().catch(() => undefined))
-      .then(flash)
+      .then(() => { refreshConfig(); flash() })
       .catch((e) => { setTriageOn(!v); notify(`Couldn't change that: ${String((e as Error)?.message || e)}`, 'error') })
   }
 
   const setAutoExec = (v: boolean) => {
     setAutoExecOn(v)
     api.patchConfig('proactive.auto_execute_enabled', v)
-      .then(flash)
+      .then(() => { refreshConfig(); flash() })
       .catch((e) => { setAutoExecOn(!v); notify(`Couldn't change that: ${String((e as Error)?.message || e)}`, 'error') })
   }
 
   const setEngagement = (v: boolean) => {
     setEngagementOn(v)
     api.patchConfig('inbox.engagement_ranking_enabled', v)
-      .then(flash)
+      .then(() => { refreshConfig(); flash() })
       .catch(() => setEngagementOn(!v))
   }
 

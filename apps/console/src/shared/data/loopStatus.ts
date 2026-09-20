@@ -49,6 +49,10 @@ export const ACTIVE_LOOP_STATUSES: ReadonlySet<string> = new Set([
   'running', 'paused', 'stagnant', 'blocked', 'needs_input',
 ])
 
+export function shownCycle(totalCycles: number, status: string): number {
+  return totalCycles + (ACTIVE_LOOP_STATUSES.has(status) ? 1 : 0)
+}
+
 export const STOPPABLE_LOOP_STATUSES: ReadonlySet<string> = new Set([
   ...ACTIVE_LOOP_STATUSES, 'intake', 'planning',
 ])

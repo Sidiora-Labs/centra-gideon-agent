@@ -139,7 +139,7 @@ def _row(repo: str, **overrides: Any) -> dict[str, Any]:
         "repo": repo,
         "types": ["search"],
         "permissions_declared": ["network"],
-        "license": "MIT",
+        "license": "Apache License 2.0",
         "maintainer": "gideon",
         "added": "2026-08-18",
     }
@@ -295,7 +295,7 @@ def test_a_license_the_row_disagrees_with_blocks(tmp_path: Path) -> None:
     row = _validate_one(_row(repo, license="Apache-2.0"))
     assert not row.listable
     detail = next(r.detail for r in row.blocking if r.code == "license_mismatch")
-    assert "'Apache-2.0'" in detail and "'MIT'" in detail
+    assert "'Apache-2.0'" in detail and "'Apache License 2.0'" in detail
 
 
 def test_an_unparseable_manifest_is_a_failed_validation_not_a_skip(

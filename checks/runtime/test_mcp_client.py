@@ -8,6 +8,7 @@ external MCP tools being callable by the native loop. Skips when the optional
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import textwrap
 
@@ -38,6 +39,24 @@ _FIXTURE_SERVER = textwrap.dedent("""
         mcp.run()
     """)
 
+_ELICITATION_SERVER = textwrap.dedent("""
+    from mcp.server.fastmcp import Context, FastMCP
+    from pydantic import BaseModel
+
+    mcp = FastMCP("elicitation-fixture")
+
+    class Answer(BaseModel):
+        value: str
+
+    @mcp.tool()
+    async def ask(ctx: Context) -> str:
+        result = await ctx.elicit("Which value?", Answer)
+        return result.data.value if result.action == "accept" else result.action
+
+    if __name__ == "__main__":
+        mcp.run()
+    """)
+
 
 @pytest.fixture()
 def fixture_server(tmp_path):
@@ -63,6 +82,42 @@ async def test_stdio_list_and_call_round_trip(fixture_server):
         ok, output = await conn.call_tool("shout", {"text": "hi there"})
         assert ok is True
         assert "HI THERE" in output
+    finally:
+        await reg.shutdown_all()
+
+
+@pytest.mark.asyncio
+async def test_elicitation_is_forwarded_and_awaited_only_with_server_opt_in(tmp_path):
+    from mcp.types import ElicitResult
+
+    server = tmp_path / "elicitation_server.py"
+    server.write_text(_ELICITATION_SERVER)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def elicit(server_name, params):
+        assert server_name == "allowed"
+        assert params.message == "Which value?"
+        entered.set()
+        await release.wait()
+        return ElicitResult(action="accept", content={"value": "forwarded"})
+
+    base = {"command": sys.executable, "args": [str(server)]}
+    reg = McpClientRegistry(elicitation_handler=elicit)
+    reg.load_from_specs({"denied": base, "allowed": {**base, "allowElicitation": True}})
+    try:
+        denied = reg.get("denied")
+        allowed = reg.get("allowed")
+        assert denied is not None and allowed is not None
+        ok, output = await denied.call_tool("ask", {})
+        assert ok is False
+        assert "Elicitation not supported" in output
+
+        pending = asyncio.create_task(allowed.call_tool("ask", {}))
+        await entered.wait()
+        assert not pending.done()
+        release.set()
+        assert await pending == (True, "forwarded")
     finally:
         await reg.shutdown_all()
 

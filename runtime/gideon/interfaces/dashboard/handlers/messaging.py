@@ -15,6 +15,7 @@ from gideon.assurance.validation import (
     ValidationError,
     validate_tool_args,
 )
+from gideon.core.http_request import read_json_body
 from gideon.engine.subagent_persistence import _agent_dir, read_state
 from gideon.interfaces.dashboard.chat_persistence import _rehydrate_session_from_history
 from gideon.interfaces.dashboard.chat_utils import _remove_queued_by_id
@@ -47,7 +48,7 @@ async def api_spawn(request: web.Request) -> web.Response:
     if not state.subagents:
         return web.json_response({"error": "subagents not available"}, status=503)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -239,7 +240,7 @@ async def api_spawn_cancel_fanout(request: web.Request) -> web.Response:
     if not state.subagents:
         return web.json_response({"error": "subagents not available"}, status=503)
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -274,7 +275,7 @@ async def api_notification_delete(request: web.Request) -> web.Response:
     """DELETE /api/notifications — delete a single notification by timestamp."""
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -297,7 +298,7 @@ async def api_notification_ack(request: web.Request) -> web.Response:
     """POST /api/notifications/ack — mark a single notification as read."""
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -313,7 +314,7 @@ async def api_notification_unack(request: web.Request) -> web.Response:
     """POST /api/notifications/unack — mark a single notification as unread."""
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -454,7 +455,7 @@ async def api_send_message(request: web.Request) -> web.Response:
 
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
@@ -708,7 +709,7 @@ async def api_channel_profile(request: web.Request) -> web.Response:
 
     state: ConsoleState = request.app["state"]
     try:
-        body = await request.json()
+        body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):

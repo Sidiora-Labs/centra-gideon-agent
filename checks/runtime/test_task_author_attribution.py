@@ -79,7 +79,10 @@ async def test_create_refuses_a_supplied_author_and_writes_nothing(tmp_path):
     async with _client(tmp_path) as client:
         r = await client.post("/api/tasks", json={"title": "forged", "author": FORGED})
         assert r.status == 400
-        assert (await r.json())["error"] == REFUSAL
+        assert (await r.json())["error"] == {
+            "code": "invalid_request",
+            "message": REFUSAL,
+        }
         assert _task_files(tmp_path) == []
 
 
@@ -126,7 +129,10 @@ async def test_update_refuses_a_supplied_author_and_leaves_provenance_intact(tmp
         t = await (await client.post("/api/tasks", json={"title": "honest"})).json()
         r = await client.put(f"/api/tasks/{t['id']}", json={"author": FORGED})
         assert r.status == 400
-        assert (await r.json())["error"] == REFUSAL
+        assert (await r.json())["error"] == {
+            "code": "invalid_request",
+            "message": REFUSAL,
+        }
         assert _stored(tmp_path, t["id"])["author"] == OWNER
 
 
@@ -308,7 +314,7 @@ async def test_ids_and_timestamps_stay_server_owned_on_both_write_paths(tmp_path
             json={
                 "id": "t-forged",
                 "created_at": "1999-01-01T00:00:00Z",
-                "provider": "evil",
+                "provider": "native",
             },
         )
         assert r.status == 200
@@ -329,7 +335,10 @@ async def test_the_comment_route_refuses_with_the_same_message(tmp_path):
             f"/api/tasks/{t['id']}/comments", json={"body": "forged", "author": FORGED}
         )
         assert r.status == 400
-        assert (await r.json())["error"] == REFUSAL
+        assert (await r.json())["error"] == {
+            "code": "invalid_request",
+            "message": REFUSAL,
+        }
 
         r = await client.post(f"/api/tasks/{t['id']}/comments", json={"body": "honest"})
         assert r.status == 201

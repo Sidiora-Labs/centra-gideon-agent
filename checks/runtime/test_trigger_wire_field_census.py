@@ -33,6 +33,7 @@ compare them; a list written by hand only records what someone already knew.
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -49,12 +50,20 @@ _HANDLERS = (
     / "triggers.py"
 )
 _SCHEDULE_FORM = (
-    _REPO_ROOT / "apps/console" / "src" / "pages" / "schedule" / "ScheduleForm.tsx"
+    _REPO_ROOT / "apps/console" / "src" / "features" / "schedule" / "ScheduleForm.tsx"
 )
 _CREATE_PAGE = (
-    _REPO_ROOT / "apps/console" / "src" / "pages" / "triggers" / "TriggerCreatePage.tsx"
+    _REPO_ROOT
+    / "apps/console"
+    / "src"
+    / "features"
+    / "triggers"
+    / "TriggerCreatePage.tsx"
 )
-_API = _REPO_ROOT / "apps/console" / "src" / "lib" / "api.ts"
+_API = _REPO_ROOT / "apps/console" / "src" / "shared" / "data" / "api.ts"
+_WHEN_MET = (
+    _REPO_ROOT / "apps/console" / "src" / "features" / "schedule" / "scheduleMeta.ts"
+)
 
 _DELIBERATELY_UNREAD: dict[str, str] = {
     "at": (
@@ -108,6 +117,23 @@ def _assigned_keys(region: str) -> set[str]:
     return set(re.findall(r"\bbody\.([a-z_][a-z_0-9]*)\s*=(?!=)", region))
 
 
+def _when_met_keys() -> set[str]:
+    """Keys `scheduleWhenMet` can add to a payload — the `Object.assign` half of both builders."""
+    return _returned_object_keys(
+        _region(_WHEN_MET, "export function scheduleWhenMet(", "\n}")
+    )
+
+
+def _returned_object_keys(region: str) -> set[str]:
+    keys: set[str] = set()
+    for returned in re.finditer(r"\breturn\s+(?=\{)", region):
+        keys |= _object_literal_keys(_region_literal("= " + region[returned.end() :]))
+    assert (
+        keys
+    ), "schedule helper no longer returns object literals; re-point the extractor"
+    return keys
+
+
 def _sent_fields() -> set[str]:
     """Every key either frontend payload builder can put on a schedule create/update body."""
     edit = _region(
@@ -120,6 +146,8 @@ def _sent_fields() -> set[str]:
     for region in (edit, create):
         literal = _region_literal(region)
         sent |= _object_literal_keys(literal) | _assigned_keys(region)
+        if "scheduleWhenMet(" in region:
+            sent |= _when_met_keys()
     return sent
 
 
@@ -157,19 +185,56 @@ def _action_config_fields() -> set[str]:
     return names - {"action"}
 
 
-def _handler_reads(func: str) -> set[str]:
-    """Body keys a handler reads: `body.get("x")`, `body["x"]`, `"x" in body`, and tuple loops.
+_READ_HELPERS = ("_outcome_control_patch",)
+
+
+def _body_reads(region: str) -> set[str]:
+    """Body keys a region reads: `body.get("x")`, `body["x"]`, `"x" in body`, and tuple loops.
 
     The tuple-loop pattern is here because `_update_schedule`'s allowlist is
     `for key in ("name", "channel", …)`. Without it the four fields that path DOES read would read
     as unread, and the census would fail on fields that work fine.
     """
-    region = _region(_HANDLERS, f"async def {func}(", "\n\nasync def ")
     keys = set(re.findall(r'body\.get\(\s*"([a-z_][a-z_0-9]*)"', region))
     keys |= set(re.findall(r'body\[\s*"([a-z_][a-z_0-9]*)"\s*\]', region))
     keys |= set(re.findall(r'"([a-z_][a-z_0-9]*)"\s+in\s+body', region))
     for tup in re.findall(r"for\s+\w+\s+in\s+\(([^)]*)\)", region):
         keys |= set(re.findall(r'"([a-z_][a-z_0-9]*)"', tup))
+    return keys
+
+
+def _python_function_source(source: str, name: str) -> str:
+    for node in ast.parse(source).body:
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == name
+        ):
+            return ast.get_source_segment(source, node) or ""
+    pytest.fail(f"handler helper {name!r} was not found")
+
+
+def test_helper_read_extraction_crosses_blank_lines() -> None:
+    source = 'def helper(body):\n    value = body.get("first")\n\n    return body.get("later")\n\ndef unrelated(body):\n    return body.get("other")\n'
+    assert _body_reads(_python_function_source(source, "helper")) == {"first", "later"}
+
+
+def test_returned_fields_exclude_parameter_type_members() -> None:
+    source = "function when(d: { kind: string }): object {\n  if (d.kind) return { every: 1 }\n  return { at: 2, new_field: 3 }\n}"
+    assert _returned_object_keys(source) == {"every", "at", "new_field"}
+
+
+def _handler_reads(func: str) -> set[str]:
+    """Body keys a handler reads, following the extracted helpers it delegates to.
+
+    `_create_schedule`/`_update_schedule` both route their outcome controls through
+    `_outcome_control_patch`, which is where `failure_policy` is actually read. Reading only the
+    handler body would call a field the path persists "unread".
+    """
+    region = _region(_HANDLERS, f"async def {func}(", "\n\nasync def ")
+    keys = _body_reads(region)
+    for helper in _READ_HELPERS:
+        if f"{helper}(" in region:
+            keys |= _body_reads(_python_function_source(_HANDLERS.read_text(), helper))
     return keys
 
 

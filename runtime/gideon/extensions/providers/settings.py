@@ -46,7 +46,11 @@ class ProviderSettings:
     def save(extension_name: str, config: dict[str, Any]) -> None:
         path = ProviderSettings.config_path(extension_name)
         path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write(path, json.dumps(config, indent=2) + "\n")
+        atomic_write(
+            path,
+            json.dumps({**ProviderSettings.load(extension_name), **config}, indent=2)
+            + "\n",
+        )
 
     @staticmethod
     def update(extension_name: str, partial: dict[str, Any]) -> dict[str, Any]:

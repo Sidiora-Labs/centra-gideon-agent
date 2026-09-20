@@ -70,7 +70,7 @@ def test_install_seeds_app_skill_through_the_chokepoint(tmp_path):
     res = app_manager.install(_skill_app(tmp_path), confirm=True)
     assert res.ok, res.error
 
-    dest = skills_dir() / "infrastructure"
+    dest = skills_dir() / "deploy"
     assert (dest / "SKILL.md").is_file(), "app skill not seeded into the user tree"
     lock = dest / ".gideon-lock.json"
     assert (
@@ -87,7 +87,7 @@ def test_reseed_is_idempotent_and_non_clobbering(tmp_path):
 
     res = app_manager.install(_skill_app(tmp_path), confirm=True)
     assert res.ok, res.error
-    dest = skills_dir() / "infrastructure"
+    dest = skills_dir() / "deploy"
 
     (dest / "SKILL.md").write_text("EDITED BY USER\n", encoding="utf-8")
     manifest = AppManifest.from_json_file(manager.app_dir("skilly") / "app.json")
@@ -111,13 +111,11 @@ def test_removal_is_provenance_keyed(tmp_path):
     user_skill.mkdir()
     (user_skill / "SKILL.md").write_text(_skill_md("mine"), encoding="utf-8")
 
-    assert (tree / "infrastructure" / "SKILL.md").is_file()
+    assert (tree / "deploy" / "SKILL.md").is_file()
     assert (tree / "probe" / "SKILL.md").is_file()
 
     assert app_manager.disable("skilly") is True
-    assert not (
-        tree / "infrastructure"
-    ).exists(), "the app's own skill is removed on disable"
+    assert not (tree / "deploy").exists(), "the app's own skill is removed on disable"
     assert (tree / "probe" / "SKILL.md").is_file(), "another app's skill is untouched"
     assert (user_skill / "SKILL.md").is_file(), "a user's own skill is untouched"
 
@@ -128,7 +126,7 @@ def test_removal_leaves_a_same_named_user_skill_untouched(tmp_path):
 
     tree = skills_dir()
     tree.mkdir(parents=True, exist_ok=True)
-    user_deploy = tree / "infrastructure"
+    user_deploy = tree / "deploy"
     user_deploy.mkdir()
     (user_deploy / "SKILL.md").write_text("USER OWNED\n", encoding="utf-8")
 
@@ -150,7 +148,7 @@ def test_skip_flag_suppresses_app_skill_seeding(tmp_path, monkeypatch):
     app_dir = _skill_app(tmp_path)
     manifest = AppManifest.from_json_file(app_dir / "app.json")
     seed_app_skills(manifest, app_dir, origin="local")
-    assert not (skills_dir() / "infrastructure").exists()
+    assert not (skills_dir() / "deploy").exists()
 
 
 def test_no_declared_skills_is_a_no_op(tmp_path):

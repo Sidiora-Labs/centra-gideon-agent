@@ -45,6 +45,8 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import make_mocked_request
 
 from gideon.cognition import learning_report as LR
 from gideon.extensions.skills import loader as loader_mod
@@ -174,15 +176,6 @@ def _write_cadence(value: str) -> None:
     data.setdefault("learning", {})["identity_report_cadence"] = value
     path.write_text(json.dumps(data), encoding="utf-8")
     assert AppConfig.load().learning.identity_report_cadence == value
-
-
-def _async(value):
-    """A zero-arg coroutine returning *value* — the shape `request.json` has."""
-
-    async def _call():
-        return value
-
-    return _call
 
 
 def _seed(vs) -> None:
@@ -330,13 +323,18 @@ class TestTheWritePath:
         config_path().write_text("{}", encoding="utf-8")
 
         async def _patch(value):
-            req = MagicMock()
-            req.app = {"state": MagicMock()}
-            req.headers = {}
-            req.get = lambda k, d=None: {"user": "owner"}.get(k, d)
-            req.json = _async(
-                dict(path="learning.identity_report_cadence", value=value)
+            app = web.Application()
+            app["state"] = MagicMock()
+            req = make_mocked_request(
+                "PATCH",
+                "/api/config/gideon",
+                headers={"Content-Type": "application/json"},
+                app=app,
             )
+            req["user"] = "owner"
+            req._read_bytes = json.dumps(
+                {"path": "learning.identity_report_cadence", "value": value}
+            ).encode()
             return await core.api_gideon_config_patch(req)
 
         resp = asyncio.run(_patch(LR.CADENCE_WEEKLY))
@@ -351,12 +349,18 @@ class TestTheWritePath:
 
     def test_the_frontend_control_writes_that_exact_path(self):
         """Round-trip point 5, at its call site. The click is driven in
-        `apps/console/src/features/learning/identityReportCadence.test.tsx`; this is the census that fails
-        if the panel stops writing the field at all."""
-        src = (WEB / "features" / "learning" / "IdentityReportPanel.tsx").read_text(
+        `apps/console/src/features/learning/identityReportCadence.test.tsx`; the panel
+        delegates the write to `useIdentityReportActions`, so the census follows that
+        chain and fails if either link stops writing the field."""
+        panel = (WEB / "features" / "learning" / "IdentityReportPanel.tsx").read_text(
             encoding="utf-8"
         )
-        assert "api.patchConfig('learning.identity_report_cadence'" in src
+        assert "useIdentityReportActions" in panel
+        assert "setCadenceTo" in panel
+        actions = (WEB / "features" / "learning" / "learningActionState.ts").read_text(
+            encoding="utf-8"
+        )
+        assert "api.patchConfig('learning.identity_report_cadence'" in actions
 
 
 class TestTheTriggerConverges:

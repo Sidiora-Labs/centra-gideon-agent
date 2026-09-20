@@ -8,7 +8,7 @@ import { Field, TextInput, TextArea, Segmented, ChipInput } from '../../shared/u
 import { SoonTag } from '../tasks/taskMeta'
 import {
   KINDS, EXEC_MODES, deriveKind, deriveMode, kindMeta, modeMeta,
-  secsToInterval, intervalToSecs, INTERVAL_UNITS, CRON_PRESETS,
+  secsToInterval, scheduleWhenMet, INTERVAL_UNITS, CRON_PRESETS,
 } from './scheduleMeta'
 
 export interface ScheduleDraft {
@@ -63,9 +63,7 @@ export function draftToPayload(d: ScheduleDraft): Record<string, unknown> {
     channel: d.channel.trim(),
     skip_dates: d.skip_dates,
   }
-  if (d.kind === 'cron') body.cron = d.cron.trim()
-  else if (d.kind === 'every') body.every = intervalToSecs(d.intervalValue, d.intervalUnit)
-  else if (d.kind === 'at') body.at = d.at
+  Object.assign(body, scheduleWhenMet(d))
   if (d.mode !== 'other') body.message = d.message.trim()
   if (d.mode === 'agent') { body.agent = d.agent; body.model = d.model; body.approval_mode = d.approval_mode || '' }
   else if (d.mode === 'script') body.script = d.script.trim()
@@ -93,11 +91,14 @@ export function ScheduleForm({ draft, onChange, compact, triggerOnly }: { draft:
         <Segmented options={KINDS.map((k) => ({ key: k.key, label: k.label, tone: k.tone, icon: k.icon }))} value={draft.kind} onChange={(v) => set('kind', v as ScheduleKind)} />
       </Field>
       {draft.kind === 'every' && (
-        <div className="flex items-center gap-s">
-          <input type="number" min={1} value={draft.intervalValue} onChange={(e) => set('intervalValue', Math.max(1, Number(e.target.value) || 1))}
-            name="interval-value" aria-label="Run every — interval count"
-            className="w-24 h-10 rounded-md bg-surface-container px-m text-on-surface text-[0.9375rem] outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
-          <NativeSelect value={draft.intervalUnit} onChange={(v) => set('intervalUnit', v)} options={INTERVAL_UNITS.map((u) => ({ value: u.key, label: u.label }))} label="Run every — interval unit" name="interval-unit" />
+        <div className="flex flex-col gap-xs">
+          <div className="flex items-center gap-s">
+            <input type="number" min={1} value={draft.intervalValue} onChange={(e) => set('intervalValue', Math.max(1, Number(e.target.value) || 1))}
+              name="interval-value" aria-label="Run every — interval count"
+              className="w-24 h-10 rounded-md bg-surface-container px-m text-on-surface text-[0.9375rem] outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
+            <NativeSelect value={draft.intervalUnit} onChange={(v) => set('intervalUnit', v)} options={INTERVAL_UNITS.map((u) => ({ value: u.key, label: u.label }))} label="Run every — interval unit" name="interval-unit" />
+          </div>
+          <p className="text-on-surface-low text-[0.75rem]">Recommended minimum: 60 seconds. Faster schedules are saved with a warning.</p>
         </div>
       )}
       {draft.kind === 'cron' && <CronField value={draft.cron} onChange={(v) => set('cron', v)} />}

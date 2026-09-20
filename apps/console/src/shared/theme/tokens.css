@@ -536,11 +536,11 @@
   animation: blueprint-scan 2.6s ease-in-out infinite;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
-                                                                   
-  .blueprint-scan { display: none; }
+[data-reduced-motion] *, [data-reduced-motion] *::before, [data-reduced-motion] *::after {
+  animation-duration: 0.001ms !important;
+  transition-duration: 0.001ms !important;
 }
+[data-reduced-motion] .blueprint-scan { display: none; }
 
                                                                                 
                                                                   
@@ -612,11 +612,8 @@
     backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
   }
 }
+[data-reduced-motion] .glass { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--color-surface-container); }
                                                                                     
-@media (prefers-reduced-motion: reduce) {
-  .glass { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--color-surface-container); }
-}
-
                                                                         
                                                                           
                                                                       
@@ -801,7 +798,8 @@ input[type="checkbox"] {
                                                                                  
                                                                                 
                                            
-::highlight(gideon-find) {
+::highlight(gideon-find),
+::highlight(gideon-session-map) {
   background-color: color-mix(in srgb, var(--color-primary) 34%, transparent);
   color: var(--color-on-surface);
 }

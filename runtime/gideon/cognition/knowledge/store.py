@@ -100,6 +100,14 @@ def _restore_value(value: Any) -> Any:
     return value
 
 
+def _embedding_floats(blob: bytes | None) -> list[float]:
+    if not blob:
+        return []
+    from gideon.cognition.knowledge.embedder import bytes_to_floats
+
+    return bytes_to_floats(blob)
+
+
 def _placeholders(items: Sequence[Any]) -> str:
     """``?, ?, ?`` for *items* — one placeholder per element, never interpolated values."""
     return ", ".join("?" for _ in items)
@@ -2418,6 +2426,7 @@ class KnowledgeStore:
         self.vec_index.sync_item(item_id, [(r[0], r[4]) for r in rows])
         self.clear_similarity_sweep(item_id)
         self.db.commit()
+        self._sync_external_vectors(item_id, rows)
         return len(rows)
 
     def get_chunks(self, item_id: str, *, with_embedding: bool = False) -> list[dict]:
@@ -2451,6 +2460,51 @@ class KnowledgeStore:
         self.db.execute("DELETE FROM chunks WHERE item_id = ?", (item_id,))
         self.clear_similarity_sweep(item_id)
         self.db.commit()
+        self._delete_external_vectors(item_id)
+
+    @staticmethod
+    def _external_vector_store():
+        from gideon.integrations.vector_store_providers.registry import get_provider
+
+        return get_provider()
+
+    def _sync_external_vectors(self, item_id: str, rows: list[tuple]) -> None:
+        provider = self._external_vector_store()
+        if provider is None:
+            return
+        try:
+            provider.replace_item(
+                item_id,
+                [
+                    {
+                        "chunk_id": row[0],
+                        "item_id": item_id,
+                        "embedding": _embedding_floats(row[4]),
+                        "section": row[7],
+                        "line_start": row[8],
+                        "line_end": row[9],
+                    }
+                    for row in rows
+                    if row[4]
+                ],
+            )
+        except Exception:
+            logger.warning(
+                "External vector-store write failed for item %s", item_id, exc_info=True
+            )
+
+    def _delete_external_vectors(self, item_id: str) -> None:
+        provider = self._external_vector_store()
+        if provider is None:
+            return
+        try:
+            provider.delete_item(item_id)
+        except Exception:
+            logger.warning(
+                "External vector-store delete failed for item %s",
+                item_id,
+                exc_info=True,
+            )
 
     def set_item_citations(self, item_id: str, citations: Sequence[Any]) -> int:
         """REPLACE the citing item's whole citation set, in one transaction.
@@ -2857,6 +2911,7 @@ class KnowledgeStore:
         self.db.execute("DELETE FROM extracted_contents WHERE item_id = ?", (item_id,))
         self.vec_index.drop_item(item_id)
         self.db.execute("DELETE FROM chunks WHERE item_id = ?", (item_id,))
+        self._delete_external_vectors(item_id)
         self.db.execute(
             "UPDATE intent_outcomes SET item_id = NULL WHERE item_id = ?", (item_id,)
         )
@@ -3926,6 +3981,36 @@ class KnowledgeStore:
         self.db.commit()
         return True
 
+    def merge_entity_aliases(self, entity_id: str, aliases: list[str] | None) -> bool:
+        additions = [
+            a.strip() for a in aliases or [] if isinstance(a, str) and a.strip()
+        ]
+        if not additions:
+            return False
+        row = self.db.execute(
+            "SELECT name, aliases FROM entities WHERE id = ?", (entity_id,)
+        ).fetchone()
+        if row is None:
+            return False
+        current = json.loads(row["aliases"] or "[]")
+        seen = {str(a).casefold() for a in current}
+        merged = list(current)
+        for alias in additions:
+            if (
+                alias.casefold() != str(row["name"]).casefold()
+                and alias.casefold() not in seen
+            ):
+                merged.append(alias)
+                seen.add(alias.casefold())
+        if merged == current:
+            return False
+        self.db.execute(
+            "UPDATE entities SET aliases = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(merged), datetime.now().isoformat(), entity_id),
+        )
+        self.db.commit()
+        return True
+
     def find_entity(self, name):
         row = self.db.execute(
             "SELECT * FROM entities WHERE name = ?", (name,)
@@ -4403,6 +4488,15 @@ class KnowledgeStore:
     VALID_READ_STATES = ("unread", "reading", "read")
     VALID_COLLECTION_KINDS = ("manual", "smart")
 
+    @staticmethod
+    def _validate_collection_name(name: object) -> str:
+        cleaned = str(name or "").strip()
+        if not cleaned:
+            raise ValueError("collection name is required")
+        if len(cleaned) > 200:
+            raise ValueError("collection name must be 200 characters or fewer")
+        return cleaned
+
     def _collection_name_clash(self, name: str, *, exclude_id: str = "") -> bool:
         """Whether another shelf already carries ``name`` (case-insensitively).
 
@@ -4436,9 +4530,7 @@ class KnowledgeStore:
         backfill. A smart collection with no query would silently match nothing, so
         that is rejected rather than created as a shelf that looks broken.
         """
-        name = (name or "").strip()
-        if not name:
-            raise ValueError("collection name is required")
+        name = self._validate_collection_name(name)
         if self._collection_name_clash(name):
             raise ValueError(f"collection_name_taken:{name}")
         if kind not in self.VALID_COLLECTION_KINDS:
@@ -4502,11 +4594,10 @@ class KnowledgeStore:
             if not (existing.get("query") or "").strip():
                 raise ValueError("a smart collection requires a query")
         if "name" in sets:
-            renamed = str(sets["name"] or "").strip()
-            if not renamed:
-                raise ValueError("collection name is required")
+            renamed = self._validate_collection_name(sets["name"])
             if self._collection_name_clash(renamed, exclude_id=collection_id):
                 raise ValueError(f"collection_name_taken:{renamed}")
+            sets["name"] = renamed
         sets["updated_at"] = datetime.now().isoformat()
         cols = ", ".join(f"{k} = ?" for k in sets)
         cur = self.db.execute(

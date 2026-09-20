@@ -7,7 +7,7 @@ export interface KindMeta { key: ScheduleKind; label: string; icon: LucideIcon; 
 export const KINDS: KindMeta[] = [
   { key: 'every', label: 'Interval', icon: Repeat, tone: 'var(--color-info)', hint: 'Run every N minutes/hours/days.' },
   { key: 'cron', label: 'Cron', icon: CalendarClock, tone: 'var(--color-primary)', hint: 'Five-field cron expression (min hour dom month dow).' },
-  { key: 'at', label: 'One-shot', icon: Calendar, tone: 'var(--color-warn)', hint: 'Fire once at a specific date & time.', soon: true },
+  { key: 'at', label: 'One-shot', icon: Calendar, tone: 'var(--color-warn)', hint: 'Fire once at a specific date & time.' },
 ]
 export function kindMeta(k?: ScheduleKind): KindMeta { return KINDS.find((x) => x.key === k) ?? KINDS[0] }
 
@@ -24,6 +24,13 @@ export const OTHER_MODE: ModeMeta = {
 export function modeMeta(m?: ScheduleExecMode): ModeMeta {
   if (m === 'other') return OTHER_MODE
   return EXEC_MODES.find((x) => x.key === m) ?? EXEC_MODES[0]
+}
+
+export function scheduleWhenMet(d: { kind: ScheduleKind; cron: string; intervalValue: number; intervalUnit: string; at: string }): Record<string, unknown> {
+  if (d.kind === 'cron') return { cron: d.cron.trim() }
+  if (d.kind === 'every') return { every: intervalToSecs(d.intervalValue, d.intervalUnit) }
+  const milliseconds = new Date(d.at).getTime()
+  return { at: Number.isNaN(milliseconds) ? d.at : Math.floor(milliseconds / 1000) }
 }
 
 export function deriveKind(j: ScheduleJob): ScheduleKind {

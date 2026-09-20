@@ -56,6 +56,18 @@ async def _json(resp):
     return json.loads(resp.body.decode())
 
 
+def _put_req(use_case: str, providers: list[str]):
+    """A PUT carrying real serialized JSON bytes; the handler reads the body."""
+    req = make_mocked_request(
+        "PUT",
+        f"/api/search/active/{use_case}",
+        headers={"Content-Type": "application/json"},
+        match_info={"use_case": use_case},
+    )
+    req._read_bytes = json.dumps({"providers": providers}).encode()
+    return req
+
+
 @pytest.mark.asyncio
 async def test_providers_lists_capabilities_and_availability():
     reg.register_provider(_Fake("tavily", available=True, fetch=True))
@@ -81,13 +93,7 @@ async def test_active_returns_all_use_cases():
 @pytest.mark.asyncio
 async def test_set_active_binds_provider():
     reg.register_provider(_Fake("tavily"))
-    req = make_mocked_request(
-        "PUT",
-        "/api/search/active/search-general",
-        match_info={"use_case": "search-general"},
-    )
-    req.json = _async_return({"providers": ["tavily"]})
-    resp = await sr.api_search_active_set(req)
+    resp = await sr.api_search_active_set(_put_req("search-general", ["tavily"]))
     data = await _json(resp)
     assert data["ok"] is True
     assert data["providers"] == ["tavily"]
@@ -100,13 +106,7 @@ async def test_set_active_rejects_unknown_provider():
     strand the use-case on a dead name. Regression for the set-time validation gap
     (the search sibling of model bug #16)."""
     reg.register_provider(_Fake("tavily"))
-    req = make_mocked_request(
-        "PUT",
-        "/api/search/active/search-general",
-        match_info={"use_case": "search-general"},
-    )
-    req.json = _async_return({"providers": ["nosuchsearch"]})
-    resp = await sr.api_search_active_set(req)
+    resp = await sr.api_search_active_set(_put_req("search-general", ["nosuchsearch"]))
     assert resp.status == 400
     assert "Unknown search provider" in (await _json(resp))["error"]
     assert uc.active_search_provider_names("search-general") in ([], None)
@@ -115,39 +115,18 @@ async def test_set_active_rejects_unknown_provider():
 @pytest.mark.asyncio
 async def test_set_active_empty_clears_binding():
     uc.set_active_search_provider("search-news", "tavily")
-    req = make_mocked_request(
-        "PUT", "/api/search/active/search-news", match_info={"use_case": "search-news"}
-    )
-    req.json = _async_return({"providers": []})
-    resp = await sr.api_search_active_set(req)
+    resp = await sr.api_search_active_set(_put_req("search-news", []))
     assert (await _json(resp))["providers"] == []
     assert uc.load_active_search_providers().get("search-news") in (None, [])
 
 
 @pytest.mark.asyncio
 async def test_set_active_rejects_invalid_use_case():
-    req = make_mocked_request(
-        "PUT", "/api/search/active/bogus", match_info={"use_case": "bogus"}
-    )
-    req.json = _async_return({"providers": ["tavily"]})
-    resp = await sr.api_search_active_set(req)
+    resp = await sr.api_search_active_set(_put_req("bogus", ["tavily"]))
     assert resp.status == 400
 
 
 @pytest.mark.asyncio
 async def test_set_active_rejects_multiple_providers():
-    req = make_mocked_request(
-        "PUT",
-        "/api/search/active/search-general",
-        match_info={"use_case": "search-general"},
-    )
-    req.json = _async_return({"providers": ["a", "b"]})
-    resp = await sr.api_search_active_set(req)
+    resp = await sr.api_search_active_set(_put_req("search-general", ["a", "b"]))
     assert resp.status == 400
-
-
-def _async_return(value):
-    async def _f():
-        return value
-
-    return _f

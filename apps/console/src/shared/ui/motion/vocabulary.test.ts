@@ -80,6 +80,7 @@ describe('the four primitives own no timing of their own', () => {
   it('every member self-gates reduced motion in JS', () => {
     for (const name of MEMBERS) {
       expect(code(source(name)), `${name} does not self-gate`).toContain('useReducedMotion()')
+      expect(code(source(name)), `${name} bypasses the shared accessor`).toMatch(/from '\.\.\/\.\.\/theme\/motion'/)
     }
   })
 })

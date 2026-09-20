@@ -123,7 +123,7 @@ def test_meta_cannot_name_its_own_source():
 
 
 @pytest.mark.parametrize(
-    "key", ["mode", "targets", "escalated_by", "badge_only", "native"]
+    "key", ["mode", "targets", "severity", "escalated_by", "badge_only", "native"]
 )
 def test_meta_cannot_set_any_delivery_decision(key):
     """Each of these is a delivery decision the rule layer makes. `mode` is the sharpest: setting it
@@ -134,7 +134,7 @@ def test_meta_cannot_set_any_delivery_decision(key):
     assert note.get(key) != "spoofed"
 
 
-@pytest.mark.parametrize("key", ["mode", "targets", "source"])
+@pytest.mark.parametrize("key", ["mode", "targets", "source", "severity"])
 def test_meta_cannot_set_a_delivery_decision_when_THE_RULE_FAILS_TO_RESOLVE(
     key, monkeypatch
 ):
@@ -242,8 +242,6 @@ def test_meta_is_merged_before_the_platform_fields_not_after():
 def _fresh():
     """A per-test state. Built here rather than via the fixture so the parametrized cases each get
     a clean delivery log without the fixture's argument threading."""
-    import gideon.interfaces.dashboard.state as state_mod
-
     st = ConsoleState.__new__(ConsoleState)
     st._notification_log = []
     st._sessions = {}
@@ -252,5 +250,4 @@ def _fresh():
     st._operator_name = lambda: ""  # type: ignore[method-assign]
     st._push_target = lambda kind, note: None  # type: ignore[method-assign]
     st.captured = {"broadcast": broadcast, "persisted": []}
-    state_mod._persist_notification = lambda note: None  # type: ignore[assignment]
     return st

@@ -5,7 +5,7 @@ import { resetDataStore } from '../../shared/data/data'
 import type { InboxItem, PendingApproval } from '../../shared/data/api'
 
 
-const inboxPending = vi.fn()
+const inboxOpen = vi.fn()
 const approvals = vi.fn()
 const chatSessions = vi.fn()
 const resolveApproval = vi.fn()
@@ -14,7 +14,7 @@ const resumeWorkflowRun = vi.fn()
 vi.mock('../../shared/data/api', async (orig) => ({
   ...(await orig<Record<string, unknown>>()),
   api: {
-    inboxPending: (...a: unknown[]) => inboxPending(...a),
+    inboxOpen: (...a: unknown[]) => inboxOpen(...a),
     approvals: (...a: unknown[]) => approvals(...a),
     chatSessions: (...a: unknown[]) => chatSessions(...a),
     resolveApproval: (...a: unknown[]) => resolveApproval(...a),
@@ -69,7 +69,7 @@ const lanes = (over: Partial<Record<string, unknown[]>> = {}) => ({
 beforeEach(() => {
   vi.clearAllMocks()
   resetDataStore()
-  inboxPending.mockResolvedValue([])
+  inboxOpen.mockResolvedValue([])
   approvals.mockResolvedValue([])
   chatSessions.mockResolvedValue([])
   toLanes.mockReturnValue(lanes())
@@ -146,7 +146,7 @@ describe('answering a pending question', () => {
   const card = { id: 'q1', title: 'loop-worker', item: questionItem() }
 
   beforeEach(() => {
-    inboxPending.mockResolvedValue([questionItem()])
+    inboxOpen.mockResolvedValue([questionItem()])
     toLanes.mockReturnValue(lanes({ 'your-turn': [card] }))
   })
 
@@ -203,7 +203,7 @@ describe('the lane split comes from lib/attentionLanes, not from this view', () 
   it('consults the mocked toLanes with the items, the approvals AND the session activity', async () => {
     const item = questionItem()
     const appr = approval()
-    inboxPending.mockResolvedValue([item])
+    inboxOpen.mockResolvedValue([item])
     approvals.mockResolvedValue([appr])
     chatSessions.mockResolvedValue([session()])
     render(<MissionControl />)
@@ -223,7 +223,7 @@ describe('the lane split comes from lib/attentionLanes, not from this view', () 
       ...questionItem(), id: 'inbox-mirror', item_kind: 'agent_request',
       refs: { session: 'chat-1', approval: 'appr-9' },
     }
-    inboxPending.mockResolvedValue([mirror])
+    inboxOpen.mockResolvedValue([mirror])
     approvals.mockResolvedValue([appr])
     render(<MissionControl />)
 

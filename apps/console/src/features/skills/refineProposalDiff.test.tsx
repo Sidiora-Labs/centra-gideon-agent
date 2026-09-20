@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { refinePillLabel, TRIGGER_LABEL, SkillProposals } from './SkillProposals'
 import { diffLineColor, UnifiedDiff } from '../../shared/ui/UnifiedDiff'
-import { api } from '../../shared/data/api'
+import { api, ApiError } from '../../shared/data/api'
 import type { SkillProposal, SkillProposalDetail } from '../../shared/data/api'
 
 
@@ -109,6 +109,17 @@ describe('SkillProposals refine row', () => {
     expect(screen.queryByText('Procedure')).toBeNull()
   })
 
+  it('names the refine target while collapsed, not the proposal slug', async () => {
+    vi.spyOn(api, 'skillProposals').mockResolvedValue({
+      proposals: [proposal({ slug: 'generated-proposal', refine_target: 'release-flow' })],
+      lastReview: null,
+    })
+
+    render(<SkillProposals />)
+    expect(await screen.findByText('release-flow')).toBeTruthy()
+    expect(screen.queryByText('generated-proposal')).toBeNull()
+  })
+
   it('says plainly when a refine has NO diff, instead of showing an empty change', async () => {
     vi.spyOn(api, 'skillProposals').mockResolvedValue({ proposals: [proposal()], lastReview: null })
     vi.spyOn(api, 'skillProposalDetail').mockResolvedValue(detail({ diff: '', version: 0 }))
@@ -127,6 +138,20 @@ describe('SkillProposals refine row', () => {
     await screen.findByText('release-flow')
     await userEvent.click(screen.getByRole('button', { name: /accept/i }))
     await waitFor(() => expect(screen.getByText(/refinement v2/i)).toBeTruthy())
+    expect(screen.queryByRole('button', { name: /accept/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /reject/i })).toBeNull()
+  })
+
+  it.each([404, 409])('treats an HTTP %i decision race as already answered', async (status) => {
+    vi.spyOn(api, 'skillProposals').mockResolvedValue({ proposals: [proposal()], lastReview: null })
+    vi.spyOn(api, 'acceptSkillProposal').mockRejectedValue(new ApiError('gone', status))
+
+    render(<SkillProposals />)
+    await screen.findByText('release-flow')
+    await userEvent.click(screen.getByRole('button', { name: /accept/i }))
+    await waitFor(() => expect(screen.getByText(/already answered/i)).toBeTruthy())
+    expect(screen.queryByRole('button', { name: /accept/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /reject/i })).toBeNull()
   })
 
   it('omits the version for a kind=new accept, which creates rather than versions', async () => {
