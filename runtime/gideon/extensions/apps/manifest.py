@@ -18,6 +18,7 @@ from typing import Any
 KEBAB_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+([+-]|$)")
 ROUTE_OP_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+ICON_RE = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
 
 
 def version_tuple(v: str) -> tuple[int, ...]:
@@ -1377,6 +1378,9 @@ class AppManifest:
         if not self.description:
             errors.append("missing required field: description")
 
+        if self.icon and not ICON_RE.fullmatch(self.icon):
+            errors.append(f"icon must be a bare identifier, got: {self.icon!r}")
+
         for p in self.prompts:
             if ".." in str(p):
                 errors.append(f"prompts path contains path traversal: {p!r}")
@@ -1399,10 +1403,24 @@ class AppManifest:
             )
 
         for page in self.ui.pages:
+            page_name = page.label or page.route or "<unnamed>"
             if not page.route:
                 errors.append("ui page missing required field: route")
             if not page.label:
                 errors.append("ui page missing required field: label")
+            if page.icon and not ICON_RE.fullmatch(page.icon):
+                errors.append(
+                    f"ui page {page_name!r} icon must be a bare identifier, got: {page.icon!r}"
+                )
+            icon_url = page.iconUrl.replace("\\", "/")
+            if page.iconUrl and (
+                icon_url.startswith("/")
+                or re.match(r"^[A-Za-z]:", icon_url)
+                or ".." in icon_url.split("/")
+            ):
+                errors.append(
+                    f"ui page {page_name!r} iconUrl contains path traversal: {page.iconUrl!r}"
+                )
             if page.entryPoint and ".." in page.entryPoint:
                 errors.append(
                     f"ui page entryPoint contains path traversal: {page.entryPoint!r}"

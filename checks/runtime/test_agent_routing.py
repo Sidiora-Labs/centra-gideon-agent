@@ -137,6 +137,28 @@ class TestSuppressionStore:
         assert "dba" not in routing.routing_status()["muted"]
         assert not routing.is_suppressed("dba", now=now, cooldown_hours=24.0)
 
+    def test_canonical_identity_and_unmute_echo(self):
+        now = time.time()
+        for _ in range(3):
+            routing.record_dismiss("  Straße  ", now=now)
+        assert routing.routing_status()["muted"] == ["strasse"]
+        assert routing.unmute("STRASSE") == "strasse"
+        assert routing.routing_status() == {"muted": [], "dismissals": {}}
+
+    @pytest.mark.asyncio
+    async def test_unmute_endpoint_echoes_canonical_key(self):
+        from aiohttp import web
+
+        from gideon.interfaces.dashboard.handlers.routing import api_routing_unmute
+
+        routing.record_dismiss("DBA", now=time.time(), mute_at=1)
+        app = web.Application()
+        app.router.add_post("/unmute", api_routing_unmute)
+        async with TestClient(TestServer(app)) as client:
+            response = await client.post("/unmute", json={"agent": " DbA "})
+            assert response.status == 200
+            assert await response.json() == {"ok": True, "agent": "dba"}
+
 
 class TestSuggestForSend:
     @pytest.fixture(autouse=True)

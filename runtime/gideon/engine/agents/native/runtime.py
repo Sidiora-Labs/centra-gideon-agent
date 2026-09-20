@@ -467,6 +467,7 @@ class NativeAgentRuntime(AgentProvider):
         self._tool_outcomes: list[tuple[str, str]] = []
         self._last_context_pct: float | None = None
         self._compaction_saves: list[float] = []
+        self._compaction_result: dict = {"type": "timeout"}
         self._cache_generation = 0
         self._pull_steer: Callable[[], list[str]] | None = None
         self._steers_injected = 0
@@ -1309,6 +1310,33 @@ class NativeAgentRuntime(AgentProvider):
 
     def context_usage_pct(self) -> float | None:
         return self._last_context_pct
+
+    @property
+    def compacts_in_process(self) -> bool:
+        return True
+
+    async def compact(self, context: str = "") -> None:
+        from gideon.cognition import context_compaction
+
+        before = context_compaction.total_chars(self._messages)
+        replacement = context_compaction.compact(self._messages)
+        after = context_compaction.total_chars(replacement)
+        status = "completed" if after < before else "noop"
+        if status == "completed":
+            self._messages = replacement
+            self._cache_generation += 1
+            if self._last_context_pct is not None and before > 0:
+                self._last_context_pct *= after / before
+            self._breaker.reset_structural()
+        self._compaction_result = {
+            "type": status,
+            "before": before,
+            "after": after,
+            "summary": f"{before:,} → {after:,} characters",
+        }
+
+    async def wait_for_compaction(self, timeout: float = 120.0) -> dict:
+        return dict(self._compaction_result)
 
     async def cancel(self, *, wait_ack_timeout: float = 0.0) -> str:
         scope = self._cancel

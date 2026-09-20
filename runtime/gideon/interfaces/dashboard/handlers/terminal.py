@@ -6,7 +6,6 @@ import json
 import logging
 import os
 import pty as _pty
-import shutil
 import struct
 import termios
 import time
@@ -16,11 +15,7 @@ from typing import TYPE_CHECKING
 
 from aiohttp import web
 
-from gideon.core.cancellation import (
-    run_with_timeout,
-    terminate_and_reap,
-    wait_with_timeout,
-)
+from gideon.core.cancellation import terminate_and_reap
 from gideon.core.config import loader as config_loader
 from gideon.core.http_request import read_json_body
 from gideon.engine import tmux_substrate
@@ -90,7 +85,7 @@ _TMUX_SOCKET = tmux_substrate.TMUX_SOCKET
 
 def _tmux_available() -> bool:
     """Whether the tmux binary is on PATH (macOS/Linux only; Windows has none)."""
-    return shutil.which("tmux") is not None
+    return tmux_substrate.tmux_available()
 
 
 def _persist_enabled(request: web.Request) -> bool:
@@ -644,20 +639,7 @@ async def api_terminal_delete(request: web.Request) -> web.Response:
 
 async def _kill_tmux_session(session_id: str) -> None:
     """`tmux kill-session` for a Gideon terminal id on our socket. Best-effort/never-raises."""
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "tmux",
-            "-L",
-            _TMUX_SOCKET,
-            "kill-session",
-            "-t",
-            _tmux_session_name(session_id),
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await wait_with_timeout(proc, 5)
-    except (FileNotFoundError, asyncio.TimeoutError, OSError):
-        pass
+    await tmux_substrate.kill_session(_tmux_session_name(session_id))
 
 
 async def api_terminal_list(request: web.Request) -> web.Response:
@@ -747,25 +729,7 @@ async def api_terminal_list(request: web.Request) -> web.Response:
 
 async def _list_tmux_sessions() -> list[str]:
     """Live tmux session names on our dedicated socket, or [] if tmux/none. Never raises."""
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "tmux",
-            "-L",
-            _TMUX_SOCKET,
-            "list-sessions",
-            "-F",
-            "#{session_name}",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        out, _ = await run_with_timeout(proc, 5)
-        return [
-            ln.strip()
-            for ln in out.decode("utf-8", "replace").splitlines()
-            if ln.strip()
-        ]
-    except (FileNotFoundError, asyncio.TimeoutError, OSError):
-        return []
+    return await tmux_substrate.list_sessions()
 
 
 async def reap_orphaned_terminals(app: web.Application) -> None:

@@ -159,6 +159,25 @@ class TestNestingHappyPath:
         _run, status = await _run_parent(_parent_spec(ref="child@1"))
         assert status == RunStatus.COMPLETE
 
+    async def test_parent_timeout_degrades_with_the_child_run_id(self) -> None:
+        await _author_child(
+            root={"kind": "wait", "id": "slow", "config": {"duration_secs": 60}}
+        )
+        spec = _parent_spec(inputs={})
+        wd = WorkflowWatchdog(None, EngineServices(node_timeout_total=1))
+        run = store.create(WorkflowRun(id="", workflow_name="parent"))
+        store.write_spec(run.id, spec)
+        controller = await wd.launch(run, spec)
+
+        status = await controller.run_to_completion(timeout=5)
+
+        assert status == RunStatus.COMPLETE
+        nested = store.read_state(run.id)["root.children[1]"]
+        assert nested.state == InstanceState.DEGRADED
+        out = store.read_output(run.id, "root.children[1]")
+        assert out["child_run_id"]
+        assert store.get(out["child_run_id"]).status == RunStatus.RUNNING
+
 
 class TestGenealogy:
     async def test_both_parent_and_root_are_recorded(self) -> None:

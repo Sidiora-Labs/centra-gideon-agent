@@ -419,9 +419,6 @@ RECORDS = {
             ),
             "document_editing": Value(("dashboard", "document_editing"), False, bool),
             "terminal": Value(("dashboard", "terminal"), {"enabled": True}),
-            "dashboard_layout": Value(
-                ("dashboard", "dashboard_layout"), {}, lambda value: value or {}
-            ),
         },
     ),
     "config.legibility.LegibilityConfig": Record(

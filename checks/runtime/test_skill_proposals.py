@@ -52,6 +52,27 @@ def test_enqueue_and_list(home):
     assert pend[0].slug == "release-flow"
 
 
+def test_enqueue_coalesces_pending_by_accept_target(home):
+    first = _enqueue(slug="first", kind="refine", refine_target="nested/skill")
+    second = _enqueue(
+        slug="another",
+        kind="refine",
+        refine_target="nested/skill",
+        session_key="sess:2",
+        created_at="2026-07-04T00:00:00+00:00",
+    )
+    assert first is not None
+    assert second is None
+    assert [p.id for p in proposals.list_pending()] == [first.id]
+
+
+def test_iter_skill_files_finds_nested_skills(home):
+    _seed_skill(home, "nested/deep", "---\nname: deep\ndescription: d\n---\nbody\n")
+    assert [
+        (name, path.name) for name, path in loader_mod.iter_skill_files(home / "skills")
+    ] == [("nested/deep", "SKILL.md")]
+
+
 def test_enqueue_rejects_empty(home):
     assert _enqueue(slug="") is None
     assert (

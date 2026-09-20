@@ -13,6 +13,7 @@ from gideon.integrations.action_providers.base import (
     provider_failure,
 )
 from gideon.integrations.action_providers.registry import (
+    dispatchable_action_providers,
     get_action_provider,
     list_action_providers,
     register_action_provider,
@@ -24,6 +25,7 @@ __all__ = [
     "ActionResult",
     "provider_failure",
     "register_action_provider",
+    "dispatchable_action_providers",
     "get_action_provider",
     "list_action_providers",
 ]

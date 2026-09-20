@@ -9,6 +9,7 @@ import { Button } from '../../shared/ui/Button'
 import { ListSkeleton, LoadError } from '../../shared/ui/ListScaffold'
 import { Field, TextInput, DateInput } from '../../shared/ui/forms'
 import { notify } from '../../app/shell/appSdk'
+import { readableErrText } from '../../shared/data/errText'
 
 const OUTCOME_TONE: Record<string, string> = {
   success: 'var(--color-success)', allowed: 'var(--color-success)', approved: 'var(--color-success)',
@@ -48,6 +49,10 @@ export function capped(v: { checked: number; windowed?: boolean; window?: number
   return !!v.windowed && typeof v.window === 'number' && v.checked >= v.window
 }
 
+type VerifyState =
+  | { status: 'complete'; verdict: SelVerify }
+  | { status: 'did-not-run'; reason: string }
+
 export function AuditPanel() {
   const [filters, setFilters] = useState<AuditFilters>({})
   const [showMore, setShowMore] = useState(false)
@@ -56,7 +61,7 @@ export function AuditPanel() {
   const [truncated, setTruncated] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<unknown>(null)
-  const [verify, setVerify] = useState<SelVerify | null>(null)
+  const [verify, setVerify] = useState<VerifyState | null>(null)
   const [families, setFamilies] = useState<AuditPage['outcome_families']>([])
 
   const runId = useRef(0)
@@ -92,7 +97,11 @@ export function AuditPanel() {
 
   const runVerify = async () => {
     setVerify(null)
-    try { setVerify(await api.auditVerify()) } catch { setVerify({ ok: false, checked: 0, error: 'verify failed' }) }
+    try {
+      setVerify({ status: 'complete', verdict: await api.auditVerify() })
+    } catch (error) {
+      setVerify({ status: 'did-not-run', reason: readableErrText(error) || 'The verification request failed.' })
+    }
   }
   const rotate = async () => {
     if (!(await confirm({ title: 'Archive the audit log and start a new chain?', body: 'The existing entries move to a timestamped archive file next to the log — they leave the dashboard verify and browse surface. The signing key is unchanged.', confirmLabel: 'Archive & reset' }))) return
@@ -160,16 +169,30 @@ export function AuditPanel() {
         </div>
       )}
 
-      {verify && (
+      {verify?.status === 'did-not-run' && (
+        <div role="status" data-type="body-s" className="mb-3 rounded-lg bg-surface-container px-3 py-2">
+          <div className="flex items-center gap-1.5" style={{ color: 'var(--color-warning)' }}>
+            <ShieldAlert size={14} />
+            Verification did not run — no integrity verdict was produced.
+          </div>
+          <p data-type="caption" className="mt-1 text-on-surface-low">
+            {verify.reason} Check the connection and try Verify again.
+          </p>
+        </div>
+      )}
+
+      {verify?.status === 'complete' && (() => {
+        const verdict = verify.verdict
+        return (
         <div data-type="body-s" className="mb-3 rounded-lg bg-surface-container px-3 py-2">
           <div className="flex items-center gap-1.5"
-            style={{ color: verify.ok ? 'var(--color-success)' : 'var(--color-danger)' }}>
-            {verify.ok ? <ShieldCheck size={14} /> : <ShieldAlert size={14} />}
-            {verify.ok
-              ? `Chain intact — ${verifiedScope(verify)} verified.`
-              : `Chain broken — ${verify.tampered ?? '?'} of ${verifiedScope(verify)} altered${verify.error ? ` (${verify.error})` : ''}.`}
+            style={{ color: verdict.ok ? 'var(--color-success)' : 'var(--color-danger)' }}>
+            {verdict.ok ? <ShieldCheck size={14} /> : <ShieldAlert size={14} />}
+            {verdict.ok
+              ? `Chain intact — ${verifiedScope(verdict)} verified.`
+              : `Chain broken — ${verdict.tampered ?? '?'} of ${verifiedScope(verdict)} altered.`}
           </div>
-          {capped(verify) && (
+          {capped(verdict) && (
             <p data-type="caption" className="mt-1 text-on-surface-low">
               Older entries were not checked — this is the live tamper-detection window.
               {' '}<code className="font-mono">gideon security verify</code> walks the whole log
@@ -177,7 +200,8 @@ export function AuditPanel() {
             </p>
           )}
         </div>
-      )}
+        )
+      })()}
 
       {
 }

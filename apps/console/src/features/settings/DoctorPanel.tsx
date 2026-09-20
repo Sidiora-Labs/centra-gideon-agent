@@ -110,7 +110,7 @@ function SurfacingSimulator() {
       {
 }
       <form
-        className="mt-2 flex items-center gap-2"
+        className="mt-s flex items-center gap-s"
         onSubmit={(e) => { e.preventDefault(); if (text.trim() && !busy) void run() }}
       >
         <TextInput
@@ -128,17 +128,17 @@ function SurfacingSimulator() {
         </Button>
       </form>
       {err !== null && (
-        <div role="alert" data-type="caption" className="mt-2 text-on-surface-low">
+        <div role="alert" data-type="caption" className="mt-s text-on-surface-low">
           Couldn't simulate surfacing: {String((err as Error)?.message || err)}
         </div>
       )}
       {rows !== null && rows.length === 0 && (
-        <div data-type="caption" className="mt-2 text-on-surface-low">No skill scored against that message.</div>
+        <div data-type="caption" className="mt-s text-on-surface-low">No skill scored against that message.</div>
       )}
       {rows !== null && rows.length > 0 && (
-        <div className="mt-2 flex flex-col gap-1 border-t border-outline-variant/30 pt-2">
+        <div className="mt-s flex flex-col gap-xs border-t border-outline-variant/30 pt-s">
           {rows.map((c) => (
-            <div key={c.key} data-type="caption" className="flex items-baseline justify-between gap-2">
+            <div key={c.key} data-type="caption" className="flex items-baseline justify-between gap-s">
               <span className={c.included ? 'text-on-surface-var' : 'text-on-surface-low'}>
                 {c.key} <span className="text-on-surface-low">· {c.reason}</span>
               </span>
@@ -184,7 +184,7 @@ function AutomationSimulator() {
         What one automation would do on its next fire — the resolved schedule, the rendered action,
         the session it targets, what it is allowed to do, and its observe-mode dry fire.
       </div>
-      <div className="mt-2 flex items-center gap-2">
+      <div className="mt-s flex items-center gap-s">
         <Select
           value={pick}
           onChange={(v) => { setPick(v); setDesc(null); setErr(null) }}
@@ -201,12 +201,12 @@ function AutomationSimulator() {
       {
 }
       {empty && (
-        <div data-type="caption" className="mt-2 text-on-surface-low">
+        <div data-type="caption" className="mt-s text-on-surface-low">
           No automations yet. Create one on the Automations page, then reopen this panel.
         </div>
       )}
       {err !== null && (
-        <div role="alert" data-type="caption" className="mt-2 text-on-surface-low">
+        <div role="alert" data-type="caption" className="mt-s text-on-surface-low">
           Couldn't describe that automation: {String((err as Error)?.message || err)}
         </div>
       )}
@@ -221,7 +221,7 @@ export function WouldExecute({ d }: { d: AutomationWouldExecute }) {
   const cg = d.capability_grants
   const om = d.observe_mode
   return (
-    <div className="mt-2 flex flex-col gap-1.5 border-t border-outline-variant/30 pt-2">
+    <div className="mt-s flex flex-col gap-1.5 border-t border-outline-variant/30 pt-s">
       {
 }
       <Fact label="Next fire">
@@ -244,9 +244,9 @@ export function WouldExecute({ d }: { d: AutomationWouldExecute }) {
         {ac.render_error
           ? <div role="alert" style={{ color: 'var(--color-warning)' }}>Would fail to render: {ac.render_error}</div>
           : ac.rendered
-            ? <pre data-type="caption" className="mt-1 overflow-x-auto rounded-md bg-surface px-2.5 py-2 text-on-surface-low">{ac.rendered}</pre>
+            ? <pre data-type="caption" className="mt-xs overflow-x-auto rounded-md bg-surface px-2.5 py-s text-on-surface-low">{ac.rendered}</pre>
             : null}
-        <pre data-type="caption" className="mt-1 overflow-x-auto rounded-md bg-surface px-2.5 py-2 text-on-surface-low">
+        <pre data-type="caption" className="mt-xs overflow-x-auto rounded-md bg-surface px-2.5 py-s text-on-surface-low">
           {JSON.stringify(ac.config, null, 2)}
         </pre>
       </Fact>
@@ -285,7 +285,7 @@ export function WouldExecute({ d }: { d: AutomationWouldExecute }) {
             what would run instead of running it.
           </div>
         )}
-        <pre data-type="caption" className="mt-1 overflow-x-auto rounded-md bg-surface px-2.5 py-2 text-on-surface-low">{om.detail}</pre>
+        <pre data-type="caption" className="mt-xs overflow-x-auto rounded-md bg-surface px-2.5 py-s text-on-surface-low">{om.detail}</pre>
         {om.gate_plan.enforced && om.gate_plan.enforced.length > 0 && (
           <div className="text-on-surface-low">Gates enforced: {om.gate_plan.enforced.join(', ')}</div>
         )}
@@ -342,7 +342,12 @@ export function RemediationSection() {
     setBusy(true)
     try {
       const r = await api.doctorRemediationRun()
-      notify(`Maintenance: score ${Math.round(r.score_before)}→${Math.round(r.score_after)} (${r.stopped_reason})`, 'success')
+      const jobs = r.jobs as Array<{ status: string }>
+      const failed = jobs.filter((j) => j.status === 'error').length
+      const blocked = jobs.filter((j) => j.status === 'blocked').length
+      const cooled = jobs.filter((j) => j.status === 'skipped_cooldown').length
+      const suffix = failed ? `${failed} failed` : blocked ? `${blocked} blocked` : cooled ? `${cooled} cooling down` : r.stopped_reason
+      notify(`Maintenance: score ${Math.round(r.score_before)}→${Math.round(r.score_after)} (${suffix})`, failed || blocked ? 'error' : 'success')
       load()
     } catch (e) {
       notify(`Maintenance failed: ${String((e as Error)?.message || e)}`, 'error')
@@ -370,9 +375,9 @@ export function RemediationSection() {
         {
 }
         {scored.length > 0 && (
-          <div className="mt-2 flex flex-col gap-1 border-t border-outline-variant/30 pt-2">
+          <div className="mt-s flex flex-col gap-xs border-t border-outline-variant/30 pt-s">
             {scored.map((d) => (
-              <div key={d.key} data-type="caption" className="flex items-baseline justify-between gap-2">
+              <div key={d.key} data-type="caption" className="flex items-baseline justify-between gap-s">
                 <span className={d.reachable ? 'text-on-surface-var' : 'text-on-surface-low'}>
                   {capLabel(d.key)}
                   <span className="ml-1.5 text-on-surface-low tabular-nums">×{d.count}</span>
@@ -390,7 +395,7 @@ export function RemediationSection() {
         {
 }
         {snap && (
-          <div data-type="caption" className="mt-2 border-t border-outline-variant/30 pt-2 text-on-surface-low">
+          <div data-type="caption" className="mt-s border-t border-outline-variant/30 pt-s text-on-surface-low">
             {snap.plan.length > 0
               ? <>Run now would: {snap.plan.map((j) => capLabel(j.id)).join(' · ')}</>
               : scored.some((d) => d.reachable)
@@ -399,10 +404,10 @@ export function RemediationSection() {
           </div>
         )}
         {snap && snap.recent_runs.length > 0 && (
-          <div className="mt-2 flex flex-col gap-1 border-t border-outline-variant/30 pt-2">
+          <div className="mt-s flex flex-col gap-xs border-t border-outline-variant/30 pt-s">
             {snap.recent_runs.slice(0, 5).map((r, i) => (
               <div key={i} data-type="caption" className="text-on-surface-low">
-                score {Math.round(r.score_before)}→{Math.round(r.score_after)} · {r.jobs.length} job{r.jobs.length === 1 ? '' : 's'} · {r.stopped_reason}
+                {new Date(((r as typeof r & { timestamp?: string }).timestamp ?? r.ts * 1000)).toLocaleString()} · score {Math.round(r.score_before)}→{Math.round(r.score_after)} · {(r as typeof r & { outcome?: string }).outcome ?? r.stopped_reason}
               </div>
             ))}
             <MoreRow total={snap.recent_runs.length} shown={5} noun="runs" />
@@ -416,21 +421,21 @@ export function RemediationSection() {
 function StatusBanner({ report }: { report: DoctorReport }) {
   if (report.core_ok && report.ok) {
     return (
-      <div data-type="body-s" className="flex items-center gap-2" style={{ color: 'var(--color-success)' }}>
+      <div data-type="body-s" className="flex items-center gap-s" style={{ color: 'var(--color-success)' }}>
         <CheckCircle2 size={16} /> All systems healthy
       </div>
     )
   }
   if (!report.core_ok) {
     return (
-      <div data-type="body-s" className="flex items-center gap-2" style={{ color: 'var(--color-error)' }}>
+      <div data-type="body-s" className="flex items-center gap-s" style={{ color: 'var(--color-error)' }}>
         <XCircle size={16} />
         Gateway core failing{report.restart_suggested ? ' — a restart may be required' : ''}
       </div>
     )
   }
   return (
-    <div data-type="body-s" className="flex items-center gap-2" style={{ color: 'var(--color-warning)' }}>
+    <div data-type="body-s" className="flex items-center gap-s" style={{ color: 'var(--color-warning)' }}>
       <AlertTriangle size={16} />
       Core healthy · {capLabel(report.worst)} degraded
     </div>
@@ -442,7 +447,7 @@ function CapabilityCard({ name, cap, onFixed }: { name: string; cap: DoctorCapab
   const color = cap.ok ? 'var(--color-success)' : cap.tier <= 2 ? 'var(--color-error)' : 'var(--color-warning)'
   return (
     <div className="rounded-lg bg-surface-container px-4 py-3">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-s">
         <Icon size={16} style={{ color }} />
         <span data-type="body-m" className="text-on-surface">{capLabel(name)}</span>
         {!cap.ok && (
@@ -454,7 +459,7 @@ function CapabilityCard({ name, cap, onFixed }: { name: string; cap: DoctorCapab
           <InvestigateButton kind="doctor_finding" id={name} backLink="#/settings/doctor" size={28} />
         </span>
       </div>
-      <div className="mt-2 flex flex-col gap-1.5">
+      <div className="mt-s flex flex-col gap-1.5">
         {cap.probes.map((p) => <ProbeRow key={p.id} probe={p} onFixed={onFixed} />)}
       </div>
     </div>
@@ -480,7 +485,7 @@ function FixButton({ fixId, onFixed }: { fixId: string; onFixed: () => void }) {
     } finally { setBusy(false) }
   }
   return (
-    <Button variant="secondary" size="xs" onClick={run} loading={busy} className="mt-1 shrink-0">
+    <Button variant="secondary" size="xs" onClick={run} loading={busy} className="mt-xs shrink-0">
       <Wrench size={13} /> Fix
     </Button>
   )
@@ -501,21 +506,21 @@ function ProbeRow({ probe, onFixed }: { probe: DoctorProbe; onFixed: () => void 
   )
   if (!hasEvidence) {
     return (
-      <div className="flex items-start gap-2 border-b border-outline-variant/30 pb-1.5 last:border-0 last:pb-0">
+      <div className="flex items-start gap-s border-b border-outline-variant/30 pb-1.5 last:border-0 last:pb-0">
         {head}
       </div>
     )
   }
   return (
     <details className="group border-b border-outline-variant/30 pb-1.5 last:border-0 last:pb-0">
-      <summary className="flex cursor-pointer list-none items-start gap-2">
+      <summary className="flex cursor-pointer list-none items-start gap-s">
         {head}
         <ChevronRight
           size={14}
-          className="mt-1 shrink-0 text-on-surface-low transition-transform group-open:rotate-90"
+          className="mt-xs shrink-0 text-on-surface-low transition-transform group-open:rotate-90"
         />
       </summary>
-      <pre data-type="caption" className="mt-1.5 overflow-x-auto rounded-md bg-surface px-2.5 py-2 text-on-surface-low">
+      <pre data-type="caption" className="mt-1.5 overflow-x-auto rounded-md bg-surface px-2.5 py-s text-on-surface-low">
         {JSON.stringify(probe.evidence, null, 2)}
       </pre>
     </details>

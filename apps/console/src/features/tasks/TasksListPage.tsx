@@ -157,9 +157,9 @@ export function TasksListPage({ onCreate, view: viewProp, filter, openId, setVie
 }
 
 function TaskListBar({ lists, repeatableId, active, onPick, onReset }: { lists: TaskListItem[]; repeatableId?: string; active: string; onPick: (list: TaskListItem) => void; onReset: (list: TaskListItem) => void }) {
-  return <div className="mb-m flex flex-wrap items-center gap-s"><span data-type="caption" className="inline-flex items-center gap-1 text-on-surface-low uppercase tracking-wide"><ListChecks size={12} /> Task lists</span>{lists.map(list => {
+  return <div className="mb-m flex flex-wrap items-center gap-s"><span data-type="caption" className="inline-flex items-center gap-xs text-on-surface-low uppercase tracking-wide"><ListChecks size={12} /> Task lists</span>{lists.map(list => {
     const picked = active === list.id
-    return <span key={list.id} data-type="body-s" className={`inline-flex min-h-8 items-center gap-1 rounded-md border px-s ${picked ? 'border-primary bg-primary text-on-primary' : 'border-outline-variant/30 bg-surface-container text-on-surface-var'}`}>
+    return <span key={list.id} data-type="body-s" className={`inline-flex min-h-8 items-center gap-xs rounded-md border px-s ${picked ? 'border-primary bg-primary text-on-primary' : 'border-outline-variant/30 bg-surface-container text-on-surface-var'}`}>
       <button type="button" aria-label={`Task list: ${list.name}`} aria-pressed={picked} onClick={() => onPick(list)} className="min-h-6">{list.name}</button>
       {!!repeatableId && list.project_id === repeatableId && <button type="button" aria-label={`Reset list ${list.name}`} title="Reset this repeatable list (all tasks must be done)" onClick={event => { event.stopPropagation(); onReset(list) }} className="grid size-6 place-items-center rounded-md hover:brightness-125"><RotateCcw size={12} /></button>}
     </span>
@@ -172,11 +172,11 @@ function MetaLine({ t, onProject }: { t: TaskItem; onProject?: (project: string)
   const exit = t.exit_criteria ?? []
   const lead: ReactNode[] = [
     pm ? <span key="priority" style={{ color: pm.tone }}>{pm.label}</span> : null,
-    who ? <span key="person" className="inline-flex items-center gap-1" title={t.assignee?.trim() ? `Assigned to ${who}` : `Created by ${who}`}><UserRound size={11} />{who}</span> : null,
+    who ? <span key="person" className="inline-flex items-center gap-xs" title={t.assignee?.trim() ? `Assigned to ${who}` : `Created by ${who}`}><UserRound size={11} />{who}</span> : null,
     t.project ? <TextLink key="project" onClick={event => { event.stopPropagation(); onProject?.(t.project!) }} icon={FolderKanban} iconSize={11} title={`Filter by project “${t.project}”`}>{t.project}</TextLink> : null,
   ].filter(Boolean)
   const tail: ReactNode[] = [due ? <span key="due" style={{ color: due.tone }}>{due.label}</span> : null, exit.length ? <span key="criteria">{exitDoneCount(exit)}/{exit.length} criteria</span> : null].filter(Boolean)
-  const comments = (t.comment_count ?? 0) > 0 ? <span className="inline-flex items-center gap-1"><MessageSquare size={11} />{t.comment_count}</span> : null
+  const comments = (t.comment_count ?? 0) > 0 ? <span className="inline-flex items-center gap-xs"><MessageSquare size={11} />{t.comment_count}</span> : null
   if (lead.length === 0 && tail.length === 0 && !comments) return null
   // Gaps keep metadata readable at 320px (WCAG 1.4.10 Reflow).
   return <div data-type="body-s" className="mt-1 flex flex-wrap items-center gap-x-m gap-y-0.5 text-on-surface-low">{lead}{tail}{comments}</div>
@@ -195,7 +195,7 @@ function TaskRow({ t, index, onOpen, onProject, onTag, selected, selecting, onTo
     {reorderable && <span title={taskRowLocked(t) ? 'Project tasks keep their place' : 'Drag to reorder'}><GripVertical size={16} className={`shrink-0 text-on-surface-low ${taskRowLocked(t) ? 'cursor-not-allowed opacity-40' : 'cursor-grab active:cursor-grabbing'}`} /></span>}
     <button type="button" aria-label={`${selected ? 'Deselect' : 'Select'}: ${t.title}`} onClick={event => { event.stopPropagation(); onToggleSelect?.() }} className="-m-0.5 grid size-6 shrink-0 place-items-center"><span className={`grid size-5 place-items-center rounded-md border ${selected ? 'border-primary bg-primary text-on-primary' : `border-outline-variant text-transparent ${selecting ? '' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'}`}`}><Check size={13} /></span></button>
     <sm.icon size={20} className="shrink-0" style={{ color: sm.tone }} /><div className="min-w-0 flex-1"><span className={`block truncate text-[0.9375rem] font-medium ${done ? 'text-on-surface-low line-through' : 'text-on-surface'}`} title={t.title}>{t.title}</span><MetaLine t={t} onProject={onProject} /></div>
-    {!!t.labels?.length && <div className="hidden shrink-0 gap-1 md:flex">{t.labels.slice(0, 2).map(label => <button key={label} type="button" data-type="caption" aria-label={`Filter by tag “${label}”`} onClick={event => { event.stopPropagation(); onTag?.(label) }} className="rounded-md bg-surface-high px-2 py-1 text-on-surface-var hover:text-primary">{label}</button>)}</div>}
+    {!!t.labels?.length && <div className="hidden shrink-0 gap-xs md:flex">{t.labels.slice(0, 2).map(label => <button key={label} type="button" data-type="caption" aria-label={`Filter by tag “${label}”`} onClick={event => { event.stopPropagation(); onTag?.(label) }} className="rounded-md bg-surface-high px-2 py-1 text-on-surface-var hover:text-primary">{label}</button>)}</div>}
   </motion.div></ContextMenu>
 }
 function TaskCard({ t, index, onOpen, onProject, onTag }: { t: TaskItem; index: number; onOpen: () => void; onProject?: (project: string) => void; onTag?: (tag: string) => void }) {
@@ -207,7 +207,7 @@ function TaskCard({ t, index, onOpen, onProject, onTag }: { t: TaskItem; index: 
     className="group relative grid cursor-pointer gap-m rounded-lg border border-outline-variant/30 bg-surface-container/60 p-l transition-colors hover:bg-surface-high has-[>button:focus-visible]:ring-2 has-[>button:focus-visible]:ring-inset has-[>button:focus-visible]:ring-primary">
     <RowHitTarget label={t.title} /><div className="flex items-start gap-s"><sm.icon size={18} style={{ color: sm.tone }} className="mt-0.5 shrink-0" /><span data-type="label-m" className={`min-w-0 flex-1 font-medium leading-snug ${TERMINAL.has(t.status) ? 'text-on-surface-low line-through' : 'text-on-surface'}`}>{t.title}</span>{t.assignee && <span data-type="caption" title={`Assigned to ${t.assignee}`} className="rounded-md bg-surface-high px-2 py-1 text-on-surface-var">@{t.assignee}</span>}</div>
     <div className="flex flex-wrap items-center gap-1.5">{badges.map((badge, position) => <span key={position} data-type="caption" className="rounded-md px-2 py-1" style={{ color: badge.tone, background: `color-mix(in srgb, ${badge.tone} 16%, transparent)` }}>{badge.label}</span>)}
-      {t.project && <button type="button" onClick={event => { event.stopPropagation(); onProject?.(t.project!) }} title={`Filter by project “${t.project}”`} data-type="caption" className="inline-flex min-h-6 items-center gap-1 rounded-md px-2 hover:brightness-125" style={accentChip}><FolderKanban size={10} />{t.project}</button>}
+      {t.project && <button type="button" onClick={event => { event.stopPropagation(); onProject?.(t.project!) }} title={`Filter by project “${t.project}”`} data-type="caption" className="inline-flex min-h-6 items-center gap-xs rounded-md px-2 hover:brightness-125" style={accentChip}><FolderKanban size={10} />{t.project}</button>}
       {(t.labels ?? []).slice(0, 2).map(label => <button key={label} type="button" data-type="caption" aria-label={`Filter by tag “${label}”`} onClick={event => { event.stopPropagation(); onTag?.(label) }} className="rounded-md bg-surface-high px-2 py-1 text-on-surface-var hover:text-primary">{label}</button>)}
     </div>
     {exit.length > 0 && <div className="flex items-center gap-s"><Meter size="thin" className="flex-1" tone="var(--color-ok)" label={`Exit criteria: ${exitDone} of ${exit.length} met`} pct={exitDone / exit.length * 100} /><span data-type="caption" className="text-on-surface-low tabular-nums">{exitDone}/{exit.length}</span></div>}

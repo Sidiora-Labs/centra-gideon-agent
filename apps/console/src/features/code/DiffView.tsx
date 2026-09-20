@@ -49,7 +49,7 @@ export function DiffView({ path, name, ws, deleted = false }: { path: string; na
   })()
   return (
     <div className="flex h-full flex-col">
-      <div data-type="body-s" className="shrink-0 border-b border-outline-variant/40 bg-surface-low/40 px-3 py-1.5 text-on-surface-var">
+      <div data-type="body-s" className="shrink-0 border-b border-outline-variant/40 bg-surface-low/40 px-m py-1.5 text-on-surface-var">
         {
 }
         <span className="font-mono">{rel}</span>{' '}

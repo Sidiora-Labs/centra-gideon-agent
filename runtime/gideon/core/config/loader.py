@@ -1376,15 +1376,6 @@ class DashboardConfig:
             "panel + per-provider Sign-in terminal); set enabled=false to hide.",
         ),
     )
-    dashboard_layout: dict = field(
-        default_factory=dict,
-        metadata=_meta(
-            "Dashboard Layout",
-            "The home dashboard's customized widget layout ({widgets:[{id,x,y,w,h,"
-            "hidden}], v}). Empty = the curated default layout. Persisted per-user "
-            "so the home follows the operator across browsers/machines.",
-        ),
-    )
 
 
 @dataclass

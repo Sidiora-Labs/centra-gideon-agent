@@ -3,6 +3,7 @@ import { CalendarClock, Webhook, Bell, MessageSquare, ListPlus, Users, TerminalS
 import type { LucideIcon } from 'lucide-react'
 import { api, type ScheduleJob, type HookItem, type HookEnforcement, type LifecycleEventInfo, type TriggerVariables, type Trigger as WireTrigger, type EventPattern } from '../../shared/data/api'
 import { deriveKind, deriveMode, kindMeta as schedKindMeta, modeMeta as schedModeMeta } from '../schedule/scheduleMeta'
+import { statusMeta, triggerHealthMeta, type StatusMeta } from '../schedule/scheduleMeta'
 import { epochSeconds } from '../../shared/data/epoch'
 
 export type TriggerKind = 'schedule' | 'lifecycle' | 'event' | 'store'
@@ -156,6 +157,8 @@ export interface Trigger {
   lastRunTs: number | null
   lastStatus: string | null
   state?: string | null
+  health?: string | null
+  lastError?: string | null
   runCount: number | null
   usedBy: string[]
   blocking?: boolean
@@ -177,6 +180,7 @@ export function scheduleToTrigger(j: ScheduleJob): Trigger {
   const km = schedKindMeta(deriveKind(j))
   const mm = schedModeMeta(deriveMode(j))
   const provider = j.action?.provider
+  const metadata = j as ScheduleJob & { state?: string | null; health?: string | null }
   return {
     kind: 'schedule', id: `schedule:${j.id}`, rawId: j.id, name: j.name || j.id, enabled: j.enabled,
     whenLabel: j.schedule, whenIcon: km.icon, whenTone: km.tone,
@@ -185,6 +189,8 @@ export function scheduleToTrigger(j: ScheduleJob): Trigger {
     actionProvider: provider,
     lastRunTs: j.last_run_ts ?? null,
     lastStatus: j.last_run_status || (j.last_run_ts ? j.last_status : null) || null,
+    state: metadata.state ?? null, health: metadata.health ?? j.last_status ?? null,
+    lastError: j.last_error ?? null,
     runCount: null, usedBy: [],
     schedule: j,
     broken: j.broken ?? [], warnings: j.warnings ?? [],
@@ -216,7 +222,8 @@ export function storeToTrigger(t: WireTrigger): Trigger {
     actionLabel: provider ? actionLabel(provider) : 'Action',
     actionIcon: provider ? actionIcon(provider) : Zap,
     actionProvider: provider,
-    lastRunTs: null, lastStatus: t.health || null, state: t.state || null,
+    lastRunTs: t.last_run_ts ?? null, lastStatus: t.last_run_status ?? null,
+    state: t.state ?? null, health: t.health ?? null, lastError: t.last_error ?? null,
     runCount: t.run_count ?? null, usedBy: [],
     storeKind: t.store_kind, broken: t.broken ?? [], warnings: t.warnings ?? [], store: t,
     author: t.author, readOnly: t.read_only === true,
@@ -232,11 +239,25 @@ export function eventToTrigger(t: WireTrigger): Trigger {
     actionLabel: provider ? actionLabel(provider) : 'Action',
     actionIcon: provider ? actionIcon(provider) : Zap,
     actionProvider: provider,
-    lastRunTs: null, lastStatus: null, state: null,
+    lastRunTs: t.last_run_ts ?? t.last_fired_at ?? null,
+    lastStatus: t.last_run_status ?? null, state: t.state ?? null,
+    health: t.health ?? null, lastError: t.last_error ?? null,
     runCount: t.fire_count ?? null, usedBy: [],
     eventPattern: t.pattern, eventMatcher: eventMatcherValue(t, pm.matcher), event: t,
     author: t.author, readOnly: t.read_only === true,
   }
+}
+
+export interface TriggerStatusMeta extends StatusMeta { reason: string }
+
+export function triggerStatusMeta(trigger: Trigger): TriggerStatusMeta {
+  const lifecycle = triggerHealthMeta(trigger.health, trigger.state)
+  const stopped = trigger.state && trigger.state !== 'active'
+  const unhealthy = trigger.health && trigger.health !== 'ok' && trigger.health !== 'success'
+  const meta = stopped || unhealthy
+    ? lifecycle
+    : statusMeta(trigger.lastRunTs || trigger.lastStatus ? trigger.lastStatus : null)
+  return { ...meta, reason: trigger.lastError || '' }
 }
 
 export function eventMatcherValue(t: WireTrigger, field: EventMatcherField): string {

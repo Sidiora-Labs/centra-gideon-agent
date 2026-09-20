@@ -7,11 +7,13 @@ import { SearchPanel } from './SearchPanel'
 const searchProviders = vi.fn()
 const searchActive = vi.fn()
 const setActiveSearchProvider = vi.fn()
+const tools = vi.fn()
 vi.mock('../../shared/data/api', () => ({
   api: {
     searchProviders: (...a: unknown[]) => searchProviders(...a),
     searchActive: (...a: unknown[]) => searchActive(...a),
     setActiveSearchProvider: (...a: unknown[]) => setActiveSearchProvider(...a),
+    tools: (...a: unknown[]) => tools(...a),
   },
 }))
 
@@ -33,6 +35,7 @@ describe('the search bind list announces which provider is bound, and to what', 
       { name: 'tavily', display_name: 'Tavily', capabilities: { ...CAPS, supports_fetch: true }, available: false },
     ])
     searchActive.mockResolvedValue({ 'search-general': ['searxng'] })
+    tools.mockResolvedValue([{ name: 'web_search', disabled: false, providerDisabled: false }])
   })
 
   it('the group is named with its use case, so four sibling lists are distinguishable', async () => {
@@ -87,5 +90,26 @@ describe('the search bind list announces which provider is bound, and to what', 
     const opts = [...group.querySelectorAll('button')]
     expect(opts.length).toBe(1)
     expect(opts[0].textContent).toContain('Tavily')
+  })
+
+  it('distinguishes provider setup from the web_search tool prerequisite with deep links', async () => {
+    searchProviders.mockResolvedValue([])
+    tools.mockResolvedValue([{ name: 'web_search', disabled: true, providerDisabled: false }])
+    render(<SearchPanel />)
+
+    const providers = await screen.findByRole('link', { name: 'Providers' })
+    expect(providers.getAttribute('href')).toBe('#/settings/providers')
+    expect(providers.className).toContain('underline')
+    const tool = screen.getByRole('link', { name: 'Tools' })
+    expect(tool.getAttribute('href')).toBe('#/tools')
+    expect(tool.className).toContain('underline')
+  })
+
+  it('does not call a failed tools read an unavailable web_search tool', async () => {
+    tools.mockRejectedValue(new Error('offline'))
+    render(<SearchPanel />)
+
+    await screen.findByText('General search')
+    expect(screen.queryByText(/web_search tool is unavailable/)).toBeNull()
   })
 })

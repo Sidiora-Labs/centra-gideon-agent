@@ -225,7 +225,7 @@ function NewProjectModal({ busy, onClose, onCreate }: {
         <Field label="Name">
           <TextInput autoFocus value={name} onChange={setName}
             onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
-            placeholder="Project name (or let the system name it later)…"
+            placeholder="Project name"
             surface="high" />
         </Field>
         <Field label="Brief" hint="The goal, scope, and background — shared as context with every agent working on this project's sessions and loops.">
@@ -320,9 +320,9 @@ function ProjectDetailPage({ id, onBack, navigate, query, setQuery }: { id: stri
       <FolderKanban size={18} className="shrink-0 text-primary" />
 
       <PageTitle className="truncate">{project.name}</PageTitle>
-      {project.name_locked && <Lock size={12} className="shrink-0 text-on-surface-low" aria-label="Name locked" />}
+       {project.name_locked && <Lock size={12} className="shrink-0 text-on-surface-low" aria-label="Automatic naming off" />}
       {!project.is_builtin && (
-        <IconButton icon={Pencil} label="Rename" size={24} iconSize={13} onClick={() => { setNameDraft(project.name); setRenaming(true) }} className="shrink-0 -m-0.5" />
+         <IconButton icon={Pencil} label="Rename project" size={24} iconSize={13} onClick={() => { setNameDraft(project.name); setRenaming(true) }} className="shrink-0 -m-0.5" />
       )}
     </div>
   )

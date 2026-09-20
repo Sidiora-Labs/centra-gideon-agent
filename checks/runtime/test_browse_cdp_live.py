@@ -39,7 +39,6 @@ import tempfile
 import threading
 import time
 import types
-import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
 
@@ -48,6 +47,7 @@ import pytest
 
 from gideon.core.config.loader import AppConfig
 from gideon.integrations.browse import cdp
+from gideon.integrations.browse.launch import ready_page_target
 from gideon.security.net import policy as net_policy
 
 ALLOWED_HOST = "allowed.local"
@@ -197,23 +197,7 @@ def _browser(chrome: str):
         stderr=stderr_log,
     )
     try:
-        page_ws = None
-        deadline = time.time() + 30
-        while time.time() < deadline and page_ws is None:
-            try:
-                with urllib.request.urlopen(
-                    f"http://127.0.0.1:{port}/json/list", timeout=1
-                ) as r:
-                    for target in json.load(r):
-                        if target.get("type") == "page" and target.get(
-                            "webSocketDebuggerUrl"
-                        ):
-                            page_ws = target["webSocketDebuggerUrl"]
-                            break
-            except Exception:
-                pass
-            if page_ws is None:
-                time.sleep(0.2)
+        page_ws = ready_page_target(port, time.monotonic() + 30)
         if page_ws is None:
             stderr_log.seek(0)
             detail = stderr_log.read().decode("utf-8", "replace").strip()

@@ -135,6 +135,7 @@ class Node:
 
     kind: NodeKind
     id: str = ""
+    label: str = ""
     children: list[Node] = field(default_factory=list)
     body: Node | None = None
     cases: dict[str, Node] = field(default_factory=dict)
@@ -158,17 +159,32 @@ class Node:
     # ── serialization ──
 
     _KNOWN = frozenset(
-        {"kind", "id", "children", "body", "cases", "default", "config", "needs"}
+        {
+            "kind",
+            "id",
+            "label",
+            "children",
+            "body",
+            "cases",
+            "default",
+            "config",
+            "needs",
+        }
     )
 
     def to_dict(self) -> dict[str, Any]:
-        return TreeShape.write(self)
+        result = TreeShape.write(self)
+        if self.label:
+            result["label"] = self.label
+        return result
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Node:
         """Tolerant read. An unrecognized `kind` raises (the engine cannot schedule what
         it cannot dispatch), but unknown *fields* are preserved in `extra`."""
-        return TreeShape.read(cls, d)
+        node = TreeShape.read(cls, d)
+        node.label = str(d.get("label", "") or "")
+        return node
 
 
 def walk(node: Node, path: str = "root") -> list[tuple[str, Node]]:

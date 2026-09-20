@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 _PROPOSALS_DIRNAME = ".proposals"
 _SOURCE_EXCERPT_MAX = 4_000
 _MAX_PENDING = 100
+_COALESCE_WINDOW_SECONDS = 86_400
 
 
 def _proposals_dir() -> Path:
@@ -165,6 +166,52 @@ def _make_id(slug: str, session_key: str, created_at: str) -> str:
     return f"{slug}-{h}"
 
 
+def accept_target(*, slug: str, kind: str = "new", refine_target: str = "") -> str:
+    return refine_target if kind == "refine" and refine_target else f"auto/{slug}"
+
+
+def _parse_created_at(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def coalesce_reason(
+    *, slug: str, kind: str = "new", refine_target: str = "", created_at: str
+) -> str:
+    """Explain why a proposal for this accepted subject must not be enqueued."""
+    subject = accept_target(slug=slug, kind=kind, refine_target=refine_target)
+    for pending in list_pending():
+        if (
+            accept_target(
+                slug=pending.slug,
+                kind=pending.kind,
+                refine_target=pending.refine_target,
+            )
+            == subject
+        ):
+            return f"a proposal for {subject} is already pending"
+
+    incoming = _parse_created_at(created_at) or datetime.now(timezone.utc)
+    cutoff = incoming.timestamp() - _COALESCE_WINDOW_SECONDS
+    if kind == "refine":
+        from gideon.extensions.skills import overlays
+
+        accepted = overlays.last_refinement(subject)
+        stamp = _parse_created_at(str((accepted or {}).get("created_at", "")))
+    else:
+        from gideon.extensions.skills.loader import ProcedureLibrary
+
+        path = ProcedureLibrary(install_builtins=False).skill_file(subject)
+        meta = ProcedureLibrary._parse_frontmatter(path) if path else {}
+        stamp = _parse_created_at(meta.get("created_at", ""))
+    if stamp is not None and stamp.timestamp() >= cutoff:
+        return f"{subject} accepted a proposal in the last 24h"
+    return ""
+
+
 def enqueue(
     *,
     slug: str,
@@ -182,6 +229,15 @@ def enqueue(
     if the queue is full or inputs are empty. The source excerpt is FENCED so a
     poisoned trace can't direct any model that later renders it."""
     if not (slug and description and procedure_md):
+        return None
+    reason = coalesce_reason(
+        slug=slug,
+        kind=kind,
+        refine_target=refine_target,
+        created_at=created_at,
+    )
+    if reason:
+        logger.info("skill proposal coalesced: %s", reason)
         return None
     d = _proposals_dir()
     if d.is_dir() and len(list(d.glob("*.json"))) >= _MAX_PENDING:

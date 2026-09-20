@@ -470,7 +470,7 @@ class LoopWatchdog:
         ``CYCLE_BUDGET`` — so every completion carries a reason without every legacy
         call site changing."""
         if stop_reason is None:
-            stop_reason = default_stop_reason(genuine)
+            stop_reason = default_stop_reason(genuine=genuine)
         fields = (
             {"error_message": None}
             if genuine

@@ -39,6 +39,7 @@ from gideon.automation.workflows.models import (
     SUCCESS_STATES,
     TERMINAL_STATES,
     InstanceState,
+    Node,
 )
 from gideon.engine.tasks.models import Task, TaskStatus, WorkflowTaskBinding
 
@@ -232,6 +233,21 @@ def test_a_plan_creates_one_task_per_work_node():
     )
     assert [s.binding.node_id for s in plan.create] == ["a", "b"]
     assert any("root" in s for s in plan.skipped)
+
+
+def test_a_declared_node_label_round_trips_and_wins_over_the_config_fallback():
+    spec = Node.from_dict(
+        {
+            "kind": "stage",
+            "id": "review",
+            "label": "Review the proposal",
+            "config": {"label": "Legacy review label"},
+        }
+    )
+
+    assert spec.to_dict()["label"] == "Review the proposal"
+    plan = plan_materialization("r-1", [spec.to_dict()])
+    assert plan.create[0].title == "Review the proposal"
 
 
 def test_an_ALREADY_MATERIALIZED_node_is_not_duplicated():

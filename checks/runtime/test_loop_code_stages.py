@@ -12,6 +12,24 @@ from gideon.automation.loop import kinds, store
 from gideon.automation.loop.loop import Loop
 
 
+def test_command_runnability_resolves_binary_not_project_manifest(
+    monkeypatch, tmp_path
+):
+    from gideon.automation.loop.kinds.sdlc import _command_runnable_here
+
+    (tmp_path / "package.json").write_text("{}")
+    monkeypatch.setenv("PATH", "")
+    missing = _command_runnable_here("npm test", str(tmp_path))
+    assert missing.runnable is False
+    assert missing.missing_binary == "npm"
+
+    local_bin = tmp_path / "node_modules" / ".bin" / "npm"
+    local_bin.parent.mkdir(parents=True)
+    local_bin.write_text("#!/bin/sh\n")
+    local_bin.chmod(0o755)
+    assert _command_runnable_here("npm test", str(tmp_path)).runnable is True
+
+
 def _run(coro):
     return asyncio.get_event_loop().run_until_complete(coro)
 

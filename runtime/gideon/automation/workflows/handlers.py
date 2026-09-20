@@ -1114,6 +1114,21 @@ async def api_run_pause(request: web.Request) -> web.Response:
     return _reply(result)
 
 
+async def api_run_start_draft(request: web.Request) -> web.Response:
+    denied = _guard(request, "workflow_run_start")
+    if denied is not None:
+        return denied
+    run_id = request.match_info.get("run_id", "")
+    result = await service.start_draft(run_id, supervisor=_supervisor(request))
+    _audit(
+        request,
+        "workflow_run_start",
+        "success" if result.get("ok") else "failure",
+        run_id,
+    )
+    return _reply(result, status=202 if result.get("ok") else 200)
+
+
 async def api_run_steer(request: web.Request) -> web.Response:
     """POST a mid-run steering instruction (LOOPS-EVOLUTION R14).
 
@@ -1434,6 +1449,7 @@ def register_workflow_routes(app: web.Application) -> None:
     )
     app.router.add_post("/api/workflows/runs/{run_id}/cancel", api_run_cancel)
     app.router.add_post("/api/workflows/runs/{run_id}/pause", api_run_pause)
+    app.router.add_post("/api/workflows/runs/{run_id}/start", api_run_start_draft)
     app.router.add_post("/api/workflows/runs/{run_id}/resume", api_run_resume)
     app.router.add_post("/api/workflows/runs/{run_id}/confirm", api_run_confirm)
     app.router.add_post("/api/workflows/runs/{run_id}/steer", api_run_steer)

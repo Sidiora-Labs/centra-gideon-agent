@@ -216,6 +216,8 @@ def test_compute_returns_grouped_visible_tips(
     assert out["enabled"] is True
     assert out["total"] == len(dc.CATALOG)
     assert out["visible_count"] == len(dc.CATALOG) - 1
+    assert out["dismissed_count"] == 1
+    assert out["engaged_count"] == 0
     flat_ids = [tip["id"] for g in out["areas"] for tip in g["tips"]]
     assert "chat" not in flat_ids
     assert len(flat_ids) == out["visible_count"]
@@ -232,3 +234,5 @@ def test_compute_auto_hides_engaged(
     flat_ids = [tip["id"] for g in out["areas"] for tip in g["tips"]]
     assert "chat" not in flat_ids and "loops" not in flat_ids
     assert out["visible_count"] == len(dc.CATALOG) - 2
+    assert out["dismissed_count"] == 0
+    assert out["engaged_count"] == 2

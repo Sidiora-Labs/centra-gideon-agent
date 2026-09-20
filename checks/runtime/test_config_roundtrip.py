@@ -520,7 +520,6 @@ _SPECIAL = {
     ("dashboard", "widget_density"): "less",
     ("dashboard", "stream_reveal"): "immediate",
     ("dashboard", "terminal"): {"enabled": False, "persist": True},
-    ("dashboard", "dashboard_layout"): {"widgets": [], "v": 1},
     ("inbox", "poll_interval_seconds"): 90,
     # loops.judge_use_case is constrained to the use-case vocabulary (WF2LOO-17) — a
     # generated "reasoning-x" would (correctly) be refused by load() and collapse back to

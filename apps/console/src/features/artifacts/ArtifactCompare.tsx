@@ -40,7 +40,7 @@ export function ArtifactCompare({ art, versions }: { art: Artifact; versions: nu
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-outline/40 px-m py-2">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-outline/40 px-m py-s">
         <VersionPicker label="Compare" value={left} options={ordered} onChange={setLeft} />
         <button type="button" onClick={() => { setLeft(right); setRight(left) }}
           title="Swap which version is on each side"

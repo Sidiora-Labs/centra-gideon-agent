@@ -367,6 +367,32 @@ class TestRunRoutes:
         body = _body(resp)
         assert body["run_id"] and sup.launched == [body["run_id"]]
 
+    async def test_starting_an_existing_draft_launches_it_once(self) -> None:
+        run = store.create(WorkflowRun(id="", workflow_name="draft-wf"))
+        store.write_spec(run.id, {"name": "draft-wf", "root": SPEC_ROOT})
+        sup = _Sup()
+        req = _req("POST", "/api/workflows/runs/x/start", state=_State(sup), body={})
+        req.match_info["run_id"] = run.id
+
+        resp = await H.api_run_start_draft(req)
+
+        assert resp.status == 202
+        assert _body(resp) == {"run_id": run.id, "status": "running"}
+        assert sup.launched == [run.id]
+
+    async def test_start_draft_refuses_a_non_prelaunch_run(self) -> None:
+        run = store.create(
+            WorkflowRun(id="", workflow_name="running-wf", status=RunStatus.RUNNING)
+        )
+        store.write_spec(run.id, {"name": "running-wf", "root": SPEC_ROOT})
+        req = _req("POST", "/api/workflows/runs/x/start", state=_State(_Sup()), body={})
+        req.match_info["run_id"] = run.id
+
+        resp = await H.api_run_start_draft(req)
+
+        assert resp.status == 409
+        assert _body(resp)["error"]["code"] == "run_not_prelaunch"
+
     async def test_a_blocking_run_returns_200_with_the_final_state(
         self, provider
     ) -> None:
@@ -651,6 +677,7 @@ class TestRestrictedSessions:
             H.api_run_edit,
             H.api_run_cancel,
             H.api_run_pause,
+            H.api_run_start_draft,
             H.api_run_resume,
             H.api_run_fork,
         ):

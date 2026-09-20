@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     from gideon.integrations.action_providers.base import ActionProvider
 
 _providers: "dict[str, ActionProvider]" = {}
+_builtin_names: list[str] = []
 _registration_lock = RLock()
 
 _BUILTIN_GROUPS = (
@@ -102,6 +103,16 @@ def list_action_providers() -> list[str]:
         return [*_providers]
 
 
+def dispatchable_action_providers() -> list[str]:
+    """Return the live action-provider names after bootstrapping core providers."""
+    _ensure_default_providers_registered()
+    with _registration_lock:
+        return [
+            *_builtin_names,
+            *(name for name in _providers if name not in _builtin_names),
+        ]
+
+
 def _ensure_default_providers_registered() -> None:
     from gideon.security.guardrails.rungs import ensure_core_action_types
 
@@ -114,4 +125,7 @@ def _ensure_default_providers_registered() -> None:
                 implementation = getattr(
                     import_module(f"{__package__}.{module}"), symbol
                 )
-                register_action_provider(implementation())
+                provider = implementation()
+                register_action_provider(provider)
+                if provider.name not in _builtin_names:
+                    _builtin_names.append(provider.name)

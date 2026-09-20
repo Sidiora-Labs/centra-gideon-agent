@@ -549,7 +549,9 @@ def snapshot_main(
                 staged_extra.append(rel)
 
         ws_files = sum(1 for _ in (stage / "workspace").rglob("*") if _.is_file())
-        sk_count = sum(1 for _ in (stage / "skills").iterdir() if _.is_dir())
+        from gideon.extensions.skills.loader import iter_skill_files
+
+        sk_count = len(iter_skill_files(stage / "skills"))
         manifest = {
             "version": 3,
             "domains": _domain_counts(stage),

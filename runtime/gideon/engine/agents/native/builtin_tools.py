@@ -1699,6 +1699,7 @@ class NativeBuiltinToolProvider(ToolProvider):
 
     async def _t_task_update(self, a: dict) -> ToolResult:
         from gideon.engine.tasks import reconcile, registry
+        from gideon.engine.tasks.rules import resolve_reject_write
 
         identifier = str(a.get("id", "")).strip()
         if not identifier:
@@ -1709,6 +1710,16 @@ class NativeBuiltinToolProvider(ToolProvider):
             return ToolResult(success=False, error=str(exc), recovery_hints=exc.hints)
         if not fields:
             return ToolResult(success=False, error="task_update: nothing to change")
+        refusal = await resolve_reject_write(identifier, fields)
+        if refusal:
+            return ToolResult(
+                success=False,
+                error=refusal,
+                metadata={"error": {"code": "engine_owned_field"}},
+                recovery_hints=[
+                    "Use workflow_skip or workflow_rewind on the owning run."
+                ],
+            )
         try:
             changed = await registry.update_task(identifier, **fields)
         except (reconcile.DependencyCycleError, ValueError) as exc:

@@ -59,7 +59,7 @@ export function TypingReveal({ text, mode, theme, onDone }: {
       style={{ background: bg, color: fg, tabSize: 2 }}>
       <code className="block px-0 py-2.5">
         {lines.map((ln, i) => (
-          <span key={i} className="grid grid-cols-[3.5ch_1fr] px-3">
+          <span key={i} className="grid grid-cols-[3.5ch_1fr] px-m">
             <span className="select-none pr-3 text-right" style={{ color: gutter }}>{i + 1}</span>
             <span className="whitespace-pre-wrap break-words">
               {ln}

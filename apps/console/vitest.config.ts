@@ -9,6 +9,8 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/shared/testing/setup.ts'],
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    pool: 'forks',
+    maxWorkers: 4,
     testTimeout: 20_000,
     hookTimeout: 20_000,
   },

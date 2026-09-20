@@ -156,7 +156,7 @@ def export_filename(title: str, key: str, fmt: str) -> str:
     alone produced names that broke the header for anyone whose chat titles aren't
     Latin — the fallback keeps the download working instead of failing on their locale.
     """
-    source = title or key or "chat"
+    source = redact_field(title or key or "chat")
     stem = "".join(
         ch if (ch.isascii() and ch.isalnum()) or ch in "-_" else "-" for ch in source
     )

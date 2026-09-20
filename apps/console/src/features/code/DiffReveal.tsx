@@ -123,7 +123,7 @@ function DiffLine({ text, gutter, bg, sign, caret, fg }: {
   text: string; gutter: string; bg?: string; sign?: '+' | '-'; caret?: boolean; fg?: string
 }) {
   return (
-    <span className="grid grid-cols-[2ch_1fr] px-3" style={bg ? { background: bg } : undefined}>
+    <span className="grid grid-cols-[2ch_1fr] px-m" style={bg ? { background: bg } : undefined}>
       <span className="select-none pr-2 text-center" style={{ color: gutter }}>{sign || ''}</span>
       <span className="whitespace-pre-wrap break-words">
         {text}

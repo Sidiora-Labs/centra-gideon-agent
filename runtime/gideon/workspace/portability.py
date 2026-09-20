@@ -325,8 +325,8 @@ def _remaining_export_paths(
     Derived from `durability.inventory.export_entries()` — which excludes `secret=True` and
     `derived=True` by construction, so a credential cannot arrive here by being newly declared. The
     three literal lists in `create_export_zip` are subtracted rather than replaced: they encode
-    per-entry reasons (the safe sqlite backup API for the databases, the `skills/auto` skip, the
-    `crons.json` note) that a generic pass would lose.
+    per-entry reasons (the safe sqlite backup API for the databases and the `crons.json` note) that
+    a generic pass would lose.
 
     Databases are deliberately NOT returned. They are already staged through `_backup_sqlite`, and a
     filesystem copy of a live WAL store can capture a torn page set — the hazard the snapshot path
@@ -502,8 +502,6 @@ def create_export_zip(domains: Sequence[str] | None = None) -> tuple[bytes, dict
                     if not _wanted(str(rel)):
                         continue
                     if is_sensitive_path(str(fpath)):
-                        continue
-                    if dirname == "skills" and "auto" in rel.parts:
                         continue
                     if _is_projected_db(rel.as_posix()):
                         continue
@@ -799,9 +797,6 @@ def apply_import_zip(zip_path: Path, mode: str = "merge") -> dict:
             summary["refused"] = stripped
 
         if mode == "replace":
-            auto_dir = snap / "skills" / "auto"
-            if auto_dir.is_dir():
-                shutil.rmtree(str(auto_dir))
             before = {p.name for p in pc.glob("pre-restore-*") if p.is_dir()}
             try:
                 _do_replace(snap, pc, None)
@@ -896,15 +891,8 @@ def apply_import_zip(zip_path: Path, mode: str = "merge") -> dict:
 
             if (snap / "skills").is_dir():
                 (pc / "skills").mkdir(parents=True, exist_ok=True)
-                # Skip skills/auto/ — those must go through ProcedureLibrary APIs
-                for item in (snap / "skills").iterdir():
-                    if item.name == "auto":
-                        continue
-                    target = pc / "skills" / item.name
-                    if item.is_dir() and not target.exists():
-                        shutil.copytree(str(item), str(target))
-                    elif item.is_file() and not target.exists():
-                        shutil.copy2(str(item), str(target))
+                _copy_tree_no_overwrite(snap / "skills", pc / "skills")
+                summary["items"].append("skills (merged)")
 
             imported_stores = 0
             for entry in _remaining_export_paths(snap):
@@ -919,6 +907,5 @@ def apply_import_zip(zip_path: Path, mode: str = "merge") -> dict:
                     imported_stores += 1
             if imported_stores:
                 summary["items"].append(f"{imported_stores} stores (merged)")
-                summary["items"].append("skills (merged, auto/ skipped)")
 
     return summary

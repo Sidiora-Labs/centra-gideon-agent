@@ -358,7 +358,7 @@ def _list_tools() -> list[dict[str, Any]]:
         {
             "name": "sheet_create",
             "description": (
-                "Generate a real spreadsheet (.xlsx) and save it as a versioned artifact. "
+                "Generate a real spreadsheet (.xlsx or single-sheet .csv) and save it as a versioned artifact. "
                 "Supply `sheets` as {sheet name: rows} for multiple tabs, or `rows` for a "
                 "single tab, or `csv` text. Row 0 is treated as the header. KEEP NUMBERS "
                 "AS NUMBERS (not strings) so the result can be summed and charted — that "
@@ -383,7 +383,7 @@ def _list_tools() -> list[dict[str, Any]]:
                     "csv": {"type": "string", "description": "Single-sheet CSV text"},
                     "format": {
                         "type": "string",
-                        "description": "Output format (default 'xlsx')",
+                        "description": "Output format: 'xlsx' (default) or 'csv'. CSV accepts exactly one sheet.",
                     },
                     "slug": {
                         "type": "string",
@@ -1073,6 +1073,7 @@ _DOC_MIME = {
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     "pdf": "application/pdf",
+    "csv": "text/csv",
 }
 
 
@@ -1105,7 +1106,11 @@ def _document_create(
     Generated document bytes must not enter a prompt (CONTEXT-ECONOMY); when the agent
     needs the content back it goes through the existing read path.
     """
-    from gideon.workspace.artifacts.models import MAX_BINARY_CONTENT_BYTES
+    from gideon.workspace.artifacts.models import (
+        MAX_BINARY_CONTENT_BYTES,
+        MAX_CONTENT_BYTES,
+        is_binary_kind,
+    )
     from gideon.workspace.documents import available_formats, get_writer
     from gideon.workspace.documents.from_markup import (
         document_from_html,
@@ -1122,6 +1127,9 @@ def _document_create(
             f"Error: no writer for format {fmt!r}. Available: "
             f"{', '.join(available_formats()) or 'none'}."
         )
+    if fmt == "csv" and name != "sheet_create":
+        _audit("denied", error="csv requires sheet input")
+        return "Error: CSV is a sheet format; use sheet_create with rows, csv, or one sheet."
 
     if name == "deck_create":
         from gideon.workspace.documents.from_markup import deck_from_markdown
@@ -1161,11 +1169,10 @@ def _document_create(
         elif isinstance(rows, list) and rows:
             model = SheetModel.from_rows({"Sheet1": [list(r) for r in rows]})
         elif csv_text.strip():
-            parsed: list[list[object]] = [
-                [c.strip() for c in line.split(",")]
-                for line in csv_text.replace("\r\n", "\n").split("\n")
-                if line.strip()
-            ]
+            import csv
+            import io
+
+            parsed: list[list[object]] = list(csv.reader(io.StringIO(csv_text)))
             model = SheetModel.from_rows({"Sheet1": parsed})
         else:
             _audit("denied", error="no sheet input")
@@ -1196,14 +1203,20 @@ def _document_create(
             _audit("denied", error="no document input")
             return "Error: provide markdown, html, or source."
 
+    if fmt == "csv" and len(model.sheets) != 1:
+        _audit("denied", error="csv requires exactly one sheet")
+        return "Error: CSV supports exactly one sheet; use xlsx for multiple sheets."
+
     try:
         data = writer(model)
     except Exception as e:  # noqa: BLE001 — a writer failure is a caller-facing refusal
         _audit("error", error=str(e))
         return f"Error: could not render the {fmt}: {e}"
 
-    if len(data) > MAX_BINARY_CONTENT_BYTES:
-        mb, cap = len(data) / 1_048_576, MAX_BINARY_CONTENT_BYTES / 1_048_576
+    binary = is_binary_kind(fmt)
+    size_cap = MAX_BINARY_CONTENT_BYTES if binary else MAX_CONTENT_BYTES
+    if len(data) > size_cap:
+        mb, cap = len(data) / 1_048_576, size_cap / 1_048_576
         _audit("denied", error=f"oversized {len(data)}")
         return (
             f"Error: the generated {fmt} came to {mb:.1f}MB (cap {cap:.0f}MB). "
@@ -1212,16 +1225,32 @@ def _document_create(
 
     display_name = str(args.get("name") or "").strip() or f"Untitled {fmt}"
     slug = str(args.get("slug") or "").strip()
-    if slug and prov.get(slug) is not None:
+    existing = prov.get(slug) if slug else None
+    if existing is not None and existing.kind != fmt:
+        _audit("denied", slug, f"format mismatch: {existing.kind} != {fmt}")
+        return (
+            f"Error: artifact {slug!r} is {existing.kind}, not {fmt}; "
+            "omit slug to create a new file."
+        )
+    if existing is not None and binary:
         art = prov.update_binary(
             slug,
             data=data,
-            mime=_DOC_MIME.get(fmt, "application/octet-stream"),
+            mime=_DOC_MIME[fmt],
             event_type="iterated",
             actor="agent",
             session_id=sk,
         )
-    else:
+    elif existing is not None:
+        art = prov.update(
+            slug,
+            content=data.decode("utf-8"),
+            snapshot=True,
+            event_type="iterated",
+            actor="agent",
+            session_id=sk,
+        )
+    elif binary:
         art = prov.create_binary(
             name=display_name,
             data=data,
@@ -1235,10 +1264,29 @@ def _document_create(
             session_id=sk,
             project_id=_current_project_id(),
         )
+    else:
+        art = prov.create(
+            name=display_name,
+            content=data.decode("utf-8"),
+            kind=fmt,
+            source="chat",
+            slug=slug or None,
+            description=str(args.get("description") or ""),
+            tags=args.get("tags") or None,
+            actor="agent",
+            session_id=sk,
+            project_id=_current_project_id(),
+        )
     _audit("success", art.slug)
-    return (
-        f"Created {fmt}: {art.slug} (v{art.version}, {len(data) / 1024:.0f}KB). "
+    verb = "Updated" if existing is not None else "Created"
+    location = (
         f"Download at /api/artifacts/{art.slug}/raw"
+        if binary
+        else f"Open at /api/artifacts/{art.slug}"
+    )
+    return (
+        f"{verb} {fmt}: {art.slug} (v{art.version}, {len(data) / 1024:.0f}KB). "
+        f"{location}"
     )
 
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   eventDormancyReason, eventIsDormant, lifecycleEventMeta, storeToTrigger, scheduleToTrigger,
   EVENT_PATTERN_META, eventPatternMeta, eventSourceIcon, eventSourceLabel,
-  appEventOptions, actionIsSendCapable, eventToTrigger,
+  appEventOptions, actionIsSendCapable, eventToTrigger, triggerStatusMeta,
 } from './triggerMeta'
 import type { TriggerVariables, Trigger as WireTrigger, ScheduleJob } from '../../shared/data/api'
 
@@ -100,6 +100,13 @@ describe('scheduleToTrigger', () => {
 
   it('defaults broken to an empty array for a healthy schedule', () => {
     expect(scheduleToTrigger(schedRow()).broken).toEqual([])
+  })
+
+  it('preserves clock state, health, and the redacted boundary reason', () => {
+    const t = scheduleToTrigger(schedRow({
+      state: 'autopaused', health: 'failing', last_error: 'safe failure summary',
+    } as Partial<ScheduleJob>))
+    expect([t.state, t.health, t.lastError]).toEqual(['autopaused', 'failing', 'safe failure summary'])
   })
 })
 
@@ -288,6 +295,15 @@ describe('eventToTrigger', () => {
     expect(t.lastStatus).toBeNull()
   })
 
+  it('preserves event state, health, last error, and run metadata', () => {
+    const t = eventToTrigger({
+      ...wire, state: 'parked', health: 'parked', last_error: 'delivery unavailable',
+      last_run_ts: 1786000000, last_run_status: 'ran',
+    } as unknown as WireTrigger)
+    expect([t.state, t.health, t.lastError]).toEqual(['parked', 'parked', 'delivery unavailable'])
+    expect([t.lastRunTs, t.lastStatus]).toEqual([1786000000, 'ran'])
+  })
+
   it('carries only the ONE matcher its pattern reads', () => {
     expect(eventToTrigger(wire).eventMatcher).toBe('project.acme.*')
     const anyWrite = eventToTrigger({ ...wire, pattern: 'MemoryUpdate' } as unknown as WireTrigger)
@@ -307,5 +323,24 @@ describe('eventToTrigger', () => {
     expect(t.hook).toBeUndefined()
     expect(t.store).toBeUndefined()
     expect(t.event).toBeTruthy()
+  })
+})
+
+describe('triggerStatusMeta', () => {
+  it('keeps a healthy active trigger that has not run in the never-run state', () => {
+    const t = scheduleToTrigger({
+      id: 'clock:new', name: 'New', message: '', enabled: true, schedule: 'hourly',
+      health: 'ok', state: 'active',
+    } as ScheduleJob)
+    expect(triggerStatusMeta(t).label).toBe('never run')
+  })
+
+  it('lets lifecycle state and unhealthy rollups outrank a prior run outcome', () => {
+    const t = eventToTrigger({
+      kind: 'event', id: 'event:x', raw_id: 'x', name: 'X', enabled: true,
+      action: { provider: 'notify', config: {} }, state: 'parked', health: 'parked',
+      last_run_ts: 1786000000, last_run_status: 'ran', last_error: 'safe reason',
+    } as WireTrigger)
+    expect(triggerStatusMeta(t)).toMatchObject({ label: 'parked', reason: 'safe reason' })
   })
 })

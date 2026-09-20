@@ -4,6 +4,9 @@ import { ArrowRight, Loader2, type LucideIcon } from 'lucide-react'
 import { Toggle } from '../../shared/ui/Toggle'
 import { StatusPill as UiStatusPill } from '../../shared/ui/StatusPill'
 import { StaleNotice } from '../../shared/ui/StaleNotice'
+import { InlineError } from '../../shared/ui/InlineError'
+import { readableErrText } from '../../shared/data/errText'
+import type { QueryStatus } from '../../shared/data/data'
 import { spring, expr } from '../../shared/theme/motion'
 import { fvs, withWeight } from '../../shared/theme/fontWeight'
 
@@ -31,12 +34,16 @@ export function Highlight({ text, query }: { text: string; query: string }) {
   return <>{out}</>
 }
 
-export function BentoCard({ icon: Icon, title, query, onClick, loading, stale, accent, footer, rows, children }: {
+export function BentoCard({ icon: Icon, title, query, onClick, loading, status, error, refresh, operation, stale, accent, footer, rows, children }: {
   icon: LucideIcon
   title: string
   query?: string
   onClick: () => void
   loading?: boolean
+  status?: QueryStatus
+  error?: unknown
+  refresh?: () => void
+  operation?: string
   stale?: boolean
   accent?: string
   footer?: ReactNode
@@ -44,6 +51,9 @@ export function BentoCard({ icon: Icon, title, query, onClick, loading, stale, a
   children?: ReactNode
 }) {
   const tint = accent || 'var(--color-primary)'
+  const failed = status === 'error'
+  const waiting = status ? status === 'loading' : !!loading
+  const serverWords = readableErrText(error) || "The server didn't respond."
   return (
     <motion.div
       layout
@@ -56,7 +66,7 @@ export function BentoCard({ icon: Icon, title, query, onClick, loading, stale, a
       {
 }
       <button type="button" onClick={onClick} aria-label={`Open ${title} settings`}
-        aria-busy={loading || undefined}
+        aria-busy={waiting || undefined}
         className="absolute inset-0 z-0 rounded-xl outline-none" />
       { }
       <div className="pointer-events-none relative z-10 flex min-h-0 flex-col">
@@ -67,10 +77,14 @@ export function BentoCard({ icon: Icon, title, query, onClick, loading, stale, a
           <span data-type="title-m" className="flex-1 truncate text-on-surface" style={fvs(600)}>
             {query ? <Highlight text={title} query={query} /> : title}
           </span>
-          <StaleNotice stale={!loading && !!stale} what={title.toLowerCase()} announce={false} className="shrink-0" />
+          <StaleNotice stale={!waiting && !!stale} what={title.toLowerCase()} announce={false} className="shrink-0" />
           <ArrowRight size={14} className="shrink-0 text-on-surface-low transition-transform group-hover:translate-x-0.5" />
         </div>
-        {loading
+        {failed
+          ? <div className="pointer-events-auto" onClick={(e) => e.stopPropagation()}>
+              <InlineError icon multiline onRetry={refresh}>Couldn&rsquo;t load {operation ?? title.toLowerCase()}: {serverWords}</InlineError>
+            </div>
+          : waiting
           ? <CardSkeleton rows={rows ?? 2} />
           : <div className="flex min-h-0 flex-1 flex-col">{children}</div>}
         {footer && <div data-type="caption" className="mt-2 text-on-surface-low">{footer}</div>}

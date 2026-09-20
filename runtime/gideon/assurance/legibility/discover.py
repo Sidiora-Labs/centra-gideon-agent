@@ -397,9 +397,18 @@ def compute_discover(state: Any = None) -> dict[str, Any]:
     dismissed = load_dismissed()
     engaged = compute_engaged(state)
     visible = select_visible(dismissed=dismissed, engaged=engaged)
+    dismissed_count = sum(tip.id in dismissed for tip in CATALOG)
+    engaged_count = sum(
+        tip.id not in dismissed
+        and bool(tip.engaged_key)
+        and bool(engaged.get(tip.engaged_key))
+        for tip in CATALOG
+    )
     return {
         "enabled": True,
         "areas": _group_by_area(visible),
         "visible_count": len(visible),
         "total": len(CATALOG),
+        "dismissed_count": dismissed_count,
+        "engaged_count": engaged_count,
     }

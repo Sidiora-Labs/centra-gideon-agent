@@ -84,7 +84,7 @@ def _serialize_event(t) -> dict[str, Any]:
         "action": {"provider": t.action_provider, "config": t.action_config},
         "state": t.state,
         "health": _event_health(t),
-        "last_error": t.park_reason,
+        "last_error": _redact(t.park_reason),
     }
 
 
@@ -781,6 +781,9 @@ def _create_event(body: dict) -> web.Response:
             status=400,
         )
     action = body.get("action") or {}
+    refusal = _provider_refusal({"provider": action.get("provider") or "notify"})
+    if refusal is not None:
+        return refusal
     t = EventTrigger(
         id=str(body.get("name") or uuid.uuid4().hex[:8]).strip(),
         pattern=pattern,
@@ -823,6 +826,9 @@ async def _create_lifecycle(
     )
 
     action = body.get("action") or {}
+    refusal = _provider_refusal({"provider": action.get("provider", "")})
+    if refusal is not None:
+        return refusal
     payload = {
         "name": body.get("name", ""),
         "event": body.get("event", ""),
@@ -1069,6 +1075,13 @@ def _update_event(raw: str, body: dict) -> web.Response:
     if trigger is None:
         return web.json_response({"error": "not found"}, status=404)
 
+    action = body.get("action") if isinstance(body.get("action"), dict) else {}
+    refusal = _provider_refusal(
+        {"provider": action.get("provider") or trigger.action_provider}
+    )
+    if refusal is not None:
+        return refusal
+
     if "pattern" in body:
         pattern = str(body.get("pattern") or "").strip()
         if pattern not in EVENT_PATTERNS:
@@ -1142,6 +1155,12 @@ async def _update_lifecycle(state: ConsoleState, raw: str, body: dict) -> web.Re
             patch["provider"] = body["action"]["provider"]
         if "config" in body["action"]:
             patch["provider_config"] = body["action"]["config"] or {}
+    current = _hook_store(state).get(raw)
+    if current is None:
+        return web.json_response({"error": "not found"}, status=404)
+    refusal = _provider_refusal({"provider": patch.get("provider", current.provider)})
+    if refusal is not None:
+        return refusal
     try:
         validated = validate_tool_args(patch, HOOK_UPDATE_SCHEMA)
     except ValidationError as exc:
@@ -1243,6 +1262,9 @@ async def _update_schedule(
             patch["name"] = str(kwargs["name"])
         if "action" in kwargs and isinstance(kwargs["action"], dict):
             patch["workflow"] = {"inline": kwargs["action"]}
+            refusal = _provider_refusal(patch["workflow"])
+            if refusal is not None:
+                return refusal
         if "channel" in kwargs or "silent" in kwargs:
             silent = bool(kwargs.get("silent", row.trigger.delivery == "none"))
             channel_id = kwargs.get("channel", channel_of(row.trigger))
@@ -1294,6 +1316,15 @@ async def _update_schedule(
         return web.json_response({"ok": True, "trigger": projected})
 
     return web.json_response({"error": "not found"}, status=404)
+
+
+def _provider_refusal(workflow: dict[str, Any]) -> web.Response | None:
+    from gideon.automation.triggers.tools import unknown_action_provider
+
+    refusal = unknown_action_provider(workflow)
+    if refusal is None:
+        return None
+    return web.json_response({"error": refusal.text, **refusal.data}, status=400)
 
 
 def _carried(spec: dict[str, Any]) -> dict[str, Any]:
@@ -2202,8 +2233,26 @@ async def api_triggers_doctor(request: web.Request) -> web.Response:
             {
                 "id": f"{_EVENT}:{trigger.id}",
                 "gates": {},
-                "workflow": {},
+                "workflow": {
+                    "provider": trigger.action_provider,
+                    "config": trigger.action_config,
+                },
                 "spec": {"glob": trigger.key_glob or ""},
+            }
+        )
+
+    state: ConsoleState = request.app["state"]
+    for hook in _hook_store(state).list_all():
+        rows.append(
+            {
+                "id": f"{_LIFECYCLE}:{hook.id}",
+                "gates": {},
+                "workflow": {
+                    "provider": hook.provider,
+                    "config": hook.provider_config,
+                },
+                "spec": {},
+                "capabilities": {},
             }
         )
 

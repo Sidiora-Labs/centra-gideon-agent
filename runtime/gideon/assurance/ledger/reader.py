@@ -95,7 +95,7 @@ def run_totals(store: LedgerStore, run_id: str) -> dict[str, Any]:
     ``priced`` is a claim about MONEY in both money surfaces, and widening it to mean "and the
     token count is a floor too" would give one word two meanings. See #2566.
     """
-    tokens = 0
+    tokens: int | None = 0
     cost = 0.0
     steps = 0
     failures = 0
@@ -105,7 +105,13 @@ def run_totals(store: LedgerStore, run_id: str) -> dict[str, Any]:
         kind = rec.get("kind")
         if kind == STEP_COMPLETED:
             steps += 1
-            tokens += int(rec.get("tokens", 0) or 0)
+            if tokens is not None:
+                recorded_tokens = rec.get("tokens")
+                tokens = (
+                    tokens + int(recorded_tokens or 0)
+                    if recorded_tokens is not None
+                    else None
+                )
             cost += float(rec.get("cost_usd", 0.0) or 0.0)
             if rec.get("cost_usd") is None:
                 priced = False

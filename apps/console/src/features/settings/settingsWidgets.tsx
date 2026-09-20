@@ -2,7 +2,7 @@ import {
   User, Palette, MessageSquare, Plug, Cpu, FileText, Database, Bot, AudioLines,
   Inbox, Bell, Shield, ShieldAlert, ScrollText, Archive, FolderSync, DownloadCloud, CheckCircle2, Search, Blocks, Activity, Compass, Stethoscope, Scissors, ThumbsUp, HardDriveDownload, Coins, Route, Trophy,
   MonitorSmartphone, Plug2, FileType2, LayoutDashboard, Smartphone, Rss, Package, FlaskConical, KeyRound,
-  MessageCircle, SlidersHorizontal,
+  MessageCircle, SlidersHorizontal, Workflow, Repeat,
 } from 'lucide-react'
 import { verifiedScope } from './AuditPanel'
 import type { LucideIcon } from 'lucide-react'
@@ -112,6 +112,8 @@ const usePacksCfg = () => useQuery('settings:packs', () =>
 const usePacksInstalled = () => useQuery('settings:packs:installed', () =>
   api.packsInstalled().catch(() => [] as InstalledPackRec[]), { persist: true })
 const useCompanionDiscovery = () => useQuery('settings:companion:discovery', () => api.companionDiscovery())
+const useWorkflows = () => useQuery('settings:workflows-card', () => api.workflowDefs().then((d) => d.defs), { persist: true })
+const useAutonomousLoops = () => useQuery('settings:autonomous-loops-card', () => api.uLoops().then((loops) => loops.filter((loop) => loop.kind !== 'code')), { persist: false })
 
 async function mutate(fn: () => Promise<unknown>, ...affects: CacheKeySpec[]) {
   try {
@@ -130,6 +132,32 @@ export const SETTINGS_WIDGETS: SettingsWidget[] = [
     description: 'Sandbox, routing, updates, loops, workflows, learning, knowledge, local models, and tool groups.',
     useSearchText() { return 'sandbox routing updates loops workflows learning knowledge local models tool groups runtime configuration' },
     render(query, go) { return <BentoCard icon={SlidersHorizontal} title="Runtime configuration" query={query} onClick={() => go('runtime-config')}><div data-type="body-s" className="text-on-surface-low">Nine editable runtime sections</div></BentoCard> },
+  },
+  {
+    id: 'workflows', group: 'System', label: 'Workflows', icon: Workflow, size: 'sm',
+    description: 'Installed workflow definitions for repeatable multi-step operations.',
+    useSearchText() { const { data } = useWorkflows(); return `workflows definitions operations ${data?.map((workflow) => workflow.name).join(' ') ?? ''}` },
+    render(query, go) {
+      const { data, status, error, refresh, stale } = useWorkflows()
+      return <BentoCard icon={Workflow} title="Workflows" query={query} onClick={() => go('runtime-config')}
+        status={status} error={error} refresh={refresh} operation="workflows" stale={stale}>
+        {data && <BigStat value={data.length} caption={data.length === 1 ? 'workflow installed' : 'workflows installed'} />}
+      </BentoCard>
+    },
+  },
+  {
+    id: 'autonomous-loops', group: 'System', label: 'Autonomous loops', icon: Repeat, size: 'sm',
+    description: 'Long-running autonomous operations and their current server state.',
+    useSearchText() { const { data } = useAutonomousLoops(); return `autonomous loops operations ${data?.map((loop) => `${loop.name} ${loop.status}`).join(' ') ?? ''}` },
+    render(query, go) {
+      const { data, status, error, refresh, stale } = useAutonomousLoops()
+      const running = data?.filter((loop) => loop.status === 'running').length ?? 0
+      return <BentoCard icon={Repeat} title="Autonomous loops" query={query} onClick={() => go('runtime-config')}
+        status={status} error={error} refresh={refresh} operation="autonomous loops" stale={stale}>
+        {data && <><BigStat value={data.length} caption={data.length === 1 ? 'loop' : 'loops'} />
+          <div data-type="caption" className="mt-1.5 text-on-surface-low">{running} running</div></>}
+      </BentoCard>
+    },
   },
   {
     id: 'account', group: 'General', label: 'Account', icon: User, size: 'sm',
@@ -652,7 +680,7 @@ export const SETTINGS_WIDGETS: SettingsWidget[] = [
         <BentoCard icon={ScrollText} title="Audit log" query={query} onClick={() => go('audit')} loading={v === undefined} stale={vStale}>
           {v && (v.ok
             ? <><StatusPill label="Chain intact" tone="ok" />{typeof v.checked === 'number' && <div data-type="caption" className="mt-1.5 text-on-surface-low">{verifiedScope(v)} verified</div>}</>
-            : <><StatusPill label="Chain broken" tone="warn" />{(v.error || v.tampered) && <div data-type="caption" className="mt-1.5 text-on-surface-low">{v.error || `${v.tampered} altered`}</div>}</>)}
+            : <><StatusPill label="Chain broken" tone="warn" />{typeof v.tampered === 'number' && <div data-type="caption" className="mt-1.5 text-on-surface-low">{v.tampered} altered</div>}</>)}
         </BentoCard>
       )
     },

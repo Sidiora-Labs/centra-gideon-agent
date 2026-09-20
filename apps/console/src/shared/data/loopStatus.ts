@@ -35,8 +35,8 @@ export function loopStatusColor(status: string): string {
   return loopStatusLook(status).accent || NEUTRAL_ACCENT
 }
 
-export function effectiveLoopStatus(status: string, errorMessage?: string | null): string {
-  return status === 'complete' && errorMessage ? 'ended_early' : status
+export function effectiveLoopStatus(status: string, stopReason?: string | null): string {
+  return status === 'complete' && stopReason && stopReason !== 'done' ? 'ended_early' : status
 }
 
 export function loopStatusTone(status: string, mix = 16): CSSProperties {

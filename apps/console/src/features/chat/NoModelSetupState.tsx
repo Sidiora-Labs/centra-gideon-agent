@@ -42,7 +42,7 @@ export function NoModelSetupState({ detail, onSetup }: { detail: string; onSetup
             <summary data-type="caption" className="cursor-pointer text-on-surface-low hover:text-on-surface-var">
               Technical details
             </summary>
-            <pre data-type="caption" className="mt-1.5 whitespace-pre-wrap break-words rounded-md bg-surface-high px-2.5 py-2 font-mono text-on-surface-low">
+            <pre data-type="caption" className="mt-1.5 whitespace-pre-wrap break-words rounded-md bg-surface-high px-2.5 py-s font-mono text-on-surface-low">
               {detail}
             </pre>
           </details>

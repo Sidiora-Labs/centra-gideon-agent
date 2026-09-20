@@ -62,7 +62,7 @@ export function ArtifactDeploy({ slug, kind }: { slug: string; kind: ArtifactKin
             <Rocket size={13} className="shrink-0 text-primary" />
             <span className="text-on-surface-low">Deployed at</span>
             <code className="truncate rounded bg-surface-high px-1.5 py-0.5 font-mono text-on-surface">{dep.url}</code>
-            <div className="ml-auto flex items-center gap-1">
+            <div className="ml-auto flex items-center gap-xs">
               <QuietButton onClick={() => setPreview((v) => !v)} ariaExpanded={preview}
                 title={preview ? 'Hide the embedded preview' : 'Open the deployed page in a pane here'}>
                 <PanelTop size={13} /> {preview ? 'Hide preview' : 'Preview'}
@@ -70,7 +70,7 @@ export function ArtifactDeploy({ slug, kind }: { slug: string; kind: ArtifactKin
               {
 }
               <a href={dep.url} target="_blank" rel="noopener noreferrer"
-                className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[0.75rem] text-on-surface-low hover:bg-surface-high hover:text-on-surface"
+                className="inline-flex h-7 items-center gap-xs rounded-md px-2 text-[0.75rem] text-on-surface-low hover:bg-surface-high hover:text-on-surface"
                 title="Open the deployed page in a new tab">
                 <ExternalLink size={13} /> Open
               </a>

@@ -36,7 +36,7 @@ export function KeyValueFields({ obj, label = 'Input' }: { obj: Record<string, u
   return (
     <div className="mb-1.5">
       <div data-type="caption" className="mb-1 text-on-surface-low uppercase tracking-wide">{label}</div>
-      <div className="flex flex-col gap-1.5 rounded-md bg-surface-low px-2.5 py-2">
+      <div className="flex flex-col gap-1.5 rounded-md bg-surface-low px-2.5 py-s">
         {entries.map(([k, v]) => (
           <div key={k} className="flex flex-col gap-0.5">
             <span data-type="caption" className="font-mono text-on-surface-low uppercase tracking-wide">{k}</span>

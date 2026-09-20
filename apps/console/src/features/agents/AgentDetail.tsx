@@ -9,7 +9,7 @@ import { confirmDelete } from '../../shared/ui/dialog'
 import { Skeleton } from '../../shared/ui/ListScaffold'
 import { useQuery } from '../../shared/data/data'
 import { api, type SavedAgent, type DiscoveredAgent, type McpActiveServer, type AgentHook } from '../../shared/data/api'
-import { useActiveChatModelOptions } from '../../shared/data/agents'
+import { AGENT_ROUTING_MUTES_KEY, canonicalAgentKey, unmuteAgent, useActiveChatModelOptions } from '../../shared/data/agents'
 import { providerMeta, isReservedAgent } from './agentMeta'
 import { AgentForm, toDraft, draftToPayload } from './AgentForm'
 import { accentChip, toneChipSkin } from '../../shared/theme/accent'
@@ -78,15 +78,10 @@ function RoutingNotesEditor({ agentName }: { agentName: string }) {
   </Section>
 }
 function RoutingStatusView({ agentName }: { agentName: string }) {
-  const [muted, setMuted] = useState<boolean | null>(null)
+  const { data: status } = useQuery(AGENT_ROUTING_MUTES_KEY, api.routingStatus)
   const operation = useAgentWrite(agentName)
-  useEffect(() => {
-    let current = true
-    setMuted(null)
-    api.routingStatus().then(status => { if (current) setMuted((status.muted ?? []).includes(agentName)) }).catch(() => { if (current) setMuted(false) })
-    return () => { current = false }
-  }, [agentName])
-  return <Section label="Routing status">{muted === null ? <Skeleton className="h-6 w-40 rounded-md" /> : muted ? <div data-type="body-s" className="flex flex-wrap items-center gap-s"><span className="inline-flex items-center gap-1.5 text-on-surface-var"><VolumeX size={14} /> Muted — the auto-router stopped suggesting this agent.</span><Button size="sm" loading={operation.busy} onClick={() => operation.write(() => api.routingUnmute(agentName), () => setMuted(false), 'Unmute failed')}>Unmute</Button>{operation.error && <span role="alert" data-type="caption" className="text-danger">{operation.error}</span>}</div> : <p data-type="caption" className="text-on-surface-low">Active — eligible for auto-routing suggestions.</p>}</Section>
+  const muted = status?.muted.some(agent => canonicalAgentKey(agent) === canonicalAgentKey(agentName))
+  return <Section label="Routing status">{status === undefined ? <Skeleton className="h-6 w-40 rounded-md" /> : muted ? <div data-type="body-s" className="flex flex-wrap items-center gap-s"><span className="inline-flex items-center gap-1.5 text-on-surface-var"><VolumeX size={14} /> Muted — the auto-router stopped suggesting this agent.</span><Button size="sm" ariaLabel={`Unmute ${agentName}`} loading={operation.busy} onClick={() => operation.write(() => unmuteAgent(agentName), () => {}, 'Unmute failed')}>Unmute</Button>{operation.error && <span role="alert" data-type="caption" className="text-danger">{operation.error}</span>}</div> : <p data-type="caption" className="text-on-surface-low">Active — eligible for auto-routing suggestions.</p>}</Section>
 }
 function AgentMcpView({ agentName }: { agentName: string }) {
   const { data: servers } = useQuery<McpActiveServer[]>(`agent:mcp:${agentName}`, () => api.mcpActive(agentName).catch(() => []), { persist: false })

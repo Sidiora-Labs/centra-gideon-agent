@@ -888,20 +888,24 @@ class TestTerminalSession:
 
 
 class TestPersistence:
+    def test_uses_canonical_tmux_capability_probe(self, monkeypatch):
+        monkeypatch.setattr(terminal.tmux_substrate, "tmux_available", lambda: True)
+        assert terminal._tmux_available() is True
+
     def test_persist_off_by_default(self, tmp_path, monkeypatch):
         cfg_file = tmp_path / "config.json"
         cfg_file.write_text(json.dumps({"dashboard": {"terminal": {"enabled": True}}}))
         monkeypatch.setattr(terminal, "config_path", lambda: cfg_file)
-        monkeypatch.setattr(terminal.shutil, "which", lambda _b: "/usr/bin/tmux")
+        monkeypatch.setattr(terminal.tmux_substrate, "tmux_available", lambda: True)
         assert terminal._persist_enabled(_make_request()) is False
 
     def test_persist_requires_both_flag_and_tmux(self, tmp_path, monkeypatch):
         cfg_file = tmp_path / "config.json"
         cfg_file.write_text(json.dumps({"dashboard": {"terminal": {"persist": True}}}))
         monkeypatch.setattr(terminal, "config_path", lambda: cfg_file)
-        monkeypatch.setattr(terminal.shutil, "which", lambda _b: "/usr/bin/tmux")
+        monkeypatch.setattr(terminal.tmux_substrate, "tmux_available", lambda: True)
         assert terminal._persist_enabled(_make_request()) is True
-        monkeypatch.setattr(terminal.shutil, "which", lambda _b: None)
+        monkeypatch.setattr(terminal.tmux_substrate, "tmux_available", lambda: False)
         assert terminal._persist_enabled(_make_request()) is False
 
     @pytest.mark.asyncio
@@ -916,16 +920,19 @@ class TestPersistence:
 
     @pytest.mark.asyncio
     async def test_list_tmux_sessions_empty_without_tmux(self, monkeypatch):
-        async def _boom(*a, **k):
-            raise FileNotFoundError("tmux")
+        async def _empty():
+            return []
 
-        monkeypatch.setattr(terminal.asyncio, "create_subprocess_exec", _boom)
+        monkeypatch.setattr(terminal.tmux_substrate, "list_sessions", _empty)
         assert await terminal._list_tmux_sessions() == []
 
     @pytest.mark.asyncio
     async def test_kill_tmux_session_best_effort_no_tmux(self, monkeypatch):
-        async def _boom(*a, **k):
-            raise FileNotFoundError("tmux")
+        killed = []
 
-        monkeypatch.setattr(terminal.asyncio, "create_subprocess_exec", _boom)
+        async def _kill(name):
+            killed.append(name)
+
+        monkeypatch.setattr(terminal.tmux_substrate, "kill_session", _kill)
         await terminal._kill_tmux_session("abc.123")
+        assert killed == ["gideon-abc_123"]

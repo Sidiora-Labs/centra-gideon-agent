@@ -1782,7 +1782,20 @@ async def api_file_git_status(request: web.Request) -> web.Response:
     if not branch:
         branch = (await _git(["rev-parse", "--abbrev-ref", "HEAD"], repo)).out.strip()
     porcelain = (await _git(["status", "--porcelain", "-z"], repo)).out
+    statuses = await _git_statuses(repo, porcelain)
+
+    _sel().log_tool_invocation(
+        session_key="dashboard",
+        tool_name="git_status",
+        outcome="success",
+        resources=repo,
+    )
+    return web.json_response({"repoRoot": repo, "branch": branch, "statuses": statuses})
+
+
+async def _git_statuses(repo: str, porcelain: str) -> dict[str, str]:
     statuses: dict[str, str] = {}
+    collapsed: list[str] = []
     parts = porcelain.split("\0")
     i = 0
     while i < len(parts):
@@ -1792,19 +1805,30 @@ async def api_file_git_status(request: web.Request) -> web.Response:
             continue
         code = entry[:2].strip() or entry[:2]
         rel = entry[3:]
-        statuses[os.path.join(repo, rel)] = code
+        if rel.endswith("/"):
+            collapsed.append(rel.rstrip("/"))
+        else:
+            statuses[os.path.join(repo, rel)] = code
         if entry[:1] in ("R", "C"):
             i += 2
         else:
             i += 1
 
-    _sel().log_tool_invocation(
-        session_key="dashboard",
-        tool_name="git_status",
-        outcome="success",
-        resources=repo,
-    )
-    return web.json_response({"repoRoot": repo, "branch": branch, "statuses": statuses})
+    if collapsed:
+        untracked = (
+            await _git(
+                ["ls-files", "--others", "--exclude-standard", "--", *collapsed], repo
+            )
+        ).out
+        for rel in untracked.splitlines():
+            statuses[os.path.join(repo, rel)] = "??"
+
+    for path, code in list(statuses.items()):
+        parent = os.path.dirname(path.rstrip(os.sep))
+        while parent != repo and parent.startswith(repo + os.sep):
+            statuses.setdefault(parent, code)
+            parent = os.path.dirname(parent)
+    return statuses
 
 
 async def api_file_git_log(request: web.Request) -> web.Response:
@@ -2115,14 +2139,12 @@ async def api_file_complete(request: web.Request) -> web.Response:
         parent, prefix = os.path.dirname(expanded), os.path.basename(expanded)
     parent_ok = _validate_dashboard_path(parent)
     if not parent_ok or not os.path.isdir(parent_ok):
-        return web.json_response({"suggestions": []})
+        return web.json_response({"suggestions": [], "truncated": False})
 
-    out: list[dict] = []
+    candidates: list[tuple[bool, str, str]] = []
     try:
         with os.scandir(parent_ok) as it:
             for de in it:
-                if len(out) >= limit:
-                    break
                 if prefix and not de.name.startswith(prefix):
                     continue
                 try:
@@ -2131,15 +2153,22 @@ async def api_file_complete(request: web.Request) -> web.Response:
                     continue
                 if kind == "dir" and not is_dir:
                     continue
-                full = os.path.realpath(de.path)
-                if _validate_dashboard_path(full) is None:
-                    continue
-                out.append({"name": de.name, "path": full, "is_dir": is_dir})
+                candidates.append((is_dir, de.name, de.path))
     except OSError:
-        return web.json_response({"suggestions": []})
+        return web.json_response({"suggestions": [], "truncated": False})
 
-    out.sort(key=lambda e: (not e["is_dir"], e["name"].lower()))
-    return web.json_response({"suggestions": out})
+    candidates.sort(key=lambda entry: (not entry[0], entry[1].lower()))
+    out: list[dict] = []
+    truncated = False
+    for is_dir, name, path in candidates:
+        full = os.path.realpath(path)
+        if _validate_dashboard_path(full) is None:
+            continue
+        if len(out) == limit:
+            truncated = True
+            break
+        out.append({"name": name, "path": full, "is_dir": is_dir})
+    return web.json_response({"suggestions": out, "truncated": truncated})
 
 
 def _reject_name(name: str) -> str:
@@ -2894,65 +2923,6 @@ async def api_create_dir(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "path": target})
 
 
-_DASHBOARD_WIDGET_IDS = {
-    "hero",
-    "action-center",
-    "active-work",
-    "ask",
-    "suggestions",
-    "tasks",
-    "schedule",
-    "knowledge",
-    "memory",
-    "system",
-}
-
-
-def _sanitize_dashboard_layout(raw: object) -> dict | None:
-    """Validate + normalize a persisted dashboard layout. Returns the cleaned dict,
-    an empty dict (reset-to-default), or None if the shape is invalid (→ 400).
-
-    Shape: ``{"widgets": [{"id","x","y","w","h","hidden"?}], "v": 1}``. Numeric
-    fields are coerced + clamped to the 12-col grid; unknown widget ids are dropped;
-    an empty/absent widgets list is treated as reset."""
-    if raw is None or raw == {}:
-        return {}
-    if not isinstance(raw, dict):
-        return None
-    widgets_in = raw.get("widgets")
-    if not isinstance(widgets_in, list):
-        return None
-    seen: set[str] = set()
-    widgets_out: list[dict] = []
-    for w in widgets_in:
-        if not isinstance(w, dict):
-            return None
-        wid = w.get("id")
-        if wid not in _DASHBOARD_WIDGET_IDS or wid in seen:
-            continue
-        seen.add(wid)
-        try:
-            x = max(0, min(11, int(w.get("x", 0))))
-            y = max(0, min(200, int(w.get("y", 0))))
-            width = max(1, min(12, int(w.get("w", 4))))
-            height = max(1, min(12, int(w.get("h", 2))))
-        except (TypeError, ValueError):
-            return None
-        widgets_out.append(
-            {
-                "id": wid,
-                "x": x,
-                "y": y,
-                "w": width,
-                "h": height,
-                "hidden": bool(w.get("hidden", False)),
-            }
-        )
-    if not widgets_out:
-        return {}
-    return {"widgets": widgets_out, "v": 1}
-
-
 async def api_dashboard_config(request: web.Request) -> web.Response:
     """GET/PUT /api/dashboard/config — read or write dashboard settings."""
     cfg = AppConfig.load()
@@ -2983,7 +2953,6 @@ async def api_dashboard_config(request: web.Request) -> web.Response:
             "stream_reveal",
             "screen_share_enabled",
             "document_editing",
-            "dashboard_layout",
         }
         unknown = set(body.keys()) - _allowed
         if unknown:
@@ -3107,21 +3076,6 @@ async def api_dashboard_config(request: web.Request) -> web.Response:
                         {"error": f"{_bool_field} must be a boolean"}, status=400
                     )
                 setattr(cfg.dashboard, _bool_field, val)
-        if "dashboard_layout" in body:
-            layout = _sanitize_dashboard_layout(body["dashboard_layout"])
-            if layout is None:
-                _sel().log_tool_invocation(
-                    session_key="dashboard",
-                    tool_name="dashboard_config_write",
-                    outcome="failure",
-                )
-                return web.json_response(
-                    {
-                        "error": "dashboard_layout must be {widgets:[{id,x,y,w,h,hidden?}], v} or {} to reset"  # noqa: E501
-                    },
-                    status=400,
-                )
-            cfg.dashboard.dashboard_layout = layout
         cfg.save()
         _sel().log_tool_invocation(
             session_key="dashboard",
@@ -3150,6 +3104,5 @@ async def api_dashboard_config(request: web.Request) -> web.Response:
             "stream_reveal": cfg.dashboard.stream_reveal,
             "screen_share_enabled": cfg.dashboard.screen_share_enabled,
             "document_editing": cfg.dashboard.document_editing,
-            "dashboard_layout": cfg.dashboard.dashboard_layout or {},
         }
     )

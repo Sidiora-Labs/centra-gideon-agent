@@ -165,10 +165,13 @@ class _AgentShelf:
         self.root = root
 
     def files(self):
-        for directory in sorted(self.root.iterdir()):
-            path = directory / "agent.json"
-            if directory.is_dir() and path.is_file():
-                yield directory.name, path
+        for entry in sorted(self.root.iterdir()):
+            if entry.is_file() and entry.suffix == ".json":
+                yield entry.stem, entry
+                continue
+            path = entry / "agent.json"
+            if entry.is_dir() and path.is_file():
+                yield entry.name, path
 
     @staticmethod
     def read(path):
@@ -205,14 +208,25 @@ class LocalAgentMarketplace(AgentMarketplace):
         self._base.mkdir(parents=True, exist_ok=True)
 
     def list(self) -> list[AgentDefinition]:
-        self._ensure_base()
         result = []
-        for name, path in _AgentShelf(self._base).files():
+        for name, document in self.documents():
             try:
-                result.append(_AgentShelf.read(path))
+                result.append(AgentDefinition.from_dict(document))
             except Exception as exc:
                 logger.warning("Skipping malformed agent %s: %s", name, exc)
         return result
+
+    def documents(self):
+        """Yield raw agent records from flat and marketplace directory layouts."""
+        self._ensure_base()
+        for name, path in _AgentShelf(self._base).files():
+            try:
+                document = json.loads(path.read_text(encoding="utf-8"))
+                if not isinstance(document, dict):
+                    raise ValueError("agent definition must be an object")
+                yield name, document
+            except Exception as exc:
+                logger.warning("Skipping malformed agent %s: %s", name, exc)
 
     def get(self, name: str) -> AgentDefinition | None:
         if _NAME_RE.match(name):
@@ -280,6 +294,17 @@ class AgentMarketplaceRegistry:
             dict(name=name, type=self._marketplaces[name].marketplace_type)
             for name in self.names()
         ]
+
+    def documents(self):
+        """Yield agent names and raw records from registered marketplaces."""
+        for marketplace_name in self.names():
+            marketplace = self._marketplaces[marketplace_name]
+            documents = getattr(marketplace, "documents", None)
+            if documents is not None:
+                yield from documents()
+            else:
+                for definition in marketplace.list():
+                    yield definition.name, definition.to_dict()
 
 
 _DEFAULT_REGISTRY: AgentMarketplaceRegistry | None = None

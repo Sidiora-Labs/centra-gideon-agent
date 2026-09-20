@@ -86,7 +86,7 @@ export function WorkflowProgressCard({ refObj }: { refObj: WorkflowRunRef }) {
           {vm?.workflow || 'Workflow'}
         </span>
         {look && StatusIcon && (
-          <span data-type="caption" className={`inline-flex shrink-0 items-center gap-1 ${look.tone}`}>
+          <span data-type="caption" className={`inline-flex shrink-0 items-center gap-xs ${look.tone}`}>
             <StatusIcon size={12} className={look.spin ? 'animate-spin' : ''} /> {look.label}
           </span>
         )}

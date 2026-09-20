@@ -140,8 +140,8 @@ export function LoopsListPage({ onOpen, onCreate, query, setQuery }: { onOpen: (
               {loops
                 .filter(matches)
                 .map((c, i) => {
-                const endedEarly = c.status === 'complete' && !!c.error_message
-                const dispStatus = effectiveLoopStatus(c.status, c.error_message)
+                const dispStatus = effectiveLoopStatus(c.status, c.stop_reason)
+                const endedEarly = dispStatus === 'ended_early'
                 const pct = c.status === 'complete' && !endedEarly
                   ? 1
                   : (c.max_cycles ? Math.min(1, c.total_cycles / c.max_cycles) : 0)
@@ -230,7 +230,7 @@ export function LoopsListPage({ onOpen, onCreate, query, setQuery }: { onOpen: (
 }
 
 function LoopPeek({ loop, onOpenFull }: { loop: GoalLoop; onOpenFull: () => void }) {
-  const dispStatus = effectiveLoopStatus(loop.status, loop.error_message)
+  const dispStatus = effectiveLoopStatus(loop.status, loop.stop_reason)
   const running = loop.status === 'running'
   const kind = (loop as { kind?: string }).kind
   const cycle = shownCycle(loop.total_cycles, loop.status)

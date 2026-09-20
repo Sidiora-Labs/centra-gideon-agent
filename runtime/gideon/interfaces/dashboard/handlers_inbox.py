@@ -140,6 +140,22 @@ def _record_signal(state: "ConsoleState", item, signal: str) -> None:
     _record_signals(state, [item], signal)
 
 
+def _dismiss(
+    state: "ConsoleState", inbox_state: InboxState, inbox: InboxStore, item, owner: str
+) -> None:
+    """Apply every consequence of dismissing one row."""
+    inbox_state.dismissed.add(item.id)
+    _record_signal(state, item, "dismiss")
+    proposal_id = (
+        item.refs.get("skill_proposal") if isinstance(item.refs, dict) else None
+    )
+    if proposal_id:
+        from gideon.extensions.skills import proposals
+
+        proposals.reject(str(proposal_id))
+    item.set_status_for(owner, ItemStatus.DISMISSED.value)
+
+
 def _rank_items(state: "ConsoleState", items: list) -> list:
     """Recency baseline, optionally re-weighted by engagement when the flag is on. The
     baseline (pure created_at desc) is unchanged when disabled — a true no-op default.
@@ -333,9 +349,8 @@ async def api_inbox_update(request: web.Request) -> web.Response:
         inbox_state.save()
 
     if body.get("status") == ItemStatus.DISMISSED:
-        inbox_state.dismissed.add(item_id)
+        _dismiss(state, inbox_state, inbox, item, owner)
         inbox_state.save()
-        _record_signal(state, item, "dismiss")
 
     if body.get("favorited") is True:
         _record_signal(state, item, "favorite")
@@ -435,12 +450,11 @@ async def api_inbox_dismiss_all(request: web.Request) -> web.Response:
     count = 0
     swept: list = []
     for item in inbox.open_items(owner):
-        inbox_state.dismissed.add(item.id)
-        inbox.update_status(item.id, ItemStatus.DISMISSED.value, owner=owner)
+        _dismiss(state, inbox_state, inbox, item, owner)
         swept.append(item)
         count += 1
     inbox_state.save()
-    _record_signals(state, swept, "dismiss")
+    inbox.save()
     try:
         sel().log_tool_invocation(
             session_key="dashboard:inbox",
@@ -662,6 +676,7 @@ async def api_inbox_status(request: web.Request) -> web.Response:
             "owner": owner,
             "shared": bool(owner and len(mine) != len(inbox.items)),
             "mine_count": len(mine),
+            "pending_count": len(inbox.pending(owner)),
             "open_count": len(inbox.open_items(owner)),
             "total_count": len(inbox.items),
             "health": health,

@@ -302,7 +302,7 @@ export function FilesSection({ sub, navigate, query: routeQuery, setQuery }: Rou
                 {!showResults && (
                   <>
                     { }
-                    <PathBar value={activeRoot} onNavigate={setDir} />
+                    <PathBar value={dirs.resolved[activeRoot] || activeRoot} onNavigate={setDir} />
                     { }
                     <div className="flex items-center gap-0.5">
                       <RailBtn icon={FilePlus2} label="New file" onClick={() => { setCreating('file'); setNewName('') }} />

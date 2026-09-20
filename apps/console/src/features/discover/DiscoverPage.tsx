@@ -65,8 +65,8 @@ export function DiscoverPage({ navigate }: Pick<RouteProps, 'navigate'>) {
         ) : data.visible_count === 0 ? (
           <EmptyState
             icon={Compass}
-            title="You've explored every part of Gideon"
-            hint="Nice. New tips will appear here as Gideon grows — and anything you dismissed stays hidden. The tour above stays too."
+            title="No Discover tips to show"
+            hint={emptyDiscoverReason(data.dismissed_count ?? 0, data.engaged_count ?? 0)}
           />
         ) : (
           <EntranceGroup className="flex flex-col gap-2xl">
@@ -165,4 +165,11 @@ function TipRow({ tip, index, onGo, onDismiss }: { tip: DiscoverTip; index: numb
 function tryItPath(t: DiscoverTryIt): string {
   const q = new URLSearchParams(t.query ?? {}).toString()
   return q ? `${t.route}?${q}` : t.route
+}
+
+export function emptyDiscoverReason(dismissed: number, engaged: number): string {
+  if (dismissed && engaged) return `${engaged} hidden because you tried those features; ${dismissed} dismissed by you. New tips will appear as Gideon grows.`
+  if (dismissed) return `You dismissed ${dismissed} tip${dismissed === 1 ? '' : 's'}. New tips will appear as Gideon grows.`
+  if (engaged) return `You already tried the feature${engaged === 1 ? '' : 's'} behind ${engaged === 1 ? 'this tip' : `these ${engaged} tips`}. New tips will appear as Gideon grows.`
+  return 'There are no curated tips available right now. New tips will appear as Gideon grows.'
 }

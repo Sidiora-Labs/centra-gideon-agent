@@ -10,6 +10,7 @@ import {
   KINDS, EXEC_MODES, deriveKind, deriveMode, kindMeta, modeMeta,
   secsToInterval, scheduleWhenMet, INTERVAL_UNITS, CRON_PRESETS,
 } from './scheduleMeta'
+import { cronExprInvalidReason } from './cronExpr'
 
 export interface ScheduleDraft {
   id?: string
@@ -228,19 +229,19 @@ function NativeSelect({ value, onChange, options, label, name }: { value: string
 }
 
 function CronField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const valid = value.trim().split(/\s+/).length === 5
+  const invalidReason = cronExprInvalidReason(value)
   return (
     <div className="flex flex-col gap-s">
       <input value={value} onChange={(e) => onChange(e.target.value)} placeholder="0 9 * * *"
         name="cron-expression" aria-label="Cron expression (minute hour day-of-month month day-of-week)"
-        className={`w-full h-10 rounded-md bg-surface-container px-m font-mono text-on-surface text-[0.8125rem] outline-none focus:ring-2 ${valid ? 'focus:ring-primary' : 'ring-1 ring-danger/50'}`} />
+        className={`w-full h-10 rounded-md bg-surface-container px-m font-mono text-on-surface text-[0.8125rem] outline-none focus:ring-2 ${invalidReason ? 'ring-1 ring-danger/50' : 'focus:ring-primary'}`} />
       <div className="flex flex-wrap gap-1.5">
         {CRON_PRESETS.map((p) => (
           <button key={p.expr} type="button" onClick={() => onChange(p.expr)}
             className={`rounded-pill px-m h-7 text-[0.75rem] transition-colors ${value.trim() === p.expr ? 'bg-primary-container text-on-primary-container' : 'bg-surface-high text-on-surface-var hover:bg-surface-highest'}`}>{p.label}</button>
         ))}
       </div>
-      {!valid && <p className="text-danger text-[0.75rem]">Cron needs five fields: minute hour day-of-month month day-of-week.</p>}
+      {invalidReason && <p className="text-danger text-[0.75rem]">{invalidReason}</p>}
     </div>
   )
 }

@@ -95,7 +95,7 @@ export function ContributedPage({ app, host, src, mountFunction = 'mount' }: Pro
           <Loader2 size={22} className="animate-spin text-on-surface-low" />
         </div>
       )}
-      {actionError && <div role="alert" data-type="body-s" className="m-3 rounded-lg border border-danger/30 bg-danger/5 px-3 py-2 text-danger">{actionError}</div>}
+      {actionError && <div role="alert" data-type="body-s" className="m-3 rounded-lg border border-danger/30 bg-danger/5 px-m py-s text-danger">{actionError}</div>}
       <div ref={hostRef} className="h-full" />
     </div>
   )

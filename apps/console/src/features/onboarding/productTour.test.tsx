@@ -331,7 +331,7 @@ describe('Discover is the replay entry, and it cannot be lost', () => {
     location.hash = '#/discover'
     renderApp()
     expect(await screen.findByRole('button', { name: 'Start the tour' })).toBeInTheDocument()
-    expect(await screen.findByText(/explored every part/)).toBeInTheDocument()
+    expect(await screen.findByText(/No Discover tips to show/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Dismiss/ })).toBeNull()
   })
 

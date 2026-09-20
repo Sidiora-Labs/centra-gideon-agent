@@ -93,7 +93,7 @@ export function SdlcProgressCard({ refObj, controllable = false, onDeleted }: {
     finally { setBusy(false) }
   }
 
-  const status = entity ? effectiveLoopStatus(entity.status, entity.error_message) : (created ? 'ready' : '…')
+  const status = entity ? effectiveLoopStatus(entity.status, entity.stop_reason) : (created ? 'ready' : '…')
   const dispKind = entity?.kind || (kind === 'code' ? 'code' : 'goal')
   const meta = loopKindMeta(dispKind)
   const title = entity?.name || `${meta.noun}${dispKind === 'code' ? ' project' : ''}`

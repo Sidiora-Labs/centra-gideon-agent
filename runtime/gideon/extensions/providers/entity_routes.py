@@ -42,13 +42,20 @@ def _entity_settings_path(entity: str) -> Path:
 
 def _load_entity_settings(entity: str) -> dict[str, Any]:
     path = _entity_settings_path(entity)
-    if not path.is_file():
-        return {}
     try:
+        if not path.is_file():
+            return {}
         data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
+        if isinstance(data, dict):
+            return data
+        logger.warning(
+            "discarding non-object entity settings for %s at %s", entity, path
+        )
     except (json.JSONDecodeError, OSError):
-        return {}
+        logger.warning(
+            "failed to load entity settings for %s at %s", entity, path, exc_info=True
+        )
+    return {}
 
 
 def _save_entity_settings(entity: str, settings: dict[str, Any]) -> None:

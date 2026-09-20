@@ -134,8 +134,8 @@ async def api_skills_list(request: web.Request) -> web.Response:
     ``tampered`` (a locked file changed/went missing or an unexpected file appeared), or
     ``unverified`` (no lock — a bundled or hand-placed skill, not a failure)."""
     from gideon.engine.agent import _all_skill_paths
+    from gideon.extensions.skills.loader import iter_skill_files
     from gideon.extensions.skills.marketplace import (
-        _SKILL_FILENAME,
         _parse_description,
         verify_skill_integrity,
     )
@@ -152,13 +152,8 @@ async def api_skills_list(request: web.Request) -> web.Response:
         is_bundled = base_str == bundled_path
         # 🔴 RECURSIVE, matching `ProcedureLibrary._iter`'s own `base.rglob("SKILL.md")`. This walked
         # is what `ProcedureLibrary` calls it, what the delete route takes, and what
-        for skill_md in sorted(base.rglob(_SKILL_FILENAME)):
-            if not skill_md.is_file():
-                continue
+        for name, skill_md in iter_skill_files(base):
             entry = skill_md.parent
-            if entry == base:
-                continue
-            name = entry.relative_to(base).as_posix()
             if name in seen:
                 continue
             seen.add(name)
@@ -185,7 +180,7 @@ async def api_skills_list(request: web.Request) -> web.Response:
     try:
         from gideon.core.config.loader import AppConfig
         from gideon.engine.agents.defaults import DEFAULT_NATIVE_AGENT_NAME
-        from gideon.extensions.skills.loader import agent_skills_dir
+        from gideon.extensions.skills.loader import agent_skills_dir, iter_skill_files
 
         agent_names = [DEFAULT_NATIVE_AGENT_NAME, *AppConfig.load().agents.keys()]
         seen_agent_dirs: set[str] = set()
@@ -198,12 +193,8 @@ async def api_skills_list(request: web.Request) -> web.Response:
             seen_agent_dirs.add(str(adir))
             if not adir.is_dir():
                 continue
-            for entry in sorted(adir.iterdir()):
-                if not entry.is_dir():
-                    continue
-                skill_md = entry / _SKILL_FILENAME
-                if not skill_md.is_file():
-                    continue
+            for name, skill_md in iter_skill_files(adir):
+                entry = skill_md.parent
                 rep = verify_skill_integrity(entry)
                 integrity = (
                     "unverified"
@@ -212,8 +203,8 @@ async def api_skills_list(request: web.Request) -> web.Response:
                 )
                 skills.append(
                     {
-                        "key": f"{ag_name}/{entry.name}",
-                        "name": entry.name,
+                        "key": f"{ag_name}/{name}",
+                        "name": name,
                         "description": _parse_description(skill_md),
                         "always": _parse_always(skill_md),
                         "path": str(skill_md),

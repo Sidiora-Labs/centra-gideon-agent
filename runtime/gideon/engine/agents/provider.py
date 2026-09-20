@@ -87,6 +87,10 @@ class AgentProvider(ABC):
     def supports_native_commands(self) -> bool:
         return False
 
+    @property
+    def compacts_in_process(self) -> bool:
+        return False
+
     async def stream_command(self, command: str) -> AsyncIterator[AgentEvent]:
         turn = aiter(self.stream(command))
         while True:

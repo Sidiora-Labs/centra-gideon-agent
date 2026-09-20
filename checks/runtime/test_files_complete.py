@@ -27,8 +27,18 @@ def root(tmp_path, monkeypatch):
     return tmp_path
 
 
-def _call(path: str, kind: str = ""):
-    qs = urlencode({"path": path, "kind": kind})
+def _call(path: str, kind: str = "", limit: int | None = None):
+    qs = urlencode(
+        {
+            key: value
+            for key, value in {
+                "path": path,
+                "kind": kind,
+                "limit": limit,
+            }.items()
+            if value is not None
+        }
+    )
     req = make_mocked_request("GET", f"/api/file-complete?{qs}")
     resp = asyncio.run(F.api_file_complete(req))
     return resp.status, json.loads(resp.body.decode())
@@ -60,6 +70,35 @@ def test_outside_roots_returns_empty(root, monkeypatch):
     status, body = _call("/etc/")
     assert status == 200
     assert body["suggestions"] == []
+    assert body["truncated"] is False
+
+
+def test_sorts_all_candidates_before_allowlist_and_limit(root, monkeypatch):
+    for name in ("aardvark", "able", "azure"):
+        (root / name).mkdir()
+
+    original_validate = F._validate_dashboard_path
+
+    def validate(raw):
+        if str(raw).endswith("aardvark"):
+            return None
+        return original_validate(raw)
+
+    monkeypatch.setattr(F, "_validate_dashboard_path", validate)
+    _, body = _call(f"{root}/a", "dir", 2)
+
+    assert [item["name"] for item in body["suggestions"]] == ["able", "alpha"]
+    assert body["truncated"] is True
+
+
+def test_default_limit_is_30(root):
+    for index in range(35):
+        (root / f"item-{index:02}").mkdir()
+
+    _, body = _call(f"{root}/item-", "dir")
+
+    assert len(body["suggestions"]) == 30
+    assert body["truncated"] is True
 
 
 def test_screenshot_unavailable_off_macos(monkeypatch):

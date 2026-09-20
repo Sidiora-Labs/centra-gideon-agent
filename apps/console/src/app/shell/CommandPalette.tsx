@@ -56,8 +56,8 @@ function PaletteResults({ query, results, cursor, search, select, move, run }: {
       {!results.length && <p className="p-l text-center text-on-surface-low">No matches for “{query}”.</p>}
     </div>
     <div className="flex items-center gap-m text-on-surface-low text-[0.75rem]">
-      <span className="inline-flex items-center gap-1"><ArrowRight size={12} className="rotate-90" /> navigate</span>
-      <span className="inline-flex items-center gap-1"><CornerDownLeft size={12} /> select</span>
+      <span className="inline-flex items-center gap-xs"><ArrowRight size={12} className="rotate-90" /> navigate</span>
+      <span className="inline-flex items-center gap-xs"><CornerDownLeft size={12} /> select</span>
       <kbd className="ml-auto font-mono">⌘K / Ctrl+K</kbd>
     </div>
   </div>

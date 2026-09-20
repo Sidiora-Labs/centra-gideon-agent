@@ -44,9 +44,11 @@ export function RoutingChip({ suggestion, defaultAgent, onRoute, onDismiss }: {
     }
   }
 
-  const dismiss = () => {
-    void reportingWrite(`dismiss the ${suggestion.agent} suggestion`,
-      () => api.routingDismiss(suggestion.agent))
+  const dismiss = async () => {
+    let result: Awaited<ReturnType<typeof api.routingDismiss>> | undefined
+    const ok = await reportingWrite(`dismiss the ${suggestion.agent} suggestion`,
+      async () => { result = await api.routingDismiss(suggestion.agent) })
+    if (ok && result?.muted) notify(`${suggestion.agent} muted. Undo this in Settings › Chat › Agent routing.`, 'info')
     api.recordFeedback({
       target_kind: 'routing_suggestion', target_id: targetId, verdict: 'down',
       producer_kind: 'routing_pair', producer_id: producerId,
@@ -67,8 +69,8 @@ export function RoutingChip({ suggestion, defaultAgent, onRoute, onDismiss }: {
         <span className="text-on-surface" style={fvs(600)}>{suggestion.agent}</span>
         {suggestion.specialty ? ` handles this` : ' may fit better'} — route this chat to it?
       </span>
-      <Button variant="secondary" size="xs" onClick={route} loading={busy} className="h-6 px-3">Route</Button>
-      <IconButton icon={X} label="Not now (won't ask again for a while)" onClick={dismiss} size={24} iconSize={13} />
+      <Button variant="secondary" size="xs" onClick={route} loading={busy} className="h-6 px-m">Route</Button>
+      <IconButton icon={X} label="Not now (won't ask again for a while)" onClick={() => { void dismiss() }} size={24} iconSize={13} />
     </motion.div>
   )
 }

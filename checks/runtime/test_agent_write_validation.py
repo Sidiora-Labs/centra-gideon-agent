@@ -172,6 +172,12 @@ def _agents_on_disk(home) -> dict:
     return json.loads(p.read_text(encoding="utf-8")).get("agents", {})
 
 
+async def _sync() -> Any:
+    from gideon.interfaces.dashboard.handlers.agents import api_gideon_agents_sync
+
+    return await api_gideon_agents_sync(_request({}))
+
+
 async def _create(body) -> Any:
     from gideon.interfaces.dashboard.handlers.agents import api_gideon_agents_create
 
@@ -231,6 +237,67 @@ class TestTheTableCannotDrift:
                 coerce_edit_value(name, object(), spec)
             except ConfigValueError as exc:
                 assert exc.status == 400, f"{name} can produce a {exc.status}"
+
+
+class TestAgentFileSync:
+    @pytest.fixture
+    def agent_files(self, home, monkeypatch):
+        from gideon.engine.agents import marketplace
+
+        root = home / "agents"
+        registry = marketplace.AgentMarketplaceRegistry()
+        registry.register("local", marketplace.LocalAgentMarketplace(root))
+        monkeypatch.setattr(marketplace, "_DEFAULT_REGISTRY", registry)
+        return root
+
+    @pytest.mark.asyncio
+    async def test_syncs_flat_and_marketplace_layouts_through_shared_specs(
+        self, home, agent_files
+    ):
+        agent_files.mkdir()
+        (agent_files / "flat.json").write_text(
+            json.dumps({"name": "flat", "description": "flat agent", "tools": ["read"]})
+        )
+        nested = agent_files / "nested"
+        nested.mkdir()
+        (nested / "agent.json").write_text(
+            json.dumps({"name": "nested", "provider": "native", "natural_voice": True})
+        )
+        invalid = agent_files / "invalid"
+        invalid.mkdir()
+        (invalid / "agent.json").write_text(
+            json.dumps({"name": "invalid", "tools": [5]})
+        )
+
+        response = await _sync()
+
+        assert response.status == 200
+        assert _body(response) == {"ok": True, "synced": ["flat", "nested"]}
+        saved = _agents_on_disk(home)
+        assert saved["flat"]["description"] == "flat agent"
+        assert saved["flat"]["tools"] == ["read"]
+        assert saved["nested"]["provider"] == "native"
+        assert saved["nested"]["natural_voice"] is True
+        assert "invalid" not in saved
+
+    @pytest.mark.asyncio
+    async def test_no_new_agents_does_not_save_config(self, home, agent_files):
+        from gideon.core.config.loader import AppConfig
+
+        agent_files.mkdir()
+        cfg = AppConfig.load()
+        cfg.agents["known"] = AgentProfile(description="keep")
+        cfg.save()
+        config_path = home / "config.json"
+        before = config_path.read_bytes()
+        before_mtime = config_path.stat().st_mtime_ns
+        (agent_files / "known.json").write_text(json.dumps({"name": "known"}))
+
+        response = await _sync()
+
+        assert _body(response) == {"ok": True, "synced": []}
+        assert config_path.read_bytes() == before
+        assert config_path.stat().st_mtime_ns == before_mtime
 
 
 class TestScalarTypesOnCreate:

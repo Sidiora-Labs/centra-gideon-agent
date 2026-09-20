@@ -194,6 +194,40 @@ class TestApiAndDoctor:
             body = await resp.json()
             assert "never fire" in body["error"]
 
+    async def test_patch_refuses_unknown_provider_without_mutating(
+        self, tmp_path, monkeypatch
+    ):
+        h, store = self._app_state(tmp_path, monkeypatch)
+        from unittest.mock import MagicMock
+
+        from gideon.automation.triggers.models import Trigger
+
+        store.upsert(
+            Trigger(
+                id="clock:known",
+                name="known",
+                kind="clock",
+                spec={"kind": "cron", "expr": "0 9 * * *"},
+                workflow={"inline": {"provider": "notify", "config": {}}},
+            )
+        )
+        app = web.Application()
+        app["state"] = MagicMock()
+        app.router.add_put("/api/triggers/{id}", h.api_trigger_detail)
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.put(
+                "/api/triggers/schedule:clock:known",
+                json={"action": {"provider": "not-installed", "config": {}}},
+            )
+            payload = await resp.json()
+
+        assert resp.status == 400
+        assert payload["code"] == "unknown_action_provider"
+        assert payload["dispatchable_action_providers"][0] == "bash"
+        assert (
+            store.get("clock:known").trigger.workflow["inline"]["provider"] == "notify"
+        )
+
     async def test_doctor_reports_the_inert_skip_date(self, tmp_path, monkeypatch):
         h, store = self._app_state(tmp_path, monkeypatch)
         from unittest.mock import MagicMock
@@ -238,3 +272,34 @@ class TestApiAndDoctor:
         assert all(
             f["fix"] for f in findings
         ), "a doctor finding always says what to do"
+
+    async def test_doctor_reports_a_stored_unknown_action_provider(
+        self, tmp_path, monkeypatch
+    ):
+        h, store = self._app_state(tmp_path, monkeypatch)
+        from unittest.mock import MagicMock
+
+        from gideon.automation.triggers.models import Trigger
+
+        store.upsert(
+            Trigger(
+                id="legacy",
+                name="legacy",
+                kind="clock",
+                spec={"kind": "cron", "expr": "0 9 * * *"},
+                workflow={"inline": {"provider": "removed-app", "config": {}}},
+            )
+        )
+        app = web.Application()
+        app["state"] = MagicMock()
+        app.router.add_get("/api/triggers/doctor", h.api_triggers_doctor)
+        async with TestClient(TestServer(app)) as client:
+            report = await (await client.get("/api/triggers/doctor")).json()
+
+        finding = next(
+            item
+            for item in report["findings"]
+            if item["code"] == "unknown_action_provider"
+        )
+        assert finding["trigger_id"] == "schedule:legacy"
+        assert "removed-app" in finding["detail"]

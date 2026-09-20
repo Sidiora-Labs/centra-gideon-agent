@@ -22,10 +22,10 @@ import { api, partitionRunHistory, type ActionProvider } from '../../shared/data
 import { ScheduleDetail } from '../schedule/ScheduleDetail'
 import { LifecycleDetail } from './LifecycleDetail'
 import { StoreTriggerDetail } from './StoreTriggerDetail'
-import { scheduleToTrigger, hookToTrigger, storeToTrigger, eventToTrigger, eventPatternMeta, relPast, useTriggerVariables, eventIsDormant, eventIsAgentScoped, type Trigger } from './triggerMeta'
+import { scheduleToTrigger, hookToTrigger, storeToTrigger, eventToTrigger, eventPatternMeta, relPast, triggerStatusMeta, useTriggerVariables, eventIsDormant, eventIsAgentScoped, type Trigger } from './triggerMeta'
 import { RungChip } from '../../shared/ui/RungChip'
 import { providerRungIndex, useAutonomyLadder } from '../../shared/data/rungs'
-import { statusMeta, triggerHealthMeta, lastRunMeta, relFuture } from '../schedule/scheduleMeta'
+import { relFuture } from '../schedule/scheduleMeta'
 import { PageTitle } from '../../shared/ui/PageTitle'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
 
@@ -73,15 +73,8 @@ export function TriggersListPage({ onCreate, query, setQuery }: {
     const all = [
       ...schedules.map(scheduleToTrigger),
       ...hooks.map(hookToTrigger),
-      ...stores.map((row) => ({
-        ...storeToTrigger(row),
-        lastRunTs: row.last_run_ts ?? null,
-      })),
-      ...events.map((row) => ({
-        ...eventToTrigger(row),
-        lastRunTs: row.last_run_ts ?? row.last_fired_at ?? null,
-        lastStatus: row.last_run_status || (row.last_run_ts || row.last_fired_at ? 'ran' : null),
-      })),
+      ...stores.map(storeToTrigger),
+      ...events.map(eventToTrigger),
     ]
     const n = q.trim().toLowerCase()
     return all
@@ -190,17 +183,7 @@ export function TriggersListPage({ onCreate, query, setQuery }: {
               <div className="flex flex-col gap-s">
                 <div id={runHistoryId} className="flex flex-col gap-s">
                 {listedTriggers.map((t, i) => {
-                  const sd = t.kind === 'store'
-                    ? triggerHealthMeta(t.lastStatus, t.state)
-                    : t.schedule
-                      ? lastRunMeta(t.schedule.last_run_status, t.schedule.last_status)
-                      : statusMeta(t.lastStatus)
-                  const runStatus = t.kind === 'store'
-                    ? t.store?.last_run_status
-                    : t.kind === 'event'
-                      ? t.event?.last_run_status
-                      : t.lastStatus
-                  const runLabel = statusMeta(runStatus).label
+                  const sd = triggerStatusMeta(t)
                   const menuItems: ContextMenuItem[] = [
                     { icon: <Zap size={15} />, label: 'Open', onSelect: () => setQuery({ open: t.id, edit: null }) },
                     ...(t.readOnly || t.kind === 'event' ? [] : [{ icon: <Pencil size={15} />, label: 'Edit', onSelect: () => setQuery({ open: t.id, edit: '1' }) }]),
@@ -244,9 +227,9 @@ export function TriggersListPage({ onCreate, query, setQuery }: {
                           {t.kind === 'event' && t.runCount != null && <span>fired {t.runCount}×</span>}
                         </div>
                       </div>
-                      <div className="hidden sm:flex shrink-0 items-center gap-1.5 text-on-surface-low text-[0.75rem]">
+                      <div className="hidden sm:flex shrink-0 items-center gap-1.5 text-on-surface-low text-[0.75rem]" title={sd.reason || undefined}>
                         <sd.icon size={13} style={{ color: sd.tone }} />
-                        <span>{t.lastRunTs ? `${runLabel} · ${relPast(t.lastRunTs)}` : 'never'}</span>
+                        <span>{t.lastRunTs ? `${sd.label} · ${relPast(t.lastRunTs)}` : sd.label}</span>
                       </div>
                     </ListRow>
                     </ContextMenu>

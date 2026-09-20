@@ -401,6 +401,18 @@ def _list_tools() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "workflow_start_draft",
+            "description": (
+                "Start an existing draft workflow run after reviewing its inputs and "
+                "prelaunch policy controls. This only accepts runs still in prelaunch."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {"run_id": run_id},
+                "required": ["run_id"],
+            },
+        },
+        {
             "name": "workflow_cancel",
             "description": (
                 "Cancel a run. The intent is persisted, so it is honoured even if the "
@@ -688,6 +700,12 @@ def _dispatch(name: str, args: dict[str, Any]) -> str:
                 answer=args.get("answer"),
                 always_allow=bool(args.get("always_allow")),
             )
+        )
+
+    if name == "workflow_start_draft":
+        return _fmt(
+            _run(service.start_draft(run_id, supervisor=_supervisor())),
+            summary="Workflow draft started.",
         )
 
     if name == "workflow_cancel":

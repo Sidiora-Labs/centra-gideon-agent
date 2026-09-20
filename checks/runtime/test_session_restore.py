@@ -409,6 +409,25 @@ class TestDashboardConfigAPI:
                 data = await resp.json()
                 assert data["restore_sessions"] is False
                 assert data["restore_window_minutes"] == 30
+                assert "dashboard_layout" not in data
+
+    @pytest.mark.asyncio
+    async def test_put_rejects_removed_dashboard_layout(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "gideon.core.config.loader.config_path", lambda: tmp_path / "config.json"
+        )
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        with patch("gideon.security.sel.sel") as mock_sel:
+            mock_sel.return_value = MagicMock()
+            app = _make_config_app(tmp_path)
+            async with TestClient(TestServer(app)) as client:
+                resp = await client.put(
+                    "/api/dashboard/config", json={"dashboard_layout": {}}
+                )
+                assert resp.status == 400
+                assert "Unknown fields" in (await resp.json())["error"]
 
     @pytest.mark.asyncio
     async def test_put_updates_config(self, tmp_path, monkeypatch):

@@ -155,6 +155,46 @@ def test_run_respects_cooldown(monkeypatch):
     result = rem.run_remediation(target_score=90, max_cost_usd=1.0, now=1000.0 + 3600)
     assert ran["n"] == 1
     assert any(j["status"] == "skipped_cooldown" for j in result.jobs)
+    assert result.jobs[0]["cooldown_until"] == 1000.0 + 24 * 3600
+
+
+def test_failed_dependency_blocks_dependent_job(monkeypatch):
+    ran = []
+    rem.register_job(
+        RemediationJob(
+            id="dep",
+            title="dep",
+            run=lambda: (_ for _ in ()).throw(RuntimeError("no")),
+            fixes_deficit="dep",
+        )
+    )
+    rem.register_job(
+        RemediationJob(
+            id="child",
+            title="child",
+            run=lambda: ran.append("child") or "ok",
+            after=("dep",),
+            fixes_deficit="child",
+        )
+    )
+    _stub_deficits(
+        monkeypatch,
+        [
+            Deficit(key="dep", count=20, weight=1, max_penalty=20),
+            Deficit(key="child", count=20, weight=1, max_penalty=20),
+        ],
+    )
+
+    result = rem.run_remediation(target_score=90, max_cost_usd=1, now=1000)
+
+    assert ran == []
+    assert result.jobs[-1] == {
+        "id": "child",
+        "status": "blocked",
+        "blocked_by": ["dep"],
+        "cost": 0.0,
+    }
+    assert result.outcome == "failed"
 
 
 def test_dry_run_does_not_execute_or_change_score(monkeypatch):
@@ -202,6 +242,8 @@ def test_ledger_written_and_read_back(monkeypatch):
     runs = rem.recent_runs()
     assert len(runs) == 1
     assert runs[0]["ts"] == 1234.0
+    assert runs[0]["timestamp"] == "1970-01-01T00:20:34+00:00"
+    assert runs[0]["outcome"] == "success"
     assert runs[0]["stopped_reason"] in ("target_score reached", "plan exhausted")
 
 

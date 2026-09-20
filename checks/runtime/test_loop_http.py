@@ -211,6 +211,34 @@ class TestCreate:
         assert d["kind_config"]["entry_stage"] == "design"
         assert d["kind_config"]["verify_command"] == "make lint"
 
+    def test_get_exposes_unrunnable_code_commands(self, state, monkeypatch):
+        monkeypatch.setenv("PATH", "")
+        created = _run(
+            H.api_loop_create(
+                _req(
+                    "POST",
+                    "/api/loops",
+                    state,
+                    body={
+                        "kind": "code",
+                        "task": "add oauth login to the web app",
+                        "verify_command": "missing-build --check",
+                        "test_command": "missing-test run",
+                    },
+                )
+            )
+        )
+        cid = _body(created)["id"]
+        response = _run(
+            H.api_loop_get(
+                _req("GET", f"/api/loops/{cid}", state, match_info={"id": cid})
+            )
+        )
+        assert _body(response)["unrunnable_commands"] == [
+            {"command": "missing-build --check", "missing_binary": "missing-build"},
+            {"command": "missing-test run", "missing_binary": "missing-test"},
+        ]
+
     @pytest.mark.parametrize(
         "kind,kc_key",
         [

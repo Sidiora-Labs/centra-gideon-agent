@@ -54,6 +54,7 @@ def _ensure_registered() -> None:
         return
     _registered = True
     for module, fmt in (
+        ("csv_writer", "csv"),
         ("docx_writer", "docx"),
         ("xlsx_writer", "xlsx"),
         ("pptx_writer", "pptx"),

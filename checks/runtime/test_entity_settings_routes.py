@@ -10,6 +10,7 @@ authoritative allowlist.
 from __future__ import annotations
 
 import json
+import logging
 from unittest.mock import MagicMock
 
 import pytest
@@ -35,6 +36,63 @@ def _req(body):
     )
     r._read_bytes = json.dumps(body).encode()
     return r
+
+
+@pytest.mark.parametrize(
+    ("contents", "message"),
+    (("{bad json", "failed to load"), ("[]", "discarding non-object")),
+)
+def test_load_entity_settings_warns_when_contents_are_discarded(
+    caplog, contents, message
+):
+    path = er._entity_settings_path("inbox")
+    path.write_text(contents)
+
+    with caplog.at_level(logging.WARNING, logger=er.__name__):
+        assert er._load_entity_settings("inbox") == {}
+
+    assert len(caplog.records) == 1
+    assert message in caplog.text
+    assert "inbox" in caplog.text
+    assert str(path) in caplog.text
+
+
+def test_load_entity_settings_warns_on_oserror(monkeypatch, caplog):
+    path = er._entity_settings_path("notifications")
+    path.write_text("{}")
+    monkeypatch.setattr(
+        type(path), "read_text", MagicMock(side_effect=OSError("denied"))
+    )
+
+    with caplog.at_level(logging.WARNING, logger=er.__name__):
+        assert er._load_entity_settings("notifications") == {}
+
+    assert len(caplog.records) == 1
+    assert "notifications" in caplog.text
+    assert str(path) in caplog.text
+
+
+def test_load_entity_settings_absent_is_silent(caplog):
+    path = er._entity_settings_path("inbox")
+
+    with caplog.at_level(logging.WARNING, logger=er.__name__):
+        assert er._load_entity_settings("inbox") == {}
+
+    assert not path.exists()
+    assert caplog.records == []
+
+
+def test_routing_load_store_logs_unexpected_failure(monkeypatch, caplog):
+    from gideon.engine.agents import routing
+
+    monkeypatch.setattr(
+        er, "_load_entity_settings", MagicMock(side_effect=RuntimeError("boom"))
+    )
+    with caplog.at_level(logging.WARNING, logger=routing.__name__):
+        assert routing._load_store() == {}
+
+    assert len(caplog.records) == 1
+    assert caplog.records[0].exc_info is not None
 
 
 async def _json(resp):
