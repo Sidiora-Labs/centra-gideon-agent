@@ -218,26 +218,28 @@ export function PackStoreSection({ installed, onInstalled }: {
   }
 
   return (
-    <Section title="Pack store" hint="The packs shipped in this build. Installing one scans every component, lands its triggers disabled, and stages its roster until you deploy it.">
-      {error ? <LoadError what="pack catalog" error={error} onRetry={refresh} /> : null}
-      <div className="flex flex-col gap-2">
-        {(bundled ?? []).map((p) => (
-          <RowGroup key={p.name}>
-            <Row label={`${p.displayName} ${p.version}`.trim()} hint={p.description}>
-              {have.has(p.name)
-                ? <span data-type="caption" className="text-on-surface-low">Installed</span>
-                : <Button variant="primary" size="sm" loading={busy === p.name} onClick={() => install(p.name, p.displayName)}>Install</Button>}
-            </Row>
-          </RowGroup>
-        ))}
-      </div>
-    </Section>
+    <div id="pack-store">
+      <Section title="Pack store" hint="The packs shipped in this build. Installing one scans every component, lands its triggers disabled, and stages its roster until you deploy it.">
+        {error ? <LoadError what="pack catalog" error={error} onRetry={refresh} /> : null}
+        <div className="flex flex-col gap-2">
+          {(bundled ?? []).map((p) => (
+            <RowGroup key={p.name}>
+              <Row label={`${p.displayName} ${p.version}`.trim()} hint={p.description}>
+                {have.has(p.name)
+                  ? <span data-type="caption" className="text-on-surface-low">Installed</span>
+                  : <Button variant="primary" size="sm" loading={busy === p.name} onClick={() => install(p.name, p.displayName)}>Install</Button>}
+              </Row>
+            </RowGroup>
+          ))}
+        </div>
+      </Section>
+    </div>
   )
 }
 
-function InstalledPacks({ packs }: { packs: InstalledPackRec[] }) {
+export function InstalledPacks({ packs }: { packs: InstalledPackRec[] }) {
   if (packs.length === 0) {
-    return <div data-type="body-s" className="rounded-lg bg-surface-container px-4 py-3 text-on-surface-low">No packs installed yet.</div>
+    return <div data-type="body-s" className="rounded-lg bg-surface-container px-4 py-3 text-on-surface-low">No packs installed yet. Choose one from the <a href="#pack-store" className="underline">Pack store above</a>.</div>
   }
   return (
     <div className="flex flex-col gap-2">

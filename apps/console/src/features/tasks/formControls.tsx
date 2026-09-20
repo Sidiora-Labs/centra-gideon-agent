@@ -11,7 +11,7 @@ import type { TaskItem, TaskNote } from '../../shared/data/api'
 import { statusMeta } from './taskMeta'
 import { dependencyCandidates } from './taskEditorState'
 
-const rowStyle = 'group flex items-center gap-s rounded-md border border-outline-variant/25 bg-surface-container/40 px-m py-2'
+const rowStyle = 'group flex items-center gap-s rounded-md border border-outline-variant/25 bg-surface-container/40 px-m py-s'
 const inputStyle = 'min-w-0 flex-1 h-9 rounded-md border border-outline-variant/30 bg-surface px-m text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary'
 
 function useAppendText(append: (text: string) => void) {
@@ -47,7 +47,7 @@ export function DependencyEditor({ selfId, allTasks, value, onChange }: { selfId
     <AnimatePresence initial={false} mode="wait">
       {open ? <Bud key="picker" from="top" className="border border-outline-variant/30 bg-surface-container p-m">
         <TextInput value={query} onChange={setQuery} autoFocus placeholder="Find a prerequisite task" ariaLabel="Find a prerequisite task" name={`dep-search-${searchId}`} size="sm" surface="base" leadingIcon={<Search size={14} />} />
-        <div className="mt-s grid max-h-52 gap-1 overflow-y-auto">
+        <div className="mt-s grid max-h-52 gap-xs overflow-y-auto">
           {choices.length === 0 && <p data-type="body-s" className="p-m text-on-surface-low">No tasks to add.</p>}
           {choices.map(({ task, cyclic }) => {
             const status = statusMeta(task.status)
@@ -56,7 +56,7 @@ export function DependencyEditor({ selfId, allTasks, value, onChange }: { selfId
               className="flex min-h-9 items-center gap-s rounded-md px-s py-1 text-left text-on-surface hover:bg-surface-high aria-disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:hover:bg-transparent">
               <status.icon size={14} style={{ color: status.tone }} className="shrink-0" />
               <span data-type="body-s" className="min-w-0 flex-1 truncate">{task.title}</span>
-              {cyclic && <span data-type="caption" className="inline-flex items-center gap-1 text-warn" title="Would create a dependency cycle"><AlertTriangle size={11} /> cycle</span>}
+              {cyclic && <span data-type="caption" className="inline-flex items-center gap-xs text-warn" title="Would create a dependency cycle"><AlertTriangle size={11} /> cycle</span>}
             </button>
           })}
         </div>

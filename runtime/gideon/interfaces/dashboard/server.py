@@ -16,6 +16,7 @@ from gideon.core.config import config_dir
 from gideon.core.layout import package_path
 from gideon.engine.hooks import ScriptHookStore, set_global_hook_store
 from gideon.interfaces.dashboard import chat, handlers, handlers_inbox, ws
+from gideon.interfaces.dashboard.handlers.doc_comments import setup_doc_comment_routes
 from gideon.interfaces.dashboard.handlers.knowledge import setup_knowledge_routes
 from gideon.interfaces.dashboard.handlers.research_reports import (
     setup_research_report_routes,
@@ -1419,6 +1420,7 @@ async def start_dashboard(
     register_entity_routes(app)
 
     setup_knowledge_routes(app)
+    setup_doc_comment_routes(app)
     setup_research_report_routes(app)
 
     async def _transports_startup(app_: web.Application) -> None:

@@ -676,6 +676,7 @@ async def api_doctor_remediation(request: web.Request) -> web.Response:
             dry_run=True,
         )
         return {
+            "generated_at": _t.time(),
             "score": _rem.health_score(deficits),
             "target_score": cfg.target_score,
             "deficits": [
@@ -732,6 +733,8 @@ async def api_doctor_remediation_run(request: web.Request) -> web.Response:
             },
         )
         return {
+            "generated_at": _t.time(),
+            "outcome": result.outcome,
             "score_before": result.score_before,
             "score_after": result.score_after,
             "jobs": result.jobs,

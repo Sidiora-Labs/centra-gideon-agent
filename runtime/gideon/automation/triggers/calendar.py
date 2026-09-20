@@ -512,6 +512,7 @@ class TriggerDiagnosis:
     entry: dict[str, Any]
     workflows: set[str] | None
     duty_gates: set[str]
+    action_providers: set[str]
     findings: list[Finding] = field(default_factory=list)
 
     def add(self, code: str, detail: str, fix: str) -> None:
@@ -646,6 +647,17 @@ class TriggerDiagnosis:
                 "install the app that provides the gate, or remove the duty_gate block",
             )
 
+    def action_provider(self) -> None:
+        workflow = _mapping(self.entry.get("workflow"))
+        inline = _mapping(workflow.get("inline"))
+        name = str((inline or workflow).get("provider") or "").strip()
+        if name and name not in self.action_providers:
+            self.add(
+                "unknown_action_provider",
+                f"names the action provider {name!r}, which is not registered and cannot dispatch",
+                "install the app that provides the action, or choose a dispatchable action provider",
+            )
+
     def run(self) -> list[Finding]:
         checks = (
             self.references,
@@ -657,6 +669,7 @@ class TriggerDiagnosis:
             self.agent_scope,
             self.path_fence,
             self.duty_provider,
+            self.action_provider,
         )
         for check in checks:
             check()
@@ -668,12 +681,23 @@ def diagnose(
     *,
     known_workflows: set[str] | frozenset[str] | None = None,
     known_duty_gates: set[str] | frozenset[str] | None = None,
+    known_action_providers: set[str] | frozenset[str] | None = None,
 ) -> DoctorReport:
     workflows = None if known_workflows is None else set(known_workflows)
     providers = set(_DUTY_GATES if known_duty_gates is None else known_duty_gates)
+    if known_action_providers is None:
+        from gideon.integrations.action_providers.registry import (
+            dispatchable_action_providers,
+        )
+
+        action_providers = set(dispatchable_action_providers())
+    else:
+        action_providers = set(known_action_providers)
     rows = []
     for entry in triggers or []:
-        rows.extend(TriggerDiagnosis(entry, workflows, providers).run())
+        rows.extend(
+            TriggerDiagnosis(entry, workflows, providers, action_providers).run()
+        )
     return DoctorReport(rows)
 
 

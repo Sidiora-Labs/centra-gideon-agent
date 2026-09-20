@@ -640,6 +640,33 @@ async def start_run(
     return _ok(run_id=run.id, status=RunStatus.RUNNING.value, blocking=False)
 
 
+async def start_draft(run_id: str, *, supervisor: Any = None) -> dict[str, Any]:
+    """Launch an existing prelaunch run after its draft controls have been reviewed."""
+    run = store.get(run_id)
+    if run is None:
+        return _run_not_found(run_id)
+    if RUN_PHASES[run.status] is not LifecyclePhase.PRELAUNCH:
+        return _service_failure(
+            "WF_RUN_NOT_PRELAUNCH", f"run is already {run.status.value}"
+        )
+    if supervisor is None:
+        return _service_failure(
+            "WF_NO_SUPERVISOR", "the workflow supervisor is unavailable"
+        )
+    spec = store.read_spec(run_id)
+    if not isinstance(spec, dict):
+        return _service_failure(
+            "WF_RUN_NO_SPEC", "the run spec is missing or unreadable"
+        )
+    try:
+        await supervisor.launch(run, spec)
+    except Exception as exc:
+        return _service_failure(
+            "WF_RUN_LAUNCH_FAILED", f"could not start the run: {exc}"
+        )
+    return _ok(run_id=run_id, status=RunStatus.RUNNING.value)
+
+
 def status(run_id: str) -> dict[str, Any]:
     """Run status plus node-level progress. Pure read — constructs no controller."""
     run = store.get(run_id)

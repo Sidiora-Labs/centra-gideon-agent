@@ -6,6 +6,7 @@ from gideon.core.http_request import RequestBodyTypeError, read_json_body
 from gideon.engine.tasks import reconcile, registry
 from gideon.engine.tasks.models import Task
 from gideon.engine.tasks.provider import task_page_window
+from gideon.engine.tasks.rules import resolve_reject_write
 from gideon.http_errors import json_error
 
 _SUPPLIED_AUTHOR_ERROR = "author is server-derived and must not be supplied"
@@ -133,6 +134,24 @@ class TaskBatch:
         for index, item in enumerate(self.items):
             try:
                 task_id = item["id"] if self.operation == "update" else None
+                if task_id is not None:
+                    fields = {
+                        key: value
+                        for key, value in item.items()
+                        if key not in ("id", "provider")
+                    }
+                    refusal = await resolve_reject_write(
+                        task_id, fields, provider_name=item.get("provider")
+                    )
+                    if refusal:
+                        errors.append(
+                            {
+                                "index": index,
+                                "code": "engine_owned_field",
+                                "error": refusal,
+                            }
+                        )
+                        continue
                 await registry.validate_task_write(
                     task_id,
                     provider_name=item.get("provider"),
@@ -188,6 +207,21 @@ class TaskBatch:
     async def execute(self) -> web.Response:
         errors = await self.admission_errors()
         if errors:
+            refusal = next(
+                (
+                    error
+                    for error in errors
+                    if error.get("code") == "engine_owned_field"
+                ),
+                None,
+            )
+            if refusal:
+                return json_error(
+                    "engine_owned_field",
+                    message=refusal["error"],
+                    status=409,
+                    **self.receipt([], errors, refused=True),
+                )
             return web.json_response(self.receipt([], errors, refused=True), status=400)
         results, errors = [], []
         for index, item in enumerate(self.items):
@@ -252,6 +286,11 @@ class TaskWrite:
                     return json_error(
                         "invalid_request", message="task id required", status=400
                     )
+                refusal = await resolve_reject_write(
+                    task_id, body, provider_name=provider
+                )
+                if refusal:
+                    return json_error("engine_owned_field", message=refusal, status=409)
                 updated_task = await registry.update_task(
                     task_id, provider_name=provider, **body
                 )

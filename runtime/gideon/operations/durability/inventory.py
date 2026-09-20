@@ -207,6 +207,14 @@ INVENTORY: tuple[StateEntry, ...] = (
         help="saved artifacts and their version history",
     ),
     StateEntry(
+        id="doc_comments",
+        kind=KIND_JSON_FILE,
+        path="doc_comments.json",
+        domain=DOMAIN_WORK,
+        merge=MERGE_UNION_BY_ID,
+        help="comments anchored to documents",
+    ),
+    StateEntry(
         id="sessions",
         kind=KIND_JSONL_APPEND,
         path="sessions",

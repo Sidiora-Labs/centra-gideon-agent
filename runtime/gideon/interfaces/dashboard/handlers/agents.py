@@ -781,9 +781,29 @@ async def api_gideon_agents_sync(request: web.Request) -> web.Response:
 
 
 async def _do_agents_sync(request: web.Request) -> web.Response:
+    from gideon.engine.agents.marketplace import get_default_agent_registry
+
     cfg = AppConfig.load()
-    cfg.save()
-    return web.json_response({"ok": True, "synced": []})
+    synced = []
+    for file_name, body in get_default_agent_registry().documents():
+        name = body.get("name", file_name)
+        if not isinstance(name, str) or not re.fullmatch(
+            r"^[a-z0-9][a-z0-9-]{0,62}$", name
+        ):
+            logger.warning("Skipping malformed agent %s: invalid name", file_name)
+            continue
+        if _resolve_agent_name(name, cfg):
+            continue
+        try:
+            staged = _staged_agent_fields(body)
+        except ConfigValueError as exc:
+            logger.warning("Skipping malformed agent %s: %s", name, exc)
+            continue
+        cfg.agents[name] = AgentProfile(**staged)
+        synced.append(name)
+    if synced:
+        cfg.save()
+    return web.json_response({"ok": True, "synced": synced})
 
 
 async def api_gideon_agents_create(request: web.Request) -> web.Response:

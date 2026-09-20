@@ -270,6 +270,20 @@ async def stream_slash_command(
         AcpMethodNotFound,
     )
 
+    if command.split(maxsplit=1)[0] == "/compact" and bool(
+        getattr(client, "compacts_in_process", False)
+    ):
+        await client.compact()
+        result = await client.wait_for_compaction()
+        from gideon.integrations.llm.events import EVENT_COMPACTION_STATUS, AgentEvent
+
+        yield AgentEvent(
+            kind=EVENT_COMPACTION_STATUS,
+            text=result.get("type", "failed"),
+            title=result.get("summary", ""),
+        )
+        return
+
     if not bool(getattr(client, "supports_native_commands", False)):
         notify(
             f"`{command}` isn't a command this agent can run — sent as a plain message."
@@ -390,6 +404,12 @@ def _broadcast_compaction_result(
         error, _ = redact_credentials(event.title or "unknown error")
         error, _ = redact_exfiltration_urls(error)
         msg_text = f"Compaction failed: {error}"
+    elif status_type == "noop":
+        summary, _ = redact_credentials(event.title)
+        summary, _ = redact_exfiltration_urls(summary)
+        msg_text = "Conversation is too short to compact; nothing changed."
+        if summary:
+            msg_text += f" ({summary})"
     else:
         return None
     session.append("assistant", msg_text, "msg msg-a")

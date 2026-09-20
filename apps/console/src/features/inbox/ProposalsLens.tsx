@@ -80,7 +80,7 @@ export function ProposalsLens({ items, onChanged }: { items: InboxItem[]; onChan
                     {kase ? (
                       <span>· {APPLY_CASE_LABEL[kase]}</span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 text-warn">
+                      <span className="inline-flex items-center gap-xs text-warn">
                         <AlertTriangle size={11} /> no runnable action
                       </span>
                     )}

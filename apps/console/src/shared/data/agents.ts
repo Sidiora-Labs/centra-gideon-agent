@@ -1,5 +1,14 @@
 import { useEffect, useState } from 'react'
 import { api, type AgentProvider, type DiscoveredAgent, type ModelItem } from './api'
+import { invalidateKeys } from './data'
+
+export const AGENT_ROUTING_MUTES_KEY = 'agents:routing-mutes'
+export const canonicalAgentKey = (agent: string): string => agent.trim().toLocaleLowerCase()
+export const unmuteAgent = async (agent: string): Promise<string> => {
+  const result = await api.routingUnmute(agent)
+  invalidateKeys(AGENT_ROUTING_MUTES_KEY)
+  return result.agent
+}
 
 
 export async function loadAcpDiscovered(providers: AgentProvider[]): Promise<Record<string, DiscoveredAgent[]>> {

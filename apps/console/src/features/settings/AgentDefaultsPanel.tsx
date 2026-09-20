@@ -9,6 +9,7 @@ import { FieldError, NumberField, TextInput } from '../../shared/ui/forms'
 import { Button } from '../../shared/ui/Button'
 import { FormSkeleton, LoadError } from '../../shared/ui/ListScaffold'
 import { accentChip } from '../../shared/theme/accent'
+import { persistClaim } from '../../lib/persistClaim'
 
 type AgentCfg = Record<string, unknown>
 
@@ -16,6 +17,13 @@ export function AgentDefaultsPanel() {
   const [cfg, setCfg] = useState<AgentCfg | null>(null)
   const { options: agentOptions, loading: agentsLoading, discovered } = useAgentCatalog()
   const [defaultAgent, setDefaultAgent] = useState('')
+  const [tmuxAvailable, setTmuxAvailable] = useState<boolean | undefined>()
+
+  useEffect(() => {
+    Promise.resolve().then(() => api.terminalSessions())
+      .then((r) => setTmuxAvailable(r.persist_available))
+      .catch(() => {})
+  }, [])
 
   const { data, error: loadErr, refresh } = useQuery('settings:agent-defaults', async () => {
     const [plaw, agents] = await Promise.all([
@@ -109,7 +117,11 @@ export function AgentDefaultsPanel() {
           <NumberRow label="Runner idle release" cfg={cfg} field="runner_idle_release_secs" patch={patch} min={60} max={86400} step={60} suffix="s"
             hint="How long a session may hold an agent runner without using it. Past this the hold is released and the runner reads as free under Runners — so a session that went quiet, or a gateway that was killed, cannot leave a runner looking permanently taken. The session itself is untouched." />
           <ToggleRow label="Durable worker sessions" cfg={cfg} field="durable_sessions" patch={patch}
-            hint="Run workers inside a tmux session on Gideon's own socket so their shell outlives the gateway. On restart the recovery sweep finds the still-alive worker and marks the run resumable instead of aborting it. Requires the tmux binary; without it this has no effect." />
+            hint={persistClaim(cfg.durable_sessions, tmuxAvailable)
+              ? "Confirmed active: workers run inside tmux on Gideon's own socket so their shell outlives the gateway."
+              : tmuxAvailable === false
+                ? 'Requires tmux; this setting has no effect while tmux is unavailable.'
+                : "Run workers inside tmux on Gideon's own socket when tmux availability is confirmed."} />
         </RowGroup>
         {
 }
@@ -326,4 +338,3 @@ function NumberRow({ label, hint, cfg, field, patch, min, max, step, suffix }: {
     </Row>
   )
 }
-

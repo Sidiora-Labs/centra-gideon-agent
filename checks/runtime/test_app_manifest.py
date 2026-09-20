@@ -78,6 +78,55 @@ class TestValidation:
         errors = m.validate()
         assert any("displayName" in e for e in errors)
 
+    @pytest.mark.parametrize(
+        "icon", ["Alarm Clock", "icons.AlarmClock", "../AlarmClock"]
+    )
+    def test_top_icon_must_be_a_bare_identifier(self, icon):
+        errors = AppManifest.from_dict(_valid_manifest(icon=icon)).validate()
+        assert errors == [f"icon must be a bare identifier, got: {icon!r}"]
+
+    def test_page_icon_errors_name_the_page(self):
+        manifest = AppManifest.from_dict(
+            _valid_manifest(
+                ui={
+                    "pages": [
+                        {"route": "/reports", "label": "Reports", "icon": "../Chart"}
+                    ]
+                }
+            )
+        )
+        assert manifest.validate() == [
+            "ui page 'Reports' icon must be a bare identifier, got: '../Chart'"
+        ]
+
+    @pytest.mark.parametrize(
+        "icon_url",
+        [
+            "../icon.svg",
+            "images/../../icon.svg",
+            r"..\icon.svg",
+            "/icon.svg",
+            r"C:\icon.svg",
+        ],
+    )
+    def test_page_icon_url_rejects_traversal(self, icon_url):
+        manifest = AppManifest.from_dict(
+            _valid_manifest(
+                ui={
+                    "pages": [
+                        {
+                            "route": "/reports",
+                            "label": "Reports",
+                            "iconUrl": icon_url,
+                        }
+                    ]
+                }
+            )
+        )
+        assert manifest.validate() == [
+            f"ui page 'Reports' iconUrl contains path traversal: {icon_url!r}"
+        ]
+
     def test_missing_description(self):
         m = AppManifest.from_dict(_valid_manifest(description=""))
         errors = m.validate()

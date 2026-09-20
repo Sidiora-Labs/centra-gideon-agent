@@ -61,7 +61,7 @@ export function QualityBadges({ quality }: { quality?: AppQualityWire | null }) 
   const badges = qualityBadges(quality)
   if (!badges.length) return null
   return (
-    <div className="flex flex-wrap gap-1" data-testid="quality-badges">
+    <div className="flex flex-wrap gap-xs" data-testid="quality-badges">
       {badges.map((b) => (
         <span
           key={b.axis}
@@ -69,7 +69,7 @@ export function QualityBadges({ quality }: { quality?: AppQualityWire | null }) 
           data-tone={b.tone}
           title={b.title}
           data-type="label-s"
-          className={`inline-flex items-center gap-1 rounded-pill px-1.5 py-0.5 ${
+          className={`inline-flex items-center gap-xs rounded-pill px-1.5 py-0.5 ${
             b.tone === 'met'
               ? 'bg-surface-high text-ok'
               : 'bg-surface-high text-on-surface-low'

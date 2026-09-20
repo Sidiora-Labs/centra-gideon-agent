@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { ACTIVE_LOOP_STATUSES, shownCycle } from './loopStatus'
+import { ACTIVE_LOOP_STATUSES, effectiveLoopStatus, shownCycle } from './loopStatus'
 
 const SRC = join(process.cwd(), 'src')
 const walk = (dir: string): string[] => readdirSync(dir).flatMap((name) => {
@@ -27,5 +27,15 @@ describe('shownCycle', () => {
     expect(chat).toContain("hint: 'Do not write to memory'")
     expect(chat).toContain('This chat is still saved to your history.')
     expect(chat).not.toMatch(/no memory (?:is )?read|stays out of your history/i)
+  })
+})
+
+describe('effectiveLoopStatus', () => {
+  it('uses the closed stop reason rather than human-facing error copy', () => {
+    expect(effectiveLoopStatus('complete', 'done')).toBe('complete')
+    expect(effectiveLoopStatus('complete', 'cycle_budget')).toBe('ended_early')
+    expect(effectiveLoopStatus('complete', 'deadline')).toBe('ended_early')
+    expect(effectiveLoopStatus('complete', null)).toBe('complete')
+    expect(effectiveLoopStatus('failed', 'worker_failed')).toBe('failed')
   })
 })

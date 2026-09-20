@@ -63,7 +63,7 @@ export function OrganizeChip({ sessionKey, refreshKey, onApplied }: {
         <span className="text-on-surface" style={fvs(600)}>{parts.join(' · ')}</span>
         {proposal.reason ? ` — ${proposal.reason}?` : '?'}
       </span>
-      <Button variant="secondary" size="xs" onClick={accept} loading={busy} className="h-6 px-3">File it</Button>
+      <Button variant="secondary" size="xs" onClick={accept} loading={busy} className="h-6 px-m">File it</Button>
       <IconButton icon={X} label="No thanks (won't suggest this again)" onClick={decline} size={24} iconSize={13} />
     </motion.div>
   )

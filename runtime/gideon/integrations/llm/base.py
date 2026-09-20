@@ -74,6 +74,10 @@ class ModelProvider(ABC):
     def supports_native_commands(self) -> bool:
         return False
 
+    @property
+    def compacts_in_process(self) -> bool:
+        return False
+
     async def stream_command(self, command: str) -> AsyncIterator[LLMEvent]:
         async for event in _forward_events(self.stream(command)):
             yield event

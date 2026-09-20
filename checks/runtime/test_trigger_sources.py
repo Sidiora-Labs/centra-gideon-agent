@@ -918,3 +918,14 @@ def test_the_health_rollup_uses_the_SHARED_vocabulary(_store):
     assert wire["health"] == TriggerHealth.PARKED.value
     assert APP in wire["last_error"], "the panel has no reason to show without this"
     assert wire["event_glob"] == f"{NAMESPACE_PREFIX}:{APP}:*"
+
+
+def test_event_reason_is_redacted_at_the_wire_boundary(_store):
+    from gideon.interfaces.dashboard.handlers.triggers import _serialize_event
+
+    _store.upsert(_app_trigger())
+    row = _store.load()[0]
+    row.park_reason = "failed with api_key=secret-value"
+
+    reason = _serialize_event(row)["last_error"]
+    assert "secret-value" not in reason

@@ -47,6 +47,17 @@ describe('resolveAppIcon', () => {
     expect(resolveAppIcon('SquareTerminalIcon')).toBe(resolveAppIcon('SquareTerminal'))
   })
 
+  it('looks up names case-insensitively without changing component identity', () => {
+    expect(resolveAppIcon('squareterminal')).toBe(resolveAppIcon('SquareTerminal'))
+    expect(resolveAppIcon('SQUARETERMINALICON')).toBe(resolveAppIcon('SquareTerminal'))
+  })
+
+  it('does not allow member expressions or other non-identifiers into the lookup', () => {
+    expect(resolveAppIcon('Lucide.SquareTerminal')).toBe(Blocks)
+    expect(resolveAppIcon('../SquareTerminal')).toBe(Blocks)
+    expect(resolveAppIcon('Square Terminal')).toBe(Blocks)
+  })
+
   it('falls back for absent, non-letter and unknown names', () => {
     expect(resolveAppIcon(undefined)).toBe(Blocks)
     expect(resolveAppIcon('')).toBe(Blocks)

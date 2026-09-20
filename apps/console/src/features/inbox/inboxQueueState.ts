@@ -67,7 +67,7 @@ export function useInboxQueue(openId: string | null, setOpenId: (id: string) => 
   }, [status, items])
   const dismissAll = () => operation.run('dismiss', async () => {
     const count = status?.open_count ?? 0
-    if (!await confirm({ title: `Dismiss all ${count} open item${count === 1 ? '' : 's'}?`, body: 'Every open item of every kind is dismissed at once. There is no undo — but they stay readable under Handled.', danger: true, confirmLabel: 'Dismiss all' })) return false
+    if (!count || !await confirm({ title: `Dismiss all ${count} open item${count === 1 ? '' : 's'}?`, body: 'Every open item of every kind is dismissed at once, and skill proposals are rejected. There is no undo — but inbox rows stay readable under Handled.', danger: true, confirmLabel: 'Dismiss all' })) return false
     return reportingWrite(`dismiss ${count === 1 ? 'this item' : `all ${count} items`}`, () => api.dismissAllInbox())
   }, accepted => { if (accepted) reload() }, 'Dismiss failed')
   const restart = () => operation.run('restart', () => reportingWrite('restart the inbox sources', async () => {

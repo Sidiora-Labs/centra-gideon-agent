@@ -495,16 +495,12 @@ def list_local_skills(extra_paths: list[Path] | None = None) -> list[dict[str, s
     skills: list[dict[str, str]] = []
     seen_names: set[str] = set()
 
+    from gideon.extensions.skills.loader import iter_skill_files
+
     for base in search_paths:
         if not base.is_dir():
             continue
-        for entry in sorted(base.iterdir()):
-            if not entry.is_dir():
-                continue
-            skill_md = entry / _SKILL_FILENAME
-            if not skill_md.is_file():
-                continue
-            name = entry.name
+        for name, skill_md in iter_skill_files(base):
             if name in seen_names:
                 continue
             seen_names.add(name)

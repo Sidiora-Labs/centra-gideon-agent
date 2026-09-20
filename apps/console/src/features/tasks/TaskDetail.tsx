@@ -18,7 +18,7 @@ import { prereqIds } from './dag'
 import { TaskForm, toDraft, draftToPayload, type TaskDraft } from './TaskForm'
 import { taskChecklistPatch, useTaskOperation, useTaskCommentThread } from './taskEditorState'
 
-const relationStyle = 'flex min-h-9 items-center gap-s rounded-md border border-outline-variant/25 bg-surface-container/40 px-m py-2 text-left transition-colors enabled:hover:bg-surface-high disabled:cursor-default'
+const relationStyle = 'flex min-h-9 items-center gap-s rounded-md border border-outline-variant/25 bg-surface-container/40 px-m py-s text-left transition-colors enabled:hover:bg-surface-high disabled:cursor-default'
 const chipStyle = 'inline-flex h-7 items-center gap-1.5 rounded-md px-m'
 
 export function TaskDetail({ task, onSaved, onDeleted, editing: editingProp, onEditingChange, allTasks = [], onOpenTask }: {
@@ -85,7 +85,7 @@ export function TaskDetail({ task, onSaved, onDeleted, editing: editingProp, onE
     {task.description && <DetailSection label="Description"><Markdown>{task.description}</Markdown></DetailSection>}
     {criteria.length > 0 && <DetailSection label={`Exit criteria · ${exitDoneCount(criteria)}/${criteria.length}`}>
       <Meter label="Exit criteria" pct={exitDoneCount(criteria) / criteria.length * 100} tone="var(--color-ok)" className="mb-2" />
-      <ul className="grid gap-1">{criteria.map((criterion, index) => {
+      <ul className="grid gap-xs">{criteria.map((criterion, index) => {
         const done = isExitComplete(criterion)
         return <li key={index} data-type="body-s" className="flex items-start gap-s">
           <button type="button" disabled={readOnly || busy} onClick={() => toggle('exit', index)} aria-label={done ? 'Mark criterion incomplete' : 'Mark criterion complete'} className="group -mx-1 shrink-0 inline-flex size-6 items-center justify-center disabled:cursor-default">
@@ -95,7 +95,7 @@ export function TaskDetail({ task, onSaved, onDeleted, editing: editingProp, onE
         </li>
       })}</ul>
     </DetailSection>}
-    {steps.length > 0 && <DetailSection label="Action plan"><ol className="grid gap-1">{steps.map((step, index) => <li key={index} data-type="body-s" className="flex items-start gap-s">
+    {steps.length > 0 && <DetailSection label="Action plan"><ol className="grid gap-xs">{steps.map((step, index) => <li key={index} data-type="body-s" className="flex items-start gap-s">
       <button type="button" disabled={readOnly || busy} onClick={() => toggle('step', index)} aria-label={step.completed ? 'Mark step incomplete' : 'Mark step done'} className="group -mx-0.5 shrink-0 inline-flex size-6 items-center justify-center disabled:cursor-default">
         <span className="inline-flex size-5 items-center justify-center rounded-pill tabular-nums transition-shadow group-hover:ring-2 group-hover:ring-primary group-disabled:ring-0" data-type="caption" style={{ background: step.completed ? 'var(--color-ok)' : 'color-mix(in srgb, var(--color-primary) 18%, transparent)' }}>{step.completed ? <Check size={11} className="text-white" /> : index + 1}</span>
       </button>

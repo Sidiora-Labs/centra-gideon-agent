@@ -90,6 +90,8 @@ class ScheduleProjection:
 
         trigger = self.trigger
         return {
+            "health": str(getattr(trigger, "health_status", "") or ""),
+            "state": str(getattr(trigger, "state", "") or ""),
             "last_status": str(getattr(trigger, "health_status", "") or ""),
             "last_run_status": self.last_run_status or None,
             "last_run_ts": _last_run_ts(trigger),

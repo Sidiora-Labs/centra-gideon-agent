@@ -804,7 +804,7 @@ async def dispatch_subworkflow(
     depth: int = 0,
     run_id: str = "",
     supervisor: Any = None,
-    timeout: int = 60,
+    timeout: float = 60,
     on_progress: Any = None,
 ) -> NodeResult:
     """Run a named workflow as a CHILD run, and wait for it (WF2-R13).
@@ -975,7 +975,7 @@ async def dispatch_action(
     ctx: BindingContext,
     *,
     get_provider: Any = None,
-    timeout: int = 60,
+    timeout: int | float = 60,
     run_id: str = "",
     project_id: str = "",
     instance_path: str = "",
@@ -2242,7 +2242,7 @@ async def dispatch(
     completion: Any = None,
     get_provider: Any = None,
     verify: Any = None,
-    timeout: int = 60,
+    timeout: float = 60,
     mode: str = "background",
     supervisor: Any = None,
     on_progress: Any = None,

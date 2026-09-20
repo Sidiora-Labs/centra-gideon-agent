@@ -158,7 +158,7 @@ export function PromptsListPage({ onCreate, onOpen, navigate, query, setQuery }:
                       {r.description && <span className="truncate">{r.description}</span>}
                     </div>
                   </div>
-                  {(r.tags?.length ?? 0) > 0 && <div className="hidden md:flex shrink-0 gap-1">{r.tags!.slice(0, 2).map((t) => <span key={t} data-type="caption" className="rounded-md bg-surface-high px-2 h-6 inline-flex items-center text-on-surface-var">{t}</span>)}</div>}
+                  {(r.tags?.length ?? 0) > 0 && <div className="hidden md:flex shrink-0 gap-xs">{r.tags!.slice(0, 2).map((t) => <span key={t} data-type="caption" className="rounded-md bg-surface-high px-2 h-6 inline-flex items-center text-on-surface-var">{t}</span>)}</div>}
                 </ListRow>
                 </ContextMenu>
                 </Disintegrate>

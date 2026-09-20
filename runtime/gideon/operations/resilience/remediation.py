@@ -42,6 +42,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -341,6 +342,17 @@ class RunResult:
     jobs: list[dict] = field(default_factory=list)
     stopped_reason: str = ""
 
+    @property
+    def outcome(self) -> str:
+        statuses = {str(job.get("status", "")) for job in self.jobs}
+        if "error" in statuses:
+            return "partial" if "ok" in statuses else "failed"
+        if "blocked" in statuses:
+            return "partial" if "ok" in statuses else "blocked"
+        if "ok" in statuses:
+            return "success"
+        return "no_op"
+
 
 def run_remediation(
     *,
@@ -367,6 +379,8 @@ def run_remediation(
 
     if score_before >= target_score:
         result.stopped_reason = "target_score already met"
+        if not dry_run:
+            _write_ledger(result, now=now)
         return result
 
     state = _load_job_state()
@@ -380,20 +394,46 @@ def run_remediation(
         )
     ]
     plan = _ordered(candidates)
+    plan_ids = {job.id for job in plan}
+    outcomes: dict[str, str] = {}
 
     for job in plan:
+        blocked_by = [
+            dep
+            for dep in job.after
+            if dep in plan_ids and outcomes.get(dep) not in {"ok", "would_run"}
+        ]
+        if blocked_by:
+            result.jobs.append(
+                {
+                    "id": job.id,
+                    "status": "blocked",
+                    "blocked_by": blocked_by,
+                    "cost": 0.0,
+                }
+            )
+            outcomes[job.id] = "blocked"
+            continue
         if job.lane == "judgment":
             spent = meter.run_totals("doctor").dollars
             if spent >= max_cost_usd:
                 result.stopped_reason = f"max_cost_usd ${max_cost_usd} reached"
                 break
         if _in_cooldown(job, state, now=now):
+            last = float(state[job.id]["last_success_ts"])
             result.jobs.append(
-                {"id": job.id, "status": "skipped_cooldown", "cost": 0.0}
+                {
+                    "id": job.id,
+                    "status": "skipped_cooldown",
+                    "cooldown_until": last + job.cooldown_hours * 3600.0,
+                    "cost": 0.0,
+                }
             )
+            outcomes[job.id] = "skipped_cooldown"
             continue
         if dry_run:
             result.jobs.append({"id": job.id, "status": "would_run", "cost": 0.0})
+            outcomes[job.id] = "would_run"
             continue
         try:
             token = set_current_run_key("doctor")
@@ -405,11 +445,13 @@ def run_remediation(
             result.jobs.append(
                 {"id": job.id, "status": "ok", "cost": 0.0, "detail": detail[:200]}
             )
+            outcomes[job.id] = "ok"
         except Exception as exc:
             logger.warning("remediation job %s failed", job.id, exc_info=True)
             result.jobs.append(
                 {"id": job.id, "status": "error", "cost": 0.0, "error": str(exc)[:200]}
             )
+            outcomes[job.id] = "error"
             continue
         result.score_after = health_score(measure_deficits())
         if result.score_after >= target_score:
@@ -435,6 +477,8 @@ def _write_ledger(result: RunResult, *, now: float) -> None:
         path = d / _LEDGER_FILE
         row = {
             "ts": now,
+            "timestamp": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
+            "outcome": result.outcome,
             "score_before": round(result.score_before, 1),
             "score_after": round(result.score_after, 1),
             "jobs": result.jobs,

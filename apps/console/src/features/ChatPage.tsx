@@ -63,7 +63,7 @@ import { ChatActivityPanel } from './chat/ChatActivityPanel'
 import { createScrollToTurnHandler } from './chat/scrollToTurn'
 import { AssistantActions, UserActions } from './chat/MessageActions'
 import { parseOptions, parseSwitchToAgent } from './chat/parseAssistant'
-import { type PasteBlock, shouldCollapsePaste, nextSeq, makePasteId, markerFor, expandPasteMarkers, pruneBlocks } from './chat/pasteBlocks'
+import { type PasteBlock, shouldCollapsePaste, makePasteId, markerFor, expandPasteMarkers, pruneBlocks } from './chat/pasteBlocks'
 import { Modal } from '../shared/ui/Modal'
 import { confirm, promptInput } from '../shared/ui/dialog'
 import { type ChatTurn, type Segment, type ToolSegment, type ApprovalSegment, type ActivitySegment, type ThinkingSegment, appendThinking, type SubagentCard, type HistMsg, type MemoryCitation, type SkillUsed, userTurn, assistantTurn, hydrateTurns, turnText, deriveActivity, skillsUsedLabel, skillsUsedTitle, stampActivityOrigin } from './chat/chatTypes'
@@ -449,6 +449,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   const [mentionedArtifacts, setMentionedArtifacts] = useState<{ slug: string; name: string }[]>([])
   const [artifactPickerOpen, setArtifactPickerOpen] = useState(false)
   const [pasteBlocks, setPasteBlocks] = useState<PasteBlock[]>([])
+  const pasteSeq = useRef(0)
   const [attachedPaths, setAttachedPaths] = useState<string[]>([])
   const platform = usePlatform()
   const displayCapture = displayCaptureSupported()
@@ -1295,7 +1296,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   }
   function onLargePaste(text: string): boolean {
     if (!shouldCollapsePaste(text)) return false
-    const seq = nextSeq(pasteBlocks)
+    const seq = ++pasteSeq.current
     const block: PasteBlock = { id: makePasteId(seq), seq, lines: text.split('\n').length, content: text }
     const marker = markerFor(seq)
     setPasteBlocks((prev) => [...prev, block])

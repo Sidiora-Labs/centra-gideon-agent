@@ -42,7 +42,7 @@ export function ArtifactIteratePanel({ slug, name, session, onSession, onClose }
   return (
     <aside aria-label={`Iterate with agent: ${name}`}
       className="flex min-h-0 min-w-0 flex-1 flex-col border-outline/40 border-t lg:border-t-0 lg:border-l">
-      <div className="flex shrink-0 items-center gap-2 border-b border-outline/40 px-m py-2">
+      <div className="flex shrink-0 items-center gap-2 border-b border-outline/40 px-m py-s">
         <MessagesSquare size={14} className="shrink-0 text-primary" />
         <span className="truncate text-on-surface text-[0.8125rem]" style={fvs(500)}>Iterate with agent</span>
         <div className="ml-auto shrink-0">

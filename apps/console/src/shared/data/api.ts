@@ -1366,7 +1366,7 @@ export interface Manifest { apiVersion: number; tools: ManifestTool[]; routes: M
 export interface DiscoverTryIt { route: string; query: Record<string, string>; label: string }
 export interface DiscoverTip { id: string; area: string; title: string; lesson: string; try_it: DiscoverTryIt }
 export interface DiscoverArea { area: string; tips: DiscoverTip[] }
-export interface DiscoverResponse { enabled: boolean; areas: DiscoverArea[]; visible_count: number; total: number }
+export interface DiscoverResponse { enabled: boolean; areas: DiscoverArea[]; visible_count: number; total: number; dismissed_count?: number; engaged_count?: number }
 export interface AlwaysOnItem {
   id: string; kind: 'always_skill' | 'project_instruction'; name: string
   scope: 'global' | 'project'; source: string; path: string; chars: number
@@ -2185,7 +2185,7 @@ export interface InboxStatus {
   enabled: boolean; user_id?: string
   native_source_active?: boolean; sources?: InboxSourceHealth[]
   watched_channels?: Array<{ id: string; name: string }>
-  open_count: number; total_count: number; health: InboxHealth
+  pending_count: number; open_count: number; total_count: number; health: InboxHealth
   poll_interval_seconds?: number
   owner?: string
   shared?: boolean
@@ -2213,7 +2213,6 @@ export interface AuditFilters {
 export interface SelVerify {
   ok: boolean; checked: number; valid?: number; tampered?: number; windowed?: boolean
   window?: number | null
-  error?: string
 }
 export interface ComputerUseTrailPoint {
   seq: number; ts: number; tool: string; app: string
@@ -2909,7 +2908,6 @@ export interface DashboardConfig {
   followup_chips: boolean; offer_check_work: boolean; stream_reveal: 'smooth' | 'immediate'
   screen_share_enabled: boolean
   document_editing: boolean
-  dashboard_layout?: { widgets: Array<{ id: string; x: number; y: number; w: number; h: number; hidden?: boolean }>; v: number } | Record<string, never>
 }
 export interface OnboardingEssentials {
   model: string | null
@@ -3004,6 +3002,7 @@ export interface GoalLoop {
   tasks_project_id?: string
   session_key?: string
   skill_ids?: string[]; workflow_ids?: string[]; execution_plan?: Record<string, unknown>[]
+  unrunnable_commands?: { command: string; missing_binary: string }[]
 }
 export interface LoopClassification {
   title?: string
@@ -3554,7 +3553,7 @@ export const api = {
   deleteAgent: (name: string) => del(`/api/agents/${encodeURIComponent(name)}`),
   setDefaultAgent: (name: string) => put<{ ok: boolean; default_agent: string }>('/api/config/default-agent', { agent: name }),
   routingDismiss: (agent: string) => post<{ ok: boolean; count: number; muted: boolean }>('/api/agents/routing/dismiss', { agent }),
-  routingUnmute: (agent: string) => post<{ ok: boolean }>('/api/agents/routing/unmute', { agent }),
+  routingUnmute: (agent: string) => post<{ ok: boolean; agent: string }>('/api/agents/routing/unmute', { agent }),
   routingStatus: () => get<{ enabled: boolean; muted: string[]; dismissals: Record<string, { count: number; last_dismissed_at: number }> }>('/api/agents/routing/status'),
   usageTotals: (opts?: { session?: string; since?: string; until?: string }) => get<{ session: string; totals: UsageAgg }>(`/api/usage/totals${_usageQuery(opts)}`),
   usageRollup: (opts?: { group_by?: 'model' | 'source' | 'agent' | 'provider' | 'day'; since?: string; until?: string; session?: string }) => get<{ group_by: string; rows: Array<UsageAgg & Record<string, string>> }>(`/api/usage/rollup${_usageQuery(opts)}`),
@@ -4920,7 +4919,7 @@ export const api = {
   fileSearch: (q: string, project?: string) =>
     get<{ results: { path: string; name: string; size: number; mtime: number }[]; root?: string }>(`/api/file-search?q=${encodeURIComponent(q)}${project ? `&project=${encodeURIComponent(project)}` : ''}`),
   fileComplete: (path: string, kind?: 'dir') =>
-    get<{ suggestions: FsEntry[] }>(`/api/file-complete?path=${encodeURIComponent(path)}${kind ? `&kind=${kind}` : ''}`),
+    get<{ suggestions: FsEntry[]; truncated: boolean }>(`/api/file-complete?path=${encodeURIComponent(path)}${kind ? `&kind=${kind}` : ''}`),
   browseDirs: (path?: string) =>
     get<{ path: string; parent: string; in_repo?: boolean; dirs: { name: string; path: string; is_repo?: boolean }[] }>(`/api/browse-dirs${path ? `?path=${encodeURIComponent(path)}` : ''}`),
   createDir: (path: string) => post<{ ok: boolean; path: string }>('/api/create-dir', { path }),
@@ -5015,6 +5014,7 @@ export const api = {
   cancelWorkflowRun: (id: string) => post<{ run_id: string; cancel_requested: boolean }>(`/api/workflows/runs/${encodeURIComponent(id)}/cancel`),
   deleteWorkflowRun: (id: string) => del(`/api/workflows/runs/${encodeURIComponent(id)}`),
   pauseWorkflowRun: (id: string) => post<{ run_id: string; pause_requested: boolean }>(`/api/workflows/runs/${encodeURIComponent(id)}/pause`),
+  startWorkflowDraft: (id: string) => post<{ run_id: string; status: string }>(`/api/workflows/runs/${encodeURIComponent(id)}/start`),
   steerWorkflowRun: (id: string, body: { text: string }) =>
     post<{ ok?: boolean; run_id?: string; queued?: number; error?: { code: string; message: string } }>(
       `/api/workflows/runs/${encodeURIComponent(id)}/steer`, body),

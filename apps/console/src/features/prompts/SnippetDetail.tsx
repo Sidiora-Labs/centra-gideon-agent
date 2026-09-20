@@ -118,7 +118,7 @@ export function SnippetDetail({ snippet, onSaved, onDeleted, editing: editingPro
 
       <div>
         <div data-type="caption" className="text-on-surface-low uppercase tracking-wide mb-1.5">Content</div>
-        <pre data-type="body-s" className="rounded-md border border-outline-variant/25 bg-surface-container/40 px-m py-2 text-on-surface-var font-mono overflow-x-auto whitespace-pre-wrap break-words">{full.content || '—'}</pre>
+        <pre data-type="body-s" className="rounded-md border border-outline-variant/25 bg-surface-container/40 px-m py-s text-on-surface-var font-mono overflow-x-auto whitespace-pre-wrap break-words">{full.content || '—'}</pre>
       </div>
 
       <SnippetRenderPanel name={snippet.name} vars={vars} />
@@ -138,14 +138,14 @@ function SnippetRenderPanel({ name, vars }: { name: string; vars: PromptVariable
             <input value={String(values[v.name] ?? '')} aria-label={`${v.name} value`}
               onChange={(e) => setValues((s) => ({ ...s, [v.name]: e.target.value }))} placeholder={v.description}
               data-type="body-s"
-              className="w-full rounded-md border border-outline-variant/25 bg-surface-container/40 px-m py-2 text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
+              className="w-full rounded-md border border-outline-variant/25 bg-surface-container/40 px-m py-s text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
           </Field>
         ))}
         <Button size="sm" onClick={render} loading={loading} className="self-start"><Play size={15} /> Render</Button>
       </div>
       {err && <FieldError className="mt-2">{err}</FieldError>}
       {out != null && (
-        <div data-type="body-s" className="mt-2 rounded-md border border-outline-variant/25 bg-surface-container/40 px-m py-2 text-on-surface-var leading-relaxed"><Markdown>{out}</Markdown></div>
+        <div data-type="body-s" className="mt-2 rounded-md border border-outline-variant/25 bg-surface-container/40 px-m py-s text-on-surface-var leading-relaxed"><Markdown>{out}</Markdown></div>
       )}
     </Section>
   )

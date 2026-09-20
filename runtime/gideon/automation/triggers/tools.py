@@ -124,6 +124,37 @@ def unattended_action_refusal(workflow: Any) -> ToolResult | None:
     )
 
 
+def unknown_action_provider(workflow: Any) -> ToolResult | None:
+    """Refuse an action whose provider is absent from the live dispatch registry."""
+    candidate = workflow if isinstance(workflow, dict) else {}
+    inline = candidate.get("inline")
+    raw = (
+        (inline or {}).get("provider")
+        if isinstance(inline, dict)
+        else candidate.get("provider") or ""
+    )
+    name = str(raw).strip()
+    if not name or "resume" in candidate:
+        return None
+    from gideon.integrations.action_providers.registry import (
+        dispatchable_action_providers,
+        get_action_provider,
+    )
+
+    providers = dispatchable_action_providers()
+    if get_action_provider(name) is not None:
+        return None
+    return ToolResult(
+        False,
+        f"Error: unknown action provider {name!r}. Registered providers: {sorted(providers)}.",
+        dict(
+            provider=name,
+            code="unknown_action_provider",
+            dispatchable_action_providers=providers,
+        ),
+    )
+
+
 def slug_for(name: str, kind: str) -> str:
     slug = _SLUG_RE.sub("-", (name or "").strip().lower()).strip("-")
     return (kind + ":" + (slug or "automation"))[:96]
@@ -261,30 +292,7 @@ class CreationPlan:
         return None
 
     def check_provider(self) -> ToolResult | None:
-        workflow = self.workflow or {}
-        inline = workflow.get("inline")
-        raw = (
-            (inline or {}).get("provider")
-            if isinstance(inline, dict)
-            else workflow.get("provider") or ""
-        )
-        name = str(raw).strip()
-        if not name or "resume" in workflow:
-            return None
-        from gideon.integrations.action_providers.registry import (
-            _ensure_default_providers_registered,
-            get_action_provider,
-            list_action_providers,
-        )
-
-        _ensure_default_providers_registered()
-        if get_action_provider(name) is not None:
-            return None
-        return ToolResult(
-            False,
-            f"Error: unknown action provider {name!r}. Registered providers: {sorted(list_action_providers())}.",
-            dict(provider=name),
-        )
+        return unknown_action_provider(self.workflow)
 
     def persist(self) -> Any:
         from gideon.automation.triggers.arm import arm
@@ -466,6 +474,9 @@ def update(store: Any, *, trigger_id: str, patch: dict[str, Any]) -> ToolResult:
         )
     if "workflow" in accepted:
         refusal = unattended_action_refusal(accepted["workflow"])
+        if refusal is not None:
+            return refusal
+        refusal = unknown_action_provider(accepted["workflow"])
         if refusal is not None:
             return refusal
     for key in accepted:

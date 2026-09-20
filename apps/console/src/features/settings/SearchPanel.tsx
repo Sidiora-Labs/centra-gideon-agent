@@ -5,6 +5,7 @@ import { useQuery, invalidateKeys } from '../../shared/data/data'
 import { PanelHeader, Section } from './settingsUI'
 import { ListSkeleton } from '../../shared/ui/ListScaffold'
 import { DisclosureCard } from '../../shared/ui/DisclosureCard'
+import { TextLink } from '../../shared/ui/TextLink'
 
 const USE_CASE_META: Record<string, { label: string; description: string; icon: LucideIcon }> = {
   'search-general': { label: 'General search', description: 'Default web search for any chat turn or loop.', icon: Globe },
@@ -16,14 +17,17 @@ const USE_CASE_ORDER = ['search-general', 'search-news', 'search-financial', 'fe
 
 export function SearchPanel() {
   const { data, refresh } = useQuery('settings:search', async () => {
-    const [providers, active] = await Promise.all([
+    const [providers, active, tools] = await Promise.all([
       api.searchProviders().catch(() => [] as SearchProviderInfo[]),
       api.searchActive().catch(() => ({} as Record<string, string[]>)),
+      api.tools().catch(() => null),
     ])
-    return { providers, active }
+    return { providers, active, tools }
   }, { persist: true })
   const providers = data?.providers
   const active = data?.active ?? {}
+  const tools = data?.tools
+  const webSearch = tools?.find((tool) => tool.name === 'web_search')
 
   const reloadActive = () => { invalidateKeys('settings:search'); refresh() }
 
@@ -33,6 +37,16 @@ export function SearchPanel() {
     <div>
       <PanelHeader title="Search" hint="Bind a search provider to each use case. Configure providers (endpoint / API key) in Providers, then assign them here. An unbound use case falls back to General search." />
       <Section>
+        {!providers.some((provider) => provider.available) && (
+          <div data-type="body-s" className="mb-3 rounded-lg border border-dashed border-outline-variant/50 bg-surface-container px-4 py-3 text-on-surface-low">
+            Web search needs a configured search provider. Open <TextLink href="#/settings/providers" className="underline">Providers</TextLink> to add credentials or an endpoint.
+          </div>
+        )}
+        {tools !== null && (!webSearch || webSearch.disabled || webSearch.providerDisabled) && (
+          <div data-type="body-s" className="mb-3 rounded-lg border border-dashed border-outline-variant/50 bg-surface-container px-4 py-3 text-on-surface-low">
+            The <code>web_search</code> tool is unavailable. Open <TextLink href="#/tools" className="underline">Tools</TextLink> to enable it.
+          </div>
+        )}
         {providers.length === 0 && (
           <div data-type="body-s" className="mb-3 rounded-lg border border-dashed border-outline-variant/50 bg-surface-container px-4 py-5 text-center text-on-surface-low">
             No search providers configured. Enable <span className="text-on-surface">SearXNG</span> or <span className="text-on-surface">Tavily</span> in <span className="text-on-surface">Providers</span> and add their endpoint / API key.

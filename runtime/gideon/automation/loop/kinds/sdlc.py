@@ -12,7 +12,11 @@ Slice 2.
 from __future__ import annotations
 
 import logging
+import os
+import shlex
+import shutil
 import time
+from dataclasses import dataclass
 
 from gideon.automation.loop import files as loop_files
 from gideon.automation.loop.kinds import LoopKindStrategy, register
@@ -43,56 +47,83 @@ _POOL_CAP = 4
 _CONFLICT_REDO_CAP = 2
 _STALL_FINDINGS = 5
 
-_BUILD_MANIFESTS: dict[str, tuple[str, ...]] = {
-    "npm": ("package.json",),
-    "pnpm": ("package.json",),
-    "yarn": ("package.json",),
-    "node": ("package.json",),
-    "vite": ("package.json",),
-    "tsc": ("package.json", "tsconfig.json"),
-    "eslint": ("package.json",),
-    "vitest": ("package.json",),
-    "jest": ("package.json",),
-    "cargo": ("Cargo.toml",),
-    "go": ("go.mod",),
-    "pytest": ("pyproject.toml", "setup.py", "setup.cfg", "tox.ini"),
-    "python": ("pyproject.toml", "setup.py"),
-    "ruff": ("pyproject.toml", "setup.cfg"),
-    "make": ("Makefile", "makefile"),
-    "gradle": ("build.gradle", "build.gradle.kts"),
-    "mvn": ("pom.xml",),
-    "maven": ("pom.xml",),
+_SHELL_KEYWORDS = frozenset(
+    {
+        "!",
+        "case",
+        "coproc",
+        "do",
+        "done",
+        "elif",
+        "else",
+        "esac",
+        "fi",
+        "for",
+        "function",
+        "if",
+        "in",
+        "select",
+        "then",
+        "time",
+        "until",
+        "while",
+        "{",
+        "}",
+        "[[",
+    }
+)
+
+
+@dataclass(frozen=True)
+class _CommandRunnability:
+    runnable: bool
+    missing_binary: str = ""
+
+    def __bool__(self) -> bool:
+        return self.runnable
+
+
+_SHELL_BUILTINS = {
+    ".",
+    ":",
+    "cd",
+    "eval",
+    "exec",
+    "export",
+    "read",
+    "set",
+    "source",
+    "test",
+    "unset",
 }
 
 
-def _command_runnable_here(cmd: str, workspace_dir: str) -> bool:
-    """Whether a verify/test command can MEANINGFULLY run in the workspace yet — i.e.
-    the toolchain it invokes has its project manifest present. Returns True when we
-    don't recognize the toolchain (don't suppress an unknown command — let it run and
-    report its real exit code) or no workspace is bound (the runner handles cwd=None).
-    Returns False only when a recognized toolchain's manifest is absent — meaning a
-    planning/pre-scaffold stage where running the command would just ENOENT-fail.
-
-    This is what makes the gate STAGE-APPROPRIATE without hard-coding stage names: the
-    same `verify_command` simply doesn't gate a stage whose project isn't built yet,
-    and starts gating once the scaffold stage creates the manifest."""
-    import os
-
-    cmd = (cmd or "").strip().lower()
+def _command_runnable_here(cmd: str, workspace_dir: str) -> _CommandRunnability:
+    """Resolve the command's executable in the environment where the gate will run."""
+    text = (cmd or "").strip()
+    if not text:
+        return _CommandRunnability(True)
+    try:
+        argv = shlex.split(text)
+    except ValueError:
+        return _CommandRunnability(True)
+    while argv and "=" in argv[0] and not argv[0].startswith(("/", "./", "../")):
+        argv.pop(0)
+    if not argv or argv[0].lower() in _SHELL_KEYWORDS or argv[0] in _SHELL_BUILTINS:
+        return _CommandRunnability(True)
+    binary = argv[0]
     ws = (workspace_dir or "").strip()
-    if not cmd or not ws:
-        return True
-    manifests: tuple[str, ...] = ()
-    for token, mans in _BUILD_MANIFESTS.items():
-        if token in cmd.split() or any(
-            seg.strip().startswith(token + " ") or seg.strip() == token
-            for seg in cmd.replace("&&", ";").replace("||", ";").split(";")
-        ):
-            manifests = mans
-            break
-    if not manifests:
-        return True
-    return any(os.path.isfile(os.path.join(ws, m)) for m in manifests)
+    if os.path.sep in binary:
+        candidate = (
+            binary if os.path.isabs(binary) else os.path.join(ws or os.getcwd(), binary)
+        )
+        found = os.path.isfile(candidate) and os.access(candidate, os.X_OK)
+    else:
+        path = os.environ.get("PATH", "")
+        if ws:
+            path = os.pathsep.join((os.path.join(ws, "node_modules", ".bin"), path))
+        found = shutil.which(binary, path=path) is not None
+    return _CommandRunnability(found, "" if found else binary)
 
 
 class CodeKind(LoopKindStrategy):

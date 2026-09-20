@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, ChevronDown, ChevronRight, FolderGit2, GitBranch, MessageSquarePlus, MessageSquareCode, Package, Pause, Pencil, RotateCcw, ScanSearch, Scale, SkipForward, X } from 'lucide-react'
+import { ArrowLeft, ChevronDown, ChevronRight, FolderGit2, GitBranch, MessageSquarePlus, MessageSquareCode, Package, Pause, Pencil, Play, RotateCcw, ScanSearch, Scale, SkipForward, X } from 'lucide-react'
 import { TopBar } from '../../shared/ui/TopBar'
 import { Segmented } from '../../shared/ui/Segmented'
 import { Loading } from '../../shared/ui/ListScaffold'
@@ -355,14 +355,25 @@ export function WorkflowRunDetail({ runId, onBack, initialInspectNodeId, onInspe
             <QuietButton onClick={() => setReviewOpen((v) => !v)} ariaExpanded={reviewOpen} title="Review — accept or reject this run's line-anchored findings">
               <MessageSquareCode size={13} /> Review
             </QuietButton>
-            {!isTerminal(run.status) ? (
+            {isPrelaunch(run.status) ? (
+              <QuietButton onClick={() => act('Start', () => api.startWorkflowDraft(runId))} title="Start this draft workflow">
+                <Play size={13} /> Start
+              </QuietButton>
+            ) : run.status === 'paused' ? (
+              <>
+                <QuietButton onClick={() => act('Resume', () => api.resumeWorkflowRun(runId, {}))} title="Resume this paused workflow">
+                  <Play size={13} /> Resume
+                </QuietButton>
+                <QuietButton onClick={cancel} title="Cancel this run"><X size={13} /> Cancel</QuietButton>
+              </>
+            ) : !isTerminal(run.status) ? (
               <>
                 <QuietButton onClick={() => setSteerOpen((v) => !v)} ariaExpanded={steerOpen} title="Steer this run — queue an instruction or accept a judge comment">
                   <MessageSquarePlus size={13} /> Steer
                 </QuietButton>
-                <QuietButton onClick={() => act('Pause', () => api.pauseWorkflowRun(runId))} title="Pause — in-flight steps finish">
+                {run.status === 'running' && <QuietButton onClick={() => act('Pause', () => api.pauseWorkflowRun(runId))} title="Pause — in-flight steps finish">
                   <Pause size={13} /> Pause
-                </QuietButton>
+                </QuietButton>}
                 <QuietButton onClick={cancel} title="Cancel this run"><X size={13} /> Cancel</QuietButton>
               </>
             ) : (

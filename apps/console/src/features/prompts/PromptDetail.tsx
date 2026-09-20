@@ -93,7 +93,7 @@ export function PromptDetail({ prompt, onSaved, onDeleted, editing: editingProp,
         )}
         {full.kind && <span data-type="caption" className="inline-flex items-center rounded-md px-m h-6" style={{ background: 'var(--color-surface-high)', color: 'var(--color-on-surface-var)' }}>{full.kind} prompt</span>}
         {full.launch_spec && Object.keys(full.launch_spec).length > 0 && (
-          <span data-type="caption" className="inline-flex items-center gap-1 rounded-md px-m h-6" style={accentChip}><Rocket size={11} /> runnable</span>
+          <span data-type="caption" className="inline-flex items-center gap-xs rounded-md px-m h-6" style={accentChip}><Rocket size={11} /> runnable</span>
         )}
         <span data-type="caption" className="ml-auto inline-flex items-center rounded-md px-m h-6" style={toneChipSkin(sourceTone(prompt.source), 16)}>{sourceLabel(prompt.source, full?.tags)}</span>
       </div>
@@ -110,7 +110,7 @@ export function PromptDetail({ prompt, onSaved, onDeleted, editing: editingProp,
         <Section label={`Includes · ${includes.length}`}>
           <div className="flex flex-wrap gap-1.5">
             {includes.map((n) => (
-              <span key={n} data-type="caption" className="inline-flex items-center gap-1 rounded-md border border-outline-variant/25 bg-surface-container/40 px-2 h-7 font-mono text-on-surface-var"><Puzzle size={12} className="text-info" /> {n}</span>
+              <span key={n} data-type="caption" className="inline-flex items-center gap-xs rounded-md border border-outline-variant/25 bg-surface-container/40 px-2 h-7 font-mono text-on-surface-var"><Puzzle size={12} className="text-info" /> {n}</span>
             ))}
           </div>
         </Section>
@@ -166,7 +166,7 @@ function RenderPanel({ name, vars, launchable, launchKind, onNavigate }: { name:
       </div>
       {err && <FieldError className="mt-2">{err}</FieldError>}
       {out != null && (
-        <div data-type="body-s" className="mt-2 rounded-md border border-outline-variant/25 bg-surface-container/40 px-m py-2 text-on-surface-var leading-relaxed"><Markdown>{out}</Markdown></div>
+        <div data-type="body-s" className="mt-2 rounded-md border border-outline-variant/25 bg-surface-container/40 px-m py-s text-on-surface-var leading-relaxed"><Markdown>{out}</Markdown></div>
       )}
     </Section>
   )
@@ -192,7 +192,7 @@ function TemplateSection({ content, vars }: { content: string; vars: PromptVaria
   const raw = mode === 'raw'
   const title = raw ? 'Show rendered' : 'Show raw template'
   const body = raw ? <pre data-type="body-s" className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-on-surface-var">{content || '—'}</pre> : <Markdown>{fillDefaults(content, vars) || '—'}</Markdown>
-  return <section className="grid gap-s"><div className="flex items-center gap-s"><h2 data-type="caption" className="text-on-surface-low uppercase tracking-wide">Template</h2><button type="button" onClick={() => setMode(raw ? 'rendered' : 'raw')} data-type="caption" className="ml-auto inline-flex min-h-6 items-center gap-1 rounded-md border border-outline-variant/30 px-s text-on-surface-low hover:text-on-surface" title={title}>{raw ? <><Eye size={12} /> Rendered</> : <><Code2 size={12} /> Raw</>}</button></div><div data-type="body-s" className="rounded-md border border-outline-variant/25 bg-surface-container/30 p-m leading-relaxed text-on-surface">{body}</div></section>
+  return <section className="grid gap-s"><div className="flex items-center gap-s"><h2 data-type="caption" className="text-on-surface-low uppercase tracking-wide">Template</h2><button type="button" onClick={() => setMode(raw ? 'rendered' : 'raw')} data-type="caption" className="ml-auto inline-flex min-h-6 items-center gap-xs rounded-md border border-outline-variant/30 px-s text-on-surface-low hover:text-on-surface" title={title}>{raw ? <><Eye size={12} /> Rendered</> : <><Code2 size={12} /> Raw</>}</button></div><div data-type="body-s" className="rounded-md border border-outline-variant/25 bg-surface-container/30 p-m leading-relaxed text-on-surface">{body}</div></section>
 }
 
 function Section({ label, children }: { label: string; children: React.ReactNode }) {

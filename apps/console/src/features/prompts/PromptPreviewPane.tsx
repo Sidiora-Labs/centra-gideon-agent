@@ -30,7 +30,7 @@ export function PromptPreviewPane({ draft }: { draft: PromptDraft }) {
       )}
 
       {error ? (
-        <div role="alert" data-type="body-s" className="flex items-start gap-2 rounded-lg px-3 py-2"
+        <div role="alert" data-type="body-s" className="flex items-start gap-2 rounded-lg px-m py-s"
           style={{ background: 'color-mix(in srgb, var(--color-danger) 12%, transparent)', color: 'var(--color-danger)' }}>
           <AlertTriangle size={15} className="mt-0.5 shrink-0" />
           <span>Couldn't render this template: {error}</span>
@@ -47,12 +47,12 @@ export function PromptPreviewPane({ draft }: { draft: PromptDraft }) {
 function SampleField({ v, value, onChange }: { v: PromptVariable; value: unknown; onChange: (value: unknown) => void }) {
   const base = 'w-full rounded-md border border-outline-variant/25 bg-surface px-m text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary'
   const text = value == null ? '' : String(value)
-  const label = <span data-type="caption" className="inline-flex items-center gap-1 text-on-surface-var"><code className="font-mono">{v.name}</code>{v.required && <span className="text-danger">*</span>}</span>
+  const label = <span data-type="caption" className="inline-flex items-center gap-xs text-on-surface-var"><code className="font-mono">{v.name}</code>{v.required && <span className="text-danger">*</span>}</span>
   if (v.type === 'boolean') return <div className="flex items-center justify-between gap-s">{label}<button type="button" aria-label={v.name} aria-pressed={Boolean(value)} onClick={() => onChange(!value)} data-type="caption" className="min-h-7 rounded-md border border-outline-variant/30 px-m" style={{ background: value ? 'var(--color-primary)' : 'var(--color-surface-high)', color: value ? 'var(--color-on-primary)' : 'var(--color-on-surface-low)' }}>{value ? 'true' : 'false'}</button></div>
   const control = v.type === 'select'
     ? <select value={text} onChange={event => onChange(event.target.value)} aria-label={v.name} data-type="body-s" className={`${base} h-8`}><option value="">—</option>{(v.options ?? []).map(option => <option key={option} value={option}>{option}</option>)}</select>
     : v.type === 'textarea'
       ? <textarea value={text} onChange={event => onChange(event.target.value)} rows={2} aria-label={v.name} data-type="body-s" className={`${base} resize-y py-s`} />
       : <input type={v.type === 'number' ? 'number' : 'text'} value={text} onChange={event => onChange(event.target.value)} aria-label={v.name} data-type="body-s" className={`${base} h-8`} />
-  return <div className="grid gap-1">{label}{control}</div>
+  return <div className="grid gap-xs">{label}{control}</div>
 }

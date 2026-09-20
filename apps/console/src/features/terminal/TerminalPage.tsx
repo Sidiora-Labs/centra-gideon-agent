@@ -11,6 +11,7 @@ import { TerminalView } from './TerminalView'
 import { PageTitle } from '../../shared/ui/PageTitle'
 import { tabListKeys } from '../../shared/data/tabListKeys'
 import { SandboxPicker, type SandboxProvider } from './SandboxPicker'
+import { persistClaim } from '../../lib/persistClaim'
 
 export interface TermTab { id: string; label: string; cwd?: string; shell?: string; sandbox?: string; custom?: boolean }
 
@@ -37,6 +38,7 @@ export function TerminalPage({ query, setQuery }: Pick<RouteProps, 'query' | 'se
   const [restored, setRestored] = useState(false)
   const [persist, setPersist] = useState<boolean | null>(null)
   const [persistAvailable, setPersistAvailable] = useState<boolean | undefined>()
+  const persistenceConfirmed = persistClaim(persist, persistAvailable)
   useEffect(() => {
     api.gideonConfig()
       .then((c) => setPersist(Boolean(c?.dashboard?.terminal?.persist)))
@@ -127,10 +129,10 @@ export function TerminalPage({ query, setQuery }: Pick<RouteProps, 'query' | 'se
           {persistAvailable === true && persist !== null && (
             <HeaderControl icon={Anchor}
               label={persist ? 'Disable persistent sessions' : 'Enable persistent sessions'}
-              hint={persist
-                ? 'Sessions are tmux-backed, so they survive a restart.'
+              hint={persistenceConfirmed
+                ? 'Confirmed active: sessions are tmux-backed, so they survive a restart.'
                 : 'Sessions are lost on restart. Enabling keeps them alive with tmux.'}
-              active={persist} priority="low" onClick={togglePersist} />
+              active={persistenceConfirmed} priority="low" onClick={togglePersist} />
           )}
           {persistAvailable === false && (
             <HeaderControl icon={Anchor} label="Persistent sessions unavailable"

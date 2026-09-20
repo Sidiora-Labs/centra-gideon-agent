@@ -181,7 +181,7 @@ function PinnedTile({ tile, onResolve }: { tile: DashboardTile; onResolve: (ref:
         </span>
         {live && <FreshnessBar tile={tile} row={row} />}
         {isProposal && (
-          <span data-type="label-s" className="inline-flex items-center gap-1 rounded-pill bg-primary-container px-2 py-0.5 text-on-primary-container">
+          <span data-type="label-s" className="inline-flex items-center gap-xs rounded-pill bg-primary-container px-2 py-0.5 text-on-primary-container">
             <Sparkles size={11} /> Proposed
           </span>
         )}

@@ -322,6 +322,9 @@ HTTP_ERROR_CODES: dict[str, str] = {
     "run_not_prelaunch": (
         "The run has launched, so its policy overrides are frozen; edit them before launch."
     ),
+    "engine_owned_field": (
+        "The workflow engine owns this field; change the owning run instead."
+    ),
     "unknown_policy_key": (
         "A policy override key is not in the overridable set; the detail names the "
         "offending keys and the keys a run may override."

@@ -355,6 +355,17 @@ async def api_loop_get(request: web.Request) -> web.Response:
     view = store.get_redacted(cid)
     if view is None:
         return web.json_response({"error": "Not found"}, status=404)
+    if view.get("kind") == "code":
+        from gideon.automation.loop.kinds.sdlc import _command_runnable_here
+
+        config = view.get("kind_config") or {}
+        workspace = str(view.get("workspace_dir") or "")
+        view["unrunnable_commands"] = [
+            {"command": command, "missing_binary": result.missing_binary}
+            for key in ("verify_command", "test_command")
+            if (command := str(config.get(key) or "").strip())
+            if not (result := _command_runnable_here(command, workspace)).runnable
+        ]
     try:
         from gideon.automation.loop.manager import loop_spend
 

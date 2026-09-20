@@ -482,7 +482,7 @@ class RunController:
         """
         resumed = bool(self.run.started_at)
         totals = journal_mod.run_totals(self.run.id)
-        self.run.total_tokens = max(self.run.total_tokens, int(totals.get("tokens", 0)))
+        self._restore_recorded_tokens(totals)
         self._rehydrate_context()
         async with self._lock:
             if not self.run.started_at:
@@ -2398,6 +2398,11 @@ class RunController:
             completion=self.services.completion,
             get_provider=self.services.get_provider,
             verify=self.services.verify,
+            timeout=(
+                max(0.001, float(total) - 0.1)
+                if node.kind == NodeKind.SUBWORKFLOW and total and total > 0
+                else total
+            ),
             mode=self.run.mode,
             supervisor=self.services.supervisor,
             on_progress=lambda path=item.path: self.note_progress(path),
@@ -3999,6 +4004,11 @@ class RunController:
     def _save_run(self) -> None:
         store.save(self.run)
 
+    def _restore_recorded_tokens(self, totals: dict[str, Any]) -> None:
+        tokens = totals.get("tokens")
+        if tokens is not None:
+            self.run.total_tokens = max(self.run.total_tokens, int(tokens))
+
     async def _cancel_inflight(self) -> None:
         for entry in list(self._inflight.values()):
             entry.task.cancel()
@@ -4024,7 +4034,7 @@ class RunController:
                     0.0, _epoch(self.run.completed_at) - _epoch(self.run.started_at)
                 )
         totals = journal_mod.run_totals(self.run.id)
-        self.run.total_tokens = max(self.run.total_tokens, int(totals.get("tokens", 0)))
+        self._restore_recorded_tokens(totals)
         self._save_run()
         self._persist_state()
         self.journal.run_finished(
@@ -4393,6 +4403,7 @@ class RunController:
 
             node_dict = {
                 "id": item.node.id,
+                "label": item.node.label,
                 "path": item.path,
                 "kind": item.node.kind.value,
                 "config": dict(item.node.config or {}),

@@ -76,7 +76,7 @@ export function InboxPage({ query, setQuery, navigate }: Pick<RouteProps, 'query
         <TopBar
           keepCornerPadding
 
-          left={<PageTitle className="flex min-w-0 items-baseline gap-s"><span className="shrink-0">Inbox</span> {status && <span data-type="caption" className="min-w-0 truncate text-on-surface-low">{status.open_count} open · {status.total_count} total</span>}</PageTitle>}
+          left={<PageTitle className="flex min-w-0 items-baseline gap-s"><span className="shrink-0">Inbox</span> {status && <span data-type="caption" className="min-w-0 truncate text-on-surface-low">{status.pending_count} new · {status.total_count} total</span>}</PageTitle>}
           right={
 
             <div className="flex items-center gap-1">

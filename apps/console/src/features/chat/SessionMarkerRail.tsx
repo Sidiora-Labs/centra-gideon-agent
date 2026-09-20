@@ -200,7 +200,7 @@ function MapMarks({ id, turns, viewport, current, compact, jumpTo, moveWithKeybo
         <div data-session-map role="region" aria-label="Session map messages"
           data-session-map-state="open"
           aria-describedby={`${id}-session-map-keyboard-help`}
-          className="relative flex flex-col items-center rounded-xl border border-outline-variant/50 bg-surface/95 py-1 shadow-md backdrop-blur-md">
+          className="relative flex flex-col items-center rounded-xl border border-outline-variant/50 bg-rail py-1 shadow-md">
           <span id={`${id}-session-map-keyboard-help`} className="sr-only">
             Use the Up and Down arrow keys to jump between messages. Home jumps to the first message and End jumps to the newest.
           </span>
@@ -222,8 +222,8 @@ function MapMarks({ id, turns, viewport, current, compact, jumpTo, moveWithKeybo
                 aria-describedby={previewId}
                 aria-current={current === index ? 'location' : undefined}
                 onClick={() => jumpTo(index)} onKeyDown={(event) => moveWithKeyboard(event, index)}
-                className={`group relative inline-flex items-center justify-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-visible:ring-offset-surface ${compact ? 'size-6' : 'size-8'}`}>
-                <span aria-hidden="true" className={`relative z-10 flex items-center gap-0.5 rounded-pill px-0.5 transition-transform group-hover:scale-125 ${current === index ? 'bg-primary ring-2 ring-primary ring-offset-2 ring-offset-surface' : 'bg-outline'}`}>
+                className={`group relative inline-flex items-center justify-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-visible:ring-offset-rail ${compact ? 'size-6' : 'size-8'}`}>
+                <span aria-hidden="true" className={`relative z-10 flex items-center gap-0.5 rounded-pill px-0.5 transition-transform group-hover:scale-125 ${current === index ? 'bg-primary ring-2 ring-primary ring-offset-2 ring-offset-rail' : 'bg-on-surface-low'}`}>
                   {marks.map((mark) => mark === 'tool'
                     ? <Wrench key={mark} data-mark="tool" size={8} className="text-primary" />
                     : mark === 'error'

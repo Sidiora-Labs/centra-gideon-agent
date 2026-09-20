@@ -13,7 +13,7 @@ import { HeaderActions, HeaderControl } from '../../shared/ui/HeaderActions'
 import { ReactWidgetFrame } from '../../shared/ui/widget/ReactWidgetFrame'
 import { api, type Loop, type Artifact, type LoopPhase } from '../../shared/data/api'
 import { downloadText, safeFilename } from '../../shared/data/download'
-import { shownCycle, ACTIVE_LOOP_STATUSES, PRELAUNCH_LOOP_STATUSES, LOOP_ACTION_SOURCE_STATUSES, type LoopAction } from '../../shared/data/loopStatus'
+import { shownCycle, effectiveLoopStatus, ACTIVE_LOOP_STATUSES, PRELAUNCH_LOOP_STATUSES, LOOP_ACTION_SOURCE_STATUSES, type LoopAction } from '../../shared/data/loopStatus'
 import { useRunStream } from './useRunStream'
 import { CockpitPromptBar } from './CockpitPromptBar'
 import type { RouteProps } from '../../app/shell/useQueryState'
@@ -233,7 +233,7 @@ export function DesignCockpitPage({ id, onBack, onDeleted, onOpenProject, onBuil
         style={{ background: 'var(--color-surface-container)' }}>
         <DesignPhaseTrail plan={(loop.plan ?? []) as LoopPhase[]} phaseStatus={loop.phase_status || {}}
           cycle={loop.total_cycles || 0} active={active} complete={status === 'complete'} />
-        <span data-type="caption" className="text-on-surface-var capitalize">{status}{(loop.total_cycles || active) ? ` · cycle ${shownCycle(loop.total_cycles, loop.status)}/${loop.max_cycles}` : ''}</span>
+        <span data-type="caption" className="text-on-surface-var capitalize">{effectiveLoopStatus(status || '', loop.stop_reason).replace('_', ' ')}{(loop.total_cycles || active) ? ` · cycle ${shownCycle(loop.total_cycles, loop.status)}/${loop.max_cycles}` : ''}</span>
         {(loop.elapsed_seconds ?? 0) > 0 && (
           <span data-type="caption" className="inline-flex items-center gap-1 text-on-surface-low" title="Elapsed (running time)">
             <Clock size={11} />{fmtDesignElapsed(loop.elapsed_seconds ?? 0)}

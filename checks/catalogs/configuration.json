@@ -254,11 +254,6 @@
         "sensitive": false,
         "type": "bool"
       },
-      "dashboard.dashboard_layout": {
-        "default": {},
-        "sensitive": false,
-        "type": "dict"
-      },
       "dashboard.document_editing": {
         "default": false,
         "sensitive": false,

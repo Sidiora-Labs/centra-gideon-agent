@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, type DashboardConfig, type SessionTemplate } from '../../shared/data/api'
 import { notify } from '../../app/shell/appSdk'
-import { useAgentCatalog, ensureBindableAgentName } from '../../shared/data/agents'
+import { AGENT_ROUTING_MUTES_KEY, useAgentCatalog, ensureBindableAgentName, unmuteAgent } from '../../shared/data/agents'
 import { useQuery, invalidateKeys } from '../../shared/data/data'
 import { PanelHeader, Section, RowGroup, Row, Toggle, SegPills, SavedToast } from './settingsUI'
 import { Combobox } from '../../shared/ui/Combobox'
@@ -10,6 +10,8 @@ import { IconButton } from '../../shared/ui/IconButton'
 import { confirmDelete } from '../../shared/ui/dialog'
 import { Trash2 } from 'lucide-react'
 import { FormSkeleton, LoadError } from '../../shared/ui/ListScaffold'
+import { Button } from '../../shared/ui/Button'
+import { reportingWrite } from '../../app/shell/reportingWrite'
 
 const RESTORE_WINDOWS = [
   { key: '15', label: '15 min' }, { key: '30', label: '30 min' },
@@ -90,9 +92,9 @@ function StartersSection() {
     <Section title="Chat starters" hint="Reusable setups — agent, model and reasoning effort. Save one from a chat's header; they appear on the new-chat screen.">
       <RowGroup>
         {items === null ? (
-          <p data-type="body-s" className="py-3 text-on-surface-low">Loading…</p>
+          <p data-type="body-s" className="py-m text-on-surface-low">Loading…</p>
         ) : items.length === 0 ? (
-          <p data-type="body-s" className="py-3 text-on-surface-low">
+          <p data-type="body-s" className="py-m text-on-surface-low">
             No starters yet. Open a chat, set it up how you like, then use “Save as starter” in its header.
           </p>
         ) : items.map((t) => (
@@ -129,13 +131,13 @@ function MidTurnSection({ resilience, setResilience }: {
       <RowGroup>
         <Row label="Default handling"
           hint="Queue: deliver it as the next turn. Steer: fold it into the answer being written, where the running agent supports that — otherwise it queues. Replace: stop the current answer and start over with the new message. Unattended work (loops, cron, subagents) always queues.">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-s">
             <SavedToast show={saved} />
             <SegPills ariaLabel="Default handling" value={policy} onChange={patch} options={[...MID_TURN_POLICIES]} />
           </div>
         </Row>
         {policy === 'steer' && (
-          <p data-type="caption" className="pb-3 text-on-surface-low">
+          <p data-type="caption" className="pb-m text-on-surface-low">
             Steering reaches the running answer on the built-in agent. Connected CLI
             agents (ACP) don't expose a mid-turn seam yet, so a message there queues
             instead — either way it appears above the composer, never dropped.
@@ -148,6 +150,7 @@ function MidTurnSection({ resilience, setResilience }: {
 
 function RoutingSection({ routing, setRouting }: { routing: Record<string, unknown>; setRouting: (r: Record<string, unknown>) => void }) {
   const [saved, flash] = useSavedFlash()
+  const { data: muteStatus } = useQuery(AGENT_ROUTING_MUTES_KEY, api.routingStatus)
   const patch = (key: string, value: unknown, _cb?: () => void, label?: string) => {
     const prev = routing[key]
     setRouting({ ...routing, [key]: value })
@@ -161,14 +164,19 @@ function RoutingSection({ routing, setRouting }: { routing: Record<string, unkno
     <Section title="Agent routing" hint="Suggest a better-fit specialist agent when a message matches one — you always confirm before it re-targets the chat.">
       <RowGroup>
         <Row label="Suggest specialists" hint="When a message in a default-agent chat fits an installed specialist, show a one-click 'route to <agent>?' chip. Never routes silently.">
-          <div className="flex items-center gap-2"><SavedToast show={saved} /><Toggle on={enabled} onChange={(v) => patch('enabled', v)} label="Suggest specialists" /></div>
+          <div className="flex items-center gap-s"><SavedToast show={saved} /><Toggle on={enabled} onChange={(v) => patch('enabled', v)} label="Suggest specialists" /></div>
         </Row>
         {enabled && (
           <NumberRow label="Confidence threshold" hint="Minimum match confidence before a routing chip appears. Higher = fewer, surer suggestions." value={Number(routing.min_confidence ?? 0.62)} min={0.3} max={0.95} step={0.01} onCommit={(n, l) => patch('min_confidence', n, undefined, l)} saved={saved} />
         )}
         {enabled && (
-          <NumberRow label="Dismiss cooldown" hint="After you dismiss a suggestion for an agent, suppress it for this long (three dismissals mute it until you re-enable)." value={Number(routing.cooldown_hours ?? 24)} min={0} max={720} step={1} suffix="h" onCommit={(n, l) => patch('cooldown_hours', n, undefined, l)} saved={saved} />
+          <NumberRow label="Dismiss cooldown" hint="After you dismiss a suggestion for an agent, suppress it for this long (three dismissals mute it until you use the Muted agents row below)." value={Number(routing.cooldown_hours ?? 24)} min={0} max={720} step={1} suffix="h" onCommit={(n, l) => patch('cooldown_hours', n, undefined, l)} saved={saved} />
         )}
+        <Row label="Muted agents" hint={muteStatus?.muted.length ? 'These agents stay out of routing suggestions until unmuted.' : 'No agents are muted.'}>
+          <div className="grid gap-s">
+            {(muteStatus?.muted ?? []).map(agent => <div key={agent} data-type="caption" className="flex items-center justify-end gap-s text-on-surface-var"><span>{agent} · {muteStatus?.dismissals[agent]?.count ?? 0} dismissals</span><Button size="xs" variant="secondary" ariaLabel={`Unmute ${agent}`} onClick={() => { void reportingWrite(`unmute ${agent}`, () => unmuteAgent(agent)) }}>Unmute</Button></div>)}
+          </div>
+        </Row>
       </RowGroup>
     </Section>
   )
@@ -187,7 +195,7 @@ function SessionsSection({ cfg, setCfg }: { cfg: DashboardConfig; setCfg: (c: Da
       <RowGroup>
         { }
         <Row label="Restore sessions on startup" hint="Re-open recently active sessions when the app starts.">
-          <div className="flex items-center gap-2"><SavedToast show={saved} /><Toggle on={cfg.restore_sessions} onChange={(v) => save({ restore_sessions: v })} label="Restore sessions on startup" /></div>
+          <div className="flex items-center gap-s"><SavedToast show={saved} /><Toggle on={cfg.restore_sessions} onChange={(v) => save({ restore_sessions: v })} label="Restore sessions on startup" /></div>
         </Row>
         {cfg.restore_sessions && (
           <Row label="Restore window" hint="How recently active a session must be to re-open.">
@@ -224,7 +232,7 @@ function MessagesSection({ cfg, setCfg }: { cfg: DashboardConfig; setCfg: (c: Da
         {
 }
         <Row label="Send on Enter" hint={cfg.send_on_enter ? 'Enter sends · Shift+Enter for a newline.' : 'Enter inserts a newline · sending is button-only.'}>
-          <div className="flex items-center gap-2"><SavedToast show={saved} /><Toggle on={cfg.send_on_enter} onChange={(v) => save({ send_on_enter: v })} label="Send on Enter" /></div>
+          <div className="flex items-center gap-s"><SavedToast show={saved} /><Toggle on={cfg.send_on_enter} onChange={(v) => save({ send_on_enter: v })} label="Send on Enter" /></div>
         </Row>
         <Row label="Show timestamps" hint="Display a time on each message.">
           <Toggle on={cfg.show_timestamps} onChange={(v) => save({ show_timestamps: v })} label="Show timestamps" />
@@ -278,7 +286,7 @@ function CheckpointsSection({ checkpoints, setCheckpoints }: {
     <Section title="File checkpoints" hint="Before the agent's first write to a file in a turn, its current bytes are saved so /rewind-to-turn can restore them. Files only — never the conversation. Credential files (.env, keys) are never copied, so they are never restored either.">
       <RowGroup>
         <Row label="Back up files before an edit" hint={on ? 'A wrong edit is recoverable with /rewind-to-turn N.' : 'Off — a wrong edit is gone. Nothing is being recorded.'}>
-          <div className="flex items-center gap-2"><SavedToast show={saved} /><Toggle on={on} onChange={(v) => patch('enabled', v)} label="Back up files before an edit" /></div>
+          <div className="flex items-center gap-s"><SavedToast show={saved} /><Toggle on={on} onChange={(v) => patch('enabled', v)} label="Back up files before an edit" /></div>
         </Row>
         {on && (
           <>
@@ -378,7 +386,7 @@ export function AutoArchiveRow({ days, onCommit, saved }: {
       label="Auto-archive after"
       hint="Archive chats with no activity for this long. Archived chats stay searchable and restore in one click — nothing is deleted. 0 = off."
     >
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-s">
         <SavedToast show={saved} />
         {shown > 0 && preview?.days === shown && (
           <span data-type="caption" className="text-on-surface-var tabular-nums">
@@ -406,7 +414,7 @@ function NumberRow({ label, hint, value, min, max, step, suffix, onCommit, saved
 }) {
   return (
     <Row label={label} hint={hint}>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-s">
         <SavedToast show={saved} />
         <NumberField value={value} min={min} max={max} step={step} onChange={(n) => onCommit(n, label)} ariaLabel={label} />
         {suffix && <span data-type="caption" className="w-6 text-on-surface-low">{suffix}</span>}

@@ -7,6 +7,7 @@ import { Toggle } from '../../shared/ui/Toggle'
 import { Button } from '../../shared/ui/Button'
 import { CUES, type CueName } from '../../shared/theme/soundCues'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
+import { cronExprInvalidReason } from '../schedule/cronExpr'
 
 const MODES: { key: NotificationMode; label: string }[] = [
   { key: 'never', label: 'Never' },
@@ -149,8 +150,10 @@ export function DigestSchedule({ schedule, onSaved }: { schedule: string; onSave
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const dirty = value.trim() !== schedule
+  const invalidReason = cronExprInvalidReason(value)
 
   async function save() {
+    if (invalidReason) return
     setBusy(true); setErr('')
     try { await api.saveNotificationRules({ digest: { schedule: value.trim() } }); onSaved() }
     catch (e) { setErr(e instanceof Error ? e.message : 'Save failed') }
@@ -164,10 +167,11 @@ export function DigestSchedule({ schedule, onSaved }: { schedule: string; onSave
           <div className="w-44">
             <TextInput value={value} onChange={setValue} size="sm" mono ariaLabel="Digest schedule" />
           </div>
-          {dirty && <Button size="sm" onClick={save} disabled={busy} disabledReason={BUSY_REASON}>Save</Button>}
+          {dirty && <Button size="sm" onClick={save} disabled={busy || !!invalidReason} disabledReason={invalidReason || BUSY_REASON}>Save</Button>}
           {dirty && <Button size="sm" variant="ghost" onClick={() => { setValue(schedule); setErr('') }} disabled={busy} disabledReason={BUSY_REASON}>Cancel</Button>}
         </div>
       </Field>
+      {invalidReason && <FieldError>{invalidReason}</FieldError>}
       {err && <FieldError>{err}</FieldError>}
     </Section>
   )

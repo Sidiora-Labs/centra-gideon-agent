@@ -29,11 +29,12 @@ export function FileTree({ dirs, rootPath, activePath, gitStatuses, onOpenFile, 
   useEffect(() => {
     let alive = true
     if (rootCached) setEntries(rootCached)
-    dirs.load(rootPath).then((e) => { if (alive) setEntries(e) })
+    dirs.load(rootPath, !dirs.resolved[rootPath]).then((e) => { if (alive) setEntries(e) })
     return () => { alive = false }
   }, [rootPath, dirs, rootCached])
 
   if (entries === null) return <FileTreeSkeleton />
+  if (dirs.errors[rootPath]) return <div role="alert" className="px-m py-s text-danger text-[0.8125rem]">Couldn&rsquo;t open this path: {dirs.errors[rootPath]}</div>
   let shown = hideNames?.size ? entries.filter((e) => !hideNames.has(e.name)) : entries
   if (hidePrefixes?.size) shown = shown.filter((e) => ![...hidePrefixes].some((p) => e.name.startsWith(p)))
   if (hideNamesDeep?.size) shown = shown.filter((e) => !hideNamesDeep.has(e.name))
@@ -291,7 +292,7 @@ function ContextMenu({ x, y, items, onClose }: { x: number; y: number; items: Me
       {items.map((it, i) => (
         <button key={it.label} type="button" role="menuitem" tabIndex={tabIndexFor(i)}
           onClick={() => { it.onClick(); closeAndReturnFocus() }}
-          className="flex w-full items-center gap-s rounded-md px-m py-2 text-left text-[0.8125rem] transition-colors hover:bg-surface-high"
+          className="flex w-full items-center gap-s rounded-md px-m py-s text-left text-[0.8125rem] transition-colors hover:bg-surface-high"
           style={{ color: it.tone === 'danger' ? 'var(--color-danger)' : 'var(--color-on-surface)' }}>
           <it.icon size={15} className="shrink-0" />
           <span className="truncate">{it.label}</span>

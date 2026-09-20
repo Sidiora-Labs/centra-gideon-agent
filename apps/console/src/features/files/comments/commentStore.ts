@@ -7,7 +7,6 @@ export interface DocComment {
   docPath?: string
   quote: string
   comment: string
-
   line?: number
   column?: number
   context?: string
@@ -20,9 +19,7 @@ export function findCoords(content: string, selected: string): { line: number; c
   if (idx < 0) return undefined
   const before = content.slice(0, idx)
   const nl = before.lastIndexOf('\n')
-  const line = (before.match(/\n/g)?.length ?? 0) + 1
-  const column = (nl < 0 ? idx : idx - nl - 1) + 1
-  return { line, column }
+  return { line: (before.match(/\n/g)?.length ?? 0) + 1, column: (nl < 0 ? idx : idx - nl - 1) + 1 }
 }
 
 export function captureContext(content: string, quote: string, line?: number, column?: number): string | undefined {
@@ -55,57 +52,72 @@ export function formatCommentsMessage(comments: DocComment[], instructions: stri
   return out.join('\n').trim()
 }
 
-const KEY = 'doc-comments-v1'
-
-function load(): DocComment[] {
-  try {
-    const raw = localStorage.getItem(KEY)
-    if (raw) { const v = JSON.parse(raw); if (Array.isArray(v)) return v }
-  } catch {   }
-  return []
-}
-
-let comments: DocComment[] = load()
+type NewComment = Omit<DocComment, 'id' | 'ts'>
+let comments: DocComment[] = []
+let error: string | undefined
 const listeners = new Set<() => void>()
+const emit = () => listeners.forEach((listener) => listener())
+const fromServer = (comment: DocComment): DocComment => ({ ...comment, ts: comment.ts * 1000 })
 
-function emit() {
-  try { localStorage.setItem(KEY, JSON.stringify(comments)) } catch {   }
-  listeners.forEach((l) => l())
+async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, { credentials: 'same-origin', ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } })
+  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || `Request failed (${response.status})`)
+  return response.json()
 }
 
-let _seq = 0
-function newId(): string {
-  _seq += 1
-  return `c-${Date.now().toString(36)}-${_seq}`
+async function resync(): Promise<void> {
+  try {
+    const data = await request<{ comments: DocComment[] }>('/api/doc-comments')
+    comments = data.comments.map(fromServer)
+    error = undefined
+  } catch (cause) {
+    error = cause instanceof Error ? cause.message : 'Could not load comments'
+  }
+  emit()
+}
+
+async function write(action: () => Promise<void>): Promise<void> {
+  try { await action(); error = undefined } catch (cause) {
+    const writeError = cause instanceof Error ? cause.message : 'Could not save comments'
+    await resync()
+    error = writeError
+  }
+  emit()
 }
 
 export const commentStore = {
-  all(): DocComment[] { return comments },
-  add(c: Omit<DocComment, 'id' | 'ts'>): DocComment {
-    const full: DocComment = { ...c, id: newId(), ts: Date.now() }
-    comments = [...comments, full]
-    emit()
-    return full
+  all: (): DocComment[] => comments,
+  error: (): string | undefined => error,
+  resync,
+  add(c: NewComment): Promise<void> {
+    return write(async () => {
+      const data = await request<{ comment: DocComment }>('/api/doc-comments', { method: 'POST', body: JSON.stringify(c) })
+      comments = [...comments, fromServer(data.comment)]
+    })
   },
-  update(id: string, patch: Partial<Pick<DocComment, 'comment'>>) {
-    comments = comments.map((c) => (c.id === id ? { ...c, ...patch } : c))
-    emit()
+  update(id: string, patch: Pick<DocComment, 'comment'>): Promise<void> {
+    return write(async () => {
+      const data = await request<{ comment: DocComment }>(`/api/doc-comments/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) })
+      comments = comments.map((comment) => comment.id === id ? fromServer(data.comment) : comment)
+    })
   },
-  remove(id: string) {
-    comments = comments.filter((c) => c.id !== id)
-    emit()
+  remove(id: string): Promise<void> {
+    return write(async () => {
+      await request(`/api/doc-comments/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      comments = comments.filter((comment) => comment.id !== id)
+    })
   },
-  removeMany(ids: string[]) {
-    const set = new Set(ids)
-    comments = comments.filter((c) => !set.has(c.id))
-    emit()
+  removeMany(ids: string[]): Promise<void> {
+    return write(async () => {
+      await request('/api/doc-comments', { method: 'DELETE', body: JSON.stringify({ ids }) })
+      const removed = new Set(ids); comments = comments.filter((comment) => !removed.has(comment.id))
+    })
   },
-  clear() { comments = []; emit() },
-  subscribe(fn: () => void): () => void {
-    listeners.add(fn)
-    return () => { listeners.delete(fn) }
-  },
+  clear(): Promise<void> { return this.removeMany(comments.map((comment) => comment.id)) },
+  subscribe(fn: () => void): () => void { listeners.add(fn); return () => { listeners.delete(fn) } },
 }
+
+void resync()
 
 export function useComments(): DocComment[] {
   return useSyncExternalStore(commentStore.subscribe, commentStore.all, commentStore.all)

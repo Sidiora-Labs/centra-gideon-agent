@@ -3,6 +3,7 @@ import { api } from './api'
 import { useChatSocket, type WsMessage } from './useChatSocket'
 import { useVisiblePoll } from './useVisiblePoll'
 import type { ChatSessionSummary, Loop, PendingApproval, SpawnedAgent } from './api'
+import { effectiveLoopStatus } from './loopStatus'
 
 
 export type AgentActivityKind = 'session' | 'loop' | 'subagent'
@@ -48,7 +49,7 @@ const SALIENCE: Record<AgentActivityState, number> = {
 const LOOP_STATE: Record<string, AgentActivityState> = {
   intake: 'working', planning: 'working', review: 'working', running: 'working',
   needs_input: 'needs_input', blocked: 'needs_input', stagnant: 'needs_input',
-  failed: 'error',
+  failed: 'error', ended_early: 'error',
   ready: 'idle', paused: 'idle', stopped: 'idle', complete: 'idle',
 }
 
@@ -64,10 +65,10 @@ export function approvalSessions(approvals: PendingApproval[]): Set<string> {
 export function foldLoops(loops: Loop[], blocked: Set<string>): AgentActivityEntity[] {
   return loops.map((l) => {
     const awaiting = !!l.session_key && blocked.has(l.session_key)
-    const ended = l.status === 'complete' && !!l.error_message
+    const status = effectiveLoopStatus(l.status, l.stop_reason)
     const state: AgentActivityState = awaiting
       ? 'waiting_approval'
-      : ended ? 'error' : (LOOP_STATE[l.status] ?? 'idle')
+      : (LOOP_STATE[status] ?? 'idle')
     const total = l.max_cycles > 0 ? Math.min(1, Math.max(0, l.total_cycles / l.max_cycles)) : undefined
     return {
       id: `loop:${l.id}`,

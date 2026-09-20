@@ -240,6 +240,8 @@ def test_the_projection_covers_every_field_the_api_publishes(tmp_path):
     assert row["model"] == "m"
     assert row["approval_mode"] == "auto"
     assert row["action"]["provider"] == "invoke-agent"
+    assert row["health"] == "ok"
+    assert row["state"] == "active"
     assert row["last_status"] == "ok"
     assert row["last_error"] == "boom"
     assert row["next_run_ts"] and row["next_run_ts"] > NOW

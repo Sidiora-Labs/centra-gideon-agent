@@ -24,7 +24,7 @@ import { useQuery } from '../../shared/data/data'
 import { useChatSocket, type WsMessage } from '../../shared/data/useChatSocket'
 import { useVisiblePoll } from '../../shared/data/useVisiblePoll'
 import { cleanSay, toolDetail } from '../../shared/data/agentFeed'
-import { ACTIVE_LOOP_STATUSES, LOOP_ACTION_SOURCE_STATUSES } from '../../shared/data/loopStatus'
+import { ACTIVE_LOOP_STATUSES, effectiveLoopStatus, LOOP_ACTION_SOURCE_STATUSES } from '../../shared/data/loopStatus'
 import { useRunStream } from '../loops/useRunStream'
 import { belongsToLoop } from '../workflows/containerKey'
 import { foldReducer, emptyRunFlags, type RunFlags } from '../loops/runFold'
@@ -2215,7 +2215,7 @@ function OutcomeBanner({ project: p, findings }: { project: CodeProject; finding
   }
   let meta = TERMINAL[p.status]
   if (!meta) return null
-  const incompleteFinish = p.status === 'complete' && !!p.error_message
+  const incompleteFinish = effectiveLoopStatus(p.status, p.stop_reason) === 'ended_early'
   if (incompleteFinish) {
     meta = { label: 'Project ended before finishing', tone: 'var(--color-warn)', ok: false }
   }

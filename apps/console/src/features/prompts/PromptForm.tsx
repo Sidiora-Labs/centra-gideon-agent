@@ -29,26 +29,26 @@ export function PromptForm({ draft, onChange, compact, nameLocked, registerInser
           spellCheck={false} name="prompt-template" aria-label="Prompt template body"
           placeholder={'Summarize the thread {{thread_url}} in {{style}} style.\n{{> signature}}'}
           data-type="body-s"
-          className="w-full rounded-md border border-outline-variant/30 bg-surface-container/40 px-3 py-2.5 font-mono leading-relaxed text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary resize-y" />
+          className="w-full rounded-md border border-outline-variant/30 bg-surface-container/40 px-m py-2.5 font-mono leading-relaxed text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary resize-y" />
       </Field>
 
       {includes.length > 0 && (
-        <div className="rounded-md px-m py-2" style={{ background: 'color-mix(in srgb, var(--color-info) 10%, transparent)' }}>
+        <div className="rounded-md px-m py-s" style={{ background: 'color-mix(in srgb, var(--color-info) 10%, transparent)' }}>
           <div data-type="body-s" className="flex items-center gap-1.5 text-on-surface-var mb-1.5"><Puzzle size={13} className="text-info" /> Includes these snippets (their variables merge in automatically):</div>
           <div className="flex flex-wrap gap-1.5">
             {includes.map((n) => (
-              <span key={n} data-type="caption" className="inline-flex items-center gap-1 rounded-md bg-surface-high px-2 h-7 text-on-surface-var"><Puzzle size={11} /> <span className="font-mono">{n}</span></span>
+              <span key={n} data-type="caption" className="inline-flex items-center gap-xs rounded-md bg-surface-high px-2 h-7 text-on-surface-var"><Puzzle size={11} /> <span className="font-mono">{n}</span></span>
             ))}
           </div>
         </div>
       )}
 
       {undeclared.length > 0 && (
-        <div className="rounded-md px-m py-2" style={{ background: 'color-mix(in srgb, var(--color-primary) 10%, transparent)' }}>
+        <div className="rounded-md px-m py-s" style={{ background: 'color-mix(in srgb, var(--color-primary) 10%, transparent)' }}>
           <div data-type="body-s" className="flex items-center gap-1.5 text-on-surface-var mb-1.5"><Wand2 size={13} className="text-primary" /> Placeholders in the template not yet declared:</div>
           <div className="flex flex-wrap gap-1.5">
             {undeclared.map((n) => (
-              <button key={n} type="button" onClick={() => addVar(n)} data-type="caption" className="inline-flex items-center gap-1 rounded-md bg-surface-high px-2 h-7 text-on-surface hover:bg-surface-highest transition-colors">
+              <button key={n} type="button" onClick={() => addVar(n)} data-type="caption" className="inline-flex items-center gap-xs rounded-md bg-surface-high px-2 h-7 text-on-surface hover:bg-surface-highest transition-colors">
                 <Plus size={12} /> <span className="font-mono">{n}</span>
               </button>
             ))}

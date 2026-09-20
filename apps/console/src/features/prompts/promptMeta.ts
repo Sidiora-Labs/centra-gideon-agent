@@ -81,5 +81,5 @@ export function detectPlaceholders(content: string): string[] {
 }
 export function detectIncludes(content: string): string[] { return templateTokens(content, /\{\{>\s*([a-zA-Z0-9_-]+)\s*\}\}/g) }
 export function seedRenderValues(variables: PromptVariable[]): Record<string, unknown> {
-  return Object.fromEntries(variables.map(variable => [variable.name, variable.default ?? (variable.type === 'boolean' ? false : '')]))
+  return Object.fromEntries(variables.filter(variable => variable.default !== undefined && variable.default !== null && variable.default !== '').map(variable => [variable.name, variable.default]))
 }

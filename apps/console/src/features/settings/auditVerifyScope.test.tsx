@@ -93,6 +93,17 @@ describe('the panel says what was left out, and where the whole check lives', ()
     expect(screen.getByText('gideon security verify')).toBeTruthy()
   })
 
+  it('a request failure says verification did not run instead of fabricating a broken verdict', async () => {
+    auditVerify.mockRejectedValue(new Error('Gateway unavailable'))
+    render(<AuditPanel />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Verify$/ }))
+    await waitFor(() => expect(screen.getByText(/Verification did not run/)).toBeTruthy())
+    expect(screen.getByText(/Gateway unavailable/)).toBeTruthy()
+    expect(screen.getByText(/try Verify again/)).toBeTruthy()
+    expect(screen.queryByText(/Chain broken/)).toBeNull()
+    expect(screen.queryByText(/Chain intact/)).toBeNull()
+  })
+
   it('the verify request stays the windowed one — the browser never walks the log', () => {
     const src = strip(PANEL)
     expect(src, 'no call site may pass full=true from the UI').not.toMatch(/auditVerify\(true\)/)

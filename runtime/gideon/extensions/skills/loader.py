@@ -150,7 +150,7 @@ def _project_skills_dir() -> Path | None:
     return None
 
 
-def _iter_skill_files(base: Path) -> list[tuple[str, Path]]:
+def iter_skill_files(base: Path) -> list[tuple[str, Path]]:
     """Recursively find all SKILL.md files under *base*.
 
     Returns ``(relative_name, skill_file_path)`` pairs sorted by name.
@@ -177,7 +177,7 @@ def _ensure_builtin_skills(base: Path) -> None:
     for src_root in (_project_skills_dir(), _BUILTIN_SKILLS_DIR):
         if not src_root or not src_root.exists():
             continue
-        for name, src_file in _iter_skill_files(src_root):
+        for name, src_file in iter_skill_files(src_root):
             source_names.add(name)
             src_dir = src_file.parent
             dest_dir = base / name
@@ -423,8 +423,8 @@ class ProcedureLibrary:
         """
         results: list[tuple[str, Path]] = []
         if self._agent_dir is not None and self._agent_dir.is_dir():
-            results.extend(_iter_skill_files(self._agent_dir))
-        results.extend(_iter_skill_files(self._dir))
+            results.extend(iter_skill_files(self._agent_dir))
+        results.extend(iter_skill_files(self._dir))
         if self._scoped:
             return results
         from gideon.extensions.skills.marketplace import SKILL_DISCOVERY_PATHS
@@ -432,7 +432,7 @@ class ProcedureLibrary:
         seen = {name for name, _ in results}
         for extra_dir in SKILL_DISCOVERY_PATHS:
             if extra_dir.is_dir() and extra_dir != self._dir:
-                for name, path in _iter_skill_files(extra_dir):
+                for name, path in iter_skill_files(extra_dir):
                     if name not in seen:
                         results.append((name, path))
                         seen.add(name)

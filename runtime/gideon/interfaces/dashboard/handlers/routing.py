@@ -55,8 +55,8 @@ async def api_routing_unmute(request: web.Request) -> web.Response:
     agent, err = await _agent_from_body(request)
     if err is not None:
         return err
-    routing.unmute(str(agent))
-    return web.json_response({"ok": True, "agent": agent})
+    cleared = routing.unmute(str(agent))
+    return web.json_response({"ok": True, "agent": cleared})
 
 
 async def api_routing_status(request: web.Request) -> web.Response:

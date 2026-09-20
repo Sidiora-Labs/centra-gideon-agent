@@ -19,6 +19,10 @@ _STORE = "agent_routing"
 _TURNS_BETWEEN_SUGGESTIONS = 5
 
 
+def canonical_agent(agent: str) -> str:
+    return str(agent).strip().casefold()
+
+
 @dataclass(frozen=True)
 class RouteCandidate:
     agent: str
@@ -196,15 +200,16 @@ def _load_store() -> dict:
     try:
         document = _load_entity_settings(_STORE)
     except Exception:
-        return {}
-    if not isinstance(document, dict):
+        logger.warning("agent-routing store load failed", exc_info=True)
         return {}
     document.update(
         muted=list(
-            dict.fromkeys(str(name).lower() for name in (document.get("muted") or []))
+            dict.fromkeys(
+                canonical_agent(name) for name in (document.get("muted") or [])
+            )
         ),
         dismissals={
-            str(name).lower(): entry
+            canonical_agent(name): entry
             for name, entry in (document.get("dismissals") or {}).items()
         },
     )
@@ -259,18 +264,19 @@ class _SuggestionPreferences:
 
 
 def is_suppressed(agent: str, *, now: float, cooldown_hours: float) -> bool:
-    key = agent.lower()
+    key = canonical_agent(agent)
     return _SuggestionPreferences().blocked(key, now, cooldown_hours)
 
 
 def record_dismiss(agent: str, *, now: float, mute_at: int = 3) -> dict:
-    key = agent.lower()
+    key = canonical_agent(agent)
     return _SuggestionPreferences().dismiss(key, now, mute_at)
 
 
-def unmute(agent: str) -> None:
-    key = agent.lower()
+def unmute(agent: str) -> str:
+    key = canonical_agent(agent)
     _SuggestionPreferences().restore(key)
+    return key
 
 
 def routing_status() -> dict:

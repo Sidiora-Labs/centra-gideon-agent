@@ -131,7 +131,7 @@ export function AudioRecorder({ onRecorded, onClear }: { onRecorded: (file: File
           <audio src={url} controls className="w-full max-w-md" />
           <div data-type="body-s" className="flex items-center gap-3 text-on-surface-low">
             <span>Recorded · {fmtDuration(duration)}</span>
-            <button type="button" onClick={discard} data-type="body-s" className="inline-flex items-center gap-1.5 rounded-pill px-3 h-8 text-danger hover:bg-danger/10 transition-colors"><Trash2 size={14} /> Discard & re-record</button>
+            <button type="button" onClick={discard} data-type="body-s" className="inline-flex items-center gap-1.5 rounded-pill px-m h-8 text-danger hover:bg-danger/10 transition-colors"><Trash2 size={14} /> Discard & re-record</button>
           </div>
         </>
       ) : (

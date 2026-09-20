@@ -38,6 +38,7 @@ import { belongsToLoop } from '../workflows/containerKey'
 import { type SkillUsed, skillsUsedLabel, skillsUsedTitle } from '../chat/chatTypes'
 import { useQueryFlag, type RouteProps } from '../../app/shell/useQueryState'
 import { accentChip } from '../../shared/theme/accent'
+import { WARN_STRIP } from '../../shared/theme/warnings'
 import { tabListKeys } from '../../shared/data/tabListKeys'
 import { shownCycle, loopStatusLabel, effectiveLoopStatus, ACTIVE_LOOP_STATUSES, LOOP_ACTION_SOURCE_STATUSES } from '../../shared/data/loopStatus'
 import { notify } from '../../app/shell/appSdk'
@@ -402,7 +403,7 @@ export function LoopCockpitPage({ id, onBack, onDeleted, onOpenArtifact, onOpenT
       ) : (
         <span className="size-1.5 rounded-pill" style={{ background: c.status === 'failed' ? 'var(--color-danger)' : c.status === 'complete' ? 'var(--color-primary)' : 'var(--color-on-surface-low)' }} />
       )}
-      {running ? (statusText || 'Working') : loopStatusLabel(effectiveLoopStatus(c.status, c.error_message))}
+      {running ? (statusText || 'Working') : loopStatusLabel(effectiveLoopStatus(c.status, c.stop_reason))}
       {
 }
       {running && (
@@ -571,8 +572,20 @@ export function LoopCockpitPage({ id, onBack, onDeleted, onOpenArtifact, onOpenT
               {LOOP_ACTION_SOURCE_STATUSES.resume.has(c.status) && <p className="mt-1.5 opacity-75">Fix the underlying cause, then <span style={fvs(500)}>Resume</span> to continue from where it left off.</p>}
             </motion.div>
           )})()}
+          {(c.unrunnable_commands?.length ?? 0) > 0 && (
+            <div role="alert" data-type="body-s" className="rounded-md px-m py-2.5" style={WARN_STRIP}>
+              <div className="flex items-center gap-1.5 mb-1" style={fvs(500)}>
+                <AlertTriangle size={14} className="shrink-0" /> Command unavailable
+              </div>
+              {c.unrunnable_commands!.map(({ command, missing_binary }) => (
+                <div key={command} className="break-words">
+                  <code>{command}</code> · missing binary <code>{missing_binary}</code>
+                </div>
+              ))}
+            </div>
+          )}
           {judgeDegraded && running && (
-            <div role="status" aria-live="polite" aria-atomic="true" data-type="body-s" className="rounded-md px-m py-2 flex items-center gap-2" style={{ background: 'color-mix(in srgb, var(--color-warning) 12%, transparent)', color: 'var(--color-warning)' }}>
+            <div role="status" aria-live="polite" aria-atomic="true" data-type="body-s" className="rounded-md px-m py-2 flex items-center gap-2" style={WARN_STRIP}>
               <AlertTriangle size={14} className="shrink-0" /> Done-ness check was unavailable on a recent cycle — the loop keeps running on its cycle budget. It’ll resume quality assessment automatically.
             </div>
           )}
@@ -681,7 +694,7 @@ export function LoopCockpitPage({ id, onBack, onDeleted, onOpenArtifact, onOpenT
                             {running && <motion.span aria-hidden className="absolute inset-[-6px] rounded-pill" style={{ background: thinkingGlow() }} animate={{ opacity: [0.3, 0.7, 0.3] }} transition={{ duration: 3, repeat: Infinity }} />}
                             <span className={running ? '' : 'text-on-surface-low'}><Spark size={13} /></span>
                           </span>
-                          <span data-type="label-s" className="flex-1 truncate text-on-surface" style={fvs(500)}>Cycle {shownCycle(c.total_cycles, c.status)} · {running ? (statusText || 'working') : loopStatusLabel(effectiveLoopStatus(c.status, c.error_message)).toLowerCase()}</span>
+                          <span data-type="label-s" className="flex-1 truncate text-on-surface" style={fvs(500)}>Cycle {shownCycle(c.total_cycles, c.status)} · {running ? (statusText || 'working') : loopStatusLabel(effectiveLoopStatus(c.status, c.stop_reason)).toLowerCase()}</span>
                           {running && <span data-type="caption" className="shrink-0 text-on-surface-low tabular-nums">{fmt(curCycleElapsed)}</span>}
                         </div>
                         {running && activity.length > 0 && <LiveSubsteps activity={activity} />}

@@ -273,6 +273,39 @@ def _doctor_proxy_bypass(cfg: AppConfig) -> list[str]:
     return []
 
 
+def _doctor_maintenance() -> None:
+    """Render the same read-only maintenance snapshot exposed by Settings → Doctor."""
+    import time
+
+    from gideon.operations.resilience import remediation
+
+    cfg = AppConfig.load().resilience.remediation
+    deficits = remediation.measure_deficits()
+    preview = remediation.run_remediation(
+        target_score=float(cfg.target_score),
+        max_cost_usd=cfg.max_cost_usd,
+        now=time.time(),
+        dry_run=True,
+    )
+    print("\nMaintenance")
+    print(
+        f"  health score: {remediation.health_score(deficits):.0f} "
+        f"(target {cfg.target_score})"
+    )
+    pending = [job["id"] for job in preview.jobs if job["status"] == "would_run"]
+    cooling = [job["id"] for job in preview.jobs if job["status"] == "skipped_cooldown"]
+    print(f"  pending:      {', '.join(pending) if pending else 'none'}")
+    if cooling:
+        print(f"  cooling down: {', '.join(cooling)}")
+    recent = remediation.recent_runs(1)
+    if recent:
+        row = recent[0]
+        print(
+            f"  last run:     {row.get('timestamp', row.get('ts', '?'))} "
+            f"({row.get('outcome', row.get('stopped_reason', 'unknown'))})"
+        )
+
+
 def _doctor() -> None:
     """Verify Gideon setup — check dependencies, config, credentials, connectivity."""
 
@@ -605,6 +638,12 @@ def _doctor() -> None:
     print("\nProvider Health")
     _provider_issues = _doctor_providers()
     issues.extend(_provider_issues)
+
+    try:
+        _doctor_maintenance()
+    except Exception as exc:
+        print("\nMaintenance")
+        print(f"  status:      ⚠️  could not inspect ({exc})")
 
     print("\nConnectivity")
     is_remote = bool(os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_CLIENT"))

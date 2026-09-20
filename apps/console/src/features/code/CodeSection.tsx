@@ -94,7 +94,7 @@ const projectKind = (p: Loop): string => String(p.kind_config?.project_kind ?? '
 const stagePlan = (p: Loop): LoopPhase[] => (p.plan ?? []) as LoopPhase[]
 const stageStatus = (p: Loop): Record<string, string> => (p.phase_status ?? {}) as Record<string, string>
 
-const effectiveStatus = (p: Loop): string => effectiveLoopStatus(p.status, p.error_message)
+const effectiveStatus = (p: Loop): string => effectiveLoopStatus(p.status, p.stop_reason)
 
 const statusPill = (status: string): React.CSSProperties => loopStatusTone(status, 18)
 
@@ -240,7 +240,7 @@ function CodeListPage({ onCreate, onOpen }: { onCreate: () => void; onOpen: (id:
 }
                   {needsWorkspace(p) && (
                     <button type="button" onClick={(e) => { e.stopPropagation(); setPickFor(p) }}
-                      data-type="caption" className="shrink-0 inline-flex items-center gap-1 rounded-pill px-2 py-0.5 transition-colors hover:brightness-110"
+                      data-type="caption" className="shrink-0 inline-flex items-center gap-xs rounded-pill px-2 py-0.5 transition-colors hover:brightness-110"
                       style={{ background: 'color-mix(in srgb, var(--color-warn) 16%, transparent)', color: 'var(--color-warn)' }}
                       title="Choose a workspace folder before this project can start">
                       <FolderOpen size={11} /> needs workspace

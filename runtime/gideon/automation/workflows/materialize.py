@@ -23,11 +23,16 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from gideon.automation.workflows.models import InstanceState
+from gideon.engine.tasks import rules as task_rules
 from gideon.engine.tasks.models import (
     TERMINAL_STATUSES,
     TaskStatus,
     WorkflowTaskBinding,
 )
+
+ENGINE_OWNED_FIELDS = task_rules.ENGINE_OWNED_FIELDS
+managed = task_rules.managed
+reject_write = task_rules.reject_write
 
 FANOUT_TASK_CAP = 20
 
@@ -308,7 +313,7 @@ def plan_materialization(
             plan.skipped.append(f"{node_id or '<no id>'}: {why}")
             continue
         cfg = node.get("config") or {}
-        title = str(cfg.get("label") or node_id)
+        title = str(node.get("label") or cfg.get("label") or node_id)
         print_key = fingerprint(
             source_ref=str(node.get("source_ref", "") or ""),
             title=title,
@@ -405,40 +410,6 @@ def task_list_ids_for_run(run_id: str, tasks: Iterable[Any] | None) -> dict[str,
         elif node_id not in out:
             out[node_id] = list_id
     return out
-
-
-def managed(task: Any) -> bool:
-    """Whether the engine owns this task's status. A task with NO binding is not managed, and a
-    binding with `managed=False` is not either — that is the produced-task case, where the
-    workflow created the work but tracks nothing about it.
-    """
-    binding = getattr(task, "workflow_binding", None)
-    return bool(binding is not None and binding.managed)
-
-
-ENGINE_OWNED_FIELDS = frozenset(
-    {"status", "blocked_kind", "preview", "done_criterion", "evidence", "attempts"}
-)
-
-
-def reject_write(task: Any, fields: dict[str, Any]) -> str:
-    """Why this write must be refused, or "" when it may proceed. Refused rather than merged. Two
-    writers on one status field produce a board that disagrees with the run it is showing, and
-    the user believes the board. The message names the ALTERNATIVE, because a refusal that
-    does not say what to do instead reads as the feature being broken.
-    """
-    if not managed(task):
-        return ""
-    attempted = sorted(set(fields or {}) & ENGINE_OWNED_FIELDS)
-    if not attempted:
-        return ""
-    binding = getattr(task, "workflow_binding", None)
-    run_id = getattr(binding, "run_id", "") or "the owning run"
-    return (
-        f"{', '.join(attempted)} on this task {'is' if len(attempted) == 1 else 'are'} driven by "
-        f"run {run_id} — use workflow_skip or workflow_rewind to change what the run does, and the "
-        "task will follow. A direct write would make the board disagree with the run it shows."
-    )
 
 
 def progress_line(done: int, total: int, blocked: int = 0) -> str:

@@ -24,7 +24,7 @@ export function SyntaxReference({ onInsert }: { onInsert?: (snippet: string) => 
     <div data-type="body-s" className="grid gap-m">
       <div className="flex items-center gap-1.5 text-on-surface-var"><BookOpen size={14} /> <span data-type="title-s">Syntax</span></div>
 
-      <div className="flex flex-col gap-1">
+      <div className="flex flex-col gap-xs">
         {(data?.constructs ?? []).map((c) => {
           const Icon = CONSTRUCT_ICON[c.category] ?? Braces
           return (

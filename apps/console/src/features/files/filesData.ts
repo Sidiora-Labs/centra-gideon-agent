@@ -36,6 +36,8 @@ function persistCache(cache: Record<string, FsEntry[]>): void {
 
 export function useDirCache() {
   const [cache, setCache] = useState<Record<string, FsEntry[]>>(loadPersistedCache)
+  const [resolved, setResolved] = useState<Record<string, string>>({})
+  const [errors, setErrors] = useState<Record<string, string>>({})
   const inflight = useRef<Record<string, boolean>>({})
   const cacheRef = useRef(cache)
   cacheRef.current = cache
@@ -50,9 +52,16 @@ export function useDirCache() {
     const startGen = gen.current[path] ?? 0
     try {
       const r = await api.fileList(path)
-      if ((gen.current[path] ?? 0) === startGen) setCache((c) => ({ ...c, [path]: r.entries }))
+      if ((gen.current[path] ?? 0) === startGen) {
+        setCache((c) => ({ ...c, [path]: r.entries }))
+        setResolved((current) => ({ ...current, [path]: r.path }))
+        setErrors((current) => { const next = { ...current }; delete next[path]; return next })
+      }
       return r.entries
-    } catch {
+    } catch (failure) {
+      if ((gen.current[path] ?? 0) === startGen) {
+        setErrors((current) => ({ ...current, [path]: (failure as Error)?.message || 'The server refused this path.' }))
+      }
       return []
     } finally {
       inflight.current[path] = false
@@ -64,6 +73,8 @@ export function useDirCache() {
   const invalidate = useCallback((path: string) => {
     bumpGen(path)
     setCache((c) => { const next = { ...c }; delete next[path]; return next })
+    setResolved((c) => { const next = { ...c }; delete next[path]; return next })
+    setErrors((c) => { const next = { ...c }; delete next[path]; return next })
   }, [])
 
   const invalidateSubtree = useCallback((root: string) => {
@@ -81,7 +92,7 @@ export function useDirCache() {
     for (const k of Object.keys(cacheRef.current)) if (k === r || k.startsWith(r + '/')) bumpGen(k)
   }, [])
 
-  return useMemo(() => ({ cache, load, invalidate, invalidateSubtree }), [cache, load, invalidate, invalidateSubtree])
+  return useMemo(() => ({ cache, resolved, errors, load, invalidate, invalidateSubtree }), [cache, resolved, errors, load, invalidate, invalidateSubtree])
 }
 
 export function useGitStatus(rootPath: string | null, nonce = 0) {
