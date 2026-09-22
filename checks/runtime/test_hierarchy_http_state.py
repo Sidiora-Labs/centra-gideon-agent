@@ -162,3 +162,28 @@ async def test_hierarchy_patch_admission_preserves_file_on_refusal(
         ] == "New"
         assert (await client.delete(list_url)).status == 200
         assert (await client.get(list_url)).status == 404
+
+
+@pytest.mark.asyncio
+async def test_project_archive_lifecycle_is_writable_and_reversible(
+    tmp_path, monkeypatch
+):
+    async with hierarchy_server(tmp_path, monkeypatch) as (client, _):
+        project = await (
+            await client.post("/api/projects", json={"name": "Archive me"})
+        ).json()
+        url = f"/api/projects/{project['id']}"
+
+        archived = await client.put(url, json={"status": "archived"})
+        assert archived.status == 200
+        assert (await archived.json())["status"] == "archived"
+        assert (await (await client.get(url)).json())["status"] == "archived"
+        listed = await (await client.get("/api/projects")).json()
+        listed_project = next(
+            row for row in listed["projects"] if row["id"] == project["id"]
+        )
+        assert listed_project["status"] == "archived"
+
+        restored = await client.put(url, json={"status": "active"})
+        assert restored.status == 200
+        assert (await restored.json())["status"] == "active"

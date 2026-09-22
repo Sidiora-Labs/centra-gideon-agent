@@ -1325,12 +1325,9 @@ async def _describe_screen_frame(data_url: str) -> str:
     silently drops the frame is worse than one that says nothing, so the caller
     annotates only when this returns text.
     """
-    from gideon.extensions.providers.provider_bridge import (
-        resolve_provider_for_use_case,
-    )
     from gideon.integrations.llm.base import EVENT_TEXT_CHUNK
+    from gideon.integrations.llm_helpers import execute_with_fallback_chain
 
-    provider = resolve_provider_for_use_case("image_modality")
     prompt = (
         "Describe this screenshot of the user's screen factually and in detail: what "
         "application or page is shown, the visible text, and any errors or highlighted "
@@ -1345,11 +1342,15 @@ async def _describe_screen_frame(data_url: str) -> str:
             ],
         }
     ]
-    parts: list[str] = []
-    async for ev in provider.complete(messages):
-        if ev.kind == EVENT_TEXT_CHUNK:
-            parts.append(getattr(ev, "text", "") or "")
-    return "".join(parts).strip()
+
+    async def _describe(provider) -> str:
+        parts: list[str] = []
+        async for ev in provider.complete(messages):
+            if ev.kind == EVENT_TEXT_CHUNK:
+                parts.append(getattr(ev, "text", "") or "")
+        return "".join(parts).strip()
+
+    return await execute_with_fallback_chain("image_modality", _describe)
 
 
 async def _apply_screen_frame(

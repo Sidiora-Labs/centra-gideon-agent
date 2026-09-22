@@ -2,8 +2,11 @@ import asyncio
 import logging
 import time
 
-from gideon.automation.triggers.models import Trigger
+from gideon.automation.schedule_history import ExecutionJournal
+from gideon.automation.triggers.history import schedule_run_to_record
+from gideon.automation.triggers.models import Outcome, Trigger
 from gideon.core.config import AppConfig
+from gideon.engine import gateway
 from gideon.engine.automation_routes import AutomationRoutes
 from gideon.engine.gateway import RuntimeCoordinator
 from gideon.engine.session import ConversationDirectory
@@ -128,6 +131,13 @@ def test_real_daily_spend_and_config_change_rearm_notification(tmp_path, monkeyp
     get_meter().charge(120, 0)
     assert coordinator._day_budget_exceeded(context="Scheduled report")
     assert coordinator._day_budget_exceeded(context="Scheduled report")
+    rows, total = asyncio.run(
+        ExecutionJournal(gateway.config_dir()).list_for_job("day-budget")
+    )
+    assert total == 1 and rows[0]["status"] == "needs_input"
+    pause = schedule_run_to_record(rows[0])
+    assert pause.outcome == Outcome.SKIPPED_BUDGET.value
+    assert "Scheduled report paused" in pause.reason
     assert len(_load_notifications()) == 1
     cfg.guardrails.budgets.max_tokens_per_day = 1000
     cfg.save()

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, renderHook, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { TaskItem } from '../../shared/data/api'
-import { TaskGraph } from './TaskGraph'
+import { scopedGraphMetrics, TaskGraph } from './TaskGraph'
 import { DagView } from './DagView'
 import { filterTasksByTag, taskNoMatchCause, taskTagOptions } from './taskGraphState'
 import { useTaskPreference } from './taskCollectionState'
@@ -20,6 +20,13 @@ describe('task graph accessibility and filters', () => {
     })
   })
   afterAll(() => vi.unstubAllGlobals())
+
+  it('derives completion from the scoped task DAG', () => {
+    expect(scopedGraphMetrics([
+      { id: 'completed', title: 'Completed scoped task', status: 'done' },
+      { id: 'open', title: 'Open scoped task', status: 'open' },
+    ] as TaskItem[])).toEqual({ completion_pct: 50 })
+  })
 
   it('uses named native buttons for graph nodes and activates them from the keyboard', async () => {
     const open = vi.fn()

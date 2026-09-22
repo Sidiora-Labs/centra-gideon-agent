@@ -551,6 +551,11 @@ WORKFLOW_START_SCHEMA = ToolSchema(
     ],
 )
 
+WORKFLOW_START_DRAFT_SCHEMA = ToolSchema(
+    tool_name="workflow_start_draft",
+    fields=[FieldSpec("run_id", str, required=True, max_len=16, pattern=_WF_RUN_ID_RE)],
+)
+
 WORKFLOW_STATUS_SCHEMA = ToolSchema(
     tool_name="workflow_status",
     fields=[FieldSpec("run_id", str, required=True, max_len=16, pattern=_WF_RUN_ID_RE)],
@@ -604,6 +609,7 @@ WORKFLOW_REWIND_SCHEMA = ToolSchema(
         FieldSpec("run_id", str, required=True, max_len=16, pattern=_WF_RUN_ID_RE),
         FieldSpec("node_id", str, required=True, max_len=128),
         FieldSpec("redo_effects", bool, default=False),
+        FieldSpec("confirm_cascade", bool, default=False),
         FieldSpec("force", bool, default=False),
     ],
 )
@@ -613,6 +619,7 @@ WORKFLOW_RUN_FROM_SCHEMA = ToolSchema(
     fields=[
         FieldSpec("run_id", str, required=True, max_len=16, pattern=_WF_RUN_ID_RE),
         FieldSpec("node_id", str, required=True, max_len=128),
+        FieldSpec("confirm_cascade", bool, default=False),
     ],
 )
 
@@ -659,6 +666,7 @@ MCP_WORKFLOW_SCHEMAS: dict[str, ToolSchema] = {
     "workflow_get_def": WORKFLOW_GET_DEF_SCHEMA,
     "workflow_delete_def": WORKFLOW_DELETE_DEF_SCHEMA,
     "workflow_start": WORKFLOW_START_SCHEMA,
+    "workflow_start_draft": WORKFLOW_START_DRAFT_SCHEMA,
     "workflow_status": WORKFLOW_STATUS_SCHEMA,
     "workflow_observe": WORKFLOW_OBSERVE_SCHEMA,
     "workflow_output": WORKFLOW_OUTPUT_SCHEMA,

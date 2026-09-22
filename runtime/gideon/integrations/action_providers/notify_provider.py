@@ -12,8 +12,16 @@ from gideon.integrations.action_providers.base import (
 )
 from gideon.integrations.action_providers.services import get_action_services
 from gideon.integrations.action_providers.template import render_template
+from gideon.workspace import notification_kinds
 
-_ALLOWED_KINDS = {"info", "success", "warning", "error"}
+_ALLOWED_KINDS = frozenset(
+    (
+        notification_kinds.INFO,
+        notification_kinds.SUCCESS,
+        notification_kinds.WARNING,
+        notification_kinds.ERROR,
+    )
+)
 
 
 @dataclass(frozen=True)

@@ -15,5 +15,5 @@
   "hex": "#[0-9a-fA-F]{3,8}\\b",
   "raw_px": "style=\\{\\{[^}]*?\\b\\d+px\\b",
   "px_ok_context": "minmax\\(|repeat\\(|\\bmin\\(|\\bmax\\(|\\bclamp\\(|\\b(border|outline)(-[a-z]+)?:\\s*[^;}]*\\d+px|border[A-Z][a-zA-Z]*:\\s*[`'\"]?\\s*\\$?\\{?[^}]*\\d+px|Math\\.(min|max)\\(",
-  "calc_with_token": "calc\\([^)]*var\\("
+  "calc_with_token": "calc\\([^)]*var\\(--(?!content-width\\))"
 }

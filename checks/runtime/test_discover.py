@@ -187,6 +187,14 @@ def test_dismiss_persists_and_loads(_entity_home: Path):
     assert (_entity_home / "entity_settings" / "legibility.json").exists()
 
 
+def test_clear_dismissed_restores_all_persisted_tips(_entity_home: Path):
+    dc.dismiss("chat")
+    dc.dismiss("tasks")
+
+    assert dc.clear_dismissed() == set()
+    assert dc.load_dismissed() == set()
+
+
 def _stub_config(monkeypatch: pytest.MonkeyPatch, *, enabled: bool) -> None:
     cfg = SimpleNamespace(legibility=SimpleNamespace(discover_tips=enabled))
     monkeypatch.setattr(
@@ -236,3 +244,18 @@ def test_compute_auto_hides_engaged(
     assert out["visible_count"] == len(dc.CATALOG) - 2
     assert out["dismissed_count"] == 0
     assert out["engaged_count"] == 2
+
+
+def test_compute_counts_only_dismissals_that_restore_visibility(
+    monkeypatch: pytest.MonkeyPatch, _entity_home: Path
+):
+    _stub_config(monkeypatch, enabled=True)
+    monkeypatch.setattr(dc, "compute_engaged", lambda state=None: {"chat": True})
+    dc.dismiss("chat")
+    dc.dismiss("tasks")
+
+    out = dc.compute_discover()
+
+    assert out["dismissed_count"] == 2
+    assert out["restorable_count"] == 1
+    assert out["engaged_count"] == 0

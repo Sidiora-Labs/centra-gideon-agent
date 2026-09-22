@@ -367,9 +367,10 @@ def test_malformed_digest_schedule_falls_back(home, bad):
     assert nr.digest_settings()["schedule"] == nr.DEFAULT_DIGEST_SCHEDULE
 
 
-def test_rules_document_has_a_row_for_every_registered_kind(home):
+def test_rules_document_has_a_row_for_every_configurable_registered_kind(home):
     doc = nr.rules_document()
-    assert {r["key"] for r in doc["rules"]} == {k.key for k in nk.all_kinds()}
+    assert {r["key"] for r in doc["rules"]} == {k.key for k in nk.configurable_kinds()}
+    assert all(row["production_owner"] for row in doc["rules"])
 
 
 def test_rules_document_marks_which_rows_are_configured(home):

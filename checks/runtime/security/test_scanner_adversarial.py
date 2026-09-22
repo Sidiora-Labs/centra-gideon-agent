@@ -429,15 +429,21 @@ def assert_oversize_skipped_by_walk_refused_at_commit(
 
 
 def assert_manifest_rejected(case: dict[str, Any], tmp_path: Path) -> None:
-    """A manifest that parses to nonsense must stop the write, and no SKILL.md may land."""
+    """Marketplace imports preserve source files; authored writes reject bad manifests."""
     files = payload(case)
-    with pytest.raises(ValueError, match="SKILL.md"):
-        mk.install_skill_files(files, "helper", tmp_path / "live")
-    assert not (tmp_path / "live" / "helper" / "SKILL.md").exists()
-    market = AdversarialMarket(files)
-    with pytest.raises(ValueError, match="SKILL.md"):
-        mk.install_scanned(market, "adversarial", "helper", tmp_path / "live2")
-    assert not (tmp_path / "live2" / "helper" / "SKILL.md").exists()
+    skill = next((entry for entry in files if entry["path"] == "SKILL.md"), None)
+    if skill is None:
+        with pytest.raises(ValueError, match="No SKILL.md"):
+            mk.install_skill_files(files, "helper", tmp_path / "live")
+        return
+
+    written = mk.install_skill_files(files, "helper", tmp_path / "live")
+    assert written.read_bytes() == mk._entry_bytes(skill)
+    from gideon.extensions.skills.loader import ProcedureLibrary
+
+    loader = ProcedureLibrary(skills_path=tmp_path / "authored", install_builtins=False)
+    assert loader.create_skill("helper", str(skill.get("contents", ""))) is False
+    assert not (tmp_path / "authored" / "helper").exists()
 
 
 class _TamperedResources:
@@ -892,7 +898,9 @@ class TestCorpusRedsOnAWeakenedScanner:
     ):
         case = self._case("degenerate-manifest/missing-frontmatter")
         assert_manifest_rejected(case, tmp_path / "intact")
-        monkeypatch.setattr(mk, "_validate_skill_md", lambda contents: [])
+        from gideon.extensions.skills import loader as skill_loader
+
+        monkeypatch.setattr(skill_loader, "validate_skill_md", lambda contents: [])
         expect_rail_red(assert_manifest_rejected, case, tmp_path / "weakened")
 
     def test_silently_dropping_unsafe_entries_reds_archive(self, tmp_path, monkeypatch):

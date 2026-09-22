@@ -32,9 +32,12 @@ AUTO_SKILL_NAMESPACE = "auto"
 
 AUTO_SKILL_SOURCE_VALUE = "auto"
 
+TAUGHT_SKILL_SOURCE_VALUE = "taught"
+
 AUTO_SKILL_MAX_PROCEDURE_CHARS = 10_240
 
 _AUTO_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$")
+_SKILL_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 
 _BUILTIN_SKILLS_DIR = Path(__file__).parent / "bundled"
 
@@ -380,6 +383,44 @@ def parse_frontmatter(content: str) -> dict[str, str]:
     return ProcedureLibrary._parse_frontmatter_text(content)
 
 
+def validate_skill_md(content: str) -> list[str]:
+    """Return validation errors for user-authored SKILL.md content."""
+    errors: list[str] = []
+    if not content.strip().startswith("---"):
+        errors.append("SKILL.md must start with YAML frontmatter (---)")
+        return errors
+    end = content.find("\n---", 3)
+    if end == -1:
+        errors.append("SKILL.md frontmatter is not closed with ---")
+        return errors
+    frontmatter = content[3:end]
+    name_m = re.search(r"^name:\s*(.+)$", frontmatter, re.MULTILINE)
+    if not name_m:
+        errors.append("SKILL.md frontmatter missing required 'name' field")
+    else:
+        name = name_m.group(1).strip().strip("\"'")
+        if not _SKILL_NAME_PATTERN.match(name):
+            errors.append(
+                f"SKILL.md name must match ^[a-z0-9][a-z0-9-]{{0,62}}$ (got {name!r})"
+            )
+    if not re.search(r"^description:\s*.+$", frontmatter, re.MULTILINE):
+        errors.append("SKILL.md frontmatter missing required 'description' field")
+    return errors
+
+
+def skill_provenance(meta: dict[str, str]) -> str:
+    """Return the supported skill provenance declared in frontmatter.
+
+    ``source`` also carries values that describe install origins.  The library
+    view only exposes the two creation origins it can explain, keeping its
+    public value set stable for hand-authored and third-party skills.
+    """
+    value = meta.get("source", "").strip().lower()
+    if value in (AUTO_SKILL_SOURCE_VALUE, TAUGHT_SKILL_SOURCE_VALUE):
+        return value
+    return ""
+
+
 class ProcedureLibrary:
     """Load skill markdown files from ~/.gideon/skills/.
 
@@ -654,7 +695,7 @@ class ProcedureLibrary:
 
         Writes into the loader's write tier (agent-local when agent-scoped, else
         the base skills dir) — matching where the same loader would resolve it."""
-        if not self._safe_name(name):
+        if not self._safe_name(name) or validate_skill_md(content):
             return False
         skill_dir = self._write_dir / name
         if skill_dir.exists():
@@ -666,7 +707,7 @@ class ProcedureLibrary:
 
     def update_skill(self, name: str, content: str) -> bool:
         """Overwrite an existing skill's SKILL.md.  Returns True if found."""
-        if not self._safe_name(name):
+        if not self._safe_name(name) or validate_skill_md(content):
             return False
         skill_file = self._dir / name / "SKILL.md"
         if not skill_file.exists():

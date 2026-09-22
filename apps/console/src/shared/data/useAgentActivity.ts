@@ -68,7 +68,9 @@ export function foldLoops(loops: Loop[], blocked: Set<string>): AgentActivityEnt
     const status = effectiveLoopStatus(l.status, l.stop_reason)
     const state: AgentActivityState = awaiting
       ? 'waiting_approval'
-      : (LOOP_STATE[status] ?? 'idle')
+      : l.error_message
+        ? 'error'
+        : (LOOP_STATE[status] ?? 'idle')
     const total = l.max_cycles > 0 ? Math.min(1, Math.max(0, l.total_cycles / l.max_cycles)) : undefined
     return {
       id: `loop:${l.id}`,

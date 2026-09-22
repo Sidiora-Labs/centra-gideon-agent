@@ -285,6 +285,27 @@ def test_a_judge_gate_without_criteria_is_caught():
     assert any("no `config.prompt`" in i for i in self_check(spec).issues)
 
 
+@pytest.mark.parametrize(
+    "config, expected",
+    [
+        ({"kind": "judge", "prompt": " \n\t"}, "no `config.prompt`"),
+        ({"kind": "ladder"}, "no non-empty `config.criteria` list"),
+        ({"kind": "ladder", "criteria": {}}, "no non-empty `config.criteria` list"),
+        ({"kind": "verify_command"}, "no `config.verify` block"),
+        ({"kind": "verify_script", "verify": "script.sh"}, "no `config.verify` block"),
+    ],
+)
+def test_gate_self_check_matches_runtime_requirements(config, expected):
+    spec = {
+        "root": {
+            "kind": "sequence",
+            "id": "r",
+            "children": [stage("w"), {"kind": "gate", "id": "g", "config": config}],
+        }
+    }
+    assert any(expected in issue for issue in self_check(spec).issues)
+
+
 def test_an_unbounded_until_loop_is_caught():
     spec = {
         "root": {

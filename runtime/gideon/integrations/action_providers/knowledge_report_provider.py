@@ -238,6 +238,7 @@ class _ReportRun:
             rr.record_run(identifier, ok=False, error=str(exc)[:200])
             return self.result(error=f"knowledge-report: {identifier} failed: {exc}")
         if receipt.success:
+            _emit_persisted_finding(definition, identifier, text, receipt)
             rr.record_run(identifier, ok=True, watermark_ts=evidence.timestamp)
             return self.result(
                 {
@@ -517,3 +518,35 @@ def _persist_body(result: ActionResult) -> dict[str, Any]:
     except (json.JSONDecodeError, ValueError):
         decoded = None
     return decoded if isinstance(decoded, dict) else {}
+
+
+def _emit_persisted_finding(
+    definition: Any, report_id: str, text: str, receipt: ActionResult
+) -> None:
+    """Surface a finding only after the knowledge write has succeeded."""
+    try:
+        from gideon.integrations.action_providers.services import get_action_services
+        from gideon.workspace import notification_kinds
+
+        services = get_action_services()
+        state = getattr(services, "state", None)
+        if state is None:
+            return
+        persisted = _persist_body(receipt)
+        title = str(
+            getattr(definition, "name", "")
+            or getattr(definition, "id", "")
+            or "Research finding"
+        )
+        body = next((line.strip() for line in text.splitlines() if line.strip()), "")
+        state.notify(
+            notification_kinds.RESEARCH_FINDING,
+            title,
+            body[:280],
+            meta={
+                "report_id": report_id,
+                "knowledge_item": str(persisted.get("item_id") or ""),
+            },
+        )
+    except Exception:
+        logger.debug("knowledge-report: finding notification failed", exc_info=True)

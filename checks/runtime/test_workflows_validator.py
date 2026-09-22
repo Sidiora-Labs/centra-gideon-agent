@@ -252,6 +252,27 @@ class TestStructuralRules:
         assert "WF_MISSING_EXPR" in _codes(
             _wrap({"kind": "gate", "id": "g", "config": {"kind": "expression"}})
         )
+        assert "WF_MISSING_CRITERIA" in _codes(
+            _wrap({"kind": "gate", "id": "g", "config": {"kind": "ladder"}})
+        )
+        assert "WF_MISSING_PROMPT" in _codes(
+            _wrap(
+                {
+                    "kind": "gate",
+                    "id": "g",
+                    "config": {"kind": "judge", "prompt": "  \n\t"},
+                }
+            )
+        )
+        assert "WF_MISSING_VERIFY" in _codes(
+            _wrap(
+                {
+                    "kind": "gate",
+                    "id": "g",
+                    "config": {"kind": "verify_script", "verify": "script.sh"},
+                }
+            )
+        )
         assert validate_spec(
             _wrap({"kind": "gate", "id": "g", "config": {"kind": "approval"}})
         ).ok

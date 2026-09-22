@@ -19,6 +19,7 @@ from gideon.interfaces.dashboard.handlers import (
     api_prompt_syntax,
     api_prompts,
     api_skill_detail,
+    api_skills_create,
     api_snippet_create,
     api_snippet_delete,
     api_snippet_detail,
@@ -473,21 +474,60 @@ class TestSkillDetailPut:
 
     def test_put_non_string_content_returns_400(self, tmp_path):
         r, loader = self._put_req(tmp_path, "editable", {"content": 12345})
-        loader.create_skill("editable", "# Original\nUntouched.")
+        loader.create_skill(
+            "editable", "---\nname: editable\ndescription: Original\n---\n# Original\n"
+        )
         resp = _run(api_skill_detail(r))
         assert resp.status == 400
         assert "string" in _body(resp)["error"].lower()
-        assert loader.load_skill("editable") == "# Original\nUntouched."
+        assert loader.load_skill("editable") == (
+            "---\nname: editable\ndescription: Original\n---\n# Original\n"
+        )
 
     def test_put_valid_string_content_succeeds(self, tmp_path):
         r, loader = self._put_req(
-            tmp_path, "editable", {"content": "# Updated\nNew body."}
+            tmp_path,
+            "editable",
+            {"content": "---\nname: editable\ndescription: Updated\n---\n# Updated\n"},
         )
-        loader.create_skill("editable", "# Original\nUntouched.")
+        loader.create_skill(
+            "editable", "---\nname: editable\ndescription: Original\n---\n# Original\n"
+        )
         resp = _run(api_skill_detail(r))
         assert resp.status == 200
         assert _body(resp)["ok"] is True
-        assert loader.load_skill("editable") == "# Updated\nNew body."
+        assert loader.load_skill("editable") == (
+            "---\nname: editable\ndescription: Updated\n---\n# Updated\n"
+        )
+
+    def test_put_invalid_skill_content_returns_400(self, tmp_path):
+        r, loader = self._put_req(tmp_path, "editable", {"content": "# Updated\n"})
+        loader.create_skill(
+            "editable", "---\nname: editable\ndescription: Original\n---\n# Original\n"
+        )
+        resp = _run(api_skill_detail(r))
+        assert resp.status == 400
+        assert "SKILL.md validation failed" in _body(resp)["error"]
+        assert "# Original" in loader.load_skill("editable")
+
+
+def test_create_skill_rejects_invalid_skill_content(tmp_path):
+    from gideon.extensions.skills import ProcedureLibrary
+
+    loader = ProcedureLibrary(skills_path=tmp_path, install_builtins=False)
+    state = SimpleNamespace(context_builder=SimpleNamespace(skills=loader))
+    resp = _run(
+        api_skills_create(
+            _req(
+                body={"name": "invalid", "content": "# Invalid\n"},
+                method="POST",
+                state=state,
+            )
+        )
+    )
+    assert resp.status == 400
+    assert "SKILL.md validation failed" in _body(resp)["error"]
+    assert loader.load_skill("invalid") is None
 
 
 def _seed_greet():

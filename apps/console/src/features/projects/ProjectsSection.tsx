@@ -8,7 +8,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { ContextMenu, type ContextMenuItem } from '../../shared/ui/motion'
 import { spring } from '../../shared/theme/motion'
 import { fvs } from '../../shared/theme/fontWeight'
-import { FolderKanban, Search, Plus, Loader2, Trash2, FolderOpen, Folder, FolderTree, File as FileIcon, X, ChevronRight, ChevronDown, Pencil, Check, ListChecks, Lock, FileBox, Star, MessageSquare, Repeat, Target, Code2, Telescope, Palette, FileText, CircleDot, Circle, AlertTriangle, RefreshCw, Download, BookMarked, Users, type LucideIcon } from 'lucide-react'
+import { FolderKanban, Search, Plus, Loader2, Trash2, FolderOpen, Folder, FolderTree, File as FileIcon, X, ChevronRight, ChevronDown, Pencil, Check, ListChecks, Lock, FileBox, Star, MessageSquare, Repeat, Target, Code2, Telescope, Palette, FileText, CircleDot, Circle, AlertTriangle, RefreshCw, Download, BookMarked, Users, Archive, ArchiveRestore, type LucideIcon } from 'lucide-react'
 import { statusMeta, TERMINAL } from '../tasks/taskMeta'
 import { Popover, MenuRow } from '../../shared/ui/Popover'
 import { TopBar } from '../../shared/ui/TopBar'
@@ -39,7 +39,7 @@ export function ProjectsSection({ sub, navigate, query, setQuery }: RouteProps) 
 }
 
 function ProjectListPage({ onOpen, query, setQuery }: { onOpen: (id: string) => void } & Pick<RouteProps, 'query' | 'setQuery'>) {
-  const { projects, loading, loadErr, refresh, creating, setCreating, busy, err, setErr, activeId, create, del } = useProjectCollection(onOpen)
+  const { projects, loading, loadErr, refresh, creating, setCreating, busy, err, setErr, activeId, create, del, setStatus } = useProjectCollection(onOpen)
 
   const [q, setQ] = useQueryParam(query, setQuery, 'q', '', { replace: true })
 
@@ -84,7 +84,8 @@ function ProjectListPage({ onOpen, query, setQuery }: { onOpen: (id: string) => 
             <div className="flex flex-col gap-2">
               {shown.map((project, index) => <ProjectCollectionRow key={project.id} project={project} index={index}
                 active={project.id === activeId} peeked={project.id === peekId}
-                onPeek={() => setPeekId(peekId === project.id ? '' : project.id)} onOpen={() => onOpen(project.id)} onDelete={() => del(project)} />)}
+                onPeek={() => setPeekId(peekId === project.id ? '' : project.id)} onOpen={() => onOpen(project.id)} onDelete={() => del(project)}
+                onSetStatus={(status) => setStatus(project, status)} />)}
             </div>
           )}
       </div>
@@ -106,14 +107,18 @@ function ProjectListPage({ onOpen, query, setQuery }: { onOpen: (id: string) => 
   )
 }
 
-function ProjectCollectionRow({ project, index, active, peeked, onPeek, onOpen, onDelete }: {
+function ProjectCollectionRow({ project, index, active, peeked, onPeek, onOpen, onDelete, onSetStatus }: {
   project: ProjectItem; index: number; active: boolean; peeked: boolean
   onPeek: () => void; onOpen: () => void; onDelete: () => void
+  onSetStatus: (status: 'active' | 'archived') => void
 }) {
   const entries: ContextMenuItem[] = [
     { icon: <FolderKanban size={15} />, label: peeked ? 'Close peek' : 'Peek', onSelect: onPeek },
     { icon: <FolderOpen size={15} />, label: 'Open full page', onSelect: onOpen },
   ]
+  entries.push(project.status === 'archived'
+    ? { icon: <ArchiveRestore size={15} />, label: 'Restore from archive', onSelect: () => onSetStatus('active') }
+    : { icon: <Archive size={15} />, label: 'Archive', onSelect: () => onSetStatus('archived') })
   if (!project.is_builtin) entries.push({ icon: <Trash2 size={15} />, label: 'Delete', onSelect: onDelete, danger: true })
   const badges = [project.is_builtin ? 'Built-in' : '', project.status === 'archived' ? 'Archived' : ''].filter(Boolean)
   const workspace = project.workspace_dir ? project.workspace_dir.split('/').slice(-2).join('/') : 'no workspace'
@@ -349,6 +354,9 @@ function ProjectDetailPage({ id, onBack, navigate, query, setQuery }: { id: stri
         )}
       </Popover>
       <HeaderControl icon={MessageSquare} label="Chat" onClick={launchChat} />
+      <HeaderControl icon={project.status === 'archived' ? ArchiveRestore : Archive}
+        label={project.status === 'archived' ? 'Restore' : 'Archive'}
+        onClick={() => patch({ status: project.status === 'archived' ? 'active' : 'archived' })} />
 
       <HeaderControl icon={Download} label="Export" priority="low"
         hint="Download this project as a portable archive (no credentials)"

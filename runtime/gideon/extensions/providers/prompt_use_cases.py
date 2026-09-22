@@ -20,12 +20,16 @@ A use case with no binding falls back to the bundled default prompt
 
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from gideon.core.atomic_write import atomic_write
 
 logger = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from gideon.integrations.prompt_providers.base import PromptProvider, PromptTemplate
 
 from gideon.integrations.prompt_providers.catalog import BUNDLED_PROMPTS as _CATALOG  # noqa: E402
 
@@ -221,13 +225,23 @@ def split_ref(ref: str) -> tuple[str, str] | None:
     return (provider_name, prompt_name)
 
 
-def resolve_prompt_content(use_case: str) -> str | None:
-    """Resolve the bound prompt for ``use_case`` to its rendered content.
+@dataclass(frozen=True)
+class ResolvedPromptDeclaration:
+    """The provider/template pair selected by one prompt-use-case declaration."""
 
-    Reads the binding (or the bundled default), fetches the template from its
-    provider, and returns its ``content``. Returns ``None`` when the prompt
-    can't be resolved (no provider, missing template) so the caller can fall
-    back to the shipped file.
+    use_case: str
+    provider_name: str
+    prompt_name: str
+    provider: "PromptProvider"
+    template: "PromptTemplate"
+
+
+def resolve_prompt_declaration(use_case: str) -> ResolvedPromptDeclaration | None:
+    """Resolve a use case once for every runtime consumer.
+
+    A persisted binding is authoritative while its provider and template are
+    available. If either disappears, use the bundled prompt declared for that
+    use case; an unknown use case uses the chat declaration.
     """
     try:
         from gideon.integrations.prompt_providers.registry import (
@@ -238,19 +252,44 @@ def resolve_prompt_content(use_case: str) -> str | None:
         _ensure_default_providers_registered()
         ref = active_prompt_ref(use_case)
         parsed = split_ref(ref)
-        if not parsed:
+        if parsed:
+            provider_name, prompt_name = parsed
+            provider = get_prompt_provider(provider_name)
+            template = provider.get_prompt(prompt_name) if provider else None
+            if provider is not None and template is not None:
+                return ResolvedPromptDeclaration(
+                    use_case, provider_name, prompt_name, provider, template
+                )
+
+        fallback_use_case = use_case if use_case in valid_prompt_use_cases() else "chat"
+        fallback_name = (
+            bundled_prompt_name_for(fallback_use_case) or DEFAULT_PROMPT_NAME
+        )
+        fallback = get_prompt_provider(DEFAULT_PROMPT_PROVIDER)
+        template = fallback.get_prompt(fallback_name) if fallback else None
+        if fallback is None or template is None:
             return None
-        provider_name, prompt_name = parsed
-        provider = get_prompt_provider(provider_name)
-        if provider is None:
-            return None
-        template = provider.get_prompt(prompt_name)
-        if template is None:
-            fallback = get_prompt_provider(DEFAULT_PROMPT_PROVIDER)
-            template = fallback.get_prompt(DEFAULT_PROMPT_NAME) if fallback else None
-            if template is None:
-                return None
-        return template.content
+        return ResolvedPromptDeclaration(
+            fallback_use_case,
+            DEFAULT_PROMPT_PROVIDER,
+            fallback_name,
+            fallback,
+            template,
+        )
     except Exception:
-        logger.debug("resolve_prompt_content failed for %s", use_case, exc_info=True)
+        logger.debug(
+            "prompt declaration resolution failed for %s", use_case, exc_info=True
+        )
         return None
+
+
+def resolve_prompt_content(use_case: str) -> str | None:
+    """Resolve the bound prompt for ``use_case`` to its template content.
+
+    Reads the binding (or the bundled default), fetches the template from its
+    provider, and returns its ``content``. Returns ``None`` when the prompt
+    can't be resolved (no provider, missing template) so the caller can fall
+    back to the shipped file.
+    """
+    declaration = resolve_prompt_declaration(use_case)
+    return declaration.template.content if declaration else None

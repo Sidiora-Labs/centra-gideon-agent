@@ -1,30 +1,14 @@
 import { useId, useState, type ReactNode } from 'react'
 import { Toggle } from '../../shared/ui/Toggle'
+import type { JsonSchema, SchemaMeta, SchemaProp } from '../../shared/data/api'
 
+export type { JsonSchema, SchemaMeta, SchemaProp }
 
-export interface SchemaMeta {
-  label?: string
-  help?: string
-  widget?: string
-  tags?: string[]
-}
-
-export interface JsonSchema {
-  type?: string | string[]
-  description?: string
-  properties?: Record<string, JsonSchema>
-  required?: string[]
-  items?: JsonSchema
-  enum?: unknown[]
-  default?: unknown
-  'x-meta'?: SchemaMeta
-}
-
-export function schemaMeta(s: JsonSchema): SchemaMeta {
+export function schemaMeta(s: SchemaProp): SchemaMeta {
   return (s['x-meta'] ?? {}) as SchemaMeta
 }
 
-export function schemaProps(parameters: unknown): { props: [string, JsonSchema][]; required: Set<string> } {
+export function schemaProps(parameters: unknown): { props: [string, SchemaProp][]; required: Set<string> } {
   const s = (parameters ?? {}) as JsonSchema
   const props = Object.entries(s.properties ?? {})
   return { props, required: new Set(s.required ?? []) }
@@ -46,7 +30,7 @@ export function missingRequired(
   return out
 }
 
-export function typeLabel(s: JsonSchema): string {
+export function typeLabel(s: SchemaProp): string {
   const t = Array.isArray(s.type) ? s.type.join('|') : s.type
   if (t === 'array') return `${(s.items?.type as string) ?? 'any'}[]`
   if (s.enum) return 'enum'
@@ -66,12 +50,62 @@ export function seedArgs(parameters: unknown): Record<string, unknown> {
 }
 
 export type WidgetRenderer = (props: {
-  value: unknown; onChange: (v: unknown) => void; schema: JsonSchema; placeholder?: string
+  value: unknown; onChange: (v: unknown) => void; schema: SchemaProp; placeholder?: string
 }) => ReactNode
 export type WidgetMap = Record<string, WidgetRenderer>
 
+export type SchemaFieldEntry = [string, SchemaProp]
+
+export interface SchemaFieldDisclosureProps {
+  fields: readonly SchemaFieldEntry[]
+  required?: readonly string[] | ReadonlySet<string>
+  values?: Readonly<Record<string, unknown>>
+  configured?: readonly string[]
+  renderField: (field: SchemaFieldEntry) => ReactNode
+}
+
+function hasConfiguredValue(value: unknown): boolean {
+  return value !== undefined && value !== null && (typeof value !== 'string' || value.trim() !== '')
+}
+
+export function rankSchemaFields(fields: readonly SchemaFieldEntry[], required: readonly string[] | ReadonlySet<string> = []) {
+  const requiredNames = new Set(required)
+  const allAdvanced = fields.length > 0 && fields.every(([, schema]) => schemaMeta(schema).tags?.includes('advanced'))
+  const advanced = allAdvanced ? [] : fields.filter(([name, schema]) =>
+    !requiredNames.has(name) && schemaMeta(schema).tags?.includes('advanced'))
+  const standard = allAdvanced ? [...fields] : fields.filter((field) => !advanced.includes(field))
+  return { standard, advanced, allAdvanced }
+}
+
+export function SchemaFieldDisclosure({ fields, required = [], values = {}, configured = [], renderField }: SchemaFieldDisclosureProps) {
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const disclosureId = useId()
+  const { standard, advanced } = rankSchemaFields(fields, required)
+  const configuredNames = new Set(configured)
+  const configuredCount = advanced.filter(([name]) => configuredNames.has(name) || hasConfiguredValue(values[name])).length
+
+  return (
+    <>
+      {standard.map(renderField)}
+      {advanced.length > 0 && (
+        <>
+          <button type="button" onClick={() => setAdvancedOpen((open) => !open)} aria-expanded={advancedOpen}
+            aria-controls={disclosureId} aria-describedby={`${disclosureId}-summary`}
+            className="inline-flex w-fit items-center text-[0.8125rem] text-primary hover:underline">
+            Advanced settings
+          </button>
+          <span id={`${disclosureId}-summary`} data-type="caption" className="sr-only">
+            {advancedOpen ? 0 : advanced.length} hidden advanced {advanced.length === 1 ? 'setting' : 'settings'}, {configuredCount} configured {configuredCount === 1 ? 'value' : 'values'}.
+          </span>
+          {advancedOpen && <div id={disclosureId} className="contents">{advanced.map(renderField)}</div>}
+        </>
+      )}
+    </>
+  )
+}
+
 export function SchemaField({ name, schema, required, value, onChange, widgets }: {
-  name: string; schema: JsonSchema; required: boolean; value: unknown; onChange: (v: unknown) => void
+  name: string; schema: SchemaProp; required: boolean; value: unknown; onChange: (v: unknown) => void
   widgets?: WidgetMap
 }) {
   const t = Array.isArray(schema.type) ? schema.type[0] : schema.type

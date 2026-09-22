@@ -141,6 +141,7 @@ class RepeatableListReset:
     async def respond(self):
         from gideon.engine.tasks import registry
         from gideon.engine.tasks.models import TERMINAL_STATUSES
+        from gideon.engine.tasks.rules import ENGINE_OWNED_FIELDS, managed
 
         store = _store()
         record = store.get_task_list(self.list_id)
@@ -163,18 +164,24 @@ class RepeatableListReset:
         reset_ids = []
         for task in tasks:
             task.reset_for_repeat()
-            await registry.update_task(
-                task.id,
-                status=task.status.value,
-                exit_criteria=task.exit_criteria,
-                action_plan=task.action_plan,
-                execution_notes=[],
-                blocked_reason_kind="",
-                blocked_kind="",
-                preview="",
-                evidence=[],
-                attempts=[],
-            )
+            fields = {
+                "status": task.status.value,
+                "exit_criteria": task.exit_criteria,
+                "action_plan": task.action_plan,
+                "execution_notes": [],
+                "blocked_reason_kind": "",
+                "blocked_kind": "",
+                "preview": "",
+                "evidence": [],
+                "attempts": [],
+            }
+            if managed(task):
+                fields = {
+                    key: value
+                    for key, value in fields.items()
+                    if key not in ENGINE_OWNED_FIELDS
+                }
+            await registry.update_task(task.id, **fields)
             reset_ids.append(task.id)
         return web.json_response({"ok": True, "reset_task_ids": reset_ids})
 

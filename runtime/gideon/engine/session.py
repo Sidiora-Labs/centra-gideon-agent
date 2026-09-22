@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from gideon import shutdown_event
+from gideon.cognition.context_management import cleanup_stale_sessions
 from gideon.core.config import AppConfig
 from gideon.core.config.loader import default_workspace_dir
 from gideon.engine.session_map import SessionMap as SessionMap
@@ -1217,6 +1218,10 @@ class ConversationDirectory:
                     await self._sweep_process_records()
                 except Exception:
                     logger.debug("Orphan PID sweep failed", exc_info=True)
+                try:
+                    cleanup_stale_sessions()
+                except Exception:
+                    logger.debug("Stale workspace cleanup failed", exc_info=True)
             else:
                 return
 

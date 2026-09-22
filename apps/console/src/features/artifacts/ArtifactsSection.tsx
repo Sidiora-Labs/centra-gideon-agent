@@ -196,7 +196,7 @@ export function ArtifactsSection({ sub, navigate, query: routeQuery, setQuery }:
               ? <Loading what="artifacts" />
               : <ArtifactGrid artifacts={filtered} onOpen={open}
                   onBrowseFiles={() => navigate('files')}
-                  narrowed={!!(q.trim() || kind || src || col)} />}
+                  narrowed={!!(q.trim() || src || col)} kind={ARTIFACT_KINDS.find((item) => item.key === kind)?.key} />}
           </div>
         </div>
       )}

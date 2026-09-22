@@ -409,10 +409,14 @@ class CompletionDelivery:
             )
 
     async def channel(self) -> None:
+        from gideon.automation.workflows.failure_taxonomy import classify_exception
+
         assert self.runtime.sessions is not None
         delivered = False
         reasons = []
+        attempts_made = 0
         for attempt in range(1, self.api._MAX_INJECT_ATTEMPTS + 1):
+            attempts_made = attempt
             if attempt > 1:
                 await asyncio.sleep(2)
             acquired = False
@@ -444,7 +448,10 @@ class CompletionDelivery:
                 self.logger.exception(
                     "Subagent %s channel injection failed", self.lead.id
                 )
-                break
+                if not classify_exception(error).retryable:
+                    break
+                if acquired:
+                    await self.reset("retriable channel injection failure")
             finally:
                 if acquired:
                     await self.release()
@@ -453,7 +460,7 @@ class CompletionDelivery:
             self.logger.error(
                 "Subagent %s: all %d channel injection attempts failed: %s",
                 self.lead.id,
-                self.api._MAX_INJECT_ATTEMPTS,
+                attempts_made,
                 detail,
             )
             self.failed(detail)

@@ -11,6 +11,12 @@ function graphState(task: TaskItem, cyclic: boolean): DagNodeState {
   const running: Record<string, DagNodeState> = { blocked: 'blocked', in_progress: 'active' }
   return running[task.status] ?? (TERMINAL.has(task.status) ? 'done' : 'todo')
 }
+
+export function scopedGraphMetrics(tasks: TaskItem[]) {
+  const completed = tasks.filter(task => task.status === 'done').length
+  return { completion_pct: tasks.length ? completed / tasks.length * 100 : 0 }
+}
+
 export function TaskGraph({ tasks, onOpen }: { tasks: TaskItem[]; onOpen: (id: string) => void }) {
   const viewport = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
@@ -30,6 +36,7 @@ export function TaskGraph({ tasks, onOpen }: { tasks: TaskItem[]; onOpen: (id: s
     return () => observer.disconnect()
   }, [])
   const placement = useMemo(() => placeTaskGraph(tasks, width), [tasks, width])
+  const metrics = useMemo(() => scopedGraphMetrics(tasks), [tasks])
   const critical = new Set(analysis?.critical_path ?? [])
   const names = new Map(tasks.map(task => [task.id, task.title]))
   const bottlenecks = analysis?.bottleneck_tasks ?? []
@@ -44,7 +51,7 @@ export function TaskGraph({ tasks, onOpen }: { tasks: TaskItem[]; onOpen: (id: s
   return <div ref={viewport} className="rounded-lg border border-outline-variant/30 bg-surface-container/20 p-s">
     {tasks.length === 0 ? <EmptyState icon={GitFork} title="No tasks to graph" hint="Add tasks and link prerequisites to see the dependency DAG." /> : <>
       {analysis && <div data-type="caption" className="mb-s flex flex-wrap items-center gap-x-l gap-y-s border-b border-outline-variant/25 p-m text-on-surface-low">
-        <span className="inline-flex items-center gap-1.5"><Activity size={13} className="text-ok" />{Math.round(analysis.completion_pct)}% complete</span>
+        <span className="inline-flex items-center gap-1.5"><Activity size={13} className="text-ok" />{Math.round(metrics.completion_pct)}% complete</span>
         <span className="inline-flex items-center gap-1.5"><Route size={13} className="text-primary" />Critical path: {critical.size} {critical.size === 1 ? 'task' : 'tasks'}</span>
         {!!bottlenecks.length && <span className="inline-flex items-center gap-1.5" title={bottlenecks.slice(0, 5).map(entry => `${names.get(entry.id) ?? entry.id} (${entry.dependents})`).join('\n')}><GitFork size={13} className="text-warn" />{bottlenecks.length} {bottlenecks.length === 1 ? 'bottleneck' : 'bottlenecks'}</span>}
         {!!analysis.cycles?.length && <span className="inline-flex items-center gap-1.5 text-danger"><TriangleAlert size={13} />{analysis.cycles.length} cycle{analysis.cycles.length === 1 ? '' : 's'} detected</span>}

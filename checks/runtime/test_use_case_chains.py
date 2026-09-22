@@ -268,7 +268,7 @@ class TestConsumerAxes:
         judge_src = Path(judge.__file__).read_text(encoding="utf-8")
         assert 'resolve_provider_for_use_case("loops")' not in gates_src
         assert 'resolve_provider_for_use_case("loops")' not in judge_src
-        assert "resolve_provider_for_use_case(judge_use_case())" in gates_src
+        assert "execute_with_fallback_chain(judge_use_case(), _judge)" in gates_src
         assert judge_src.count("resolve_provider_for_use_case(judge_use_case())") == 2
 
     def test_background_session_factory_passes_axis(self):
@@ -524,6 +524,135 @@ class TestCallFailureAdvance:
         assert out == "ok"
         assert resolve.call_count == 1
         assert not resolve.call_args.kwargs.get("model_override")
+
+
+class TestDirectCallFailureAdvance:
+    """The direct provider call sites advance after a resolved provider fails."""
+
+    @staticmethod
+    def _provider(text: str, *, start_error: bool = False, call_error: bool = False):
+        from gideon.integrations.llm.base import (
+            EVENT_COMPLETE,
+            EVENT_TEXT_CHUNK,
+            LLMEvent,
+        )
+
+        class Provider:
+            async def start(self):
+                if start_error:
+                    raise RuntimeError("provider did not start")
+
+            async def shutdown(self):
+                return None
+
+            async def stream(self, _prompt):
+                if call_error:
+                    raise RuntimeError("provider stream failed")
+                yield LLMEvent(kind=EVENT_TEXT_CHUNK, text=text)
+                yield LLMEvent(kind=EVENT_COMPLETE)
+
+            async def complete(self, _messages):
+                if call_error:
+                    raise RuntimeError("provider completion failed")
+                yield LLMEvent(kind=EVENT_TEXT_CHUNK, text=text)
+                yield LLMEvent(kind=EVENT_COMPLETE)
+
+        return Provider()
+
+    @staticmethod
+    def _install_chain(monkeypatch, use_case: str, providers):
+        from gideon.extensions.providers import provider_bridge as pb
+
+        monkeypatch.setattr(uc, "_known_provider_names", lambda: {"p1", "p2"})
+        uc.save_active_models({use_case: ["p1:m1", "p2:m2"]})
+        monkeypatch.setattr(
+            pb,
+            "resolve_provider_for_use_case",
+            lambda _use_case, **kw: providers[kw["model_override"]],
+        )
+
+    @pytest.mark.asyncio
+    async def test_loop_gate_advances_after_start_failure(
+        self, isolated_store, monkeypatch
+    ):
+        from gideon.automation.loop import gates
+
+        self._install_chain(
+            monkeypatch,
+            "reasoning",
+            {
+                "p1:m1": self._provider("unused", start_error=True),
+                "p2:m2": self._provider("PASS"),
+            },
+        )
+        assert await gates.judge_verdict("judge this") == "PASS"
+
+    @pytest.mark.asyncio
+    async def test_knowledge_node_advances_after_completion_failure(
+        self, isolated_store, monkeypatch
+    ):
+        from gideon.cognition.knowledge.pipeline.nodes import _llm
+
+        self._install_chain(
+            monkeypatch,
+            "background",
+            {
+                "p1:m1": self._provider("unused", call_error=True),
+                "p2:m2": self._provider("recovered knowledge"),
+            },
+        )
+        assert (
+            await _llm.complete_text("background", "summarize") == "recovered knowledge"
+        )
+
+    @pytest.mark.asyncio
+    async def test_screen_description_advances_after_completion_failure(
+        self, isolated_store, monkeypatch
+    ):
+        from gideon.interfaces.dashboard import chat_runner
+
+        self._install_chain(
+            monkeypatch,
+            "image_modality",
+            {
+                "p1:m1": self._provider("unused", call_error=True),
+                "p2:m2": self._provider("recovered description"),
+            },
+        )
+        assert (
+            await chat_runner._describe_screen_frame("data:image/png;base64,AAA")
+            == "recovered description"
+        )
+
+    @pytest.mark.asyncio
+    async def test_eval_judge_advances_factory_chain_after_start_failure(
+        self, isolated_store, monkeypatch
+    ):
+        from gideon.assurance.eval.judge import LLMJudge
+
+        self._install_chain(
+            monkeypatch,
+            "chat",
+            {
+                "p1:m1": self._provider("unused", start_error=True),
+                "p2:m2": self._provider('{"score": 4, "reason": "recovered"}'),
+            },
+        )
+
+        def factory(_session_key, **kwargs):
+            return {
+                "p1:m1": self._provider("unused", start_error=True),
+                "p2:m2": self._provider('{"score": 4, "reason": "recovered"}'),
+            }[kwargs["model_override"]]
+
+        judge = LLMJudge(factory)
+        await judge.start()
+        try:
+            verdict = await judge.judge_turn("description", "criteria", "user", "reply")
+        finally:
+            await judge.shutdown()
+        assert verdict.score == 4
+        assert verdict.reason == "recovered"
 
 
 class TestChainPut:

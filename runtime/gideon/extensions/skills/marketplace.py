@@ -17,7 +17,6 @@ Additional marketplaces (skills.sh, custom registries) register via
 
 import builtins
 import logging
-import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -40,7 +39,6 @@ def _path_home_gideon():
 
 logger = logging.getLogger(__name__)
 
-_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 _SKILL_FILENAME = "SKILL.md"
 
 SKILL_DISCOVERY_PATHS: list[Path] = [
@@ -534,31 +532,6 @@ def _parse_description(skill_md: Path) -> str:
     return ProcedureLibrary._parse_frontmatter_text(text).get("description", "")
 
 
-def _validate_skill_md(contents: str) -> list[str]:
-    """Return validation errors for a SKILL.md string; empty = valid."""
-    errors: list[str] = []
-    if not contents.strip().startswith("---"):
-        errors.append("SKILL.md must start with YAML frontmatter (---)")
-        return errors
-    end = contents.find("\n---", 3)
-    if end == -1:
-        errors.append("SKILL.md frontmatter is not closed with ---")
-        return errors
-    frontmatter = contents[3:end]
-    name_m = re.search(r"^name:\s*(.+)$", frontmatter, re.MULTILINE)
-    if not name_m:
-        errors.append("SKILL.md frontmatter missing required 'name' field")
-    else:
-        name = name_m.group(1).strip().strip("\"'")
-        if not _NAME_RE.match(name):
-            errors.append(
-                f"SKILL.md name must match ^[a-z0-9][a-z0-9-]{{0,62}}$ (got {name!r})"
-            )
-    if not re.search(r"^description:\s*.+$", frontmatter, re.MULTILINE):
-        errors.append("SKILL.md frontmatter missing required 'description' field")
-    return errors
-
-
 def install_skill_files(
     files: list[dict[str, str]],
     skill_name: str,
@@ -566,7 +539,7 @@ def install_skill_files(
 ) -> Path:
     """Write skill files to ``target_base/<skill_name>/``.
 
-    Validates SKILL.md content and rejects any path containing ``..``.
+    Rejects any path containing ``..``.
     Returns the path to the written SKILL.md.
 
     🔴 THE DIRECTORY NAME IS VALIDATED TOO. Every *file* path here was checked for ``..`` and for a
@@ -613,9 +586,6 @@ def install_skill_files(
         out_path = skill_dir / rel_path
         out_path.parent.mkdir(parents=True, exist_ok=True)
         if rel_path.endswith("SKILL.md") or rel_path == "SKILL.md":
-            errors = _validate_skill_md(str(file_entry.get("contents", "")))
-            if errors:
-                raise ValueError(f"SKILL.md validation failed: {'; '.join(errors)}")
             written_skill_md = out_path
         out_path.write_bytes(_entry_bytes(file_entry))
 

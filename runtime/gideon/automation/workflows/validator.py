@@ -402,10 +402,23 @@ class _ShapeRules:
         if gate in (
             GateKind.VERIFY_COMMAND,
             GateKind.VERIFY_SCRIPT,
-        ) and not self.config.get("verify"):
+        ) and not isinstance(self.config.get("verify"), dict):
             self.issue("WF_MISSING_VERIFY", f"{raw} gate needs a `verify` block")
         if gate == GateKind.EXPRESSION and not self.config.get("expr"):
             self.issue("WF_MISSING_EXPR", "expression gate needs an `expr`")
+        if gate == GateKind.LADDER and (
+            not isinstance(self.config.get("criteria"), list)
+            or not self.config["criteria"]
+        ):
+            self.issue(
+                "WF_MISSING_CRITERIA",
+                "ladder gate needs a non-empty `criteria` list",
+            )
+        if (
+            gate == GateKind.JUDGE
+            and not str(self.config.get("prompt", "") or "").strip()
+        ):
+            self.issue("WF_MISSING_PROMPT", "judge gate needs a `prompt`")
 
     def subworkflow(self):
         reference = str(self.config.get("ref", "") or "")

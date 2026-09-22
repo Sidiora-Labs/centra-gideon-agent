@@ -272,7 +272,7 @@ def leaf_tool_denial(name: str) -> str:
 
 
 def _leaf_depth() -> int:
-    from gideon.automation.workflows.engine import WF_DEPTH_KEY
+    from gideon.automation.workflows.engine_support import WF_DEPTH_KEY
 
     try:
         return int(os.environ.get(WF_DEPTH_KEY, "0") or "0")

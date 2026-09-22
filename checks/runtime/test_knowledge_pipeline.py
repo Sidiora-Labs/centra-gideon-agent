@@ -43,7 +43,6 @@ def test_graph_validates_and_topo_orders():
     g.build()
     g.validate()
     assert g.topo_order() == ["a", "b"]
-    assert g.roots == ["a"]
 
 
 def test_graph_rejects_unknown_edge():

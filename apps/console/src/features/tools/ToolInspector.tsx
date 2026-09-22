@@ -5,7 +5,7 @@ import { ShieldAlert, Play, ChevronRight, Check, AlertTriangle } from 'lucide-re
 import { Button } from '../../shared/ui/Button'
 import { Markdown } from '../../shared/ui/Markdown'
 import { api, type ToolItem, type ToolInvokeResult } from '../../shared/data/api'
-import { schemaProps, typeLabel, SchemaField, buildArgs, useArgs, type JsonSchema } from './schema'
+import { schemaProps, typeLabel, SchemaField, SchemaFieldDisclosure, buildArgs, useArgs, type JsonSchema } from './schema'
 import { ToolOutput } from './ToolOutput'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
 import { Modal } from '../../shared/ui/Modal'
@@ -105,10 +105,9 @@ function RunPanel({ tool }: { tool: ToolItem }) {
         <div className="px-m pb-m flex flex-col gap-m border-t border-outline-variant/30 pt-m">
           {props.length === 0 ? <p data-type="body-s" className="text-on-surface-low">No inputs — runs as-is.</p> : (
             <div className="flex flex-col gap-m">
-              {props.map(([name, s]) => (
-                <SchemaField key={name} name={name} schema={s} required={required.has(name)}
-                  value={args[name]} onChange={(v) => setArgs((a) => ({ ...a, [name]: v }))} />
-              ))}
+              <SchemaFieldDisclosure fields={props} required={required} values={args}
+                renderField={([name, s]) => <SchemaField key={name} name={name} schema={s} required={required.has(name)}
+                  value={args[name]} onChange={(v) => setArgs((a) => ({ ...a, [name]: v }))} />} />
             </div>
           )}
           {formErr && <FieldError>{formErr}</FieldError>}

@@ -840,6 +840,18 @@ class TestEdgeCases:
         assert "default" in cfg.memory_stores
         assert isinstance(cfg.memory_stores["default"], MemoryStoreConfig)
 
+    def test_missing_config_fallback_seeds_default_memory_store(
+        self, tmp_path: Path
+    ) -> None:
+        """The no-config fallback carries the built-in memory-store profile too."""
+        with unittest.mock.patch(
+            "gideon.core.config.loader.config_path",
+            return_value=tmp_path / "config.json",
+        ):
+            cfg = AppConfig.load()
+
+        assert cfg.memory_stores == {"default": MemoryStoreConfig()}
+
     def test_retired_system_agent_pruned_and_persisted(self, tmp_path: Path) -> None:
         """A retired system agent left in an existing config.json is pruned on load
         (backend-cleanup §4) AND the prune is persisted — a genuine one-time migration, not

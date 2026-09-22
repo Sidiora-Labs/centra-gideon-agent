@@ -23,6 +23,7 @@ SCHEDULE_STATUS_TO_OUTCOME: dict[str, str] = {
     "launched": Outcome.DEFERRED.value,
     "queued": Outcome.DEFERRED.value,
     "blocked_injection": Outcome.BLOCKED_INJECTION.value,
+    "needs_input": Outcome.SKIPPED_BUDGET.value,
     **{value: value for value in sorted(INERT_OUTCOMES)},
 }
 

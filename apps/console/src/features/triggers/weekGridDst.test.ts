@@ -1,6 +1,7 @@
 process.env.TZ = 'America/Santiago'
 
-import { describe, expect, it, afterAll } from 'vitest'
+import { describe, expect, it, afterAll, vi } from 'vitest'
+import { api } from '../../shared/data/api'
 import { buildWeekGrid, weekDays, weekEnd, weekSummary } from './weekGrid'
 import type { WeekOccurrence } from '../../shared/data/api'
 
@@ -57,6 +58,25 @@ describe('the drawn week IS the requested window, across DST (issue 608)', () =>
     const grid = buildWeekGrid(occ, start)
     expect(grid.totalFires + grid.outsideWindow).toBe(169)
     expect(grid.outsideWindow).toBe(0)
+  })
+
+  it('sends local DST boundaries as absolute instants for the server to coerce', async () => {
+    const start = new Date(2026, 8, 2)
+    const end = weekEnd(start)
+    const originalFetch = globalThis.fetch
+    const fetch = vi.fn(async (_input: RequestInfo | URL) => new Response(JSON.stringify({
+      start: '', end: '', server_tz: '', occurrences: [], truncated: [],
+    })))
+    globalThis.fetch = fetch as typeof globalThis.fetch
+    try {
+      await api.triggersWeek(start, 7, end)
+      const request = new URL(String(fetch.mock.calls[0]?.[0]), 'http://gideon.local')
+      expect(request.searchParams.get('start')).toBe(start.toISOString())
+      expect(request.searchParams.get('until')).toBe(end.toISOString())
+      expect((end.getTime() - start.getTime()) / 3_600_000).toBe(167)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
   })
 
   it('an occurrence past the drawn week is DISCLOSED, not silently dropped', () => {

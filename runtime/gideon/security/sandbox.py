@@ -23,7 +23,6 @@ import functools
 import json
 import logging
 import os
-import platform
 import re
 import shutil
 import subprocess
@@ -284,39 +283,24 @@ _SANDBOX_EXEC_PROBE_CACHE: dict[tuple[object, ...], bool] = {}
 def _probe_sandbox_exec() -> bool:
     """Return True if macOS ``sandbox-exec`` actually works.
 
-    Uses a file-based profile and targets /usr/bin/true as
-    fallback) to match the real sandbox_exec_argv() invocation.  macOS ≥ 26
-    refuses sandbox_apply() for third-party binaries, so probing with just
-    ``true`` gives false positives.
+    Uses a file-based profile and targets ``/usr/bin/true`` to match the real
+    :func:`sandbox_exec_argv` invocation.
 
-    The dependency values form the cache key so tests that replace the platform helpers do
-    not inherit a result produced under a different simulated host. In production they are
+    The dependency values form the cache key so tests that replace the host helpers do not
+    inherit a result produced under a different simulated host. In production they are
     process constants, making the external probe a one-time spawn.
     """
     platform_name = sys.platform
     if platform_name != "darwin":
         _SANDBOX_EXEC_PROBE_CACHE.setdefault(
-            (platform_name, "", None, subprocess.run), False
+            (platform_name, None, subprocess.run), False
         )
         return False
-    mac_ver = platform.mac_ver()[0]
     sandbox_exec = shutil.which("sandbox-exec")
-    cache_key = (platform_name, mac_ver, sandbox_exec, subprocess.run)
+    cache_key = (platform_name, sandbox_exec, subprocess.run)
     if cache_key in _SANDBOX_EXEC_PROBE_CACHE:
         return _SANDBOX_EXEC_PROBE_CACHE[cache_key]
     available = False
-    try:
-        if mac_ver:
-            major = int(mac_ver.split(".")[0])
-            if major >= 26:
-                logger.info(
-                    "sandbox-exec unavailable: macOS %s denies sandbox_apply for third-party binaries",  # noqa: E501
-                    mac_ver,
-                )
-                _SANDBOX_EXEC_PROBE_CACHE[cache_key] = False
-                return False
-    except (ValueError, IndexError):
-        pass
     if sandbox_exec is None:
         _SANDBOX_EXEC_PROBE_CACHE[cache_key] = False
         return False

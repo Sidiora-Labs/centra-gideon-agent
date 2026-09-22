@@ -25,6 +25,11 @@ export function DiscoverPage({ navigate }: Pick<RouteProps, 'navigate'>) {
     refresh()
   }
 
+  const restore = async () => {
+    if (!(await reportingWrite('restore dismissed tips', () => api.clearDismissedDiscoverTips()))) return
+    refresh()
+  }
+
   return (
     <WorkbenchLayout
       topBar={
@@ -66,7 +71,8 @@ export function DiscoverPage({ navigate }: Pick<RouteProps, 'navigate'>) {
           <EmptyState
             icon={Compass}
             title="No Discover tips to show"
-            hint={emptyDiscoverReason(data.dismissed_count ?? 0, data.engaged_count ?? 0)}
+            hint={emptyDiscoverReason(data.restorable_count ?? 0, data.engaged_count ?? 0)}
+            action={data.restorable_count ? { label: 'Restore dismissed tips', onClick: restore } : undefined}
           />
         ) : (
           <EntranceGroup className="flex flex-col gap-2xl">
@@ -167,9 +173,9 @@ function tryItPath(t: DiscoverTryIt): string {
   return q ? `${t.route}?${q}` : t.route
 }
 
-export function emptyDiscoverReason(dismissed: number, engaged: number): string {
-  if (dismissed && engaged) return `${engaged} hidden because you tried those features; ${dismissed} dismissed by you. New tips will appear as Gideon grows.`
-  if (dismissed) return `You dismissed ${dismissed} tip${dismissed === 1 ? '' : 's'}. New tips will appear as Gideon grows.`
+export function emptyDiscoverReason(restorable: number, engaged: number): string {
+  if (restorable && engaged) return `${engaged} hidden because you tried those features; ${restorable} dismissed by you. Restore them to see them again.`
+  if (restorable) return `You dismissed ${restorable} tip${restorable === 1 ? '' : 's'}. Restore them to see them again.`
   if (engaged) return `You already tried the feature${engaged === 1 ? '' : 's'} behind ${engaged === 1 ? 'this tip' : `these ${engaged} tips`}. New tips will appear as Gideon grows.`
   return 'There are no curated tips available right now. New tips will appear as Gideon grows.'
 }

@@ -12,6 +12,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from gideon.engine.tasks import registry
 from gideon.engine.tasks.handlers import register_task_routes
+from gideon.engine.tasks.models import WorkflowTaskBinding
 
 
 @asynccontextmanager
@@ -879,6 +880,52 @@ async def test_reset_repeatable_list(tmp_path):
         assert reloaded["action_plan"][0]["completed"] is False
         assert reloaded["execution_notes"] == []
         assert reloaded["evidence"] == [] and reloaded["attempts"] == []
+
+
+@pytest.mark.asyncio
+async def test_reset_repeatable_list_defers_managed_task_fields(tmp_path):
+    async with _client(tmp_path) as client:
+        task_list = await (
+            await client.post(
+                "/api/task-lists", json={"name": "Workflow", "repeatable": True}
+            )
+        ).json()
+        task = await registry.create_task(
+            title="engine task",
+            task_list_id=task_list["id"],
+            status="done",
+            exit_criteria=[{"description": "verified", "met": True}],
+            action_plan=[{"content": "run it", "completed": True}],
+            execution_notes=[{"content": "old run"}],
+            workflow_binding=WorkflowTaskBinding(run_id="run-48", node_id="node-48"),
+        )
+        await registry.update_task(
+            task.id,
+            blocked_reason_kind="manual",
+            blocked_kind="capability",
+            preview="awaiting capacity",
+            done_criterion="engine check",
+            evidence=[{"kind": "gate", "ref": "engine"}],
+            attempts=[{"status": "passed"}],
+        )
+
+        response = await client.post(
+            f"/api/task-lists/{task_list['id']}/reset", json={"confirm": True}
+        )
+
+        assert response.status == 200
+        reloaded = await registry.get_task(task.id)
+        assert reloaded is not None
+        assert reloaded.status.value == "done"
+        assert reloaded.exit_criteria[0]["met"] is False
+        assert reloaded.action_plan[0]["completed"] is False
+        assert reloaded.execution_notes == []
+        assert reloaded.blocked_reason_kind == ""
+        assert reloaded.blocked_kind == "capability"
+        assert reloaded.preview == "awaiting capacity"
+        assert reloaded.done_criterion == "engine check"
+        assert reloaded.evidence == [{"kind": "gate", "ref": "engine"}]
+        assert reloaded.attempts == [{"status": "passed"}]
 
 
 @pytest.mark.asyncio

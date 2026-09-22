@@ -22,7 +22,7 @@ export function ArchivePanel() {
 
   return (
     <div>
-      <PanelHeader title="Archive" hint="Archived chat sessions. Browse and inspect past transcripts — read-only." />
+      <PanelHeader title="Archive" hint="Dropped session-history lines from compaction or rotation. Browse and inspect them during their 7-day retention window — read-only." />
 
       {archives.length > 0 && (
         <div className="mb-3">
@@ -37,7 +37,7 @@ export function ArchivePanel() {
       {shown.length === 0 ? (
         <div className="rounded-lg border border-dashed border-outline-variant/50 bg-surface-container px-4 py-8 text-center">
           <Archive size={22} className="mx-auto mb-2 text-on-surface-low" />
-          <p data-type="body-s" className="text-on-surface-low">{q ? 'No archives match.' : 'No archived sessions yet. Closed sessions are archived here.'}</p>
+          <p data-type="body-s" className="text-on-surface-low">{q ? 'No archives match.' : 'No dropped lines archived yet. Lines dropped by compaction or rotation appear here for 7 days.'}</p>
         </div>
       ) : (
         <div className="flex flex-col gap-1.5">

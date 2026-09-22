@@ -28,7 +28,7 @@ def _wf_depth() -> int:
     CALLER supplies is a depth a leaf can understate, and `depth_lint` refusing a nested batch
     would then be advisory. The engine writes it (``engine.WF_DEPTH_KEY``); a leaf inherits it.
     """
-    from gideon.automation.workflows.engine import WF_DEPTH_KEY
+    from gideon.automation.workflows.engine_support import WF_DEPTH_KEY
 
     try:
         return int(os.environ.get(WF_DEPTH_KEY, "0") or "0")

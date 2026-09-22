@@ -104,6 +104,15 @@ class TestCredentials:
         assert "UNDECLARED" in result.checked["credentials"]
         assert not result.ok
 
+    def test_a_secret_reference_outside_the_tree_is_checked(self) -> None:
+        spec = _spec({"kind": "sequence", "id": "s"})
+        spec["description"] = (
+            "Authenticate with {{secret:OUTSIDE_TREE}} before starting"
+        )
+        result = PF.preflight(spec, credential_resolver=lambda _: False)
+        assert result.checked["credentials"] == ["OUTSIDE_TREE"]
+        assert result.errors[0].code == "WF_PRE_CREDENTIAL_MISSING"
+
     def test_an_unavailable_store_warns_rather_than_blocking(self) -> None:
         """Refusing a run because the CHECKER was unavailable is its own outage."""
 
@@ -268,6 +277,34 @@ class TestActionProviders:
             }
         )
         assert PF.preflight(spec).ok
+
+    def test_undeclared_action_providers_are_typed_requirement_warnings(self) -> None:
+        spec = _spec(
+            {
+                "kind": "sequence",
+                "id": "s",
+                "children": [
+                    {"kind": "action", "id": "a", "config": {"provider": "bash"}}
+                ],
+            }
+        )
+        (finding,) = PF.provider_requirement_gap(spec)
+        assert finding.code == "WF_PRE_PROVIDER_REQUIREMENT_GAP"
+        assert finding.severity == PF.SEVERITY_WARNING
+        assert finding.kind == "action_providers"
+
+    def test_declared_action_providers_do_not_leave_a_requirement_gap(self) -> None:
+        spec = _spec(
+            {
+                "kind": "sequence",
+                "id": "s",
+                "children": [
+                    {"kind": "action", "id": "a", "config": {"provider": "bash"}}
+                ],
+            },
+            requirements={"providers": ["bash"]},
+        )
+        assert PF.provider_requirement_gap(spec) == []
 
 
 class TestResultShape:

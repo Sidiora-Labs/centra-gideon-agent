@@ -41,14 +41,13 @@ class PipelineGraph:
     item_type: str
     nodes: dict[str, NodeSpec] = field(default_factory=dict)
     edges: list[Edge] = field(default_factory=list)
-    roots: list[str] = field(default_factory=list)
 
     def add(self, spec: NodeSpec) -> NodeSpec:
         self.nodes[spec.node_type] = spec
         return spec
 
     def build(self) -> None:
-        """Populate ``nodes``/``edges``/``roots`` for this knowledge type.
+        """Populate ``nodes``/``edges`` for this knowledge type.
         Subclasses override; the base is a no-op so a bare graph is valid-but-empty."""
         return None
 
@@ -83,9 +82,6 @@ class PipelineGraph:
             if e.to_node not in self.nodes:
                 raise PipelineGraphError(f"edge to unknown node {e.to_node!r}")
         self._reject_cycles()
-        if not self.roots:
-            targets = {e.to_node for e in self.edges if not e.loop}
-            self.roots = [n for n in self.nodes if n not in targets]
 
     def _reject_cycles(self) -> None:
         WHITE, GREY, BLACK = 0, 1, 2
@@ -128,11 +124,3 @@ class PipelineGraph:
                 if indeg[m] == 0:
                     ready.append(m)
         return order
-
-
-def build_graph(cls: type, item_type: str) -> PipelineGraph:
-    """Instantiate + validate a PipelineGraph subclass for *item_type*."""
-    g = cls(item_type=item_type)
-    g.build()  # type: ignore[attr-defined]
-    g.validate()
-    return g

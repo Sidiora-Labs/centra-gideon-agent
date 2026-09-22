@@ -1973,6 +1973,10 @@ _CONTENT_SEARCH_TIMEOUT = 15.0
 _RG_AVAILABLE: bool | None = None
 
 
+class _ContentSearchTimedOut(Exception):
+    """Stop the Python fallback when its content-search deadline expires."""
+
+
 def _has_rg() -> bool:
     """Whether ripgrep is on PATH (cached after first lookup)."""
 
@@ -2047,9 +2051,9 @@ def _content_search_python(
             if d not in _CONTENT_SEARCH_IGNORE_DIRS and not d.startswith(".")
         ]
         for fn in filenames:
-            if globs and not any(fnmatch.fnmatch(fn, g) for g in globs):
-                continue
             fpath = os.path.join(dirpath, fn)
+            if globs and not any(fnmatch.fnmatch(fpath, g) for g in globs):
+                continue
             if _validate_dashboard_path(fpath) is None:
                 continue
             try:
@@ -2069,6 +2073,8 @@ def _content_search_python(
                             )
                             if len(results) >= _CONTENT_SEARCH_MAX_RESULTS:
                                 return results, True
+            except _ContentSearchTimedOut:
+                raise
             except OSError:
                 continue
     return results, False

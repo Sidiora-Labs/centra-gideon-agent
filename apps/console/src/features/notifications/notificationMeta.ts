@@ -25,7 +25,6 @@ const KINDS: Record<string, KindMeta> = {
   complete: { label: 'Loop complete', icon: CheckCircle2, tone: 'var(--color-ok)' },
 
   failed: { label: 'Loop failed', icon: XCircle, tone: 'var(--color-danger)' },
-  stalled: { label: 'Loop stalled or blocked', icon: AlertTriangle, tone: 'var(--color-warn)' },
   needs_input: { label: 'Loop needs your input', icon: HelpCircle, tone: 'var(--color-warn)' },
   progress: { label: 'Loop progress', icon: Activity, tone: 'var(--color-info)' },
   proposal: { label: 'Skill proposal', icon: Lightbulb, tone: 'var(--color-primary)' },

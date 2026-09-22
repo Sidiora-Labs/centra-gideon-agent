@@ -2580,6 +2580,8 @@ async def list_item_relations(request: web.Request) -> web.Response:
     if not item_id:
         return web.json_response({"error": "item id required"}, status=400)
     store = _store(request)
+    if store.get_item(item_id) is None:
+        return web.json_response({"error": "item not found"}, status=404)
     out: dict[str, list[dict]] = {"outbound": [], "inbound": []}
     try:
         for direction, sql in (

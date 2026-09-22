@@ -6,7 +6,7 @@ import { Loading } from '../../shared/ui/ListScaffold'
 import { QuietButton } from '../../shared/ui/QuietButton'
 import { SidePanel } from '../../shared/ui/SidePanel'
 import { InlineError } from '../../shared/ui/InlineError'
-import { api, partitionRunHistory, requireWriteAccepted, type WorkflowContinuation, type WorkflowNodeState, type WorkflowRunDetailData } from '../../shared/data/api'
+import { ApiError, api, partitionRunHistory, requireWriteAccepted, type WorkflowCascadePreview, type WorkflowContinuation, type WorkflowNodeState, type WorkflowRunDetailData } from '../../shared/data/api'
 import { notify } from '../../app/shell/appSdk'
 import { confirm, promptForm } from '../../shared/ui/dialog'
 import { PageTitle } from '../../shared/ui/PageTitle'
@@ -18,7 +18,7 @@ import { useWorkflowStream, type WorkflowLifecycleEvent } from './useWorkflowStr
 import { DagView } from '../tasks/DagView'
 import { layoutRunDag } from './runDag'
 import { tokenForNode } from './surfacingMeta'
-import { revalidateNotice, revalidateSummary } from './revalidate'
+import { cascadeConfirmation, revalidateNotice, revalidateSummary } from './revalidate'
 import { WorkflowAsk } from './WorkflowAsk'
 import { NodeInspectorDrawer } from './NodeInspectorDrawer'
 import { SteeringPanel } from './SteeringPanel'
@@ -89,6 +89,14 @@ function layoutWorkflowRunDag(nodes: WorkflowNodeState[], continuations: Workflo
       return { ...edge, id: `${from ?? ''}->${to ?? ''}`, from, to }
     }),
   }
+}
+
+function cascadePreview(error: unknown): WorkflowCascadePreview | null {
+  if (!(error instanceof ApiError) || error.code !== 'confirmation_required') return null
+  const detail = error.detail
+  if (!detail || typeof detail !== 'object') return null
+  const preview = (detail as { preview?: unknown }).preview
+  return preview && typeof preview === 'object' ? preview as WorkflowCascadePreview : null
 }
 
 export function WorkflowRunDetail({ runId, onBack, initialInspectNodeId, onInspectorClose }: {
@@ -177,18 +185,32 @@ export function WorkflowRunDetail({ runId, onBack, initialInspectNodeId, onInspe
     }))
   }, [act, runId])
 
+  const requestCascade = useCallback(async <T,>(title: string, confirmLabel: string, request: (confirmCascade: boolean) => Promise<T>): Promise<T | null> => {
+    try {
+      return await request(false)
+    } catch (error) {
+      const preview = cascadePreview(error)
+      if (!preview) throw error
+      const accepted = await confirm({ title, body: cascadeConfirmation(preview), confirmLabel, danger: true })
+      return accepted ? request(true) : null
+    }
+  }, [])
+
   const rewind = useCallback(async (nodeId: string) => {
-    const ok = await confirm({
-      title: `Re-run "${nodeId}"?`,
-      body: 'This node and everything that reads its output will run again. Previous outputs are archived, not lost.',
-      confirmLabel: 'Re-run',
-    })
-    if (ok) await act('Rewind', () => api.rewindWorkflowRun(runId, { node_id: nodeId }))
-  }, [act, runId])
+    await act('Rewind', async () => requestCascade(
+      `Re-run "${nodeId}"?`,
+      'Re-run',
+      (confirm_cascade) => api.rewindWorkflowRun(runId, { node_id: nodeId, confirm_cascade }),
+    ))
+  }, [act, requestCascade, runId])
 
   const runFrom = useCallback(async (nodeId: string) => {
-    await act('Run from', () => api.workflowRunFrom(runId, { node_id: nodeId }))
-  }, [act, runId])
+    await act('Run from', async () => requestCascade(
+      `Re-run after "${nodeId}"?`,
+      'Re-run downstream steps',
+      (confirm_cascade) => api.workflowRunFrom(runId, { node_id: nodeId, confirm_cascade }),
+    ))
+  }, [act, requestCascade, runId])
 
   const editNodePrompt = useCallback(async (nodeId: string) => {
     const answers = await promptForm({
@@ -205,16 +227,22 @@ export function WorkflowRunDetail({ runId, onBack, initialInspectNodeId, onInspe
     })
     if (answers === null) return
     await act('Edit', async () => {
-      const res = await api.editWorkflowRun(runId, {
-        ops: [{ kind: 'update_node', node_id: nodeId, fields: { prompt: answers.prompt } }],
-      })
+      const res = await requestCascade(
+        `Apply edit to "${nodeId}"?`,
+        'Apply edit and re-run',
+        (confirm_cascade) => api.editWorkflowRun(runId, {
+          ops: [{ kind: 'update_node', node_id: nodeId, fields: { prompt: answers.prompt } }],
+          confirm_cascade,
+        }),
+      )
+      if (res === null) return { ok: true }
       if (res.ok === false || (res.issues?.length ?? 0) > 0) {
         throw new Error(res.issues?.[0]?.message ?? 'The edit was rejected.')
       }
       notify(revalidateSummary(res.preview))
       return res
     })
-  }, [act, runId])
+  }, [act, requestCascade, runId])
 
   const cancel = useCallback(async () => {
     const ok = await confirm({

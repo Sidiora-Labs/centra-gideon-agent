@@ -77,6 +77,12 @@ class TestRecordRoute:
             assert got["verdict"] is None
 
     @pytest.mark.asyncio
+    async def test_unknown_target_kind_is_not_read(self):
+        async with TestClient(TestServer(_make_app())) as c:
+            response = await c.get("/api/feedback/target/unknown/item-1")
+            assert response.status == 404
+
+    @pytest.mark.asyncio
     async def test_bad_bodies_rejected(self):
         async with TestClient(TestServer(_make_app())) as c:
             assert (

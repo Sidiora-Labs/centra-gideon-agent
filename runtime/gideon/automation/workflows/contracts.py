@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Iterable
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +99,41 @@ def apply_extraction(
 ) -> Extraction:
     fill = _ParameterFill(params, declined or set())
     return fill.apply(raw)
+
+
+def extract_inputs(
+    spec: dict[str, Any],
+    candidates: Any,
+    *,
+    declined: Iterable[str] = (),
+) -> Extraction:
+    """Fill a workflow's derived parameters from conversation candidates.
+
+    Only unfenced user content is eligible.  This keeps the input contract next to the
+    parameter derivation and gives every surface the same latest-value, schema-filtering,
+    default, and follow-up rules.
+    """
+    parameters = resolve_unfilled_inputs(spec)
+    if not isinstance(candidates, (list, tuple)):
+        return apply_extraction(parameters, None, declined=set(declined))
+
+    extracted: dict[str, Any] = {}
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        if str(candidate.get("role", "")) != "user":
+            continue
+        if candidate.get("fenced") or candidate.get("pasted"):
+            continue
+        values = candidate.get("values")
+        if not isinstance(values, dict):
+            continue
+        for key, value in values.items():
+            if value not in (None, ""):
+                extracted[str(key)] = value
+    return apply_extraction(
+        parameters, {"extracted": extracted}, declined=set(declined)
+    )
 
 
 def _follow_up(missing: list[str], by_name: dict[str, ParamSpec]) -> str:
@@ -370,6 +405,18 @@ class _ParameterFill:
                 result.missing.append(name)
         if result.missing:
             result.follow_up = _follow_up(result.missing, schema)
+        else:
+            optional = [
+                parameter.name
+                for parameter in self.parameters
+                if not parameter.required
+                and parameter.name not in result.extracted
+                and parameter.name not in self.declined
+            ]
+            if optional:
+                result.follow_up = (
+                    "Optionally, you can also set: " + ", ".join(optional) + "."
+                )
         return result
 
 

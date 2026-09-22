@@ -36,9 +36,25 @@ class LLMJudge:
         self._provider: ModelProvider | None = None
 
     async def start(self) -> None:
-        provider = self._factory("eval_judge")
-        await provider.start()
-        self._provider = provider
+        from gideon.integrations.llm_helpers import execute_with_fallback_chain
+
+        async def _start(provider: ModelProvider) -> ModelProvider:
+            try:
+                await provider.start()
+            except Exception:
+                try:
+                    await provider.shutdown()
+                except Exception:
+                    pass
+                raise
+            return provider
+
+        self._provider = await execute_with_fallback_chain(
+            "chat",
+            _start,
+            provider_factory=self._factory,
+            session_key="eval_judge",
+        )
 
     async def shutdown(self) -> None:
         if self._provider:

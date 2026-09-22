@@ -1870,6 +1870,27 @@ class TestCleanupLoop:
         await mgr.close_all()
 
     @pytest.mark.asyncio
+    async def test_cleanup_loop_reaps_stale_workspaces(self, cfg):
+        cfg.session.timeout_secs = 120
+        mgr = ConversationDirectory(cfg, provider_factory=_mock_provider_factory())
+
+        with (
+            patch.object(mgr, "_expire_idle", new_callable=AsyncMock) as mock_expire,
+            patch(
+                "gideon.engine.session._cleanup_orphaned_mcp_servers", return_value=0
+            ),
+            patch.object(mgr, "_sweep_process_records", new_callable=AsyncMock),
+            patch("gideon.engine.session.cleanup_stale_sessions") as mock_reap,
+            patch("gideon.engine.session.shutdown_event") as mock_event,
+        ):
+            mock_event.is_set = lambda: mock_expire.await_count >= 1
+            mock_event.wait = AsyncMock(side_effect=asyncio.TimeoutError)
+            await mgr._cleanup_loop()
+
+        mock_reap.assert_called_once_with()
+        await mgr.close_all()
+
+    @pytest.mark.asyncio
     async def test_cleanup_loop_clamps_low_timeout(self, cfg, caplog):
         cfg.session.timeout_secs = 30
         mgr = ConversationDirectory(cfg, provider_factory=_mock_provider_factory())

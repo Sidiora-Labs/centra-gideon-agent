@@ -62,5 +62,12 @@ export function useProjectCollection(onOpen: (id: string) => void) {
     catch (failure) { setErr(`Couldn't delete that project: ${(failure as Error)?.message || 'unknown error'}`); reload() }
     finally { pending.current.delete(project.id) }
   }
-  return { projects, loading, loadErr, refresh, reload, creating, setCreating, busy, err, setErr, activeId, create, del }
+  const setStatus = async (project: ProjectItem, status: 'active' | 'archived') => {
+    if (pending.current.has(project.id) || project.status === status) return
+    pending.current.add(project.id); setErr(null)
+    try { await api.updateProject(project.id, { status }); reload() }
+    catch (failure) { setErr(`Couldn't ${status === 'archived' ? 'archive' : 'restore'} that project: ${(failure as Error)?.message || 'unknown error'}`); reload() }
+    finally { pending.current.delete(project.id) }
+  }
+  return { projects, loading, loadErr, refresh, reload, creating, setCreating, busy, err, setErr, activeId, create, del, setStatus }
 }

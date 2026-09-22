@@ -211,12 +211,13 @@ function ProposalRow({ row, busy, onAccept, onReject }: {
 }
 
 function WeekPanel({ week }: { week: StagingWeek }) {
+  const firstPassDay = week.first_pass_day ?? null
   const days = week.buckets.map(day => {
-    const state = dayState(day)
+    const state = dayState(day, firstPassDay)
     return {
       key: day.day, label: dayLabel(day.day), tone: DAY_TONE[state], passes: day.passes === 0 ? '—' : day.passes,
       title: `${day.day} — ${DAY_HINT[state]} (${day.passes} pass${day.passes === 1 ? '' : 'es'}, ${day.produced} produced, ${day.errors} error${day.errors === 1 ? '' : 's'})`,
-      outcome: state === 'silent' ? 'silent' : day.produced > 0 ? `${day.produced} filed` : state === 'error' ? 'error' : 'ok',
+      outcome: state === 'not_started' ? 'not started' : state === 'silent' ? 'silent' : day.produced > 0 ? `${day.produced} filed` : state === 'error' ? 'error' : 'ok',
     }
   })
   const footer = [
@@ -227,9 +228,7 @@ function WeekPanel({ week }: { week: StagingWeek }) {
   return <section className={learningPanelClass}>
     <header className="flex flex-wrap items-center gap-s">
       <h2 data-type="title-m" className="text-on-surface">Capture, last {week.days} days</h2>
-      {week.silent_days.length > 0 && (week.has_ever_run === false
-        ? <span data-type="caption" className="text-on-surface-low">no capture pass has run yet</span>
-        : <StatusPill tone="warn" className="gap-xs" title="No capture pass ran on these days. An aggregate view cannot distinguish this from a quiet day."><AlertTriangle size={12} /> {week.silent_days.length} silent</StatusPill>)}
+      {week.silent_days.length > 0 && <StatusPill tone="warn" className="gap-xs" title="No capture pass ran on these days. An aggregate view cannot distinguish this from a quiet day."><AlertTriangle size={12} /> {week.silent_days.length} silent</StatusPill>}
     </header>
     <div className="grid grid-cols-[repeat(auto-fit,minmax(4.5rem,1fr))] gap-s">{days.map(day => <div key={day.key} title={day.title} className="flex flex-col items-center gap-xs rounded-lg border border-outline-variant/20 bg-surface-container p-m">
       <span className="text-on-surface-low text-[0.75rem]">{day.label}</span>

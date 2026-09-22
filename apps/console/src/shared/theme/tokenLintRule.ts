@@ -5,7 +5,7 @@ export const RAW_PX = /style=\{\{[^}]*?\b\d+px\b/
 
 export const PX_OK_CONTEXT = /minmax\(|repeat\(|\bmin\(|\bmax\(|\bclamp\(|\b(border|outline)(-[a-z]+)?:\s*[^;}]*\d+px|border[A-Z][a-zA-Z]*:\s*[`'"]?\s*\$?\{?[^}]*\d+px|Math\.(min|max)\(/
 
-export const CALC_WITH_TOKEN = /calc\([^)]*var\(/
+export const CALC_WITH_TOKEN = /calc\([^)]*var\(--(?!content-width\))/
 
 export function lineViolations(line: string): ('hex' | 'px')[] {
   const out: ('hex' | 'px')[] = []

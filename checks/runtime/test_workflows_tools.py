@@ -54,6 +54,12 @@ SPEC_ROOT = {
     ],
 }
 
+EXTRACTION_ROOT = {
+    "kind": "infer",
+    "id": "extract",
+    "config": {"prompt": "deploy {{inputs.env}} at {{inputs.version}}"},
+}
+
 
 class _MemProvider(defs_mod.WorkflowDefProvider):
     """A writable in-memory def provider — the seam a real pack would occupy."""
@@ -175,8 +181,8 @@ class _FakeSupervisor:
 
 
 class TestToolSurface:
-    def test_all_nineteen_tools_are_declared(self) -> None:
-        assert len(T._list_tools()) == 19
+    def test_all_twenty_tools_are_declared(self) -> None:
+        assert len(T._list_tools()) == 20
 
     def test_tool_names_are_unique_and_prefixed(self) -> None:
         names = [t["name"] for t in T._list_tools()]
@@ -473,6 +479,63 @@ class TestDefs:
     async def test_authoring_without_a_writable_provider_is_coded(self) -> None:
         body = await service.author_def(name="wf-x", root=SPEC_ROOT)
         assert not body["ok"] and body["code"] == "WF_DEF_NO_WRITABLE_PROVIDER"
+
+
+class TestInputExtraction:
+    async def _author_extractable(self) -> None:
+        await service.author_def(
+            name="wf-extract",
+            root=EXTRACTION_ROOT,
+            inputs={
+                "env": {"type": "string", "required": True},
+                "version": {"type": "string", "required": False},
+            },
+        )
+
+    async def test_extracts_only_eligible_user_values(self, provider) -> None:
+        await self._author_extractable()
+        body = await service.extract_inputs(
+            "wf-extract",
+            [
+                {"role": "assistant", "values": {"env": "assistant"}},
+                {"role": "user", "values": {"env": "fenced"}, "fenced": True},
+                {"role": "user", "values": {"env": "pasted"}, "pasted": True},
+                {"role": "user", "values": {"env": "staging", "ignored": 1}},
+                {"role": "user", "values": {"env": "prod", "version": "1.2"}},
+            ],
+        )
+        assert body["ok"] and body["all_filled"]
+        assert body["extracted"] == {"env": "prod", "version": "1.2"}
+
+    async def test_revalidates_required_values_and_never_fills_a_placeholder(
+        self, provider
+    ) -> None:
+        await self._author_extractable()
+        body = await service.extract_inputs(
+            "wf-extract", [{"role": "user", "values": {"version": "1.2"}}]
+        )
+        assert body["ok"] and not body["all_filled"]
+        assert body["missing"] == ["env"]
+        assert body["extracted"] == {"version": "1.2"}
+        assert "env" in body["follow_up"]
+
+    async def test_declined_optional_is_not_reoffered(self, provider) -> None:
+        await self._author_extractable()
+        offered = await service.extract_inputs(
+            "wf-extract", [{"role": "user", "values": {"env": "prod"}}]
+        )
+        assert offered["all_filled"] and "version" in offered["follow_up"]
+        body = await service.extract_inputs(
+            "wf-extract",
+            [{"role": "user", "values": {"env": "prod"}}],
+            declined=["version"],
+        )
+        assert body["ok"] and body["all_filled"]
+        assert body["follow_up"] == ""
+
+    async def test_missing_definition_is_coded(self) -> None:
+        body = await service.extract_inputs("nope", [])
+        assert not body["ok"] and body["code"] == "WF_DEF_NOT_FOUND"
 
 
 class TestRuns:

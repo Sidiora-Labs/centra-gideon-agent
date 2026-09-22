@@ -133,6 +133,7 @@ function Installed({ onBrowse, onProposals, query, setQuery }: { onBrowse: () =>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-s">
                         <span className="truncate text-on-surface text-[0.9375rem]" style={fvs(500)}>{s.name}</span>
+                        {s.provenance && <span className="shrink-0 rounded-md bg-surface-high px-2 h-6 inline-flex items-center text-on-surface-var text-[0.75rem]">{s.provenance}</span>}
                         {s.always && <span className="shrink-0 inline-flex items-center gap-1 text-warn text-[0.75rem]" title="Always loaded"><Zap size={11} /> always</span>}
                         {s.integrity === 'intact' && <ShieldCheck size={12} className="shrink-0 text-ok" aria-label="Integrity verified" role="img" />}
                         {s.integrity === 'tampered' && <span className="shrink-0 inline-flex items-center gap-1 text-danger text-[0.75rem]" title="Integrity check failed — files changed since install"><ShieldAlert size={11} /> tampered</span>}

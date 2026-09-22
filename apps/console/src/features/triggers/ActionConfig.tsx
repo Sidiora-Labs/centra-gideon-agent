@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
-import { api, type ActionProvider, type PromptItem, type PromptVariable } from '../../shared/data/api'
+import { useEffect, useMemo } from 'react'
+import { type ActionProvider, type PromptItem, type PromptVariable } from '../../shared/data/api'
 import { Combobox } from '../../shared/ui/Combobox'
 import { Field, TextArea } from '../../shared/ui/forms'
 import { InlineError } from '../../shared/ui/InlineError'
-import { buildArgs, schemaProps, SchemaField, type WidgetMap } from '../tools/schema'
+import { buildArgs, schemaProps, SchemaField, SchemaFieldDisclosure } from '../tools/schema'
+import { usePromptWidgets } from '../tools/usePromptWidgets'
 import { actionIcon } from './triggerMeta'
 
 export function ActionConfig({ providers, provider, config, onProvider, onConfig, vars, loadError, onRetryProviders }: {
@@ -24,20 +25,7 @@ export function ActionConfig({ providers, provider, config, onProvider, onConfig
 
   const setField = (k: string, v: unknown) => onConfig({ ...config, [k]: v })
 
-  const [prompts, setPrompts] = useState<PromptItem[]>([])
-  const needsPrompt = props.some(([, s]) => s['x-meta']?.widget === 'prompt')
-  useEffect(() => {
-    if (needsPrompt && prompts.length === 0) api.prompts('user').then(setPrompts).catch(() => {})
-  }, [needsPrompt])  // eslint-disable-line react-hooks/exhaustive-deps
-
-  const widgets: WidgetMap = useMemo(() => ({
-    prompt: ({ value, onChange, placeholder }) => (
-      <Combobox
-        options={prompts.map((p) => ({ value: p.name, label: p.name, description: p.description || undefined }))}
-        value={String(value ?? '')} onChange={onChange} placeholder={placeholder || 'Pick a saved prompt…'}
-        emptyText="No saved prompts" />
-    ),
-  }), [prompts])
+  const { prompts, widgets } = usePromptWidgets(props.map(([, schema]) => schema))
 
   return (
     <div className="flex flex-col gap-l">
@@ -68,10 +56,9 @@ export function ActionConfig({ providers, provider, config, onProvider, onConfig
             <p className="text-on-surface-low text-[0.8125rem]">This action takes no configuration.</p>
           ) : (
             <div className="flex flex-col gap-m">
-              {props.map(([name, schema]) => (
-                <SchemaField key={name} name={name} schema={schema} required={required.has(name)}
-                  value={config[name]} onChange={(v) => setField(name, v)} widgets={widgets} />
-              ))}
+              <SchemaFieldDisclosure fields={props} required={required} values={config}
+                renderField={([name, schema]) => <SchemaField key={name} name={name} schema={schema} required={required.has(name)}
+                  value={config[name]} onChange={(v) => setField(name, v)} widgets={widgets} />} />
             </div>
           )}
 

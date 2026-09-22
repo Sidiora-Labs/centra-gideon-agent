@@ -97,6 +97,38 @@ def test_run_stats_matches_the_engines_OWN_run_totals(journal_home):
     assert stats.steps_failed == official["steps_failed"]
     assert stats.steps_cached == official["steps_cached"]
     assert stats.priced is official["priced"] is True
+    assert stats.tokens_recorded is (official["tokens"] is not None) is True
+
+
+def test_unrecorded_tokens_collapse_the_run_total_and_are_serialized(journal_home):
+    """One completed step without token usage makes the run total unavailable, never zero."""
+    from gideon.assurance.ledger.writer import EVENTS_FILE
+    from gideon.automation.workflows import journal as J
+    from gideon.automation.workflows import store as run_store
+
+    write_run(
+        "r-unrecorded-tokens",
+        [
+            (
+                J.STEP_COMPLETED,
+                {"instance_path": "a", "node_id": "a", "tokens": 100},
+            ),
+        ],
+    )
+    run_store.append_jsonl(
+        "r-unrecorded-tokens",
+        EVENTS_FILE,
+        {"kind": J.STEP_COMPLETED, "instance_path": "b", "node_id": "b"},
+    )
+    stats = run_stats("r-unrecorded-tokens", J.ledger("r-unrecorded-tokens"))
+    official = J.run_totals("r-unrecorded-tokens")
+
+    assert (
+        stats.steps_completed == 2
+    ), "vacuity floor: the unrecorded step was not written"
+    assert stats.tokens is official["tokens"] is None
+    assert stats.tokens_recorded is False
+    assert stats.to_dict()["tokens_recorded"] is False
 
 
 def test_the_models_a_run_used_are_collected(journal_home):

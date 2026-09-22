@@ -26,8 +26,8 @@ export function WeekGridView({ onOpenTrigger }: { onOpenTrigger?: (triggerId: st
   }, [offset])
 
   const { data: week } = useQuery<WeekProjection>(
-    `triggers:week:${start.toISOString().slice(0, 10)}`,
-    () => api.triggersWeek(localIso(start), 7, localIso(weekEnd(start))),
+    `triggers:week:${start.getTime()}`,
+    () => api.triggersWeek(start, 7, weekEnd(start)),
     { persist: false },
   )
 
@@ -184,11 +184,6 @@ function Legend() {
       ))}
     </div>
   )
-}
-
-function localIso(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`
 }
 
 function weekLabel(days: Date[]): string {

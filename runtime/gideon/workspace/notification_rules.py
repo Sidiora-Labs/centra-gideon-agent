@@ -429,7 +429,7 @@ def rules_document() -> dict[str, Any]:
     stored = load_rules().get("rules")
     stored = stored if isinstance(stored, dict) else {}
     rows = []
-    for registered in nk.all_kinds():
+    for registered in nk.configurable_kinds():
         rule = _coerce_rule(
             registered.source,
             registered.kind,
@@ -446,6 +446,7 @@ def rules_document() -> dict[str, Any]:
                 "mode": rule.mode,
                 "default_mode": registered.default_mode,
                 "configured": registered.key in stored,
+                "production_owner": registered.production_owner,
                 "targets": list(rule.targets),
                 "conditions": {
                     "keywords": list(rule.conditions.keywords),

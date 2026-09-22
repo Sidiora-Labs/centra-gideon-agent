@@ -343,19 +343,6 @@ def _prompt_use_case_for(session_key: str | None, explicit: str = "") -> str:
     return "background" if key == "_bg" else explicit or "chat"
 
 
-def _resolve_use_case_prompt(use_case: str) -> str:
-    try:
-        from gideon.extensions.providers.prompt_use_cases import resolve_prompt_content
-
-        resolved = resolve_prompt_content(use_case)
-        return resolved or ""
-    except Exception:
-        logger.debug(
-            "use-case prompt resolution failed for %r", use_case, exc_info=True
-        )
-        return ""
-
-
 def _snippet_resolver():
     provider = None
     try:
@@ -935,12 +922,27 @@ class PromptAssembler:
         override: str,
         suffix: str,
     ) -> str:
+        rendered = False
         if override.strip():
             prompt = override
         elif agent and agent != "gideon":
             prompt = self._load_agent_prompt(agent)
         else:
-            prompt = _resolve_use_case_prompt(_prompt_use_case_for(key, use_case))
+            from gideon.integrations.prompt_providers.runtime import (
+                render_use_case_prompt,
+            )
+
+            prompt = (
+                render_use_case_prompt(
+                    _prompt_use_case_for(key, use_case),
+                    {
+                        "bot_name": self._bot_name,
+                        "widget_block": self._widget_block(key or ""),
+                    },
+                )
+                or ""
+            )
+            rendered = bool(prompt)
             if not prompt:
                 try:
                     prompt = _shipped_prompt().read_text(encoding="utf-8")
@@ -948,7 +950,11 @@ class PromptAssembler:
                     prompt = ""
         if suffix.strip():
             prompt = "\n\n".join(filter(None, (prompt, suffix)))
-        return self._apply_runtime_vars(prompt, key or "") if prompt else ""
+        if not prompt:
+            return ""
+        if not rendered or suffix.strip():
+            return self._apply_runtime_vars(prompt, key or "")
+        return prompt
 
     def _startup_parts(
         self,

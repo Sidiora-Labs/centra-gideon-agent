@@ -109,21 +109,27 @@ def _loaded_by_agents(skill_keys: list[str]) -> dict[str, list[str]]:
     return {k: sorted(v) for k, v in out.items()}
 
 
-def _parse_always(skill_md: Path) -> bool:
-    """Extract the 'always' field from SKILL.md frontmatter.
+def _skill_listing_metadata(skill_md: Path) -> tuple[bool, str]:
+    """Extract listing fields from SKILL.md through the shared frontmatter parser.
 
     Delegates to the one parser rather than re-deriving it: this copy lacked the
     loader's BOM/leading-blank tolerance, so a BOM'd skill reported
     ``always: false`` regardless of what it actually declared.
     """
-    from gideon.extensions.skills.loader import ProcedureLibrary
+    from gideon.extensions.skills.loader import ProcedureLibrary, skill_provenance
 
     try:
         text = skill_md.read_text(encoding="utf-8-sig", errors="replace")
     except OSError:
-        return False
-    value = ProcedureLibrary._parse_frontmatter_text(text).get("always", "")
-    return value.strip().lower() in ("true", "yes", "1")
+        return False, ""
+    meta = ProcedureLibrary._parse_frontmatter_text(text)
+    always = meta.get("always", "").strip().lower() in ("true", "yes", "1")
+    return always, skill_provenance(meta)
+
+
+def _parse_always(skill_md: Path) -> bool:
+    """Compatibility wrapper for callers that need only the always flag."""
+    return _skill_listing_metadata(skill_md)[0]
 
 
 async def api_skills_list(request: web.Request) -> web.Response:
@@ -161,12 +167,14 @@ async def api_skills_list(request: web.Request) -> web.Response:
             integrity = (
                 "unverified" if rep.unlocked else ("intact" if rep.ok else "tampered")
             )
+            always, provenance = _skill_listing_metadata(skill_md)
             skills.append(
                 {
                     "key": name,
                     "name": name,
                     "description": _parse_description(skill_md),
-                    "always": _parse_always(skill_md),
+                    "always": always,
+                    "provenance": provenance,
                     "path": str(skill_md),
                     "source": "bundled" if is_bundled else "local",
                     "type": "bundled" if is_bundled else "installed",
@@ -201,12 +209,14 @@ async def api_skills_list(request: web.Request) -> web.Response:
                     if rep.unlocked
                     else ("intact" if rep.ok else "tampered")
                 )
+                always, provenance = _skill_listing_metadata(skill_md)
                 skills.append(
                     {
                         "key": f"{ag_name}/{name}",
                         "name": name,
                         "description": _parse_description(skill_md),
-                        "always": _parse_always(skill_md),
+                        "always": always,
+                        "provenance": provenance,
                         "path": str(skill_md),
                         "source": "agent-local",
                         "type": "agent-local",

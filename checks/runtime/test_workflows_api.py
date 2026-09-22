@@ -570,6 +570,44 @@ class TestRunRoutes:
         resp = await H.api_run_rewind(req)
         assert resp.status == 400 and "node_id" in _body(resp)["error"]["message"]
 
+    @pytest.mark.parametrize(
+        ("handler", "path"),
+        [
+            (H.api_run_rewind, "/api/workflows/runs/x/rewind"),
+            (H.api_run_from, "/api/workflows/runs/x/run-from"),
+        ],
+    )
+    async def test_reentry_requires_explicit_cascade_confirmation(
+        self, handler, path
+    ) -> None:
+        """Both re-entry verbs show their cascade before queueing completed work."""
+        spec = {"name": "reentry", "root": SPEC_ROOT}
+        run = store.create(WorkflowRun(id="", workflow_name="reentry"))
+        store.write_spec(run.id, spec)
+        controller = RunController(run, spec, services=EngineServices())
+        assert await controller.run_to_completion(timeout=20) == RunStatus.COMPLETE
+        supervisor = _Sup()
+        supervisor.controllers[run.id] = controller
+
+        request = _req("POST", path, state=_State(supervisor), body={"node_id": "seed"})
+        request.match_info["run_id"] = run.id
+        refused = await handler(request)
+        refusal = _body(refused)
+        assert refused.status == 409
+        assert refusal["error"]["code"] == "confirmation_required"
+        assert refusal["error"]["detail"]["preview"]["needs_confirmation"] is True
+        assert controller._pending_mutations == []
+
+        confirmed = _req(
+            "POST",
+            path,
+            state=_State(supervisor),
+            body={"node_id": "seed", "confirm_cascade": True},
+        )
+        confirmed.match_info["run_id"] = run.id
+        accepted = await handler(confirmed)
+        assert accepted.status == 200 and _body(accepted)["queued"] is True
+
     async def test_fork_returns_201(self, provider) -> None:
         await provider.save_def(name="fork-wf", root=SPEC_ROOT)
         started = _body(

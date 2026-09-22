@@ -87,24 +87,31 @@ describe('bulkBlockedReason', () => {
 })
 
 describe('the capture week panel', () => {
-  it('calls a day with no passes SILENT', () => {
-    expect(dayState(day({ passes: 0 }))).toBe('silent')
+  it('calls a no-pass day after the first pass SILENT', () => {
+    expect(dayState(day({ passes: 0 }), '2024-01-01')).toBe('silent')
     expect(DAY_HINT.silent).toContain('gap')
   })
 
+  it('calls a no-pass day before the first pass not started', () => {
+    expect(dayState(day({ passes: 0 }), '2024-01-04')).toBe('not_started')
+    expect(dayState(day({ passes: 0 }), null)).toBe('not_started')
+  })
+
   it('ranks an error above a production', () => {
-    expect(dayState(day({ passes: 3, errors: 1, produced: 2 }))).toBe('error')
-    expect(dayState(day({ passes: 3, produced: 2 }))).toBe('produced')
+    expect(dayState(day({ passes: 3, errors: 1, produced: 2 }), '2024-01-01')).toBe('error')
+    expect(dayState(day({ passes: 3, produced: 2 }), '2024-01-01')).toBe('produced')
   })
 
   it('calls a ran-but-quiet day ok, not silent', () => {
-    expect(dayState(day({ passes: 4, produced: 0 }))).toBe('ok')
+    expect(dayState(day({ passes: 4, produced: 0 }), '2024-01-01')).toBe('ok')
   })
 
   it('gives every state a distinct tone and a hint', () => {
     const states = ['silent', 'error', 'produced', 'ok'] as const
     expect(new Set(states.map((s) => DAY_TONE[s])).size).toBe(4)
     for (const s of states) expect(DAY_HINT[s]).toBeTruthy()
+    expect(DAY_TONE.not_started).toBe(DAY_TONE.ok)
+    expect(DAY_HINT.not_started).toBeTruthy()
   })
 })
 

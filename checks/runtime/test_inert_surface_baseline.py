@@ -2,8 +2,8 @@
 
 ``checks/catalogs/inert-surfaces.json`` is a GENERATED census (by
 ``tooling/scripts/generate_inert_surface_baseline.py``) of *declared-but-inert surfaces* across
-five seam kinds — config keys, enum members, trigger kinds, ``_EDITABLE_CONFIG`` entries,
-and SDK exports — each being a place where something is declared and nothing on the other
+six seam kinds — config keys, enum members, trigger kinds, ``_EDITABLE_CONFIG`` entries,
+editable-config readers, and SDK exports — each being a place where something is declared and nothing on the other
 side of the seam consumes or produces it. That defect passes ordinary tests because they
 hand-build the state the missing writer should have created; only a census of both ends
 catches it.
@@ -67,6 +67,7 @@ from tooling.scripts.generate_inert_surface_baseline import (
     _iterated_enum_classes,
     _parse,
     _src_py_files,
+    _unread_editable_config_keys,
     baseline_path,
     build_baseline,
     build_inventory,
@@ -192,6 +193,7 @@ def test_baseline_is_well_shaped_and_sorted():
                 "enum",
                 "trigger_kind",
                 "editable_config",
+                "editable_config_reader",
                 "sdk_export",
             }, s
         total += bucket["inert"]
@@ -267,6 +269,14 @@ def test_a_cleanup_that_shrinks_a_counter_does_not_red_the_ratchet():
     shrunk[victim]["surfaces"].pop()
     shrunk[victim]["inert"] -= 1
     assert regressions(per_file, shrunk) == []
+
+
+def test_editable_config_reader_census_names_only_unread_backed_leaves():
+    assert _unread_editable_config_keys(
+        ["workflows.active_limit", "workflows.live_limit", "workflows.unknown"],
+        {"workflows.active_limit", "workflows.live_limit"},
+        {"live_limit"},
+    ) == ["workflows.active_limit"]
 
 
 def _fixture_tree(tmp_path: Path, modules: dict[str, str]) -> list[Path]:

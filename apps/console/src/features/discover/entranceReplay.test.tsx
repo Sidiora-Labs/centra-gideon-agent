@@ -6,11 +6,13 @@ import { DiscoverPage } from './DiscoverPage'
 
 const discover = vi.fn()
 const dismissDiscoverTip = vi.fn((_id: string) => Promise.resolve({}))
+const clearDismissedDiscoverTips = vi.fn(() => Promise.resolve({}))
 
 vi.mock('../../shared/data/api', () => ({
   api: {
     discover: () => discover(),
     dismissDiscoverTip: (id: string) => dismissDiscoverTip(id),
+    clearDismissedDiscoverTips: () => clearDismissedDiscoverTips(),
   },
 }))
 
@@ -40,6 +42,7 @@ const regions = () => [...document.querySelectorAll<HTMLElement>('[data-entrance
 beforeEach(() => {
   discover.mockReset()
   dismissDiscoverTip.mockClear()
+  clearDismissedDiscoverTips.mockClear()
   discover.mockResolvedValue(payload(['a', 'b']))
 })
 
@@ -73,5 +76,16 @@ describe('a dismiss does not replay the entrance', () => {
     expect(dismissDiscoverTip).toHaveBeenCalledWith('a')
     expect(group()).toBe(before.g)
     expect(regions()).toEqual(before.r)
+  })
+})
+
+describe('restoring Discover tips', () => {
+  it('clears every dismissal only when one can become visible again', async () => {
+    discover.mockResolvedValue({ enabled: true, visible_count: 0, areas: [], restorable_count: 1 })
+    render(<DiscoverPage navigate={() => {}} />)
+
+    screen.getByRole('button', { name: 'Restore dismissed tips' }).click()
+
+    await waitFor(() => expect(clearDismissedDiscoverTips).toHaveBeenCalledOnce())
   })
 })

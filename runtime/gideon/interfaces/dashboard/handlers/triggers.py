@@ -2143,10 +2143,25 @@ async def api_triggers_week(request: web.Request) -> web.Response:
     """
     from datetime import datetime, timedelta
 
+    from gideon.automation.schedule import get_local_tz
+
+    tz_name, local_tz = get_local_tz()
+
+    def local_bound(value: datetime) -> datetime:
+        return (
+            value.replace(tzinfo=local_tz)
+            if value.tzinfo is None
+            else value.astimezone(local_tz)
+        )
+
     state: ConsoleState = request.app["state"]
     raw_start = (request.query.get("start") or "").strip()
     try:
-        start = datetime.fromisoformat(raw_start) if raw_start else datetime.now()
+        start = (
+            local_bound(datetime.fromisoformat(raw_start))
+            if raw_start
+            else datetime.now(local_tz)
+        )
     except ValueError:
         return web.json_response({"error": "start must be an ISO date"}, status=400)
     try:
@@ -2157,7 +2172,7 @@ async def api_triggers_week(request: web.Request) -> web.Response:
     raw_until = (request.query.get("until") or "").strip()
     if raw_until:
         try:
-            until = datetime.fromisoformat(raw_until)
+            until = local_bound(datetime.fromisoformat(raw_until))
         except ValueError:
             return web.json_response({"error": "until must be an ISO date"}, status=400)
         if until <= start or until > start + timedelta(days=31):
@@ -2173,9 +2188,6 @@ async def api_triggers_week(request: web.Request) -> web.Response:
         if cut:
             truncated.append(f"{_SCHEDULE}:{trigger.id}")
 
-    from gideon.automation.schedule import get_local_tz
-
-    tz_name, _ = get_local_tz()
     return web.json_response(
         {
             "start": start.isoformat(),

@@ -4,11 +4,11 @@
 A recurring defect class in this codebase: something is *declared* and nothing on the
 other side of the seam consumes or produces it — a config key no ``load()`` mapping
 reads, an enum member no code references, a trigger kind with no dispatch, an editable-
-config entry with no backing field, an SDK export nothing imports. Tests pass anyway
+config entry with no backing field, an allowlisted config leaf nothing reads, an SDK export nothing imports. Tests pass anyway
 because they hand-build the state the missing writer should have produced. A round-trip
 or unit test cannot see the gap; only a *census of both ends of each seam* can.
 
-This generator IS that census. For each of five declared-surface kinds it enumerates the
+This generator IS that census. For each of six declared-surface kinds it enumerates the
 declared surfaces, applies a cheap deterministic writer/reader heuristic, and emits a
 per-file counter of inert surfaces to a committed ``checks/catalogs/inert-surfaces.json``. A
 companion test (``checks/runtime/test_inert_surface_baseline.py``) regenerates in-memory and
@@ -68,6 +68,8 @@ Per-surface-kind heuristic (each documented at its detector below):
                           other file under ``triggers/`` (declared, nothing dispatches it).
   * ``editable_config`` — an ``_EDITABLE_CONFIG`` PATCH-allowlist key with no backing
                           config field (the entry edits nothing).
+  * ``editable_config_reader`` — an ``_EDITABLE_CONFIG`` key whose backing config leaf
+                          has no production attribute reader (the write changes nothing).
   * ``sdk_export``      — a ``gideon.sdk.*`` ``__all__`` symbol imported nowhere
                           outside the sdk package (no in-repo consumer). The SDK is a
                           facade for installable app bundles that live in a SEPARATE repo,
@@ -96,6 +98,7 @@ KIND_CONFIG = "config"
 KIND_ENUM = "enum"
 KIND_TRIGGER_KIND = "trigger_kind"
 KIND_EDITABLE_CONFIG = "editable_config"
+KIND_EDITABLE_CONFIG_READER = "editable_config_reader"
 KIND_SDK_EXPORT = "sdk_export"
 
 _ENUM_BASES = {"Enum", "IntEnum", "StrEnum", "Flag", "IntFlag"}
@@ -126,8 +129,6 @@ def _src_py_files() -> list[Path]:
     return sorted(_src_root().rglob("*.py"))
 
 
-
-
 def _attribute_names_in_src(files: list[Path]) -> set[str]:
     """Every attribute name accessed (``x.NAME``) anywhere in production ``src/``.
 
@@ -145,8 +146,6 @@ def _attribute_names_in_src(files: list[Path]) -> set[str]:
             if isinstance(node, ast.Attribute):
                 names.add(node.attr)
     return names
-
-
 
 
 _LOAD_MAPPING_METHODS = frozenset({"load", "load_with_migration_state"})
@@ -199,10 +198,14 @@ def _config_leaf_paths() -> list[str]:
     """Leaf config paths from the SH3.1 baseline generator (single source of truth)."""
     from tooling.scripts.generate_config_baseline import (
         build_baseline as config_baseline,
+    )
+    from tooling.scripts.generate_config_baseline import (
         decode_catalog as decode_configuration,
     )
 
-    return [entry["path"] for entry in decode_configuration(json.loads(config_baseline()))]
+    return [
+        entry["path"] for entry in decode_configuration(json.loads(config_baseline()))
+    ]
 
 
 def _inert_config_surfaces() -> list[tuple[str, str]]:
@@ -220,8 +223,6 @@ def _inert_config_surfaces() -> list[tuple[str, str]]:
         if leaf not in load_kwargs:
             out.append((_rel(loader), f"{KIND_CONFIG}:{path}"))
     return out
-
-
 
 
 def _enum_members(tree: ast.Module) -> list[tuple[str, str]]:
@@ -489,8 +490,6 @@ def _inert_enum_surfaces(
     ]
 
 
-
-
 def _tuple_string_members(tree: ast.Module, name: str) -> list[str]:
     """String members of a module-level ``NAME = (...)`` tuple/list assignment."""
     for node in ast.walk(tree):
@@ -549,8 +548,6 @@ def _inert_trigger_kind_surfaces() -> list[tuple[str, str]]:
     ]
 
 
-
-
 def _editable_config_keys(tree: ast.Module) -> list[str]:
     """String keys of the module-level ``_EDITABLE_CONFIG`` dict (Assign or AnnAssign)."""
     for node in ast.walk(tree):
@@ -601,6 +598,46 @@ def _inert_editable_config_surfaces() -> list[tuple[str, str]]:
     ]
 
 
+def _unread_editable_config_keys(
+    keys: list[str], leaves: set[str], attribute_names: set[str]
+) -> list[str]:
+    """Allowlisted leaf paths with no production attribute reader.
+
+    An attribute read with the same leaf name clears a path even when its receiver cannot
+    be proven to be the config object. That deliberately errs toward under-reporting: a
+    same-named attribute on an unrelated object can hide an inert config path, but the
+    census must not direct a cleanup at a path whose reader the AST cannot resolve.
+    """
+    return sorted(
+        key
+        for key in keys
+        if key in leaves and key.rsplit(".", 1)[-1] not in attribute_names
+    )
+
+
+def _inert_editable_config_reader_surfaces() -> list[tuple[str, str]]:
+    """An ``_EDITABLE_CONFIG`` key that names a real field but has no production reader.
+
+    The PATCH route accepts and persists its value, yet no runtime code observes the
+    corresponding config attribute. This is distinct from ``editable_config``: that
+    detector catches an allowlist entry with no field at all; this one catches a field
+    that loads correctly but still has no behavioral consumer.
+    """
+    core = _src_root() / "dashboard" / "handlers" / "core.py"
+    tree = _parse(core)
+    if tree is None:
+        return []
+    keys = _editable_config_keys(tree)
+    if not keys:
+        return []
+    return [
+        (_rel(core), f"{KIND_EDITABLE_CONFIG_READER}:{key}")
+        for key in _unread_editable_config_keys(
+            keys,
+            set(_config_leaf_paths()),
+            _attribute_names_in_src(_src_py_files()),
+        )
+    ]
 
 
 def _module_all(tree: ast.Module) -> list[str]:
@@ -661,10 +698,8 @@ def _inert_sdk_export_surfaces() -> list[tuple[str, str]]:
     return out
 
 
-
-
 def _all_inert_surfaces() -> list[tuple[str, str]]:
-    """Every (repo-relative-file, ``kind:name``) inert surface across all five kinds."""
+    """Every (repo-relative-file, ``kind:name``) inert surface across all six kinds."""
     files = _src_py_files()
     attr_names = _attribute_names_in_src(files)
     surfaces: list[tuple[str, str]] = []
@@ -672,6 +707,7 @@ def _all_inert_surfaces() -> list[tuple[str, str]]:
     surfaces += _inert_enum_surfaces(files, attr_names)
     surfaces += _inert_trigger_kind_surfaces()
     surfaces += _inert_editable_config_surfaces()
+    surfaces += _inert_editable_config_reader_surfaces()
     surfaces += _inert_sdk_export_surfaces()
     return surfaces
 
@@ -693,6 +729,7 @@ def build_inventory() -> dict[str, Any]:
         KIND_ENUM: 0,
         KIND_TRIGGER_KIND: 0,
         KIND_EDITABLE_CONFIG: 0,
+        KIND_EDITABLE_CONFIG_READER: 0,
         KIND_SDK_EXPORT: 0,
     }
     for rel, surface in _all_inert_surfaces():
@@ -717,16 +754,23 @@ def encode_catalog(inventory: dict[str, Any]) -> dict[str, Any]:
     for path, entry in sorted(inventory["per_file"].items()):
         declarations = [
             {"kind": kind, "symbol": symbol}
-            for kind, symbol in (surface.split(":", 1) for surface in sorted(entry["surfaces"]))
+            for kind, symbol in (
+                surface.split(":", 1) for surface in sorted(entry["surfaces"])
+            )
         ]
-        sources.append({"path": path, "count": entry["inert"], "declarations": declarations})
+        sources.append(
+            {"path": path, "count": entry["inert"], "declarations": declarations}
+        )
     return {
         "version": 1,
         "kind": "gideon.inert-surfaces",
         "data": {
             "generator": inventory["generated_from"],
             "sources": sources,
-            "summary": {"total": inventory["totals"]["inert"], "kinds": inventory["totals"]["by_kind"]},
+            "summary": {
+                "total": inventory["totals"]["inert"],
+                "kinds": inventory["totals"]["by_kind"],
+            },
         },
     }
 
@@ -742,17 +786,30 @@ def decode_catalog(document: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"duplicate source in inert-surface catalog: {path}")
         per_file[path] = {
             "inert": source["count"],
-            "surfaces": [f"{item['kind']}:{item['symbol']}" for item in source["declarations"]],
+            "surfaces": [
+                f"{item['kind']}:{item['symbol']}" for item in source["declarations"]
+            ],
         }
     return {
         "generated_from": data["generator"],
         "per_file": per_file,
-        "totals": {"inert": data["summary"]["total"], "by_kind": data["summary"]["kinds"]},
+        "totals": {
+            "inert": data["summary"]["total"],
+            "by_kind": data["summary"]["kinds"],
+        },
     }
 
 
 def build_baseline() -> str:
-    return json.dumps(encode_catalog(build_inventory()), indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    return (
+        json.dumps(
+            encode_catalog(build_inventory()),
+            indent=2,
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+        + "\n"
+    )
 
 
 def regressions(

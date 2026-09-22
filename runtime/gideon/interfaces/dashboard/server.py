@@ -1284,6 +1284,7 @@ async def start_dashboard(
 
     app.router.add_get("/api/legibility/discover", api_discover)
     app.router.add_post("/api/legibility/discover/dismiss", api_discover_dismiss)
+    app.router.add_delete("/api/legibility/discover/dismiss", api_discover_dismiss)
     app.router.add_get("/api/legibility/always-on", api_always_on)
     app.router.add_get("/api/legibility/always-on/doc", api_always_on_doc)
     app.router.add_put("/api/legibility/always-on/doc", api_always_on_doc_write)

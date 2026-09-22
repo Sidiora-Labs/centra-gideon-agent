@@ -118,38 +118,36 @@ async def judge_verdict(prompt: str) -> str:
     on failure). Used by the code stage gate + any kind needing a conservative LLM
     verdict."""
     from gideon.automation.loop.judge import judge_use_case
-    from gideon.extensions.providers.provider_bridge import (
-        resolve_provider_for_use_case,
-    )
     from gideon.integrations.llm.base import (
         EVENT_COMPLETE,
         EVENT_PERMISSION_REQUEST,
         EVENT_TEXT_CHUNK,
     )
+    from gideon.integrations.llm_helpers import execute_with_fallback_chain
+
+    async def _judge(provider) -> str:
+        chunks: list[str] = []
+        try:
+            await provider.start()
+            async for event in provider.stream(prompt):
+                if event.kind == EVENT_TEXT_CHUNK:
+                    chunks.append(event.text)
+                elif event.kind == EVENT_PERMISSION_REQUEST:
+                    try:
+                        await provider.respond_permission(event, allow=False)  # type: ignore[attr-defined]  # noqa: E501
+                    except Exception:
+                        pass
+                elif event.kind == EVENT_COMPLETE:
+                    break
+        finally:
+            try:
+                await provider.shutdown()
+            except Exception:
+                pass
+        return "".join(chunks)
 
     try:
-        provider = resolve_provider_for_use_case(judge_use_case())
-        await provider.start()
+        return await execute_with_fallback_chain(judge_use_case(), _judge)
     except Exception:
         logger.warning("loop gate: judge provider unavailable", exc_info=True)
         return ""
-    chunks: list[str] = []
-    try:
-        async for event in provider.stream(prompt):
-            if event.kind == EVENT_TEXT_CHUNK:
-                chunks.append(event.text)
-            elif event.kind == EVENT_PERMISSION_REQUEST:
-                try:
-                    await provider.respond_permission(event, allow=False)  # type: ignore[attr-defined]  # noqa: E501
-                except Exception:
-                    pass
-            elif event.kind == EVENT_COMPLETE:
-                break
-    except Exception:
-        logger.debug("loop gate: judge stream errored", exc_info=True)
-    finally:
-        try:
-            await provider.shutdown()
-        except Exception:
-            pass
-    return "".join(chunks)
