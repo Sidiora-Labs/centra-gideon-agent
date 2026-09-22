@@ -84,7 +84,13 @@ export function AgentDefaultsPanel() {
           <EnumRow label="Sandbox" hint="Sandbox mode for the ACP provider." cfg={cfg} field="sandbox" patch={patch}
             options={[{ key: 'auto', label: 'Auto' }, { key: 'off', label: 'Off' }]} />
           <ToggleRow label="YOLO mode" cfg={cfg} field="yolo" patch={patch}
-            hint="Skip every tool-approval confirmation — overrides approval mode, applies immediately, and stays on until turned off (no expiry, unlike the chat YOLO pill). Only inside a sandbox or for trusted automation." danger />
+            hint="Skip every tool-approval confirmation — overrides approval mode, applies immediately, and stays on until turned off (no expiry, unlike the chat YOLO pill). Only inside a sandbox or for trusted automation." danger
+            confirmOn={(next) => next ? {
+              title: 'Enable YOLO mode?',
+              body: 'Tool-approval confirmations will be skipped until you turn YOLO mode off.',
+              confirmLabel: 'Enable YOLO mode',
+              danger: true,
+            } : undefined} />
         </RowGroup>
       </Section>
 
@@ -137,7 +143,13 @@ export function AgentDefaultsPanel() {
           <NumberRow label="Max scenarios per run" cfg={selfQa} field="max_scenarios_per_fire" patch={patchSelfQa} min={1} max={20}
             hint="Ceiling on scenarios generated from one push. Every commit still gets a verdict; this bounds how many browser sessions one push can start." />
           <ToggleRow label="Propose fix branches" cfg={selfQa} field="fix_branch_enabled" patch={patchSelfQa} danger
-            hint="On a confirmed failure, open a gideon/selfqa-<sha> branch carrying a proposed diff. Never merged and never pushed — the branch name lands in the Task for you to review." />
+            hint="On a confirmed failure, open a gideon/selfqa-<sha> branch carrying a proposed diff. Never merged and never pushed — the branch name lands in the Task for you to review."
+            confirmOn={(next) => next ? {
+              title: 'Let the companion propose fix branches?',
+              body: 'On a confirmed failure, the companion can create a local branch with a proposed fix for you to review.',
+              confirmLabel: 'Allow fix branches',
+              danger: true,
+            } : undefined} />
         </RowGroup>
       </Section>
     </div>

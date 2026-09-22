@@ -193,7 +193,7 @@ def _resolve_model(
     resolver: Callable[[str], str] | None,
 ) -> str:
     if resolver is None:
-        from gideon.automation.workflows.engine import resolve_axis_model
+        from gideon.automation.workflows.engine_support import resolve_axis_model
 
         resolver = resolve_axis_model
     return model or resolver(use_case) or ""

@@ -351,6 +351,24 @@ def dismiss(tip_id: str) -> set[str]:
     return ids
 
 
+def clear_dismissed() -> set[str]:
+    """Clear every persisted Discover dismissal and return the remaining set."""
+    from gideon.extensions.providers.entity_routes import (
+        _load_entity_settings,
+        _save_entity_settings,
+    )
+
+    current = _load_entity_settings(_ENTITY)
+    current[_DISMISSED_FIELD] = []
+    _save_entity_settings(_ENTITY, current)
+    return set()
+
+
+def _auto_hidden(tip: DiscoverTip, engaged: dict[str, bool]) -> bool:
+    """Whether prior use hides *tip* independently of an explicit dismissal."""
+    return bool(tip.engaged_key and engaged.get(tip.engaged_key))
+
+
 def select_visible(
     *, dismissed: set[str], engaged: dict[str, bool]
 ) -> list[DiscoverTip]:
@@ -362,8 +380,7 @@ def select_visible(
     return [
         tip
         for tip in CATALOG
-        if tip.id not in dismissed
-        and not (tip.engaged_key and engaged.get(tip.engaged_key))
+        if tip.id not in dismissed and not _auto_hidden(tip, engaged)
     ]
 
 
@@ -398,11 +415,11 @@ def compute_discover(state: Any = None) -> dict[str, Any]:
     engaged = compute_engaged(state)
     visible = select_visible(dismissed=dismissed, engaged=engaged)
     dismissed_count = sum(tip.id in dismissed for tip in CATALOG)
+    restorable_count = sum(
+        tip.id in dismissed and not _auto_hidden(tip, engaged) for tip in CATALOG
+    )
     engaged_count = sum(
-        tip.id not in dismissed
-        and bool(tip.engaged_key)
-        and bool(engaged.get(tip.engaged_key))
-        for tip in CATALOG
+        tip.id not in dismissed and _auto_hidden(tip, engaged) for tip in CATALOG
     )
     return {
         "enabled": True,
@@ -410,5 +427,6 @@ def compute_discover(state: Any = None) -> dict[str, Any]:
         "visible_count": len(visible),
         "total": len(CATALOG),
         "dismissed_count": dismissed_count,
+        "restorable_count": restorable_count,
         "engaged_count": engaged_count,
     }

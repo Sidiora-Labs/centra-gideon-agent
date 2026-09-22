@@ -166,6 +166,29 @@ def test_route_context_caps_skills_and_flags_the_cap():
     assert any("Skills:" in n for n in routed.unloaded)
 
 
+def test_route_context_scores_skills_and_reports_actual_overflow():
+    project = SimpleNamespace(
+        id="p", name="P", brief="", agent_instructions_template=""
+    )
+    routed = cr.route_context(
+        project,
+        query="deploy",
+        skills=[
+            {"key": "unrelated", "description": "Write prose."},
+            {"key": "release", "description": "Deploy applications."},
+            {"key": "docker", "description": "Deploy containers."},
+        ],
+        memory_svc=None,
+        knowledge_retriever=None,
+        skill_limit=1,
+    )
+
+    assert [skill["key"] for skill in routed.skills] == ["docker"]
+    assert routed.skill_overflow == 2
+    assert routed.to_dict()["skill_overflow"] == 2
+    assert "2 more available" in "\n".join(routed.unloaded)
+
+
 def test_apply_block_first_write_appends_after_user_content():
     existing = "# My project notes\n\nHand-written stuff.\n"
     block = cr.render_block(_routed())

@@ -125,11 +125,32 @@ def drill_fields(result: JobResult, *, at: float) -> dict:
     }
 
 
-def persist_drill_result(result: JobResult, *, at: float | None = None) -> None:
-    """Record a drill outcome for callers that do not own a `save_state` of their own."""
+def job_stamp_fields(result: JobResult, *, at: float) -> dict:
+    """Return the state fields a completed durability job is allowed to stamp."""
+    if result.skipped:
+        return {}
+    if result.job == "incremental_export":
+        return {"last_export": at} if result.ok else {}
+    if result.job == "nightly_snapshot":
+        return {"last_snapshot": at} if result.ok else {}
+    if result.job == "restore_drill":
+        return drill_fields(result, at=at)
+    return {}
+
+
+def persist_job_result(result: JobResult, *, at: float | None = None) -> None:
+    """Persist the state fields earned by one completed on-demand durability job."""
+    fields = job_stamp_fields(result, at=at if at is not None else time.time())
+    if not fields:
+        return
     state = load_state()
-    state.update(drill_fields(result, at=at if at is not None else time.time()))
+    state.update(fields)
     save_state(state)
+
+
+def persist_drill_result(result: JobResult, *, at: float | None = None) -> None:
+    """Compatibility wrapper for callers that record only drill results."""
+    persist_job_result(result, at=at)
 
 
 def last_drill() -> dict:
@@ -666,8 +687,7 @@ def run_due_jobs(
     if force == "export" or _due(state, "last_export", HOURLY_SECS, now=stamp):
         result = run_incremental_export()
         results.append(result)
-        if result.ok and not result.skipped:
-            state["last_export"] = stamp
+        state.update(job_stamp_fields(result, at=stamp))
 
     if force == "history" or _due(state, "last_history", HOURLY_SECS, now=stamp):
         result = run_history_commit()
@@ -678,8 +698,7 @@ def run_due_jobs(
     if force == "snapshot" or _due(state, "last_snapshot", NIGHTLY_SECS, now=stamp):
         result = run_nightly_snapshot()
         results.append(result)
-        if result.ok and not result.skipped:
-            state["last_snapshot"] = stamp
+        state.update(job_stamp_fields(result, at=stamp))
 
     drills_on = _cfg().restore_drills
     if force == "drill" or (
@@ -687,8 +706,7 @@ def run_due_jobs(
     ):
         result = run_restore_drill(notifier=notifier)
         results.append(result)
-        if not result.skipped:
-            state.update(drill_fields(result, at=stamp))
+        state.update(job_stamp_fields(result, at=stamp))
 
     cfg = _cfg()
     if getattr(cfg, "sync_enabled", False):

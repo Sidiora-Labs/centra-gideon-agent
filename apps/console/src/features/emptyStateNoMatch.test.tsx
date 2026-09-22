@@ -14,6 +14,13 @@ describe('ArtifactGrid empty states', () => {
     expect(screen.getByRole('button', { name: /Browse files/ })).toBeInTheDocument()
   })
 
+  it('does not offer the text-file save path for an empty binary kind', () => {
+    render(<ArtifactGrid artifacts={[]} onOpen={() => {}} onBrowseFiles={() => {}} kind="pdf" />)
+    expect(screen.getByText(/Ask the agent to create one/)).toBeInTheDocument()
+    expect(screen.queryByText(/save a file as an artifact from the Files page/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Browse files/ })).not.toBeInTheDocument()
+  })
+
   it('says "no matching" — and drops the create advice — when a filter is active', () => {
     render(<ArtifactGrid artifacts={[]} onOpen={() => {}} onBrowseFiles={() => {}} narrowed />)
     expect(screen.getByText('No matching artifacts')).toBeInTheDocument()

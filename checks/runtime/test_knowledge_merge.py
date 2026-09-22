@@ -485,6 +485,18 @@ def _merge_via_route(store, keep, loser, **body):
     )
 
 
+def test_relations_rejects_a_missing_item_parent(store):
+    response, body = _call(
+        store,
+        "list_item_relations",
+        "GET",
+        "/api/knowledge/items/missing/relations",
+        match_info={"id": "missing"},
+    )
+    assert response.status == 404
+    assert body["error"] == "item not found"
+
+
 def test_the_route_merge_keeps_the_path_item_and_moves_both_sides_curation(store):
     """The atom's substance: after a UI-shaped merge the survivor carries BOTH items' rows."""
     keep, loser = _item(store, "Keep"), _item(store, "Loser")

@@ -70,7 +70,7 @@ function AgentAdvanced({ agentName }: { agentName: string }) {
 }
 function RoutingNotesEditor({ agentName }: { agentName: string }) {
   const notes = useAgentRoutingNotes(agentName)
-  return <Section label="Routing notes"><p data-type="caption" className="mb-s text-on-surface-low">A short "when to use this agent" note the auto-router reads to pick between agents.</p>
+  return <Section label="Routing notes"><p data-type="caption" className="mb-s text-on-surface-low">A note the default agent reads when choosing a specialist to delegate to. Use Specialty to control automatic chat suggestions.</p>
     {notes.loadError ? <div className="grid justify-items-start gap-s"><p role="alert" data-type="caption" className="text-danger">Couldn’t load this note, so it isn’t safe to edit — saving now could overwrite what’s on disk. {notes.loadError}</p><Button size="sm" onClick={notes.retry}><RefreshCw size={14} /> Try again</Button></div> : notes.content === null ? <Skeleton className="h-16 w-full rounded-md" /> : <div className="grid gap-s">
       <TextArea value={notes.draft} onChange={notes.setDraft} rows={3} size="sm" ariaLabel="Routing notes" placeholder="e.g. Use for deep code reviews and multi-file refactors; prefers a thorough, direct style." />
       <div className="flex flex-wrap items-center gap-s"><Button size="sm" onClick={notes.save} loading={notes.busy} loadingLabel="Saving…" disabled={!notes.dirty || notes.busy} disabledReason={!notes.dirty && !notes.busy ? 'No changes to save' : undefined}><Check size={14} /> Save notes</Button>{notes.saved && <span data-type="caption" className="text-ok">Saved ✓</span>}{notes.error && <span role="alert" data-type="caption" className="text-danger">{notes.error}</span>}</div>

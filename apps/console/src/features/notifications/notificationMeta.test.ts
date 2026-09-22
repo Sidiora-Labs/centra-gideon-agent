@@ -17,7 +17,7 @@ describe('notificationMeta shared visual helpers', () => {
 const BACKEND_KINDS = [
   'agent_request', 'alert', 'complete', 'digest', 'error', 'failed', 'fired', 'generic',
   'info', 'message', 'needs_input', 'progress', 'proposal', 'result', 'retire',
-  'route_drift', 'session', 'stalled', 'status', 'subagent', 'success', 'update', 'warning',
+  'route_drift', 'session', 'status', 'subagent', 'success', 'update', 'warning',
   'agent', 'app.route.drift', 'app_update', 'cron', 'feedback_retire', 'heartbeat', 'hook',
   'inbox_alert', 'loop', 'schedule',
 ]
@@ -30,6 +30,10 @@ describe('kindMeta covers every kind the backend emits', () => {
 
   it('proposal uses the registry\'s declared display name', () => {
     expect(kindMeta('proposal').label).toBe('Skill proposal')
+  })
+
+  it('retired stalled display key uses the unknown-kind fallback', () => {
+    expect(kindMeta('stalled').label).toBe('stalled')
   })
 
   it('every backend kind yields a usable label / icon / token-routed tone', () => {

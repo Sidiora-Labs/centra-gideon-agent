@@ -1079,7 +1079,8 @@ export interface WorkflowOutboxEntry {
 }
 export interface WorkflowRunStats {
   run_id: string
-  tokens: number
+  tokens: number | null
+  tokens_recorded: boolean
   cached_tokens: number
   cost_usd: number
   priced: boolean
@@ -1336,7 +1337,7 @@ export interface PromptPreview { ok: boolean; rendered?: string; error?: string;
 export interface PromptSyntaxFn { name: string; category: string; signature: string; description: string; insert: string }
 export interface PromptSyntaxConstruct { category: string; label: string; snippet: string; description: string }
 export interface PromptSyntax { functions: PromptSyntaxFn[]; constructs: PromptSyntaxConstruct[] }
-export interface SkillItem { key: string; name: string; description: string; always: boolean; path?: string; source: string; type: string; loaded_by_agents: string[]; integrity?: 'intact' | 'tampered' | 'unverified'; agent?: string }
+export interface SkillItem { key: string; name: string; description: string; always: boolean; path?: string; source: string; type: string; provenance?: 'auto' | 'taught' | ''; loaded_by_agents: string[]; integrity?: 'intact' | 'tampered' | 'unverified'; agent?: string }
 export interface EphemeralDraft { slug: string; title: string; body: string; created_at: string }
 export interface SkillProposal { id: string; slug: string; description: string; triggers: string; kind: string; refine_target?: string; trigger?: string; session_key: string; created_at: string; status: string; procedure_preview: string }
 export interface SkillLadderReview { verdict: string; elapsed_ms: number; session_key: string; detail: string; at: string }
@@ -1366,7 +1367,7 @@ export interface Manifest { apiVersion: number; tools: ManifestTool[]; routes: M
 export interface DiscoverTryIt { route: string; query: Record<string, string>; label: string }
 export interface DiscoverTip { id: string; area: string; title: string; lesson: string; try_it: DiscoverTryIt }
 export interface DiscoverArea { area: string; tips: DiscoverTip[] }
-export interface DiscoverResponse { enabled: boolean; areas: DiscoverArea[]; visible_count: number; total: number; dismissed_count?: number; engaged_count?: number }
+export interface DiscoverResponse { enabled: boolean; areas: DiscoverArea[]; visible_count: number; total: number; dismissed_count?: number; restorable_count?: number; engaged_count?: number }
 export interface AlwaysOnItem {
   id: string; kind: 'always_skill' | 'project_instruction'; name: string
   scope: 'global' | 'project'; source: string; path: string; chars: number
@@ -1449,9 +1450,34 @@ function _triggerToHook(t: Trigger): HookItem {
     blocking: t.blocking, enforcement: t.enforcement,
   }
 }
+export interface SchemaMeta {
+  label?: string
+  help?: string
+  widget?: string
+  sensitive?: boolean
+  placeholder?: string
+  tags?: string[]
+}
+export interface JsonSchema {
+  type?: string | string[]
+  description?: string
+  minimum?: number
+  maximum?: number
+  minLength?: number
+  maxLength?: number
+  pattern?: string
+  properties?: Record<string, SchemaProp>
+  required?: string[]
+  items?: JsonSchema
+  enum?: unknown[]
+  default?: unknown
+}
+export interface SchemaProp extends JsonSchema {
+  'x-meta'?: SchemaMeta
+}
 export interface ActionProvider {
   name: string; display_name: string; supports_blocking: boolean
-  settingsSchema: { type?: string; properties?: Record<string, unknown>; required?: string[] }
+  settingsSchema: JsonSchema
 }
 export interface LifecycleEventInfo { event: string; label: string; desc: string; vars: string[]; blocking: boolean; dormant?: boolean; dormant_reason?: string; agent_scoped?: boolean }
 export interface AppSourceEvent { event: string; source_event: string }
@@ -1503,7 +1529,7 @@ export interface StagingWeek {
   days: number; buckets: StagingDay[]
   silent_days: string[]; error_days: string[]
   produced_total: number; cost_usd: number
-  has_ever_run?: boolean
+  first_pass_day?: string | null
 }
 
 export type AttributionVerdict =
@@ -2764,10 +2790,9 @@ export interface RunnerLease {
   holder: string; taken_at: number; expires_at: number; renewals: number
   age_secs: number; expires_in_secs: number
 }
-export interface ProviderSchemaProp {
-  type?: string; default?: unknown; enum?: string[]; minimum?: number; maximum?: number
+export interface ProviderSchemaProp extends SchemaProp {
+  enum?: string[]; minimum?: number; maximum?: number
   minLength?: number; maxLength?: number; pattern?: string
-  'x-meta'?: { label?: string; help?: string; sensitive?: boolean; placeholder?: string; tags?: string[] }
 }
 export interface ProviderSchema { type?: string; properties?: Record<string, ProviderSchemaProp>; required?: string[] }
 export interface ProviderInstance { id: string; extension_name: string; display_name: string; config: Record<string, unknown>; enabled: boolean; _secret_set?: string[] }
@@ -2780,11 +2805,9 @@ export interface ModelProviderType {
   multiInstance: boolean
   settingsSchema: { properties?: Record<string, ModelProviderTypeField>; required?: string[] }
 }
-export interface ModelProviderTypeField {
-  type?: string
+export interface ModelProviderTypeField extends SchemaProp {
   default?: string
   enum?: string[]
-  'x-meta'?: { label?: string; help?: string; sensitive?: boolean; tags?: string[] }
 }
 export interface OllamaLocalModel {
   name: string; size: number; size_human?: string; modified_at?: string
@@ -3826,6 +3849,7 @@ export const api = {
 
   discover: () => get<DiscoverResponse>('/api/legibility/discover'),
   dismissDiscoverTip: (id: string) => post<{ ok: boolean; dismissed: string[] }>('/api/legibility/discover/dismiss', { id }),
+  clearDismissedDiscoverTips: () => del('/api/legibility/discover/dismiss'),
 
   alwaysOn: (projectId = '') =>
     get<AlwaysOnResponse>(`/api/legibility/always-on${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`),
@@ -4225,11 +4249,11 @@ export const api = {
     get<{ triggers: Trigger[]; server_tz: string; owner?: string }>(
       `/api/triggers${type ? `?type=${type}` : ''}`,
     ),
-  triggersWeek: (start?: string, days = 7, until?: string) => {
+  triggersWeek: (start?: Date, days = 7, until?: Date) => {
     const qs = new URLSearchParams()
-    if (start) qs.set('start', start)
+    if (start) qs.set('start', start.toISOString())
     qs.set('days', String(days))
-    if (until) qs.set('until', until)
+    if (until) qs.set('until', until.toISOString())
     return get<WeekProjection>(`/api/triggers/week?${qs.toString()}`)
   },
   eventTriggers: () => get<{ triggers: Trigger[] }>('/api/triggers?type=event').then((d) => d.triggers),
@@ -5030,9 +5054,9 @@ export const api = {
     post<WorkflowTriageResult>(`/api/workflows/runs/${encodeURIComponent(id)}/review/triage`, body),
   resumeWorkflowRun: (id: string, body: { answer?: unknown; resume_token?: string; always_allow?: boolean }) =>
     post<{ ok?: boolean; approved?: boolean; node_id?: string; resumed?: boolean }>(`/api/workflows/runs/${encodeURIComponent(id)}/resume`, body),
-  rewindWorkflowRun: (id: string, body: { node_id: string; redo_effects?: boolean; force?: boolean }) =>
+  rewindWorkflowRun: (id: string, body: { node_id: string; redo_effects?: boolean; force?: boolean; confirm_cascade?: boolean }) =>
     post<{ ok?: boolean; preview: WorkflowCascadePreview }>(`/api/workflows/runs/${encodeURIComponent(id)}/rewind`, body),
-  workflowRunFrom: (id: string, body: { node_id: string }) =>
+  workflowRunFrom: (id: string, body: { node_id: string; confirm_cascade?: boolean }) =>
     post<{ ok?: boolean; preview: WorkflowCascadePreview }>(`/api/workflows/runs/${encodeURIComponent(id)}/run-from`, body),
   forkWorkflowRun: (id: string, body?: { checkpoint_id?: string; note?: string }) =>
     post<{ child_run_id: string; fork_axis: string; shared_axes: string[]; isolation_notes: string[] }>(

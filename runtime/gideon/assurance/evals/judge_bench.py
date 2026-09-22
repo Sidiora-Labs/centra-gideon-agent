@@ -152,7 +152,7 @@ def use_case_for_tier(tier: str) -> str:
     the axes a template's `model_tier` actually selects rather than a parallel table that
     would drift the first time the engine's changed.
     """
-    from gideon.automation.workflows.engine import DEFAULT_MODEL_TIERS
+    from gideon.automation.workflows.engine_support import DEFAULT_MODEL_TIERS
 
     table = dict(DEFAULT_MODEL_TIERS)
     if tier not in table:
@@ -166,7 +166,7 @@ def model_ref_for_tier(tier: str) -> str:
     """The concrete ``"Provider:model"`` a tier resolves to today, or ``""`` when nothing
     is bound. This is the ref the Models panel binds, so the recommendation names the
     exact string a user clicks rather than an intent they must translate."""
-    from gideon.automation.workflows.engine import resolve_axis_model
+    from gideon.automation.workflows.engine_support import resolve_axis_model
 
     return resolve_axis_model(use_case_for_tier(tier))
 

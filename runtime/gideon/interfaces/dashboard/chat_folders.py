@@ -66,13 +66,18 @@ async def _generate_folder_icon(state: ConsoleState, folder: dict) -> None:
 
     text = ""
     async with _folder_icon_lock:
-        client, _is_new, _resumed = await state.sessions.get_or_create(BACKGROUND_KEY)
+        acquired = False
         try:
+            client, _is_new, _resumed = await state.sessions.get_or_create(
+                BACKGROUND_KEY
+            )
+            acquired = True
             text = await asyncio.wait_for(_stream(client), timeout=30)
         except Exception:  # noqa: BLE001 — best-effort background task
             text = ""
         finally:
-            state.sessions.release(BACKGROUND_KEY)
+            if acquired:
+                state.sessions.release(BACKGROUND_KEY)
     icon = text.strip()
     icon, _ = redact_exfiltration_urls(icon)
     icon, _ = redact_credentials(icon)

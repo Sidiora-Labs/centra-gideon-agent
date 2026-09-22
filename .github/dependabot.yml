@@ -45,6 +45,11 @@ updates:
       - dependency-name: isort
         versions: [">=9"]
 
+      # `croniter>=2.0,<3`: 3.x needs a scheduler compatibility migration. Keep
+      # safe 2.x updates flowing while the runtime's cron behavior is preserved.
+      - dependency-name: croniter
+        versions: [">=3"]
+
                                                                                 
                                                                              
                                                                            

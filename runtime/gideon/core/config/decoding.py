@@ -872,20 +872,10 @@ RECORDS = {
         "WorkflowsConfig",
         {
             "enabled": Value(("workflows", "enabled"), True, bool),
-            "max_active_runs": Value(
-                ("workflows", "max_active_runs"),
-                10,
-                lambda value: definitions._safe_int(value, 10),
-            ),
             "self_schedule_max_outstanding": Value(
                 ("workflows", "self_schedule_max_outstanding"),
                 20,
                 lambda value: definitions._safe_int(value, 20),
-            ),
-            "max_concurrent_nodes": Value(
-                ("workflows", "max_concurrent_nodes"),
-                6,
-                lambda value: definitions._safe_int(value, 6),
             ),
             "default_node_timeout_total_secs": Value(
                 ("workflows", "default_node_timeout_total_secs"),
@@ -896,21 +886,6 @@ RECORDS = {
                 ("workflows", "default_node_timeout_stall_secs"),
                 300,
                 lambda value: definitions._safe_int(value, 300),
-            ),
-            "retention_per_def": Value(
-                ("workflows", "retention_per_def"),
-                100,
-                lambda value: definitions._safe_int(value, 100),
-            ),
-            "max_concurrent_llm_nodes": Value(
-                ("workflows", "max_concurrent_llm_nodes"),
-                4,
-                lambda value: definitions._safe_int(value, 4),
-            ),
-            "max_concurrent_io_nodes": Value(
-                ("workflows", "max_concurrent_io_nodes"),
-                2,
-                lambda value: definitions._safe_int(value, 2),
             ),
             "model_tier_reasoning": Value(
                 ("workflows", "model_tier_reasoning"),

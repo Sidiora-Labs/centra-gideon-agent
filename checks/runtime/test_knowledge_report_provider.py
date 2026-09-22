@@ -526,6 +526,39 @@ def test_the_finding_is_written_with_the_finding_kind(
     assert cfg["tags"] == ["perf"]
 
 
+def test_a_persisted_finding_emits_its_registered_notification(
+    home, reports, provider, ctx, model, persist, monkeypatch
+):
+    from gideon.integrations.action_providers import services
+    from gideon.workspace import notification_kinds
+
+    class State:
+        def __init__(self):
+            self.notes: list[tuple[str, str, str, dict]] = []
+
+        def notify(self, kind, title, body, *, meta):
+            self.notes.append((kind, title, body, meta))
+
+    state = State()
+    monkeypatch.setattr(
+        services, "_services", services.ActionServices(state, lambda coroutine: None)
+    )
+    seed(ctx, title="Latency regressed", tags=["perf"])
+    defn_for(reports)
+
+    result = run(provider.execute({"report_id": "rep-1"}, ctx))
+
+    assert result.success, result.error
+    assert state.notes == [
+        (
+            notification_kinds.RESEARCH_FINDING,
+            "Weekly perf",
+            "a finding [1]",
+            {"report_id": "rep-1", "knowledge_item": "itm-new"},
+        )
+    ]
+
+
 def test_the_write_goes_through_the_persist_provider(
     home, reports, provider, ctx, model
 ):

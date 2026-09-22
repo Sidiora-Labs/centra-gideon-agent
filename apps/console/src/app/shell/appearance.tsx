@@ -52,6 +52,10 @@ function applyAppearance(state: AppearanceState, mode: 'dark' | 'light', mobile:
   properties.set('zoom', String((state.scalars['--ui-zoom'] ?? 100) / 100))
   properties.set('font-size', `${state.scalars['--font-scale'] ?? 100}%`)
   properties.set('--content-width', mobile ? '100%' : WIDTH_PRESETS[state.widthPreset])
+  properties.set('--modal-width', mobile ? '100%' : 'calc(var(--content-width) + 160px)')
+  properties.set('--side-panel-width', mobile ? '100%' : 'calc(var(--content-width) + 200px)')
+  properties.set('--snip-overlay-width', mobile ? '100%' : 'calc(var(--content-width) + 320px)')
+  properties.set('--loop-cockpit-width', mobile ? '100%' : 'calc(var(--content-width) + 340px)')
   const font = state.selects['--font-family']
   if (font) properties.set('--font-sans', FONTS[font] ?? FONTS['dm-sans'])
   else root.style.removeProperty('--font-sans')

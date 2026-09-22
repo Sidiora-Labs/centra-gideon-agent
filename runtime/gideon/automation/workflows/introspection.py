@@ -79,7 +79,8 @@ class RunStats:
     """
 
     run_id: str
-    tokens: int = 0
+    tokens: int | None = 0
+    tokens_recorded: bool = True
     cached_tokens: int = 0
     cost_usd: float = 0.0
     priced: bool = True
@@ -112,6 +113,7 @@ class RunStats:
         return {
             "run_id": self.run_id,
             "tokens": self.tokens,
+            "tokens_recorded": self.tokens_recorded,
             "cached_tokens": self.cached_tokens,
             "cost_usd": round(self.cost_usd, 6),
             "priced": self.priced,
@@ -159,7 +161,14 @@ def run_stats(run_id: str, events: list[dict[str, Any]]) -> RunStats:
             last_ts = ts if last_ts is None else max(last_ts, ts)
         if kind == "step_completed":
             stats.steps_completed += 1
-            stats.tokens += int(event.get("tokens", 0) or 0)
+            if stats.tokens is not None:
+                recorded_tokens = event.get("tokens")
+                stats.tokens = (
+                    stats.tokens + int(recorded_tokens or 0)
+                    if recorded_tokens is not None
+                    else None
+                )
+                stats.tokens_recorded = stats.tokens is not None
             stats.cost_usd += float(event.get("cost_usd", 0.0) or 0.0)
             if event.get("cost_usd") is None:
                 stats.priced = False

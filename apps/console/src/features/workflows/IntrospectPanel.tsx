@@ -7,6 +7,7 @@ import { InlineError } from '../../shared/ui/InlineError'
 import { api, type WorkflowIntrospection, type WorkflowTimelineRow } from '../../shared/data/api'
 import { fmtElapsed } from './workflowMeta'
 import { runCostStat, runCostText, templateCostStat } from '../../shared/data/runCost'
+import { UNRECORDED_LABEL, runTokensStat } from '../../shared/data/unrecorded'
 
 export function IntrospectPanel({ runId, onClose }: { runId: string; onClose: () => void }) {
   const [data, setData] = useState<WorkflowIntrospection | null>(null)
@@ -80,7 +81,7 @@ export function IntrospectPanel({ runId, onClose }: { runId: string; onClose: ()
                   {
 }
                   <Stat label="Cost (est.)" value={runCostStat(data.stats.cost_usd, data.stats.priced)} />
-                  <Stat label="Tokens" value={data.stats.tokens.toLocaleString()} />
+                  <Stat label="Tokens" value={runTokensStat(data.stats.tokens, data.stats.tokens_recorded)} />
                   <Stat label="Duration" value={fmtElapsed(data.stats.duration_secs)} />
                   <Stat label="To first output" value={`${Math.round(data.stats.first_byte_ms)} ms`} />
                   <Stat label="Steps done" value={String(data.stats.steps_completed)} />
@@ -88,6 +89,12 @@ export function IntrospectPanel({ runId, onClose }: { runId: string; onClose: ()
                   <Stat label="Cache hits" value={`${Math.round(data.stats.cache_hit_rate * 100)}%`} />
                   <Stat label="Models" value={data.stats.models.join(', ') || 'none recorded'} />
                 </dl>
+                {!data.stats.tokens_recorded && (
+                  <p data-type="caption" className="text-on-surface-low">
+                    One or more completed steps did not record token usage, so this run&apos;s token total is{' '}
+                    <span className="text-on-surface-var">{UNRECORDED_LABEL}</span> rather than zero.
+                  </p>
+                )}
               </section>
 
               {

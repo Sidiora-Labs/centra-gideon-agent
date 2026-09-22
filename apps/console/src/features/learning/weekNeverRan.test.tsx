@@ -13,6 +13,7 @@ const week = (over: Partial<StagingWeek> = {}): StagingWeek => ({
   error_days: [],
   produced_total: 0,
   cost_usd: 0,
+  first_pass_day: null,
   ...over,
 })
 
@@ -46,34 +47,36 @@ vi.mock('../../shared/data/api', async (importOriginal) => {
   }
 })
 
-describe('the silent-days chip waits for a first run', () => {
+describe('the silent-days chip uses the server classification', () => {
   beforeEach(() => {
     invalidateKeys('', true)
     sessionStorage.clear()
     vi.clearAllMocks()
   })
 
-  it('renders never-ran as the quiet zero-state, not as an amber warning', async () => {
-    learningStagingWeek.mockResolvedValue(week({ has_ever_run: false }))
-    render(<LearningPage />)
-
-    expect(await screen.findByText(/no capture pass has run yet/)).toBeTruthy()
-    expect(screen.queryByText(/7 silent/)).toBeNull()
-  })
-
-  it('keeps the chip for ran-then-died — silent days AFTER a first run are the signal', async () => {
-    learningStagingWeek.mockResolvedValue(week({ has_ever_run: true }))
-    render(<LearningPage />)
-
-    expect(await screen.findByText(/7 silent/)).toBeTruthy()
-    expect(screen.queryByText(/no capture pass has run yet/)).toBeNull()
-  })
-
-  it('defaults a MISSING field to showing the chip, so a stale payload cannot calm a real gap', async () => {
+  it('renders the server-classified silent days even without a first pass', async () => {
     learningStagingWeek.mockResolvedValue(week())
     render(<LearningPage />)
 
+    expect(await screen.findByText('Capture, last 7 days')).toBeTruthy()
+    expect(screen.getByText(/7 silent/)).toBeTruthy()
+  })
+
+  it('keeps the chip for ran-then-died — silent days after a first run are the signal', async () => {
+    learningStagingWeek.mockResolvedValue(week({ first_pass_day: '2026-08-01' }))
+    render(<LearningPage />)
+
     expect(await screen.findByText(/7 silent/)).toBeTruthy()
     expect(screen.queryByText(/no capture pass has run yet/)).toBeNull()
+  })
+
+  it('keeps every server-classified silent day', async () => {
+    learningStagingWeek.mockResolvedValue(week({
+      first_pass_day: '2026-09-03',
+      silent_days: ['2026-08-29', '2026-09-02', '2026-09-03', '2026-09-04'],
+    }))
+    render(<LearningPage />)
+
+    expect(await screen.findByText(/4 silent/)).toBeTruthy()
   })
 })

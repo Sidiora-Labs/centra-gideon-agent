@@ -40,7 +40,7 @@ def _sel():
 
 
 def _skills_index() -> list[dict]:
-    """The surfaced skills index (key + description), best-effort."""
+    """The active skill index used to score routed context, best-effort."""
     try:
         from gideon.extensions.skills.loader import ProcedureLibrary
 

@@ -85,6 +85,12 @@ async def _post(body: object) -> tuple[int, dict]:
     return resp.status, json.loads(resp.text or "{}")
 
 
+async def _delete() -> tuple[int, dict]:
+    req = make_mocked_request("DELETE", "/api/legibility/discover/dismiss")
+    resp = await handler.api_discover_dismiss(req)
+    return resp.status, json.loads(resp.text or "{}")
+
+
 @pytest.mark.parametrize("junk", JUNK)
 def test_an_id_outside_the_catalog_is_not_persisted(junk: str, home: Path):
     """🔑 The defect itself, at the layer that owns the write."""
@@ -132,6 +138,17 @@ async def test_a_real_tip_is_still_dismissed(home: Path):
     assert status == 200
     assert body == {"ok": True, "dismissed": ["chat"]}
     assert _stored(home) == ["chat"]
+
+
+@pytest.mark.asyncio
+async def test_delete_clears_all_dismissed_tips(home: Path):
+    dc.dismiss("chat")
+    dc.dismiss("tasks")
+
+    status, body = await _delete()
+
+    assert (status, body) == (200, {"ok": True, "dismissed": []})
+    assert _stored(home) == []
 
 
 @pytest.mark.asyncio

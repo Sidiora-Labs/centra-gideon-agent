@@ -40,6 +40,7 @@ describe('token-lint rule parity (TS ↔ packaged JSON)', () => {
       ["  const c = '#1a2b3c'", ['hex']],
       ['  <div style={{ fontSize: 13px }}>', ['px']],
       ["  <div style={{ maxWidth: 'calc(var(--w) + 160px)' }}>", []],
+      ["  <div style={{ maxWidth: 'calc(var(--content-width) + 160px)' }}>", ['px']],
       ['  <div style={{ gridTemplateColumns: minmax(0, 120px) }}>', []],
       ['  <div className="bg-surface-high text-on-surface">', []],
       ["  <div style={{ color: '#fff', padding: 4px }}>", ['hex', 'px']],

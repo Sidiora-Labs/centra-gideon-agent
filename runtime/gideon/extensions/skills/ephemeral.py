@@ -24,6 +24,7 @@ from pathlib import Path
 
 from gideon.core.atomic_write import atomic_write
 from gideon.extensions.skills.loader import (
+    TAUGHT_SKILL_SOURCE_VALUE,
     ProcedureLibrary,
     agent_skills_dir,
     skills_dir,
@@ -186,7 +187,7 @@ def _skill_markdown(title: str, body: str, slug: str) -> str:
     """A clean SKILL.md for a promoted skill. Description = the title; the body is
     the taught procedure. Marked ``source: taught`` to distinguish from ``auto``."""
     desc = " ".join(title.split())[:200].replace("\n", " ")
-    return f"---\nname: {slug}\ndescription: {desc}\nsource: taught\n---\n\n{body.strip()}\n"
+    return f"---\nname: {slug}\ndescription: {desc}\nsource: {TAUGHT_SKILL_SOURCE_VALUE}\n---\n\n{body.strip()}\n"
 
 
 class PromotionError(Exception):

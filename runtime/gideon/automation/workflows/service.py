@@ -246,6 +246,27 @@ async def get_def(name: str) -> dict[str, Any]:
     )
 
 
+async def extract_inputs(
+    name: str,
+    candidates: Any,
+    *,
+    declined: list[str] | tuple[str, ...] = (),
+) -> dict[str, Any]:
+    """Extract launch inputs for a definition from eligible conversation values."""
+    definition = await _raw_def(name)
+    if definition is None:
+        return _service_failure(
+            "WF_DEF_NOT_FOUND", f"no workflow definition named {name!r}"
+        )
+    spec = definition if isinstance(definition, dict) else definition.to_dict()
+    from gideon.automation.workflows import contracts
+
+    return _ok(
+        name=name,
+        **contracts.extract_inputs(spec, candidates, declined=declined).to_dict(),
+    )
+
+
 def _default_eligibility(name: str) -> dict[str, Any]:
     """R6a: may this template become its kind's default? (LOOPS-EVOLUTION R6 criterion 1).
 
@@ -1974,6 +1995,7 @@ def _reentry(
     supervisor: Any = None,
     redo_effects: bool = False,
     force: bool = False,
+    confirm_cascade: bool = False,
 ) -> dict[str, Any]:
     if store.get(run_id) is None:
         return _run_not_found(run_id)
@@ -1986,7 +2008,7 @@ def _reentry(
     return controller.submit_mutation(
         [{"op": op, "node_id": node_id, "redo_effects": redo_effects, "force": force}],
         actor="chat",
-        confirm=True,
+        confirm=confirm_cascade,
     )
 
 

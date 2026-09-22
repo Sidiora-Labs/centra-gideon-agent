@@ -45,7 +45,7 @@ this as an invariant, not a coincidence.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 logger = logging.getLogger(__name__)
@@ -78,6 +78,8 @@ class NotificationKind:
     default_severity: int = SEV_INFO
     attention: bool = False
     verifiable: bool = False
+    production_owner: str = ""
+    configurable: bool = True
 
     @property
     def key(self) -> str:
@@ -99,6 +101,14 @@ def register(k: NotificationKind) -> None:
         raise ValueError(
             f"{k.key}: severity must be 1, 2 or 3 (got {k.default_severity})"
         )
+    if (
+        k.configurable
+        and not k.production_owner.strip()
+        and k.source.startswith("app:")
+    ):
+        k = replace(k, production_owner=k.source)
+    if k.configurable and not k.production_owner.strip():
+        raise ValueError(f"{k.key}: configurable kinds require a production owner")
     _REGISTRY[ident] = k
 
 
@@ -119,6 +129,15 @@ def all_kinds() -> list[NotificationKind]:
     return sorted(_REGISTRY.values(), key=lambda k: (k.source, k.kind))
 
 
+def configurable_kinds() -> list[NotificationKind]:
+    """Registered kinds backed by a declared production owner.
+
+    Resolution-only entries remain in the registry so historical notification rows keep
+    their policy and display label, but do not become settings that imply a live producer.
+    """
+    return [k for k in all_kinds() if k.configurable]
+
+
 def resolve_kind(source: str, kind: str) -> NotificationKind:
     """The registered kind, or a synthetic generic one (fail-open + warn)."""
     found = _REGISTRY.get((source, kind))
@@ -137,6 +156,7 @@ def resolve_kind(source: str, kind: str) -> NotificationKind:
         label=f"{source}/{kind}" if source or kind else "Notification",
         default_mode="immediate",
         default_severity=SEV_INFO,
+        configurable=False,
     )
 
 
@@ -173,16 +193,83 @@ def kind_for_legacy(kind: str) -> NotificationKind:
     return resolve_kind(*ident)
 
 
+_PRODUCTION_OWNERS: dict[tuple[str, str], str | None] = {
+    ("cron", "result"): "gideon.automation.triggers",
+    ("cron", "failed"): "gideon.automation.triggers",
+    ("heartbeat", "status"): "gideon.automation.heartbeat",
+    ("loop", "complete"): "gideon.automation.loop.watchdog",
+    ("loop", "failed"): "gideon.automation.loop.watchdog",
+    ("loop", "stalled"): None,
+    ("loop", "needs_input"): "gideon.automation.loop.watchdog",
+    ("loop", "progress"): "gideon.automation.loop.watchdog",
+    ("inbox", "alert"): "gideon.integrations.inbox",
+    ("agent", "message"): "gideon.interfaces.dashboard.handlers.messaging",
+    ("agent", "subagent"): "gideon.engine.delegation_host",
+    ("hook", "fired"): "gideon.interfaces.dashboard.handlers.hooks",
+    ("system", "warning"): "gideon.integrations.action_providers.notify_provider",
+    ("system", "error"): "gideon.integrations.action_providers.notify_provider",
+    ("system", "info"): "gideon.integrations.action_providers.notify_provider",
+    ("system", "success"): "gideon.integrations.action_providers.notify_provider",
+    ("system", "route_drift"): "gideon.extensions.apps",
+    ("system", "session"): None,
+    ("learning", "retire"): "gideon.cognition.feedback",
+    ("skills", "proposal"): "gideon.cognition.learning",
+    ("guardrails", "autonomy_revocation"): "gideon.security.guardrails",
+    ("learning", "proposal"): "gideon.cognition.learning",
+    ("planning", "proposal"): "gideon.cognition.planning.scratchpad",
+    ("system", "agent_request"): "gideon.automation.workflows",
+    ("system", "digest"): "gideon.workspace.notification_rules",
+    (
+        "system",
+        "usage_recap",
+    ): "gideon.integrations.action_providers.usage_recap_provider",
+    ("apps", "update"): "gideon.extensions.apps",
+    (
+        "knowledge",
+        "research_finding",
+    ): "gideon.integrations.action_providers.knowledge_report_provider",
+    ("learning", "report"): "gideon.cognition.learning_report",
+    ("approval", "requested"): "gideon.interfaces.dashboard.state",
+    ("user", "note"): "gideon.interfaces.dashboard.handlers_inbox",
+    (GENERIC_SOURCE, GENERIC_KIND): "gideon.interfaces.dashboard.state",
+}
+
+
+def _built_in(
+    source: str,
+    kind: str,
+    label: str,
+    default_mode: Mode = "immediate",
+    default_severity: int = SEV_INFO,
+    **kwargs: object,
+) -> NotificationKind:
+    """Build a registry entry only after declaring its production owner."""
+    identity = (source, kind)
+    if identity not in _PRODUCTION_OWNERS:
+        raise RuntimeError(
+            f"notification kind {source}/{kind} has no owner declaration"
+        )
+    owner = _PRODUCTION_OWNERS[identity]
+    return NotificationKind(
+        source,
+        kind,
+        label,
+        default_mode,
+        default_severity,
+        production_owner=owner or "",
+        configurable=owner is not None,
+        **kwargs,
+    )
+
+
 _KINDS: tuple[NotificationKind, ...] = (
-    NotificationKind("cron", "result", "Scheduled job result", "immediate", SEV_INFO),
-    NotificationKind("cron", "failed", "Scheduled job failed", "immediate", SEV_ERROR),
-    NotificationKind("heartbeat", "status", "Heartbeat", "immediate", SEV_INFO),
-    NotificationKind("loop", "complete", "Loop complete", "immediate", SEV_INFO),
-    NotificationKind("loop", "failed", "Loop failed", "immediate", SEV_ERROR),
-    NotificationKind(
-        "loop", "stalled", "Loop stalled or blocked", "immediate", SEV_WARNING
-    ),
-    NotificationKind(
+    _built_in("cron", "result", "Scheduled job result", "immediate", SEV_INFO),
+    _built_in("cron", "failed", "Scheduled job failed", "immediate", SEV_ERROR),
+    _built_in("heartbeat", "status", "Heartbeat", "immediate", SEV_INFO),
+    _built_in("loop", "complete", "Loop complete", "immediate", SEV_INFO),
+    _built_in("loop", "failed", "Loop failed", "immediate", SEV_ERROR),
+    _built_in("loop", "stalled", "Loop stalled or blocked", "immediate", SEV_WARNING),
+    _built_in(
         "loop",
         "needs_input",
         "Loop needs your input",
@@ -190,21 +277,19 @@ _KINDS: tuple[NotificationKind, ...] = (
         SEV_WARNING,
         attention=True,
     ),
-    NotificationKind("loop", "progress", "Loop progress", "immediate", SEV_INFO),
-    NotificationKind("inbox", "alert", "Inbox alert", "immediate", SEV_WARNING),
-    NotificationKind("agent", "message", "Agent message", "immediate", SEV_INFO),
-    NotificationKind("agent", "subagent", "Subagent update", "immediate", SEV_INFO),
-    NotificationKind("hook", "fired", "Trigger fired", "immediate", SEV_INFO),
-    NotificationKind("system", "warning", "System warning", "immediate", SEV_WARNING),
-    NotificationKind("system", "error", "System error", "immediate", SEV_ERROR),
-    NotificationKind("system", "info", "Notice", "immediate", SEV_INFO),
-    NotificationKind("system", "success", "Success", "immediate", SEV_INFO),
-    NotificationKind("system", "route_drift", "App route drift", "immediate", SEV_INFO),
-    NotificationKind("system", "session", "Session notice", "immediate", SEV_INFO),
-    NotificationKind(
-        "learning", "retire", "Retired a learned signal", "immediate", SEV_INFO
-    ),
-    NotificationKind(
+    _built_in("loop", "progress", "Loop progress", "immediate", SEV_INFO),
+    _built_in("inbox", "alert", "Inbox alert", "immediate", SEV_WARNING),
+    _built_in("agent", "message", "Agent message", "immediate", SEV_INFO),
+    _built_in("agent", "subagent", "Subagent update", "immediate", SEV_INFO),
+    _built_in("hook", "fired", "Trigger fired", "immediate", SEV_INFO),
+    _built_in("system", "warning", "System warning", "immediate", SEV_WARNING),
+    _built_in("system", "error", "System error", "immediate", SEV_ERROR),
+    _built_in("system", "info", "Notice", "immediate", SEV_INFO),
+    _built_in("system", "success", "Success", "immediate", SEV_INFO),
+    _built_in("system", "route_drift", "App route drift", "immediate", SEV_INFO),
+    _built_in("system", "session", "Session notice", "immediate", SEV_INFO),
+    _built_in("learning", "retire", "Retired a learned signal", "immediate", SEV_INFO),
+    _built_in(
         "skills",
         "proposal",
         "Skill proposal",
@@ -213,7 +298,7 @@ _KINDS: tuple[NotificationKind, ...] = (
         attention=True,
         verifiable=True,
     ),
-    NotificationKind(
+    _built_in(
         "guardrails",
         "autonomy_revocation",
         "Earned autonomy revoked",
@@ -221,7 +306,7 @@ _KINDS: tuple[NotificationKind, ...] = (
         SEV_WARNING,
         attention=True,
     ),
-    NotificationKind(
+    _built_in(
         "learning",
         "proposal",
         "Learning proposal",
@@ -230,7 +315,7 @@ _KINDS: tuple[NotificationKind, ...] = (
         attention=True,
         verifiable=True,
     ),
-    NotificationKind(
+    _built_in(
         "planning",
         "proposal",
         "Planning proposal",
@@ -239,7 +324,7 @@ _KINDS: tuple[NotificationKind, ...] = (
         attention=True,
         verifiable=True,
     ),
-    NotificationKind(
+    _built_in(
         "system",
         "agent_request",
         "Agent request",
@@ -248,16 +333,14 @@ _KINDS: tuple[NotificationKind, ...] = (
         attention=True,
         verifiable=True,
     ),
-    NotificationKind(
+    _built_in(
         "system", "digest", "Daily digest", "immediate", SEV_INFO, attention=True
     ),
-    NotificationKind(
-        "system", "usage_recap", "Monthly usage recap", "digest", SEV_INFO
-    ),
-    NotificationKind(
+    _built_in("system", "usage_recap", "Monthly usage recap", "digest", SEV_INFO),
+    _built_in(
         "apps", "update", "App update available", "immediate", SEV_INFO, attention=True
     ),
-    NotificationKind(
+    _built_in(
         "knowledge",
         "research_finding",
         "Research report finding",
@@ -265,14 +348,12 @@ _KINDS: tuple[NotificationKind, ...] = (
         SEV_INFO,
         attention=True,
     ),
-    NotificationKind(
+    _built_in(
         "learning", "report", "Identity report", "immediate", SEV_INFO, attention=True
     ),
     # timeout (`ConsoleState._approval_futures`), not a durable inbox row. Claiming
-    NotificationKind(
-        "approval", "requested", "Approval needed", "immediate", SEV_WARNING
-    ),
-    NotificationKind(
+    _built_in("approval", "requested", "Approval needed", "immediate", SEV_WARNING),
+    _built_in(
         "user",
         "note",
         "Note you captured",
@@ -281,9 +362,7 @@ _KINDS: tuple[NotificationKind, ...] = (
         attention=True,
         verifiable=False,
     ),
-    NotificationKind(
-        GENERIC_SOURCE, GENERIC_KIND, "Uncategorized", "immediate", SEV_INFO
-    ),
+    _built_in(GENERIC_SOURCE, GENERIC_KIND, "Uncategorized", "immediate", SEV_INFO),
 )
 
 _LEGACY_FLAT: dict[str, tuple[str, str]] = {

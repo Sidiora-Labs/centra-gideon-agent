@@ -702,7 +702,9 @@ async def api_models_active_set(request: web.Request) -> web.Response:
             _known_provider_names,
             split_ref,
         )
+        from gideon.integrations.llm.registry import sync_entries_from_config
 
+        sync_entries_from_config()
         known = _known_provider_names()
         if known is not None:
             for m in models:

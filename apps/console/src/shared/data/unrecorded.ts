@@ -20,3 +20,9 @@ export function provenanceRecorded(
 export function tokensUnrecorded(row: { tokens_recorded?: boolean }): boolean {
   return row.tokens_recorded === false
 }
+
+export function runTokensStat(tokens: number | null, tokensRecorded: boolean): string {
+  return tokensRecorded && typeof tokens === 'number'
+    ? tokens.toLocaleString()
+    : UNRECORDED_LABEL
+}

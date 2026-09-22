@@ -32,6 +32,7 @@ from gideon.automation.workflows.effects import (
     redo_blocked,
     run_teardown,
 )
+from gideon.automation.workflows.engine import dispatcher_commits_effects
 from gideon.automation.workflows.journal import EFFECT
 from gideon.automation.workflows.models import (
     InstanceState,
@@ -101,6 +102,16 @@ def _action_spec(config: dict | None = None) -> dict:
 
 
 class TestIdentity:
+    def test_effect_membership_comes_from_the_selected_dispatcher(self) -> None:
+        from gideon.automation.workflows.models import Node
+
+        action = Node.from_dict(_action_spec()["root"]["children"][0])
+        transform = Node.from_dict(
+            {"kind": "transform", "id": "pure", "config": {"expr": 1}}
+        )
+        assert dispatcher_commits_effects(action)
+        assert not dispatcher_commits_effects(transform)
+
     def test_key_is_deterministic_and_epoch_sensitive(self) -> None:
         a = idempotency_key("r1", "root.children[0]", 0)
         assert a == idempotency_key("r1", "root.children[0]", 0)

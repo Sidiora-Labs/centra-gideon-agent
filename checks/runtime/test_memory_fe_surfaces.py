@@ -114,6 +114,23 @@ def test_only_the_two_real_kinds_resolve(svc, store):
     assert svc.graph_record_links("sem:") == []
 
 
+@pytest.mark.asyncio
+async def test_backlinks_rejects_a_missing_entity_parent(svc, monkeypatch):
+    from aiohttp.test_utils import make_mocked_request
+
+    from gideon.interfaces.dashboard.handlers import memory as handlers
+
+    monkeypatch.setattr(handlers, "_get_service", lambda _state: svc)
+    request = make_mocked_request(
+        "GET",
+        "/api/memory/entities/missing/backlinks",
+        match_info={"entity_id": "missing"},
+    )
+    request.app["state"] = MagicMock()
+    response = await handlers.api_memory_entity_backlinks(request)
+    assert response.status == 404
+
+
 def test_slots_list_includes_unwritten_builtins(svc):
     """Every built-in is listed, materialized or not.
 

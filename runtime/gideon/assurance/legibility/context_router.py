@@ -89,6 +89,7 @@ class RoutedContext:
     skills: list[dict] = field(default_factory=list)
     knowledge: list[dict] = field(default_factory=list)
     unloaded: list[str] = field(default_factory=list)
+    skill_overflow: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         """JSON form for the API / MCP tool. Knowledge carries id/title/summary
@@ -118,6 +119,7 @@ class RoutedContext:
                 }
                 for k in self.knowledge
             ],
+            "skill_overflow": self.skill_overflow,
             "unloaded": list(self.unloaded),
             "text": self.render(),
         }
@@ -204,6 +206,7 @@ def _unloaded_catalog(
     know_shown: int,
     know_capped: bool,
     skill_shown: int,
+    skill_overflow: int,
 ) -> list[str]:
     """One-liner notes of what exists but wasn't loaded here, each with the tool
     that pulls it. Honest about truncation (no silent caps) — a tier that hit its
@@ -227,9 +230,11 @@ def _unloaded_catalog(
         else f"Knowledge: {know_shown} pointer(s) shown{know_more} "
         "`GET /api/knowledge/items?q=…`."
     )
+    skill_more = f"; {skill_overflow} more available" if skill_overflow else ""
     notes.append(
-        f"Skills: {skill_shown} indexed here — load any with `skill_invoke(name)`, "
-        "or find one across the whole library with `skill_search(query)`."
+        f"Skills: {skill_shown} indexed here{skill_more} — load any with "
+        "`skill_invoke(name)`, or find one across the whole library with "
+        "`skill_search(query)`."
     )
     notes.append(
         "Everything else this instance can do (tasks, artifacts, UI docs, more) is in "
@@ -249,6 +254,7 @@ def assemble(
     knowledge: list[dict] | None = None,
     mem_capped: bool = False,
     know_capped: bool = False,
+    skill_overflow: int = 0,
 ) -> RoutedContext:
     """Pure assembler — build a :class:`RoutedContext` from already-fetched inputs.
 
@@ -272,6 +278,7 @@ def assemble(
         know_shown=len(knowledge),
         know_capped=know_capped,
         skill_shown=len(skills),
+        skill_overflow=skill_overflow,
     )
 
     return RoutedContext(
@@ -282,6 +289,7 @@ def assemble(
         skills=skills,
         knowledge=knowledge,
         unloaded=unloaded,
+        skill_overflow=skill_overflow,
     )
 
 
@@ -335,7 +343,21 @@ def route_context(
             knowledge = []
 
     idx = list(skills or [])
-    skill_capped = len(idx) > skill_limit
+    if idx:
+        try:
+            from gideon.extensions.skills.surfacing import search_skills
+
+            candidates = idx
+            ranked = search_skills(q, candidates, limit=len(candidates))
+            scored_keys = {row["key"] for row in ranked}
+            by_key = {row.get("key", ""): row for row in candidates}
+            idx = [by_key[row["key"]] for row in ranked]
+            idx.extend(
+                row for row in candidates if row.get("key", "") not in scored_keys
+            )
+        except Exception:
+            logger.debug("context_router: skill scoring failed", exc_info=True)
+    skill_overflow = max(0, len(idx) - skill_limit)
     idx = idx[:skill_limit]
 
     return assemble(
@@ -347,7 +369,8 @@ def route_context(
         skills=idx,
         knowledge=knowledge,
         mem_capped=len(memories) >= mem_limit,
-        know_capped=len(knowledge) >= know_limit or skill_capped,
+        know_capped=len(knowledge) >= know_limit,
+        skill_overflow=skill_overflow,
     )
 
 

@@ -305,6 +305,10 @@ def _list_tools() -> list[dict[str, Any]]:
                     "run_id": run_id,
                     "node_id": {"type": "string"},
                     "redo_effects": {"type": "boolean"},
+                    "confirm_cascade": {
+                        "type": "boolean",
+                        "description": "Confirm the shown cascade when it re-runs completed work.",
+                    },
                     "force": {
                         "type": "boolean",
                         "description": "Re-run even where inputs are unchanged (skips cache).",
@@ -322,7 +326,14 @@ def _list_tools() -> list[dict[str, Any]]:
             ),
             "inputSchema": {
                 "type": "object",
-                "properties": {"run_id": run_id, "node_id": {"type": "string"}},
+                "properties": {
+                    "run_id": run_id,
+                    "node_id": {"type": "string"},
+                    "confirm_cascade": {
+                        "type": "boolean",
+                        "description": "Confirm the shown cascade when it re-runs completed work.",
+                    },
+                },
                 "required": ["run_id", "node_id"],
             },
         },
@@ -667,13 +678,17 @@ def _dispatch(name: str, args: dict[str, Any]) -> str:
                 supervisor=_supervisor(),
                 redo_effects=bool(args.get("redo_effects")),
                 force=bool(args.get("force")),
+                confirm_cascade=bool(args.get("confirm_cascade")),
             )
         )
 
     if name == "workflow_run_from":
         return _fmt(
             service.run_from(
-                run_id, str(args.get("node_id", "") or ""), supervisor=_supervisor()
+                run_id,
+                str(args.get("node_id", "") or ""),
+                supervisor=_supervisor(),
+                confirm_cascade=bool(args.get("confirm_cascade")),
             )
         )
 
@@ -783,11 +798,17 @@ def _plan(args: dict[str, Any]) -> str:
         }[classified.rigor]
 
     match = _match_library(goal, classified)
+    routing = {
+        "intent": classified.to_dict(),
+        "match": (
+            match.to_dict() if match is not None else {"reason": "matcher unavailable"}
+        ),
+    }
     if match is not None and match.matched and _def_resolvable(match.primary):
         return _plan_from_template(
             goal,
             match.primary,
-            routing={"intent": classified.to_dict(), "match": match.to_dict()},
+            routing=routing,
             mined=mined,
             source_session_id=source_session_id,
         )
@@ -856,24 +877,25 @@ def _plan(args: dict[str, Any]) -> str:
         proposed = fast_spec["root"]
 
     proposed = _prepend_grounding_preamble(goal, proposed)
+    definition = {
+        "description": goal,
+        "inputs": {},
+        "metadata": {},
+        "root": proposed,
+    }
 
     body = {
         "ok": True,
         "planner": "grounded-v1" if grounded else "scaffold-v1",
         "goal": goal,
         "rigor": rigor,
-        "routing": {
-            "intent": classified.to_dict(),
-            "match": (
-                match.to_dict()
-                if match is not None
-                else {"reason": "matcher unavailable"}
-            ),
-        },
+        "routing": routing,
         "proposed_root": proposed,
         "rigor_note": rigor_mod.rigor_note(classified, requested=requested),
         **_mined_surface(mined, source_session_id),
         **({"grounding": grounded} if grounded else {}),
+        "preflight": _planner_preflight(definition),
+        **_review_surface(goal, definition, routing),
         **_grill_surface(
             goal, classified, {"root": proposed}, topics=_plan_topics(goal)
         ),
@@ -890,6 +912,13 @@ def _plan(args: dict[str, Any]) -> str:
         "manifest": {k: v for k, v in service.manifest().items() if k != "ok"},
     }
     return _fmt(body, summary=f"Draft plan for: {goal}")
+
+
+def _planner_preflight(definition: dict[str, Any]) -> dict[str, Any]:
+    """Run the run-start checker against the complete proposed definition."""
+    from gideon.automation.workflows.preflight import preflight as run_preflight
+
+    return run_preflight(definition).to_dict()
 
 
 def _freeze_authored_candidate(args: dict[str, Any]) -> None:
@@ -1643,6 +1672,7 @@ def _plan_from_template(
         ),
         **_contract_review(definition),
         **_eval_surface(template, definition),
+        "preflight": _planner_preflight(definition),
         **_review_surface(goal, definition, routing),
         **_autonomy_surface(definition),
         "proposed_root": definition.get("root"),

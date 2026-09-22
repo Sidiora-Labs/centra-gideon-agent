@@ -51,13 +51,11 @@ class NodeOutput:
     backend: str = ""
     text: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
-    vectors: list[float] | None = None
     segments: list[dict] = field(default_factory=list)
     artifacts: list[str] = field(default_factory=list)
     classification: str = ""
     success: bool = True
     error: str = ""
-    duration_ms: int = 0
     pooled: bool = True
     pool_rows: list[PoolRow] = field(default_factory=list)
 

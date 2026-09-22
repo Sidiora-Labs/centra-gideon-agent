@@ -105,6 +105,28 @@ def _spawn_run(args: argparse.Namespace, base: str) -> None:
             return
 
 
+def render_agent_table(agents: dict[str, AgentProfile], default_agent: str) -> str:
+    """Render the configured agent list with widths derived from its contents."""
+    headers = ("NAME", "PROVIDER_AGENT", "DEFAULT_DIR", "MEMORY_STORE")
+    rows = [
+        (
+            name + (" *" if name == default_agent else ""),
+            agent.provider_agent,
+            agent.default_dir,
+            agent.memory_store,
+        )
+        for name, agent in agents.items()
+    ]
+    widths = tuple(
+        max(len(header), *(len(row[index]) for row in rows)) if rows else len(header)
+        for index, header in enumerate(headers)
+    )
+    return "\n".join(
+        "  ".join(f"{value:<{width}}" for value, width in zip(row, widths, strict=True))
+        for row in (headers, *rows)
+    )
+
+
 def _handle_agent(args: argparse.Namespace) -> None:
     """Dispatch agent subcommands: list, create, update, delete."""
 
@@ -112,16 +134,7 @@ def _handle_agent(args: argparse.Namespace) -> None:
     cfg = AppConfig.load()
 
     if action == "list":
-        default = cfg.default_agent
-        print(
-            f"{'NAME':<20} {'PROVIDER_AGENT':<20} {'DEFAULT_DIR':<15} {'MEMORY_STORE':<15}"
-        )
-        for name, agent in cfg.agents.items():
-            marker = " *" if name == default else ""
-            print(
-                f"{name + marker:<20} {agent.provider_agent:<20} "
-                f"{agent.default_dir:<15} {agent.memory_store:<15}"
-            )
+        print(render_agent_table(cfg.agents, cfg.default_agent))
 
     elif action == "create":
         if args.name in cfg.agents:

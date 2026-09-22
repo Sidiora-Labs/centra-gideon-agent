@@ -287,7 +287,9 @@ async def test_real_process_echo_shutdown_and_pid_release(tmp_path, monkeypatch)
         transport.teardown()
     assert transport.pid is None
     for path in (tmp_path / "home").glob("*pids.txt"):
-        assert str(pid) not in path.read_text().splitlines()
+        assert all(
+            str(pid) not in entry.split(":") for entry in path.read_text().splitlines()
+        )
 
 
 @pytest.mark.asyncio

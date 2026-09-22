@@ -1064,6 +1064,22 @@ class TestConsolidationOffset:
         assert c._prefs_offset["k"] == _CONSOLIDATION_THRESHOLD
 
 
+class TestConsolidatorLlmSessionLease:
+    @pytest.mark.asyncio
+    async def test_call_llm_does_not_release_an_unacquired_background_session(self):
+        sessions = MagicMock()
+        sessions.get_or_create = AsyncMock(side_effect=RuntimeError("acquire failed"))
+        sessions.recycle_background = AsyncMock()
+        consolidator = HistoryConsolidator(
+            log=object(), memory=object(), sessions=sessions
+        )
+
+        assert await consolidator._call_llm("consolidate this") is None
+
+        sessions.release.assert_not_called()
+        sessions.recycle_background.assert_not_awaited()
+
+
 class TestExplicitConsolidationTriggers:
     """E11-P2: consolidate_now / consolidate_session always use the history path
     (include_history=True), respect the running guard, and clear it after."""

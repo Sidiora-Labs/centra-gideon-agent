@@ -27,7 +27,7 @@ export function Modal({ title, icon, onClose, children, layoutId }: {
       <motion.div className="absolute inset-0 bg-canvas/70 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
       <motion.div ref={trapRef} role="dialog" aria-modal="true" aria-labelledby={titleId} layoutId={layoutId}
         className="relative flex max-h-full w-full flex-col overflow-hidden rounded-2xl border border-outline-variant/50 bg-surface shadow-sheet"
-        style={{ maxWidth: 'calc(var(--content-width) + 160px)' }}
+        style={{ maxWidth: 'var(--modal-width)' }}
         initial={hidden} animate={resting} exit={hidden} transition={reduced ? spring.effects : physics.fluid}>
         <header className="flex shrink-0 items-center gap-m border-b border-outline-variant/40 bg-surface-high/40 px-l py-m">
           {icon && <span className="shrink-0 text-primary">{icon}</span>}

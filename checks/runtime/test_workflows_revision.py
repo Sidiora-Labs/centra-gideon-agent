@@ -578,3 +578,18 @@ def test_the_plan_tool_ships_the_review_surface():
     grammar = body.get("revision_grammar") or {}
     assert grammar.get("no_update_sentinel") == NO_UPDATE
     assert set(grammar.get("ops") or []) == {"replace", "add", "remove", "annotate"}
+    assert set(body.get("preflight") or []) == {"ok", "findings", "checked"}
+
+
+def test_the_scaffold_plan_ships_preflight_and_the_review_surface(monkeypatch):
+    from gideon.integrations import mcp_workflows
+
+    monkeypatch.setattr(mcp_workflows, "_match_library", lambda *_args: None)
+    monkeypatch.setattr(mcp_workflows, "_grounding_for", lambda *_args: None)
+    out = mcp_workflows._plan(
+        {"goal": "summarize the weekly release notes", "rigor": "minimal"}
+    )
+    body = json.loads(out[out.find("{") :])
+    assert set(body.get("preflight") or []) == {"ok", "findings", "checked"}
+    assert body["routing"]["intent"]
+    assert body["revision_grammar"]["no_update_sentinel"] == NO_UPDATE

@@ -84,7 +84,7 @@ def test_unsafe_path_rejected(skill_root):
     assert status == 400
 
 
-def test_unknown_skill_404(skill_root):
+def test_files_rejects_an_unknown_skill_parent(skill_root):
     status, body = _files("nonexistent")
     assert status == 404
 
@@ -228,3 +228,55 @@ def test_list_annotates_integrity(skill_root):
     skills = json.loads(resp.body.decode())
     greet = next(s for s in skills if s["name"] == "greet")
     assert greet["integrity"] == "unverified"
+
+
+def test_list_derives_closed_vocabulary_provenance(skill_root):
+    """The installed listing recognizes only the two declared creation origins."""
+    _make_skill(
+        skill_root,
+        "automatic",
+        {"SKILL.md": "\ufeff---\nname: automatic\nsource: auto\n---\n"},
+    )
+    _make_skill(
+        skill_root, "taught", {"SKILL.md": "---\nname: taught\nsource: taught\n---\n"}
+    )
+    _make_skill(
+        skill_root,
+        "imported",
+        {"SKILL.md": "---\nname: imported\nsource: marketplace\n---\n"},
+    )
+    req = make_mocked_request("GET", "/api/skills")
+    resp = asyncio.run(skills_h.api_skills_list(req))
+    rows = {row["name"]: row for row in json.loads(resp.body.decode())}
+    assert {
+        name: rows[name]["provenance"] for name in ("automatic", "taught", "imported")
+    } == {
+        "automatic": "auto",
+        "taught": "taught",
+        "imported": "",
+    }
+
+
+def test_list_derives_provenance_for_agent_local_skills(
+    skill_root, tmp_path, monkeypatch
+):
+    """The agent-local branch carries the same parsed creation origin."""
+    agent_root = tmp_path / "agent-skills"
+    _make_skill(
+        agent_root, "draft", {"SKILL.md": "---\nname: draft\nsource: taught\n---\n"}
+    )
+
+    class _Cfg:
+        agents = {}
+
+    monkeypatch.setattr(
+        "gideon.core.config.loader.AppConfig.load", staticmethod(lambda: _Cfg())
+    )
+    monkeypatch.setattr(
+        "gideon.extensions.skills.loader.agent_skills_dir", lambda _agent: agent_root
+    )
+    req = make_mocked_request("GET", "/api/skills")
+    resp = asyncio.run(skills_h.api_skills_list(req))
+    rows = json.loads(resp.body.decode())
+    agent_row = next(row for row in rows if row["source"] == "agent-local")
+    assert agent_row["provenance"] == "taught"

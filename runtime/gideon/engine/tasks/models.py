@@ -2,6 +2,7 @@
 
 import enum
 from dataclasses import asdict, dataclass, field, fields
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -367,6 +368,17 @@ def _as_dict_list(normalizer: Any, *, indexed: bool = False) -> Any:
     return normalize
 
 
+def _as_note_list(value: Any, *, strict: bool) -> list[dict]:
+    items = _as_item_list(value)
+    notes = [normalize_note(item) for item in items]
+    stamp = ""
+    for item, note in zip(items, notes):
+        if strict and not (isinstance(item, dict) and "timestamp" in item):
+            stamp = stamp or datetime.now(timezone.utc).isoformat()
+            note["timestamp"] = stamp
+    return notes
+
+
 def _as_open_dict_list(value: Any, *, strict: bool) -> list[dict]:
     rows = _as_item_list(value)
     result = []
@@ -444,9 +456,9 @@ TASK_FIELD_COERCERS: dict[str, Any] = {
     "order": _as_number,
     "exit_criteria": _as_dict_list(normalize_exit_criterion),
     "action_plan": _as_dict_list(normalize_action_plan_item, indexed=True),
-    "notes": _as_dict_list(normalize_note),
-    "research_notes": _as_dict_list(normalize_note),
-    "execution_notes": _as_dict_list(normalize_note),
+    "notes": _as_note_list,
+    "research_notes": _as_note_list,
+    "execution_notes": _as_note_list,
     "agent_instructions_template": _as_text,
     "blocked_reason_kind": _as_text,
     "workflow_binding": _as_binding,

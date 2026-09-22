@@ -1525,26 +1525,6 @@
         "sensitive": false,
         "type": "float"
       },
-      "workflows.max_active_runs": {
-        "default": 10,
-        "sensitive": false,
-        "type": "int"
-      },
-      "workflows.max_concurrent_io_nodes": {
-        "default": 2,
-        "sensitive": false,
-        "type": "int"
-      },
-      "workflows.max_concurrent_llm_nodes": {
-        "default": 4,
-        "sensitive": false,
-        "type": "int"
-      },
-      "workflows.max_concurrent_nodes": {
-        "default": 6,
-        "sensitive": false,
-        "type": "int"
-      },
       "workflows.max_materialized_per_foreach": {
         "default": 20,
         "sensitive": false,
@@ -1564,11 +1544,6 @@
         "default": "orchestration",
         "sensitive": false,
         "type": "str"
-      },
-      "workflows.retention_per_def": {
-        "default": 100,
-        "sensitive": false,
-        "type": "int"
       },
       "workflows.self_schedule_max_outstanding": {
         "default": 20,

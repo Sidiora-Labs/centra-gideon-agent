@@ -60,7 +60,7 @@ export function SidePanel({ title, icon, onClose, urlKey, storeKey = 'sidepanel-
         animate={reduced ? { opacity: 1 } : { clipPath: 'inset(0px 0px 0px 0px)' }}
         exit={reduced ? { opacity: 0 } : { clipPath: edge }} transition={reduced ? spring.effects : physics.fluid}>
         {header}
-        <div className="mx-auto flex min-h-0 w-full flex-1 flex-col" style={{ maxWidth: 'calc(var(--content-width) + 200px)' }}>{body}</div>
+        <div className="mx-auto flex min-h-0 w-full flex-1 flex-col" style={{ maxWidth: 'var(--side-panel-width)' }}>{body}</div>
       </motion.div>, document.body,
     )
   }

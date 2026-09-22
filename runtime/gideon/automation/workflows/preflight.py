@@ -119,6 +119,7 @@ class _AdmissionPlan:
         )
         for check, arguments in stages:
             globals()[check](*arguments)
+        self.result.findings.extend(provider_requirement_gap(self.spec))
         return self.result
 
 
@@ -234,7 +235,7 @@ class _ModelRequirements:
 
 
 def _check_models(spec: dict[str, Any], result: PreflightResult, probe: Any) -> None:
-    from gideon.automation.workflows.engine import DEFAULT_MODEL_TIERS
+    from gideon.automation.workflows.engine_support import DEFAULT_MODEL_TIERS
 
     root = _root_of(spec)
     if root is None:
@@ -287,6 +288,40 @@ def _provider_names(root: Node) -> set[str]:
             if isinstance(provider, str) and provider and "{{" not in provider:
                 names.add(provider)
     return names
+
+
+def provider_requirement_gap(spec: dict[str, Any]) -> list[Finding]:
+    """Warn when action providers are absent from the definition's requirements.
+
+    The run-start check still derives providers from the executable tree and refuses unknown
+    providers.  This warning gives an author the missing declaration while the plan is still
+    being reviewed, without treating incomplete planning metadata as a reason to refuse a run.
+    """
+    root = _root_of(spec)
+    if root is None:
+        return []
+    metadata = spec.get("metadata") or {}
+    requirements = metadata.get("requirements") if isinstance(metadata, dict) else {}
+    declared = requirements.get("providers") if isinstance(requirements, dict) else []
+    declared = declared if isinstance(declared, list) else []
+    known = {str(name) for name in declared if isinstance(name, str) and name}
+    missing = sorted(_provider_names(root) - known)
+    return [
+        Finding(
+            code="WF_PRE_PROVIDER_REQUIREMENT_GAP",
+            message=(
+                f"action provider {name!r} is used by the workflow but not declared in "
+                "metadata.requirements.providers"
+            ),
+            remediation=(
+                f"add {name!r} to metadata.requirements.providers so the plan states its "
+                "provider dependency"
+            ),
+            severity=SEVERITY_WARNING,
+            kind="action_providers",
+        )
+        for name in missing
+    ]
 
 
 def _check_action_providers(

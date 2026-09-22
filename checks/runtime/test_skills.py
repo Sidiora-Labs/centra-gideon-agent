@@ -175,11 +175,20 @@ class TestSkillsCRUD:
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
         loader = ProcedureLibrary(skills_path=skills_dir, install_builtins=False)
-        ok = loader.create_skill("my-tool", "---\nname: my-tool\n---\n# My Tool\n")
+        ok = loader.create_skill(
+            "my-tool", "---\nname: my-tool\ndescription: My tool\n---\n# My Tool\n"
+        )
         assert ok is True
         assert (skills_dir / "my-tool" / "SKILL.md").exists()
         content = loader.load_skill("my-tool")
         assert "My Tool" in content
+
+    def test_create_skill_rejects_invalid_frontmatter(self, tmp_path):
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        loader = ProcedureLibrary(skills_path=skills_dir, install_builtins=False)
+        assert loader.create_skill("my-tool", "# My Tool\n") is False
+        assert not (skills_dir / "my-tool").exists()
 
     def test_create_duplicate_fails(self, tmp_path):
         skills_dir = tmp_path / "skills"
@@ -192,7 +201,10 @@ class TestSkillsCRUD:
         skills_dir = tmp_path / "skills"
         _create_skill(skills_dir, "updatable", "# Old\n")
         loader = ProcedureLibrary(skills_path=skills_dir, install_builtins=False)
-        ok = loader.update_skill("updatable", "# Updated\nNew content.")
+        ok = loader.update_skill(
+            "updatable",
+            "---\nname: updatable\ndescription: Updated\n---\n# Updated\nNew content.",
+        )
         assert ok is True
         content = loader.load_skill("updatable")
         assert "Updated" in content
@@ -201,7 +213,9 @@ class TestSkillsCRUD:
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
         loader = ProcedureLibrary(skills_path=skills_dir, install_builtins=False)
-        ok = loader.update_skill("nonexistent", "# Nope\n")
+        ok = loader.update_skill(
+            "nonexistent", "---\nname: nonexistent\ndescription: Nope\n---\n"
+        )
         assert ok is False
 
     def test_delete_skill(self, tmp_path):
@@ -236,7 +250,12 @@ class TestSkillsCRUD:
         loader = ProcedureLibrary(skills_path=skills_dir, install_builtins=False)
         assert loader.create_skill("../escape", "# bad") is False
         assert loader.create_skill("", "# bad") is False
-        assert loader.create_skill("foo/bar", "# nested") is True
+        assert (
+            loader.create_skill(
+                "foo/bar", "---\nname: nested\ndescription: Nested\n---\n"
+            )
+            is True
+        )
 
     def test_create_then_list(self, tmp_path):
         skills_dir = tmp_path / "skills"

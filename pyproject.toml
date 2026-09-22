@@ -9,7 +9,7 @@ description = "Gideon personal agent runtime, automation, knowledge and client a
 license = { text = "Apache-2.0" }
 requires-python = ">=3.12"
 authors = [{ name = "Gideon contributors" }]
-dependencies = ["aiohttp>=3.9,<4", "websockets>=12,<18", "cron-descriptor>=1.4,<3", "croniter>=2.0,<7", "numpy>=1.21,<3", "snowballstemmer>=1.0", "pysqlite3-binary>=0.5.4; sys_platform == 'linux' and platform_machine == 'x86_64'", "sqlite-vec>=0.1,<1", "python-docx>=1.1,<2", "pdfplumber>=0.11,<1", "python-pptx>=0.6.21,<2", "html2text>=2020.1.16", "reportlab>=4,<6", "trafilatura>=2,<3", "nh3>=0.2", "openpyxl>=3.1,<4", "Pillow>=10,<13", "tree-sitter>=0.21,<1", "tree-sitter-language-pack>=1.0,<2", "httpx>=0.27", "PyYAML>=6,<7", "python-dotenv>=1.0", "argon2-cffi>=23,<26", "cryptography>=42", "jsonschema>=4"]
+dependencies = ["aiohttp>=3.9,<4", "websockets>=12,<18", "cron-descriptor>=1.4,<3", "croniter>=2.0,<3", "numpy>=1.21,<3", "snowballstemmer>=1.0", "pysqlite3-binary>=0.5.4; sys_platform == 'linux' and platform_machine == 'x86_64'", "sqlite-vec>=0.1,<1", "python-docx>=1.1,<2", "pdfplumber>=0.11,<1", "python-pptx>=0.6.21,<2", "html2text>=2020.1.16", "reportlab>=4,<6", "trafilatura>=2,<3", "nh3>=0.2", "openpyxl>=3.1,<4", "Pillow>=10,<13", "tree-sitter>=0.21,<1", "tree-sitter-language-pack>=1.0,<2", "httpx>=0.27", "PyYAML>=6,<7", "python-dotenv>=1.0", "argon2-cffi>=23,<26", "cryptography>=42", "jsonschema>=4"]
 
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.20"]

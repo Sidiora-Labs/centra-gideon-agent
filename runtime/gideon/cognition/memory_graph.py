@@ -44,9 +44,6 @@ class Entity:
     aliases: tuple[str, ...] = ()
     source: str = "user"
 
-    def surface_forms(self) -> tuple[str, ...]:
-        return (self.name,) + tuple(self.aliases)
-
 
 @dataclass(frozen=True)
 class Mention:
@@ -73,14 +70,6 @@ class AliasIndex:
     def __init__(self) -> None:
         self._phrases: dict[str, dict[int, dict[tuple[str, ...], list[str]]]] = {}
         self._registrations = 0
-        self._longest = 0
-
-    def __len__(self) -> int:
-        return self._registrations
-
-    @property
-    def max_phrase_tokens(self) -> int:
-        return self._longest
 
     def add(self, entity_id: str, surface: str) -> bool:
         phrase = tuple(word for word, _start, _end in _tokenize(surface))
@@ -92,11 +81,12 @@ class AliasIndex:
         if entity_id not in matches:
             matches.append(entity_id)
         self._registrations += 1
-        self._longest = max(width, self._longest)
         return True
 
     def add_entity(self, entity: Entity) -> int:
-        accepted = [self.add(entity.id, form) for form in entity.surface_forms()]
+        accepted = [
+            self.add(entity.id, form) for form in (entity.name, *entity.aliases)
+        ]
         return sum(accepted)
 
     def find(self, text: str) -> list[Mention]:

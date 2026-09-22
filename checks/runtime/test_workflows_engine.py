@@ -22,10 +22,6 @@ import pytest
 
 from gideon.automation.workflows.bindings import BindingContext
 from gideon.automation.workflows.engine import (
-    DEFAULT_MODEL_TIERS,
-    MAX_JUDGE_SAMPLES,
-    MAX_WF_DEPTH,
-    NodeResult,
     apply_judge_contract,
     check_output_contract,
     dispatch,
@@ -37,6 +33,12 @@ from gideon.automation.workflows.engine import (
     dispatch_transform,
     dispatch_visualize,
     dispatch_wait,
+)
+from gideon.automation.workflows.engine_support import (
+    DEFAULT_MODEL_TIERS,
+    MAX_JUDGE_SAMPLES,
+    MAX_WF_DEPTH,
+    NodeResult,
     resolve_use_case,
 )
 from gideon.automation.workflows.judge_contract import hints_from_dict

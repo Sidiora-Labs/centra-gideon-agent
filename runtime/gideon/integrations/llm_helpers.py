@@ -5,11 +5,12 @@ and history modules.
 """
 
 import asyncio
+import inspect
 import json
 import logging
 from collections.abc import Awaitable, Callable
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 from gideon.engine.hooks import fire_tool_hooks, get_global_hook_store
 from gideon.integrations.llm.base import (
@@ -35,6 +36,78 @@ if TYPE_CHECKING:
     from gideon.engine.hooks import HookManager
 
 logger = logging.getLogger(__name__)
+
+_ProviderResult = TypeVar("_ProviderResult")
+
+
+async def execute_with_fallback_chain(
+    use_case: str,
+    execute: Callable[[ModelProvider], Awaitable[_ProviderResult]],
+    *,
+    provider_factory: Callable[..., ModelProvider] | None = None,
+    session_key: str | None = None,
+) -> _ProviderResult:
+    """Run *execute* against each configured model until one call succeeds.
+
+    The provider bridge already advances an ordered selection when an entry cannot
+    be built. Direct callers also need to advance when a provider starts or streams
+    unsuccessfully: a resolved provider is not proof that it can complete a call.
+    A single-entry chain keeps the existing direct resolution path unchanged.
+
+    ``provider_factory`` supports callers such as :class:`LLMJudge` that own a
+    factory rather than importing the bridge. Factories without a ``model_override``
+    parameter retain their existing single-call contract.
+    """
+    from gideon.extensions.providers.provider_bridge import (
+        resolve_provider_for_use_case,
+    )
+    from gideon.extensions.providers.use_cases import resolution_chain
+
+    factory = provider_factory or resolve_provider_for_use_case
+    key = session_key if session_key is not None else None
+    try:
+        chain = resolution_chain(use_case)
+    except Exception:  # noqa: BLE001 — direct resolution must stay available
+        chain = []
+
+    def resolve(ref: str | None = None) -> ModelProvider:
+        kwargs = {} if ref is None else {"model_override": ref}
+        if provider_factory is None:
+            return factory(use_case, **kwargs)
+        return factory(key, **kwargs)
+
+    if provider_factory is not None and len(chain) > 1:
+        try:
+            inspect.signature(provider_factory).bind(key, model_override=chain[0])
+        except TypeError:
+            return await execute(resolve())
+        except (ValueError, AttributeError):
+            # Some callable implementations do not expose a signature. Attempt
+            # the normal chain path in that case rather than suppressing it.
+            pass
+
+    if len(chain) <= 1:
+        return await execute(resolve())
+
+    last_exc: Exception | None = None
+    for index, ref in enumerate(chain):
+        try:
+            return await execute(resolve(ref))
+        except Exception as exc:  # noqa: BLE001 — provider failures advance
+            last_exc = exc
+        if index + 1 < len(chain):
+            logger.warning(
+                "direct-resolve chain advance: %s entry %d (%s) failed (%s) — trying next",
+                use_case,
+                index,
+                ref,
+                type(last_exc).__name__,
+            )
+    raise RuntimeError(
+        f"every model in the {use_case!r} fallback chain failed "
+        f"({len(chain)} entr{'y' if len(chain) == 1 else 'ies'}); "
+        f"last error: {last_exc}"
+    ) from last_exc
 
 
 class ToolApprovalPolicy(Enum):

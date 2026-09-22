@@ -4,7 +4,7 @@ const ALIASES = new Set(['@annually', '@yearly', '@monthly', '@weekly', '@daily'
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
 const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
 
-function valueValid(value: string, min: number, max: number, names: string[] = []) {
+function valueValid(value: string, min: number, max: number, names: readonly string[] = []) {
   const named = names.indexOf(value.toLowerCase())
   if (named >= 0) return true
   return /^\d+$/.test(value) && Number(value) >= min && Number(value) <= max

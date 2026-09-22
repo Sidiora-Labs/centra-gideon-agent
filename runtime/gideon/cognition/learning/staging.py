@@ -422,12 +422,23 @@ class StagingStore:
             captures = query.rows(
                 "SELECT created_ts FROM staging WHERE created_ts >= ?;", cutoff
             )
-            ever = bool(
-                query.value("SELECT EXISTS(SELECT 1 FROM flush_records LIMIT 1);")
-            )
+            first_pass = query.value("SELECT MIN(created_ts) FROM flush_records;")
         calendar = CalendarCapture(span, timestamp)
         calendar.consume(flushes, captures, FlushOutcome.FLUSH_ERROR.value)
-        return calendar.result(ever)
+        first_pass_day = (
+            CalendarCapture.date(float(first_pass)) if first_pass is not None else None
+        )
+        week = calendar.result(False)
+        week.pop("has_ever_run")
+        week["first_pass_day"] = first_pass_day
+        week["silent_days"] = [
+            bucket["day"]
+            for bucket in week["buckets"]
+            if not bucket["passes"]
+            and first_pass_day is not None
+            and bucket["day"] >= first_pass_day
+        ]
+        return week
 
     def prune(
         self, *, retention_days: int = DEFAULT_RETENTION_DAYS, now: float | None = None

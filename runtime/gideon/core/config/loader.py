@@ -2054,9 +2054,7 @@ class WorkflowsConfig:
     now reads it as the cosine floor below which an embedding is too weak to unseat a
     keyword tie. It is a real reader this time — not the inert knob it was under the old
     SOP feature — so the field is live and wired through all four config points.
-    `enabled` keeps its meaning as the feature kill-switch; the engine's own keys
-    (max_active_runs, per-lane max_concurrent_nodes, model_tiers, retention.*) arrive
-    with Slice 0, each wired through all four config points."""
+    `enabled` keeps its meaning as the feature kill-switch."""
 
     enabled: bool = field(
         default=True,
@@ -2064,14 +2062,6 @@ class WorkflowsConfig:
             "Enabled",
             "Master switch for the workflow engine. Turning it off stops new runs "
             "from starting without touching stored definitions.",
-        ),
-    )
-    max_active_runs: int = field(
-        default=10,
-        metadata=_meta(
-            "Max Active Runs",
-            "How many workflow runs may execute at once. A trigger firing faster than "
-            "its runs finish would otherwise stack them without bound.",
         ),
     )
     self_schedule_max_outstanding: int = field(
@@ -2084,14 +2074,6 @@ class WorkflowsConfig:
             "unbounded fan-out of clocks is how a helpful loop becomes a runaway one. Counted "
             "over ENABLED agent-created automations, so pausing one frees a slot without "
             "deleting it.",
-        ),
-    )
-    max_concurrent_nodes: int = field(
-        default=6,
-        metadata=_meta(
-            "Max Concurrent Nodes",
-            "Total node slots per run, partitioned across typed lanes (llm/io/compute) "
-            "so a long local-model action cannot block the run's model calls.",
         ),
     )
     default_node_timeout_total_secs: int = field(
@@ -2108,29 +2090,6 @@ class WorkflowsConfig:
             "Kill a node after this many seconds with NO progress, even when it is "
             "under the total cap. Progress events reset the clock, so a slow-but-"
             "working node survives while a wedged one does not.",
-        ),
-    )
-    retention_per_def: int = field(
-        default=100,
-        metadata=_meta(
-            "Runs Kept Per Workflow",
-            "Oldest runs beyond this are pruned. Matches the per-job cap schedules use.",
-        ),
-    )
-    max_concurrent_llm_nodes: int = field(
-        default=4,
-        metadata=_meta(
-            "Lane Cap — Model Calls",
-            "How many model-backed nodes (stage/infer) may run at once in one workflow.",
-        ),
-    )
-    max_concurrent_io_nodes: int = field(
-        default=2,
-        metadata=_meta(
-            "Lane Cap — Actions",
-            "How many action nodes may run at once. Kept low on purpose: a fan-out over "
-            "minutes-long local-model actions would otherwise starve the run's model "
-            "calls behind it.",
         ),
     )
     model_tier_reasoning: str = field(
@@ -2259,13 +2218,8 @@ class WorkflowsConfig:
 
     def __post_init__(self) -> None:
         floors = {
-            "max_active_runs": 1,
-            "max_concurrent_nodes": 1,
             "default_node_timeout_total_secs": 0,
             "default_node_timeout_stall_secs": 0,
-            "retention_per_def": 1,
-            "max_concurrent_llm_nodes": 1,
-            "max_concurrent_io_nodes": 1,
         }
         for key, floor in floors.items():
             if getattr(self, key) < floor:
@@ -3094,7 +3048,7 @@ class AppConfig:
 
         values = read_configuration(config_path(), logger)
         if values is None:
-            return cls(), False
+            return cls(memory_stores={"default": MemoryStoreConfig()}), False
         _validate_config_data(values)
         configuration = decode_configuration(values, cls)
         try:

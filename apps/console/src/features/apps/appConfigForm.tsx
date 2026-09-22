@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { Field, Select, TextArea } from '../../shared/ui/forms'
 import { api } from '../../shared/data/api'
+import type { SchemaProp } from '../../shared/data/api'
+export type { SchemaProp } from '../../shared/data/api'
 import { useQuery, invalidateKeys } from '../../shared/data/data'
-import { missingRequired } from '../tools/schema'
+import { missingRequired, SchemaFieldDisclosure } from '../tools/schema'
 
 export function serializeJsonField(value: unknown, expected: 'array' | 'object'): string {
   if (value === undefined || value === null) return expected === 'array' ? '[]' : '{}'
@@ -50,18 +52,6 @@ function JsonField({ label, help, expected, value, onChange }: {
   )
 }
 
-export interface SchemaProp {
-  type?: string
-  default?: unknown
-  enum?: unknown[]
-  minimum?: number
-  maximum?: number
-  minLength?: number
-  maxLength?: number
-  pattern?: string
-  'x-meta'?: { label?: string; help?: string; sensitive?: boolean }
-}
-
 export interface AppConfigSchema {
   properties?: Record<string, SchemaProp>
   required?: string[]
@@ -75,65 +65,67 @@ export function AppConfigFields({ appName, props, cur, set, secretSet = [], requ
   required?: readonly string[]
   secretSet?: string[]
 }) {
+  const fields = Object.entries(props)
+
+  function renderField([key, p]: [string, SchemaProp]) {
+    const meta = p['x-meta'] ?? {}
+    const isRequired = required.includes(key)
+    const label = (meta.label || key) + (isRequired ? ' *' : '')
+    const v = cur[key]
+    const fieldId = `app-cfg-${appName}-${key}`
+    const secretAlreadySet = !!meta.sensitive && secretSet.includes(key)
+    if (Array.isArray(p.enum) && p.enum.length) {
+      return (
+        <Field key={key} label={label} hint={meta.help}>
+          <Select name={fieldId} value={String(v ?? '')} onChange={(nv) => set(key, nv)}
+            required={isRequired}
+            options={p.enum.map((o) => ({ value: String(o), label: String(o) }))} />
+        </Field>
+      )
+    }
+    if (p.type === 'boolean') {
+      return (
+        <Field key={key} label={label} hint={meta.help}>
+          <button type="button" id={fieldId} name={fieldId} onClick={() => set(key, !v)}
+            className={`h-6 w-11 rounded-pill transition-colors ${v ? 'bg-primary' : 'bg-surface-highest'}`}
+            aria-pressed={!!v} aria-label={label} aria-required={isRequired || undefined}>
+            <span className={`block size-5 rounded-full bg-white transition-transform ${v ? 'translate-x-5' : 'translate-x-0.5'}`} />
+          </button>
+        </Field>
+      )
+    }
+    if (p.type === 'array' || p.type === 'object') {
+      return (
+        <JsonField key={key} label={label} help={meta.help}
+          expected={p.type} value={v} onChange={(nv) => set(key, nv)} />
+      )
+    }
+    const isNum = p.type === 'integer' || p.type === 'number'
+    return (
+      <Field key={key} label={label} hint={meta.help}>
+        <input
+          id={fieldId} name={fieldId}
+          aria-required={isRequired || undefined}
+          type={meta.sensitive ? 'password' : isNum ? 'number' : 'text'}
+          placeholder={secretAlreadySet ? 'saved — leave blank to keep' : undefined}
+          min={isNum && typeof p.minimum === 'number' ? p.minimum : undefined}
+          max={isNum && typeof p.maximum === 'number' ? p.maximum : undefined}
+          step={p.type === 'integer' ? 1 : undefined}
+          minLength={!isNum && typeof p.minLength === 'number' ? p.minLength : undefined}
+          maxLength={!isNum && typeof p.maxLength === 'number' ? p.maxLength : undefined}
+          pattern={!isNum && !meta.sensitive && typeof p.pattern === 'string' ? p.pattern : undefined}
+          className="w-full rounded-md border border-outline-variant bg-surface-high px-m py-s text-[0.8125rem] text-on-surface"
+          value={v === undefined || v === null ? '' : String(v)}
+          onChange={(e) => {
+            const raw = e.target.value
+            set(key, isNum ? (raw === '' ? undefined : Number(raw)) : raw)
+          }} />
+      </Field>
+    )
+  }
+
   return (
-    <>
-      {Object.entries(props).map(([key, p]) => {
-        const meta = p['x-meta'] ?? {}
-        const isRequired = required.includes(key)
-        const label = (meta.label || key) + (isRequired ? ' *' : '')
-        const v = cur[key]
-        const fieldId = `app-cfg-${appName}-${key}`
-        const secretAlreadySet = !!meta.sensitive && secretSet.includes(key)
-        if (Array.isArray(p.enum) && p.enum.length) {
-          return (
-            <Field key={key} label={label} hint={meta.help}>
-              <Select name={fieldId} value={String(v ?? '')} onChange={(nv) => set(key, nv)}
-                required={isRequired}
-                options={p.enum.map((o) => ({ value: String(o), label: String(o) }))} />
-            </Field>
-          )
-        }
-        if (p.type === 'boolean') {
-          return (
-            <Field key={key} label={label} hint={meta.help}>
-              <button type="button" id={fieldId} name={fieldId} onClick={() => set(key, !v)}
-                className={`h-6 w-11 rounded-pill transition-colors ${v ? 'bg-primary' : 'bg-surface-highest'}`}
-                aria-pressed={!!v} aria-label={label} aria-required={isRequired || undefined}>
-                <span className={`block size-5 rounded-full bg-white transition-transform ${v ? 'translate-x-5' : 'translate-x-0.5'}`} />
-              </button>
-            </Field>
-          )
-        }
-        if (p.type === 'array' || p.type === 'object') {
-          return (
-            <JsonField key={key} label={label} help={meta.help}
-              expected={p.type} value={v} onChange={(nv) => set(key, nv)} />
-          )
-        }
-        const isNum = p.type === 'integer' || p.type === 'number'
-        return (
-          <Field key={key} label={label} hint={meta.help}>
-            <input
-              id={fieldId} name={fieldId}
-              aria-required={isRequired || undefined}
-              type={meta.sensitive ? 'password' : isNum ? 'number' : 'text'}
-              placeholder={secretAlreadySet ? 'saved — leave blank to keep' : undefined}
-              min={isNum && typeof p.minimum === 'number' ? p.minimum : undefined}
-              max={isNum && typeof p.maximum === 'number' ? p.maximum : undefined}
-              step={p.type === 'integer' ? 1 : undefined}
-              minLength={!isNum && typeof p.minLength === 'number' ? p.minLength : undefined}
-              maxLength={!isNum && typeof p.maxLength === 'number' ? p.maxLength : undefined}
-              pattern={!isNum && !meta.sensitive && typeof p.pattern === 'string' ? p.pattern : undefined}
-              className="w-full rounded-md border border-outline-variant bg-surface-high px-m py-s text-[0.8125rem] text-on-surface"
-              value={v === undefined || v === null ? '' : String(v)}
-              onChange={(e) => {
-                const raw = e.target.value
-                set(key, isNum ? (raw === '' ? undefined : Number(raw)) : raw)
-              }} />
-          </Field>
-        )
-      })}
-    </>
+    <SchemaFieldDisclosure fields={fields} required={required} values={cur} configured={secretSet} renderField={renderField} />
   )
 }
 

@@ -1291,6 +1291,7 @@ async def _reentry(request: web.Request, operation: str, fn: Any) -> web.Respons
     if fn is service.rewind_run:
         kwargs["redo_effects"] = bool(body.get("redo_effects"))
         kwargs["force"] = bool(body.get("force"))
+    kwargs["confirm_cascade"] = bool(body.get("confirm_cascade"))
     result = fn(run_id, node_id, **kwargs)
     _audit(request, operation, "success" if result.get("ok") else "failure", run_id)
     return _reply(result)

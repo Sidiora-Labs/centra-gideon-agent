@@ -939,16 +939,19 @@ class HistoryConsolidator:
         if self._sessions:
             from gideon.integrations.llm_helpers import stream_and_collect_json
 
+            acquired = False
             try:
                 client, _, _ = await self._sessions.get_or_create(
                     BACKGROUND_KEY, agent="gideon-lite"
                 )
+                acquired = True
                 return await stream_and_collect_json(client, prompt)
             except Exception:
                 logger.warning("LLM consolidation call failed", exc_info=True)
                 return None
             finally:
-                self._sessions.release(BACKGROUND_KEY)
-                await self._sessions.recycle_background()
+                if acquired:
+                    self._sessions.release(BACKGROUND_KEY)
+                    await self._sessions.recycle_background()
         logger.warning("LLM consolidation skipped — no session manager")
         return None

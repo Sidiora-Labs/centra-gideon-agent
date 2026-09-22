@@ -9,6 +9,7 @@ import { Segmented } from '../../shared/ui/Segmented'
 import { Field, TextInput } from '../../shared/ui/forms'
 import { Toggle } from '../../shared/ui/Toggle'
 import { PageTitle } from '../../shared/ui/PageTitle'
+import { SchemaFieldDisclosure } from '../tools/schema'
 import {
   api,
   type WorkflowDef,
@@ -114,6 +115,12 @@ export function WorkflowDefDetail({ name, onBack, onStarted }: {
 
   const rows = useMemo(() => (def ? flatten(def.root) : []), [def])
   const declared = useMemo(() => Object.entries(def?.inputs ?? {}), [def])
+  const inputFields = useMemo(() => declared.map(([key, input]) => [key, {
+    type: input.type,
+    default: input.default,
+    'x-meta': { help: input.help, tags: (input as { tags?: string[] }).tags },
+  }] as [string, { type?: string; default?: unknown; 'x-meta': { help?: string; tags?: string[] } }]), [declared])
+  const requiredInputs = useMemo(() => declared.filter(([, input]) => input.required).map(([key]) => key), [declared])
   const published = def?.metadata?.a2a_published === true
   const handoffs = useMemo(
     () => (def?.metadata?.hands_off_to ?? []).filter((h) => (h?.target_def ?? '').trim()),
@@ -223,20 +230,22 @@ export function WorkflowDefDetail({ name, onBack, onStarted }: {
                 {declared.length > 0 && (
                   <div className="flex flex-col gap-s">
                     <span data-type="title-m" className="text-on-surface">Inputs</span>
-                    {declared.map(([key, meta]) => (
-                      <Field
-                        key={key}
-                        label={`${key}${meta.required ? ' *' : ''}`}
-                        hint={meta.help || (meta.default !== undefined && meta.default !== null ? `Default: ${String(meta.default)}` : undefined)}
-                      >
-                        <TextInput
-                          value={inputs[key] ?? ''}
-                          onChange={(v) => setInputs((p) => ({ ...p, [key]: v }))}
-                          placeholder={meta.default !== undefined && meta.default !== null ? String(meta.default) : ''}
-                          ariaLabel={key}
-                        />
-                      </Field>
-                    ))}
+                    <SchemaFieldDisclosure fields={inputFields} required={requiredInputs} values={inputs}
+                      renderField={([key]) => {
+                        const meta = def.inputs?.[key]
+                        return <Field
+                          key={key}
+                          label={`${key}${meta?.required ? ' *' : ''}`}
+                          hint={meta?.help || (meta?.default !== undefined && meta.default !== null ? `Default: ${String(meta.default)}` : undefined)}
+                        >
+                          <TextInput
+                            value={inputs[key] ?? ''}
+                            onChange={(v) => setInputs((p) => ({ ...p, [key]: v }))}
+                            placeholder={meta?.default !== undefined && meta.default !== null ? String(meta.default) : ''}
+                            ariaLabel={key}
+                          />
+                        </Field>
+                      }} />
                   </div>
                 )}
 

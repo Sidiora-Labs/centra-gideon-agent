@@ -11,7 +11,7 @@ from gideon.automation.workflows import execution_hints
 from gideon.automation.workflows import journal as journal_mod
 from gideon.automation.workflows import store
 from gideon.automation.workflows.bindings import BindingContext
-from gideon.automation.workflows.engine import resolve_config
+from gideon.automation.workflows.engine_support import resolve_config
 from gideon.automation.workflows.models import (
     SUCCESS_STATES,
     InstanceState,

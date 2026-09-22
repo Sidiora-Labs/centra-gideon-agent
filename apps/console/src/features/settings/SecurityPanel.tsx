@@ -346,6 +346,15 @@ function EgressPolicyEditor() {
     catch (e) { setErr(e instanceof Error ? e.message : 'Failed to save') }
     finally { setBusy(false) }
   }
+  const setAllowPrivate = async (next: boolean) => {
+    if (next && !(await confirm({
+      title: 'Allow all private networks?',
+      body: 'The agent will be able to reach any private or LAN address, removing SSRF protection for the whole LAN.',
+      confirmLabel: 'Allow private networks',
+      danger: true,
+    }))) return
+    await save({ ...eg, allow_private: next })
+  }
 
   return (
     <Section title="Network egress" hint="The agent's outbound fetches, scrapes, and webhooks are blocked from reaching non-public addresses (loopback, LAN, cloud metadata) by default — SSRF protection. Relax it for your own network below; a deny always wins over an allow.">
@@ -358,7 +367,7 @@ function EgressPolicyEditor() {
           onChange={(hosts) => save({ ...eg, deny_hosts: hosts })} />
         <label className="flex items-start gap-2.5 rounded-lg bg-surface-container px-3 py-2.5 cursor-pointer">
           <input type="checkbox" checked={eg.allow_private} disabled={busy}
-            onChange={(e) => save({ ...eg, allow_private: e.target.checked })}
+            onChange={(e) => { void setAllowPrivate(e.target.checked) }}
             className="mt-0.5 size-4 shrink-0 accent-primary" />
           <span className="min-w-0">
             <span data-type="body-s" className="text-on-surface">Allow all private networks</span>

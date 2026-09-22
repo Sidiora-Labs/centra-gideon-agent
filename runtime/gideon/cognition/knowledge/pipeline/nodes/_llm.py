@@ -24,12 +24,8 @@ async def complete_text(
     multimodal content blocks. Returns ``""`` on any failure.
     """
     try:
-        from gideon.extensions.providers.provider_bridge import (
-            resolve_provider_for_use_case,
-        )
         from gideon.integrations.llm.base import EVENT_TEXT_CHUNK
-
-        provider = resolve_provider_for_use_case(use_case)
+        from gideon.integrations.llm_helpers import execute_with_fallback_chain
     except Exception:
         logger.warning(
             "knowledge node: could not resolve use-case %s", use_case, exc_info=True
@@ -37,17 +33,27 @@ async def complete_text(
         return ""
 
     messages = _build_messages(prompt, images)
-    parts: list[str] = []
+    partial = ""
+
+    async def _complete(provider) -> str:
+        nonlocal partial
+        parts: list[str] = []
+        try:
+            async for ev in provider.complete(messages):
+                if ev.kind == EVENT_TEXT_CHUNK:
+                    parts.append(getattr(ev, "text", "") or "")
+        except Exception:
+            partial = "".join(parts)
+            raise
+        return "".join(parts).strip()
+
     try:
-        async for ev in provider.complete(messages):
-            if ev.kind == EVENT_TEXT_CHUNK:
-                parts.append(getattr(ev, "text", "") or "")
+        result = await execute_with_fallback_chain(use_case, _complete)
     except Exception:
         logger.warning(
             "knowledge node completion failed (use-case %s)", use_case, exc_info=True
         )
-        return "".join(parts)
-    result = "".join(parts).strip()
+        return partial
     if not result:
         logger.warning(
             "knowledge node: use-case %s returned EMPTY text (images=%d) — "

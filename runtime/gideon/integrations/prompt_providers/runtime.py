@@ -28,12 +28,14 @@ logger = logging.getLogger(__name__)
 
 
 def _variables_with_inline(
-    content: str, declared: list[PromptVariable]
+    content: str,
+    declared: list[PromptVariable],
+    values: dict[str, Any],
 ) -> list[PromptVariable]:
     from gideon.integrations.prompt_providers.engine import extract_inline_variables
 
     seen = {variable.name for variable in declared}
-    return [
+    variables = [
         *declared,
         *(
             variable
@@ -41,6 +43,13 @@ def _variables_with_inline(
             if variable.name not in seen
         ),
     ]
+    seen.update(variable.name for variable in variables)
+    variables.extend(
+        PromptVariable(name=name)
+        for name in values
+        if isinstance(name, str) and name not in seen
+    )
+    return variables
 
 
 def _render_with_inline(
@@ -52,7 +61,7 @@ def _render_with_inline(
 
     return render(
         template.content,
-        _variables_with_inline(template.content, template.variables),
+        _variables_with_inline(template.content, template.variables, values),
         values,
         resolver=resolver,
     )
@@ -83,40 +92,21 @@ def render_use_case_prompt(
 
     Reads the binding (Settings → Prompts) or the bundled default, fetches the
     template from its provider, and renders it through the engine with snippet
-    includes resolved. Returns the rendered string, or ``None`` when the prompt
-    can't be resolved (no provider / missing template) so the caller can fall
-    back to a shipped default.
+    includes resolved. Returns ``None`` only when neither the binding nor its
+    declared bundled fallback can be resolved.
     """
     from gideon.extensions.providers.prompt_use_cases import (
-        DEFAULT_PROMPT_NAME,
-        DEFAULT_PROMPT_PROVIDER,
-        active_prompt_ref,
-        split_ref,
+        resolve_prompt_declaration,
     )
 
     try:
-        from gideon.integrations.prompt_providers.registry import (
-            _ensure_default_providers_registered,
-            get_prompt_provider,
-        )
-
-        _ensure_default_providers_registered()
-        ref = active_prompt_ref(use_case)
-        parsed = split_ref(ref)
-        if not parsed:
+        declaration = resolve_prompt_declaration(use_case)
+        if declaration is None:
             return None
-        provider_name, prompt_name = parsed
-        provider = get_prompt_provider(provider_name)
-        if provider is None:
-            return None
-        template = provider.get_prompt(prompt_name)
-        if template is None:
-            fallback = get_prompt_provider(DEFAULT_PROMPT_PROVIDER)
-            template = fallback.get_prompt(DEFAULT_PROMPT_NAME) if fallback else None
-            if template is None:
-                return None
         return _render_with_inline(
-            template, values or {}, resolver=(lambda n: provider.get_snippet(n))
+            declaration.template,
+            values or {},
+            resolver=declaration.provider.get_snippet,
         )
     except Exception:
         logger.debug("render_use_case_prompt failed for %r", use_case, exc_info=True)

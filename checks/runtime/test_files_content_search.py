@@ -49,10 +49,39 @@ def test_python_search_glob_filter(search_root):
     assert {r["file"].split("/")[-1] for r in results} == {"a.py"}
 
 
+def test_python_search_glob_filter_matches_full_path(search_root):
+    nested = search_root / "nested"
+    nested.mkdir()
+    (nested / "match.py").write_text("NEEDLE_here = 1\n")
+
+    results, _ = F._content_search_python(
+        str(search_root), "needle_here", f"{nested}/*.py"
+    )
+
+    assert [r["file"] for r in results] == [str(nested / "match.py")]
+
+
 def test_python_search_reports_line_and_col(search_root):
     results, _ = F._content_search_python(str(search_root), "needle_here", "*.py")
     r = results[0]
     assert r["line"] == 2 and r["col"] >= 1
+
+
+def test_python_search_propagates_mid_file_timeout(search_root, monkeypatch):
+    import builtins
+
+    original_open = builtins.open
+
+    def timeout_open(path, *args, **kwargs):
+        if path.endswith("a.py"):
+            raise F._ContentSearchTimedOut()
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", timeout_open)
+
+    assert F._ContentSearchTimedOut.__bases__ == (Exception,)
+    with pytest.raises(F._ContentSearchTimedOut):
+        F._content_search_python(str(search_root), "needle_here", "")
 
 
 def _call(

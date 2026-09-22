@@ -17,7 +17,7 @@ vi.mock('../../shared/data/api', async (importActual) => {
 
 function payload(over: Partial<WorkflowIntrospection> = {}): WorkflowIntrospection {
   const stats = {
-    run_id: 'r1', tokens: 1200, cached_tokens: 100, cost_usd: 0.0342, priced: true,
+    run_id: 'r1', tokens: 1200, tokens_recorded: true, cached_tokens: 100, cost_usd: 0.0342, priced: true,
     steps_completed: 4, steps_failed: 1, steps_cached: 1, duration_secs: 92.5,
     first_byte_ms: 830, models: ['claude-sonnet'], unverified_steps: 3,
     verification_debt: 0.75, cache_hit_rate: 0.2,
@@ -86,6 +86,17 @@ describe('the nine questions reach the DOM', () => {
     expect(await screen.findByText('~$0.0342')).toBeTruthy()
     expect(screen.getByText(/to first output/i)).toBeTruthy()
     expect(screen.getByText('830 ms')).toBeTruthy()
+  })
+
+  it('discloses an unrecorded token total rather than displaying zero', async () => {
+    const base = payload()
+    introspect = async () => ({
+      ...base,
+      stats: { ...base.stats, tokens: null, tokens_recorded: false },
+    })
+    render(<IntrospectPanel runId="r1" onClose={() => {}} />)
+    expect(await screen.findByText('not recorded')).toBeTruthy()
+    expect(screen.getByText(/did not record token usage/i)).toBeTruthy()
   })
 
   it('shows the template p50/p95 card, never a mean', async () => {

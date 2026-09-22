@@ -317,7 +317,7 @@ def test_event_put_persists_every_field(state, event_store):
         "key_glob": "project.*",
         "max_fires": 10,
         "debounce_secs": 1.5,
-        "action": {"provider": "webhook", "config": {"url": "https://example.test/x"}},
+        "action": {"provider": "notify", "config": {"title": "deadline"}},
     }
     req = _req(
         "PUT",
@@ -335,8 +335,8 @@ def test_event_put_persists_every_field(state, event_store):
     assert t.key_glob == "project.*"
     assert t.max_fires == 10
     assert t.debounce_secs == 1.5
-    assert t.action_provider == "webhook"
-    assert t.action_config == {"url": "https://example.test/x"}
+    assert t.action_provider == "notify"
+    assert t.action_config == {"title": "deadline"}
 
 
 def test_event_put_rejects_an_unknown_pattern(state, event_store):
@@ -712,6 +712,36 @@ def test_week_grid_rejects_a_bad_start(state):
         )
     )
     assert resp.status == 400
+
+
+def test_week_grid_coerces_bounds_to_its_local_zone_across_dst(state, monkeypatch):
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+
+    import gideon.automation.schedule as schedule
+
+    zone = ZoneInfo("America/Santiago")
+    monkeypatch.setattr(schedule, "get_local_tz", lambda: ("America/Santiago", zone))
+    start = datetime(2026, 9, 2, 4, tzinfo=timezone.utc)
+    until = datetime(2026, 9, 9, 3, tzinfo=timezone.utc)
+    resp = _run(
+        T.api_triggers_week(
+            _req(
+                "GET",
+                "/api/triggers/week",
+                state,
+                query=(
+                    f"start={start.isoformat().replace('+', '%2B')}"
+                    f"&until={until.isoformat().replace('+', '%2B')}"
+                ),
+            )
+        )
+    )
+    body = _body(resp)
+    assert resp.status == 200
+    assert body["start"] == start.astimezone(zone).isoformat()
+    assert body["end"] == until.astimezone(zone).isoformat()
+    assert body["server_tz"] == "America/Santiago"
 
 
 def test_week_grid_bounds_the_window(state):

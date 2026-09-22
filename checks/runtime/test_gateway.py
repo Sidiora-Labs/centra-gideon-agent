@@ -2166,6 +2166,43 @@ class TestSubagentSlackInjection:
         orch.subagent_mgr.notify_injection_failed.assert_called()
 
     @pytest.mark.asyncio
+    async def test_slack_injection_retries_provider_server_failures(self):
+        """A retriable provider server fault spends both advertised delivery attempts."""
+        orch, mock_sm = self._setup()
+        on_done = mock_sm.call_args[1]["on_done"]
+
+        class InternalServerException(Exception):
+            pass
+
+        info = MagicMock()
+        info.id = "agent-provider-failure"
+        info.parent_session_key = "C123:ts.123"
+        info.error = None
+        info.result = "result"
+        info.result_path = ""
+        info.task = "task"
+        info.agent = ""
+        info.silent = False
+        info.elapsed = 1.0
+        info.started = 0.0
+
+        with (
+            patch(
+                "gideon.engine.gateway.stream_and_collect",
+                new_callable=AsyncMock,
+                side_effect=InternalServerException("provider unavailable"),
+            ) as collect,
+            patch(
+                "gideon.engine.delegation_host.asyncio.sleep", new_callable=AsyncMock
+            ),
+        ):
+            await on_done([info])
+
+        assert collect.await_count == _MAX_INJECT_ATTEMPTS
+        reason = orch.subagent_mgr.notify_injection_failed.call_args.kwargs["reason"]
+        assert reason.count("attempt ") == _MAX_INJECT_ATTEMPTS
+
+    @pytest.mark.asyncio
     async def test_cron_injection_timeout(self):
         """Cron injection timeout → notifies failure."""
         orch, mock_sm = self._setup()

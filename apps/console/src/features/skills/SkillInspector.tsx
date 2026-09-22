@@ -41,6 +41,9 @@ export function SkillInspector({ skill, onDeleted, onSaved }: { skill: SkillItem
 
       <p className="text-on-surface text-[0.9375rem] leading-relaxed">{skill.description}</p>
 
+      {skill.provenance === 'auto' && <p className="text-on-surface-low text-[0.8125rem]">This skill was generated automatically.</p>}
+      {skill.provenance === 'taught' && <p className="text-on-surface-low text-[0.8125rem]">This skill was taught from a session draft.</p>}
+
       {skill.loaded_by_agents.length > 0 && (
         <Section label="Used by">
           <div className="flex flex-wrap gap-1.5">{skill.loaded_by_agents.map((a) => <span key={a} className="rounded-md bg-surface-high px-m h-6 inline-flex items-center text-on-surface-var text-[0.75rem]">{a}</span>)}</div>
@@ -84,11 +87,12 @@ function IntegritySection({ skill }: { skill: SkillItem }) {
   useEffect(() => { setResult(null) }, [skill.name])
   const status = result?.integrity ?? skill.integrity ?? 'unverified'
   const presentation = {
-    intact: { tone: 'var(--color-ok)', icon: ShieldCheck, label: 'Verified — matches install baseline' },
-    tampered: { tone: 'var(--color-danger)', icon: ShieldAlert, label: 'Tampered — files changed since install' },
-    unverified: { tone: 'var(--color-on-surface-low)', icon: ShieldQuestion, label: 'Unverified — no install baseline (bundled or hand-placed)' },
+    intact: { tone: 'var(--color-ok)', icon: ShieldCheck, label: 'Verified — matches install baseline', outcome: 'Integrity verified' },
+    tampered: { tone: 'var(--color-danger)', icon: ShieldAlert, label: 'Tampered — files changed since install', outcome: 'Changes found' },
+    unverified: { tone: 'var(--color-on-surface-low)', icon: ShieldQuestion, label: 'Unverified — no install baseline (bundled or hand-placed)', outcome: 'No integrity baseline' },
   }
   const { tone, icon: Icon, label } = presentation[status] ?? presentation.unverified
+  const outcome = result ? presentation[result.integrity] : null
   const changes = result ? [
     ...result.mutated.map(path => ({ key: `changed:${path}`, label: `changed: ${path}`, tone: 'text-danger' })),
     ...result.missing.map(path => ({ key: `missing:${path}`, label: `missing: ${path}`, tone: 'text-danger' })),
@@ -100,7 +104,10 @@ function IntegritySection({ skill }: { skill: SkillItem }) {
     <Section label="Integrity">
       <div className="flex items-center gap-s">
         <span className="inline-flex items-center gap-1.5 text-[0.8125rem]" style={{ color: tone }}><Icon size={14} /> {label}</span>
-        <Button size="sm" variant="ghost" onClick={verify} loading={request.busy} className="ml-auto"><ShieldCheck size={14} /> Re-verify</Button>
+        <div className="ml-auto flex items-center gap-s">
+          {outcome && <span role="status" aria-live="polite" className="text-[0.75rem]" style={{ color: outcome.tone }}>{outcome.outcome}</span>}
+          <Button size="sm" variant="ghost" onClick={verify} loading={request.busy}><ShieldCheck size={14} /> Re-verify</Button>
+        </div>
       </div>
       {request.err && <FieldError>{request.err}</FieldError>}
       {changes.length > 0 && <div className="mt-s grid gap-1 font-mono text-[0.75rem]">{changes.map(change => <div key={change.key} className={change.tone}>{change.label}</div>)}</div>}

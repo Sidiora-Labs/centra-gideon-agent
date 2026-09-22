@@ -39,6 +39,16 @@ def test_all_kinds_is_sorted_and_stable():
     assert nk.all_kinds() == kinds
 
 
+def test_configurable_rows_have_declared_production_owners():
+    configurable = nk.configurable_kinds()
+    assert configurable
+    assert all(kind.production_owner for kind in configurable)
+    assert {kind.key for kind in configurable}.isdisjoint(
+        {"loop/stalled", "system/session"}
+    )
+    assert nk.kind_for_legacy(nk.SESSION).key == "system/session"
+
+
 def test_key_is_source_slash_kind():
     k = nk.resolve_kind("cron", "result")
     assert k.key == "cron/result"
@@ -455,7 +465,7 @@ def test_every_emitted_constant_resolves():
     unknown = sorted(n for n in _emitted_constant_names() if not hasattr(nk, n))
     assert not unknown, f"call sites reference nonexistent constants: {unknown}"
     unregistered = sorted(
-        n for n in _emitted_constant_names() if getattr(nk, n) not in nk._LEGACY_FLAT
+        n for n in _emitted_constant_names() if getattr(nk, n) not in nk._WIRE_TO_PAIR
     )
     assert not unregistered, (
         f"these constants are emitted but unregistered: {unregistered} — "

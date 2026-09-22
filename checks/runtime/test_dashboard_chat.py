@@ -4318,6 +4318,34 @@ class TestFolderPersistence:
 
 class TestGenerateFolderIcon:
     @pytest.mark.asyncio
+    async def test_missing_provider_omits_icon_without_releasing(
+        self, tmp_path, monkeypatch
+    ):
+        """A provider-less install leaves the newly-created folder unmodified."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from gideon.interfaces.dashboard.chat_folders import _generate_folder_icon
+
+        monkeypatch.setattr(
+            "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
+        )
+        state = _make_state(tmp_path)
+        state.sessions.get_or_create = AsyncMock(
+            side_effect=RuntimeError("No provider factory configured")
+        )
+        state.sessions.release = MagicMock()
+        state.save_folders = MagicMock()
+        state.push_sessions_update = MagicMock()
+        folder = {"id": "f1", "name": "Deploy"}
+        state._folders = [folder]
+
+        await _generate_folder_icon(state, folder)
+
+        assert "icon" not in folder
+        state.sessions.release.assert_not_called()
+        state.save_folders.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_valid_emoji_stored(self, tmp_path, monkeypatch):
         from unittest.mock import AsyncMock, MagicMock
 

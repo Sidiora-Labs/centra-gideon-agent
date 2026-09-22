@@ -137,18 +137,18 @@ class _DraftRules:
             label = node.get("id", "?")
             if not kind:
                 yield f"gate `{label}` has no `config.kind` — set it to approval, judge, expression, verify_command, verify_script, event or ladder"
-            required = {
-                "judge": (
-                    "prompt",
-                    f"judge gate `{label}` has no `config.prompt` — a judge with no criteria approves everything, which is worse than no gate",
-                ),
-                "expression": (
-                    "expr",
-                    f"expression gate `{label}` has no `config.expr`",
-                ),
-            }.get(kind)
-            if required is not None and not config.get(required[0]):
-                yield required[1]
+            if kind == "judge" and not str(config.get("prompt", "") or "").strip():
+                yield f"judge gate `{label}` has no `config.prompt` — a judge with no criteria approves everything, which is worse than no gate"
+            if kind == "expression" and not config.get("expr"):
+                yield f"expression gate `{label}` has no `config.expr`"
+            if kind in ("verify_command", "verify_script") and not isinstance(
+                config.get("verify"), dict
+            ):
+                yield f"{kind} gate `{label}` has no `config.verify` block"
+            if kind == "ladder" and (
+                not isinstance(config.get("criteria"), list) or not config["criteria"]
+            ):
+                yield f"ladder gate `{label}` has no non-empty `config.criteria` list"
 
     def foreach(self):
         for node, config in self.configurations("foreach"):

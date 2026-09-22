@@ -8,6 +8,7 @@ import { listItemEnter, stagger, spring } from '../../shared/theme/motion'
 import { essentialLane, essentialCandidates, useEssentialSetup, useProviderConfiguration, useChatModelBinding, type EssentialLane, type ModelPhase } from './essentialSetupState'
 import { ConsentModal, PermissionConsent, CronConsentList } from '../apps/installConsent'
 import { SchemaField } from '../settings/ModelBackends'
+import { SchemaFieldDisclosure } from '../tools/schema'
 import { type AppCatalogEntry, type OnboardingState, type OnboardingStatePatch } from '../../shared/data/api'
 
 type LaneId = EssentialLane
@@ -208,10 +209,9 @@ function ConfigureProvider({ app, onConfigured }: { app: string; onConfigured: (
         {t.label} is installed. Fill in its settings, then test the connection for real before moving on.
       </p>
       <div className="flex flex-col gap-2">
-        {Object.entries(props).map(([k, f]) => (
-          <SchemaField key={k} name={k} field={f} value={values[k] ?? ''}
-            onChange={(value) => setValue(k, value)} />
-        ))}
+        <SchemaFieldDisclosure fields={Object.entries(props)} values={values}
+          renderField={([k, f]) => <SchemaField key={k} name={k} field={f} value={values[k] ?? ''}
+            onChange={(value) => setValue(k, value)} />} />
       </div>
       {error && <div className="text-danger text-[0.8125rem]" role="alert">{error}</div>}
       <div>

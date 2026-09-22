@@ -1,6 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
-import { fireEvent } from '@testing-library/dom'
+import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 
 vi.mock('../data/api', () => ({ api: { themes: () => new Promise(() => {}), theme: () => new Promise(() => {}) } }))
 

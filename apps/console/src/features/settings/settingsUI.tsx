@@ -8,6 +8,7 @@ import { fvs } from '../../shared/theme/fontWeight'
 import { Toggle } from '../../shared/ui/Toggle'
 import { Surface } from '../../shared/ui/Surface'
 import { FieldHintProvider, FieldLabelProvider, NumberField } from '../../shared/ui/forms'
+import { confirm, type ConfirmOptions } from '../../shared/ui/dialog'
 
 
 export function RowGroup({ children }: { children: ReactNode }) {
@@ -123,13 +124,15 @@ export function SavedToast({ show }: { show: boolean }) {
   )
 }
 
-export function ToggleRow({ label, hint, cfg, field, patch, danger }: {
+export function ToggleRow({ label, hint, cfg, field, patch, danger, confirmOn }: {
   label: string
   hint?: string
   cfg: Record<string, unknown>
   field: string
   patch: (k: string, v: never, cb: () => void, label?: string) => void
+  /** Asks before changing to a value that relaxes a safety default. */
   danger?: boolean
+  confirmOn?: (next: boolean) => ConfirmOptions | undefined
 }) {
   const [saved, setSaved] = useState(false)
   const flash = () => { setSaved(true); window.setTimeout(() => setSaved(false), 1500) }
@@ -141,7 +144,11 @@ export function ToggleRow({ label, hint, cfg, field, patch, danger }: {
         {
 }
         {danger && on && <AlertTriangle size={14} className="text-warn" role="img" aria-label="Relaxes a safety default" />}
-        <Toggle on={on} onChange={(v) => patch(field, v as never, flash, label)} label={label} />
+        <Toggle on={on} onChange={async (v) => {
+          const options = confirmOn?.(v)
+          if (options && !(await confirm(options))) return
+          patch(field, v as never, flash, label)
+        }} label={label} />
       </div>
     </Row>
   )

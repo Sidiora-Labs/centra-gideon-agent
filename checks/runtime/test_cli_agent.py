@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from gideon.core.config.loader import AgentProfile
+from gideon.interfaces.cli.commands import render_agent_table
 from gideon.interfaces.cli.main import main
 
 
@@ -37,6 +39,31 @@ def _base_config() -> dict:
 
 class TestAgentList:
     """Test ``gideon agent list`` output format."""
+
+    def test_render_agent_table_derives_widths_from_rows_and_default_marker(
+        self,
+    ) -> None:
+        name = "agent-with-a-name-longer-than-the-old-column"
+        provider = "provider-agent-with-a-long-name"
+        default_dir = "workspace-with-a-long-default-directory"
+        memory_store = "memory-store-with-a-long-name"
+
+        output = render_agent_table(
+            {
+                name: AgentProfile(
+                    provider_agent=provider,
+                    default_dir=default_dir,
+                    memory_store=memory_store,
+                )
+            },
+            name,
+        )
+
+        header, row = output.splitlines()
+        assert row == f"{name} *  {provider}  {default_dir}  {memory_store}"
+        assert header.index("PROVIDER_AGENT") == row.index(provider)
+        assert header.index("DEFAULT_DIR") == row.index(default_dir)
+        assert header.index("MEMORY_STORE") == row.index(memory_store)
 
     def test_list_output_format(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]

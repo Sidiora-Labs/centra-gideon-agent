@@ -388,10 +388,9 @@ async def api_durability_run(request: web.Request) -> web.Response:
         "drill": lambda: service.run_restore_drill(notifier=notifier),
     }
     result = await asyncio.get_event_loop().run_in_executor(None, runners[job])
-    if job == "drill" and not result.skipped:
-        await asyncio.get_event_loop().run_in_executor(
-            None, lambda: service.persist_drill_result(result)
-        )
+    await asyncio.get_event_loop().run_in_executor(
+        None, lambda: service.persist_job_result(result)
+    )
     _audit_api(
         request,
         f"durability_run:{job}",

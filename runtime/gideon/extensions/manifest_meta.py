@@ -506,6 +506,16 @@ TOOL_META: dict[str, dict[str, Any]] = {
             },
         ],
     },
+    "workflow_start_draft": {
+        "response_type": "workflow.run.started",
+        "error_codes": [],
+        "examples": [
+            {
+                "summary": "Start a reviewed draft run",
+                "args": {"run_id": "a1b2c3d4"},
+            },
+        ],
+    },
     "workflow_status": {
         "response_type": "workflow.run.status",
         "error_codes": [],

@@ -8,6 +8,7 @@ from typing import Any
 from aiohttp import web
 
 from gideon.core.http_request import read_json_body
+from gideon.extensions.skills.loader import validate_skill_md
 from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.handlers._shared import (
     _get_skills,
@@ -981,6 +982,12 @@ async def api_skill_detail(request: web.Request) -> web.Response:
             return web.json_response({"error": "content must be a string"}, status=400)
         if not content:
             return web.json_response({"error": "content is required"}, status=400)
+        errors = validate_skill_md(content)
+        if errors:
+            return web.json_response(
+                {"error": f"SKILL.md validation failed: {'; '.join(errors)}"},
+                status=400,
+            )
         ok = skills.update_skill(name, content)
         if not ok:
             return web.json_response({"error": "not found"}, status=404)
@@ -1029,6 +1036,12 @@ async def api_skills_create(request: web.Request) -> web.Response:
         return web.json_response({"error": "name is required"}, status=400)
     if not content:
         return web.json_response({"error": "content is required"}, status=400)
+    errors = validate_skill_md(content)
+    if errors:
+        return web.json_response(
+            {"error": f"SKILL.md validation failed: {'; '.join(errors)}"},
+            status=400,
+        )
     safe_name = re.sub(r"[^a-z0-9\-/]", "-", name.lower()).strip("-").strip("/")
     safe_name = re.sub(r"/+", "/", safe_name)
     if not safe_name:

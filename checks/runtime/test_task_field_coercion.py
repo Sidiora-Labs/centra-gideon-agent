@@ -219,15 +219,33 @@ class TestBothEndsAgree:
         ] == ["via put"]
 
     @pytest.mark.asyncio
-    async def test_notes_are_normalized_on_both_ends(self, provider, tmp_path):
+    async def test_notes_are_normalized_and_stamped_on_both_ends(
+        self, provider, tmp_path
+    ):
         """#818's third clause: the note channels were uncoerced even on create."""
         created = await provider.create_task(title="t", notes="a thought")
-        assert _stored(tmp_path, created.id)["notes"] == [
-            {"content": "a thought", "timestamp": ""}
-        ]
+        note = _stored(tmp_path, created.id)["notes"]
+        assert note[0]["content"] == "a thought"
+        assert note[0]["timestamp"]
         await provider.update_task(created.id, research_notes="found it")
         stored = _stored(tmp_path, created.id)["research_notes"]
-        assert stored == [{"content": "found it", "timestamp": ""}]
+        assert stored[0]["content"] == "found it"
+        assert stored[0]["timestamp"]
+
+    @pytest.mark.asyncio
+    async def test_note_write_keeps_a_client_timestamp(self, provider, tmp_path):
+        supplied = "2025-02-03T04:05:06Z"
+        created = await provider.create_task(
+            title="t", notes=[{"content": "imported", "timestamp": supplied}]
+        )
+        assert _stored(tmp_path, created.id)["notes"] == [
+            {"content": "imported", "timestamp": supplied}
+        ]
+
+    def test_editing_an_existing_undated_note_keeps_it_undated(self):
+        task = Task.from_dict({"id": "t1", "title": "T", "notes": [{"content": "old"}]})
+        assert task.notes == [{"content": "old", "timestamp": ""}]
+        assert coerce_task_field("notes", task.notes) == task.notes
 
 
 class TestShapesThisModuleDoesNotOwn:

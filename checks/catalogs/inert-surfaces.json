@@ -1165,6 +1165,7 @@
       "kinds": {
         "config": 0,
         "editable_config": 0,
+        "editable_config_reader": 0,
         "enum": 7,
         "sdk_export": 230,
         "trigger_kind": 0

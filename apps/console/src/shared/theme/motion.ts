@@ -1,5 +1,6 @@
 
-import { useReducedMotion as useFramerReducedMotion, type Transition, type Variants } from 'framer-motion'
+import { useEffect, useState } from 'react'
+import type { Transition, Variants } from 'framer-motion'
 
 import { motionRegistry } from './motionRegistry'
 import { runtime } from './runtime'
@@ -10,7 +11,18 @@ export function prefersReducedMotion(): boolean {
 }
 
 export function useReducedMotion(): boolean {
-  return useFramerReducedMotion() ?? false
+  const [reduced, setReduced] = useState(prefersReducedMotion)
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const update = () => setReduced(media.matches)
+    update()
+    media.addEventListener?.('change', update)
+    return () => media.removeEventListener?.('change', update)
+  }, [])
+
+  return reduced
 }
 
 export const instant: Transition = { type: 'tween', duration: 0 }

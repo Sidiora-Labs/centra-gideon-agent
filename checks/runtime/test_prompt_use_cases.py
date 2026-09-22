@@ -60,6 +60,59 @@ def test_binding_overrides_resolution():
     assert "Gideon" in puc.resolve_prompt_content("chat")
 
 
+def test_declaration_keeps_the_template_and_snippets_on_the_bound_provider(tmp_path):
+    from gideon.integrations.prompt_providers.base import PromptSnippet, PromptTemplate
+    from gideon.integrations.prompt_providers.registry import (
+        _ensure_default_providers_registered,
+        get_prompt_provider,
+    )
+
+    _ensure_default_providers_registered()
+    native = get_prompt_provider("native")
+    assert native is not None
+    native.create_prompt(
+        PromptTemplate(
+            name="custom-code",
+            content="Agent {{bot_name}}: {{> bound-signature}}",
+        )
+    )
+    native.create_snippet(PromptSnippet(name="bound-signature", content="ready"))
+    puc.save_active_prompts({"code": "native:custom-code"})
+
+    declaration = puc.resolve_prompt_declaration("code")
+    assert declaration is not None
+    assert declaration.provider is native
+    assert declaration.template.name == "custom-code"
+
+    from gideon.integrations.prompt_providers.runtime import render_use_case_prompt
+
+    assert render_use_case_prompt("code", {"bot_name": "Ada"}) == "Agent Ada: ready"
+
+    from gideon.cognition.context import PromptAssembler
+    from gideon.cognition.memory import MemoryJournal
+    from gideon.extensions.skills import ProcedureLibrary
+
+    builder = PromptAssembler(
+        memory=MemoryJournal(workspace=tmp_path),
+        skills=ProcedureLibrary(
+            skills_path=tmp_path / "skills", install_builtins=False
+        ),
+    )
+    assert (
+        builder._identity_prompt(None, "code:project", "chat", "", "")
+        == "Agent Gideon: ready"
+    )
+
+
+def test_missing_bound_prompt_uses_its_declared_bundled_default():
+    puc.save_active_prompts({"code": "native:removed"})
+
+    declaration = puc.resolve_prompt_declaration("code")
+    assert declaration is not None
+    assert declaration.prompt_name == puc.bundled_prompt_name_for("code")
+    assert declaration.template.name == "system-code"
+
+
 def test_unknown_use_case_falls_back_to_chat_prompt():
     assert puc.active_prompt_ref("bogus") == f"native:{puc.DEFAULT_PROMPT_NAME}"
     assert puc.DEFAULT_PROMPT_NAME == "system-chat"

@@ -82,10 +82,10 @@ from gideon.automation.workflows.effects import (
     redo_blocked,
     run_teardown,
 )
-from gideon.automation.workflows.engine import (
+from gideon.automation.workflows.engine import dispatch, dispatcher_commits_effects
+from gideon.automation.workflows.engine_support import (
     DEFAULT_MODEL_TIERS,
     NodeResult,
-    dispatch,
     resolve_axis_model,
 )
 from gideon.automation.workflows.human_input import drop_continuations
@@ -1204,6 +1204,7 @@ class RunController:
             return body
         if result.preview.needs_confirmation and not confirm:
             body["ok"] = False
+            body["code"] = "WF_MUT_CONFIRM_REQUIRED"
             body["needs_confirmation"] = True
             body["issues"] = [
                 {
@@ -2152,7 +2153,7 @@ class RunController:
         inst.attempt += 1
         if item.has_item and not inst.item_label:
             inst.item_label = _item_label(item.item)
-        if item.node.kind == NodeKind.ACTION:
+        if dispatcher_commits_effects(item.node):
             self._record_effect(item, inst, EffectStatus.ATTEMPTED)
         self._persist_state()
         self.journal.step_started(
@@ -2220,12 +2221,12 @@ class RunController:
         """The committed-effect boundary, enforced before an action node re-executes.
 
         Returns False when the node was refused (a terminal state was written). Only
-        ACTION nodes are side-effecting dispatches; every other kind passes through.
+        dispatchers that commit effects enter the fence; every other kind passes through.
         A same-epoch retry passes too — it reuses the same idempotency key, which an
         idempotent receiver dedupes, so it is the retry contract working, not a
         double-fire.
         """
-        if item.node.kind != NodeKind.ACTION:
+        if not dispatcher_commits_effects(item.node):
             return True
         committed = committed_effect(self._effects.get(item.path, []))
         if committed is None or committed.epoch == inst.epoch:
@@ -2606,10 +2607,12 @@ class RunController:
                 except asyncio.CancelledError:
                     continue
                 except Exception as exc:
-                    from gideon.automation.workflows.engine import _classify_exception
+                    from gideon.automation.workflows.failure_taxonomy import (
+                        classify_exception,
+                    )
 
                     result = NodeResult(
-                        state=InstanceState.FAILED, failure=_classify_exception(exc)
+                        state=InstanceState.FAILED, failure=classify_exception(exc)
                     )
                 self._apply(entry, result)
             self._persist_state()
@@ -2773,7 +2776,7 @@ class RunController:
             )
             self._attempts.setdefault(item.path, []).append(record)
             if self._should_retry(item, inst, result):
-                if item.node.kind == NodeKind.ACTION:
+                if dispatcher_commits_effects(item.node):
                     self._record_effect(item, inst, EffectStatus.RETRIED)
                 inst.state = InstanceState.PENDING
                 self.journal.write(
@@ -2813,7 +2816,7 @@ class RunController:
                 )
                 return
 
-        if item.node.kind == NodeKind.ACTION:
+        if dispatcher_commits_effects(item.node):
             if (
                 result.state in SUCCESS_STATES
                 and result.state != InstanceState.NO_CHANGE

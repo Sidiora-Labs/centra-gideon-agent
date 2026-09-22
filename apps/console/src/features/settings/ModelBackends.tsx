@@ -4,7 +4,7 @@ import {
   Plus, Cpu, Wifi, Pencil, Trash2, X, Eye, EyeOff,
   CheckCircle2, AlertTriangle, ChevronRight, RotateCcw,
 } from 'lucide-react'
-import { api, type ModelProvider, type AvailableModel, type ProviderTestResult, type ModelProviderTypeField } from '../../shared/data/api'
+import { api, type ModelProvider, type AvailableModel, type ProviderTestResult, type SchemaProp } from '../../shared/data/api'
 import { useQuery, invalidateKeys } from '../../shared/data/data'
 import { confirmDelete } from '../../shared/ui/dialog'
 import { Button } from '../../shared/ui/Button'
@@ -15,6 +15,7 @@ import { TextInput } from '../../shared/ui/forms'
 import { OllamaModelManager } from './OllamaModelManager'
 import { fvs } from '../../shared/theme/fontWeight'
 import { reportingWrite } from '../../app/shell/reportingWrite'
+import { SchemaFieldDisclosure } from '../tools/schema'
 
 const typeLabel = (type: string) => type
 
@@ -176,7 +177,7 @@ function InstanceCard({ provider, models, onChanged }: { provider: ModelProvider
 const inputCls = 'h-9 w-full rounded-md bg-surface-high px-3 text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary'
 
 export function SchemaField({ field, name, value, onChange }: {
-  field: ModelProviderTypeField; name: string; value: string; onChange: (v: string) => void
+  field: SchemaProp; name: string; value: string; onChange: (v: string) => void
 }) {
   const [show, setShow] = useState(false)
   const meta = field['x-meta'] || {}
@@ -187,7 +188,7 @@ export function SchemaField({ field, name, value, onChange }: {
       <label className="flex flex-col gap-1">
         <span data-type="caption" className="text-on-surface-low">{label}</span>
         <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} data-type="body-s" className={inputCls + ' cursor-pointer'}>
-          {enumVals.map((v) => <option key={v} value={v}>{v}</option>)}
+          {enumVals.map((v) => <option key={String(v)} value={String(v)}>{String(v)}</option>)}
         </select>
         {meta.help && <span data-type="caption" className="text-on-surface-low">{meta.help}</span>}
       </label>
@@ -276,11 +277,10 @@ function AddInstanceForm({ onDone }: { onDone: (created: boolean) => void }) {
         <TextInput ariaLabel="Instance name" value={name} onChange={setName} placeholder="Instance name (e.g. my-bedrock)" size="md" surface="high" />
       </div>
       <div className="mt-2 flex flex-col gap-2">
-        {Object.entries(props).map(([k, f]) => (
-          <SchemaField key={k} name={k} field={f}
+        <SchemaFieldDisclosure fields={Object.entries(props)} required={required} values={values}
+          renderField={([k, f]) => <SchemaField key={k} name={k} field={f}
             value={values[k] ?? String(f.default ?? '')}
-            onChange={(v) => setValues((prev) => ({ ...prev, [k]: v }))} />
-        ))}
+            onChange={(v) => setValues((prev) => ({ ...prev, [k]: v }))} />} />
       </div>
       <div className="mt-3 flex items-center gap-2">
         <Button size="sm" onClick={submit} loading={saving} loadingLabel="Adding…">Add instance</Button>

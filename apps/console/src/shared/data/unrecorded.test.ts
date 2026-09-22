@@ -5,6 +5,7 @@ import {
   UNRECORDED_LABEL,
   provenanceRecorded,
   reportSchema,
+  runTokensStat,
   tokensUnrecorded,
 } from './unrecorded'
 
@@ -31,6 +32,12 @@ describe('the one vocabulary for "unrecorded"', () => {
     expect(tokensUnrecorded({ tokens_recorded: false })).toBe(true)
     expect(tokensUnrecorded({ tokens_recorded: true })).toBe(false)
     expect(tokensUnrecorded({})).toBe(false)
+  })
+
+  it('renders run tokens only when every completed step recorded them', () => {
+    expect(runTokensStat(1200, true)).toBe('1,200')
+    expect(runTokensStat(null, false)).toBe(UNRECORDED_LABEL)
+    expect(runTokensStat(1200, false)).toBe(UNRECORDED_LABEL)
   })
 
   it('keeps "not recorded" distinct from the panels\' "not measured"', () => {

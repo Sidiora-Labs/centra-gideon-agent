@@ -129,6 +129,8 @@ async def api_feedback_target(request: web.Request) -> web.Response:
         return _disabled_response()
     kind = request.match_info.get("kind", "")
     target_id = request.match_info.get("id", "")
+    if kind not in fb.TARGET_KINDS:
+        return web.json_response({"error": "target kind not found"}, status=404)
     rec = fb.current_verdict(kind, target_id)
     if rec is None:
         return web.json_response({"verdict": None})

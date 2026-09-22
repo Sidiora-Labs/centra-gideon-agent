@@ -454,6 +454,33 @@ class TestRestoreDrill:
 
 
 class TestScheduling:
+    @pytest.mark.parametrize(
+        ("result", "expected"),
+        [
+            (service.JobResult("incremental_export"), {"last_export": 42.0}),
+            (service.JobResult("nightly_snapshot"), {"last_snapshot": 42.0}),
+            (
+                service.JobResult(
+                    "restore_drill", ok=False, extra={"snapshot": "broken.tar.gz"}
+                ),
+                {
+                    "last_drill": 42.0,
+                    "last_drill_ok": False,
+                    "last_drill_archive": "broken.tar.gz",
+                },
+            ),
+            (service.JobResult("incremental_export", ok=False), {}),
+            (service.JobResult("nightly_snapshot", ok=False), {}),
+            (service.JobResult("restore_drill", skipped="already running"), {}),
+        ],
+    )
+    def test_job_stamp_fields_follow_the_job_outcome(self, result, expected):
+        fields = service.job_stamp_fields(result, at=42.0)
+        for key, value in expected.items():
+            assert fields[key] == value
+        if not expected:
+            assert fields == {}
+
     def test_everything_is_due_on_a_fresh_install(self):
         status = service.status()
         assert status["export"]["due"] is True
@@ -640,6 +667,32 @@ class TestEndpoints:
                 await client.post("/api/durability/run", json={"job": "export"})
             ).json()
         assert body["job"] == "incremental_export"
+
+    @pytest.mark.asyncio
+    async def test_run_persists_a_successful_export_stamp(self, monkeypatch):
+        from aiohttp.test_utils import TestClient, TestServer
+
+        monkeypatch.setattr(
+            service,
+            "run_incremental_export",
+            lambda: service.JobResult("incremental_export"),
+        )
+        async with TestClient(TestServer(self._app())) as client:
+            await client.post("/api/durability/run", json={"job": "export"})
+        assert service.load_state().get("last_export")
+
+    @pytest.mark.asyncio
+    async def test_run_does_not_persist_a_failed_export_stamp(self, monkeypatch):
+        from aiohttp.test_utils import TestClient, TestServer
+
+        monkeypatch.setattr(
+            service,
+            "run_incremental_export",
+            lambda: service.JobResult("incremental_export", ok=False),
+        )
+        async with TestClient(TestServer(self._app())) as client:
+            await client.post("/api/durability/run", json={"job": "export"})
+        assert "last_export" not in service.load_state()
 
     @pytest.mark.asyncio
     async def test_a_failed_job_still_returns_200(self, monkeypatch):

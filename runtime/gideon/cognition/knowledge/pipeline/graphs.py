@@ -20,7 +20,6 @@ from gideon.integrations.knowledge_providers.base import ENRICHMENT_FULL, ENRICH
 
 _TEXT_TYPES = {"note", "gist", "journal", "fleeting", "decision"}
 _DOC_TYPES = {"pdf", "document", "sheet", "slides"}
-_MEDIA_TYPES = {"image", "audio", "video"}
 
 TERMINAL_STAGES = ("insights", "entities", "intents", "embed", "dedup")
 

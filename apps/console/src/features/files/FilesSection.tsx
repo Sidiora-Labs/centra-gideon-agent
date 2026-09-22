@@ -314,7 +314,7 @@ export function FilesSection({ sub, navigate, query: routeQuery, setQuery }: Rou
                 {(branch || searchEngine) && (
                   <div className="flex items-center gap-2 text-on-surface-low text-[0.75rem]">
                     {showResults
-                      ? <span>{searchBusy ? 'searching…' : `${results.length} match${results.length === 1 ? '' : 'es'}`}{searchEngine && ` · ${searchEngine === 'rg' ? 'ripgrep' : 'python'}`}</span>
+                      ? <span>{searchBusy ? 'searching…' : `${results.length} match${results.length === 1 ? '' : 'es'}`}{searchEngine && ` · ${searchEngine === 'rg' ? 'ripgrep' : 'Python fallback'}`}</span>
                       : branch && <span className="inline-flex items-center gap-1"><GitBranch size={11} /> {branch}</span>}
                   </div>
                 )}

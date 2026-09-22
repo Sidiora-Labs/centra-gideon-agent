@@ -115,14 +115,20 @@ export function replayRegressed(row: LearningRow): boolean {
   return replay?.state === 'replayed' ? replay.verdict === 'regressed' : false
 }
 
-export type DayState = 'silent' | 'error' | 'produced' | 'ok'
+export type DayState = 'not_started' | 'silent' | 'error' | 'produced' | 'ok'
 
-export function dayState(day: StagingDay): DayState {
-  const states: [boolean, DayState][] = [[day.passes === 0, 'silent'], [day.errors > 0, 'error'], [day.produced > 0, 'produced']]
+export function dayState(day: StagingDay, firstPassDay: string | null = null): DayState {
+  const states: [boolean, DayState][] = [
+    [day.passes === 0 && (firstPassDay === null || day.day < firstPassDay), 'not_started'],
+    [day.passes === 0, 'silent'],
+    [day.errors > 0, 'error'],
+    [day.produced > 0, 'produced'],
+  ]
   return states.find(([matches]) => matches)?.[1] ?? 'ok'
 }
 
 export const DAY_TONE: Record<DayState, string> = {
+  not_started: 'var(--color-on-surface-low)',
   silent: 'var(--color-warn)',
   error: 'var(--color-danger)',
   produced: 'var(--color-primary)',
@@ -130,6 +136,7 @@ export const DAY_TONE: Record<DayState, string> = {
 }
 
 export const DAY_HINT: Record<DayState, string> = {
+  not_started: 'Capture had not started yet',
   silent: 'No capture pass ran — this is the gap an aggregate view cannot see',
   error: 'A capture pass errored',
   produced: 'Produced proposals',

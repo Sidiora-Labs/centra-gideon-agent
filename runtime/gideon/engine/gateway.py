@@ -538,7 +538,33 @@ class RuntimeCoordinator:
     def _day_budget_exceeded(self, *, context: str) -> bool:
         from gideon.engine.automation_routes import DailySpendGate
 
-        return DailySpendGate(self, logger).exceeded(context)
+        already_paused = bool(getattr(self, "_budget_notified", False))
+        exceeded = DailySpendGate(self, logger).exceeded(context)
+        if exceeded and not already_paused:
+            self._record_day_budget_pause(context)
+        return exceeded
+
+    def _record_day_budget_pause(self, context: str) -> None:
+        from gideon.automation.schedule_history import ExecutionRecord
+
+        try:
+            now = time.time()
+            ExecutionJournal(config_dir())._record_execution(
+                ExecutionRecord(
+                    run_id=f"day-budget-{int(now * 1000)}",
+                    job_id="day-budget",
+                    trigger="day_budget",
+                    started_at=now,
+                    finished_at=now,
+                    status="needs_input",
+                    error=(
+                        f"{context} paused: daily automation budget reached; "
+                        "raise the budget in Settings → Guardrails to resume."
+                    ),
+                )
+            )
+        except Exception:
+            logger.debug("could not record a daily-budget pause", exc_info=True)
 
     async def _clock_loop(self) -> None:
         from gideon.engine.automation_routes import AutomationRoutes

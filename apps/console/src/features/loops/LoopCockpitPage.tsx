@@ -340,7 +340,7 @@ export function LoopCockpitPage({ id, onBack, onDeleted, onOpenArtifact, onOpenT
         .sort((a, b) => a.cycle - b.cycle)
     : (c.marginal_scores ?? []).map((s, i) => ({ cycle: i + 1, score: s }))
   const { byCycle, pending } = groupNudges(c.nudges ?? [])
-  const W = 'calc(var(--content-width) + 340px)'
+  const W = 'var(--loop-cockpit-width)'
 
   const cycleTs = (c.findings ?? []).map((f) => f.ts).filter((t): t is number => typeof t === 'number').sort((a, b) => a - b)
   const banked = c.elapsed_seconds ?? 0

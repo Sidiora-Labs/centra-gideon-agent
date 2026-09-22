@@ -1,4 +1,4 @@
-from gideon.automation.loop.kinds.sdlc import _command_runnable_here, _command_word
+from gideon.automation.loop.kinds.sdlc import _command_runnable_here
 
 
 def test_leading_shell_keywords_are_syntax_not_commands(tmp_path):
@@ -24,12 +24,17 @@ def test_leading_shell_keywords_are_syntax_not_commands(tmp_path):
         "{",
         "}",
     ):
-        assert _command_word(f"{keyword} pytest") == ""
-        assert _command_runnable_here(f"{keyword} pytest", str(tmp_path)) is True
+        result = _command_runnable_here(f"{keyword} pytest", str(tmp_path))
+        assert result.runnable is True
+        assert result.missing_binary == ""
 
 
-def test_absolute_executable_uses_its_command_name(tmp_path):
-    assert _command_word("/usr/local/bin/pytest -q") == "pytest"
-    assert _command_runnable_here("/usr/local/bin/pytest -q", str(tmp_path)) is False
-    (tmp_path / "pyproject.toml").touch()
-    assert _command_runnable_here("/usr/local/bin/pytest -q", str(tmp_path)) is True
+def test_absolute_executable_must_exist(tmp_path):
+    executable = tmp_path / "pytest"
+    missing = _command_runnable_here(f"{executable} -q", str(tmp_path))
+    assert missing.runnable is False
+    assert missing.missing_binary == str(executable)
+
+    executable.write_text("#!/bin/sh\n")
+    executable.chmod(0o755)
+    assert _command_runnable_here(f"{executable} -q", str(tmp_path)).runnable is True

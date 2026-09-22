@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { revalidateNotice, revalidateSummary } from './revalidate'
+import { cascadeConfirmation, revalidateNotice, revalidateSummary } from './revalidate'
 
 
 describe('revalidateNotice', () => {
@@ -28,5 +28,10 @@ describe('revalidateSummary', () => {
   it('tolerates a missing preview', () => {
     expect(revalidateSummary(null)).toMatch(/Re-validate/)
     expect(revalidateSummary(undefined)).toMatch(/Re-validate/)
+  })
+
+  it('names committed effects before consent', () => {
+    expect(cascadeConfirmation({ rerun: ['send'], stale: [], skipped: [], committed_effects: ['send'], needs_confirmation: true }))
+      .toMatch(/Committed external effects: send/)
   })
 })

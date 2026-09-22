@@ -69,9 +69,11 @@ const STEERABLE = new Set([...ACTIVE_LOOP_STATUSES, 'failed'])
 const TERMINAL_STATUSES = new Set(['complete', 'stopped'])
 const REVEAL_MAX_CHARS = 40_000
 
-function resolveTouchedPath(raw: string, root: string): { abs: string; rel: string } | null {
+export function resolveTouchedPath(raw: string, root: string): { abs: string; rel: string } | null {
   if (typeof raw !== 'string' || !raw || !root) return null
-  let p = raw
+  let p = raw.trim()
+    .replace(/\s+[-–—→:]\s+.*$/, '')
+    .replace(/\s+\([^)]*\)\s*$/, '')
   const mk = '/.gideon-worktrees/'
   const i = p.indexOf(mk)
   if (i >= 0) {

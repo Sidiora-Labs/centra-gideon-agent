@@ -173,13 +173,25 @@ function LoginSection() {
       .finally(() => setBusy(false))
   }
 
-  const toggleLogin = (next: boolean) => {
+  const toggleLogin = async (next: boolean) => {
+    if (!next && !(await confirm({
+      title: 'Disable password sign-in?',
+      body: 'People using the password sign-in page will no longer be able to use it. Your token link remains available.',
+      confirmLabel: 'Disable password sign-in',
+      danger: true,
+    }))) return
     api.patchConfig('auth.login_enabled', next)
       .then(() => load())
       .catch((e) => notify(`Couldn't change sign-in: ${String((e as Error)?.message || e)}`, 'error'))
   }
 
-  const toggleTotp = (next: boolean) => {
+  const toggleTotp = async (next: boolean) => {
+    if (!next && !(await confirm({
+      title: 'Stop requiring a 2FA code?',
+      body: 'Password sign-in will no longer require a code from an authenticator app.',
+      confirmLabel: 'Stop requiring 2FA',
+      danger: true,
+    }))) return
     api.patchConfig('auth.require_totp', next)
       .then(() => load())
       .catch((e) => notify(`Couldn't change the 2FA requirement: ${String((e as Error)?.message || e)}`, 'error'))

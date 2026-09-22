@@ -4,8 +4,8 @@
 (the hand-authored catalog minus dismissed tips and minus areas the user has already
 engaged), grouped by area, or ``enabled: false`` when the ``legibility.discover_tips``
 kill switch is off. ``POST /api/legibility/discover/dismiss`` persists a per-tip
-dismissal so it never resurfaces. Propose-don't-write: neither endpoint ever enables
-or configures anything on the user's behalf.
+dismissal and ``DELETE`` restores all dismissed tips. Propose-don't-write: neither
+endpoint ever enables or configures anything on the user's behalf.
 
 ``GET /api/legibility/always-on`` is the always-on conventions viewer's data (PEP-10): every
 ``always: true`` skill and project-instruction doc a session receives unconditionally, with
@@ -27,6 +27,7 @@ from gideon.assurance.legibility.always_on import (
 )
 from gideon.assurance.legibility.discover import (
     UnknownTipError,
+    clear_dismissed,
     compute_discover,
     dismiss,
 )
@@ -46,16 +47,17 @@ async def api_discover(request: web.Request) -> web.Response:
 
 
 async def api_discover_dismiss(request: web.Request) -> web.Response:
-    """POST /api/legibility/discover/dismiss — hide a Discover tip forever.
+    """Change persisted Discover dismissals.
 
-    Body: ``{"id": "<tip-id>"}``. Persists the dismissal in
-    ``entity_settings/legibility.json`` and echoes the full dismissed set.
+    ``POST`` takes ``{"id": "<tip-id>"}`` and hides one tip. ``DELETE`` clears
+    every stored dismissal in ``entity_settings/legibility.json``.
 
-    The id must be one the catalog defines. This validated only that ``id`` was *present*,
-    so any string at all was persisted forever into a settings file with no UI that can
-    inspect or clear it — and, since one POST may carry the app's whole body ceiling, a
-    single request could leave megabytes there for every later Discover read to parse.
+    The POST id must be one the catalog defines, so the persisted list only contains tips
+    whose visibility it can change.
     """
+    if request.method == "DELETE":
+        return web.json_response({"ok": True, "dismissed": sorted(clear_dismissed())})
+
     try:
         body = await read_json_body(request)
     except Exception:
