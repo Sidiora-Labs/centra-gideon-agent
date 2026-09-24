@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '../../../shared/ui/Button'
 import './experience.css'
+import Narration from './Narration'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 
 type Choice = { id: string; label: string; target: string }
@@ -77,6 +78,7 @@ export default function Page({ baseUrl = '/api/capabilities/experience' }: { bas
     {view ? <section aria-label="Story player" className="space-y-3">
       <h2>{view.story.title}</h2><p>Story revision {view.session.story_revision} · {view.session.history.length} choices</p>
       <p style={{ whiteSpace: 'pre-wrap' }}>{view.node.text}</p>
+      <Narration sessionId={view.session.id} revision={view.session.revision} baseUrl={baseUrl} />
       {view.node.kind === 'ending' && <p role="status">The end</p>}
       {view.node.choices.map(c => <Button key={c.id} disabled={busy} onClick={() => choose(c)}>{c.label}</Button>)}
     </section> : <form className="space-y-3" onSubmit={e => { e.preventDefault(); void save() }}>

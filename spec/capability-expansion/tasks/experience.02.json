@@ -1,0 +1,58 @@
+{
+  "id": "experience.02",
+  "status": "locally_qualified",
+  "base_revision": "868e8274",
+  "schema_version": 1,
+  "contract": "Narration request binds session revision to immutable source node text and selects only existing configured speech parameters. Persistent job receipts support replay, cancellation, restart interruption, missing-provider failure and content-hashed canonical audio artifact references.",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/experience/narration.py",
+    "runtime/gideon/workspace/capabilities/experience/narration_http.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_experience.py",
+    "apps/console/src/features/capabilities/experience/Narration.tsx",
+    "apps/console/src/features/capabilities/experience/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/experience/test_narration.py",
+    "apps/console/src/features/capabilities/experience/Narration.test.tsx",
+    "checks/runtime/capabilities/experience/test_experience.py"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/experience/test_narration.py",
+    "checks/runtime/capabilities/experience/test_experience.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/experience/Narration.test.tsx"
+  ],
+  "acceptance_coverage": [
+    "Source is read only from the existing immutable story/session snapshot; client cannot override text, provider, voice or home",
+    "Request replay returns the same persisted job; conflicting request reuse and stale session revisions fail",
+    "Actual queued job cancellation prevents provider work and is idempotent",
+    "Actual process exit leaves interrupted state after restart with no invented audio",
+    "Real unconfigured provider resolution reports unavailable and publishes no artifact",
+    "Voice fingerprint changes with voice/conditioning while excluding credentials",
+    "Canonical artifact reads are pinned to version and SHA256; missing/tampered cache fails closed",
+    "Console narrate/retry/source-conflict flows exercise actual HTTP and never show fabricated playback"
+  ],
+  "shared_dependency": "Canonical artifact audio kind and MIME support supplied by the music lane",
+  "remaining_limits": [
+    "Actual provider speech generation, successful cache reuse and audible playback remain external-provider qualification pending",
+    "No simultaneous multiplayer or voice-input participation is claimed",
+    "Root registers final shared integration and hosted variant independently"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify experience.02",
+  "qualification": {
+    "command": "python3 tooling/capability_workflow.py verify experience.02",
+    "exit_code": 0,
+    "evidence": "/tmp/gideon-experience.02-checks-d7z2gmb0/evidence.json",
+    "compile_exit_code": 0,
+    "runtime_tests": 47,
+    "ui_tests": 4,
+    "production_lines": 238,
+    "test_lines": 289,
+    "ratio": 1.2142857142857142,
+    "repairs": [
+      "Cancel every queued speech task before awaiting shutdown, preventing remaining jobs from starting during cleanup."
+    ],
+    "boundary": "Local orchestration/source/error/cancel contracts qualified; actual speech synthesis, successful audio cache replay and audible output remain external-provider pending."
+  }
+}
