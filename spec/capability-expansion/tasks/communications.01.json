@@ -1,0 +1,43 @@
+{
+  "id": "communications.01",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "source_revision": "b028287ab250030c9d7e08e8b799c9f88720ca48",
+  "store": "${GIDEON_HOME}/capabilities/communications/people.sqlite3",
+  "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.01",
+  "exit_code": 0,
+  "evidence_dir": "/tmp/gideon-communications.01-checks-ndhmwc72",
+  "production_lines": 281,
+  "test_lines": 400,
+  "ratio": 1.4234875444839858,
+  "files": {
+    "apps/console/src/features/capabilities/communications/Page.tsx": "ec62e5f2005475f4508d5fb2563a2780e9bd48f182870c419025d9481920d378",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py": "4ea1038a29c1151f1a0f73a74c888fc6b3e0c788f211e2ecceb8d0d22168c46b",
+    "runtime/gideon/workspace/capabilities/communications/__init__.py": "8668d3eb8abb10cb2dea1f66cc0e85539647a11c0b2c684990f16be9824bf3b4",
+    "runtime/gideon/workspace/capabilities/communications/store.py": "11e7d45d3374e07cfdb8d904523958338db249618d67e5d105bdd4147b9b844a",
+    "apps/console/src/features/capabilities/communications/Page.test.tsx": "68f033a04de405226da23a2db0b4bd73a2563017ddd600764dbddbb1ffaafb70",
+    "checks/runtime/capabilities/communications/test_people.py": "a44ba8586de22064c77073d4ca98dde8f076af0658cf6524df08bd57e8143ea4",
+    "checks/runtime/capabilities/communications/ui_server.py": "610182188b59eebf1e91aae34f2df1b24c8c332b281349f47d4c463b9aea0e4b"
+  },
+  "acceptance_coverage": {
+    "person_create_edit_identity_normalization": "43 real runtime cases and real HTTP console creation/edit",
+    "persistence_and_notes": "SQLite reopen and subprocess readback",
+    "idempotent_touchpoints": "source/external ID replay and changed-content conflict, concurrent claims",
+    "care_timezone": "UTC versus Europe/Berlin date boundaries, future exclusion and external-ring exclusion",
+    "invalid_references_and_stale_writes": "real store and HTTP 400/404/409 assertions",
+    "console_care_detail": "3 actual aiohttp-backed component journeys without response doubles"
+  },
+  "qualification": {
+    "python_compile": "passed",
+    "runtime": "43 passed",
+    "console_component_http": "3 passed",
+    "integrated_browser": "pending root integration",
+    "api_tool_registration": "pending root integration",
+    "durability_enrollment": "pending root integration"
+  },
+  "limits": [
+    "Manual people and touchpoints only; no external account import or outbound sending.",
+    "Focused component tests use the real HTTP handler; merged browser build and navigation journey belong to integration.",
+    "Original source events are immutable; retries with changed source content are rejected."
+  ]
+}
