@@ -1,0 +1,83 @@
+{
+  "id": "creative.01",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "storage": "capabilities/creative/catalog.sqlite3",
+  "source_revision": "b028287ab250030c9d7e08e8b799c9f88720ca48",
+  "verification": {
+    "task": "creative.01",
+    "root": "/tmp/gideon-expansion-worktrees/creative",
+    "started_at": 1790293612.2422519,
+    "production_lines": 367,
+    "test_lines": 417,
+    "ratio": 1.1362397820163488,
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative.py",
+          "runtime/gideon/workspace/capabilities/creative/__init__.py",
+          "runtime/gideon/workspace/capabilities/creative/store.py",
+          "checks/runtime/capabilities/creative/http_server.py",
+          "checks/runtime/capabilities/creative/test_catalog.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-creative.01-checks-iab07iqi/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/creative/checks/runtime/capabilities/creative",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-creative.01-checks-iab07iqi/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/creative/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/creative/apps/console/src/features/capabilities/creative/Page.test.tsx"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-creative.01-checks-iab07iqi/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-creative.01-checks-iab07iqi",
+    "completed_at": 1790293653.5033937,
+    "files": {
+      "apps/console/src/features/capabilities/creative/Page.tsx": "7da213b425b0540e0d117fa2e24b086a66b51f0f5dc56275ff513f06d8ac3480",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative.py": "52024277d75bf95819a28732ba8d5436585b1cab368c2912349f735baaa35de3",
+      "runtime/gideon/workspace/capabilities/creative/__init__.py": "8c9b01bea34764fcb21b61288e4c74a5eff7b219f3be5e1d990f53c54a046e8d",
+      "runtime/gideon/workspace/capabilities/creative/store.py": "cd113e3745ad3d83efbf354691d7f66c3265532b6a0918ca58858c507b7c3768",
+      "apps/console/src/features/capabilities/creative/Page.test.tsx": "1a89421263f1696700f90a8e87c9463e472567eb72aac91518abf9024f5418c9",
+      "checks/runtime/capabilities/creative/http_server.py": "926cd8c76445446745d86839faf8ae583bb699d2396dee1d0c987a353b71bda3",
+      "checks/runtime/capabilities/creative/test_catalog.py": "d98599ce774998eda7eda8094fb44acd50b1bb4973976a5917afc936f44f4e69"
+    }
+  },
+  "acceptance_coverage": [
+    "real HTTP create/edit and immutable revision restore",
+    "idempotent create replay and request conflicts",
+    "search/type/tag filters and bounded pagination",
+    "transactional dangling/self/contains-cycle rejection including restore",
+    "real artifact and knowledge source references with missing and isolated-home state",
+    "concurrent optimistic writers and persisted reopen",
+    "React UI through spawned production aiohttp handler and store: create/edit/restore/references/relations/conflicts/filter/pagination/URL selection/errors"
+  ],
+  "repair_cycles": 1,
+  "limits": [
+    "Shell route and native tool registration and durability enrollment are root integration work.",
+    "No integrated browser or hosted boundary qualification is claimed by this OSS task.",
+    "Source references retain missing targets explicitly; ingredients have no delete operation in this slice."
+  ],
+  "next_task": "creative.02"
+}
